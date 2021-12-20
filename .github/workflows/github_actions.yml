@@ -1,0 +1,11 @@
+name: CI
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: [self-hosted, gpu]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install and Test
+        run: .github/workflows/run_ci.sh
