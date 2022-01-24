@@ -12,13 +12,15 @@ BUILDK = 0b10
 TILESIZE = 8
 LMAX_ON_GPU = 4
 BLKSIZE_BY_L = [72, 72, 72, 80, 120]
-MAX_BLKSIZE = 480
+MAX_BLKSIZE = 720
 
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None):
     '''Compute J, K matrices with CPU-GPU hybrid algorithm
     '''
     cput0 = (logger.process_clock(), logger.perf_counter())
+    _check_blksize()
+
     if vhfopt is None:
         vhfopt = _VHFOpt(mol, 'int2e', 'CVHFnrs8_prescreen',
                          'CVHFsetnr_direct_scf', 'CVHFsetnr_direct_scf_dm')
@@ -56,6 +58,14 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None):
     q_cond = vhfopt.get_q_cond()
     dm_cond = vhfopt.get_dm_cond()
     ao_loc = pmol.ao_loc_nr()
+    locs = [np.arange(p0, p1, 2) for p0, p1 in zip(slices[:-1], slices[1:])]
+    cond_loc = np.cumsum([0] + [x.size for x in locs])
+    logger.debug1(mol, 'cond-matrix offsets %s', cond_loc)
+    locs.append(pmol.nbas)
+    locs = np.asarray(np.hstack(locs), dtype=np.int32)
+    dm_cond = lib.condense('max', dm_cond, locs, locs)
+    q_cond = lib.condense('max', q_cond, locs, locs)
+    nc = q_cond.shape[0]
 
     fn = libgint.GPUbuild_jk
     n_slices = len(slices) - 1  # ~= lmax+1
@@ -63,18 +73,19 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None):
         for lj in range(li+1):
             for lk in range(li+1):
                 for ll in range(lk+1):
-                    shls_slice = slices[li:li+2] + slices[lj:lj+2] + slices[lk:lk+2] + slices[ll:ll+2]
                     if (pmol.bas_angular(slices[li]) == LMAX_ON_GPU and
                         pmol.bas_angular(slices[lj]) == LMAX_ON_GPU and
                         pmol.bas_angular(slices[lk]) == LMAX_ON_GPU and
                         pmol.bas_angular(slices[ll]) == LMAX_ON_GPU):
                         continue
+                    shls_slice = slices[li:li+2] + slices[lj:lj+2] + slices[lk:lk+2] + slices[ll:ll+2]
                     fn(vs.ctypes.data_as(ctypes.c_void_p),
                        dms.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(n_dm),
                        ctypes.c_int(jk_type), ctypes.c_int(hermi),
                        (ctypes.c_int*8)(*shls_slice),
                        ao_loc.ctypes.data_as(ctypes.c_void_p),
                        (ctypes.c_int*5)(*BLKSIZE_BY_L),
+                       (ctypes.c_int*5)(cond_loc[li], cond_loc[lj], cond_loc[lk], cond_loc[ll], nc),
                        q_cond.ctypes.data_as(ctypes.c_void_p),
                        dm_cond.ctypes.data_as(ctypes.c_void_p),
                        ctypes.c_double(vhfopt.direct_scf_tol),
@@ -148,6 +159,7 @@ def __apply_gpu(cpu_kernel):
                                  getattr(mf.opt, 'prescreen', 'CVHFnrs8_prescreen'),
                                  getattr(mf.opt, '_qcondname', 'CVHFsetnr_direct_scf'),
                                  getattr(mf.opt, '_dmcondname', 'CVHFsetnr_direct_scf_dm'))
+                vhfopt.direct_scf_tol = mf.direct_scf_tol
                 mf._opt_gpu = vhfopt
             vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega)
             logger.timer(mf, 'vj and vk on gpu', *cput0)
@@ -232,3 +244,9 @@ def _group_shells_to_slices(mol):
         l_slices = l_slices[:LMAX_ON_GPU+2].tolist()
         lmax = LMAX_ON_GPU
     return l_slices, g_shls, h_shls
+
+def _check_blksize():
+    blksize = max(BLKSIZE_BY_L)
+    assert blksize < 2**(31*.25)
+    assert blksize**2 * MAX_BLKSIZE**2 // 64 < 2**31
+    assert BLKSIZE_BY_L[0]**4 < 2**31
