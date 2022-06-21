@@ -60,14 +60,19 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         dms.ctypes.data_as(ctypes.c_void_p),
         ctypes.c_int(dms.shape[0]), ctypes.c_int(dms.shape[1]),
         ctypes.c_int(with_j), ctypes.c_int(with_k))
-    nbins = 10
     l_symb = lib.param.ANGULAR
     uniq_l_ctr = vhfopt.uniq_l_ctr
     pair2bra, pair2ket = vhfopt.bas_pair2shls
     bas_pairs_locs = vhfopt.bas_pairs_locs
     log_qs = vhfopt.log_qs
-    fn = libgint.GINTbuild_jk
 
+    # adjust nbins according to the size of the system
+    pairs_max = (bas_pairs_locs[1:] - bas_pairs_locs[:-1]).max()
+    nbins = max(10, int(pairs_max//200000))
+    if nbins > 10:
+        log.debug('Set the number of buckets for s_index to %d', nbins)
+
+    fn = libgint.GINTbuild_jk
     for cp_ij_id, log_q_ij in enumerate(log_qs):
         cpi = cp_idx[cp_ij_id]
         cpj = cp_jdx[cp_ij_id]
@@ -99,7 +104,6 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             log.debug2('(%s%s|%s%s) on GPU %.3fs',
                        l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
                        time.perf_counter() - t0)
-
     if with_j:
         libgint.GINTfetch_j(vj.ctypes.data_as(ctypes.c_void_p), jkcache)
         # *2 because only the lower triangle part of dm was used in J contraction
@@ -119,13 +123,10 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         shls_slice = g_shls + g_shls + g_shls + g_shls
         ao_loc = pmol.ao_loc_nr(cart=True)
         p0, p1 = ao_loc[g_shls]
-        # Setting _dmcondname=None to temporarily disable vhfopt.set_dm
-        # Otherwise jk.get_jk calls set_dm for dms_blk with improper dimensions
-        with lib.temporary_env(vhfopt, _dmcondname=None):
-            vs_g = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
-                                     dms[:,p0:p1,p0:p1], 1,
-                                     pmol._atm, pmol._bas, pmol._env,
-                                     vhfopt=vhfopt, shls_slice=shls_slice)
+        vs_g = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
+                                 dms[:,p0:p1,p0:p1], 1,
+                                 pmol._atm, pmol._bas, pmol._env,
+                                 vhfopt=vhfopt, shls_slice=shls_slice)
         if with_j and with_k:
             vj[:,p0:p1,p0:p1] += vs_g[0]
             vk[:,p0:p1,p0:p1] += vs_g[1]
@@ -238,8 +239,8 @@ class _VHFOpt(_vhf.VHFOpt):
                     pcoeff = shell[gto.PTR_COEFF]
                     # remove normalization from contraction coefficients
                     c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
-                    c = np.einsum('ip,p,ef->epfi', c, 1/norm, np.eye(nf))
-                    coeff.append(c.reshape(nf*nprim, nf*nctr))
+                    c = np.einsum('ip,p,ef->iepf', c, 1/norm, np.eye(nf))
+                    coeff.append(c.reshape(nf*nctr, nf*nprim).T)
 
                     _env[pcoeff:pcoeff+nprim] = norm
                     bs = np.repeat(shell[np.newaxis], nprim, axis=0)
@@ -265,12 +266,13 @@ class _VHFOpt(_vhf.VHFOpt):
         return pmol, contr_coeff
 
     def build(self, cutoff=1e-13):
+        cput0 = (logger.process_clock(), logger.perf_counter())
         mol = self.mol
         # Sort basis according to angular momentum and contraction patterns so
         # as to group the basis functions to blocks in GPU kernel.
-        l_ctr_patterns = mol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
+        l_ctr = mol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
         uniq_l_ctr, uniq_bas_idx, inv_idx, l_ctr_counts = np.unique(
-            l_ctr_patterns, return_index=True, return_inverse=True, return_counts=True, axis=0)
+            l_ctr, return_index=True, return_inverse=True, return_counts=True, axis=0)
         if mol.verbose >= logger.DEBUG:
             logger.debug1(mol, 'Number of shells for each [l, nctr] group')
             for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
@@ -279,7 +281,10 @@ class _VHFOpt(_vhf.VHFOpt):
         sorted_idx = np.argsort(inv_idx).astype(np.int32)
         # Sort contraction coefficients before updating self.mol
         ao_loc = mol.ao_loc_nr(cart=True)
-        ao_idx = np.array_split(np.arange(ao_loc[-1]), ao_loc[1:-1])
+        nao = ao_loc[-1]
+        # Some addressing problems in GPU kernel code
+        assert nao < 32768
+        ao_idx = np.array_split(np.arange(nao), ao_loc[1:-1])
         ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
         self.coeff = self.coeff[ao_idx]
         # Sort basis inplace
@@ -290,8 +295,8 @@ class _VHFOpt(_vhf.VHFOpt):
                              self._qcondname, self._dmcondname)
         self.direct_scf_tol = cutoff
 
-        lmax = l_ctr_patterns[:,0].max()
-        nbas_by_l = [l_ctr_counts[uniq_l_ctr[:,0]==l].sum() for l in range(lmax)]
+        lmax = uniq_l_ctr[:,0].max()
+        nbas_by_l = [l_ctr_counts[uniq_l_ctr[:,0]==l].sum() for l in range(lmax+1)]
         l_slices = np.append(0, np.cumsum(nbas_by_l))
         if lmax >= LMAX_ON_GPU:
             self.g_shls = l_slices[LMAX_ON_GPU:LMAX_ON_GPU+2].tolist()
@@ -304,12 +309,13 @@ class _VHFOpt(_vhf.VHFOpt):
 
         # TODO: is it more accurate to filter with overlap_cond (or exp_cond)?
         q_cond = self.get_q_cond()
+        cput1 = logger.timer(mol, 'Initialize q_cond', *cput0)
         log_qs = []
         pair2bra = []
         pair2ket = []
         l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
         for i, (p0, p1) in enumerate(zip(l_ctr_offsets[:-1], l_ctr_offsets[1:])):
-            if l_ctr_patterns[i,0] > LMAX_ON_GPU:
+            if uniq_l_ctr[i,0] > LMAX_ON_GPU:
                 # no integrals with h functions should be evaluated on GPU
                 continue
 
@@ -366,6 +372,7 @@ class _VHFOpt(_vhf.VHFOpt):
             mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(mol.natm),
             mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(mol.nbas),
             mol._env.ctypes.data_as(ctypes.c_void_p))
+        logger.timer(mol, 'Initialize GPU cache', *cput1)
         return self
 
     def clear(self):
@@ -390,6 +397,7 @@ def _make_s_index_offsets(log_q, nbins=10, cutoff=1e-12):
     scale = nbins / np.log(min(cutoff, .1))
     s_index = np.ceil(scale * log_q).astype(np.int32)
     bins = np.bincount(s_index)
+    assert bins.max() < 65536 * 8
     if bins.size < nbins:
         bins = np.append(bins, np.zeros(nbins-bins.size, dtype=np.int32))
     else:
