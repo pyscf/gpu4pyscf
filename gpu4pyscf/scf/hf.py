@@ -1,15 +1,17 @@
 import time
 import copy
 import ctypes
+import contextlib
 import numpy as np
 import scipy.linalg
 from pyscf import lib, gto
 from pyscf.lib import logger
 from pyscf.scf import hf, jk, _vhf
-from pyscf.scf.hf import SCF, RHF
+from gpu4pyscf.lib.utils import patch_cpu_kernel
 
 libgint = lib.load_library('libgint')
-LMAX_ON_GPU = 4
+libgint.GINTbuild_jk.restype = ctypes.c_int
+LMAX_ON_GPU = 3
 
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
@@ -31,17 +33,14 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     dms = dm0.reshape(-1,nao,nao)
     dms = np.asarray(lib.einsum('nij,pi,qj->npq', dms, coeff, coeff), order='C')
 
-    if with_j and with_k:
-        vj, vk = vs = np.zeros((2,) + dms.shape).transpose(0, 1, 3, 2)
-        scripts = ['ji->s2kl', 'jk->s1il']
-    elif with_j:
-        vj = vs = np.zeros(dms.shape).transpose(0, 2, 1)
-        vk = None
-        scripts = ['ji->s2kl']
-    elif with_k:
-        vk = vs = np.zeros(dms.shape).transpose(0, 2, 1)
-        vj = None
-        scripts = ['jk->s1il']
+    scripts = []
+    vj = vk = None
+    if with_j:
+        vj = np.zeros(dms.shape).transpose(0, 2, 1)
+        scripts.append('ji->s2kl')
+    if with_k:
+        vk = np.zeros(dms.shape).transpose(0, 2, 1)
+        scripts.append('jk->s1il')
 
     if hermi == 1:
         scripts = [s.replace('s1', 's2') for s in scripts]
@@ -53,15 +52,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     ncptype = len(vhfopt.uniq_l_ctr)
     cp_idx, cp_jdx = np.tril_indices(ncptype)
 
-    n_dm = dms.shape[0]
-    jkcache = ctypes.POINTER(JKMatrixCache)()
-    libgint.GINTinit_jkmatrix_cache(
-        ctypes.byref(jkcache),
-        dms.ctypes.data_as(ctypes.c_void_p),
-        ctypes.c_int(dms.shape[0]), ctypes.c_int(dms.shape[1]),
-        ctypes.c_int(with_j), ctypes.c_int(with_k))
     l_symb = lib.param.ANGULAR
-    uniq_l_ctr = vhfopt.uniq_l_ctr
     pair2bra, pair2ket = vhfopt.bas_pair2shls
     bas_pairs_locs = vhfopt.bas_pairs_locs
     log_qs = vhfopt.log_qs
@@ -73,67 +64,53 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         log.debug('Set the number of buckets for s_index to %d', nbins)
 
     fn = libgint.GINTbuild_jk
-    for cp_ij_id, log_q_ij in enumerate(log_qs):
-        cpi = cp_idx[cp_ij_id]
-        cpj = cp_jdx[cp_ij_id]
-        li = vhfopt.uniq_l_ctr[cpi,0]
-        lj = vhfopt.uniq_l_ctr[cpj,0]
-
-        for cp_kl_id, log_q_kl in enumerate(log_qs[:cp_ij_id+1]):
-            cpk = cp_idx[cp_kl_id]
-            cpl = cp_jdx[cp_kl_id]
-            lk = vhfopt.uniq_l_ctr[cpk,0]
-            ll = vhfopt.uniq_l_ctr[cpl,0]
-            if (li == LMAX_ON_GPU and lj == LMAX_ON_GPU and
-                lk == LMAX_ON_GPU and ll == LMAX_ON_GPU):
+    with _jkmatrix_cache(mol, dms, vhfopt, with_j, with_k) as jkcache:
+        for cp_ij_id, log_q_ij in enumerate(log_qs):
+            cpi = cp_idx[cp_ij_id]
+            cpj = cp_jdx[cp_ij_id]
+            li = vhfopt.uniq_l_ctr[cpi,0]
+            lj = vhfopt.uniq_l_ctr[cpj,0]
+            if li > LMAX_ON_GPU or lj > LMAX_ON_GPU:
                 continue
 
-            t0 = time.perf_counter()
-            # TODO: determine cutoff based on the relevant maximum value of dm blocks?
-            cutoff = vhfopt.direct_scf_tol / max(
-                dm_ctr_cond[cpi,cpj], dm_ctr_cond[cpk,cpl],
-                dm_ctr_cond[cpi,cpk], dm_ctr_cond[cpj,cpk],
-                dm_ctr_cond[cpi,cpl], dm_ctr_cond[cpj,cpl])
-            bins_locs_ij = _make_s_index_offsets(log_q_ij, nbins, cutoff)
-            bins_locs_kl = _make_s_index_offsets(log_q_kl, nbins, cutoff)
+            for cp_kl_id, log_q_kl in enumerate(log_qs[:cp_ij_id+1]):
+                cpk = cp_idx[cp_kl_id]
+                cpl = cp_jdx[cp_kl_id]
+                lk = vhfopt.uniq_l_ctr[cpk,0]
+                ll = vhfopt.uniq_l_ctr[cpl,0]
+                if lk > LMAX_ON_GPU and ll > LMAX_ON_GPU:
+                    continue
 
-            fn(vhfopt.bpcache, jkcache,
-               bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
-               bins_locs_kl.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(nbins),
-               ctypes.c_int(cp_ij_id), ctypes.c_int(cp_kl_id))
-            log.debug2('(%s%s|%s%s) on GPU %.3fs',
-                       l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
-                       time.perf_counter() - t0)
-    if with_j:
-        libgint.GINTfetch_j(vj.ctypes.data_as(ctypes.c_void_p), jkcache)
-        # *2 because only the lower triangle part of dm was used in J contraction
-        vj *= 2
-        vj = vj + vj.transpose(0, 2, 1)
-    if with_k:
-        libgint.GINTfetch_k(vk.ctypes.data_as(ctypes.c_void_p), jkcache)
-        vk = vk + vk.transpose(0, 2, 1)
-    libgint.GINTdel_jkmatrix_cache(ctypes.byref(jkcache))
+                t0 = time.perf_counter()
+                # TODO: determine cutoff based on the relevant maximum value of dm blocks?
+                cutoff = vhfopt.direct_scf_tol / max(
+                    dm_ctr_cond[cpi,cpj], dm_ctr_cond[cpk,cpl],
+                    dm_ctr_cond[cpi,cpk], dm_ctr_cond[cpj,cpk],
+                    dm_ctr_cond[cpi,cpl], dm_ctr_cond[cpj,cpl])
+                bins_locs_ij = _make_s_index_offsets(log_q_ij, nbins, cutoff)
+                bins_locs_kl = _make_s_index_offsets(log_q_kl, nbins, cutoff)
+
+                err = fn(vhfopt.bpcache, jkcache,
+                         bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
+                         bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
+                         ctypes.c_int(nbins), ctypes.c_int(cp_ij_id), ctypes.c_int(cp_kl_id))
+                if err != 0:
+                    detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
+                    raise RuntimeError(detail)
+                log.debug1('(%s%s|%s%s) on GPU %.3fs',
+                           l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
+                           time.perf_counter() - t0)
+        if with_j:
+            libgint.GINTfetch_j(vj.ctypes.data_as(ctypes.c_void_p), jkcache)
+            # *2 because only the lower triangle part of dm was used in J contraction
+            vj *= 2
+            vj = vj + vj.transpose(0, 2, 1)
+        if with_k:
+            libgint.GINTfetch_k(vk.ctypes.data_as(ctypes.c_void_p), jkcache)
+            vk = vk + vk.transpose(0, 2, 1)
     cput0 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
 
-    # For gggg and l >= 5
-    g_shls = vhfopt.g_shls
     h_shls = vhfopt.h_shls
-    if g_shls and pmol.bas_angular(g_shls[0]) == LMAX_ON_GPU:
-        log.debug3('Integrals (%s%s|%s%s) on CPU', *([l_symb[LMAX_ON_GPU]]*4))
-        shls_slice = g_shls + g_shls + g_shls + g_shls
-        ao_loc = pmol.ao_loc_nr(cart=True)
-        p0, p1 = ao_loc[g_shls]
-        vs_g = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
-                                 dms[:,p0:p1,p0:p1], 1,
-                                 pmol._atm, pmol._bas, pmol._env,
-                                 vhfopt=vhfopt, shls_slice=shls_slice)
-        if with_j and with_k:
-            vj[:,p0:p1,p0:p1] += vs_g[0]
-            vk[:,p0:p1,p0:p1] += vs_g[1]
-        else:
-            vs[:,p0:p1,p0:p1] += vs_g[0]
-        cput0 = log.timer_debug1('get_jk pass 2 for l=4 basis on cpu', *cput0)
-
     if h_shls:
         log.debug3('Integrals for %s functions on CPU', l_symb[LMAX_ON_GPU+1])
         shls_excludes = [0, h_shls[0]] * 4
@@ -143,8 +120,10 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         if with_j and with_k:
             vj += vs_h[0]
             vk += vs_h[1]
+        elif with_j:
+            vj += vs_h[0]
         else:
-            vs += vs_h[0]
+            vk += vs_h[0]
         cput0 = log.timer_debug1('get_jk pass 3 for l>4 basis on cpu', *cput0)
 
     pnao = dms.shape[-1]
@@ -162,42 +141,37 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     return vj, vk
 
 
-def __apply_gpu(cpu_kernel):
-    def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
-                omega=None):
-        if getattr(mf, 'device', 'cpu') == 'gpu':
-            if omega is not None:
-                raise NotImplementedError('Range separated Coulomb integrals')
-            cput0 = (logger.process_clock(), logger.perf_counter())
-            log = logger.new_logger(mf)
-            log.debug3('apply get_jk on gpu')
-            if hasattr(mf, '_opt_gpu'):
-                vhfopt = mf._opt_gpu
-            else:
-                vhfopt = _VHFOpt(mol, getattr(mf.opt, '_intor', 'int2e'),
-                                 getattr(mf.opt, 'prescreen', 'CVHFnrs8_prescreen'),
-                                 getattr(mf.opt, '_qcondname', 'CVHFsetnr_direct_scf'),
-                                 getattr(mf.opt, '_dmcondname', 'CVHFsetnr_direct_scf_dm'))
-                vhfopt.build(mf.direct_scf_tol)
-                mf._opt_gpu = vhfopt
-            vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega,
-                            verbose=log)
-            log.timer('vj and vk on gpu', *cput0)
-            return vj, vk
+def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
+            omega=None):
+    if omega is not None:
+        raise NotImplementedError('Range separated Coulomb integrals')
+    cput0 = (logger.process_clock(), logger.perf_counter())
+    log = logger.new_logger(mf)
+    log.debug3('apply get_jk on gpu')
+    if hasattr(mf, '_opt_gpu'):
+        vhfopt = mf._opt_gpu
+    else:
+        vhfopt = _VHFOpt(mol, getattr(mf.opt, '_intor', 'int2e'),
+                         getattr(mf.opt, 'prescreen', 'CVHFnrs8_prescreen'),
+                         getattr(mf.opt, '_qcondname', 'CVHFsetnr_direct_scf'),
+                         getattr(mf.opt, '_dmcondname', 'CVHFsetnr_direct_scf_dm'))
+        vhfopt.build(mf.direct_scf_tol)
+        mf._opt_gpu = vhfopt
+    vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega,
+                    verbose=log)
+    log.timer('vj and vk on gpu', *cput0)
+    return vj, vk
 
-        logger.debug3(mf, 'apply get_jk on cpu')
-        return cpu_kernel(mf, mol, dm, hermi, with_j, with_k, omega)
-    return _get_jk
 
-SCF.device = 'gpu'
-SCF.get_jk = __apply_gpu(SCF.get_jk)
-RHF.get_jk = __apply_gpu(RHF.get_jk)
+class RHF(hf.RHF):
+    device = 'gpu'
+    get_jk = patch_cpu_kernel(hf.RHF.get_jk)(_get_jk)
 
 
 class _VHFOpt(_vhf.VHFOpt):
     def __init__(self, mol, intor, prescreen='CVHFnoscreen',
                  qcondname='CVHFsetnr_direct_scf', dmcondname=None):
-        self.mol, self.coeff = self.decontract_basis(mol)
+        self.mol, self.coeff = basis_seg_contraction(mol)
         # Note mol._bas will be sorted in .build() method. VHFOpt should be
         # initialized after mol._bas updated.
         self._intor = intor
@@ -205,74 +179,14 @@ class _VHFOpt(_vhf.VHFOpt):
         self._qcondname = qcondname
         self._dmcondname = dmcondname
 
-    def decontract_basis(self, mol):
-        bas_templates = {}
-        _bas = []
-        _env = mol._env.copy()
-        contr_coeff = []
-
-        aoslices = mol.aoslice_by_atom()
-        for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
-            key = tuple(mol._bas[ib0:ib1,gto.PTR_EXP])
-            if key in bas_templates:
-                bas_of_ia, coeff = bas_templates[key]
-                bas_of_ia = bas_of_ia.copy()
-                bas_of_ia[:,gto.ATOM_OF] = ia
-            else:
-                # Generate the template for decontracted basis
-                coeff = []
-                bas_of_ia = []
-                for shell in mol._bas[ib0:ib1]:
-                    l = shell[gto.ANG_OF]
-                    nf = (l + 1) * (l + 2) // 2
-                    nctr = shell[gto.NCTR_OF]
-                    if nctr == 1:
-                        bas_of_ia.append(shell)
-                        coeff.append(np.eye(nf))
-                        continue
-
-                    # Only basis with nctr > 1 needs to be decontracted
-                    nprim = shell[gto.NPRIM_OF]
-                    pexp = shell[gto.PTR_EXP]
-                    exps = _env[pexp:pexp+nprim]
-                    norm = gto.gto_norm(l, exps)
-                    pcoeff = shell[gto.PTR_COEFF]
-                    # remove normalization from contraction coefficients
-                    c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
-                    c = np.einsum('ip,p,ef->iepf', c, 1/norm, np.eye(nf))
-                    coeff.append(c.reshape(nf*nctr, nf*nprim).T)
-
-                    _env[pcoeff:pcoeff+nprim] = norm
-                    bs = np.repeat(shell[np.newaxis], nprim, axis=0)
-                    bs[:,gto.NPRIM_OF] = 1
-                    bs[:,gto.NCTR_OF] = 1
-                    bs[:,gto.PTR_EXP] = np.arange(pexp, pexp+nprim)
-                    bs[:,gto.PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim)
-                    bas_of_ia.append(bs)
-
-                bas_of_ia = np.vstack(bas_of_ia)
-                bas_templates[key] = (bas_of_ia, coeff)
-
-            _bas.append(bas_of_ia)
-            contr_coeff.extend(coeff)
-
-        pmol = copy.copy(mol)
-        pmol.cart = True
-        pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
-        pmol._env = _env
-        contr_coeff = scipy.linalg.block_diag(*contr_coeff)
-        if not mol.cart:
-            contr_coeff = contr_coeff.dot(mol.cart2sph_coeff())
-        return pmol, contr_coeff
-
     def build(self, cutoff=1e-13):
         cput0 = (logger.process_clock(), logger.perf_counter())
         mol = self.mol
         # Sort basis according to angular momentum and contraction patterns so
         # as to group the basis functions to blocks in GPU kernel.
-        l_ctr = mol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
+        l_ctrs = mol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
         uniq_l_ctr, uniq_bas_idx, inv_idx, l_ctr_counts = np.unique(
-            l_ctr, return_index=True, return_inverse=True, return_counts=True, axis=0)
+            l_ctrs, return_index=True, return_inverse=True, return_counts=True, axis=0)
         if mol.verbose >= logger.DEBUG:
             logger.debug1(mol, 'Number of shells for each [l, nctr] group')
             for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
@@ -316,7 +230,7 @@ class _VHFOpt(_vhf.VHFOpt):
         l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
         for i, (p0, p1) in enumerate(zip(l_ctr_offsets[:-1], l_ctr_offsets[1:])):
             if uniq_l_ctr[i,0] > LMAX_ON_GPU:
-                # no integrals with h functions should be evaluated on GPU
+                # no integrals with g functions should be evaluated on GPU
                 continue
 
             for q0, q1 in zip(l_ctr_offsets[:i], l_ctr_offsets[1:i+1]):
@@ -392,6 +306,93 @@ class BasisProdCache(ctypes.Structure):
 class JKMatrixCache(ctypes.Structure):
     pass
 
+@contextlib.contextmanager
+def _jkmatrix_cache(mol, dms, vhfopt, with_j, with_k):
+    try:
+        jkcache = ctypes.POINTER(JKMatrixCache)()
+        libgint.GINTinit_jkmatrix_cache(
+            ctypes.byref(jkcache), vhfopt.bpcache,
+            dms.ctypes.data_as(ctypes.c_void_p),
+            ctypes.c_int(dms.shape[0]), ctypes.c_int(dms.shape[1]),
+            ctypes.c_int(with_j), ctypes.c_int(with_k))
+        yield jkcache
+    finally:
+        libgint.GINTdel_jkmatrix_cache(ctypes.byref(jkcache))
+
+def basis_seg_contraction(mol, allow_replica=False):
+    '''transform generally contracted basis to segment contracted basis
+
+    Kwargs:
+        allow_replica:
+            transform the generally contracted basis to replicated
+            segment-contracted basis
+    '''
+    bas_templates = {}
+    _bas = []
+    _env = mol._env.copy()
+    contr_coeff = []
+
+    aoslices = mol.aoslice_by_atom()
+    for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
+        key = tuple(mol._bas[ib0:ib1,gto.PTR_EXP])
+        if key in bas_templates:
+            bas_of_ia, coeff = bas_templates[key]
+            bas_of_ia = bas_of_ia.copy()
+            bas_of_ia[:,gto.ATOM_OF] = ia
+        else:
+            # Generate the template for decontracted basis
+            coeff = []
+            bas_of_ia = []
+            for shell in mol._bas[ib0:ib1]:
+                l = shell[gto.ANG_OF]
+                nf = (l + 1) * (l + 2) // 2
+                nctr = shell[gto.NCTR_OF]
+                if nctr == 1:
+                    bas_of_ia.append(shell)
+                    coeff.append(np.eye(nf))
+                    continue
+
+                # Only basis with nctr > 1 needs to be decontracted
+                nprim = shell[gto.NPRIM_OF]
+                pcoeff = shell[gto.PTR_COEFF]
+                if allow_replica:
+                    coeff.extend([np.eye(nf)] * nctr)
+                    bs = np.repeat(shell[np.newaxis], nctr, axis=0)
+                    bs[:,gto.NCTR_OF] = 1
+                    bs[:,gto.PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr, nprim)
+                    bas_of_ia.append(bs)
+                else:
+                    pexp = shell[gto.PTR_EXP]
+                    exps = _env[pexp:pexp+nprim]
+                    norm = gto.gto_norm(l, exps)
+                    # remove normalization from contraction coefficients
+                    c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
+                    c = np.einsum('ip,p,ef->iepf', c, 1/norm, np.eye(nf))
+                    coeff.append(c.reshape(nf*nctr, nf*nprim).T)
+
+                    _env[pcoeff:pcoeff+nprim] = norm
+                    bs = np.repeat(shell[np.newaxis], nprim, axis=0)
+                    bs[:,gto.NPRIM_OF] = 1
+                    bs[:,gto.NCTR_OF] = 1
+                    bs[:,gto.PTR_EXP] = np.arange(pexp, pexp+nprim)
+                    bs[:,gto.PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim)
+                    bas_of_ia.append(bs)
+
+            bas_of_ia = np.vstack(bas_of_ia)
+            bas_templates[key] = (bas_of_ia, coeff)
+
+        _bas.append(bas_of_ia)
+        contr_coeff.extend(coeff)
+
+    pmol = copy.copy(mol)
+    pmol.cart = True
+    pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
+    pmol._env = _env
+    contr_coeff = scipy.linalg.block_diag(*contr_coeff)
+    if not mol.cart:
+        contr_coeff = contr_coeff.dot(mol.cart2sph_coeff())
+    return pmol, contr_coeff
+
 def _make_s_index_offsets(log_q, nbins=10, cutoff=1e-12):
     '''Divides the shell pairs to "nbins" collections down to "cutoff"'''
     scale = nbins / np.log(min(cutoff, .1))
@@ -403,3 +404,5 @@ def _make_s_index_offsets(log_q, nbins=10, cutoff=1e-12):
     else:
         bins = bins[:nbins]
     return np.append(0, np.cumsum(bins)).astype(np.int32)
+
+del patch_cpu_kernel

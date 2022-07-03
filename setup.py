@@ -84,5 +84,5 @@ setup(
     # The ext_modules placeholder is to ensure build_ext getting initialized
     ext_modules=[Extension('gpu4pyscf_lib_placeholder', [])],
     cmdclass={'build_ext': CMakeBuildExt},
-    install_requires=['pyscf>=2.0', 'numpy'],
+    install_requires=['pyscf>=2.0', 'numpy', 'cupy'],
 )
