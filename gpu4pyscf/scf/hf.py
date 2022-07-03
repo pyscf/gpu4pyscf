@@ -3,15 +3,18 @@ import copy
 import ctypes
 import contextlib
 import numpy as np
+import cupy
 import scipy.linalg
 from pyscf import lib, gto
 from pyscf.lib import logger
 from pyscf.scf import hf, jk, _vhf
 from gpu4pyscf.lib.utils import patch_cpu_kernel
 
+LMAX_ON_GPU = 3
+FREE_CUPY_CACHE = True
+
 libgint = lib.load_library('libgint')
 libgint.GINTbuild_jk.restype = ctypes.c_int
-LMAX_ON_GPU = 3
 
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
@@ -26,31 +29,27 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     if vhfopt is None:
         vhfopt = _VHFOpt(mol, 'int2e').build()
 
-    pmol = vhfopt.mol
-    coeff = vhfopt.coeff
+    coeff = cupy.asarray(vhfopt.coeff)
+    nao, nao0 = coeff.shape
     dm0 = dm
-    nao = dm0.shape[-1]
-    dms = dm0.reshape(-1,nao,nao)
-    dms = np.asarray(lib.einsum('nij,pi,qj->npq', dms, coeff, coeff), order='C')
+    dms = cupy.asarray(dm0.reshape(-1,nao0,nao0))
+    dms = [cupy.einsum('pi,ij,qj->pq', coeff, x, coeff) for x in dms]
+    if dm0.ndim == 2:
+        dms = dms[0].reshape(1,nao,nao)
+    else:
+        dms = cupy.asarray(dms, order='C')
 
     scripts = []
     vj = vk = None
     if with_j:
-        vj = np.zeros(dms.shape).transpose(0, 2, 1)
+        vj = cupy.zeros(dms.shape).transpose(0, 2, 1)
         scripts.append('ji->s2kl')
     if with_k:
-        vk = np.zeros(dms.shape).transpose(0, 2, 1)
-        scripts.append('jk->s1il')
-
-    if hermi == 1:
-        scripts = [s.replace('s1', 's2') for s in scripts]
-
-    dm_ctr_cond = np.max(
-        [lib.condense('absmax', x, vhfopt.l_ctr_offsets) for x in dms], axis=0)
-    if hermi != 1:
-        dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
-    ncptype = len(vhfopt.uniq_l_ctr)
-    cp_idx, cp_jdx = np.tril_indices(ncptype)
+        vk = cupy.zeros(dms.shape).transpose(0, 2, 1)
+        if hermi == 1:
+            scripts.append('jk->s2il')
+        else:
+            scripts.append('jk->s1il')
 
     l_symb = lib.param.ANGULAR
     pair2bra, pair2ket = vhfopt.bas_pair2shls
@@ -59,12 +58,18 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
 
     # adjust nbins according to the size of the system
     pairs_max = (bas_pairs_locs[1:] - bas_pairs_locs[:-1]).max()
-    nbins = max(10, int(pairs_max//200000))
-    if nbins > 10:
-        log.debug('Set the number of buckets for s_index to %d', nbins)
+    nbins = max(10, int(pairs_max//100000))
+    log.debug('Set the number of buckets for s_index to %d', nbins)
+
+    ncptype = len(vhfopt.uniq_l_ctr)
+    cp_idx, cp_jdx = np.tril_indices(ncptype)
+    dm_ctr_cond = np.max(
+        [lib.condense('absmax', x, vhfopt.l_ctr_offsets) for x in dms.get()], axis=0)
+    if hermi != 1:
+        dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
 
     fn = libgint.GINTbuild_jk
-    with _jkmatrix_cache(mol, dms, vhfopt, with_j, with_k) as jkcache:
+    with _jkmatrix_cache(mol, dms, vhfopt, vj, vk) as jkcache:
         for cp_ij_id, log_q_ij in enumerate(log_qs):
             cpi = cp_idx[cp_ij_id]
             cpj = cp_jdx[cp_ij_id]
@@ -100,44 +105,61 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
                 log.debug1('(%s%s|%s%s) on GPU %.3fs',
                            l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
                            time.perf_counter() - t0)
-        if with_j:
-            libgint.GINTfetch_j(vj.ctypes.data_as(ctypes.c_void_p), jkcache)
-            # *2 because only the lower triangle part of dm was used in J contraction
-            vj *= 2
-            vj = vj + vj.transpose(0, 2, 1)
-        if with_k:
-            libgint.GINTfetch_k(vk.ctypes.data_as(ctypes.c_void_p), jkcache)
-            vk = vk + vk.transpose(0, 2, 1)
+    if with_j:
+        vj = [cupy.einsum('pi,pq,qj->ij', coeff, x, coeff) for x in vj]
+        # *2 because only the lower triangle part of dm was used in J contraction
+    if with_k:
+        vk = [cupy.einsum('pi,pq,qj->ij', coeff, x, coeff) for x in vk]
+    if with_j:
+        vj = [lib.transpose_sum(x.get()) * 2 for x in vj]
+    if with_k:
+        vk = [lib.transpose_sum(x.get()) for x in vk]
     cput0 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
 
     h_shls = vhfopt.h_shls
     if h_shls:
         log.debug3('Integrals for %s functions on CPU', l_symb[LMAX_ON_GPU+1])
+        pmol = vhfopt.mol
         shls_excludes = [0, h_shls[0]] * 4
         vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
                                  dms, 1, pmol._atm, pmol._bas, pmol._env,
                                  vhfopt=vhfopt, shls_excludes=shls_excludes)
+        coeff = vhfopt.coeff
+        pnao = coeff.shape[0]
+        idx, idy = np.tril_indices(pnao, -1)
         if with_j and with_k:
-            vj += vs_h[0]
-            vk += vs_h[1]
+            vj1 = vs_h[0]
+            vk1 = vs_h[1]
         elif with_j:
-            vj += vs_h[0]
+            vj1 = vs_h[0]
         else:
-            vk += vs_h[0]
-        cput0 = log.timer_debug1('get_jk pass 3 for l>4 basis on cpu', *cput0)
+            vk1 = vs_h[0]
 
-    pnao = dms.shape[-1]
-    idx = np.tril_indices(pnao)
-    if with_j:
-        vj[:, idx[1], idx[0]] = vj[:, idx[0], idx[1]]
-        vj = lib.einsum('npq,pi,qj->nij', vj, coeff, coeff)
-        vj = vj.reshape(dm0.shape)
+        if with_j:
+            vj1[:,idy,idx] = vj1[:,idx,idy]
+            for i, v in enumerate(vj1):
+                vj[i] += coeff.T.dot(v).dot(coeff)
+        if with_k:
+            if hermi:
+                vk1[:,idy,idx] = vk1[:,idx,idy]
+            for i, v in enumerate(vk1):
+                vk[i] += coeff.T.dot(v).dot(coeff)
+        cput0 = log.timer_debug1('get_jk pass 2 for l>4 basis on cpu', *cput0)
 
-    if with_k:
-        if hermi:
-            vk[:, idx[1], idx[0]] = vk[:, idx[0], idx[1]]
-        vk = lib.einsum('npq,pi,qj->nij', vk, coeff, coeff)
-        vk = vk.reshape(dm0.shape)
+    if FREE_CUPY_CACHE:
+        coeff = dms = None
+        cupy.get_default_memory_pool().free_all_blocks()
+
+    if dm0.ndim == 2:
+        if with_j:
+            vj = vj[0]
+        if with_k:
+            vk = vk[0]
+    else:
+        if with_j:
+            vj = np.asarray(vj).reshape(dm0.shape)
+        if with_k:
+            vk = np.asarray(vk).reshape(dm0.shape)
     return vj, vk
 
 
@@ -192,7 +214,7 @@ class _VHFOpt(_vhf.VHFOpt):
             for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
                 logger.debug(mol, '    %s : %s', l_ctr, n)
 
-        sorted_idx = np.argsort(inv_idx).astype(np.int32)
+        sorted_idx = np.argsort(inv_idx, kind='stable').astype(np.int32)
         # Sort contraction coefficients before updating self.mol
         ao_loc = mol.ao_loc_nr(cart=True)
         nao = ao_loc[-1]
@@ -307,14 +329,18 @@ class JKMatrixCache(ctypes.Structure):
     pass
 
 @contextlib.contextmanager
-def _jkmatrix_cache(mol, dms, vhfopt, with_j, with_k):
+def _jkmatrix_cache(mol, dms, vhfopt, vj, vk):
     try:
         jkcache = ctypes.POINTER(JKMatrixCache)()
+        vj_ptr = vk_ptr = lib.c_null_ptr()
+        if vj is not None:
+            vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
+        if vk is not None:
+            vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
         libgint.GINTinit_jkmatrix_cache(
             ctypes.byref(jkcache), vhfopt.bpcache,
-            dms.ctypes.data_as(ctypes.c_void_p),
-            ctypes.c_int(dms.shape[0]), ctypes.c_int(dms.shape[1]),
-            ctypes.c_int(with_j), ctypes.c_int(with_k))
+            ctypes.cast(dms.data.ptr, ctypes.c_void_p), vj_ptr, vk_ptr,
+            ctypes.c_int(dms.shape[0]), ctypes.c_int(dms.shape[1]))
         yield jkcache
     finally:
         libgint.GINTdel_jkmatrix_cache(ctypes.byref(jkcache))
@@ -396,7 +422,7 @@ def basis_seg_contraction(mol, allow_replica=False):
 def _make_s_index_offsets(log_q, nbins=10, cutoff=1e-12):
     '''Divides the shell pairs to "nbins" collections down to "cutoff"'''
     scale = nbins / np.log(min(cutoff, .1))
-    s_index = np.ceil(scale * log_q).astype(np.int32)
+    s_index = np.floor(scale * log_q).astype(np.int32)
     bins = np.bincount(s_index)
     assert bins.max() < 65536 * 8
     if bins.size < nbins:
