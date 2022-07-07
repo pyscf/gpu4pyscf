@@ -13,8 +13,8 @@ from gpu4pyscf.lib.utils import patch_cpu_kernel
 LMAX_ON_GPU = 3
 FREE_CUPY_CACHE = True
 
-libgint = lib.load_library('libgint')
-libgint.GINTbuild_jk.restype = ctypes.c_int
+libgvhf = lib.load_library('libgvhf')
+libgvhf.GINTbuild_jk.restype = ctypes.c_int
 
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
@@ -35,17 +35,21 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     dms = cupy.asarray(dm0.reshape(-1,nao0,nao0))
     dms = [cupy.einsum('pi,ij,qj->pq', coeff, x, coeff) for x in dms]
     if dm0.ndim == 2:
-        dms = dms[0].reshape(1,nao,nao)
+        dms = cupy.asarray(dms[0], order='C').reshape(1,nao,nao)
     else:
         dms = cupy.asarray(dms, order='C')
+    n_dm = dms.shape[0]
 
     scripts = []
     vj = vk = None
+    vj_ptr = vk_ptr = lib.c_null_ptr()
     if with_j:
         vj = cupy.zeros(dms.shape).transpose(0, 2, 1)
+        vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
         scripts.append('ji->s2kl')
     if with_k:
         vk = cupy.zeros(dms.shape).transpose(0, 2, 1)
+        vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
         if hermi == 1:
             scripts.append('jk->s2il')
         else:
@@ -55,56 +59,61 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     pair2bra, pair2ket = vhfopt.bas_pair2shls
     bas_pairs_locs = vhfopt.bas_pairs_locs
     log_qs = vhfopt.log_qs
+    direct_scf_tol = vhfopt.direct_scf_tol
 
     # adjust nbins according to the size of the system
     pairs_max = (bas_pairs_locs[1:] - bas_pairs_locs[:-1]).max()
     nbins = max(10, int(pairs_max//100000))
     log.debug('Set the number of buckets for s_index to %d', nbins)
 
-    ncptype = len(vhfopt.uniq_l_ctr)
+    ncptype = len(log_qs)
     cp_idx, cp_jdx = np.tril_indices(ncptype)
     dm_ctr_cond = np.max(
         [lib.condense('absmax', x, vhfopt.l_ctr_offsets) for x in dms.get()], axis=0)
     if hermi != 1:
         dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
 
-    fn = libgint.GINTbuild_jk
-    with _jkmatrix_cache(mol, dms, vhfopt, vj, vk) as jkcache:
-        for cp_ij_id, log_q_ij in enumerate(log_qs):
-            cpi = cp_idx[cp_ij_id]
-            cpj = cp_jdx[cp_ij_id]
-            li = vhfopt.uniq_l_ctr[cpi,0]
-            lj = vhfopt.uniq_l_ctr[cpj,0]
-            if li > LMAX_ON_GPU or lj > LMAX_ON_GPU:
+    fn = libgvhf.GINTbuild_jk
+    for cp_ij_id, log_q_ij in enumerate(log_qs):
+        cpi = cp_idx[cp_ij_id]
+        cpj = cp_jdx[cp_ij_id]
+        li = vhfopt.uniq_l_ctr[cpi,0]
+        lj = vhfopt.uniq_l_ctr[cpj,0]
+        if li > LMAX_ON_GPU or lj > LMAX_ON_GPU or log_q_ij.size == 0:
+            continue
+
+        for cp_kl_id, log_q_kl in enumerate(log_qs[:cp_ij_id+1]):
+            cpk = cp_idx[cp_kl_id]
+            cpl = cp_jdx[cp_kl_id]
+            lk = vhfopt.uniq_l_ctr[cpk,0]
+            ll = vhfopt.uniq_l_ctr[cpl,0]
+            if lk > LMAX_ON_GPU or ll > LMAX_ON_GPU or log_q_kl.size == 0:
                 continue
 
-            for cp_kl_id, log_q_kl in enumerate(log_qs[:cp_ij_id+1]):
-                cpk = cp_idx[cp_kl_id]
-                cpl = cp_jdx[cp_kl_id]
-                lk = vhfopt.uniq_l_ctr[cpk,0]
-                ll = vhfopt.uniq_l_ctr[cpl,0]
-                if lk > LMAX_ON_GPU and ll > LMAX_ON_GPU:
-                    continue
+            # TODO: determine cutoff based on the relevant maximum value of dm blocks?
+            sub_dm_cond = max(dm_ctr_cond[cpi,cpj], dm_ctr_cond[cpk,cpl],
+                              dm_ctr_cond[cpi,cpk], dm_ctr_cond[cpj,cpk],
+                              dm_ctr_cond[cpi,cpl], dm_ctr_cond[cpj,cpl])
+            if sub_dm_cond < direct_scf_tol * 1e3:
+                continue
 
-                t0 = time.perf_counter()
-                # TODO: determine cutoff based on the relevant maximum value of dm blocks?
-                cutoff = vhfopt.direct_scf_tol / max(
-                    dm_ctr_cond[cpi,cpj], dm_ctr_cond[cpk,cpl],
-                    dm_ctr_cond[cpi,cpk], dm_ctr_cond[cpj,cpk],
-                    dm_ctr_cond[cpi,cpl], dm_ctr_cond[cpj,cpl])
-                bins_locs_ij = _make_s_index_offsets(log_q_ij, nbins, cutoff)
-                bins_locs_kl = _make_s_index_offsets(log_q_kl, nbins, cutoff)
+            t0 = time.perf_counter()
+            cutoff = direct_scf_tol / sub_dm_cond
+            bins_locs_ij = _make_s_index_offsets(log_q_ij, nbins, cutoff)
+            bins_locs_kl = _make_s_index_offsets(log_q_kl, nbins, cutoff)
 
-                err = fn(vhfopt.bpcache, jkcache,
-                         bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
-                         bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
-                         ctypes.c_int(nbins), ctypes.c_int(cp_ij_id), ctypes.c_int(cp_kl_id))
-                if err != 0:
-                    detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
-                    raise RuntimeError(detail)
-                log.debug1('(%s%s|%s%s) on GPU %.3fs',
-                           l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
-                           time.perf_counter() - t0)
+            err = fn(vhfopt.bpcache, vj_ptr, vk_ptr,
+                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                     ctypes.c_int(nao), ctypes.c_int(n_dm),
+                     bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
+                     bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
+                     ctypes.c_int(nbins), ctypes.c_int(cp_ij_id), ctypes.c_int(cp_kl_id))
+            if err != 0:
+                detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
+                raise RuntimeError(detail)
+            log.debug1('(%s%s|%s%s) on GPU %.3fs',
+                       l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
+                       time.perf_counter() - t0)
     if with_j:
         vj = [cupy.einsum('pi,pq,qj->ij', coeff, x, coeff) for x in vj]
         # *2 because only the lower triangle part of dm was used in J contraction
@@ -122,7 +131,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         pmol = vhfopt.mol
         shls_excludes = [0, h_shls[0]] * 4
         vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
-                                 dms, 1, pmol._atm, pmol._bas, pmol._env,
+                                 dms.get(), 1, pmol._atm, pmol._bas, pmol._env,
                                  vhfopt=vhfopt, shls_excludes=shls_excludes)
         coeff = vhfopt.coeff
         pnao = coeff.shape[0]
@@ -201,14 +210,20 @@ class _VHFOpt(_vhf.VHFOpt):
         self._qcondname = qcondname
         self._dmcondname = dmcondname
 
-    def build(self, cutoff=1e-13):
+    def build(self, cutoff=1e-13, group_size=None, diag_block_with_triu=False):
         cput0 = (logger.process_clock(), logger.perf_counter())
         mol = self.mol
         # Sort basis according to angular momentum and contraction patterns so
         # as to group the basis functions to blocks in GPU kernel.
         l_ctrs = mol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
-        uniq_l_ctr, uniq_bas_idx, inv_idx, l_ctr_counts = np.unique(
+        uniq_l_ctr, _, inv_idx, l_ctr_counts = np.unique(
             l_ctrs, return_index=True, return_inverse=True, return_counts=True, axis=0)
+
+        # Limit the number of AOs in each group
+        if group_size is not None:
+            uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(
+                uniq_l_ctr, l_ctr_counts, group_size)
+
         if mol.verbose >= logger.DEBUG:
             logger.debug1(mol, 'Number of shells for each [l, nctr] group')
             for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
@@ -276,7 +291,10 @@ class _VHFOpt(_vhf.VHFOpt):
             idx = q_sub.argsort(axis=None)[::-1]
             q_sorted = q_sub[idx]
             ishs, jshs = np.unravel_index(idx, (p1-p0, p1-p0))
-            mask = (ishs >= jshs) & (q_sorted > cutoff)
+            mask = q_sorted > cutoff
+            if not diag_block_with_triu:
+                # Drop the shell pairs in the upper triangle for diagonal blocks
+                mask &= ishs >= jshs
 
             ishs = ishs[mask]
             jshs = jshs[mask]
@@ -300,8 +318,12 @@ class _VHFOpt(_vhf.VHFOpt):
         ao_loc = mol.ao_loc_nr(cart=True)
         ncptype = len(log_qs)
         self.bpcache = ctypes.POINTER(BasisProdCache)()
-        libgint.GINTinit_basis_prod(
-            ctypes.byref(self.bpcache),
+        if diag_block_with_triu:
+            scale_shellpair_diag = 1.
+        else:
+            scale_shellpair_diag = 0.5
+        libgvhf.GINTinit_basis_prod(
+            ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),
             ao_loc.ctypes.data_as(ctypes.c_void_p),
             self.bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
             self.bas_pairs_locs.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ncptype),
@@ -313,7 +335,7 @@ class _VHFOpt(_vhf.VHFOpt):
 
     def clear(self):
         _vhf.VHFOpt.__del__(self)
-        libgint.GINTdel_basis_prod(ctypes.byref(self.bpcache))
+        libgvhf.GINTdel_basis_prod(ctypes.byref(self.bpcache))
         return self
 
     def __del__(self):
@@ -324,26 +346,6 @@ class _VHFOpt(_vhf.VHFOpt):
 
 class BasisProdCache(ctypes.Structure):
     pass
-
-class JKMatrixCache(ctypes.Structure):
-    pass
-
-@contextlib.contextmanager
-def _jkmatrix_cache(mol, dms, vhfopt, vj, vk):
-    try:
-        jkcache = ctypes.POINTER(JKMatrixCache)()
-        vj_ptr = vk_ptr = lib.c_null_ptr()
-        if vj is not None:
-            vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
-        if vk is not None:
-            vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
-        libgint.GINTinit_jkmatrix_cache(
-            ctypes.byref(jkcache), vhfopt.bpcache,
-            ctypes.cast(dms.data.ptr, ctypes.c_void_p), vj_ptr, vk_ptr,
-            ctypes.c_int(dms.shape[0]), ctypes.c_int(dms.shape[1]))
-        yield jkcache
-    finally:
-        libgint.GINTdel_jkmatrix_cache(ctypes.byref(jkcache))
 
 def basis_seg_contraction(mol, allow_replica=False):
     '''transform generally contracted basis to segment contracted basis
@@ -424,11 +426,38 @@ def _make_s_index_offsets(log_q, nbins=10, cutoff=1e-12):
     scale = nbins / np.log(min(cutoff, .1))
     s_index = np.floor(scale * log_q).astype(np.int32)
     bins = np.bincount(s_index)
-    assert bins.max() < 65536 * 8
     if bins.size < nbins:
         bins = np.append(bins, np.zeros(nbins-bins.size, dtype=np.int32))
     else:
         bins = bins[:nbins]
+    assert bins.max() < 65536 * 8
     return np.append(0, np.cumsum(bins)).astype(np.int32)
+
+def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size):
+    '''Splits l_ctr patterns into small groups with group_size the maximum
+    number of AOs in each group
+    '''
+    l = uniq_l_ctr[:,0]
+    nf = l * (l + 1) // 2
+    _l_ctrs = []
+    _l_ctr_counts = []
+    for l_ctr, counts in zip(uniq_l_ctr, l_ctr_counts):
+        l = l_ctr[0]
+        nf = (l + 1) * (l + 2) // 2
+        max_shells = max(group_size // nf, 2)
+        if l > LMAX_ON_GPU or counts <= max_shells:
+            _l_ctrs.append(l_ctr)
+            _l_ctr_counts.append(counts)
+            continue
+
+        nsubs, rests = counts.__divmod__(max_shells)
+        _l_ctrs.extend([l_ctr] * nsubs)
+        _l_ctr_counts.extend([max_shells] * nsubs)
+        if rests > 0:
+            _l_ctrs.append(l_ctr)
+            _l_ctr_counts.append(rests)
+    uniq_l_ctr = np.vstack(_l_ctrs)
+    l_ctr_counts = np.hstack(_l_ctr_counts)
+    return uniq_l_ctr, l_ctr_counts
 
 del patch_cpu_kernel
