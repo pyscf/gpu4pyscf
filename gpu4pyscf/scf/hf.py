@@ -193,10 +193,27 @@ def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
     log.timer('vj and vk on gpu', *cput0)
     return vj, vk
 
+def eig(h, s):
+    '''Solver for generalized eigenvalue problem
+    '''
+    seig, t = cupy.linalg.eigh(cupy.asarray(s))
+    seig_inv = 1. / cupy.sqrt(seig)
+    seig_inv[seig < 1e-15] = 0
+    t *= seig_inv
+    heff = t.conj().T.dot(cupy.asarray(h)).dot(t)
+    e, c = cupy.linalg.eigh(heff)
+    c = t.dot(c)
+    e = e.get()
+    c = c.get()
+    return e, c
+
+def _eigh(mf, h, s):
+    return eig(h, s)
 
 class RHF(hf.RHF):
     device = 'gpu'
     get_jk = patch_cpu_kernel(hf.RHF.get_jk)(_get_jk)
+    _eigh = patch_cpu_kernel(hf.RHF._eigh)(_eigh)
 
 
 class _VHFOpt(_vhf.VHFOpt):
