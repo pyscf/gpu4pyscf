@@ -15,22 +15,20 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from pyscf.dft import uks
-from gpu4pyscf.dft import numint
-from gpu4pyscf.scf.hf import _get_jk, _eigh
-from gpu4pyscf.lib.utils import patch_cpu_kernel
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_60")
 
-class UKS(uks.UKS):
-    def __init__(self, mol, xc='LDA,VWN'):
-        super().__init__(mol, xc)
-        self._numint = numint.NumInt()
+add_library(gvhf SHARED 
+  nr_jk_driver.cu
+)
 
-    @property
-    def device(self):
-        return self._numint.device
-    @device.setter
-    def device(self, value):
-        self._numint.device = value
+#option(BUILD_SHARED_LIBS "build shared libraries" 1)
+#option(ENABLE_STATIC "Enforce static library build" 0)
+#if(ENABLE_STATIC)
+#  set(BUILD_SHARED_LIBS 0)
+#endif()
 
-    get_jk = patch_cpu_kernel(uks.UKS.get_jk)(_get_jk)
-    _eigh = patch_cpu_kernel(uks.UKS._eigh)(_eigh)
+set_target_properties(gvhf PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
+  CUDA_SEPARABLE_COMPILATION ON)
+
+target_link_libraries(gvhf gint cint)
