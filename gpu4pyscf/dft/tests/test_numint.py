@@ -20,7 +20,7 @@ import numpy as np
 import pyscf
 from pyscf import lib
 from pyscf.dft import Grids
-from gpu4pyscf.dft.numint import NumInt
+from gpu4pyscf.dft.numint import NumInt, _GDFTOpt
 
 mol = pyscf.M(
     atom='''
@@ -50,7 +50,7 @@ class KnownValues(unittest.TestCase):
         fn = getattr(ni, method)
         ni.device = 'gpu'
         e, n, v = fn(mol, grids, xc, dm1, hermi=1)
-        self.assertAlmostEqual(lib.fp(v), fpref, 12)
+        self.assertAlmostEqual(lib.fp(v), fpref, 10)
         ni.device = 'cpu'
         eref, nref, vref = fn(mol, grids, xc, dm1, hermi=1)
         self.assertAlmostEqual(abs(e - eref).max(), 0, 12)
@@ -159,6 +159,29 @@ class KnownValues(unittest.TestCase):
 
     def test_rks_fxc_st_mgga(self):
         self._check_rks_fxc_st('m06,', 1.2456987899337242)
+
+    def test_gdftopt(self):
+        mol = pyscf.M(
+            atom='He',
+            basis=[
+                [0, [1, 1]],
+                [0, [2, 1]],
+                [0, [.5, 1]],
+                [0, [3, 1], [4, 1]],
+                [1, [1, 1]],
+                [1, [2, 1]],
+                [1, [3, 1]],
+                [2, [1, 1]],
+            ])
+        opt = _GDFTOpt.from_mol(mol)
+        self.assertEqual(opt.coeff.shape, (40, 18))
+        self.assertTrue(all(opt.coeff.max(axis=1)[13:16] == 0))
+        self.assertTrue(all(opt.coeff.max(axis=1)[22:] == 0))
+        self.assertEqual(opt.mol.nbas, 12)
+        self.assertTrue(all(opt.mol._bas[::4, 1] == [0, 1, 2]))
+        self.assertTrue(all(opt.l_bas_offsets == [0, 4, 8, 12]))
+        self.assertTrue(all(opt.l_ctr_offsets == [0, 3, 4, 8, 12]))
+
 
 if __name__ == "__main__":
     print("Full Tests for dft numint")

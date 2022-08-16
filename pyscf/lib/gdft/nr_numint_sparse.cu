@@ -6,7 +6,6 @@
 #include <cuda_runtime.h>
 #include <cint.h>
 #include "gint/cuda_alloc.cuh"
-#include "nr_eval_gto.cuh"
 
 #define THREADSX        32
 #define THREADSY        4
@@ -15,9 +14,9 @@
 #define DIVXY           (THREADSX / THREADSY)
 
 __global__
-static void _dot_ao_dm(double *out, double *ao, double *dm,
-                       int jsh0, int jsh1, int ngrids, int nbins, int nsegs,
-                       int *bas_segs, uint8_t *screen_index, uint8_t *pair_mask)
+static void _dot_ao_dm(double *out, double *ao, double *dm, int jsh0, int jsh1,
+                       int ngrids, int nbas, int nbins, int nsegs, int *bas_segs,
+                       uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
 {
     int tx = threadIdx.x;
     int ty = threadIdx.y;
@@ -28,7 +27,6 @@ static void _dot_ao_dm(double *out, double *ao, double *dm,
         return;
     }
 
-    int nbas = c_envs.nbas;
     int bas_blocks = (nbas + THREADSY - 1) / THREADSY;
     int jsh_blk = jsh0 / THREADSY + shell_blk;
     uint8_t sj = screen_index[grid_blk * bas_blocks + jsh_blk];
@@ -43,11 +41,10 @@ static void _dot_ao_dm(double *out, double *ao, double *dm,
         nbins_i = 1;
     }
 
-    int *ao_loc = c_envs.ao_loc;
     int grid_id = grid_blk * THREADSX + tx;
     int jp = blockIdx.z;
     int j = ao_loc[jsh] + jp;
-    int ish, ip, n, k, i, seg;
+    int ishp, ip, k, i, seg;
     size_t Nao = ao_loc[nbas];
     size_t Ngrids = ngrids;
     double val = 0;
@@ -58,48 +55,42 @@ static void _dot_ao_dm(double *out, double *ao, double *dm,
     for (seg = 0; seg < nsegs; seg++) {
         int ish0 = bas_segs[seg];
         int ish1 = bas_segs[seg+1];
-        int nsh = ish1 - ish0;
+        int nsh = ish1 - ish0;  // nsh mush be 4-element alighed
         int degen = ao_loc[ish0+1] - ao_loc[ish0];
         int i0 = ao_loc[ish0];
-        for (ish = 0; ish < nsh; ish+=THREADSX) {
-            for (ip = 0; ip < degen; ip++) {
-                i = i0 + ish * degen + ip;
-                s_dm[ty*THREADSX+tx] = dm[i * Nao + j];
+        for (ip = i0; ip < i0 + degen; ip++) {
+            for (ishp = 0; ishp < nsh; ishp += THREADSY) {
+                int ish = ish0 + ishp;
+                int ish_blk = ish / THREADSY;
+                int off = ishp % THREADSX;
+                if (off == 0 && ishp + tx < nsh) {
+                    i = ip + (ishp + tx) * degen;
+                    s_dm[ty*THREADSX+tx] = dm[i * Nao + j];
+                }
 
-                for (n = 0; n < THREADSX; n+=THREADSY) {
-                    int ishp = ish0 + ish + n;
-                    int ish_blk = ishp / THREADSY;
-                    if (ishp < ish1 &&
-                        screen_index[grid_blk * bas_blocks + ish_blk] > nbins_i &&
-                        pair_mask[ish_blk * bas_blocks + jsh_blk]) {
-                        i = i0 + ishp * degen + ip;
-                        s_ao[ty*THREADSX+tx] = ao[i*Ngrids+grid_id];
-                        __syncthreads();
-                        if (ishp + THREADSY < ish1) {
-                            for (k = 0; k < THREADSY; k++) {
-                                val += s_ao[k*THREADSX+tx] * s_dm[ty*THREADSX+n+k];
-                            }
-                        } else {
-                            for (k = 0; k < ish1 - ishp; k++) {
-                                val += s_ao[k*THREADSX+tx] * s_dm[ty*THREADSX+n+k];
-                            }
-                        }
-                        __syncthreads();
+                if (screen_index[grid_blk * bas_blocks + ish_blk] > nbins_i &&
+                    pair_mask[ish_blk * bas_blocks + jsh_blk]) {
+                    i = ip + (ishp + ty) * degen;
+                    s_ao[ty*THREADSX+tx] = ao[i*Ngrids+grid_id];
+                    __syncthreads();
+                    for (k = 0; k < THREADSY; k++) {
+                        val += s_ao[k*THREADSX+tx] * s_dm[ty*THREADSX+off+k];
                     }
+                    __syncthreads();
                 }
             }
         }
     }
 
     if (grid_id < ngrids) {
-        ao[j*Ngrids+grid_id] += val;
+        out[j*Ngrids+grid_id] += val;
     }
 }
 
 __global__
-static void _dot_ao_dmT(double *out, double *ao, double *dm,
-                        int jsh0, int jsh1, int ngrids, int nbins, int nsegs,
-                        int *bas_segs, uint8_t *screen_index, uint8_t *pair_mask)
+static void _dot_ao_dmT(double *out, double *ao, double *dm, int jsh0, int jsh1,
+                        int ngrids, int nbas, int nbins, int nsegs, int *bas_segs,
+                        uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
 {
     int tx = threadIdx.x;
     int ty = threadIdx.y;
@@ -110,7 +101,6 @@ static void _dot_ao_dmT(double *out, double *ao, double *dm,
         return;
     }
 
-    int nbas = c_envs.nbas;
     int bas_blocks = (nbas + THREADSY - 1) / THREADSY;
     int jsh_blk = jsh0 / THREADSY + shell_blk;
     uint8_t sj = screen_index[grid_blk * bas_blocks + jsh_blk];
@@ -125,11 +115,10 @@ static void _dot_ao_dmT(double *out, double *ao, double *dm,
         nbins_i = 1;
     }
 
-    int *ao_loc = c_envs.ao_loc;
     int grid_id = grid_blk * THREADSX + tx;
     int jp = blockIdx.z;
     int j = ao_loc[jsh] + jp;
-    int ish, ip, n, k, i, seg;
+    int ishp, ip, k, i, seg;
     size_t Nao = ao_loc[nbas];
     size_t Ngrids = ngrids;
     double val = 0;
@@ -140,48 +129,42 @@ static void _dot_ao_dmT(double *out, double *ao, double *dm,
     for (seg = 0; seg < nsegs; seg++) {
         int ish0 = bas_segs[seg];
         int ish1 = bas_segs[seg+1];
-        int nsh = ish1 - ish0;
+        int nsh = ish1 - ish0;  // nsh mush be 4-element alighed
         int degen = ao_loc[ish0+1] - ao_loc[ish0];
         int i0 = ao_loc[ish0];
-        for (ish = 0; ish < nsh; ish+=THREADSX) {
-            for (ip = 0; ip < degen; ip++) {
-                i = i0 + ish * degen + ip;
-                s_dm[ty*THREADSX+tx] = dm[j * Nao + i];
+        for (ip = i0; ip < i0 + degen; ip++) {
+            for (ishp = 0; ishp < nsh; ishp += THREADSY) {
+                int ish = ish0 + ishp;
+                int ish_blk = ish / THREADSY;
+                int off = ishp % THREADSX;
+                if (off == 0 && ishp + tx < nsh) {
+                    i = ip + (ishp + tx) * degen;
+                    s_dm[ty*THREADSX+tx] = dm[j * Nao + i];
+                }
 
-                for (n = 0; n < THREADSX; n+=THREADSY) {
-                    int ishp = ish0 + ish + n;
-                    int ish_blk = ishp / THREADSY;
-                    if (ishp < ish1 &&
-                        screen_index[grid_blk * bas_blocks + ish_blk] > nbins_i &&
-                        pair_mask[ish_blk * bas_blocks + jsh_blk]) {
-                        i = i0 + ishp * degen + ip;
-                        s_ao[ty*THREADSX+tx] = ao[i*Ngrids+grid_id];
-                        __syncthreads();
-                        if (ishp + THREADSY < ish1) {
-                            for (k = 0; k < THREADSY; k++) {
-                                val += s_ao[k*THREADSX+tx] * s_dm[ty*THREADSX+n+k];
-                            }
-                        } else {
-                            for (k = 0; k < ish1 - ishp; k++) {
-                                val += s_ao[k*THREADSX+tx] * s_dm[ty*THREADSX+n+k];
-                            }
-                        }
-                        __syncthreads();
+                if (screen_index[grid_blk * bas_blocks + ish_blk] > nbins_i &&
+                    pair_mask[ish_blk * bas_blocks + jsh_blk]) {
+                    i = ip + (ishp + ty) * degen;
+                    s_ao[ty*THREADSX+tx] = ao[i*Ngrids+grid_id];
+                    __syncthreads();
+                    for (k = 0; k < THREADSY; k++) {
+                        val += s_ao[k*THREADSX+tx] * s_dm[ty*THREADSX+off+k];
                     }
+                    __syncthreads();
                 }
             }
         }
     }
 
     if (grid_id < ngrids) {
-        ao[j*Ngrids+grid_id] += val;
+        out[j*Ngrids+grid_id] += val;
     }
 }
 
 __global__
 static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
-                        int ngrids, int nbins, uint8_t *screen_index,
-                        int *bas_pair2bra, int *bas_pair2ket)
+                        int ngrids, int nbas, int nbins, uint8_t *screen_index,
+                        int *bas_pair2bra, int *bas_pair2ket, int *ao_loc)
 {
     int task_ij = blockIdx.x;
     int tx = threadIdx.x;
@@ -191,7 +174,6 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
     int tyz = tz * THREADSY + ty;
     int ish0 = bas_pair2bra[task_ij];
     int jsh0 = bas_pair2ket[task_ij];
-    int *ao_loc = c_envs.ao_loc;
     int i0 = ao_loc[ish0];
     int j0 = ao_loc[jsh0];
     int ish4 = ish0 / THREADSY;
@@ -201,7 +183,6 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
     int ip = blockIdx.y;
     int jp = blockIdx.z;
 
-    int nbas = c_envs.nbas;
     int bas_blocks = (nbas + THREADSY - 1) / THREADSY;
     size_t Nao = ao_loc[nbas];
     size_t Ngrids = ngrids;
@@ -262,14 +243,14 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
     int i = i0 + ty * degen_i + ip;
     int j = j0 + tz * degen_j + jp;
     if (tx == 0) {
-        out[i*Nao+j] = val_buf[tyz];
+        out[i*Nao+j] += val_buf[tyz];
     }
 }
 
 __global__
 static void _dot_ao_ao(double *out, double *bra, double *ket,
-                       int ngrids, int nbins, uint8_t *screen_index,
-                       int *bas_pair2bra, int *bas_pair2ket)
+                       int ngrids, int nbas, int nbins, uint8_t *screen_index,
+                       int *bas_pair2bra, int *bas_pair2ket, int *ao_loc)
 {
     int task_ij = blockIdx.x;
     int tx = threadIdx.x;
@@ -279,7 +260,6 @@ static void _dot_ao_ao(double *out, double *bra, double *ket,
     int tyz = tz * THREADSY + ty;
     int ish0 = bas_pair2bra[task_ij];
     int jsh0 = bas_pair2ket[task_ij];
-    int *ao_loc = c_envs.ao_loc;
     int i0 = ao_loc[ish0];
     int j0 = ao_loc[jsh0];
     int ish4 = ish0 / THREADSY;
@@ -289,7 +269,6 @@ static void _dot_ao_ao(double *out, double *bra, double *ket,
     int ip = blockIdx.y;
     int jp = blockIdx.z;
 
-    int nbas = c_envs.nbas;
     int bas_blocks = (nbas + THREADSY - 1) / THREADSY;
     size_t Nao = ao_loc[nbas];
     size_t Ngrids = ngrids;
@@ -350,7 +329,7 @@ static void _dot_ao_ao(double *out, double *bra, double *ket,
     int i = i0 + ty * degen_i + ip;
     int j = j0 + tz * degen_j + jp;
     if (tx == 0) {
-        out[i*Nao+j] = val_buf[tyz];
+        out[i*Nao+j] += val_buf[tyz];
     }
 }
 
@@ -361,7 +340,6 @@ static void _dot_ao_ao(double *out, double *bra, double *ket,
 //                             int nao, int ngrids, int nbas,
 //                             uint8_t *screen_index)
 //{
-//    int *ao_loc = c_envs.ao_loc;
 //    int grid_blk = blockIdx.x;
 //    int grid_id = grid_blk * THREADSX + threadIdx.x;
 //
@@ -422,8 +400,9 @@ int GDFTdot_ao_dm_sparse(double *out, double *ao, double *dm, int trans_dm,
     int nao = ao_loc[nbas];
     checkCudaErrors(cudaMemset(out, 0, sizeof(double)*ngrids*nao));
     DEVICE_INIT(uint8_t, d_sindex, screen_index, grid_blocks * bas_blocks);
-    DEVICE_INIT(uint8_t, d_pair_mask, pair_mask, grid_blocks * bas_blocks);
-    DEVICE_INIT(int, d_seg_loc, seg_loc, nsegs);
+    DEVICE_INIT(uint8_t, d_pair_mask, pair_mask, bas_blocks * bas_blocks);
+    DEVICE_INIT(int, d_ao_loc, ao_loc, (nbas + 1));
+    DEVICE_INIT(int, d_seg_loc, seg_loc, (nsegs + 1));
 
     for (int seg = 0; seg < nsegs; seg++) {
         int ish0 = seg_loc[seg];
@@ -435,13 +414,13 @@ int GDFTdot_ao_dm_sparse(double *out, double *ao, double *dm, int trans_dm,
         dim3 threads(THREADSX, THREADSY);
         dim3 blocks((ngrids+THREADSX-1)/THREADSX, (nsh+THREADSY-1)/THREADSY, degen);
         if (trans_dm) {
-            _dot_ao_dmT<<<blocks, threads>>>(out, ao, dm, ish0, ish1, ngrids,
+            _dot_ao_dmT<<<blocks, threads>>>(out, ao, dm, ish0, ish1, ngrids, nbas,
                                              nbins, nsegs, d_seg_loc, d_sindex,
-                                             d_pair_mask);
+                                             d_pair_mask, d_ao_loc);
         } else {
-            _dot_ao_dm<<<blocks, threads>>>(out, ao, dm, ish0, ish1, ngrids,
+            _dot_ao_dm<<<blocks, threads>>>(out, ao, dm, ish0, ish1, ngrids, nbas,
                                             nbins, nsegs, d_seg_loc, d_sindex,
-                                            d_pair_mask);
+                                            d_pair_mask, d_ao_loc);
         }
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
@@ -454,6 +433,7 @@ int GDFTdot_ao_dm_sparse(double *out, double *ao, double *dm, int trans_dm,
 cleanup:
     FREE(d_sindex);
     FREE(d_pair_mask);
+    FREE(d_ao_loc);
     FREE(d_seg_loc);
     return err_code;
 }
@@ -472,7 +452,9 @@ int GDFTdot_aow_ao_sparse(double *out, double *bra, double *ket, double *wv,
     int *pair2ket = bas_pair2shls + tot_pairs;
     DEVICE_INIT(uint8_t, d_sindex, screen_index, grid_blocks * bas_blocks);
     DEVICE_INIT(int, d_pair2bra, bas_pair2shls, tot_pairs * 2);
+    DEVICE_INIT(int, d_ao_loc, ao_loc, (nbas + 1));
     int *d_pair2ket = d_pair2bra + tot_pairs;
+    DEVICE_INIT(double, d_wv, wv, ngrids);
 
     for (int seg = 0; seg < npair_segs; seg++) {
         int pair0 = bas_pairs_locs[seg];
@@ -486,8 +468,9 @@ int GDFTdot_aow_ao_sparse(double *out, double *bra, double *ket, double *wv,
         int degen_j = ao_loc[jsh0+1] - ao_loc[jsh0];
         dim3 threads(DIVXY, THREADSY, THREADSY);
         dim3 blocks((npairs+THREADSXY-1)/THREADSXY, degen_i, degen_j);
-        _dot_aow_ao<<<blocks, threads>>>(out, bra, ket, wv, ngrids, nbins, d_sindex,
-                                         d_pair2bra+pair0, d_pair2ket+pair0);
+        _dot_aow_ao<<<blocks, threads>>>(out, bra, ket, d_wv, ngrids, nbas, nbins,
+                                         d_sindex, d_pair2bra+pair0, d_pair2ket+pair0,
+                                         d_ao_loc);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             fprintf(stderr, "CUDA Error of GDFTdot_aow_ao_sparse: %s\n",
@@ -499,6 +482,8 @@ int GDFTdot_aow_ao_sparse(double *out, double *bra, double *ket, double *wv,
 cleanup:
     FREE(d_sindex);
     FREE(d_pair2bra);
+    FREE(d_ao_loc);
+    FREE(d_wv);
     return err_code;
 }
 
@@ -516,6 +501,7 @@ int GDFTdot_ao_ao_sparse(double *out, double *bra, double *ket,
     int *pair2ket = bas_pair2shls + tot_pairs;
     DEVICE_INIT(uint8_t, d_sindex, screen_index, grid_blocks * bas_blocks);
     DEVICE_INIT(int, d_pair2bra, bas_pair2shls, tot_pairs * 2);
+    DEVICE_INIT(int, d_ao_loc, ao_loc, (nbas + 1));
     int *d_pair2ket = d_pair2bra + tot_pairs;
 
     for (int seg = 0; seg < npair_segs; seg++) {
@@ -530,8 +516,8 @@ int GDFTdot_ao_ao_sparse(double *out, double *bra, double *ket,
         int degen_j = ao_loc[jsh0+1] - ao_loc[jsh0];
         dim3 threads(DIVXY, THREADSY, THREADSY);
         dim3 blocks((npairs+THREADSXY-1)/THREADSXY, degen_i, degen_j);
-        _dot_ao_ao<<<blocks, threads>>>(out, bra, ket, ngrids, nbins, d_sindex,
-                                        d_pair2bra+pair0, d_pair2ket+pair0);
+        _dot_ao_ao<<<blocks, threads>>>(out, bra, ket, ngrids, nbas, nbins, d_sindex,
+                                        d_pair2bra+pair0, d_pair2ket+pair0, d_ao_loc);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             fprintf(stderr, "CUDA Error of GDFTdot_ao_ao_sparse: %s\n",
@@ -543,6 +529,7 @@ int GDFTdot_ao_ao_sparse(double *out, double *bra, double *ket,
 cleanup:
     FREE(d_sindex);
     FREE(d_pair2bra);
+    FREE(d_ao_loc);
     return err_code;
 }
 }
