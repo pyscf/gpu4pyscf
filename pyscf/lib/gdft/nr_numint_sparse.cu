@@ -457,20 +457,19 @@ int GDFTdot_aow_ao_sparse(double *out, double *bra, double *ket, double *wv,
     DEVICE_INIT(double, d_wv, wv, ngrids);
 
     for (int seg = 0; seg < npair_segs; seg++) {
-        int pair0 = bas_pairs_locs[seg];
-        int pair1 = bas_pairs_locs[seg+1];
-        int npairs = pair1 - pair0;
-        int ish0 = pair2bra[pair0];
-        int jsh0 = pair2ket[pair0];
+        int task0 = bas_pairs_locs[seg];
+        int task1 = bas_pairs_locs[seg+1];
+        int ntasks = task1 - task0;  // each task contains 16 shell-pairs
+        int ish0 = pair2bra[task0];
+        int jsh0 = pair2ket[task0];
         assert(ish0 % THREADSY == 0);
         assert(jsh0 % THREADSY == 0);
         int degen_i = ao_loc[ish0+1] - ao_loc[ish0];
         int degen_j = ao_loc[jsh0+1] - ao_loc[jsh0];
         dim3 threads(DIVXY, THREADSY, THREADSY);
-        dim3 blocks((npairs+THREADSXY-1)/THREADSXY, degen_i, degen_j);
-        _dot_aow_ao<<<blocks, threads>>>(out, bra, ket, d_wv, ngrids, nbas, nbins,
-                                         d_sindex, d_pair2bra+pair0, d_pair2ket+pair0,
-                                         d_ao_loc);
+        dim3 blocks(ntasks, degen_i, degen_j);
+        _dot_aow_ao<<<blocks, threads>>>(out, bra, ket, d_wv, ngrids, nbas, nbins, d_sindex,
+                                         d_pair2bra+task0, d_pair2ket+task0, d_ao_loc);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             fprintf(stderr, "CUDA Error of GDFTdot_aow_ao_sparse: %s\n",
@@ -505,19 +504,19 @@ int GDFTdot_ao_ao_sparse(double *out, double *bra, double *ket,
     int *d_pair2ket = d_pair2bra + tot_pairs;
 
     for (int seg = 0; seg < npair_segs; seg++) {
-        int pair0 = bas_pairs_locs[seg];
-        int pair1 = bas_pairs_locs[seg+1];
-        int npairs = pair1 - pair0;
-        int ish0 = pair2bra[pair0];
-        int jsh0 = pair2ket[pair0];
+        int task0 = bas_pairs_locs[seg];
+        int task1 = bas_pairs_locs[seg+1];
+        int ntasks = task1 - task0;  // each task contains 16 shell-pairs
+        int ish0 = pair2bra[task0];
+        int jsh0 = pair2ket[task0];
         assert(ish0 % THREADSY == 0);
         assert(jsh0 % THREADSY == 0);
         int degen_i = ao_loc[ish0+1] - ao_loc[ish0];
         int degen_j = ao_loc[jsh0+1] - ao_loc[jsh0];
         dim3 threads(DIVXY, THREADSY, THREADSY);
-        dim3 blocks((npairs+THREADSXY-1)/THREADSXY, degen_i, degen_j);
+        dim3 blocks(ntasks, degen_i, degen_j);
         _dot_ao_ao<<<blocks, threads>>>(out, bra, ket, ngrids, nbas, nbins, d_sindex,
-                                        d_pair2bra+pair0, d_pair2ket+pair0, d_ao_loc);
+                                        d_pair2bra+task0, d_pair2ket+task0, d_ao_loc);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             fprintf(stderr, "CUDA Error of GDFTdot_ao_ao_sparse: %s\n",

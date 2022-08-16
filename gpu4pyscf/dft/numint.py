@@ -199,15 +199,15 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1, max_memory=2000,
                 if xctype == 'LDA':
                     den = rho * weight
                     wv = weight * vxc[0]
-                    _dot_ao_ao_sparse(ao, ao, wv, nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls, pairs_locs, vmat[i])
+                    _dot_ao_ao_sparse(ao, ao, wv, nbins, sindex, ao_loc,
+                                      pair2shls, pairs_locs, vmat[i])
                 elif xctype == 'GGA':
                     den = rho[0] * weight
                     wv = vxc * weight
                     wv[0] *= .5
                     aow = _scale_ao(ao, wv)
-                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls_full, pairs_locs_full, vmat[i])
+                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
+                                      pair2shls_full, pairs_locs_full, vmat[i])
                 elif xctype == 'NLC':
                     raise NotImplementedError('NLC')
                 elif xctype == 'MGGA':
@@ -215,10 +215,10 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1, max_memory=2000,
                     wv = vxc * weight
                     wv[0] *= .5  # *.5 for v+v.T
                     aow = _scale_ao(ao[:4], wv[:4])
-                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls_full, pairs_locs_full, vmat[i])
-                    _tau_dot_sparse(ao, ao, wv[4], nbins, sindex, ni.pair_mask,
-                                    ao_loc, pair2shls, pairs_locs, vmat1[i])
+                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
+                                      pair2shls_full, pairs_locs_full, vmat[i])
+                    _tau_dot_sparse(ao, ao, wv[4], nbins, sindex, ao_loc,
+                                    pair2shls, pairs_locs, vmat1[i])
                 elif xctype == 'HF':
                     pass
                 else:
@@ -317,21 +317,21 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1, max_memory=2000,
                     den_a = rho_a * weight
                     den_b = rho_b * weight
                     wv = vxc[:,0] * weight
-                    _dot_ao_ao_sparse(ao, ao, wv[0], nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls, pairs_locs, vmata[i])
-                    _dot_ao_ao_sparse(ao, ao, wv[1], nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls, pairs_locs, vmatb[i])
+                    _dot_ao_ao_sparse(ao, ao, wv[0], nbins, sindex, ao_loc,
+                                      pair2shls, pairs_locs, vmata[i])
+                    _dot_ao_ao_sparse(ao, ao, wv[1], nbins, sindex, ao_loc,
+                                      pair2shls, pairs_locs, vmatb[i])
                 elif xctype == 'GGA':
                     den_a = rho_a[0] * weight
                     den_b = rho_b[0] * weight
                     wv = vxc * weight
                     wv[:,0] *= .5
                     aow = _scale_ao(ao, wv[0])
-                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls_full, pairs_locs_full, vmata[i])
+                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
+                                      pair2shls_full, pairs_locs_full, vmata[i])
                     aow = _scale_ao(ao, wv[1])
-                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls_full, pairs_locs_full, vmatb[i])
+                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
+                                      pair2shls_full, pairs_locs_full, vmatb[i])
                 elif xctype == 'NLC':
                     raise NotImplementedError('NLC')
                 elif xctype == 'MGGA':
@@ -340,15 +340,15 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1, max_memory=2000,
                     wv = vxc * weight
                     wv[:,0] *= .5
                     aow = _scale_ao(ao[:4], wv[0,:4])
-                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls_full, pairs_locs_full, vmata[i])
+                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
+                                      pair2shls_full, pairs_locs_full, vmata[i])
                     aow = _scale_ao(ao[:4], wv[1,:4])
-                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls_full, pairs_locs_full, vmatb[i])
-                    _tau_dot_sparse(ao, ao, wv[0,4], nbins, sindex, ni.pair_mask,
-                                    ao_loc, pair2shls, pairs_locs, vmat1a[i])
-                    _tau_dot_sparse(ao, ao, wv[1,4], nbins, sindex, ni.pair_mask,
-                                    ao_loc, pair2shls, pairs_locs, vmat1b[i])
+                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
+                                      pair2shls_full, pairs_locs_full, vmatb[i])
+                    _tau_dot_sparse(ao, ao, wv[0,4], nbins, sindex, ao_loc,
+                                    pair2shls, pairs_locs, vmat1a[i])
+                    _tau_dot_sparse(ao, ao, wv[1,4], nbins, sindex, ao_loc,
+                                    pair2shls, pairs_locs, vmat1b[i])
                 elif xctype == 'HF':
                     pass
                 else:
@@ -480,24 +480,24 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                                     hermi=hermi, ao_cutoff=ao_cutoff)
                 if xctype == 'LDA':
                     wv = rho1 * fxc[0,0,p0:p1] * weight
-                    _dot_ao_ao_sparse(ao, ao, wv, nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls, pairs_locs, vmat[i])
+                    _dot_ao_ao_sparse(ao, ao, wv, nbins, sindex, ao_loc,
+                                      pair2shls, pairs_locs, vmat[i])
                 elif xctype == 'GGA':
                     wv = np.einsum('xg,xyg->yg', rho1, fxc[:,:,p0:p1]) * weight
                     wv[0] *= .5
                     aow = _scale_ao(ao, wv)
-                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls_full, pairs_locs_full, vmat[i])
+                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
+                                      pair2shls_full, pairs_locs_full, vmat[i])
                 elif xctype == 'NLC':
                     raise NotImplementedError('NLC')
                 else:
                     wv = np.einsum('xg,xyg->yg', rho1, fxc[:,:,p0:p1]) * weight
                     wv[0] *= .5  # *.5 for v+v.T
                     aow = _scale_ao(ao[:4], wv[:4])
-                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls_full, pairs_locs_full, vmat[i])
-                    _tau_dot_sparse(ao, ao, wv[4], nbins, sindex, ni.pair_mask,
-                                    ao_loc, pair2shls, pairs_locs, vmat1[i])
+                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
+                                      pair2shls_full, pairs_locs_full, vmat[i])
+                    _tau_dot_sparse(ao, ao, wv[4], nbins, sindex, ao_loc,
+                                    pair2shls, pairs_locs, vmat1[i])
             ao = None
 
     if xctype == 'GGA':
@@ -600,34 +600,34 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 rho1 = np.asarray([rho1a, rho1b])
                 if xctype == 'LDA':
                     wv = np.einsum('ag,abg->bg', rho1, fxc[:,0,:,0,p0:p1]) * weight
-                    _dot_ao_ao_sparse(ao, ao, wv[0], nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls, pairs_locs, vmata[i])
-                    _dot_ao_ao_sparse(ao, ao, wv[1], nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls, pairs_locs, vmatb[i])
+                    _dot_ao_ao_sparse(ao, ao, wv[0], nbins, sindex, ao_loc,
+                                      pair2shls, pairs_locs, vmata[i])
+                    _dot_ao_ao_sparse(ao, ao, wv[1], nbins, sindex, ao_loc,
+                                      pair2shls, pairs_locs, vmatb[i])
                 elif xctype == 'GGA':
                     wv = np.einsum('axg,axbyg->byg', rho1, fxc[:,:,:,:,p0:p1]) * weight
                     wv[:,0] *= .5
                     aow = _scale_ao(ao, wv[0])
-                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls_full, pairs_locs_full, vmata[i])
+                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
+                                      pair2shls_full, pairs_locs_full, vmata[i])
                     aow = _scale_ao(ao, wv[1])
-                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls_full, pairs_locs_full, vmatb[i])
+                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
+                                      pair2shls_full, pairs_locs_full, vmatb[i])
                 elif xctype == 'NLC':
                     raise NotImplementedError('NLC')
                 else:
                     wv = np.einsum('axg,axbyg->byg', rho1, fxc[:,:,:,:,p0:p1]) * weight
                     wv[:,0] *= .5
                     aow = _scale_ao(ao[:4], wv[0,:4])
-                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls_full, pairs_locs_full, vmata[i])
+                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
+                                      pair2shls_full, pairs_locs_full, vmata[i])
                     aow = _scale_ao(ao[:4], wv[1,:4])
-                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ni.pair_mask,
-                                      ao_loc, pair2shls_full, pairs_locs_full, vmatb[i])
-                    _tau_dot_sparse(ao, ao, wv[0,4], nbins, sindex, ni.pair_mask,
-                                    ao_loc, pair2shls, pairs_locs, vmat1a[i])
-                    _tau_dot_sparse(ao, ao, wv[1,4], nbins, sindex, ni.pair_mask,
-                                    ao_loc, pair2shls, pairs_locs, vmat1b[i])
+                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
+                                      pair2shls_full, pairs_locs_full, vmatb[i])
+                    _tau_dot_sparse(ao, ao, wv[0,4], nbins, sindex, ao_loc,
+                                    pair2shls, pairs_locs, vmat1a[i])
+                    _tau_dot_sparse(ao, ao, wv[1,4], nbins, sindex, ao_loc,
+                                    pair2shls, pairs_locs, vmat1b[i])
             ao = None
 
     if xctype == 'GGA':
@@ -872,7 +872,7 @@ def _dot_ao_dm_sparse(ao, dm, nbins, screen_index, pair_mask, ao_loc,
         raise RuntimeError('CUDA Error')
     return out
 
-def _dot_ao_ao_sparse(bra, ket, wv, nbins, screen_index, pair_mask, ao_loc,
+def _dot_ao_ao_sparse(bra, ket, wv, nbins, screen_index, ao_loc,
                       bas_pair2shls, bas_pairs_locs, out):
     if not USE_SPARSITY:
         if wv is None:
@@ -932,15 +932,15 @@ def _contract_rho(bra, ket):
         rho = cupy.einsum('gi,gi->g', bra, ket)
     return rho
 
-def _tau_dot_sparse(bra, ket, wv, nbins, screen_index, pair_mask, ao_loc,
+def _tau_dot_sparse(bra, ket, wv, nbins, screen_index, ao_loc,
                     bas_pair2shls, bas_pairs_locs, out):
     '''1/2 <nabla i| v | nabla j>'''
     wv = .5 * wv
-    _dot_ao_ao_sparse(bra[1], ket[1], wv, nbins, screen_index, pair_mask,
+    _dot_ao_ao_sparse(bra[1], ket[1], wv, nbins, screen_index,
                       ao_loc, bas_pair2shls, bas_pairs_locs, out)
-    _dot_ao_ao_sparse(bra[2], ket[2], wv, nbins, screen_index, pair_mask,
+    _dot_ao_ao_sparse(bra[2], ket[2], wv, nbins, screen_index,
                       ao_loc, bas_pair2shls, bas_pairs_locs, out)
-    _dot_ao_ao_sparse(bra[3], ket[3], wv, nbins, screen_index, pair_mask,
+    _dot_ao_ao_sparse(bra[3], ket[3], wv, nbins, screen_index,
                       ao_loc, bas_pair2shls, bas_pairs_locs, out)
     return out
 

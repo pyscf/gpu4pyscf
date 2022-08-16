@@ -50,12 +50,12 @@ class KnownValues(unittest.TestCase):
         fn = getattr(ni, method)
         ni.device = 'gpu'
         e, n, v = fn(mol, grids, xc, dm1, hermi=1)
-        self.assertAlmostEqual(lib.fp(v), fpref, 10)
+        self.assertAlmostEqual(lib.fp(v), fpref, 9)
         ni.device = 'cpu'
         eref, nref, vref = fn(mol, grids, xc, dm1, hermi=1)
-        self.assertAlmostEqual(abs(e - eref).max(), 0, 12)
-        self.assertAlmostEqual(abs(n - nref).max(), 0, 12)
-        self.assertAlmostEqual(abs(v - vref).max(), 0, 10)
+        self.assertAlmostEqual(abs(e - eref).max(), 0, 10)
+        self.assertAlmostEqual(abs(n - nref).max(), 0, 10)
+        self.assertAlmostEqual(abs(v - vref).max(), 0, 9)
 
     def _check_rks_fxc(self, xc, fpref, hermi=1):
         if hermi == 1:
@@ -67,12 +67,12 @@ class KnownValues(unittest.TestCase):
         ni.device = 'gpu'
         rho, vxc, fxc = ni.cache_xc_kernel(mol, grids, xc, mo_coeff, mo_occ, spin)
         v = ni.nr_rks_fxc(mol, grids, xc, dms=t1, fxc=fxc, hermi=hermi)
-        self.assertAlmostEqual(lib.fp(v), fpref, 12)
+        self.assertAlmostEqual(lib.fp(v), fpref, 9)
         ni.device = 'cpu'
         rho, vxc, fxc = ni.cache_xc_kernel(mol, grids, xc, mo_coeff, mo_occ, spin)
         vref = ni.nr_rks_fxc(
             mol, grids, xc, dm0=dm0, dms=t1, rho0=rho, vxc=vxc, fxc=fxc, hermi=hermi)
-        self.assertAlmostEqual(abs(v - vref).max(), 0, 12)
+        self.assertAlmostEqual(abs(v - vref).max(), 0, 9)
 
     def _check_rks_fxc_st(self, xc, fpref):
         ni = NumInt()
@@ -81,13 +81,13 @@ class KnownValues(unittest.TestCase):
         rho, vxc, fxc = ni.cache_xc_kernel(
             mol, grids, xc, [mo_coeff]*2, [mo_occ*.5]*2, spin)
         v = ni.nr_rks_fxc_st(mol, grids, xc, dms_alpha=dm, fxc=fxc)
-        self.assertAlmostEqual(lib.fp(v), fpref, 12)
+        self.assertAlmostEqual(lib.fp(v), fpref, 9)
         ni.device = 'cpu'
         rho, vxc, fxc = ni.cache_xc_kernel(
             mol, grids, xc, [mo_coeff]*2, [mo_occ*.5]*2, spin)
         vref = ni.nr_rks_fxc_st(
             mol, grids, xc, dm0=dm0, dms_alpha=dm, rho0=rho, vxc=vxc, fxc=fxc)
-        self.assertAlmostEqual(abs(v - vref).max(), 0, 12)
+        self.assertAlmostEqual(abs(v - vref).max(), 0, 9)
 
     def _check_uks_fxc(self, xc, fpref, hermi=1):
         if hermi == 1:
@@ -100,14 +100,14 @@ class KnownValues(unittest.TestCase):
         rho, vxc, fxc = ni.cache_xc_kernel(
             mol, grids, xc, [mo_coeff]*2, [mo_occ, 1-mo_occ], spin)
         v = ni.nr_uks_fxc(mol, grids, xc, dms=t1, fxc=fxc, hermi=hermi)
-        self.assertAlmostEqual(lib.fp(v), fpref, 12)
+        self.assertAlmostEqual(lib.fp(v), fpref, 8)
         ni.device = 'cpu'
         dm0 = mo_coeff.dot(mo_coeff.T)
         rho, vxc, fxc = ni.cache_xc_kernel(
             mol, grids, xc, [mo_coeff]*2, [mo_occ, 1-mo_occ], spin)
         vref = ni.nr_uks_fxc(
             mol, grids, xc, dm0=dm0, dms=t1, rho0=rho, vxc=vxc, fxc=fxc, hermi=hermi)
-        self.assertAlmostEqual(abs(v - vref).max(), 0, 12)
+        self.assertAlmostEqual(abs(v - vref).max(), 0, 8)
 
     def test_rks_lda(self):
         self._check_vxc('nr_rks', 'lda,', -5.592159200616021)
