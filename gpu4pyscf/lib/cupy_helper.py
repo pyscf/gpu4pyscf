@@ -15,7 +15,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import ctypes
 from pyscf import lib
+
 libcupy_helper = lib.load_library('libcupy_helper')
 
 # for i > j of 2d mat, mat[j,i] = mat[i,j]
