@@ -18,6 +18,7 @@
  */
 
 #include <math.h>
+#include <stdio.h>
 #include "g2e.h"
 
 double CINTcommon_fac_sp(int l);
@@ -120,6 +121,7 @@ void GINTinit_aexyz(double *aexyz, BasisProdCache *bpcache, double diag_fac,
                 for (count = off, ip = 0; ip < npi; ip++) {
                 for (jp = 0; jp < npj; jp++, count++) {
                         aij = ai[ip] + aj[jp];
+                        printf("aij: %d \n", aij);
                         a12[count] = aij;
                         e12[count] = norm * ci[ip] * cj[jp] *
                                 exp(-dist_ij * ai[ip] * aj[jp] / aij);

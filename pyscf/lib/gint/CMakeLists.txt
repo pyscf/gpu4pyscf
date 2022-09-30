@@ -3,7 +3,7 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_60")
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_60 --ptxas-options=-v")
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_50 --ptxas-options=-v -maxrregcount=255")
 
-add_library(gint SHARED 
+add_library(gint SHARED
   g2e.c
   pair_data.c
   nr_fill_ao_ints.cu
@@ -16,7 +16,8 @@ add_library(gint SHARED
 #endif()
 
 set_target_properties(gint PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
+#  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
   CUDA_SEPARABLE_COMPILATION ON)
 
 #target_link_libraries(gint gint cint)

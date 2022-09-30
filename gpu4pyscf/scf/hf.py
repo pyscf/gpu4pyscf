@@ -356,6 +356,14 @@ class _VHFOpt(_vhf.VHFOpt):
             scale_shellpair_diag = 1.
         else:
             scale_shellpair_diag = 0.5
+
+        print(scale_shellpair_diag)
+        print(self.bas_pair2shls)
+        print(self.bas_pairs_locs)
+        print(ncptype)
+        print(mol.nbas)
+        print(mol.natm)
+        quit()
         libgvhf.GINTinit_basis_prod(
             ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),
             ao_loc.ctypes.data_as(ctypes.c_void_p),

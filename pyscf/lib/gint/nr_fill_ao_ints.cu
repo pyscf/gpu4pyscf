@@ -54,7 +54,7 @@ static int GINTfill_int2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GINTE
     int nrys_roots = envs->nrys_roots;
     int ntasks_ij = offsets->ntasks_ij;
     int ntasks_kl = offsets->ntasks_kl;
-    assert(task_kl < 65536*THREADSY);
+    assert(ntasks_kl < 65536*THREADSY);
     int type_ijkl;
 
     dim3 threads(THREADSX, THREADSY);
@@ -188,17 +188,20 @@ void GINTinit_basis_prod(BasisProdCache **pbp, double diag_fac, int *ao_loc,
     memset(bpcache, 0, sizeof(BasisProdCache));
     *pbp = bpcache;
 
+  printf("bug flag");
     GINTinit_contraction_types(bpcache, bas_pair2shls, bas_pairs_locs, ncptype,
                                atm, natm, bas, nbas, env);
     int n_bas_pairs = bpcache->bas_pairs_locs[ncptype];
     int n_primitive_pairs = bpcache->primitive_pairs_locs[ncptype];
+  printf("n_primitive_pairs * 5: %d\n", n_primitive_pairs * 5);
     double *aexyz = (double *)malloc(sizeof(double) * n_primitive_pairs * 5);
     GINTinit_aexyz(aexyz, bpcache, diag_fac, atm, natm, bas, nbas, env);
     bpcache->aexyz = aexyz;
     bpcache->bas_pair2shls = bas_pair2shls;
 
     // initialize ao_loc on GPU
-    DEVICE_INIT(int, d_ao_loc, ao_loc, nbas+1);
+
+  DEVICE_INIT(int, d_ao_loc, ao_loc, nbas+1);
     bpcache->ao_loc = d_ao_loc;
 
     // initialize basis coordinates on GPU memory

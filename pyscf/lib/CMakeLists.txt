@@ -16,7 +16,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 cmake_minimum_required (VERSION 3.9)
-project (gpu4pyscf C CUDA)
+project (gpu4pyscf C CXX CUDA)
 
 if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RELWITHDEBINFO)
@@ -116,3 +116,32 @@ if(NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/include/cint.h")
   add_dependencies(gint libcint)
 endif()
 endif()
+
+####################
+#       Test       #
+####################
+
+enable_testing()
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(test_api
+        ../unit_test/int2e_test.cu
+        )
+
+add_library(catch2 SHARED unit_test/Catch2/catch.cpp)
+include_directories("unit_test/Catch2")
+target_include_directories(catch2 PUBLIC unit_test/Catch2/)
+
+find_package(
+        Armadillo
+        REQUIRED
+)
+
+if (${Armadillo_FOUND})
+  message("Adding Armadillo library.")
+  include_directories(SYSTEM ${Armadillo_INCLUDE_DIRS})
+  target_link_libraries(test_api ${Armadillo_LIBRARIES})
+endif ()
+
+target_link_libraries(test_api gint catch2 -fsanitize=address)
