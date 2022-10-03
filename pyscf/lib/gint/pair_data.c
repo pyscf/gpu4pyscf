@@ -42,7 +42,7 @@ void GINTinit_contraction_types(BasisProdCache *bpcache,
         int *bas_pair2ket = bas_pair2shls + n_bas_pairs;
         int n_primitive_pairs = 0;
         primitive_pairs_locs[0] = 0;
-        printf("primitive_pairs_locs[1]_before: %d\n", primitive_pairs_locs[1]);
+
         for (n = 0; n < ncptype; n++, cptype++) {
                 int pair_id = bas_pairs_locs[n];
                 int npairs = bas_pairs_locs[n+1] - bas_pairs_locs[n];
@@ -56,13 +56,9 @@ void GINTinit_contraction_types(BasisProdCache *bpcache,
                 cptype->l_ket = lj;
                 cptype->nprim_12 = npi * npj;
                 cptype->npairs = npairs;
-                printf("npairs: %d\n", npairs);
-                printf("npi: %d\n", npi);
-                printf("npj: %d\n", npj);
                 n_primitive_pairs += npairs * npi * npj;
                 primitive_pairs_locs[n+1] = n_primitive_pairs;
         }
-        printf("primitive_pairs_locs[1]_after: %d\n", primitive_pairs_locs[1]);
 }
 
 void GINTsort_bas_coordinates(double *bas_coords, int *atm, int natm,
@@ -125,8 +121,7 @@ void GINTinit_aexyz(double *aexyz, BasisProdCache *bpcache, double diag_fac,
                 for (count = off, ip = 0; ip < npi; ip++) {
                 for (jp = 0; jp < npj; jp++, count++) {
                         aij = ai[ip] + aj[jp];
-                        printf("aij: %f \n", aij);
-                        printf("count: %d \n", count);
+                        printf("aij: %d \n", aij);
                         a12[count] = aij;
                         e12[count] = norm * ci[ip] * cj[jp] *
                                 exp(-dist_ij * ai[ip] * aj[jp] / aij);
