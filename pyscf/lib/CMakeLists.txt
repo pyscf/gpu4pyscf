@@ -144,4 +144,4 @@ if (${Armadillo_FOUND})
   target_link_libraries(test_api ${Armadillo_LIBRARIES})
 endif ()
 
-target_link_libraries(test_api gint catch2 -fsanitize=address)
+target_link_libraries(test_api PRIVATE gint catch2)

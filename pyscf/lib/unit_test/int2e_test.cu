@@ -1,4 +1,4 @@
-#include <catch2/catch.hpp>
+#include <catch.hpp>
 
 #include "gint/nr_fill_ao_ints.cuh"
 #include <armadillo>
@@ -11,7 +11,7 @@ TEST_CASE("Let's try replicating the numbers!") {
 
   std::vector<int> basis_pair_to_shells = arma::conv_to<std::vector<int>>::from(
       arma::vectorise(arma::Mat<int>{{1, 0, 1},
-                                     {1, 0, 0}}));
+                                     {1, 0, 0}}.t()));
 
   std::vector<int> basis_pairs_locations{0, 3};
   int ncptype = 1;
@@ -20,10 +20,10 @@ TEST_CASE("Let's try replicating the numbers!") {
   std::vector<int> ao_loc{0, 1, 2};
   std::vector<int> atm = arma::conv_to<std::vector<int>>::from(
       arma::vectorise(arma::Mat<int>{{1, 20, 1, 23, 0, 0},
-                                     {1, 24, 1, 27, 0, 0}}));
+                                     {1, 24, 1, 27, 0, 0}}.t()));
   std::vector<int> basis = arma::conv_to<std::vector<int>>::from(
       arma::vectorise(arma::Mat<int>({{0, 0, 3, 1, 0, 28, 31, 0},
-                                      {1, 0, 3, 1, 0, 28, 31, 0}})));
+                                      {1, 0, 3, 1, 0, 28, 31, 0}}).t()));
 
   std::vector<double> environment{0, 0, 0, 0, 0, 0,
                                   0, 0, 0, 0, 0, 0,

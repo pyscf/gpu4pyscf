@@ -193,6 +193,7 @@ void GINTinit_basis_prod(BasisProdCache **pbp, double diag_fac, int *ao_loc,
                                atm, natm, bas, nbas, env);
     int n_bas_pairs = bpcache->bas_pairs_locs[ncptype];
     int n_primitive_pairs = bpcache->primitive_pairs_locs[ncptype];
+    printf("ncptype: %d\n", ncptype);
   printf("n_primitive_pairs * 5: %d\n", n_primitive_pairs * 5);
     double *aexyz = (double *)malloc(sizeof(double) * n_primitive_pairs * 5);
     GINTinit_aexyz(aexyz, bpcache, diag_fac, atm, natm, bas, nbas, env);

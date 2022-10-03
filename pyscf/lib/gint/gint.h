@@ -130,7 +130,7 @@ typedef struct {
     double *x12;
     double *y12;
     double *z12;
-} BasisProdCache;
+}  BasisProdCache;
 
 
 typedef void (*FPtr_CPUkernel_jk)(double *g, double **dm, double **v,
