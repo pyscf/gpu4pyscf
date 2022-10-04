@@ -31,7 +31,90 @@ LMAX_ON_GPU = 3
 FREE_CUPY_CACHE = True
 
 libgvhf = lib.load_library('libgvhf')
+libgint = lib.load_library('libgint')
 libgvhf.GINTbuild_jk.restype = ctypes.c_int
+
+
+def get_int2e(mol, vhfopt=None, verbose=None):
+    '''Compute J, K matrices with CPU-GPU hybrid algorithm
+    '''
+    cput0 = (logger.process_clock(), logger.perf_counter())
+    log = logger.new_logger(mol, verbose)
+
+    if vhfopt is None:
+        vhfopt = _VHFOpt(mol, 'int2e').build()
+
+    coeff = cupy.asarray(vhfopt.coeff)
+    nao, nao0 = coeff.shape
+
+    scripts = []
+
+    l_symb = lib.param.ANGULAR
+    pair2bra, pair2ket = vhfopt.bas_pair2shls
+    bas_pairs_locs = vhfopt.bas_pairs_locs
+    log_qs = vhfopt.log_qs
+    direct_scf_tol = vhfopt.direct_scf_tol
+
+    # adjust nbins according to the size of the system
+    pairs_max = (bas_pairs_locs[1:] - bas_pairs_locs[:-1]).max()
+    nbins = max(10, int(pairs_max//100000))
+    log.debug('Set the number of buckets for s_index to %d', nbins)
+
+    ncptype = len(log_qs)
+    cp_idx, cp_jdx = np.tril_indices(ncptype)
+
+    strides = np.array([1, nao, nao * nao, nao * nao * nao])
+    eritensor = cupy.zeros(nao * nao * nao * nao)
+    ao_offsets = np.array([0, 0, 1, 2])
+
+    eri_tensor_ptr = ctypes.cast(eritensor.data.ptr, ctypes.c_void_p)
+
+    fn = libgint.GINTfill_int2e
+    for cp_ij_id, log_q_ij in enumerate(log_qs):
+        cpi = cp_idx[cp_ij_id]
+        cpj = cp_jdx[cp_ij_id]
+        li = vhfopt.uniq_l_ctr[cpi,0]
+        lj = vhfopt.uniq_l_ctr[cpj,0]
+        if li > LMAX_ON_GPU or lj > LMAX_ON_GPU or log_q_ij.size == 0:
+            continue
+
+        for cp_kl_id, log_q_kl in enumerate(log_qs[:cp_ij_id+1]):
+            cpk = cp_idx[cp_kl_id]
+            cpl = cp_jdx[cp_kl_id]
+            lk = vhfopt.uniq_l_ctr[cpk,0]
+            ll = vhfopt.uniq_l_ctr[cpl,0]
+            if lk > LMAX_ON_GPU or ll > LMAX_ON_GPU or log_q_kl.size == 0:
+                continue
+
+            t0 = time.perf_counter()
+            cutoff = direct_scf_tol
+            bins_locs_ij = _make_s_index_offsets(log_q_ij, nbins, cutoff)
+            bins_locs_kl = _make_s_index_offsets(log_q_kl, nbins, cutoff)
+
+            err = fn(vhfopt.bpcache,
+                     eri_tensor_ptr,
+                     ctypes.c_int(nao),
+                     strides.ctypes.data_as(ctypes.c_void_p),
+                     ao_offsets.ctypes.data_as(ctypes.c_void_p),
+                     bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
+                     bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
+                     ctypes.c_int(nbins),
+                     ctypes.c_int(cp_ij_id),
+                     ctypes.c_int(cp_kl_id))
+
+            if err != 0:
+                detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
+                raise RuntimeError(detail)
+            log.debug1('(%s%s|%s%s) on GPU %.3fs',
+                       l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
+                       time.perf_counter() - t0)
+
+    cput0 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
+
+    if FREE_CUPY_CACHE:
+        cupy.get_default_memory_pool().free_all_blocks()
+
+    return eritensor
 
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
@@ -253,6 +336,8 @@ class _VHFOpt(_vhf.VHFOpt):
         uniq_l_ctr, _, inv_idx, l_ctr_counts = np.unique(
             l_ctrs, return_index=True, return_inverse=True, return_counts=True, axis=0)
 
+        print("l_ctr", l_ctrs)
+        print("l_ctr_counts", l_ctr_counts)
         # Limit the number of AOs in each group
         if group_size is not None:
             uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(
@@ -299,7 +384,10 @@ class _VHFOpt(_vhf.VHFOpt):
         pair2bra = []
         pair2ket = []
         l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+        print("l_ctr_offsets", l_ctr_offsets)
         for i, (p0, p1) in enumerate(zip(l_ctr_offsets[:-1], l_ctr_offsets[1:])):
+            print("(p0, p1)", (p0, p1))
+
             if uniq_l_ctr[i,0] > LMAX_ON_GPU:
                 # no integrals with g functions should be evaluated on GPU
                 continue
@@ -357,13 +445,13 @@ class _VHFOpt(_vhf.VHFOpt):
         else:
             scale_shellpair_diag = 0.5
 
-        print(scale_shellpair_diag)
-        print(self.bas_pair2shls)
-        print(self.bas_pairs_locs)
-        print(ncptype)
-        print(mol.nbas)
-        print(mol.natm)
-        quit()
+        print("scale_shellpair_diag", scale_shellpair_diag)
+        print("bas_pair2shls", self.bas_pair2shls)
+        print("bas_pairs_locs", self.bas_pairs_locs)
+        print("ncptype", ncptype)
+        print("mol.nbas", mol.nbas)
+        print("mol.natm", mol.natm)
+        print("log_qs", log_qs)
         libgvhf.GINTinit_basis_prod(
             ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),
             ao_loc.ctypes.data_as(ctypes.c_void_p),
