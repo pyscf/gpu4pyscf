@@ -529,8 +529,6 @@ static void GINTfill_int2e_kernel0000(ERITensor eri, BasisProdOffsets offsets)
         double ykl = y12[kl];
         double zkl = z12[kl];
 
-      printf("aij %f eij %f xij %f yij %f zij %f akl %f ekl %f xkl %f ykl %f zkl %f\n",
-             aij, eij, xij, yij, zij, akl, ekl, xkl, ykl, zkl);
         double xijxkl = xij - xkl;
         double yijykl = yij - ykl;
         double zijzkl = zij - zkl;
@@ -547,9 +545,9 @@ static void GINTfill_int2e_kernel0000(ERITensor eri, BasisProdOffsets offsets)
         gout0 += fac;
     } }
 
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    int jstride = eri.stride_j;
+    int kstride = eri.stride_k;
+    int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
@@ -557,8 +555,8 @@ static void GINTfill_int2e_kernel0000(ERITensor eri, BasisProdOffsets offsets)
     int l0 = ao_loc[lsh] - eri.ao_offsets_l;
     eri.data[l0*lstride+k0*kstride+j0*jstride+i0] += gout0;
     eri.data[l0*lstride+k0*kstride+i0*jstride+j0] += gout0;
-  printf("ish %d jsh %d ksh %d lsh %d i0 %d, j0 %d, k0 %d, l0 %d, gout0 %f \n",
-         ish, jsh, ksh, lsh, i0, j0, k0, l0, gout0);
+    eri.data[k0*lstride+l0*kstride+j0*jstride+i0] += gout0;
+    eri.data[k0*lstride+l0*kstride+i0*jstride+j0] += gout0;
 }
 
 __global__
