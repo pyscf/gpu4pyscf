@@ -198,8 +198,7 @@ void GINTinit_basis_prod(BasisProdCache **pbp, double diag_fac, int *ao_loc,
     bpcache->bas_pair2shls = bas_pair2shls;
 
     // initialize ao_loc on GPU
-
-  DEVICE_INIT(int, d_ao_loc, ao_loc, nbas+1);
+    DEVICE_INIT(int, d_ao_loc, ao_loc, nbas+1);
     bpcache->ao_loc = d_ao_loc;
 
     // initialize basis coordinates on GPU memory
@@ -227,7 +226,6 @@ int GINTfill_int2e(BasisProdCache *bpcache, double *eri, int nao,
                    int *bins_locs_ij, int *bins_locs_kl, int nbins,
                    int cp_ij_id, int cp_kl_id)
 {
-
     ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
     ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
     GINTEnvVars envs;
@@ -287,9 +285,9 @@ int GINTfill_int2e(BasisProdCache *bpcache, double *eri, int nao,
     eritensor.stride_l = strides[3];
     eritensor.ao_offsets_k = ao_offsets[2];
     eritensor.ao_offsets_l = ao_offsets[3];
-
     eritensor.nao = nao;
     eritensor.data = eri;
+
     BasisProdOffsets offsets;
     int *bas_pairs_locs = bpcache->bas_pairs_locs;
     int *primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -314,6 +312,7 @@ int GINTfill_int2e(BasisProdCache *bpcache, double *eri, int nao,
         offsets.bas_kl = bas_pairs_locs[cp_kl_id] + bas_kl0;
         offsets.primitive_ij = primitive_pairs_locs[cp_ij_id] + bas_ij0 * envs.nprim_ij;
         offsets.primitive_kl = primitive_pairs_locs[cp_kl_id] + bas_kl0 * envs.nprim_kl;
+
         if (envs.nrys_roots > POLYFIT_ORDER) {
             // move rys roots and weights to device
             GINTinit_uw_s1(uw_buf, &offsets, &envs, bpcache);
@@ -321,7 +320,6 @@ int GINTfill_int2e(BasisProdCache *bpcache, double *eri, int nao,
             checkCudaErrors(cudaMemcpy(d_uw, uw_buf, sizeof(double) * uw_size,
                                        cudaMemcpyHostToDevice));
         }
-
         int err = GINTfill_int2e_tasks(&eritensor, &offsets, &envs);
         if (err != 0) {
             return err;

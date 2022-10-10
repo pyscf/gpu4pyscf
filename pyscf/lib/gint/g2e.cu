@@ -488,7 +488,6 @@ static void GINTfill_int2e_kernel(ERITensor eri, BasisProdOffsets offsets)
 __global__
 static void GINTfill_int2e_kernel0000(ERITensor eri, BasisProdOffsets offsets)
 {
-
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
@@ -528,7 +527,6 @@ static void GINTfill_int2e_kernel0000(ERITensor eri, BasisProdOffsets offsets)
         double xkl = x12[kl];
         double ykl = y12[kl];
         double zkl = z12[kl];
-
         double xijxkl = xij - xkl;
         double yijykl = yij - ykl;
         double zijzkl = zij - zkl;
@@ -553,10 +551,8 @@ static void GINTfill_int2e_kernel0000(ERITensor eri, BasisProdOffsets offsets)
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh] - eri.ao_offsets_k;
     int l0 = ao_loc[lsh] - eri.ao_offsets_l;
-    eri.data[l0*lstride+k0*kstride+j0*jstride+i0] += gout0;
-    eri.data[l0*lstride+k0*kstride+i0*jstride+j0] += gout0;
-    eri.data[k0*lstride+l0*kstride+j0*jstride+i0] += gout0;
-    eri.data[k0*lstride+l0*kstride+i0*jstride+j0] += gout0;
+    eri.data[l0*lstride+k0*kstride+j0*jstride+i0] = gout0;
+    eri.data[l0*lstride+k0*kstride+i0*jstride+j0] = gout0;
 }
 
 __global__

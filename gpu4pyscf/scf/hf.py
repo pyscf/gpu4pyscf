@@ -34,6 +34,14 @@ libgvhf = lib.load_library('libgvhf')
 libgint = lib.load_library('libgint')
 libgvhf.GINTbuild_jk.restype = ctypes.c_int
 
+def symmetrize(eri_tensor: np.array):
+    nao = eri_tensor.shape[0]
+    index = 0
+    for i in range(nao):
+        for j in range(nao):
+            for k in range(nao):
+                for l in range(nao):
+                    eri_tensor[i, j, k, l] = eri_tensor[min(i, j), max(i, j), min(k, l), max(k, l)]
 
 def get_int2e(mol, vhfopt=None, verbose=None):
     '''Compute J, K matrices with CPU-GPU hybrid algorithm
@@ -42,7 +50,7 @@ def get_int2e(mol, vhfopt=None, verbose=None):
     log = logger.new_logger(mol, verbose)
 
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol, 'int2e').build()
+        vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=False)
 
     coeff = cupy.asarray(vhfopt.coeff)
     nao, nao0 = coeff.shape
@@ -61,11 +69,11 @@ def get_int2e(mol, vhfopt=None, verbose=None):
     log.debug('Set the number of buckets for s_index to %d', nbins)
 
     ncptype = len(log_qs)
-    cp_idx, cp_jdx = np.tril_indices(ncptype)
+    cp_idx, cp_jdx = np.tril_indices(len(vhfopt.uniq_l_ctr))
 
-    strides = np.array([1, nao, nao * nao, nao * nao * nao])
-    eritensor = cupy.zeros(nao * nao * nao * nao)
-    ao_offsets = np.array([0, 0, 1, 2])
+    strides = np.array([1, nao, nao * nao, nao * nao * nao], dtype=np.int32)
+    eritensor = cupy.zeros((nao, nao, nao, nao), dtype=np.double)
+    ao_offsets = np.array([0, 0, 0, 0], dtype=np.int32)
 
     eri_tensor_ptr = ctypes.cast(eritensor.data.ptr, ctypes.c_void_p)
 
@@ -78,7 +86,7 @@ def get_int2e(mol, vhfopt=None, verbose=None):
         if li > LMAX_ON_GPU or lj > LMAX_ON_GPU or log_q_ij.size == 0:
             continue
 
-        for cp_kl_id, log_q_kl in enumerate(log_qs[:cp_ij_id+1]):
+        for cp_kl_id, log_q_kl in enumerate(log_qs):
             cpk = cp_idx[cp_kl_id]
             cpl = cp_jdx[cp_kl_id]
             lk = vhfopt.uniq_l_ctr[cpk,0]
@@ -114,7 +122,9 @@ def get_int2e(mol, vhfopt=None, verbose=None):
     if FREE_CUPY_CACHE:
         cupy.get_default_memory_pool().free_all_blocks()
 
-    return eritensor
+    sort_index = np.argsort(vhfopt.coeff @ np.arange(mol.nao))
+    symmetrize(eritensor)
+    return eritensor[sort_index, :, :, :][:, sort_index, :, :][:, :, sort_index, :][:, :, :, sort_index]
 
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
@@ -440,18 +450,13 @@ class _VHFOpt(_vhf.VHFOpt):
         ao_loc = mol.ao_loc_nr(cart=True)
         ncptype = len(log_qs)
         self.bpcache = ctypes.POINTER(BasisProdCache)()
-        if diag_block_with_triu:
-            scale_shellpair_diag = 1.
-        else:
-            scale_shellpair_diag = 0.5
 
-        print("scale_shellpair_diag", scale_shellpair_diag)
-        print("bas_pair2shls", self.bas_pair2shls)
-        print("bas_pairs_locs", self.bas_pairs_locs)
-        print("ncptype", ncptype)
-        print("mol.nbas", mol.nbas)
-        print("mol.natm", mol.natm)
-        print("log_qs", log_qs)
+        scale_shellpair_diag = 1.
+        # if diag_block_with_triu:
+        #     scale_shellpair_diag = 1.
+        # else:
+        #     scale_shellpair_diag = 0.5
+
         libgvhf.GINTinit_basis_prod(
             ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),
             ao_loc.ctypes.data_as(ctypes.c_void_p),
