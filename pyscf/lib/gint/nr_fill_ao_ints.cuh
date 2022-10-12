@@ -10,6 +10,7 @@ typedef struct {
   int stride_j;
   int stride_k;
   int stride_l;
+  int stride_xyz;
   int ao_offsets_k;
   int ao_offsets_l;
   int nao;

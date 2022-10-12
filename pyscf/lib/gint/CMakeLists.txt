@@ -7,6 +7,7 @@ add_library(gint SHARED
   g2e.c
   pair_data.c
   nr_fill_ao_ints.cu
+  nr_fill_ao_ints_gradient.cu
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
