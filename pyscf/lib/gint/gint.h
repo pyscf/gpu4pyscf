@@ -62,6 +62,18 @@
 
 #ifndef HAVE_DEFINED_GINTENVVAS_H
 #define HAVE_DEFINED_GINTENVVAS_H
+
+typedef struct {
+  int stride_j;
+  int stride_k;
+  int stride_l;
+  int stride_xyz;
+  int ao_offsets_k;
+  int ao_offsets_l;
+  int nao;
+  double *data;
+} ERITensor;
+
 typedef struct {
         int16_t i_l;
         int16_t j_l;

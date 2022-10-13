@@ -18,10 +18,7 @@
  */
 
 #include "nr_fill_ao_ints.cuh"
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <assert.h>
+
 #include "g2e.h"
 #include "gout2e.cuh"
 #include "cint2e.cuh"

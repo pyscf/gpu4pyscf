@@ -17,7 +17,12 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#ifndef GPU4PYSCF_RYS_ROOTS_CUH
+#define GPU4PYSCF_RYS_ROOTS_CUH
+
 __device__ void GINTrys_root2(double x, double *rw);
 __device__ void GINTrys_root3(double x, double *rw);
 __device__ void GINTrys_root4(double x, double *rw);
 __device__ void GINTrys_root5(double x, double *rw);
+
+#endif //GPU4PYSCF_RYS_ROOTS_CUH

@@ -5,21 +5,8 @@
 #include "config.h"
 #include "cuda_alloc.cuh"
 #include "g2e.h"
-
-typedef struct {
-  int stride_j;
-  int stride_k;
-  int stride_l;
-  int stride_xyz;
-  int ao_offsets_k;
-  int ao_offsets_l;
-  int nao;
-  double *data;
-} ERITensor;
-
 #include "fill_ints.cu"
-#include "g2e.cu"
-#include "rys_roots.cu"
+#include "rys_roots.cuh"
 #include "g2e_root2.cu"
 #include "g2e_root3.cu"
 

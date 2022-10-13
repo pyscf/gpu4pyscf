@@ -6,6 +6,7 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_60")
 add_library(gint SHARED
   g2e.c
   pair_data.c
+  rys_roots.cu
   nr_fill_ao_ints.cu
   nr_fill_ao_ints_gradient.cu
 )

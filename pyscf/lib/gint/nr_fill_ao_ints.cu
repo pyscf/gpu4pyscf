@@ -28,23 +28,12 @@
 #include "cuda_alloc.cuh"
 #include "g2e.h"
 
-typedef struct {
-        int stride_j;
-        int stride_k;
-        int stride_l;
-        int ao_offsets_k;
-        int ao_offsets_l;
-        int nao;
-        double *data;
-} ERITensor;
-
 __constant__ GINTEnvVars c_envs;
 __constant__ BasisProdCache c_bpcache;
 __constant__ int16_t c_idx4c[NFffff*3];
 
-#include "fill_ints.cu"
+#include "fill_ints.cuh"
 #include "g2e.cu"
-#include "rys_roots.cu"
 #include "g2e_root2.cu"
 #include "g2e_root3.cu"
 
