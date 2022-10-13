@@ -18,6 +18,8 @@ static int GINTfill_int2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GINTE
       //GINTfill_int2e_kernel<1, GOUTSIZE1> <<<blocks, threads>>>(*offsets);
       switch (type_ijkl) {
         case 0b0000: GINTfill_nabla1i_int2e_kernel0000<<<blocks, threads>>>(*eri, *offsets, extra_info); break;
+        case 0b0010: GINTfill_int2e_kernel0010<<<blocks, threads>>>(*eri, *offsets); break;
+
         default:
           fprintf(stderr, "troots=1 ype_ijkl %d\n", type_ijkl);
       }
