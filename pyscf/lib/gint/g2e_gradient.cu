@@ -32,7 +32,7 @@
 __global__
 static void GINTfill_nabla1i_int2e_kernel0000(ERITensor eri,
                                               BasisProdOffsets offsets,
-                                              GradientExtraInfo * extra_info)
+                                              GradientExtraInfo extra_info)
 {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
@@ -82,7 +82,7 @@ static void GINTfill_nabla1i_int2e_kernel0000(ERITensor eri,
       double aijkl = aij + akl;
       double a1 = aij * akl;
       double a0 = a1 / aijkl;
-      double exponent_i = extra_info -> exponents[ish];
+      double exponent_i = extra_info.exponents[ish];
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
       double root0, weight0;
@@ -137,7 +137,7 @@ static void GINTfill_nabla1i_int2e_kernel0000(ERITensor eri,
   int k0 = ao_loc[ksh] - eri.ao_offsets_k;
   int l0 = ao_loc[lsh] - eri.ao_offsets_l;
   double* __restrict__ eri_ij = eri.data + l0*lstride+k0*kstride+j0*jstride+i0;
-  int xyz_stride = extra_info->stride_xyz;
+  int xyz_stride = extra_info.stride_xyz;
 
   eri_ij[0] = gout0;
   eri_ij[1 * xyz_stride] = gout1;
@@ -147,7 +147,7 @@ static void GINTfill_nabla1i_int2e_kernel0000(ERITensor eri,
 __global__
 static void GINTfill_nabla1j_int2e_kernel0000(ERITensor eri,
                                               BasisProdOffsets offsets,
-                                              GradientExtraInfo * extra_info)
+                                              GradientExtraInfo extra_info)
 {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
@@ -197,7 +197,7 @@ static void GINTfill_nabla1j_int2e_kernel0000(ERITensor eri,
       double aijkl = aij + akl;
       double a1 = aij * akl;
       double a0 = a1 / aijkl;
-      double exponent_i = extra_info -> exponents[ish];
+      double exponent_i = extra_info.exponents[ish];
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
       double root0, weight0;
@@ -252,7 +252,7 @@ static void GINTfill_nabla1j_int2e_kernel0000(ERITensor eri,
   int k0 = ao_loc[ksh] - eri.ao_offsets_k;
   int l0 = ao_loc[lsh] - eri.ao_offsets_l;
   double* __restrict__ eri_ij = eri.data + l0*lstride+k0*kstride+j0*jstride+i0;
-  int xyz_stride = extra_info->stride_xyz;
+  int xyz_stride = extra_info.stride_xyz;
 
   eri_ij[0] = gout0;
   eri_ij[1 * xyz_stride] = gout1;
@@ -262,7 +262,7 @@ static void GINTfill_nabla1j_int2e_kernel0000(ERITensor eri,
 __global__
 static void GINTfill_nabla1k_int2e_kernel0000(ERITensor eri,
                                               BasisProdOffsets offsets,
-                                              GradientExtraInfo * extra_info)
+                                              GradientExtraInfo extra_info)
 {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
@@ -312,7 +312,7 @@ static void GINTfill_nabla1k_int2e_kernel0000(ERITensor eri,
       double aijkl = aij + akl;
       double a1 = aij * akl;
       double a0 = a1 / aijkl;
-      double exponent_i = extra_info -> exponents[ish];
+      double exponent_i = extra_info.exponents[ish];
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
       double root0, weight0;
@@ -367,7 +367,7 @@ static void GINTfill_nabla1k_int2e_kernel0000(ERITensor eri,
   int k0 = ao_loc[ksh] - eri.ao_offsets_k;
   int l0 = ao_loc[lsh] - eri.ao_offsets_l;
   double* __restrict__ eri_ij = eri.data + l0*lstride+k0*kstride+j0*jstride+i0;
-  int xyz_stride = extra_info->stride_xyz;
+  int xyz_stride = extra_info.stride_xyz;
 
   eri_ij[0] = gout0;
   eri_ij[1 * xyz_stride] = gout1;
@@ -377,7 +377,7 @@ static void GINTfill_nabla1k_int2e_kernel0000(ERITensor eri,
 __global__
 static void GINTfill_nabla1l_int2e_kernel0000(ERITensor eri,
                                               BasisProdOffsets offsets,
-                                              GradientExtraInfo * extra_info)
+                                              GradientExtraInfo extra_info)
 {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
@@ -427,7 +427,7 @@ static void GINTfill_nabla1l_int2e_kernel0000(ERITensor eri,
       double aijkl = aij + akl;
       double a1 = aij * akl;
       double a0 = a1 / aijkl;
-      double exponent_i = extra_info -> exponents[ish];
+      double exponent_i = extra_info.exponents[ish];
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
       double root0, weight0;
@@ -456,7 +456,7 @@ static void GINTfill_nabla1l_int2e_kernel0000(ERITensor eri,
       double zj = bas_z[jsh];
 
       double u2 = a0 * root0;
-      double tmp2 = akl * u2 / (u2 * aijkl + a1);;
+      double tmp2 = akl * u2 / (u2 * aijkl + a1);
       double d00x_prime = xij - xj + tmp2 * xijxkl;
       double d00y_prime = yij - yj + tmp2 * yijykl;
       double d00z_prime = zij - zj + tmp2 * zijzkl;
@@ -482,7 +482,7 @@ static void GINTfill_nabla1l_int2e_kernel0000(ERITensor eri,
   int k0 = ao_loc[ksh] - eri.ao_offsets_k;
   int l0 = ao_loc[lsh] - eri.ao_offsets_l;
   double* __restrict__ eri_ij = eri.data + l0*lstride+k0*kstride+j0*jstride+i0;
-  int xyz_stride = extra_info->stride_xyz;
+  int xyz_stride = extra_info.stride_xyz;
 
   eri_ij[0] = gout0;
   eri_ij[1 * xyz_stride] = gout1;
