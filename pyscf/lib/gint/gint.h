@@ -142,6 +142,9 @@ typedef struct {
     double *x12;
     double *y12;
     double *z12;
+
+    int * primitive_functions_offsets;
+    double * exponents;
 } BasisProdCache;
 
 

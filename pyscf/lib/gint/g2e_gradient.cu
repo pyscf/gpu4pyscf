@@ -137,11 +137,25 @@ static void GINTfill_nabla1i_int2e_kernel0000(ERITensor eri,
   int k0 = ao_loc[ksh] - eri.ao_offsets_k;
   int l0 = ao_loc[lsh] - eri.ao_offsets_l;
   double* __restrict__ eri_ij = eri.data + l0*lstride+k0*kstride+j0*jstride+i0;
+  double* __restrict__ eri_ji = eri.data + l0*lstride+k0*kstride+i0*jstride+j0;
+  double* __restrict__ eri_ij_lk = eri.data + k0*lstride+l0*kstride+j0*jstride+i0;
+  double* __restrict__ eri_ji_lk = eri.data + k0*lstride+l0*kstride+i0*jstride+j0;
+
   int xyz_stride = extra_info.stride_xyz;
 
   eri_ij[0] = gout0;
   eri_ij[1 * xyz_stride] = gout1;
   eri_ij[2 * xyz_stride] = gout2;
+  eri_ji[0] = - gout0;
+  eri_ji[1 * xyz_stride] = - gout1;
+  eri_ji[2 * xyz_stride] = - gout2;
+  eri_ij_lk[0] = gout0;
+  eri_ij_lk[1 * xyz_stride] = gout1;
+  eri_ij_lk[2 * xyz_stride] = gout2;
+  eri_ji_lk[0] = - gout0;
+  eri_ji_lk[1 * xyz_stride] = - gout1;
+  eri_ji_lk[2 * xyz_stride] = - gout2;
+
 }
 
 __global__

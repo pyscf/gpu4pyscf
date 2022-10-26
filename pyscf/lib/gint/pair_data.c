@@ -34,6 +34,7 @@ void GINTinit_contraction_types(BasisProdCache *bpcache,
         ContractionProdType *cptype = (ContractionProdType *)malloc(sizeof(ContractionProdType) * ncptype);
         bpcache->cptype = cptype;
         int *primitive_pairs_locs = (int *)malloc(sizeof(int) * (ncptype + 1));
+        int *primitive_functions_offsets = (int *)malloc(sizeof(int) * (nbas + 1));
         bpcache->primitive_pairs_locs = primitive_pairs_locs;
 
         int n;

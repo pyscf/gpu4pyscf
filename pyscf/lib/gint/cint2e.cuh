@@ -23,3 +23,4 @@
 extern __constant__ GINTEnvVars c_envs;
 extern __constant__ BasisProdCache c_bpcache;
 extern __constant__ int16_t c_idx4c[NFffff*3];
+extern __constant__

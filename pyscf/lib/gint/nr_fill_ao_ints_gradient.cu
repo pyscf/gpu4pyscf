@@ -4,6 +4,7 @@
 #include "g2e_gradient.cu"
 #include "cuda_alloc.cuh"
 
+#define print printf("The code has arrived here\n");
 __host__
 static int GINTfill_nabla1i_int2e_tasks(ERITensor *eri,
                                         BasisProdOffsets *offsets,
@@ -46,19 +47,21 @@ static int GINTfill_nabla1i_int2e_tasks(ERITensor *eri,
 
 extern "C" {__host__
 
-void GINTinit_gradient_extra_info(GradientExtraInfo * gradient_extra_info,
+void GINTinit_gradient_extra_info(GradientExtraInfo ** gradient_extra_info,
                                   const int * bas, const int nbas,
                                   const double * env,
                                   const size_t stride_xyz) {
+  int n_primitive_
   GradientExtraInfo * info = (GradientExtraInfo *) malloc(
       sizeof(GradientExtraInfo));
   memset(info, 0, sizeof(GradientExtraInfo));
+  *gradient_extra_info = info;
 
   double * exponents = (double *) malloc(nbas * sizeof(double));
   for (int basis_id = 0; basis_id < nbas; basis_id++) {
     exponents[basis_id] = bas[NPRIM_OF + basis_id * BAS_SLOTS];
   }
-  // initialize pair data on GPU memory
+
   DEVICE_INIT(double, d_exponents, exponents, nbas * sizeof(double));
   info->exponents = d_exponents;
   info->stride_xyz = stride_xyz;
@@ -66,9 +69,10 @@ void GINTinit_gradient_extra_info(GradientExtraInfo * gradient_extra_info,
   free(exponents);
 }
 
-void GINTdel_gradient_extra_info(GradientExtraInfo * extra_info) {
-  FREE(extra_info->exponents);
-  free(extra_info);
+void GINTdel_gradient_extra_info(GradientExtraInfo ** extra_info) {
+  FREE((*extra_info)->exponents);
+  free(*extra_info);
+  *extra_info = NULL;
 }
 
 int GINTfill_nabla1i_int2e(BasisProdCache *bpcache,
@@ -186,5 +190,6 @@ int GINTfill_nabla1i_int2e(BasisProdCache *bpcache,
     FREE(envs.idx);
   }
   return 0;
+
 }
 }

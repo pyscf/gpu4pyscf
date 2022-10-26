@@ -36,7 +36,6 @@ libgvhf.GINTbuild_jk.restype = ctypes.c_int
 
 def symmetrize(eri_tensor: np.array):
     nao = eri_tensor.shape[0]
-    index = 0
     for i in range(nao):
         for j in range(nao):
             for k in range(nao):
@@ -44,8 +43,7 @@ def symmetrize(eri_tensor: np.array):
                     eri_tensor[i, j, k, l] = eri_tensor[min(i, j), max(i, j), min(k, l), max(k, l)]
 
 def get_int2e(mol, vhfopt=None, verbose=None):
-    '''Compute J, K matrices with CPU-GPU hybrid algorithm
-    '''
+
     cput0 = (logger.process_clock(), logger.perf_counter())
     log = logger.new_logger(mol, verbose)
 
@@ -55,10 +53,7 @@ def get_int2e(mol, vhfopt=None, verbose=None):
     coeff = cupy.asarray(vhfopt.coeff)
     nao, nao0 = coeff.shape
 
-    scripts = []
-
     l_symb = lib.param.ANGULAR
-    pair2bra, pair2ket = vhfopt.bas_pair2shls
     bas_pairs_locs = vhfopt.bas_pairs_locs
     log_qs = vhfopt.log_qs
     direct_scf_tol = vhfopt.direct_scf_tol
@@ -68,7 +63,6 @@ def get_int2e(mol, vhfopt=None, verbose=None):
     nbins = max(10, int(pairs_max//100000))
     log.debug('Set the number of buckets for s_index to %d', nbins)
 
-    ncptype = len(log_qs)
     cp_idx, cp_jdx = np.tril_indices(len(vhfopt.uniq_l_ctr))
 
     strides = np.array([1, nao, nao * nao, nao * nao * nao], dtype=np.int32)
@@ -126,6 +120,89 @@ def get_int2e(mol, vhfopt=None, verbose=None):
     symmetrize(eritensor)
     return eritensor[sort_index, :, :, :][:, sort_index, :, :][:, :, sort_index, :][:, :, :, sort_index]
 
+def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
+
+    cput0 = (logger.process_clock(), logger.perf_counter())
+    log = logger.new_logger(mol, verbose)
+
+    if vhfopt is None:
+        vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=False)
+
+    coeff = cupy.asarray(vhfopt.coeff)
+    nao, nao0 = coeff.shape
+
+    l_symb = lib.param.ANGULAR
+    bas_pairs_locs = vhfopt.bas_pairs_locs
+    log_qs = vhfopt.log_qs
+    direct_scf_tol = vhfopt.direct_scf_tol
+
+    # adjust nbins according to the size of the system
+    pairs_max = (bas_pairs_locs[1:] - bas_pairs_locs[:-1]).max()
+    nbins = max(10, int(pairs_max//100000))
+
+    cp_idx, cp_jdx = np.tril_indices(len(vhfopt.uniq_l_ctr))
+
+    strides = np.array([1, nao, nao * nao, nao * nao * nao], dtype=np.int32)
+    eritensor = cupy.zeros((nao, nao, nao, nao, 3), dtype=np.double)
+    ao_offsets = np.array([0, 0, 0, 0], dtype=np.int32)
+
+    eri_tensor_ptr = ctypes.cast(eritensor.data.ptr, ctypes.c_void_p)
+
+    extra_info = GradientInfo(mol)
+
+    fn = libgint.GINTfill_nabla1i_int2e
+    for cp_ij_id, log_q_ij in enumerate(log_qs):
+        cpi = cp_idx[cp_ij_id]
+        cpj = cp_jdx[cp_ij_id]
+        li = vhfopt.uniq_l_ctr[cpi, 0]
+        lj = vhfopt.uniq_l_ctr[cpj, 0]
+        if li > LMAX_ON_GPU or lj > LMAX_ON_GPU or log_q_ij.size == 0:
+            continue
+
+        for cp_kl_id, log_q_kl in enumerate(log_qs):
+            cpk = cp_idx[cp_kl_id]
+            cpl = cp_jdx[cp_kl_id]
+            lk = vhfopt.uniq_l_ctr[cpk,0]
+            ll = vhfopt.uniq_l_ctr[cpl,0]
+            if lk > LMAX_ON_GPU or ll > LMAX_ON_GPU or log_q_kl.size == 0:
+                continue
+
+            t0 = time.perf_counter()
+            cutoff = direct_scf_tol
+            bins_locs_ij = _make_s_index_offsets(log_q_ij, nbins, cutoff)
+            bins_locs_kl = _make_s_index_offsets(log_q_kl, nbins, cutoff)
+
+            err = fn(vhfopt.bpcache,
+                     extra_info.extra_info,
+                     eri_tensor_ptr,
+                     ctypes.c_int(nao),
+                     strides.ctypes.data_as(ctypes.c_void_p),
+                     ao_offsets.ctypes.data_as(ctypes.c_void_p),
+                     bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
+                     bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
+                     ctypes.c_int(nbins),
+                     ctypes.c_int(cp_ij_id),
+                     ctypes.c_int(cp_kl_id))
+
+    print(eritensor[:, :, :, :, 0])
+    print(eritensor[:, :, :, :, 1])
+    print(eritensor[:, :, :, :, 2])
+    #
+    #         if err != 0:
+    #             detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
+    #             raise RuntimeError(detail)
+    #         log.debug1('(%s%s|%s%s) on GPU %.3fs',
+    #                    l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
+    #                    time.perf_counter() - t0)
+    #
+    # cput0 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
+    #
+    # if FREE_CUPY_CACHE:
+    #     cupy.get_default_memory_pool().free_all_blocks()
+    #
+    # sort_index = np.argsort(vhfopt.coeff @ np.arange(mol.nao))
+    # symmetrize(eritensor)
+    # return eritensor[sort_index, :, :, :][:, sort_index, :, :][:, :, sort_index, :][:, :, :, sort_index]
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
            verbose=None):
@@ -325,6 +402,27 @@ class RHF(hf.RHF):
     get_jk = patch_cpu_kernel(hf.RHF.get_jk)(_get_jk)
     _eigh = patch_cpu_kernel(hf.RHF._eigh)(_eigh)
 
+class GradientInfo:
+    def __init__(self, mol):
+        self.extra_info = ctypes.POINTER(GradientExtraInfo)()
+
+        stride_xyz = ctypes.c_uint32(mol.nbas * mol.nbas * mol.nbas * mol.nbas)
+        libgvhf.GINTinit_gradient_extra_info(
+            ctypes.byref(self.extra_info),
+            mol._bas.ctypes.data_as(ctypes.c_void_p),
+            ctypes.c_int(mol.nbas),
+            mol._env.ctypes.data_as(ctypes.c_void_p),
+            stride_xyz)
+
+    def clear(self):
+        libgvhf.GINTdel_gradient_extra_info(ctypes.byref(self.extra_info))
+        return self
+
+    def __del__(self):
+        try:
+            self.clear()
+        except AttributeError:
+            pass
 
 class _VHFOpt(_vhf.VHFOpt):
     def __init__(self, mol, intor, prescreen='CVHFnoscreen',
@@ -457,6 +555,8 @@ class _VHFOpt(_vhf.VHFOpt):
         # else:
         #     scale_shellpair_diag = 0.5
 
+        print("log_qs", log_qs)
+        print("bas_pairs_locs", self.bas_pairs_locs)
         libgvhf.GINTinit_basis_prod(
             ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),
             ao_loc.ctypes.data_as(ctypes.c_void_p),
@@ -479,6 +579,8 @@ class _VHFOpt(_vhf.VHFOpt):
         except AttributeError:
             pass
 
+class GradientExtraInfo(ctypes.Structure):
+    pass
 class BasisProdCache(ctypes.Structure):
     pass
 
