@@ -118,7 +118,7 @@ def get_int2e(mol, vhfopt=None, verbose=None):
 
     sort_index = np.argsort(vhfopt.coeff @ np.arange(mol.nao))
     symmetrize(eritensor)
-    return eritensor[sort_index, :, :, :][:, sort_index, :, :][:, :, sort_index, :][:, :, :, sort_index]
+    return np.einsum("ijkl, ia, jb, kc, ld -> abcd", eritensor, coeff, coeff, coeff, coeff)
 
 def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
 
@@ -148,8 +148,6 @@ def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
 
     eri_tensor_ptr = ctypes.cast(eritensor.data.ptr, ctypes.c_void_p)
 
-    extra_info = GradientInfo(mol)
-
     fn = libgint.GINTfill_nabla1i_int2e
     for cp_ij_id, log_q_ij in enumerate(log_qs):
         cpi = cp_idx[cp_ij_id]
@@ -173,7 +171,6 @@ def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
             bins_locs_kl = _make_s_index_offsets(log_q_kl, nbins, cutoff)
 
             err = fn(vhfopt.bpcache,
-                     extra_info.extra_info,
                      eri_tensor_ptr,
                      ctypes.c_int(nao),
                      strides.ctypes.data_as(ctypes.c_void_p),
@@ -183,24 +180,19 @@ def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
                      ctypes.c_int(nbins),
                      ctypes.c_int(cp_ij_id),
                      ctypes.c_int(cp_kl_id))
+            if err != 0:
+                detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
+                raise RuntimeError(detail)
+            log.debug1('(%s%s|%s%s) on GPU %.3fs',
+                       l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
+                       time.perf_counter() - t0)
 
-    print(eritensor[0, :, :, :, :])
-    #
-    #         if err != 0:
-    #             detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
-    #             raise RuntimeError(detail)
-    #         log.debug1('(%s%s|%s%s) on GPU %.3fs',
-    #                    l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
-    #                    time.perf_counter() - t0)
-    #
-    # cput0 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
-    #
-    # if FREE_CUPY_CACHE:
-    #     cupy.get_default_memory_pool().free_all_blocks()
-    #
-    # sort_index = np.argsort(vhfopt.coeff @ np.arange(mol.nao))
-    # symmetrize(eritensor)
-    # return eritensor[sort_index, :, :, :][:, sort_index, :, :][:, :, sort_index, :][:, :, :, sort_index]
+    cput0 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
+
+    if FREE_CUPY_CACHE:
+        cupy.get_default_memory_pool().free_all_blocks()
+
+    return np.einsum("pijkl, ia, jb, kc, ld -> pabcd", eritensor, coeff, coeff, coeff, coeff)
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
            verbose=None):
@@ -400,27 +392,6 @@ class RHF(hf.RHF):
     get_jk = patch_cpu_kernel(hf.RHF.get_jk)(_get_jk)
     _eigh = patch_cpu_kernel(hf.RHF._eigh)(_eigh)
 
-class GradientInfo:
-    def __init__(self, mol):
-        self.extra_info = ctypes.POINTER(GradientExtraInfo)()
-
-        stride_xyz = ctypes.c_uint32(mol.nbas * mol.nbas * mol.nbas * mol.nbas)
-        libgvhf.GINTinit_gradient_extra_info(
-            ctypes.byref(self.extra_info),
-            mol._bas.ctypes.data_as(ctypes.c_void_p),
-            ctypes.c_int(mol.nbas),
-            mol._env.ctypes.data_as(ctypes.c_void_p),
-            stride_xyz)
-
-    def clear(self):
-        libgvhf.GINTdel_gradient_extra_info(ctypes.byref(self.extra_info))
-        return self
-
-    def __del__(self):
-        try:
-            self.clear()
-        except AttributeError:
-            pass
 
 class _VHFOpt(_vhf.VHFOpt):
     def __init__(self, mol, intor, prescreen='CVHFnoscreen',
@@ -582,8 +553,6 @@ class _VHFOpt(_vhf.VHFOpt):
         except AttributeError:
             pass
 
-class GradientExtraInfo(ctypes.Structure):
-    pass
 class BasisProdCache(ctypes.Structure):
     pass
 

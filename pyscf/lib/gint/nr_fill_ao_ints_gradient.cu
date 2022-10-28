@@ -8,8 +8,7 @@
 __host__
 static int GINTfill_nabla1i_int2e_tasks(ERITensor *eri,
                                         BasisProdOffsets *offsets,
-                                        GINTEnvVars *envs,
-                                        GradientExtraInfo * extra_info)
+                                        GINTEnvVars *envs)
 {
   int nrys_roots = envs->nrys_roots;
   int ntasks_ij = offsets->ntasks_ij;
@@ -24,9 +23,7 @@ static int GINTfill_nabla1i_int2e_tasks(ERITensor *eri,
       type_ijkl = (envs->i_l << 3) | (envs->j_l << 2) | (envs->k_l << 1) | envs->l_l;
       //GINTfill_int2e_kernel<1, GOUTSIZE1> <<<blocks, threads>>>(*offsets);
       switch (type_ijkl) {
-        case 0b0000: GINTfill_nabla1i_int2e_kernel0000<<<blocks, threads>>>(*eri, *offsets, *extra_info); break;
-//        case 0b0010: GINTfill_nabla1i_int2e_kernel0010<<<blocks, threads>>>(*eri, *offsets); break;
-
+        case 0b0000: GINTfill_nabla1i_int2e_kernel0000<<<blocks, threads>>>(*eri, *offsets); break;
         default:
           fprintf(stderr, "troots=1 ype_ijkl %d\n", type_ijkl);
       }
@@ -47,36 +44,7 @@ static int GINTfill_nabla1i_int2e_tasks(ERITensor *eri,
 
 extern "C" {__host__
 
-void GINTinit_gradient_extra_info(GradientExtraInfo ** gradient_extra_info,
-                                  const int * bas, const int nbas,
-                                  const double * env,
-                                  const size_t stride_xyz) {
-
-  GradientExtraInfo * info = (GradientExtraInfo *) malloc(
-      sizeof(GradientExtraInfo));
-  memset(info, 0, sizeof(GradientExtraInfo));
-  *gradient_extra_info = info;
-
-  double * exponents = (double *) malloc(nbas * sizeof(double));
-  for (int basis_id = 0; basis_id < nbas; basis_id++) {
-    exponents[basis_id] = bas[NPRIM_OF + basis_id * BAS_SLOTS];
-  }
-
-  DEVICE_INIT(double, d_exponents, exponents, nbas * sizeof(double));
-  info->exponents = d_exponents;
-  info->stride_xyz = stride_xyz;
-
-  free(exponents);
-}
-
-void GINTdel_gradient_extra_info(GradientExtraInfo ** extra_info) {
-  FREE((*extra_info)->exponents);
-  free(*extra_info);
-  *extra_info = NULL;
-}
-
 int GINTfill_nabla1i_int2e(BasisProdCache *bpcache,
-                           GradientExtraInfo *extra_info,
                            double *eri, int nao,
                            int *strides, int *ao_offsets,
                            int *bins_locs_ij, int *bins_locs_kl, int nbins,
@@ -139,6 +107,7 @@ int GINTfill_nabla1i_int2e(BasisProdCache *bpcache,
   eritensor.stride_j = strides[1];
   eritensor.stride_k = strides[2];
   eritensor.stride_l = strides[3];
+  eritensor.n_elem = nao * strides[3];
   eritensor.ao_offsets_k = ao_offsets[2];
   eritensor.ao_offsets_l = ao_offsets[3];
   eritensor.nao = nao;
@@ -176,7 +145,7 @@ int GINTfill_nabla1i_int2e(BasisProdCache *bpcache,
       checkCudaErrors(cudaMemcpy(d_uw, uw_buf, sizeof(double) * uw_size,
                                  cudaMemcpyHostToDevice));
     }
-    int err = GINTfill_nabla1i_int2e_tasks(&eritensor, &offsets, &envs, extra_info);
+    int err = GINTfill_nabla1i_int2e_tasks(&eritensor, &offsets, &envs);
     if (err != 0) {
       return err;
     }
