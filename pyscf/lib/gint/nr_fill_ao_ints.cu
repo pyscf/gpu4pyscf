@@ -208,6 +208,17 @@ void GINTinit_basis_prod(BasisProdCache **pbp, double diag_fac, int *ao_loc,
     bpcache->z12 = d_aexyz + n_primitive_pairs * 4;
     bpcache->bas_pair2bra = d_bas_pair2shls;
     bpcache->bas_pair2ket = d_bas_pair2shls + n_bas_pairs;
+
+    int * host_primitive_functions_offsets = bpcache->primitive_functions_offsets;
+    double * host_exponents = bpcache->exponents;
+    DEVICE_INIT(int, d_primitive_functions_offsets, host_primitive_functions_offsets, nbas + 1);
+    DEVICE_INIT(double, d_exponents, host_exponents, host_primitive_functions_offsets[nbas]);
+    bpcache->primitive_functions_offsets = d_primitive_functions_offsets;
+    bpcache->exponents = d_exponents;
+
+    free(host_primitive_functions_offsets);
+    free(host_exponents);
+
 }
 
 int GINTfill_int2e(BasisProdCache *bpcache, double *eri, int nao,

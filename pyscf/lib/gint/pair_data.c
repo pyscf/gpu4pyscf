@@ -20,6 +20,7 @@
 #include <math.h>
 #include <stdio.h>
 #include "g2e.h"
+#include <memory.h>
 
 double CINTcommon_fac_sp(int l);
 
@@ -35,6 +36,32 @@ void GINTinit_contraction_types(BasisProdCache *bpcache,
         bpcache->cptype = cptype;
         int *primitive_pairs_locs = (int *)malloc(sizeof(int) * (ncptype + 1));
         int *primitive_functions_offsets = (int *)malloc(sizeof(int) * (nbas + 1));
+        memset(primitive_functions_offsets, 0, sizeof(int) * (nbas + 1));
+
+        int i; int n_primitive = 0;
+        for(i=0; i<nbas; i++) {
+          primitive_functions_offsets[i] = n_primitive;
+
+          int n_primitive_of_i = bas[NPRIM_OF + i * BAS_SLOTS];
+          n_primitive += n_primitive_of_i;
+        }
+        primitive_functions_offsets[i] = n_primitive;
+
+        double * exponents = (double *)malloc(sizeof(double) * n_primitive);
+        for(i=0; i<nbas; i++) {
+          int i_offset = primitive_functions_offsets[i];
+          int next_offset = primitive_functions_offsets[i + 1];
+          int n_primitive_of_i = next_offset - i_offset;
+          double * exponent_i_location = exponents + i_offset;
+          double * exponent_env_position = env + bas[PTR_EXP + i * BAS_SLOTS];
+
+          for(int j=0; j<n_primitive_of_i; j++) {
+            exponent_i_location[j] = exponent_env_position[j];
+          }
+        }
+
+        bpcache->exponents = exponents;
+        bpcache->primitive_functions_offsets = primitive_functions_offsets;
         bpcache->primitive_pairs_locs = primitive_pairs_locs;
 
         int n;

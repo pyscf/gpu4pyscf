@@ -143,7 +143,7 @@ def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
     cp_idx, cp_jdx = np.tril_indices(len(vhfopt.uniq_l_ctr))
 
     strides = np.array([1, nao, nao * nao, nao * nao * nao], dtype=np.int32)
-    eritensor = cupy.zeros((nao, nao, nao, nao, 3), dtype=np.double)
+    eritensor = cupy.zeros((3, nao, nao, nao, nao), dtype=np.double)
     ao_offsets = np.array([0, 0, 0, 0], dtype=np.int32)
 
     eri_tensor_ptr = ctypes.cast(eritensor.data.ptr, ctypes.c_void_p)
@@ -184,9 +184,7 @@ def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
                      ctypes.c_int(cp_ij_id),
                      ctypes.c_int(cp_kl_id))
 
-    print(eritensor[:, :, :, :, 0])
-    print(eritensor[:, :, :, :, 1])
-    print(eritensor[:, :, :, :, 2])
+    print(eritensor[0, :, :, :, :])
     #
     #         if err != 0:
     #             detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
@@ -555,8 +553,13 @@ class _VHFOpt(_vhf.VHFOpt):
         # else:
         #     scale_shellpair_diag = 0.5
 
-        print("log_qs", log_qs)
+        print("bas_pair2shls", self.bas_pair2shls)
         print("bas_pairs_locs", self.bas_pairs_locs)
+        print("_atm", mol._atm)
+        print("_bas", mol._bas)
+        print("_env", mol._env)
+        print("log_qs", log_qs)
+
         libgvhf.GINTinit_basis_prod(
             ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),
             ao_loc.ctypes.data_as(ctypes.c_void_p),

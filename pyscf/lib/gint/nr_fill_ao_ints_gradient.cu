@@ -51,7 +51,7 @@ void GINTinit_gradient_extra_info(GradientExtraInfo ** gradient_extra_info,
                                   const int * bas, const int nbas,
                                   const double * env,
                                   const size_t stride_xyz) {
-  int n_primitive_
+
   GradientExtraInfo * info = (GradientExtraInfo *) malloc(
       sizeof(GradientExtraInfo));
   memset(info, 0, sizeof(GradientExtraInfo));

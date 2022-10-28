@@ -50,6 +50,7 @@ static void GINTfill_nabla1i_int2e_kernel0000(ERITensor eri,
   int jsh = bas_pair2ket[bas_ij];
   int ksh = bas_pair2bra[bas_kl];
   int lsh = bas_pair2ket[bas_kl];
+
   int nprim_ij = c_envs.nprim_ij;
   int nprim_kl = c_envs.nprim_kl;
   int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
@@ -60,12 +61,40 @@ static void GINTfill_nabla1i_int2e_kernel0000(ERITensor eri,
   double* __restrict__ y12 = c_bpcache.y12;
   double* __restrict__ z12 = c_bpcache.z12;
   int ij, kl;
-  double gout0 = 0;
-  double gout1 = 0;
-  double gout2 = 0;
+
+  int nbas = c_bpcache.nbas;
+  double* __restrict__ bas_x = c_bpcache.bas_coords;
+  double* __restrict__ bas_y = bas_x + nbas;
+  double* __restrict__ bas_z = bas_y + nbas;
+
+  double xi = bas_x[ish];
+  double yi = bas_y[ish];
+  double zi = bas_z[ish];
+
+  double xj = bas_x[jsh];
+  double yj = bas_y[jsh];
+  double zj = bas_z[jsh];
+
+  double gout0 = 0, gout0_prime = 0;
+  double gout1 = 0, gout1_prime = 0;
+  double gout2 = 0, gout2_prime = 0;
+
+  int nprim_i =
+      c_bpcache.primitive_functions_offsets[ish + 1]
+      - c_bpcache.primitive_functions_offsets[ish];
+  int nprim_j =
+      c_bpcache.primitive_functions_offsets[jsh + 1]
+      - c_bpcache.primitive_functions_offsets[jsh];
+
+  double * exponent_i =
+      c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
+  double * exponent_j =
+      c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
 
   for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+      double ai = exponent_i[(ij-prim_ij) / nprim_j];
+      double aj = exponent_j[(ij-prim_ij) % nprim_j];
       double aij = a12[ij];
       double eij = e12[ij];
       double xij = x12[ij];
@@ -82,16 +111,10 @@ static void GINTfill_nabla1i_int2e_kernel0000(ERITensor eri,
       double aijkl = aij + akl;
       double a1 = aij * akl;
       double a0 = a1 / aijkl;
-      double exponent_i = extra_info.exponents[ish];
+
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
       double root0, weight0;
-
-
-      int nbas = c_bpcache.nbas;
-      double* __restrict__ bas_x = c_bpcache.bas_coords;
-      double* __restrict__ bas_y = bas_x + nbas;
-      double* __restrict__ bas_z = bas_y + nbas;
 
       if (x < 3.e-7) {
         root0 = 0.5;
@@ -106,26 +129,36 @@ static void GINTfill_nabla1i_int2e_kernel0000(ERITensor eri,
         root0 = fmt1 / (fmt0 - fmt1);
       }
 
-      double xi = bas_x[ish];
-      double yi = bas_y[ish];
-      double zi = bas_z[ish];
-
       double u2 = a0 * root0;
-      double tmp2 = akl * u2 / (u2 * aijkl + a1);;
+      double tmp2 = akl * u2 / (u2 * aijkl + a1);
       double c00x = xij - xi - tmp2 * xijxkl;
       double c00y = yij - yi - tmp2 * yijykl;
       double c00z = zij - zi - tmp2 * zijzkl;
+
+      double c00x_prime = xij - xj - tmp2 * xijxkl;
+      double c00y_prime = yij - yj - tmp2 * yijykl;
+      double c00z_prime = zij - zj - tmp2 * zijzkl;
+
       double g_0 = 1;
       double g_1 = c00x;
       double g_2 = 1;
       double g_3 = c00y;
-      double g_4 = norm * fac * weight0 * 2.0 * exponent_i;
+      double g_4 = fac * weight0;
       double g_5 = g_4 * c00z;
+      double g_6 = 2.0 * ai;
 
-      gout0 += g_1 * g_2 * g_4;
-      gout1 += g_0 * g_3 * g_4;
-      gout2 += g_0 * g_2 * g_5;
+      double g_1_prime = c00x_prime;
+      double g_3_prime = c00y_prime;
+      double g_5_prime = g_4 * c00z_prime;
+      double g_6_prime = 2.0 * aj;
 
+      gout0 += g_1 * g_2 * g_4 * g_6;
+      gout1 += g_0 * g_3 * g_4 * g_6;
+      gout2 += g_0 * g_2 * g_5 * g_6;
+
+      gout0_prime += g_1_prime * g_2 * g_4 * g_6_prime;
+      gout1_prime += g_0 * g_3_prime * g_4 * g_6_prime;
+      gout2_prime += g_0 * g_2 * g_5_prime * g_6_prime;
     } }
 
   int jstride = eri.stride_j;
@@ -146,16 +179,16 @@ static void GINTfill_nabla1i_int2e_kernel0000(ERITensor eri,
   eri_ij[0] = gout0;
   eri_ij[1 * xyz_stride] = gout1;
   eri_ij[2 * xyz_stride] = gout2;
-  eri_ji[0] = - gout0;
-  eri_ji[1 * xyz_stride] = - gout1;
-  eri_ji[2 * xyz_stride] = - gout2;
   eri_ij_lk[0] = gout0;
   eri_ij_lk[1 * xyz_stride] = gout1;
   eri_ij_lk[2 * xyz_stride] = gout2;
-  eri_ji_lk[0] = - gout0;
-  eri_ji_lk[1 * xyz_stride] = - gout1;
-  eri_ji_lk[2 * xyz_stride] = - gout2;
 
+  eri_ji[0] = gout0_prime;
+  eri_ji[1 * xyz_stride] = gout1_prime;
+  eri_ji[2 * xyz_stride] = gout2_prime;
+  eri_ji_lk[0] = gout0_prime;
+  eri_ji_lk[1 * xyz_stride] = gout1_prime;
+  eri_ji_lk[2 * xyz_stride] = gout2_prime;
 }
 
 __global__
