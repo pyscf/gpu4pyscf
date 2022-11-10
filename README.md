@@ -1,6 +1,38 @@
 GPU plugin for PySCF
 ====================
 
+
+Build and Install
+------------
+- Install dependencies
+Install cuda11.6, cudnn, Cupy and its denpendencies (Numpy, scipy, optuna, cuTENSOR v1.5, cuSPARSELt v0.2.0, cuDNN v8.3 / v8.4 / v8.5, NCCL v2.11 / v2.12 / v2.13 / v2.14)
+
+
+```
+apt install libnccl2=2.12.10-1+cuda11.6 libnccl-dev=2.12.10-1+cuda11.6  
+python -m pip install -U setuptools pip  
+pip install optuna scipy numpy cupy
+nvcc --version
+
+cd gpu4pyscf
+python setup install
+```
+
+
+- Set enviromental variables
+```
+vi ~/.bashrc
+export PATH=$PATH:/usr/local/cuda-11.6/bin
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda-11.6/lib64
+export PYTHONPATH="/root/gpu4pyscf":$PYTHONPATH
+source ~/.bashrc
+```
+
+- Troubles
+```
+ln -s ...../cint.h   ***/cint.h
+```
+
 Examples
 --------
 ```
