@@ -53,7 +53,7 @@ static int GINTrun_tasks_jk(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars
     int nrys_roots = envs->nrys_roots;
     int ntasks_ij = offsets->ntasks_ij;
     int ntasks_kl = offsets->ntasks_kl;
-    assert(task_kl < 65536*THREADSY);
+    assert(ntask_kl < 65536*THREADSY);
     int type_ijkl;
 
     dim3 threads(THREADSX, THREADSY);
