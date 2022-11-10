@@ -26,10 +26,25 @@ AUTHOR          = 'Qiming Sun'
 AUTHOR_EMAIL    = 'osirpt.sun@gmail.com'
 DESCRIPTION     = 'GPU extensions for PySCF'
 LICENSE         = 'GPLv3'
-URL             = None
-DOWNLOAD_URL    = None
-CLASSIFIERS     = None
-PLATFORMS       = None
+URL             = 'http://www.pyscf.org'
+DOWNLOAD_URL    = 'https://github.com/pyscf/gpu4pyscf'
+CLASSIFIERS     = [
+'Development Status :: 5 - Production/Stable',
+'Intended Audience :: Science/Research',
+'Intended Audience :: Developers',
+'License :: OSI Approved :: Apache Software License',
+'Programming Language :: C',
+'Programming Language :: Python',
+'Programming Language :: Python :: 3.6',
+'Programming Language :: Python :: 3.7',
+'Programming Language :: Python :: 3.8',
+'Programming Language :: Python :: 3.9',
+'Topic :: Software Development',
+'Topic :: Scientific/Engineering',
+'Operating System :: POSIX',
+'Operating System :: Unix',
+]
+PLATFORMS       = ['Linux', 'Unix']
 
 def get_version():
     topdir = os.path.abspath(os.path.join(__file__, '..'))
@@ -99,9 +114,9 @@ setup(
     author=AUTHOR,
     author_email=AUTHOR_EMAIL,
     platforms=PLATFORMS,
-    #package_dir={'pyscf': 'pyscf'},  # packages are under directory pyscf
+    package_dir={'pyscf': 'pyscf'},  # packages are under directory pyscf
     #include *.so *.dat files. They are now placed in MANIFEST.in
-    #package_data={'': ['*.so', '*.dylib', '*.dll', '*.dat']},
+    package_data={'': ['*.so']},
     include_package_data=True,  # include everything in source control
     packages=find_packages(exclude=['*test*', '*examples*']),
     # The ext_modules placeholder is to ensure build_ext getting initialized
