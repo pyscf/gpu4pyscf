@@ -48,6 +48,16 @@
 #define GSIZE8       12000
 #define MAX_GSIZE    GSIZE8
 
+#define NABLA1IGSIZE1       6
+#define NABLA1IGSIZE2       48
+#define NABLA1IGSIZE3       216
+#define NABLA1IGSIZE4       648
+#define NABLA1IGSIZE5       1620
+#define NABLA1IGSIZE6       3456
+#define NABLA1IGSIZE7       6720
+#define NABLA1IGSIZE8       12000
+#define NABLA1IMAX_GSIZE    NABLA1IGSIZE8
+
 #define GOUTSIZE1    (GSIZE1 + 3)
 #define GOUTSIZE2    (GSIZE2 + 27)
 #define GOUTSIZE3    (GSIZE3 + 162)
