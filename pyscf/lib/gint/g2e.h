@@ -25,6 +25,10 @@ extern "C" {
 #endif
 void GINTinit_EnvVars(GINTEnvVars *envs,
                       ContractionProdType *cp_ij, ContractionProdType *cp_kl);
+void GINTinit_EnvVars_nabla1i(GINTEnvVars *envs,
+                              ContractionProdType *cp_ij,
+                              ContractionProdType *cp_kl);
+
 void GINTinit_2c_gidx(int *idx, int li, int lj);
 void GINTinit_4c_idx(int16_t *idx, int *ij_idx, int *kl_idx, GINTEnvVars *envs);
 void GINTinit_uw_s1(double *uw_buf, BasisProdOffsets *offsets,

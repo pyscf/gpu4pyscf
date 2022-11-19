@@ -2,60 +2,12 @@
 
 #include "nr_fill_ao_ints_gradient.cuh"
 #include "g2e_gradient.cu"
+#include "g2e_root2_gradient.cu"
+#include "g2e_root3_gradient.cu"
 #include "cuda_alloc.cuh"
+#include "rys_roots.cuh"
 
 #define print printf("The code has arrived here\n");
-
-void GINTinit_uw_s1_nabla1i(double *uw_buf, BasisProdOffsets *offsets,
-                            GINTEnvVars *envs, BasisProdCache *bpcache)
-{
-  size_t ntasks_ij = offsets->ntasks_ij;
-  size_t ntasks_kl = offsets->ntasks_kl;
-  int nprim_ij = envs->nprim_ij;
-  int nprim_kl = envs->nprim_kl;
-  int nroots = envs->nrys_roots + 1;
-  int strides = envs->nprim_ij * envs->nprim_kl * nroots * 2;
-  int n_primitive_pairs = bpcache->primitive_pairs_locs[bpcache->ncptype];
-  double *a12 = bpcache->aexyz;
-  double *x12 = bpcache->aexyz + n_primitive_pairs * 2;
-  double *y12 = bpcache->aexyz + n_primitive_pairs * 3;
-  double *z12 = bpcache->aexyz + n_primitive_pairs * 4;
-
-#pragma omp parallel
-  {
-    int ij, kl, task_ij, task_kl, prim_ij, prim_kl;
-    size_t n;
-    double *uw;
-#pragma omp for schedule(static)
-    for (n = 0; n < ntasks_ij*ntasks_kl; n++) {
-      task_ij = n % ntasks_ij;
-      task_kl = n / ntasks_ij;
-      prim_ij = offsets->primitive_ij + task_ij * nprim_ij;
-      prim_kl = offsets->primitive_kl + task_kl * nprim_kl;
-      uw = uw_buf + n * strides;
-      for (ij = prim_ij; ij < prim_ij+nprim_ij; ij++) {
-        for (kl = prim_kl; kl < prim_kl+nprim_kl; kl++) {
-          double aij = a12[ij];
-          double xij = x12[ij];
-          double yij = y12[ij];
-          double zij = z12[ij];
-          double akl = a12[kl];
-          double xkl = x12[kl];
-          double ykl = y12[kl];
-          double zkl = z12[kl];
-          double rx = xij - xkl;
-          double ry = yij - ykl;
-          double rz = zij - zkl;
-          double aijkl = aij + akl;
-          double a0 = aij * akl / aijkl;
-          double x = a0 * (rx * rx + ry * ry + rz * rz);
-          double *u = uw;
-          double *w = uw + nroots;
-          CINTrys_roots(nroots, x, u, w);
-          uw += nroots * 2;
-        } }
-    }
-  }
 
 __host__
 static int GINTfill_nabla1i_int2e_tasks(ERITensor *eri,
@@ -77,9 +29,11 @@ static int GINTfill_nabla1i_int2e_tasks(ERITensor *eri,
       switch (type_ijkl) {
         case 0b0000: GINTfill_nabla1i_int2e_kernel0000<<<blocks, threads>>>(*eri, *offsets); break;
         default:
-          fprintf(stderr, "troots=1 ype_ijkl %d\n", type_ijkl);
+          fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
       }
       break;
+
+
 
     default:
       fprintf(stderr, "rys roots %d\n", nrys_roots);
@@ -105,7 +59,7 @@ int GINTfill_nabla1i_int2e(BasisProdCache *bpcache,
   ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
   ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
   GINTEnvVars envs;
-  GINTinit_EnvVars(&envs, cp_ij, cp_kl);
+  GINTinit_EnvVars_nabla1i(&envs, cp_ij, cp_kl);
   if (envs.nrys_roots >= 8) {
     return 2;
   }
@@ -128,15 +82,13 @@ int GINTfill_nabla1i_int2e(BasisProdCache *bpcache,
     free(idx_kl);
   }
 
-  int nrys_roots_gradient = envs.nrys_roots + 1;
-
   // Data and buffers to be allocated on-device. Allocate them here to
   // reduce the calls to malloc
-  int nroots2 = nrys_roots_gradient * 2;
+  int nroots2 = envs.nrys_roots * 2;
   int kl_bin, ij_bin1;
   double *uw_buf, *d_uw;
   size_t uw_size = 0;
-  if (nrys_roots_gradient + 1 > POLYFIT_ORDER) {
+  if (envs.nrys_roots + 1 > POLYFIT_ORDER) {
     for (kl_bin = 0; kl_bin < nbins; ++kl_bin) {
       ij_bin1 = nbins - kl_bin;
       int bas_ij0 = bins_locs_ij[0];
@@ -192,7 +144,7 @@ int GINTfill_nabla1i_int2e(BasisProdCache *bpcache,
     offsets.primitive_ij = primitive_pairs_locs[cp_ij_id] + bas_ij0 * envs.nprim_ij;
     offsets.primitive_kl = primitive_pairs_locs[cp_kl_id] + bas_kl0 * envs.nprim_kl;
 
-    if (nrys_roots_gradient > POLYFIT_ORDER) {
+    if (envs.nrys_roots > POLYFIT_ORDER) {
       // move rys roots and weights to device
       GINTinit_uw_s1(uw_buf, &offsets, &envs, bpcache);
       uw_size = (size_t)ntasks_ij * ntasks_kl * envs.nprim_ij * envs.nprim_kl * nroots2;
@@ -205,7 +157,7 @@ int GINTfill_nabla1i_int2e(BasisProdCache *bpcache,
     }
   }
 
-  if (nrys_roots_gradient > POLYFIT_ORDER) {
+  if (envs.nrys_roots > POLYFIT_ORDER) {
     checkCudaErrors(cudaFreeHost(uw_buf));
     FREE(d_uw);
   }
