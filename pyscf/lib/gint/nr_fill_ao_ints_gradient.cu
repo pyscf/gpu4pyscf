@@ -33,11 +33,67 @@ static int GINTfill_nabla1i_int2e_tasks(ERITensor *eri,
       }
       break;
 
+    case 2:
+      type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;
+      switch (type_ijkl) {
+        case (0<<6)|(0<<4)|(1<<2)|0: GINTfill_int2e_kernel_nabla1i_0010<<<blocks, threads>>>(*eri, *offsets); break;
+        case (0<<6)|(0<<4)|(1<<2)|1: GINTfill_int2e_kernel_nabla1i_0011<<<blocks, threads>>>(*eri, *offsets); break;
+        case (0<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel_nabla1i_0020<<<blocks, threads>>>(*eri, *offsets); break;
+        case (1<<6)|(0<<4)|(0<<2)|0: GINTfill_int2e_kernel_nabla1i_1000<<<blocks, threads>>>(*eri, *offsets); break;
+        case (1<<6)|(0<<4)|(1<<2)|0: GINTfill_int2e_kernel_nabla1i_1010<<<blocks, threads>>>(*eri, *offsets); break;
+        case (1<<6)|(1<<4)|(0<<2)|0: GINTfill_int2e_kernel_nabla1i_1100<<<blocks, threads>>>(*eri, *offsets); break;
+        case (2<<6)|(0<<4)|(0<<2)|0: GINTfill_int2e_kernel_nabla1i_2000<<<blocks, threads>>>(*eri, *offsets); break;
+        default:
+          fprintf(stderr, "roots=2 type_ijkl %d\n", type_ijkl);
+      }
+      break;
 
+    case 3:
+      type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;
+      switch (type_ijkl) {
+        case (0<<6)|(0<<4)|(2<<2)|1: GINTfill_int2e_kernel_nabla1i_0021<<<blocks, threads>>>(*eri, *offsets); break;
+        case (0<<6)|(0<<4)|(2<<2)|2: GINTfill_int2e_kernel_nabla1i_0022<<<blocks, threads>>>(*eri, *offsets); break;
+        case (0<<6)|(0<<4)|(3<<2)|0: GINTfill_int2e_kernel_nabla1i_0030<<<blocks, threads>>>(*eri, *offsets); break;
+        case (0<<6)|(0<<4)|(3<<2)|1: GINTfill_int2e_kernel_nabla1i_0031<<<blocks, threads>>>(*eri, *offsets); break;
+        case (1<<6)|(0<<4)|(1<<2)|1: GINTfill_int2e_kernel_nabla1i_1011<<<blocks, threads>>>(*eri, *offsets); break;
+        case (1<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel_nabla1i_1020<<<blocks, threads>>>(*eri, *offsets); break;
+        case (1<<6)|(0<<4)|(2<<2)|1: GINTfill_int2e_kernel_nabla1i_1021<<<blocks, threads>>>(*eri, *offsets); break;
+        case (1<<6)|(0<<4)|(3<<2)|0: GINTfill_int2e_kernel_nabla1i_1030<<<blocks, threads>>>(*eri, *offsets); break;
+        case (1<<6)|(1<<4)|(1<<2)|0: GINTfill_int2e_kernel_nabla1i_1110<<<blocks, threads>>>(*eri, *offsets); break;
+        case (1<<6)|(1<<4)|(1<<2)|1: GINTfill_int2e_kernel_nabla1i_1111<<<blocks, threads>>>(*eri, *offsets); break;
+        case (1<<6)|(1<<4)|(2<<2)|0: GINTfill_int2e_kernel_nabla1i_1120<<<blocks, threads>>>(*eri, *offsets); break;
+        case (2<<6)|(0<<4)|(1<<2)|0: GINTfill_int2e_kernel_nabla1i_2010<<<blocks, threads>>>(*eri, *offsets); break;
+        case (2<<6)|(0<<4)|(1<<2)|1: GINTfill_int2e_kernel_nabla1i_2011<<<blocks, threads>>>(*eri, *offsets); break;
+        case (2<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel_nabla1i_2020<<<blocks, threads>>>(*eri, *offsets); break;
+        case (2<<6)|(1<<4)|(0<<2)|0: GINTfill_int2e_kernel_nabla1i_2100<<<blocks, threads>>>(*eri, *offsets); break;
+        case (2<<6)|(1<<4)|(1<<2)|0: GINTfill_int2e_kernel_nabla1i_2110<<<blocks, threads>>>(*eri, *offsets); break;
+        case (2<<6)|(2<<4)|(0<<2)|0: GINTfill_int2e_kernel_nabla1i_2200<<<blocks, threads>>>(*eri, *offsets); break;
+        case (3<<6)|(0<<4)|(0<<2)|0: GINTfill_int2e_kernel_nabla1i_3000<<<blocks, threads>>>(*eri, *offsets); break;
+        case (3<<6)|(0<<4)|(1<<2)|0: GINTfill_int2e_kernel_nabla1i_3010<<<blocks, threads>>>(*eri, *offsets); break;
+        case (3<<6)|(1<<4)|(0<<2)|0: GINTfill_int2e_kernel_nabla1i_3100<<<blocks, threads>>>(*eri, *offsets); break;default:
+          fprintf(stderr, "roots=3 type_ijkl %d\n", type_ijkl);
+      }
+      break;
 
+    case 4:
+      GINTfill_int2e_kernel_nabla1i<4, GOUTSIZE4> <<<blocks, threads>>>(*eri, *offsets);
+      break;
+    case 5:
+      GINTfill_int2e_kernel_nabla1i<5, GOUTSIZE5> <<<blocks, threads>>>(*eri, *offsets);
+      break;
+    case 6:
+      GINTfill_int2e_kernel_nabla1i<6, GOUTSIZE6> <<<blocks, threads>>>(*eri, *offsets);
+      break;
+    case 7:
+      GINTfill_int2e_kernel_nabla1i<7, GOUTSIZE7> <<<blocks, threads>>>(*eri, *offsets);
+      break;
+      //case 8:
+      //    GINTfill_int2e_kernel<8, GOUTSIZE8> <<<blocks, threads>>>(*offsets);
+      //    break;
     default:
       fprintf(stderr, "rys roots %d\n", nrys_roots);
       return 1;
+
   }
 
   cudaError_t err = cudaGetLastError();

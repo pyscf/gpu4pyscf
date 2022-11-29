@@ -62,12 +62,8 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0010(ERITensor eri,
   double gout16 = 0;
   double gout17 = 0;
 
-  double xi = bas_x[ish];
-  double yi = bas_y[ish];
-  double zi = bas_z[ish];
-  double ABx = xi - bas_x[jsh];
-  double ABy = yi - bas_y[jsh];
-  double ABz = zi - bas_z[jsh];
+
+
   double xk = bas_x[ksh];
   double yk = bas_y[ksh];
   double zk = bas_z[ksh];
@@ -108,14 +104,10 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0010(ERITensor eri,
         double u2 = a0 * root0;
         double tmp4 = .5 / (u2 * aijkl + a1);
         double B00 = u2 * tmp4;
-        double tmp1 = 2 * B00;
-        double tmp2 = tmp1 * akl;
 
-        double C00x = xij - xi - tmp2 * xijxkl;
-        double C00y = yij - yi - tmp2 * yijykl;
-        double C00z = zij - zi - tmp2 * zijzkl;
-        double tmp3 = tmp1 * aij;
+
         double B01 = B00 + tmp4 * aij;
+        double tmp3 = tmp1 * aij;
         double D00x = xkl - xk + tmp3 * xijxkl;
         double D00y = ykl - yk + tmp3 * yijykl;
         double D00z = zkl - zk + tmp3 * zijzkl;
@@ -302,12 +294,8 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0011(ERITensor eri,
   double gout52 = 0;
   double gout53 = 0;
 
-  double xi = bas_x[ish];
-  double yi = bas_y[ish];
-  double zi = bas_z[ish];
-  double ABx = xi - bas_x[jsh];
-  double ABy = yi - bas_y[jsh];
-  double ABz = zi - bas_z[jsh];
+
+
   double xk = bas_x[ksh];
   double yk = bas_y[ksh];
   double zk = bas_z[ksh];
@@ -350,14 +338,10 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0011(ERITensor eri,
         double u2 = a0 * root0;
         double tmp4 = .5 / (u2 * aijkl + a1);
         double B00 = u2 * tmp4;
-        double tmp1 = 2 * B00;
-        double tmp2 = tmp1 * akl;
 
-        double C00x = xij - xi - tmp2 * xijxkl;
-        double C00y = yij - yi - tmp2 * yijykl;
-        double C00z = zij - zi - tmp2 * zijzkl;
-        double tmp3 = tmp1 * aij;
+
         double B01 = B00 + tmp4 * aij;
+        double tmp3 = tmp1 * aij;
         double D00x = xkl - xk + tmp3 * xijxkl;
         double D00y = ykl - yk + tmp3 * yijykl;
         double D00z = zkl - zk + tmp3 * zijzkl;
@@ -656,12 +640,8 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0020(ERITensor eri,
   double gout34 = 0;
   double gout35 = 0;
 
-  double xi = bas_x[ish];
-  double yi = bas_y[ish];
-  double zi = bas_z[ish];
-  double ABx = xi - bas_x[jsh];
-  double ABy = yi - bas_y[jsh];
-  double ABz = zi - bas_z[jsh];
+
+
   double xk = bas_x[ksh];
   double yk = bas_y[ksh];
   double zk = bas_z[ksh];
@@ -702,14 +682,10 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0020(ERITensor eri,
         double u2 = a0 * root0;
         double tmp4 = .5 / (u2 * aijkl + a1);
         double B00 = u2 * tmp4;
-        double tmp1 = 2 * B00;
-        double tmp2 = tmp1 * akl;
 
-        double C00x = xij - xi - tmp2 * xijxkl;
-        double C00y = yij - yi - tmp2 * yijykl;
-        double C00z = zij - zi - tmp2 * zijzkl;
-        double tmp3 = tmp1 * aij;
+
         double B01 = B00 + tmp4 * aij;
+        double tmp3 = tmp1 * aij;
         double D00x = xkl - xk + tmp3 * xijxkl;
         double D00y = ykl - yk + tmp3 * yijykl;
         double D00z = zkl - zk + tmp3 * zijzkl;
@@ -929,12 +905,8 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_1000(ERITensor eri,
   double xi = bas_x[ish];
   double yi = bas_y[ish];
   double zi = bas_z[ish];
-  double ABx = xi - bas_x[jsh];
-  double ABy = yi - bas_y[jsh];
-  double ABz = zi - bas_z[jsh];
-  double xk = bas_x[ksh];
-  double yk = bas_y[ksh];
-  double zk = bas_z[ksh];
+
+
 
   prim_ij0 = prim_ij;
   prim_ij1 = prim_ij + nprim_ij;
@@ -972,13 +944,11 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_1000(ERITensor eri,
         double u2 = a0 * root0;
         double tmp4 = .5 / (u2 * aijkl + a1);
         double B00 = u2 * tmp4;
-        double tmp1 = 2 * B00;
-        double tmp2 = tmp1 * akl;
         double B10 = B00 + tmp4 * akl;
+        double tmp2 = tmp1 * akl;
         double C00x = xij - xi - tmp2 * xijxkl;
         double C00y = yij - yi - tmp2 * yijykl;
         double C00z = zij - zi - tmp2 * zijzkl;
-        double tmp3 = tmp1 * aij;
 
 
 
@@ -1167,9 +1137,7 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_1010(ERITensor eri,
   double xi = bas_x[ish];
   double yi = bas_y[ish];
   double zi = bas_z[ish];
-  double ABx = xi - bas_x[jsh];
-  double ABy = yi - bas_y[jsh];
-  double ABz = zi - bas_z[jsh];
+
   double xk = bas_x[ksh];
   double yk = bas_y[ksh];
   double zk = bas_z[ksh];
@@ -1210,14 +1178,13 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_1010(ERITensor eri,
         double u2 = a0 * root0;
         double tmp4 = .5 / (u2 * aijkl + a1);
         double B00 = u2 * tmp4;
-        double tmp1 = 2 * B00;
-        double tmp2 = tmp1 * akl;
         double B10 = B00 + tmp4 * akl;
+        double tmp2 = tmp1 * akl;
         double C00x = xij - xi - tmp2 * xijxkl;
         double C00y = yij - yi - tmp2 * yijykl;
         double C00z = zij - zi - tmp2 * zijzkl;
-        double tmp3 = tmp1 * aij;
         double B01 = B00 + tmp4 * aij;
+        double tmp3 = tmp1 * aij;
         double D00x = xkl - xk + tmp3 * xijxkl;
         double D00y = ykl - yk + tmp3 * yijykl;
         double D00z = zkl - zk + tmp3 * zijzkl;
@@ -1533,9 +1500,7 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_1100(ERITensor eri,
   double ABx = xi - bas_x[jsh];
   double ABy = yi - bas_y[jsh];
   double ABz = zi - bas_z[jsh];
-  double xk = bas_x[ksh];
-  double yk = bas_y[ksh];
-  double zk = bas_z[ksh];
+
 
   prim_ij0 = prim_ij;
   prim_ij1 = prim_ij + nprim_ij;
@@ -1573,13 +1538,11 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_1100(ERITensor eri,
         double u2 = a0 * root0;
         double tmp4 = .5 / (u2 * aijkl + a1);
         double B00 = u2 * tmp4;
-        double tmp1 = 2 * B00;
-        double tmp2 = tmp1 * akl;
         double B10 = B00 + tmp4 * akl;
+        double tmp2 = tmp1 * akl;
         double C00x = xij - xi - tmp2 * xijxkl;
         double C00y = yij - yi - tmp2 * yijykl;
         double C00z = zij - zi - tmp2 * zijzkl;
-        double tmp3 = tmp1 * aij;
 
 
 
@@ -1871,12 +1834,8 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_2000(ERITensor eri,
   double xi = bas_x[ish];
   double yi = bas_y[ish];
   double zi = bas_z[ish];
-  double ABx = xi - bas_x[jsh];
-  double ABy = yi - bas_y[jsh];
-  double ABz = zi - bas_z[jsh];
-  double xk = bas_x[ksh];
-  double yk = bas_y[ksh];
-  double zk = bas_z[ksh];
+
+
 
   prim_ij0 = prim_ij;
   prim_ij1 = prim_ij + nprim_ij;
@@ -1914,13 +1873,11 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_2000(ERITensor eri,
         double u2 = a0 * root0;
         double tmp4 = .5 / (u2 * aijkl + a1);
         double B00 = u2 * tmp4;
-        double tmp1 = 2 * B00;
-        double tmp2 = tmp1 * akl;
         double B10 = B00 + tmp4 * akl;
+        double tmp2 = tmp1 * akl;
         double C00x = xij - xi - tmp2 * xijxkl;
         double C00y = yij - yi - tmp2 * yijykl;
         double C00z = zij - zi - tmp2 * zijzkl;
-        double tmp3 = tmp1 * aij;
 
 
 
