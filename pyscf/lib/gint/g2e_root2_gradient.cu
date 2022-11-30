@@ -1,7 +1,7 @@
 
 __global__
-static void GINTfill_nabla1i_int2e_kernel_nabla1i_0010(ERITensor eri,
-                                                       BasisProdOffsets offsets)
+static void GINTfill_int2e_kernel_nabla1i_0010(ERITensor eri,
+                                               BasisProdOffsets offsets)
 {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
@@ -62,7 +62,9 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0010(ERITensor eri,
   double gout16 = 0;
   double gout17 = 0;
 
-
+  double xi = bas_x[ish];
+  double yi = bas_y[ish];
+  double zi = bas_z[ish];
 
   double xk = bas_x[ksh];
   double yk = bas_y[ksh];
@@ -104,23 +106,26 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0010(ERITensor eri,
         double u2 = a0 * root0;
         double tmp4 = .5 / (u2 * aijkl + a1);
         double B00 = u2 * tmp4;
-
-
+        double B10 = B00 + tmp4 * akl;
+        double tmp2 = tmp1 * akl;
+        double C00x = xij - xi - tmp2 * xijxkl;
+        double C00y = yij - yi - tmp2 * yijykl;
+        double C00z = zij - zi - tmp2 * zijzkl;
         double B01 = B00 + tmp4 * aij;
         double tmp3 = tmp1 * aij;
         double D00x = xkl - xk + tmp3 * xijxkl;
         double D00y = ykl - yk + tmp3 * yijykl;
         double D00z = zkl - zk + tmp3 * zijzkl;
 
-        double g1 = B00+C00x*D00x;
+        double g1 = B00+(C00x*D00x);
         double g2 = ABx+C00x;
-        double g4 = B00+g2*D00x;
-        double g6 = B00+C00y*D00y;
+        double g4 = B00+(g2*D00x);
+        double g6 = B00+(C00y*D00y);
         double g7 = ABy+C00y;
-        double g9 = B00+g7*D00y;
-        double g11 = B00+C00z*D00z;
+        double g9 = B00+(g7*D00y);
+        double g11 = B00+(C00z*D00z);
         double g12 = ABz+C00z;
-        double g14 = B00+g12*D00z;
+        double g14 = B00+(g12*D00z);
 
         gout0 += (2*alpha*g1) * weight0;
         gout1 += (2*alpha*C00x) * (D00y) * weight0;
@@ -196,8 +201,8 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0010(ERITensor eri,
 }
 
 __global__
-static void GINTfill_nabla1i_int2e_kernel_nabla1i_0011(ERITensor eri,
-                                                       BasisProdOffsets offsets)
+static void GINTfill_int2e_kernel_nabla1i_0011(ERITensor eri,
+                                               BasisProdOffsets offsets)
 {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
@@ -294,7 +299,9 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0011(ERITensor eri,
   double gout52 = 0;
   double gout53 = 0;
 
-
+  double xi = bas_x[ish];
+  double yi = bas_y[ish];
+  double zi = bas_z[ish];
 
   double xk = bas_x[ksh];
   double yk = bas_y[ksh];
@@ -338,45 +345,48 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0011(ERITensor eri,
         double u2 = a0 * root0;
         double tmp4 = .5 / (u2 * aijkl + a1);
         double B00 = u2 * tmp4;
-
-
+        double B10 = B00 + tmp4 * akl;
+        double tmp2 = tmp1 * akl;
+        double C00x = xij - xi - tmp2 * xijxkl;
+        double C00y = yij - yi - tmp2 * yijykl;
+        double C00z = zij - zi - tmp2 * zijzkl;
         double B01 = B00 + tmp4 * aij;
         double tmp3 = tmp1 * aij;
         double D00x = xkl - xk + tmp3 * xijxkl;
         double D00y = ykl - yk + tmp3 * yijykl;
         double D00z = zkl - zk + tmp3 * zijzkl;
 
-        double g1 = B00+C00x*D00x;
+        double g1 = B00+(C00x*D00x);
         double g2 = ABx+C00x;
         double g3 = g2*D00x;
         double g4 = B00+g3;
         double g5 = CDx+D00x;
-        double g7 = B00+C00x*g5;
-        double g9 = B01+D00x*g5;
-        double g14 = B00*CDx+2*D00x;
-        double g15 = B01*C00x+C00x*D00x*g5+g14;
-        double g17 = B00+g2*g5;
-        double g19 = g14+g2*g9;
-        double g21 = B00+C00y*D00y;
+        double g7 = B00+(C00x*g5);
+        double g9 = B01+(D00x*g5);
+        double g14 = B00*(CDx+(2*D00x));
+        double g15 = (B01*C00x)+(C00x*D00x*g5)+g14;
+        double g17 = B00+(g2*g5);
+        double g19 = g14+(g2*g9);
+        double g21 = B00+(C00y*D00y);
         double g22 = ABy+C00y;
-        double g24 = B00+g22*D00y;
+        double g24 = B00+(g22*D00y);
         double g25 = CDy+D00y;
-        double g27 = B00+C00y*g25;
-        double g29 = B01+D00y*g25;
-        double g34 = B00*CDy+2*D00y;
-        double g35 = B01*C00y+C00y*D00y*g25+g34;
-        double g37 = B00+g22*g25;
-        double g39 = g34+g22*g29;
-        double g41 = B00+C00z*D00z;
+        double g27 = B00+(C00y*g25);
+        double g29 = B01+(D00y*g25);
+        double g34 = B00*(CDy+(2*D00y));
+        double g35 = (B01*C00y)+(C00y*D00y*g25)+g34;
+        double g37 = B00+(g22*g25);
+        double g39 = g34+(g22*g29);
+        double g41 = B00+(C00z*D00z);
         double g42 = ABz+C00z;
-        double g44 = B00+g42*D00z;
+        double g44 = B00+(g42*D00z);
         double g45 = CDz+D00z;
-        double g47 = B00+C00z*g45;
-        double g49 = B01+D00z*g45;
-        double g54 = B00*CDz+2*D00z;
-        double g55 = B01*C00z+C00z*D00z*g45+g54;
-        double g57 = B00+g42*g45;
-        double g59 = g54+g42*g49;
+        double g47 = B00+(C00z*g45);
+        double g49 = B01+(D00z*g45);
+        double g54 = B00*(CDz+(2*D00z));
+        double g55 = (B01*C00z)+(C00z*D00z*g45)+g54;
+        double g57 = B00+(g42*g45);
+        double g59 = g54+(g42*g49);
 
         gout0 += (2*alpha*g15) * weight0;
         gout1 += (2*alpha*g1) * (g25) * weight0;
@@ -560,8 +570,8 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0011(ERITensor eri,
 }
 
 __global__
-static void GINTfill_nabla1i_int2e_kernel_nabla1i_0020(ERITensor eri,
-                                                       BasisProdOffsets offsets)
+static void GINTfill_int2e_kernel_nabla1i_0020(ERITensor eri,
+                                               BasisProdOffsets offsets)
 {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
@@ -640,7 +650,9 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0020(ERITensor eri,
   double gout34 = 0;
   double gout35 = 0;
 
-
+  double xi = bas_x[ish];
+  double yi = bas_y[ish];
+  double zi = bas_z[ish];
 
   double xk = bas_x[ksh];
   double yk = bas_y[ksh];
@@ -682,35 +694,38 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0020(ERITensor eri,
         double u2 = a0 * root0;
         double tmp4 = .5 / (u2 * aijkl + a1);
         double B00 = u2 * tmp4;
-
-
+        double B10 = B00 + tmp4 * akl;
+        double tmp2 = tmp1 * akl;
+        double C00x = xij - xi - tmp2 * xijxkl;
+        double C00y = yij - yi - tmp2 * yijykl;
+        double C00z = zij - zi - tmp2 * zijzkl;
         double B01 = B00 + tmp4 * aij;
         double tmp3 = tmp1 * aij;
         double D00x = xkl - xk + tmp3 * xijxkl;
         double D00y = ykl - yk + tmp3 * yijykl;
         double D00z = zkl - zk + tmp3 * zijzkl;
 
-        double g1 = B00+C00x*D00x;
+        double g1 = B00+(C00x*D00x);
         double g2 = B01+D00x*D00x;
         double g3 = 2*B00*D00x;
-        double g5 = g3+C00x*g2;
+        double g5 = g3+(C00x*g2);
         double g6 = ABx+C00x;
-        double g8 = B00+g6*D00x;
-        double g10 = g3+g6*g2;
-        double g12 = B00+C00y*D00y;
+        double g8 = B00+(g6*D00x);
+        double g10 = g3+(g6*g2);
+        double g12 = B00+(C00y*D00y);
         double g13 = B01+D00y*D00y;
         double g14 = 2*B00*D00y;
-        double g16 = g14+C00y*g13;
+        double g16 = g14+(C00y*g13);
         double g17 = ABy+C00y;
-        double g19 = B00+g17*D00y;
-        double g21 = g14+g17*g13;
-        double g23 = B00+C00z*D00z;
+        double g19 = B00+(g17*D00y);
+        double g21 = g14+(g17*g13);
+        double g23 = B00+(C00z*D00z);
         double g24 = B01+D00z*D00z;
         double g25 = 2*B00*D00z;
-        double g27 = g25+C00z*g24;
+        double g27 = g25+(C00z*g24);
         double g28 = ABz+C00z;
-        double g30 = B00+g28*D00z;
-        double g32 = g25+g28*g24;
+        double g30 = B00+(g28*D00z);
+        double g32 = g25+(g28*g24);
 
         gout0 += (2*alpha*g5) * weight0;
         gout1 += (2*alpha*g1) * (D00y) * weight0;
@@ -840,8 +855,8 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_0020(ERITensor eri,
 }
 
 __global__
-static void GINTfill_nabla1i_int2e_kernel_nabla1i_1000(ERITensor eri,
-                                                       BasisProdOffsets offsets)
+static void GINTfill_int2e_kernel_nabla1i_1000(ERITensor eri,
+                                               BasisProdOffsets offsets)
 {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
@@ -954,13 +969,13 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_1000(ERITensor eri,
 
         double g0 = B10+C00x*C00x;
         double g1 = ABx+C00x;
-        double g3 = B10+C00x*g1;
+        double g3 = B10+(C00x*g1);
         double g4 = B10+C00y*C00y;
         double g5 = ABy+C00y;
-        double g7 = B10+C00y*g5;
+        double g7 = B10+(C00y*g5);
         double g8 = B10+C00z*C00z;
         double g9 = ABz+C00z;
-        double g11 = B10+C00z*g9;
+        double g11 = B10+(C00z*g9);
 
         gout0 += (-1 + 2*alpha*g0) * weight0;
         gout1 += (2*alpha*C00x) * (C00y) * weight0;
@@ -1036,8 +1051,8 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_1000(ERITensor eri,
 }
 
 __global__
-static void GINTfill_nabla1i_int2e_kernel_nabla1i_1010(ERITensor eri,
-                                                       BasisProdOffsets offsets)
+static void GINTfill_int2e_kernel_nabla1i_1010(ERITensor eri,
+                                               BasisProdOffsets offsets)
 {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
@@ -1196,23 +1211,23 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_1010(ERITensor eri,
         double g4 = g0*D00x;
         double g5 = g3+g4;
         double g6 = ABx+C00x;
-        double g8 = B10+C00x*g6;
-        double g10 = B00+g6*D00x;
-        double g15 = B00*ABx+2*C00x+g8*D00x;
+        double g8 = B10+(C00x*g6);
+        double g10 = B00+(g6*D00x);
+        double g15 = (B00*(ABx+(2*C00x)))+(g8*D00x);
         double g16 = B10+C00y*C00y;
-        double g18 = B00+C00y*D00y;
-        double g21 = 2*B00*C00y+g16*D00y;
+        double g18 = B00+(C00y*D00y);
+        double g21 = (2*B00*C00y)+(g16*D00y);
         double g22 = ABy+C00y;
-        double g24 = B10+C00y*g22;
-        double g26 = B00+g22*D00y;
-        double g31 = B00*ABy+2*C00y+g24*D00y;
+        double g24 = B10+(C00y*g22);
+        double g26 = B00+(g22*D00y);
+        double g31 = (B00*(ABy+(2*C00y)))+(g24*D00y);
         double g32 = B10+C00z*C00z;
-        double g34 = B00+C00z*D00z;
-        double g37 = 2*B00*C00z+g32*D00z;
+        double g34 = B00+(C00z*D00z);
+        double g37 = (2*B00*C00z)+(g32*D00z);
         double g38 = ABz+C00z;
-        double g40 = B10+C00z*g38;
-        double g42 = B00+g38*D00z;
-        double g47 = B00*ABz+2*C00z+g40*D00z;
+        double g40 = B10+(C00z*g38);
+        double g42 = B00+(g38*D00z);
+        double g47 = (B00*(ABz+(2*C00z)))+(g40*D00z);
 
         gout0 += (-D00x + 2*alpha*g5) * weight0;
         gout1 += (-1 + 2*alpha*g0) * (D00y) * weight0;
@@ -1396,8 +1411,8 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_1010(ERITensor eri,
 }
 
 __global__
-static void GINTfill_nabla1i_int2e_kernel_nabla1i_1100(ERITensor eri,
-                                                       BasisProdOffsets offsets)
+static void GINTfill_int2e_kernel_nabla1i_1100(ERITensor eri,
+                                               BasisProdOffsets offsets)
 {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
@@ -1551,23 +1566,23 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_1100(ERITensor eri,
         double g2 = C00x*g1;
         double g3 = B10+g2;
         double g4 = 3*B10*C00x;
-        double g6 = g4+C00x*C00x*C00x+ABx*g0;
+        double g6 = g4+C00x*C00x*C00x+(ABx*g0);
         double g7 = B10+g1*g1;
-        double g10 = ABx*ABx*C00x+g4+C00x*C00x*C00x+2*ABx*g0;
+        double g10 = (ABx*ABx*C00x)+g4+C00x*C00x*C00x+(2*ABx*g0);
         double g11 = B10+C00y*C00y;
         double g12 = ABy+C00y;
-        double g14 = B10+C00y*g12;
+        double g14 = B10+(C00y*g12);
         double g15 = 3*B10*C00y;
-        double g17 = g15+C00y*C00y*C00y+ABy*g11;
+        double g17 = g15+C00y*C00y*C00y+(ABy*g11);
         double g18 = B10+g12*g12;
-        double g21 = ABy*ABy*C00y+g15+C00y*C00y*C00y+2*ABy*g11;
+        double g21 = (ABy*ABy*C00y)+g15+C00y*C00y*C00y+(2*ABy*g11);
         double g22 = B10+C00z*C00z;
         double g23 = ABz+C00z;
-        double g25 = B10+C00z*g23;
+        double g25 = B10+(C00z*g23);
         double g26 = 3*B10*C00z;
-        double g28 = g26+C00z*C00z*C00z+ABz*g22;
+        double g28 = g26+C00z*C00z*C00z+(ABz*g22);
         double g29 = B10+g23*g23;
-        double g32 = ABz*ABz*C00z+g26+C00z*C00z*C00z+2*ABz*g22;
+        double g32 = (ABz*ABz*C00z)+g26+C00z*C00z*C00z+(2*ABz*g22);
 
         gout0 += (-g1 + 2*alpha*g6) * weight0;
         gout1 += (-1 + 2*alpha*g0) * (g12) * weight0;
@@ -1751,8 +1766,8 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_1100(ERITensor eri,
 }
 
 __global__
-static void GINTfill_nabla1i_int2e_kernel_nabla1i_2000(ERITensor eri,
-                                                       BasisProdOffsets offsets)
+static void GINTfill_int2e_kernel_nabla1i_2000(ERITensor eri,
+                                               BasisProdOffsets offsets)
 {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
@@ -1885,20 +1900,20 @@ static void GINTfill_nabla1i_int2e_kernel_nabla1i_2000(ERITensor eri,
         double g1 = 3*B10*C00x;
         double g2 = g1+C00x*C00x*C00x;
         double g3 = ABx+C00x;
-        double g5 = B10+C00x*g3;
-        double g7 = g1+C00x*C00x*C00x+ABx*g0;
+        double g5 = B10+(C00x*g3);
+        double g7 = g1+C00x*C00x*C00x+(ABx*g0);
         double g8 = B10+C00y*C00y;
         double g9 = 3*B10*C00y;
         double g10 = g9+C00y*C00y*C00y;
         double g11 = ABy+C00y;
-        double g13 = B10+C00y*g11;
-        double g15 = g9+C00y*C00y*C00y+ABy*g8;
+        double g13 = B10+(C00y*g11);
+        double g15 = g9+C00y*C00y*C00y+(ABy*g8);
         double g16 = B10+C00z*C00z;
         double g17 = 3*B10*C00z;
         double g18 = g17+C00z*C00z*C00z;
         double g19 = ABz+C00z;
-        double g21 = B10+C00z*g19;
-        double g23 = g17+C00z*C00z*C00z+ABz*g16;
+        double g21 = B10+(C00z*g19);
+        double g23 = g17+C00z*C00z*C00z+(ABz*g16);
 
         gout0 += (-2*C00x + 2*alpha*g2) * weight0;
         gout1 += (-1 + 2*alpha*g0) * (C00y) * weight0;
