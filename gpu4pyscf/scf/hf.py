@@ -48,7 +48,7 @@ def get_int2e(mol, vhfopt=None, verbose=None):
     log = logger.new_logger(mol, verbose)
 
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=False)
+        vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=True)
 
     coeff = cupy.asarray(vhfopt.coeff)
     nao, nao0 = coeff.shape
@@ -116,9 +116,9 @@ def get_int2e(mol, vhfopt=None, verbose=None):
     if FREE_CUPY_CACHE:
         cupy.get_default_memory_pool().free_all_blocks()
 
-    sort_index = np.argsort(vhfopt.coeff @ np.arange(mol.nao))
     symmetrize(eritensor)
-    return np.einsum("ijkl, ia, jb, kc, ld -> abcd", eritensor, coeff, coeff, coeff, coeff)
+
+    return eritensor
 
 def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
 
@@ -126,7 +126,7 @@ def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
     log = logger.new_logger(mol, verbose)
 
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=False)
+        vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=True)
 
     coeff = cupy.asarray(vhfopt.coeff)
     nao, nao0 = coeff.shape
@@ -192,7 +192,52 @@ def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
     if FREE_CUPY_CACHE:
         cupy.get_default_memory_pool().free_all_blocks()
 
-    return np.einsum("pijkl, ia, jb, kc, ld -> pabcd", eritensor, coeff, coeff, coeff, coeff)
+
+    # return cupy.einsum("xlkji -> xijkl", eritensor)
+    return cupy.einsum("apqkl, kr, ls -> asrqp",
+            cupy.einsum("aijkl, ip, jq-> apqkl", eritensor, coeff, coeff), coeff, coeff)
+
+def grad_get_jk(mol, dm):
+    cput0 = (logger.process_clock(), logger.perf_counter())
+
+    vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=True)
+    coeff = cupy.asarray(vhfopt.coeff)
+    nao, nao0 = coeff.shape
+    dm0 = dm
+
+    dms = cupy.asarray(dm0.reshape(-1,nao0,nao0))
+    dms = [cupy.einsum('pi,ij,qj->pq', coeff, x, coeff) for x in dms]
+    if dm0.ndim == 2:
+        dms = cupy.asarray(dms[0], order='C').reshape(nao,nao)
+    else:
+        dms = cupy.asarray(dms, order='C')
+
+    int2e = get_nabla1i_int2e(mol, vhfopt=vhfopt)
+
+    # cupy has got weird bug that if we write
+    # vj = cupy.einsum("pijkl, lk -> pij", int2e, dm)
+    # vk = cupy.einsum("pijkl, jk -> pil", int2e, dm)
+    # The values of vk will be the same as vj
+    # This might be related to some JIT compilation of the kernels
+    vj = cupy.einsum("lk, pijkl -> pij", dm, int2e)
+    vk = cupy.einsum("pijkl, jk -> pil", int2e, dm)
+
+    return cupy.asnumpy(vj), cupy.asnumpy(vk)
+
+def _write(dev, mol, de, atmlst):
+    '''Format output of nuclear gradients.
+
+    Args:
+        dev : lib.logger.Logger object
+    '''
+    if atmlst is None:
+        atmlst = range(mol.natm)
+    dev.stdout.write('         x                y                z\n')
+    for k, ia in enumerate(atmlst):
+        dev.stdout.write('%d %s  %15.10f  %15.10f  %15.10f\n' %
+                         (ia, mol.atom_symbol(ia), de[k,0], de[k,1], de[k,2]))
+
+
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
            verbose=None):
@@ -413,8 +458,6 @@ class _VHFOpt(_vhf.VHFOpt):
         uniq_l_ctr, _, inv_idx, l_ctr_counts = np.unique(
             l_ctrs, return_index=True, return_inverse=True, return_counts=True, axis=0)
 
-        print("l_ctr", l_ctrs)
-        print("l_ctr_counts", l_ctr_counts)
         # Limit the number of AOs in each group
         if group_size is not None:
             uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(
@@ -461,9 +504,7 @@ class _VHFOpt(_vhf.VHFOpt):
         pair2bra = []
         pair2ket = []
         l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
-        print("l_ctr_offsets", l_ctr_offsets)
         for i, (p0, p1) in enumerate(zip(l_ctr_offsets[:-1], l_ctr_offsets[1:])):
-            print("(p0, p1)", (p0, p1))
 
             if uniq_l_ctr[i,0] > LMAX_ON_GPU:
                 # no integrals with g functions should be evaluated on GPU
@@ -518,18 +559,10 @@ class _VHFOpt(_vhf.VHFOpt):
         ncptype = len(log_qs)
         self.bpcache = ctypes.POINTER(BasisProdCache)()
 
-        scale_shellpair_diag = 1.
-        # if diag_block_with_triu:
-        #     scale_shellpair_diag = 1.
-        # else:
-        #     scale_shellpair_diag = 0.5
-
-        print("bas_pair2shls", self.bas_pair2shls)
-        print("bas_pairs_locs", self.bas_pairs_locs)
-        print("_atm", mol._atm)
-        print("_bas", mol._bas)
-        print("_env", mol._env)
-        print("log_qs", log_qs)
+        if diag_block_with_triu:
+            scale_shellpair_diag = 1.
+        else:
+            scale_shellpair_diag = 0.5
 
         libgvhf.GINTinit_basis_prod(
             ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),

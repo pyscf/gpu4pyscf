@@ -7,8 +7,6 @@
 #include "cuda_alloc.cuh"
 #include "rys_roots.cuh"
 
-#define print printf("The code has arrived here\n");
-
 __host__
 static int GINTfill_nabla1i_int2e_tasks(ERITensor *eri,
                                         BasisProdOffsets *offsets,
@@ -76,16 +74,16 @@ static int GINTfill_nabla1i_int2e_tasks(ERITensor *eri,
       break;
 
     case 4:
-      GINTfill_int2e_kernel_nabla1i<4, GOUTSIZE4> <<<blocks, threads>>>(*eri, *offsets);
+      GINTfill_int2e_kernel_nabla1i<4, NABLAGOUTSIZE4> <<<blocks, threads>>>(*eri, *offsets);
       break;
     case 5:
-      GINTfill_int2e_kernel_nabla1i<5, GOUTSIZE5> <<<blocks, threads>>>(*eri, *offsets);
+      GINTfill_int2e_kernel_nabla1i<5, NABLAGOUTSIZE5> <<<blocks, threads>>>(*eri, *offsets);
       break;
     case 6:
-      GINTfill_int2e_kernel_nabla1i<6, GOUTSIZE6> <<<blocks, threads>>>(*eri, *offsets);
+      GINTfill_int2e_kernel_nabla1i<6, NABLAGOUTSIZE6> <<<blocks, threads>>>(*eri, *offsets);
       break;
     case 7:
-      GINTfill_int2e_kernel_nabla1i<7, GOUTSIZE7> <<<blocks, threads>>>(*eri, *offsets);
+      GINTfill_int2e_kernel_nabla1i<7, NABLAGOUTSIZE7> <<<blocks, threads>>>(*eri, *offsets);
       break;
       //case 8:
       //    GINTfill_int2e_kernel<8, GOUTSIZE8> <<<blocks, threads>>>(*offsets);
@@ -124,7 +122,7 @@ int GINTfill_nabla1i_int2e(BasisProdCache *bpcache,
     int16_t *idx4c = (int16_t *)malloc(sizeof(int16_t) * envs.nf * 3);
     int *idx_ij = (int *)malloc(sizeof(int) * envs.nfi * envs.nfj * 3);
     int *idx_kl = (int *)malloc(sizeof(int) * envs.nfk * envs.nfl * 3);
-    GINTinit_2c_gidx(idx_ij, cp_ij->l_bra, cp_ij->l_ket);
+    GINTinit_2c_gidx_nabla1i(idx_ij, cp_ij->l_bra, cp_ij->l_ket);
     GINTinit_2c_gidx(idx_kl, cp_kl->l_bra, cp_kl->l_ket);
     GINTinit_4c_idx(idx4c, idx_ij, idx_kl, &envs);
     if (envs.nf > NFffff) {
@@ -144,7 +142,7 @@ int GINTfill_nabla1i_int2e(BasisProdCache *bpcache,
   int kl_bin, ij_bin1;
   double *uw_buf, *d_uw;
   size_t uw_size = 0;
-  if (envs.nrys_roots + 1 > POLYFIT_ORDER) {
+  if (envs.nrys_roots > POLYFIT_ORDER) {
     for (kl_bin = 0; kl_bin < nbins; ++kl_bin) {
       ij_bin1 = nbins - kl_bin;
       int bas_ij0 = bins_locs_ij[0];

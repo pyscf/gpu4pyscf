@@ -337,3 +337,33 @@ void GINTinit_EnvVars_nabla1i(GINTEnvVars *envs,
   envs->nprim_ij = cp_ij->nprim_12;
   envs->nprim_kl = cp_kl->nprim_12;
 }
+
+void GINTinit_2c_gidx_nabla1i(int *idx, int li, int lj)
+{
+  int nfi = (li + 1) * (li + 2) / 2;
+  int nfj = (lj + 1) * (lj + 2) / 2;
+  int nfij = nfi * nfj;
+  int i, j, n;
+  int stride_i, stride_j;
+  int *idy = idx + nfij;
+  int *idz = idx + nfij * 2;
+
+  int i_nx[GPU_CART_MAX], i_ny[GPU_CART_MAX], i_nz[GPU_CART_MAX];
+  int j_nx[GPU_CART_MAX], j_ny[GPU_CART_MAX], j_nz[GPU_CART_MAX];
+  CINTcart_comp(i_nx, i_ny, i_nz, li);
+  CINTcart_comp(j_nx, j_ny, j_nz, lj);
+
+  if (li >= lj) {
+    stride_i = 1;
+    stride_j = li + 2;
+  } else {
+    stride_i = li + 2;
+    stride_j = 1;
+  }
+  for (n = 0, j = 0; j < nfj; j++) {
+    for (i = 0; i < nfi; i++, n++) {
+      idx[n] = stride_j * j_nx[j] + stride_i * i_nx[i];
+      idy[n] = stride_j * j_ny[j] + stride_i * i_ny[i];
+      idz[n] = stride_j * j_nz[j] + stride_i * i_nz[i];
+    } }
+}
