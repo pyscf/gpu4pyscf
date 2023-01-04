@@ -429,8 +429,228 @@ void GINTg0_2e_2d4d_nabla1i(double * __restrict__ g, double * __restrict__ uw,
 
 template<int NROOTS>
 __device__
+void GINTgout2e_nabla1i(ERITensor eri,
+                        double * __restrict__ g,
+                        double ai, double aj,
+                        int ish, int jsh, int ksh, int lsh) {
+
+  int di = c_envs.stride_ijmax;
+  int dj = c_envs.stride_ijmin;
+
+  if constexpr(NROOTS < 7) {
+
+    int nf = c_envs.nf;
+    int16_t * idx = c_idx4c;
+    int16_t * idy = idx + nf;
+    int16_t * idz = idx + nf * 2;
+
+    int ix, iy, iz,
+        ij_index_for_ix, i_index_for_ix, j_index_for_ix,
+        ij_index_for_iy, i_index_for_iy, j_index_for_iy,
+        ij_index_for_iz, i_index_for_iz, j_index_for_iz;
+
+    int * ao_loc = c_bpcache.ao_loc;
+
+    size_t jstride = eri.stride_j;
+    size_t kstride = eri.stride_k;
+    size_t lstride = eri.stride_l;
+    size_t xyz_stride = eri.n_elem;
+
+    int i0 = ao_loc[ish];
+    int i1 = ao_loc[ish + 1];
+    int j0 = ao_loc[jsh];
+    int j1 = ao_loc[jsh + 1];
+    int k0 = ao_loc[ksh] - eri.ao_offsets_k;
+    int k1 = ao_loc[ksh + 1] - eri.ao_offsets_k;
+    int l0 = ao_loc[lsh] - eri.ao_offsets_l;
+    int l1 = ao_loc[lsh + 1] - eri.ao_offsets_l;
+    int i, j, k, l, n, root;
+    double s_ix, s_iy, s_iz, s_jx, s_jy, s_jz;
+    double * __restrict__ peri;
+    double * __restrict__ peri_lk;
+    for (n = 0, l = l0; l < l1; ++l) {
+      for (k = k0; k < k1; ++k) {
+        peri = eri.data + l * lstride + k * kstride;
+        peri_lk = eri.data + k * lstride + l * kstride;
+        for (j = j0; j < j1; ++j) {
+          for (i = i0; i < i1; ++i, ++n) {
+
+            ix = idx[n];
+            ij_index_for_ix = ix % c_envs.g_size_ij;
+            i_index_for_ix = ij_index_for_ix % dj / di;
+            j_index_for_ix = ij_index_for_ix / dj;
+            iy = idy[n];
+            ij_index_for_iy = iy % c_envs.g_size_ij;
+            i_index_for_iy = ij_index_for_iy % dj / di;
+            j_index_for_iy = ij_index_for_iy / dj;
+            iz = idz[n];
+            ij_index_for_iz = iz % c_envs.g_size_ij;
+            i_index_for_iz = ij_index_for_iz % dj / di;
+            j_index_for_iz = ij_index_for_iz / dj;
+
+            s_ix = peri[i + jstride * j];
+            s_iy = peri[i + jstride * j + xyz_stride];
+            s_iz = peri[i + jstride * j + 2 * xyz_stride];
+            s_jx = peri[j + jstride * i];
+            s_jy = peri[j + jstride * i + xyz_stride];
+            s_jz = peri[j + jstride * i + 2 * xyz_stride];
+
+#pragma unroll
+            for (root = 0; root < NROOTS; ++root) {
+              s_ix += -i_index_for_ix *
+                      g[ix + root - di] * g[iy + root] * g[iz + root]
+                      + 2.0 * ai * g[ix + root + di] * g[iy + root] *
+                        g[iz + root];
+              s_iy += -i_index_for_iy *
+                      g[ix + root] * g[iy + root - di] * g[iz + root]
+                      + 2.0 * ai * g[ix + root] * g[iy + root + di] *
+                        g[iz + root];
+              s_iz += -i_index_for_iz *
+                      g[ix + root] * g[iy + root] * g[iz + root - di]
+                      + 2.0 * ai * g[ix + root] * g[iy + root] *
+                        g[iz + root + di];
+              s_jx += -j_index_for_ix *
+                      g[ix + root - dj] * g[iy + root] * g[iz + root]
+                      + 2.0 * aj * g[ix + root + dj] * g[iy + root] *
+                        g[iz + root];
+              s_jy += -j_index_for_iy *
+                      g[ix + root] * g[iy + root - dj] * g[iz + root]
+                      + 2.0 * aj * g[ix + root] * g[iy + root + dj] *
+                        g[iz + root];
+              s_jz += -j_index_for_iz *
+                      g[ix + root] * g[iy + root] * g[iz + root - dj]
+                      + 2.0 * aj * g[ix + root] * g[iy + root] *
+                        g[iz + root + dj];
+            }
+
+            peri[i + jstride * j] = s_ix;
+            peri[i + jstride * j + xyz_stride] = s_iy;
+            peri[i + jstride * j + 2 * xyz_stride] = s_iz;
+            peri[j + jstride * i] = s_jx;
+            peri[j + jstride * i + xyz_stride] = s_jy;
+            peri[j + jstride * i + 2 * xyz_stride] = s_jz;
+          }
+        }
+      }
+    }
+
+  } else {
+    int nf = c_envs.nf;
+    int16_t * idx = c_idx4c;
+    if (nf > NFffff) {
+      idx = c_envs.idx;
+    }
+    int16_t * idy = idx + nf;
+    int16_t * idz = idx + nf * 2;
+    double s_ix, s_iy, s_iz, s_jx, s_jy, s_jz;
+    int ix, iy, iz,
+        ij_index_for_ix, i_index_for_ix, j_index_for_ix,
+        ij_index_for_iy, i_index_for_iy, j_index_for_iy,
+        ij_index_for_iz, i_index_for_iz, j_index_for_iz;
+
+
+    int * ao_loc = c_bpcache.ao_loc;
+
+    size_t jstride = eri.stride_j;
+    size_t kstride = eri.stride_k;
+    size_t lstride = eri.stride_l;
+    size_t xyz_stride = eri.n_elem;
+
+    int i0 = ao_loc[ish];
+    int i1 = ao_loc[ish + 1];
+    int j0 = ao_loc[jsh];
+    int j1 = ao_loc[jsh + 1];
+    int k0 = ao_loc[ksh] - eri.ao_offsets_k;
+    int k1 = ao_loc[ksh + 1] - eri.ao_offsets_k;
+    int l0 = ao_loc[lsh] - eri.ao_offsets_l;
+    int l1 = ao_loc[lsh + 1] - eri.ao_offsets_l;
+    int i, j, k, l, n, root;
+    double * __restrict__ peri;
+    double * __restrict__ peri_lk;
+    for (n = 0, l = l0; l < l1; ++l) {
+      for (k = k0; k < k1; ++k) {
+        peri = eri.data + l * lstride + k * kstride;
+        peri_lk = eri.data + k * lstride + l * kstride;
+        for (j = j0; j < j1; ++j) {
+          for (i = i0; i < i1; ++i, ++n) {
+//            s_ix = peri[i + jstride * j];
+//            s_iy = peri[i + jstride * j + xyz_stride];
+//            s_iz = peri[i + jstride * j + 2 * xyz_stride];
+//            s_jx = peri[j + jstride * i];
+//            s_jy = peri[j + jstride * i + xyz_stride];
+//            s_jz = peri[j + jstride * i + 2 * xyz_stride];
+
+            s_ix = 0;
+            s_iy = 0;
+            s_iz = 0;
+            s_jx = 0;
+            s_jy = 0;
+            s_jz = 0;
+
+            ix = idx[n];
+            ij_index_for_ix = ix % c_envs.g_size_ij;
+            i_index_for_ix = ij_index_for_ix % dj / di;
+            j_index_for_ix = ij_index_for_ix / dj;
+            iy = idy[n];
+            ij_index_for_iy = iy % c_envs.g_size_ij;
+            i_index_for_iy = ij_index_for_iy % dj / di;
+            j_index_for_iy = ij_index_for_iy / dj;
+            iz = idz[n];
+            ij_index_for_iz = iz % c_envs.g_size_ij;
+            i_index_for_iz = ij_index_for_iz % dj / di;
+            j_index_for_iz = ij_index_for_iz / dj;
+
+#pragma unroll
+            for (root = 0; root < NROOTS; ++root) {
+              s_ix += -i_index_for_ix *
+                      g[ix + root - di] * g[iy + root] * g[iz + root]
+                      + 2.0 * ai * g[ix + root + di] * g[iy + root] *
+                        g[iz + root];
+              s_iy += -i_index_for_iy *
+                      g[ix + root] * g[iy + root - di] * g[iz + root]
+                      + 2.0 * ai * g[ix + root] * g[iy + root + di] *
+                        g[iz + root];
+              s_iz += -i_index_for_iz *
+                      g[ix + root] * g[iy + root] * g[iz + root - di]
+                      + 2.0 * ai * g[ix + root] * g[iy + root] *
+                        g[iz + root + di];
+              s_jx += -j_index_for_ix *
+                      g[ix + root - dj] * g[iy + root] * g[iz + root]
+                      + 2.0 * aj * g[ix + root + dj] * g[iy + root] *
+                        g[iz + root];
+              s_jy += -j_index_for_iy *
+                      g[ix + root] * g[iy + root - dj] * g[iz + root]
+                      + 2.0 * aj * g[ix + root] * g[iy + root + dj] *
+                        g[iz + root];
+              s_jz += -j_index_for_iz *
+                      g[ix + root] * g[iy + root] * g[iz + root - dj]
+                      + 2.0 * aj * g[ix + root] * g[iy + root] *
+                        g[iz + root + dj];
+            }
+
+            peri[i + jstride * j] = s_ix;
+            peri[i + jstride * j + xyz_stride] = s_iy;
+            peri[i + jstride * j + 2 * xyz_stride] = s_iz;
+            peri[j + jstride * i] = s_jx;
+            peri[j + jstride * i + xyz_stride] = s_jy;
+            peri[j + jstride * i + 2 * xyz_stride] = s_jz;
+            peri_lk[i + jstride * j] = s_ix;
+            peri_lk[i + jstride * j + xyz_stride] = s_iy;
+            peri_lk[i + jstride * j + 2 * xyz_stride] = s_iz;
+            peri_lk[j + jstride * i] = s_jx;
+            peri_lk[j + jstride * i + xyz_stride] = s_jy;
+            peri_lk[j + jstride * i + 2 * xyz_stride] = s_jz;
+          }
+        }
+      }
+    }
+  }
+}
+
+template<int NROOTS, int xyz, bool is_i_major>
+__device__
 void GINTgout2e_nabla1i(double * __restrict__ gout, double * __restrict__ g,
-                        double ai, double aj) {
+                        double exponent) {
 
   int di = c_envs.stride_ijmax;
   int dj = c_envs.stride_ijmin;
@@ -441,64 +661,63 @@ void GINTgout2e_nabla1i(double * __restrict__ gout, double * __restrict__ g,
     int16_t * idy = idx + nf;
     int16_t * idz = idx + nf * 2;
 
-    double s_ix, s_iy, s_iz, s_jx, s_jy, s_jz;
+    double s;
 
-    int i, n, ix, iy, iz,
-        ij_index_for_ix, i_index_for_ix, j_index_for_ix,
-        ij_index_for_iy, i_index_for_iy, j_index_for_iy,
-        ij_index_for_iz, i_index_for_iz, j_index_for_iz;
+    int i, n, ix, iy, iz, ij_index, i_index;
 
     for (i = 0; i < nf; i++) {
 
-      s_ix = gout[i];
-      s_iy = gout[i + nf];
-      s_iz = gout[i + 2 * nf];
-      s_jx = gout[i + 3 * nf];
-      s_jy = gout[i + 4 * nf];
-      s_jz = gout[i + 5 * nf];
+      s = gout[i];
 
       ix = idx[i];
-      ij_index_for_ix = ix % c_envs.g_size_ij;
-      i_index_for_ix = ij_index_for_ix % dj / di;
-      j_index_for_ix = ij_index_for_ix / dj;
       iy = idy[i];
-      ij_index_for_iy = iy % c_envs.g_size_ij;
-      i_index_for_iy = ij_index_for_iy % dj / di;
-      j_index_for_iy = ij_index_for_iy / dj;
       iz = idz[i];
-      ij_index_for_iz = iz % c_envs.g_size_ij;
-      i_index_for_iz = ij_index_for_iz % dj / di;
-      j_index_for_iz = ij_index_for_iz / dj;
+
+      if constexpr (xyz == 0) {
+        ij_index = ix % c_envs.g_size_ij;
+        if constexpr (is_i_major) {
+          i_index = ij_index % dj / di;
+        } else {
+          i_index = ij_index / dj;
+        }
+      } else if constexpr (xyz == 1) {
+        ij_index = iy % c_envs.g_size_ij;
+        if constexpr (is_i_major) {
+          i_index = ij_index % dj / di;
+        } else {
+          i_index = ij_index / dj;
+        }
+      } else {
+        ij_index = iz % c_envs.g_size_ij;
+        if constexpr (is_i_major) {
+          i_index = ij_index % dj / di;
+        } else {
+          i_index = ij_index / dj;
+        }
+      }
+
+      if constexpr (is_i_major) {
+        dj = di;
+      }
 
 #pragma unroll
       for (n = 0; n < NROOTS; ++n) {
-
-        s_ix += -i_index_for_ix *
-                g[ix + n - di] * g[iy + n] * g[iz + n]
-                + 2.0 * ai * g[ix + n + di] * g[iy + n] * g[iz + n];
-        s_iy += -i_index_for_iy *
-                g[ix + n] * g[iy + n - di] * g[iz + n]
-                + 2.0 * ai * g[ix + n] * g[iy + n + di] * g[iz + n];
-        s_iz += -i_index_for_iz *
-                g[ix + n] * g[iy + n] * g[iz + n - di]
-                + 2.0 * ai * g[ix + n] * g[iy + n] * g[iz + n + di];
-        s_jx += -j_index_for_ix *
-                g[ix + n - dj] * g[iy + n] * g[iz + n]
-                + 2.0 * aj * g[ix + n + dj] * g[iy + n] * g[iz + n];
-        s_jy += -j_index_for_iy *
-                g[ix + n] * g[iy + n - dj] * g[iz + n]
-                + 2.0 * aj * g[ix + n] * g[iy + n + dj] * g[iz + n];
-        s_jz += -j_index_for_iz *
-                g[ix + n] * g[iy + n] * g[iz + n - dj]
-                + 2.0 * aj * g[ix + n] * g[iy + n] * g[iz + n + dj];
+        if constexpr (xyz == 0) {
+          s += -i_index *
+               g[ix + n - dj] * g[iy + n] * g[iz + n]
+               + 2.0 * exponent * g[ix + n + dj] * g[iy + n] * g[iz + n];
+        } else if constexpr (xyz == 1) {
+          s += -i_index *
+               g[ix + n] * g[iy + n - dj] * g[iz + n]
+               + 2.0 * exponent * g[ix + n] * g[iy + n + dj] * g[iz + n];
+        } else {
+          s += -i_index *
+               g[ix + n] * g[iy + n] * g[iz + n - dj]
+               + 2.0 * exponent * g[ix + n] * g[iy + n] * g[iz + n + dj];
+        }
       }
 
-      gout[i] = s_ix;
-      gout[i + nf] = s_iy;
-      gout[i + 2 * nf] = s_iz;
-      gout[i + 3 * nf] = s_jx;
-      gout[i + 4 * nf] = s_jy;
-      gout[i + 5 * nf] = s_jz;
+      gout[i] = s;
     }
   } else {
     int nf = c_envs.nf;
@@ -508,118 +727,66 @@ void GINTgout2e_nabla1i(double * __restrict__ gout, double * __restrict__ g,
     }
     int16_t * idy = idx + nf;
     int16_t * idz = idx + nf * 2;
-    double s_ix, s_iy, s_iz, s_jx, s_jy, s_jz;
-    int i, n, ix, iy, iz,
-        ij_index_for_ix, i_index_for_ix, j_index_for_ix,
-        ij_index_for_iy, i_index_for_iy, j_index_for_iy,
-        ij_index_for_iz, i_index_for_iz, j_index_for_iz;
+    double s;
+    int i, n, ix, iy, iz, ij_index, i_index;
 
     for (i = 0; i < nf; i++) {
 
-      s_ix = gout[i];
-      s_iy = gout[i + nf];
-      s_iz = gout[i + 2 * nf];
-      s_jx = gout[i + 3 * nf];
-      s_jy = gout[i + 4 * nf];
-      s_jz = gout[i + 5 * nf];
+      s = gout[i];
 
       ix = idx[i];
-      ij_index_for_ix = ix % c_envs.g_size_ij;
-      i_index_for_ix = ij_index_for_ix % dj / di;
-      j_index_for_ix = ij_index_for_ix / dj;
       iy = idy[i];
-      ij_index_for_iy = iy % c_envs.g_size_ij;
-      i_index_for_iy = ij_index_for_iy % dj / di;
-      j_index_for_iy = ij_index_for_iy / dj;
       iz = idz[i];
-      ij_index_for_iz = iz % c_envs.g_size_ij;
-      i_index_for_iz = ij_index_for_iz % dj / di;
-      j_index_for_iz = ij_index_for_iz / dj;
 
+      if constexpr (xyz == 0) {
+        ij_index = ix % c_envs.g_size_ij;
+        if constexpr (is_i_major) {
+          i_index = ij_index % dj / di;
+        } else {
+          i_index = ij_index / dj;
+        }
+      } else if constexpr (xyz == 1) {
+        ij_index = iy % c_envs.g_size_ij;
+        if constexpr (is_i_major) {
+          i_index = ij_index % dj / di;
+        } else {
+          i_index = ij_index / dj;
+        }
+      } else {
+        ij_index = iz % c_envs.g_size_ij;
+        if constexpr (is_i_major) {
+          i_index = ij_index % dj / di;
+        } else {
+          i_index = ij_index / dj;
+        }
+      }
+
+      if constexpr (is_i_major) {
+        dj = di;
+      }
 
 #pragma unroll
       for (n = 0; n < NROOTS; ++n) {
-        s_ix += -i_index_for_ix *
-                g[ix + n - di] * g[iy + n] * g[iz + n]
-                + 2.0 * ai * g[ix + n + di] * g[iy + n] * g[iz + n];
-        s_iy += -i_index_for_iy *
-                g[ix + n] * g[iy + n - di] * g[iz + n]
-                + 2.0 * ai * g[ix + n] * g[iy + n + di] * g[iz + n];
-        s_iz += -i_index_for_iz *
-                g[ix + n] * g[iy + n] * g[iz + n - di]
-                + 2.0 * ai * g[ix + n] * g[iy + n] * g[iz + n + di];
-        s_jx += -j_index_for_ix *
-                g[ix + n - dj] * g[iy + n] * g[iz + n]
-                + 2.0 * aj * g[ix + n + dj] * g[iy + n] * g[iz + n];
-        s_jy += -j_index_for_iy *
-                g[ix + n] * g[iy + n - dj] * g[iz + n]
-                + 2.0 * aj * g[ix + n] * g[iy + n + dj] * g[iz + n];
-        s_jz += -j_index_for_iz *
-                g[ix + n] * g[iy + n] * g[iz + n - dj]
-                + 2.0 * aj * g[ix + n] * g[iy + n] * g[iz + n + dj];
-      }
-      gout[i] = s_ix;
-      gout[i + nf] = s_iy;
-      gout[i + 2 * nf] = s_iz;
-      gout[i + 3 * nf] = s_jx;
-      gout[i + 4 * nf] = s_jy;
-      gout[i + 5 * nf] = s_jz;
-    }
-  }
-}
-
-__device__
-void GINTwrite_ints_s2_nabla1i(ERITensor eri, double * __restrict__ gout,
-                               int ish, int jsh, int ksh, int lsh) {
-  int * ao_loc = c_bpcache.ao_loc;
-  size_t jstride = eri.stride_j;
-  size_t kstride = eri.stride_k;
-  size_t lstride = eri.stride_l;
-  size_t xyz_stride = eri.n_elem;
-  int i0 = ao_loc[ish];
-  int i1 = ao_loc[ish + 1];
-  int j0 = ao_loc[jsh];
-  int j1 = ao_loc[jsh + 1];
-  int k0 = ao_loc[ksh] - eri.ao_offsets_k;
-  int k1 = ao_loc[ksh + 1] - eri.ao_offsets_k;
-  int l0 = ao_loc[lsh] - eri.ao_offsets_l;
-  int l1 = ao_loc[lsh + 1] - eri.ao_offsets_l;
-  int nf = c_envs.nf;
-  int i, j, k, l, n;
-  double s_ix, s_iy, s_iz, s_jx, s_jy, s_jz;
-  double * __restrict__ peri;
-  double * __restrict__ peri_lk;
-  for (n = 0, l = l0; l < l1; ++l) {
-    for (k = k0; k < k1; ++k) {
-      peri = eri.data + l * lstride + k * kstride;
-      peri_lk = eri.data + k * lstride + l * kstride;
-      for (j = j0; j < j1; ++j) {
-        for (i = i0; i < i1; ++i, ++n) {
-          s_ix = gout[n];
-          s_iy = gout[n + nf];
-          s_iz = gout[n + 2 * nf];
-          s_jx = gout[n + 3 * nf];
-          s_jy = gout[n + 4 * nf];
-          s_jz = gout[n + 5 * nf];
-          peri[i + jstride * j] = s_ix;
-          peri[i + jstride * j + xyz_stride] = s_iy;
-          peri[i + jstride * j + 2 * xyz_stride] = s_iz;
-          peri[j + jstride * i] = s_jx;
-          peri[j + jstride * i + xyz_stride] = s_jy;
-          peri[j + jstride * i + 2 * xyz_stride] = s_jz;
-          peri_lk[i + jstride * j] = s_ix;
-          peri_lk[i + jstride * j + xyz_stride] = s_iy;
-          peri_lk[i + jstride * j + 2 * xyz_stride] = s_iz;
-          peri_lk[j + jstride * i] = s_jx;
-          peri_lk[j + jstride * i + xyz_stride] = s_jy;
-          peri_lk[j + jstride * i + 2 * xyz_stride] = s_jz;
+        if constexpr (xyz == 0) {
+          s += -i_index *
+               g[ix + n - dj] * g[iy + n] * g[iz + n]
+               + 2.0 * exponent * g[ix + n + dj] * g[iy + n] * g[iz + n];
+        } else if constexpr (xyz == 1) {
+          s += -i_index *
+               g[ix + n] * g[iy + n - dj] * g[iz + n]
+               + 2.0 * exponent * g[ix + n] * g[iy + n + dj] * g[iz + n];
+        } else {
+          s += -i_index *
+               g[ix + n] * g[iy + n] * g[iz + n - dj]
+               + 2.0 * exponent * g[ix + n] * g[iy + n] * g[iz + n + dj];
         }
       }
+      gout[i] = s;
     }
   }
 }
 
-template<int NROOTS, int GOUTSIZE>
+template<int NROOTS, int GSIZE>
 __global__
 static void
 GINTfill_int2e_kernel_nabla1i(ERITensor eri, BasisProdOffsets offsets) {
@@ -655,12 +822,7 @@ GINTfill_int2e_kernel_nabla1i(ERITensor eri, BasisProdOffsets offsets) {
 
   int task_id = task_ij + ntasks_ij * task_kl;
   double * uw = c_envs.uw + task_id * nprim_ij * nprim_kl * NROOTS * 2;
-  double gout[GOUTSIZE];
-  double * g = gout + c_envs.nf * 6;
-  int i;
-  for (i = 0; i < c_envs.nf * 6; ++i) {
-    gout[i] = 0;
-  }
+  double g[GSIZE + 30];
 
   int ij, kl;
   int as_ish, as_jsh, as_ksh, as_lsh;
@@ -686,12 +848,11 @@ GINTfill_int2e_kernel_nabla1i(ERITensor eri, BasisProdOffsets offsets) {
       double ai = exponent_i[(ij - prim_ij) / nprim_j];
       double aj = exponent_j[(ij - prim_ij) % nprim_j];
 
-      GINTgout2e_nabla1i<NROOTS>(gout, g, ai, aj);
+      GINTgout2e_nabla1i<NROOTS>(eri, g + 30, ai, aj, ish, jsh, ksh, lsh);
       uw += NROOTS * 2;
     }
   }
 
-  GINTwrite_ints_s2_nabla1i(eri, gout, ish, jsh, ksh, lsh);
 }
 
 __global__
@@ -861,8 +1022,8 @@ static void GINTfill_nabla1i_int2e_kernel0000(ERITensor eri,
 
 template<>
 __global__
-void GINTfill_int2e_kernel_nabla1i<4, NABLAGOUTSIZE4>(ERITensor eri,
-                                                      BasisProdOffsets offsets) {
+void GINTfill_int2e_kernel_nabla1i<4, NABLAGSIZE4>(ERITensor eri,
+                                                   BasisProdOffsets offsets) {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
   int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
@@ -874,6 +1035,7 @@ void GINTfill_int2e_kernel_nabla1i<4, NABLAGOUTSIZE4>(ERITensor eri,
   int bas_ij = offsets.bas_ij + task_ij;
   int bas_kl = offsets.bas_kl + task_kl;
   double norm = c_envs.fac;
+
   int nprim_ij = c_envs.nprim_ij;
   int nprim_kl = c_envs.nprim_kl;
   int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
@@ -894,12 +1056,8 @@ void GINTfill_int2e_kernel_nabla1i<4, NABLAGOUTSIZE4>(ERITensor eri,
       c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
 
   double uw[8];
-  double gout[NABLAGOUTSIZE4];
-  double * g = gout + c_envs.nf * 6;
-  int i;
-  for (i = 0; i < 6 * c_envs.nf; ++i) {
-    gout[i] = 0;
-  }
+  double g[NABLAGSIZE4 + 30];
+  double * __restrict__ g_table = g + 30;
 
   double * __restrict__ a12 = c_bpcache.a12;
   double * __restrict__ x12 = c_bpcache.x12;
@@ -939,16 +1097,14 @@ void GINTfill_int2e_kernel_nabla1i<4, NABLAGOUTSIZE4>(ERITensor eri,
       double a0 = a1 / aijkl;
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       GINTrys_root4(x, uw);
-      GINTg0_2e_2d4d_nabla1i<4>(g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij,
+      GINTg0_2e_2d4d_nabla1i<4>(g_table, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij,
                                 kl);
       double ai = exponent_i[(ij - prim_ij) / nprim_j];
       double aj = exponent_j[(ij - prim_ij) % nprim_j];
 
-      GINTgout2e_nabla1i<4>(gout, g, ai, aj);
+      GINTgout2e_nabla1i<4>(eri, g_table, ai, aj, ish, jsh, ksh, lsh);
     }
   }
-
-  GINTwrite_ints_s2_nabla1i(eri, gout, ish, jsh, ksh, lsh);
 }
 
 #endif
@@ -957,8 +1113,8 @@ void GINTfill_int2e_kernel_nabla1i<4, NABLAGOUTSIZE4>(ERITensor eri,
 
 template<>
 __global__
-void GINTfill_int2e_kernel_nabla1i<5, NABLAGOUTSIZE5>(ERITensor eri,
-                                                      BasisProdOffsets offsets) {
+void GINTfill_int2e_kernel_nabla1i<5, NABLAGSIZE5>(ERITensor eri,
+                                                   BasisProdOffsets offsets) {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
   int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
@@ -970,6 +1126,7 @@ void GINTfill_int2e_kernel_nabla1i<5, NABLAGOUTSIZE5>(ERITensor eri,
   int bas_ij = offsets.bas_ij + task_ij;
   int bas_kl = offsets.bas_kl + task_kl;
   double norm = c_envs.fac;
+
   int nprim_ij = c_envs.nprim_ij;
   int nprim_kl = c_envs.nprim_kl;
   int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
@@ -990,12 +1147,8 @@ void GINTfill_int2e_kernel_nabla1i<5, NABLAGOUTSIZE5>(ERITensor eri,
       c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
 
   double uw[10];
-  double gout[NABLAGOUTSIZE5];
-  double * g = gout + c_envs.nf * 6;
-  int i;
-  for (i = 0; i < 6 * c_envs.nf; ++i) {
-    gout[i] = 0;
-  }
+  double g[NABLAGSIZE5 + 30];
+  double * __restrict__ g_table = g + 30;
 
   double * __restrict__ a12 = c_bpcache.a12;
   double * __restrict__ x12 = c_bpcache.x12;
@@ -1035,16 +1188,14 @@ void GINTfill_int2e_kernel_nabla1i<5, NABLAGOUTSIZE5>(ERITensor eri,
       double a0 = a1 / aijkl;
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       GINTrys_root5(x, uw);
-      GINTg0_2e_2d4d_nabla1i<5>(g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij,
+      GINTg0_2e_2d4d_nabla1i<5>(g_table, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij,
                                 kl);
       double ai = exponent_i[(ij - prim_ij) / nprim_j];
       double aj = exponent_j[(ij - prim_ij) % nprim_j];
 
-      GINTgout2e_nabla1i<5>(gout, g, ai, aj);
+      GINTgout2e_nabla1i<5>(eri, g_table, ai, aj, ish, jsh, ksh, lsh);
     }
   }
-
-  GINTwrite_ints_s2_nabla1i(eri, gout, ish, jsh, ksh, lsh);
 }
 
 #endif

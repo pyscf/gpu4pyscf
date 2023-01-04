@@ -34,7 +34,7 @@ libgvhf = lib.load_library('libgvhf')
 libgint = lib.load_library('libgint')
 libgvhf.GINTbuild_jk.restype = ctypes.c_int
 
-def symmetrize(eri_tensor: np.array):
+def symmetrize(eri_tensor: cupy.array):
     nao = eri_tensor.shape[0]
     for i in range(nao):
         for j in range(nao):
@@ -42,6 +42,11 @@ def symmetrize(eri_tensor: np.array):
                 for l in range(nao):
                     eri_tensor[i, j, k, l] = eri_tensor[min(i, j), max(i, j), min(k, l), max(k, l)]
 
+def symmetrize_over_kl(eri_tensor: cupy.array):
+    nao = eri_tensor.shape[1]
+    for k in range(nao):
+        for l in range(k+1, nao):
+            eri_tensor[:, l, k] = eri_tensor[:, k, l]
 def get_int2e(mol, vhfopt=None, verbose=None):
 
     cput0 = (logger.process_clock(), logger.perf_counter())
@@ -126,7 +131,7 @@ def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
     log = logger.new_logger(mol, verbose)
 
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=True)
+        vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=False, scale=False)
 
     coeff = cupy.asarray(vhfopt.coeff)
     nao, nao0 = coeff.shape
@@ -192,6 +197,7 @@ def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
     if FREE_CUPY_CACHE:
         cupy.get_default_memory_pool().free_all_blocks()
 
+    symmetrize_over_kl(eritensor)
 
     # return cupy.einsum("xlkji -> xijkl", eritensor)
     return cupy.einsum("apqkl, kr, ls -> asrqp",
@@ -449,7 +455,7 @@ class _VHFOpt(_vhf.VHFOpt):
         self._qcondname = qcondname
         self._dmcondname = dmcondname
 
-    def build(self, cutoff=1e-13, group_size=None, diag_block_with_triu=False):
+    def build(self, cutoff=1e-13, group_size=None, diag_block_with_triu=False, scale=True):
         cput0 = (logger.process_clock(), logger.perf_counter())
         mol = self.mol
         # Sort basis according to angular momentum and contraction patterns so
@@ -559,7 +565,7 @@ class _VHFOpt(_vhf.VHFOpt):
         ncptype = len(log_qs)
         self.bpcache = ctypes.POINTER(BasisProdCache)()
 
-        if diag_block_with_triu:
+        if diag_block_with_triu or not scale:
             scale_shellpair_diag = 1.
         else:
             scale_shellpair_diag = 0.5
