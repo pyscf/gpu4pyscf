@@ -200,8 +200,10 @@ def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
     symmetrize_over_kl(eritensor)
 
     # return cupy.einsum("xlkji -> xijkl", eritensor)
-    return cupy.einsum("apqkl, kr, ls -> asrqp",
-            cupy.einsum("aijkl, ip, jq-> apqkl", eritensor, coeff, coeff), coeff, coeff)
+    # return cupy.einsum("apqkl, kr, ls -> asrqp",
+    #         cupy.einsum("aijkl, ip, jq-> apqkl", eritensor, coeff, coeff), coeff, coeff)
+
+    return eritensor
 
 def grad_get_jk(mol, dm):
     cput0 = (logger.process_clock(), logger.perf_counter())
@@ -218,7 +220,11 @@ def grad_get_jk(mol, dm):
     else:
         dms = cupy.asarray(dms, order='C')
 
-    int2e = get_nabla1i_int2e(mol, vhfopt=vhfopt)
+    int2e = cupy.einsum("apqkl, kr, ls -> asrqp",
+                        cupy.einsum("aijkl, ip, jq-> apqkl",
+                                    get_nabla1i_int2e(mol, vhfopt=vhfopt),
+                                    coeff, coeff),
+                        coeff, coeff)
 
     # cupy has got weird bug that if we write
     # vj = cupy.einsum("pijkl, lk -> pij", int2e, dm)
