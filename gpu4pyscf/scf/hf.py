@@ -455,7 +455,7 @@ class _VHFOpt(_vhf.VHFOpt):
         self._qcondname = qcondname
         self._dmcondname = dmcondname
 
-    def build(self, cutoff=1e-13, group_size=None, diag_block_with_triu=False, scale=True):
+    def build(self, cutoff=1e-13, group_size=None, diag_block_with_triu=False, scale=False):
         cput0 = (logger.process_clock(), logger.perf_counter())
         mol = self.mol
         # Sort basis according to angular momentum and contraction patterns so

@@ -462,20 +462,11 @@ void GINTwrite_ints_s2_nabla1i(ERITensor eri, double * __restrict__ g,
       ij_index_for_iz, i_index_for_iz, j_index_for_iz;
   double s_ix, s_iy, s_iz, s_jx, s_jy, s_jz;
   double * peri;
-  double * peri_lk;
   for (f = 0, l = l0; l < l1; ++l) {
     for (k = k0; k < k1; ++k) {
       peri = eri.data + l * lstride + k * kstride;
-      peri_lk = eri.data + k * lstride + l * kstride;
       for (j = j0; j < j1; ++j) {
         for (i = i0; i < i1; ++i, ++f) {
-
-//          s_ix = peri[i + jstride * j];
-//          s_iy = peri[i + jstride * j + xyz_stride];
-//          s_iz = peri[i + jstride * j + 2 * xyz_stride];
-//          s_jx = peri[j + jstride * i];
-//          s_jy = peri[j + jstride * i + xyz_stride];
-//          s_jz = peri[j + jstride * i + 2 * xyz_stride];
 
           s_ix = 0;
           s_iy = 0;
@@ -555,6 +546,11 @@ GINTfill_int2e_kernel_nabla1i(ERITensor eri, BasisProdOffsets offsets) {
   int jsh = bas_pair2ket[bas_ij];
   int ksh = bas_pair2bra[bas_kl];
   int lsh = bas_pair2ket[bas_kl];
+
+  if(ish == jsh) {
+    norm *= 0.5;
+  }
+
   int nprim_j =
       c_bpcache.primitive_functions_offsets[jsh + 1]
       - c_bpcache.primitive_functions_offsets[jsh];
@@ -566,8 +562,13 @@ GINTfill_int2e_kernel_nabla1i(ERITensor eri, BasisProdOffsets offsets) {
 
   int task_id = task_ij + ntasks_ij * task_kl;
   double * uw = c_envs.uw + task_id * nprim_ij * nprim_kl * NROOTS * 2;
-  double g[GSIZE + 30];
-  double * g_table = g + 30;
+  // pad space for table so that it does not go out of bound when
+  // reading, for example, g[ix + n - di]
+  // Mind that the LMAX on GPU is 3 (f orbitals), 
+  // but the gradient requires one more angular momentum,
+  // so the table will have length of 5 * NROOTS over i.
+  double g[GSIZE + 5 * NROOTS];
+  double * g_table = g + 5 * NROOTS;
 
   int ij, kl;
   int as_ish, as_jsh, as_ksh, as_lsh;
@@ -790,6 +791,11 @@ void GINTfill_int2e_kernel_nabla1i<4, NABLAGSIZE4>(ERITensor eri,
   int jsh = bas_pair2ket[bas_ij];
   int ksh = bas_pair2bra[bas_kl];
   int lsh = bas_pair2ket[bas_kl];
+
+  if(ish == jsh) {
+    norm *= 0.5;
+  }
+  
   int nprim_j =
       c_bpcache.primitive_functions_offsets[jsh + 1]
       - c_bpcache.primitive_functions_offsets[jsh];
@@ -800,8 +806,10 @@ void GINTfill_int2e_kernel_nabla1i<4, NABLAGSIZE4>(ERITensor eri,
       c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
 
   double uw[8];
-  double g[NABLAGSIZE4 + 30];
-  double * g_table = g + 30;
+  // pad space for table so that it does not go out of bound when
+  // reading, for example, g[ix + n - di]
+  double g[NABLAGSIZE4 + 20];
+  double * g_table = g + 20;
 
   double * __restrict__ a12 = c_bpcache.a12;
   double * __restrict__ x12 = c_bpcache.x12;
@@ -880,6 +888,11 @@ void GINTfill_int2e_kernel_nabla1i<5, NABLAGSIZE5>(ERITensor eri,
   int jsh = bas_pair2ket[bas_ij];
   int ksh = bas_pair2bra[bas_kl];
   int lsh = bas_pair2ket[bas_kl];
+
+  if(ish == jsh) {
+    norm *= 0.5;
+  }
+
   int nprim_j =
       c_bpcache.primitive_functions_offsets[jsh + 1]
       - c_bpcache.primitive_functions_offsets[jsh];
@@ -890,8 +903,10 @@ void GINTfill_int2e_kernel_nabla1i<5, NABLAGSIZE5>(ERITensor eri,
       c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
 
   double uw[10];
-  double g[NABLAGSIZE5 + 30];
-  double * g_table = g + 30;
+  // pad space for table so that it does not go out of bound when
+  // reading, for example, g[ix + n - di]
+  double g[NABLAGSIZE5 + 25];
+  double * g_table = g + 25;
 
   double * __restrict__ a12 = c_bpcache.a12;
   double * __restrict__ x12 = c_bpcache.x12;
