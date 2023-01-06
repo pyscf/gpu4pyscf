@@ -206,7 +206,7 @@ def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
 def grad_get_jk(mol, dm):
     cput0 = (logger.process_clock(), logger.perf_counter())
 
-    vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=True)
+    vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=False, scale=False)
     coeff = cupy.asarray(vhfopt.coeff)
     nao, nao0 = coeff.shape
     dm0 = dm
