@@ -427,8 +427,749 @@ void GINTg0_2e_2d4d(double* __restrict__ g, double*__restrict__ uw,
   }
 }
 
+
+template<int NROOTS>
+__device__
+void GINTgout2e_nabla1i(double * __restrict__ gout, double * __restrict__ g,
+                        double ai, double aj) {
+
+  int di = c_envs.stride_ijmax;
+  int dj = c_envs.stride_ijmin;
+
+  if (NROOTS < 7) {
+    int nf = c_envs.nf;
+    int16_t * idx = c_idx4c;
+    int16_t * idy = idx + nf;
+    int16_t * idz = idx + nf * 2;
+
+    double s_ix, s_iy, s_iz, s_jx, s_jy, s_jz;
+
+    int i, n, ix, iy, iz,
+        ij_index_for_ix, i_index_for_ix, j_index_for_ix,
+        ij_index_for_iy, i_index_for_iy, j_index_for_iy,
+        ij_index_for_iz, i_index_for_iz, j_index_for_iz;
+
+    for (i = 0; i < nf; i++) {
+
+      s_ix = gout[i];
+      s_iy = gout[i + nf];
+      s_iz = gout[i + 2 * nf];
+      s_jx = gout[i + 3 * nf];
+      s_jy = gout[i + 4 * nf];
+      s_jz = gout[i + 5 * nf];
+
+      ix = idx[i];
+      ij_index_for_ix = ix % c_envs.g_size_ij;
+      i_index_for_ix = ij_index_for_ix % dj / di;
+      j_index_for_ix = ij_index_for_ix / dj;
+      iy = idy[i];
+      ij_index_for_iy = iy % c_envs.g_size_ij;
+      i_index_for_iy = ij_index_for_iy % dj / di;
+      j_index_for_iy = ij_index_for_iy / dj;
+      iz = idz[i];
+      ij_index_for_iz = iz % c_envs.g_size_ij;
+      i_index_for_iz = ij_index_for_iz % dj / di;
+      j_index_for_iz = ij_index_for_iz / dj;
+
+#pragma unroll
+      for (n = 0; n < NROOTS; ++n) {
+
+        s_ix += -i_index_for_ix *
+                g[ix + n - di] * g[iy + n] * g[iz + n]
+                + 2.0 * ai * g[ix + n + di] * g[iy + n] * g[iz + n];
+        s_iy += -i_index_for_iy *
+                g[ix + n] * g[iy + n - di] * g[iz + n]
+                + 2.0 * ai * g[ix + n] * g[iy + n + di] * g[iz + n];
+        s_iz += -i_index_for_iz *
+                g[ix + n] * g[iy + n] * g[iz + n - di]
+                + 2.0 * ai * g[ix + n] * g[iy + n] * g[iz + n + di];
+        s_jx += -j_index_for_ix *
+                g[ix + n - dj] * g[iy + n] * g[iz + n]
+                + 2.0 * aj * g[ix + n + dj] * g[iy + n] * g[iz + n];
+        s_jy += -j_index_for_iy *
+                g[ix + n] * g[iy + n - dj] * g[iz + n]
+                + 2.0 * aj * g[ix + n] * g[iy + n + dj] * g[iz + n];
+        s_jz += -j_index_for_iz *
+                g[ix + n] * g[iy + n] * g[iz + n - dj]
+                + 2.0 * aj * g[ix + n] * g[iy + n] * g[iz + n + dj];
+      }
+
+      gout[i] = s_ix;
+      gout[i + nf] = s_iy;
+      gout[i + 2 * nf] = s_iz;
+      gout[i + 3 * nf] = s_jx;
+      gout[i + 4 * nf] = s_jy;
+      gout[i + 5 * nf] = s_jz;
+    }
+  } else {
+    int nf = c_envs.nf;
+    int16_t * idx = c_idx4c;
+    if (nf > NFffff) {
+      idx = c_envs.idx;
+    }
+    int16_t * idy = idx + nf;
+    int16_t * idz = idx + nf * 2;
+    double s_ix, s_iy, s_iz, s_jx, s_jy, s_jz;
+    int i, n, ix, iy, iz,
+        ij_index_for_ix, i_index_for_ix, j_index_for_ix,
+        ij_index_for_iy, i_index_for_iy, j_index_for_iy,
+        ij_index_for_iz, i_index_for_iz, j_index_for_iz;
+
+    for (i = 0; i < nf; i++) {
+
+      s_ix = gout[i];
+      s_iy = gout[i + nf];
+      s_iz = gout[i + 2 * nf];
+      s_jx = gout[i + 3 * nf];
+      s_jy = gout[i + 4 * nf];
+      s_jz = gout[i + 5 * nf];
+
+      ix = idx[i];
+      ij_index_for_ix = ix % c_envs.g_size_ij;
+      i_index_for_ix = ij_index_for_ix % dj / di;
+      j_index_for_ix = ij_index_for_ix / dj;
+      iy = idy[i];
+      ij_index_for_iy = iy % c_envs.g_size_ij;
+      i_index_for_iy = ij_index_for_iy % dj / di;
+      j_index_for_iy = ij_index_for_iy / dj;
+      iz = idz[i];
+      ij_index_for_iz = iz % c_envs.g_size_ij;
+      i_index_for_iz = ij_index_for_iz % dj / di;
+      j_index_for_iz = ij_index_for_iz / dj;
+
+
+#pragma unroll
+      for (n = 0; n < NROOTS; ++n) {
+        s_ix += -i_index_for_ix *
+                g[ix + n - di] * g[iy + n] * g[iz + n]
+                + 2.0 * ai * g[ix + n + di] * g[iy + n] * g[iz + n];
+        s_iy += -i_index_for_iy *
+                g[ix + n] * g[iy + n - di] * g[iz + n]
+                + 2.0 * ai * g[ix + n] * g[iy + n + di] * g[iz + n];
+        s_iz += -i_index_for_iz *
+                g[ix + n] * g[iy + n] * g[iz + n - di]
+                + 2.0 * ai * g[ix + n] * g[iy + n] * g[iz + n + di];
+        s_jx += -j_index_for_ix *
+                g[ix + n - dj] * g[iy + n] * g[iz + n]
+                + 2.0 * aj * g[ix + n + dj] * g[iy + n] * g[iz + n];
+        s_jy += -j_index_for_iy *
+                g[ix + n] * g[iy + n - dj] * g[iz + n]
+                + 2.0 * aj * g[ix + n] * g[iy + n + dj] * g[iz + n];
+        s_jz += -j_index_for_iz *
+                g[ix + n] * g[iy + n] * g[iz + n - dj]
+                + 2.0 * aj * g[ix + n] * g[iy + n] * g[iz + n + dj];
+      }
+      gout[i] = s_ix;
+      gout[i + nf] = s_iy;
+      gout[i + 2 * nf] = s_iz;
+      gout[i + 3 * nf] = s_jx;
+      gout[i + 4 * nf] = s_jy;
+      gout[i + 5 * nf] = s_jz;
+    }
+  }
+}
+
+__device__
+void GINTkernel_getjk_nabla1i(JKMatrix jk, double* __restrict__ gout,
+                              int ish, int jsh, int ksh, int lsh)
+{
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int task_id = ty * THREADSX + tx;
+    int *ao_loc = c_bpcache.ao_loc;
+    int i0 = ao_loc[ish  ];
+    int i1 = ao_loc[ish+1];
+    int j0 = ao_loc[jsh  ];
+    int j1 = ao_loc[jsh+1];
+    int k0 = ao_loc[ksh  ];
+    int k1 = ao_loc[ksh+1];
+    int l0 = ao_loc[lsh  ];
+    int l1 = ao_loc[lsh+1];
+    int nfi = i1 - i0;
+    int nfj = j1 - j0;
+    // int nfk = k1 - k0;
+    // int nfl = l1 - l0;
+    int nfij = nfi * nfj;
+    int nf = c_envs.nf;
+    int nao = jk.nao;
+    int nao2 = nao * nao;
+    int i, j, k, l, n, i_dm;
+    int ip, jp;
+    double d_kl, d_jk, d_jl, d_ik, d_il;
+    double v_jk_x, v_jk_y, v_jk_z, v_jl_x, v_jl_y, v_jl_z;
+    // enough to hold (g,s) shells
+    __shared__ double _buf[3*THREADS*(GPU_CART_MAX*2+1)];
+    int n_dm = jk.n_dm;
+    double *vj = jk.vj;
+    double *vk = jk.vk;
+    double* __restrict__ dm = jk.dm;
+    double s_ix, s_iy, s_iz, s_jx, s_jy, s_jz;
+    if (vk == NULL) {
+        if (nfij > (GPU_CART_MAX*2+1) / 2) {
+            double* __restrict__  buf_ij = gout + 6 * c_envs.nf;
+            for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+                for (ip = 0; ip < 6 * nfij; ++ip) {
+                    buf_ij[ip] = 0;
+                }
+                double* __restrict__ pgout = gout;
+                for (l = l0; l < l1; ++l) {
+                    for (k = k0; k < k1; ++k) {
+                        d_kl = dm[k+nao*l];
+                        for (n = 0, j = j0; j < j1; ++j) {
+                            for (i = i0; i < i1; ++i, ++n) {
+                                s_ix = pgout[n];
+                                s_iy = pgout[n + nf];
+                                s_iz = pgout[n + 2 * nf];
+                                s_jx = pgout[n + 3 * nf];
+                                s_jy = pgout[n + 4 * nf];
+                                s_jz = pgout[n + 5 * nf];
+                                buf_ij[n] += s_ix * d_kl;
+                                buf_ij[n + nfij] += s_iy * d_kl;
+                                buf_ij[n + 2 * nfij] += s_iz * d_kl;
+                                buf_ij[n + 3 * nfij] += s_jx * d_kl;
+                                buf_ij[n + 4 * nfij] += s_jy * d_kl;
+                                buf_ij[n + 5 * nfij] += s_jz * d_kl;
+                            }
+                        }
+                        pgout += nfij;
+                    }
+                }
+                for (n = 0, j = j0; j < j1; ++j) {
+                    for (i = i0; i < i1; ++i, ++n) {
+                        atomicAdd(vj+i+nao*j, buf_ij[n]);
+                        atomicAdd(vj+i+nao*j+nao2, buf_ij[n + nfij]);
+                        atomicAdd(vj+i+nao*j+2*nao2, buf_ij[n + 2 * nfij]);
+                        atomicAdd(vj+j+nao*i, buf_ij[n + 3 * nfij]);
+                        atomicAdd(vj+j+nao*i+nao2, buf_ij[n + 4 * nfij]);
+                        atomicAdd(vj+j+nao*i+2*nao2, buf_ij[n + 5 * nfij]);
+                    }
+                }
+                dm += nao2;
+                vj += 3 * nao2;
+            }
+
+        } else {
+            for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+                for (ip = 0; ip < 6 * nfij; ++ip) {
+                    _buf[ip*THREADS+task_id] = 0;
+                }
+                double* __restrict__ pgout = gout;
+                for (l = l0; l < l1; ++l) {
+                    for (k = k0; k < k1; ++k) {
+                        d_kl = dm[k+nao*l];
+                        for (n = 0, j = j0; j < j1; ++j) {
+                            for (i = i0; i < i1; ++i, ++n) {
+                                s_ix = pgout[n];
+                                s_iy = pgout[n + nf];
+                                s_iz = pgout[n + 2 * nf];
+                                s_jx = pgout[n + 3 * nf];
+                                s_jy = pgout[n + 4 * nf];
+                                s_jz = pgout[n + 5 * nf];
+
+                                _buf[n*THREADS+task_id] += s_ix * d_kl;
+                                _buf[(n+nfij)*THREADS+task_id] += s_iy * d_kl;
+                                _buf[(n+2*nfij)*THREADS+task_id] += s_iz * d_kl;
+                                _buf[(n+3*nfij)*THREADS+task_id] += s_jx * d_kl;
+                                _buf[(n+4*nfij)*THREADS+task_id] += s_jy * d_kl;
+                                _buf[(n+5*nfij)*THREADS+task_id] += s_jz * d_kl;
+                            }
+                        }
+                        pgout += nfij;
+                    }
+                }
+                for (n = 0, j = j0; j < j1; ++j) {
+                    for (i = i0; i < i1; ++i, ++n) {
+                        atomicAdd(vj+i+nao*j, _buf[n*THREADS+task_id]);
+                        atomicAdd(vj+i+nao*j+nao2, _buf[(n+nfij)*THREADS+task_id]);
+                        atomicAdd(vj+i+nao*j+2*nao2, _buf[(n+2*nfij)*THREADS+task_id]);
+                        atomicAdd(vj+j+nao*i, _buf[(n+3*nfij)*THREADS+task_id]);
+                        atomicAdd(vj+j+nao*i+nao2, _buf[(n+4*nfij)*THREADS+task_id]);
+                        atomicAdd(vj+j+nao*i+2*nao2, _buf[(n+5*nfij)*THREADS+task_id]);
+                    }
+                }
+                dm += nao * nao;
+                vj += 3 * nao * nao;
+            }
+        }
+        return;
+    }
+
+    // vk != NULL
+    double* __restrict__ buf_ik = _buf;
+    double* __restrict__ buf_il = _buf + 3 * nfi * THREADS;
+    
+    if (vj != NULL) {
+        double* __restrict__  buf_ij = gout + 6 * c_envs.nf;
+        if (nfij > 36) {
+            double* __restrict__ buf_jk = buf_ij + 6 * nfij;
+            double* __restrict__ buf_jl = buf_jk + 3 * nfj;
+
+            for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+                for (ip = 0; ip < 6 * nfij; ++ip) {
+                    buf_ij[ip] = 0;
+                }
+                double* __restrict__ pgout = gout;
+                for (l = l0; l < l1; ++l) {
+                    for (ip = 0; ip < 3 * nfi; ++ip) {
+                        buf_il[ip*THREADS + task_id] = 0;
+                    }
+                    for (jp = 0; jp < 3 * nfj; ++jp) {
+                        buf_jl[jp] = 0;
+                    }
+
+                    for (k = k0; k < k1; ++k) {
+                        d_kl = dm[k+nao*l];
+
+                        for(ip = 0; ip < 3 * nfi; ++ip) {
+                          buf_ik[ip*THREADS + task_id] = 0;
+                        }
+
+                        for(jp = 0; jp < 3 * nfj; ++jp) {
+                          buf_jk[jp] = 0;
+                        }
+
+                        for (n = 0, j = j0; j < j1; ++j) { jp = j - j0;
+                            v_jl_x = 0;
+                            v_jl_y = 0;
+                            v_jl_z = 0;
+                            v_jk_x = 0;
+                            v_jk_y = 0;
+                            v_jk_z = 0;
+                            d_jk = dm[j+nao*k];
+                            d_jl = dm[j+nao*l];
+                            for (i = i0; i < i1; ++i, ++n) { ip = i - i0;
+                                s_ix = pgout[n];
+                                s_iy = pgout[n + nf];
+                                s_iz = pgout[n + 2 * nf];
+                                s_jx = pgout[n + 3 * nf];
+                                s_jy = pgout[n + 4 * nf];
+                                s_jz = pgout[n + 5 * nf];
+                                d_ik = dm[i+nao*k];
+                                v_jl_x += s_jx * d_ik;
+                                v_jl_y += s_jy * d_ik;
+                                v_jl_z += s_jz * d_ik;
+
+                                d_il = dm[i+nao*l];
+                                v_jk_x += s_jx * d_il;
+                                v_jk_y += s_jy * d_il;
+                                v_jk_z += s_jz * d_il;
+
+                                buf_ij[n] += s_ix * d_kl;
+                                buf_ij[n + nfij] += s_iy * d_kl;
+                                buf_ij[n + 2 * nfij] += s_iz * d_kl;
+                                buf_ij[n + 3 * nfij] += s_jx * d_kl;
+                                buf_ij[n + 4 * nfij] += s_jy * d_kl;
+                                buf_ij[n + 5 * nfij] += s_jz * d_kl;
+
+                                buf_il[ip*THREADS+task_id] += s_ix * d_jk;
+                                buf_il[(ip+nfi)*THREADS+task_id] += s_iy * d_jk;
+                                buf_il[(ip+2*nfi)*THREADS+task_id] += s_iz * d_jk;
+
+                                buf_ik[ip*THREADS+task_id] += s_ix * d_jl;
+                                buf_ik[(ip+nfi)*THREADS+task_id] += s_iy * d_jl;
+                                buf_ik[(ip+2*nfi)*THREADS+task_id] += s_iz * d_jl;
+                            }
+                            buf_jl[jp] += v_jl_x;
+                            buf_jl[jp+nfj] += v_jl_y;
+                            buf_jl[jp+2*nfj] += v_jl_z;
+
+                            buf_jk[jp] += v_jk_x;
+                            buf_jk[jp+nfj] += v_jk_y;
+                            buf_jk[jp+2*nfj] += v_jk_z;
+                        }
+
+                        for (ip = 0; ip < nfi; ++ip) {
+                          atomicAdd(vk+i0+ip+nao*k, buf_ik[ip*THREADS+task_id]);
+                          atomicAdd(vk+i0+ip+nao*k+nao2, buf_ik[(ip+nfi)*THREADS+task_id]);
+                          atomicAdd(vk+i0+ip+nao*k+2*nao2, buf_ik[(ip+2*nfi)*THREADS+task_id]);
+                        }
+
+                        for (jp = 0; jp < nfj; ++jp) {
+                          atomicAdd(vk+j0+jp+nao*k, buf_jk[jp]);
+                          atomicAdd(vk+j0+jp+nao*k+nao2, buf_jk[jp+nfj]);
+                          atomicAdd(vk+j0+jp+nao*k+2*nao2, buf_jk[jp+2*nfj]);
+                        }
+
+                        pgout += nfij;
+                    }
+                    for (ip = 0; ip < nfi; ++ip) {
+                        atomicAdd(vk+i0+ip+nao*l, buf_il[ip*THREADS+task_id]);
+                        atomicAdd(vk+i0+ip+nao*l+nao2, buf_il[(ip+nfi)*THREADS+task_id]);
+                        atomicAdd(vk+i0+ip+nao*l+2*nao2, buf_il[(ip+2*nfi)*THREADS+task_id]);
+                    }
+                    for (jp = 0; jp < nfj; ++jp) {
+                        atomicAdd(vk+j0+jp+nao*l, buf_jl[jp]);
+                        atomicAdd(vk+j0+jp+nao*l+nao2, buf_jl[jp+nfj]);
+                        atomicAdd(vk+j0+jp+nao*l+2*nao2, buf_jl[jp+2*nfj]);
+                    }
+                }
+                for (n = 0, j = j0; j < j1; ++j) {
+                    for (i = i0; i < i1; ++i, ++n) {
+                        atomicAdd(vj+i+nao*j, buf_ij[n]);
+                        atomicAdd(vj+i+nao*j+nao2, buf_ij[n + nfij]);
+                        atomicAdd(vj+i+nao*j+2*nao2, buf_ij[n + 2 * nfij]);
+                        atomicAdd(vj+j+nao*i, buf_ij[n + 3 * nfij]);
+                        atomicAdd(vj+j+nao*i+nao2, buf_ij[n + 4 * nfij]);
+                        atomicAdd(vj+j+nao*i+2*nao2, buf_ij[n + 5 * nfij]);
+                    }
+                }
+                dm += nao * nao;
+                vj += 3 * nao * nao;
+                vk += 3 * nao * nao;
+            }
+
+        } else {  
+            double* __restrict__ buf_jk = buf_il + 3 * nfi * THREADS;
+            double* __restrict__ buf_jl = buf_jk + 3 * nfj * THREADS;
+            
+            for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+                for (ip = 0; ip < 6 * nfij; ++ip) {
+                    buf_ij[ip] = 0;
+                }
+                double* __restrict__ pgout = gout; 
+                for (l = l0; l < l1; ++l) {
+                    for (ip = 0; ip < 3 * nfi; ++ip) {
+                        buf_il[ip*THREADS+task_id] = 0;
+                    }
+                    for (jp = 0; jp < 3 * nfj; ++jp) {
+                        buf_jl[jp*THREADS+task_id] = 0;
+                    }
+
+                    for (k = k0; k < k1; ++k) {
+                        d_kl = dm[k+nao*l];
+                        for(ip = 0; ip < 3 * nfi; ++ip) {
+                          buf_ik[ip*THREADS + task_id] = 0;
+                        }
+
+                        for(jp = 0; jp < 3 * nfj; ++jp) {
+                          buf_jk[jp*THREADS + task_id] = 0;
+                        }
+                        for (n = 0, j = j0; j < j1; ++j) { jp = j - j0;
+                            v_jl_x = 0;
+                            v_jl_y = 0;
+                            v_jl_z = 0;
+                            v_jk_x = 0;
+                            v_jk_y = 0;
+                            v_jk_z = 0;
+                            d_jk = dm[j+nao*k];
+                            d_jl = dm[j+nao*l];
+                            for (i = i0; i < i1; ++i, ++n) { ip = i - i0;
+                                s_ix = pgout[n];
+                                s_iy = pgout[n + nf];
+                                s_iz = pgout[n + 2 * nf];
+                                s_jx = pgout[n + 3 * nf];
+                                s_jy = pgout[n + 4 * nf];
+                                s_jz = pgout[n + 5 * nf];
+
+                                d_ik = dm[i+nao*k];
+                                v_jl_x += s_jx * d_ik;
+                                v_jl_y += s_jy * d_ik;
+                                v_jl_z += s_jz * d_ik;
+
+                                d_il = dm[i+nao*l];
+                                v_jk_x += s_jx * d_il;
+                                v_jk_y += s_jy * d_il;
+                                v_jk_z += s_jz * d_il;
+
+                                buf_ij[n] += s_ix * d_kl;
+                                buf_ij[n + nfij] += s_iy * d_kl;
+                                buf_ij[n + 2 * nfij] += s_iz * d_kl;
+                                buf_ij[n + 3 * nfij] += s_jx * d_kl;
+                                buf_ij[n + 4 * nfij] += s_jy * d_kl;
+                                buf_ij[n + 5 * nfij] += s_jz * d_kl;
+
+                                buf_il[ip*THREADS+task_id] += s_ix * d_jk;
+                                buf_il[(ip+nfi)*THREADS+task_id] += s_iy * d_jk;
+                                buf_il[(ip+2*nfi)*THREADS+task_id] += s_iz * d_jk;
+
+                                buf_ik[ip*THREADS+task_id] += s_ix * d_jl;
+                                buf_ik[(ip+nfi)*THREADS+task_id] += s_iy * d_jl;
+                                buf_ik[(ip+2*nfi)*THREADS+task_id] += s_iz * d_jl;
+                            }
+                            buf_jl[jp*THREADS+task_id] += v_jl_x;
+                            buf_jl[(jp+nfj)*THREADS+task_id] += v_jl_y;
+                            buf_jl[(jp+2*nfj)*THREADS+task_id] += v_jl_z;
+
+                            buf_jk[jp*THREADS+task_id] += v_jk_x;
+                            buf_jk[(jp+nfj)*THREADS+task_id] += v_jk_y;
+                            buf_jk[(jp+2*nfj)*THREADS+task_id] += v_jk_z;
+                        }
+                        for (ip = 0; ip < nfi; ++ip) {
+                          atomicAdd(vk+i0+ip+nao*k, buf_ik[ip*THREADS+task_id]);
+                          atomicAdd(vk+i0+ip+nao*k+nao2, buf_ik[(ip+nfi)*THREADS+task_id]);
+                          atomicAdd(vk+i0+ip+nao*k+2*nao2, buf_ik[(ip+2*nfi)*THREADS+task_id]);
+                        }
+
+                        for (jp = 0; jp < nfj; ++jp) {
+                          atomicAdd(vk+j0+jp+nao*k, buf_jk[jp*THREADS+task_id]);
+                          atomicAdd(vk+j0+jp+nao*k+nao2, buf_jk[(jp+nfj)*THREADS+task_id]);
+                          atomicAdd(vk+j0+jp+nao*k+2*nao2, buf_jk[(jp+2*nfj)*THREADS+task_id]);
+                        }
+                        pgout += nfij;
+                    }
+                    for (ip = 0; ip < nfi; ++ip) {
+                      atomicAdd(vk+i0+ip+nao*l, buf_il[ip*THREADS+task_id]);
+                      atomicAdd(vk+i0+ip+nao*l+nao2, buf_il[(ip+nfi)*THREADS+task_id]);
+                      atomicAdd(vk+i0+ip+nao*l+2*nao2, buf_il[(ip+2*nfi)*THREADS+task_id]);
+                    }
+                    for (jp = 0; jp < nfj; ++jp) {
+                      atomicAdd(vk+j0+jp+nao*l, buf_jl[jp*THREADS+task_id]);
+                      atomicAdd(vk+j0+jp+nao*l+nao2, buf_jl[(jp+nfj)*THREADS+task_id]);
+                      atomicAdd(vk+j0+jp+nao*l+2*nao2, buf_jl[(jp+nfj)*THREADS+task_id]);
+                    }
+                }
+                for (n = 0, j = j0; j < j1; ++j) {
+                    for (i = i0; i < i1; ++i, ++n) {
+                        atomicAdd(vj+i+nao*j, buf_ij[n]);
+                        atomicAdd(vj+i+nao*j+nao2, buf_ij[n + nfij]);
+                        atomicAdd(vj+i+nao*j+2*nao2, buf_ij[n + 2 * nfij]);
+                        atomicAdd(vj+j+nao*i, buf_ij[n + 3 * nfij]);
+                        atomicAdd(vj+j+nao*i+nao2, buf_ij[n + 4 * nfij]);
+                        atomicAdd(vj+j+nao*i+2*nao2, buf_ij[n + 5 * nfij]);
+                    }
+                }
+                dm += nao * nao;
+                vj += 3 * nao * nao;
+                vk += 3 * nao * nao;
+            }
+        }
+
+    } else {  // vj == NULL, vk != NULL
+      if (nfij > 36) {
+        double* __restrict__ buf_jk = gout + 6 * c_envs.nf;
+        double* __restrict__ buf_jl = buf_jk + 3 * nfj;
+
+        for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+
+            double* __restrict__ pgout = gout;
+            for (l = l0; l < l1; ++l) {
+                for (ip = 0; ip < 3 * nfi; ++ip) {
+                    buf_il[ip*THREADS + task_id] = 0;
+                }
+                for (jp = 0; jp < 3 * nfj; ++jp) {
+                    buf_jl[jp] = 0;
+                }
+
+                for (k = k0; k < k1; ++k) {
+                    for(ip = 0; ip < 3 * nfi; ++ip) {
+                      buf_ik[ip*THREADS + task_id] = 0;
+                    }
+
+                    for(jp = 0; jp < 3 * nfj; ++jp) {
+                      buf_jk[jp] = 0;
+                    }
+
+                    for (n = 0, j = j0; j < j1; ++j) { jp = j - j0;
+                        v_jl_x = 0;
+                        v_jl_y = 0;
+                        v_jl_z = 0;
+                        v_jk_x = 0;
+                        v_jk_y = 0;
+                        v_jk_z = 0;
+                        d_jk = dm[j+nao*k];
+                        d_jl = dm[j+nao*l];
+                        for (i = i0; i < i1; ++i, ++n) { ip = i - i0;
+                            s_ix = pgout[n];
+                            s_iy = pgout[n + nf];
+                            s_iz = pgout[n + 2 * nf];
+                            s_jx = pgout[n + 3 * nf];
+                            s_jy = pgout[n + 4 * nf];
+                            s_jz = pgout[n + 5 * nf];
+                            d_ik = dm[i+nao*k];
+                            v_jl_x += s_jx * d_ik;
+                            v_jl_y += s_jy * d_ik;
+                            v_jl_z += s_jz * d_ik;
+
+                            d_il = dm[i+nao*l];
+                            v_jk_x += s_jx * d_il;
+                            v_jk_y += s_jy * d_il;
+                            v_jk_z += s_jz * d_il;
+
+                            buf_il[ip*THREADS+task_id] += s_ix * d_jk;
+                            buf_il[(ip+nfi)*THREADS+task_id] += s_iy * d_jk;
+                            buf_il[(ip+2*nfi)*THREADS+task_id] += s_iz * d_jk;
+
+                            buf_ik[ip*THREADS+task_id] += s_ix * d_jl;
+                            buf_ik[(ip+nfi)*THREADS+task_id] += s_iy * d_jl;
+                            buf_ik[(ip+2*nfi)*THREADS+task_id] += s_iz * d_jl;
+                        }
+                        buf_jl[jp] += v_jl_x;
+                        buf_jl[jp+nfj] += v_jl_y;
+                        buf_jl[jp+2*nfj] += v_jl_z;
+
+                        buf_jk[jp] += v_jk_x;
+                        buf_jk[jp+nfj] += v_jk_y;
+                        buf_jk[jp+2*nfj] += v_jk_z;
+                    }
+
+                    for (ip = 0; ip < nfi; ++ip) {
+                      atomicAdd(vk+i0+ip+nao*k, buf_ik[ip*THREADS+task_id]);
+                      atomicAdd(vk+i0+ip+nao*k+nao2, buf_ik[(ip+nfi)*THREADS+task_id]);
+                      atomicAdd(vk+i0+ip+nao*k+2*nao2, buf_ik[(ip+2*nfi)*THREADS+task_id]);
+                    }
+
+                    for (jp = 0; jp < nfj; ++jp) {
+                      atomicAdd(vk+j0+jp+nao*k, buf_jk[jp]);
+                      atomicAdd(vk+j0+jp+nao*k+nao2, buf_jk[jp+nfj]);
+                      atomicAdd(vk+j0+jp+nao*k+2*nao2, buf_jk[jp+2*nfj]);
+                    }
+
+                    pgout += nfij;
+                }
+                for (ip = 0; ip < nfi; ++ip) {
+                    atomicAdd(vk+i0+ip+nao*l, buf_il[ip*THREADS+task_id]);
+                    atomicAdd(vk+i0+ip+nao*l+nao2, buf_il[(ip+nfi)*THREADS+task_id]);
+                    atomicAdd(vk+i0+ip+nao*l+2*nao2, buf_il[(ip+2*nfi)*THREADS+task_id]);
+                }
+                for (jp = 0; jp < nfj; ++jp) {
+                    atomicAdd(vk+j0+jp+nao*l, buf_jl[jp]);
+                    atomicAdd(vk+j0+jp+nao*l+nao2, buf_jl[jp+nfj]);
+                    atomicAdd(vk+j0+jp+nao*l+2*nao2, buf_jl[jp+2*nfj]);
+                }
+            }
+            dm += nao * nao;
+            vk += 3 * nao * nao;
+        }
+
+    } else {  
+        double* __restrict__ buf_jk = buf_il + 3 * nfi * THREADS;
+        double* __restrict__ buf_jl = buf_jk + 3 * nfj * THREADS;
+        
+        for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+            double* __restrict__ pgout = gout; 
+            for (l = l0; l < l1; ++l) {
+                for (ip = 0; ip < 3 * nfi; ++ip) {
+                    buf_il[ip*THREADS+task_id] = 0;
+                }
+                for (jp = 0; jp < 3 * nfj; ++jp) {
+                    buf_jl[jp*THREADS+task_id] = 0;
+                }
+
+                for (k = k0; k < k1; ++k) {
+                    d_kl = dm[k+nao*l];
+                    for(ip = 0; ip < 3 * nfi; ++ip) {
+                      buf_ik[ip*THREADS + task_id] = 0;
+                    }
+
+                    for(jp = 0; jp < 3 * nfj; ++jp) {
+                      buf_jk[jp*THREADS + task_id] = 0;
+                    }
+                    for (n = 0, j = j0; j < j1; ++j) { jp = j - j0;
+                        v_jl_x = 0;
+                        v_jl_y = 0;
+                        v_jl_z = 0;
+                        v_jk_x = 0;
+                        v_jk_y = 0;
+                        v_jk_z = 0;
+                        d_jk = dm[j+nao*k];
+                        d_jl = dm[j+nao*l];
+                        for (i = i0; i < i1; ++i, ++n) { ip = i - i0;
+                            s_ix = pgout[n];
+                            s_iy = pgout[n + nf];
+                            s_iz = pgout[n + 2 * nf];
+                            s_jx = pgout[n + 3 * nf];
+                            s_jy = pgout[n + 4 * nf];
+                            s_jz = pgout[n + 5 * nf];
+
+                            d_ik = dm[i+nao*k];
+                            v_jl_x += s_jx * d_ik;
+                            v_jl_y += s_jy * d_ik;
+                            v_jl_z += s_jz * d_ik;
+
+                            d_il = dm[i+nao*l];
+                            v_jk_x += s_jx * d_il;
+                            v_jk_y += s_jy * d_il;
+                            v_jk_z += s_jz * d_il;
+
+                            buf_il[ip*THREADS+task_id] += s_ix * d_jk;
+                            buf_il[(ip+nfi)*THREADS+task_id] += s_iy * d_jk;
+                            buf_il[(ip+2*nfi)*THREADS+task_id] += s_iz * d_jk;
+
+                            buf_ik[ip*THREADS+task_id] += s_ix * d_jl;
+                            buf_ik[(ip+nfi)*THREADS+task_id] += s_iy * d_jl;
+                            buf_ik[(ip+2*nfi)*THREADS+task_id] += s_iz * d_jl;
+                        }
+                        buf_jl[jp*THREADS+task_id] += v_jl_x;
+                        buf_jl[(jp+nfj)*THREADS+task_id] += v_jl_y;
+                        buf_jl[(jp+2*nfj)*THREADS+task_id] += v_jl_z;
+
+                        buf_jk[jp*THREADS+task_id] += v_jk_x;
+                        buf_jk[(jp+nfj)*THREADS+task_id] += v_jk_y;
+                        buf_jk[(jp+2*nfj)*THREADS+task_id] += v_jk_z;
+                    }
+                    for (ip = 0; ip < nfi; ++ip) {
+                      atomicAdd(vk+i0+ip+nao*k, buf_ik[ip*THREADS+task_id]);
+                      atomicAdd(vk+i0+ip+nao*k+nao2, buf_ik[(ip+nfi)*THREADS+task_id]);
+                      atomicAdd(vk+i0+ip+nao*k+2*nao2, buf_ik[(ip+2*nfi)*THREADS+task_id]);
+                    }
+
+                    for (jp = 0; jp < nfj; ++jp) {
+                      atomicAdd(vk+j0+jp+nao*k, buf_jk[jp*THREADS+task_id]);
+                      atomicAdd(vk+j0+jp+nao*k+nao2, buf_jk[(jp+nfj)*THREADS+task_id]);
+                      atomicAdd(vk+j0+jp+nao*k+2*nao2, buf_jk[(jp+2*nfj)*THREADS+task_id]);
+                    }
+                    pgout += nfij;
+                }
+                for (ip = 0; ip < nfi; ++ip) {
+                  atomicAdd(vk+i0+ip+nao*l, buf_il[ip*THREADS+task_id]);
+                  atomicAdd(vk+i0+ip+nao*l+nao2, buf_il[(ip+nfi)*THREADS+task_id]);
+                  atomicAdd(vk+i0+ip+nao*l+2*nao2, buf_il[(ip+2*nfi)*THREADS+task_id]);
+                }
+                for (jp = 0; jp < nfj; ++jp) {
+                  atomicAdd(vk+j0+jp+nao*l, buf_jl[jp*THREADS+task_id]);
+                  atomicAdd(vk+j0+jp+nao*l+nao2, buf_jl[(jp+nfj)*THREADS+task_id]);
+                  atomicAdd(vk+j0+jp+nao*l+2*nao2, buf_jl[(jp+nfj)*THREADS+task_id]);
+                }
+            }
+
+            dm += nao * nao;
+            vk += 3 * nao * nao;
+        }
+    }
+    }
+
+//
+//    // vj == NULL, vk != NULL
+//    vk = jk.vk;
+//    dm = jk.dm;
+//    for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+//        for (k = k0; k < k1; ++k) { kp = k - k0;
+//            for (ip = 0; ip < nfi; ++ip) {
+//                buf_i[ip*THREADS+task_id] = 0;
+//            }
+//            for (jp = 0; jp < nfj; ++jp) {
+//                buf_j[jp*THREADS+task_id] = 0;
+//            }
+//
+//            for (l = l0; l < l1; ++l) { lp = l - l0;
+//                n = nfij * (lp * nfk + kp);
+//                for (j = j0; j < j1; ++j) { jp = j - j0;
+//                    v_ik = 0;
+//                    v_jk = 0;
+//                    d_jl = dm[j+nao*l];
+//                    for (i = i0; i < i1; ++i, ++n) { ip = i - i0;
+//                        s = gout[n];
+//                        v_ik  = s * d_jl;
+//                        v_jk += s * dm[i+nao*l];
+//                        buf_i[ip*THREADS+task_id] += v_ik;
+//                    }
+//                    buf_j[jp*THREADS+task_id] += v_jk;
+//                }
+//            }
+//            for (ip = 0; ip < nfi; ++ip) {
+//                atomicAdd(vk+i0+ip+nao*k, buf_i[ip*THREADS+task_id]);
+//            }
+//            for (jp = 0; jp < nfj; ++jp) {
+//                atomicAdd(vk+j0+jp+nao*k, buf_j[jp*THREADS+task_id]);
+//            }
+//        }
+//        dm += nao * nao;
+//        vk += nao * nao;
+//    }
+}
+
 template <int NROOTS, int GOUTSIZE> __global__
-static void GINTint2e_jk_kernel(JKMatrix jk, BasisProdOffsets offsets)
+static void GINTint2e_jk_kernel_nabla1i(JKMatrix jk, BasisProdOffsets offsets)
 {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
@@ -444,9 +1185,6 @@ static void GINTint2e_jk_kernel(JKMatrix jk, BasisProdOffsets offsets)
     return;
   }
   double norm = c_envs.fac;
-  if (bas_ij == bas_kl) {
-    norm *= .5;
-  }
 
   int nprim_ij = c_envs.nprim_ij;
   int nprim_kl = c_envs.nprim_kl;
@@ -487,7 +1225,7 @@ static void GINTint2e_jk_kernel(JKMatrix jk, BasisProdOffsets offsets)
   for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
       GINTg0_2e_2d4d<NROOTS>(g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-      GINTgout2e<NROOTS>(gout, g);
+      GINTgout2e_nabla1i<NROOTS>(gout, g);
       uw += NROOTS * 2;
     } }
 
@@ -537,9 +1275,9 @@ static void GINTint2e_jk_kernel_nabla1i_0000(JKMatrix jk, BasisProdOffsets offse
   double yi = bas_y[ish];
   double zi = bas_z[ish];
 
-  double ABx = xi - bas_x[jsh];
-  double ABy = yi - bas_y[jsh];
-  double ABz = zi - bas_z[jsh];
+  double xj = bas_x[jsh];
+  double yj = bas_y[jsh];
+  double zj = bas_z[jsh];
 
   double* __restrict__ a12 = c_bpcache.a12;
   double* __restrict__ e12 = c_bpcache.e12;
@@ -547,12 +1285,9 @@ static void GINTint2e_jk_kernel_nabla1i_0000(JKMatrix jk, BasisProdOffsets offse
   double* __restrict__ y12 = c_bpcache.y12;
   double* __restrict__ z12 = c_bpcache.z12;
   int ij, kl, i_dm;
-  double gout0 = 0;
-  double gout1 = 0;
-  double gout2 = 0;
-  double gout3 = 0;
-  double gout4 = 0;
-  double gout5 = 0;
+  double gout0 = 0, gout0_prime = 0;
+  double gout1 = 0, gout1_prime = 0;
+  double gout2 = 0, gout2_prime = 0;
   int nprim_j =
       c_bpcache.primitive_functions_offsets[jsh + 1]
       - c_bpcache.primitive_functions_offsets[jsh];
@@ -587,36 +1322,50 @@ static void GINTint2e_jk_kernel_nabla1i_0000(JKMatrix jk, BasisProdOffsets offse
 
       if (x < 3.e-7) {
         root0 = 0.5;
-        weight0 = fac;
+        weight0 = 1.;
       } else {
         double tt = sqrt(x);
         double fmt0 = SQRTPIE4 / tt * erf(tt);
-        weight0 = fmt0 * fac;
+        weight0 = fmt0;
         double e = exp(-x);
         double b = .5 / x;
         double fmt1 = b * (fmt0 - e);
         root0 = fmt1 / (fmt0 - fmt1);
       }
 
-      double alpha = exponent_i[(ij-prim_ij) / nprim_j] * weight0;
-      double beta = exponent_j[(ij-prim_ij) % nprim_j]  * weight0;
+      double ai = exponent_i[(ij-prim_ij) / nprim_j];
+      double aj = exponent_j[(ij-prim_ij) % nprim_j];
 
       double u2 = a0 * root0;
       double tmp2 = akl * u2 / (u2 * aijkl + a1);
-      double C00x = xij - xi - tmp2 * xijxkl;
-      double C00y = yij - yi - tmp2 * yijykl;
-      double C00z = zij - zi - tmp2 * zijzkl;
+      double c00x = xij - xi - tmp2 * xijxkl;
+      double c00y = yij - yi - tmp2 * yijykl;
+      double c00z = zij - zi - tmp2 * zijzkl;
 
-      double g0 = ABx+C00x;
-      double g1 = ABy+C00y;
-      double g2 = ABz+C00z;
+      double c00x_prime = xij - xj - tmp2 * xijxkl;
+      double c00y_prime = yij - yj - tmp2 * yijykl;
+      double c00z_prime = zij - zj - tmp2 * zijzkl;
 
-      gout0 += (2.*alpha*C00x);
-      gout1 += (2.*alpha*C00y);
-      gout2 += (2.*alpha*C00z);
-      gout3 += (2.*beta*g0);
-      gout4 += (2.*beta*g1);
-      gout5 += (2.*beta*g2);
+      double g_0 = 1;
+      double g_1 = c00x;
+      double g_2 = 1;
+      double g_3 = c00y;
+      double g_4 = fac * weight0;
+      double g_5 = g_4 * c00z;
+      double g_6 = 2.0 * ai;
+
+      double g_1_prime = c00x_prime;
+      double g_3_prime = c00y_prime;
+      double g_5_prime = g_4 * c00z_prime;
+      double g_6_prime = 2.0 * aj;
+
+      gout0 += g_1 * g_2 * g_4 * g_6;
+      gout1 += g_0 * g_3 * g_4 * g_6;
+      gout2 += g_0 * g_2 * g_5 * g_6;
+
+      gout0_prime += g_1_prime * g_2 * g_4 * g_6_prime;
+      gout1_prime += g_0 * g_3_prime * g_4 * g_6_prime;
+      gout2_prime += g_0 * g_2 * g_5_prime * g_6_prime;
     }
   }
 
@@ -630,13 +1379,13 @@ static void GINTint2e_jk_kernel_nabla1i_0000(JKMatrix jk, BasisProdOffsets offse
 
   for (i_dm = 0; i_dm < n_dm; ++i_dm) {
     if (vj != NULL) {
-      d_0 = dm[(k0+0)+nao*(l0+0)];
+      d_0 = dm[k0+nao*l0];
       atomicAdd(vj+i0+nao*j0, gout0*d_0);
       atomicAdd(vj+i0+nao*j0+nao2, gout1*d_0);
       atomicAdd(vj+i0+nao*j0+2*nao2, gout2*d_0);
-      atomicAdd(vj+nao*i0+j0, gout3*d_0);
-      atomicAdd(vj+nao*i0+j0+nao2, gout4*d_0);
-      atomicAdd(vj+nao*i0+j0+2*nao2, gout5*d_0);
+      atomicAdd(vj+nao*i0+j0, gout0_prime*d_0);
+      atomicAdd(vj+nao*i0+j0+nao2, gout1_prime*d_0);
+      atomicAdd(vj+nao*i0+j0+2*nao2, gout2_prime*d_0);
       vj += 3*nao2;
     }
     if(vk != NULL) {
@@ -652,190 +1401,202 @@ static void GINTint2e_jk_kernel_nabla1i_0000(JKMatrix jk, BasisProdOffsets offse
       atomicAdd(vk+(i0+0)+nao*(k0+0)+2*nao2, gout2*d_0);
       // ijkl, ik -> jl
       d_0 = dm[(i0+0)+nao*(k0+0)];
-      atomicAdd(vk+(j0+0)+nao*(l0+0), gout3*d_0);
-      atomicAdd(vk+(j0+0)+nao*(l0+0)+nao2, gout4*d_0);
-      atomicAdd(vk+(j0+0)+nao*(l0+0)+2*nao2, gout5*d_0);
+      atomicAdd(vk+(j0+0)+nao*(l0+0), gout0_prime*d_0);
+      atomicAdd(vk+(j0+0)+nao*(l0+0)+nao2, gout1_prime*d_0);
+      atomicAdd(vk+(j0+0)+nao*(l0+0)+2*nao2, gout2_prime*d_0);
       // ijkl, il -> jk
       d_0 = dm[(i0+0)+nao*(l0+0)];
-      atomicAdd(vk+(j0+0)+nao*(k0+0), gout3*d_0);
-      atomicAdd(vk+(j0+0)+nao*(k0+0)+nao2, gout4*d_0);
-      atomicAdd(vk+(j0+0)+nao*(k0+0)+2*nao2, gout5*d_0);
+      atomicAdd(vk+(j0+0)+nao*(k0+0), gout0_prime*d_0);
+      atomicAdd(vk+(j0+0)+nao*(k0+0)+nao2, gout1_prime*d_0);
+      atomicAdd(vk+(j0+0)+nao*(k0+0)+2*nao2, gout2_prime*d_0);
       vk+=3*nao2;
     }
     dm += nao2;
   }
 }
-//
-//#if POLYFIT_ORDER >= 4
-//template <> __global__
-//void GINTint2e_jk_nabla1i_kernel<4, GOUTSIZE4>(JKMatrix jk, BasisProdOffsets offsets)
-//{
-//  int ntasks_ij = offsets.ntasks_ij;
-//  int ntasks_kl = offsets.ntasks_kl;
-//  int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-//  int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-//  if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-//    return;
-//  }
-//
-//  int bas_ij = offsets.bas_ij + task_ij;
-//  int bas_kl = offsets.bas_kl + task_kl;
-//  if (bas_ij < bas_kl) {
-//    return;
-//  }
-//  double norm = c_envs.fac;
-//  if (bas_ij == bas_kl) {
-//    norm *= .5;
-//  }
-//
-//  int nprim_ij = c_envs.nprim_ij;
-//  int nprim_kl = c_envs.nprim_kl;
-//  int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-//  int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-//  int *bas_pair2bra = c_bpcache.bas_pair2bra;
-//  int *bas_pair2ket = c_bpcache.bas_pair2ket;
-//  int ish = bas_pair2bra[bas_ij];
-//  int jsh = bas_pair2ket[bas_ij];
-//  int ksh = bas_pair2bra[bas_kl];
-//  int lsh = bas_pair2ket[bas_kl];
-//
-//  double uw[8];
-//  double gout[GOUTSIZE4];
-//  double *g = gout + c_envs.nf;
-//  int i;
-//  for (i = 0; i < c_envs.nf; ++i) {
-//    gout[i] = 0;
-//  }
-//
-//  double* __restrict__ a12 = c_bpcache.a12;
-//  double* __restrict__ x12 = c_bpcache.x12;
-//  double* __restrict__ y12 = c_bpcache.y12;
-//  double* __restrict__ z12 = c_bpcache.z12;
-//  int ij, kl;
-//  int as_ish, as_jsh, as_ksh, as_lsh;
-//  if (c_envs.ibase) {
-//    as_ish = ish;
-//    as_jsh = jsh;
-//  } else {
-//    as_ish = jsh;
-//    as_jsh = ish;
-//  }
-//  if (c_envs.kbase) {
-//    as_ksh = ksh;
-//    as_lsh = lsh;
-//  } else {
-//    as_ksh = lsh;
-//    as_lsh = ksh;
-//  }
-//  for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-//    for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-//      double aij = a12[ij];
-//      double xij = x12[ij];
-//      double yij = y12[ij];
-//      double zij = z12[ij];
-//      double akl = a12[kl];
-//      double xkl = x12[kl];
-//      double ykl = y12[kl];
-//      double zkl = z12[kl];
-//      double xijxkl = xij - xkl;
-//      double yijykl = yij - ykl;
-//      double zijzkl = zij - zkl;
-//      double aijkl = aij + akl;
-//      double a1 = aij * akl;
-//      double a0 = a1 / aijkl;
-//      double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-//      GINTrys_root4(x, uw);
-//      GINTg0_2e_2d4d<4>(g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-//      GINTgout2e<4>(gout, g);
-//    } }
-//
-//  GINTkernel_getjk(jk, gout, ish, jsh, ksh, lsh);
-//}
-//#endif
-//
-//#if POLYFIT_ORDER >= 5
-//template <> __global__
-//void GINTint2e_jk_nabla1i_kernel<5, GOUTSIZE5>(JKMatrix jk, BasisProdOffsets offsets)
-//{
-//  int ntasks_ij = offsets.ntasks_ij;
-//  int ntasks_kl = offsets.ntasks_kl;
-//  int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-//  int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-//  if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-//    return;
-//  }
-//
-//  int bas_ij = offsets.bas_ij + task_ij;
-//  int bas_kl = offsets.bas_kl + task_kl;
-//  if (bas_ij < bas_kl) {
-//    return;
-//  }
-//  double norm = c_envs.fac;
-//  if (bas_ij == bas_kl) {
-//    norm *= .5;
-//  }
-//
-//  int nprim_ij = c_envs.nprim_ij;
-//  int nprim_kl = c_envs.nprim_kl;
-//  int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-//  int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-//  int *bas_pair2bra = c_bpcache.bas_pair2bra;
-//  int *bas_pair2ket = c_bpcache.bas_pair2ket;
-//  int ish = bas_pair2bra[bas_ij];
-//  int jsh = bas_pair2ket[bas_ij];
-//  int ksh = bas_pair2bra[bas_kl];
-//  int lsh = bas_pair2ket[bas_kl];
-//
-//  double uw[10];
-//  double gout[GOUTSIZE5];
-//  double *g = gout + c_envs.nf;
-//  int i;
-//  for (i = 0; i < c_envs.nf; ++i) {
-//    gout[i] = 0;
-//  }
-//
-//  double* __restrict__ a12 = c_bpcache.a12;
-//  double* __restrict__ x12 = c_bpcache.x12;
-//  double* __restrict__ y12 = c_bpcache.y12;
-//  double* __restrict__ z12 = c_bpcache.z12;
-//  int ij, kl;
-//  int as_ish, as_jsh, as_ksh, as_lsh;
-//  if (c_envs.ibase) {
-//    as_ish = ish;
-//    as_jsh = jsh;
-//  } else {
-//    as_ish = jsh;
-//    as_jsh = ish;
-//  }
-//  if (c_envs.kbase) {
-//    as_ksh = ksh;
-//    as_lsh = lsh;
-//  } else {
-//    as_ksh = lsh;
-//    as_lsh = ksh;
-//  }
-//  for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-//    for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-//      double aij = a12[ij];
-//      double xij = x12[ij];
-//      double yij = y12[ij];
-//      double zij = z12[ij];
-//      double akl = a12[kl];
-//      double xkl = x12[kl];
-//      double ykl = y12[kl];
-//      double zkl = z12[kl];
-//      double xijxkl = xij - xkl;
-//      double yijykl = yij - ykl;
-//      double zijzkl = zij - zkl;
-//      double aijkl = aij + akl;
-//      double a1 = aij * akl;
-//      double a0 = a1 / aijkl;
-//      double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-//      GINTrys_root5(x, uw);
-//      GINTg0_2e_2d4d<5>(g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-//      GINTgout2e<5>(gout, g);
-//    } }
-//
-//  GINTkernel_getjk(jk, gout, ish, jsh, ksh, lsh);
-//}
-//#endif
+
+#if POLYFIT_ORDER >= 4
+template <> __global__
+void GINTint2e_jk_kernel_nabla1i<4, NABLAGOUTSIZE4>(JKMatrix jk, BasisProdOffsets offsets)
+{
+  int ntasks_ij = offsets.ntasks_ij;
+  int ntasks_kl = offsets.ntasks_kl;
+  int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+  int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+  if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
+    return;
+  }
+
+  int bas_ij = offsets.bas_ij + task_ij;
+  int bas_kl = offsets.bas_kl + task_kl;
+
+  double norm = c_envs.fac;
+
+  int nprim_ij = c_envs.nprim_ij;
+  int nprim_kl = c_envs.nprim_kl;
+  int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
+  int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
+  int *bas_pair2bra = c_bpcache.bas_pair2bra;
+  int *bas_pair2ket = c_bpcache.bas_pair2ket;
+  int ish = bas_pair2bra[bas_ij];
+  int jsh = bas_pair2ket[bas_ij];
+  int ksh = bas_pair2bra[bas_kl];
+  int lsh = bas_pair2ket[bas_kl];
+
+  double uw[8];
+  double gout[NABLAGOUTSIZE4];
+  double *g = gout + 6 * c_envs.nf;
+  int i;
+  for (i = 0; i < c_envs.nf; ++i) {
+    gout[i] = 0;
+  }
+
+  int nprim_j = c_bpcache.primitive_functions_offsets[jsh + 1]
+              - c_bpcache.primitive_functions_offsets[jsh];
+
+  double * __restrict__ exponent_i = 
+      c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
+    
+  double * __restrict__ exponent_j =
+      c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
+
+  double* __restrict__ a12 = c_bpcache.a12;
+  double* __restrict__ x12 = c_bpcache.x12;
+  double* __restrict__ y12 = c_bpcache.y12;
+  double* __restrict__ z12 = c_bpcache.z12;
+  int ij, kl;
+  int as_ish, as_jsh, as_ksh, as_lsh;
+  if (c_envs.ibase) {
+    as_ish = ish;
+    as_jsh = jsh;
+  } else {
+    as_ish = jsh;
+    as_jsh = ish;
+  }
+  if (c_envs.kbase) {
+    as_ksh = ksh;
+    as_lsh = lsh;
+  } else {
+    as_ksh = lsh;
+    as_lsh = ksh;
+  }
+  for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+    double ai = exponent_i[(ij - prim_ij) / nprim_j];
+    double aj = exponent_j[(ij - prim_ij) % nprim_j];
+    for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+      double aij = a12[ij];
+      double xij = x12[ij];
+      double yij = y12[ij];
+      double zij = z12[ij];
+      double akl = a12[kl];
+      double xkl = x12[kl];
+      double ykl = y12[kl];
+      double zkl = z12[kl];
+      double xijxkl = xij - xkl;
+      double yijykl = yij - ykl;
+      double zijzkl = zij - zkl;
+      double aijkl = aij + akl;
+      double a1 = aij * akl;
+      double a0 = a1 / aijkl;
+      double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
+      GINTrys_root4(x, uw);
+      GINTg0_2e_2d4d<4>(g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+      GINTgout2e_nabla1i<4>(gout, g, ai, aj);
+  } }
+
+  GINTkernel_getjk_nabla1i(jk, gout, ish, jsh, ksh, lsh);
+}
+#endif
+
+#if POLYFIT_ORDER >= 5
+template <> __global__
+void GINTint2e_jk_kernel_nabla1i<5, NABLAGOUTSIZE5>(JKMatrix jk, BasisProdOffsets offsets)
+{
+  int ntasks_ij = offsets.ntasks_ij;
+  int ntasks_kl = offsets.ntasks_kl;
+  int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+  int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+  if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
+    return;
+  }
+
+  int bas_ij = offsets.bas_ij + task_ij;
+  int bas_kl = offsets.bas_kl + task_kl;
+
+  double norm = c_envs.fac;
+
+  int nprim_ij = c_envs.nprim_ij;
+  int nprim_kl = c_envs.nprim_kl;
+  int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
+  int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
+  int *bas_pair2bra = c_bpcache.bas_pair2bra;
+  int *bas_pair2ket = c_bpcache.bas_pair2ket;
+  int ish = bas_pair2bra[bas_ij];
+  int jsh = bas_pair2ket[bas_ij];
+  int ksh = bas_pair2bra[bas_kl];
+  int lsh = bas_pair2ket[bas_kl];
+
+  double uw[10];
+  double gout[NABLAGOUTSIZE5];
+  double *g = gout + 6 * c_envs.nf;
+  int i;
+  for (i = 0; i < 6 * c_envs.nf; ++i) {
+    gout[i] = 0;
+  }
+
+  int nprim_j = c_bpcache.primitive_functions_offsets[jsh + 1]
+              - c_bpcache.primitive_functions_offsets[jsh];
+
+  double * __restrict__ exponent_i = 
+      c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
+
+  double * __restrict__ exponent_j =
+      c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
+
+  double* __restrict__ a12 = c_bpcache.a12;
+  double* __restrict__ x12 = c_bpcache.x12;
+  double* __restrict__ y12 = c_bpcache.y12;
+  double* __restrict__ z12 = c_bpcache.z12;
+  int ij, kl;
+  int as_ish, as_jsh, as_ksh, as_lsh;
+  if (c_envs.ibase) {
+    as_ish = ish;
+    as_jsh = jsh;
+  } else {
+    as_ish = jsh;
+    as_jsh = ish;
+  }
+  if (c_envs.kbase) {
+    as_ksh = ksh;
+    as_lsh = lsh;
+  } else {
+    as_ksh = lsh;
+    as_lsh = ksh;
+  }
+  for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+    double ai = exponent_i[(ij - prim_ij) / nprim_j];
+    double aj = exponent_j[(ij - prim_ij) % nprim_j];
+    for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+      double aij = a12[ij];
+      double xij = x12[ij];
+      double yij = y12[ij];
+      double zij = z12[ij];
+      double akl = a12[kl];
+      double xkl = x12[kl];
+      double ykl = y12[kl];
+      double zkl = z12[kl];
+      double xijxkl = xij - xkl;
+      double yijykl = yij - ykl;
+      double zijzkl = zij - zkl;
+      double aijkl = aij + akl;
+      double a1 = aij * akl;
+      double a0 = a1 / aijkl;
+      double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
+      GINTrys_root5(x, uw);
+      GINTg0_2e_2d4d<5>(g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+      GINTgout2e_nabla1i<5>(gout, g, ai, aj);
+    } }
+
+  GINTkernel_getjk_nabla1i(jk, gout, ish, jsh, ksh, lsh);
+}
+#endif
