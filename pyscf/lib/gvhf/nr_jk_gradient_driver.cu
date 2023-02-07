@@ -91,16 +91,16 @@ static int GINTrun_tasks_jk_nabla1i(JKMatrix *jk,
       break;
 
     case 4:
-//      GINTint2e_jk_kernel_nabla1i<4, NABLAGSIZE4> <<<blocks, threads>>>(*jk, *offsets);
+     GINTint2e_jk_kernel_nabla1i<4, NABLAGOUTSIZE4> <<<blocks, threads>>>(*jk, *offsets);
       break;
     case 5:
-//      GINTint2e_jk_kernel_nabla1i<5, NABLAGSIZE5> <<<blocks, threads>>>(*jk, *offsets);
+     GINTint2e_jk_kernel_nabla1i<5, NABLAGOUTSIZE5> <<<blocks, threads>>>(*jk, *offsets);
       break;
     case 6:
-//      GINTint2e_jk_kernel_nabla1i<6, NABLAGSIZE6> <<<blocks, threads>>>(*jk, *offsets);
+    //  GINTint2e_jk_kernel_nabla1i<6, NABLAGOUTSIZE6> <<<blocks, threads>>>(*jk, *offsets);
       break;
     case 7:
-//      GINTint2e_jk_kernel_nabla1i<7, NABLAGSIZE7> <<<blocks, threads>>>(*jk, *offsets);
+    //  GINTint2e_jk_kernel_nabla1i<7, NABLAGOUTSIZE7> <<<blocks, threads>>>(*jk, *offsets);
       break;
 
     default:
@@ -132,7 +132,7 @@ int GINTbuild_jk_nabla1i(BasisProdCache *bpcache,
     return 2;
   }
 
-  if (envs.nrys_roots > 2) {
+  if (envs.nrys_roots > 3) {
     int16_t *idx4c = (int16_t *)malloc(sizeof(int16_t) * envs.nf * 3);
     int *idx_ij = (int *)malloc(sizeof(int) * envs.nfi * envs.nfj * 3);
     int *idx_kl = (int *)malloc(sizeof(int) * envs.nfk * envs.nfl * 3);

@@ -200,10 +200,10 @@ def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
     symmetrize_over_kl(eritensor)
 
     # return cupy.einsum("xlkji -> xijkl", eritensor)
-    # return cupy.einsum("apqkl, kr, ls -> asrqp",
-    #         cupy.einsum("aijkl, ip, jq-> apqkl", eritensor, coeff, coeff), coeff, coeff)
+    return cupy.einsum("apqkl, kr, ls -> asrqp",
+            cupy.einsum("aijkl, ip, jq-> apqkl", eritensor, coeff, coeff), coeff, coeff)
 
-    return eritensor
+    # return eritensor
 
 def grad_get_jk(mol, dm):
     cput0 = (logger.process_clock(), logger.perf_counter())
@@ -220,11 +220,13 @@ def grad_get_jk(mol, dm):
     else:
         dms = cupy.asarray(dms, order='C')
 
-    int2e = cupy.einsum("apqkl, kr, ls -> asrqp",
-                        cupy.einsum("aijkl, ip, jq-> apqkl",
-                                    get_nabla1i_int2e(mol, vhfopt=vhfopt),
-                                    coeff, coeff),
-                        coeff, coeff)
+    # int2e = cupy.einsum("apqkl, kr, ls -> asrqp",
+    #                     cupy.einsum("aijkl, ip, jq-> apqkl",
+    #                                 get_nabla1i_int2e(mol, vhfopt=vhfopt),
+    #                                 coeff, coeff),
+    #                     coeff, coeff)
+
+    int2e = get_nabla1i_int2e(mol, vhfopt=vhfopt)
 
     # cupy has got weird bug that if we write
     # vj = cupy.einsum("pijkl, lk -> pij", int2e, dm)
@@ -235,6 +237,159 @@ def grad_get_jk(mol, dm):
     vk = cupy.einsum("pijkl, jk -> pil", int2e, dm)
 
     return cupy.asnumpy(vj), cupy.asnumpy(vk)
+
+def get_grad_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
+                verbose=None):
+
+    cput0 = (logger.process_clock(), logger.perf_counter())
+    log = logger.new_logger(mol, verbose)
+    if hermi != 1:
+        raise NotImplementedError('JK-builder only supports hermitian density matrix')
+
+    if vhfopt is None:
+        vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=False, scale=True)
+
+    coeff = cupy.asarray(vhfopt.coeff)
+    nao, nao0 = coeff.shape
+    dm0 = dm
+    dms = cupy.asarray(dm0.reshape(-1,nao0,nao0))
+    dms = [cupy.einsum('pi,ij,qj->pq', coeff, x, coeff) for x in dms]
+    if dm0.ndim == 2:
+        dms = cupy.asarray(dms[0], order='C').reshape(1,nao,nao)
+    else:
+        dms = cupy.asarray(dms, order='C')
+    n_dm = dms.shape[0]
+
+    scripts = []
+    vj = vk = None
+    vj_ptr = vk_ptr = lib.c_null_ptr()
+    gradient_shape = list(dms.shape)
+    gradient_shape[0] *= 3
+
+    if with_j:
+        vj = cupy.zeros(gradient_shape).transpose(0, 2, 1)
+        vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
+        scripts.append('ji->s2kl')
+    if with_k:
+        vk = cupy.zeros(gradient_shape).transpose(0, 2, 1)
+        vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
+        if hermi == 1:
+            scripts.append('jk->s2il')
+        else:
+            scripts.append('jk->s1il')
+
+    l_symb = lib.param.ANGULAR
+    pair2bra, pair2ket = vhfopt.bas_pair2shls
+    bas_pairs_locs = vhfopt.bas_pairs_locs
+    log_qs = vhfopt.log_qs
+    direct_scf_tol = vhfopt.direct_scf_tol
+
+    # adjust nbins according to the size of the system
+    pairs_max = (bas_pairs_locs[1:] - bas_pairs_locs[:-1]).max()
+    nbins = max(10, int(pairs_max//100000))
+    log.debug('Set the number of buckets for s_index to %d', nbins)
+
+    ncptype = len(log_qs)
+    cp_idx, cp_jdx = np.tril_indices(ncptype)
+    dm_ctr_cond = np.max(
+        [lib.condense('absmax', x, vhfopt.l_ctr_offsets) for x in dms.get()], axis=0)
+    if hermi != 1:
+        dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
+
+    fn = libgvhf.GINTbuild_jk_nabla1i
+    
+    for cp_ij_id, log_q_ij in enumerate(log_qs):
+        cpi = cp_idx[cp_ij_id]
+        cpj = cp_jdx[cp_ij_id]
+        li = vhfopt.uniq_l_ctr[cpi,0]
+        lj = vhfopt.uniq_l_ctr[cpj,0]
+        if li > LMAX_ON_GPU or lj > LMAX_ON_GPU or log_q_ij.size == 0:
+            continue
+
+        for cp_kl_id, log_q_kl in enumerate(log_qs):
+            cpk = cp_idx[cp_kl_id]
+            cpl = cp_jdx[cp_kl_id]
+            lk = vhfopt.uniq_l_ctr[cpk,0]
+            ll = vhfopt.uniq_l_ctr[cpl,0]
+
+            if lk > LMAX_ON_GPU or ll > LMAX_ON_GPU or log_q_kl.size == 0:
+                continue
+
+            # TODO: determine cutoff based on the relevant maximum value of dm blocks?
+            sub_dm_cond = max(dm_ctr_cond[cpi,cpj], dm_ctr_cond[cpk,cpl],
+                              dm_ctr_cond[cpi,cpk], dm_ctr_cond[cpj,cpk],
+                              dm_ctr_cond[cpi,cpl], dm_ctr_cond[cpj,cpl])
+
+            # if sub_dm_cond < direct_scf_tol * 1e3:
+            #     continue
+
+            t0 = time.perf_counter()
+            # cutoff = direct_scf_tol / sub_dm_cond
+            cutoff = 1e-12
+            bins_locs_ij = _make_s_index_offsets(log_q_ij, nbins, cutoff)
+            bins_locs_kl = _make_s_index_offsets(log_q_kl, nbins, cutoff)
+
+            err = fn(vhfopt.bpcache, vj_ptr, vk_ptr,
+                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                     ctypes.c_int(nao), ctypes.c_int(n_dm),
+                     bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
+                     bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
+                     ctypes.c_int(nbins), ctypes.c_int(cp_ij_id), ctypes.c_int(cp_kl_id))
+            if err != 0:
+                detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
+                raise RuntimeError(detail)
+            log.debug1('(%s%s|%s%s) on GPU %.3fs',
+                       l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
+                       time.perf_counter() - t0)
+    if with_j:
+        vj = cupy.einsum('pi,apq,qj->aij', coeff, vj, coeff) * 2
+        # *2 because only the lower triangle part of dm was used in J contraction
+    if with_k:
+        vk = cupy.einsum('pi,apq,qj->aij', coeff, vk, coeff)
+
+    cput0 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
+
+    h_shls = vhfopt.h_shls
+    if h_shls:
+        log.debug3('Integrals for %s functions on CPU', l_symb[LMAX_ON_GPU+1])
+        pmol = vhfopt.mol
+        shls_excludes = [0, h_shls[0]] * 4
+        vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
+                                 dms.get(), 1, pmol._atm, pmol._bas, pmol._env,
+                                 vhfopt=vhfopt, shls_excludes=shls_excludes)
+        coeff = vhfopt.coeff
+        pnao = coeff.shape[0]
+        idx, idy = np.tril_indices(pnao, -1)
+        if with_j and with_k:
+            vj1 = vs_h[0]
+            vk1 = vs_h[1]
+        elif with_j:
+            vj1 = vs_h[0]
+        else:
+            vk1 = vs_h[0]
+
+        if with_j:
+            vj1[:,idy,idx] = vj1[:,idx,idy]
+            for i, v in enumerate(vj1):
+                vj[i] += coeff.T.dot(v).dot(coeff)
+        if with_k:
+            if hermi:
+                vk1[:,idy,idx] = vk1[:,idx,idy]
+            for i, v in enumerate(vk1):
+                vk[i] += coeff.T.dot(v).dot(coeff)
+        cput0 = log.timer_debug1('get_jk pass 2 for l>4 basis on cpu', *cput0)
+
+    if FREE_CUPY_CACHE:
+        coeff = dms = None
+        cupy.get_default_memory_pool().free_all_blocks()
+
+    if dm0.ndim != 2:
+        if with_j:
+            vj = np.asarray(vj).reshape((3,) + dm0.shape)
+        if with_k:
+            vk = np.asarray(vk).reshape((3,) + dm0.shape)
+    return vj, vk
+
 
 def _write(dev, mol, de, atmlst):
     '''Format output of nuclear gradients.
@@ -398,11 +553,13 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             vj = vj[0]
         if with_k:
             vk = vk[0]
+
     else:
         if with_j:
             vj = np.asarray(vj).reshape(dm0.shape)
         if with_k:
             vk = np.asarray(vk).reshape(dm0.shape)
+
     return vj, vk
 
 
@@ -461,7 +618,7 @@ class _VHFOpt(_vhf.VHFOpt):
         self._qcondname = qcondname
         self._dmcondname = dmcondname
 
-    def build(self, cutoff=1e-13, group_size=None, diag_block_with_triu=False, scale=False):
+    def build(self, cutoff=1e-13, group_size=None, diag_block_with_triu=False, scale=True):
         cput0 = (logger.process_clock(), logger.perf_counter())
         mol = self.mol
         # Sort basis according to angular momentum and contraction patterns so

@@ -19,6 +19,7 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_60")
 
 add_library(gvhf SHARED 
   nr_jk_driver.cu
+  nr_jk_gradient_driver.cu
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
