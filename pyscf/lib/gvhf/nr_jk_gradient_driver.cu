@@ -30,6 +30,13 @@ static int GINTrun_tasks_jk_nabla1i(JKMatrix *jk,
                                     GINTEnvVars *envs)
 {
   int nrys_roots = envs->nrys_roots;
+  int nfij_chunk = 6 * envs->nfi * envs->nfj * jk->n_dm;
+  int exchange_chunk = 3 * envs->nfi * (envs->nfk + envs->nfl) * jk->n_dm;
+  int shared_memory_size =
+      jk->vj != NULL ?
+        nfij_chunk < 94 ? nfij_chunk * THREADS * sizeof(double) : 0
+        : exchange_chunk < 94 ? exchange_chunk * THREADS * sizeof(double) : 0;
+
   int ntasks_ij = offsets->ntasks_ij;
   int ntasks_kl = offsets->ntasks_kl;
   assert(ntasks_kl < 65536*THREADSY);
@@ -91,16 +98,16 @@ static int GINTrun_tasks_jk_nabla1i(JKMatrix *jk,
       break;
 
     case 4:
-     GINTint2e_jk_kernel_nabla1i<4, NABLAGOUTSIZE4> <<<blocks, threads>>>(*jk, *offsets);
+      GINTint2e_jk_kernel_nabla1i<4, NABLAGOUTSIZE4> <<<blocks, threads>>>(*jk, *offsets);
       break;
     case 5:
-     GINTint2e_jk_kernel_nabla1i<5, NABLAGOUTSIZE5> <<<blocks, threads>>>(*jk, *offsets);
+      GINTint2e_jk_kernel_nabla1i<5, NABLAGOUTSIZE5> <<<blocks, threads>>>(*jk, *offsets);
       break;
     case 6:
-    //  GINTint2e_jk_kernel_nabla1i<6, NABLAGOUTSIZE6> <<<blocks, threads>>>(*jk, *offsets);
+      GINTint2e_jk_kernel_nabla1i<6, NABLAGOUTSIZE6> <<<blocks, threads, shared_memory_size>>>(*jk, *offsets);
       break;
     case 7:
-    //  GINTint2e_jk_kernel_nabla1i<7, NABLAGOUTSIZE7> <<<blocks, threads>>>(*jk, *offsets);
+      GINTint2e_jk_kernel_nabla1i<7, NABLAGOUTSIZE7> <<<blocks, threads, shared_memory_size>>>(*jk, *offsets);
       break;
 
     default:
@@ -132,7 +139,7 @@ int GINTbuild_jk_nabla1i(BasisProdCache *bpcache,
     return 2;
   }
 
-  if (envs.nrys_roots > 3) {
+  if (envs.nrys_roots > 2) {
     int16_t *idx4c = (int16_t *)malloc(sizeof(int16_t) * envs.nf * 3);
     int *idx_ij = (int *)malloc(sizeof(int) * envs.nfi * envs.nfj * 3);
     int *idx_kl = (int *)malloc(sizeof(int) * envs.nfk * envs.nfl * 3);

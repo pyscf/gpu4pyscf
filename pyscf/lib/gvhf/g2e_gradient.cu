@@ -557,6 +557,10 @@ void GINTkernel_getjk_nabla1i(JKMatrix jk, double * __restrict__ gout,
   double * __restrict__ dm = jk.dm;
   double s_ix, s_iy, s_iz, s_jx, s_jy, s_jz;
   if (vk == NULL) {
+    if(vj == NULL) {
+      return;
+    }
+
     if (nfij > (GPU_CART_MAX * 2 + 1) / 2) {
       double * __restrict__ buf_ij = gout + 6 * c_envs.nf;
       for (i_dm = 0; i_dm < n_dm; ++i_dm) {
@@ -968,12 +972,11 @@ static void GINTint2e_jk_kernel_nabla1i(JKMatrix jk, BasisProdOffsets offsets) {
   int bas_ij = offsets.bas_ij + task_ij;
   int bas_kl = offsets.bas_kl + task_kl;
 
-  int nf = c_envs.nf;
   int nao = jk.nao;
   int nao2 = nao * nao;
 
   int i, j, k, l, n, f, i_dm;
-  int ip, jp, kp, lp;
+  int ip, jp;
   double d_kl, d_jk, d_jl, d_ik, d_il;
   double v_jk_x, v_jk_y, v_jk_z, v_jl_x, v_jl_y, v_jl_z;
 
@@ -1001,9 +1004,14 @@ static void GINTint2e_jk_kernel_nabla1i(JKMatrix jk, BasisProdOffsets offsets) {
   int nfi = i1 - i0;
   int nfj = j1 - j0;
   int nfk = k1 - k0;
+  int nfl = l1 - l0;
   int nfij = nfi * nfj;
+  int nfik = nfi * nfk;
+  int nfil = nfi * nfl;
+  int nfjk = nfj * nfk;
+  int nfjl = nfj * nfl;
 
-  __shared__ double _buf[3 * THREADS * (GPU_CART_MAX * 2 + 1)];
+
   int n_dm = jk.n_dm;
   double * vj = jk.vj;
   double * vk = jk.vk;
@@ -1014,15 +1022,10 @@ static void GINTint2e_jk_kernel_nabla1i(JKMatrix jk, BasisProdOffsets offsets) {
                 (task_ij + ntasks_ij * task_kl) * nprim_ij * nprim_kl * NROOTS *
                 2;
   double gout[GOUTSIZE];
-  double * g = gout + 6 * nfij + 3 * nfi + 3 * nfj;
-
-  memset(gout, 0, 6 * nfij * sizeof(double));
+  double * g = gout + (3 * nfik + 3 * nfjk + 3 * nfil + 3 * nfjl + 6 * nfij) * n_dm;
 
   int nprim_j = c_bpcache.primitive_functions_offsets[jsh + 1]
                 - c_bpcache.primitive_functions_offsets[jsh];
-
-  int di = c_envs.stride_ijmax;
-  int dj = c_envs.stride_ijmin;
 
   double * __restrict__ exponent_i =
       c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
@@ -1047,12 +1050,15 @@ static void GINTint2e_jk_kernel_nabla1i(JKMatrix jk, BasisProdOffsets offsets) {
     as_lsh = ksh;
   }
   if (vk == NULL) {
+    
+    if(vj == NULL) {
+      return; 
+    }
+
     if (nfij > (GPU_CART_MAX * 2 + 1) / 2 / n_dm) {
       double * __restrict__ buf_ij = gout;
       memset(buf_ij, 0, 6 * nfij * n_dm * sizeof(double));
 
-      double * __restrict__ p_buf_ij = buf_ij;
-
       for (ij = prim_ij; ij < prim_ij + nprim_ij; ++ij) {
         double ai = exponent_i[(ij - prim_ij) / nprim_j];
         double aj = exponent_j[(ij - prim_ij) % nprim_j];
@@ -1068,98 +1074,645 @@ static void GINTint2e_jk_kernel_nabla1i(JKMatrix jk, BasisProdOffsets offsets) {
                     GINTgout2e_nabla1i_per_function<NROOTS>(g, ai, aj, f,
                                                             &s_ix, &s_iy, &s_iz,
                                                             &s_jx, &s_jy, &s_jz);
-                    p_buf_ij[n] += s_ix * d_kl;
-                    p_buf_ij[n + nfij] += s_iy * d_kl;
-                    p_buf_ij[n + 2 * nfij] += s_iz * d_kl;
-                    p_buf_ij[n + 3 * nfij] += s_jx * d_kl;
-                    p_buf_ij[n + 4 * nfij] += s_jy * d_kl;
-                    p_buf_ij[n + 5 * nfij] += s_jz * d_kl;
+                    buf_ij[n] += s_ix * d_kl;
+                    buf_ij[n + nfij] += s_iy * d_kl;
+                    buf_ij[n + 2 * nfij] += s_iz * d_kl;
+                    buf_ij[n + 3 * nfij] += s_jx * d_kl;
+                    buf_ij[n + 4 * nfij] += s_jy * d_kl;
+                    buf_ij[n + 5 * nfij] += s_jz * d_kl;
                   }
                 }
               }
             }
             dm += nao2;
-            p_buf_ij += 6 * nfij;
+            buf_ij += 6 * nfij;
           }
           uw += NROOTS * 2;
         }
       }
 
-      p_buf_ij = buf_ij;
+      buf_ij = gout;
       for (i_dm = 0; i_dm < n_dm; ++i_dm) {
         for (n = 0, j = j0; j < j1; ++j) {
           for (i = i0; i < i1; ++i, ++n) {
-            atomicAdd(vj + i + nao * j, p_buf_ij[n]);
-            atomicAdd(vj + i + nao * j + nao2, p_buf_ij[n + nfij]);
-            atomicAdd(vj + i + nao * j + 2 * nao2, p_buf_ij[n + 2 * nfij]);
-            atomicAdd(vj + j + nao * i, p_buf_ij[n + 3 * nfij]);
-            atomicAdd(vj + j + nao * i + nao2, p_buf_ij[n + 4 * nfij]);
-            atomicAdd(vj + j + nao * i + 2 * nao2, p_buf_ij[n + 5 * nfij]);
+            atomicAdd(vj + i + nao * j, buf_ij[n]);
+            atomicAdd(vj + i + nao * j + nao2, buf_ij[n + nfij]);
+            atomicAdd(vj + i + nao * j + 2 * nao2, buf_ij[n + 2 * nfij]);
+            atomicAdd(vj + j + nao * i, buf_ij[n + 3 * nfij]);
+            atomicAdd(vj + j + nao * i + nao2, buf_ij[n + 4 * nfij]);
+            atomicAdd(vj + j + nao * i + 2 * nao2, buf_ij[n + 5 * nfij]);
           }
         }
         vj += 3 * nao2;
-        p_buf_ij += 6 * nfij;
+        buf_ij += 6 * nfij;
       }
     } else {
+//
+//      extern __shared__ double _buf[];
+//
+//      for (ip = 0; ip < 6 * nfij * n_dm; ++ip) {
+//        _buf[ip * THREADS + task_id] = 0;
+//      }
+//
+//
+//      double * __restrict__ buf_ij = _buf;
+//
+//      for (ij = prim_ij; ij < prim_ij + nprim_ij; ++ij) {
+//        double ai = exponent_i[(ij - prim_ij) / nprim_j];
+//        double aj = exponent_j[(ij - prim_ij) % nprim_j];
+//        for (kl = prim_kl; kl < prim_kl + nprim_kl; ++kl) {
+//          GINTg0_2e_2d4d<NROOTS>(g, uw, norm,
+//                                 as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+//          for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+//            for (f = 0, l = l0; l < l1; ++l) {
+//              for (k = k0; k < k1; ++k) {
+//                d_kl = dm[k + nao * l];
+//                for (n = 0, j = j0; j < j1; ++j) {
+//                  for (i = i0; i < i1; ++i, ++n) {
+//                    GINTgout2e_nabla1i_per_function<NROOTS>(g, ai, aj, f,
+//                                                            &s_ix, &s_iy, &s_iz,
+//                                                            &s_jx, &s_jy, &s_jz);
+//                    buf_ij[n * THREADS + task_id] += s_ix * d_kl;
+//                    buf_ij[(n + nfij) * THREADS + task_id] += s_iy * d_kl;
+//                    buf_ij[(n + 2 * nfij) * THREADS + task_id] += s_iz * d_kl;
+//                    buf_ij[(n + 3 * nfij) * THREADS + task_id] += s_jx * d_kl;
+//                    buf_ij[(n + 4 * nfij) * THREADS + task_id] += s_jy * d_kl;
+//                    buf_ij[(n + 5 * nfij) * THREADS + task_id] += s_jz * d_kl;
+//                  }
+//                }
+//              }
+//            }
+//            dm += nao2;
+//            buf_ij += 6 * nfij * THREADS;
+//          }
+//          uw += NROOTS * 2;
+//        }
+//      }
+//
+//      buf_ij = _buf;
+//      for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+//        for (n = 0, j = j0; j < j1; ++j) {
+//          for (i = i0; i < i1; ++i, ++n) {
+//            atomicAdd(vj + i + nao * j, buf_ij[n * THREADS + task_id]);
+//            atomicAdd(vj + i + nao * j + nao2,
+//              buf_ij[(n + nfij) * THREADS + task_id]);
+//            atomicAdd(vj + i + nao * j + 2 * nao2,
+//              buf_ij[(n + 2 * nfij) * THREADS + task_id]);
+//            atomicAdd(vj + j + nao * i,
+//              buf_ij[(n + 3 * nfij) * THREADS + task_id]);
+//            atomicAdd(vj + j + nao * i + nao2,
+//              buf_ij[(n + 4 * nfij) * THREADS + task_id]);
+//            atomicAdd(vj + j + nao * i + 2 * nao2,
+//              buf_ij[(n + 5 * nfij) * THREADS + task_id]);
+//          }
+//        }
+//        vj += 3 * nao2;
+//        buf_ij += 6 * nfij * THREADS;
+//      }
+    }
+  } else { // vk != NULL
 
-      for (ip = 0; ip < 6 * nfij * n_dm; ++ip) {
-        _buf[ip * THREADS + task_id] = 0;
-      }
+    double * __restrict__ p_buf_ik;
+    double * __restrict__ p_buf_jk;
+    double * __restrict__ p_buf_il;
+    double * __restrict__ p_buf_jl;
+    double * __restrict__ p_buf_ij;
 
-      double * __restrict__ p_buf_ij = _buf;
+    if(vj != NULL) {
+      double * __restrict__ buf_ik = gout;
+      double * __restrict__ buf_jk = buf_ik + 3 * nfik * n_dm;
+      double * __restrict__ buf_il = buf_jk + 3 * nfjk * n_dm;
+      double * __restrict__ buf_jl = buf_il + 3 * nfil * n_dm;
+      if(nfij > (GPU_CART_MAX * 2 + 1) / 2 / n_dm) {
+        double * __restrict__ buf_ij = buf_jl + 3 * nfjl * n_dm;
+        memset(gout, 0, 
+          (3 * nfik + 3 * nfjk + 3 * nfil + 3 * nfjl + 6 * nfij) * n_dm * sizeof(double));
 
-      for (ij = prim_ij; ij < prim_ij + nprim_ij; ++ij) {
-        double ai = exponent_i[(ij - prim_ij) / nprim_j];
-        double aj = exponent_j[(ij - prim_ij) % nprim_j];
-        for (kl = prim_kl; kl < prim_kl + nprim_kl; ++kl) {
-          GINTg0_2e_2d4d<NROOTS>(g, uw, norm,
-                                 as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-          for (i_dm = 0; i_dm < n_dm; ++i_dm) {
-            for (f = 0, l = l0; l < l1; ++l) {
-              for (k = k0; k < k1; ++k) {
-                d_kl = dm[k + nao * l];
-                for (n = 0, j = j0; j < j1; ++j) {
-                  for (i = i0; i < i1; ++i, ++n) {
-                    GINTgout2e_nabla1i_per_function<NROOTS>(g, ai, aj, f,
-                                                            &s_ix, &s_iy, &s_iz,
-                                                            &s_jx, &s_jy, &s_jz);
-                    p_buf_ij[n * THREADS + task_id] += s_ix * d_kl;
-                    p_buf_ij[(n + nfij) * THREADS + task_id] += s_iy * d_kl;
-                    p_buf_ij[(n + 2 * nfij) * THREADS + task_id] += s_iz * d_kl;
-                    p_buf_ij[(n + 3 * nfij) * THREADS + task_id] += s_jx * d_kl;
-                    p_buf_ij[(n + 4 * nfij) * THREADS + task_id] += s_jy * d_kl;
-                    p_buf_ij[(n + 5 * nfij) * THREADS + task_id] += s_jz * d_kl;
+        for (ij = prim_ij; ij < prim_ij + nprim_ij; ++ij) {
+          double ai = exponent_i[(ij - prim_ij) / nprim_j];
+          double aj = exponent_j[(ij - prim_ij) % nprim_j];
+          for (kl = prim_kl; kl < prim_kl + nprim_kl; ++kl) {
+            GINTg0_2e_2d4d<NROOTS>(g, uw, norm,
+                                  as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+            for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+              p_buf_il = buf_il + 3 * i_dm * nfil;
+              p_buf_jl = buf_jl + 3 * i_dm * nfjl;
+              for (f = 0, l = l0; l < l1; ++l) {
+                p_buf_ik = buf_ik + i_dm * nfik;
+                p_buf_jk = buf_jk + i_dm * nfjk;
+                for (k = k0; k < k1; ++k) {
+                  d_kl = dm[k + nao * l];
+                  for (jp = 0, n = 0, j = j0; j < j1; ++j, ++jp) {
+                    d_jl = dm[j + nao * l];
+                    d_jk = dm[j + nao * k];
+
+                    v_jl_x = 0;
+                    v_jl_y = 0;
+                    v_jl_z = 0;
+                    v_jk_x = 0;
+                    v_jk_y = 0;
+                    v_jk_z = 0;
+
+                    for (ip = 0, i = i0; i < i1; ++i, ++n, ++ip) {
+                      d_il = dm[i + nao * l];
+                      d_ik = dm[i + nao * k];
+                      
+                      GINTgout2e_nabla1i_per_function<NROOTS>(g, ai, aj, f,
+                                                              &s_ix, &s_iy, &s_iz,
+                                                              &s_jx, &s_jy, &s_jz);
+                      p_buf_ij[n] += s_ix * d_kl;
+                      p_buf_ij[n + nfij] += s_iy * d_kl;
+                      p_buf_ij[n + 2 * nfij] += s_iz * d_kl;
+                      p_buf_ij[n + 3 * nfij] += s_jx * d_kl;
+                      p_buf_ij[n + 4 * nfij] += s_jy * d_kl;
+                      p_buf_ij[n + 5 * nfij] += s_jz * d_kl;
+
+                      p_buf_ik[ip] += s_ix * d_jl;
+                      p_buf_ik[ip + nfik] += s_iy * d_jl;
+                      p_buf_ik[ip + 2 * nfik] += s_iz * d_jl;
+
+                      p_buf_il[ip] += s_ix * d_jk;
+                      p_buf_il[ip + nfil] += s_iy * d_jk;
+                      p_buf_il[ip + 2 * nfil] += s_iz * d_jk;
+
+                      v_jl_x += s_jx * d_ik;
+                      v_jl_y += s_jy * d_ik;
+                      v_jl_z += s_jz * d_ik;
+
+                      v_jk_x += s_jx * d_il;
+                      v_jk_y += s_jy * d_il;
+                      v_jk_z += s_jz * d_il;
+                    }
+
+                    p_buf_jl[jp] += v_jl_x;
+                    p_buf_jl[jp + nfjl] += v_jl_y;
+                    p_buf_jl[jp + 2 * nfjl] += v_jl_z;
+
+                    p_buf_jk[jp] += v_jk_x;
+                    p_buf_jk[jp + nfjk] += v_jk_y;
+                    p_buf_jk[jp + 2 * nfjk] += v_jk_z;
                   }
+
+                  p_buf_jk += nfj;
+                  p_buf_ik += nfi;
                 }
+
+                p_buf_il += nfi;
+                p_buf_jl += nfj;
               }
+              dm += nao2;
+              p_buf_ij += 6 * nfij;
             }
-            dm += nao2;
-            p_buf_ij += 6 * nfij * THREADS;
+            uw += NROOTS * 2;
           }
-          uw += NROOTS * 2;
+        }
+
+        p_buf_il = buf_il;
+        p_buf_jl = buf_jl;
+        p_buf_ik = buf_ik;
+        p_buf_jk = buf_jk;
+        p_buf_ij = buf_ij;
+        for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+          for (n = 0, j = j0; j < j1; ++j) {
+            for (i = i0; i < i1; ++i, ++n) {
+              atomicAdd(vj + i + nao * j, p_buf_ij[n]);
+              atomicAdd(vj + i + nao * j + nao2, p_buf_ij[n + nfij]);
+              atomicAdd(vj + i + nao * j + 2 * nao2, p_buf_ij[n + 2 * nfij]);
+              atomicAdd(vj + j + nao * i, p_buf_ij[n + 3 * nfij]);
+              atomicAdd(vj + j + nao * i + nao2, p_buf_ij[n + 4 * nfij]);
+              atomicAdd(vj + j + nao * i + 2 * nao2, p_buf_ij[n + 5 * nfij]);
+            }
+          }
+
+          for (ip = 0, jp = 0, k = k0; k < k1; ++k) {
+            for (i = i0; i < i1; ++i, ++ip) {
+              atomicAdd(vk + i + nao * k, p_buf_ik[ip]);
+              atomicAdd(vk + i + nao * k + nao2, p_buf_ik[ip + nfik]);
+              atomicAdd(vk + i + nao * k + 2 * nao2, p_buf_ik[ip + 2 * nfik]);
+            }
+
+            for (j = j0; j < j1; ++j, ++jp) {
+              atomicAdd(vk + i + nao * k, p_buf_jk[jp]);
+              atomicAdd(vk + i + nao * k + nao2, p_buf_jk[jp + nfjk]);
+              atomicAdd(vk + i + nao * k + 2 * nao2, p_buf_jk[jp + 2 * nfjk]);
+            }
+          }
+
+          for (ip = 0, n = 0, l = l0; l < l1; ++l) {
+            for (i = i0; i < i1; ++i, ++ip) {
+              atomicAdd(vk + i + nao * l, p_buf_il[ip]);
+              atomicAdd(vk + i + nao * l + nao2, p_buf_il[ip + nfil]);
+              atomicAdd(vk + i + nao * l + 2 * nao2, p_buf_il[ip + 2 * nfil]);
+            }
+
+            for (j = j0; j < j1; ++j, ++jp) {
+              atomicAdd(vk + j + nao * l, p_buf_jl[jp]);
+              atomicAdd(vk + j + nao * l + nao2, p_buf_jl[jp + nfjl]);
+              atomicAdd(vk + j + nao * l + 2 * nao2, p_buf_jl[jp + 2 * nfjl]);
+            }
+          }
+
+          vj += 3 * nao2;
+          vk += 3 * nao2;
+          p_buf_il += 3 * nfil;
+          p_buf_jl += 3 * nfjl;
+          p_buf_ik += 3 * nfik;
+          p_buf_jk += 3 * nfjk;
+          p_buf_ij += 6 * nfij;
+        }
+      } else {
+        extern __shared__ double buf_ij[];
+
+        memset(gout, 0,
+               (3 * nfik + 3 * nfjk + 3 * nfil + 3 * nfjl) * n_dm * sizeof(double));
+
+
+        double * __restrict__ p_buf_ij = buf_ij;
+
+        for (ip = 0; ip < 6 * nfij * n_dm; ++ip) {
+          buf_ij[ip * THREADS + task_id] = 0;
+        }
+
+        for (ij = prim_ij; ij < prim_ij + nprim_ij; ++ij) {
+          double ai = exponent_i[(ij - prim_ij) / nprim_j];
+          double aj = exponent_j[(ij - prim_ij) % nprim_j];
+          for (kl = prim_kl; kl < prim_kl + nprim_kl; ++kl) {
+            GINTg0_2e_2d4d<NROOTS>(g, uw, norm,
+                                   as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+            for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+              p_buf_il = buf_il + 3 * i_dm * nfil;
+              p_buf_jl = buf_jl + 3 * i_dm * nfjl;
+              for (f = 0, l = l0; l < l1; ++l) {
+                p_buf_ik = buf_ik + i_dm * nfik;
+                p_buf_jk = buf_jk + i_dm * nfjk;
+                for (k = k0; k < k1; ++k) {
+                  d_kl = dm[k + nao * l];
+                  for (jp = 0, n = 0, j = j0; j < j1; ++j, ++jp) {
+                    d_jl = dm[j + nao * l];
+                    d_jk = dm[j + nao * k];
+
+                    v_jl_x = 0;
+                    v_jl_y = 0;
+                    v_jl_z = 0;
+                    v_jk_x = 0;
+                    v_jk_y = 0;
+                    v_jk_z = 0;
+
+                    for (ip = 0, i = i0; i < i1; ++i, ++n, ++ip) {
+                      d_il = dm[i + nao * l];
+                      d_ik = dm[i + nao * k];
+
+                      GINTgout2e_nabla1i_per_function<NROOTS>(g, ai, aj, f,
+                                                              &s_ix, &s_iy, &s_iz,
+                                                              &s_jx, &s_jy, &s_jz);
+                      p_buf_ij[n * THREADS + task_id] += s_ix * d_kl;
+                      p_buf_ij[(n + nfij) * THREADS + task_id] += s_iy * d_kl;
+                      p_buf_ij[(n + 2 * nfij) * THREADS + task_id] += s_iz * d_kl;
+                      p_buf_ij[(n + 3 * nfij) * THREADS + task_id] += s_jx * d_kl;
+                      p_buf_ij[(n + 4 * nfij) * THREADS + task_id] += s_jy * d_kl;
+                      p_buf_ij[(n + 5 * nfij) * THREADS + task_id] += s_jz * d_kl;
+
+                      p_buf_ik[ip] += s_ix * d_jl;
+                      p_buf_ik[ip + nfik] += s_iy * d_jl;
+                      p_buf_ik[ip + 2 * nfik] += s_iz * d_jl;
+
+                      p_buf_il[ip] += s_ix * d_jk;
+                      p_buf_il[ip + nfil] += s_iy * d_jk;
+                      p_buf_il[ip + 2 * nfil] += s_iz * d_jk;
+
+                      v_jl_x += s_jx * d_ik;
+                      v_jl_y += s_jy * d_ik;
+                      v_jl_z += s_jz * d_ik;
+
+                      v_jk_x += s_jx * d_il;
+                      v_jk_y += s_jy * d_il;
+                      v_jk_z += s_jz * d_il;
+                    }
+
+                    p_buf_jl[jp] += v_jl_x;
+                    p_buf_jl[jp + nfjl] += v_jl_y;
+                    p_buf_jl[jp + 2 * nfjl] += v_jl_z;
+
+                    p_buf_jk[jp] += v_jk_x;
+                    p_buf_jk[jp + nfjk] += v_jk_y;
+                    p_buf_jk[jp + 2 * nfjk] += v_jk_z;
+                  }
+
+                  p_buf_jk += nfj;
+                  p_buf_ik += nfi;
+                }
+
+                p_buf_il += nfi;
+                p_buf_jl += nfj;
+              }
+              dm += nao2;
+              p_buf_ij += 6 * nfij * THREADS;
+            }
+            uw += NROOTS * 2;
+          }
+        }
+
+        p_buf_il = buf_il;
+        p_buf_jl = buf_jl;
+        p_buf_ik = buf_ik;
+        p_buf_jk = buf_jk;
+        p_buf_ij = buf_ij;
+        for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+          for (n = 0, j = j0; j < j1; ++j) {
+            for (i = i0; i < i1; ++i, ++n) {
+              atomicAdd(vj + i + nao * j, p_buf_ij[n]);
+              atomicAdd(vj + i + nao * j + nao2, p_buf_ij[n + nfij]);
+              atomicAdd(vj + i + nao * j + 2 * nao2, p_buf_ij[n + 2 * nfij]);
+              atomicAdd(vj + j + nao * i, p_buf_ij[n + 3 * nfij]);
+              atomicAdd(vj + j + nao * i + nao2, p_buf_ij[n + 4 * nfij]);
+              atomicAdd(vj + j + nao * i + 2 * nao2, p_buf_ij[n + 5 * nfij]);
+            }
+          }
+
+          for (ip = 0, jp = 0, k = k0; k < k1; ++k) {
+            for (i = i0; i < i1; ++i, ++ip) {
+              atomicAdd(vk + i + nao * k, p_buf_ik[ip]);
+              atomicAdd(vk + i + nao * k + nao2, p_buf_ik[ip + nfik]);
+              atomicAdd(vk + i + nao * k + 2 * nao2, p_buf_ik[ip + 2 * nfik]);
+            }
+
+            for (j = j0; j < j1; ++j, ++jp) {
+              atomicAdd(vk + i + nao * k, p_buf_jk[jp]);
+              atomicAdd(vk + i + nao * k + nao2, p_buf_jk[jp + nfjk]);
+              atomicAdd(vk + i + nao * k + 2 * nao2, p_buf_jk[jp + 2 * nfjk]);
+            }
+          }
+
+          for (ip = 0, n = 0, l = l0; l < l1; ++l) {
+            for (i = i0; i < i1; ++i, ++ip) {
+              atomicAdd(vk + i + nao * l, p_buf_il[ip]);
+              atomicAdd(vk + i + nao * l + nao2, p_buf_il[ip + nfil]);
+              atomicAdd(vk + i + nao * l + 2 * nao2, p_buf_il[ip + 2 * nfil]);
+            }
+
+            for (j = j0; j < j1; ++j, ++jp) {
+              atomicAdd(vk + j + nao * l, p_buf_jl[jp]);
+              atomicAdd(vk + j + nao * l + nao2, p_buf_jl[jp + nfjl]);
+              atomicAdd(vk + j + nao * l + 2 * nao2, p_buf_jl[jp + 2 * nfjl]);
+            }
+          }
+
+          vj += 3 * nao2;
+          vk += 3 * nao2;
+          p_buf_il += 3 * nfil;
+          p_buf_jl += 3 * nfjl;
+          p_buf_ik += 3 * nfik;
+          p_buf_jk += 3 * nfjk;
+          p_buf_ij += 6 * nfij * THREADS;
+        }
+      }
+      
+      } else { // only vk required
+      if(nfik + nfil > (GPU_CART_MAX * 2 + 1) / n_dm) {
+
+        double * __restrict__ buf_ik = gout;
+        double * __restrict__ buf_jk = buf_ik + 3 * nfik * n_dm;
+        double * __restrict__ buf_il = buf_jk + 3 * nfjk * n_dm;
+        double * __restrict__ buf_jl = buf_il + 3 * nfil * n_dm;
+
+        memset(gout, 0,
+               (3 * nfik + 3 * nfjk + 3 * nfil + 3 * nfjl) * n_dm * sizeof(double));
+
+        for (ij = prim_ij; ij < prim_ij + nprim_ij; ++ij) {
+          double ai = exponent_i[(ij - prim_ij) / nprim_j];
+          double aj = exponent_j[(ij - prim_ij) % nprim_j];
+          for (kl = prim_kl; kl < prim_kl + nprim_kl; ++kl) {
+            GINTg0_2e_2d4d<NROOTS>(g, uw, norm,
+                                   as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+            for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+              p_buf_il = buf_il + 3 * i_dm * nfil;
+              p_buf_jl = buf_jl + 3 * i_dm * nfjl;
+              for (f = 0, l = l0; l < l1; ++l) {
+                p_buf_ik = buf_ik + i_dm * nfik;
+                p_buf_jk = buf_jk + i_dm * nfjk;
+                for (k = k0; k < k1; ++k) {
+                  for (jp = 0, j = j0; j < j1; ++j, ++jp) {
+                    d_jl = dm[j + nao * l];
+                    d_jk = dm[j + nao * k];
+
+                    v_jl_x = 0;
+                    v_jl_y = 0;
+                    v_jl_z = 0;
+                    v_jk_x = 0;
+                    v_jk_y = 0;
+                    v_jk_z = 0;
+
+                    for (ip = 0, i = i0; i < i1; ++i, ++ip) {
+                      d_il = dm[i + nao * l];
+                      d_ik = dm[i + nao * k];
+
+                      GINTgout2e_nabla1i_per_function<NROOTS>(g, ai, aj, f,
+                                                              &s_ix, &s_iy, &s_iz,
+                                                              &s_jx, &s_jy, &s_jz);
+
+                      p_buf_ik[ip] += s_ix * d_jl;
+                      p_buf_ik[ip + nfik] += s_iy * d_jl;
+                      p_buf_ik[ip + 2 * nfik] += s_iz * d_jl;
+
+                      p_buf_il[ip] += s_ix * d_jk;
+                      p_buf_il[ip + nfil] += s_iy * d_jk;
+                      p_buf_il[ip + 2 * nfil] += s_iz * d_jk;
+
+                      v_jl_x += s_jx * d_ik;
+                      v_jl_y += s_jy * d_ik;
+                      v_jl_z += s_jz * d_ik;
+
+                      v_jk_x += s_jx * d_il;
+                      v_jk_y += s_jy * d_il;
+                      v_jk_z += s_jz * d_il;
+                    }
+
+                    p_buf_jl[jp] += v_jl_x;
+                    p_buf_jl[jp + nfjl] += v_jl_y;
+                    p_buf_jl[jp + 2 * nfjl] += v_jl_z;
+
+                    p_buf_jk[jp] += v_jk_x;
+                    p_buf_jk[jp + nfjk] += v_jk_y;
+                    p_buf_jk[jp + 2 * nfjk] += v_jk_z;
+                  }
+
+                  p_buf_jk += nfj;
+                  p_buf_ik += nfi;
+                }
+
+                p_buf_il += nfi;
+                p_buf_jl += nfj;
+              }
+              dm += nao2;
+            }
+            uw += NROOTS * 2;
+          }
+        }
+
+        p_buf_il = buf_il;
+        p_buf_jl = buf_jl;
+        p_buf_ik = buf_ik;
+        p_buf_jk = buf_jk;
+        for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+
+          for (ip = 0, jp = 0, k = k0; k < k1; ++k) {
+            for (i = i0; i < i1; ++i, ++ip) {
+              atomicAdd(vk + i + nao * k, p_buf_ik[ip]);
+              atomicAdd(vk + i + nao * k + nao2, p_buf_ik[ip + nfik]);
+              atomicAdd(vk + i + nao * k + 2 * nao2, p_buf_ik[ip + 2 * nfik]);
+            }
+
+            for (j = j0; j < j1; ++j, ++jp) {
+              atomicAdd(vk + i + nao * k, p_buf_jk[jp]);
+              atomicAdd(vk + i + nao * k + nao2, p_buf_jk[jp + nfjk]);
+              atomicAdd(vk + i + nao * k + 2 * nao2, p_buf_jk[jp + 2 * nfjk]);
+            }
+          }
+
+          for (ip = 0, n = 0, l = l0; l < l1; ++l) {
+            for (i = i0; i < i1; ++i, ++ip) {
+              atomicAdd(vk + i + nao * l, p_buf_il[ip]);
+              atomicAdd(vk + i + nao * l + nao2, p_buf_il[ip + nfil]);
+              atomicAdd(vk + i + nao * l + 2 * nao2, p_buf_il[ip + 2 * nfil]);
+            }
+
+            for (j = j0; j < j1; ++j, ++jp) {
+              atomicAdd(vk + j + nao * l, p_buf_jl[jp]);
+              atomicAdd(vk + j + nao * l + nao2, p_buf_jl[jp + nfjl]);
+              atomicAdd(vk + j + nao * l + 2 * nao2, p_buf_jl[jp + 2 * nfjl]);
+            }
+          }
+          vk += 3 * nao2;
+          p_buf_il += 3 * nfil;
+          p_buf_jl += 3 * nfjl;
+          p_buf_ik += 3 * nfik;
+          p_buf_jk += 3 * nfjk;
+        }
+      } else {
+        extern __shared__ double buf_ik[];
+        double * __restrict__ buf_il = buf_ik + 3 * nfik * n_dm * THREADS;
+        double * __restrict__ buf_jk = gout;
+        double * __restrict__ buf_jl = gout + 3 * nfjk * n_dm;
+
+        memset(gout, 0, (3 * nfjk + 3 * nfjl) * n_dm * sizeof(double));
+
+        for (ip = 0; ip < 3 * (nfik + nfil) * n_dm; ++ip) {
+          buf_ik[ip * THREADS + task_id] = 0;
+        }
+
+        for (ij = prim_ij; ij < prim_ij + nprim_ij; ++ij) {
+          double ai = exponent_i[(ij - prim_ij) / nprim_j];
+          double aj = exponent_j[(ij - prim_ij) % nprim_j];
+          for (kl = prim_kl; kl < prim_kl + nprim_kl; ++kl) {
+            GINTg0_2e_2d4d<NROOTS>(g, uw, norm,
+                                   as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+            for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+              p_buf_il = buf_il + 3 * i_dm * nfil * THREADS;
+              p_buf_jl = buf_jl + 3 * i_dm * nfjl;
+              for (f = 0, l = l0; l < l1; ++l) {
+                p_buf_ik = buf_ik + i_dm * nfik * THREADS;
+                p_buf_jk = buf_jk + i_dm * nfjk;
+                for (k = k0; k < k1; ++k) {
+                  for (jp = 0, n = 0, j = j0; j < j1; ++j, ++jp) {
+                    d_jl = dm[j + nao * l];
+                    d_jk = dm[j + nao * k];
+
+                    v_jl_x = 0;
+                    v_jl_y = 0;
+                    v_jl_z = 0;
+                    v_jk_x = 0;
+                    v_jk_y = 0;
+                    v_jk_z = 0;
+
+                    for (ip = 0, i = i0; i < i1; ++i, ++n, ++ip) {
+                      d_il = dm[i + nao * l];
+                      d_ik = dm[i + nao * k];
+
+                      GINTgout2e_nabla1i_per_function<NROOTS>(g, ai, aj, f,
+                                                              &s_ix, &s_iy, &s_iz,
+                                                              &s_jx, &s_jy, &s_jz);
+
+                      p_buf_ik[ip * THREADS + task_id] += s_ix * d_jl;
+                      p_buf_ik[(ip + nfik) * THREADS + task_id] += s_iy * d_jl;
+                      p_buf_ik[(ip + 2 * nfik) * THREADS + task_id] += s_iz * d_jl;
+
+                      p_buf_il[ip * THREADS + task_id] += s_ix * d_jk;
+                      p_buf_il[(ip + nfil) * THREADS + task_id] += s_iy * d_jk;
+                      p_buf_il[(ip + 2 * nfil) * THREADS + task_id] += s_iz * d_jk;
+
+                      v_jl_x += s_jx * d_ik;
+                      v_jl_y += s_jy * d_ik;
+                      v_jl_z += s_jz * d_ik;
+
+                      v_jk_x += s_jx * d_il;
+                      v_jk_y += s_jy * d_il;
+                      v_jk_z += s_jz * d_il;
+                    }
+
+                    p_buf_jl[jp] += v_jl_x;
+                    p_buf_jl[jp + nfjl] += v_jl_y;
+                    p_buf_jl[jp + 2 * nfjl] += v_jl_z;
+
+                    p_buf_jk[jp] += v_jk_x;
+                    p_buf_jk[jp + nfjk] += v_jk_y;
+                    p_buf_jk[jp + 2 * nfjk] += v_jk_z;
+                  }
+
+                  p_buf_jk += nfj;
+                  p_buf_ik += nfi * THREADS;
+                }
+
+                p_buf_il += nfi * THREADS;
+                p_buf_jl += nfj;
+              }
+              dm += nao2;
+            }
+            uw += NROOTS * 2;
+          }
+        }
+
+        p_buf_il = buf_il;
+        p_buf_jl = buf_jl;
+        p_buf_ik = buf_ik;
+        p_buf_jk = buf_jk;
+        for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+
+          for (ip = 0, jp = 0, k = k0; k < k1; ++k) {
+            for (i = i0; i < i1; ++i, ++ip) {
+              atomicAdd(vk + i + nao * k, p_buf_ik[ip * THREADS + task_id]);
+              atomicAdd(vk + i + nao * k + nao2, p_buf_ik[(ip + nfik) * THREADS + task_id]);
+              atomicAdd(vk + i + nao * k + 2 * nao2, p_buf_ik[(ip + 2 * nfik) * THREADS + task_id]);
+            }
+
+            for (j = j0; j < j1; ++j, ++jp) {
+              atomicAdd(vk + i + nao * k, p_buf_jk[jp]);
+              atomicAdd(vk + i + nao * k + nao2, p_buf_jk[jp + nfjk]);
+              atomicAdd(vk + i + nao * k + 2 * nao2, p_buf_jk[jp + 2 * nfjk]);
+            }
+          }
+
+          for (ip = 0, n = 0, l = l0; l < l1; ++l) {
+            for (i = i0; i < i1; ++i, ++ip) {
+              atomicAdd(vk + i + nao * l, p_buf_il[ip * THREADS + task_id]);
+              atomicAdd(vk + i + nao * l + nao2, p_buf_il[(ip + nfil) * THREADS + task_id]);
+              atomicAdd(vk + i + nao * l + 2 * nao2, p_buf_il[(ip + 2 * nfil) * THREADS + task_id]);
+            }
+
+            for (j = j0; j < j1; ++j, ++jp) {
+              atomicAdd(vk + j + nao * l, p_buf_jl[jp]);
+              atomicAdd(vk + j + nao * l + nao2, p_buf_jl[jp + nfjl]);
+              atomicAdd(vk + j + nao * l + 2 * nao2, p_buf_jl[jp + 2 * nfjl]);
+            }
+          }
+
+          vk += 3 * nao2;
+          p_buf_il += 3 * nfil * THREADS;
+          p_buf_jl += 3 * nfjl;
+          p_buf_ik += 3 * nfik * THREADS;
+          p_buf_jk += 3 * nfjk;
         }
       }
 
-      p_buf_ij = _buf;
-      for (i_dm = 0; i_dm < n_dm; ++i_dm) {
-        for (n = 0, j = j0; j < j1; ++j) {
-          for (i = i0; i < i1; ++i, ++n) {
-            atomicAdd(vj + i + nao * j, p_buf_ij[n * THREADS + task_id]);
-            atomicAdd(vj + i + nao * j + nao2,
-                      p_buf_ij[(n + nfij) * THREADS + task_id]);
-            atomicAdd(vj + i + nao * j + 2 * nao2,
-                      p_buf_ij[(n + 2 * nfij) * THREADS + task_id]);
-            atomicAdd(vj + j + nao * i,
-                      p_buf_ij[(n + 3 * nfij) * THREADS + task_id]);
-            atomicAdd(vj + j + nao * i + nao2,
-                      p_buf_ij[(n + 4 * nfij) * THREADS + task_id]);
-            atomicAdd(vj + j + nao * i + 2 * nao2,
-                      p_buf_ij[(n + 5 * nfij) * THREADS + task_id]);
-          }
-        }
-        vj += 3 * nao2;
-        p_buf_ij += 6 * nfij * THREADS;
-      }
     }
   }
 
