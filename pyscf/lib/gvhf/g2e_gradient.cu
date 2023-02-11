@@ -1018,11 +1018,11 @@ static void GINTint2e_jk_kernel_nabla1i(JKMatrix jk, BasisProdOffsets offsets) {
   double * dm = jk.dm;
   double s_ix, s_iy, s_iz, s_jx, s_jy, s_jz;
 
-  double * uw = c_envs.uw +
+  double * __restrict__ uw = c_envs.uw +
                 (task_ij + ntasks_ij * task_kl) * nprim_ij * nprim_kl * NROOTS *
                 2;
   double gout[GOUTSIZE];
-  double * g =
+  double * __restrict__ g =
       gout + (3 * nfik + 3 * nfjk + 3 * nfil + 3 * nfjl + 6 * nfij) * n_dm;
 
   int nprim_j = c_bpcache.primitive_functions_offsets[jsh + 1]
@@ -1057,7 +1057,7 @@ static void GINTint2e_jk_kernel_nabla1i(JKMatrix jk, BasisProdOffsets offsets) {
     }
 
     if (nfij > (GPU_CART_MAX * 2 + 1) / 2 / n_dm) {
-      double * buf_ij = gout;
+      double * __restrict__ buf_ij = gout;
       memset(buf_ij, 0, 6 * nfij * n_dm * sizeof(double));
 
 
