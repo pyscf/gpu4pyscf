@@ -173,7 +173,7 @@ static void GINTint2e_jk_kernel_nabla1i_0021(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -200,8 +200,8 @@ static void GINTint2e_jk_kernel_nabla1i_0021(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
-            
+            double tmp1 = 2 * B00;
+
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
             double C00y = yij - yi - tmp2 * yijykl;
@@ -796,7 +796,7 @@ static void GINTint2e_jk_kernel_nabla1i_0022(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -823,8 +823,8 @@ static void GINTint2e_jk_kernel_nabla1i_0022(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
-            
+            double tmp1 = 2 * B00;
+
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
             double C00y = yij - yi - tmp2 * yijykl;
@@ -1454,7 +1454,7 @@ static void GINTint2e_jk_kernel_nabla1i_0030(JKMatrix jk,
     double xk = bas_x[ksh];
     double yk = bas_y[ksh];
     double zk = bas_z[ksh];
-    
+
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
@@ -1464,7 +1464,7 @@ static void GINTint2e_jk_kernel_nabla1i_0030(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -1491,8 +1491,8 @@ static void GINTint2e_jk_kernel_nabla1i_0030(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
-            
+            double tmp1 = 2 * B00;
+
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
             double C00y = yij - yi - tmp2 * yijykl;
@@ -1983,7 +1983,7 @@ static void GINTint2e_jk_kernel_nabla1i_0031(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -2010,8 +2010,8 @@ static void GINTint2e_jk_kernel_nabla1i_0031(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
-            
+            double tmp1 = 2 * B00;
+
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
             double C00y = yij - yi - tmp2 * yijykl;
@@ -2713,7 +2713,7 @@ static void GINTint2e_jk_kernel_nabla1i_1011(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -2740,7 +2740,7 @@ static void GINTint2e_jk_kernel_nabla1i_1011(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
@@ -3303,7 +3303,7 @@ static void GINTint2e_jk_kernel_nabla1i_1020(JKMatrix jk,
     double xk = bas_x[ksh];
     double yk = bas_y[ksh];
     double zk = bas_z[ksh];
-    
+
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
@@ -3313,7 +3313,7 @@ static void GINTint2e_jk_kernel_nabla1i_1020(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -3340,7 +3340,7 @@ static void GINTint2e_jk_kernel_nabla1i_1020(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
@@ -4065,7 +4065,7 @@ static void GINTint2e_jk_kernel_nabla1i_1021(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -4092,7 +4092,7 @@ static void GINTint2e_jk_kernel_nabla1i_1021(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
@@ -5007,7 +5007,7 @@ static void GINTint2e_jk_kernel_nabla1i_1030(JKMatrix jk,
     double xk = bas_x[ksh];
     double yk = bas_y[ksh];
     double zk = bas_z[ksh];
-    
+
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
@@ -5017,7 +5017,7 @@ static void GINTint2e_jk_kernel_nabla1i_1030(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -5044,7 +5044,7 @@ static void GINTint2e_jk_kernel_nabla1i_1030(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
@@ -5768,7 +5768,7 @@ static void GINTint2e_jk_kernel_nabla1i_1110(JKMatrix jk,
     double xk = bas_x[ksh];
     double yk = bas_y[ksh];
     double zk = bas_z[ksh];
-    
+
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
@@ -5778,7 +5778,7 @@ static void GINTint2e_jk_kernel_nabla1i_1110(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -5805,13 +5805,13 @@ static void GINTint2e_jk_kernel_nabla1i_1110(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
             double C00y = yij - yi - tmp2 * yijykl;
             double C00z = zij - zi - tmp2 * zijzkl;
-            
+
             double tmp3 = tmp1 * aij;
             double D00x = xkl - xk + tmp3 * xijxkl;
             double D00y = ykl - yk + tmp3 * yijykl;
@@ -6765,7 +6765,7 @@ static void GINTint2e_jk_kernel_nabla1i_1111(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -6792,7 +6792,7 @@ static void GINTint2e_jk_kernel_nabla1i_1111(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
@@ -8046,7 +8046,7 @@ static void GINTint2e_jk_kernel_nabla1i_1120(JKMatrix jk,
     double xk = bas_x[ksh];
     double yk = bas_y[ksh];
     double zk = bas_z[ksh];
-    
+
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
@@ -8056,7 +8056,7 @@ static void GINTint2e_jk_kernel_nabla1i_1120(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -8083,7 +8083,7 @@ static void GINTint2e_jk_kernel_nabla1i_1120(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
@@ -8935,7 +8935,7 @@ static void GINTint2e_jk_kernel_nabla1i_2010(JKMatrix jk,
     double xk = bas_x[ksh];
     double yk = bas_y[ksh];
     double zk = bas_z[ksh];
-    
+
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
@@ -8945,7 +8945,7 @@ static void GINTint2e_jk_kernel_nabla1i_2010(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -8972,13 +8972,13 @@ static void GINTint2e_jk_kernel_nabla1i_2010(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
             double C00y = yij - yi - tmp2 * yijykl;
             double C00z = zij - zi - tmp2 * zijzkl;
-            
+
             double tmp3 = tmp1 * aij;
             double D00x = xkl - xk + tmp3 * xijxkl;
             double D00y = ykl - yk + tmp3 * yijykl;
@@ -9706,7 +9706,7 @@ static void GINTint2e_jk_kernel_nabla1i_2011(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -9733,7 +9733,7 @@ static void GINTint2e_jk_kernel_nabla1i_2011(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
@@ -10704,7 +10704,7 @@ static void GINTint2e_jk_kernel_nabla1i_2020(JKMatrix jk,
     double xk = bas_x[ksh];
     double yk = bas_y[ksh];
     double zk = bas_z[ksh];
-    
+
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
@@ -10714,7 +10714,7 @@ static void GINTint2e_jk_kernel_nabla1i_2020(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -10741,7 +10741,7 @@ static void GINTint2e_jk_kernel_nabla1i_2020(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
@@ -11481,8 +11481,8 @@ static void GINTint2e_jk_kernel_nabla1i_2100(JKMatrix jk,
     double ABx = xi - bas_x[jsh];
     double ABy = yi - bas_y[jsh];
     double ABz = zi - bas_z[jsh];
-    
-    
+
+
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
@@ -11492,7 +11492,7 @@ static void GINTint2e_jk_kernel_nabla1i_2100(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -11519,14 +11519,14 @@ static void GINTint2e_jk_kernel_nabla1i_2100(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
             double C00y = yij - yi - tmp2 * yijykl;
             double C00z = zij - zi - tmp2 * zijzkl;
-            
-            
+
+
 
             double g0 = B10+C00x*C00x;
             double g1 = 3*B10*C00x;
@@ -12260,7 +12260,7 @@ static void GINTint2e_jk_kernel_nabla1i_2110(JKMatrix jk,
     double xk = bas_x[ksh];
     double yk = bas_y[ksh];
     double zk = bas_z[ksh];
-    
+
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
@@ -12270,7 +12270,7 @@ static void GINTint2e_jk_kernel_nabla1i_2110(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -12297,13 +12297,13 @@ static void GINTint2e_jk_kernel_nabla1i_2110(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
             double C00y = yij - yi - tmp2 * yijykl;
             double C00z = zij - zi - tmp2 * zijzkl;
-            
+
             double tmp3 = tmp1 * aij;
             double D00x = xkl - xk + tmp3 * xijxkl;
             double D00y = ykl - yk + tmp3 * yijykl;
@@ -13271,8 +13271,8 @@ static void GINTint2e_jk_kernel_nabla1i_2200(JKMatrix jk,
     double ABx = xi - bas_x[jsh];
     double ABy = yi - bas_y[jsh];
     double ABz = zi - bas_z[jsh];
-    
-    
+
+
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
@@ -13282,7 +13282,7 @@ static void GINTint2e_jk_kernel_nabla1i_2200(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -13309,14 +13309,14 @@ static void GINTint2e_jk_kernel_nabla1i_2200(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
             double C00y = yij - yi - tmp2 * yijykl;
             double C00z = zij - zi - tmp2 * zijzkl;
-            
-            
+
+
 
             double g0 = B10+C00x*C00x;
             double g1 = 3*B10*C00x;
@@ -14047,8 +14047,8 @@ static void GINTint2e_jk_kernel_nabla1i_3000(JKMatrix jk,
     double ABx = xi - bas_x[jsh];
     double ABy = yi - bas_y[jsh];
     double ABz = zi - bas_z[jsh];
-    
-    
+
+
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
@@ -14058,7 +14058,7 @@ static void GINTint2e_jk_kernel_nabla1i_3000(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -14085,14 +14085,14 @@ static void GINTint2e_jk_kernel_nabla1i_3000(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
             double C00y = yij - yi - tmp2 * yijykl;
             double C00z = zij - zi - tmp2 * zijzkl;
-            
-            
+
+
 
             double g0 = B10+C00x*C00x;
             double g1 = 3*B10*C00x;
@@ -14595,7 +14595,7 @@ static void GINTint2e_jk_kernel_nabla1i_3010(JKMatrix jk,
     double xk = bas_x[ksh];
     double yk = bas_y[ksh];
     double zk = bas_z[ksh];
-    
+
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
@@ -14605,7 +14605,7 @@ static void GINTint2e_jk_kernel_nabla1i_3010(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -14632,13 +14632,13 @@ static void GINTint2e_jk_kernel_nabla1i_3010(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
             double C00y = yij - yi - tmp2 * yijykl;
             double C00z = zij - zi - tmp2 * zijzkl;
-            
+
             double tmp3 = tmp1 * aij;
             double D00x = xkl - xk + tmp3 * xijxkl;
             double D00y = ykl - yk + tmp3 * yijykl;
@@ -15393,8 +15393,8 @@ static void GINTint2e_jk_kernel_nabla1i_3100(JKMatrix jk,
     double ABx = xi - bas_x[jsh];
     double ABy = yi - bas_y[jsh];
     double ABz = zi - bas_z[jsh];
-    
-    
+
+
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
@@ -15404,7 +15404,7 @@ static void GINTint2e_jk_kernel_nabla1i_3100(JKMatrix jk,
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
         double alpha = exponent_i[(ij-prim_ij) / nprim_j];
         double beta = exponent_j[(ij-prim_ij) % nprim_j];
-		double aij = a12[ij];
+        double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
         double yij = y12[ij];
@@ -15431,14 +15431,14 @@ static void GINTint2e_jk_kernel_nabla1i_3100(JKMatrix jk,
             double u2 = a0 * root0;
             double tmp4 = .5 / (u2 * aijkl + a1);
             double B00 = u2 * tmp4;
-            double tmp1 = 2 * B00;    
+            double tmp1 = 2 * B00;
             double B10 = B00 + tmp4 * akl;
             double tmp2 = tmp1 * akl;
             double C00x = xij - xi - tmp2 * xijxkl;
             double C00y = yij - yi - tmp2 * yijykl;
             double C00z = zij - zi - tmp2 * zijzkl;
-            
-            
+
+
 
             double g0 = B10+C00x*C00x;
             double g1 = 3*B10*C00x;
