@@ -18,7 +18,7 @@
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_60")
 
 add_library(cupy_helper SHARED 
-  transpose.cu
+  transpose.cu pack.cu
 )
 
 set_target_properties(cupy_helper PROPERTIES

@@ -16,6 +16,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import ctypes
+import numpy as np
+import cupy
 from pyscf import lib
 
 libcupy_helper = lib.load_library('libcupy_helper')
@@ -41,3 +43,31 @@ def hermi_triu(mat, hermi=1, inplace=True):
         ctypes.cast(mat.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n), ctypes.c_int(counts))
     return mat
+
+@lib.with_doc(lib.unpack_tril)
+def unpack_tril(tril, filltriu=lib.HERMITIAN, axis=-1, out=None):
+    assert tril.flags.c_contiguous
+    assert tril.dtype == np.double
+    if tril.ndim == 1:
+        count, nd = 1, tril.size
+        nd = int((nd*2)**.5)
+        shape = (nd, nd)
+    elif tril.ndim == 2:
+        if axis == 0:
+            nd, count = tril.shape
+        else:
+            count, nd = tril.shape
+        nd = int((nd*2)**.5)
+        shape = (count, nd, nd)
+    else:
+        raise NotImplementedError('unpack_tril for high-dimension arrays')
+
+    if out is None:
+        out = cupy.empty(shape)
+    else:
+        out.size >= np.prod(shape)
+    libcupy_helper.CPdunpack_tril_2d(
+        ctypes.c_int(count), ctypes.c_int(nd),
+        ctypes.cast(tril.data.ptr, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p), ctypes.c_int(filltriu))
+    return out

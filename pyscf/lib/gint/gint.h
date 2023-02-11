@@ -38,9 +38,9 @@
 // 6 roots upto (ff|fd)  3456
 // 7 roots upto (gf|ff)  6720
 // 8 roots upto (gg|gf)  12000
-#define GSIZE1       6
-#define GSIZE2       48
-#define GSIZE3       216
+#define GSIZE1       0
+#define GSIZE2       0
+#define GSIZE3       0
 #define GSIZE4       648
 #define GSIZE5       1620
 #define GSIZE6       3456
