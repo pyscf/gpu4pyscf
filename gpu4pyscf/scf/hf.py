@@ -385,10 +385,10 @@ def get_grad_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=N
 
     if dm0.ndim != 2:
         if with_j:
-            vj = np.asarray(vj).reshape((3,) + dm0.shape)
+            vj = vj.reshape((3,) + dm0.shape)
         if with_k:
-            vk = np.asarray(vk).reshape((3,) + dm0.shape)
-    return vj, vk
+            vk = vk.reshape((3,) + dm0.shape)
+    return cupy.asnumpy(vj), cupy.asnumpy(vk)
 
 
 def _write(dev, mol, de, atmlst):
