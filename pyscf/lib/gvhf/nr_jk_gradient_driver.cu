@@ -30,8 +30,9 @@ static int GINTrun_tasks_jk_nabla1i(JKMatrix *jk,
                                     GINTEnvVars *envs)
 {
   int nrys_roots = envs->nrys_roots;
-  int nfij_chunk = 6 * envs->nfi * envs->nfj * jk->n_dm;
-  int exchange_chunk = 3 * envs->nfi * (envs->nfk + envs->nfl) * jk->n_dm;
+  int n_dm = jk -> n_dm;
+  int nfij_chunk = 6 * envs->nfi * envs->nfj * n_dm;
+  int exchange_chunk = 3 * envs->nfi * (envs->nfk + envs->nfl) * n_dm;
   int shared_memory_size =
       jk->vj != NULL ?
         nfij_chunk < 94 ? nfij_chunk * THREADS * sizeof(double) : 0
@@ -40,13 +41,12 @@ static int GINTrun_tasks_jk_nabla1i(JKMatrix *jk,
   int ntasks_ij = offsets->ntasks_ij;
   int ntasks_kl = offsets->ntasks_kl;
   assert(ntasks_kl < 65536*THREADSY);
-  int type_ijkl;
+  int type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;;
 
   dim3 threads(THREADSX, THREADSY);
   dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
   switch (nrys_roots) {
     case 1:
-      type_ijkl = (envs->i_l << 3) | (envs->j_l << 2) | (envs->k_l << 1) | envs->l_l;
       switch (type_ijkl) {
         case 0b0000: GINTint2e_jk_kernel_nabla1i_0000<<<blocks, threads>>>(*jk, *offsets); break;
         default:
@@ -55,7 +55,6 @@ static int GINTrun_tasks_jk_nabla1i(JKMatrix *jk,
       break;
 
     case 2:
-      type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;
       switch (type_ijkl) {
         case (0<<6)|(0<<4)|(1<<2)|0: GINTint2e_jk_kernel_nabla1i_0010<<<blocks, threads>>>(*jk, *offsets); break;
         case (0<<6)|(0<<4)|(1<<2)|1: GINTint2e_jk_kernel_nabla1i_0011<<<blocks, threads>>>(*jk, *offsets); break;
@@ -70,7 +69,6 @@ static int GINTrun_tasks_jk_nabla1i(JKMatrix *jk,
       break;
 
     case 3:
-      type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;
       switch (type_ijkl) {
         case (0<<6)|(0<<4)|(2<<2)|1: GINTint2e_jk_kernel_nabla1i_0021<<<blocks, threads>>>(*jk, *offsets); break;
         case (0<<6)|(0<<4)|(2<<2)|2: GINTint2e_jk_kernel_nabla1i_0022<<<blocks, threads>>>(*jk, *offsets); break;
@@ -104,11 +102,39 @@ static int GINTrun_tasks_jk_nabla1i(JKMatrix *jk,
       GINTint2e_jk_kernel_nabla1i<5, NABLAGOUTSIZE5> <<<blocks, threads>>>(*jk, *offsets);
       break;
     case 6:
-      GINTint2e_jk_kernel_nabla1i<6, NABLAGOUTSIZE6> <<<blocks, threads, shared_memory_size>>>(*jk, *offsets);
-      break;
+      if(n_dm == 1) {
+        switch(type_ijkl) {
+          case (2<<6)|(1<<4)|(3<<2)|3: GINTint2e_jk_kernel_nabla1i_2133_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+          case (2<<6)|(2<<4)|(3<<2)|2: GINTint2e_jk_kernel_nabla1i_2232_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+          case (2<<6)|(2<<4)|(3<<2)|3: GINTint2e_jk_kernel_nabla1i_2233_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+          case (3<<6)|(0<<4)|(3<<2)|3: GINTint2e_jk_kernel_nabla1i_3033_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+          case (3<<6)|(1<<4)|(3<<2)|2: GINTint2e_jk_kernel_nabla1i_3132_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+          case (3<<6)|(1<<4)|(3<<2)|3: GINTint2e_jk_kernel_nabla1i_3133_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+          case (3<<6)|(2<<4)|(2<<2)|2: GINTint2e_jk_kernel_nabla1i_3222_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+          case (3<<6)|(2<<4)|(3<<2)|1: GINTint2e_jk_kernel_nabla1i_3231_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+          case (3<<6)|(2<<4)|(3<<2)|2: GINTint2e_jk_kernel_nabla1i_3232_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+          case (3<<6)|(3<<4)|(2<<2)|1: GINTint2e_jk_kernel_nabla1i_3321_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+          case (3<<6)|(3<<4)|(2<<2)|2: GINTint2e_jk_kernel_nabla1i_3322_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+          case (3<<6)|(3<<4)|(3<<2)|0: GINTint2e_jk_kernel_nabla1i_3330_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+          case (3<<6)|(3<<4)|(3<<2)|1: GINTint2e_jk_kernel_nabla1i_3331_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+        }
+        break;
+      } else {
+        GINTint2e_jk_kernel_nabla1i<6, NABLAGOUTSIZE6> <<<blocks, threads, shared_memory_size>>>(*jk, *offsets);
+        break;
+      }
     case 7:
-      GINTint2e_jk_kernel_nabla1i<7, NABLAGOUTSIZE7> <<<blocks, threads, shared_memory_size>>>(*jk, *offsets);
-      break;
+      if(n_dm == 1) {
+        switch (type_ijkl) {
+          case (3<<6)|(2<<4)|(3<<2)|3: GINTint2e_jk_kernel_nabla1i_3233_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+          case (3<<6)|(3<<4)|(3<<2)|2: GINTint2e_jk_kernel_nabla1i_3332_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+          case (3<<6)|(3<<4)|(3<<2)|3: GINTint2e_jk_kernel_nabla1i_3333_restricted<<<blocks, threads>>>(*jk, *offsets); break;
+        }
+        break;
+      } else {
+        GINTint2e_jk_kernel_nabla1i<7, NABLAGOUTSIZE7> <<<blocks, threads, shared_memory_size>>>(*jk, *offsets);
+        break;
+      }
 
     default:
       fprintf(stderr, "rys roots %d\n", nrys_roots);
