@@ -211,7 +211,7 @@ int GINTbuild_jk(BasisProdCache *bpcache,
         if (ntasks_kl <= 0) {
             continue;
         }
-        // ij_bin + kl_bin < nbins <~> e_ij*e_kl < cutoff
+        // ij_bin + kl_bin < nbins <~> e_ij*e_kl > cutoff
         ij_bin1 = nbins - kl_bin;
         int bas_ij0 = bins_locs_ij[0];
         int bas_ij1 = bins_locs_ij[ij_bin1];
