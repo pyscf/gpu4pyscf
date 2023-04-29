@@ -85,8 +85,10 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
 
     ncptype = len(log_qs)
     cp_idx, cp_jdx = np.tril_indices(ncptype)
+    shell_locs_for_l_ctr_offsets = vhfopt.l_ctr_offsets
+    l_ctr_ao_loc = vhfopt.mol.ao_loc[shell_locs_for_l_ctr_offsets]
     dm_ctr_cond = np.max(
-        [lib.condense('absmax', x, vhfopt.l_ctr_offsets) for x in dms.get()], axis=0)
+        [lib.condense('absmax', x, l_ctr_ao_loc) for x in dms.get()], axis=0)
     if hermi != 1:
         dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
 
