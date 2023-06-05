@@ -34,210 +34,6 @@ libgvhf = lib.load_library('libgvhf')
 libgint = lib.load_library('libgint')
 libgvhf.GINTbuild_jk.restype = ctypes.c_int
 
-def symmetrize(eri_tensor: cupy.array):
-    nao = eri_tensor.shape[0]
-    for i in range(nao):
-        for j in range(nao):
-            for k in range(nao):
-                for l in range(nao):
-                    eri_tensor[i, j, k, l] = eri_tensor[min(i, j), max(i, j), min(k, l), max(k, l)]
-
-def symmetrize_over_kl(eri_tensor: cupy.array):
-    nao = eri_tensor.shape[1]
-    for k in range(nao):
-        for l in range(k+1, nao):
-            eri_tensor[:, l, k] = eri_tensor[:, k, l]
-def get_int2e(mol, vhfopt=None, verbose=None):
-
-    cput0 = (logger.process_clock(), logger.perf_counter())
-    log = logger.new_logger(mol, verbose)
-
-    if vhfopt is None:
-        vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=True)
-
-    coeff = cupy.asarray(vhfopt.coeff)
-    nao, nao0 = coeff.shape
-
-    l_symb = lib.param.ANGULAR
-    bas_pairs_locs = vhfopt.bas_pairs_locs
-    log_qs = vhfopt.log_qs
-    direct_scf_tol = vhfopt.direct_scf_tol
-
-    # adjust nbins according to the size of the system
-    pairs_max = (bas_pairs_locs[1:] - bas_pairs_locs[:-1]).max()
-    nbins = max(10, int(pairs_max//100000))
-    log.debug('Set the number of buckets for s_index to %d', nbins)
-
-    cp_idx, cp_jdx = np.tril_indices(len(vhfopt.uniq_l_ctr))
-
-    strides = np.array([1, nao, nao * nao, nao * nao * nao], dtype=np.int32)
-    eritensor = cupy.zeros((nao, nao, nao, nao), dtype=np.double)
-    ao_offsets = np.array([0, 0, 0, 0], dtype=np.int32)
-
-    eri_tensor_ptr = ctypes.cast(eritensor.data.ptr, ctypes.c_void_p)
-
-    fn = libgint.GINTfill_int2e
-    for cp_ij_id, log_q_ij in enumerate(log_qs):
-        cpi = cp_idx[cp_ij_id]
-        cpj = cp_jdx[cp_ij_id]
-        li = vhfopt.uniq_l_ctr[cpi,0]
-        lj = vhfopt.uniq_l_ctr[cpj,0]
-        if li > LMAX_ON_GPU or lj > LMAX_ON_GPU or log_q_ij.size == 0:
-            continue
-
-        for cp_kl_id, log_q_kl in enumerate(log_qs):
-            cpk = cp_idx[cp_kl_id]
-            cpl = cp_jdx[cp_kl_id]
-            lk = vhfopt.uniq_l_ctr[cpk,0]
-            ll = vhfopt.uniq_l_ctr[cpl,0]
-            if lk > LMAX_ON_GPU or ll > LMAX_ON_GPU or log_q_kl.size == 0:
-                continue
-
-            t0 = time.perf_counter()
-            cutoff = direct_scf_tol
-            bins_locs_ij = _make_s_index_offsets(log_q_ij, nbins, cutoff)
-            bins_locs_kl = _make_s_index_offsets(log_q_kl, nbins, cutoff)
-
-            err = fn(vhfopt.bpcache,
-                     eri_tensor_ptr,
-                     ctypes.c_int(nao),
-                     strides.ctypes.data_as(ctypes.c_void_p),
-                     ao_offsets.ctypes.data_as(ctypes.c_void_p),
-                     bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
-                     bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
-                     ctypes.c_int(nbins),
-                     ctypes.c_int(cp_ij_id),
-                     ctypes.c_int(cp_kl_id))
-
-            if err != 0:
-                detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
-                raise RuntimeError(detail)
-            log.debug1('(%s%s|%s%s) on GPU %.3fs',
-                       l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
-                       time.perf_counter() - t0)
-
-    cput0 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
-
-    if FREE_CUPY_CACHE:
-        cupy.get_default_memory_pool().free_all_blocks()
-
-    symmetrize(eritensor)
-
-    return eritensor
-
-def get_nabla1i_int2e(mol, vhfopt=None, verbose=None):
-
-    cput0 = (logger.process_clock(), logger.perf_counter())
-    log = logger.new_logger(mol, verbose)
-
-    if vhfopt is None:
-        vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=False, scale=False)
-
-    coeff = cupy.asarray(vhfopt.coeff)
-    nao, nao0 = coeff.shape
-
-    l_symb = lib.param.ANGULAR
-    bas_pairs_locs = vhfopt.bas_pairs_locs
-    log_qs = vhfopt.log_qs
-    direct_scf_tol = vhfopt.direct_scf_tol
-
-    # adjust nbins according to the size of the system
-    pairs_max = (bas_pairs_locs[1:] - bas_pairs_locs[:-1]).max()
-    nbins = max(10, int(pairs_max//100000))
-
-    cp_idx, cp_jdx = np.tril_indices(len(vhfopt.uniq_l_ctr))
-
-    strides = np.array([1, nao, nao * nao, nao * nao * nao], dtype=np.int32)
-    eritensor = cupy.zeros((3, nao, nao, nao, nao), dtype=np.double)
-    ao_offsets = np.array([0, 0, 0, 0], dtype=np.int32)
-
-    eri_tensor_ptr = ctypes.cast(eritensor.data.ptr, ctypes.c_void_p)
-
-    fn = libgint.GINTfill_nabla1i_int2e
-    for cp_ij_id, log_q_ij in enumerate(log_qs):
-        cpi = cp_idx[cp_ij_id]
-        cpj = cp_jdx[cp_ij_id]
-        li = vhfopt.uniq_l_ctr[cpi, 0]
-        lj = vhfopt.uniq_l_ctr[cpj, 0]
-        if li > LMAX_ON_GPU or lj > LMAX_ON_GPU or log_q_ij.size == 0:
-            continue
-
-        for cp_kl_id, log_q_kl in enumerate(log_qs):
-            cpk = cp_idx[cp_kl_id]
-            cpl = cp_jdx[cp_kl_id]
-            lk = vhfopt.uniq_l_ctr[cpk,0]
-            ll = vhfopt.uniq_l_ctr[cpl,0]
-            if lk > LMAX_ON_GPU or ll > LMAX_ON_GPU or log_q_kl.size == 0:
-                continue
-
-            t0 = time.perf_counter()
-            cutoff = direct_scf_tol
-            bins_locs_ij = _make_s_index_offsets(log_q_ij, nbins, cutoff)
-            bins_locs_kl = _make_s_index_offsets(log_q_kl, nbins, cutoff)
-
-            err = fn(vhfopt.bpcache,
-                     eri_tensor_ptr,
-                     ctypes.c_int(nao),
-                     strides.ctypes.data_as(ctypes.c_void_p),
-                     ao_offsets.ctypes.data_as(ctypes.c_void_p),
-                     bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
-                     bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
-                     ctypes.c_int(nbins),
-                     ctypes.c_int(cp_ij_id),
-                     ctypes.c_int(cp_kl_id))
-            if err != 0:
-                detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
-                raise RuntimeError(detail)
-            log.debug1('(%s%s|%s%s) on GPU %.3fs',
-                       l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
-                       time.perf_counter() - t0)
-
-    cput0 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
-
-    if FREE_CUPY_CACHE:
-        cupy.get_default_memory_pool().free_all_blocks()
-
-    symmetrize_over_kl(eritensor)
-
-    # return cupy.einsum("xlkji -> xijkl", eritensor)
-    return cupy.einsum("apqkl, kr, ls -> asrqp",
-            cupy.einsum("aijkl, ip, jq-> apqkl", eritensor, coeff, coeff), coeff, coeff)
-
-    # return eritensor
-
-def grad_get_jk(mol, dm):
-    cput0 = (logger.process_clock(), logger.perf_counter())
-
-    vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=False, scale=False)
-    coeff = cupy.asarray(vhfopt.coeff)
-    nao, nao0 = coeff.shape
-    dm0 = dm
-
-    dms = cupy.asarray(dm0.reshape(-1,nao0,nao0))
-    dms = [cupy.einsum('pi,ij,qj->pq', coeff, x, coeff) for x in dms]
-    if dm0.ndim == 2:
-        dms = cupy.asarray(dms[0], order='C').reshape(nao,nao)
-    else:
-        dms = cupy.asarray(dms, order='C')
-
-    # int2e = cupy.einsum("apqkl, kr, ls -> asrqp",
-    #                     cupy.einsum("aijkl, ip, jq-> apqkl",
-    #                                 get_nabla1i_int2e(mol, vhfopt=vhfopt),
-    #                                 coeff, coeff),
-    #                     coeff, coeff)
-
-    int2e = get_nabla1i_int2e(mol, vhfopt=vhfopt)
-
-    # cupy has got weird bug that if we write
-    # vj = cupy.einsum("pijkl, lk -> pij", int2e, dm)
-    # vk = cupy.einsum("pijkl, jk -> pil", int2e, dm)
-    # The values of vk will be the same as vj
-    # This might be related to some JIT compilation of the kernels
-    vj = cupy.einsum("lk, pijkl -> pij", dm, int2e)
-    vk = cupy.einsum("pijkl, jk -> pil", int2e, dm)
-
-    return cupy.asnumpy(vj), cupy.asnumpy(vk)
-
 def get_grad_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
                 verbose=None):
 
@@ -291,8 +87,10 @@ def get_grad_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=N
 
     ncptype = len(log_qs)
     cp_idx, cp_jdx = np.tril_indices(ncptype)
+    shell_locs_for_l_ctr_offsets = vhfopt.l_ctr_offsets
+    l_ctr_ao_loc = vhfopt.mol.ao_loc[shell_locs_for_l_ctr_offsets]
     dm_ctr_cond = np.max(
-        [lib.condense('absmax', x, vhfopt.l_ctr_offsets) for x in dms.get()], axis=0)
+        [lib.condense('absmax', x, l_ctr_ao_loc) for x in dms.get()], axis=0)
     if hermi != 1:
         dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
 
@@ -320,12 +118,11 @@ def get_grad_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=N
                               dm_ctr_cond[cpi,cpk], dm_ctr_cond[cpj,cpk],
                               dm_ctr_cond[cpi,cpl], dm_ctr_cond[cpj,cpl])
 
-            # if sub_dm_cond < direct_scf_tol * 1e3:
-            #     continue
+            if sub_dm_cond < direct_scf_tol * 1e3:
+                 continue
 
             t0 = time.perf_counter()
-            # cutoff = direct_scf_tol / sub_dm_cond
-            cutoff = 1e-12
+            cutoff = direct_scf_tol / sub_dm_cond
             bins_locs_ij = _make_s_index_offsets(log_q_ij, nbins, cutoff)
             bins_locs_kl = _make_s_index_offsets(log_q_kl, nbins, cutoff)
 
@@ -457,8 +254,10 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
 
     ncptype = len(log_qs)
     cp_idx, cp_jdx = np.tril_indices(ncptype)
+    shell_locs_for_l_ctr_offsets = vhfopt.l_ctr_offsets
+    l_ctr_ao_loc = vhfopt.mol.ao_loc[shell_locs_for_l_ctr_offsets]
     dm_ctr_cond = np.max(
-        [lib.condense('absmax', x, vhfopt.l_ctr_offsets) for x in dms.get()], axis=0)
+        [lib.condense('absmax', x, l_ctr_ao_loc) for x in dms.get()], axis=0)
     if hermi != 1:
         dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
 
