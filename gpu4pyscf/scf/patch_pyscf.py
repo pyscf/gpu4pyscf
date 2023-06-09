@@ -31,4 +31,5 @@ SCF.device = 'gpu'
 print(f'{SCF} monkey-patched')
 SCF.get_jk = patch_cpu_kernel(SCF.get_jk)(_get_jk)
 SCF._eigh = patch_cpu_kernel(SCF._eigh)(_eigh)
-rhf.get_jk = patch_cpu_kernel(rhf.get_jk)(get_grad_jk)
+rhf.Gradients.get_jk = patch_cpu_kernel(rhf.Gradients.get_jk)(get_grad_jk)
+
