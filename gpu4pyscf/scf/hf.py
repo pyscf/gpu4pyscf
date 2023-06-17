@@ -188,6 +188,27 @@ def get_grad_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=N
     return cupy.asnumpy(vj), cupy.asnumpy(vk)
 
 
+def _get_grad_jk(gradient_object, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
+            omega=None):
+    if omega is not None:
+        raise NotImplementedError('Range separated Coulomb integrals')
+    mf = gradient_object.base
+    cput0 = (logger.process_clock(), logger.perf_counter())
+    log = logger.new_logger(gradient_object)
+    log.debug3('apply get_grad_jk on gpu')
+    if hasattr(mf, '_opt_gpu'):
+        vhfopt = mf._opt_gpu
+    else:
+        vhfopt = _VHFOpt(mol, getattr(mf.opt, '_intor', 'int2e'),
+                         getattr(mf.opt, 'prescreen', 'CVHFnrs8_prescreen'),
+                         getattr(mf.opt, '_qcondname', 'CVHFsetnr_direct_scf'),
+                         getattr(mf.opt, '_dmcondname', 'CVHFsetnr_direct_scf_dm'))
+        vhfopt.build(mf.direct_scf_tol)
+        mf._opt_gpu = vhfopt
+    vj, vk = get_grad_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega, verbose=log)
+    log.timer('vj and vk gradient on gpu', *cput0)
+    return vj, vk
+
 def _write(dev, mol, de, atmlst):
     '''Format output of nuclear gradients.
 
