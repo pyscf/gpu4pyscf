@@ -253,6 +253,24 @@ class KnownValues(unittest.TestCase):
         refk = mf.get_k(mol1, dm, hermi=0)
         self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
 
+    def test_get_jk_screening(self):
+        mol = pyscf.M(atom='He', basis='''
+He    S
+     14.764404247            0.54848620937E-01
+      3.3185831473           0.22074382186
+He    S
+      0.87413869551          1.0000000
+He    P
+      3.04400000             1.0000000        ''')
+        nao = mol.nao
+        dm = np.zeros((nao, nao))
+        dm[0,0] = 1
+        mf = scf.RHF(mol)
+        mf.device = 'gpu'
+        vj, vk = mf.get_jk(mol, dm)
+        self.assertAlmostEqual(lib.fp(vj), 8.056922698761744, 7)
+        self.assertAlmostEqual(lib.fp(vk), 4.780903763783102, 7)
+
 
 if __name__ == "__main__":
     print("Full Tests for rhf")

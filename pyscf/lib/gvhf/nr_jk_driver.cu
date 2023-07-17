@@ -53,7 +53,7 @@ static int GINTrun_tasks_jk(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars
     int nrys_roots = envs->nrys_roots;
     int ntasks_ij = offsets->ntasks_ij;
     int ntasks_kl = offsets->ntasks_kl;
-    assert(task_kl < 65536*THREADSY);
+    assert(ntask_kl < 65536*THREADSY);
     int type_ijkl;
 
     dim3 threads(THREADSX, THREADSY);
@@ -211,7 +211,7 @@ int GINTbuild_jk(BasisProdCache *bpcache,
         if (ntasks_kl <= 0) {
             continue;
         }
-        // ij_bin + kl_bin < nbins <~> e_ij*e_kl < cutoff
+        // ij_bin + kl_bin < nbins <~> e_ij*e_kl > cutoff
         ij_bin1 = nbins - kl_bin;
         int bas_ij0 = bins_locs_ij[0];
         int bas_ij1 = bins_locs_ij[ij_bin1];

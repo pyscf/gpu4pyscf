@@ -54,7 +54,7 @@ static int GINTfill_int2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GINTE
     int nrys_roots = envs->nrys_roots;
     int ntasks_ij = offsets->ntasks_ij;
     int ntasks_kl = offsets->ntasks_kl;
-    assert(task_kl < 65536*THREADSY);
+    assert(ntask_kl < 65536*THREADSY);
     int type_ijkl;
 
     dim3 threads(THREADSX, THREADSY);
