@@ -153,15 +153,14 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
                                  dms.get(), 1, pmol._atm, pmol._bas, pmol._env,
                                  vhfopt=vhfopt, shls_excludes=shls_excludes)
         coeff = vhfopt.coeff
-        pnao = coeff.shape[0]
-        idx, idy = np.tril_indices(pnao, -1)
+        idx, idy = np.tril_indices(nao, -1)
         if with_j and with_k:
-            vj1 = vs_h[0]
-            vk1 = vs_h[1]
+            vj1 = vs_h[0].reshape(n_dm,nao,nao)
+            vk1 = vs_h[1].reshape(n_dm,nao,nao)
         elif with_j:
-            vj1 = vs_h[0]
+            vj1 = vs_h[0].reshape(n_dm,nao,nao)
         else:
-            vk1 = vs_h[0]
+            vk1 = vs_h[0].reshape(n_dm,nao,nao)
 
         if with_j:
             vj1[:,idy,idx] = vj1[:,idx,idy]
