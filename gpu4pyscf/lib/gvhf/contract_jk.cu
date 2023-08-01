@@ -20,9 +20,216 @@
 #include <stdio.h>
 #include "gint/gint.h"
 #include "gint/cint2e.cuh"
+#include "gvhf.h"
 
+template <int NROOTS, int GSIZE> __device__
+static void GINTkernel_direct_getjk(GINTEnvVars envs, JKMatrix jk, double* __restrict__ g,
+                      int ish, int jsh, int ksh, int lsh)
+{
+    int *ao_loc = c_bpcache.ao_loc;
+    int i0 = ao_loc[ish  ];
+    int i1 = ao_loc[ish+1];
+    int j0 = ao_loc[jsh  ];
+    int j1 = ao_loc[jsh+1];
+    int k0 = ao_loc[ksh  ];
+    int k1 = ao_loc[ksh+1];
+    int l0 = ao_loc[lsh  ];
+    int l1 = ao_loc[lsh+1];
+    int nfi = i1 - i0;
+    int nfj = j1 - j0;
+    int nfij = nfi * nfj;
+
+    int nao = jk.nao;
+    int i, j, k, l, n, i_dm;
+
+    int n_dm = jk.n_dm;
+    double *vj = jk.vj;
+    double *vk = jk.vk;
+    double* __restrict__ dm = jk.dm;
+
+    int nf = envs.nf;
+    int16_t *idx = c_idx4c;
+    if (nf > NFffff){
+        idx = envs.idx;
+    }
+    int16_t *idy = idx + nf;
+    int16_t *idz = idx + nf * 2;
+    
+    if (vk == NULL) {
+        for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+            int ngout = 0;
+            for (l = l0; l < l1; ++l) {
+                for (k = k0; k < k1; ++k) {
+                    double v_kl = 0;
+                    double d_kl = dm[k+nao*l];
+                    for (n = 0, j = j0; j < j1; ++j) {
+                        for (i = i0; i < i1; ++i, ++n) {
+                            int ng = n + ngout;
+                            int ix = idx[ng];
+                            int iy = idy[ng];
+                            int iz = idz[ng];
+                            double s = 0.0;
+#pragma unroll
+                            for (int r = 0; r < NROOTS; r++){
+                                s += g[ix+r] * g[iy+r] * g[iz+r];
+                            }
+                            double v_ij  = s * d_kl;   
+                            atomicAdd(vj+i+nao*j, v_ij);
+                            v_kl += s * dm[i+j*nao];
+                        }
+                    }
+                    atomicAdd(vj+k+nao*l, v_kl);
+                    ngout += nfij;
+                }
+            }
+            dm += nao * nao;
+            vj += nao * nao;
+        }
+        return;
+    }
+    
+    if (vj == NULL){
+        for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+            int ngout = 0;
+            for (l = l0; l < l1; ++l) {
+                for (k = k0; k < k1; ++k) {
+                    double gout[GPU_AO_NF * GPU_AO_NF];
+                    for (n = 0, j = j0; j < j1; ++j) {
+                        int jp = j - j0;
+                        for (i = i0; i < i1; ++i, ++n) {
+                            int ip = i - i0;
+                            int ng = n + ngout;
+                            int ix = idx[ng];
+                            int iy = idy[ng];
+                            int iz = idz[ng];
+                            double s = 0.0;
+                            for (int r = 0; r < NROOTS; r++){
+                                s += g[ix+r] * g[iy+r] * g[iz+r];
+                            }
+                            gout[ip + GPU_AO_NF * jp] = s;
+                        }
+                    }
+
+                    double v_ik[GPU_AO_NF];
+                    double d_ik[GPU_AO_NF];
+                    double v_il[GPU_AO_NF];
+                    double d_il[GPU_AO_NF];
+                    for (i = 0; i < i1-i0; ++i){ 
+                        v_il[i] = 0.0; 
+                        d_il[i] = dm[i+i0+l*nao];
+                        v_ik[i] = 0.0; 
+                        d_ik[i] = dm[i+i0+k*nao];
+                    }
+
+                    for (j = j0; j < j1; ++j){
+                        int jp = j - j0;
+                        double v_jk = 0.0;
+                        double v_jl = 0.0;
+                        double d_jk = dm[j+nao*k];
+                        double d_jl = dm[j+nao*l];
+                        for (i = i0; i < i1; ++i){
+                            int ip = i - i0;
+                            double s = gout[ip + GPU_AO_NF * jp];
+                            v_il[ip] += s * d_jk;
+                            v_ik[ip] += s * d_jl;
+
+                            v_jl += s * d_ik[ip];
+                            v_jk += s * d_il[ip];
+                        }
+                        atomicAdd(vk+j+nao*k, v_jk);
+                        atomicAdd(vk+j+nao*l, v_jl);
+                    }
+                    for (i = 0; i < i1-i0; i++){ 
+                        atomicAdd(vk+i+i0+nao*k, v_ik[i]); 
+                        atomicAdd(vk+i+i0+nao*l, v_il[i]);  
+                    }
+                    ngout += nfij;
+                }
+            }
+            dm += nao * nao;
+            vk += nao * nao;
+        }
+        return;
+
+    }
+
+    // vj != NULL and vk != NULL
+    for (i_dm = 0; i_dm < n_dm; ++i_dm) {
+        int ngout = 0;
+        for (l = l0; l < l1; ++l) {
+            for (k = k0; k < k1; ++k) {
+                double d_kl = dm[k+nao*l];
+                double gout[GPU_AO_NF * GPU_AO_NF];
+                for (n = 0, j = j0; j < j1; ++j) {
+                    int jp = j - j0;
+                    for (i = i0; i < i1; ++i, ++n) {
+                        int ip = i - i0;
+                        int ng = n + ngout;
+                        int ix = idx[ng];
+                        int iy = idy[ng];
+                        int iz = idz[ng];
+                        double s = 0.0;
+#pragma unroll
+                        for (int r = 0; r < NROOTS; r++){
+                            s += g[ix+r] * g[iy+r] * g[iz+r];
+                        }
+                        double v_ij  = s * d_kl;   
+                        atomicAdd(vj+i+nao*j, v_ij);
+                        gout[ip + GPU_AO_NF * jp] = s;
+                    }
+                }
+                double v_il[GPU_AO_NF];
+                double v_ik[GPU_AO_NF];
+                double v_kl = 0.0;
+
+                double d_ik[GPU_AO_NF];
+                double d_il[GPU_AO_NF];
+                
+                for (i = 0; i < i1-i0; ++i){ 
+                    v_il[i] = 0.0; 
+                    d_il[i] = dm[i+i0+l*nao];
+                    v_ik[i] = 0.0; 
+                    d_ik[i] = dm[i+i0+k*nao];
+                }
+
+                for (j = j0; j < j1; ++j){
+                    int jp = j - j0;
+                    double v_jk = 0.0;
+                    double v_jl = 0.0;
+                    double d_jk = dm[j+nao*k];
+                    double d_jl = dm[j+nao*l];
+                    for (i = i0; i < i1; ++i){
+                        int ip = i - i0;
+                        double s = gout[ip + GPU_AO_NF * jp];
+                        
+                        v_il[ip] += s * d_jk;
+                        v_ik[ip] += s * d_jl;
+
+                        v_jl += s * d_ik[ip];
+                        v_jk += s * d_il[ip];
+
+                        v_kl += s * dm[i+j*nao];
+                    }
+                    atomicAdd(vk+j+nao*k, v_jk);
+                    atomicAdd(vk+j+nao*l, v_jl);
+                }
+                for (i = 0; i < i1-i0; i++){ 
+                    atomicAdd(vk+i+i0+nao*k, v_ik[i]); 
+                    atomicAdd(vk+i+i0+nao*l, v_il[i]);  
+                }
+                atomicAdd(vj+k+nao*l, v_kl);
+                ngout += nfij;
+            }
+        }
+        dm += nao * nao;
+        vj += nao * nao;
+        vk += nao * nao;
+    }
+}
+
+/*
 __device__
-void GINTkernel_getjk(JKMatrix jk, double* __restrict__ gout,
+static void GINTkernel_getjk(JKMatrix jk, double* __restrict__ gout,
                       int ish, int jsh, int ksh, int lsh)
 {
     int tx = threadIdx.x;
@@ -58,7 +265,7 @@ void GINTkernel_getjk(JKMatrix jk, double* __restrict__ gout,
 
     if (vk == NULL) {
         if (nfij > (GPU_CART_MAX*2+1)) {
-            double* __restrict__  buf_ij = gout + c_envs.nf;
+            double* __restrict__  buf_ij = gout + envs.nf;
             for (i_dm = 0; i_dm < n_dm; ++i_dm) {
                 for (ip = 0; ip < nfij; ++ip) {
                     buf_ij[ip] = 0;
@@ -129,7 +336,7 @@ void GINTkernel_getjk(JKMatrix jk, double* __restrict__ gout,
 
     if (vj != NULL) {
         if (nfij > SHARED_MEM_NFIJ_MAX) {
-            double* __restrict__  buf_ij = gout + c_envs.nf;
+            double* __restrict__  buf_ij = gout + envs.nf;
                 for (i_dm = 0; i_dm < n_dm; ++i_dm) {
                 for (ip = 0; ip < nfij; ++ip) {
                     buf_ij[ip] = 0;
@@ -306,5 +513,26 @@ void GINTkernel_getjk(JKMatrix jk, double* __restrict__ gout,
         }
         dm += nao * nao;
         vk += nao * nao;
+    }
+}
+*/
+
+__device__
+static int is_skip(JKMatrix jk, double log_q_ij, double log_q_kl, int ish, int jsh, int ksh, int lsh, double log_cutoff)
+{
+    double max_dm = -9999;
+    int nshls = jk.nshls;
+    max_dm = MAX(max_dm, jk.dm_sh[ish * nshls + jsh]);
+    max_dm = MAX(max_dm, jk.dm_sh[ksh * nshls + lsh]);
+    max_dm = MAX(max_dm, jk.dm_sh[ish * nshls + ksh]);
+    max_dm = MAX(max_dm, jk.dm_sh[jsh * nshls + ksh]);
+    max_dm = MAX(max_dm, jk.dm_sh[ish * nshls + lsh]);
+    max_dm = MAX(max_dm, jk.dm_sh[jsh * nshls + lsh]);
+    
+    if(log_q_ij + log_q_kl + max_dm < log_cutoff){
+        return 1;
+    }
+    else{
+        return 0;
     }
 }
