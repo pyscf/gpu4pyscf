@@ -24,7 +24,7 @@ add_library(cupy_helper SHARED
   eigh.cu
   cho_solve.cu
   take_last2d.cu
-  sparse_cderi.cu
+  async_d2h_2d.cu
 )
 
 set_target_properties(cupy_helper PROPERTIES

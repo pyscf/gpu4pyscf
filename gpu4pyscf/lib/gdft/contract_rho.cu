@@ -23,17 +23,17 @@ __global__
 void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, int nao)
 {
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    if (grid_id >= ngrids) {
-        return;
-    }
+    const bool active = grid_id < ngrids;
 
     size_t Ngrids = ngrids;
     int ao_id;
     double v = 0;
-    for (ao_id = threadIdx.y; ao_id < nao; ao_id += BLKSIZEY) {
-        v += bra[grid_id + ao_id * Ngrids] * ket[grid_id + ao_id * Ngrids];
+    if (active){
+        for (ao_id = threadIdx.y; ao_id < nao; ao_id += BLKSIZEY) {
+            v += bra[grid_id + ao_id * Ngrids] * ket[grid_id + ao_id * Ngrids];
+        }
     }
-
+    
     __shared__ double buf[BLKSIZEX*(BLKSIZEY+1)];
     int ix = threadIdx.x;
     int iy = threadIdx.y;
@@ -46,7 +46,8 @@ void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, 
             buf[ixy] += buf[ixy + BLKSIZEX * n];
         }
     }
-    if (iy == 0) {
+    __syncthreads();
+    if (iy == 0 && active) {
         rho[grid_id] = buf[ix];
     }
 }

@@ -16,7 +16,6 @@
 import pyscf
 import cupy
 import numpy as np
-import dftd3.pyscf as disp
 import unittest
 from pyscf import lib
 from gpu4pyscf.dft import rks
@@ -37,19 +36,20 @@ H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
 xc0='B3LYP'
-bas0='sto3g'#'def2-tzvpp'
-auxbasis0='sto3g'#'def2-tzvpp-jkfit'
+bas0='def2-tzvpp'
+auxbasis0='def2-tzvpp-jkfit'
 disp0='d3bj'
 grids_level = 6
 mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000)
 mol.build()
 mol.verbose = 1
-eps = 1e-3
+eps = 1.0/1024
 
 def _check_grad(grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
     mf = rks.RKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
     mf.device = 'gpu'
     mf.grids.level = grids_level
+    mf.conv_tol = 1e-12
     e_tot = mf.kernel()
     g = mf.nuc_grad_method()
     g.auxbasis_response = True
@@ -125,7 +125,7 @@ class KnownValues(unittest.TestCase):
     
     def test_grad_nlc(self):
         print('--------nlc testing-------------')
-        _check_grad(xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-4)
+        _check_grad(xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-6)
     
 if __name__ == "__main__":
     print("Full Tests for DF Gradient")

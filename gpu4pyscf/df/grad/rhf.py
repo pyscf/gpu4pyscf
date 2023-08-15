@@ -22,7 +22,7 @@ from pyscf import lib, scf, gto
 from gpu4pyscf.scf.hf import _get_jk
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.utils import patch_cpu_kernel
-from gpu4pyscf.lib.cupy_helper import solve_triangular, tag_array, unpack_tril, contract, load_library
+from gpu4pyscf.lib.cupy_helper import print_mem_info, solve_triangular, tag_array, unpack_tril, contract, load_library
 from gpu4pyscf import __config__
 
 libcupy_helper = load_library('libcupy_helper')
@@ -71,36 +71,39 @@ def _get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omeg
 
     # (L|ij) -> rhoj: (L), rhok: (L|oo)
     low = with_df.cd_low
-    tril_col = with_df.tril_col
-    tril_row = with_df.tril_row
-    idx = cupy.arange(nao)
-    dm_tril = dm[tril_row, tril_col]
-    dm_tril[idx*(idx+1)//2+idx] *= .5
+    rows = with_df.intopt.cderi_row
+    cols = with_df.intopt.cderi_col
+    dm_sparse = dm[rows, cols]
+    dm_sparse[with_df.intopt.cderi_diag] *= .5
     
     blksize = with_df.get_blksize()
-    rhoj = cupy.zeros([naux])
+    rhoj = cupy.empty([naux])
     rhok = cupy.empty([naux, nocc, nocc], order='C')
-    buf = cupy.empty([blksize, nao, nao], order='C')
-    for p0, p1, cderi_tril in with_df.loop(blksize=blksize):
-        rhoj[p0:p1] = 2.0*cupy.dot(cderi_tril, dm_tril)
-        unpack_tril(cderi_tril, buf)
-        tmp = contract('Lij,jk->Lki', buf[:p1-p0], orbo)
+    p0 = p1 = 0
+    
+    for cderi, cderi_sparse in with_df.loop(blksize=blksize):
+        p1 = p0 + cderi.shape[0]
+        rhoj[p0:p1] = 2.0*dm_sparse.dot(cderi_sparse)
+        tmp = contract('Lij,jk->Lki', cderi, orbo)
         contract('Lki,il->Lkl', tmp, orbo, out=rhok[p0:p1])
-    tmp = buf = dm_tril = None
+        p0 = p1
+    tmp = dm_sparse = cderi_sparse = cderi = None
+
     aux_cart2sph = intopt.aux_cart2sph
     low_t = low.T.copy()
     if with_j:
         if low.tag == 'eig':
             rhoj = cupy.dot(low_t.T, rhoj)
         elif low.tag == 'cd':
-            solve_triangular(low_t, rhoj, lower=False)
+            rhoj = solve_triangular(low_t, rhoj, lower=False)
         rhoj_cart = contract('pq,q->p', aux_cart2sph, rhoj)
     if with_k:
         if low.tag == 'eig':
             rhok = contract('pq,qij->pij', low_t.T, rhok)
         elif low.tag == 'cd':
-            solve_triangular(low_t, rhok, lower=False)
+            rhok = solve_triangular(low_t, rhok, lower=False)
         rhok_cart = contract('pq,qkl->pkl', aux_cart2sph, rhok)
+    low_t = None
     t0 = log.timer_debug1('prep', *t0)
 
     # (d/dX P|Q) contributions
@@ -124,10 +127,10 @@ def _get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omeg
         vkaux_2c = cupy.array([-vkaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
         rhok = vkaux = None
     t0 = log.timer_debug1('(d/dX P|Q)', *t0)
-
     tmp = int2c_e1 = None
 
-    block_size = MIN_BLK_SIZE
+    nao_cart = intopt.mol.nao
+    block_size = with_df.get_blksize(nao=nao_cart)
     intopt.clear()
     # rebuild with aosym
     intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, \
@@ -139,23 +142,20 @@ def _get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omeg
     dm_cart = cart2sph @ dm @ cart2sph.T
     dm = orbo = None
 
-    nao_cart = intopt.mol.nao
     vj = cupy.zeros((3,nao_cart), order='C')
     vk = cupy.zeros((3,nao_cart), order='C')
     
     naux_cart = intopt.auxmol.nao
     vjaux = cupy.zeros((3,naux_cart))
     vkaux = cupy.zeros((3,naux_cart))
-    
+    cupy.get_default_memory_pool().free_all_blocks()
     for cp_kl_id in range(len(intopt.aux_log_qs)):
         t1 = (logger.process_clock(), logger.perf_counter())
         k0, k1 = intopt.cart_aux_loc[cp_kl_id], intopt.cart_aux_loc[cp_kl_id+1]
         assert k1-k0 <= block_size
-        
         rhoj_tmp = rhoj_cart[k0:k1]
         rhok_tmp = contract('por,ir->pio', rhok_cart[k0:k1], orbo_cart)
         rhok_tmp = contract('pio,jo->pji', rhok_tmp, orbo_cart)
-        
         if(rhoj_tmp.flags['C_CONTIGUOUS'] == False):
             rhoj_tmp = rhoj_tmp.astype(cupy.float64, order='C')
 
@@ -251,9 +251,8 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
 
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
-
+    
     # CPU tasks are executed on background
-    # replace with call_in_background
     def calculate_h1e():
         # (\nabla i | hcore | j) - (\nabla i | j)
         h1 = mf_grad.get_hcore(mol)
@@ -261,7 +260,6 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
         return cupy.asarray(h1), cupy.asarray(s1)
 
     bg0 = lib.bg(calculate_h1e)
-
     # (i | \nabla hcore | j)
     dh1e = int3c2e.get_dh1e(mol, dm0)
     if mol.has_ecp():
@@ -269,7 +267,7 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
     
     t1 = log.timer_debug1('gradients of h1e', *t0)
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
-    
+
     dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
     dvhf, extra_force = mf_grad.get_veff(mol, dm0)
     t2 = log.timer_debug1('gradients of 2e part', *t1)

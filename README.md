@@ -1,6 +1,5 @@
 GPU plugin for PySCF
 ====================
-
 Installation
 --------
 Compile with
@@ -40,14 +39,13 @@ Direct SCF scheme (experimental)
 
 Limitations
 --------
-- Rys roots up to 8 for density fitting scheme
-- Rys roots up to 9 for direct scf scheme
-- Atomic basis up to g orbitals
-- Auxiliary basis up to h orbitals
-- Up to ~70 atoms with def2-tzvpp basis on NVIDIA GPU with 80G memory
-- Up to ~50 atoms with def2-tzvpp basis on NVIDIA GPU with 32G memory
-- Gradient, Hessian and Geometry optimization are unavailable for Direct SCF yet
-- meta-GGA without density laplacian
+- Rys roots up to 8 for density fitting scheme;
+- Rys roots up to 9 for direct scf scheme;
+- Atomic basis up to g orbitals;
+- Auxiliary basis up to h orbitals;
+- Up to ~100 atoms with def2-tzvpd basis, consuming a large amount of CPU memory;
+- Gradient, Hessian and Geometry optimization are unavailable for Direct SCF yet;
+- meta-GGA without density laplacian;
 
 
 Examples

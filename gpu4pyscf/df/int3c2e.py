@@ -32,8 +32,6 @@ libgvhf = load_library('libgvhf')
 libgint = load_library('libgint')
 libcupy_helper = load_library('libcupy_helper')
 
-#c2s_l = mole.get_cart2sph(lmax=LMAX_ON_GPU)
-
 def basis_seg_contraction(mol, allow_replica=False):
     '''transform generally contracted basis to segment contracted basis
     Kwargs:
@@ -269,6 +267,14 @@ class VHFOpt(_vhf.VHFOpt):
         self.aux_coeff = self.aux_cart2sph[:, inv_idx]
         aux_l_ctr_offsets += fake_l_ctr_offsets[-1]
 
+        ao_loc = self.sorted_mol.ao_loc_nr(cart=False)
+        self.ao_pairs_row, self.ao_pairs_col = get_ao_pairs(pair2bra, pair2ket, ao_loc)
+        cderi_row = cupy.hstack(self.ao_pairs_row)
+        cderi_col = cupy.hstack(self.ao_pairs_col)
+        self.cderi_row = cderi_row
+        self.cderi_col = cderi_col
+        self.cderi_diag = cupy.argwhere(cderi_row == cderi_col)[:,0]
+
         # fake q_cond
         q_cond = np.ones([aux_l_ctr_offsets[-1], aux_l_ctr_offsets[-1]])
         aux_log_qs, aux_pair2bra, aux_pair2ket = get_pairing(
@@ -310,8 +316,7 @@ class VHFOpt(_vhf.VHFOpt):
             self.cp_idx, self.cp_jdx = np.tril_indices(ncptype)
         else:
             nl = int(round(np.sqrt(ncptype)))
-            self.cp_idx, self.cp_jdx = np.unravel_index(np.arange(ncptype), (nl, nl))
-
+            self.cp_idx, self.cp_jdx = np.unravel_index(np.arange(ncptype), (nl, nl)) 
     
 def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None):
     intopt = VHFOpt(mol, auxmol, 'int2e')
@@ -351,13 +356,11 @@ def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None):
     fn = getattr(libgvhf, 'GINTbuild_int3c2e_' + ip_type + '_jk')
     if omega is None: omega = 0.0
     nao = intopt.mol.nao
-    nbins = 1
     n_dm = 1
 
     cp_kl_id = cp_aux_id + len(intopt.log_qs)
     log_q_kl = intopt.aux_log_qs[cp_aux_id]
     
-    bins_locs_kl = np.array([0, len(log_q_kl)], dtype=np.int32)
     k0, k1 = intopt.cart_aux_loc[cp_aux_id], intopt.cart_aux_loc[cp_aux_id+1]
     ao_offsets = np.array([0,0,nao+1+k0,nao], dtype=np.int32) 
     nk = k1 - k0
@@ -372,31 +375,33 @@ def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None):
     assert(rhoj.flags['C_CONTIGUOUS'])
     assert(rhok.flags['C_CONTIGUOUS'])
     
-    for cp_ij_id, log_q_ij in enumerate(intopt.log_qs):
-        bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
-        err = fn(
-            intopt.bpcache,
-            ctypes.cast(vj.data.ptr, ctypes.c_void_p),
-            ctypes.cast(vk.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dm.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rhoj.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rhok.data.ptr, ctypes.c_void_p),
-            ao_offsets.ctypes.data_as(ctypes.c_void_p),
-            ctypes.c_int(nao),
-            ctypes.c_int(nk),
-            ctypes.c_int(n_dm),
-            bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
-            bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
-            ctypes.c_int(nbins),
-            ctypes.c_int(cp_ij_id),
-            ctypes.c_int(cp_kl_id),
-            ctypes.c_double(omega))
-        if err != 0: 
-            raise RuntimeError(f'GINT_getjk_int2e_ip failed, err={err}')
+    num_cp_ij = [len(log_qs) for log_qs in intopt.log_qs]
+    bins_locs_ij = np.append(0, np.cumsum(num_cp_ij)).astype(np.int32)
+    ntasks_kl = len(log_q_kl)
+    ncp_ij = len(intopt.log_qs)
+    err = fn(
+        intopt.bpcache,
+        ctypes.cast(vj.data.ptr, ctypes.c_void_p),
+        ctypes.cast(vk.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rhoj.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rhok.data.ptr, ctypes.c_void_p),
+        ao_offsets.ctypes.data_as(ctypes.c_void_p),
+        ctypes.c_int(nao),
+        ctypes.c_int(nk),
+        ctypes.c_int(n_dm),
+        bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
+        ctypes.c_int(ntasks_kl),
+        ctypes.c_int(ncp_ij),
+        ctypes.c_int(cp_kl_id),
+        ctypes.c_double(omega))
+    if err != 0: 
+        raise RuntimeError(f'GINT_getjk_int2e_ip failed, err={err}')
+    
     return vj, vk
 
 
-def loop_int3c2e_general(intopt, ip_type='', omega=None):
+def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
     '''
     loop over all int3c2e blocks
     - outer loop for k
@@ -412,7 +417,8 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None):
     if ip_type == 'ipip2':  order = 2
     
     if omega is None: omega = 0.0
-
+    if stream is None: stream = cupy.cuda.get_current_stream()
+    
     nao_sph = len(intopt.sph_ao_idx)
     nao = intopt.mol.nao
     naux = intopt.auxmol.nao
@@ -444,6 +450,7 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None):
 
             int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
             err = fn(
+                ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p), 
                 ctypes.c_int(norb), 
@@ -468,7 +475,7 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None):
             
             yield i0,i1,j0,j1,k0,k1,int3c_blk
 
-def loop_aux_jk(intopt, ip_type='', omega=None):
+def loop_aux_jk(intopt, ip_type='', omega=None, stream=None):
     '''
     loop over all int3c2e blocks
     - outer loop for k
@@ -484,6 +491,7 @@ def loop_aux_jk(intopt, ip_type='', omega=None):
     if ip_type == 'ipip2':  order = 2
 
     if omega is None: omega = 0.0
+    if stream is None: stream = cupy.cuda.get_current_stream()
 
     nao_sph = len(intopt.sph_ao_idx)
     nao = intopt.mol.nao
@@ -518,6 +526,7 @@ def loop_aux_jk(intopt, ip_type='', omega=None):
 
             int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
             err = fn(
+                ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p), 
                 ctypes.c_int(norb), 
@@ -845,12 +854,12 @@ def get_int3c2e_ipip2_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None):
     hk = hk.reshape([naux_sph,3,3])
     return hj, hk
 
-def get_int3c2e_ip_slice(intopt, cp_aux_id, ip_type, out=None, omega=None):
+def get_int3c2e_ip_slice(intopt, cp_aux_id, ip_type, out=None, omega=None, stream=None):
     '''
     Generate int3c2e_ip slice along k, full dimension in ij
     '''
     if omega is None: omega = 0.0
-
+    if stream is None: stream = cupy.cuda.get_current_stream()
     nao = intopt.mol.nao
     naux = intopt.auxmol.nao
 
@@ -877,6 +886,7 @@ def get_int3c2e_ip_slice(intopt, cp_aux_id, ip_type, out=None, omega=None):
     for cp_ij_id, log_q_ij in enumerate(intopt.log_qs):
         bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
         err = libgint.GINTfill_int3c2e_ip(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
             intopt.bpcache,
             ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p), 
             ctypes.c_int(norb), 
@@ -895,7 +905,7 @@ def get_int3c2e_ip_slice(intopt, cp_aux_id, ip_type, out=None, omega=None):
     
     return int3c_blk
     
-def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_scf_tol=1e-13, omega=None):
+def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_scf_tol=1e-13, omega=None, stream=None):
     '''
     Generate full int3c2e_ip tensor on GPU
     ip_type == 1: int3c2e_ip1
@@ -903,6 +913,7 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
     '''
     fn = getattr(libgint, 'GINTfill_int3c2e_' + ip_type)
     if omega is None: omega = 0.0
+    if stream is None: stream = cupy.cuda.get_current_stream()
     if auxmol is None: 
         auxmol = df.addons.make_auxmol(mol, auxbasis)
     
@@ -940,6 +951,7 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
 
             int3c_blk = cupy.zeros([3, nk, nj, ni], order='C', dtype=np.float64)
             err = fn(
+                ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p), 
                 ctypes.c_int(norb), 
@@ -968,7 +980,7 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
     return int3c.transpose([0,3,2,1])
 
   
-def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', direct_scf_tol=1e-13, omega=None):
+def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', direct_scf_tol=1e-13, omega=None, stream=None):
     '''
     Generate full int3c2e type tensor on GPU
     '''
@@ -982,7 +994,7 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
     if ip_type == 'ipip2':  order = 2
 
     if omega is None: omega = 0.0
-
+    if stream is None: stream = cupy.cuda.get_current_stream()
     if auxmol is None: 
         auxmol = df.addons.make_auxmol(mol, auxbasis)
     
@@ -1021,6 +1033,7 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
 
             int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
             err = fn(
+                ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p), 
                 ctypes.c_int(norb), 
@@ -1066,10 +1079,11 @@ def get_dh1e(mol, dm0):
         dh1e[k0:k1,:3] += cupy.einsum('xkji,ij->kx', int3c_blk, dm0_sorted[i0:i1,j0:j1])
     return 2.0 * cupy.einsum('kx,k->kx', dh1e, -charges)
 
-def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, aosym=None, out=None, omega=None):
+def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, aosym=None, out=None, omega=None, stream=None):
     '''
     Generate one int3c2e block for given ij, k
     '''
+    if stream is None: stream = cupy.cuda.get_current_stream()
     if omega is None: omega = 0.0
     nao = intopt.nao
     naux = intopt.nao
@@ -1107,7 +1121,9 @@ def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, aosym=None, out=None, omega=N
         s = int3c_blk.strides
         # will be filled in F order
         strides = np.array([s[2]//8 ,s[1]//8, s[0]//8, 1], dtype=np.int32)
+
     err = libgint.GINTfill_int3c2e(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
         ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p), 
         ctypes.c_int(norb), 
@@ -1168,11 +1184,12 @@ def get_int3c2e(mol, auxmol=None, auxbasis='weigend+etb', direct_scf_tol=1e-13, 
 
     return int3c.transpose([2,1,0])
 
-def get_int2c2e_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, aosym=None, omega=None):
+def get_int2c2e_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, aosym=None, omega=None, stream=None):
     '''
     Generated int2c2e consistent with pyscf
     '''
     if omega is None: omega = 0.0
+    if stream is None: stream = cupy.cuda.get_current_stream()
     if intopt is None:
         intopt = VHFOpt(mol, auxmol, 'int2e')
         intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False)
@@ -1194,6 +1211,7 @@ def get_int2c2e_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, aosym=Non
             bins_locs_l = _make_s_index_offsets(log_q_l, nbins)
             cp_l_id = l_id + len(intopt.log_qs)
             err = libgint.GINTfill_int2e(
+                ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(int2c.data.ptr, ctypes.c_void_p), 
                 ctypes.c_int(norb),
@@ -1215,10 +1233,11 @@ def get_int2c2e_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, aosym=Non
     
     return int2c
 
-def get_int2c2e_ip_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, intor=None, aosym=None):
+def get_int2c2e_ip_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, intor=None, aosym=None, stream=None):
     '''
     TODO: WIP
     '''
+    if stream is None: stream = cupy.cuda.get_current_stream()
     if intopt is None:
         intopt = VHFOpt(mol, auxmol, 'int2e')
         intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False)
@@ -1240,6 +1259,7 @@ def get_int2c2e_ip_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, intor=
             bins_locs_l = _make_s_index_offsets(log_q_l, nbins)
             cp_l_id = l_id + len(intopt.log_qs)
             err = libgint.GINTfill_int2e(
+                ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(int2c.data.ptr, ctypes.c_void_p), 
                 ctypes.c_int(norb),
@@ -1294,7 +1314,7 @@ def sort_mol(mol0, cart=True):
     return mol, sorted_idx, uniq_l_ctr, l_ctr_counts
 
 def get_pairing(p_offsets, q_offsets, q_cond, \
-    cutoff=1e-8, diag_block_with_triu=True, aosym=True):
+    cutoff=1e-14, diag_block_with_triu=True, aosym=True):
     '''
     pair shells and return pairing indices
     '''
@@ -1373,24 +1393,20 @@ def get_ao_pairs(pair2bra, pair2ket, ao_loc):
     """
     Compute the AO-pairs for the given pair2bra and pair2ket
     """
-    ao_loc = ao_loc
     bra_ctr = []
     ket_ctr = []
     for bra_shl, ket_shl in zip(pair2bra, pair2ket):
-        bra = []
-        ket = []
-        if bra_shl is None or ket_shl is None:
+        if len(bra_shl) == 0 or len(ket_shl) == 0:
+            bra_ctr.append(np.array([], dtype=np.int64))
+            ket_ctr.append(np.array([], dtype=np.int64))
             continue
-        for i, j in zip(bra_shl, ket_shl):
-            indices = np.mgrid[ao_loc[i]:ao_loc[i+1], ao_loc[j]:ao_loc[j+1]]
-            ao_bra = indices[0]
-            ao_ket = indices[1]
-            mask = ao_bra >= ao_ket
-            bra.append(ao_bra[mask].ravel())
-            ket.append(ao_ket[mask].ravel())
-        if bra and ket:
-            bra_ctr.append(np.hstack(bra))
-            ket_ctr.append(np.hstack(ket))
-        else:
-            bra_ctr.append([])
-    return [bra_ctr, ket_ctr]
+        
+        i = bra_shl[0]
+        j = ket_shl[0]
+        indices = np.mgrid[:ao_loc[i+1]-ao_loc[i], :ao_loc[j+1]-ao_loc[j]]
+        ao_bra = indices[0].reshape(-1,1) + ao_loc[bra_shl]
+        ao_ket = indices[1].reshape(-1,1) + ao_loc[ket_shl]
+        mask = ao_bra >= ao_ket
+        bra_ctr.append(ao_bra[mask])
+        ket_ctr.append(ao_ket[mask])
+    return bra_ctr, ket_ctr

@@ -46,6 +46,7 @@ def prune_small_rho_grids_(ks, mol, dm, grids):
     if abs(n-mol.nelectron) < gen_grid.NELEC_ERROR_TOL*n:    
         rho *= grids.weights
         idx = cupy.abs(rho) > threshold / grids.weights.size
+        
         logger.debug(grids, 'Drop grids %d', grids.weights.size - cupy.count_nonzero(idx))
         grids.coords  = cupy.asarray(grids.coords [idx], order='C')
         grids.weights = cupy.asarray(grids.weights[idx], order='C')
@@ -60,8 +61,8 @@ def prune_small_rho_grids_(ks, mol, dm, grids):
         # make_mask has to be executed on cpu for now.
         #grids.non0tab = grids.make_mask(mol, grids.coords)
         #grids.screen_index = grids.non0tab
-        if ks._numint.use_sparsity:
-            ks._numint.build(mol, grids.coords)
+        #if ks._numint.use_sparsity:
+        #    ks._numint.build(mol, grids.coords)
     return grids
 
 def initialize_grids(ks, mol=None, dm=None):
@@ -99,7 +100,7 @@ def initialize_grids(ks, mol=None, dm=None):
     return ks
 
 def _get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
-    '''Coulomb + XC functional
+    '''Coulomb + XC functionals
     .. note::
         This function will modify the input ks object.
     Args:

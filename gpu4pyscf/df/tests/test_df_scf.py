@@ -15,11 +15,8 @@
 
 import unittest
 import numpy as np
-import cupy
 import pyscf
-import dftd3.pyscf as disp
 from pyscf import lib
-from pyscf.geomopt.geometric_solver import optimize
 from gpu4pyscf import scf
 from gpu4pyscf.dft import rks
 

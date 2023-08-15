@@ -38,7 +38,6 @@ int cho_solve(cublasHandle_t handle, const double *a, double *b, int m, int n, i
     const double alpha = 1.0;
 
     cublasStatus_t status = cublasDtrsm(handle, side, uplo, trans, diag, m, n, &alpha, a, n, b, m);
-
     if(status == CUBLAS_STATUS_SUCCESS){
         return 0;
     }

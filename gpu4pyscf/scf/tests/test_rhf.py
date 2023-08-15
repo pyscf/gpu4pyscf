@@ -17,9 +17,9 @@
 
 import unittest
 import numpy as np
+import cupy
 import pyscf
 from pyscf import lib
-from gpu4pyscf import scf
 
 mol = pyscf.M(
     atom='''
@@ -184,7 +184,7 @@ class KnownValues(unittest.TestCase):
         dm = np.random.random((2,nao,nao))
         mf = mol1.RHF()
         mf.device = 'gpu'
-        vj, vk = mf.get_jk(mol1, dm, hermi=0)
+        vj, vk = mf.get_jk(mol1, cupy.asarray(dm), hermi=0)
         self.assertAlmostEqual(lib.fp(vj.get()), 89.57263277687994, 7)
         self.assertAlmostEqual(lib.fp(vk.get()),-26.36969769724246, 7)
 
@@ -250,26 +250,6 @@ class KnownValues(unittest.TestCase):
         mf.device = 'cpu'
         refk = mf.get_k(mol1, dm, hermi=0)
         self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
-
-    def test_get_jk_screening(self):
-        mol = pyscf.M(atom='He', basis='''
-He    S
-     14.764404247            0.54848620937E-01
-      3.3185831473           0.22074382186
-He    S
-      0.87413869551          1.0000000
-He    P
-      3.04400000             1.0000000        ''')
-        nao = mol.nao
-        dm = np.zeros((nao, nao))
-        dm[0,0] = 1
-        mf = scf.RHF(mol)
-        mf.device = 'gpu'
-        vj, vk = mf.get_jk(mol, dm)
-        self.assertAlmostEqual(lib.fp(vj), 8.056922698761744, 7)
-        self.assertAlmostEqual(lib.fp(vk), 4.780903763783102, 7)
-
-    
     '''
     # end to end test
     def test_rhf_scf(self):

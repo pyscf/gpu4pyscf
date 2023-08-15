@@ -30,6 +30,7 @@
 
 #define THREADS         128
 #define LMAX            8
+#define GTO_MAX_CART     15
 
 template <int ANG> __device__
 static void _nabla1(double *fx1, double *fy1, double *fz1,
@@ -47,6 +48,52 @@ static void _nabla1(double *fx1, double *fy1, double *fz1,
     }
 }
 
+template <int ANG> __device__
+static void _cart2sph(double g_cart[GTO_MAX_CART], double *g_sph, int stride, int grid_id){
+    if (ANG == 0) {
+        g_sph[grid_id + 0*stride] += g_cart[0];
+    } else if (ANG == 1){
+        g_sph[grid_id + 0*stride] += g_cart[0];
+        g_sph[grid_id + 1*stride] += g_cart[1];
+        g_sph[2*stride] += g_cart[2];
+    } else if (ANG == 2){
+        g_sph[grid_id + 0*stride] += 1.092548430592079070 * g_cart[1];
+        g_sph[grid_id + 1*stride] += 1.092548430592079070 * g_cart[4];
+        g_sph[grid_id + 2*stride] += 0.630783130505040012 * g_cart[5] - 0.315391565252520002 * g_cart[0] - 0.315391565252520002 * g_cart[3];
+        g_sph[grid_id + 3*stride] += 1.092548430592079070 * g_cart[2];
+        g_sph[grid_id + 4*stride] += 0.546274215296039535 * g_cart[0] - 0.546274215296039535 * g_cart[3];
+    } else if (ANG == 3){
+        g_sph[grid_id + 0*stride] += 1.770130769779930531 * g_cart[1] - 0.590043589926643510 * g_cart[6];
+        g_sph[grid_id + 1*stride] += 2.890611442640554055 * g_cart[4];
+        g_sph[grid_id + 2*stride] += 1.828183197857862944 * g_cart[8] - 0.457045799464465739 * g_cart[1] - 0.457045799464465739 * g_cart[6];
+        g_sph[grid_id + 3*stride] += 0.746352665180230782 * g_cart[9] - 1.119528997770346170 * g_cart[2] - 1.119528997770346170 * g_cart[7];
+        g_sph[grid_id + 4*stride] += 1.828183197857862944 * g_cart[5] - 0.457045799464465739 * g_cart[0] - 0.457045799464465739 * g_cart[3];
+        g_sph[grid_id + 5*stride] += 1.445305721320277020 * g_cart[2] - 1.445305721320277020 * g_cart[7];
+        g_sph[grid_id + 6*stride] += 0.590043589926643510 * g_cart[0] - 1.770130769779930530 * g_cart[3];
+    } else if (ANG == 4){
+        g_sph[grid_id + 0*stride] += 2.503342941796704538 * g_cart[1] - 2.503342941796704530 * g_cart[6] ;
+        g_sph[grid_id + 1*stride] += 5.310392309339791593 * g_cart[4] - 1.770130769779930530 * g_cart[11];
+        g_sph[grid_id + 2*stride] += 5.677048174545360108 * g_cart[8] - 0.946174695757560014 * g_cart[1] - 0.946174695757560014 * g_cart[6] ;
+        g_sph[grid_id + 3*stride] += 2.676186174229156671 * g_cart[13]- 2.007139630671867500 * g_cart[4] - 2.007139630671867500 * g_cart[11];
+        g_sph[grid_id + 4*stride] += 0.317356640745612911 * g_cart[0] + 0.634713281491225822 * g_cart[3] - 2.538853125964903290 * g_cart[5] + 0.317356640745612911 * g_cart[10] - 2.538853125964903290 * g_cart[12] + 0.846284375321634430 * g_cart[14];
+        g_sph[grid_id + 5*stride] += 2.676186174229156671 * g_cart[9] - 2.007139630671867500 * g_cart[2] - 2.007139630671867500 * g_cart[7] ;
+        g_sph[grid_id + 6*stride] += 2.838524087272680054 * g_cart[5] + 0.473087347878780009 * g_cart[10]- 0.473087347878780002 * g_cart[0] - 2.838524087272680050 * g_cart[12];
+        g_sph[grid_id + 7*stride] += 1.770130769779930531 * g_cart[2] - 5.310392309339791590 * g_cart[7] ;
+        g_sph[grid_id + 8*stride] += 0.625835735449176134 * g_cart[0] - 3.755014412695056800 * g_cart[3] + 0.625835735449176134 * g_cart[10];
+    }
+}
+
+template <int ANG> __device__
+static void _cart_gto(double *g, double ce, double *fx, double *fy, double *fz){
+    for (int lx = ANG, i = 0; lx >= 0; lx--){
+        for (int ly = ANG - lx; ly >= 0; ly--, i++){
+            int lz = ANG - lx - ly;
+            g[i] = ce * fx[lx] * fy[ly] * fz[lz];
+        }
+    }
+}
+
+
 template <int ANG> __global__
 static void _cart_kernel_deriv0(BasOffsets offsets)
 {
@@ -62,15 +109,6 @@ static void _cart_kernel_deriv0(BasOffsets offsets)
     int atm_id = c_bas_atom[ish];
     size_t i0 = c_envs.ao_loc[ish];
     double* __restrict__ gto = offsets.data + i0 * ngrids;
-
-    //if (c_envs.mask[blockIdx.x + blockIdx.y * c_envs.nbas] == 0) {
-    //    int i1 = c_envs.ao_loc[ish+1];
-    //    int nf = i1 - i0;
-    //    for (int i = 0; i < nf; ++i) {
-    //        gto[i*ngrids+grid_id] = 0;
-    //    }
-    //    return;
-    //}
 
     double *atom_coordx = c_envs.atom_coordx;
     double *atom_coordy = c_envs.atom_coordx + natm;
@@ -150,8 +188,8 @@ static void _cart_kernel_deriv0(BasOffsets offsets)
             for(ly = ANG - lx; ly >= 0; ly--, i++){
                 lz = ANG - lx - ly;
                 gto[i*ngrids + grid_id] = xpows[lx] * ypows[ly] * zpows[lz] * ce;
-                }
             }
+        }
     }
 }
 
@@ -1098,6 +1136,292 @@ static void _sph_kernel_deriv1(BasOffsets offsets)
     }
 }
 
+template <int ANG> __global__
+static void _sph_kernel_deriv2(BasOffsets offsets)
+{
+    int ngrids = offsets.ngrids;
+    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    if (grid_id >= ngrids) {
+        return;
+    }
+
+    int bas_id = blockIdx.y;
+    int natm = c_envs.natm;
+    int nbas = c_envs.nbas;
+    int nao = c_envs.ao_loc[nbas];
+    int ish = offsets.bas_off + bas_id;
+    int atm_id = c_bas_atom[ish];
+    size_t i0 = c_envs.ao_loc[ish];
+    double* __restrict__ gto = offsets.data + i0 * ngrids;
+    double* __restrict__ gtox = offsets.data + (nao * 1 + i0) * ngrids;
+    double* __restrict__ gtoy = offsets.data + (nao * 2 + i0) * ngrids;
+    double* __restrict__ gtoz = offsets.data + (nao * 3 + i0) * ngrids;
+    double* __restrict__ gtoxx = offsets.data + (nao * 4 + i0) * ngrids;
+    double* __restrict__ gtoxy = offsets.data + (nao * 5 + i0) * ngrids;
+    double* __restrict__ gtoxz = offsets.data + (nao * 6 + i0) * ngrids;
+    double* __restrict__ gtoyy = offsets.data + (nao * 7 + i0) * ngrids;
+    double* __restrict__ gtoyz = offsets.data + (nao * 8 + i0) * ngrids;
+    double* __restrict__ gtozz = offsets.data + (nao * 9 + i0) * ngrids;
+    
+    double *atom_coordx = c_envs.atom_coordx;
+    double *atom_coordy = c_envs.atom_coordx + natm;
+    double *atom_coordz = c_envs.atom_coordx + natm * 2;
+    double *gridx = offsets.gridx;
+    double *gridy = offsets.gridx + ngrids;
+    double *gridz = offsets.gridx + ngrids * 2;
+    double rx = gridx[grid_id] - atom_coordx[atm_id];
+    double ry = gridy[grid_id] - atom_coordy[atm_id];
+    double rz = gridz[grid_id] - atom_coordz[atm_id];
+    double rr = rx * rx + ry * ry + rz * rz;
+    double *exps = c_envs.env + c_bas_exp[ish];
+    double *coeffs = c_envs.env + c_bas_coeff[ish];
+
+    double fx0[16], fy0[16], fz0[16];
+    double fx1[16], fy1[16], fz1[16];
+    double fx2[16], fy2[16], fz2[16];
+    
+    fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
+    for (int lx = 1; lx <= ANG+2; lx++){
+        fx0[lx] = fx0[lx-1] * rx;
+        fy0[lx] = fy0[lx-1] * ry;
+        fz0[lx] = fz0[lx-1] * rz;
+    }
+    double g[GTO_MAX_CART];
+    for (int ip = 0; ip < offsets.nprim; ++ip) {
+        double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
+        _nabla1<ANG+1>(fx1, fy1, fz1, fx0, fy0, fz0, exps[ip]);
+        _nabla1<ANG  >(fx2, fy2, fz2, fx1, fy1, fz1, exps[ip]);
+
+        _cart_gto<ANG>(g, ce, fx0, fy0, fz0); _cart2sph<ANG>(g, gto,   ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy0, fz0); _cart2sph<ANG>(g, gtox,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy1, fz0); _cart2sph<ANG>(g, gtoy,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy0, fz1); _cart2sph<ANG>(g, gtoz,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx2, fy0, fz0); _cart2sph<ANG>(g, gtoxx, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy1, fz0); _cart2sph<ANG>(g, gtoxy, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy0, fz1); _cart2sph<ANG>(g, gtoxz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy2, fz0); _cart2sph<ANG>(g, gtoyy, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy1, fz1); _cart2sph<ANG>(g, gtoyz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy0, fz2); _cart2sph<ANG>(g, gtozz, ngrids, grid_id);
+    }
+}
+
+
+template <int ANG> __global__
+static void _sph_kernel_deriv3(BasOffsets offsets)
+{
+    int ngrids = offsets.ngrids;
+    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    if (grid_id >= ngrids) {
+        return;
+    }
+
+    int bas_id = blockIdx.y;
+    int natm = c_envs.natm;
+    int nbas = c_envs.nbas;
+    int nao = c_envs.ao_loc[nbas];
+    int ish = offsets.bas_off + bas_id;
+    int atm_id = c_bas_atom[ish];
+    size_t i0 = c_envs.ao_loc[ish];
+    double* __restrict__ gto    = offsets.data + i0 * ngrids;
+    double* __restrict__ gtox   = offsets.data + (nao * 1 + i0) * ngrids;
+    double* __restrict__ gtoy   = offsets.data + (nao * 2 + i0) * ngrids;
+    double* __restrict__ gtoz   = offsets.data + (nao * 3 + i0) * ngrids;
+    double* __restrict__ gtoxx  = offsets.data + (nao * 4 + i0) * ngrids;
+    double* __restrict__ gtoxy  = offsets.data + (nao * 5 + i0) * ngrids;
+    double* __restrict__ gtoxz  = offsets.data + (nao * 6 + i0) * ngrids;
+    double* __restrict__ gtoyy  = offsets.data + (nao * 7 + i0) * ngrids;
+    double* __restrict__ gtoyz  = offsets.data + (nao * 8 + i0) * ngrids;
+    double* __restrict__ gtozz  = offsets.data + (nao * 9 + i0) * ngrids;
+    double* __restrict__ gtoxxx = offsets.data + (nao * 10 + i0) * ngrids;
+    double* __restrict__ gtoxxy = offsets.data + (nao * 11 + i0) * ngrids;
+    double* __restrict__ gtoxxz = offsets.data + (nao * 12 + i0) * ngrids;
+    double* __restrict__ gtoxyy = offsets.data + (nao * 13 + i0) * ngrids;
+    double* __restrict__ gtoxyz = offsets.data + (nao * 14 + i0) * ngrids;
+    double* __restrict__ gtoxzz = offsets.data + (nao * 15 + i0) * ngrids;
+    double* __restrict__ gtoyyy = offsets.data + (nao * 16 + i0) * ngrids;
+    double* __restrict__ gtoyyz = offsets.data + (nao * 17 + i0) * ngrids;
+    double* __restrict__ gtoyzz = offsets.data + (nao * 18 + i0) * ngrids;
+    double* __restrict__ gtozzz = offsets.data + (nao * 19 + i0) * ngrids;
+
+    double *atom_coordx = c_envs.atom_coordx;
+    double *atom_coordy = c_envs.atom_coordx + natm;
+    double *atom_coordz = c_envs.atom_coordx + natm * 2;
+    double *gridx = offsets.gridx;
+    double *gridy = offsets.gridx + ngrids;
+    double *gridz = offsets.gridx + ngrids * 2;
+    double rx = gridx[grid_id] - atom_coordx[atm_id];
+    double ry = gridy[grid_id] - atom_coordy[atm_id];
+    double rz = gridz[grid_id] - atom_coordz[atm_id];
+    double rr = rx * rx + ry * ry + rz * rz;
+    double *exps = c_envs.env + c_bas_exp[ish];
+    double *coeffs = c_envs.env + c_bas_coeff[ish];
+
+    double fx0[16], fy0[16], fz0[16];
+    double fx1[16], fy1[16], fz1[16];
+    double fx2[16], fy2[16], fz2[16];
+    double fx3[16], fy3[16], fz3[16];
+
+    fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
+    for (int lx = 1; lx <= ANG+3; lx++){
+        fx0[lx] = fx0[lx-1] * rx;
+        fy0[lx] = fy0[lx-1] * ry;
+        fz0[lx] = fz0[lx-1] * rz;
+    }
+    
+    double g[GTO_MAX_CART];
+    for (int ip = 0; ip < offsets.nprim; ++ip) {
+        double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
+        _nabla1<ANG+2>(fx1, fy1, fz1, fx0, fy0, fz0, exps[ip]);
+        _nabla1<ANG+1>(fx2, fy2, fz2, fx1, fy1, fz1, exps[ip]);
+        _nabla1<ANG  >(fx3, fy3, fz3, fx2, fy2, fz2, exps[ip]);
+        
+        _cart_gto<ANG>(g, ce, fx0, fy0, fz0); _cart2sph<ANG>(g, gto,    ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy0, fz0); _cart2sph<ANG>(g, gtox,   ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy1, fz0); _cart2sph<ANG>(g, gtoy,   ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy0, fz1); _cart2sph<ANG>(g, gtoz,   ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx2, fy0, fz0); _cart2sph<ANG>(g, gtoxx,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy1, fz0); _cart2sph<ANG>(g, gtoxy,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy0, fz1); _cart2sph<ANG>(g, gtoxz,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy2, fz0); _cart2sph<ANG>(g, gtoyy,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy1, fz1); _cart2sph<ANG>(g, gtoyz,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy0, fz2); _cart2sph<ANG>(g, gtozz,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx3, fy0, fz0); _cart2sph<ANG>(g, gtoxxx, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx2, fy1, fz0); _cart2sph<ANG>(g, gtoxxy, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx2, fy0, fz1); _cart2sph<ANG>(g, gtoxxz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy2, fz0); _cart2sph<ANG>(g, gtoxyy, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy1, fz1); _cart2sph<ANG>(g, gtoxyz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy0, fz2); _cart2sph<ANG>(g, gtoxzz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy3, fz0); _cart2sph<ANG>(g, gtoyyy, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy2, fz1); _cart2sph<ANG>(g, gtoyyz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy1, fz2); _cart2sph<ANG>(g, gtoyzz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy0, fz3); _cart2sph<ANG>(g, gtozzz, ngrids, grid_id);
+    }
+}
+
+
+template <int ANG> __global__
+static void _sph_kernel_deriv4(BasOffsets offsets)
+{
+    int ngrids = offsets.ngrids;
+    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    if (grid_id >= ngrids) {
+        return;
+    }
+
+    int bas_id = blockIdx.y;
+    int natm = c_envs.natm;
+    int nbas = c_envs.nbas;
+    int nao = c_envs.ao_loc[nbas];
+    int ish = offsets.bas_off + bas_id;
+    int atm_id = c_bas_atom[ish];
+    size_t i0 = c_envs.ao_loc[ish];
+    double* __restrict__ gto     = offsets.data + i0 * ngrids;
+    double* __restrict__ gtox    = offsets.data + (nao * 1 + i0) * ngrids;
+    double* __restrict__ gtoy    = offsets.data + (nao * 2 + i0) * ngrids;
+    double* __restrict__ gtoz    = offsets.data + (nao * 3 + i0) * ngrids;
+    double* __restrict__ gtoxx   = offsets.data + (nao * 4 + i0) * ngrids;
+    double* __restrict__ gtoxy   = offsets.data + (nao * 5 + i0) * ngrids;
+    double* __restrict__ gtoxz   = offsets.data + (nao * 6 + i0) * ngrids;
+    double* __restrict__ gtoyy   = offsets.data + (nao * 7 + i0) * ngrids;
+    double* __restrict__ gtoyz   = offsets.data + (nao * 8 + i0) * ngrids;
+    double* __restrict__ gtozz   = offsets.data + (nao * 9 + i0) * ngrids;
+    double* __restrict__ gtoxxx  = offsets.data + (nao * 10 + i0) * ngrids;
+    double* __restrict__ gtoxxy  = offsets.data + (nao * 11 + i0) * ngrids;
+    double* __restrict__ gtoxxz  = offsets.data + (nao * 12 + i0) * ngrids;
+    double* __restrict__ gtoxyy  = offsets.data + (nao * 13 + i0) * ngrids;
+    double* __restrict__ gtoxyz  = offsets.data + (nao * 14 + i0) * ngrids;
+    double* __restrict__ gtoxzz  = offsets.data + (nao * 15 + i0) * ngrids;
+    double* __restrict__ gtoyyy  = offsets.data + (nao * 16 + i0) * ngrids;
+    double* __restrict__ gtoyyz  = offsets.data + (nao * 17 + i0) * ngrids;
+    double* __restrict__ gtoyzz  = offsets.data + (nao * 18 + i0) * ngrids;
+    double* __restrict__ gtozzz  = offsets.data + (nao * 19 + i0) * ngrids;
+    double* __restrict__ gtoxxxx = offsets.data + (nao * 20 + i0) * ngrids;
+    double* __restrict__ gtoxxxy = offsets.data + (nao * 21 + i0) * ngrids;
+    double* __restrict__ gtoxxxz = offsets.data + (nao * 22 + i0) * ngrids;
+    double* __restrict__ gtoxxyy = offsets.data + (nao * 23 + i0) * ngrids;
+    double* __restrict__ gtoxxyz = offsets.data + (nao * 24 + i0) * ngrids;
+    double* __restrict__ gtoxxzz = offsets.data + (nao * 25 + i0) * ngrids;
+    double* __restrict__ gtoxyyy = offsets.data + (nao * 26 + i0) * ngrids;
+    double* __restrict__ gtoxyyz = offsets.data + (nao * 27 + i0) * ngrids;
+    double* __restrict__ gtoxyzz = offsets.data + (nao * 28 + i0) * ngrids;
+    double* __restrict__ gtoxzzz = offsets.data + (nao * 29 + i0) * ngrids;
+    double* __restrict__ gtoyyyy = offsets.data + (nao * 30 + i0) * ngrids;
+    double* __restrict__ gtoyyyz = offsets.data + (nao * 31 + i0) * ngrids;
+    double* __restrict__ gtoyyzz = offsets.data + (nao * 32 + i0) * ngrids;
+    double* __restrict__ gtoyzzz = offsets.data + (nao * 33 + i0) * ngrids;
+    double* __restrict__ gtozzzz = offsets.data + (nao * 34 + i0) * ngrids;
+
+    double *atom_coordx = c_envs.atom_coordx;
+    double *atom_coordy = c_envs.atom_coordx + natm;
+    double *atom_coordz = c_envs.atom_coordx + natm * 2;
+    double *gridx = offsets.gridx;
+    double *gridy = offsets.gridx + ngrids;
+    double *gridz = offsets.gridx + ngrids * 2;
+    double rx = gridx[grid_id] - atom_coordx[atm_id];
+    double ry = gridy[grid_id] - atom_coordy[atm_id];
+    double rz = gridz[grid_id] - atom_coordz[atm_id];
+    double rr = rx * rx + ry * ry + rz * rz;
+    double *exps = c_envs.env + c_bas_exp[ish];
+    double *coeffs = c_envs.env + c_bas_coeff[ish];
+
+    double fx0[16], fy0[16], fz0[16];
+    double fx1[16], fy1[16], fz1[16];
+    double fx2[16], fy2[16], fz2[16];
+    double fx3[16], fy3[16], fz3[16];
+    double fx4[16], fy4[16], fz4[16];
+
+    fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
+    for (int lx = 1; lx <= ANG+4; lx++){
+        fx0[lx] = fx0[lx-1] * rx;
+        fy0[lx] = fy0[lx-1] * ry;
+        fz0[lx] = fz0[lx-1] * rz;
+    }
+    double g[GTO_MAX_CART];
+    for (int ip = 0; ip < offsets.nprim; ++ip) {
+        double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
+        _nabla1<ANG+3>(fx1, fy1, fz1, fx0, fy0, fz0, exps[ip]);
+        _nabla1<ANG+2>(fx2, fy2, fz2, fx1, fy1, fz1, exps[ip]);
+        _nabla1<ANG+1>(fx3, fy3, fz3, fx2, fy2, fz2, exps[ip]);
+        _nabla1<ANG  >(fx4, fy4, fz4, fx3, fy3, fz3, exps[ip]);
+
+        _cart_gto<ANG>(g, ce, fx0, fy0, fz0); _cart2sph<ANG>(g, gto,     ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy0, fz0); _cart2sph<ANG>(g, gtox,    ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy1, fz0); _cart2sph<ANG>(g, gtoy,    ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy0, fz1); _cart2sph<ANG>(g, gtoz,    ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx2, fy0, fz0); _cart2sph<ANG>(g, gtoxx,   ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy1, fz0); _cart2sph<ANG>(g, gtoxy,   ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy0, fz1); _cart2sph<ANG>(g, gtoxz,   ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy2, fz0); _cart2sph<ANG>(g, gtoyy,   ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy1, fz1); _cart2sph<ANG>(g, gtoyz,   ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy0, fz2); _cart2sph<ANG>(g, gtozz,   ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx3, fy0, fz0); _cart2sph<ANG>(g, gtoxxx,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx2, fy1, fz0); _cart2sph<ANG>(g, gtoxxy,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx2, fy0, fz1); _cart2sph<ANG>(g, gtoxxz,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy2, fz0); _cart2sph<ANG>(g, gtoxyy,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy1, fz1); _cart2sph<ANG>(g, gtoxyz,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy0, fz2); _cart2sph<ANG>(g, gtoxzz,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy3, fz0); _cart2sph<ANG>(g, gtoyyy,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy2, fz1); _cart2sph<ANG>(g, gtoyyz,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy1, fz2); _cart2sph<ANG>(g, gtoyzz,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy0, fz3); _cart2sph<ANG>(g, gtozzz,  ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx4, fy0, fz0); _cart2sph<ANG>(g, gtoxxxx, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx3, fy1, fz0); _cart2sph<ANG>(g, gtoxxxy, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx3, fy0, fz1); _cart2sph<ANG>(g, gtoxxxz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx2, fy2, fz0); _cart2sph<ANG>(g, gtoxxyy, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx2, fy1, fz1); _cart2sph<ANG>(g, gtoxxyz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx2, fy0, fz2); _cart2sph<ANG>(g, gtoxxzz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy3, fz0); _cart2sph<ANG>(g, gtoxyyy, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy2, fz1); _cart2sph<ANG>(g, gtoxyyz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy1, fz2); _cart2sph<ANG>(g, gtoxyzz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx1, fy0, fz3); _cart2sph<ANG>(g, gtoxzzz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy4, fz0); _cart2sph<ANG>(g, gtoyyyy, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy3, fz1); _cart2sph<ANG>(g, gtoyyyz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy2, fz2); _cart2sph<ANG>(g, gtoyyzz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy1, fz3); _cart2sph<ANG>(g, gtoyzzz, ngrids, grid_id);
+        _cart_gto<ANG>(g, ce, fx0, fy0, fz4); _cart2sph<ANG>(g, gtozzzz, ngrids, grid_id);
+    }
+}
+
 extern "C" {
 __host__
 void GDFTinit_envs(GTOValEnvVars **envs_cache, int *ao_loc,
@@ -1175,11 +1499,11 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
     for (int bucket = 0; bucket < nbuckets; ++bucket) {
         int ish = bas_loc[bucket];
         int l = bas[ANG_OF+ish*BAS_SLOTS];
+        
         offsets.bas_off = ish;
         offsets.nprim = bas[NPRIM_OF+ish*BAS_SLOTS];
         offsets.fac = CINTcommon_fac_sp(l);
         blocks.y = bas_loc[bucket+1] - ish;
-
         switch (deriv) {
         case 0:
             if (cart == 1) {
@@ -1239,10 +1563,16 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 case 6: _cart_kernel_deriv2<6> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 7: _cart_kernel_deriv2<7> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 8: _cart_kernel_deriv2<8> <<<blocks, threads, 0, stream>>>(offsets); break;
-                default: fprintf(stderr, "l = %d not supported\n", l); }
+                default: fprintf(stderr, "l = %d not supported\n", l); break;}
             } else {
-                fprintf(stderr, "sph deriv=2 not supported\n");
-            }
+                switch(l){
+                case 0: _cart_kernel_deriv2<0> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 1: _cart_kernel_deriv2<1> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 2: _sph_kernel_deriv2<2> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 3: _sph_kernel_deriv2<3> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 4: _sph_kernel_deriv2<4> <<<blocks, threads, 0, stream>>>(offsets); break;
+                default: fprintf(stderr, "l = %d not supported\n", l); break; }
+                }
             break;
         case 3:
             if (cart == 1){
@@ -1256,10 +1586,16 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 case 6: _cart_kernel_deriv3<6> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 7: _cart_kernel_deriv3<7> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 8: _cart_kernel_deriv3<8> <<<blocks, threads, 0, stream>>>(offsets); break;
-                default: fprintf(stderr, "l = %d not supported\n", l); }
+                default: fprintf(stderr, "l = %d not supported\n", l); break; }
             } else {
-                fprintf(stderr, "sph deriv=3 not supported\n");
-            }
+                switch(l){
+                case 0: _cart_kernel_deriv3<0> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 1: _cart_kernel_deriv3<1> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 2: _sph_kernel_deriv3<2> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 3: _sph_kernel_deriv3<3> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 4: _sph_kernel_deriv3<4> <<<blocks, threads, 0, stream>>>(offsets); break;
+                default: fprintf(stderr, "l = %d not supported\n", l); break; }
+                }
             break;
         case 4:
             if (cart == 1){
@@ -1273,9 +1609,15 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 case 6: _cart_kernel_deriv4<6> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 7: _cart_kernel_deriv4<7> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 8: _cart_kernel_deriv4<8> <<<blocks, threads, 0, stream>>>(offsets); break;
-                default: fprintf(stderr, "l = %d not supported\n", l); }
+                default: fprintf(stderr, "l = %d not supported\n", l); break; }
             } else {
-                fprintf(stderr, "sph deriv=4 not supported\n");
+                switch(l){
+                case 0: _cart_kernel_deriv4<0> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 1: _cart_kernel_deriv4<1> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 2: _sph_kernel_deriv4<2> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 3: _sph_kernel_deriv4<3> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 4: _sph_kernel_deriv4<4> <<<blocks, threads, 0, stream>>>(offsets); break;
+                default: fprintf(stderr, "l = %d not supported\n", l); break; }
             }
             break;
         default:
