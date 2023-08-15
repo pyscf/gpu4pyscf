@@ -23,7 +23,7 @@ lib.num_threads(8)
 
 xc='pbe0'
 bas='def2-tzvpp'
-auxbasis='def2-tzvpp-ri'
+auxbasis='def2-tzvpp-jkfit'
 grids_level = 5
 eps=1e-4
 
@@ -56,6 +56,7 @@ def _check_grad(grid_response=False, tol=1e-5):
     mf = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
     mf.device = 'gpu'
     mf.grids.level = grids_level
+    mf.conv_tol = 1e-12
     e_tot = mf.kernel()
     g = mf.nuc_grad_method()
     g.auxbasis_response = True
@@ -108,7 +109,7 @@ def _check_dft_hessian(disp=None, ix=0, iy=0, tol=1e-3):
     mf.conv_tol = 1e-12
     mf.grids.level = grids_level
     mf.verbose = 1
-    mf.kernel(conv_tol=1e-12)
+    mf.kernel()
     
     g = mf.nuc_grad_method()
     g.auxbasis_response = True

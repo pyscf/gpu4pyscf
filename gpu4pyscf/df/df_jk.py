@@ -23,7 +23,7 @@ from pyscf import lib, scf, __config__
 from pyscf.lib import logger
 from pyscf.scf import dhf
 from pyscf.df import df_jk, addons
-from gpu4pyscf.lib.cupy_helper import contract, solve_triangular, unpack_tril, take_last2d, transpose_sum, load_library, get_avail_mem
+from gpu4pyscf.lib.cupy_helper import contract, solve_triangular, take_last2d, transpose_sum, load_library, get_avail_mem
 from gpu4pyscf.dft import rks, numint
 from gpu4pyscf.scf import hf
 from gpu4pyscf.df import df, int3c2e
@@ -62,7 +62,6 @@ def init_workflow(mf, dm0=None):
             rks.initialize_grids(mf, mf.mol, dm0)
             ni.build(mf.mol, mf.grids.coords)
             mf._numint.xcfuns = numint._init_xcfuns(mf.xc)
-            mf._numint.use_sparsity = 0
     dm0 = cupy.asarray(dm0)
     return
 
@@ -269,60 +268,65 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
 
     t1 = log.timer_debug1('init jk', *t0)
     if with_j:
-        tril_row = dfobj.tril_row
-        tril_col = dfobj.tril_col
-        dm_tril = dms[:, tril_row, tril_col]
-        dm_tril[:, dfobj.diag_idx] *= .5
-        rhoj = 2.0*dm_tril.dot(dfobj._cderi.T)
-        vj_tril = cupy.dot(rhoj, dfobj._cderi)
-        dm_tril = None
-        
-        vj = cupy.empty_like(dms)
-        vj[:,tril_row, tril_col] = vj_tril
-        vj[:,tril_col, tril_row] = vj_tril
-        vj_tril = None
-    if with_k:
-        vk = cupy.zeros_like(dms)
-        # SCF K matrix with occ
-        if nset == 1 and hasattr(dms_tag, 'occ_coeff'):
-            occ_coeff = cupy.asarray(dms_tag.occ_coeff[ao_idx, :], order='C')
-            nocc = occ_coeff.shape[1]
-            blksize = dfobj.get_blksize(extra=nao*nocc)
-            cderi_buf = cupy.empty([blksize, nao, nao])
-            for p0, p1, cderi_tril in dfobj.loop(blksize=blksize):
-                unpack_tril(cderi_tril, cderi_buf)
-                # leading dimension is 1
-                rhok = contract('Lij,jk->Lki', cderi_buf[:p1-p0], occ_coeff)
-                vk[0] += contract('Lki,Lkj->ij', rhok, rhok)
-                #contract('Lki,Lkj->ij', rhok, rhok, alpha=1.0, beta=1.0, out=vk[0])
-            vk *= 2.0
-        # CP-HF K matrix
-        elif hasattr(dms_tag, 'mo1'):
-            mo1 = dms_tag.mo1[:,ao_idx,:]
-            nocc = mo1.shape[2]
-            occ_coeff = dms_tag.occ_coeff[ao_idx,:] * 2.0  # due to rhok and rhok1, put it here for symmetry
-            blksize = dfobj.get_blksize(extra=2*nao*nocc)
-            cderi_buf = cupy.empty([blksize, nao, nao])
-            for p0, p1, cderi_tril in dfobj.loop(blksize=blksize):
-                unpack_tril(cderi_tril, cderi_buf)
-                rhok = contract('Lij,jk->Lki', cderi_buf[:p1-p0], occ_coeff)
+        rows = dfobj.intopt.cderi_row
+        cols = dfobj.intopt.cderi_col
+        dm_sparse = dms[:,rows,cols]
+        dm_sparse[:, dfobj.intopt.cderi_diag] *= .5
+        vj = cupy.zeros_like(dms)
+
+    def get_j(cderi_sparse):
+        rhoj = 2.0*dm_sparse.dot(cderi_sparse)
+        vj_sparse = cupy.dot(rhoj, cderi_sparse.T)
+        vj_tmp = cupy.zeros_like(dms)
+        vj_tmp[:,rows,cols] = vj_sparse
+        vj_tmp[:,cols,rows] = vj_sparse
+        vj_sparse = None
+        return vj_tmp
+
+    vk = cupy.zeros_like(dms)
+    # SCF K matrix with occ
+    if nset == 1 and hasattr(dms_tag, 'occ_coeff'):
+        occ_coeff = cupy.asarray(dms_tag.occ_coeff[ao_idx, :], order='C')
+        nocc = occ_coeff.shape[1]
+        blksize = dfobj.get_blksize(extra=nao*nocc)
+        for cderi, cderi_sparse in dfobj.loop(blksize=blksize):
+            # leading dimension is 1
+            if with_j: 
+                vj += get_j(cderi_sparse)
+            if with_k:
+                rhok = contract('Lij,jk->Lki', cderi, occ_coeff)
+                #vk[0] += contract('Lki,Lkj->ij', rhok, rhok)
+                contract('Lki,Lkj->ij', rhok, rhok, alpha=1.0, beta=1.0, out=vk[0])
+        vk *= 2.0
+    # CP-HF K matrix
+    elif hasattr(dms_tag, 'mo1'):
+        mo1 = dms_tag.mo1[:,ao_idx,:]
+        nocc = mo1.shape[2]
+        # 2.0 due to rhok and rhok1, put it here for symmetry
+        occ_coeff = dms_tag.occ_coeff[ao_idx,:] * 2.0
+        blksize = dfobj.get_blksize(extra=2*nao*nocc)
+        for cderi, cderi_sparse in dfobj.loop(blksize=blksize):
+            if with_j:
+                vj += get_j(cderi_sparse)
+            if with_k:
+                rhok = contract('Lij,jk->Lki', cderi, occ_coeff)
                 for i in range(mo1.shape[0]):
-                    rhok1 = contract('Lij,jk->Lki', cderi_buf[:p1-p0], mo1[i])
+                    rhok1 = contract('Lij,jk->Lki', cderi, mo1[i])
                     vk[i] += contract('Lki,Lkj->ij', rhok, rhok1)
                     #contract('Lki,Lkj->ij', rhok, rhok1, alpha=1.0, beta=1.0, out=vk[i])
-            cderi_buf = occ_coeff = rhok1 = rhok = mo1 = None
-            #vk *= 2.0
-            vk = vk + vk.transpose(0,2,1)
-        # general K matrix with density matrix
-        else:
-            blksize = dfobj.get_blksize()
-            cderi_buf = cupy.empty([blksize, nao, nao])
-            for p0, p1, cderi_tril in dfobj.loop(blksize=blksize):
-                unpack_tril(cderi_tril, cderi_buf)
+        occ_coeff = rhok1 = rhok = mo1 = None
+        vk = vk + vk.transpose(0,2,1)
+    # general K matrix with density matrix
+    else:
+        blksize = dfobj.get_blksize()
+        for cderi, cderi_sparse in dfobj.loop(blksize=blksize):
+            if with_j:
+                vj += get_j(cderi_sparse)
+            if with_k:
                 for k in range(nset):
-                    rhok = contract('Lij,jk->Lki', cderi_buf[:p1-p0], dms[k])
-                    vk[k] += contract('Lki,Lkj->ij', cderi_buf[:p1-p0], rhok)
-            rhok = cderi_buf = None
+                    rhok = contract('Lij,jk->Lki', cderi, dms[k])
+                    vk[k] += contract('Lki,Lkj->ij', cderi, rhok)
+        rhok = None
 
     rev_ao_idx = numpy.argsort(dfobj.intopt.sph_ao_idx)
     if with_j:
@@ -335,7 +339,11 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     if out_cupy:
         return vj, vk
     else:
-        return vj.get() if vj else None, vk.get() if vk else None
+        if vj is not None:
+            vj = vj.get()
+        if vk is not None:
+            vk = vk.get()
+        return vj, vk
 
 def _get_jk(dfobj, dm, hermi=1, with_j=True, with_k=True,
             direct_scf_tol=getattr(__config__, 'scf_hf_SCF_direct_scf_tol', 1e-13),

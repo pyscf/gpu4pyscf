@@ -107,7 +107,6 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     dm_shl = cupy.asarray(np.log(dm_shl))
     nshls = dm_shl.shape[0]
     t0 = time.perf_counter()
-
     if hermi != 1:
         dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
     fn = libgvhf.GINTbuild_jk
@@ -335,10 +334,11 @@ def _kernel(mf, dm0=None, conv_tol=1e-12, conv_tol_grad=None):
     else:
         h1e = cupy.asarray(mf.get_hcore(mol))
         s1e = cupy.asarray(mf.get_ovlp(mol))
-    
-    e, v = cupy.linalg.eigh(dm)
-    occ_coeff = v[:,:mol.nelectron//2]
-    dm = tag_array(dm, occ_coeff=occ_coeff)
+    if hasattr(dm0, 'occ_coeff') and hasattr(dm0, 'mo_occ'):
+        mo_coeff = cupy.asarray(dm0.mo_coeff)
+        mo_occ = cupy.asarray(dm0.mo_occ)
+        occ_coeff = cupy.asarray(mo_coeff[:,mo_occ>0])
+        dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     logger.info(mf, 'init E= %.15g', e_tot)
@@ -360,7 +360,7 @@ def _kernel(mf, dm0=None, conv_tol=1e-12, conv_tol_grad=None):
         mf.mo_occ = mf.get_occ(mf.mo_energy, mf.mo_coeff)
         dm = _make_rdm1(mf, mf.mo_coeff, mf.mo_occ)
         occ_coeff = mf.mo_coeff[:, mf.mo_occ>1.0]
-        dm = tag_array(dm, occ_coeff=occ_coeff)
+        dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mf.mo_occ, mo_coeff=mf.mo_coeff)
         t1 = log.timer_debug1('dm', *t1)
 
         vhf = mf.get_veff(mol, dm, dm_last, vhf)

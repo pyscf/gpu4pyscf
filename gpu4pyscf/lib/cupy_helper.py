@@ -20,13 +20,303 @@ import sys
 import numpy as np
 import cupy
 import ctypes
-import opt_einsum
-from cupy import cutensor
+from cupyx import cutensor
 from cupy.cuda import device
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
 from cupy_backends.cuda.libs import cusolver
 from cupy_backends.cuda.libs import cublas
+
+LMAX_ON_GPU = 8
+DSOLVE_LINDEP = 1e-15
+
+c2s_l = mole.get_cart2sph(lmax=LMAX_ON_GPU)
+c2s_data = cupy.concatenate([x.ravel() for x in c2s_l])
+c2s_offset = np.cumsum([0] + [x.shape[0]*x.shape[1] for x in c2s_l])
+
+def load_library(libname):
+    try:
+        _loaderpath = os.path.dirname(__file__)
+        return np.ctypeslib.load_library(libname, _loaderpath)
+    except OSError:
+        raise
+
+libcupy_helper = load_library('libcupy_helper')
+
+pinned_memory_pool = cupy.cuda.PinnedMemoryPool()
+cupy.cuda.set_pinned_memory_allocator(pinned_memory_pool.malloc)
+def pin_memory(array):
+    mem = cupy.cuda.alloc_pinned_memory(array.nbytes)
+    ret = np.frombuffer(mem, array.dtype, array.size).reshape(array.shape)
+    ret[...] = array
+    return ret
+
+def release_gpu_stack():
+    cupy.cuda.runtime.deviceSetLimit(0x00, 128)
+
+def print_mem_info():
+    mempool = cupy.get_default_memory_pool()
+    cupy.get_default_memory_pool().free_all_blocks()
+    cupy.get_default_pinned_memory_pool().free_all_blocks()
+    mem_avail = cupy.cuda.runtime.memGetInfo()[0]
+    print(cupy.cuda.runtime.memGetInfo())
+    total_mem = mempool.total_bytes()
+    used_mem = mempool.used_bytes()
+    mem_limit = mempool.get_limit()
+    stack_size_per_thread = cupy.cuda.runtime.deviceGetLimit(0x00)
+    mem_stack = stack_size_per_thread 
+    GB = 1024 * 1024 * 1024
+    print(f'mem_avail: {mem_avail/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB, used_mem: {used_mem/GB:.3f} GB,mem_limt: {mem_limit/GB:.3f} GB')
+    
+def get_avail_mem():
+    mempool = cupy.get_default_memory_pool()
+    used_mem = mempool.used_bytes()
+    mem_limit = mempool.get_limit()
+    if(mem_limit != 0):
+        return mem_limit - used_mem
+    else:
+        total_mem = mempool.total_bytes()
+        # get memGetInfo() is slow
+        mem_avail = cupy.cuda.runtime.memGetInfo()[0]
+        return mem_avail + total_mem - used_mem
+
+def device2host_2d(a_cpu, a_gpu, stream=None):
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    libcupy_helper.async_d2h_2d(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        a_cpu.ctypes.data_as(ctypes.c_void_p),
+        ctypes.c_int(a_cpu.strides[0]), 
+        ctypes.cast(a_gpu.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(a_gpu.strides[0]),
+        ctypes.c_int(a_gpu.shape[0]),
+        ctypes.c_int(a_gpu.shape[1]))
+
+# define cupy array with tags
+class CPArrayWithTag(cupy.ndarray):
+    pass
+
+def tag_array(a, **kwargs):
+    ''' attach attributes to cupy ndarray'''
+    t = cupy.asarray(a).view(CPArrayWithTag)
+    if isinstance(a, CPArrayWithTag):
+        t.__dict__.update(a.__dict__)
+    t.__dict__.update(kwargs)
+    return t
+
+def unpack_tril(cderi_tril, cderi, stream=None):
+    nao = cderi.shape[1]
+    count = cderi_tril.shape[0]
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.unpack_tril(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(cderi_tril.data.ptr, ctypes.c_void_p),
+        ctypes.cast(cderi.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(nao),
+        ctypes.c_int(count))
+    if err != 0:
+        raise RuntimeError('failed in unpack_tril kernel')
+    return
+
+def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    if out is None:
+        out = cupy.zeros([nao,nao,p1-p0])
+    nij = len(row)
+    naux = cderi_sparse.shape[1]
+    nao = out.shape[1]
+    err = libcupy_helper.unpack_sparse(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(cderi_sparse.data.ptr, ctypes.c_void_p),
+        ctypes.cast(row.data.ptr, ctypes.c_void_p),
+        ctypes.cast(col.data.ptr, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(nao),
+        ctypes.c_int(nij),
+        ctypes.c_int(naux),
+        ctypes.c_int(p0),
+        ctypes.c_int(p1)
+    )
+    return out
+
+def eigh(h, s):
+    '''
+    solve generalized eigenvalue problem
+    '''
+    n = h.shape[0]
+    w = cupy.zeros(n)
+    A = h.copy(); B = s.copy()
+    cusolver_handle = device.get_cusolver_handle()
+    err = libcupy_helper.eigh(
+        ctypes.cast(cusolver_handle, ctypes.c_void_p),
+        ctypes.cast(A.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(B.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(w.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n))
+    if err != 0:
+        raise RuntimeError("failed in eigh kernel")
+    return w, A.T
+
+def cholesky(A):
+    n = len(A)
+    assert A.flags['C_CONTIGUOUS']
+    x = A.copy()
+    handle = device.get_cusolver_handle()
+    potrf = cusolver.dpotrf
+    potrf_bufferSize = cusolver.dpotrf_bufferSize
+    buffersize = potrf_bufferSize(handle, cublas.CUBLAS_FILL_MODE_UPPER, n, x.data.ptr, n)
+    workspace = cupy.empty(buffersize)
+    dev_info = cupy.empty(1, dtype=np.int32)
+    potrf(handle, cublas.CUBLAS_FILL_MODE_UPPER, n, x.data.ptr, n,
+        workspace.data.ptr, buffersize, dev_info.data.ptr)
+    
+    if dev_info[0] > 0:
+        raise RuntimeError('failed to perform Cholesky Decomposition')
+    cupy.linalg._util._tril(x,k=0)
+    return x
+
+def solve_triangular(A, B, lower=True):
+    '''
+    solve triangular linear system, overwrite b
+    '''
+    assert A.flags['C_CONTIGUOUS']
+    assert B.flags['C_CONTIGUOUS']
+    if B.ndim == 1:
+        m, n = (1, B.size)
+    else:
+        m = np.prod(B.shape[1:])
+        n = B.shape[0]
+    
+    uplo = 1 if lower else 0
+    cublas_handle = device.get_cublas_handle()
+    stat = libcupy_helper.cho_solve(
+        ctypes.cast(cublas_handle, ctypes.c_void_p),
+        ctypes.cast(A.data.ptr, ctypes.c_void_p),
+        ctypes.cast(B.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(m),
+        ctypes.c_int(n),
+        ctypes.c_int(uplo)
+    )
+    if stat != 0:
+        raise RuntimeError('failed to solve triangular linear system')
+    return B
+
+def block_c2s_diag(ncart, nsph, angular, counts):
+    '''
+    constract a cartesian to spherical transformation of n shells
+    '''
+
+    nshells = np.sum(counts)
+    cart2sph = cupy.zeros([ncart, nsph])
+    rows = [0]
+    cols = [0]
+    offsets = []
+    for l, count in zip(angular, counts):
+        for _ in range(count):
+            r, c = c2s_l[l].shape
+            rows.append(rows[-1] + r)
+            cols.append(cols[-1] + c)
+            offsets.append(c2s_offset[l])
+    rows = np.asarray(rows, dtype='int32')
+    cols = np.asarray(cols, dtype='int32')
+    offsets = np.asarray(offsets, dtype='int32')
+
+    rows = cupy.asarray(rows, dtype='int32')
+    cols = cupy.asarray(cols, dtype='int32')
+    offsets = cupy.asarray(offsets, dtype='int32')
+
+    stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.block_diag(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(cart2sph.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ncart),
+        ctypes.c_int(nsph),
+        ctypes.cast(c2s_data.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(nshells),
+        ctypes.cast(offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rows.data.ptr, ctypes.c_void_p),
+        ctypes.cast(cols.data.ptr, ctypes.c_void_p),
+    )
+    if err != 0:
+        raise RuntimeError('failed in block_diag kernel')
+    return cart2sph
+
+def block_diag(blocks, out=None):
+    '''
+    each block size is up to 16x16
+    '''
+    rows = np.cumsum(np.asarray([0] + [x.shape[0] for x in blocks]))
+    cols = np.cumsum(np.asarray([0] + [x.shape[1] for x in blocks]))
+    offsets = np.cumsum(np.asarray([0] + [x.shape[0]*x.shape[1] for x in blocks]))
+    
+    m, n = rows[-1], cols[-1]
+    if out is None: out = cupy.zeros([m, n])
+    rows = cupy.asarray(rows, dtype='int32')
+    cols = cupy.asarray(cols, dtype='int32')
+    offsets = cupy.asarray(offsets, dtype='int32')
+    data = cupy.concatenate([x.ravel() for x in blocks])
+    stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.block_diag(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(m),
+        ctypes.c_int(n),
+        ctypes.cast(data.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(len(blocks)),
+        ctypes.cast(offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rows.data.ptr, ctypes.c_void_p),
+        ctypes.cast(cols.data.ptr, ctypes.c_void_p),
+    )
+    if err != 0:
+        raise RuntimeError('failed in block_diag kernel')
+    return out
+    
+def take_last2d(a, indices, out=None):
+    '''
+    reorder the last 2 dimensions with 'indices', the first n-2 indices do not change
+    shape in the last 2 dimensions have to be the same
+    '''
+    assert a.flags.c_contiguous == True
+    assert a.shape[-1] == a.shape[-2]
+    nao = a.shape[-1]
+    if a.ndim == 2:
+        count = 1
+    else:
+        count = np.prod(a.shape[:-2])
+    if out is None:
+        out = cupy.zeros_like(a)
+    indices_int32 = cupy.asarray(indices, dtype='int32')
+    stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.take_last2d(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.cast(indices_int32.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(count),
+        ctypes.c_int(nao)
+    )
+    if err != 0:
+        raise RuntimeError('failed in take_last2d kernel')
+    return out
+
+def transpose_sum(a):
+    '''
+    transpose (0,2,1)
+    '''
+    assert a.flags.c_contiguous == True
+    assert a.ndim == 3
+    n = a.shape[-1]
+    count = a.shape[0]
+    err = libcupy_helper.transpose_sum(
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n),
+        ctypes.c_int(count)
+    )
+    if err != 0:
+        raise RuntimeError('failed in transpose_sum kernel')
+    return a
 
 LMAX_ON_GPU = 8
 CONTRACT_OPTION = 'cutensor'
@@ -275,7 +565,8 @@ def transpose_sum(a):
     return a
 # for i > j of 2d mat, mat[j,i] = mat[i,j]
 def hermi_triu(mat, hermi=1, inplace=True):
-    '''Use the elements of the lower triangular part to fill the upper triangular part.
+    '''
+    Use the elements of the lower triangular part to fill the upper triangular part.
     See also pyscf.lib.hermi_triu
     '''
     if not inplace:
@@ -350,26 +641,8 @@ def contract323(a, b, alpha=1.0, beta=0.0, out=None):
     cutensor.contraction(alpha, a, desc_a, mode_a, b, desc_b, mode_b, beta, c, desc_c, mode_c)
 
     return c
-
-def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
-    '''
-    a wrapper of various implementations of einsum
-    '''
-
-    if CONTRACT_OPTION == 'cupy':
-        return cupy.asarray(cupy.einsum(pattern, a, b), order='C')
-    elif CONTRACT_OPTION == 'cutensor':
-        return cutensor_contract(pattern, a, b, alpha=alpha, beta=beta, out=out)
-    elif CONTRACT_OPTION == 'cuquantum':
-        return cuquantum.contract(pattern, a, b, options={'handle':cutensornet_handle})
-    elif CONTRACT_OPTION == 'opt_einsum':
-        # still have a bug in the contiguous
-        c = opt_einsum.contract(pattern, a, b)
-        return cupy.asarray(c, order='C')
-    else:
-        raise NotImplementedError()
     
-def cutensor_contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
+def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
     '''
     a wrapper for general tensor contraction
     pattern has to be a standard einsum notation
@@ -394,16 +667,11 @@ def cutensor_contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
         a = cupy.asarray(a, order='C')
     if not b.flags['C_CONTIGUOUS']:
         b = cupy.asarray(b, order='C')
-    '''
-    if a.flags['OWNDATA'] == False:
-        a = a.copy(order='C')
-    if b.flags['OWNDATA'] == False:
-        a = a.copy(order='C')
-    '''
+
     desc_a = cutensor.create_tensor_descriptor(a)
     desc_b = cutensor.create_tensor_descriptor(b)
     desc_c = cutensor.create_tensor_descriptor(c)
-
+    
     mode_a = cutensor.create_mode(*mode_a)
     mode_b = cutensor.create_mode(*mode_b)
     mode_c = cutensor.create_mode(*mode_c)

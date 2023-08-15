@@ -213,7 +213,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
         ao_deriv = 2
         for ao, mask, weight, coords \
                 in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
-            rho = ni.eval_rho2(opt.mol, ao[0], mo_coeff, mo_occ, mask, xctype)
+            rho = numint.eval_rho2(opt.mol, ao[0], mo_coeff, mo_occ, mask, xctype)
             vxc = ni.eval_xc_eff(mf.xc, rho, 1, xctype=xctype)[1]
             wv = weight * vxc[0]
             aow = numint._scale_ao(ao[0], wv)
@@ -231,7 +231,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
         ao_deriv = 3
         for ao, mask, weight, coords \
                 in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
-            rho = ni.eval_rho2(opt.mol, ao[:4], mo_coeff, mo_occ, mask, xctype)
+            rho = numint.eval_rho2(opt.mol, ao[:4], mo_coeff, mo_occ, mask, xctype)
             vxc = ni.eval_xc_eff(mf.xc, rho, 1, xctype=xctype)[1]
             wv = weight * vxc
             #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
@@ -258,7 +258,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
         ao_deriv = 3
         for ao, mask, weight, coords \
                 in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
-            rho = ni.eval_rho2(opt.mol, ao[:10], mo_coeff, mo_occ, mask, xctype)
+            rho = numint.eval_rho2(opt.mol, ao[:10], mo_coeff, mo_occ, mask, xctype)
             vxc = ni.eval_xc_eff(mf.xc, rho, 1, xctype=xctype)[1]
             wv = weight * vxc
             wv[4] *= .5  # for the factor 1/2 in tau
@@ -385,7 +385,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
         for ao, mask, weight, coords \
                 in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
             ao = contract('nip,ij->njp', ao, coeff)
-            rho = ni.eval_rho2(opt.mol, ao[0], mo_coeff, mo_occ, mask, xctype)
+            rho = numint.eval_rho2(opt.mol, ao[0], mo_coeff, mo_occ, mask, xctype)
             vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
             wv = weight * vxc[0]
             aow = [numint._scale_ao(ao[i], wv) for i in range(1, 4)]
@@ -414,7 +414,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory, extra=5*comp*nao):
             # TODO: improve efficiency
             ao = contract('nip,ij->njp', ao, coeff)
-            rho = ni.eval_rho2(opt.mol, ao[:4], mo_coeff, mo_occ, mask, xctype)
+            rho = numint.eval_rho2(opt.mol, ao[:4], mo_coeff, mo_occ, mask, xctype)
             vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
             wv = weight * vxc
             wv[0] *= .5
@@ -446,7 +446,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
         for ao, mask, weight, coords \
                 in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
             ao = contract('nip,ij->njp', ao, coeff)
-            rho = ni.eval_rho2(opt.mol, ao[:10], mo_coeff, mo_occ, mask, xctype)
+            rho = numint.eval_rho2(opt.mol, ao[:10], mo_coeff, mo_occ, mask, xctype)
             vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
             wv = weight * vxc
             wv[0] *= .5
@@ -524,7 +524,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         for ao, mask, weight, coords \
                 in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
             ao = contract('nip,ij->njp', ao, coeff)
-            rho = ni.eval_rho2(opt.mol, ao[0], mo_coeff, mo_occ, mask, xctype)
+            rho = numint.eval_rho2(opt.mol, ao[0], mo_coeff, mo_occ, mask, xctype)
             vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
             wv = weight * vxc[0]
             aow = numint._scale_ao(ao[0], wv)
@@ -547,7 +547,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
                 in ni.block_loop(mol, grids, nao, ao_deriv, max_memory):
             # TODO: improve efficiency
             ao = contract('nip,ij->njp', ao, coeff)
-            rho = ni.eval_rho2(mol, ao[:4], mo_coeff, mo_occ, mask, xctype)
+            rho = numint.eval_rho2(mol, ao[:4], mo_coeff, mo_occ, mask, xctype)
             vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
             wv = weight * vxc
             wv[0] *= .5
@@ -571,7 +571,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         for ao, mask, weight, coords \
                 in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
             ao = contract('nip,ij->njp', ao, coeff)
-            rho = ni.eval_rho2(opt.mol, ao[:10], mo_coeff, mo_occ, mask, xctype)
+            rho = numint.eval_rho2(opt.mol, ao[:10], mo_coeff, mo_occ, mask, xctype)
             vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
             wv = weight * vxc
             wv[0] *= .5

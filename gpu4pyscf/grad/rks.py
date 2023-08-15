@@ -23,7 +23,7 @@ from pyscf import lib, gto
 from pyscf.lib import logger
 from pyscf.dft import radi, gen_grid
 from gpu4pyscf.dft import numint, xc_deriv
-from gpu4pyscf.dft.numint import _GDFTOpt
+from gpu4pyscf.dft.numint import _GDFTOpt, AO_THRESHOLD
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem
 from pyscf import __config__
 
@@ -37,7 +37,6 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
         opt = ni.gdftopt = _GDFTOpt(mol)
-
     mo_occ = cupy.asarray(dms.mo_occ)
     mo_coeff = cupy.asarray(dms.mo_coeff)
     
@@ -72,9 +71,14 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     rho = numint.eval_rho2(opt.mol, ao[0], mo_coeff, mo_occ, None, xctype)
                     vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                     wv = weight * vxc[0]
-                    aow = numint._scale_ao(ao[0], wv)
-                    vmat[idm] += _d1_dot_(ao[1:4], aow.T)
-
+                    mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
+                    ao_mask = ao[:,mask,:]
+                    aow = numint._scale_ao(ao_mask[0], wv)
+                    vtmp = _d1_dot_(ao_mask[1:4], aow.T)
+                    idx = cupy.ix_(mask, mask)
+                    vmat[idm][0][idx] += vtmp[0]
+                    vmat[idm][1][idx] += vtmp[1]
+                    vmat[idm][2][idx] += vtmp[2]
         elif xctype == 'GGA':
             ao_deriv = 2
             for ao, _, weight, _ in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
@@ -83,8 +87,13 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                     wv = weight * vxc
                     wv[0] *= .5
-                    vmat[idm] += _gga_grad_sum_(ao, wv)
-
+                    mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
+                    ao_mask = ao[:,mask,:]
+                    vtmp = _gga_grad_sum_(ao_mask, wv)
+                    idx = cupy.ix_(mask, mask)
+                    vmat[idm][0][idx] += vtmp[0]
+                    vmat[idm][1][idx] += vtmp[1]
+                    vmat[idm][2][idx] += vtmp[2]
         elif xctype == 'NLC':
             raise NotImplementedError('NLC')
 
@@ -97,11 +106,15 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     wv = weight * vxc
                     wv[0] *= .5
                     wv[4] *= .5  # for the factor 1/2 in tau
-                    vmat[idm] += _gga_grad_sum_(ao, wv)
-                    vmat[idm] += _tau_grad_dot_(ao, wv[4])
-                
+                    mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
+                    ao_mask = ao[:,mask,:]
+                    vtmp = _gga_grad_sum_(ao_mask, wv)
+                    vtmp += _tau_grad_dot_(ao_mask, wv[4])
+                    idx = cupy.ix_(mask, mask)
+                    vmat[idm][0][idx] += vtmp[0]
+                    vmat[idm][1][idx] += vtmp[1]
+                    vmat[idm][2][idx] += vtmp[2]
     vmat = [cupy.einsum('pi,npq,qj->nij', coeff, v, coeff) for v in vmat]
-    
     exc = None
     if nset == 1:
         vmat = vmat[0]
