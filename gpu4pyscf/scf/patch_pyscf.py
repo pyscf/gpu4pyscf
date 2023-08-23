@@ -20,8 +20,6 @@ Patch pyscf SCF modules to make all subclass of SCF class support GPU mode.
 '''
 
 from gpu4pyscf.scf.hf import _get_grad_jk, _get_jk, _eigh
-from gpu4pyscf.scf.diis import _get_err_vec_orth, _get_err_vec_orig
-from pyscf.scf import diis
 from pyscf.scf.hf import SCF
 from pyscf.grad import rhf
 from gpu4pyscf.lib.utils import patch_cpu_kernel
@@ -35,6 +33,4 @@ print(f'{SCF} monkey-patched')
 SCF.get_jk = patch_cpu_kernel(SCF.get_jk)(_get_jk)
 SCF._eigh = patch_cpu_kernel(SCF._eigh)(_eigh)
 rhf.Gradients.get_jk = patch_cpu_kernel(rhf.Gradients.get_jk)(_get_grad_jk)
-diis.get_err_vec_orth = _get_err_vec_orth
-diis.get_err_vec_orig = _get_err_vec_orig
 

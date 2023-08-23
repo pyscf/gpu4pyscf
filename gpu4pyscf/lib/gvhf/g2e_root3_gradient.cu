@@ -1,6 +1,6 @@
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_0021(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_0021(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -12,30 +12,26 @@ static void GINTint2e_jk_kernel_nabla1i_0021(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -171,8 +167,8 @@ static void GINTint2e_jk_kernel_nabla1i_0021(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -515,7 +511,7 @@ static void GINTint2e_jk_kernel_nabla1i_0021(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_0022(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_0022(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -527,30 +523,26 @@ static void GINTint2e_jk_kernel_nabla1i_0022(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -794,8 +786,8 @@ static void GINTint2e_jk_kernel_nabla1i_0022(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -1341,7 +1333,7 @@ static void GINTint2e_jk_kernel_nabla1i_0022(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_0030(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_0030(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -1353,30 +1345,26 @@ static void GINTint2e_jk_kernel_nabla1i_0030(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -1462,8 +1450,8 @@ static void GINTint2e_jk_kernel_nabla1i_0030(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -1738,7 +1726,7 @@ static void GINTint2e_jk_kernel_nabla1i_0030(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_0031(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_0031(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -1750,30 +1738,26 @@ static void GINTint2e_jk_kernel_nabla1i_0031(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -1981,8 +1965,8 @@ static void GINTint2e_jk_kernel_nabla1i_0031(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -2486,7 +2470,7 @@ static void GINTint2e_jk_kernel_nabla1i_0031(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_1011(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_1011(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -2498,30 +2482,26 @@ static void GINTint2e_jk_kernel_nabla1i_1011(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -2711,8 +2691,8 @@ static void GINTint2e_jk_kernel_nabla1i_1011(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -3142,7 +3122,7 @@ static void GINTint2e_jk_kernel_nabla1i_1011(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_1020(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_1020(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -3154,30 +3134,26 @@ static void GINTint2e_jk_kernel_nabla1i_1020(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -3311,8 +3287,8 @@ static void GINTint2e_jk_kernel_nabla1i_1020(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -3676,7 +3652,7 @@ static void GINTint2e_jk_kernel_nabla1i_1020(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_1021(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_1021(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -3688,30 +3664,26 @@ static void GINTint2e_jk_kernel_nabla1i_1021(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -4063,8 +4035,8 @@ static void GINTint2e_jk_kernel_nabla1i_1021(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -4774,7 +4746,7 @@ static void GINTint2e_jk_kernel_nabla1i_1021(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_1030(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_1030(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -4786,30 +4758,26 @@ static void GINTint2e_jk_kernel_nabla1i_1030(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -5015,8 +4983,8 @@ static void GINTint2e_jk_kernel_nabla1i_1030(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -5553,7 +5521,7 @@ static void GINTint2e_jk_kernel_nabla1i_1030(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_1110(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_1110(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -5565,30 +5533,26 @@ static void GINTint2e_jk_kernel_nabla1i_1110(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -5776,8 +5740,8 @@ static void GINTint2e_jk_kernel_nabla1i_1110(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -6214,7 +6178,7 @@ static void GINTint2e_jk_kernel_nabla1i_1110(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_1111(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_1111(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -6226,30 +6190,26 @@ static void GINTint2e_jk_kernel_nabla1i_1111(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -6763,8 +6723,8 @@ static void GINTint2e_jk_kernel_nabla1i_1111(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -7669,7 +7629,7 @@ static void GINTint2e_jk_kernel_nabla1i_1111(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_1120(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_1120(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -7681,30 +7641,26 @@ static void GINTint2e_jk_kernel_nabla1i_1120(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -8054,8 +8010,8 @@ static void GINTint2e_jk_kernel_nabla1i_1120(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -8774,7 +8730,7 @@ static void GINTint2e_jk_kernel_nabla1i_1120(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_2010(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_2010(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -8786,30 +8742,26 @@ static void GINTint2e_jk_kernel_nabla1i_2010(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -8943,8 +8895,8 @@ static void GINTint2e_jk_kernel_nabla1i_2010(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -9317,7 +9269,7 @@ static void GINTint2e_jk_kernel_nabla1i_2010(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_2011(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_2011(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -9329,30 +9281,26 @@ static void GINTint2e_jk_kernel_nabla1i_2011(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -9704,8 +9652,8 @@ static void GINTint2e_jk_kernel_nabla1i_2011(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -10435,7 +10383,7 @@ static void GINTint2e_jk_kernel_nabla1i_2011(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_2020(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_2020(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -10447,30 +10395,26 @@ static void GINTint2e_jk_kernel_nabla1i_2020(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -10712,8 +10656,8 @@ static void GINTint2e_jk_kernel_nabla1i_2020(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -11323,7 +11267,7 @@ static void GINTint2e_jk_kernel_nabla1i_2020(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_2100(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_2100(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -11335,30 +11279,26 @@ static void GINTint2e_jk_kernel_nabla1i_2100(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -11490,8 +11430,8 @@ static void GINTint2e_jk_kernel_nabla1i_2100(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -11883,7 +11823,7 @@ static void GINTint2e_jk_kernel_nabla1i_2100(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_2110(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_2110(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -11895,30 +11835,26 @@ static void GINTint2e_jk_kernel_nabla1i_2110(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -12268,8 +12204,8 @@ static void GINTint2e_jk_kernel_nabla1i_2110(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -13005,7 +12941,7 @@ static void GINTint2e_jk_kernel_nabla1i_2110(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_2200(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_2200(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -13017,30 +12953,26 @@ static void GINTint2e_jk_kernel_nabla1i_2200(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -13280,8 +13212,8 @@ static void GINTint2e_jk_kernel_nabla1i_2200(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -13937,7 +13869,7 @@ static void GINTint2e_jk_kernel_nabla1i_2200(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_3000(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_3000(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -13949,30 +13881,26 @@ static void GINTint2e_jk_kernel_nabla1i_3000(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -14056,8 +13984,8 @@ static void GINTint2e_jk_kernel_nabla1i_3000(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -14362,7 +14290,7 @@ static void GINTint2e_jk_kernel_nabla1i_3000(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_3010(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_3010(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -14374,30 +14302,26 @@ static void GINTint2e_jk_kernel_nabla1i_3010(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -14603,8 +14527,8 @@ static void GINTint2e_jk_kernel_nabla1i_3010(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];
@@ -15163,7 +15087,7 @@ static void GINTint2e_jk_kernel_nabla1i_3010(JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_3100(JKMatrix jk,
+static void GINTint2e_jk_kernel_nabla1i_3100(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -15175,30 +15099,26 @@ static void GINTint2e_jk_kernel_nabla1i_3100(JKMatrix jk,
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = c_envs.fac;
+    double norm = envs.fac;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    int nprim_ij = c_envs.nprim_ij;
-    int nprim_kl = c_envs.nprim_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int nprim_j =
-	      c_bpcache.primitive_functions_offsets[jsh + 1]
-	      - c_bpcache.primitive_functions_offsets[jsh];
 
-    double * exponent_i =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[ish];
-    double * exponent_j =
-          c_bpcache.exponents + c_bpcache.primitive_functions_offsets[jsh];
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    double * __restrict__ i_exponent = c_bpcache.a1;
+    double * __restrict__ j_exponent = c_bpcache.a2;
+
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -15402,8 +15322,8 @@ static void GINTint2e_jk_kernel_nabla1i_3100(JKMatrix jk,
     double rw[6];
     int irys;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
-        double alpha = exponent_i[(ij-prim_ij) / nprim_j];
-        double beta = exponent_j[(ij-prim_ij) % nprim_j];
+        double alpha = i_exponent[ij];
+        double beta = j_exponent[ij];
         double aij = a12[ij];
         double eij = e12[ij];
         double xij = x12[ij];

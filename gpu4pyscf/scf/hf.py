@@ -287,10 +287,12 @@ def get_grad_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=N
     log = logger.new_logger(mol, verbose)
     if hermi != 1:
         raise NotImplementedError('JK-builder only supports hermitian density matrix')
-
+    if omega is None:
+        omega = 0.0
     if vhfopt is None:
         vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=False, scale=True)
-
+    if not isinstance(dm, cupy.ndarray):
+        dm = cupy.asarray(dm)
     coeff = cupy.asarray(vhfopt.coeff)
     nao, nao0 = coeff.shape
     dm0 = dm
@@ -301,13 +303,11 @@ def get_grad_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=N
     else:
         dms = cupy.asarray(dms, order='C')
     n_dm = dms.shape[0]
-
     scripts = []
     vj = vk = None
     vj_ptr = vk_ptr = lib.c_null_ptr()
     gradient_shape = list(dms.shape)
     gradient_shape[0] *= 3
-
     if with_j:
         vj = cupy.zeros(gradient_shape).transpose(0, 2, 1)
         vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
@@ -321,27 +321,48 @@ def get_grad_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=N
             scripts.append('jk->s1il')
 
     l_symb = lib.param.ANGULAR
-    pair2bra, pair2ket = vhfopt.bas_pair2shls
-    bas_pairs_locs = vhfopt.bas_pairs_locs
     log_qs = vhfopt.log_qs
     direct_scf_tol = vhfopt.direct_scf_tol
-
-    # adjust nbins according to the size of the system
-    pairs_max = (bas_pairs_locs[1:] - bas_pairs_locs[:-1]).max()
-    nbins = max(10, int(pairs_max//100000))
-    log.debug('Set the number of buckets for s_index to %d', nbins)
-
     ncptype = len(log_qs)
     cp_idx, cp_jdx = np.tril_indices(ncptype)
-    shell_locs_for_l_ctr_offsets = vhfopt.l_ctr_offsets
-    l_ctr_ao_loc = vhfopt.mol.ao_loc[shell_locs_for_l_ctr_offsets]
+    l_ctr_shell_locs = vhfopt.l_ctr_offsets
+    l_ctr_ao_locs = vhfopt.mol.ao_loc[l_ctr_shell_locs]
     dm_ctr_cond = np.max(
-        [lib.condense('absmax', x, l_ctr_ao_loc) for x in dms.get()], axis=0)
+        [lib.condense('absmax', x, l_ctr_ao_locs) for x in dms.get()], axis=0)
+
+    dm_shl = cupy.zeros([l_ctr_shell_locs[-1], l_ctr_shell_locs[-1]])
+    assert dms.flags.c_contiguous
+    size_l = np.array([1,3,6,10,15,21,28])
+    l_ctr = vhfopt.uniq_l_ctr[:,0]
+    r = 0
+
+    dm_shl = cupy.zeros([l_ctr_shell_locs[-1], l_ctr_shell_locs[-1]])
+    assert dms.flags.c_contiguous
+    size_l = np.array([1,3,6,10,15,21,28])
+    l_ctr = vhfopt.uniq_l_ctr[:,0]
+    r = 0
+    for i, li in enumerate(l_ctr):
+        i0 = l_ctr_ao_locs[i]
+        i1 = l_ctr_ao_locs[i+1]
+        ni_shls = (i1-i0)//size_l[li]
+        c = 0
+        for j, lj in enumerate(l_ctr):
+            j0 = l_ctr_ao_locs[j]
+            j1 = l_ctr_ao_locs[j+1]
+            nj_shls = (j1-j0)//size_l[lj]
+            sub_dm = dms[0][i0:i1,j0:j1].reshape([ni_shls, size_l[li], nj_shls, size_l[lj]])
+            dm_shl[r:r+ni_shls, c:c+nj_shls] = cupy.max(sub_dm, axis=[1,3])
+            c += nj_shls
+        r += ni_shls
+
+    dm_shl = cupy.asarray(np.log(dm_shl))
+    nshls = dm_shl.shape[0]
+
+    t0 = time.perf_counter()
+
     if hermi != 1:
         dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
-
     fn = libgvhf.GINTbuild_jk_nabla1i
-
     for cp_ij_id, log_q_ij in enumerate(log_qs):
         cpi = cp_idx[cp_ij_id]
         cpj = cp_jdx[cp_ij_id]
@@ -355,7 +376,6 @@ def get_grad_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=N
             cpl = cp_jdx[cp_kl_id]
             lk = vhfopt.uniq_l_ctr[cpk,0]
             ll = vhfopt.uniq_l_ctr[cpl,0]
-
             if lk > LMAX_ON_GPU or ll > LMAX_ON_GPU or log_q_kl.size == 0:
                 continue
 
@@ -367,17 +387,39 @@ def get_grad_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=N
             if sub_dm_cond < direct_scf_tol * 1e3:
                 continue
 
-            t0 = time.perf_counter()
-            cutoff = direct_scf_tol / sub_dm_cond
-            bins_locs_ij = _make_s_index_offsets(log_q_ij, nbins, cutoff)
-            bins_locs_kl = _make_s_index_offsets(log_q_kl, nbins, cutoff)
+            log_cutoff = np.log(direct_scf_tol)
+            sub_dm_cond = np.log(sub_dm_cond)
+
+            bins_locs_ij = vhfopt.bins[cp_ij_id]
+            bins_locs_kl = vhfopt.bins[cp_kl_id]
+
+            log_q_ij = cupy.asarray(log_q_ij, dtype=np.float64)
+            log_q_kl = cupy.asarray(log_q_kl, dtype=np.float64)
+
+            bins_floor_ij = vhfopt.bins_floor[cp_ij_id]
+            bins_floor_kl = vhfopt.bins_floor[cp_kl_id]
+
+            nbins_ij = len(bins_locs_ij) - 1
+            nbins_kl = len(bins_locs_kl) - 1
 
             err = fn(vhfopt.bpcache, vj_ptr, vk_ptr,
                      ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                      ctypes.c_int(nao), ctypes.c_int(n_dm),
                      bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
                      bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
-                     ctypes.c_int(nbins), ctypes.c_int(cp_ij_id), ctypes.c_int(cp_kl_id))
+                     bins_floor_ij.ctypes.data_as(ctypes.c_void_p),
+                     bins_floor_kl.ctypes.data_as(ctypes.c_void_p),
+                     ctypes.c_int(nbins_ij),
+                     ctypes.c_int(nbins_kl),
+                     ctypes.c_int(cp_ij_id),
+                     ctypes.c_int(cp_kl_id),
+                     ctypes.c_double(omega),
+                     ctypes.c_double(log_cutoff),
+                     ctypes.c_double(sub_dm_cond),
+                     ctypes.cast(dm_shl.data.ptr, ctypes.c_void_p),
+                     ctypes.c_int(nshls),
+                     ctypes.cast(log_q_ij.data.ptr, ctypes.c_void_p),
+                     ctypes.cast(log_q_kl.data.ptr, ctypes.c_void_p))
             if err != 0:
                 detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
                 raise RuntimeError(detail)

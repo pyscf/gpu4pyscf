@@ -1,7 +1,4 @@
-/*
- * gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
- *
- * Copyright (C) 2022 Qiming Sun
+/* Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,9 +14,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "gint/gint.h"
+#include "constant.cuh"
 
-//__constant__ GINTEnvVars c_envs;
 __constant__ BasisProdCache c_bpcache;
 __constant__ int16_t c_idx4c[NFffff*3];
 __constant__ int c_idx[TOT_NF*3]; 

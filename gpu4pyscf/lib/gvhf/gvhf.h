@@ -17,21 +17,4 @@
 
 #pragma once
 
-#ifndef GPU4PYSCF_RYS_ROOTS_CUH
-#define GPU4PYSCF_RYS_ROOTS_CUH
-
-//extern __constant__ GINTEnvVars c_envs;
-extern __constant__ BasisProdCache c_bpcache;
-extern __constant__ int16_t c_idx4c[NFffff*3];
-extern __constant__ int c_idx[TOT_NF*3];
-extern __constant__ int c_l_locs[GPU_LMAX+2];
-
-__device__ void GINTrys_root2(double x, double *rw);
-__device__ void GINTrys_root3(double x, double *rw);
-__device__ void GINTrys_root4(double x, double *rw);
-__device__ void GINTrys_root5(double x, double *rw);
-
-extern __constant__ BasisProdOffsets c_offsets[MAX_STREAMS];
-extern __constant__ GINTEnvVars c_envs[MAX_STREAMS];
-extern __constant__ JKMatrix c_jk[MAX_STREAMS];
-#endif //GPU4PYSCF_RYS_ROOTS_CUH
+#include "gint/constant.cuh"

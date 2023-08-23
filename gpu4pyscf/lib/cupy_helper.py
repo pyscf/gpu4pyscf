@@ -59,10 +59,10 @@ def print_mem_info():
     used_mem = mempool.used_bytes()
     mem_limit = mempool.get_limit()
     stack_size_per_thread = cupy.cuda.runtime.deviceGetLimit(0x00)
-    mem_stack = stack_size_per_thread
+    mem_stack = stack_size_per_thread 
     GB = 1024 * 1024 * 1024
     print(f'mem_avail: {mem_avail/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB, used_mem: {used_mem/GB:.3f} GB,mem_limt: {mem_limit/GB:.3f} GB')
-
+    
 def get_avail_mem():
     mempool = cupy.get_default_memory_pool()
     used_mem = mempool.used_bytes()
@@ -111,8 +111,8 @@ def eigh(h, s):
     cusolver_handle = device.get_cusolver_handle()
     err = libcupy_helper.eigh(
         ctypes.cast(cusolver_handle, ctypes.c_void_p),
-        ctypes.cast(A.data.ptr, ctypes.c_void_p),
-        ctypes.cast(B.data.ptr, ctypes.c_void_p),
+        ctypes.cast(A.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(B.data.ptr, ctypes.c_void_p), 
         ctypes.cast(w.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n))
     if err != 0:
@@ -131,7 +131,7 @@ def cholesky(A):
     dev_info = cupy.empty(1, dtype=np.int32)
     potrf(handle, cublas.CUBLAS_FILL_MODE_UPPER, n, x.data.ptr, n,
         workspace.data.ptr, buffersize, dev_info.data.ptr)
-
+    
     if dev_info[0] > 0:
         raise RuntimeError('failed to perform Cholesky Decomposition')
 
@@ -148,7 +148,7 @@ def solve_triangular(A, B, lower=True):
     else:
         m = np.prod(B.shape[1:])
         n = B.shape[0]
-
+    
     uplo = 1 if lower else 0
     cublas_handle = device.get_cublas_handle()
     stat = libcupy_helper.cho_solve(
@@ -206,7 +206,7 @@ def block_diag(blocks, out=None):
     rows = np.cumsum(np.asarray([0] + [x.shape[0] for x in blocks]))
     cols = np.cumsum(np.asarray([0] + [x.shape[1] for x in blocks]))
     offsets = np.cumsum(np.asarray([0] + [x.shape[0]*x.shape[1] for x in blocks]))
-
+    
     m, n = rows[-1], cols[-1]
     if out is None: out = cupy.zeros([m, n])
     rows = cupy.asarray(rows, dtype='int32')
@@ -228,7 +228,7 @@ def block_diag(blocks, out=None):
     if err != 0:
         raise RuntimeError('failed in block_diag kernel')
     return out
-
+    
 def take_last2d(a, indices, out=None):
     '''
     reorder the last 2 dimensions with 'indices', the first n-2 indices do not change
@@ -302,7 +302,7 @@ def cart2sph(t, axis=0, ang=1, out=None):
     '''
     transform 'axis' of a tensor from cartesian basis into spherical basis
     '''
-    if(ang <= 1):
+    if(ang <= 1): 
         if(out is not None): out[:] = t
         return t
     size = list(t.shape)
@@ -313,9 +313,9 @@ def cart2sph(t, axis=0, ang=1, out=None):
     i0 = max(1, np.prod(size[:axis]))
     i3 = max(1, np.prod(size[axis+1:]))
     out_shape = size[:axis] + [nli*li_size[1]] + size[axis+1:]
-
+    
     t_cart = t.reshape([i0*nli, li_size[0], i3])
-    if(out is not None):
+    if(out is not None): 
         out = out.reshape([i0*nli, li_size[1], i3])
     #t_sph = contract('min,ip->mpn', t_cart, c2s, out=out, order='C')
     t_sph = contract323(t_cart, c2s, out=out)
@@ -338,7 +338,7 @@ def contract323(a, b, alpha=1.0, beta=0.0, out=None):
         a = a.copy(order='C')
     if b.flags['OWNDATA'] == False:
         a = a.copy(order='C')
-
+    
     desc_a = cutensor.create_tensor_descriptor(a)
     desc_b = cutensor.create_tensor_descriptor(b)
     desc_c = cutensor.create_tensor_descriptor(c)
@@ -368,7 +368,7 @@ def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
         return cupy.asarray(c, order='C')
     else:
         raise NotImplementedError()
-
+    
 def cutensor_contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
     '''
     a wrapper for general tensor contraction
@@ -381,11 +381,11 @@ def cutensor_contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
     val = list(a.shape) + list(b.shape)
 
     shape = {k:v for k, v in zip(key, val)}
-
+    
     mode_a = list(str_a)
     mode_b = list(str_b)
     mode_c = list(str_c)
-
+    
     if(out is not None):
         c = out
     else:
@@ -407,12 +407,12 @@ def cutensor_contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
     mode_a = cutensor.create_mode(*mode_a)
     mode_b = cutensor.create_mode(*mode_b)
     mode_c = cutensor.create_mode(*mode_c)
-
+    
     cutensor.contraction(alpha, a, desc_a, mode_a, b, desc_b, mode_b, beta, c, desc_c, mode_c)
-
+    
     return c
 
-# a copy with modification from
+# a copy with modification from 
 # https://github.com/pyscf/pyscf/blob/9219058ac0a1bcdd8058166cad0fb9127b82e9bf/pyscf/lib/linalg_helper.py#L1536
 def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
            lindep=DSOLVE_LINDEP, callback=None, hermi=False,
@@ -455,7 +455,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
 
     if not (isinstance(b, cupy.ndarray) and b.ndim == 1):
         b = cupy.asarray(b)
-
+    
     if x0 is None:
         x1 = b
     else:
@@ -493,7 +493,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         ax.extend(axt)
         if callable(callback):
             callback(cycle, xs, ax)
-
+        
         x1 = axt.copy()
         for i in range(len(xs)):
             xsi = cupy.asarray(xs[i])
@@ -510,22 +510,22 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
                 idx.append(i)
                 innerprod.append(innerprod1)
         log.debug('krylov cycle %d  r = %g', cycle, max_innerprod**.5)
-
+        
         if max_innerprod < lindep or max_innerprod < tol**2:
             break
 
         x1 = x1[idx]
-
+        
     xs = cupy.asarray(xs)
     ax = cupy.asarray(ax)
     nd = cycle + 1
 
     h = cupy.einsum('in,jn->ij', xs, ax)
-
+    
     # Add the contribution of I in (1+a)
     h += cupy.diag(cupy.asarray(innerprod[:nd]))
     g = cupy.zeros((nd,nroots), dtype=x1.dtype)
-
+    
     if b.ndim == 1:
         g[0] = innerprod[0]
     else:
@@ -538,7 +538,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
             for j in range(nroots):
                 g[i,j] = cupy.dot(xsi.conj(), b[j])
         '''
-
+    
     c = cupy.linalg.solve(h, g)
     x = _gen_x0(c, cupy.asarray(xs))
     if b.ndim == 1:

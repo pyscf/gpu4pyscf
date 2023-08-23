@@ -25,7 +25,6 @@ extern "C" {
 #endif
 void GINTinit_EnvVars(GINTEnvVars *envs,
                       ContractionProdType *cp_ij, ContractionProdType *cp_kl, int *ng);
-                      ContractionProdType *cp_ij, ContractionProdType *cp_kl);
 void GINTinit_EnvVars_nabla1i(GINTEnvVars *envs,
                               ContractionProdType *cp_ij,
                               ContractionProdType *cp_kl);
