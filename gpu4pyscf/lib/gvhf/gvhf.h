@@ -17,4 +17,4 @@
 
 #pragma once
 
-#include "gint/constant.cuh"
+#include "constant.cuh"

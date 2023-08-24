@@ -139,14 +139,14 @@ int GINTfill_int2e(BasisProdCache *bpcache, double *eri, int nao,
     ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
     ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
     GINTEnvVars envs;
-
+    
     int ng[4] = {0,0,0,0};
     GINTinit_EnvVars(&envs, cp_ij, cp_kl, ng);
     envs.omega = omega;
     if (envs.nrys_roots > 8) {
         return 2;
     }
-
+    
     if (envs.nrys_roots > 2) {
         int16_t *idx4c = (int16_t *)malloc(sizeof(int16_t) * envs.nf * 3);
         int *idx_ij = (int *)malloc(sizeof(int) * envs.nfi * envs.nfj * 3);
@@ -154,7 +154,7 @@ int GINTfill_int2e(BasisProdCache *bpcache, double *eri, int nao,
         GINTinit_2c_gidx(idx_ij, cp_ij->l_bra, cp_ij->l_ket);
         GINTinit_2c_gidx(idx_kl, cp_kl->l_bra, cp_kl->l_ket);
         GINTinit_4c_idx(idx4c, idx_ij, idx_kl, &envs);
-
+        
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             fprintf(stderr, "CUDA Error of GINTfill_int2e_kernel: %s\n", cudaGetErrorString(err));
@@ -170,7 +170,7 @@ int GINTfill_int2e(BasisProdCache *bpcache, double *eri, int nao,
         free(idx_ij);
         free(idx_kl);
     }
-
+    
     // Data and buffers to be allocated on-device. Allocate them here to
     // reduce the calls to malloc
     int nroots2 = envs.nrys_roots * 2;
@@ -232,7 +232,7 @@ int GINTfill_int2e(BasisProdCache *bpcache, double *eri, int nao,
         offsets.bas_kl = bas_pairs_locs[cp_kl_id] + bas_kl0;
         offsets.primitive_ij = primitive_pairs_locs[cp_ij_id] + bas_ij0 * envs.nprim_ij;
         offsets.primitive_kl = primitive_pairs_locs[cp_kl_id] + bas_kl0 * envs.nprim_kl;
-
+        
         if (envs.nrys_roots > POLYFIT_ORDER) {
             // move rys roots and weights to device
             GINTinit_uw_s1(uw_buf, &offsets, &envs, bpcache);
@@ -245,12 +245,12 @@ int GINTfill_int2e(BasisProdCache *bpcache, double *eri, int nao,
             return err;
         }
     }
-
+    
     if (envs.nrys_roots > POLYFIT_ORDER) {
         checkCudaErrors(cudaFreeHost(uw_buf));
         FREE(d_uw);
     }
-
+    
     if (envs.nrys_roots > 2) {
         if (envs.nf > NFffff) {
             FREE(envs.idx);

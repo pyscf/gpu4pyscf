@@ -17,12 +17,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef GPU4PYSCF_CUDA_ALLOC_CUH
-#define GPU4PYSCF_CUDA_ALLOC_CUH
-
 #include <cuda_runtime.h>
-
-#include <stdexcept>
 
 // copy from samples/common/inc/helper_cuda.h
 template <typename T>
@@ -51,4 +46,3 @@ void check(T result, char const *const func, const char *const file,
     MALLOC(type, dst, size); \
     checkCudaErrors(cudaMemcpy(dst, src, sizeof(type) * (size), cudaMemcpyHostToDevice))
 
-#endif //GPU4PYSCF_CUDA_ALLOC_CUH

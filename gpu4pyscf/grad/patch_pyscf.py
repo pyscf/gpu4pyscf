@@ -16,12 +16,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 '''
-Aggresively patch all PySCF modules if applicable
-This patch may break some pyscf modules.
+Patch pyscf SCF modules to make all subclass of SCF class support GPU mode.
 '''
-from gpu4pyscf.df import patch_pyscf
-from gpu4pyscf.scf import patch_pyscf
-from gpu4pyscf.dft import patch_pyscf
-from gpu4pyscf.grad import patch_pyscf
 
-del patch_pyscf
+from gpu4pyscf.grad.rhf import _get_jk
+from gpu4pyscf.lib.utils import patch_cpu_kernel
+import pyscf.grad.rhf as RHF
+
+RHF.Gradients.get_jk = patch_cpu_kernel(RHF.Gradients.get_jk)(_get_jk)
