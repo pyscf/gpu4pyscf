@@ -313,7 +313,6 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
 
 def _kernel(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     cput0 = (logger.process_clock(), logger.perf_counter())
-
     if mo_energy is None: mo_energy = cupy.asarray(mf_grad.base.mo_energy)
     if mo_coeff is None: mo_coeff = cupy.asarray(mf_grad.base.mo_coeff)
     if mo_occ is None: mo_occ = cupy.asarray(mf_grad.base.mo_occ)
@@ -343,7 +342,7 @@ class Gradients(grad.rhf.Gradients):
     get_jk = patch_cpu_kernel(grad.rhf.Gradients.get_jk)(_get_jk)
     make_rdm1e = patch_cpu_kernel(grad.rhf.Gradients.make_rdm1e)(_make_rdm1e)
     grad_elec = patch_cpu_kernel(grad.rhf.Gradients.grad_elec)(_grad_elec)
-    kernel = patch_cpu_kernel(grad.rhf.Gradients.grad_elec)(_kernel)
+    kernel = patch_cpu_kernel(grad.rhf.Gradients.kernel)(_kernel)
 
 
 Grad = Gradients
