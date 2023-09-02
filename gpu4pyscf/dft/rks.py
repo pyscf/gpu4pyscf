@@ -16,18 +16,19 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # modified by Xiaojie Wu (wxj6000@gmail.com)
+import numpy
+import cupy
 
 from pyscf import lib
-from pyscf.scf import hf
+from pyscf.scf import hf as pyscf_hf
 from pyscf.dft import rks
 
-from gpu4pyscf.scf.hf import _get_jk, _eigh, _kernel, _make_rdm1, _get_occ, _get_grad, _gen_rhf_response, _quad_moment
+from gpu4pyscf import scf
+from gpu4pyscf.scf import diis
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
 from gpu4pyscf.lib.utils import patch_cpu_kernel
 from gpu4pyscf.lib.cupy_helper import load_library, tag_array
-import cupy
-import numpy
 
 libcupy_helper = load_library('libcupy_helper')
 
@@ -202,7 +203,7 @@ def _get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
     return vxc
 
-class RKS(rks.RKS):
+class RKS(rks.RKS, scf.hf.RHF):
     def __init__(self, mol, xc='LDA,VWN', disp=None):
         super().__init__(mol, xc)
         self._numint = numint.NumInt(xc=xc)
@@ -242,7 +243,7 @@ class RKS(rks.RKS):
             return res.get("energy")
     
     def reset(self, mol=None):
-        hf.SCF.reset(self, mol)
+        pyscf_hf.SCF.reset(self, mol)
         self.grids.reset(mol)
         self.nlcgrids.reset(mol)
         self._numint.gdftopt = None
@@ -257,7 +258,6 @@ class RKS(rks.RKS):
         ecoul = self.ecoul
         exc = self.exc
         e2 = ecoul + exc
-        #print(f'E1 = {e1}, Ecoul = {ecoul}, Exc = {exc}')
         return e1+e2, e2
     
     def energy_tot(self, dm, h1e, vhf=None):
@@ -266,12 +266,5 @@ class RKS(rks.RKS):
         self.scf_summary['nuc'] = nuc.real
         return e_tot
     
-    get_jk = patch_cpu_kernel(rks.RKS.get_jk)(_get_jk)
-    eigh = patch_cpu_kernel(rks.RKS._eigh)(_eigh)
-    kernel = patch_cpu_kernel(rks.RKS.kernel)(_kernel)
-    make_rdm1 = patch_cpu_kernel(rks.RKS.make_rdm1)(_make_rdm1)
-    get_occ = patch_cpu_kernel(rks.RKS.get_occ)(_get_occ)
-    get_grad = patch_cpu_kernel(rks.RKS.get_grad)(_get_grad)
     get_veff = patch_cpu_kernel(rks.RKS.get_veff)(_get_veff)
-    gen_response = _gen_rhf_response
-    quad_moment = _quad_moment
+    

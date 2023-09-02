@@ -18,7 +18,7 @@
  */
 
 #include "contract_rho.cuh"
-// A bug in __sync?
+// TODO: improve this?
 __global__
 void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, int nao)
 {
@@ -38,15 +38,14 @@ void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, 
     int ix = threadIdx.x;
     int iy = threadIdx.y;
     int ixy = ix + BLKSIZEX * iy;
-    buf[ixy] = v;
-    int n;
-    for (n = BLKSIZEY>>1; n > 0; n >>= 1) {
-        __syncthreads();
-        if (iy < n) {
-            buf[ixy] += buf[ixy + BLKSIZEX * n];
-        }
-    }
-    __syncthreads();
+    buf[ixy] = v;   __syncthreads();
+    // assume block dim = 32 x 32
+    if (blockDim.y >= 32 && iy < 16) buf[ixy] += buf[ixy + BLKSIZEX * 16]; __syncthreads();
+    if (blockDim.y >= 16 && iy < 8)  buf[ixy] += buf[ixy + BLKSIZEX * 8];  __syncthreads();
+    if (blockDim.y >= 8  && iy < 4)  buf[ixy] += buf[ixy + BLKSIZEX * 4];  __syncthreads();
+    if (blockDim.y >= 4  && iy < 2)  buf[ixy] += buf[ixy + BLKSIZEX * 2];  __syncthreads();
+    if (blockDim.y >= 2  && iy < 1)  buf[ixy] += buf[ixy + BLKSIZEX * 1];  __syncthreads();
+
     if (iy == 0 && active) {
         rho[grid_id] = buf[ix];
     }

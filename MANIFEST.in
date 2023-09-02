@@ -2,11 +2,11 @@ include MANIFEST.in
 include README.md setup.py CHANGELOG AUTHORS LICENSE NOTICE
 
 global-exclude *.py[cod]
-global-exclude *.cu
-global-exclude *.h
-global-exclude *.c
-global-exclude *.cuh
-global-exclude *.sh
+#global-exclude *.cu
+#global-exclude *.h
+#global-exclude *.c
+#global-exclude *.cuh
+#global-exclude *.sh
 
 prune gpu4pyscf/lib/build
 prune bytedance

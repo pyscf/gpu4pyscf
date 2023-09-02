@@ -27,6 +27,8 @@ from gpu4pyscf.gto import mole
 from cupy_backends.cuda.libs import cusolver
 from cupy_backends.cuda.libs import cublas
 
+from gpu4pyscf.lib import cutensor as cutensor_lib
+
 LMAX_ON_GPU = 8
 DSOLVE_LINDEP = 1e-15
 
@@ -139,8 +141,27 @@ def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
         ctypes.c_int(p0),
         ctypes.c_int(p1)
     )
+    if err != 0:
+        raise RuntimeError('failed in unpack_sparse')
     return out
 
+def add_sparse(a, b, indices):
+    '''
+    a[np.ix_(indices, indices)] += b
+    '''
+    n = a.shape[0]
+    m = b.shape[0]
+    
+    err = libcupy_helper.add_sparse(
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.cast(b.data.ptr, ctypes.c_void_p),
+        ctypes.cast(indices.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n),
+        ctypes.c_int(m)
+    )
+    if err != 0:
+        raise RecursionError('failed in sparse_add2d')
+    return a
 def eigh(h, s):
     '''
     solve generalized eigenvalue problem
@@ -319,7 +340,6 @@ def transpose_sum(a):
     return a
 
 LMAX_ON_GPU = 8
-CONTRACT_OPTION = 'cutensor'
 DSOLVE_LINDEP = 1e-15
 
 #c2s_l = [cupy.asarray(gto.mole.cart2sph(l, normalized='sp'), order='C') for l in range(12)]
@@ -647,37 +667,8 @@ def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
     a wrapper for general tensor contraction
     pattern has to be a standard einsum notation
     '''
-    pattern = pattern.replace(" ", "")
-    str_a, rest = pattern.split(',')
-    str_b, str_c = rest.split('->')
-    key = str_a + str_b
-    val = list(a.shape) + list(b.shape)
+    c = cutensor_lib.contraction(pattern, a, b, alpha, beta, out=out)
 
-    shape = {k:v for k, v in zip(key, val)}
-    
-    mode_a = list(str_a)
-    mode_b = list(str_b)
-    mode_c = list(str_c)
-    
-    if(out is not None):
-        c = out
-    else:
-        c = cupy.zeros([shape[k] for k in str_c], order='C')
-    if not a.flags['C_CONTIGUOUS']:
-        a = cupy.asarray(a, order='C')
-    if not b.flags['C_CONTIGUOUS']:
-        b = cupy.asarray(b, order='C')
-
-    desc_a = cutensor.create_tensor_descriptor(a)
-    desc_b = cutensor.create_tensor_descriptor(b)
-    desc_c = cutensor.create_tensor_descriptor(c)
-    
-    mode_a = cutensor.create_mode(*mode_a)
-    mode_b = cutensor.create_mode(*mode_b)
-    mode_c = cutensor.create_mode(*mode_c)
-    
-    cutensor.contraction(alpha, a, desc_a, mode_a, b, desc_b, mode_b, beta, c, desc_c, mode_c)
-    
     return c
 
 # a copy with modification from 

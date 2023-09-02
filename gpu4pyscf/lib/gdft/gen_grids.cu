@@ -85,10 +85,6 @@ extern "C"{
 __host__
 int GDFTgen_grid_partition(cudaStream_t stream, double *pbecke, double *coords, double *atm_coords, double *a, int ngrids, int natm)
 {
-    if (natm > THREADS){
-        fprintf(stderr, "The scheme only supports natm < %d\n", THREADS);
-        return 1;
-    }
     dim3 threads(THREADS);
     dim3 blocks((ngrids+THREADS-1)/THREADS);
     GDFTgen_grid_kernel<<<blocks, threads, 0, stream>>>(pbecke, coords, atm_coords, a, ngrids, natm);
