@@ -18,7 +18,7 @@ import ctypes
 import copy
 import numpy as np
 import cupy
-from pyscf import gto, df
+from pyscf import gto, df, lib
 from pyscf.scf import _vhf
 from gpu4pyscf.scf.hf import BasisProdCache, _make_s_index_offsets
 from gpu4pyscf.lib.cupy_helper import block_c2s_diag, cart2sph, block_diag, contract, load_library, c2s_l
@@ -240,7 +240,6 @@ class VHFOpt(_vhf.VHFOpt):
         # pairing auxiliary basis with fake basis set
         fake_l_ctr_offsets = np.append(0, np.cumsum(fake_l_ctr_counts))
         fake_l_ctr_offsets += l_ctr_offsets[-1]
-
         aux_l_ctr_offsets = np.append(0, np.cumsum(aux_l_ctr_counts))
 
         # contraction coefficient for auxiliary basis
@@ -275,15 +274,18 @@ class VHFOpt(_vhf.VHFOpt):
         self.cderi_col = cderi_col
         self.cderi_diag = cupy.argwhere(cderi_row == cderi_col)[:,0]
 
-        # fake q_cond
-        q_cond = np.ones([aux_l_ctr_offsets[-1], aux_l_ctr_offsets[-1]])
-        aux_log_qs, aux_pair2bra, aux_pair2ket = get_pairing(
-            aux_l_ctr_offsets, fake_l_ctr_offsets, q_cond,
-            diag_block_with_triu=diag_block_with_triu)
+        aux_pair2bra = []
+        aux_pair2ket = []
+        aux_log_qs = []
+        for p0, p1 in zip(aux_l_ctr_offsets[:-1], aux_l_ctr_offsets[1:]):
+            aux_pair2bra.append(np.arange(p0,p1))
+            aux_pair2ket.append(fake_l_ctr_offsets[0] * np.ones(p1-p0))
+            aux_log_qs.append(np.ones(p1-p0))
+        
         self.aux_log_qs = aux_log_qs.copy()
         pair2bra += aux_pair2bra
         pair2ket += aux_pair2ket
-        
+
         uniq_l_ctr = np.concatenate([uniq_l_ctr, fake_uniq_l_ctr, aux_uniq_l_ctr])
         l_ctr_offsets = np.concatenate([
             l_ctr_offsets, 
@@ -364,28 +366,37 @@ def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None):
     k0, k1 = intopt.cart_aux_loc[cp_aux_id], intopt.cart_aux_loc[cp_aux_id+1]
     ao_offsets = np.array([0,0,nao+1+k0,nao], dtype=np.int32) 
     nk = k1 - k0
-    
-    if ip_type == 'ip1':
-        vj = cupy.zeros([3, nao], order='C')
-        vk = cupy.zeros([3, nao], order='C')
-    elif ip_type == 'ip2':
-        vj = cupy.zeros([3, nk], order='C')
-        vk = cupy.zeros([3, nk], order='C')
-    
-    assert(rhoj.flags['C_CONTIGUOUS'])
-    assert(rhok.flags['C_CONTIGUOUS'])
-    
+
+    vj_ptr = vk_ptr = lib.c_null_ptr()
+    rhoj_ptr = rhok_ptr = lib.c_null_ptr()
+    vj = vk = None
+    if rhoj is not None:
+        assert(rhoj.flags['C_CONTIGUOUS'])
+        rhoj_ptr = ctypes.cast(rhoj.data.ptr, ctypes.c_void_p)
+        if ip_type == 'ip1':
+            vj = cupy.zeros([3, nao], order='C')
+        elif ip_type == 'ip2':
+            vj = cupy.zeros([3, nk], order='C')
+        vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
+    if rhok is not None:
+        assert(rhok.flags['C_CONTIGUOUS'])
+        rhok_ptr = ctypes.cast(rhok.data.ptr, ctypes.c_void_p)
+        if ip_type == 'ip1':
+            vk = cupy.zeros([3, nao], order='C')
+        elif ip_type == 'ip2':
+            vk = cupy.zeros([3, nk], order='C')
+        vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
     num_cp_ij = [len(log_qs) for log_qs in intopt.log_qs]
     bins_locs_ij = np.append(0, np.cumsum(num_cp_ij)).astype(np.int32)
     ntasks_kl = len(log_q_kl)
     ncp_ij = len(intopt.log_qs)
     err = fn(
         intopt.bpcache,
-        ctypes.cast(vj.data.ptr, ctypes.c_void_p),
-        ctypes.cast(vk.data.ptr, ctypes.c_void_p),
+        vj_ptr,
+        vk_ptr,
         ctypes.cast(dm.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rhoj.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rhok.data.ptr, ctypes.c_void_p),
+        rhoj_ptr,
+        rhok_ptr,
         ao_offsets.ctypes.data_as(ctypes.c_void_p),
         ctypes.c_int(nao),
         ctypes.c_int(nk),

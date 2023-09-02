@@ -13,33 +13,35 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import unittest
-import numpy as np
 import pyscf
-from pyscf import lib
-from gpu4pyscf import scf
+import time
+from pyscf import lib, gto
 
+from gpu4pyscf.dft import rks
 lib.num_threads(8)
-atom = '''
-I 0 0 0 
-I 1 0 0
-'''
-bas='def2-svp'
-mol = pyscf.M(atom=atom, basis=bas, ecp=bas)
+
+mol = gto.M(atom=['H 0 0 %f'%i for i in range(10)], unit='Bohr',
+            basis='ccpvtz', symmetry=1)
 mol.verbose = 4
 
-def tearDownModule():
-    global mol
-    del mol
+mf = rks.RKS(mol, xc='B3LYP').density_fit()
+mf.grids.level = 5
+mf.conv_tol = 1e-10
+mf.direct_scf_tol = 1e-14
+mf.nlcgrids.level = 2
 
-class KnownValues(unittest.TestCase):
-    def test_rhf(self):
-        mf = scf.RHF(mol)
-        mf.max_cycle = 10
-        mf.conv_tol = 1e-9
-        e_tot = mf.kernel()
-        assert np.allclose(e_tot, -578.9674228876)
+import cupy
+from functools import reduce
+tol = 1e-6
+def eig(h, s):
+    d, t = cupy.linalg.eigh(s)
+    x = t[:,d>tol] / cupy.sqrt(d[d>tol])
+    xhx = reduce(cupy.dot, (x.T, h, x))
+    e, c = cupy.linalg.eigh(xhx)
+    c = cupy.dot(x, c)
+    return e, c
+from gpu4pyscf import scf
+scf.hf.eigh = eig
 
-if __name__ == "__main__":
-    print("Full Tests for SCF")
-    unittest.main()
+e_tot = mf.kernel()
+end_time = time.time()

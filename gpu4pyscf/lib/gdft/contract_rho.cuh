@@ -17,8 +17,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#define BLKSIZEX        16
-#define BLKSIZEY        16
+#define BLKSIZEX        32
+#define BLKSIZEY        32
 
 __global__
 void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, int nao);

@@ -1,29 +1,38 @@
 import cupy
 
 props = cupy.cuda.runtime.getDeviceProperties(0)
-
-# for A100-80G
-if props['name'][-4:] == b'80GB':
+GB = 1024*1024*1024
+# such as A100-80G
+if props['totalGlobalMem'] >= 64 * GB:
     min_ao_blksize = 256
     min_grid_blksize = 256*256
     ao_aligned = 64
     grid_aligned = 128
     mem_fraction = 0.9
     number_of_threads = 2048 * 108
-# for V100-32G
-elif props['name'][-4:] == b'32GB':
+# such as V100-32G
+elif props['totalGlobalMem'] >= 32 * GB:
     min_ao_blksize = 128
     min_grid_blksize = 128*128
     ao_aligned = 32
     grid_aligned = 128
     mem_fraction = 0.9
     number_of_threads = 1024 * 80
-else:
+# such as A30-24GB
+elif props['totalGlobalMem'] >= 16 * GB:
     min_ao_blksize = 64
-    min_grid_blksize = 32*32
+    min_grid_blksize = 64*64
     ao_aligned = 16
-    grid_aligned = 16*16
-    mem_fraction = 0.6
+    grid_aligned = 128
+    mem_fraction = 0.9
     number_of_threads = 1024 * 80
-    
+# other gaming cards
+else:
+    min_ao_blksize = 32
+    min_grid_blksize = 32*32
+    ao_aligned = 8
+    grid_aligned = 128
+    mem_fraction = 0.9
+    number_of_threads = 1024 * 80
+
 cupy.get_default_memory_pool().set_limit(fraction=mem_fraction)

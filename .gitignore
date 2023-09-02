@@ -9,6 +9,7 @@ core
 gpu4pyscf.egg-info/
 output/
 .pytest_cache/
+.vscode/
 gpu4pyscf/lib/bin
 gpu4pyscf/lib/build
 gpu4pyscf/lib/include

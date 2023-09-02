@@ -81,7 +81,7 @@ def _check_dft_hessian(xc=xc0, disp=None, ix=0, iy=0, tol=1e-3):
     mf.conv_tol = 1e-12
     mf.grids.level = grids_level
     mf.verbose = 1
-    mf.kernel(conv_tol=1e-12)
+    mf.kernel()
     
     g = mf.nuc_grad_method()
     g.auxbasis_response = True
@@ -157,7 +157,7 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol = 1e-12
         mf.grids.level = grids_level
         mf.verbose = 1
-        mf.kernel(conv_tol=1e-12)
+        mf.kernel()
         
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
@@ -172,7 +172,7 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol = 1e-12
         mf.grids.level = grids_level
         mf.verbose = 1
-        mf.kernel(conv_tol=1e-12)
+        mf.kernel()
 
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)

@@ -26,7 +26,7 @@ from pyscf.dft import numint
 from pyscf.gto.eval_gto import NBINS, CUTOFF, make_screen_index
 from gpu4pyscf.scf.hf import basis_seg_contraction
 from gpu4pyscf.lib.utils import patch_cpu_kernel
-from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, load_library, print_mem_info, release_gpu_stack
+from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, load_library, add_sparse, release_gpu_stack
 from gpu4pyscf.dft import xc_deriv, xc_alias, libxc
 from gpu4pyscf import __config__
 
@@ -35,7 +35,7 @@ BAS_ALIGNED = 4
 GRID_BLKSIZE = 32
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 64*64)
 ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
-AO_THRESHOLD = 1e-14
+AO_THRESHOLD = 1e-12
 
 # Should we release the cupy cache?
 FREE_CUPY_CACHE = False
@@ -405,7 +405,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                                                                opt.l_bas_offsets)
         else:
             pair2shls_full, pairs_locs_full = pair2shls, pairs_locs
-
+    
     release_gpu_stack()
     if xctype == 'LDA':
         ao_deriv = 0
@@ -431,9 +431,11 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                         pair2shls_full, pairs_locs_full, vmat[i])
                 elif USE_SPARSITY == 2:
                     mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[1])
-                    ao_mask = ao[mask,:]
+                    idx = cupy.argwhere(mask).astype(np.int32)[:,0]
+                    ao_mask = ao[idx,:]
                     aow = _scale_ao(ao_mask, wv)
-                    vmat[i][cupy.ix_(mask, mask)] += ao_mask.dot(aow.T)
+                    #vmat[i][cupy.ix_(mask, mask)] += ao_mask.dot(aow.T)
+                    add_sparse(vmat[i], ao_mask.dot(aow.T), idx)
                 else:
                     raise NotImplementedError('Not implemented yet')
             elif xctype == 'GGA':
@@ -448,9 +450,11 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                         pair2shls_full, pairs_locs_full, vmat[i])
                 elif USE_SPARSITY == 2:
                     mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
-                    ao_mask = ao[:,mask,:]
+                    idx = cupy.argwhere(mask).astype(np.int32)[:,0]
+                    ao_mask = ao[:,idx,:]
                     aow = _scale_ao(ao_mask, wv)
-                    vmat[i][cupy.ix_(mask, mask)] += ao_mask[0].dot(aow.T)
+                    #vmat[i][cupy.ix_(mask, mask)] += ao_mask[0].dot(aow.T)
+                    add_sparse(vmat[i], ao_mask[0].dot(aow.T), idx)
                 else:
                     raise NotImplementedError('Not implemented yet')
             elif xctype == 'NLC':
@@ -470,11 +474,13 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                         pair2shls_full, pairs_locs_full, vmat[i])
                 else:
                     mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
-                    ao_mask = ao[:,mask,:]
+                    idx = cupy.argwhere(mask).astype(np.int32)[:,0]
+                    ao_mask = ao[:,idx,:]
                     aow = _scale_ao(ao_mask, wv[:4])
                     vtmp = ao_mask[0].dot(aow.T)
                     vtmp+= _tau_dot(ao_mask, ao_mask, wv[4])
-                    vmat[i][cupy.ix_(mask, mask)] += vtmp
+                    #vmat[i][cupy.ix_(mask, mask)] += vtmp
+                    add_sparse(vmat[i], vtmp, idx)
             elif xctype == 'HF':
                 pass
             else:
@@ -656,27 +662,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     dms = contract('pi,niq->npq', coeff, dms)
     nset = len(dms)
     vmat = cupy.zeros((nset, nao, nao))
-    '''
-    with opt.gdft_envs_cache():
-        mem_avail = get_avail_mem()
-        if xctype == 'LDA':
-            block_size = int((mem_avail*.7/8/3/nao - nao*2)/ ALIGNED) * ALIGNED
-        else:
-            block_size = int((mem_avail*.7/8/8/nao - nao*2)/ ALIGNED) * ALIGNED
 
-        if block_size < ALIGNED:
-            raise RuntimeError('Not enough GPU memory')
-
-        if xctype == 'LDA':
-            ao_deriv = 0
-        else:
-            ao_deriv = 1
-        ngrids = grids.weights.size
-        for p0, p1 in lib.prange(0, ngrids, block_size):
-            coords = grids.coords[p0:p1]
-            weights = grids.weights[p0:p1]
-            ao = eval_ao(ni, opt.mol, coords, ao_deriv)
-    '''
     if xctype == 'LDA':
         ao_deriv = 0
     else:
