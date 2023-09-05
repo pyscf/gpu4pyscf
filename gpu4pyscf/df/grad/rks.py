@@ -80,7 +80,7 @@ def _get_veff(ks_grad, mol=None, dm=None):
                 max_memory=max_memory, verbose=ks_grad.verbose)
             vxc += vnlc
     t0 = logger.timer(ks_grad, 'vxc total', *t0)
-
+    
     # this can be moved into vxc calculations
     occ_coeff = cupy.asarray(mf.mo_coeff[:, mf.mo_occ>0.5], order='C')
     tmp = contract('nij,jk->nik', vxc, occ_coeff)

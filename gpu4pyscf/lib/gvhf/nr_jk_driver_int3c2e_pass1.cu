@@ -35,16 +35,12 @@
 #include "g3c2e_pass1.cu"
 
 __host__
-static int GINTrun_tasks_int3c2e_pass1_j(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars *envs, cudaStream_t stream, int ns)
+static int GINTrun_tasks_int3c2e_pass1_j(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars *envs, cudaStream_t stream)
 {
     int nrys_roots = envs->nrys_roots;
     int ntasks_ij = offsets->ntasks_ij;
     int ntasks_kl = offsets->ntasks_kl;
     assert(ntasks_kl < 65536*THREADSY);
-
-    //checkCudaErrors(cudaMemcpyToSymbolAsync(c_envs[ns], envs, sizeof(GINTEnvVars), 0, cudaMemcpyHostToDevice, stream));
-    //checkCudaErrors(cudaMemcpyToSymbolAsync(c_offsets[ns], offsets, sizeof(BasisProdOffsets), 0, cudaMemcpyHostToDevice, stream));
-    //checkCudaErrors(cudaMemcpyToSymbolAsync(c_jk[ns], jk, sizeof(JKMatrix), 0, cudaMemcpyHostToDevice, stream));
 
     dim3 threads(THREADSX, THREADSY);
     dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
@@ -143,7 +139,7 @@ int GINTbuild_j_int3c2e_pass1(BasisProdCache *bpcache,
             offsets.bas_kl = bas_pairs_locs[cp_kl_id];
             offsets.primitive_ij = primitive_pairs_locs[cp_ij_id];
             offsets.primitive_kl = primitive_pairs_locs[cp_kl_id];
-            int err = GINTrun_tasks_int3c2e_pass1_j(&jk, &offsets, &envs, streams[n_stream], n_stream);
+            int err = GINTrun_tasks_int3c2e_pass1_j(&jk, &offsets, &envs, streams[n_stream]);
             if (err != 0) {
                 return err;
             }

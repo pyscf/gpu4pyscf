@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include "gint/gint.h"
 #include "gint/cint2e.cuh"
+#include "gint/reduction.cu"
 #include "gvhf.h"
 
 template <int NROOTS, int GSIZE> __device__
@@ -153,15 +154,33 @@ static void GINTkernel_direct_getjk(GINTEnvVars envs, JKMatrix jk, double* __res
 
     }
 
+    double v_il[GPU_AO_NF];
+    double v_ik[GPU_AO_NF];
+
+    double d_ik[GPU_AO_NF];
+    double d_il[GPU_AO_NF];
+
     // vj != NULL and vk != NULL
     for (i_dm = 0; i_dm < n_dm; ++i_dm) {
         int ngout = 0;
         for (l = l0; l < l1; ++l) {
+            for (i = 0; i < i1-i0; ++i){ 
+                v_il[i] = 0.0; 
+                d_il[i] = dm[i+i0+l*nao];
+            }
             for (k = k0; k < k1; ++k) {
+                for (i = 0; i < i1-i0; ++i){ 
+                    v_ik[i] = 0.0; 
+                    d_ik[i] = dm[i+i0+k*nao];
+                }
+                double v_kl = 0;
                 double d_kl = dm[k+nao*l];
-                double gout[GPU_AO_NF * GPU_AO_NF];
                 for (n = 0, j = j0; j < j1; ++j) {
-                    int jp = j - j0;
+                    double v_jk = 0.0;
+                    double v_jl = 0.0;
+                    double d_jk = dm[j+nao*k];
+                    double d_jl = dm[j+nao*l];
+                    
                     for (i = i0; i < i1; ++i, ++n) {
                         int ip = i - i0;
                         int ng = n + ngout;
@@ -169,39 +188,12 @@ static void GINTkernel_direct_getjk(GINTEnvVars envs, JKMatrix jk, double* __res
                         int iy = idy[ng];
                         int iz = idz[ng];
                         double s = 0.0;
-#pragma unroll
                         for (int r = 0; r < NROOTS; r++){
                             s += g[ix+r] * g[iy+r] * g[iz+r];
                         }
                         double v_ij  = s * d_kl;   
                         atomicAdd(vj+i+nao*j, v_ij);
-                        gout[ip + GPU_AO_NF * jp] = s;
-                    }
-                }
-                double v_il[GPU_AO_NF];
-                double v_ik[GPU_AO_NF];
-                double v_kl = 0.0;
 
-                double d_ik[GPU_AO_NF];
-                double d_il[GPU_AO_NF];
-                
-                for (i = 0; i < i1-i0; ++i){ 
-                    v_il[i] = 0.0; 
-                    d_il[i] = dm[i+i0+l*nao];
-                    v_ik[i] = 0.0; 
-                    d_ik[i] = dm[i+i0+k*nao];
-                }
-
-                for (j = j0; j < j1; ++j){
-                    int jp = j - j0;
-                    double v_jk = 0.0;
-                    double v_jl = 0.0;
-                    double d_jk = dm[j+nao*k];
-                    double d_jl = dm[j+nao*l];
-                    for (i = i0; i < i1; ++i){
-                        int ip = i - i0;
-                        double s = gout[ip + GPU_AO_NF * jp];
-                        
                         v_il[ip] += s * d_jk;
                         v_ik[ip] += s * d_jl;
 
@@ -215,12 +207,15 @@ static void GINTkernel_direct_getjk(GINTEnvVars envs, JKMatrix jk, double* __res
                 }
                 for (i = 0; i < i1-i0; i++){ 
                     atomicAdd(vk+i+i0+nao*k, v_ik[i]); 
-                    atomicAdd(vk+i+i0+nao*l, v_il[i]);  
                 }
                 atomicAdd(vj+k+nao*l, v_kl);
                 ngout += nfij;
             }
+            for (i = 0; i < i1-i0; i++){ 
+                atomicAdd(vk+i+i0+nao*l, v_il[i]);  
+            }
         }
+
         dm += nao * nao;
         vj += nao * nao;
         vk += nao * nao;

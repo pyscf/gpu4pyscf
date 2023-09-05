@@ -143,6 +143,13 @@ int GINTbuild_jk(BasisProdCache *bpcache,
         GINTinit_2c_gidx(idx_ij, cp_ij->l_bra, cp_ij->l_ket);
         GINTinit_2c_gidx(idx_kl, cp_kl->l_bra, cp_kl->l_ket);
         GINTinit_4c_idx(idx4c, idx_ij, idx_kl, &envs);
+
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA Error of GINTbuild_int2e_kernel: %s\n", cudaGetErrorString(err));
+            return 1;
+        }
+
         if (envs.nf > NFffff) {
             DEVICE_INIT(int16_t, d_idx4c, idx4c, envs.nf * 3);
             envs.idx = d_idx4c;
@@ -193,10 +200,8 @@ int GINTbuild_jk(BasisProdCache *bpcache,
     jk.dm_sh = dm_sh;
     jk.nshls = nshls;
     BasisProdOffsets offsets;
-
     offsets.log_q_ij = log_q_ij;
     offsets.log_q_kl = log_q_kl;
-
     int *bas_pairs_locs = bpcache->bas_pairs_locs;
     int *primitive_pairs_locs = bpcache->primitive_pairs_locs;
     for (kl_bin = 0; kl_bin < nbins_kl; kl_bin++) {

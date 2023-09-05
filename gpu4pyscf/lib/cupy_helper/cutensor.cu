@@ -14,33 +14,30 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-
 #include <cuda_runtime.h>
-#include <cusolverDn.h>
+#include <cutensor.h>
 
 extern "C" {
 __host__
-int cho_solve(cublasHandle_t handle, const double *a, double *b, int m, int n, int lower)
-{
-    // XA = B
-    cublasSideMode_t side = CUBLAS_SIDE_RIGHT; 
-    cublasFillMode_t uplo;
-    cublasOperation_t trans = CUBLAS_OP_N; 
-    cublasDiagType_t diag = CUBLAS_DIAG_NON_UNIT;
+int create_plan_cache(cutensorHandle_t *handle, int numCachelines){
+    const size_t sizeCache = numCachelines * sizeof(cutensorPlanCacheline_t);
+    cutensorPlanCacheline_t* cachelines = (cutensorPlanCacheline_t*) malloc(sizeCache);
+    const auto err = cutensorHandleAttachPlanCachelines(handle, cachelines, numCachelines);
+    if( err != CUTENSOR_STATUS_SUCCESS ){
+        printf("Error: %s in line %d\n", cutensorGetErrorString(err), __LINE__);
+        return 1;
 
-    if(lower == 1){
-        uplo = CUBLAS_FILL_MODE_UPPER;
     }
-    else {
-        uplo = CUBLAS_FILL_MODE_LOWER;
-    }
+    return 0;
+}
 
-    const double alpha = 1.0;
-
-    cublasStatus_t status = cublasDtrsm(handle, side, uplo, trans, diag, m, n, &alpha, a, n, b, m);
-    if(status == CUBLAS_STATUS_SUCCESS){
-        return 0;
+__host__
+int delete_plan_cache(cutensorHandle_t *handle){
+    const auto err = cutensorHandleDetachPlanCachelines(handle);
+    if( err != CUTENSOR_STATUS_SUCCESS ){
+        printf("Error: %s in line %d\n", cutensorGetErrorString(err), __LINE__);
+        return 1;
     }
-    return 1;
+    return 0;
 }
 }

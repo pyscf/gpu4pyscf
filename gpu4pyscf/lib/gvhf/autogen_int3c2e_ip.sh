@@ -49,9 +49,11 @@ gen_code(){
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        active = false;
+        task_ij = 0;
+        task_kl = 0;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
@@ -129,22 +131,26 @@ void GINTint3c2e_${IP_TYPE}_jk_kernel<${ROOT},${GS}>(GINTEnvVars envs, JKMatrix 
         as_ksh = lsh;
         as_lsh = ksh;
     }
-
+    
     double j3[GPU_CART_MAX * 3];
     double k3[GPU_CART_MAX * 3];
     for (int k = 0; k < GPU_CART_MAX * 3; k++){
         j3[k] = 0.0;
         k3[k] = 0.0;
     }
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-            ${BLK1}
-            GINTrys_root${ROOT}(x, uw);
-            GINTscale_u<${ROOT}>(uw, theta);
-            GINTg0_2e_2d4d<${ROOT}>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-            ${NABLA_SCRIPT}
-            ${GET_JK_DIRECT}
-    } }
+    if (active) {
+        for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+            for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+                ${BLK1}
+                GINTrys_root${ROOT}(x, uw);
+                GINTscale_u<${ROOT}>(uw, theta);
+                GINTg0_2e_2d4d<${ROOT}>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+                ${NABLA_SCRIPT}
+                ${GET_JK_DIRECT}
+            } 
+        }
+    }
+    
     ${WRITE_JK}
 }
 #endif " >> ${FILE}

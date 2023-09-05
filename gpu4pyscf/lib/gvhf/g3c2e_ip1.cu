@@ -28,9 +28,11 @@ void GINTint3c2e_ip1_jk_kernel<2,GSIZE2_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        active = false;
+        task_ij = 0;
+        task_kl = 0;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
@@ -73,16 +75,17 @@ void GINTint3c2e_ip1_jk_kernel<2,GSIZE2_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
         as_ksh = lsh;
         as_lsh = ksh;
     }
-
+    
     double j3[GPU_CART_MAX * 3];
     double k3[GPU_CART_MAX * 3];
     for (int k = 0; k < GPU_CART_MAX * 3; k++){
         j3[k] = 0.0;
         k3[k] = 0.0;
     }
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-                        
+    if (active) {
+        for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+            for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+                            
             double aij = a12[ij];
             double xij = x12[ij];
             double yij = y12[ij];
@@ -100,14 +103,17 @@ void GINTint3c2e_ip1_jk_kernel<2,GSIZE2_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
             double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
             a0 *= theta;
             double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-            GINTrys_root2(x, uw);
-            GINTscale_u<2>(uw, theta);
-            GINTg0_2e_2d4d<2>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-            
+                GINTrys_root2(x, uw);
+                GINTscale_u<2>(uw, theta);
+                GINTg0_2e_2d4d<2>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+                
             double ai2 = -2.0*exp[ij];
             GINTnabla1i_2e<2>(envs, f, g, ai2, envs.i_l, envs.j_l, envs.k_l);
-            GINTkernel_int3c2e_ip1_getjk_direct<2>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
-    } }
+                GINTkernel_int3c2e_ip1_getjk_direct<2>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
+            } 
+        }
+    }
+    
     write_int3c2e_ip1_jk(jk, j3, k3, ish);
 }
 #endif 
@@ -120,9 +126,11 @@ void GINTint3c2e_ip1_jk_kernel<3,GSIZE3_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        active = false;
+        task_ij = 0;
+        task_kl = 0;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
@@ -165,16 +173,17 @@ void GINTint3c2e_ip1_jk_kernel<3,GSIZE3_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
         as_ksh = lsh;
         as_lsh = ksh;
     }
-
+    
     double j3[GPU_CART_MAX * 3];
     double k3[GPU_CART_MAX * 3];
     for (int k = 0; k < GPU_CART_MAX * 3; k++){
         j3[k] = 0.0;
         k3[k] = 0.0;
     }
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-                        
+    if (active) {
+        for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+            for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+                            
             double aij = a12[ij];
             double xij = x12[ij];
             double yij = y12[ij];
@@ -192,14 +201,17 @@ void GINTint3c2e_ip1_jk_kernel<3,GSIZE3_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
             double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
             a0 *= theta;
             double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-            GINTrys_root3(x, uw);
-            GINTscale_u<3>(uw, theta);
-            GINTg0_2e_2d4d<3>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-            
+                GINTrys_root3(x, uw);
+                GINTscale_u<3>(uw, theta);
+                GINTg0_2e_2d4d<3>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+                
             double ai2 = -2.0*exp[ij];
             GINTnabla1i_2e<3>(envs, f, g, ai2, envs.i_l, envs.j_l, envs.k_l);
-            GINTkernel_int3c2e_ip1_getjk_direct<3>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
-    } }
+                GINTkernel_int3c2e_ip1_getjk_direct<3>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
+            } 
+        }
+    }
+    
     write_int3c2e_ip1_jk(jk, j3, k3, ish);
 }
 #endif 
@@ -212,9 +224,11 @@ void GINTint3c2e_ip1_jk_kernel<4,GSIZE4_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        active = false;
+        task_ij = 0;
+        task_kl = 0;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
@@ -257,16 +271,17 @@ void GINTint3c2e_ip1_jk_kernel<4,GSIZE4_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
         as_ksh = lsh;
         as_lsh = ksh;
     }
-
+    
     double j3[GPU_CART_MAX * 3];
     double k3[GPU_CART_MAX * 3];
     for (int k = 0; k < GPU_CART_MAX * 3; k++){
         j3[k] = 0.0;
         k3[k] = 0.0;
     }
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-                        
+    if (active) {
+        for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+            for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+                            
             double aij = a12[ij];
             double xij = x12[ij];
             double yij = y12[ij];
@@ -284,14 +299,17 @@ void GINTint3c2e_ip1_jk_kernel<4,GSIZE4_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
             double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
             a0 *= theta;
             double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-            GINTrys_root4(x, uw);
-            GINTscale_u<4>(uw, theta);
-            GINTg0_2e_2d4d<4>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-            
+                GINTrys_root4(x, uw);
+                GINTscale_u<4>(uw, theta);
+                GINTg0_2e_2d4d<4>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+                
             double ai2 = -2.0*exp[ij];
             GINTnabla1i_2e<4>(envs, f, g, ai2, envs.i_l, envs.j_l, envs.k_l);
-            GINTkernel_int3c2e_ip1_getjk_direct<4>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
-    } }
+                GINTkernel_int3c2e_ip1_getjk_direct<4>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
+            } 
+        }
+    }
+    
     write_int3c2e_ip1_jk(jk, j3, k3, ish);
 }
 #endif 
@@ -304,9 +322,11 @@ void GINTint3c2e_ip1_jk_kernel<5,GSIZE5_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        active = false;
+        task_ij = 0;
+        task_kl = 0;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
@@ -349,16 +369,17 @@ void GINTint3c2e_ip1_jk_kernel<5,GSIZE5_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
         as_ksh = lsh;
         as_lsh = ksh;
     }
-
+    
     double j3[GPU_CART_MAX * 3];
     double k3[GPU_CART_MAX * 3];
     for (int k = 0; k < GPU_CART_MAX * 3; k++){
         j3[k] = 0.0;
         k3[k] = 0.0;
     }
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-                        
+    if (active) {
+        for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+            for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+                            
             double aij = a12[ij];
             double xij = x12[ij];
             double yij = y12[ij];
@@ -376,14 +397,17 @@ void GINTint3c2e_ip1_jk_kernel<5,GSIZE5_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
             double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
             a0 *= theta;
             double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-            GINTrys_root5(x, uw);
-            GINTscale_u<5>(uw, theta);
-            GINTg0_2e_2d4d<5>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-            
+                GINTrys_root5(x, uw);
+                GINTscale_u<5>(uw, theta);
+                GINTg0_2e_2d4d<5>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+                
             double ai2 = -2.0*exp[ij];
             GINTnabla1i_2e<5>(envs, f, g, ai2, envs.i_l, envs.j_l, envs.k_l);
-            GINTkernel_int3c2e_ip1_getjk_direct<5>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
-    } }
+                GINTkernel_int3c2e_ip1_getjk_direct<5>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
+            } 
+        }
+    }
+    
     write_int3c2e_ip1_jk(jk, j3, k3, ish);
 }
 #endif 
@@ -396,9 +420,11 @@ void GINTint3c2e_ip1_jk_kernel<6,GSIZE6_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        active = false;
+        task_ij = 0;
+        task_kl = 0;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
@@ -441,16 +467,17 @@ void GINTint3c2e_ip1_jk_kernel<6,GSIZE6_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
         as_ksh = lsh;
         as_lsh = ksh;
     }
-
+    
     double j3[GPU_CART_MAX * 3];
     double k3[GPU_CART_MAX * 3];
     for (int k = 0; k < GPU_CART_MAX * 3; k++){
         j3[k] = 0.0;
         k3[k] = 0.0;
     }
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-                        
+    if (active) {
+        for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+            for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+                            
             double aij = a12[ij];
             double xij = x12[ij];
             double yij = y12[ij];
@@ -468,14 +495,17 @@ void GINTint3c2e_ip1_jk_kernel<6,GSIZE6_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
             double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
             a0 *= theta;
             double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-            GINTrys_root6(x, uw);
-            GINTscale_u<6>(uw, theta);
-            GINTg0_2e_2d4d<6>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-            
+                GINTrys_root6(x, uw);
+                GINTscale_u<6>(uw, theta);
+                GINTg0_2e_2d4d<6>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+                
             double ai2 = -2.0*exp[ij];
             GINTnabla1i_2e<6>(envs, f, g, ai2, envs.i_l, envs.j_l, envs.k_l);
-            GINTkernel_int3c2e_ip1_getjk_direct<6>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
-    } }
+                GINTkernel_int3c2e_ip1_getjk_direct<6>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
+            } 
+        }
+    }
+    
     write_int3c2e_ip1_jk(jk, j3, k3, ish);
 }
 #endif 
@@ -488,9 +518,11 @@ void GINTint3c2e_ip1_jk_kernel<7,GSIZE7_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        active = false;
+        task_ij = 0;
+        task_kl = 0;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
@@ -533,16 +565,17 @@ void GINTint3c2e_ip1_jk_kernel<7,GSIZE7_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
         as_ksh = lsh;
         as_lsh = ksh;
     }
-
+    
     double j3[GPU_CART_MAX * 3];
     double k3[GPU_CART_MAX * 3];
     for (int k = 0; k < GPU_CART_MAX * 3; k++){
         j3[k] = 0.0;
         k3[k] = 0.0;
     }
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-                        
+    if (active) {
+        for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+            for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+                            
             double aij = a12[ij];
             double xij = x12[ij];
             double yij = y12[ij];
@@ -560,14 +593,17 @@ void GINTint3c2e_ip1_jk_kernel<7,GSIZE7_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
             double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
             a0 *= theta;
             double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-            GINTrys_root7(x, uw);
-            GINTscale_u<7>(uw, theta);
-            GINTg0_2e_2d4d<7>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-            
+                GINTrys_root7(x, uw);
+                GINTscale_u<7>(uw, theta);
+                GINTg0_2e_2d4d<7>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+                
             double ai2 = -2.0*exp[ij];
             GINTnabla1i_2e<7>(envs, f, g, ai2, envs.i_l, envs.j_l, envs.k_l);
-            GINTkernel_int3c2e_ip1_getjk_direct<7>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
-    } }
+                GINTkernel_int3c2e_ip1_getjk_direct<7>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
+            } 
+        }
+    }
+    
     write_int3c2e_ip1_jk(jk, j3, k3, ish);
 }
 #endif 
@@ -580,9 +616,11 @@ void GINTint3c2e_ip1_jk_kernel<8,GSIZE8_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        active = false;
+        task_ij = 0;
+        task_kl = 0;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
@@ -625,16 +663,17 @@ void GINTint3c2e_ip1_jk_kernel<8,GSIZE8_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
         as_ksh = lsh;
         as_lsh = ksh;
     }
-
+    
     double j3[GPU_CART_MAX * 3];
     double k3[GPU_CART_MAX * 3];
     for (int k = 0; k < GPU_CART_MAX * 3; k++){
         j3[k] = 0.0;
         k3[k] = 0.0;
     }
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-                        
+    if (active) {
+        for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+            for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+                            
             double aij = a12[ij];
             double xij = x12[ij];
             double yij = y12[ij];
@@ -652,14 +691,17 @@ void GINTint3c2e_ip1_jk_kernel<8,GSIZE8_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
             double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
             a0 *= theta;
             double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-            GINTrys_root8(x, uw);
-            GINTscale_u<8>(uw, theta);
-            GINTg0_2e_2d4d<8>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-            
+                GINTrys_root8(x, uw);
+                GINTscale_u<8>(uw, theta);
+                GINTg0_2e_2d4d<8>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+                
             double ai2 = -2.0*exp[ij];
             GINTnabla1i_2e<8>(envs, f, g, ai2, envs.i_l, envs.j_l, envs.k_l);
-            GINTkernel_int3c2e_ip1_getjk_direct<8>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
-    } }
+                GINTkernel_int3c2e_ip1_getjk_direct<8>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
+            } 
+        }
+    }
+    
     write_int3c2e_ip1_jk(jk, j3, k3, ish);
 }
 #endif 
@@ -672,9 +714,11 @@ void GINTint3c2e_ip1_jk_kernel<9,GSIZE9_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        active = false;
+        task_ij = 0;
+        task_kl = 0;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
@@ -717,16 +761,17 @@ void GINTint3c2e_ip1_jk_kernel<9,GSIZE9_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
         as_ksh = lsh;
         as_lsh = ksh;
     }
-
+    
     double j3[GPU_CART_MAX * 3];
     double k3[GPU_CART_MAX * 3];
     for (int k = 0; k < GPU_CART_MAX * 3; k++){
         j3[k] = 0.0;
         k3[k] = 0.0;
     }
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-                        
+    if (active) {
+        for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+            for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+                            
             double aij = a12[ij];
             double xij = x12[ij];
             double yij = y12[ij];
@@ -744,14 +789,17 @@ void GINTint3c2e_ip1_jk_kernel<9,GSIZE9_INT3C>(GINTEnvVars envs, JKMatrix jk, Ba
             double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
             a0 *= theta;
             double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-            GINTrys_root9(x, uw);
-            GINTscale_u<9>(uw, theta);
-            GINTg0_2e_2d4d<9>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-            
+                GINTrys_root9(x, uw);
+                GINTscale_u<9>(uw, theta);
+                GINTg0_2e_2d4d<9>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+                
             double ai2 = -2.0*exp[ij];
             GINTnabla1i_2e<9>(envs, f, g, ai2, envs.i_l, envs.j_l, envs.k_l);
-            GINTkernel_int3c2e_ip1_getjk_direct<9>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
-    } }
+                GINTkernel_int3c2e_ip1_getjk_direct<9>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
+            } 
+        }
+    }
+    
     write_int3c2e_ip1_jk(jk, j3, k3, ish);
 }
 #endif 

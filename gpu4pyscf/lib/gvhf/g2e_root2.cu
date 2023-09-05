@@ -17,6 +17,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+
 __global__
 static void GINTint2e_jk_kernel1010(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
@@ -24,13 +25,15 @@ static void GINTint2e_jk_kernel1010(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        task_ij = 0; task_kl = 0;
+        active = false;
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     if (bas_ij < bas_kl) {
-        return;
+        active = false;
     }
     double norm = envs.fac;
     if (bas_ij == bas_kl) {
@@ -83,6 +86,7 @@ static void GINTint2e_jk_kernel1010(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
     prim_kl1 = prim_kl + nprim_kl;
+    if(active){
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
     for (kl = prim_kl0; kl < prim_kl1; ++kl) {
         double aij = a12[ij];
@@ -150,6 +154,7 @@ static void GINTint2e_jk_kernel1010(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
             gout8 += g_0 * g_4 * g_11;
         }
     } }
+    }
     double d_0, d_1, d_2, d_3, d_4, d_5, d_6, d_7, d_8;
     int n_dm = jk.n_dm;
     int nao = jk.nao;
@@ -157,22 +162,32 @@ static void GINTint2e_jk_kernel1010(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double* __restrict__ dm = jk.dm;
     double *vj = jk.vj;
     double *vk = jk.vk;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
     for (i_dm = 0; i_dm < n_dm; ++i_dm) {
         if (vj != NULL) {
             // ijkl,ij->kl
             d_0 = dm[(i0+0)+nao*(j0+0)];
             d_1 = dm[(i0+1)+nao*(j0+0)];
             d_2 = dm[(i0+2)+nao*(j0+0)];
-            atomicAdd(vj+(k0+0)+nao*(l0+0), gout0*d_0 + gout1*d_1 + gout2*d_2);
-            atomicAdd(vj+(k0+1)+nao*(l0+0), gout3*d_0 + gout4*d_1 + gout5*d_2);
-            atomicAdd(vj+(k0+2)+nao*(l0+0), gout6*d_0 + gout7*d_1 + gout8*d_2);
+            //atomicAdd(vj+(k0+0)+nao*(l0+0), gout0*d_0 + gout1*d_1 + gout2*d_2);
+            //atomicAdd(vj+(k0+1)+nao*(l0+0), gout3*d_0 + gout4*d_1 + gout5*d_2);
+            //atomicAdd(vj+(k0+2)+nao*(l0+0), gout6*d_0 + gout7*d_1 + gout8*d_2);
+            block_reduce_x<THREADSX, THREADSY>(gout0*d_0 + gout1*d_1 + gout2*d_2, vj+(k0+0)+nao*(l0+0), tx, ty);
+            block_reduce_x<THREADSX, THREADSY>(gout3*d_0 + gout4*d_1 + gout5*d_2, vj+(k0+1)+nao*(l0+0), tx, ty);
+            block_reduce_x<THREADSX, THREADSY>(gout6*d_0 + gout7*d_1 + gout8*d_2, vj+(k0+2)+nao*(l0+0), tx, ty);
+
             // ijkl,kl->ij
             d_0 = dm[(k0+0)+nao*(l0+0)];
             d_1 = dm[(k0+1)+nao*(l0+0)];
             d_2 = dm[(k0+2)+nao*(l0+0)];
-            atomicAdd(vj+(i0+0)+nao*(j0+0), gout0*d_0 + gout3*d_1 + gout6*d_2);
-            atomicAdd(vj+(i0+1)+nao*(j0+0), gout1*d_0 + gout4*d_1 + gout7*d_2);
-            atomicAdd(vj+(i0+2)+nao*(j0+0), gout2*d_0 + gout5*d_1 + gout8*d_2);
+            //atomicAdd(vj+(i0+0)+nao*(j0+0), gout0*d_0 + gout3*d_1 + gout6*d_2);
+            //atomicAdd(vj+(i0+1)+nao*(j0+0), gout1*d_0 + gout4*d_1 + gout7*d_2);
+            //atomicAdd(vj+(i0+2)+nao*(j0+0), gout2*d_0 + gout5*d_1 + gout8*d_2);
+            block_reduce_y<THREADSX, THREADSY>(gout0*d_0 + gout3*d_1 + gout6*d_2, vj+(i0+0)+nao*(j0+0), tx, ty);
+            block_reduce_y<THREADSX, THREADSY>(gout1*d_0 + gout4*d_1 + gout7*d_2, vj+(i0+1)+nao*(j0+0), tx, ty);
+            block_reduce_y<THREADSX, THREADSY>(gout2*d_0 + gout5*d_1 + gout8*d_2, vj+(i0+2)+nao*(j0+0), tx, ty);
+
             vj += nao2;
         }
         if (vk != NULL) {
@@ -217,6 +232,7 @@ static void GINTint2e_jk_kernel1010(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         dm += nao2;
     }
 }
+
 
 __global__
 static void GINTint2e_jk_kernel1011(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)

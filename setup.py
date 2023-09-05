@@ -59,19 +59,7 @@ class CMakeBuildExt(build_ext):
         dest_path = os.path.join(self.build_temp, 'gpu4pyscf')
         os.makedirs(dest_path, exist_ok=True)
         self.build_cmake(src_path, dest_path)
-        # removed external cmake for libxc
-        '''
-        dest_path = os.path.join(self.build_temp, 'libxc')
-        os.makedirs(dest_path, exist_ok=True)
-        self.build_cmake(
-            os.path.join(src_path, 'libxc'), dest_path,
-            configure_args='-DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON -DBUILD_TESTING=OFF -DDISABLE_KXC=ON -DCMAKE_CUDA_ARCHITECTURE=80'
-        )
-        deps_dir = os.path.join(src_path, 'deps', 'lib')
-        for f in os.listdir(dest_path):
-            if 'libxc.so' in f:
-                shutil.copy(os.path.join(dest_path, f), os.path.join(src_path, 'deps', 'lib'))
-        '''
+
     def build_cmake(self, src_dir, dest_dir, *,
                     configure_args=None, build_args=None):
         self.announce('Configuring extensions', level=3)
@@ -127,9 +115,6 @@ setup(
     package_dir={'gpu4pyscf': 'gpu4pyscf'},  # packages are under directory pyscf
     # include *.so *.dat files. They are now placed in MANIFEST.in
     
-    package_data={
-        'gpu4pyscf': ['lib/*.so', 'lib/deps/lib/*so*'],
-        },
     include_package_data=True,  # include everything in source control
     packages=[*find_namespace_packages('.'), 'gpu4pyscf', 'gpu4pyscf.lib'],
     tests_require=[
@@ -144,10 +129,6 @@ setup(
     install_requires=[
         'pyscf>=2.3.0',
         'cupy-cuda11x>=12.0',
-#        'pyscf-qsdopt==0.1.0',
-#        'numpy~=1.23.5',
-#        'cupy==11.5.0',
-#        'opt_einsum==3.3.0',
         'dftd3==0.7.0',
         'dftd4==3.5.0',
         'geometric'

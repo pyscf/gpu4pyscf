@@ -24,10 +24,13 @@ add_library(cupy_helper SHARED
   eigh.cu
   cho_solve.cu
   take_last2d.cu
-  sparse_cderi.cu
+  async_d2h_2d.cu
+  cutensor.cu
+  add_sparse.cu
 )
 
 set_target_properties(cupy_helper PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 find_package(CUDAToolkit)
-target_link_libraries(cupy_helper PRIVATE CUDA::cublas PRIVATE CUDA::cusolver)
+find_package(CUTENSOR)
+target_link_libraries(cupy_helper PRIVATE CUDA::cublas PRIVATE CUDA::cusolver PRIVATE cutensor)

@@ -28,17 +28,9 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
 start_time = time.time()
 mol = pyscf.M(
-    atom='tmp.xyz',
-    #atom = atom,
-    #atom='Tamoxifen.xyz',
-    #atom='Vitamin_C.xyz',
-    #atom='Azadirachtin.xyz',
-    basis='def2-tzvpd',
-    #basis='ccpvdz',
-    #basis='sto3g',
+    atom='Vitamin_C.xyz',
     verbose=4)
 # set verbose >= 6 for debugging timer
-
 
 print(f'{mol.nao} atomic orbitals')
 mf = rks.RKS(mol, xc='HYB_MGGA_XC_WB97M_V').density_fit()

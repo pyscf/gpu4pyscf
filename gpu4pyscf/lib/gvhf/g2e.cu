@@ -25,6 +25,7 @@
 #include "gint/cint2e.cuh"
 #include "gint/gout2e.cuh"
 #include "gint/g2e.cu"
+#include "gint/reduction.cu"
 
 // this is not supposed to be exectued
 template <int NROOTS, int GOUTSIZE> __global__
@@ -100,13 +101,15 @@ static void GINTint2e_jk_kernel0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        task_ij = 0; task_kl = 0;
+        active = false;
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     if (bas_ij < bas_kl) {
-        return;
+        active = false;
     }
     double norm = envs.fac;
     if (bas_ij == bas_kl) {
@@ -135,7 +138,7 @@ static void GINTint2e_jk_kernel0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double* __restrict__ z12 = c_bpcache.z12;
     int ij, kl, i_dm;
     double gout0 = 0;
-    
+    if(active){
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
         double aij = a12[ij];
@@ -166,17 +169,22 @@ static void GINTint2e_jk_kernel0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         }
         gout0 += fac;
     } }
-
+    }
     int n_dm = jk.n_dm;
     int nao = jk.nao;
     size_t nao2 = nao * nao;
     double* __restrict__ dm = jk.dm;
     double *vj = jk.vj;
     double *vk = jk.vk;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    
     for (i_dm = 0; i_dm < n_dm; ++i_dm) {
         if (vj != NULL) {
-            atomicAdd(vj+k0+nao*l0, gout0*dm[i0+nao*j0]);
-            atomicAdd(vj+i0+nao*j0, gout0*dm[k0+nao*l0]);
+            block_reduce_x<THREADSX, THREADSY>(gout0*dm[i0+nao*j0], vj+k0+nao*l0, tx, ty);
+            block_reduce_y<THREADSX, THREADSY>(gout0*dm[k0+nao*l0], vj+i0+nao*j0, tx, ty);
+            //atomicAdd(vj+k0+nao*l0, gout0*dm[i0+nao*j0]);
+            //atomicAdd(vj+i0+nao*j0, gout0*dm[k0+nao*l0]);
             vj += nao2;
         }
         if (vk != NULL) {
@@ -197,13 +205,15 @@ static void GINTint2e_jk_kernel1000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        task_ij = 0; task_kl = 0;
+        active = false;
     }
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     if (bas_ij < bas_kl) {
-        return;
+        active = false;
     }
     double norm = envs.fac;
     if (bas_ij == bas_kl) {
@@ -243,6 +253,7 @@ static void GINTint2e_jk_kernel1000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double xi = bas_x[ish];
     double yi = bas_y[ish];
     double zi = bas_z[ish];
+    if(active){
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
         double aij = a12[ij];
@@ -295,7 +306,7 @@ static void GINTint2e_jk_kernel1000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         gout1 += g_0 * g_3 * g_4;
         gout2 += g_0 * g_2 * g_5;
     } }
-
+    }
     double d_0, d_1, d_2;
     int n_dm = jk.n_dm;
     int nao = jk.nao;
@@ -303,18 +314,26 @@ static void GINTint2e_jk_kernel1000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double* __restrict__ dm = jk.dm;
     double *vj = jk.vj;
     double *vk = jk.vk;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+
     for (i_dm = 0; i_dm < n_dm; ++i_dm) {
         if (vj != NULL) {
             // ijkl,ij->kl
             d_0 = dm[(i0+0)+nao*(j0+0)];
             d_1 = dm[(i0+1)+nao*(j0+0)];
             d_2 = dm[(i0+2)+nao*(j0+0)];
-            atomicAdd(vj+(k0+0)+nao*(l0+0), gout0*d_0 + gout1*d_1 + gout2*d_2);
+            //atomicAdd(vj+(k0+0)+nao*(l0+0), gout0*d_0 + gout1*d_1 + gout2*d_2);
+            block_reduce_x<THREADSX, THREADSY>(gout0*d_0 + gout1*d_1 + gout2*d_2, vj+(k0+0)+nao*(l0+0), tx, ty);
+
             // ijkl,kl->ij
             d_0 = dm[(k0+0)+nao*(l0+0)];
-            atomicAdd(vj+(i0+0)+nao*(j0+0), gout0*d_0);
-            atomicAdd(vj+(i0+1)+nao*(j0+0), gout1*d_0);
-            atomicAdd(vj+(i0+2)+nao*(j0+0), gout2*d_0);
+            //atomicAdd(vj+(i0+0)+nao*(j0+0), gout0*d_0);
+            //atomicAdd(vj+(i0+1)+nao*(j0+0), gout1*d_0);
+            //atomicAdd(vj+(i0+2)+nao*(j0+0), gout2*d_0);
+            block_reduce_y<THREADSX, THREADSY>(gout0*d_0, vj+(i0+0)+nao*(j0+0), tx, ty);
+            block_reduce_y<THREADSX, THREADSY>(gout1*d_0, vj+(i0+1)+nao*(j0+0), tx, ty);
+            block_reduce_y<THREADSX, THREADSY>(gout2*d_0, vj+(i0+2)+nao*(j0+0), tx, ty);
             vj += nao2;
         }
         if (vk != NULL) {
@@ -352,14 +371,16 @@ void GINTint2e_jk_kernel<3, GSIZE3>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        task_ij = 0; task_kl = 0;
+        active = false;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     if (bas_ij < bas_kl) {
-        return;
+        active = false;
     }
     double norm = envs.fac;
     if (bas_ij == bas_kl) {
@@ -379,7 +400,7 @@ void GINTint2e_jk_kernel<3, GSIZE3>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double log_q_ij = offsets.log_q_ij[task_ij];
     double log_q_kl = offsets.log_q_kl[task_kl];
     if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        return;
+        active = false;
     }
 
     double uw[6];
@@ -405,6 +426,7 @@ void GINTint2e_jk_kernel<3, GSIZE3>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         as_ksh = lsh;
         as_lsh = ksh;
     }
+    if(!active) norm = 0.0;
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
         double aij = a12[ij];
@@ -426,8 +448,8 @@ void GINTint2e_jk_kernel<3, GSIZE3>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         GINTrys_root3(x, uw);
         GINTscale_u<3>(uw, theta);
-        GINTg0_2e_2d4d<3>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        GINTkernel_direct_getjk<3, GSIZE3>(envs, jk, g, ish, jsh, ksh, lsh);
+        if(active) GINTg0_2e_2d4d<3>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+        if(active) GINTkernel_direct_getjk<3, GSIZE3>(envs, jk, g, ish, jsh, ksh, lsh);
     } }
 }
 #endif
@@ -440,14 +462,15 @@ void GINTint2e_jk_kernel<4, GSIZE4>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        task_ij = 0; task_kl = 0; active = false;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     if (bas_ij < bas_kl) {
-        return;
+        active = false;
     }
     double norm = envs.fac;
     if (bas_ij == bas_kl) {
@@ -467,7 +490,7 @@ void GINTint2e_jk_kernel<4, GSIZE4>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double log_q_ij = offsets.log_q_ij[task_ij];
     double log_q_kl = offsets.log_q_kl[task_kl];
     if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        return;
+        active = false;
     }
 
     double uw[8];
@@ -493,6 +516,7 @@ void GINTint2e_jk_kernel<4, GSIZE4>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         as_ksh = lsh;
         as_lsh = ksh;
     }
+    if(!active) norm = 0.0;
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
         double aij = a12[ij];
@@ -514,8 +538,8 @@ void GINTint2e_jk_kernel<4, GSIZE4>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         GINTrys_root4(x, uw);
         GINTscale_u<4>(uw, theta);
-        GINTg0_2e_2d4d<4>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        GINTkernel_direct_getjk<4, GSIZE4>(envs, jk, g, ish, jsh, ksh, lsh);
+        if(active) GINTg0_2e_2d4d<4>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+        if(active) GINTkernel_direct_getjk<4, GSIZE4>(envs, jk, g, ish, jsh, ksh, lsh);
     } }
 }
 #endif
@@ -528,14 +552,16 @@ void GINTint2e_jk_kernel<5, GSIZE5>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        task_ij = 0; task_kl = 0;
+        active = false;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     if (bas_ij < bas_kl) {
-        return;
+        active = false;
     }
     double norm = envs.fac;
     if (bas_ij == bas_kl) {
@@ -555,8 +581,9 @@ void GINTint2e_jk_kernel<5, GSIZE5>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double log_q_ij = offsets.log_q_ij[task_ij];
     double log_q_kl = offsets.log_q_kl[task_kl];
     if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        return;
+        active = false;
     }
+
     double uw[10];
     double g[GSIZE5];
 
@@ -580,6 +607,7 @@ void GINTint2e_jk_kernel<5, GSIZE5>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         as_ksh = lsh;
         as_lsh = ksh;
     }
+    if(!active) norm = 0.0;
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
         double aij = a12[ij];
@@ -601,8 +629,8 @@ void GINTint2e_jk_kernel<5, GSIZE5>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         GINTrys_root5(x, uw);
         GINTscale_u<5>(uw, theta);
-        GINTg0_2e_2d4d<5>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        GINTkernel_direct_getjk<5, GSIZE5>(envs, jk, g, ish, jsh, ksh, lsh);
+        if(active) GINTg0_2e_2d4d<5>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+        if(active) GINTkernel_direct_getjk<5, GSIZE5>(envs, jk, g, ish, jsh, ksh, lsh);
     } }
 }
 #endif
@@ -616,14 +644,16 @@ void GINTint2e_jk_kernel<6, GSIZE6>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        task_ij = 0; task_kl = 0;
+        active = false;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     if (bas_ij < bas_kl) {
-        return;
+        active = false;
     }
     double norm = envs.fac;
     if (bas_ij == bas_kl) {
@@ -643,8 +673,9 @@ void GINTint2e_jk_kernel<6, GSIZE6>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double log_q_ij = offsets.log_q_ij[task_ij];
     double log_q_kl = offsets.log_q_kl[task_kl];
     if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        return;
+        active = false;
     }
+
     double uw[12];
     double g[GSIZE6];
 
@@ -668,6 +699,7 @@ void GINTint2e_jk_kernel<6, GSIZE6>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         as_ksh = lsh;
         as_lsh = ksh;
     }
+    if(!active) norm = 0.0;
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
         double aij = a12[ij];
@@ -689,8 +721,8 @@ void GINTint2e_jk_kernel<6, GSIZE6>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         GINTrys_root6(x, uw);
         GINTscale_u<6>(uw, theta);
-        GINTg0_2e_2d4d<6>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        GINTkernel_direct_getjk<6, GSIZE6>(envs, jk, g, ish, jsh, ksh, lsh);
+        if(active) GINTg0_2e_2d4d<6>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+        if(active) GINTkernel_direct_getjk<6, GSIZE6>(envs, jk, g, ish, jsh, ksh, lsh);
     } }
 }
 #endif
@@ -704,14 +736,16 @@ void GINTint2e_jk_kernel<7, GSIZE7>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        task_ij = 0; task_kl = 0;
+        active = false;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     if (bas_ij < bas_kl) {
-        return;
+        active = false;
     }
     double norm = envs.fac;
     if (bas_ij == bas_kl) {
@@ -731,8 +765,9 @@ void GINTint2e_jk_kernel<7, GSIZE7>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double log_q_ij = offsets.log_q_ij[task_ij];
     double log_q_kl = offsets.log_q_kl[task_kl];
     if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        return;
+        active = false;
     }
+
     double uw[14];
     double g[GSIZE7];
 
@@ -756,6 +791,7 @@ void GINTint2e_jk_kernel<7, GSIZE7>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         as_ksh = lsh;
         as_lsh = ksh;
     }
+    if(!active) norm = 0.0;
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
         double aij = a12[ij];
@@ -777,8 +813,8 @@ void GINTint2e_jk_kernel<7, GSIZE7>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         GINTrys_root7(x, uw);
         GINTscale_u<7>(uw, theta);
-        GINTg0_2e_2d4d<7>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        GINTkernel_direct_getjk<7, GSIZE7>(envs, jk, g, ish, jsh, ksh, lsh);
+        if(active) GINTg0_2e_2d4d<7>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+        if(active) GINTkernel_direct_getjk<7, GSIZE7>(envs, jk, g, ish, jsh, ksh, lsh);
     } }
 }
 #endif
@@ -792,14 +828,16 @@ void GINTint2e_jk_kernel<8, GSIZE8>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        task_ij = 0; task_kl = 0;
+        active = false;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     if (bas_ij < bas_kl) {
-        return;
+        active = false;
     }
     double norm = envs.fac;
     if (bas_ij == bas_kl) {
@@ -819,8 +857,9 @@ void GINTint2e_jk_kernel<8, GSIZE8>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double log_q_ij = offsets.log_q_ij[task_ij];
     double log_q_kl = offsets.log_q_kl[task_kl];
     if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        return;
+        active = false;
     }
+
     double uw[16];
     double g[GSIZE8];
 
@@ -844,6 +883,7 @@ void GINTint2e_jk_kernel<8, GSIZE8>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         as_ksh = lsh;
         as_lsh = ksh;
     }
+    if(!active) norm = 0.0;
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
         double aij = a12[ij];
@@ -865,8 +905,8 @@ void GINTint2e_jk_kernel<8, GSIZE8>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         GINTrys_root8(x, uw);
         GINTscale_u<8>(uw, theta);
-        GINTg0_2e_2d4d<8>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        GINTkernel_direct_getjk<8, GSIZE8>(envs, jk, g, ish, jsh, ksh, lsh);
+        if(active) GINTg0_2e_2d4d<8>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+        if(active) GINTkernel_direct_getjk<8, GSIZE8>(envs, jk, g, ish, jsh, ksh, lsh);
     } }
 }
 #endif
@@ -880,14 +920,16 @@ void GINTint2e_jk_kernel<9, GSIZE9>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        task_ij = 0; task_kl = 0;
+        active = false;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     if (bas_ij < bas_kl) {
-        return;
+        active = false;
     }
     double norm = envs.fac;
     if (bas_ij == bas_kl) {
@@ -907,8 +949,9 @@ void GINTint2e_jk_kernel<9, GSIZE9>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double log_q_ij = offsets.log_q_ij[task_ij];
     double log_q_kl = offsets.log_q_kl[task_kl];
     if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        return;
+        active = false;
     }
+
     double uw[18];
     double g[GSIZE9];
 
@@ -932,6 +975,7 @@ void GINTint2e_jk_kernel<9, GSIZE9>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         as_ksh = lsh;
         as_lsh = ksh;
     }
+    if(!active) norm = 0.0;
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
         double aij = a12[ij];
@@ -953,8 +997,8 @@ void GINTint2e_jk_kernel<9, GSIZE9>(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         GINTrys_root9(x, uw);
         GINTscale_u<9>(uw, theta);
-        GINTg0_2e_2d4d<9>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        GINTkernel_direct_getjk<9, GSIZE9>(envs, jk, g, ish, jsh, ksh, lsh);
+        if(active) GINTg0_2e_2d4d<9>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+        if(active) GINTkernel_direct_getjk<9, GSIZE9>(envs, jk, g, ish, jsh, ksh, lsh);
     } }
 }
 #endif
