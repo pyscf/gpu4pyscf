@@ -34,7 +34,7 @@
 #include "g2e_root3.cu"
 #include "g3c2e.cu"
 
-static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GINTEnvVars *envs)
+static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GINTEnvVars *envs, cudaStream_t stream)
 {
     int nrys_roots = envs->nrys_roots;
     int ntasks_ij = offsets->ntasks_ij;
@@ -48,9 +48,9 @@ static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GIN
     case 1:
         type_ijkl = (envs->i_l << 3) | (envs->j_l << 2) | (envs->k_l << 1) | envs->l_l;
         switch (type_ijkl) {
-        case 0b0000: GINTfill_int3c2e_kernel0000<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case 0b0010: GINTfill_int3c2e_kernel0010<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case 0b1000: GINTfill_int3c2e_kernel1000<<<blocks, threads>>>(*envs, *eri, *offsets); break;
+        case 0b0000: GINTfill_int3c2e_kernel0000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 0b0010: GINTfill_int3c2e_kernel0010<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 0b1000: GINTfill_int3c2e_kernel1000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         default:
             fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
         }
@@ -58,46 +58,46 @@ static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GIN
     case 2:
         type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;
         switch (type_ijkl) {
-        case (0<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel0020<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (0<<6)|(0<<4)|(3<<2)|0: GINTfill_int2e_kernel0030<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (1<<6)|(0<<4)|(1<<2)|0: GINTfill_int2e_kernel1010<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (1<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel1020<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (1<<6)|(1<<4)|(0<<2)|0: GINTfill_int2e_kernel1100<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (1<<6)|(1<<4)|(1<<2)|0: GINTfill_int2e_kernel1110<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (2<<6)|(0<<4)|(0<<2)|0: GINTfill_int2e_kernel2000<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (2<<6)|(0<<4)|(1<<2)|0: GINTfill_int2e_kernel2010<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (2<<6)|(1<<4)|(0<<2)|0: GINTfill_int2e_kernel2100<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (3<<6)|(0<<4)|(0<<2)|0: GINTfill_int2e_kernel3000<<<blocks, threads>>>(*envs, *eri, *offsets); break;
+        case (0<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel0020<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (0<<6)|(0<<4)|(3<<2)|0: GINTfill_int2e_kernel0030<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (1<<6)|(0<<4)|(1<<2)|0: GINTfill_int2e_kernel1010<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (1<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel1020<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (1<<6)|(1<<4)|(0<<2)|0: GINTfill_int2e_kernel1100<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (1<<6)|(1<<4)|(1<<2)|0: GINTfill_int2e_kernel1110<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (2<<6)|(0<<4)|(0<<2)|0: GINTfill_int2e_kernel2000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (2<<6)|(0<<4)|(1<<2)|0: GINTfill_int2e_kernel2010<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (2<<6)|(1<<4)|(0<<2)|0: GINTfill_int2e_kernel2100<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (3<<6)|(0<<4)|(0<<2)|0: GINTfill_int2e_kernel3000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         default:
-            GINTfill_int3c2e_kernel<2, GSIZE2_INT3C> <<<blocks, threads>>>(*envs, *eri, *offsets); break;
+            GINTfill_int3c2e_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         }
         break;
     case 3:
         type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;
         switch (type_ijkl) {
-        case (1<<6)|(0<<4)|(3<<2)|0: GINTfill_int2e_kernel1030<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (1<<6)|(1<<4)|(2<<2)|0: GINTfill_int2e_kernel1120<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (1<<6)|(1<<4)|(3<<2)|0: GINTfill_int2e_kernel1130<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (2<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel2020<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (2<<6)|(0<<4)|(3<<2)|0: GINTfill_int2e_kernel2030<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (2<<6)|(1<<4)|(1<<2)|0: GINTfill_int2e_kernel2110<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (2<<6)|(1<<4)|(2<<2)|0: GINTfill_int2e_kernel2120<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (2<<6)|(2<<4)|(0<<2)|0: GINTfill_int2e_kernel2200<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (2<<6)|(2<<4)|(1<<2)|0: GINTfill_int2e_kernel2210<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (3<<6)|(0<<4)|(1<<2)|0: GINTfill_int2e_kernel3010<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (3<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel3020<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (3<<6)|(1<<4)|(0<<2)|0: GINTfill_int2e_kernel3100<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (3<<6)|(1<<4)|(1<<2)|0: GINTfill_int2e_kernel3110<<<blocks, threads>>>(*envs, *eri, *offsets); break;
-        case (3<<6)|(2<<4)|(0<<2)|0: GINTfill_int2e_kernel3200<<<blocks, threads>>>(*envs, *eri, *offsets); break;
+        case (1<<6)|(0<<4)|(3<<2)|0: GINTfill_int2e_kernel1030<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (1<<6)|(1<<4)|(2<<2)|0: GINTfill_int2e_kernel1120<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (1<<6)|(1<<4)|(3<<2)|0: GINTfill_int2e_kernel1130<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (2<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel2020<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (2<<6)|(0<<4)|(3<<2)|0: GINTfill_int2e_kernel2030<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (2<<6)|(1<<4)|(1<<2)|0: GINTfill_int2e_kernel2110<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (2<<6)|(1<<4)|(2<<2)|0: GINTfill_int2e_kernel2120<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (2<<6)|(2<<4)|(0<<2)|0: GINTfill_int2e_kernel2200<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (2<<6)|(2<<4)|(1<<2)|0: GINTfill_int2e_kernel2210<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (3<<6)|(0<<4)|(1<<2)|0: GINTfill_int2e_kernel3010<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (3<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel3020<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (3<<6)|(1<<4)|(0<<2)|0: GINTfill_int2e_kernel3100<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (3<<6)|(1<<4)|(1<<2)|0: GINTfill_int2e_kernel3110<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case (3<<6)|(2<<4)|(0<<2)|0: GINTfill_int2e_kernel3200<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         default:
-            GINTfill_int3c2e_kernel<3, GSIZE3_INT3C> <<<blocks, threads>>>(*envs, *eri, *offsets); break;
+            GINTfill_int3c2e_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         }
         break;
-    case 4: GINTfill_int3c2e_kernel<4, GSIZE4_INT3C> <<<blocks, threads>>>(*envs, *eri, *offsets); break;
-    case 5: GINTfill_int3c2e_kernel<5, GSIZE5_INT3C> <<<blocks, threads>>>(*envs, *eri, *offsets); break;
-    case 6: GINTfill_int3c2e_kernel<6, GSIZE6_INT3C> <<<blocks, threads>>>(*envs, *eri, *offsets); break;
-    case 7: GINTfill_int3c2e_kernel<7, GSIZE7_INT3C> <<<blocks, threads>>>(*envs, *eri, *offsets); break;
-    case 8: GINTfill_int3c2e_kernel<8, GSIZE8_INT3C> <<<blocks, threads>>>(*envs, *eri, *offsets); break;
+    case 4: GINTfill_int3c2e_kernel<4, GSIZE4_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+    case 5: GINTfill_int3c2e_kernel<5, GSIZE5_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+    case 6: GINTfill_int3c2e_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+    case 7: GINTfill_int3c2e_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+    case 8: GINTfill_int3c2e_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
     default:
         fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
@@ -112,7 +112,7 @@ static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GIN
 }
 
 extern "C" {
-int GINTfill_int3c2e(BasisProdCache *bpcache, double *eri, int nao,
+int GINTfill_int3c2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, int nao,
                    int *strides, int *ao_offsets,
                    int *bins_locs_ij, int *bins_locs_kl, int nbins,
                    int cp_ij_id, int cp_kl_id, double omega)
@@ -181,7 +181,7 @@ int GINTfill_int3c2e(BasisProdCache *bpcache, double *eri, int nao,
         offsets.primitive_kl = primitive_pairs_locs[cp_kl_id] + bas_kl0 * envs.nprim_kl;
 
         int err = -1;
-        err = GINTfill_int3c2e_tasks(&eritensor, &offsets, &envs);
+        err = GINTfill_int3c2e_tasks(&eritensor, &offsets, &envs, stream);
         
         if (err != 0) {
             return err;

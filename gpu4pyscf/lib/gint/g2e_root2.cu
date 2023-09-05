@@ -137,9 +137,9 @@ static void GINTfill_int2e_kernel0011(GINTEnvVars envs, ERITensor eri, BasisProd
         }
     } }
 
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    int jstride = eri.stride_j;
+    int kstride = eri.stride_k;
+    int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
@@ -275,9 +275,9 @@ static void GINTfill_int2e_kernel0020(GINTEnvVars envs, ERITensor eri, BasisProd
         }
     } }
 
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    int jstride = eri.stride_j;
+    int kstride = eri.stride_k;
+    int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
@@ -443,9 +443,9 @@ static void GINTfill_int2e_kernel0021(GINTEnvVars envs, ERITensor eri, BasisProd
         }
     } }
 
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    int jstride = eri.stride_j;
+    int kstride = eri.stride_k;
+    int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
@@ -610,9 +610,9 @@ static void GINTfill_int2e_kernel0030(GINTEnvVars envs, ERITensor eri, BasisProd
         }
     } }
 
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    int jstride = eri.stride_j;
+    int kstride = eri.stride_k;
+    int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
@@ -765,9 +765,9 @@ static void GINTfill_int2e_kernel1010(GINTEnvVars envs, ERITensor eri, BasisProd
         }
     } }
 
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    int jstride = eri.stride_j;
+    int kstride = eri.stride_k;
+    int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
@@ -970,9 +970,9 @@ static void GINTfill_int2e_kernel1011(GINTEnvVars envs, ERITensor eri, BasisProd
         }
     } }
 
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    int jstride = eri.stride_j;
+    int kstride = eri.stride_k;
+    int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
@@ -1184,9 +1184,9 @@ static void GINTfill_int2e_kernel1020(GINTEnvVars envs, ERITensor eri, BasisProd
         }
     } }
 
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    int jstride = eri.stride_j;
+    int kstride = eri.stride_k;
+    int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
@@ -1352,9 +1352,9 @@ static void GINTfill_int2e_kernel1100(GINTEnvVars envs, ERITensor eri, BasisProd
         }
     } }
 
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    int jstride = eri.stride_j;
+    int kstride = eri.stride_k;
+    int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
@@ -1557,9 +1557,9 @@ static void GINTfill_int2e_kernel1110(GINTEnvVars envs, ERITensor eri, BasisProd
         }
     } }
 
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    int jstride = eri.stride_j;
+    int kstride = eri.stride_k;
+    int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
@@ -1731,9 +1731,9 @@ static void GINTfill_int2e_kernel2000(GINTEnvVars envs, ERITensor eri, BasisProd
         }
     } }
 
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    int jstride = eri.stride_j;
+    int kstride = eri.stride_k;
+    int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
@@ -1903,9 +1903,9 @@ static void GINTfill_int2e_kernel2010(GINTEnvVars envs, ERITensor eri, BasisProd
         }
     } }
 
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    int jstride = eri.stride_j;
+    int kstride = eri.stride_k;
+    int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
@@ -2095,9 +2095,9 @@ static void GINTfill_int2e_kernel2100(GINTEnvVars envs, ERITensor eri, BasisProd
         }
     } }
 
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    int jstride = eri.stride_j;
+    int kstride = eri.stride_k;
+    int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
@@ -2262,9 +2262,9 @@ static void GINTfill_int2e_kernel3000(GINTEnvVars envs, ERITensor eri, BasisProd
         }
     } }
 
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    int jstride = eri.stride_j;
+    int kstride = eri.stride_k;
+    int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;

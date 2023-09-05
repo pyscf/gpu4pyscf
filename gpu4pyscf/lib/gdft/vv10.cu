@@ -25,7 +25,8 @@
 #include "nr_eval_gto.cuh"
 #include "contract_rho.cuh"
 
-#define THREADS        128
+#define THREADS       256
+#define NG_PER_THREADS    1
 
 __global__
 static void vv10_kernel(double *Fvec, double *Uvec, double *Wvec,
@@ -34,38 +35,71 @@ static void vv10_kernel(double *Fvec, double *Uvec, double *Wvec,
     int vvngrids, int ngrids)
 {
     // grid id
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= ngrids) {
-        return;
+    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    const bool active = grid_id < ngrids;
+    double xi, yi, zi;
+    double W0i, Ki;
+    if (active){
+        xi = coords[grid_id];
+        yi = coords[ngrids + grid_id];
+        zi = coords[2*ngrids + grid_id];
+        W0i = W0[grid_id];
+        Ki = K[grid_id];
     }
+    double F = 0.0;
+    double U = 0.0;
+    double W = 0.0;
     
-    double DX, DY, DZ, R2;
-    double gp, g, gt, T;
-    double x = coords[i*3+0];
-    double y = coords[i*3+1];
-    double z = coords[i*3+2];
-    double W0i = W0[i];
-    double Ki = K[i];
-    double F = 0;
-    double U = 0;
-    double W = 0;
-    for (int j = 0; j < vvngrids; j++) {
-        DX = vvcoords[j*3+0] - x;
-        DY = vvcoords[j*3+1] - y;
-        DZ = vvcoords[j*3+2] - z;
-        R2 = DX*DX + DY*DY + DZ*DZ;
-        gp = R2*W0p[j] + Kp[j];
-        g  = R2*W0i + Ki;
-        gt = g + gp;
-        T = RpW[j] / (g*gp*gt);
-        F += T;
-        T *= 1./g + 1./gt;
-        U += T;
-        W += T * R2;
+    double *xj = vvcoords;
+    double *yj = vvcoords + vvngrids;
+    double *zj = vvcoords + 2*vvngrids;
+
+    __shared__ double3 xj_t[THREADS];
+    __shared__ double3 kp_t[THREADS];
+    
+    const int tx = threadIdx.x;
+    for (int j = 0; j < vvngrids; j+=blockDim.x) {
+        int idx = j + threadIdx.x;
+
+        xj_t[tx] = {xj[idx], yj[idx], zj[idx]};
+        kp_t[tx] = {Kp[idx], W0p[idx], RpW[idx]}; 
+        
+        __syncthreads();
+        for (int l = 0, M = min(THREADS, vvngrids - j); l < M; ++l){
+            double3 xj_tmp = xj_t[l];
+            double pjx = xj_tmp.x;
+            double pjy = xj_tmp.y;
+            double pjz = xj_tmp.z;
+            
+            // about 23 operations for each pair
+            double DX = pjx - xi;
+            double DY = pjy - yi; 
+            double DZ = pjz - zi;
+            double R2 = DX*DX + DY*DY + DZ*DZ;
+            
+            double3 kp_tmp = kp_t[l];
+            double Kpj = kp_tmp.x;
+            double W0pj = kp_tmp.y;
+            double RpWj = kp_tmp.z;
+
+            double gp = R2*W0pj + Kpj;
+            double g  = R2*W0i + Ki;
+            double gt = g + gp;
+            double ggt = g * gt;
+            double T = RpWj / (gp*ggt);
+            
+            F += T;
+            T *= (g + gt)/ggt;
+            U += T;
+            W += T * R2;
+        }
+        __syncthreads();
     }
-    Fvec[i] = F * -1.5;
-    Uvec[i] = U;
-    Wvec[i] = W;
+    if(active){
+        Fvec[grid_id] = F * -1.5;
+        Uvec[grid_id] = U;
+        Wvec[grid_id] = W;
+    }
 }
 
 __global__
@@ -74,33 +108,70 @@ static void vv10_grad_kernel(double *Fvec, double *vvcoords, double *coords,
     int vvngrids, int ngrids)
 {
     // grid id
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= ngrids) {
-        return;
+    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    const bool active = grid_id < ngrids;
+    double xi, yi, zi;
+    double W0i, Ki;
+    if (active){
+        xi = coords[grid_id];
+        yi = coords[ngrids + grid_id];
+        zi = coords[2*ngrids + grid_id];
+        W0i = W0[grid_id];
+        Ki = K[grid_id];
     }
-
-    double DX, DY, DZ, R2;
-    double gp, g, gt, T, Q;
     double FX = 0;
     double FY = 0;
     double FZ = 0;
-    for (int j = 0; j < vvngrids; j++) {
-        DX = vvcoords[j*3+0] - coords[i*3+0];
-        DY = vvcoords[j*3+1] - coords[i*3+1];
-        DZ = vvcoords[j*3+2] - coords[i*3+2];
-        R2 = DX*DX + DY*DY + DZ*DZ;
-        gp = R2*W0p[j] + Kp[j];
-        g  = R2*W0[i] + K[i];
-        gt = g + gp;
-        T = RpW[j] / (g*gp*gt);
-        Q = T * (W0[i]/g + W0p[j]/gp + (W0[i]+W0p[j])/gt);
-        FX += Q * DX;
-        FY += Q * DY;
-        FZ += Q * DZ;
+
+    double *xj = vvcoords;
+    double *yj = vvcoords + vvngrids;
+    double *zj = vvcoords + 2*vvngrids;
+    
+    __shared__ double3 xj_t[THREADS];
+    __shared__ double3 kp_t[THREADS];
+
+    const int tx = threadIdx.x;
+    for (int j = 0; j < vvngrids; j+=blockDim.x) {
+        int idx = j + threadIdx.x;
+
+        xj_t[tx] = {xj[idx], yj[idx], zj[idx]};
+        kp_t[tx] = {Kp[idx], W0p[idx], RpW[idx]}; 
+
+        __syncthreads();
+        for (int l = 0, M = min(THREADS, vvngrids - j); l < M; ++l){
+            double3 xj_tmp = xj_t[l];
+            double pjx = xj_tmp.x;
+            double pjy = xj_tmp.y;
+            double pjz = xj_tmp.z;
+            
+            // about 23 operations for each pair
+            double DX = pjx - xi;
+            double DY = pjy - yi; 
+            double DZ = pjz - zi;
+            double R2 = DX*DX + DY*DY + DZ*DZ;
+
+            double3 kp_tmp = kp_t[l];
+            double Kpj = kp_tmp.x;
+            double W0pj = kp_tmp.y;
+            double RpWj = kp_tmp.z;
+            
+            double gp = R2*W0pj + Kpj;
+            double g  = R2*W0i + Ki;
+            double gt = g + gp;
+            double ggt = g * gt;
+            double T = RpWj / (gp*ggt);
+            double Q = T * (W0i/g + W0pj/gp + (W0i+W0pj)/gt);
+            FX += Q * DX;
+            FY += Q * DY;
+            FZ += Q * DZ;
+        }
+         __syncthreads();
     }
-    Fvec[i*3+0] = FX * -3;
-    Fvec[i*3+1] = FY * -3;
-    Fvec[i*3+2] = FZ * -3;
+    if (active) {
+        Fvec[0*ngrids + grid_id] = FX * -3;
+        Fvec[1*ngrids + grid_id] = FY * -3;
+        Fvec[2*ngrids + grid_id] = FZ * -3;
+    }
 }
 
 extern "C" {
@@ -111,7 +182,7 @@ int VXC_vv10nlc(cudaStream_t stream, double *Fvec, double *Uvec, double *Wvec,
                  int vvngrids, int ngrids)
 {
     dim3 threads(THREADS);
-    dim3 blocks((ngrids+THREADS-1)/THREADS);
+    dim3 blocks((ngrids/NG_PER_THREADS+1+THREADS-1)/THREADS);
     vv10_kernel<<<blocks, threads, 0, stream>>>(Fvec, Uvec, Wvec,
                  vvcoords, coords,
                  W0p, W0, K, Kp, RpW, vvngrids, ngrids);

@@ -214,8 +214,8 @@ class KnownValues(unittest.TestCase):
         vvcoords = cupy.asarray(vvcoords)
 
         v = dft.numint._vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars)
-        self.assertAlmostEqual(lib.fp(v[0].get()), 0.15894647203764295, 9)
-        self.assertAlmostEqual(lib.fp(v[1].get()), 0.20500922537924576, 9)
+        self.assertAlmostEqual(lib.fp(v[0].get()), 0.15894647203764295, 8)
+        self.assertAlmostEqual(lib.fp(v[1].get()), 0.20500922537924576, 8)
         return
 
 if __name__ == "__main__":

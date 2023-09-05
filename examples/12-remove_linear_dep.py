@@ -13,17 +13,35 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80 --ptxas-options=-v")
+import pyscf
+import time
+from pyscf import lib, gto
 
-add_library(gdft SHARED 
-  nr_eval_gto.cu
-  contract_rho.cu
-  gen_grids.cu
-  nr_numint_sparse.cu
-  vv10.cu
-)
+from gpu4pyscf.dft import rks
+lib.num_threads(8)
 
-set_target_properties(gdft PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+mol = gto.M(atom=['H 0 0 %f'%i for i in range(10)], unit='Bohr',
+            basis='ccpvtz', symmetry=1)
+mol.verbose = 4
 
-target_link_libraries(gdft cint)
+mf = rks.RKS(mol, xc='B3LYP').density_fit()
+mf.grids.level = 5
+mf.conv_tol = 1e-10
+mf.direct_scf_tol = 1e-14
+mf.nlcgrids.level = 2
+
+import cupy
+from functools import reduce
+tol = 1e-6
+def eig(h, s):
+    d, t = cupy.linalg.eigh(s)
+    x = t[:,d>tol] / cupy.sqrt(d[d>tol])
+    xhx = reduce(cupy.dot, (x.T, h, x))
+    e, c = cupy.linalg.eigh(xhx)
+    c = cupy.dot(x, c)
+    return e, c
+from gpu4pyscf import scf
+scf.hf.eigh = eig
+
+e_tot = mf.kernel()
+end_time = time.time()

@@ -34,7 +34,7 @@
 #include "g3c2e_ip1.cu"
 
 __host__
-static int GINTrun_tasks_int3c2e_ip1_jk(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars *envs)
+static int GINTrun_tasks_int3c2e_ip1_jk(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars *envs, cudaStream_t stream)
 {
     int nrys_roots = envs->nrys_roots;
     int ntasks_ij = offsets->ntasks_ij;
@@ -44,14 +44,14 @@ static int GINTrun_tasks_int3c2e_ip1_jk(JKMatrix *jk, BasisProdOffsets *offsets,
     dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
 
     switch (envs->nrys_roots) {
-        case 1: GINTrun_int3c2e_ip1_jk_kernel1000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-        case 2: GINTint3c2e_ip1_jk_kernel<2, GSIZE2_INT3C> <<<blocks, threads>>>(*envs, *jk, *offsets); break;
-        case 3: GINTint3c2e_ip1_jk_kernel<3, GSIZE3_INT3C> <<<blocks, threads>>>(*envs, *jk, *offsets); break;
-        case 4: GINTint3c2e_ip1_jk_kernel<4, GSIZE4_INT3C> <<<blocks, threads>>>(*envs, *jk, *offsets); break;
-        case 5: GINTint3c2e_ip1_jk_kernel<5, GSIZE5_INT3C> <<<blocks, threads>>>(*envs, *jk, *offsets); break;
-        case 6: GINTint3c2e_ip1_jk_kernel<6, GSIZE6_INT3C> <<<blocks, threads>>>(*envs, *jk, *offsets); break;
-        case 7: GINTint3c2e_ip1_jk_kernel<7, GSIZE7_INT3C> <<<blocks, threads>>>(*envs, *jk, *offsets); break;
-        case 8: GINTint3c2e_ip1_jk_kernel<8, GSIZE8_INT3C> <<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case 1: GINTrun_int3c2e_ip1_jk_kernel1000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 2: GINTint3c2e_ip1_jk_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 3: GINTint3c2e_ip1_jk_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 4: GINTint3c2e_ip1_jk_kernel<4, GSIZE4_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 5: GINTint3c2e_ip1_jk_kernel<5, GSIZE5_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 6: GINTint3c2e_ip1_jk_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 7: GINTint3c2e_ip1_jk_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 8: GINTint3c2e_ip1_jk_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
         default:
             fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
@@ -70,31 +70,12 @@ extern "C" { __host__
 int GINTbuild_int3c2e_ip1_jk(BasisProdCache *bpcache,
                  double *vj, double *vk, double *dm, double *rhoj, double *rhok, 
                  int *ao_offsets, int nao, int naux, int n_dm,
-                 int *bins_locs_ij, int *bins_locs_kl, int nbins,
-                 int cp_ij_id, int cp_kl_id, int ip_type, double omega)
+                 int *bins_locs_ij, int ntasks_kl, int ncp_ij, int cp_kl_id, double omega)
 {
-    ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
     ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
-    GINTEnvVars envs;
+    
     int ng[4] = {1,0,0,0};
     
-    GINTinit_EnvVars(&envs, cp_ij, cp_kl, ng);
-    envs.omega = omega;
-    if (envs.nrys_roots > 8) {
-        return 2;
-    }
-    
-    // TODO: improve the efficiency by unrolling
-    if (envs.nrys_roots > 1) {
-        int16_t *idx4c = (int16_t *)malloc(sizeof(int16_t) * envs.nf * 3);
-        GINTg2e_index_xyz(idx4c, &envs);
-        checkCudaErrors(cudaMemcpyToSymbol(c_idx4c, idx4c, sizeof(int16_t)*envs.nf*3));
-        free(idx4c);
-    }
-    
-    int kl_bin, ij_bin1;
-    
-    //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
     
@@ -115,36 +96,52 @@ int GINTbuild_int3c2e_ip1_jk(BasisProdCache *bpcache,
     
     int *bas_pairs_locs = bpcache->bas_pairs_locs;
     int *primitive_pairs_locs = bpcache->primitive_pairs_locs;
-    for (kl_bin = 0; kl_bin < nbins; kl_bin++) {
-        int bas_kl0 = bins_locs_kl[kl_bin];
-        int bas_kl1 = bins_locs_kl[kl_bin+1];
-        int ntasks_kl = bas_kl1 - bas_kl0;
-        if (ntasks_kl <= 0) {
-            continue;
+
+    cudaStream_t streams[MAX_STREAMS];
+    for (int n = 0; n < MAX_STREAMS; n++){
+        checkCudaErrors(cudaStreamCreate(&streams[n]));
+    }
+    
+    int *idx = (int *)malloc(sizeof(int) * TOT_NF * 3);
+    int *l_locs = (int *)malloc(sizeof(int) * (GPU_LMAX + 2)); 
+    GINTinit_index1d_xyz(idx, l_locs);
+    checkCudaErrors(cudaMemcpyToSymbol(c_idx, idx, sizeof(int) * TOT_NF*3));
+    checkCudaErrors(cudaMemcpyToSymbol(c_l_locs, l_locs, sizeof(int) * (GPU_LMAX + 2)));
+    free(idx);
+    free(l_locs);
+
+    for (int cp_ij_id = 0; cp_ij_id < ncp_ij; cp_ij_id++){
+        int n_stream = cp_ij_id % MAX_STREAMS;
+        GINTEnvVars envs;
+        ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
+        GINTinit_EnvVars(&envs, cp_ij, cp_kl, ng);
+        envs.omega = omega;
+        if (envs.nrys_roots > 8) {
+            return 2;
         }
-        // ij_bin + kl_bin < nbins <~> e_ij*e_kl < cutoff
-        ij_bin1 = nbins - kl_bin;
-        int bas_ij0 = bins_locs_ij[0];
-        int bas_ij1 = bins_locs_ij[ij_bin1];
-        int ntasks_ij = bas_ij1 - bas_ij0;
-        if (ntasks_ij <= 0) {
-            continue;
-        }
+
+        int ntasks_ij = bins_locs_ij[cp_ij_id+1] - bins_locs_ij[cp_ij_id];
+        if (ntasks_ij <= 0) continue;
+        
         offsets.ntasks_ij = ntasks_ij;
         offsets.ntasks_kl = ntasks_kl;
-        offsets.bas_ij = bas_pairs_locs[cp_ij_id] + bas_ij0;
-        offsets.bas_kl = bas_pairs_locs[cp_kl_id] + bas_kl0;
-        offsets.primitive_ij = primitive_pairs_locs[cp_ij_id] + bas_ij0 * envs.nprim_ij;
-        offsets.primitive_kl = primitive_pairs_locs[cp_kl_id] + bas_kl0 * envs.nprim_kl;
+        offsets.bas_ij = bas_pairs_locs[cp_ij_id];
+        offsets.bas_kl = bas_pairs_locs[cp_kl_id];
+        offsets.primitive_ij = primitive_pairs_locs[cp_ij_id];
+        offsets.primitive_kl = primitive_pairs_locs[cp_kl_id];
 
-        int err = GINTrun_tasks_int3c2e_ip1_jk(&jk, &offsets, &envs);
+        int err = GINTrun_tasks_int3c2e_ip1_jk(&jk, &offsets, &envs, streams[n_stream]);
+
         if (err != 0) {
             return err;
         }
     }
+    for (int n = 0; n < MAX_STREAMS; n++){
+        checkCudaErrors(cudaStreamSynchronize(streams[n]));
+        checkCudaErrors(cudaStreamDestroy(streams[n]));
+    }
     
     return 0;
 }
-
 
 }

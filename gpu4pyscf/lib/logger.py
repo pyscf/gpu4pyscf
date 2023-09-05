@@ -15,6 +15,7 @@
 
 import sys
 import time
+import cupy
 from pyscf import lib
 from gpu4pyscf.lib.utils import patch_cpu_kernel
 

@@ -36,7 +36,7 @@ NumInt.cache_xc_kernel = gpu_numint.cache_xc_kernel
 
 print(f'{KohnShamDFT} monkey-patched')
 def _get_device(obj):
-    return getattr(self._numint, 'device', 'cpu')
+    return getattr(obj._numint, 'device', 'cpu')
 def _set_device(obj, value):
-    self._numint.device = value
+    obj._numint.device = value
 KohnShamDFT.device = property(_get_device, _set_device)

@@ -28,9 +28,11 @@ lib.num_threads(8)
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
+H      -0.7570000000    -0.0000000000    -0.4696000000
+H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-bas='sto3g'
+bas='ccpvdz'
 
 mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
 mol.build()
@@ -42,7 +44,8 @@ def tearDownModule():
     del mol
 
 class KnownValues(unittest.TestCase):
-    def test_jk(self):
+    
+    def test_vj_incore(self):
         int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym=True, direct_scf_tol=1e-14)
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
         intopt.build(1e-14, diag_block_with_triu=False, aosym=True)
@@ -59,22 +62,20 @@ class KnownValues(unittest.TestCase):
         # pass 2
         vj_outcore = cupy.einsum('ijL,L->ij', int3c_gpu, rhoj_outcore)
         vj_incore = int3c2e.get_j_int3c2e_pass2(intopt, rhoj_incore)
-        print(vj_incore[:3,:3])
-        print(vj_outcore[:3,:3])
-        print(vj_incore.shape)
         assert cupy.linalg.norm(vj_outcore - vj_incore) < 1e-9
     
-    def test_j(self):
+    def test_j_outcore(self):
         cupy.random.seed(1)
         nao = mol.nao
         dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T
-        mf = scf.RHF(mol).density_fit()
+        mf = scf.RHF(mol).density_fit(auxbasis='sto3g')
         mf.kernel()
         vj0, _ = mf.get_jk(dm=dm, with_j=True, with_k=False)
         vj = df_jk.get_j(mf.with_df, dm)
         assert cupy.linalg.norm(vj - vj0) < 1e-9
     
+
 if __name__ == "__main__":
     print("Full Tests for DF JK")
     unittest.main()
