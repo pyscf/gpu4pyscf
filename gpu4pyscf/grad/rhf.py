@@ -319,7 +319,7 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
         for k, ia in enumerate(atmlst):
             p0, p1 = aoslices[ia,2:]
             # nabla was applied on bra in vhf, *2 for the contributions of nabla|ket>
-            dvhf[k] += cupy.einsum('xij,ij->x', vhf[:,p0:p1], dm0[p0:p1]) * 2
+            dvhf[k] += cupy.einsum('xij,ij->x', vhf[:,p0:p1], dm0[p0:p1])
             extra_force[k] += mf_grad.extra_force(ia, locals())
 
         t2 = log.timer_debug1('gradients of 2e part', *t1)
