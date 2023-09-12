@@ -12,7 +12,10 @@
 #include "gint/g2e.h"
 #include "gint/cint2e.cuh"
 #include "gint/rys_roots.cu"
-#include "g2e_grad_get_veff.cu"
+#include "contract_jk.cu"
+#include "g2e.cu"
+#include "g2e_ip1.cu"
+#include "g2e_get_veff_ip1.cu"
 #include "g2e_root2_gradient.cu"
 #include "g2e_root3_gradient.cu"
 

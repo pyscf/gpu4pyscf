@@ -24,8 +24,8 @@ add_library(gvhf SHARED
   nr_jk_driver_int3c2e_ip2.cu
   nr_jk_driver_int3c2e_pass1.cu
   nr_jk_driver_int3c2e_pass2.cu
-  nr_jk_gradient_driver.cu
-  grad_get_veff_driver.cu
+  nr_jk_driver_ip1.cu
+        get_veff_driver_ip1.cu
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
