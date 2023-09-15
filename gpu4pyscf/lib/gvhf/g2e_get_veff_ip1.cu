@@ -203,15 +203,14 @@ static void GINTget_veff_ip1_kernel(GINTEnvVars envs,
                                                         &s_jx, &s_jy,
                                                         &s_jz);
 
-                    double i_dm_component = d_ik * d_jl + d_il * d_jk;
-                    double j_dm_component = d_jk * d_il + d_jl * d_ik;
+                    double exchange_component = d_ik * d_jl + d_il * d_jk;
 
-                    shell_ix += s_ix * i_dm_component;
-                    shell_iy += s_iy * i_dm_component;
-                    shell_iz += s_iz * i_dm_component;
-                    shell_jx += s_jx * j_dm_component;
-                    shell_jy += s_jy * j_dm_component;
-                    shell_jz += s_jz * j_dm_component;
+                    shell_ix += s_ix * exchange_component;
+                    shell_iy += s_iy * exchange_component;
+                    shell_iz += s_iz * exchange_component;
+                    shell_jx += s_jx * exchange_component;
+                    shell_jy += s_jy * exchange_component;
+                    shell_jz += s_jz * exchange_component;
                   }
                 }
               }
@@ -286,8 +285,7 @@ static void GINTget_veff_ip1_kernel(GINTEnvVars envs,
                                                         &s_jz);
 
                     double coulomb_component = d_ij * d_kl;
-                    double i_dm_component = d_ik * d_jl + d_il * d_jk;
-                    double j_dm_component = d_jk * d_il + d_jl * d_ik;
+                    double exchange_component = d_ik * d_jl + d_il * d_jk;
 
                     j_shell_ix += s_ix * coulomb_component;
                     j_shell_iy += s_iy * coulomb_component;
@@ -296,12 +294,12 @@ static void GINTget_veff_ip1_kernel(GINTEnvVars envs,
                     j_shell_jy += s_jy * coulomb_component;
                     j_shell_jz += s_jz * coulomb_component;
 
-                    k_shell_ix += s_ix * i_dm_component;
-                    k_shell_iy += s_iy * i_dm_component;
-                    k_shell_iz += s_iz * i_dm_component;
-                    k_shell_jx += s_jx * j_dm_component;
-                    k_shell_jy += s_jy * j_dm_component;
-                    k_shell_jz += s_jz * j_dm_component;
+                    k_shell_ix += s_ix * exchange_component;
+                    k_shell_iy += s_iy * exchange_component;
+                    k_shell_iz += s_iz * exchange_component;
+                    k_shell_jx += s_jx * exchange_component;
+                    k_shell_jy += s_jy * exchange_component;
+                    k_shell_jz += s_jz * exchange_component;
                   }
                 }
               }
@@ -332,7 +330,7 @@ static void GINTget_veff_ip1_kernel(GINTEnvVars envs,
 
 __global__
 static void
-GINTint2e_jk_kernel_nabla1i_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets) {
+GINTget_veff_ip1_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets) {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
   int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
@@ -458,23 +456,33 @@ GINTint2e_jk_kernel_nabla1i_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets
   }
 
   int nao = jk.nao;
+  int n_dm = jk.n_dm;
+
   double * __restrict__ dm = jk.dm;
   double * __restrict__ vj = jk.vj;
+  double * __restrict__ vk = jk.vk;
 
-  double d_ik = dm[i + nao * k];
-  double d_il = dm[i + nao * l];
-  double d_jl = dm[j + nao * l];
-  double d_jk = dm[j + nao * k];
+  if(vj != NULL) {
+    double coulomb = dm[k + nao * l] * dm[i + nao * j];
 
-  double j_dm_component = 2 * dm[k + nao * l] * dm[i + nao * j];
-  double i_dm_component =
-      j_dm_component - 0.5 * (d_ik * d_jl + d_il * d_jk);
-  j_dm_component -= 0.5 * (d_jk * d_il + d_jl * d_ik);
+    atomicAdd(vj+ish*3  , gout0       * coulomb);
+    atomicAdd(vj+ish*3+1, gout1       * coulomb);
+    atomicAdd(vj+ish*3+2, gout2       * coulomb);
+    atomicAdd(vj+jsh*3  , gout0_prime * coulomb);
+    atomicAdd(vj+jsh*3+1, gout1_prime * coulomb);
+    atomicAdd(vj+jsh*3+2, gout2_prime * coulomb);
+  }
+  if (vk != NULL) {
+    double exchange = dm[i + nao * k] * dm[i + nao * l]
+                    + dm[j + nao * l] * dm[j + nao * k];
 
-  atomicAdd(vj+ish*3  , gout0       * i_dm_component);
-  atomicAdd(vj+ish*3+1, gout1       * i_dm_component);
-  atomicAdd(vj+ish*3+2, gout2       * i_dm_component);
-  atomicAdd(vj+jsh*3  , gout0_prime * j_dm_component);
-  atomicAdd(vj+jsh*3+1, gout1_prime * j_dm_component);
-  atomicAdd(vj+jsh*3+2, gout2_prime * j_dm_component);
+    atomicAdd(vk+ish*3  , gout0       * exchange);
+    atomicAdd(vk+ish*3+1, gout1       * exchange);
+    atomicAdd(vk+ish*3+2, gout2       * exchange);
+    atomicAdd(vk+jsh*3  , gout0_prime * exchange);
+    atomicAdd(vk+jsh*3+1, gout1_prime * exchange);
+    atomicAdd(vk+jsh*3+2, gout2_prime * exchange);
+  }
+
+
 }

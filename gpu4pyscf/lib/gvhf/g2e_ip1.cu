@@ -27,6 +27,9 @@ void GINTgout2e_ip1_per_function(GINTEnvVars envs, double * __restrict__ g,
                                  double * s_jx, double * s_jy,
                                  double * s_jz) {
 
+  ai = 2.0 * ai;
+  aj = 2.0 * aj;
+
   int di = envs.stride_ijmax;
   int dj = envs.stride_ijmin;
 
@@ -62,23 +65,17 @@ void GINTgout2e_ip1_per_function(GINTEnvVars envs, double * __restrict__ g,
 #pragma unroll
   for (n = 0; n < NROOTS; ++n) {
     s_ix_local += -i_index_for_ix *
-             g[ix + n - di] * g[iy + n] * g[iz + n]
-             + 2.0 * ai * g[ix + n + di] * g[iy + n] * g[iz + n];
+        (g[ix + n - di] - ai * g[ix + n + di]) * g[iy + n] * g[iz + n];
     s_iy_local += -i_index_for_iy *
-             g[ix + n] * g[iy + n - di] * g[iz + n]
-             + 2.0 * ai * g[ix + n] * g[iy + n + di] * g[iz + n];
+             g[ix + n] * (g[iy + n - di] - ai *  g[iy + n + di] ) * g[iz + n];
     s_iz_local += -i_index_for_iz *
-             g[ix + n] * g[iy + n] * g[iz + n - di]
-             + 2.0 * ai * g[ix + n] * g[iy + n] * g[iz + n + di];
+             g[ix + n] * g[iy + n] * (g[iz + n - di] - ai * g[iz + n + di]);
     s_jx_local += -j_index_for_ix *
-             g[ix + n - dj] * g[iy + n] * g[iz + n]
-             + 2.0 * aj * g[ix + n + dj] * g[iy + n] * g[iz + n];
+                  (g[ix + n - dj] - aj * g[ix + n + dj]) * g[iy + n] * g[iz + n];
     s_jy_local += -j_index_for_iy *
-             g[ix + n] * g[iy + n - dj] * g[iz + n]
-             + 2.0 * aj * g[ix + n] * g[iy + n + dj] * g[iz + n];
+                  g[ix + n] * (g[iy + n - dj] - aj * g[iy + n + dj] ) * g[iz + n];
     s_jz_local += -j_index_for_iz *
-             g[ix + n] * g[iy + n] * g[iz + n - dj]
-             + 2.0 * aj * g[ix + n] * g[iy + n] * g[iz + n + dj];
+                  g[ix + n] * g[iy + n] * (g[iz + n - dj] - aj * g[iz + n + dj]);
   }
 
   *s_ix = s_ix_local;
