@@ -16,6 +16,7 @@
 #include "g2e.cu"
 #include "g2e_ip1.cu"
 #include "g2e_get_veff_ip1.cu"
+#include "g2e_get_veff_ip1_root2.cu"
 #include "g2e_root2_gradient.cu"
 #include "g2e_root3_gradient.cu"
 
