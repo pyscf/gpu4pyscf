@@ -3951,7 +3951,7 @@ static void polyfit_roots(int nroots, double x, double* rr, double* ww)
             ww[i] = POLY_SMALLX_W0[off+i] + POLY_SMALLX_W1[off+i] * x;
         }
         return;
-    } else if (x > 50.) {
+    } else if (x > 35+nroots*5) {
         int off = nroots * (nroots - 1) / 2;
         double rt;
         double t = sqrt(PIE4/x);
@@ -3963,12 +3963,18 @@ static void polyfit_roots(int nroots, double x, double* rr, double* ww)
         return;
     }
     // starting from root=6
-    const double* datax = DATA_X + ((nroots-1)*nroots/2-15) * 14*20;
-    const double* dataw = DATA_W + ((nroots-1)*nroots/2-15) * 14*20;
-    int it = (int)(x / 2.5);
+    const double* datax = DATA_X + ((nroots-1)*nroots/2-15) * 14*31;
+    const double* dataw = DATA_W + ((nroots-1)*nroots/2-15) * 14*31;
+    int it;
+    double tt;
+    if (x <= 40) {
+        it = (int)(x * .4);
+        tt = (x - it * 2.5) * 0.8 - 1.;
+    } else {
+        it = (int)(x * .25);
+        tt = (x - it * 4.) * 0.5 - 1.;
+    }
     int offset = nroots * 14 * it;
-    double t0 = it * 2.5;
-    double tt = (x - t0) * 0.8 - 1.;
     _CINT_clenshaw_d1(rr, datax+offset, tt, nroots);
     _CINT_clenshaw_d1(ww, dataw+offset, tt, nroots);
 }
