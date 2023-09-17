@@ -14,6 +14,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import cupy
+import numpy
 from pyscf import lib, gto
 from pyscf.lib import logger
 from pyscf.grad import rhf
@@ -33,6 +34,23 @@ def get_dh1e_ecp(mol, dm):
             ecp = mol.intor('ECPscalar_iprinv', comp=3)
             dh1e_ecp[ia] = cupy.einsum('xij,ij->x', ecp, dm)
     return 2.0 * dh1e_ecp
+
+def _grad_nuc(mol, atmlst=None):
+    '''
+    Derivatives of nuclear repulsion energy wrt nuclear coordinates
+    '''
+    z = mol.atom_charges()
+    r = mol.atom_coords()
+    dr = r[:,None,:] - r
+    dist = numpy.linalg.norm(dr, axis=2)
+    diag_idx = numpy.diag_indices(z.size)
+    dist[diag_idx] = 1e100
+    rinv = 1./dist
+    rinv[diag_idx] = 0.
+    gs = numpy.einsum('i,j,ijx,ij->ix', -z, z, dr, rinv**3)
+    if atmlst is not None:
+        gs = gs[atmlst]
+    return gs
 
 def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     '''
@@ -93,6 +111,8 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
 
     if(hasattr(mf, 'disp') and mf.disp is not None):
         g_disp = mf_grad.get_dispersion()
+        mf_grad.grad_disp = g_disp
+        mf_grad.grad_mf = de
         de += cupy.asarray(g_disp)
 
     if log.verbose >= logger.DEBUG:
@@ -105,5 +125,5 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
 class Gradients(rhf.Gradients):
     device = 'gpu'
     grad_elec = patch_cpu_kernel(rhf.Gradients.grad_elec)(_grad_elec)
-
+    grad_elec = patch_cpu_kernel(rhf.Gradients.grad_nuc)(_grad_nuc)
     #TODO: get_jk
