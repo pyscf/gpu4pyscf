@@ -431,8 +431,10 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     e_tot = e_tot.get()
     if(hasattr(mf, 'get_dispersion')):
         e_disp = mf.get_dispersion()
+        mf.e_disp = e_disp
+        mf.e_mf = e_tot
         e_tot += e_disp
-        
+
     return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
 # tempory implemention, will be replaced after pyscf 2.2.0

@@ -33,38 +33,4 @@ set_target_properties(cupy_helper PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 find_package(CUDAToolkit)
 
-# based on https://github.com/NVIDIA/CUDALibrarySamples/blob/master/cuTENSOR/CMakeLists.txt
-if(NOT DEFINED ENV{CUTENSOR_ROOT} AND NOT DEFINED CUTENSOR_ROOT)
-  message(FATAL_ERROR "CUTENSOR_ROOT not set!")
-else()
-  if(DEFINED ENV{CUTENSOR_ROOT})
-    set(CUTENSOR_ROOT "$ENV{CUTENSOR_ROOT}")
-  endif()
-  message("-- Looking for cuTENSOR in ${CUTENSOR_ROOT}")
-  if(NOT EXISTS ${CUTENSOR_ROOT})
-    message(FATAL_ERROR "Cannot find CUTENSOR_ROOT")
-  endif()
-endif()
-
-if(NOT TARGET cutensor)
-  add_library(cutensor SHARED IMPORTED)
-  if(WIN32)
-    set(CUTENSOR_LIBRARY_NAME "cutensor.dll")
-    set(CUTENSOR_LIBRARY_DEF "cutensor.lib")
-  else()
-    set(CUTENSOR_LIBRARY_NAME "libcutensor.so")
-  endif()
-  if((${CUDA_VERSION_MAJOR} LESS_EQUAL 10))
-      set(LIB_DIR "/lib/10.2")
-  elseif((${CUDA_VERSION_MAJOR} GREATER_EQUAL 11) AND (${CUDA_VERSION_MINOR} LESS_EQUAL 0))
-      set(LIB_DIR "/lib/11.0")
-  elseif((${CUDA_VERSION_MAJOR} GREATER_EQUAL 11) AND (${CUDA_VERSION_MINOR} GREATER_EQUAL 1))
-      set(LIB_DIR "/lib/11")
-  endif()
-  set_target_properties(cutensor PROPERTIES
-    IMPORTED_LOCATION "${CUTENSOR_ROOT}/${LIB_DIR}/${CUTENSOR_LIBRARY_NAME}"
-    IMPORTED_IMPLIB "${CUTENSOR_ROOT}/${LIB_DIR}/${CUTENSOR_LIBRARY_DEF}"
-    INTERFACE_INCLUDE_DIRECTORIES "${CUTENSOR_ROOT}/include")
-endif()
-
 target_link_libraries(cupy_helper PRIVATE CUDA::cublas PRIVATE CUDA::cusolver PRIVATE cutensor)
