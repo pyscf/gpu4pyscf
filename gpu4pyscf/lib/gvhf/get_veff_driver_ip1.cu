@@ -17,14 +17,14 @@
 #include "g2e_ip1.cu"
 #include "g2e_get_veff_ip1.cu"
 #include "g2e_get_veff_ip1_root2.cu"
-#include "g2e_root2_gradient.cu"
-#include "g2e_root3_gradient.cu"
+#include "g2e_ip1_root2.cu"
+#include "g2e_ip1_root3.cu"
 
 
 __host__
-static int GINTrun_tasks_jk_nabla1i(JKMatrix *jk,
-                                    BasisProdOffsets *offsets,
-                                    GINTEnvVars *envs)
+static int GINTrun_tasks_get_veff_ip1(JKMatrix *jk,
+                                      BasisProdOffsets *offsets,
+                                      GINTEnvVars *envs)
 {
   int nrys_roots = envs->nrys_roots;
   int ntasks_ij = offsets->ntasks_ij;
@@ -34,73 +34,49 @@ static int GINTrun_tasks_jk_nabla1i(JKMatrix *jk,
 
   dim3 threads(THREADSX, THREADSY);
   dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
-//  switch (nrys_roots) {
-//    case 1:
-//      switch (type_ijkl) {
-//        case 0b0000: GINTint2e_jk_kernel_nabla1i_0000<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
-//        default:
-//          fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
-//      }
-//      break;
-//
-//    case 2:
-//      switch (type_ijkl) {
-//        case (0<<6)|(0<<4)|(1<<2)|0: GINTint2e_jk_kernel_nabla1i_0010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (0<<6)|(0<<4)|(1<<2)|1: GINTint2e_jk_kernel_nabla1i_0011<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (0<<6)|(0<<4)|(2<<2)|0: GINTint2e_jk_kernel_nabla1i_0020<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (1<<6)|(0<<4)|(0<<2)|0: GINTint2e_jk_kernel_nabla1i_1000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (1<<6)|(0<<4)|(1<<2)|0: GINTint2e_jk_kernel_nabla1i_1010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (1<<6)|(1<<4)|(0<<2)|0: GINTint2e_jk_kernel_nabla1i_1100<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (2<<6)|(0<<4)|(0<<2)|0: GINTint2e_jk_kernel_nabla1i_2000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        default:
-//          fprintf(stderr, "roots=2 type_ijkl %d\n", type_ijkl);
-//      }
-//      break;
-//
-//    case 3:
-//      switch (type_ijkl) {
-//        case (0<<6)|(0<<4)|(2<<2)|1: GINTint2e_jk_kernel_nabla1i_0021<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (0<<6)|(0<<4)|(2<<2)|2: GINTint2e_jk_kernel_nabla1i_0022<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (0<<6)|(0<<4)|(3<<2)|0: GINTint2e_jk_kernel_nabla1i_0030<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (0<<6)|(0<<4)|(3<<2)|1: GINTint2e_jk_kernel_nabla1i_0031<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (1<<6)|(0<<4)|(1<<2)|1: GINTint2e_jk_kernel_nabla1i_1011<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (1<<6)|(0<<4)|(2<<2)|0: GINTint2e_jk_kernel_nabla1i_1020<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (1<<6)|(0<<4)|(2<<2)|1: GINTint2e_jk_kernel_nabla1i_1021<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (1<<6)|(0<<4)|(3<<2)|0: GINTint2e_jk_kernel_nabla1i_1030<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (1<<6)|(1<<4)|(1<<2)|0: GINTint2e_jk_kernel_nabla1i_1110<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (1<<6)|(1<<4)|(1<<2)|1: GINTint2e_jk_kernel_nabla1i_1111<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (1<<6)|(1<<4)|(2<<2)|0: GINTint2e_jk_kernel_nabla1i_1120<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (2<<6)|(0<<4)|(1<<2)|0: GINTint2e_jk_kernel_nabla1i_2010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (2<<6)|(0<<4)|(1<<2)|1: GINTint2e_jk_kernel_nabla1i_2011<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (2<<6)|(0<<4)|(2<<2)|0: GINTint2e_jk_kernel_nabla1i_2020<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (2<<6)|(1<<4)|(0<<2)|0: GINTint2e_jk_kernel_nabla1i_2100<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (2<<6)|(1<<4)|(1<<2)|0: GINTint2e_jk_kernel_nabla1i_2110<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (2<<6)|(2<<4)|(0<<2)|0: GINTint2e_jk_kernel_nabla1i_2200<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (3<<6)|(0<<4)|(0<<2)|0: GINTint2e_jk_kernel_nabla1i_3000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (3<<6)|(0<<4)|(1<<2)|0: GINTint2e_jk_kernel_nabla1i_3010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (3<<6)|(1<<4)|(0<<2)|0: GINTint2e_jk_kernel_nabla1i_3100<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        default:
-//          fprintf(stderr, "roots=3 type_ijkl %d\n", type_ijkl);
-//      }
-//      break;
-//
-//    case 4:
-//      GINTint2e_jk_kernel_nabla1i<4, NABLAGOUTSIZE4> <<<blocks, threads>>>(*envs, *jk, *offsets);
-//      break;
-//    case 5:
-//      GINTint2e_jk_kernel_nabla1i<5, NABLAGOUTSIZE5> <<<blocks, threads>>>(*envs, *jk, *offsets);
-//      break;
-//    case 6:
-//      GINTint2e_jk_kernel_nabla1i<6, NABLAGOUTSIZE6> <<<blocks, threads>>>(*envs, *jk, *offsets);
-//      break;
-//    case 7:
-//      GINTint2e_jk_kernel_nabla1i<7, NABLAGOUTSIZE7> <<<blocks, threads>>>(*envs, *jk, *offsets);
-//      break;
-//    default:
-//      fprintf(stderr, "rys roots %d\n", nrys_roots);
-//      return 1;
-//
-//  }
+  switch (nrys_roots) {
+    case 1:
+      switch (type_ijkl) {
+        case 0b0000: GINTint2e_get_veff_ip1_kernel_0000<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        default:
+          fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
+      }
+      break;
+
+    case 2:
+      switch (type_ijkl) {
+        case (0<<6)|(0<<4)|(1<<2)|0: GINTint2e_get_veff_ip1_kernel0010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (0<<6)|(0<<4)|(1<<2)|1: GINTint2e_get_veff_ip1_kernel0011<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (0<<6)|(0<<4)|(2<<2)|0: GINTint2e_get_veff_ip1_kernel0020<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(0<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel1000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(0<<4)|(1<<2)|0: GINTint2e_get_veff_ip1_kernel1010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(1<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel1100<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(0<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel2000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        default:
+          fprintf(stderr, "roots=2 type_ijkl %d\n", type_ijkl);
+      }
+      break;
+
+    case 3:
+      GINTint2e_get_veff_ip1_kernel<3, NABLAGSIZE3> <<<blocks, threads>>>(*envs, *jk, *offsets);
+      break;
+    case 4:
+      GINTint2e_get_veff_ip1_kernel<4, NABLAGSIZE4> <<<blocks, threads>>>(*envs, *jk, *offsets);
+      break;
+    case 5:
+      GINTint2e_get_veff_ip1_kernel<5, NABLAGSIZE5> <<<blocks, threads>>>(*envs, *jk, *offsets);
+      break;
+    case 6:
+      GINTint2e_get_veff_ip1_kernel<6, NABLAGSIZE6> <<<blocks, threads>>>(*envs, *jk, *offsets);
+      break;
+    case 7:
+      GINTint2e_get_veff_ip1_kernel<7, NABLAGSIZE7> <<<blocks, threads>>>(*envs, *jk, *offsets);
+      break;
+    default:
+      fprintf(stderr, "rys roots %d\n", nrys_roots);
+      return 1;
+
+  }
 
   cudaError_t err = cudaGetLastError();
   if (err != cudaSuccess) {
@@ -112,14 +88,14 @@ static int GINTrun_tasks_jk_nabla1i(JKMatrix *jk,
 
 extern "C" {__host__
 
-int GINTbuild_jk_nabla1i(BasisProdCache *bpcache,
-                         double *vj, double *vk, double *dm, int nao, int n_dm,
-                         int *bins_locs_ij, int *bins_locs_kl,
-                         double *bins_floor_ij, double *bins_floor_kl,
-                         int nbins_ij, int nbins_kl,
-                         int cp_ij_id, int cp_kl_id, double omega, double log_cutoff, double sub_dm_cond,
-                         double *dm_sh, int nshls,
-                         double *log_q_ij, double *log_q_kl)
+int GINTget_veff_ip1(BasisProdCache *bpcache,
+                     double *vj, double *vk, double *dm, int nao, int n_dm,
+                     int *bins_locs_ij, int *bins_locs_kl,
+                     double *bins_floor_ij, double *bins_floor_kl,
+                     int nbins_ij, int nbins_kl,
+                     int cp_ij_id, int cp_kl_id, double omega, double log_cutoff, double sub_dm_cond,
+                     double *dm_sh, int nshls,
+                     double *log_q_ij, double *log_q_kl)
 {
   ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
   ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
@@ -230,7 +206,7 @@ int GINTbuild_jk_nabla1i(BasisProdCache *bpcache,
       checkCudaErrors(cudaMemcpy(d_uw, uw_buf, sizeof(double) * uw_size,
                                  cudaMemcpyHostToDevice));
     }
-    int err = GINTrun_tasks_jk_nabla1i(&jk, &offsets, &envs);
+    int err = GINTrun_tasks_get_veff_ip1(&jk, &offsets, &envs);
     if (err != 0) {
       return err;
     }

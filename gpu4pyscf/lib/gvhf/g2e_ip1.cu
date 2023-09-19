@@ -111,6 +111,7 @@ void GINTgout2e_ip1(GINTEnvVars envs, double * __restrict__ gout, double * __res
 }
 
 __device__
+static
 void GINTkernel_ip1_getjk(GINTEnvVars envs, JKMatrix jk, double * __restrict__ gout,
                           int ish, int jsh, int ksh, int lsh) {
   int * ao_loc = c_bpcache.ao_loc;

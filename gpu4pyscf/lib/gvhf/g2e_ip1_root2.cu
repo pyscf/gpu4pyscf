@@ -1,6 +1,6 @@
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_0010(GINTEnvVars envs, JKMatrix jk,
+static void GINTint2e_ip1_jk_kernel_0010(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -216,7 +216,7 @@ static void GINTint2e_jk_kernel_nabla1i_0010(GINTEnvVars envs, JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_0011(GINTEnvVars envs, JKMatrix jk,
+static void GINTint2e_ip1_jk_kernel_0011(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -550,7 +550,7 @@ static void GINTint2e_jk_kernel_nabla1i_0011(GINTEnvVars envs, JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_0020(GINTEnvVars envs, JKMatrix jk,
+static void GINTint2e_ip1_jk_kernel_0020(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -841,7 +841,7 @@ static void GINTint2e_jk_kernel_nabla1i_0020(GINTEnvVars envs, JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_1000(GINTEnvVars envs, JKMatrix jk,
+static void GINTint2e_ip1_jk_kernel_1000(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -1062,7 +1062,7 @@ static void GINTint2e_jk_kernel_nabla1i_1000(GINTEnvVars envs, JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_1010(GINTEnvVars envs, JKMatrix jk,
+static void GINTint2e_ip1_jk_kernel_1010(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -1409,7 +1409,7 @@ static void GINTint2e_jk_kernel_nabla1i_1010(GINTEnvVars envs, JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_1100(GINTEnvVars envs, JKMatrix jk,
+static void GINTint2e_ip1_jk_kernel_1100(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
@@ -1767,7 +1767,7 @@ static void GINTint2e_jk_kernel_nabla1i_1100(GINTEnvVars envs, JKMatrix jk,
 }
 
 __global__
-static void GINTint2e_jk_kernel_nabla1i_2000(GINTEnvVars envs, JKMatrix jk,
+static void GINTint2e_ip1_jk_kernel_2000(GINTEnvVars envs, JKMatrix jk,
                                     BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;

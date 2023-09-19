@@ -1,8 +1,8 @@
 template<int NROOTS, int GOUTSIZE>
 __global__
-static void GINTget_veff_ip1_kernel(GINTEnvVars envs,
-                                    JKMatrix jk,
-                                    BasisProdOffsets offsets) {
+static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
+                                          JKMatrix jk,
+                                          BasisProdOffsets offsets) {
 
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
@@ -330,7 +330,7 @@ static void GINTget_veff_ip1_kernel(GINTEnvVars envs,
 
 __global__
 static void
-GINTget_veff_ip1_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets) {
+GINTint2e_get_veff_ip1_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets) {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
   int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
@@ -456,7 +456,6 @@ GINTget_veff_ip1_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets off
   }
 
   int nao = jk.nao;
-  int n_dm = jk.n_dm;
 
   double * __restrict__ dm = jk.dm;
   double * __restrict__ vj = jk.vj;

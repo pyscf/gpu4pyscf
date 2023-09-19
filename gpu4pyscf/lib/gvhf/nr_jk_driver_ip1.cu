@@ -15,8 +15,8 @@
 #include "contract_jk.cu"
 #include "g2e.cu"
 #include "g2e_ip1.cu"
-#include "g2e_root2_gradient.cu"
-#include "g2e_root3_gradient.cu"
+#include "g2e_ip1_root2.cu"
+#include "g2e_ip1_root3.cu"
 
 
 __host__
