@@ -3971,8 +3971,10 @@ static void polyfit_roots(int nroots, double x, double* rr, double* ww)
         it = (int)(x * .4);
         tt = (x - it * 2.5) * 0.8 - 1.;
     } else {
+        x -= 40.;
         it = (int)(x * .25);
         tt = (x - it * 4.) * 0.5 - 1.;
+        it += 16;
     }
     int offset = nroots * 14 * it;
     _CINT_clenshaw_d1(rr, datax+offset, tt, nroots);
