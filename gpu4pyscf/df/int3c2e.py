@@ -1083,7 +1083,7 @@ def get_dh1e(mol, dm0):
     charges = mol.atom_charges()
     fakemol = gto.fakemol_for_charges(coords)
     intopt = VHFOpt(mol, fakemol, 'int2e')
-    intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
+    intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=256, group_size_aux=256)
     dm0_sorted = dm0[cupy.ix_(intopt.sph_ao_idx, intopt.sph_ao_idx)]
     dh1e = cupy.zeros([natm,3])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip1'):

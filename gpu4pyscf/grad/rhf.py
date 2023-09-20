@@ -30,6 +30,8 @@ LMAX_ON_GPU = 3
 FREE_CUPY_CACHE = True
 BINSIZE = 128
 libgvhf = load_library('libgvhf')
+
+@profile
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
            verbose=None):
 
@@ -262,6 +264,7 @@ def get_dh1e_ecp(mol, dm):
     return 2.0 * dh1e_ecp
 
 
+@profile
 def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     '''
     Electronic part of RHF/RKS gradients
@@ -304,7 +307,10 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
     with lib.call_in_background(calculate_h1e) as calculate_hs:
         calculate_hs(h1, s1)
         # (i | \nabla hcore | j)
+
+        t3 = log.timer_debug1("get_dh1e", *t0)
         dh1e = int3c2e.get_dh1e(mol, dm0)
+        t4 = log.timer_debug1("get_dh1e", *t3)
         if mol.has_ecp():
             dh1e += get_dh1e_ecp(mol, dm0)
 
@@ -319,7 +325,7 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
         for k, ia in enumerate(atmlst):
             p0, p1 = aoslices[ia,2:]
             # nabla was applied on bra in vhf, *2 for the contributions of nabla|ket>
-            dvhf[k] += cupy.einsum('xij,ij->x', vhf[:,p0:p1], dm0[p0:p1]) * 2
+            dvhf[k] += cupy.einsum('xij,ij->x', vhf[:,p0:p1], dm0[p0:p1])
             extra_force[k] += mf_grad.extra_force(ia, locals())
 
         t2 = log.timer_debug1('gradients of 2e part', *t1)
