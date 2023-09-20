@@ -172,10 +172,10 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
                        l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
                        time.perf_counter() - t0)
     if with_j:
-        vj = cupy.einsum('pi,apq,qj->aij', coeff, vj, coeff) * 2
+        vj = cupy.asarray([coeff @ vj_slice @ coeff * 2 for vj_slice in vj])
         # *2 because only the lower triangle part of dm was used in J contraction
     if with_k:
-        vk = cupy.einsum('pi,apq,qj->aij', coeff, vk, coeff)
+        vk = cupy.asarray([coeff @ vk_slice @ coeff for vk_slice in vk])
 
     cput0 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
 
