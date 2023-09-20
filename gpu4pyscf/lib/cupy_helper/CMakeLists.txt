@@ -52,7 +52,7 @@ else ()
                 set(CUTENSOR_LIBRARY_NAME "cutensor.dll")
                 set(CUTENSOR_LIBRARY_DEF "cutensor.lib")
             else ()
-                set(CUTENSOR_LIBRARY_NAME "libcutensor.so")
+                set(CUTENSOR_LIBRARY_NAME "libcutensor.so.1")
             endif ()
             set(LIB_DIR "/lib")
 

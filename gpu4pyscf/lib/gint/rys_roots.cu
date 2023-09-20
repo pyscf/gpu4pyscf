@@ -4011,3 +4011,22 @@ static void GINTscale_u(double *u, double theta){
         u[i] /= u[i] + 1 - u[i] * theta;
     }
 }
+
+template<int NROOTS> __device__
+static void GINTrys_root(double x, double * rw) {
+  if constexpr(NROOTS==3) {
+    GINTrys_root3(x, rw);
+  } else if constexpr(NROOTS==4) {
+    GINTrys_root4(x, rw);
+  } else if constexpr(NROOTS==5) {
+    GINTrys_root5(x, rw);
+  } else if constexpr(NROOTS==6) {
+    GINTrys_root6(x, rw);
+  } else if constexpr(NROOTS==7) {
+    GINTrys_root7(x, rw);
+  } else if constexpr(NROOTS==8) {
+    GINTrys_root8(x, rw);
+  } else if constexpr(NROOTS==9) {
+    GINTrys_root9(x, rw);
+  }
+}
