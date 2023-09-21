@@ -589,6 +589,8 @@ class Hessian(rhf_hess.Hessian):
         mf = self.base
         if(hasattr(mf, 'disp') and mf.disp is not None):
             h_disp = self.get_dispersion()
+            self.hess_disp = h_disp
+            self.hess_mf = self.de
             for k, katm in enumerate(atmlst):
                 for l, latm in enumerate(atmlst):
                     self.de[k,l] += h_disp[k,l]
