@@ -32,5 +32,5 @@ add_library(cupy_helper SHARED
 set_target_properties(cupy_helper PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 find_package(CUDAToolkit)
-find_package(CUTENSOR)
+
 target_link_libraries(cupy_helper PRIVATE CUDA::cublas PRIVATE CUDA::cusolver PRIVATE cutensor)
