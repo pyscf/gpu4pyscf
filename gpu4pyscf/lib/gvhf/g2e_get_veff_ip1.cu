@@ -51,7 +51,9 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
   double s_ix, s_iy, s_iz, s_jx, s_jy, s_jz;
 
   double uw[NROOTS * 2];
-  double g[GOUTSIZE];
+  double local_cache[NROOTS * GPU_AO_LMAX + GOUTSIZE];
+  memset(local_cache, 0, sizeof(double) * (NROOTS * GPU_AO_LMAX + GOUTSIZE));
+  double * __restrict__ g = local_cache + NROOTS * GPU_AO_LMAX;
 
   double* __restrict__ a12 = c_bpcache.a12;
   double* __restrict__ x12 = c_bpcache.x12;
@@ -264,7 +266,6 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
           double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
 
           GINTrys_root<NROOTS>(x, uw);
-
           GINTg0_2e_2d4d<NROOTS>(envs, g, uw, norm,
                                  as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
 
@@ -272,13 +273,14 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
           for(int i_dm = 0; i_dm < jk.n_dm; i_dm++) {
             for (f = 0, l = l0; l < l1; ++l) {
               for (k = k0; k < k1; ++k) {
+                d_kl = dm[k + nao * l];
                 for (j = j0; j < j1; ++j) {
                   d_jl = dm[j + nao * l];
                   d_jk = dm[j + nao * k];
                   for (i = i0; i < i1; ++i, ++f) {
+                    d_ij = dm[i + nao * j];
                     d_ik = dm[i + nao * k];
                     d_il = dm[i + nao * l];
-
                     GINTgout2e_ip1_per_function<NROOTS>(envs, g, ai, aj, f,
                                                         &s_ix, &s_iy, &s_iz,
                                                         &s_jx, &s_jy,
@@ -330,7 +332,9 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
 
 __global__
 static void
-GINTint2e_get_veff_ip1_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets) {
+GINTint2e_get_veff_ip1_kernel_0000(GINTEnvVars envs,
+                                   JKMatrix jk,
+                                   BasisProdOffsets offsets) {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
   int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
@@ -385,8 +389,8 @@ GINTint2e_get_veff_ip1_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffse
   double gout2 = 0, gout2_prime = 0;
 
   for (ij = prim_ij; ij < prim_ij + nprim_ij; ++ij) {
-    double ai = i_exponent[ij];
-    double aj = j_exponent[ij];
+    double ai = 2.0 * i_exponent[ij];
+    double aj = 2.0 * j_exponent[ij];
     double aij = a12[ij];
     double eij = e12[ij];
     double xij = x12[ij];
@@ -438,20 +442,18 @@ GINTint2e_get_veff_ip1_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffse
       double g_3 = c00y;
       double g_4 = fac * weight0;
       double g_5 = g_4 * c00z;
-      double g_6 = 2.0 * ai;
 
       double g_1_prime = c00x_prime;
       double g_3_prime = c00y_prime;
       double g_5_prime = g_4 * c00z_prime;
-      double g_6_prime = 2.0 * aj;
 
-      gout0 += g_1 * g_2 * g_4 * g_6;
-      gout1 += g_0 * g_3 * g_4 * g_6;
-      gout2 += g_0 * g_2 * g_5 * g_6;
+      gout0 += g_1 * g_2 * g_4 * ai;
+      gout1 += g_0 * g_3 * g_4 * ai;
+      gout2 += g_0 * g_2 * g_5 * ai;
 
-      gout0_prime += g_1_prime * g_2 * g_4 * g_6_prime;
-      gout1_prime += g_0 * g_3_prime * g_4 * g_6_prime;
-      gout2_prime += g_0 * g_2 * g_5_prime * g_6_prime;
+      gout0_prime += g_1_prime * g_2 * g_4 * aj;
+      gout1_prime += g_0 * g_3_prime * g_4 * aj;
+      gout2_prime += g_0 * g_2 * g_5_prime * aj;
     }
   }
 
@@ -472,8 +474,8 @@ GINTint2e_get_veff_ip1_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffse
     atomicAdd(vj+jsh*3+2, gout2_prime * coulomb);
   }
   if (vk != NULL) {
-    double exchange = dm[i + nao * k] * dm[i + nao * l]
-                    + dm[j + nao * l] * dm[j + nao * k];
+    double exchange = dm[i + nao * k] * dm[j + nao * l]
+                    + dm[i + nao * l] * dm[j + nao * k];
 
     atomicAdd(vk+ish*3  , gout0       * exchange);
     atomicAdd(vk+ish*3+1, gout1       * exchange);

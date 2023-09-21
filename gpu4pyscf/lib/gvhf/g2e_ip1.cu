@@ -30,8 +30,8 @@ void GINTgout2e_ip1_per_function(GINTEnvVars envs, double * __restrict__ g,
   ai = 2.0 * ai;
   aj = 2.0 * aj;
 
-  int di = envs.stride_ijmax;
-  int dj = envs.stride_ijmin;
+  int di = envs.stride_i;
+  int dj = envs.stride_j;
 
   int nf = envs.nf;
   int16_t * idx = c_idx4c;
@@ -60,23 +60,23 @@ void GINTgout2e_ip1_per_function(GINTEnvVars envs, double * __restrict__ g,
   i_index_for_iz = ij_index_for_iz % dj / di;
   j_index_for_iz = ij_index_for_iz / dj;
 
-  double s_ix_local, s_iy_local, s_iz_local, s_jx_local, s_jy_local, s_jz_local;
+  double s_ix_local = 0,
+         s_iy_local = 0,
+         s_iz_local = 0,
+         s_jx_local = 0,
+         s_jy_local = 0,
+         s_jz_local = 0;
 
 #pragma unroll
   for (n = 0; n < NROOTS; ++n) {
-    s_ix_local += -i_index_for_ix *
-        (g[ix + n - di] - ai * g[ix + n + di]) * g[iy + n] * g[iz + n];
-    s_iy_local += -i_index_for_iy *
-             g[ix + n] * (g[iy + n - di] - ai *  g[iy + n + di] ) * g[iz + n];
-    s_iz_local += -i_index_for_iz *
-             g[ix + n] * g[iy + n] * (g[iz + n - di] - ai * g[iz + n + di]);
-    s_jx_local += -j_index_for_ix *
-                  (g[ix + n - dj] - aj * g[ix + n + dj]) * g[iy + n] * g[iz + n];
-    s_jy_local += -j_index_for_iy *
-                  g[ix + n] * (g[iy + n - dj] - aj * g[iy + n + dj] ) * g[iz + n];
-    s_jz_local += -j_index_for_iz *
-                  g[ix + n] * g[iy + n] * (g[iz + n - dj] - aj * g[iz + n + dj]);
+    s_ix_local += (ai * g[ix + n + di] - i_index_for_ix * g[ix + n - di]) * g[iy + n] * g[iz + n];
+    s_iy_local += g[ix + n] * (ai * g[iy + n + di] - i_index_for_iy * g[iy + n - di]) * g[iz + n];
+    s_iz_local += g[ix + n] * g[iy + n] * (ai * g[iz + n + di] - i_index_for_iz * g[iz + n - di]);
+    s_jx_local += (aj * g[ix + n + dj] - j_index_for_ix * g[ix + n - dj]) * g[iy + n] * g[iz + n];
+    s_jy_local += g[ix + n] * (aj * g[iy + n + dj] - j_index_for_iy * g[iy + n - dj]) * g[iz + n];
+    s_jz_local += g[ix + n] * g[iy + n] * (aj * g[iz + n + dj] - j_index_for_iz * g[iz + n - dj]);
   }
+
 
   *s_ix = s_ix_local;
   *s_iy = s_iy_local;
@@ -1183,8 +1183,8 @@ void GINTint2e_ip1_jk_kernel<5, NABLAGOUTSIZE5>(GINTEnvVars envs, JKMatrix jk,
   double * __restrict__ x12 = c_bpcache.x12;
   double * __restrict__ y12 = c_bpcache.y12;
   double * __restrict__ z12 = c_bpcache.z12;
-  double * __restrict__ a1 = c_bpcache.a1;
-  double * __restrict__ a2 = c_bpcache.a2;
+  double * __restrict__ i_exponent = c_bpcache.a1;
+  double * __restrict__ j_exponent = c_bpcache.a2;
 
   int ij, kl;
   int as_ish, as_jsh, as_ksh, as_lsh;
@@ -1203,8 +1203,8 @@ void GINTint2e_ip1_jk_kernel<5, NABLAGOUTSIZE5>(GINTEnvVars envs, JKMatrix jk,
     as_lsh = ksh;
   }
   for (ij = prim_ij; ij < prim_ij + nprim_ij; ++ij) {
-    double ai = a1[ij];
-    double aj = a2[ij];
+    double ai = i_exponent[ij];
+    double aj = j_exponent[ij];
     double aij = a12[ij];
     double xij = x12[ij];
     double yij = y12[ij];

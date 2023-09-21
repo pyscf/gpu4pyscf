@@ -419,23 +419,32 @@ void GINTinit_uw_s1(double *uw_buf, BasisProdOffsets *offsets,
 
 void GINTinit_EnvVars_nabla1i(GINTEnvVars *envs,
                               ContractionProdType *cp_ij,
-                              ContractionProdType *cp_kl)
+                              ContractionProdType *cp_kl,
+                              int *ng)
 {
   int i_l = cp_ij->l_bra;
   int j_l = cp_ij->l_ket;
   int k_l = cp_kl->l_bra;
   int l_l = cp_kl->l_ket;
+  int li_ceil = i_l + ng[0];
+  int lj_ceil = j_l + ng[1];
+  int lk_ceil = k_l + ng[2];
+  int ll_ceil = l_l + ng[3];
   int nfi = (i_l + 1) * (i_l + 2) / 2;
   int nfj = (j_l + 1) * (j_l + 2) / 2;
   int nfk = (k_l + 1) * (k_l + 2) / 2;
   int nfl = (l_l + 1) * (l_l + 2) / 2;
-  int nroots = (i_l + j_l + k_l + l_l + 1)/2 + 1;
+  int nroots = (li_ceil + lj_ceil + lk_ceil + ll_ceil + 1)/2 + 1;
   double fac = (M_PI*M_PI*M_PI)*2/SQRTPI;
 
   envs->i_l = i_l;
   envs->j_l = j_l;
   envs->k_l = k_l;
   envs->l_l = l_l;
+  envs->li_ceil = li_ceil;
+  envs->lj_ceil = lj_ceil;
+  envs->lk_ceil = lk_ceil;
+  envs->ll_ceil = ll_ceil;
   envs->nfi = nfi;
   envs->nfj = nfj;
   envs->nfk = nfk;
@@ -449,10 +458,10 @@ void GINTinit_EnvVars_nabla1i(GINTEnvVars *envs,
   envs->ibase = ibase;
   envs->kbase = kbase;
 
-  int li1 = i_l + 2;
-  int lj1 = j_l + 2;
-  int lk1 = k_l + 1;
-  int ll1 = l_l + 1;
+  int li1 = li_ceil + 2;
+  int lj1 = lj_ceil + 2;
+  int lk1 = lk_ceil + 1;
+  int ll1 = ll_ceil + 1;
   int di = nroots;
   int dj = di * li1;
   int dk = dj * lj1;
@@ -461,27 +470,35 @@ void GINTinit_EnvVars_nabla1i(GINTEnvVars *envs,
   envs->g_size    = dl * ll1;
 
   if (ibase) {
-    envs->ijmin = j_l;
-    envs->ijmax = i_l;
+    envs->ijmin = lj_ceil;
+    envs->ijmax = li_ceil;
     envs->stride_ijmax = nroots;
     envs->stride_ijmin = nroots * li1;
+    envs->stride_i = nroots;
+    envs->stride_j = nroots * li1;
   } else {
-    envs->ijmin = i_l;
-    envs->ijmax = j_l;
+    envs->ijmin = li_ceil;
+    envs->ijmax = lj_ceil;
     envs->stride_ijmax = nroots;
     envs->stride_ijmin = nroots * lj1;
+    envs->stride_i = nroots * lj1;
+    envs->stride_j = nroots;
   }
 
   if (kbase) {
-    envs->klmin = l_l;
-    envs->klmax = k_l;
+    envs->klmin = ll_ceil;
+    envs->klmax = lk_ceil;
     envs->stride_klmax = dk;
     envs->stride_klmin = dk * lk1;
+    envs->stride_k = dk;
+    envs->stride_l = dk * lk1;
   } else {
-    envs->klmin = k_l;
-    envs->klmax = l_l;
+    envs->klmin = lk_ceil;
+    envs->klmax = ll_ceil;
     envs->stride_klmax = dk;
     envs->stride_klmin = dk * ll1;
+    envs->stride_k = dk * ll1;
+    envs->stride_l = dk;
   }
 
   envs->nprim_ij = cp_ij->nprim_12;
