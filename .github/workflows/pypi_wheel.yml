@@ -1,0 +1,38 @@
+name: PyPI-wheel
+
+on:
+  release:
+    types:
+      # Note: editing the prerelease then marking as release does not trigger
+      # this pipeline
+      # - prereleased
+      - released
+  workflow_dispatch:
+
+jobs:
+  release-pypi-linux:
+    runs-on: ubuntu-latest
+    env:
+      img: docker://pyscf/gpu4pyscf:0.1
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Build wheels
+      run: |
+        docker run --rm -v ${{ github.workspace }}:/src/gpu4pyscf:rw --workdir=/src/gpu4pyscf \
+        ${{ env.img }} \
+        bash -exc 'export CMAKE_CONFIGURE_ARGS="-DCUTENSOR=OFF" && \
+        mkdir -p /root/wheelhouse $src/linux-wheels && \
+        /opt/python/bin/pip wheel -v --no-deps --no-clean -w /root/wheelhouse $src && \
+        export whl=`ls /root/wheelhouse/pyscf-*-linux_*.whl` && \
+        auditwheel -v repair "$whl" --lib-sdir /lib -w $dst'
+    - name: List available wheels
+      run: |
+        ls ${{ github.workspace }}/linux-wheels
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_API_TOKEN }}
+        packages-dir: ${{ github.workspace }}/linux-wheels
+        verbose: true
