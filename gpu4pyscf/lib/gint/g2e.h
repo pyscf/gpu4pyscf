@@ -27,7 +27,8 @@ void GINTinit_EnvVars(GINTEnvVars *envs,
                       ContractionProdType *cp_ij, ContractionProdType *cp_kl, int *ng);
 void GINTinit_EnvVars_nabla1i(GINTEnvVars *envs,
                               ContractionProdType *cp_ij,
-                              ContractionProdType *cp_kl);
+                              ContractionProdType *cp_kl,
+                              int *ng);
 
 void GINTinit_2c_gidx(int *idx, int li, int lj);
 void GINTinit_2c_gidx_nabla1i(int *idx, int li, int lj);

@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <cuda_runtime.h>
 
 #include "gvhf.h"
@@ -13,7 +14,6 @@
 #include "gint/cint2e.cuh"
 #include "gint/rys_roots.cu"
 #include "contract_jk.cu"
-#include "g2e.cu"
 #include "g2e_ip1.cu"
 #include "g2e_ip1_root2.cu"
 #include "g2e_ip1_root3.cu"
@@ -122,7 +122,8 @@ int GINTbuild_ip1_jk(BasisProdCache *bpcache,
   ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
   ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
   GINTEnvVars envs;
-  GINTinit_EnvVars_nabla1i(&envs, cp_ij, cp_kl);
+  int ng[4] = {0,0,0,0};
+  GINTinit_EnvVars_nabla1i(&envs, cp_ij, cp_kl, ng);
   envs.omega = omega;
   if (envs.nrys_roots >= 8) {
     return 2;

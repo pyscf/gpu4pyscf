@@ -2,6 +2,8 @@ GPU plugin for PySCF
 ====================
 Installation
 --------
+Create an environment with dockerfiles/compile/Dockerfile. The same dockerfile can also be used for runtime.
+
 Compile with
 ```
 sh build.sh

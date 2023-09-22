@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-cmake_minimum_required (VERSION 3.18)
+cmake_minimum_required (VERSION 3.12)
 project (gpu4pyscf C CUDA)
 
 set(CMAKE_C_STANDARD "99")
@@ -129,12 +129,12 @@ if(BUILD_LIBXC)
     GIT_TAG 6af8da52125a05e5997fb65751eee7fe4bc2f171
     PREFIX ${PROJECT_BINARY_DIR}/deps
     INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
-    CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON
+    CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON 
             -DENABLE_FORTRAN=OFF -DDISABLE_KXC=ON -DDISABLE_LXC=ON -DDISABLE_FHC=ON
             -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
             -DCMAKE_INSTALL_LIBDIR:PATH=lib
             -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
             -DENABLE_XHOST:STRING=${BUILD_MARCH_NATIVE}
-#    CMAKE_CACHE_ARGS -DCMAKE_CUDA_ARCHITECTURES:STRING="70;80"
+    CMAKE_CACHE_ARGS -DCMAKE_CUDA_ARCHITECTURES:STRING=70-real;80-real
   )
 endif()

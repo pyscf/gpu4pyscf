@@ -27,6 +27,7 @@ from gpu4pyscf.lib import logger
 LMAX_ON_GPU = 8
 FREE_CUPY_CACHE = True
 STACK_SIZE_PER_THREAD = 8192 * 4
+BLKSIZE = 256
 
 libgvhf = load_library('libgvhf')
 libgint = load_library('libgint')
@@ -932,7 +933,7 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
     naux_sph = auxmol.nao
 
     intopt = VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False)
+    intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
     
     nao = intopt.mol.nao
     naux = intopt.auxmol.nao
@@ -1013,7 +1014,7 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
     naux_sph = auxmol.nao
 
     intopt = VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False)
+    intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
     
     nao = intopt.mol.nao
     naux = intopt.auxmol.nao
@@ -1084,6 +1085,7 @@ def get_dh1e(mol, dm0):
     fakemol = gto.fakemol_for_charges(coords)
     intopt = VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=256, group_size_aux=256)
+    #intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
     dm0_sorted = dm0[cupy.ix_(intopt.sph_ao_idx, intopt.sph_ao_idx)]
     dh1e = cupy.zeros([natm,3])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip1'):
@@ -1167,7 +1169,7 @@ def get_int3c2e(mol, auxmol=None, auxbasis='weigend+etb', direct_scf_tol=1e-13, 
     nao_sph = mol.nao
     naux_sph = auxmol.nao
     intopt = VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=aosym)
+    intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=aosym, group_size=BLKSIZE, group_size_aux=BLKSIZE)
     
     int3c = cupy.zeros([naux_sph, nao_sph, nao_sph], order='C')
     for cp_ij_id, _ in enumerate(intopt.log_qs):
