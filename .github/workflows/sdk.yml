@@ -15,7 +15,7 @@ jobs:
       id: docker_build
       uses: docker/build-push-action@v2
       with:
-        file: docker/Dockerfile
+        file: dockerfiles/compile/Dockerfile
         push: true
         tags: pyscf/gpu4pyscf-sdk:0.1
         #cache-from: type=local,src=/tmp/.buildx-cache
