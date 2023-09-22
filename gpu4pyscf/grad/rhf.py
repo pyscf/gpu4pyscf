@@ -395,18 +395,15 @@ def get_veff(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None
                        l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
                        time.perf_counter() - t0)
     if with_j:
-        print("per_shell")
-        print(vj)
         for atom in atmlst:
-            shell_ids = mol.atom_shell_ids(atom)
-            print(shell_ids)
+            shell_ids = vhfopt.mol.atom_shell_ids(atom)
             vj_per_atom[atom] += cupy.sum(vj[shell_ids], axis=0)
 
         vj_per_atom *= 2
 
     if with_k:
         for atom in atmlst:
-            shell_ids = mol.atom_shell_ids(atom)
+            shell_ids = vhfopt.mol.atom_shell_ids(atom)
             vk_per_atom[atom] += cupy.sum(vk[shell_ids], axis=0)
 
 
@@ -439,8 +436,7 @@ def _get_veff(gradient_object, mol, dm):
     vj, vk = get_veff(mol, dm, vhfopt=vhfopt)
     log.timer('vj and vk gradient on gpu', *cput0)
 
-    # return vj - vk * .5
-    return vj
+    return vj - vk * .5
 
 def get_dh1e_ecp(mol, dm):
     natom = mol.natm
@@ -455,12 +451,12 @@ def get_dh1e_ecp(mol, dm):
             dh1e_ecp[ia] = cupy.einsum('xij,ij->x', ecp, dm)
     return 2.0 * dh1e_ecp
 
-def _grad_nuc(mol, atmlst=None):
+def _grad_nuc(mf_grad, atmlst=None):
     '''
     Derivatives of nuclear repulsion energy wrt nuclear coordinates
     '''
-    z = mol.atom_charges()
-    r = mol.atom_coords()
+    z = mf_grad.mol.atom_charges()
+    r = mf_grad.mol.atom_coords()
     dr = r[:,None,:] - r
     dist = numpy.linalg.norm(dr, axis=2)
     diag_idx = numpy.diag_indices(z.size)
@@ -515,19 +511,14 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
         if mol.has_ecp():
             dh1e += get_dh1e_ecp(mol, dm0)
 
-        extra_force = cupy.zeros((len(atmlst),3))
-        dvhf = cupy.zeros((len(atmlst), 3))
-        dvhf_debug = cupy.zeros((len(atmlst), 3))
+        dvhf = mf_grad.get_veff(mol, dm0)
         t1 = log.timer_debug1('gradients of h1e', *t0)
         log.debug('Computing Gradients of NR-HF Coulomb repulsion')
 
         dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
-        vhf = mf_grad.get_veff(mol, dm0)
 
+        extra_force = cupy.zeros((len(atmlst),3))
         for k, ia in enumerate(atmlst):
-            p0, p1 = aoslices[ia,2:]
-            # nabla was applied on bra in vhf, *2 for the contributions of nabla|ket>
-            dvhf[k] += cupy.einsum('xij,ij->x', vhf[:,p0:p1], dm0[p0:p1])
             extra_force[k] += mf_grad.extra_force(ia, locals())
 
         t2 = log.timer_debug1('gradients of 2e part', *t1)
@@ -536,12 +527,6 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
     ds = cupy.einsum('xij,ij->xi', s1, dme0)
     delec = 2.0*(dh - ds)
 
-    for k, ia in enumerate(atmlst):
-        p0, p1 = aoslices[ia,2:]
-        # nabla was applied on bra in vhf, *2 for the contributions of nabla|ket>
-        dvhf_debug[k] += cupy.einsum('xij,ij->x', vhf[:,p0:p1], dm0[p0:p1])
-
-    print("dvhf\n", dvhf_debug)
     delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
     de = 2.0 * dvhf + dh1e + delec + extra_force
 
@@ -561,7 +546,8 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
 class Gradients(rhf.Gradients):
     device = 'gpu'
     grad_elec = patch_cpu_kernel(rhf.Gradients.grad_elec)(_grad_elec)
-    grad_elec = patch_cpu_kernel(rhf.Gradients.grad_nuc)(_grad_nuc)
+    grad_nuc = patch_cpu_kernel(rhf.Gradients.grad_nuc)(_grad_nuc)
+    get_veff = patch_cpu_kernel(rhf.Gradients.get_veff)(_get_veff)
     get_jk = patch_cpu_kernel(rhf.Gradients.get_jk)(_get_jk)
 
     #TODO: get_jk

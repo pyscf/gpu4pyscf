@@ -113,7 +113,7 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
 
           GINTrys_root<NROOTS>(x, uw);
 
-          GINTg0_2e_2d4d<NROOTS>(envs, g, uw, norm,
+          GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, uw, norm,
                                  as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
 
           dm = jk.dm;
@@ -186,7 +186,7 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
 
           GINTrys_root<NROOTS>(x, uw);
 
-          GINTg0_2e_2d4d<NROOTS>(envs, g, uw, norm,
+          GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, uw, norm,
                                  as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
 
           dm = jk.dm;
@@ -266,7 +266,7 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
           double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
 
           GINTrys_root<NROOTS>(x, uw);
-          GINTg0_2e_2d4d<NROOTS>(envs, g, uw, norm,
+          GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, uw, norm,
                                  as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
 
           dm = jk.dm;

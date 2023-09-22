@@ -426,14 +426,14 @@ void GINTinit_EnvVars_nabla1i(GINTEnvVars *envs,
   int j_l = cp_ij->l_ket;
   int k_l = cp_kl->l_bra;
   int l_l = cp_kl->l_ket;
-  int li_ceil = i_l + ng[0];
-  int lj_ceil = j_l + ng[1];
-  int lk_ceil = k_l + ng[2];
-  int ll_ceil = l_l + ng[3];
   int nfi = (i_l + 1) * (i_l + 2) / 2;
   int nfj = (j_l + 1) * (j_l + 2) / 2;
   int nfk = (k_l + 1) * (k_l + 2) / 2;
   int nfl = (l_l + 1) * (l_l + 2) / 2;
+  int li_ceil = i_l + ng[0];
+  int lj_ceil = j_l + ng[1];
+  int lk_ceil = k_l + ng[2];
+  int ll_ceil = l_l + ng[3];
   int nroots = (li_ceil + lj_ceil + lk_ceil + ll_ceil + 1)/2 + 1;
   double fac = (M_PI*M_PI*M_PI)*2/SQRTPI;
 

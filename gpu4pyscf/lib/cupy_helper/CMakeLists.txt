@@ -33,4 +33,39 @@ set_target_properties(cupy_helper PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 find_package(CUDAToolkit)
 
+if (NOT DEFINED ENV{CUTENSOR_ROOT} AND NOT DEFINED CUTENSOR_ROOT)
+    message(FATAL_ERROR "cuTensor not found. CUTENSOR_ROOT must be defined.")
+else ()
+    if (DEFINED ENV{CUTENSOR_ROOT})
+        set(CUTENSOR_ROOT "$ENV{CUTENSOR_ROOT}")
+    endif ()
+    message("-- Looking for cuTENSOR in ${CUTENSOR_ROOT}")
+    if (NOT EXISTS ${CUTENSOR_ROOT})
+        message("Cannot find CUTENSOR_ROOT")
+    else ()
+        add_definitions(-DUSE_CUTENSOR)
+
+        if (NOT TARGET cutensor)
+            add_library(cutensor SHARED IMPORTED)
+            if (WIN32)
+                set(CUTENSOR_LIBRARY_NAME "cutensor.dll")
+                set(CUTENSOR_LIBRARY_DEF "cutensor.lib")
+            else ()
+                set(CUTENSOR_LIBRARY_NAME "libcutensor.so.1")
+            endif ()
+            set(LIB_DIR "/lib")
+
+            set_target_properties(cutensor PROPERTIES
+                    IMPORTED_LOCATION "${CUTENSOR_ROOT}/${LIB_DIR}/${CUTENSOR_LIBRARY_NAME}"
+                    IMPORTED_IMPLIB "${CUTENSOR_ROOT}/${LIB_DIR}/${CUTENSOR_LIBRARY_DEF}"
+                    INTERFACE_INCLUDE_DIRECTORIES "${CUTENSOR_ROOT}/include")
+        endif ()
+
+        include_directories(SYSTEM ${CUDA_INCLUDE_DIRS} ${CUTENSOR_ROOT}/include)
+
+        message("-- cuTENSOR linked.")
+
+    endif ()
+endif ()
+
 target_link_libraries(cupy_helper PRIVATE CUDA::cublas PRIVATE CUDA::cusolver PRIVATE cutensor)

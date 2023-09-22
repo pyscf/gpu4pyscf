@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <cuda_runtime.h>
 
 #include "gvhf.h"
@@ -13,7 +14,6 @@
 #include "gint/cint2e.cuh"
 #include "gint/rys_roots.cu"
 #include "contract_jk.cu"
-#include "g2e.cu"
 #include "g2e_ip1.cu"
 #include "g2e_get_veff_ip1.cu"
 #include "g2e_get_veff_ip1_root2.cu"
@@ -44,18 +44,17 @@ static int GINTrun_tasks_get_veff_ip1(JKMatrix *jk,
       break;
 
     case 2:
-//      switch (type_ijkl) {
-//        case (0<<6)|(0<<4)|(1<<2)|0: GINTint2e_get_veff_ip1_kernel0010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (0<<6)|(0<<4)|(1<<2)|1: GINTint2e_get_veff_ip1_kernel0011<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (0<<6)|(0<<4)|(2<<2)|0: GINTint2e_get_veff_ip1_kernel0020<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (1<<6)|(0<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel1000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (1<<6)|(0<<4)|(1<<2)|0: GINTint2e_get_veff_ip1_kernel1010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (1<<6)|(1<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel1100<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        case (2<<6)|(0<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel2000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
-//        default:
-//          fprintf(stderr, "roots=2 type_ijkl %d\n", type_ijkl);
-//      }
-      GINTint2e_get_veff_ip1_kernel<2, NABLAGSIZE2> <<<blocks, threads>>>(*envs, *jk, *offsets);
+      switch (type_ijkl) {
+        case (0<<6)|(0<<4)|(1<<2)|0: GINTint2e_get_veff_ip1_kernel0010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (0<<6)|(0<<4)|(1<<2)|1: GINTint2e_get_veff_ip1_kernel0011<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (0<<6)|(0<<4)|(2<<2)|0: GINTint2e_get_veff_ip1_kernel0020<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(0<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel1000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(0<<4)|(1<<2)|0: GINTint2e_get_veff_ip1_kernel1010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(1<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel1100<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(0<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel2000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        default:
+          fprintf(stderr, "roots=2 type_ijkl %d\n", type_ijkl);
+      }
       break;
 
     case 3:

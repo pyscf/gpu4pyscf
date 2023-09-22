@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <cuda_runtime.h>
 
 #include "gvhf.h"
@@ -13,7 +14,6 @@
 #include "gint/cint2e.cuh"
 #include "gint/rys_roots.cu"
 #include "contract_jk.cu"
-#include "g2e.cu"
 #include "g2e_ip1.cu"
 #include "g2e_ip1_root2.cu"
 #include "g2e_ip1_root3.cu"
