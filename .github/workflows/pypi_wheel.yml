@@ -13,7 +13,7 @@ jobs:
   release-pypi-linux:
     runs-on: ubuntu-latest
     env:
-      img: pyscf/gpu4pyscf:0.1
+      img: pyscf/gpu4pyscf-sdk:0.1
     steps:
     - name: Checkout
       uses: actions/checkout@v3
