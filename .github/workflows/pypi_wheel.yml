@@ -21,62 +21,41 @@ jobs:
       run: |
         docker run --rm -v ${{ github.workspace }}:/src/gpu4pyscf:rw --workdir=/src/gpu4pyscf \
         ${{ env.img }} \
-        bash -exc 'sh /src/gpu4pyscf/build.sh'
+        bash -exc 'export CIBW_BUIL=cp39-manylinux_x86_64 && \
+           python -m pip install cibuildwheel==2.16.0 && \
+           python -m cibuildwheel --output-dir wheelhouse'
     - name: List available wheels
       run: |
-        ls ${{ github.workspace }}/output
-    - name: Publish to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        user: __token__
-        password: ${{ secrets.PYPI_API_TOKEN }}
-        packages-dir: ${{ github.workspace }}/output
-        verbose: true
-
-  release-pypi-cibuildwheel:
-    name: Build wheels with cibuildwheel
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@v3
-    - name: Build wheels
-      uses: pypa/cibuildwheel@v2.14.1
-      env:
-        CIBW_BUILD: cp39-manylinux_x86_64
-      with:
-        output-dir: linux-wheels
-    - name: List available wheels
-      run: |
-          ls ${{ github.workspace }}/linux-wheels
-    - name: Upload to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        user: __token__
-        password: ${{ secrets.PYPI_API_TOKEN }}
-        packages-dir: ${{ github.workspace }}/linux-wheels
-        verbose: true
-
-  release-pypi-cibuildwheel-local:
-    name: Build wheels with cibuildwheel
-    strategy:
-      matrix:
-        python-version: ["3.9"]
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@v3
-    # Used to host cibuildwheel
-    - uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install cibuildwheel
-      run: python -m pip install cibuildwheel==2.16.0
-    - name: Build wheels
-      run: python -m cibuildwheel --output-dir wheelhouse
-      # to supply options, put them in 'env', like:
-      env:
-        CIBW_BUILD: cp39-manylinux_x86_64
+        ls ${{ github.workspace }}/wheelhouse
     - name: Publish to PyPI
       run: |
           pip install twine
           export TWINE_USERNAME=__token__
           export TWINE_PASSWORD="${{ secrets.PYPI_API_TOKEN }}"
-          twine upload --verbose /wheelhouse/*
+          twine upload --verbose "/wheelhouse/*"
+
+#  release-pypi-cibuildwheel:
+#    name: Build wheels with cibuildwheel
+#    strategy:
+#      matrix:
+#        python-version: ["3.9"]
+#    runs-on: ubuntu-20.04
+#    steps:
+#    - uses: actions/checkout@v3
+#    # Used to host cibuildwheel
+#    - uses: actions/setup-python@v4
+#      with:
+#        python-version: ${{ matrix.python-version }}
+#    - name: Install cibuildwheel
+#      run: python -m pip install cibuildwheel==2.16.0
+#    - name: Build wheels
+#      run: python -m cibuildwheel --output-dir wheelhouse
+#      # to supply options, put them in 'env', like:
+#      env:
+#        CIBW_BUILD: cp39-manylinux_x86_64
+#    - name: Publish to PyPI
+#      run: |
+#          pip install twine
+#          export TWINE_USERNAME=__token__
+#          export TWINE_PASSWORD="${{ secrets.PYPI_API_TOKEN }}"
+#          twine upload --verbose /wheelhouse/*
