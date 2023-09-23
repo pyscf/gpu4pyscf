@@ -32,3 +32,25 @@ jobs:
         password: ${{ secrets.PYPI_API_TOKEN }}
         packages-dir: ${{ github.workspace }}/output
         verbose: true
+
+  release-pypi-cibuildwheel:
+    name: Build wheels with cibuildwheel
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build wheels
+      uses: pypa/cibuildwheel@v2.14.1
+      env:
+        CIBW_BUILD: cp39-manylinux_x86_64
+      with:
+        output-dir: linux-wheels
+    - name: List available wheels
+      run: |
+          ls ${{ github.workspace }}/linux-wheels
+    - name: Upload to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_API_TOKEN }}
+        packages-dir: ${{ github.workspace }}/linux-wheels
+        verbose: true
