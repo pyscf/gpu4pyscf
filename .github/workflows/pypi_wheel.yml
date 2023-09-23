@@ -13,7 +13,7 @@ jobs:
   release-pypi-linux:
     runs-on: ubuntu-latest
     env:
-      img: docker://pyscf/gpu4pyscf:0.1
+      img: pyscf/gpu4pyscf:0.1
     steps:
     - name: Checkout
       uses: actions/checkout@v3
@@ -21,18 +21,14 @@ jobs:
       run: |
         docker run --rm -v ${{ github.workspace }}:/src/gpu4pyscf:rw --workdir=/src/gpu4pyscf \
         ${{ env.img }} \
-        bash -exc 'export CMAKE_CONFIGURE_ARGS="-DCUTENSOR=OFF" && \
-        mkdir -p /root/wheelhouse $src/linux-wheels && \
-        /opt/python/bin/pip wheel -v --no-deps --no-clean -w /root/wheelhouse $src && \
-        export whl=`ls /root/wheelhouse/pyscf-*-linux_*.whl` && \
-        auditwheel -v repair "$whl" --lib-sdir /lib -w $dst'
+        bash -exc 'sh /src/gpu4pyscf/build.sh'
     - name: List available wheels
       run: |
-        ls ${{ github.workspace }}/linux-wheels
+        ls ${{ github.workspace }}/output
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         user: __token__
         password: ${{ secrets.PYPI_API_TOKEN }}
-        packages-dir: ${{ github.workspace }}/linux-wheels
+        packages-dir: ${{ github.workspace }}/output
         verbose: true
