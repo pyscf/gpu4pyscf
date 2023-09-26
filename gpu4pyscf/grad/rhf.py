@@ -469,6 +469,7 @@ def _grad_nuc(mf_grad, atmlst=None):
         gs = gs[atmlst]
     return gs
 
+@profile
 def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     '''
     Electronic part of RHF/RKS gradients
@@ -508,7 +509,10 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
     with lib.call_in_background(calculate_h1e) as calculate_hs:
         calculate_hs(h1, s1)
         # (i | \nabla hcore | j)
+
+        t3 = log.timer_debug1("get_dh1e", *t0)
         dh1e = int3c2e.get_dh1e(mol, dm0)
+        t4 = log.timer_debug1("get_dh1e", *t3)
         if mol.has_ecp():
             dh1e += get_dh1e_ecp(mol, dm0)
 
