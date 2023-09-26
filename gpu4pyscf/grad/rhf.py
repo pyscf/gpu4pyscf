@@ -281,12 +281,12 @@ def get_veff(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None
     vj_ptr = vk_ptr = lib.c_null_ptr()
 
     if with_j:
-        vj = cupy.zeros([mol.nbas, 3])
+        vj = cupy.zeros([vhfopt.mol.nbas, 3])
         vj_per_atom = cupy.zeros([len(atmlst), 3])
         vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
         scripts.append('ji->s2kl')
     if with_k:
-        vk = cupy.zeros([mol.nbas, 3])
+        vk = cupy.zeros([vhfopt.mol.nbas, 3])
         vk_per_atom = cupy.zeros([len(atmlst), 3])
         vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
         if hermi == 1:
@@ -394,6 +394,7 @@ def get_veff(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None
             log.debug1('(%s%s|%s%s) on GPU %.3fs',
                        l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
                        time.perf_counter() - t0)
+
     if with_j:
         for atom in atmlst:
             shell_ids = vhfopt.mol.atom_shell_ids(atom)
