@@ -469,7 +469,6 @@ def _grad_nuc(mf_grad, atmlst=None):
         gs = gs[atmlst]
     return gs
 
-@profile
 def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     '''
     Electronic part of RHF/RKS gradients
