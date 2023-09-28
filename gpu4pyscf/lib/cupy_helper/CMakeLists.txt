@@ -31,8 +31,6 @@ add_library(cupy_helper SHARED
 
 set_target_properties(cupy_helper PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-#find_package(CUDAToolkit)
-
 
 if (NOT DEFINED ENV{CUTENSOR_ROOT} AND NOT DEFINED CUTENSOR_ROOT)
     message(FATAL_ERROR "cuTensor not found. CUTENSOR_ROOT must be defined.")
@@ -71,9 +69,10 @@ endif ()
 
 find_package(NVHPC)
 if(${NVHPC_FOUND})
-  message("looks like it's using NVHPC.")
+  message("-- looks like it's using NVHPC.")
   target_link_libraries(cupy_helper PRIVATE NVHPC::CUBLAS PRIVATE NVHPC::CUSOLVER PRIVATE NVHPC::CUTENSOR)
 else()
+  find_package(CUDAToolkit)
   target_link_libraries(cupy_helper PRIVATE CUDA::cublas PRIVATE CUDA::cusolver PRIVATE cutensor)
 endif()
 
