@@ -6,31 +6,32 @@ function install_118 {
     echo "Installing CUDA 11.8 and cuDNN 8.7 and NCCL 2.15 and cutensor 1.6.1.5"
     rm -rf /usr/local/cuda-11.8 /usr/local/cuda
     # install CUDA 11.8.0 in the same container
-    wget -q https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run
-    chmod +x cuda_11.8.0_520.61.05_linux.run
-    ./cuda_11.8.0_520.61.05_linux.run --toolkit --silent
-    rm -f cuda_11.8.0_520.61.05_linux.run
-    rm -f /usr/local/cuda && ln -s /usr/local/cuda-11.8 /usr/local/cuda
-
+    wget https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda-repo-rhel7-11-8-local-11.8.0_520.61.05-1.x86_64.rpm
+    rpm -i cuda-repo-rhel7-11-8-local-11.8.0_520.61.05-1.x86_64.rpm
+    yum clean all
+    yum -y install nvidia-driver-latest-dkms
+    yum -y install cuda
+    rm -rf cuda-repo-rhel7-11-8-local-11.8.0_520.61.05-1.x86_64.rpm
+    
     # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
-    mkdir tmp_cudnn && cd tmp_cudnn
-    wget -q https://developer.download.nvidia.com/compute/redist/cudnn/v8.7.0/local_installers/11.8/cudnn-linux-x86_64-8.7.0.84_cuda11-archive.tar.xz -O cudnn-linux-x86_64-8.7.0.84_cuda11-archive.tar.xz
-    tar xf cudnn-linux-x86_64-8.7.0.84_cuda11-archive.tar.xz
-    cp -a cudnn-linux-x86_64-8.7.0.84_cuda11-archive/include/* /usr/local/cuda/include/
-    cp -a cudnn-linux-x86_64-8.7.0.84_cuda11-archive/lib/* /usr/local/cuda/lib64/
-    cd ..
-    rm -rf tmp_cudnn
-    ldconfig
+    #mkdir tmp_cudnn && cd tmp_cudnn
+    #wget -q https://developer.download.nvidia.com/compute/redist/cudnn/v8.7.0/local_installers/11.8/cudnn-linux-x86_64-8.7.0.84_cuda11-archive.tar.xz -O cudnn-linux-x86_64-8.7.0.84_cuda11-archive.tar.xz
+    #tar xf cudnn-linux-x86_64-8.7.0.84_cuda11-archive.tar.xz
+    #cp -a cudnn-linux-x86_64-8.7.0.84_cuda11-archive/include/* /usr/local/cuda/include/
+    #cp -a cudnn-linux-x86_64-8.7.0.84_cuda11-archive/lib/* /usr/local/cuda/lib64/
+    #cd ..
+    #rm -rf tmp_cudnn
+    #ldconfig
 
     # NCCL license: https://docs.nvidia.com/deeplearning/nccl/#licenses
-    mkdir tmp_nccl && cd tmp_nccl
-    wget -q https://developer.download.nvidia.com/compute/redist/nccl/v2.15.5/nccl_2.15.5-1+cuda11.8_x86_64.txz
-    tar xf nccl_2.15.5-1+cuda11.8_x86_64.txz
-    cp -a nccl_2.15.5-1+cuda11.8_x86_64/include/* /usr/local/cuda/include/
-    cp -a nccl_2.15.5-1+cuda11.8_x86_64/lib/* /usr/local/cuda/lib64/
-    cd ..
-    rm -rf tmp_nccl
-    ldconfig
+    #mkdir tmp_nccl && cd tmp_nccl
+    #wget -q https://developer.download.nvidia.com/compute/redist/nccl/v2.15.5/nccl_2.15.5-1+cuda11.8_x86_64.txz
+    #tar xf nccl_2.15.5-1+cuda11.8_x86_64.txz
+    #cp -a nccl_2.15.5-1+cuda11.8_x86_64/include/* /usr/local/cuda/include/
+    #cp -a nccl_2.15.5-1+cuda11.8_x86_64/lib/* /usr/local/cuda/lib64/
+    #cd ..
+    #rm -rf tmp_nccl
+    #ldconfig
 	
     # cutensor license: https://docs.nvidia.com/cuda/cutensor/license.html
     mkdir tmp_cutensor && cd tmp_cutensor
