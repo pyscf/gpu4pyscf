@@ -21,7 +21,7 @@ RUN rm -rf /opt/python/cp34-cp34m /opt/_internal/cpython-3.4.6
 
 # Install CUDA
 ARG BASE_CUDA_VERSION=11.8
-ADD install_cuda.sh install_cuda.sh
+ADD dockerfiles/manylinux/install_cuda.sh install_cuda.sh
 RUN bash ./install_cuda.sh ${BASE_CUDA_VERSION} && rm install_cuda.sh
 
 ENV CUDA_HOME="/usr/local/cuda" LD_LIBRARY_PATH="${CUDA_HOME}/lib64::${LD_LIBRARY_PATH}"
