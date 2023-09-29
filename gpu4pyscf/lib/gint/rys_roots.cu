@@ -4004,3 +4004,37 @@ static void GINTscale_u(double *u, double theta){
         u[i] /= u[i] + 1 - u[i] * theta;
     }
 }
+
+template<int NROOTS> __device__
+static void GINTrys_root(double x, double * rw) {
+  if constexpr(NROOTS==1) {
+    if (x < 3.e-7) {
+      rw[0] = 0.5;
+      rw[1] = 1.;
+    } else {
+      double tt = sqrt(x);
+      double fmt0 = SQRTPIE4 / tt * erf(tt);
+      rw[1] = fmt0;
+      double e = exp(-x);
+      double b = .5 / x;
+      double fmt1 = b * (fmt0 - e);
+      rw[0] = fmt1 / (fmt0 - fmt1);
+    }
+  } else if constexpr(NROOTS==2) {
+    GINTrys_root2(x, rw);
+  } else if constexpr(NROOTS==3) {
+    GINTrys_root3(x, rw);
+  } else if constexpr(NROOTS==4) {
+    GINTrys_root4(x, rw);
+  } else if constexpr(NROOTS==5) {
+    GINTrys_root5(x, rw);
+  } else if constexpr(NROOTS==6) {
+    GINTrys_root6(x, rw);
+  } else if constexpr(NROOTS==7) {
+    GINTrys_root7(x, rw);
+  } else if constexpr(NROOTS==8) {
+    GINTrys_root8(x, rw);
+  } else if constexpr(NROOTS==9) {
+    GINTrys_root9(x, rw);
+  }
+}

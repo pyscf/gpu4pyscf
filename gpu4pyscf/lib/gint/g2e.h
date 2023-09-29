@@ -25,7 +25,13 @@ extern "C" {
 #endif
 void GINTinit_EnvVars(GINTEnvVars *envs,
                       ContractionProdType *cp_ij, ContractionProdType *cp_kl, int *ng);
+void GINTinit_EnvVars_nabla1i(GINTEnvVars *envs,
+                              ContractionProdType *cp_ij,
+                              ContractionProdType *cp_kl,
+                              int *ng);
+
 void GINTinit_2c_gidx(int *idx, int li, int lj);
+void GINTinit_2c_gidx_nabla1i(int *idx, int li, int lj);
 void GINTinit_4c_idx(int16_t *idx, int *ij_idx, int *kl_idx, GINTEnvVars *envs);
 void GINTg2e_index_xyz(int16_t *idx, GINTEnvVars *envs);
 void GINTinit_index1d_xyz(int *idx, int *l_locs);

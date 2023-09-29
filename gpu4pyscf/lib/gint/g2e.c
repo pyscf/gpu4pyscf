@@ -43,7 +43,7 @@ void GINTinit_EnvVars(GINTEnvVars *envs,
         int ll_ceil = l_l + ng[3];
         int nroots = (li_ceil + lj_ceil + lk_ceil + ll_ceil)/2 + 1;
         double fac = (M_PI*M_PI*M_PI)*2/SQRTPI;
-        
+
         envs->i_l = i_l;
         envs->j_l = j_l;
         envs->k_l = k_l;
@@ -59,12 +59,12 @@ void GINTinit_EnvVars(GINTEnvVars *envs,
         envs->nf = nfi * nfj * nfk * nfl;
         envs->nrys_roots = nroots;
         envs->fac = fac;
-        
+
         int ibase = 1;//i_l >= j_l; //li_ceil >= lj_ceil;
         int kbase = 1;//k_l >= l_l; //lk_ceil >= ll_ceil;
         envs->ibase = ibase;
         envs->kbase = kbase;
-        
+
         int li1 = li_ceil + 1;
         int lj1 = lj_ceil + 1;
         int lk1 = lk_ceil + 1;
@@ -75,7 +75,7 @@ void GINTinit_EnvVars(GINTEnvVars *envs,
         int dl = dk * lk1;
         envs->g_size_ij = dk;
         envs->g_size    = dl * ll1;
-        
+
         if (ibase) {
                 envs->ijmin = lj_ceil;
                 envs->ijmax = li_ceil;
@@ -91,7 +91,7 @@ void GINTinit_EnvVars(GINTEnvVars *envs,
                 envs->stride_i = nroots * lj1;
                 envs->stride_j = nroots;
         }
-        
+
         if (kbase) {
                 envs->klmin = ll_ceil;
                 envs->klmax = lk_ceil;
@@ -107,7 +107,7 @@ void GINTinit_EnvVars(GINTEnvVars *envs,
                 envs->stride_k = dk * ll1;
                 envs->stride_l = dk;
         }
-        
+
         envs->nprim_ij = cp_ij->nprim_12;
         envs->nprim_kl = cp_kl->nprim_12;
 }
@@ -198,7 +198,7 @@ void GINTg2e_index_xyz(int16_t *idx, GINTEnvVars *envs)
         int j_nx[GPU_CART_MAX], j_ny[GPU_CART_MAX], j_nz[GPU_CART_MAX];
         int k_nx[GPU_CART_MAX], k_ny[GPU_CART_MAX], k_nz[GPU_CART_MAX];
         int l_nx[GPU_CART_MAX], l_ny[GPU_CART_MAX], l_nz[GPU_CART_MAX];
-        
+
         //if(!envs->ibase) { di = envs->stride_ijmin; dj = envs->stride_ijmax;}//i_l = envs->j_l;  j_l = envs->i_l; }
         //if(!envs->kbase) { dk = envs->stride_klmin; dl = envs->stride_klmax;}//k_l = envs->l_l;  l_l = envs->k_l; }
 
@@ -206,18 +206,18 @@ void GINTg2e_index_xyz(int16_t *idx, GINTEnvVars *envs)
         CINTcart_comp(j_nx, j_ny, j_nz, j_l);
         CINTcart_comp(k_nx, k_ny, k_nz, k_l);
         CINTcart_comp(l_nx, l_ny, l_nz, l_l);
-        
+
         ofx = 0;
         ofy = envs->g_size;
         ofz = envs->g_size * 2;
         n = 0;
-        
+
         for (l = 0; l < nfl; l++){
                 oflx = ofx + dl * l_nx[l];
                 ofly = ofy + dl * l_ny[l];
                 oflz = ofz + dl * l_nz[l];
                 for (k = 0; k < nfk; k++){
-                        ofkx = oflx + dk * k_nx[k]; 
+                        ofkx = oflx + dk * k_nx[k];
                         ofky = ofly + dk * k_ny[k];
                         ofkz = oflz + dk * k_nz[k];
                         for (j = 0; j < nfj; j++){
@@ -292,7 +292,7 @@ void GINTg2e_index_xyz(int16_t *idx, GINTEnvVars *envs)
 }
 
 void GINTinit_index1d_xyz(int *idx, int *l_locs)
-{       
+{
         int *idx_x = idx;
         int *idx_y = idx + TOT_NF;
         int *idx_z = idx + 2 * TOT_NF;
@@ -416,4 +416,121 @@ void GINTinit_uw_s1(double *uw_buf, BasisProdOffsets *offsets,
 }
 }
 
-    
+
+void GINTinit_EnvVars_nabla1i(GINTEnvVars *envs,
+                              ContractionProdType *cp_ij,
+                              ContractionProdType *cp_kl,
+                              int *ng)
+{
+  int i_l = cp_ij->l_bra;
+  int j_l = cp_ij->l_ket;
+  int k_l = cp_kl->l_bra;
+  int l_l = cp_kl->l_ket;
+  int nfi = (i_l + 1) * (i_l + 2) / 2;
+  int nfj = (j_l + 1) * (j_l + 2) / 2;
+  int nfk = (k_l + 1) * (k_l + 2) / 2;
+  int nfl = (l_l + 1) * (l_l + 2) / 2;
+  int li_ceil = i_l + ng[0];
+  int lj_ceil = j_l + ng[1];
+  int lk_ceil = k_l + ng[2];
+  int ll_ceil = l_l + ng[3];
+  int nroots = (li_ceil + lj_ceil + lk_ceil + ll_ceil + 1)/2 + 1;
+  double fac = (M_PI*M_PI*M_PI)*2/SQRTPI;
+
+  envs->i_l = i_l;
+  envs->j_l = j_l;
+  envs->k_l = k_l;
+  envs->l_l = l_l;
+  envs->li_ceil = li_ceil;
+  envs->lj_ceil = lj_ceil;
+  envs->lk_ceil = lk_ceil;
+  envs->ll_ceil = ll_ceil;
+  envs->nfi = nfi;
+  envs->nfj = nfj;
+  envs->nfk = nfk;
+  envs->nfl = nfl;
+  envs->nf = nfi * nfj * nfk * nfl;
+  envs->nrys_roots = nroots;
+  envs->fac = fac;
+
+  int ibase = i_l >= j_l;
+  int kbase = k_l >= l_l;
+  envs->ibase = ibase;
+  envs->kbase = kbase;
+
+  int li1 = li_ceil + 2;
+  int lj1 = lj_ceil + 2;
+  int lk1 = lk_ceil + 1;
+  int ll1 = ll_ceil + 1;
+  int di = nroots;
+  int dj = di * li1;
+  int dk = dj * lj1;
+  int dl = dk * lk1;
+  envs->g_size_ij = dk;
+  envs->g_size    = dl * ll1;
+
+  if (ibase) {
+    envs->ijmin = lj_ceil;
+    envs->ijmax = li_ceil;
+    envs->stride_ijmax = nroots;
+    envs->stride_ijmin = nroots * li1;
+    envs->stride_i = nroots;
+    envs->stride_j = nroots * li1;
+  } else {
+    envs->ijmin = li_ceil;
+    envs->ijmax = lj_ceil;
+    envs->stride_ijmax = nroots;
+    envs->stride_ijmin = nroots * lj1;
+    envs->stride_i = nroots * lj1;
+    envs->stride_j = nroots;
+  }
+
+  if (kbase) {
+    envs->klmin = ll_ceil;
+    envs->klmax = lk_ceil;
+    envs->stride_klmax = dk;
+    envs->stride_klmin = dk * lk1;
+    envs->stride_k = dk;
+    envs->stride_l = dk * lk1;
+  } else {
+    envs->klmin = lk_ceil;
+    envs->klmax = ll_ceil;
+    envs->stride_klmax = dk;
+    envs->stride_klmin = dk * ll1;
+    envs->stride_k = dk * ll1;
+    envs->stride_l = dk;
+  }
+
+  envs->nprim_ij = cp_ij->nprim_12;
+  envs->nprim_kl = cp_kl->nprim_12;
+}
+
+void GINTinit_2c_gidx_nabla1i(int *idx, int li, int lj)
+{
+  int nfi = (li + 1) * (li + 2) / 2;
+  int nfj = (lj + 1) * (lj + 2) / 2;
+  int nfij = nfi * nfj;
+  int i, j, n;
+  int stride_i, stride_j;
+  int *idy = idx + nfij;
+  int *idz = idx + nfij * 2;
+
+  int i_nx[GPU_CART_MAX], i_ny[GPU_CART_MAX], i_nz[GPU_CART_MAX];
+  int j_nx[GPU_CART_MAX], j_ny[GPU_CART_MAX], j_nz[GPU_CART_MAX];
+  CINTcart_comp(i_nx, i_ny, i_nz, li);
+  CINTcart_comp(j_nx, j_ny, j_nz, lj);
+
+  if (li >= lj) {
+    stride_i = 1;
+    stride_j = li + 2;
+  } else {
+    stride_i = li + 2;
+    stride_j = 1;
+  }
+  for (n = 0, j = 0; j < nfj; j++) {
+    for (i = 0; i < nfi; i++, n++) {
+      idx[n] = stride_j * j_nx[j] + stride_i * i_nx[i];
+      idy[n] = stride_j * j_ny[j] + stride_i * i_ny[i];
+      idz[n] = stride_j * j_nz[j] + stride_i * i_nz[i];
+    } }
+}
