@@ -35,7 +35,7 @@ int async_d2h_2d(cudaStream_t stream, double *dst, int dstride, const double *sr
     cudaError_t err = cudaMemcpy2D(dst, dpitch, src, spitch, 
                                     width, height, cudaMemcpyDeviceToHost);
     */
-    printf("%d \n", sizeof(size_t));
+    printf("%zd \n", sizeof(size_t));
     if(err != cudaSuccess){
         const char *err_str = cudaGetErrorString(err);
         fprintf(stderr, "CUDA error of d2h_2d\n");

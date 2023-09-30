@@ -116,7 +116,7 @@ static void GINTint2e_get_veff_ip1_kernel0010(GINTEnvVars envs,
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-      GINTrys_root2(x, rw);
+      GINTrys_root<2>(x, rw);
       for (irys = 0; irys < 2; ++irys) {
         double gz0 = rw[irys+2] * fac;
         double root0 = rw[irys];
@@ -434,7 +434,7 @@ static void GINTint2e_get_veff_ip1_kernel0011(GINTEnvVars envs,
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-      GINTrys_root2(x, rw);
+      GINTrys_root<2>(x, rw);
       for (irys = 0; irys < 2; ++irys) {
         double gz0 = rw[irys+2] * fac;
         double root0 = rw[irys];
@@ -949,7 +949,7 @@ static void GINTint2e_get_veff_ip1_kernel0020(GINTEnvVars envs,
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-      GINTrys_root2(x, rw);
+      GINTrys_root<2>(x, rw);
       for (irys = 0; irys < 2; ++irys) {
         double gz0 = rw[irys+2] * fac;
         double root0 = rw[irys];
@@ -1335,7 +1335,7 @@ static void GINTint2e_get_veff_ip1_kernel1000(GINTEnvVars envs,
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-      GINTrys_root2(x, rw);
+      GINTrys_root<2>(x, rw);
       for (irys = 0; irys < 2; ++irys) {
         double gz0 = rw[irys+2] * fac;
         double root0 = rw[irys];
@@ -1645,7 +1645,7 @@ static void GINTint2e_get_veff_ip1_kernel1010(GINTEnvVars envs,
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-      GINTrys_root2(x, rw);
+      GINTrys_root<2>(x, rw);
       for (irys = 0; irys < 2; ++irys) {
         double gz0 = rw[irys+2] * fac;
         double root0 = rw[irys];
@@ -2161,7 +2161,7 @@ static void GINTint2e_get_veff_ip1_kernel1100(GINTEnvVars envs,
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-      GINTrys_root2(x, rw);
+      GINTrys_root<2>(x, rw);
       for (irys = 0; irys < 2; ++irys) {
         double gz0 = rw[irys+2] * fac;
         double root0 = rw[irys];
@@ -2653,7 +2653,7 @@ static void GINTint2e_get_veff_ip1_kernel2000(GINTEnvVars envs,
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-      GINTrys_root2(x, rw);
+      GINTrys_root<2>(x, rw);
       for (irys = 0; irys < 2; ++irys) {
         double gz0 = rw[irys+2] * fac;
         double root0 = rw[irys];

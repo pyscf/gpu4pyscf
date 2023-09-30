@@ -27,28 +27,29 @@
 #include "gint/g2e.cu"
 #include "gint/reduction.cu"
 
-// this is not supposed to be exectued
-template <int NROOTS, int GOUTSIZE> __global__
-static void GINTint2e_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
+template <int NROOTS, int GSIZE> __global__
+void GINTint2e_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
+        task_ij = 0; task_kl = 0;
+        active = false;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     if (bas_ij < bas_kl) {
-        return;
+        active = false;
     }
     double norm = envs.fac;
     if (bas_ij == bas_kl) {
         norm *= .5;
     }
-    
+    double omega = envs.omega;
     int nprim_ij = envs.nprim_ij;
     int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
@@ -59,16 +60,19 @@ static void GINTint2e_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets 
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-
-    int task_id = task_ij + ntasks_ij * task_kl;
-    double *uw = envs.uw + task_id * nprim_ij * nprim_kl * NROOTS * 2;
-    double gout[GOUTSIZE];
-    double *g = gout + envs.nf;
-    int i;
-    for (i = 0; i < envs.nf; ++i) {
-        gout[i] = 0;
+    double log_q_ij = offsets.log_q_ij[task_ij];
+    double log_q_kl = offsets.log_q_kl[task_kl];
+    if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
+        active = false;
     }
 
+    double uw[NROOTS*2];
+    double g[GSIZE];
+
+    double* __restrict__ a12 = c_bpcache.a12;
+    double* __restrict__ x12 = c_bpcache.x12;
+    double* __restrict__ y12 = c_bpcache.y12;
+    double* __restrict__ z12 = c_bpcache.z12;
     int ij, kl;
     int as_ish, as_jsh, as_ksh, as_lsh;
     if (envs.ibase) {
@@ -85,13 +89,31 @@ static void GINTint2e_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets 
         as_ksh = lsh;
         as_lsh = ksh;
     }
+    if(!active) norm = 0.0;
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        GINTg0_2e_2d4d<NROOTS>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        GINTgout2e<NROOTS>(envs, gout, g);
-        uw += NROOTS * 2;
+        double aij = a12[ij];
+        double xij = x12[ij];
+        double yij = y12[ij];
+        double zij = z12[ij];
+        double akl = a12[kl];
+        double xkl = x12[kl];
+        double ykl = y12[kl];
+        double zkl = z12[kl];
+        double xijxkl = xij - xkl;
+        double yijykl = yij - ykl;
+        double zijzkl = zij - zkl;
+        double aijkl = aij + akl;
+        double a1 = aij * akl;
+        double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
+        double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
+        GINTrys_root<NROOTS>(x, uw);
+        GINTscale_u<NROOTS>(uw, theta);
+        if(active) GINTg0_2e_2d4d<NROOTS>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+        if(active) GINTkernel_direct_getjk<NROOTS, GSIZE>(envs, jk, g, ish, jsh, ksh, lsh);
     } }
-    //GINTkernel_getjk(jk, gout, ish, jsh, ksh, lsh);
 }
 
 __global__
@@ -362,643 +384,3 @@ static void GINTint2e_jk_kernel1000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         dm += nao2;
     }
 }
-
-#if POLYFIT_ORDER >= 3
-template <> __global__
-void GINTint2e_jk_kernel<3, GSIZE3>(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
-{
-    int ntasks_ij = offsets.ntasks_ij;
-    int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    bool active = true;
-    if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        task_ij = 0; task_kl = 0;
-        active = false;
-    }
-
-    int bas_ij = offsets.bas_ij + task_ij;
-    int bas_kl = offsets.bas_kl + task_kl;
-    if (bas_ij < bas_kl) {
-        active = false;
-    }
-    double norm = envs.fac;
-    if (bas_ij == bas_kl) {
-        norm *= .5;
-    }
-    double omega = envs.omega;
-    int nprim_ij = envs.nprim_ij;
-    int nprim_kl = envs.nprim_kl;
-    int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-    int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
-    int ish = bas_pair2bra[bas_ij];
-    int jsh = bas_pair2ket[bas_ij];
-    int ksh = bas_pair2bra[bas_kl];
-    int lsh = bas_pair2ket[bas_kl];
-    double log_q_ij = offsets.log_q_ij[task_ij];
-    double log_q_kl = offsets.log_q_kl[task_kl];
-    if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        active = false;
-    }
-
-    double uw[6];
-    double g[GSIZE3];
-
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    int ij, kl;
-    int as_ish, as_jsh, as_ksh, as_lsh;
-    if (envs.ibase) {
-        as_ish = ish;
-        as_jsh = jsh;
-    } else {
-        as_ish = jsh;
-        as_jsh = ish;
-    }
-    if (envs.kbase) {
-        as_ksh = ksh;
-        as_lsh = lsh;
-    } else {
-        as_ksh = lsh;
-        as_lsh = ksh;
-    }
-    if(!active) norm = 0.0;
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-    for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        double aij = a12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
-        double akl = a12[kl];
-        double xkl = x12[kl];
-        double ykl = y12[kl];
-        double zkl = z12[kl];
-        double xijxkl = xij - xkl;
-        double yijykl = yij - ykl;
-        double zijzkl = zij - zkl;
-        double aijkl = aij + akl;
-        double a1 = aij * akl;
-        double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-        a0 *= theta;
-        double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        GINTrys_root3(x, uw);
-        GINTscale_u<3>(uw, theta);
-        if(active) GINTg0_2e_2d4d<3>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        if(active) GINTkernel_direct_getjk<3, GSIZE3>(envs, jk, g, ish, jsh, ksh, lsh);
-    } }
-}
-#endif
-
-#if POLYFIT_ORDER >= 4
-template <> __global__
-void GINTint2e_jk_kernel<4, GSIZE4>(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
-{
-    int ntasks_ij = offsets.ntasks_ij;
-    int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    bool active = true;
-    if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        task_ij = 0; task_kl = 0; active = false;
-    }
-
-    int bas_ij = offsets.bas_ij + task_ij;
-    int bas_kl = offsets.bas_kl + task_kl;
-    if (bas_ij < bas_kl) {
-        active = false;
-    }
-    double norm = envs.fac;
-    if (bas_ij == bas_kl) {
-        norm *= .5;
-    }
-    double omega = envs.omega;
-    int nprim_ij = envs.nprim_ij;
-    int nprim_kl = envs.nprim_kl;
-    int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-    int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
-    int ish = bas_pair2bra[bas_ij];
-    int jsh = bas_pair2ket[bas_ij];
-    int ksh = bas_pair2bra[bas_kl];
-    int lsh = bas_pair2ket[bas_kl];
-    double log_q_ij = offsets.log_q_ij[task_ij];
-    double log_q_kl = offsets.log_q_kl[task_kl];
-    if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        active = false;
-    }
-
-    double uw[8];
-    double g[GSIZE4];
-
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    int ij, kl;
-    int as_ish, as_jsh, as_ksh, as_lsh;
-    if (envs.ibase) {
-        as_ish = ish;
-        as_jsh = jsh;
-    } else {
-        as_ish = jsh;
-        as_jsh = ish;
-    }
-    if (envs.kbase) {
-        as_ksh = ksh;
-        as_lsh = lsh;
-    } else {
-        as_ksh = lsh;
-        as_lsh = ksh;
-    }
-    if(!active) norm = 0.0;
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-    for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        double aij = a12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
-        double akl = a12[kl];
-        double xkl = x12[kl];
-        double ykl = y12[kl];
-        double zkl = z12[kl];
-        double xijxkl = xij - xkl;
-        double yijykl = yij - ykl;
-        double zijzkl = zij - zkl;
-        double aijkl = aij + akl;
-        double a1 = aij * akl;
-        double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-        a0 *= theta;
-        double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        GINTrys_root4(x, uw);
-        GINTscale_u<4>(uw, theta);
-        if(active) GINTg0_2e_2d4d<4>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        if(active) GINTkernel_direct_getjk<4, GSIZE4>(envs, jk, g, ish, jsh, ksh, lsh);
-    } }
-}
-#endif
-
-#if POLYFIT_ORDER >= 5
-template <> __global__
-void GINTint2e_jk_kernel<5, GSIZE5>(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
-{
-    int ntasks_ij = offsets.ntasks_ij;
-    int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    bool active = true;
-    if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        task_ij = 0; task_kl = 0;
-        active = false;
-    }
-
-    int bas_ij = offsets.bas_ij + task_ij;
-    int bas_kl = offsets.bas_kl + task_kl;
-    if (bas_ij < bas_kl) {
-        active = false;
-    }
-    double norm = envs.fac;
-    if (bas_ij == bas_kl) {
-        norm *= .5;
-    }
-    double omega = envs.omega;
-    int nprim_ij = envs.nprim_ij;
-    int nprim_kl = envs.nprim_kl;
-    int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-    int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
-    int ish = bas_pair2bra[bas_ij];
-    int jsh = bas_pair2ket[bas_ij];
-    int ksh = bas_pair2bra[bas_kl];
-    int lsh = bas_pair2ket[bas_kl];
-    double log_q_ij = offsets.log_q_ij[task_ij];
-    double log_q_kl = offsets.log_q_kl[task_kl];
-    if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        active = false;
-    }
-
-    double uw[10];
-    double g[GSIZE5];
-
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    int ij, kl;
-    int as_ish, as_jsh, as_ksh, as_lsh;
-    if (envs.ibase) {
-        as_ish = ish;
-        as_jsh = jsh;
-    } else {
-        as_ish = jsh;
-        as_jsh = ish;
-    }
-    if (envs.kbase) {
-        as_ksh = ksh;
-        as_lsh = lsh;
-    } else {
-        as_ksh = lsh;
-        as_lsh = ksh;
-    }
-    if(!active) norm = 0.0;
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-    for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        double aij = a12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
-        double akl = a12[kl];
-        double xkl = x12[kl];
-        double ykl = y12[kl];
-        double zkl = z12[kl];
-        double xijxkl = xij - xkl;
-        double yijykl = yij - ykl;
-        double zijzkl = zij - zkl;
-        double aijkl = aij + akl;
-        double a1 = aij * akl;
-        double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-        a0 *= theta;
-        double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        GINTrys_root5(x, uw);
-        GINTscale_u<5>(uw, theta);
-        if(active) GINTg0_2e_2d4d<5>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        if(active) GINTkernel_direct_getjk<5, GSIZE5>(envs, jk, g, ish, jsh, ksh, lsh);
-    } }
-}
-#endif
-
-
-#if POLYFIT_ORDER >= 6
-template <> __global__
-void GINTint2e_jk_kernel<6, GSIZE6>(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
-{
-    int ntasks_ij = offsets.ntasks_ij;
-    int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    bool active = true;
-    if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        task_ij = 0; task_kl = 0;
-        active = false;
-    }
-
-    int bas_ij = offsets.bas_ij + task_ij;
-    int bas_kl = offsets.bas_kl + task_kl;
-    if (bas_ij < bas_kl) {
-        active = false;
-    }
-    double norm = envs.fac;
-    if (bas_ij == bas_kl) {
-        norm *= .5;
-    }
-    double omega = envs.omega;
-    int nprim_ij = envs.nprim_ij;
-    int nprim_kl = envs.nprim_kl;
-    int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-    int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
-    int ish = bas_pair2bra[bas_ij];
-    int jsh = bas_pair2ket[bas_ij];
-    int ksh = bas_pair2bra[bas_kl];
-    int lsh = bas_pair2ket[bas_kl];
-    double log_q_ij = offsets.log_q_ij[task_ij];
-    double log_q_kl = offsets.log_q_kl[task_kl];
-    if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        active = false;
-    }
-
-    double uw[12];
-    double g[GSIZE6];
-
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    int ij, kl;
-    int as_ish, as_jsh, as_ksh, as_lsh;
-    if (envs.ibase) {
-        as_ish = ish;
-        as_jsh = jsh;
-    } else {
-        as_ish = jsh;
-        as_jsh = ish;
-    }
-    if (envs.kbase) {
-        as_ksh = ksh;
-        as_lsh = lsh;
-    } else {
-        as_ksh = lsh;
-        as_lsh = ksh;
-    }
-    if(!active) norm = 0.0;
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-    for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        double aij = a12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
-        double akl = a12[kl];
-        double xkl = x12[kl];
-        double ykl = y12[kl];
-        double zkl = z12[kl];
-        double xijxkl = xij - xkl;
-        double yijykl = yij - ykl;
-        double zijzkl = zij - zkl;
-        double aijkl = aij + akl;
-        double a1 = aij * akl;
-        double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-        a0 *= theta;
-        double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        GINTrys_root6(x, uw);
-        GINTscale_u<6>(uw, theta);
-        if(active) GINTg0_2e_2d4d<6>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        if(active) GINTkernel_direct_getjk<6, GSIZE6>(envs, jk, g, ish, jsh, ksh, lsh);
-    } }
-}
-#endif
-
-
-#if POLYFIT_ORDER >= 7
-template <> __global__
-void GINTint2e_jk_kernel<7, GSIZE7>(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
-{
-    int ntasks_ij = offsets.ntasks_ij;
-    int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    bool active = true;
-    if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        task_ij = 0; task_kl = 0;
-        active = false;
-    }
-
-    int bas_ij = offsets.bas_ij + task_ij;
-    int bas_kl = offsets.bas_kl + task_kl;
-    if (bas_ij < bas_kl) {
-        active = false;
-    }
-    double norm = envs.fac;
-    if (bas_ij == bas_kl) {
-        norm *= .5;
-    }
-    double omega = envs.omega;
-    int nprim_ij = envs.nprim_ij;
-    int nprim_kl = envs.nprim_kl;
-    int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-    int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
-    int ish = bas_pair2bra[bas_ij];
-    int jsh = bas_pair2ket[bas_ij];
-    int ksh = bas_pair2bra[bas_kl];
-    int lsh = bas_pair2ket[bas_kl];
-    double log_q_ij = offsets.log_q_ij[task_ij];
-    double log_q_kl = offsets.log_q_kl[task_kl];
-    if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        active = false;
-    }
-
-    double uw[14];
-    double g[GSIZE7];
-
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    int ij, kl;
-    int as_ish, as_jsh, as_ksh, as_lsh;
-    if (envs.ibase) {
-        as_ish = ish;
-        as_jsh = jsh;
-    } else {
-        as_ish = jsh;
-        as_jsh = ish;
-    }
-    if (envs.kbase) {
-        as_ksh = ksh;
-        as_lsh = lsh;
-    } else {
-        as_ksh = lsh;
-        as_lsh = ksh;
-    }
-    if(!active) norm = 0.0;
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-    for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        double aij = a12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
-        double akl = a12[kl];
-        double xkl = x12[kl];
-        double ykl = y12[kl];
-        double zkl = z12[kl];
-        double xijxkl = xij - xkl;
-        double yijykl = yij - ykl;
-        double zijzkl = zij - zkl;
-        double aijkl = aij + akl;
-        double a1 = aij * akl;
-        double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-        a0 *= theta;
-        double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        GINTrys_root7(x, uw);
-        GINTscale_u<7>(uw, theta);
-        if(active) GINTg0_2e_2d4d<7>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        if(active) GINTkernel_direct_getjk<7, GSIZE7>(envs, jk, g, ish, jsh, ksh, lsh);
-    } }
-}
-#endif
-
-
-#if POLYFIT_ORDER >= 8
-template <> __global__
-void GINTint2e_jk_kernel<8, GSIZE8>(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
-{
-    int ntasks_ij = offsets.ntasks_ij;
-    int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    bool active = true;
-    if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        task_ij = 0; task_kl = 0;
-        active = false;
-    }
-
-    int bas_ij = offsets.bas_ij + task_ij;
-    int bas_kl = offsets.bas_kl + task_kl;
-    if (bas_ij < bas_kl) {
-        active = false;
-    }
-    double norm = envs.fac;
-    if (bas_ij == bas_kl) {
-        norm *= .5;
-    }
-    double omega = envs.omega;
-    int nprim_ij = envs.nprim_ij;
-    int nprim_kl = envs.nprim_kl;
-    int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-    int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
-    int ish = bas_pair2bra[bas_ij];
-    int jsh = bas_pair2ket[bas_ij];
-    int ksh = bas_pair2bra[bas_kl];
-    int lsh = bas_pair2ket[bas_kl];
-    double log_q_ij = offsets.log_q_ij[task_ij];
-    double log_q_kl = offsets.log_q_kl[task_kl];
-    if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        active = false;
-    }
-
-    double uw[16];
-    double g[GSIZE8];
-
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    int ij, kl;
-    int as_ish, as_jsh, as_ksh, as_lsh;
-    if (envs.ibase) {
-        as_ish = ish;
-        as_jsh = jsh;
-    } else {
-        as_ish = jsh;
-        as_jsh = ish;
-    }
-    if (envs.kbase) {
-        as_ksh = ksh;
-        as_lsh = lsh;
-    } else {
-        as_ksh = lsh;
-        as_lsh = ksh;
-    }
-    if(!active) norm = 0.0;
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-    for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        double aij = a12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
-        double akl = a12[kl];
-        double xkl = x12[kl];
-        double ykl = y12[kl];
-        double zkl = z12[kl];
-        double xijxkl = xij - xkl;
-        double yijykl = yij - ykl;
-        double zijzkl = zij - zkl;
-        double aijkl = aij + akl;
-        double a1 = aij * akl;
-        double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-        a0 *= theta;
-        double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        GINTrys_root8(x, uw);
-        GINTscale_u<8>(uw, theta);
-        if(active) GINTg0_2e_2d4d<8>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        if(active) GINTkernel_direct_getjk<8, GSIZE8>(envs, jk, g, ish, jsh, ksh, lsh);
-    } }
-}
-#endif
-
-
-#if POLYFIT_ORDER >= 9
-template <> __global__
-void GINTint2e_jk_kernel<9, GSIZE9>(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
-{
-    int ntasks_ij = offsets.ntasks_ij;
-    int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    bool active = true;
-    if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        task_ij = 0; task_kl = 0;
-        active = false;
-    }
-
-    int bas_ij = offsets.bas_ij + task_ij;
-    int bas_kl = offsets.bas_kl + task_kl;
-    if (bas_ij < bas_kl) {
-        active = false;
-    }
-    double norm = envs.fac;
-    if (bas_ij == bas_kl) {
-        norm *= .5;
-    }
-    double omega = envs.omega;
-    int nprim_ij = envs.nprim_ij;
-    int nprim_kl = envs.nprim_kl;
-    int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-    int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
-    int ish = bas_pair2bra[bas_ij];
-    int jsh = bas_pair2ket[bas_ij];
-    int ksh = bas_pair2bra[bas_kl];
-    int lsh = bas_pair2ket[bas_kl];
-    double log_q_ij = offsets.log_q_ij[task_ij];
-    double log_q_kl = offsets.log_q_kl[task_kl];
-    if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        active = false;
-    }
-
-    double uw[18];
-    double g[GSIZE9];
-
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    int ij, kl;
-    int as_ish, as_jsh, as_ksh, as_lsh;
-    if (envs.ibase) {
-        as_ish = ish;
-        as_jsh = jsh;
-    } else {
-        as_ish = jsh;
-        as_jsh = ish;
-    }
-    if (envs.kbase) {
-        as_ksh = ksh;
-        as_lsh = lsh;
-    } else {
-        as_ksh = lsh;
-        as_lsh = ksh;
-    }
-    if(!active) norm = 0.0;
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-    for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        double aij = a12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
-        double akl = a12[kl];
-        double xkl = x12[kl];
-        double ykl = y12[kl];
-        double zkl = z12[kl];
-        double xijxkl = xij - xkl;
-        double yijykl = yij - ykl;
-        double zijzkl = zij - zkl;
-        double aijkl = aij + akl;
-        double a1 = aij * akl;
-        double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-        a0 *= theta;
-        double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        GINTrys_root9(x, uw);
-        GINTscale_u<9>(uw, theta);
-        if(active) GINTg0_2e_2d4d<9>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-        if(active) GINTkernel_direct_getjk<9, GSIZE9>(envs, jk, g, ish, jsh, ksh, lsh);
-    } }
-}
-#endif

@@ -207,7 +207,7 @@ static void GINTint2e_ip1_jk_kernel_0021(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -826,7 +826,7 @@ static void GINTint2e_ip1_jk_kernel_0022(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -1490,7 +1490,7 @@ static void GINTint2e_ip1_jk_kernel_0030(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -2005,7 +2005,7 @@ static void GINTint2e_ip1_jk_kernel_0031(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -2731,7 +2731,7 @@ static void GINTint2e_ip1_jk_kernel_1011(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -3327,7 +3327,7 @@ static void GINTint2e_ip1_jk_kernel_1020(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -4075,7 +4075,7 @@ static void GINTint2e_ip1_jk_kernel_1021(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -5023,7 +5023,7 @@ static void GINTint2e_ip1_jk_kernel_1030(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -5780,7 +5780,7 @@ static void GINTint2e_ip1_jk_kernel_1110(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -6763,7 +6763,7 @@ static void GINTint2e_ip1_jk_kernel_1111(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -8050,7 +8050,7 @@ static void GINTint2e_ip1_jk_kernel_1120(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -8935,7 +8935,7 @@ static void GINTint2e_ip1_jk_kernel_2010(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -9692,7 +9692,7 @@ static void GINTint2e_ip1_jk_kernel_2011(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -10696,7 +10696,7 @@ static void GINTint2e_ip1_jk_kernel_2020(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -11470,7 +11470,7 @@ static void GINTint2e_ip1_jk_kernel_2100(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -12244,7 +12244,7 @@ static void GINTint2e_ip1_jk_kernel_2110(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -13252,7 +13252,7 @@ static void GINTint2e_ip1_jk_kernel_2200(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -14024,7 +14024,7 @@ static void GINTint2e_ip1_jk_kernel_3000(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -14567,7 +14567,7 @@ static void GINTint2e_ip1_jk_kernel_3010(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -15362,7 +15362,7 @@ static void GINTint2e_ip1_jk_kernel_3100(GINTEnvVars envs, JKMatrix jk,
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
