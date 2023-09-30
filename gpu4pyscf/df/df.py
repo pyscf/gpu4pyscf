@@ -24,6 +24,7 @@ from gpu4pyscf.lib.cupy_helper import *
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
+from gpu4pyscf.lib.utils import to_cpu
 from cupyx import scipy
 
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
@@ -32,6 +33,7 @@ LINEAR_DEP_TOL = 1e-7
 
 class DF(df.DF):
     device = 'gpu'
+
     def __init__(self, mol, auxbasis=None):
         super().__init__(mol, auxbasis)
         self.auxmol = None
@@ -39,38 +41,41 @@ class DF(df.DF):
         self.nao = None
         self.naux = None
         self.cd_low = None
-        self.intopt = None
         self._cderi = None
-    
+
+    def to_cpu(self):
+        obj = to_cpu(self)
+        return obj.reset()
+
     def build(self, direct_scf_tol=1e-14, omega=None):
         mol = self.mol
         auxmol = self.auxmol
         self.nao = mol.nao
-        
+
         # cache indices for better performance
         nao = mol.nao
         tril_row, tril_col = cupy.tril_indices(nao)
         tril_row = cupy.asarray(tril_row)
         tril_col = cupy.asarray(tril_col)
-        
+
         self.tril_row = tril_row
         self.tril_col = tril_col
-        
+
         idx = np.arange(nao)
         self.diag_idx = cupy.asarray(idx*(idx+1)//2+idx)
-        
+
         t0 = (logger.process_clock(), logger.perf_counter())
         log = logger.new_logger(mol, mol.verbose)
         if auxmol is None:
             self.auxmol = auxmol = addons.make_auxmol(mol, self.auxbasis)
-        
+
         if omega and omega > 1e-10:
             with auxmol.with_range_coulomb(omega):
                 j2c_cpu = auxmol.intor('int2c2e', hermi=1)
         else:
             j2c_cpu = auxmol.intor('int2c2e', hermi=1)
         j2c = cupy.asarray(j2c_cpu)
-        t0 = log.timer_debug1('2c2e', *t0)    
+        t0 = log.timer_debug1('2c2e', *t0)
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
         intopt.build(direct_scf_tol, diag_block_with_triu=False, aosym=True, group_size=256)
         t1 = log.timer_debug1('prepare intopt', *t0)
@@ -84,7 +89,7 @@ class DF(df.DF):
             idx = w > LINEAR_DEP_TOL
             self.cd_low = (v[:,idx] / cupy.sqrt(w[idx]))
             self.cd_low = tag_array(self.cd_low, tag='eig')
-        
+
         v = w = None
         naux = self.naux = self.cd_low.shape[1]
         log.debug('size of aux basis %d', naux)
@@ -99,7 +104,7 @@ class DF(df.DF):
         if omega is None:
             return df_jk.get_jk(self, dm, hermi, with_j, with_k, direct_scf_tol)
         assert omega >= 0.0
-        
+
         # A temporary treatment for RSH-DF integrals
         key = '%.6f' % omega
         if key in self._rsh_df:
@@ -109,7 +114,7 @@ class DF(df.DF):
             logger.info(self, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
 
         return df_jk.get_jk(rsh_df, dm, hermi, with_j, with_k, direct_scf_tol, omega=omega)
-    
+
     def get_blksize(self, extra=0, nao=None):
         '''
         extra for pre-calculated space for other variables
@@ -124,7 +129,7 @@ class DF(df.DF):
             raise RuntimeError("Not enough GPU memory")
         return blksize
 
-    
+
     def loop(self, blksize=None):
         '''
         loop over all cderi and unpack
@@ -137,7 +142,7 @@ class DF(df.DF):
         rows = self.intopt.cderi_row
         cols = self.intopt.cderi_col
         buf_prefetch = None
-        
+
         data_stream = cupy.cuda.stream.Stream(non_blocking=True)
         compute_stream = cupy.cuda.get_current_stream()
         #compute_stream = cupy.cuda.stream.Stream()
@@ -160,7 +165,7 @@ class DF(df.DF):
             yield buf2, buf.T
             compute_stream.wait_event(stop_event)
             cupy.cuda.Device().synchronize()
-            
+
             if buf_prefetch is not None:
                 buf = buf_prefetch
 
@@ -204,7 +209,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
         # TODO: async allocate memory
         mem = cupy.cuda.alloc_pinned_memory(naux * npair * 8)
         cderi = np.ndarray([naux, npair], dtype=np.float64, order='C', buffer=mem)
-    
+
     data_stream = cupy.cuda.stream.Stream(non_blocking=False)
     count = 0
     nq = len(intopt.log_qs)
@@ -241,22 +246,22 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
 
         if lj>1: ints_slices = cart2sph(ints_slices, axis=1, ang=lj)
         if li>1: ints_slices = cart2sph(ints_slices, axis=2, ang=li)
-        
+
         i0, i1 = intopt.sph_ao_loc[cpi], intopt.sph_ao_loc[cpi+1]
         j0, j1 = intopt.sph_ao_loc[cpj], intopt.sph_ao_loc[cpj+1]
-        
+
         row = intopt.ao_pairs_row[cp_ij_id] - i0
         col = intopt.ao_pairs_col[cp_ij_id] - j0
         if cpi == cpj:
             ints_slices = ints_slices + ints_slices.transpose([0,2,1])
         ints_slices = ints_slices[:,col,row]
-        
+
         if cd_low.tag == 'eig':
             cderi_block = cupy.dot(cd_low.T, ints_slices)
             ints_slices = None
         elif cd_low.tag == 'cd':
             cderi_block = solve_triangular(cd_low, ints_slices)
-        
+
         ij0, ij1 = count, count+cderi_block.shape[1]
         count = ij1
         if isinstance(cderi, cupy.ndarray):
@@ -265,7 +270,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
             with data_stream:
                 for i in range(naux):
                     cderi_block[i].get(out=cderi[i,ij0:ij1])
-            
+
         t1 = log.timer_debug1(f'solve {cp_ij_id} / {nq}', *t1)
 
     cupy.cuda.Device().synchronize()

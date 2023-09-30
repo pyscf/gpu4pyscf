@@ -23,7 +23,7 @@ from pyscf.lib import logger
 from pyscf.grad import rhf
 from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf.scf.hf import _VHFOpt
-from gpu4pyscf.lib.utils import patch_cpu_kernel
+from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu
 from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 
@@ -548,6 +548,8 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
     return de.get()
 
 class Gradients(rhf.Gradients):
+    to_cpu = to_cpu
+
     device = 'gpu'
     grad_elec = patch_cpu_kernel(rhf.Gradients.grad_elec)(_grad_elec)
     grad_nuc = patch_cpu_kernel(rhf.Gradients.grad_nuc)(_grad_nuc)

@@ -21,7 +21,7 @@ from pyscf.lib import logger
 from pyscf import lib, scf, gto
 from gpu4pyscf.scf.hf import _get_jk
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.utils import patch_cpu_kernel
+from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu
 from gpu4pyscf.lib.cupy_helper import print_mem_info, solve_triangular, tag_array, unpack_tril, contract, load_library
 from gpu4pyscf.grad.rhf import _grad_elec
 from gpu4pyscf import __config__
@@ -51,12 +51,12 @@ def _get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omeg
 
     auxmol = with_df.auxmol
     intopt = with_df.intopt
-    
+
     nao, naux = mol.nao, with_df.naux
-    
+
     log = logger.new_logger(mol, mol.verbose)
     t0 = (logger.process_clock(), logger.perf_counter())
-    
+
     if isinstance(mf_grad.base, scf.rohf.ROHF):
         raise NotImplementedError()
     mo_coeff = cupy.asarray(mf_grad.base.mo_coeff)
@@ -73,14 +73,14 @@ def _get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omeg
     cols = with_df.intopt.cderi_col
     dm_sparse = dm[rows, cols]
     dm_sparse[with_df.intopt.cderi_diag] *= .5
-    
+
     blksize = with_df.get_blksize()
     if with_j:
         rhoj = cupy.empty([naux])
     if with_k:
         rhok = cupy.empty([naux, nocc, nocc], order='C')
     p0 = p1 = 0
-    
+
     for cderi, cderi_sparse in with_df.loop(blksize=blksize):
         p1 = p0 + cderi.shape[0]
         if with_j:
@@ -136,7 +136,7 @@ def _get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omeg
     # rebuild with aosym
     intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, \
         group_size_aux=block_size)#, group_size=block_size)
-    
+
     # sph2cart for ao
     cart2sph = intopt.cart2sph
     orbo_cart = cart2sph @ orbo
@@ -225,6 +225,8 @@ def _get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omeg
 
 
 class Gradients(rhf.Gradients):
+    to_cpu = to_cpu
+
     device = 'gpu'
     get_jk = patch_cpu_kernel(rhf.Gradients.get_jk)(_get_jk)
     grad_elec = patch_cpu_kernel(rhf.Gradients.grad_elec)(_grad_elec)

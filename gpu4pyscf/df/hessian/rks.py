@@ -33,6 +33,7 @@ from pyscf import lib
 from gpu4pyscf.hessian import rks as rks_hess
 from gpu4pyscf.df.hessian import rhf as df_rhf_hess
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.utils import to_cpu
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -63,7 +64,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                                             atmlst, max_memory, verbose,
                                             True, omega=omega)[2]
         de2 -= (alpha - hyb) * ek_lr
-    
+
     max_memory = None
     veff_diag = rks_hess._get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory)
     t1 = log.timer_debug1('computing veff_diag', *t1)
@@ -111,9 +112,15 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
 
 class Hessian(rks_hess.Hessian):
     '''Non-relativistic RKS hessian'''
+
     def __init__(self, mf):
         self.auxbasis_response = 1
         rks_hess.Hessian.__init__(self, mf)
+
+    def to_cpu(self):
+        from pyscf.df.hessian.rks import Hessian
+        obj = to_cpu(self)
+        return obj.view(Hessian)
 
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1

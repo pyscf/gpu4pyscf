@@ -18,9 +18,11 @@
 from pyscf.dft import gks
 from gpu4pyscf.dft import numint
 from gpu4pyscf.scf.ghf import get_jk, _eigh
-from gpu4pyscf.lib.utils import patch_cpu_kernel
+from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu
 
 class GKS(gks.GKS):
+    to_cpu = to_cpu
+
     def __init__(self, mol, xc='LDA,VWN'):
         super().__init__(mol, xc)
         self._numint = numint.NumInt()

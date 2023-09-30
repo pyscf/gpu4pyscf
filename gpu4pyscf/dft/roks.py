@@ -18,9 +18,11 @@
 from pyscf.dft import roks
 from gpu4pyscf.dft import numint
 from gpu4pyscf.scf.hf import _get_jk, _eigh
-from gpu4pyscf.lib.utils import patch_cpu_kernel
+from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu
 
 class ROKS(roks.ROKS):
+    to_cpu = to_cpu
+
     def __init__(self, mol, xc='LDA,VWN'):
         super().__init__(mol, xc)
         self._numint = numint.NumInt()

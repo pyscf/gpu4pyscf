@@ -27,7 +27,7 @@ from gpu4pyscf import scf
 from gpu4pyscf.scf import diis
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
-from gpu4pyscf.lib.utils import patch_cpu_kernel
+from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu
 from gpu4pyscf.lib.cupy_helper import load_library, tag_array
 
 libcupy_helper = load_library('libcupy_helper')
@@ -36,18 +36,18 @@ LINEAR_DEP_THR = 1e-12
 
 def prune_small_rho_grids_(ks, mol, dm, grids):
     rho = ks._numint.get_rho(mol, dm, grids, ks.max_memory)
-    
+
     threshold = ks.small_rho_cutoff
     '''Prune grids if the electron density on the grid is small'''
     if threshold == 0:
         return grids
     mol = grids.mol
-    
+
     n = cupy.dot(rho, grids.weights)
-    if abs(n-mol.nelectron) < gen_grid.NELEC_ERROR_TOL*n:    
+    if abs(n-mol.nelectron) < gen_grid.NELEC_ERROR_TOL*n:
         rho *= grids.weights
         idx = cupy.abs(rho) > threshold / grids.weights.size
-        
+
         logger.debug(grids, 'Drop grids %d', grids.weights.size - cupy.count_nonzero(idx))
         grids.coords  = cupy.asarray(grids.coords [idx], order='C')
         grids.weights = cupy.asarray(grids.weights[idx], order='C')
@@ -80,9 +80,9 @@ def initialize_grids(ks, mol=None, dm=None):
             # dm.ndim == 2 indicates ground state
             isinstance(dm, cupy.ndarray) and dm.ndim == 2):
             # Filter grids the first time setup grids
-            ks.grids = prune_small_rho_grids_(ks, ks.mol, dm, ks.grids)       
+            ks.grids = prune_small_rho_grids_(ks, ks.mol, dm, ks.grids)
         t0 = logger.timer_debug1(ks, 'setting up grids', *t0)
-        
+
         is_nlc = ks.nlc or ks._numint.libxc.is_nlc(ks.xc)
         if is_nlc and ks.nlcgrids.coords is None:
             if ks.nlcgrids.coords is None:
@@ -125,14 +125,14 @@ def _get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         matrix Veff = J + Vxc.  Veff can be a list matrices, if the input
         dm is a list of density matrices.
     '''
-    
+
     if mol is None: mol = ks.mol
     if dm is None: dm = ks.make_rdm1()
     t0 = (logger.process_clock(), logger.perf_counter())
     if ks.grids.coords is None:
         ks.grids.ao_values = None
     initialize_grids(ks, mol, dm)
-    
+
     if hasattr(ks, 'screen_tol') and ks.screen_tol is not None:
         ks.direct_scf_tol = ks.screen_tol
     ground_state = (isinstance(dm, cupy.ndarray) and dm.ndim == 2)
@@ -151,7 +151,7 @@ def _get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
                 xc = ks.nlc
             n, enlc, vnlc = ni.nr_nlc_vxc(mol, ks.nlcgrids, xc, dm,
                                           max_memory=max_memory)
-            
+
             exc += enlc
             vxc += vnlc
         #logger.debug(ks, 'nelec by numeric integration = %s', n)
@@ -168,7 +168,7 @@ def _get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             vj += vhf_last.vj
         else:
             vj = ks.get_j(mol, dm, hermi)
-        
+
         vxc += vj
     else:
         if (ks._eri is None and ks.direct_scf and
@@ -192,7 +192,7 @@ def _get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         vxc += vj - vk * .5
         if ground_state:
             exc -= cupy.einsum('ij,ji', dm, vk).real * .5 * .5
-    
+
     if ground_state:
         ecoul = cupy.einsum('ij,ji', dm, vj).real * .5
     else:
@@ -204,6 +204,8 @@ def _get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     return vxc
 
 class RKS(rks.RKS, scf.hf.RHF):
+    to_cpu = to_cpu
+
     def __init__(self, mol, xc='LDA,VWN', disp=None):
         super().__init__(mol, xc)
         self._numint = numint.NumInt(xc=xc)
@@ -217,20 +219,20 @@ class RKS(rks.RKS, scf.hf.RHF):
     @device.setter
     def device(self, value):
         self._numint.device = value
-    
+
     def get_dispersion(self):
         if self.disp is None:
             return 0.0
-        
+
         if self.disp[:2].upper() == 'D3':
-            # multi-threads in DFTD3 conflicts with PyTorch, set it to be 1 for safty 
+            # multi-threads in DFTD3 conflicts with PyTorch, set it to be 1 for safty
             from pyscf import lib
             with lib.with_omp_threads(1):
                 import dftd3.pyscf as disp
                 d3 = disp.DFTD3Dispersion(self.mol, xc=self.xc, version=self.disp)
                 e_d3, _ = d3.kernel()
             return e_d3
-        
+
         if self.disp[:2].upper() == 'D4':
             from pyscf.data.elements import charge
             atoms = numpy.array([ charge(a[0]) for a in self.mol._atom])
@@ -241,7 +243,7 @@ class RKS(rks.RKS, scf.hf.RHF):
                 model = DispersionModel(atoms, coords)
                 res = model.get_dispersion(DampingParam(method=self.xc), grad=False)
             return res.get("energy")
-    
+
     def reset(self, mol=None):
         pyscf_hf.SCF.reset(self, mol)
         self.grids.reset(mol)
@@ -253,18 +255,17 @@ class RKS(rks.RKS, scf.hf.RHF):
         if dm is None: dm = self.make_rdm1()
         if h1e is None: h1e = self.get_hcore()
         if vhf is None: vhf = self.get_veff(self.mol, dm)
-        
+
         e1 = cupy.sum(h1e*dm)
         ecoul = self.ecoul
         exc = self.exc
         e2 = ecoul + exc
         return e1+e2, e2
-    
+
     def energy_tot(self, dm, h1e, vhf=None):
         nuc = self.energy_nuc()
         e_tot = self.energy_elec(dm, h1e, vhf)[0] + nuc
         self.scf_summary['nuc'] = nuc.real
         return e_tot
-    
+
     get_veff = patch_cpu_kernel(rks.RKS.get_veff)(_get_veff)
-    

@@ -32,6 +32,7 @@ from gpu4pyscf.lib import logger
 
 # import pyscf.grad.rks to activate nuc_grad_method method
 from gpu4pyscf.grad import rks  # noqa
+from gpu4pyscf.lib.utils import to_cpu
 
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
@@ -62,7 +63,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                                              atmlst, max_memory, verbose,
                                              abs(hyb) > 1e-10)
     de2 += ej - hyb * ek  # (A,B,dR_A,dR_B)
-    
+
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, mf.max_memory*.9-mem_now)
     veff_diag = _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory)
@@ -189,7 +190,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
         grids = mf.grids
     if grids.coords is None:
         grids.build(with_non0tab=True)
-    
+
     # move data to GPU
     mo_occ = cupy.asarray(mo_occ)
     mo_coeff = cupy.asarray(mo_coeff)
@@ -199,11 +200,11 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
     xctype = ni._xc_type(mf.xc)
     shls_slice = (0, mol.nbas)
     ao_loc = mol.ao_loc_nr()
-    
+
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
         raise RuntimeError("DFT Options are not initialized")
-    
+
     coeff = cupy.asarray(opt.coeff)
     mo_coeff = coeff @ mo_coeff
     nao = mo_coeff.shape[0]
@@ -236,17 +237,17 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
             wv = weight * vxc
             #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
             aow = numint._scale_ao(ao[:4], wv[:4])
-            
+
             for i in range(6):
                 vmat[i] += numint._dot_ao_ao(mol, ao[i+4], aow, mask, shls_slice, ao_loc)
-            
+
             contract_(vmat[0], ao, [XXX,XXY,XXZ], wv, mask)
             contract_(vmat[1], ao, [XXY,XYY,XYZ], wv, mask)
             contract_(vmat[2], ao, [XXZ,XYZ,XZZ], wv, mask)
             contract_(vmat[3], ao, [XYY,YYY,YYZ], wv, mask)
             contract_(vmat[4], ao, [XYZ,YYZ,YZZ], wv, mask)
             contract_(vmat[5], ao, [XZZ,YZZ,ZZZ], wv, mask)
-            
+
             rho = vxc = wv = aow = None
     elif xctype == 'MGGA':
         def contract_(mat, ao, aoidx, wv, mask):
@@ -281,19 +282,19 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
                 vmat[i] += numint._dot_ao_ao(mol, ao[j], aow[1], mask, shls_slice, ao_loc)
             for i, j in enumerate([XXZ, XYZ, XZZ, YYZ, YZZ, ZZZ]):
                 vmat[i] += numint._dot_ao_ao(mol, ao[j], aow[2], mask, shls_slice, ao_loc)
-    
+
     vmat = vmat[[0,1,2,
                  1,3,4,
                  2,4,5]]
     vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
-    
+
     return vmat.reshape(3,3,nao_sph,nao_sph)
 
 def _make_dR_rho1(ao, ao_dm0, atm_id, aoslices, xctype):
     # TODO: hard coded
     ao = ao.transpose([0,2,1])
     ao_dm0 = [x.T for x in ao_dm0]
-    
+
     p0, p1 = aoslices[atm_id][2:]
     ngrids = ao[0].shape[0]
     if xctype == 'GGA':
@@ -316,7 +317,7 @@ def _make_dR_rho1(ao, ao_dm0, atm_id, aoslices, xctype):
         rho1[:,4] *= .5
     else:
         raise RuntimeError
-    
+
     ao_dm0_0 = ao_dm0[0][:,p0:p1]
     # (d_X \nabla_x mu) nu DM_{mu,nu}
     rho1[:,0] = cupy.einsum('xpi,pi->xp', ao[1:4,:,p0:p1], ao_dm0_0)
@@ -377,7 +378,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     coeff = cupy.asarray(opt.coeff)
 
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-    
+
     vmat = cupy.zeros((mol.natm,3,3,nao,nao))
     ipip = cupy.zeros((3,3,nao,nao))
     if xctype == 'LDA':
@@ -432,12 +433,12 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 aow = [numint._scale_ao(ao[:4], wv[i,:4]) for i in range(3)]
                 _d1d2_dot_(vmat[ia], mol, ao[1:4], aow, mask, ao_loc, False)
             ao_dm0 = aow = None
- 
+
         for ia in range(mol.natm):
             p0, p1 = aoslices[ia][2:]
             vmat[ia,:,:,:,p0:p1] += ipip[:,:,:,p0:p1]
             vmat[ia,:,:,:,p0:p1] += ipip[:,:,p0:p1].transpose(1,0,3,2)
-        
+
     elif xctype == 'MGGA':
         XX, XY, XZ = 4, 5, 6
         YX, YY, YZ = 5, 7, 8
@@ -494,7 +495,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         grids = hessobj.grids
     else:
         grids = mf.grids
-    
+
     if grids.coords is None:
         grids.build(with_non0tab=True)
 
@@ -515,7 +516,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         raise RuntimeError("DFT Options are not initialized")
     coeff = cupy.asarray(opt.coeff)
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-    
+
     v_ip = cupy.zeros((3,nao,nao))
     vmat = cupy.zeros((mol.natm,3,nao,nao))
     max_memory = max(2000, max_memory-vmat.size*8/1e6)
@@ -592,14 +593,14 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
                     aow = [numint._scale_ao(ao[j], wv[i,4]) for i in range(3)]
                     vmat[ia] += rks_grad._d1_dot_(aow, ao[j].T)
             ao_dm0 = aow = None
-            
+
     for ia in range(mol.natm):
         p0, p1 = aoslices[ia][2:]
         vmat[ia,:,p0:p1] += v_ip[:,p0:p1]
         vmat[ia] = -vmat[ia] - vmat[ia].transpose(0,2,1)
     vmat = cupy.einsum("kxij,jq->kxiq", vmat, mocc)
     vmat = cupy.einsum("kxiq,ip->kxpq", vmat, mo_coeff)
-    
+
     return vmat
 
 
@@ -610,6 +611,11 @@ class Hessian(rhf_hess.Hessian):
         self.grids = None
         self.grid_response = False
         self._keys = self._keys.union(['grids'])
+
+    def to_cpu(self):
+        from pyscf.hessian.rks import Hessian
+        obj = to_cpu(self)
+        return obj.view(Hessian)
 
     def get_dispersion(self):
         if self.base.disp[:2].upper() == 'D3':
@@ -627,7 +633,7 @@ class Hessian(rhf_hess.Hessian):
                         mol.set_geom_(coords, unit='Bohr')
                         d3 = disp.DFTD3Dispersion(mol, xc=self.base.xc, version=self.base.disp)
                         _, g1 = d3.kernel()
-                    
+
                         coords[i,j] -= 2.0*eps
                         mol.set_geom_(coords, unit='Bohr')
                         d3 = disp.DFTD3Dispersion(mol, xc=self.base.xc, version=self.base.disp)
@@ -636,7 +642,7 @@ class Hessian(rhf_hess.Hessian):
                         coords[i,j] += eps
                         h_d3[i,:,j,:] = (g1 - g2)/(2.0*eps)
             return h_d3
-        
+
         if self.base.disp[:2].upper() == 'D4':
             from pyscf.data.elements import charge
             atoms = numpy.array([ charge(a[0]) for a in self.mol._atom])
@@ -656,7 +662,7 @@ class Hessian(rhf_hess.Hessian):
                         model = DispersionModel(atoms, coords)
                         res = model.get_dispersion(params, grad=True)
                         g1 = res.get("gradient")
-                    
+
                         coords[i,j] -= 2.0*eps
                         mol.set_geom_(coords, unit='Bohr')
                         model = DispersionModel(atoms, coords)

@@ -25,7 +25,7 @@ from pyscf.lib import logger
 from pyscf.dft import numint
 from pyscf.gto.eval_gto import NBINS, CUTOFF, make_screen_index
 from gpu4pyscf.scf.hf import basis_seg_contraction
-from gpu4pyscf.lib.utils import patch_cpu_kernel
+from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, load_library, add_sparse, release_gpu_stack
 from gpu4pyscf.dft import xc_deriv, xc_alias, libxc
 from gpu4pyscf import __config__
@@ -1074,7 +1074,10 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             yield ao, sindex, weight, coords
 
 class NumInt(numint.NumInt):
+    to_cpu = to_cpu
+
     device = 'gpu'
+
     def __init__(self, xc='LDA'):
         super().__init__()
         self.gdftopt = None
