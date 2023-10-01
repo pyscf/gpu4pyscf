@@ -15,11 +15,19 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-cmake_minimum_required (VERSION 3.12)
+# 3.18 for CUDAToolkit and CMAKE_CUDA_ARCHITECTURES
+cmake_minimum_required (VERSION 3.18)
 project (gpu4pyscf C CUDA)
 
 set(CMAKE_C_STANDARD "99")
-set(CMAKE_CUDA_ARCHITECTURES "70;80")
+
+# For better performance on A100, the option
+# -DCUDA_ARCHITECTURES="70-real;80-real" can be added to cmake command
+if(DEFINED CUDA_ARCHITECTURES)
+  set(CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCHITECTURES}")
+else()
+  set(CMAKE_CUDA_ARCHITECTURES "70")
+endif()
 
 if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RELWITHDEBINFO)
@@ -135,6 +143,6 @@ if(BUILD_LIBXC)
             -DCMAKE_INSTALL_LIBDIR:PATH=lib
             -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
             -DENABLE_XHOST:STRING=${BUILD_MARCH_NATIVE}
-    CMAKE_CACHE_ARGS -DCMAKE_CUDA_ARCHITECTURES:STRING=70-real;80-real
+    CMAKE_CACHE_ARGS -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}
   )
 endif()

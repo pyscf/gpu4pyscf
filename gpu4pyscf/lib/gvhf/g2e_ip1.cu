@@ -904,11 +904,7 @@ static void GINTint2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        if constexpr(NROOTS==6) {
-          GINTrys_root6(x, uw);
-        } else {
-          GINTrys_root7(x, uw);
-        }
+        GINTrys_root<NROOTS>(x, uw);
 
         GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, uw, norm,
                                as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
@@ -991,11 +987,7 @@ static void GINTint2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
           double a1 = aij * akl;
           double a0 = a1 / aijkl;
           double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-          if constexpr(NROOTS==6) {
-            GINTrys_root6(x, uw);
-          } else {
-            GINTrys_root7(x, uw);
-          }
+          GINTrys_root<NROOTS>(x, uw);
 
           GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, uw, norm,
                                  as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
@@ -1159,11 +1151,7 @@ static void GINTint2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
           double a1 = aij * akl;
           double a0 = a1 / aijkl;
           double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-          if constexpr(NROOTS==6) {
-            GINTrys_root6(x, uw);
-          } else {
-            GINTrys_root7(x, uw);
-          }
+          GINTrys_root<NROOTS>(x, uw);
 
           GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, uw, norm,
                                  as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
@@ -1532,7 +1520,7 @@ void GINTint2e_ip1_jk_kernel<4, NABLAGOUTSIZE4>(GINTEnvVars envs, JKMatrix jk,
       double a1 = aij * akl;
       double a0 = a1 / aijkl;
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-      GINTrys_root4(x, uw);
+      GINTrys_root<4>(x, uw);
       GINTg0_2e_2d4d_ip1<4>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
       GINTgout2e_ip1<4>(envs, gout, g, ai, aj);
     }
@@ -1620,7 +1608,7 @@ void GINTint2e_ip1_jk_kernel<5, NABLAGOUTSIZE5>(GINTEnvVars envs, JKMatrix jk,
       double a1 = aij * akl;
       double a0 = a1 / aijkl;
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-      GINTrys_root5(x, uw);
+      GINTrys_root<5>(x, uw);
       GINTg0_2e_2d4d_ip1<5>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
       GINTgout2e_ip1<5>(envs, gout, g, ai, aj);
     }
