@@ -13,7 +13,7 @@ jobs:
   release-pypi-linux:
     runs-on: ubuntu-latest
     env:
-      img: pyscf/gpu4pyscf-sdk:0.1
+      img: wxj6000/manylinux2014:cuda118
     steps:
     - name: Checkout
       uses: actions/checkout@v3
@@ -21,9 +21,7 @@ jobs:
       run: |
         docker run --rm -v ${{ github.workspace }}:/src/gpu4pyscf:rw --workdir=/src/gpu4pyscf \
         ${{ env.img }} \
-        bash -exc 'export CIBW_BUIL=cp39-manylinux_x86_64 && \
-           python3 -m pip install cibuildwheel==2.16.0 && \
-           python3 -m cibuildwheel --output-dir wheelhouse'
+        bash -exc 'sh /src/gpu4pyscf/dockers/manylinux/build_wheels.sh'
     - name: List available wheels
       run: |
         ls ${{ github.workspace }}/wheelhouse
