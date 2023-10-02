@@ -19,9 +19,9 @@ jobs:
       uses: actions/checkout@v3
     - name: Build wheels
       run: |
-        docker run --rm -v ${{ github.workspace }}:/src/gpu4pyscf:rw --workdir=/src/gpu4pyscf \
+        docker run --rm -v ${{ github.workspace }}:/gpu4pyscf:rw --workdir=/gpu4pyscf \
         ${{ env.img }} \
-        bash -exc 'sh /src/gpu4pyscf/dockerfiles/manylinux/build_wheels.sh'
+        bash -exc 'sh /gpu4pyscf/dockerfiles/manylinux/build_wheels.sh'
     - name: List available wheels
       run: |
         ls ${{ github.workspace }}/wheelhouse
