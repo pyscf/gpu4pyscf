@@ -21,7 +21,7 @@ from pyscf.df.grad import rks
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.df.grad.rhf import _get_jk, _grad_elec
 from gpu4pyscf.lib.utils import patch_cpu_kernel
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
 
 def _get_veff(ks_grad, mol=None, dm=None):
@@ -114,7 +114,8 @@ def _get_veff(ks_grad, mol=None, dm=None):
         logger.debug1(ks_grad, 'sum(auxbasis response) %s', e1_aux.sum(axis=0))
     else:
         e1_aux = None
-    return vxc, e1_aux
+    vxc = tag_array(vxc, aux=e1_aux)
+    return vxc
 
 class Gradients(rks.Gradients):
     device = 'gpu'
@@ -151,3 +152,8 @@ class Gradients(rks.Gradients):
                 res = model.get_dispersion(DampingParam(method=self.base.xc), grad=True)
             return res.get("gradient")
         
+    def extra_force(self, atom_id, envs):
+        if self.auxbasis_response:
+            return envs['dvhf'].aux[atom_id]
+        else:
+            return 0

@@ -31,12 +31,16 @@ H       0.7570000000     0.0000000000    -0.4696000000
 bas='def2tzvpp'
 grids_level = 5
 
-mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
-mol.build()
-mol.verbose = 1
-
+def setUpModule():
+    global mol
+    mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
+    mol.output = '/dev/null'
+    mol.build()
+    mol.verbose = 1
+    
 def tearDownModule():
     global mol
+    mol.stdout.close()
     del mol
 
 def run_dft(xc):

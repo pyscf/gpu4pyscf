@@ -12,6 +12,7 @@ output/
 .vscode/
 *.swo
 *.swp
+*~
 #*
 dockerfiles/manylinux/wheelhouse
 gpu4pyscf/lib/bin

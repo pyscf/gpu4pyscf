@@ -27,19 +27,23 @@ auxbasis='def2-tzvpp-jkfit'
 grids_level = 5
 eps=1e-4
 
-mol = pyscf.M(
-    verbose = 0,
-    atom = 'C 0 0 0; O 0 0 1.5',
-    basis = {'C': 'crenbl', 'O': 'ccpvdz'},
-    ecp = {'C': 'crenbl'}
-)
+def setUpModule():
+    global mol
+    mol = pyscf.M(
+        verbose = 0,
+        atom = 'C 0 0 0; O 0 0 1.5',
+        basis = {'C': 'crenbl', 'O': 'ccpvdz'},
+        ecp = {'C': 'crenbl'},
+        output = '/dev/null'
+    )
 
-mol.build()
-mol.verbose = 3
-mf = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
-mf.conv_tol = 1e-12
-e_tot = mf.kernel()
-dm = mf.make_rdm1()
+    mol.build()
+    mol.verbose = 3
+
+def tearDownModule():
+    global mol
+    mol.stdout.close()
+    del mol
 
 def tearDownModule():
     global mol
@@ -148,6 +152,9 @@ def _check_dft_hessian(disp=None, ix=0, iy=0, tol=1e-3):
 
 class KnownValues(unittest.TestCase):    
     def test_rks_scf(self):
+        mf = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
+        mf.conv_tol = 1e-12
+        e_tot = mf.kernel()
         assert np.allclose(e_tot, -80.6305435235937)
 
     def test_rks_gradient(self):

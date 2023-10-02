@@ -30,10 +30,13 @@ bas0='def2-tzvpp'
 auxbasis0='def2-tzvpp-jkfit'
 disp0='d3bj'
 grids_level = 6
-mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000)
-mol.build()
-mol.verbose = 1
 eps = 1e-3
+
+def setUpModule():
+    global mol
+    mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000)
+    mol.build(output='/dev/null')
+    mol.verbose = 1
 
 def tearDownModule():
     global mol
