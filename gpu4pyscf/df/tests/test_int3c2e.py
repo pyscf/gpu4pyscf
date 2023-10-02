@@ -29,17 +29,25 @@ libgint = load_library('libgint')
 compare int3c2e by pyscf and gpu4pyscf
 '''
 
-mol = pyscf.M(atom='''
+def setUpModule():
+    global mol, auxmol
+    mol = pyscf.M(atom='''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
     ''',
-basis= 'def2-tzvpp',
-verbose=1
-)
-
-ao_labels = mol.ao_labels()
-auxmol = df.addons.make_auxmol(mol, auxbasis='def2-tzvpp-jkfit')
+                  basis= 'def2-tzvpp',
+                  verbose=1,
+                  output='/dev/null')
+    auxmol = df.addons.make_auxmol(mol, auxbasis='def2-tzvpp-jkfit')
+    auxmol.output = '/dev/null'
+    
+def tearDownModule():
+    global mol, auxmol
+    mol.stdout.close()
+    auxmol.stdout.close()
+    del mol, auxmol
+    
 omega = 0.2
 
 def check_int3c2e_derivatives(ip_type):

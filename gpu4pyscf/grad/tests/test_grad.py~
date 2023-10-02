@@ -22,13 +22,6 @@ from gpu4pyscf.dft import rks
 
 lib.num_threads(8)
 
-'''
-test density fitting for dft
-1. energy
-2. gradient
-3. hessian
-'''
-
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
@@ -37,7 +30,6 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
 xc0='B3LYP'
 bas0='def2-tzvpp'
-auxbasis0='def2-tzvpp-jkfit'
 disp0='d3bj'
 grids_level = 6
 def setUpModule():
@@ -55,20 +47,19 @@ def tearDownModule():
     del mol
     
 def _check_grad(grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
-    mf = rks.RKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
+    mf = rks.RKS(mol, xc=xc, disp=disp)
     mf.device = 'gpu'
     mf.grids.level = grids_level
     mf.conv_tol = 1e-12
     e_tot = mf.kernel()
     g = mf.nuc_grad_method()
-    g.auxbasis_response = True
     g.grid_response = grid_response
-
+    
     g_scanner = g.as_scanner()
     g_analy = g_scanner(mol)[1]
     print('analytical gradient:')
     print(g_analy)
-
+    
     f_scanner = mf.as_scanner()
     coords = mol.atom_coords()
     grad_fd = np.zeros_like(coords)
@@ -80,7 +71,7 @@ def _check_grad(grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
             mol.build()
             e0 = f_scanner(mol)
     
-            mf = rks.RKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
+            mf = rks.RKS(mol, xc=xc, disp=disp)
             mf.device = 'gpu'
             mf.grids.level = grids_level
 
@@ -88,8 +79,8 @@ def _check_grad(grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
             mol.set_geom_(coords, unit='Bohr')
             mol.build()
             e1 = f_scanner(mol)
-
-            mf = rks.RKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
+            
+            mf = rks.RKS(mol, xc=xc, disp=disp)
             mf.device = 'gpu'
             mf.grids.level = grids_level
 
@@ -105,11 +96,11 @@ def _check_grad(grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
 class KnownValues(unittest.TestCase):
     
     def test_grad_with_grids_response(self):
-        print("-----testing DF DFT gradient with grids response----")
+        print("-----testing DFT gradient with grids response----")
         _check_grad(grid_response=True)
     
     def test_grad_without_grids_response(self):
-        print('-----testing DF DFT gradient without grids response----')
+        print('-----testing DFT gradient without grids response----')
         _check_grad(grid_response=False)
     
     def test_grad_lda(self):
@@ -137,5 +128,5 @@ class KnownValues(unittest.TestCase):
         _check_grad(xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-6)
     
 if __name__ == "__main__":
-    print("Full Tests for DF Gradient")
+    print("Full Tests for Gradient")
     unittest.main()

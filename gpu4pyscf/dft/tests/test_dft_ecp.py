@@ -28,11 +28,16 @@ I 1 0 0
 bas='def2-qzvpp'
 grids_level = 6
 
-mol = pyscf.M(atom=atom, basis=bas, ecp=bas)
-mol.verbose = 1
-
+def setUpModule():
+    global mol
+    mol = pyscf.M(atom=atom, basis=bas, ecp=bas)
+    mol.output='/dev/null'
+    mol.verbose = 1
+    mol.build()
+    
 def tearDownModule():
     global mol
+    mol.stdout.close()
     del mol
 
 def run_dft(xc):

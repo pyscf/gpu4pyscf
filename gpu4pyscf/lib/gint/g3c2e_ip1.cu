@@ -73,6 +73,6 @@ void GINTfill_int3c2e_ip1_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffse
             
             double ai2 = -2.0*exp[ij];
             GINTnabla1i_2e<NROOTS>(envs, f, g, ai2, envs.i_l, envs.j_l, envs.k_l);
-            GINTwrite_int3c2e_ip_direct<2>(envs, eri, f, g, ish, jsh, ksh);
+            GINTwrite_int3c2e_ip_direct<NROOTS>(envs, eri, f, g, ish, jsh, ksh);
     } }
 }

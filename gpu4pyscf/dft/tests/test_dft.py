@@ -77,8 +77,9 @@ class KnownValues(unittest.TestCase):
         print("------- wB97m-v -------------")
         e_tot = run_dft('HYB_MGGA_XC_WB97M_V')
         assert np.allclose(e_tot, -76.4391208632)
+        
     #TODO: add test cases for D3/D4 and gradient
-
+    
 if __name__ == "__main__":
     print("Full Tests for dft")
     unittest.main()
