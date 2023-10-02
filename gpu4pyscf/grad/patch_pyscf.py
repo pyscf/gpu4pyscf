@@ -15,32 +15,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80")
+'''
+Patch pyscf SCF modules to make all subclass of SCF class support GPU mode.
+'''
 
-add_library(cupy_helper SHARED 
-  transpose.cu
-  block_diag.cu
-  contract_cderi_k.cu
-  eigh.cu
-  cho_solve.cu
-  take_last2d.cu
-  async_d2h_2d.cu
-  cutensor.cu
-  add_sparse.cu
-)
+from gpu4pyscf.grad.rhf import _get_jk
+from gpu4pyscf.lib.utils import patch_cpu_kernel
+import pyscf.grad.rhf as RHF
 
-set_target_properties(cupy_helper PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-
-find_package(NVHPC)
-if(${NVHPC_FOUND})
-
-  message("-- looks like it's using NVHPC.")
-  target_link_libraries(cupy_helper PRIVATE NVHPC::CUBLAS PRIVATE NVHPC::CUSOLVER PRIVATE NVHPC::CUTENSOR)
-
-else()
-
-  find_package(CUDAToolkit)
-  find_package(CUTENSOR)
-  target_link_libraries(cupy_helper PRIVATE CUDA::cublas PRIVATE CUDA::cusolver PRIVATE cutensor)
-endif()
+RHF.Gradients.get_jk = patch_cpu_kernel(RHF.Gradients.get_jk)(_get_jk)

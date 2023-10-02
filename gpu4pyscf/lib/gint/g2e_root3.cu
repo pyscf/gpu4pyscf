@@ -125,7 +125,7 @@ static void GINTfill_int2e_kernel0022(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -392,7 +392,7 @@ static void GINTfill_int2e_kernel0031(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -668,7 +668,7 @@ static void GINTfill_int2e_kernel0032(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -1043,7 +1043,7 @@ static void GINTfill_int2e_kernel1021(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -1458,7 +1458,7 @@ static void GINTfill_int2e_kernel1022(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -1972,7 +1972,7 @@ static void GINTfill_int2e_kernel1030(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -2285,7 +2285,7 @@ static void GINTfill_int2e_kernel1031(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -2796,7 +2796,7 @@ static void GINTfill_int2e_kernel1111(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -3251,7 +3251,7 @@ static void GINTfill_int2e_kernel1120(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -3724,7 +3724,7 @@ static void GINTfill_int2e_kernel1121(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -4482,7 +4482,7 @@ static void GINTfill_int2e_kernel1130(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -4964,7 +4964,7 @@ static void GINTfill_int2e_kernel2011(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -5305,7 +5305,7 @@ static void GINTfill_int2e_kernel2020(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -5658,7 +5658,7 @@ static void GINTfill_int2e_kernel2021(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -6203,7 +6203,7 @@ static void GINTfill_int2e_kernel2030(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -6583,7 +6583,7 @@ static void GINTfill_int2e_kernel2110(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -7055,7 +7055,7 @@ static void GINTfill_int2e_kernel2111(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -7831,7 +7831,7 @@ static void GINTfill_int2e_kernel2120(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -8352,7 +8352,7 @@ static void GINTfill_int2e_kernel2200(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -8700,7 +8700,7 @@ static void GINTfill_int2e_kernel2210(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -9214,7 +9214,7 @@ static void GINTfill_int2e_kernel3010(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -9527,7 +9527,7 @@ static void GINTfill_int2e_kernel3011(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -10012,7 +10012,7 @@ static void GINTfill_int2e_kernel3020(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -10365,7 +10365,7 @@ static void GINTfill_int2e_kernel3100(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -10674,7 +10674,7 @@ static void GINTfill_int2e_kernel3110(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {
@@ -11158,7 +11158,7 @@ static void GINTfill_int2e_kernel3200(GINTEnvVars envs, ERITensor eri, BasisProd
 
         double rw[6];
         double root0, weight0;
-        GINTrys_root3(x, rw);
+        GINTrys_root<3>(x, rw);
         GINTscale_u<3>(rw, theta);
         int irys;
         for (irys = 0; irys < 3; ++irys) {

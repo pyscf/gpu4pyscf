@@ -113,7 +113,7 @@ static void GINTint2e_jk_kernel1010(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 
         double rw[4];
         double root0, weight0;
-        GINTrys_root2(x, rw);
+        GINTrys_root<2>(x, rw);
         GINTscale_u<2>(rw, theta);
         int irys;
         for (irys = 0; irys < 2; ++irys) {
@@ -347,7 +347,7 @@ static void GINTint2e_jk_kernel1011(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         
         double rw[4];
         double root0, weight0;
-        GINTrys_root2(x, rw);
+        GINTrys_root<2>(x, rw);
         GINTscale_u<2>(rw, theta);
         int irys;
         for (irys = 0; irys < 2; ++irys) {
@@ -607,7 +607,7 @@ static void GINTint2e_jk_kernel1100(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 
         double rw[4];
         double root0, weight0;
-        GINTrys_root2(x, rw);
+        GINTrys_root<2>(x, rw);
         GINTscale_u<2>(rw, theta);
         int irys;
         for (irys = 0; irys < 2; ++irys) {
@@ -826,7 +826,7 @@ static void GINTint2e_jk_kernel1110(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 
         double rw[4];
         double root0, weight0;
-        GINTrys_root2(x, rw);
+        GINTrys_root<2>(x, rw);
         GINTscale_u<2>(rw, theta);
         int irys;
         for (irys = 0; irys < 2; ++irys) {
@@ -1080,7 +1080,7 @@ static void GINTint2e_jk_kernel2000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 
         double rw[4];
         double root0, weight0;
-        GINTrys_root2(x, rw);
+        GINTrys_root<2>(x, rw);
         GINTscale_u<2>(rw, theta);
         int irys;
         for (irys = 0; irys < 2; ++irys) {
@@ -1279,7 +1279,7 @@ static void GINTint2e_jk_kernel2010(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 
         double rw[4];
         double root0, weight0;
-        GINTrys_root2(x, rw);
+        GINTrys_root<2>(x, rw);
         GINTscale_u<2>(rw, theta);
         int irys;
         for (irys = 0; irys < 2; ++irys) {
@@ -1536,7 +1536,7 @@ static void GINTint2e_jk_kernel2100(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 
         double rw[4];
         double root0, weight0;
-        GINTrys_root2(x, rw);
+        GINTrys_root<2>(x, rw);
         GINTscale_u<2>(rw, theta);
         int irys;
         for (irys = 0; irys < 2; ++irys) {
@@ -1778,7 +1778,7 @@ static void GINTint2e_jk_kernel3000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 
         double rw[4];
         double root0, weight0;
-        GINTrys_root2(x, rw);
+        GINTrys_root<2>(x, rw);
         GINTscale_u<2>(rw, theta);
         int irys;
         for (irys = 0; irys < 2; ++irys) {

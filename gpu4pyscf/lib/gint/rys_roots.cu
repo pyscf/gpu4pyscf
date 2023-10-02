@@ -3481,7 +3481,32 @@ static double FITTING_DATA[] = {
 };
 
 __device__
-static void GINTrys_root2(double x, double *rw)
+inline void polyfit_roots(int nroots, double x, double* rr, double* ww);
+
+template<int NROOTS> __device__
+inline void GINTrys_root(double x, double *rw)
+{
+    polyfit_roots(NROOTS, x, &rw[0], &rw[NROOTS]);
+}
+
+template<> __device__
+inline void GINTrys_root<1>(double x, double * rw) {
+    if (x < 3.e-7) {
+      rw[0] = 0.5;
+      rw[1] = 1.;
+    } else {
+      double tt = sqrt(x);
+      double fmt0 = SQRTPIE4 / tt * erf(tt);
+      rw[1] = fmt0;
+      double e = exp(-x);
+      double b = .5 / x;
+      double fmt1 = b * (fmt0 - e);
+      rw[0] = fmt1 / (fmt0 - fmt1);
+    }
+}
+
+template<> __device__
+inline void GINTrys_root<2>(double x, double *rw)
 {
     double rt0, rt1, wt0, wt1, y, z, cw, cr, ex, x1, x2, sx, f1;
     double *p;
@@ -3567,8 +3592,8 @@ static void GINTrys_root2(double x, double *rw)
     rw[3] = wt1;
 }
 
-__device__
-static void GINTrys_root3(double x, double *rw)
+template<> __device__
+inline void GINTrys_root<3>(double x, double *rw)
 {
     double rt0, rt1, rt2, wt0, wt1, wt2, t1, t2, t3, a1, a2, f1, f2;
     double y, z, cw, cr, ex, x1, sx;
@@ -3679,8 +3704,8 @@ static void GINTrys_root3(double x, double *rw)
     rw[5] = wt2;
 }
 
-__device__
-static void GINTrys_root4(double x, double *rw)
+template<> __device__
+inline void GINTrys_root<4>(double x, double *rw)
 {
     double rt0, rt1, rt2, rt3, wt0, wt1, wt2, wt3;
     double y, z, cr, cw, ex, x1, sx;
@@ -3781,8 +3806,8 @@ static void GINTrys_root4(double x, double *rw)
     rw[7] = wt3;
 }
 
-__device__
-static void GINTrys_root5(double x, double *rw)
+template<> __device__
+inline void GINTrys_root<5>(double x, double *rw)
 {
     double rt0, rt1, rt2, rt3, rt4, wt0, wt1, wt2, wt3, wt4;
     double y, cr, ex, sx;
@@ -3880,7 +3905,7 @@ static void GINTrys_root5(double x, double *rw)
 
 
 __device__
-static void _CINT_clenshaw_d1(double *rr, const double *x, double u, int nroots){
+inline void _CINT_clenshaw_d1(double *rr, const double *x, double u, int nroots){
     /*
     reference 
     https://github.com/sunqm/qcint/blob/38fa7cd87e5251e0bbb5abc549dbacc45f9da56e/src/polyfits.c
@@ -3942,7 +3967,7 @@ static void _CINT_clenshaw_d1(double *rr, const double *x, double u, int nroots)
 }
 
 __device__
-static void polyfit_roots(int nroots, double x, double* rr, double* ww)
+inline void polyfit_roots(int nroots, double x, double* rr, double* ww)
 {
     if (x < 3.e-7){
         int off = nroots * (nroots - 1) / 2;
@@ -3971,32 +3996,19 @@ static void polyfit_roots(int nroots, double x, double* rr, double* ww)
         it = (int)(x * .4);
         tt = (x - it * 2.5) * 0.8 - 1.;
     } else {
+        x -= 40.;
         it = (int)(x * .25);
         tt = (x - it * 4.) * 0.5 - 1.;
+        it += 16;
     }
     int offset = nroots * 14 * it;
     _CINT_clenshaw_d1(rr, datax+offset, tt, nroots);
     _CINT_clenshaw_d1(ww, dataw+offset, tt, nroots);
 }
 
-__device__ static void GINTrys_root6(double x, double *rw){
-    polyfit_roots(6, x, &rw[0], &rw[6]);
-}
-
-__device__ static void GINTrys_root7(double x, double *rw){
-    polyfit_roots(7, x, &rw[0], &rw[7]);
-}
-
-__device__ static void GINTrys_root8(double x, double *rw){
-    polyfit_roots(8, x, &rw[0], &rw[8]);
-}
-
-__device__ static void GINTrys_root9(double x, double *rw){
-    polyfit_roots(9, x, &rw[0], &rw[9]);
-}
-
 template <int NROOTS> __device__
-static void GINTscale_u(double *u, double theta){
+inline void GINTscale_u(double *u, double theta)
+{
 # pragma unroll
     for(int i = 0; i < NROOTS; i++){
         u[i] /= u[i] + 1 - u[i] * theta;

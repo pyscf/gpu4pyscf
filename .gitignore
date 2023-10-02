@@ -10,6 +10,10 @@ gpu4pyscf.egg-info/
 output/
 .pytest_cache/
 .vscode/
+*.swo
+*.swp
+#*
+dockerfiles/manylinux/wheelhouse
 gpu4pyscf/lib/bin
 gpu4pyscf/lib/build
 gpu4pyscf/lib/include

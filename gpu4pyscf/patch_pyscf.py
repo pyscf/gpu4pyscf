@@ -22,5 +22,6 @@ This patch may break some pyscf modules.
 from gpu4pyscf.df import patch_pyscf
 from gpu4pyscf.scf import patch_pyscf
 from gpu4pyscf.dft import patch_pyscf
+from gpu4pyscf.grad import patch_pyscf
 
 del patch_pyscf
