@@ -35,9 +35,18 @@ bas='def2-tzvpp'
 auxbasis='ccpvtz-jkfit'
 disp='d3bj'
 grids_level = 8
-mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
-mol.build()
-mol.verbose = 1
+
+def setUpModule():
+    global mol
+    mol = pyscf.M(atom=atom, basis=bas, output='/dev/null')
+    mol.build()
+    mol.verbose = 1
+
+def tearDownModule():
+    global mol
+    mol.stdout.close()
+    del mol
+    
 eps = 1e-3
 
 class KnownValues(unittest.TestCase):

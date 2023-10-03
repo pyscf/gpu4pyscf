@@ -245,5 +245,11 @@ class Gradients(rhf.Gradients):
             logger.debug1(self, 'sum(auxbasis response) %s', e1_aux.sum(axis=0))
         else:
             e1_aux = None
-        return vhf, e1_aux
-    
+        vhf = tag_array(vhf, aux=e1_aux)
+        return vhf
+
+    def extra_force(self, atom_id, envs):
+        if self.auxbasis_response:
+            return envs['dvhf'].aux[atom_id]
+        else:
+            return 0
