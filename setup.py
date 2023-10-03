@@ -19,6 +19,8 @@
 
 import os
 import shutil
+import subprocess
+import re
 
 from setuptools import setup, find_packages, Extension, find_namespace_packages
 from setuptools.command.build_ext import build_ext
@@ -33,6 +35,13 @@ DOWNLOAD_URL = None
 CLASSIFIERS = None
 PLATFORMS = None
 
+def get_cuda_version():
+    nvcc_out = subprocess.run([f"nvcc", "--version"], stdout=subprocess.PIPE).stdout.decode('utf-8')
+    m = re.search(r"V[0-9]+.[0-9]+", nvcc_out)
+    str_version = m.group(0)[1:]
+    return str_version[:2]+'x'
+
+CUDA_VERSION = get_cuda_version()
 
 def get_version():
     topdir = os.path.abspath(os.path.join(__file__, '..'))
@@ -106,7 +115,7 @@ build.sub_commands = ([c for c in build.sub_commands if c[0] == 'build_ext'] +
                       [c for c in build.sub_commands if c[0] != 'build_ext'])
 
 setup(
-    name=NAME,
+    name=NAME+'-cuda'+CUDA_VERSION,
     version=VERSION,
     description=DESCRIPTION,
     license=LICENSE,
@@ -128,7 +137,7 @@ setup(
     cmdclass={'build_ext': CMakeBuildExt},
     install_requires=[
         'pyscf>=2.3.0',
-        'cupy-cuda11x>=12.0',
+        'cupy-cuda'+CUDA_VERSION+'>=12.0',
         'dftd3==0.7.0',
         'dftd4==3.5.0',
         'geometric'

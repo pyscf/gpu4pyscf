@@ -1,0 +1,13 @@
+Metadata-Version: 2.1
+Name: gpu4pyscf-cuda12x
+Version: 0.5.2
+Summary: GPU extensions for PySCF
+Author: Qiming Sun
+Author-email: osirpt.sun@gmail.com
+License: GPLv3
+License-File: LICENSE
+Requires-Dist: pyscf>=2.3.0
+Requires-Dist: cupy-cuda12x>=12.0
+Requires-Dist: dftd3==0.7.0
+Requires-Dist: dftd4==3.5.0
+Requires-Dist: geometric

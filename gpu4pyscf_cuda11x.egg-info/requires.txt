@@ -1,0 +1,5 @@
+pyscf>=2.3.0
+cupy-cuda11x>=12.0
+dftd3==0.7.0
+dftd4==3.5.0
+geometric
