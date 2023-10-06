@@ -1,6 +1,0 @@
-pyscf==2.3.0
-cupy-cuda11x==12.0
-pytest
-dftd3
-dftd4
-geometric

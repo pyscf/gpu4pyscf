@@ -6,7 +6,7 @@
 **/deps
 core
 **tmp*
-gpu4pyscf.egg-info/
+*.egg-info/
 output/
 .pytest_cache/
 .vscode/
