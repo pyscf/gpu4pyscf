@@ -24,13 +24,13 @@ jobs:
         bash -exc 'sh /gpu4pyscf/dockerfiles/manylinux/build_wheels.sh'
     - name: List available wheels
       run: |
-        ls ${{ github.workspace }}/wheelhouse
+        ls ${{ github.workspace }}/gpu4pyscf/wheelhouse
     - name: Publish to PyPI
       run: |
           pip install twine
           export TWINE_USERNAME=__token__
           export TWINE_PASSWORD="${{ secrets.PYPI_API_TOKEN }}"
-          twine upload --verbose "/wheelhouse/*"
+          twine upload --verbose "/gpu4pyscf/wheelhouse/*"
 
 #  release-pypi-cibuildwheel:
 #    name: Build wheels with cibuildwheel
