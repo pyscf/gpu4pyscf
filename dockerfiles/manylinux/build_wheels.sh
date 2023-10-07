@@ -32,7 +32,3 @@ for PYBIN in /opt/python/{cp38-cp38,cp39-cp39,cp310-cp310,cp311-cp311}/bin; do
 done
 rm -rf /gpu4pyscf/tmp
 
-# Install packages and test
-for PYBIN in /opt/python/{cp38-cp38,cp39-cp39,cp310-cp310,cp311-cp311}/bin; do
-    "${PYBIN}/pip" install gpu4pyscf --no-index -f /gpu4pyscf/wheelhouse
-done
