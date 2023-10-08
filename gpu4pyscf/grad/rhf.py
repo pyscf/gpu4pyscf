@@ -23,7 +23,6 @@ from pyscf.lib import logger
 from pyscf.grad import rhf
 from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf.scf.hf import _VHFOpt
-from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu, to_gpu
 from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 
@@ -452,7 +451,7 @@ def get_dh1e_ecp(mol, dm):
             dh1e_ecp[ia] = cupy.einsum('xij,ij->x', ecp, dm)
     return 2.0 * dh1e_ecp
 
-def _grad_nuc(mf_grad, atmlst=None):
+def grad_nuc(mf_grad, atmlst=None):
     '''
     Derivatives of nuclear repulsion energy wrt nuclear coordinates
     '''
@@ -469,7 +468,7 @@ def _grad_nuc(mf_grad, atmlst=None):
         gs = gs[atmlst]
     return gs
 
-def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
+def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     '''
     Electronic part of RHF/RKS gradients
     Args:
@@ -548,11 +547,9 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
     return de.get()
 
 class Gradients(rhf.Gradients):
-    to_cpu = to_cpu
-    to_gpu = to_gpu
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
-    device = 'gpu'
-    grad_elec = patch_cpu_kernel(rhf.Gradients.grad_elec)(_grad_elec)
-    grad_nuc = patch_cpu_kernel(rhf.Gradients.grad_nuc)(_grad_nuc)
-    get_veff = patch_cpu_kernel(rhf.Gradients.get_veff)(_get_veff)
-    get_jk = patch_cpu_kernel(rhf.Gradients.get_jk)(_get_jk)
+    grad_elec = grad_elec
+    grad_nuc = grad_nuc
+    get_veff = get_veff
+    get_jk = _get_jk

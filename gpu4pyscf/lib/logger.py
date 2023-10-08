@@ -17,7 +17,6 @@ import sys
 import time
 import cupy
 from pyscf import lib
-from gpu4pyscf.lib.utils import patch_cpu_kernel
 
 from pyscf.lib import parameters as param
 import pyscf.__config__
@@ -54,7 +53,7 @@ timer_debug1 = _timer_debug1
 class Logger(lib.logger.Logger):
     def __init__(self, stdout=sys.stdout, verbose=NOTE):
         super().__init__(stdout=stdout, verbose=verbose)
-    timer_debug1 = patch_cpu_kernel(lib.logger.timer_debug1)(_timer_debug1)
+    timer_debug1 = _timer_debug1
 
 def new_logger(rec=None, verbose=None):
     '''Create and return a :class:`Logger` object

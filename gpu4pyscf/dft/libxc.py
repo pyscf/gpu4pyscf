@@ -56,7 +56,7 @@ libxc.xc_func_init.argtypes = (_xc_func_p, ctypes.c_int, ctypes.c_int)
 libxc.xc_func_end.argtypes = (_xc_func_p, )
 libxc.xc_func_free.argtypes = (_xc_func_p, )
 
-class XCfun():
+class XCfun:
     def __init__(self, xc, spin):
         assert spin == 'unpolarized'
         self._spin = 1

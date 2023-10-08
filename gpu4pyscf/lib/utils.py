@@ -54,3 +54,10 @@ def identity(x):
     return x
 
 to_gpu = identity
+
+@property
+def device(obj):
+    if 'gpu4pyscf' in obj.__class__.__module__:
+        return 'gpu'
+    else:
+        return 'cpu'

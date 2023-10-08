@@ -19,11 +19,9 @@ import cupy
 from pyscf.df.grad import rhf
 from pyscf.lib import logger
 from pyscf import lib, scf, gto
-from gpu4pyscf.scf.hf import _get_jk
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu, to_gpu
 from gpu4pyscf.lib.cupy_helper import print_mem_info, solve_triangular, tag_array, unpack_tril, contract, load_library
-from gpu4pyscf.grad.rhf import _grad_elec
+from gpu4pyscf.grad.rhf import grad_elec
 from gpu4pyscf import __config__
 
 libcupy_helper = load_library('libcupy_helper')
@@ -31,7 +29,7 @@ libcupy_helper = load_library('libcupy_helper')
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 64)
 
-def _get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega=None):
+def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega=None):
     if mol is None: mol = mf_grad.mol
     #TODO: dm has to be the SCF density matrix in this version.  dm should be
     # extended to any 1-particle density matrix
@@ -52,7 +50,7 @@ def _get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omeg
     auxmol = with_df.auxmol
     intopt = with_df.intopt
 
-    nao, naux = mol.nao, with_df.naux
+    naux = with_df.naux
 
     log = logger.new_logger(mol, mol.verbose)
     t0 = (logger.process_clock(), logger.perf_counter())
@@ -134,8 +132,8 @@ def _get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omeg
     block_size = with_df.get_blksize(nao=nao_cart)
     intopt.clear()
     # rebuild with aosym
-    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, \
-        group_size_aux=block_size)#, group_size=block_size)
+    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False,
+                 group_size_aux=block_size)#, group_size=block_size)
 
     # sph2cart for ao
     cart2sph = intopt.cart2sph
@@ -225,12 +223,10 @@ def _get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omeg
 
 
 class Gradients(rhf.Gradients):
-    to_cpu = to_cpu
-    to_gpu = to_gpu
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
-    device = 'gpu'
-    get_jk = patch_cpu_kernel(rhf.Gradients.get_jk)(_get_jk)
-    grad_elec = patch_cpu_kernel(rhf.Gradients.grad_elec)(_grad_elec)
+    get_jk = get_jk
+    grad_elec = grad_elec
 
     def get_j(self, mol=None, dm=None, hermi=0):
         vj, _, vjaux, _ = self.get_jk(mol, dm, with_k=False)

@@ -24,7 +24,6 @@ from pyscf.lib import logger
 from pyscf.scf import dhf
 from pyscf.df import df_jk, addons
 from gpu4pyscf.lib.cupy_helper import contract, solve_triangular, take_last2d, transpose_sum, load_library, get_avail_mem
-from gpu4pyscf.lib.utils import to_cpu, to_gpu
 from gpu4pyscf.dft import rks, numint
 from gpu4pyscf.scf import hf
 from gpu4pyscf.df import df, int3c2e
@@ -122,8 +121,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
         See also the documents of class %s for other SCF attributes.
         ''' % mf_class
 
-        to_cpu = to_cpu
-        to_gpu = to_gpu
+        from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
         def __init__(self, mf, dfobj, only_dfj):
             self.__dict__.update(mf.__dict__)
@@ -265,8 +263,9 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
         log.warn('CDERI not found, build...')
         dfobj.build(direct_scf_tol=direct_scf_tol, omega=omega)
 
-    nao, naux = dfobj.nao, dfobj.naux
-    vj = None; vk = None
+    assert nao == dfobj.nao
+    vj = None
+    vk = None
     ao_idx = dfobj.intopt.sph_ao_idx
     dms = take_last2d(dms, ao_idx)
 

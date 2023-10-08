@@ -28,7 +28,6 @@ from pyscf import lib as pyscf_lib
 from pyscf.lib import logger
 from pyscf.scf import hf, jk, _vhf
 from gpu4pyscf import lib
-from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu, to_gpu
 from gpu4pyscf.lib.cupy_helper import eigh, load_library, tag_array
 from gpu4pyscf.scf import diis
 
@@ -120,7 +119,6 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             continue
 
         for cp_kl_id, log_q_kl in enumerate(log_qs[:cp_ij_id+1]):
-            t0 = time.perf_counter()
             cpk = cp_idx[cp_kl_id]
             cpl = cp_jdx[cp_kl_id]
             lk = vhfopt.uniq_l_ctr[cpk,0]
@@ -279,10 +277,7 @@ def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
     log.timer('vj and vk on gpu', *cput0)
     return vj, vk
 
-def _eigh(mf, h, s):
-    return eigh(h, s)
-
-def _make_rdm1(mf, mo_coeff=None, mo_occ=None, **kwargs):
+def make_rdm1(mf, mo_coeff=None, mo_occ=None, **kwargs):
     if mo_occ is None: mo_occ = mf.mo_occ
     if mo_coeff is None: mo_coeff = mf.mo_coeff
     is_occ = mo_occ > 0
@@ -291,43 +286,42 @@ def _make_rdm1(mf, mo_coeff=None, mo_occ=None, **kwargs):
     occ_coeff = mo_coeff[:, mo_occ>1.0]
     return tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
 
-def _get_occ(mf, mo_energy=None, mo_coeff=None):
+def get_occ(mf, mo_energy=None, mo_coeff=None):
     if mo_energy is None: mo_energy = mf.mo_energy
     e_idx = cupy.argsort(mo_energy)
-    e_sort = mo_energy[e_idx]
     nmo = mo_energy.size
     mo_occ = cupy.zeros(nmo)
     nocc = mf.mol.nelectron // 2
     mo_occ[e_idx[:nocc]] = 2
     return mo_occ
 
-def _get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1, vhfopt=None):
+def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1, vhfopt=None):
     if dm_last is None:
-        vj, vk = _get_jk(mf, mol, cupy.asarray(dm), hermi)
+        vj, vk = mf.get_jk(mol, cupy.asarray(dm), hermi)
         return vj - vk * .5
     else:
         ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
-        vj, vk = _get_jk(mf, mol, ddm, hermi)
+        vj, vk = mf.get_jk(mol, ddm, hermi)
         return vj - vk * .5 + cupy.asarray(vhf_last)
 
-def _get_grad(mo_coeff, mo_occ, fock_ao):
+def get_grad(mo_coeff, mo_occ, fock_ao):
     occidx = mo_occ > 0
     viridx = ~occidx
     g = reduce(cupy.dot, (mo_coeff[:,viridx].conj().T, fock_ao,
                            mo_coeff[:,occidx])) * 2
     return g.ravel()
 
-def _damping(s, d, f, factor):
+def damping(s, d, f, factor):
     dm_vir = cupy.eye(s.shape[0]) - cupy.dot(s, d)
     f0 = reduce(cupy.dot, (dm_vir, f, d, s))
     f0 = (f0+f0.conj().T) * (factor/(factor+1.))
     return f - f0
 
-def _level_shift(s, d, f, factor):
+def level_shift(s, d, f, factor):
     dm_vir = s - reduce(cupy.dot, (s, d, s))
     return f + dm_vir * factor
 
-def _get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
+def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
@@ -405,19 +399,24 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         dm_last = dm
         last_hf_e = e_tot
 
-        f = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis); t1 = log.timer_debug1('DIIS', *t0)
-        mo_energy, mo_coeff = eigh(f, s1e);                 t1 = log.timer_debug1('eig', *t1)
+        f = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis)
+        t1 = log.timer_debug1('DIIS', *t0)
+        mo_energy, mo_coeff = mf.eig(f, s1e)
+        t1 = log.timer_debug1('eig', *t1)
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
-        dm = _make_rdm1(mf, mo_coeff, mo_occ);              t1 = log.timer_debug1('dm', *t1)
-        vhf = mf.get_veff(mol, dm, dm_last, vhf);           t1 = log.timer_debug1('veff', *t1)
-        e_tot = mf.energy_tot(dm, h1e, vhf);                t1 = log.timer_debug1('energy', *t1)
+        dm = mf.make_rdm1(mo_coeff, mo_occ)
+        t1 = log.timer_debug1('dm', *t1)
+        vhf = mf.get_veff(mol, dm, dm_last, vhf)
+        t1 = log.timer_debug1('veff', *t1)
+        e_tot = mf.energy_tot(dm, h1e, vhf)
+        t1 = log.timer_debug1('energy', *t1)
 
         norm_ddm = cupy.linalg.norm(dm-dm_last)
         t1 = log.timer_debug1('total', *t0)
         logger.info(mf, 'cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
                     cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
         e_diff = abs(e_tot-last_hf_e)
-        norm_gorb = cupy.linalg.norm(_get_grad(mo_coeff, mo_occ, f))
+        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, f))
         if(e_diff < conv_tol and norm_gorb < conv_tol_grad):
             scf_conv = True
             break
@@ -537,19 +536,17 @@ def _quad_moment(mf, mol=None, dm=None, unit='Debye-Ang'):
 
 
 class RHF(hf.RHF):
-    to_cpu = to_cpu
-    to_gpu = to_gpu
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     screen_tol = 1e-14
-    device = 'gpu'
     DIIS = diis.SCF_DIIS
-    get_jk = patch_cpu_kernel(hf.RHF.get_jk)(_get_jk)
-    _eigh = patch_cpu_kernel(hf.RHF._eigh)(_eigh)
-    make_rdm1 = patch_cpu_kernel(hf.RHF.make_rdm1)(_make_rdm1)
-    get_fock = patch_cpu_kernel(hf.RHF.get_fock)(_get_fock)
-    get_occ = patch_cpu_kernel(hf.RHF.get_occ)(_get_occ)
-    get_veff = patch_cpu_kernel(hf.RHF.get_veff)(_get_veff)
-    get_grad = patch_cpu_kernel(hf.RHF.get_grad)(_get_grad)
+    get_jk = _get_jk
+    _eigh = staticmethod(eigh)
+    make_rdm1 = make_rdm1
+    get_fock = get_fock
+    get_occ = get_occ
+    get_veff = get_veff
+    get_grad = staticmethod(get_grad)
     gen_response = _gen_rhf_response
     quad_moment = _quad_moment
 
@@ -579,7 +576,7 @@ class RHF(hf.RHF):
     kernel = pyscf_lib.alias(scf, alias_name='kernel')
 
 class _VHFOpt(_vhf.VHFOpt):
-    to_cpu = to_cpu
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     def __init__(self, mol, intor, prescreen='CVHFnoscreen',
                  qcondname='CVHFsetnr_direct_scf', dmcondname=None):
@@ -875,5 +872,3 @@ def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size):
     uniq_l_ctr = np.vstack(_l_ctrs)
     l_ctr_counts = np.hstack(_l_ctr_counts)
     return uniq_l_ctr, l_ctr_counts
-
-del patch_cpu_kernel

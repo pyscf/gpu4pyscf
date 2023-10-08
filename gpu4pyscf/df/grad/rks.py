@@ -19,11 +19,11 @@ import cupy
 from pyscf import lib
 from pyscf.df.grad import rks
 from gpu4pyscf.grad import rks as rks_grad
-from gpu4pyscf.df.grad.rhf import _get_jk, _grad_elec
+from gpu4pyscf.df.grad.rhf import get_jk, grad_elec
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
 
-def _get_veff(ks_grad, mol=None, dm=None):
+def get_veff(ks_grad, mol=None, dm=None):
 
     '''Coulomb + XC functional
     '''
@@ -117,13 +117,11 @@ def _get_veff(ks_grad, mol=None, dm=None):
     return vxc
 
 class Gradients(rks.Gradients):
-    to_cpu = to_cpu
-    to_gpu = to_gpu
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
-    device = 'gpu'
-    get_jk = patch_cpu_kernel(rks.Gradients.get_jk)(_get_jk)
-    get_veff = patch_cpu_kernel(rks.Gradients.get_veff)(_get_veff)
-    grad_elec = patch_cpu_kernel(rks.Gradients.grad_elec)(_grad_elec)
+    get_jk = get_jk
+    get_veff = get_veff
+    grad_elec = grad_elec
 
     def get_j(self, mol=None, dm=None, hermi=0, omega=None):
         vj, _, vjaux, _ = self.get_jk(mol, dm, with_k=False, omega=omega)

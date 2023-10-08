@@ -21,10 +21,9 @@ Patch pyscf SCF modules to make all subclass of SCF class support GPU mode.
 
 from gpu4pyscf.df.df_jk import _density_fit, _get_jk
 from pyscf import df
-from gpu4pyscf.lib.utils import patch_cpu_kernel
 
 # The device attribute is patched to the pyscf base SCF module. It will be
 # seen by all subclasses.
 
-df.df_jk.density_fit = patch_cpu_kernel(df.df_jk.density_fit)(_density_fit)
-df.df_jk.get_jk = patch_cpu_kernel(df.df_jk.get_jk)(_get_jk)
+df.df_jk.density_fit = _density_fit
+df.df_jk.get_jk = _get_jk

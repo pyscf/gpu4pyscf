@@ -43,7 +43,6 @@ def tearDownModule():
 def run_dft(xc):
     mf = rks.RKS(mol, xc=xc)
     mf.grids.level = grids_level
-    mf.device = 'gpu'
     e_dft = mf.kernel()
     return e_dft
 

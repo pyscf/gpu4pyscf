@@ -38,7 +38,6 @@ from pyscf import __config__
 from cupyx.scipy.spatial.distance import cdist
 from gpu4pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import load_library
-from gpu4pyscf.lib.utils import to_cpu, to_gpu
 
 libdft = lib.load_library('libdft')
 libgdft = load_library('libgdft')
@@ -362,7 +361,6 @@ def get_partition(mol, atom_grids_tab,
         '''
         def gen_grid_partition(coords):
             grid_dist = cupy.linalg.norm(coords[None,:,:] - atm_coords[:,None,:], axis=-1)
-            ngrid = coords.shape[0]
             r12 = grid_dist[:,None,:] - grid_dist[None,:,:]
             rinv = 1.0/atm_dist
             cupy.fill_diagonal(rinv, 0.0)
@@ -530,13 +528,15 @@ class Grids(lib.StreamObject):
             Eg, grids.atom_grid = {'H': (20,110)} will generate 20 radial
             grids and 110 angular grids for H atom.
 
-        Examples:
+    Examples:
 
-        >>> mol = gto.M(atom='H 0 0 0; H 0 0 1.1')
-        >>> grids = dft.gen_grid.Grids(mol)
-        >>> grids.level = 4
-        >>> grids.build()
-        '''
+    >>> mol = gto.M(atom='H 0 0 0; H 0 0 1.1')
+    >>> grids = dft.gen_grid.Grids(mol)
+    >>> grids.level = 4
+    >>> grids.build()
+    '''
+
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     atomic_radii = _load_conf(radi, 'dft_gen_grid_Grids_atomic_radii',
                                    radi.BRAGG_RADII)
@@ -551,9 +551,6 @@ class Grids(lib.StreamObject):
 
     alignment = ALIGNMENT_UNIT
     cutoff = CUTOFF
-
-    to_cpu = to_cpu
-    to_gpu = to_gpu
 
     def __init__(self, mol):
         self.mol = mol

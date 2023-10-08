@@ -16,14 +16,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from pyscf.scf import rohf
-from gpu4pyscf.scf.hf import _get_jk, _eigh
-from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu, to_gpu
+from gpu4pyscf.scf.hf import _get_jk, eigh
 
 
 class ROHF(rohf.ROHF):
-    to_cpu = to_cpu
-    to_gpu = to_gpu
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
-    device = 'gpu'
-    get_jk = patch_cpu_kernel(rohf.ROHF.get_jk)(_get_jk)
-    _eigh = patch_cpu_kernel(rohf.ROHF._eigh)(_eigh)
+    get_jk = _get_jk
+    _eigh = staticmethod(eigh)

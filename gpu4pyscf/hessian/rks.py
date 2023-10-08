@@ -32,7 +32,6 @@ from gpu4pyscf.lib import logger
 
 # import pyscf.grad.rks to activate nuc_grad_method method
 from gpu4pyscf.grad import rks  # noqa
-from gpu4pyscf.lib.utils import to_cpu
 
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
@@ -606,6 +605,8 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
 class Hessian(rhf_hess.Hessian):
     '''Non-relativistic RKS hessian'''
+    from gpu4pyscf.lib.utils import to_gpu, device
+
     def __init__(self, mf):
         rhf_hess.Hessian.__init__(self, mf)
         self.grids = None
@@ -613,12 +614,11 @@ class Hessian(rhf_hess.Hessian):
         self._keys = self._keys.union(['grids'])
 
     def to_cpu(self):
+        from gpu4pyscf.lib.utils import to_cpu
         from pyscf.hessian.rks import Hessian
         # to_cpu returns an rhf.Hessian object
         obj = to_cpu(self)
         return obj.view(Hessian)
-
-    to_gpu = to_gpu
 
     def get_dispersion(self):
         if self.base.disp[:2].upper() == 'D3':

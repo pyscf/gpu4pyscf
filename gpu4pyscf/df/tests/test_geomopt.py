@@ -52,7 +52,6 @@ eps = 1e-3
 class KnownValues(unittest.TestCase):
     def test_geomopt(self):
         mf = rks.RKS(mol, xc=xc, disp=disp).density_fit()
-        mf.device = 'gpu'
         mf.grids.level = grids_level
         e_tot = mf.kernel()
         mol_eq = optimize(mf, maxsteps=20)

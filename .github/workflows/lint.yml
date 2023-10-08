@@ -1,0 +1,18 @@
+name: Lint
+
+on: [push, pull_request]
+
+jobs:
+  flake:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    - name: Install flake8
+      run: pip install "flake8>=3.7.0"
+    - name: Static analysis
+      run: flake8 --config .flake8 gpu4pyscf

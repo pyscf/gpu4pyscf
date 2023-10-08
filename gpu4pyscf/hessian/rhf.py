@@ -38,7 +38,6 @@ from pyscf.grad import rhf  # noqa
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.utils import to_cpu, to_gpu
 
 def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
               mo1=None, mo_e1=None, h1ao=None,
@@ -373,7 +372,6 @@ def gen_vind(mf, mo_coeff, mo_occ):
     def fx(mo1):
         mo1 = cupy.asarray(mo1)
         mo1 = mo1.reshape(-1,nmo,nocc)
-        nset = len(mo1)
         mo1_mo = cupy.einsum('npo,ip->nio', mo1, mo_coeff)
         dm1 = cupy.einsum('nio,jo->nij', 2.0*mo1_mo, mocc)
         dm1 = dm1 + dm1.transpose(0,2,1)
@@ -473,8 +471,7 @@ def gen_hop(hobj, mo_energy=None, mo_coeff=None, mo_occ=None, verbose=None):
 class Hessian(rhf_hess.Hessian):
     '''Non-relativistic restricted Hartree-Fock hessian'''
 
-    to_cpu = to_cpu
-    to_gpu = to_gpu
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     def __init__(self, scf_method):
         self.verbose = scf_method.verbose

@@ -41,7 +41,6 @@ from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, release_gpu_stack
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.utils import to_cpu, to_gpu
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -389,10 +388,8 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     aoslices = mol.aoslice_by_atom()
     auxslices = auxmol.aoslice_by_atom()
 
-    naux = auxmol.nao
     nao, nmo = mo_coeff.shape
     mocc = mo_coeff[:,mo_occ>0]
-    nocc = mocc.shape[1]
     dm0 = cupy.dot(mocc, mocc.T) * 2
 
     if omega and omega > 1e-10:
@@ -407,7 +404,6 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     sph_ao_idx = intopt.sph_ao_idx
     sph_aux_idx = intopt.sph_aux_idx
     rev_ao_idx = np.argsort(intopt.sph_ao_idx)
-    rev_aux_idx = np.argsort(intopt.sph_aux_idx)
 
     mocc = mocc[sph_ao_idx, :]
     mo_coeff = mo_coeff[sph_ao_idx,:]
@@ -511,8 +507,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
 class Hessian(rhf_hess.Hessian):
     '''Non-relativistic restricted Hartree-Fock hessian'''
 
-    to_cpu = to_cpu
-    to_gpu = to_gpu
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     def __init__(self, mf):
         self.auxbasis_response = 1

@@ -23,11 +23,10 @@ from pyscf import lib
 from pyscf.scf import hf as pyscf_hf
 from pyscf.dft import rks
 
-from gpu4pyscf import scf
 from gpu4pyscf.scf import diis
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
-from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu, to_gpu
+from gpu4pyscf.scf.hf import RHF
 from gpu4pyscf.lib.cupy_helper import load_library, tag_array
 
 libcupy_helper = load_library('libcupy_helper')
@@ -100,7 +99,7 @@ def initialize_grids(ks, mol=None, dm=None):
 
     return ks
 
-def _get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     '''Coulomb + XC functionals
     .. note::
         This function will modify the input ks object.
@@ -203,9 +202,8 @@ def _get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
     return vxc
 
-class RKS(rks.RKS, scf.hf.RHF):
-    to_cpu = to_cpu
-    to_gpu = to_gpu
+class RKS(rks.RKS):
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     def __init__(self, mol, xc='LDA,VWN', disp=None):
         super().__init__(mol, xc)
@@ -213,13 +211,6 @@ class RKS(rks.RKS, scf.hf.RHF):
         self.disp = disp
         self.screen_tol = 1e-14
         self.grids = gen_grid.Grids(mol)
-
-    @property
-    def device(self):
-        return self._numint.device
-    @device.setter
-    def device(self, value):
-        self._numint.device = value
 
     def get_dispersion(self):
         if self.disp is None:
@@ -269,4 +260,6 @@ class RKS(rks.RKS, scf.hf.RHF):
         self.scf_summary['nuc'] = nuc.real
         return e_tot
 
-    get_veff = patch_cpu_kernel(rks.RKS.get_veff)(_get_veff)
+    get_jk = RHF.get_jk
+    get_veff = get_veff
+    _eigh = RHF._eigh

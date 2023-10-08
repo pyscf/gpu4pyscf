@@ -57,8 +57,8 @@ def get_handle():
         return handle
     return _handles[dev]
 
-def create_contraction_descriptor(handle, 
-                                  a, desc_a, mode_a, 
+def create_contraction_descriptor(handle,
+                                  a, desc_a, mode_a,
                                   b, desc_b, mode_b,
                                   c, desc_c, mode_c):
     alignment_req_A = cutensor_lib.getAlignmentRequirement(handle, a.data.ptr, desc_a)
@@ -114,7 +114,7 @@ def contraction(pattern, a, b, alpha, beta, out=None):
     ws_size = cutensor_lib.contractionGetWorkspaceSize(handle, desc, find, cutensor_lib.WORKSPACE_RECOMMENDED)
     try:
         ws = cupy.empty(ws_size, dtype=np.int8)
-    except:
+    except Exception:
         ws_size = cutensor_lib.contractionGetWorkspaceSize(handle, desc, find, cutensor_lib.WORKSPACE_MIN)
         ws = cupy.empty(ws_size, dtype=np.int8)
     
@@ -127,4 +127,3 @@ def contraction(pattern, a, b, alpha, beta, out=None):
                              beta.ctypes.data, c.data.ptr, out.data.ptr,
                              ws.data.ptr, ws_size)
     return out
-    

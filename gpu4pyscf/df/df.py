@@ -18,13 +18,13 @@ import copy
 import cupy
 import ctypes
 import numpy as np
-from pyscf import lib, __config__
+from pyscf import lib
 from pyscf.df import df, addons
-from gpu4pyscf.lib.cupy_helper import *
+from gpu4pyscf.lib.cupy_helper import (
+    cholesky, tag_array, get_avail_mem, cart2sph, solve_triangular)
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
-from gpu4pyscf.lib.utils import to_cpu, to_gpu
 from cupyx import scipy
 
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
@@ -32,7 +32,7 @@ ALIGNED = getattr(__config__, 'ao_aligned', 32)
 LINEAR_DEP_TOL = 1e-7
 
 class DF(df.DF):
-    device = 'gpu'
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     def __init__(self, mol, auxbasis=None):
         super().__init__(mol, auxbasis)
@@ -44,10 +44,9 @@ class DF(df.DF):
         self._cderi = None
 
     def to_cpu(self):
+        from gpu4pyscf.lib.utils import to_cpu
         obj = to_cpu(self)
         return obj.reset()
-
-    to_gpu = to_gpu
 
     def build(self, direct_scf_tol=1e-14, omega=None):
         mol = self.mol
@@ -80,13 +79,13 @@ class DF(df.DF):
         t0 = log.timer_debug1('2c2e', *t0)
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
         intopt.build(direct_scf_tol, diag_block_with_triu=False, aosym=True, group_size=256)
-        t1 = log.timer_debug1('prepare intopt', *t0)
+        log.timer_debug1('prepare intopt', *t0)
         self.j2c = j2c.copy()
         j2c = j2c[cupy.ix_(intopt.sph_aux_idx, intopt.sph_aux_idx)]
         try:
             self.cd_low = cholesky(j2c)
             self.cd_low = tag_array(self.cd_low, tag='cd')
-        except:
+        except Exception:
             w, v = cupy.linalg.eigh(j2c)
             idx = w > LINEAR_DEP_TOL
             self.cd_low = (v[:,idx] / cupy.sqrt(w[idx]))
@@ -175,12 +174,12 @@ class DF(df.DF):
         '''
         reset object for scanner
         '''
-        if mol is not None:
-            self.mol = mol
-        self.auxmol = None
-        self._cderi = None
-        self._rsh_df = {}
+        super().reset(mol)
         self.intopt = None
+        self.nao = None
+        self.naux = None
+        self.cd_low = None
+        self._cderi = None
         return self
 
 def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
@@ -188,11 +187,9 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
     Returns:
         2D array of (naux,nao*(nao+1)/2) in C-contiguous
     '''
-    nao = mol.nao
     naoaux, naux = cd_low.shape
     npair = len(intopt.cderi_row)
     log = logger.new_logger(mol, mol.verbose)
-    t0 = (logger.process_clock(), logger.perf_counter())
     nq = len(intopt.log_qs)
 
     # if the matrix exceeds the limit, store CDERI in CPU memory
@@ -201,7 +198,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
     if naux * npair * 8 < 0.4 * avail_mem:
         try:
             cderi = cupy.empty([naux, npair], order='C')
-        except:
+        except Exception:
             use_gpu_memory = False
     else:
         use_gpu_memory = False
@@ -224,7 +221,8 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
         lj = intopt.angular[cpj]
         i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
         j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
-        ni = i1 - i0; nj = j1 - j0
+        ni = i1 - i0
+        nj = j1 - j0
         if sr_only:
             # TODO: in-place implementation or short-range kernel
             ints_slices = cupy.zeros([naoaux, nj, ni], order='C')
