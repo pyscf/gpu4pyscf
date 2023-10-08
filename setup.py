@@ -18,7 +18,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import shutil
+import sys
 import subprocess
 import re
 
@@ -36,12 +36,10 @@ CLASSIFIERS = None
 PLATFORMS = None
 
 def get_cuda_version():
-    nvcc_out = subprocess.run([f"nvcc", "--version"], stdout=subprocess.PIPE).stdout.decode('utf-8')
+    nvcc_out = subprocess.check_output(["nvcc", "--version"]).decode('utf-8')
     m = re.search(r"V[0-9]+.[0-9]+", nvcc_out)
     str_version = m.group(0)[1:]
     return str_version[:2]+'x'
-
-CUDA_VERSION = get_cuda_version()
 
 def get_version():
     topdir = os.path.abspath(os.path.join(__file__, '..'))
@@ -114,8 +112,16 @@ from distutils.command.build import build
 build.sub_commands = ([c for c in build.sub_commands if c[0] == 'build_ext'] +
                       [c for c in build.sub_commands if c[0] != 'build_ext'])
 
+if 'sdist' in sys.argv:
+    # The sdist release
+    package_name = NAME + '-cuda'
+    CUDA_VERSION = '11x'
+else:
+    CUDA_VERSION = get_cuda_version()
+    package_name = NAME + '-cuda' + CUDA_VERSION
+
 setup(
-    name=NAME+'-cuda'+CUDA_VERSION,
+    name=package_name,
     version=VERSION,
     description=DESCRIPTION,
     license=LICENSE,
