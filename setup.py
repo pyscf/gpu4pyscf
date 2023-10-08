@@ -114,7 +114,7 @@ build.sub_commands = ([c for c in build.sub_commands if c[0] == 'build_ext'] +
 
 if 'sdist' in sys.argv:
     # The sdist release
-    package_name = NAME + '-cuda'
+    package_name = NAME
     CUDA_VERSION = '11x'
 else:
     CUDA_VERSION = get_cuda_version()
