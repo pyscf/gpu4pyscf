@@ -38,7 +38,7 @@ from pyscf.grad import rhf  # noqa
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.utils import to_cpu
+from gpu4pyscf.lib.utils import to_cpu, to_gpu
 
 def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
               mo1=None, mo_e1=None, h1ao=None,
@@ -474,6 +474,7 @@ class Hessian(rhf_hess.Hessian):
     '''Non-relativistic restricted Hartree-Fock hessian'''
 
     to_cpu = to_cpu
+    to_gpu = to_gpu
 
     def __init__(self, scf_method):
         self.verbose = scf_method.verbose

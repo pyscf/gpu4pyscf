@@ -38,7 +38,7 @@ from pyscf import __config__
 from cupyx.scipy.spatial.distance import cdist
 from gpu4pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import load_library
-from gpu4pyscf.lib.utils import to_cpu
+from gpu4pyscf.lib.utils import to_cpu, to_gpu
 
 libdft = lib.load_library('libdft')
 libgdft = load_library('libgdft')
@@ -553,6 +553,7 @@ class Grids(lib.StreamObject):
     cutoff = CUTOFF
 
     to_cpu = to_cpu
+    to_gpu = to_gpu
 
     def __init__(self, mol):
         self.mol = mol

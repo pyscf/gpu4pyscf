@@ -118,6 +118,7 @@ def _get_veff(ks_grad, mol=None, dm=None):
 
 class Gradients(rks.Gradients):
     to_cpu = to_cpu
+    to_gpu = to_gpu
 
     device = 'gpu'
     get_jk = patch_cpu_kernel(rks.Gradients.get_jk)(_get_jk)

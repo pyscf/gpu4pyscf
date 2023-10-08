@@ -41,7 +41,7 @@ from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, release_gpu_stack
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.utils import to_cpu
+from gpu4pyscf.lib.utils import to_cpu, to_gpu
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -512,6 +512,7 @@ class Hessian(rhf_hess.Hessian):
     '''Non-relativistic restricted Hartree-Fock hessian'''
 
     to_cpu = to_cpu
+    to_gpu = to_gpu
 
     def __init__(self, mf):
         self.auxbasis_response = 1

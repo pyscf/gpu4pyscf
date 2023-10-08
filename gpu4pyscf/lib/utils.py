@@ -49,3 +49,8 @@ def to_cpu(method):
         elif hasattr(val, 'to_cpu'):
             setattr(method, key, val.to_cpu())
     return method
+
+def identity(x):
+    return x
+
+to_gpu = identity

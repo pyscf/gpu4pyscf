@@ -28,7 +28,7 @@ from pyscf import lib as pyscf_lib
 from pyscf.lib import logger
 from pyscf.scf import hf, jk, _vhf
 from gpu4pyscf import lib
-from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu
+from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu, to_gpu
 from gpu4pyscf.lib.cupy_helper import eigh, load_library, tag_array
 from gpu4pyscf.scf import diis
 
@@ -538,6 +538,7 @@ def _quad_moment(mf, mol=None, dm=None, unit='Debye-Ang'):
 
 class RHF(hf.RHF):
     to_cpu = to_cpu
+    to_gpu = to_gpu
 
     screen_tol = 1e-14
     device = 'gpu'

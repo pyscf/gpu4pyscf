@@ -27,7 +27,7 @@ from gpu4pyscf import scf
 from gpu4pyscf.scf import diis
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
-from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu
+from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu, to_gpu
 from gpu4pyscf.lib.cupy_helper import load_library, tag_array
 
 libcupy_helper = load_library('libcupy_helper')
@@ -205,6 +205,7 @@ def _get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
 
 class RKS(rks.RKS, scf.hf.RHF):
     to_cpu = to_cpu
+    to_gpu = to_gpu
 
     def __init__(self, mol, xc='LDA,VWN', disp=None):
         super().__init__(mol, xc)

@@ -24,7 +24,7 @@ from pyscf.lib import logger
 from pyscf.scf import dhf
 from pyscf.df import df_jk, addons
 from gpu4pyscf.lib.cupy_helper import contract, solve_triangular, take_last2d, transpose_sum, load_library, get_avail_mem
-from gpu4pyscf.lib.utils import to_cpu
+from gpu4pyscf.lib.utils import to_cpu, to_gpu
 from gpu4pyscf.dft import rks, numint
 from gpu4pyscf.scf import hf
 from gpu4pyscf.df import df, int3c2e
@@ -123,6 +123,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
         ''' % mf_class
 
         to_cpu = to_cpu
+        to_gpu = to_gpu
 
         def __init__(self, mf, dfobj, only_dfj):
             self.__dict__.update(mf.__dict__)

@@ -18,10 +18,11 @@
 from pyscf.dft import gks
 from gpu4pyscf.dft import numint
 from gpu4pyscf.scf.ghf import get_jk, _eigh
-from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu
+from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu, to_gpu
 
 class GKS(gks.GKS):
     to_cpu = to_cpu
+    to_gpu = to_gpu
 
     def __init__(self, mol, xc='LDA,VWN'):
         super().__init__(mol, xc)

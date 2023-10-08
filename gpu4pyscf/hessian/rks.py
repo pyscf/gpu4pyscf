@@ -614,8 +614,11 @@ class Hessian(rhf_hess.Hessian):
 
     def to_cpu(self):
         from pyscf.hessian.rks import Hessian
+        # to_cpu returns an rhf.Hessian object
         obj = to_cpu(self)
         return obj.view(Hessian)
+
+    to_gpu = to_gpu
 
     def get_dispersion(self):
         if self.base.disp[:2].upper() == 'D3':

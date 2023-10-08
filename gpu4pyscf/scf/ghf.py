@@ -18,7 +18,7 @@
 from pyscf.scf import ghf
 from gpu4pyscf.scf.hf import get_jk as _get_jk_nr
 from gpu4pyscf.scf.hf import _eigh
-from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu
+from gpu4pyscf.lib.utils import patch_cpu_kernel, to_cpu, to_gpu
 
 def get_jk(mol=None, dm=None, hermi=0, with_j=True, with_k=True,
            omega=None):
@@ -38,6 +38,7 @@ def get_jk(mol=None, dm=None, hermi=0, with_j=True, with_k=True,
 
 class GHF(ghf.GHF):
     to_cpu = to_cpu
+    to_gpu = to_gpu
 
     device = 'gpu'
 

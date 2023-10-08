@@ -24,7 +24,7 @@ from gpu4pyscf.lib.cupy_helper import *
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
-from gpu4pyscf.lib.utils import to_cpu
+from gpu4pyscf.lib.utils import to_cpu, to_gpu
 from cupyx import scipy
 
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
@@ -46,6 +46,8 @@ class DF(df.DF):
     def to_cpu(self):
         obj = to_cpu(self)
         return obj.reset()
+
+    to_gpu = to_gpu
 
     def build(self, direct_scf_tol=1e-14, omega=None):
         mol = self.mol
