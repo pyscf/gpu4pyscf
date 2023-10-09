@@ -136,7 +136,6 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
 def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 max_memory=2000, verbose=None):
-    log = logger.new_logger(mol, verbose)
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
@@ -162,7 +161,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     ao_deriv = 2
     vvrho = []
     for ao, mask, weight, coords \
-        in ni.block_loop(mol, grids, nao, ao_deriv, max_memory=max_memory):
+            in ni.block_loop(mol, grids, nao, ao_deriv, max_memory=max_memory):
         rho = numint.eval_rho2(opt.mol, ao[:4], mo_coeff, mo_occ, None, xctype)
         vvrho.append(rho)
     rho = cupy.hstack(vvrho)
@@ -247,9 +246,9 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     dms = cupy.asarray(dms)
     dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
            for dm in dms.reshape(-1,nao0,nao0)]
-    nset = len(dms)
+    #nset = len(dms)
     #make_rho, nset, nao = ni._gen_rho_evaluator(mol, dms.get(), hermi, False, grids)
-    ao_loc = mol.ao_loc_nr()
+    #ao_loc = mol.ao_loc_nr()
 
     excsum = 0
     vmat = cupy.zeros((3,nao,nao))
@@ -272,8 +271,8 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             ngrids = weight.size
             for p0, p1 in lib.prange(0,ngrids,block_size):
                 ao = numint.eval_ao(ni, opt.mol, coords[p0:p1, :], ao_deriv)
-                rho = numint.eval_rho(opt.mol, ao, dms[0], \
-                    xctype=xctype, hermi=1, with_lapl=False)
+                rho = numint.eval_rho(opt.mol, ao, dms[0],
+                                      xctype=xctype, hermi=1, with_lapl=False)
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
 
                 if xctype == 'LDA':

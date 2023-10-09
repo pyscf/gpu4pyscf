@@ -20,7 +20,6 @@ Patch pyscf SCF modules to make all subclass of SCF class support GPU mode.
 '''
 
 from gpu4pyscf.grad.rhf import _get_jk
-from gpu4pyscf.lib.utils import patch_cpu_kernel
 import pyscf.grad.rhf as RHF
 
-RHF.Gradients.get_jk = patch_cpu_kernel(RHF.Gradients.get_jk)(_get_jk)
+RHF.Gradients.get_jk = _get_jk

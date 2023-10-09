@@ -25,7 +25,6 @@ from pyscf.lib import logger
 from pyscf.dft import numint
 from pyscf.gto.eval_gto import NBINS, CUTOFF, make_screen_index
 from gpu4pyscf.scf.hf import basis_seg_contraction
-from gpu4pyscf.lib.utils import patch_cpu_kernel
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, load_library, add_sparse, release_gpu_stack
 from gpu4pyscf.dft import xc_deriv, xc_alias, libxc
 from gpu4pyscf import __config__
@@ -94,7 +93,7 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None,
             mol._env.ctypes.data_as(ctypes.c_void_p))
     if err != 0:
         raise RuntimeError('CUDA Error')
-    
+
     if deriv == 0:
         ao = ao[0]
     return ao
@@ -106,7 +105,7 @@ def eval_rho(mol, ao, dm, non0tab=None, xctype='LDA', hermi=0,
         _, ngrids = ao.shape
     else:
         _, ngrids = ao[0].shape
-    
+
     dm = cupy.asarray(dm)
     if xctype in ('LDA', 'HF'):
         c0 = dm.dot(ao)
@@ -219,7 +218,7 @@ def eval_rho3(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
         _, ngrids = ao[0].shape
     shls_slice = (0, mol.nbas)
     ao_loc = None #mol.ao_loc_nr()
-    
+
     cpos1= mo1
     if xctype == 'LDA' or xctype == 'HF':
         c_0 = _dot_ao_dm(mol, ao, cpos1, non0tab, shls_slice, ao_loc)
@@ -259,7 +258,7 @@ def eval_rho3(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
             if ao.shape[0] > 4:
                 XX, YY, ZZ = 4, 7, 9
                 ao2 = ao[XX] + ao[YY] + ao[ZZ]
-                c1 = _dot_ao_dm(mol, ao2, cpos, non0tab, shls_slice, ao_loc)
+                c1 = _dot_ao_dm(mol, ao2, cpos1, non0tab, shls_slice, ao_loc)
                 #:rho[4] = numpy.einsum('pi,pi->p', c0, c1)
                 rho[4] = _contract_rho(c0, c1)
                 rho[4] += rho[5]
@@ -271,7 +270,7 @@ def eval_rho3(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
 
 def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     thresh=1e-8
-    
+
     #output
     exc=cupy.zeros(rho[0,:].size)
     vxc=cupy.zeros([2,rho[0,:].size])
@@ -319,11 +318,11 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     dKdR=(1./6.)*K
     vvcoords = cupy.asarray(vvcoords, order='F')
     coords = cupy.asarray(coords, order='F')
-    
+
     F = cupy.empty_like(R)
     U = cupy.empty_like(R)
     W = cupy.empty_like(R)
-    
+
     #for i in range(R.size):
     #    DX=vvcoords[:,0]-coords[i,0]
     #    DY=vvcoords[:,1]-coords[i,1]
@@ -338,7 +337,7 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     #    U=numpy.sum(T)
     #    W=numpy.sum(T*R2)
     #    F*=-1.5
-    
+
     stream = cupy.cuda.get_current_stream()
     err = libgdft.VXC_vv10nlc(ctypes.cast(stream.ptr, ctypes.c_void_p),
                         ctypes.cast(F.data.ptr, ctypes.c_void_p),
@@ -356,14 +355,13 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
 
     if err != 0:
         raise RuntimeError('CUDA Error')
-    
+
     #exc is multiplied by Rho later
     exc[threshind] = Beta+0.5*F
     vxc[0,threshind] = Beta+F+1.5*(U*dKdR+W*dW0dR)
     vxc[1,threshind] = 1.5*W*dW0dG
     return exc,vxc
 
-@patch_cpu_kernel(numint.nr_rks)
 def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
            max_memory=2000, verbose=None):
     log = logger.new_logger(mol, verbose)
@@ -374,7 +372,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         opt = ni.gdftopt
 
     mo_coeff = getattr(dms, 'mo_coeff', None)
-    mo_occ 	= getattr(dms,'mo_occ', None)
+    mo_occ = getattr(dms,'mo_occ', None)
 
     mol = opt.mol
     coeff = cupy.asarray(opt.coeff)
@@ -405,7 +403,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                                                                opt.l_bas_offsets)
         else:
             pair2shls_full, pairs_locs_full = pair2shls, pairs_locs
-    
+
     release_gpu_stack()
     if xctype == 'LDA':
         ao_deriv = 0
@@ -427,7 +425,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 if USE_SPARSITY == 0:
                     vmat[i] += ao.dot(_scale_ao(ao, wv).T)
                 elif USE_SPARSITY == 1:
-                    _dot_ao_ao_sparse(ao, ao, wv, nbins, sindex, ao_loc, \
+                    _dot_ao_ao_sparse(ao, ao, wv, nbins, sindex, ao_loc,
                         pair2shls_full, pairs_locs_full, vmat[i])
                 elif USE_SPARSITY == 2:
                     mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[1])
@@ -446,7 +444,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     vmat[i] += ao[0].dot(_scale_ao(ao, wv).T)
                 elif USE_SPARSITY == 1:
                     aow = _scale_ao(ao, wv)
-                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc, \
+                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
                         pair2shls_full, pairs_locs_full, vmat[i])
                 elif USE_SPARSITY == 2:
                     mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
@@ -468,9 +466,9 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     vmat[i] += ao[0].dot(aow.T)
                     vmat[i] += _tau_dot(ao, ao, wv[4])
                 elif USE_SPARSITY == 1:
-                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc, \
+                    _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
                         pair2shls_full, pairs_locs_full, vmat[i])
-                    _tau_dot_sparse(ao, ao, wv[4], nbins, sindex, ao_loc, \
+                    _tau_dot_sparse(ao, ao, wv[4], nbins, sindex, ao_loc,
                         pair2shls_full, pairs_locs_full, vmat[i])
                 else:
                     mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
@@ -489,24 +487,23 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             excsum[i] += cupy.dot(den, exc)[0]
             t1 = log.timer_debug1('integration', *t1)
         ao = None
-    
+
     vmat = contract('pi,npq->niq', coeff, vmat)
     vmat = contract('qj,niq->nij', coeff, vmat)
     if xctype != 'LDA':
         #transpose_sum(vmat)
         vmat = vmat + vmat.transpose([0,2,1])
-    
+
     if FREE_CUPY_CACHE:
         dms = None
         cupy.get_default_memory_pool().free_all_blocks()
-    
+
     if len(dm_shape) == 2:
         nelec = nelec[0]
         excsum = excsum[0]
         vmat = vmat[0]
     return nelec, excsum, vmat#np.asarray(vmat)
 
-@patch_cpu_kernel(numint.nr_uks)
 def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
            max_memory=2000, verbose=None):
     log = logger.new_logger(mol, verbose)
@@ -547,7 +544,6 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
         ngrids = grids.weights.size
         for p0, p1 in lib.prange(0, ngrids, block_size):
-            coords = grids.coords[p0:p1, :]
             ao = eval_ao(ni, opt.mol, grids.coords[p0:p1], ao_deriv)
             weight = grids.weights[p0:p1]
             for i in range(nset):
@@ -609,7 +605,6 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     return nelec, excsum, vmat
 
 
-@patch_cpu_kernel(numint.get_rho)
 def get_rho(ni, mol, dm, grids, max_memory=2000):
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
@@ -625,7 +620,7 @@ def get_rho(ni, mol, dm, grids, max_memory=2000):
         #logger.debug1(mol, 'Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
         if block_size < ALIGNED:
             raise RuntimeError('Not enough GPU memory')
-        
+
         ngrids = grids.weights.size
         rho = cupy.empty(ngrids)
         for p0, p1 in lib.prange(0, ngrids, block_size):
@@ -637,7 +632,6 @@ def get_rho(ni, mol, dm, grids, max_memory=2000):
         cupy.get_default_memory_pool().free_all_blocks()
     return rho
 
-@patch_cpu_kernel(numint.nr_rks_fxc)
 def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=0,
                rho0=None, vxc=None, fxc=None, max_memory=2000, verbose=None):
     if fxc is None:
@@ -657,7 +651,6 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     if with_mocc:
         mo1 = cupy.einsum('nio,pi->npo', dms.mo1, coeff) * 2.0**0.5
         occ_coeff = cupy.einsum('io,pi->po', dms.occ_coeff, coeff) * 2.0**0.5
-        mo_occ = dms.mo_occ
     dms = contract('nij,qj->niq', dms, coeff)
     dms = contract('pi,niq->npq', coeff, dms)
     nset = len(dms)
@@ -667,7 +660,8 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         ao_deriv = 0
     else:
         ao_deriv = 1
-    p0 = 0; p1 = 0
+    p0 = 0
+    p1 = 0
     t0 = (logger.process_clock(), logger.perf_counter())
     for ao, mask, weights, coords in ni.block_loop(opt.mol, grids, nao, ao_deriv):
         p0, p1 = p1, p1+len(weights)
@@ -714,13 +708,12 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     if FREE_CUPY_CACHE:
         dms = None
         cupy.get_default_memory_pool().free_all_blocks()
-    
+
     if len(dm_shape) == 2:
         vmat = vmat[0]
-    
+
     return cupy.asarray(vmat)
 
-@patch_cpu_kernel(numint.nr_rks_fxc_st)
 def nr_rks_fxc_st(ni, mol, grids, xc_code, dm0=None, dms_alpha=None,
                   relativity=0, singlet=True, rho0=None, vxc=None, fxc=None,
                   max_memory=2000, verbose=None):
@@ -733,7 +726,6 @@ def nr_rks_fxc_st(ni, mol, grids, xc_code, dm0=None, dms_alpha=None,
     return nr_rks_fxc(ni, mol, grids, xc_code, dm0, dms_alpha, hermi=0, fxc=fxc)
 
 
-@patch_cpu_kernel(numint.nr_uks_fxc)
 def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=0,
                rho0=None, vxc=None, fxc=None, max_memory=2000, verbose=None):
     if fxc is None:
@@ -756,7 +748,7 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     nset = len(dma)
     vmata = cupy.zeros((nset, nao, nao))
     vmatb = cupy.zeros((nset, nao, nao))
-    
+
     with opt.gdft_envs_cache():
         mem_avail = cupy.cuda.runtime.memGetInfo()[0]
         if xctype == 'LDA':
@@ -890,10 +882,9 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     vmat = vmat + vmat.T
     vmat = contract('pi,pq->iq', coeff, vmat)
     vmat = contract('qj,iq->ij', coeff, vmat)
-    t1 = log.timer_debug1('eval vv10', *t0)
+    log.timer_debug1('eval vv10', *t0)
     return nelec, excsum, vmat
 
-@patch_cpu_kernel(numint.cache_xc_kernel)
 def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
                     max_memory=2000):
     xctype = ni._xc_type(xc_code)
@@ -910,12 +901,12 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
     if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
-    
+
     coeff = cupy.asarray(opt.coeff)
     ngrids = grids.weights.size
     comp = (ao_deriv+1)*(ao_deriv+2)*(ao_deriv+3)//6
     nao = coeff.shape[0]
-    
+
     def make_rdm1(mo_coeff, mo_occ):
         orbo = coeff.dot(mo_coeff[:,mo_occ>0])
         dm = (orbo*mo_occ[mo_occ>0]).dot(orbo.T)
@@ -927,7 +918,7 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
         logger.debug1(mol, 'Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
         if block_size < ALIGNED:
             raise RuntimeError('Not enough GPU memory')
-        
+
         if spin == 0:
             dm = make_rdm1(mo_coeff, mo_occ)
             rho = []
@@ -951,7 +942,7 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
     if FREE_CUPY_CACHE:
         dm = dma = dmb = None
         cupy.get_default_memory_pool().free_all_blocks()
-    
+
     vxc, fxc = ni.eval_xc_eff(xc_code, rho, deriv=2, xctype=xctype)[1:3]
     return rho, vxc, fxc
 
@@ -980,13 +971,13 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None
         inp['rho'] = rho[0]
         inp['sigma'] = rho[1]*rho[1] + rho[2]*rho[2] + rho[3]*rho[3]
         inp['tau'] = rho[-1]     # can be 4 (without laplacian) or 5 (with laplacian)
-    
-    do_vxc = True 
-    do_fxc = deriv > 1 
+
+    do_vxc = True
+    do_fxc = deriv > 1
     do_kxc = deriv > 2
-    
+
     vxc_labels = ["vrho", "vsigma", "vlapl", "vtau"]
-    fxc_labels = ["v2rho2", "v2rhosigma", "v2sigma2", "v2lapl2", "v2tau2", \
+    fxc_labels = ["v2rho2", "v2rhosigma", "v2sigma2", "v2lapl2", "v2tau2",
             "v2rholapl", "v2rhotau", "v2lapltau", "v2sigmalapl", "v2sigmatau"]
     kxc_labels = ["v3rho3", "v3rho2sigma", "v3rhosigma2", "v3sigma3",
            "v3rho2lapl", "v3rho2tau",
@@ -1004,7 +995,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None
             else:
                 ret_full[label] = xc_res[label] * w
     vxc = None
-    fxc = None 
+    fxc = None
     kxc = None
 
     exc = ret_full["zk"]
@@ -1027,7 +1018,7 @@ def _init_xcfuns(xc_code):
         xc_names = [('HYB_GGA_XC_B3LYP',1)]
     else:
         xc_names = dft.libxc.parse_xc(xc_upper)[1:][0]
-        
+
     xcfuns = []
     for xc, w in xc_names:
         xcfun = libxc.XCfun(xc, 'unpolarized')
@@ -1063,7 +1054,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
-    
+
     mol = opt.mol
     with opt.gdft_envs_cache():
         for ip0, ip1 in lib.prange(0, ngrids, blksize):
@@ -1074,7 +1065,8 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             yield ao, sindex, weight, coords
 
 class NumInt(numint.NumInt):
-    device = 'gpu'
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+
     def __init__(self, xc='LDA'):
         super().__init__()
         self.gdftopt = None
@@ -1215,7 +1207,7 @@ def _dot_ao_ao_sparse(bra, ket, wv, nbins, screen_index, ao_loc,
             bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
             screen_index.ctypes.data_as(ctypes.c_void_p),
             ao_loc.ctypes.data_as(ctypes.c_void_p))
-    
+
     if err != 0:
         raise RuntimeError('CUDA Error')
     return out
@@ -1244,7 +1236,7 @@ def _scale_ao(ao, wv, out=None):
             return contract('nip,np->ip', ao, wv)
         nvar, nao, ngrids = ao.shape
         assert wv.shape == (nvar, ngrids)
-    
+
     wv = cupy.asarray(wv, order='C')
     if out is None:
         out = cupy.empty((nao, ngrids), order='C')
@@ -1271,7 +1263,7 @@ class _GDFTOpt:
     def __init__(self, mol):
         self.envs_cache = ctypes.POINTER(_GDFTEnvsCache)()
         self._mol = mol
-    
+
     def build(self, mol=None):
         if mol is None:
             mol = self._mol
@@ -1320,7 +1312,7 @@ class _GDFTOpt:
         if inv_idx_padding:
             inv_idx = np.append(inv_idx, inv_idx_padding)
             pmol._bas = np.vstack([pmol._bas, pmol._bas[bas_to_pad]])
-        
+
         ao_loc = pmol.ao_loc_nr()
         nao = ao_loc[-1]
         sorted_idx = np.argsort(inv_idx)

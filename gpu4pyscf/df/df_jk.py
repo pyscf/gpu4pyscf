@@ -85,7 +85,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
     '''
 
     assert isinstance(mf, scf.hf.SCF)
-    
+
     if with_df is None:
         if isinstance(mf, dhf.UHF):
             with_df = df.DF4C(mf.mol)
@@ -120,7 +120,9 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
                 Set mf.with_df = None to switch off density fitting mode.
         See also the documents of class %s for other SCF attributes.
         ''' % mf_class
-        
+
+        from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+
         def __init__(self, mf, dfobj, only_dfj):
             self.__dict__.update(mf.__dict__)
             self._eri = None
@@ -130,7 +132,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
             self.with_df = dfobj
             self.only_dfj = only_dfj
             self._keys = self._keys.union(['with_df', 'only_dfj'])
-            
+
         init_workflow = init_workflow
 
         def reset(self, mol=None):
@@ -153,14 +155,14 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
             else:
                 vj, vk = mf_class.get_jk(self, mol, dm, hermi, with_j, with_k, omega)
             return vj, vk
-        
+
         def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1):
             '''
             effective potential
             '''
             if mol is None: mol = self.mol
             if dm is None: dm = self.make_rdm1()
-            
+
             # for DFT
             if mf_class == rks.RKS:
                 return rks._get_veff(self, dm=dm)
@@ -172,7 +174,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
             else:
                 vj, vk = self.get_jk(mol, dm, hermi=hermi)
                 return vj - vk * .5
-        
+
         def energy_elec(self, dm=None, h1e=None, vhf=None):
             '''
             electronic energy
@@ -185,10 +187,10 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
                 e1 = cupy.sum(h1e*dm)
                 ecoul = self.ecoul
                 exc = self.exc
-                e2 = ecoul + exc        
+                e2 = ecoul + exc
                 #logger.debug(self, f'E1 = {e1}, Ecoul = {ecoul}, Exc = {exc}')
                 return e1+e2, e2
-            
+
             e1 = cupy.einsum('ij,ji->', h1e, dm).real
             e_coul = cupy.einsum('ij,ji->', vhf, dm).real * .5
             self.scf_summary['e1'] = e1
@@ -204,7 +206,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
             e_tot = self.energy_elec(dm, h1e, vhf)[0] + nuc
             self.scf_summary['nuc'] = nuc.real
             return e_tot
-        
+
         def nuc_grad_method(self):
             if mf_class == rks.RKS:
                 from gpu4pyscf.df.grad import rks as rks_grad
@@ -213,7 +215,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
                 from gpu4pyscf.df.grad import rhf as rhf_grad
                 return rhf_grad.Gradients(self)
             raise NotImplementedError()
-        
+
 
         def Hessian(self):
             from gpu4pyscf.df.hessian import rhf, rks
@@ -237,7 +239,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
         @property
         def auxbasis(self):
             return getattr(self.with_df, 'auxbasis', None)
-    
+
     return DensityFitting(mf, with_df, only_dfj)
 
 def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-14, omega=None):
@@ -257,12 +259,13 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     dms = dms_tag.reshape([-1,nao,nao])
     nset = dms.shape[0]
     t0 = (logger.process_clock(), logger.perf_counter())
-    if dfobj._cderi is None: 
-        log.warn('CDERI not found, build...')    
+    if dfobj._cderi is None:
+        log.warn('CDERI not found, build...')
         dfobj.build(direct_scf_tol=direct_scf_tol, omega=omega)
 
-    nao, naux = dfobj.nao, dfobj.naux
-    vj = None; vk = None
+    assert nao == dfobj.nao
+    vj = None
+    vk = None
     ao_idx = dfobj.intopt.sph_ao_idx
     dms = take_last2d(dms, ao_idx)
 
@@ -291,7 +294,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
         blksize = dfobj.get_blksize(extra=nao*nocc)
         for cderi, cderi_sparse in dfobj.loop(blksize=blksize):
             # leading dimension is 1
-            if with_j: 
+            if with_j:
                 vj += get_j(cderi_sparse)
             if with_k:
                 rhok = contract('Lij,jk->Lki', cderi, occ_coeff)
@@ -358,7 +361,7 @@ def _get_jk(dfobj, dm, hermi=1, with_j=True, with_k=True,
     else:
         rsh_df = dfobj._rsh_df[key] = copy.copy(dfobj).reset()
         logger.info(dfobj, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
-    
+
     with rsh_df.mol.with_range_coulomb(omega):
         return get_jk(rsh_df, dm, hermi, with_j, with_k, direct_scf_tol)
 

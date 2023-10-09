@@ -44,7 +44,6 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
     if omega is None: omega = 0.0
     if stream is None: stream = cupy.cuda.get_current_stream()
     
-    nao_sph = len(intopt.sph_ao_idx)
     nao = intopt.mol.nao
     naux = intopt.auxmol.nao
     norb = nao + naux + 1
@@ -65,7 +64,9 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
             i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
             j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
             k0, k1 = intopt.cart_aux_loc[aux_id], intopt.cart_aux_loc[aux_id+1]
-            ni = i1 - i0; nj = j1 - j0; nk = k1 - k0
+            ni = i1 - i0
+            nj = j1 - j0
+            nk = k1 - k0
 
             bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
             bins_locs_kl = np.array([0, len(log_q_kl)], dtype=np.int32)
@@ -107,17 +108,19 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
     ip_type == 1: int3c2e_ip1
     ip_type == 2: int3c2e_ip2
     '''
+    from gpu4pyscf.scf.hf import _VHFOpt
     fn = getattr(libgint, 'GINTfill_int3c2e_' + ip_type)
     if omega is None: omega = 0.0
     if stream is None: stream = cupy.cuda.get_current_stream()
     if auxmol is None: 
-        auxmol = df.addons.make_auxmol(mol, auxbasis)
+        from pyscf.df.addons import make_auxmol
+        auxmol = make_auxmol(mol, auxbasis)
     
     nao_sph = mol.nao
     naux_sph = auxmol.nao
 
-    intopt = VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False)
+    intopt = _VHFOpt(mol, auxmol, 'int2e')
+    intopt.build(direct_scf_tol, diag_block_with_triu=True)
     
     nao = intopt.mol.nao
     naux = intopt.auxmol.nao
@@ -136,7 +139,9 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
             i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
             j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
             k0, k1 = intopt.cart_aux_loc[aux_id], intopt.cart_aux_loc[aux_id+1]
-            ni = i1 - i0; nj = j1 - j0; nk = k1 - k0
+            ni = i1 - i0
+            nj = j1 - j0
+            nk = k1 - k0
             lk = intopt.aux_angular[aux_id]
 
             bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
@@ -159,6 +164,8 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
                 ctypes.c_int(cp_ij_id),
                 ctypes.c_int(cp_kl_id),
                 ctypes.c_double(omega))
+            if err != 0:
+                raise RuntimeError("int3c2e_ip failed\n")
 
             int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
             int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)

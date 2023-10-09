@@ -38,6 +38,7 @@ from pyscf import __config__
 from cupyx.scipy.spatial.distance import cdist
 from gpu4pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import load_library
+
 libdft = lib.load_library('libdft')
 libgdft = load_library('libgdft')
 
@@ -289,7 +290,7 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                 libdft.MakeAngularGrid(grid.ctypes.data_as(ctypes.c_void_p),
                                        ctypes.c_int(n))
                 ang_grids[n] = grid
-            
+
             angs = numpy.array(angs)
             coords = []
             vol = []
@@ -309,7 +310,7 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                 '''
             atom_grids_tab[symb] = (cupy.vstack(coords), cupy.hstack(vol))
             #print(atom_grids_tab[symb][0].shape, atom_grids_tab[symb][1].shape)
-            
+
     return atom_grids_tab
 
 def get_partition(mol, atom_grids_tab,
@@ -346,7 +347,7 @@ def get_partition(mol, atom_grids_tab,
                                            for i in range(mol.natm)
                                            for j in range(mol.natm)])
             p_radii_table = f_radii_table.ctypes.data_as(ctypes.c_void_p)
-        
+
         def gen_grid_partition0(coords):
             coords = numpy.asarray(coords, order='F')
             ngrids = coords.shape[0]
@@ -360,19 +361,18 @@ def get_partition(mol, atom_grids_tab,
         '''
         def gen_grid_partition(coords):
             grid_dist = cupy.linalg.norm(coords[None,:,:] - atm_coords[:,None,:], axis=-1)
-            ngrid = coords.shape[0]
             r12 = grid_dist[:,None,:] - grid_dist[None,:,:]
             rinv = 1.0/atm_dist
             cupy.fill_diagonal(rinv, 0.0)
             g = rinv[:,:,None] * r12
-            
+
             if f_radii_adjust is not None:
                 g = f_radii_adjust(g)
-            
+
             g = (3.0 - g*g) * g * .5
             g = (3.0 - g*g) * g * .5
             g = (3.0 - g*g) * g * .5
-            
+
             pbecke = cupy.prod(0.5 * (1.0 - g), axis=1) * 2
             return pbecke
     else:
@@ -457,7 +457,7 @@ def arg_group_grids(mol, coords, box_size=GROUP_BOX_SIZE):
     box_ids[box_ids[:,0] > boxes[0], 0] = boxes[0]
     box_ids[box_ids[:,1] > boxes[1], 1] = boxes[1]
     box_ids[box_ids[:,2] > boxes[2], 2] = boxes[2]
-    
+
     rev_idx, counts = numpy.unique(box_ids, axis=0, return_inverse=True,
                                    return_counts=True)[1:3]
     return rev_idx.argsort(kind='stable')
@@ -528,13 +528,15 @@ class Grids(lib.StreamObject):
             Eg, grids.atom_grid = {'H': (20,110)} will generate 20 radial
             grids and 110 angular grids for H atom.
 
-        Examples:
+    Examples:
 
-        >>> mol = gto.M(atom='H 0 0 0; H 0 0 1.1')
-        >>> grids = dft.gen_grid.Grids(mol)
-        >>> grids.level = 4
-        >>> grids.build()
-        '''
+    >>> mol = gto.M(atom='H 0 0 0; H 0 0 1.1')
+    >>> grids = dft.gen_grid.Grids(mol)
+    >>> grids.level = 4
+    >>> grids.build()
+    '''
+
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     atomic_radii = _load_conf(radi, 'dft_gen_grid_Grids_atomic_radii',
                                    radi.BRAGG_RADII)
@@ -593,7 +595,7 @@ class Grids(lib.StreamObject):
         if self.atom_grid:
             logger.info(self, 'User specified grid scheme %s', str(self.atom_grid))
         return self
-    
+
     def build(self, mol=None, with_non0tab=False, sort_grids=True, **kwargs):
         if mol is None: mol = self.mol
         if self.verbose >= logger.WARN:

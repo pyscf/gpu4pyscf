@@ -19,26 +19,25 @@ import cupy
 from pyscf import lib
 from pyscf.df.grad import rks
 from gpu4pyscf.grad import rks as rks_grad
-from gpu4pyscf.df.grad.rhf import _get_jk, _grad_elec
-from gpu4pyscf.lib.utils import patch_cpu_kernel
+from gpu4pyscf.df.grad.rhf import get_jk, grad_elec
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
 
-def _get_veff(ks_grad, mol=None, dm=None):
-    
+def get_veff(ks_grad, mol=None, dm=None):
+
     '''Coulomb + XC functional
     '''
     if mol is None: mol = ks_grad.mol
     if dm is None: dm = ks_grad.base.make_rdm1()
     t0 = (logger.process_clock(), logger.perf_counter())
-    
+
     mf = ks_grad.base
     ni = mf._numint
     if ks_grad.grids is not None:
         grids = ks_grad.grids
     else:
         grids = mf.grids
-    
+
     if grids.coords is None:
         grids.build(sort_grids=False)
         #grids.build(with_non0tab=True)
@@ -56,7 +55,7 @@ def _get_veff(ks_grad, mol=None, dm=None):
         raise NotImplementedError
     #enabling range-separated hybrids
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
-    
+
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, ks_grad.max_memory*.9-mem_now)
     if ks_grad.grid_response:
@@ -80,12 +79,12 @@ def _get_veff(ks_grad, mol=None, dm=None):
                 max_memory=max_memory, verbose=ks_grad.verbose)
             vxc += vnlc
     t0 = logger.timer(ks_grad, 'vxc total', *t0)
-    
+
     # this can be moved into vxc calculations
     occ_coeff = cupy.asarray(mf.mo_coeff[:, mf.mo_occ>0.5], order='C')
     tmp = contract('nij,jk->nik', vxc, occ_coeff)
     vxc = 2.0*contract('nik,ik->ni', tmp, occ_coeff)
-    
+
     aoslices = mol.aoslice_by_atom()
     vxc = [vxc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
     vxc = cupy.asarray(vxc)
@@ -96,7 +95,7 @@ def _get_veff(ks_grad, mol=None, dm=None):
             e1_aux = vjaux
     else:
         vj, vk, vjaux, vkaux = ks_grad.get_jk(mol, dm)
-        
+
         if ks_grad.auxbasis_response:
             vk_aux = vkaux * hyb
         vk *= hyb
@@ -105,11 +104,11 @@ def _get_veff(ks_grad, mol=None, dm=None):
             vk += vk_lr * (alpha - hyb)
             if ks_grad.auxbasis_response:
                 vk_aux += vkaux_lr * (alpha - hyb)
-        
+
         vxc += vj - vk * .5
         if ks_grad.auxbasis_response:
             e1_aux = vjaux - vk_aux * .5
-        
+
     if ks_grad.auxbasis_response:
         logger.debug1(ks_grad, 'sum(auxbasis response) %s', e1_aux.sum(axis=0))
     else:
@@ -118,10 +117,11 @@ def _get_veff(ks_grad, mol=None, dm=None):
     return vxc
 
 class Gradients(rks.Gradients):
-    device = 'gpu'
-    get_jk = patch_cpu_kernel(rks.Gradients.get_jk)(_get_jk)
-    get_veff = patch_cpu_kernel(rks.Gradients.get_veff)(_get_veff)
-    grad_elec = patch_cpu_kernel(rks.Gradients.grad_elec)(_grad_elec)
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+
+    get_jk = get_jk
+    get_veff = get_veff
+    grad_elec = grad_elec
 
     def get_j(self, mol=None, dm=None, hermi=0, omega=None):
         vj, _, vjaux, _ = self.get_jk(mol, dm, with_k=False, omega=omega)
@@ -130,7 +130,7 @@ class Gradients(rks.Gradients):
     def get_k(self, mol=None, dm=None, hermi=0, omega=None):
         _, vk, _, vkaux = self.get_jk(mol, dm, with_j=False, omega=omega)
         return vk, vkaux
-    
+
     def get_dispersion(self):
         if self.base.disp[:2].upper() == 'D3':
             from pyscf import lib
@@ -139,19 +139,19 @@ class Gradients(rks.Gradients):
                 d3 = disp.DFTD3Dispersion(self.mol, xc=self.base.xc, version=self.base.disp)
                 _, g_d3 = d3.kernel()
             return g_d3
-        
+
         if self.base.disp[:2].upper() == 'D4':
             from pyscf.data.elements import charge
             atoms = numpy.array([ charge(a[0]) for a in self.mol._atom])
             coords = self.mol.atom_coords()
-            
+
             from pyscf import lib
             with lib.with_omp_threads(1):
                 from dftd4.interface import DampingParam, DispersionModel
                 model = DispersionModel(atoms, coords)
                 res = model.get_dispersion(DampingParam(method=self.base.xc), grad=True)
             return res.get("gradient")
-        
+
     def extra_force(self, atom_id, envs):
         if self.auxbasis_response:
             return envs['dvhf'].aux[atom_id]

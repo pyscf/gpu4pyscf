@@ -56,7 +56,6 @@ def tearDownModule():
     
 def _check_grad(grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
     mf = rks.RKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
-    mf.device = 'gpu'
     mf.grids.level = grids_level
     mf.conv_tol = 1e-12
     e_tot = mf.kernel()
@@ -79,9 +78,8 @@ def _check_grad(grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
             mol.set_geom_(coords, unit='Bohr')
             mol.build()
             e0 = f_scanner(mol)
-    
+
             mf = rks.RKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
-            mf.device = 'gpu'
             mf.grids.level = grids_level
 
             coords[i,j] -= 2.0 * eps
@@ -90,7 +88,6 @@ def _check_grad(grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
             e1 = f_scanner(mol)
 
             mf = rks.RKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
-            mf.device = 'gpu'
             mf.grids.level = grids_level
 
             coords[i,j] += eps

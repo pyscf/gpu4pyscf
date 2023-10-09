@@ -62,19 +62,17 @@ def tearDownModule():
     del mol
 
 class KnownValues(unittest.TestCase):
-    
+
     def _check_vxc(self, method, xc):
         ni = NumInt(xc=xc)
         fn = getattr(ni, method)
-        ni.device = 'gpu'
         n, e, v = fn(mol, grids_gpu, xc, dm0, hermi=1)
         v = [i.get() for i in v]
-        
+
         ni_pyscf = pyscf_numint()
-        ni_pyscf.device = 'cpu'
         fn = getattr(ni_pyscf, method)
         nref, eref, vref = fn(mol, grids_cpu, xc, dm0, hermi=1)
-        
+
         cupy.allclose(e, eref)
         cupy.allclose(n, nref)
         cupy.allclose(v, vref)
@@ -86,7 +84,6 @@ class KnownValues(unittest.TestCase):
             t1 = dm
         spin = 0
         ni_pyscf = pyscf_numint()
-        ni_pyscf.device = 'cpu'
         rho, vxc, fxc = ni_pyscf.cache_xc_kernel(mol, grids_cpu, xc, mo_coeff, mo_occ, spin)
         vref = ni_pyscf.nr_rks_fxc(
             mol, grids_cpu, xc, dm0=dm0, dms=t1, rho0=rho, vxc=vxc, fxc=fxc, hermi=hermi)
@@ -95,7 +92,6 @@ class KnownValues(unittest.TestCase):
         vxc0 = vxc.copy()
         fxc0 = fxc.copy()
         ni = NumInt()
-        ni.device = 'gpu'
         rho, vxc, fxc = ni.cache_xc_kernel(mol, grids_gpu, xc, cupy.asarray(mo_coeff), cupy.asarray(mo_occ), spin)
         v = ni.nr_rks_fxc(mol, grids_gpu, xc, dms=t1, fxc=fxc, hermi=hermi)
         if xc == MGGA_M06:
@@ -110,14 +106,12 @@ class KnownValues(unittest.TestCase):
     def _check_rks_fxc_st(self, xc, fpref):
         ni = NumInt()
         spin = 1
-        ni.device = 'gpu'
         rho, vxc, fxc = ni.cache_xc_kernel(
             mol, grids_gpu, xc, [mo_coeff]*2, [mo_occ*.5]*2, spin)
         v = ni.nr_rks_fxc_st(mol, grids_gpu, xc, dms_alpha=dm, fxc=fxc)
         self.assertAlmostEqual(lib.fp(v), fpref, 12)
-        
+
         ni_pyscf = pyscf_numint()
-        ni_pyscf.device = 'cpu'
         rho, vxc, fxc = ni_pyscf.cache_xc_kernel(
             mol, grids_cpu, xc, [mo_coeff]*2, [mo_occ*.5]*2, spin)
         vref = ni_pyscf.nr_rks_fxc_st(
@@ -131,29 +125,28 @@ class KnownValues(unittest.TestCase):
             t1 = dm
         ni = NumInt()
         spin = 1
-        ni.device = 'gpu'
         rho, vxc, fxc = ni.cache_xc_kernel(
             mol, grids_gpu, xc, [mo_coeff]*2, [mo_occ, 1-mo_occ], spin)
         v = ni.nr_uks_fxc(mol, grids_gpu, xc, dms=t1, fxc=fxc, hermi=hermi)
         self.assertAlmostEqual(lib.fp(v), fpref, 12)
-        
-        ni.device = 'cpu'
+
+        ni = ni.to_cpu()
         dm0 = mo_coeff.dot(mo_coeff.T)
         rho, vxc, fxc = ni.cache_xc_kernel(
             mol, grids_cpu, xc, [mo_coeff]*2, [mo_occ, 1-mo_occ], spin)
         vref = ni.nr_uks_fxc(
             mol, grids_cpu, xc, dm0=dm0, dms=t1, rho0=rho, vxc=vxc, fxc=fxc, hermi=hermi)
         self.assertAlmostEqual(abs(v - vref).max(), 0, 12)
-    
+
     def test_rks_lda(self):
         self._check_vxc('nr_rks', LDA)
 
     def test_rks_gga(self):
         self._check_vxc('nr_rks', GGA_PBE)
-    
+
     def test_rks_mgga(self):
         self._check_vxc('nr_rks', MGGA_M06)
-    
+
     # Not implemented yet
     '''
     def test_uks_lda(self):
@@ -165,13 +158,13 @@ class KnownValues(unittest.TestCase):
     def test_uks_mgga(self):
         self._check_vxc('nr_uks', 'm06', 83.5606316500255)
     '''
-    
+
     def test_rks_fxc_lda(self):
         self._check_rks_fxc(LDA, hermi=1)
-    
+
     def test_rks_fxc_gga(self):
         self._check_rks_fxc(GGA_PBE, hermi=1)
-    
+
     def test_rks_fxc_mgga(self):
         self._check_rks_fxc(MGGA_M06, hermi=1)
 
@@ -187,13 +180,13 @@ class KnownValues(unittest.TestCase):
     def test_uks_fxc_mgga(self):
         self._check_uks_fxc('m06', 0.7005336565753997, hermi=1)
         self._check_uks_fxc('m06', 0.35026682828770006, hermi=0)
-    
+
     def test_rks_fxc_st_lda(self):
         self._check_rks_fxc_st('lda', -0.06358425564270553)
 
     def test_rks_fxc_st_gga(self):
         self._check_rks_fxc_st('pbe', -0.006650911990898234)
-    
+
     def test_rks_fxc_st_mgga(self):
         self._check_rks_fxc_st('m06', 1.2456987899337242)
     '''

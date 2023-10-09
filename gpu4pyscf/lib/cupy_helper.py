@@ -65,8 +65,8 @@ def print_mem_info():
     total_mem = mempool.total_bytes()
     used_mem = mempool.used_bytes()
     mem_limit = mempool.get_limit()
-    stack_size_per_thread = cupy.cuda.runtime.deviceGetLimit(0x00)
-    mem_stack = stack_size_per_thread 
+    #stack_size_per_thread = cupy.cuda.runtime.deviceGetLimit(0x00)
+    #mem_stack = stack_size_per_thread
     GB = 1024 * 1024 * 1024
     print(f'mem_avail: {mem_avail/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB, used_mem: {used_mem/GB:.3f} GB,mem_limt: {mem_limit/GB:.3f} GB')
     
@@ -169,12 +169,13 @@ def eigh(h, s):
     '''
     n = h.shape[0]
     w = cupy.zeros(n)
-    A = h.copy(); B = s.copy()
+    A = h.copy()
+    B = s.copy()
     cusolver_handle = device.get_cusolver_handle()
     err = libcupy_helper.eigh(
         ctypes.cast(cusolver_handle, ctypes.c_void_p),
-        ctypes.cast(A.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(B.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(A.data.ptr, ctypes.c_void_p),
+        ctypes.cast(B.data.ptr, ctypes.c_void_p),
         ctypes.cast(w.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n))
     if err != 0:
@@ -300,7 +301,7 @@ def take_last2d(a, indices, out=None):
     reorder the last 2 dimensions with 'indices', the first n-2 indices do not change
     shape in the last 2 dimensions have to be the same
     '''
-    assert a.flags.c_contiguous == True
+    assert a.flags.c_contiguous
     assert a.shape[-1] == a.shape[-2]
     nao = a.shape[-1]
     if a.ndim == 2:
@@ -327,7 +328,7 @@ def transpose_sum(a):
     '''
     transpose (0,2,1)
     '''
-    assert a.flags.c_contiguous == True
+    assert a.flags.c_contiguous
     assert a.ndim == 3
     n = a.shape[-1]
     count = a.shape[0]
@@ -402,9 +403,9 @@ def contract323(a, b, alpha=1.0, beta=0.0, out=None):
     else:
         c = cupy.zeros([a.shape[0], b.shape[1], a.shape[2]], order='C')
 
-    if a.flags['OWNDATA'] == False:
+    if not a.flags['OWNDATA']:
         a = a.copy(order='C')
-    if b.flags['OWNDATA'] == False:
+    if not b.flags['OWNDATA']:
         a = a.copy(order='C')
     
     desc_a = cutensor.create_tensor_descriptor(a)

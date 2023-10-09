@@ -71,7 +71,7 @@ class KnownValues(unittest.TestCase):
         ao_cpu = cupy.asarray(ao)
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=2)
-        idx = cupy.argwhere(cupy.abs(ao_gpu - ao_cpu) > 1e-10)
+        #idx = cupy.argwhere(cupy.abs(ao_gpu - ao_cpu) > 1e-10)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
     
     def test_ao_sph_deriv3(self):

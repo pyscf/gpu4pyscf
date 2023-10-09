@@ -23,7 +23,6 @@ from pyscf.lib import logger
 from pyscf.grad import rhf
 from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf.scf.hf import _VHFOpt
-from gpu4pyscf.lib.utils import patch_cpu_kernel
 from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 
@@ -452,7 +451,7 @@ def get_dh1e_ecp(mol, dm):
             dh1e_ecp[ia] = cupy.einsum('xij,ij->x', ecp, dm)
     return 2.0 * dh1e_ecp
 
-def _grad_nuc(mf_grad, atmlst=None):
+def grad_nuc(mf_grad, atmlst=None):
     '''
     Derivatives of nuclear repulsion energy wrt nuclear coordinates
     '''
@@ -469,7 +468,7 @@ def _grad_nuc(mf_grad, atmlst=None):
         gs = gs[atmlst]
     return gs
 
-def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
+def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     '''
     Electronic part of RHF/RKS gradients
     Args:
@@ -486,14 +485,14 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
     log = logger.Logger(mf_grad.stdout, mf_grad.verbose)
-    
+
     mo_energy = cupy.asarray(mo_energy)
     mo_occ = cupy.asarray(mo_occ)
     mo_coeff = cupy.asarray(mo_coeff)
 
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
-    
+
     # CPU tasks are executed on background
     def calculate_h1e(h1_gpu, s1_gpu):
         # (\nabla i | hcore | j) - (\nabla i | j)
@@ -501,7 +500,7 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
         s1_cpu = mf_grad.get_ovlp(mol)
         h1_gpu[:] = cupy.asarray(h1_cpu)
         s1_gpu[:] = cupy.asarray(s1_cpu)
-        return 
+        return
 
     h1 = cupy.empty([3, dm0.shape[0], dm0.shape[1]])
     s1 = cupy.empty([3, dm0.shape[0], dm0.shape[1]])
@@ -542,14 +541,15 @@ def _grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None)
 
     if log.verbose >= logger.DEBUG:
         log.timer_debug1('gradients of electronic part', *t0)
-    
+
     # net force should be zero
     de -= cupy.sum(de, axis=0)/len(atmlst)
     return de.get()
 
 class Gradients(rhf.Gradients):
-    device = 'gpu'
-    grad_elec = patch_cpu_kernel(rhf.Gradients.grad_elec)(_grad_elec)
-    grad_nuc = patch_cpu_kernel(rhf.Gradients.grad_nuc)(_grad_nuc)
-    get_veff = patch_cpu_kernel(rhf.Gradients.get_veff)(_get_veff)
-    get_jk = patch_cpu_kernel(rhf.Gradients.get_jk)(_get_jk)
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+
+    grad_elec = grad_elec
+    grad_nuc = grad_nuc
+    get_veff = get_veff
+    get_jk = _get_jk

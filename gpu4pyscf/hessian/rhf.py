@@ -15,7 +15,7 @@
 #
 # Author: Qiming Sun <osirpt.sun@gmail.com>
 #  modified by: Xiaojie Wu <wxj6000@gmail.com>
-# 
+#
 
 
 '''
@@ -44,7 +44,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
               atmlst=None, max_memory=4000, verbose=None):
     log = logger.new_logger(hessobj, verbose)
     time0 = t1 = (logger.process_clock(), logger.perf_counter())
- 
+
     mol = hessobj.mol
     mf = hessobj.base
     if mo_energy is None: mo_energy = mf.mo_energy
@@ -84,10 +84,10 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         s1ao = cupy.zeros((3,nao,nao))
         s1ao[:,p0:p1] += s1a[:,p0:p1]
         s1ao[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
-        
+
         tmp = cupy.einsum('xpq,pi->xiq', s1ao, mocc)
         s1oo = cupy.einsum('xiq,qj->xij', tmp, mocc)
-        
+
         #s1oo = cupy.einsum('xpq,pi,qj->xij', s1ao, mocc, mocc)
         s1mo = cupy.einsum('xij,ip->xpj', s1ao, mo_coeff)
 
@@ -105,7 +105,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             de2[j0,i0] = de2[i0,j0].T
 
     log.timer('RHF hessian', *time0)
-    
+
     return de2
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
@@ -127,7 +127,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
     if atmlst is None: atmlst = range(mol.natm)
-    
+
     nao, nmo = mo_coeff.shape
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = numpy.dot(mocc, mocc.T) * 2
@@ -176,7 +176,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         vj1 = vj1.reshape(3,3,nao,nao)
         vk1 = vk1.reshape(3,3,nao,nao)
         t1 = log.timer_debug1('contracting int2e_ipvip1 for atom %d'%ia, *t1)
-        
+
         ej[i0,i0] += cupy.einsum('xypq,pq->xy', vj1_diag[:,:,p0:p1], dm0[p0:p1])*2
         ek[i0,i0] += cupy.einsum('xypq,pq->xy', vk1_diag[:,:,p0:p1], dm0[p0:p1])
         e1[i0,i0] -= cupy.einsum('xypq,pq->xy', s1aa[:,:,p0:p1], dme0[p0:p1])*2
@@ -284,7 +284,7 @@ def _get_jk(mol, intor, comp, aosym, script_dms,
     intor = mol._add_suffix(intor)
     scripts = script_dms[::2]
     dms = script_dms[1::2]
-    
+
     vs = _vhf.direct_bindm(intor, aosym, scripts, dms, comp,
                            mol._atm, mol._bas, mol._env, vhfopt=vhfopt,
                            cintopt=cintopt, shls_slice=shls_slice)
@@ -368,11 +368,10 @@ def gen_vind(mf, mo_coeff, mo_occ):
     mocc = mo_coeff[:,mo_occ>0]
     nocc = mocc.shape[1]
     vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1)
-    
+
     def fx(mo1):
         mo1 = cupy.asarray(mo1)
         mo1 = mo1.reshape(-1,nmo,nocc)
-        nset = len(mo1)
         mo1_mo = cupy.einsum('npo,ip->nio', mo1, mo_coeff)
         dm1 = cupy.einsum('nio,jo->nij', 2.0*mo1_mo, mocc)
         dm1 = dm1 + dm1.transpose(0,2,1)
@@ -471,6 +470,9 @@ def gen_hop(hobj, mo_energy=None, mo_coeff=None, mo_occ=None, verbose=None):
 
 class Hessian(rhf_hess.Hessian):
     '''Non-relativistic restricted Hartree-Fock hessian'''
+
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+
     def __init__(self, scf_method):
         self.verbose = scf_method.verbose
         self.stdout = scf_method.stdout

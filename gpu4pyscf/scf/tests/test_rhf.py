@@ -20,6 +20,7 @@ import numpy as np
 import cupy
 import pyscf
 from pyscf import lib
+from gpu4pyscf import scf
 
 mol = pyscf.M(
     atom='''
@@ -79,13 +80,12 @@ class KnownValues(unittest.TestCase):
         nao = mol.nao
         dm = np.random.random((nao,nao))
         dm = dm + dm.T
-        mf = mol.RHF()
-        mf.device = 'gpu'
+        mf = scf.RHF(mol)
         vj, vk = mf.get_jk(mol, dm)
         self.assertAlmostEqual(lib.fp(vj), -498.6834601181653 , 7)
         self.assertAlmostEqual(lib.fp(vk), -13.552287262014744, 7)
-        mf.device = 'cpu'
-        refj, refk = mf.get_jk(mol, dm)
+        mf1 = mf.to_cpu()
+        refj, refk = mf1.get_jk(mol, dm)
         self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
         self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
         with lib.temporary_env(mol, cart=True):
@@ -93,14 +93,13 @@ class KnownValues(unittest.TestCase):
             nao = mol.nao
             dm = np.random.random((nao,nao))
             dm = dm + dm.T
-            mf = mol.RHF()
-            mf.device = 'gpu'
+            mf = scf.RHF(mol)
             vj, vk = mf.get_jk(mol, dm)
             self.assertAlmostEqual(lib.fp(vj), -3530.1507509846288, 7)
             self.assertAlmostEqual(lib.fp(vk), -845.7403732632113 , 7)
 
-            mf.device = 'cpu'
-            refj, refk = mf.get_jk(mol, dm)
+            mf1 = mf.to_cpu()
+            refj, refk = mf1.get_jk(mol, dm)
             self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
             self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
 
@@ -109,13 +108,12 @@ class KnownValues(unittest.TestCase):
         nao = mol.nao
         dm = np.random.random((nao,nao))
         dm = dm + dm.T
-        mf = mol.RHF()
-        mf.device = 'gpu'
+        mf = scf.RHF(mol)
         vj = mf.get_j(mol, dm)
         self.assertAlmostEqual(lib.fp(vj), -498.6834601181653 , 7)
 
-        mf.device = 'cpu'
-        refj = mf.get_j(mol, dm)
+        mf1 = mf.to_cpu()
+        refj = mf1.get_j(mol, dm)
         self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
 
         with lib.temporary_env(mol, cart=True):
@@ -123,13 +121,12 @@ class KnownValues(unittest.TestCase):
             nao = mol.nao
             dm = np.random.random((nao,nao))
             dm = dm + dm.T
-            mf = mol.RHF()
-            mf.device = 'gpu'
+            mf = scf.RHF(mol)
             vj = mf.get_j(mol, dm)
             self.assertAlmostEqual(lib.fp(vj), -3530.1507509846288, 7)
 
-            mf.device = 'cpu'
-            refj = mf.get_j(mol, dm)
+            mf1 = mf.to_cpu()
+            refj = mf1.get_j(mol, dm)
             self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
 
     def test_get_k(self):
@@ -137,13 +134,12 @@ class KnownValues(unittest.TestCase):
         nao = mol.nao
         dm = np.random.random((nao,nao))
         dm = dm + dm.T
-        mf = mol.RHF()
-        mf.device = 'gpu'
+        mf = scf.RHF(mol)
         vk = mf.get_k(mol, dm)
         self.assertAlmostEqual(lib.fp(vk), -13.552287262014744, 7)
 
-        mf.device = 'cpu'
-        refk = mf.get_k(mol, dm)
+        mf1 = mf.to_cpu()
+        refk = mf1.get_k(mol, dm)
         self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
 
         with lib.temporary_env(mol, cart=True):
@@ -151,13 +147,12 @@ class KnownValues(unittest.TestCase):
             nao = mol.nao
             dm = np.random.random((nao,nao))
             dm = dm + dm.T
-            mf = mol.RHF()
-            mf.device = 'gpu'
+            mf = scf.RHF(mol)
             vk = mf.get_k(mol, dm)
             self.assertAlmostEqual(lib.fp(vk), -845.7403732632113 , 7)
 
-            mf.device = 'cpu'
-            refk = mf.get_k(mol, dm)
+            mf1 = mf.to_cpu()
+            refk = mf1.get_k(mol, dm)
             self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
 
     def test_get_jk1(self):
@@ -166,14 +161,13 @@ class KnownValues(unittest.TestCase):
         nao = mol1.nao
         dm = np.random.random((2,nao,nao))
         dm = dm + dm.transpose(0,2,1)
-        mf = mol1.RHF()
-        mf.device = 'gpu'
+        mf = scf.RHF(mol1)
         vj, vk = mf.get_jk(mol1, dm, hermi=1)
         self.assertAlmostEqual(lib.fp(vj), 179.14526555375858, 7)
         self.assertAlmostEqual(lib.fp(vk), -34.851182918643005, 7)
 
-        mf.device = 'cpu'
-        refj, refk = mf.get_jk(mol1, dm, hermi=1)
+        mf1 = mf.to_cpu()
+        refj, refk = mf1.get_jk(mol1, dm, hermi=1)
         self.assertAlmostEqual(abs(vj - refj).max(), 0, 8)
         self.assertAlmostEqual(abs(vk - refk).max(), 0, 8)
 
@@ -182,14 +176,13 @@ class KnownValues(unittest.TestCase):
         np.random.seed(1)
         nao = mol1.nao
         dm = np.random.random((2,nao,nao))
-        mf = mol1.RHF()
-        mf.device = 'gpu'
+        mf = scf.RHF(mol1)
         vj, vk = mf.get_jk(mol1, cupy.asarray(dm), hermi=0)
         self.assertAlmostEqual(lib.fp(vj.get()), 89.57263277687994, 7)
         self.assertAlmostEqual(lib.fp(vk.get()),-26.36969769724246, 7)
 
-        mf.device = 'cpu'
-        refj, refk = mf.get_jk(mol1, dm, hermi=0)
+        mf1 = mf.to_cpu()
+        refj, refk = mf1.get_jk(mol1, dm, hermi=0)
         self.assertAlmostEqual(abs(vj.get() - refj).max(), 0, 8)
         self.assertAlmostEqual(abs(vk.get() - refk).max(), 0, 8)
 
@@ -199,13 +192,12 @@ class KnownValues(unittest.TestCase):
         nao = mol1.nao
         dm = np.random.random((2,nao,nao))
         dm = dm + dm.transpose(0,2,1)
-        mf = mol1.RHF()
-        mf.device = 'gpu'
+        mf = scf.RHF(mol1)
         vj = mf.get_j(mol1, dm, hermi=1)
         self.assertAlmostEqual(lib.fp(vj), 179.14526555375858, 7)
 
-        mf.device = 'cpu'
-        refj = mf.get_j(mol1, dm, hermi=1)
+        mf1 = mf.to_cpu()
+        refj = mf1.get_j(mol1, dm, hermi=1)
         self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
 
     @unittest.skip('hermi=0')
@@ -213,13 +205,12 @@ class KnownValues(unittest.TestCase):
         np.random.seed(1)
         nao = mol1.nao
         dm = np.random.random((2,nao,nao))
-        mf = mol1.RHF()
-        mf.device = 'gpu'
+        mf = scf.RHF(mol1)
         vj = mf.get_j(mol1, dm, hermi=0).get()
         self.assertAlmostEqual(lib.fp(vj), 89.57263277687994, 7)
 
-        mf.device = 'cpu'
-        refj = mf.get_j(mol1, dm, hermi=0)
+        mf1 = mf.to_cpu()
+        refj = mf1.get_j(mol1, dm, hermi=0)
         self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
 
     def test_get_k1(self):
@@ -228,13 +219,12 @@ class KnownValues(unittest.TestCase):
         nao = mol1.nao
         dm = np.random.random((2,nao,nao))
         dm = dm + dm.transpose(0,2,1)
-        mf = mol1.RHF()
-        mf.device = 'gpu'
+        mf = scf.RHF(mol1)
         vk = mf.get_k(mol1, dm, hermi=1)
         self.assertAlmostEqual(lib.fp(vk), -34.851182918643005, 7)
 
-        mf.device = 'cpu'
-        refk = mf.get_k(mol1, dm, hermi=1)
+        mf1 = mf.to_cpu()
+        refk = mf1.get_k(mol1, dm, hermi=1)
         self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
 
     @unittest.skip('hermi=0')
@@ -242,13 +232,12 @@ class KnownValues(unittest.TestCase):
         np.random.seed(1)
         nao = mol1.nao
         dm = np.random.random((2,nao,nao))
-        mf = mol1.RHF()
-        mf.device = 'gpu'
+        mf = scf.RHF(mol1)
         vk = mf.get_k(mol1, dm, hermi=0).get()
         self.assertAlmostEqual(lib.fp(vk),-26.36969769724246, 7)
 
-        mf.device = 'cpu'
-        refk = mf.get_k(mol1, dm, hermi=0)
+        mf1 = mf.to_cpu()
+        refk = mf1.get_k(mol1, dm, hermi=0)
         self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
     '''
     # end to end test
