@@ -44,4 +44,3 @@ else()
   find_package(CUTENSOR)
   target_link_libraries(cupy_helper PRIVATE CUDA::cublas PRIVATE CUDA::cusolver PRIVATE cutensor)
 endif()
-
