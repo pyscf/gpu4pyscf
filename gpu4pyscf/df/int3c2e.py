@@ -1065,6 +1065,8 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
                 ctypes.c_int(cp_ij_id),
                 ctypes.c_int(cp_kl_id),
                 ctypes.c_double(omega))
+            if err != 0:
+                raise RuntimeError("int3c2e failed\n")
 
             int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
             int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)

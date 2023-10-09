@@ -50,10 +50,8 @@ def to_cpu(method):
             setattr(method, key, val.to_cpu())
     return method
 
-def identity(x):
-    return x
-
-to_gpu = identity
+def to_gpu(method, device=None):
+    return method
 
 @property
 def device(obj):
