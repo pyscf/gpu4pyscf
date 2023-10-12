@@ -34,14 +34,17 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
 bas='ccpvdz'
 
-mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
-mol.build()
-mol.verbose = 1
-auxmol = df.addons.make_auxmol(mol, auxbasis='sto3g')
-
+def setUpModule():
+    global mol, auxmol
+    mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
+    mol.output = '/dev/null'
+    mol.build()
+    mol.verbose = 1
+    auxmol = df.addons.make_auxmol(mol, auxbasis='sto3g')
+    
 def tearDownModule():
-    global mol
-    del mol
+    global mol, auxmol
+    del mol, auxmol
 
 class KnownValues(unittest.TestCase):
     

@@ -31,6 +31,7 @@ FREE_CUPY_CACHE = True
 BINSIZE = 128
 libgvhf = load_library('libgvhf')
 
+'''
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
            verbose=None):
 
@@ -247,9 +248,9 @@ def _get_jk(gradient_object, mol=None, dm=None, hermi=1, with_j=True, with_k=Tru
     vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega, verbose=log)
     log.timer('vj and vk gradient on gpu', *cput0)
     return vj, vk
+'''
 
-
-def get_veff(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
+def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
              verbose=None, atmlst=None):
     if atmlst is None:
         atmlst = range(mol.natm)
@@ -279,6 +280,7 @@ def get_veff(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None
     vj = vk = None
     vj_ptr = vk_ptr = lib.c_null_ptr()
 
+    vj_per_atom = vk_per_atom = None
     if with_j:
         vj = cupy.zeros([vhfopt.mol.nbas, 3])
         vj_per_atom = cupy.zeros([len(atmlst), 3])
@@ -326,7 +328,7 @@ def get_veff(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None
     dm_shl = cupy.asarray(np.log(dm_shl))
     nshls = dm_shl.shape[0]
     t0 = time.perf_counter()
-
+    
     if hermi != 1:
         dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
     fn = libgvhf.GINTget_veff_ip1
@@ -345,7 +347,7 @@ def get_veff(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None
             ll = vhfopt.uniq_l_ctr[cpl,0]
             if lk > LMAX_ON_GPU or ll > LMAX_ON_GPU or log_q_kl.size == 0:
                 continue
-
+            
             # TODO: determine cutoff based on the relevant maximum value of dm blocks?
             sub_dm_cond = max(dm_ctr_cond[cpi,cpj], dm_ctr_cond[cpk,cpl],
                               dm_ctr_cond[cpi,cpk], dm_ctr_cond[cpj,cpk],
@@ -386,7 +388,8 @@ def get_veff(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None
                      ctypes.cast(dm_shl.data.ptr, ctypes.c_void_p),
                      ctypes.c_int(nshls),
                      ctypes.cast(log_q_ij.data.ptr, ctypes.c_void_p),
-                     ctypes.cast(log_q_kl.data.ptr, ctypes.c_void_p))
+                     ctypes.cast(log_q_kl.data.ptr, ctypes.c_void_p)
+                     )
             if err != 0:
                 detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
                 raise RuntimeError(detail)
@@ -413,16 +416,20 @@ def get_veff(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None
         coeff = dms = None
         cupy.get_default_memory_pool().free_all_blocks()
 
+    #if vj is not None: vj_per_atom = vj_per_atom.T
+    #if vk is not None: vk_per_atom = vk_per_atom.T
     if out_cupy:
         return vj_per_atom, vk_per_atom
     else:
         return vj_per_atom.get() if vj is not None else None, \
             vk_per_atom.get() if vk is not None else None
 
-def _get_veff(gradient_object, mol, dm):
+def _get_jk(gradient_object, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
+            omega=None):
     mf = gradient_object.base
     cput0 = (logger.process_clock(), logger.perf_counter())
     log = logger.new_logger(gradient_object)
+    log.debug3('apply get_grad_jk on gpu')
     if hasattr(mf, '_opt_gpu'):
         vhfopt = mf._opt_gpu
     else:
@@ -432,10 +439,12 @@ def _get_veff(gradient_object, mol, dm):
                          getattr(mf.opt, '_dmcondname', 'CVHFsetnr_direct_scf_dm'))
         vhfopt.build(mf.direct_scf_tol)
         mf._opt_gpu = vhfopt
-
-    vj, vk = get_veff(mol, dm, vhfopt=vhfopt)
+    vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega, verbose=log)
     log.timer('vj and vk gradient on gpu', *cput0)
+    return vj, vk
 
+def get_veff(mf_grad, mol, dm):
+    vj, vk = mf_grad.get_jk(mol, dm)
     return vj - vk * .5
 
 def get_dh1e_ecp(mol, dm):
@@ -489,7 +498,6 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     mo_energy = cupy.asarray(mo_energy)
     mo_occ = cupy.asarray(mo_occ)
     mo_coeff = cupy.asarray(mo_coeff)
-
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
 
@@ -553,3 +561,17 @@ class Gradients(rhf.Gradients):
     grad_nuc = grad_nuc
     get_veff = get_veff
     get_jk = _get_jk
+
+    def get_j(self, mol=None, dm=None, hermi=0, omega=None):
+        vj, _ = self.get_jk(mol, dm, with_k=False, omega=omega)
+        return vj
+    
+    def get_k(self, mol=None, dm=None, hermi=0, omega=None):
+        _, vk = self.get_jk(mol, dm, with_j=False, omega=omega)
+        return vk
+
+    def extra_force(self, atom_id, envs):
+        ''' 
+        grid response is implemented get_veff
+        '''
+        return 0

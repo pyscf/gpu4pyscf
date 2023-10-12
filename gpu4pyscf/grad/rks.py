@@ -19,16 +19,92 @@
 '''Non-relativistic RKS analytical nuclear gradients'''
 import numpy
 import cupy
+import pyscf
 from pyscf import lib, gto
 from pyscf.lib import logger
-from pyscf.dft import radi, gen_grid
-from gpu4pyscf.dft import numint, xc_deriv
+from pyscf.dft import radi
+from gpu4pyscf.lib.utils import patch_cpu_kernel
+from gpu4pyscf.grad import rhf as rhf_grad
+from gpu4pyscf.dft import numint, xc_deriv, rks
 from gpu4pyscf.dft.numint import _GDFTOpt, AO_THRESHOLD
-from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, add_sparse
+from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, add_sparse, tag_array
 from pyscf import __config__
 
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 128*128)
 ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
+
+def _get_veff(ks_grad, mol=None, dm=None):
+    '''
+    First order derivative of DFT effective potential matrix (wrt electron coordinates)
+
+    Args:
+        ks_grad : grad.uhf.Gradients or grad.uks.Gradients object
+    '''
+    if mol is None: mol = ks_grad.mol
+    if dm is None: dm = ks_grad.base.make_rdm1()
+    t0 = (logger.process_clock(), logger.perf_counter())
+
+    mf = ks_grad.base
+    ni = mf._numint
+    if ks_grad.grids is not None:
+        grids = ks_grad.grids
+    else:
+        grids = mf.grids
+    
+    if grids.coords is None:
+        grids.build(sort_grids=True)
+
+    nlcgrids = None
+    if mf.nlc or ni.libxc.is_nlc(mf.xc):
+        if ks_grad.nlcgrids is not None:
+            nlcgrids = ks_grad.nlcgrids
+        else:
+            nlcgrids = mf.nlcgrids
+        if nlcgrids.coords is None:
+            nlcgrids.build(sort_grids=True)
+
+    mem_now = lib.current_memory()[0]
+    max_memory = max(2000, ks_grad.max_memory*.9-mem_now)
+    if ks_grad.grid_response:
+        exc, vxc = get_vxc_full_response(ni, mol, grids, mf.xc, dm,
+                                         max_memory=max_memory,
+                                         verbose=ks_grad.verbose)
+        if mf.nlc or ni.libxc.is_nlc(mf.xc):
+            raise NotImplementedError
+    else:
+        exc, vxc = get_vxc(ni, mol, grids, mf.xc, dm,
+                           max_memory=max_memory, verbose=ks_grad.verbose)
+        if mf.nlc or ni.libxc.is_nlc(mf.xc):
+            if ni.libxc.is_nlc(mf.xc):
+                xc = mf.xc
+            else:
+                xc = mf.nlc
+            enlc, vnlc = get_nlc_vxc(
+                ni, mol, nlcgrids, xc, dm,
+                max_memory=max_memory, verbose=ks_grad.verbose)
+            vxc += vnlc
+    t0 = logger.timer(ks_grad, 'vxc', *t0)
+
+    # this can be moved into vxc calculations
+    occ_coeff = cupy.asarray(mf.mo_coeff[:, mf.mo_occ>0.5], order='C')
+    tmp = contract('nij,jk->nik', vxc, occ_coeff)
+    vxc = 2.0*contract('nik,ik->ni', tmp, occ_coeff)
+    
+    aoslices = mol.aoslice_by_atom()
+    vxc = [vxc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
+    vxc = cupy.asarray(vxc)
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
+    if abs(hyb) < 1e-10 and abs(alpha) < 1e-10:
+        vj = ks_grad.get_j(mol, dm)
+        vxc += vj
+    else:
+        vj, vk = ks_grad.get_jk(mol, dm)
+        vk *= hyb
+        if abs(omega) > 1e-10:  # For range separated Coulomb operator
+            vk_lr = ks_grad.get_k(mol, dm, omega=omega)
+            vk += vk_lr * (alpha - hyb)
+        vxc += vj - vk * .5
+    return vxc
 
 def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             max_memory=2000, verbose=None):
@@ -36,7 +112,8 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
-        opt = ni.gdftopt = _GDFTOpt(mol)
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
     mo_occ = cupy.asarray(dms.mo_occ)
     mo_coeff = cupy.asarray(dms.mo_coeff)
     
@@ -139,7 +216,8 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
-        opt = ni.gdftopt = _GDFTOpt(mol)
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
 
     mo_occ = cupy.asarray(dms.mo_occ)
     mo_coeff = cupy.asarray(dms.mo_coeff)
@@ -240,7 +318,8 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
-        opt = ni.gdftopt = _GDFTOpt(mol)
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
@@ -420,3 +499,28 @@ def grids_response_cc(grids):
         w1 *= vol
         w0 = vol * pbecke[ia] * z
         yield coords, w0, w1
+
+class Gradients(rhf_grad.Gradients, pyscf.grad.rks.Gradients):
+    device = 'gpu'
+    get_veff = patch_cpu_kernel(pyscf.grad.rks.Gradients.get_veff)(_get_veff)
+    
+    def get_dispersion(self):
+        if self.base.disp[:2].upper() == 'D3':
+            from pyscf import lib
+            with lib.with_omp_threads(1):
+                import dftd3.pyscf as disp
+                d3 = disp.DFTD3Dispersion(self.mol, xc=self.base.xc, version=self.base.disp)
+                _, g_d3 = d3.kernel()
+            return g_d3
+        
+        if self.base.disp[:2].upper() == 'D4':
+            from pyscf.data.elements import charge
+            atoms = numpy.array([ charge(a[0]) for a in self.mol._atom])
+            coords = self.mol.atom_coords()
+            
+            from pyscf import lib
+            with lib.with_omp_threads(1):
+                from dftd4.interface import DampingParam, DispersionModel
+                model = DispersionModel(atoms, coords)
+                res = model.get_dispersion(DampingParam(method=self.base.xc), grad=True)
+            return res.get("gradient")

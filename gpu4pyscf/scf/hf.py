@@ -214,11 +214,13 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
 
         if with_j:
             vj1[:,idy,idx] = vj1[:,idx,idy]
+            vj1 = cupy.asarray(vj1)
             for i, v in enumerate(vj1):
                 vj[i] += coeff.T.dot(v).dot(coeff)
         if with_k:
             if hermi:
                 vk1[:,idy,idx] = vk1[:,idx,idy]
+            vk1 = cupy.asarray(vk1)
             for i, v in enumerate(vk1):
                 vk[i] += coeff.T.dot(v).dot(coeff)
         cput0 = log.timer_debug1('get_jk pass 2 for l>4 basis on cpu', *cput0)
@@ -240,8 +242,11 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     if out_cupy:
         return vj, vk
     else:
-        return vj.get() if vj else None, vk.get() if vk else None
-
+        if with_j:
+            vj = vj.get()
+        if with_k:
+            vk = vk.get()
+        return vj, vk
 
 def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
             omega=None):
@@ -359,13 +364,14 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     if(dm0 is None):
         dm0 = mf.get_init_guess(mol)
+
     dm = cupy.asarray(dm0, order='C')
-    if hasattr(dm0, 'occ_coeff') and hasattr(dm0, 'mo_occ'):
+    if hasattr(dm0, 'mo_coeff') and hasattr(dm0, 'mo_occ'):
         mo_coeff = cupy.asarray(dm0.mo_coeff)
         mo_occ = cupy.asarray(dm0.mo_occ)
         occ_coeff = cupy.asarray(mo_coeff[:,mo_occ>0])
         dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
-
+    
     # use optimized workflow if possible
     if hasattr(mf, 'init_workflow'):
         mf.init_workflow(dm0=dm)
@@ -534,6 +540,8 @@ def _quad_moment(mf, mol=None, dm=None, unit='Debye-Ang'):
         mol_quad *= nist.AU2DEBYE * nist.BOHR
     return mol_quad
 
+def _eigh(mf, h, s):
+    return eigh(h, s)
 
 class RHF(hf.RHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
@@ -541,7 +549,8 @@ class RHF(hf.RHF):
     screen_tol = 1e-14
     DIIS = diis.SCF_DIIS
     get_jk = _get_jk
-    _eigh = staticmethod(eigh)
+    #_eigh = staticmethod(_eigh)
+    _eigh = _eigh
     make_rdm1 = make_rdm1
     get_fock = get_fock
     get_occ = get_occ
@@ -575,12 +584,29 @@ class RHF(hf.RHF):
         return self.e_tot
     kernel = pyscf_lib.alias(scf, alias_name='kernel')
 
+    def reset(self, mol=None):
+        if mol is not None:
+            self.mol = mol
+        self._opt_gpu = None
+        self._opt_gpu_omega = None
+        self._eri = None
+        return self
+
+    def nuc_grad_method(self):
+        from gpu4pyscf.grad import rhf
+        return rhf.Gradients(self)
+    
+    def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
+        import gpu4pyscf.df.df_jk
+        return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
+    
 class _VHFOpt(_vhf.VHFOpt):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     def __init__(self, mol, intor, prescreen='CVHFnoscreen',
                  qcondname='CVHFsetnr_direct_scf', dmcondname=None):
         self.mol, self.coeff = basis_seg_contraction(mol)
+        self.coeff = cupy.asarray(self.coeff)
         # Note mol._bas will be sorted in .build() method. VHFOpt should be
         # initialized after mol._bas updated.
         self._intor = intor

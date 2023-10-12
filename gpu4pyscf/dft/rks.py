@@ -20,10 +20,9 @@ import numpy
 import cupy
 
 from pyscf import lib
-from pyscf.scf import hf as pyscf_hf
 from pyscf.dft import rks
 
-from gpu4pyscf.scf import diis
+from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
 from gpu4pyscf.scf.hf import RHF
@@ -70,8 +69,7 @@ def initialize_grids(ks, mol=None, dm=None):
     if mol is None: mol = ks.mol
     if ks.grids.coords is None:
         t0 = (logger.process_clock(), logger.perf_counter())
-        ks.grids.build(sort_grids=False)
-        # do not support sparsity yet
+        ks.grids.build()
         #ks.grids.build(with_non0tab=True)
         ks.grids.weights = cupy.asarray(ks.grids.weights)
         ks.grids.coords = cupy.asarray(ks.grids.coords)
@@ -87,7 +85,7 @@ def initialize_grids(ks, mol=None, dm=None):
             if ks.nlcgrids.coords is None:
                 t0 = (logger.process_clock(), logger.perf_counter())
                 #ks.nlcgrids.build(with_non0tab=True)
-                ks.nlcgrids.build(sort_grids=False)
+                ks.nlcgrids.build()
                 ks.nlcgrids.weights = cupy.asarray(ks.nlcgrids.weights)
                 ks.nlcgrids.coords = cupy.asarray(ks.nlcgrids.coords)
                 if (ks.small_rho_cutoff > 1e-20 and
@@ -202,7 +200,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
     return vxc
 
-class RKS(rks.RKS):
+class RKS(scf.hf.RHF, rks.RKS):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     def __init__(self, mol, xc='LDA,VWN', disp=None):
@@ -237,7 +235,7 @@ class RKS(rks.RKS):
             return res.get("energy")
 
     def reset(self, mol=None):
-        pyscf_hf.SCF.reset(self, mol)
+        super().reset(mol)
         self.grids.reset(mol)
         self.nlcgrids.reset(mol)
         self._numint.gdftopt = None
@@ -260,6 +258,10 @@ class RKS(rks.RKS):
         self.scf_summary['nuc'] = nuc.real
         return e_tot
 
+    def nuc_grad_method(self):
+        from gpu4pyscf.grad import rks as rks_grad
+        return rks_grad.Gradients(self)
+    
     get_jk = RHF.get_jk
     get_veff = get_veff
     _eigh = RHF._eigh

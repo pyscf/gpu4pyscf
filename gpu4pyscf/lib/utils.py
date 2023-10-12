@@ -34,11 +34,14 @@ def patch_cpu_kernel(cpu_kernel):
 def to_cpu(method):
     # Search for the class in pyscf closest to the one defined in gpu4pyscf
     for pyscf_cls in method.__class__.__mro__:
-        if 'gpu4pyscf' not in pyscf_cls:
+        if 'gpu4pyscf' not in pyscf_cls.__module__:
             break
     method = method.view(pyscf_cls)
 
-    keys = [cls._keys for cls in pyscf_cls.__mro__[:-1] if hasattr(cls, '_keys')]
+    keys = set()
+    for cls in pyscf_cls.__mro__[:-1]:
+        if hasattr(cls, '_keys'):
+            keys.update(cls._keys)
     if keys:
         keys = set(keys).intersection(method.__dict__)
 
