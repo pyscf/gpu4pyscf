@@ -236,6 +236,7 @@ class VHFOpt(_vhf.VHFOpt):
         nsph = sph_ao_loc[-1]
         self.cart2sph = block_c2s_diag(ncart, nsph, self.angular, l_ctr_counts)
         inv_idx = np.argsort(self.sph_ao_idx, kind='stable').astype(np.int32)
+        self.rev_ao_idx = inv_idx
         self.coeff = self.cart2sph[:, inv_idx]
 
         # pairing auxiliary basis with fake basis set
@@ -1398,7 +1399,8 @@ def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size):
     for l_ctr, counts in zip(uniq_l_ctr, l_ctr_counts):
         l = l_ctr[0]
         nf = (l + 1) * (l + 2) // 2
-        max_shells = max(group_size // nf, 2)
+        aligned_size = (group_size // nf // 1) * 1
+        max_shells = max(aligned_size, 2)
         if l > LMAX_ON_GPU or counts <= max_shells:
             _l_ctrs.append(l_ctr)
             _l_ctr_counts.append(counts)

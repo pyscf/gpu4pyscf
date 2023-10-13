@@ -35,14 +35,14 @@ mol = pyscf.M(
     basis=bas, 
     max_memory=32000)
 # set verbose >= 6 for debugging timer
-mol.verbose = 1
+mol.verbose = 6
 print(mol.nao)
 
 mf_df = rks.RKS(mol, xc='HYB_GGA_XC_B3LYP').density_fit(auxbasis=args.auxbasis)
-mf_df.grids.level = 1
+mf_df.grids.atom_grid = (99,590)
 mf_df.kernel()
 print('compute time for energy: {}s'.format((time.time() - start_time)))
-
+exit()
 start_time = time.time()
 g = mf_df.nuc_grad_method()
 g.auxbasis_response = True

@@ -160,53 +160,54 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
 
     shls_slice = (0, mol.nbas)
     ao_loc = mol.ao_loc_nr()
-    if True:
-        cpos = cupy.einsum('ij,j->ij', mo_coeff[:,mo_occ>0], cupy.sqrt(mo_occ[mo_occ>0]))
-        if xctype == 'LDA' or xctype == 'HF':
-            c0 = _dot_ao_dm(mol, ao, cpos, non0tab, shls_slice, ao_loc)
-            #:rho = numpy.einsum('pi,pi->p', c0, c0)
-            rho = _contract_rho(c0, c0)
-        elif xctype in ('GGA', 'NLC'):
-            rho = cupy.empty((4,ngrids))
-            c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc)
-            #:rho[0] = numpy.einsum('pi,pi->p', c0, c0)
-            rho[0] = _contract_rho(c0, c0)
-            for i in range(1, 4):
-                c1 = _dot_ao_dm(mol, ao[i], cpos, non0tab, shls_slice, ao_loc)
-                #:rho[i] = numpy.einsum('pi,pi->p', c0, c1) * 2 # *2 for +c.c.
-                rho[i] = _contract_rho(c0, c1) * 2
-        else: # meta-GGA
-            if with_lapl:
-                # rho[4] = \nabla^2 rho, rho[5] = 1/2 |nabla f|^2
-                rho = cupy.empty((6,ngrids))
-                tau_idx = 5
+    
+    #cpos = cupy.einsum('ij,j->ij', mo_coeff[:,mo_occ>0], cupy.sqrt(mo_occ[mo_occ>0]))
+    cpos = mo_coeff[:,mo_occ>0] * cupy.sqrt(mo_occ[mo_occ>0])
+    if xctype == 'LDA' or xctype == 'HF':
+        c0 = _dot_ao_dm(mol, ao, cpos, non0tab, shls_slice, ao_loc)
+        #:rho = numpy.einsum('pi,pi->p', c0, c0)
+        rho = _contract_rho(c0, c0)
+    elif xctype in ('GGA', 'NLC'):
+        rho = cupy.empty((4,ngrids))
+        c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc)
+        #:rho[0] = numpy.einsum('pi,pi->p', c0, c0)
+        rho[0] = _contract_rho(c0, c0)
+        for i in range(1, 4):
+            c1 = _dot_ao_dm(mol, ao[i], cpos, non0tab, shls_slice, ao_loc)
+            #:rho[i] = numpy.einsum('pi,pi->p', c0, c1) * 2 # *2 for +c.c.
+            rho[i] = _contract_rho(c0, c1) * 2
+    else: # meta-GGA
+        if with_lapl:
+            # rho[4] = \nabla^2 rho, rho[5] = 1/2 |nabla f|^2
+            rho = cupy.empty((6,ngrids))
+            tau_idx = 5
+        else:
+            rho = cupy.empty((5,ngrids))
+            tau_idx = 4
+        c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc)
+        #:rho[0] = numpy.einsum('pi,pi->p', c0, c0)
+        rho[0] = _contract_rho(c0, c0)
+
+        rho[tau_idx] = 0
+        for i in range(1, 4):
+            c1 = _dot_ao_dm(mol, ao[i], cpos, non0tab, shls_slice, ao_loc)
+            #:rho[i] = numpy.einsum('pi,pi->p', c0, c1) * 2 # *2 for +c.c.
+            #:rho[5] += numpy.einsum('pi,pi->p', c1, c1)
+            rho[i] = _contract_rho(c0, c1) * 2
+            rho[tau_idx] += _contract_rho(c1, c1)
+
+        if with_lapl:
+            if ao.shape[0] > 4:
+                XX, YY, ZZ = 4, 7, 9
+                ao2 = ao[XX] + ao[YY] + ao[ZZ]
+                c1 = _dot_ao_dm(mol, ao2, cpos, non0tab, shls_slice, ao_loc)
+                #:rho[4] = numpy.einsum('pi,pi->p', c0, c1)
+                rho[4] = _contract_rho(c0, c1)
+                rho[4] += rho[5]
+                rho[4] *= 2
             else:
-                rho = cupy.empty((5,ngrids))
-                tau_idx = 4
-            c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc)
-            #:rho[0] = numpy.einsum('pi,pi->p', c0, c0)
-            rho[0] = _contract_rho(c0, c0)
-
-            rho[tau_idx] = 0
-            for i in range(1, 4):
-                c1 = _dot_ao_dm(mol, ao[i], cpos, non0tab, shls_slice, ao_loc)
-                #:rho[i] = numpy.einsum('pi,pi->p', c0, c1) * 2 # *2 for +c.c.
-                #:rho[5] += numpy.einsum('pi,pi->p', c1, c1)
-                rho[i] = _contract_rho(c0, c1) * 2
-                rho[tau_idx] += _contract_rho(c1, c1)
-
-            if with_lapl:
-                if ao.shape[0] > 4:
-                    XX, YY, ZZ = 4, 7, 9
-                    ao2 = ao[XX] + ao[YY] + ao[ZZ]
-                    c1 = _dot_ao_dm(mol, ao2, cpos, non0tab, shls_slice, ao_loc)
-                    #:rho[4] = numpy.einsum('pi,pi->p', c0, c1)
-                    rho[4] = _contract_rho(c0, c1)
-                    rho[4] += rho[5]
-                    rho[4] *= 2
-                else:
-                    rho[4] = 0
-            rho[tau_idx] *= .5
+                rho[4] = 0
+        rho[tau_idx] *= .5
     return rho
 
 def eval_rho3(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
@@ -382,15 +383,9 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     dms = [coeff @ dm @ coeff.T for dm in dms.reshape(-1,nao0,nao0)]
     nset = len(dms)
     ao_loc = mol.ao_loc_nr()
-
-    #print(mo_coeff is not None, mo_occ is not None)
-    if mo_coeff is not None: mo_coeff = coeff @ mo_coeff
-    def _make_rho(ao_value, dm, xctype=None):
-        if mo_coeff is not None and mo_occ is not None:
-            rho = eval_rho2(mol, ao, mo_coeff, mo_occ, None, xctype)
-        else:
-            rho = eval_rho(mol, ao_value, dm, xctype=xctype, hermi=1)
-        return rho
+    
+    if mo_coeff is not None: 
+        mo_coeff = coeff @ mo_coeff
 
     nelec = cupy.zeros(nset)
     excsum = cupy.zeros(nset)
@@ -409,11 +404,42 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         ao_deriv = 0
     else:
         ao_deriv = 1
-    for ao, sindex, weight, coords in ni.block_loop(mol, grids, nao, ao_deriv):
+    
+    block_id = 0
+    for ao, sindex, weight, _ in ni.block_loop(mol, grids, nao, ao_deriv, blksize=ni.grid_blksize):
+        if ni.grid_blksize is None:
+            ni.grid_blksize = weight.shape[0]
+        
+        # cache ao indices
+        if block_id not in ni.non0ao_idx:
+            t0 = (logger.process_clock(), logger.perf_counter())
+            if xctype == 'LDA':
+                mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[1])
+                idx = cupy.argwhere(mask).astype(np.int32)[:,0]
+                ao_mask = ao[idx,:]
+            else:
+                mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
+                idx = cupy.argwhere(mask).astype(np.int32)[:,0]
+                ao_mask = ao[:,idx,:]
+            ni.non0ao_idx[block_id] = idx
+            t1 = log.timer_debug1('initialize ao sparsity', *t0)
+        else:
+            idx = ni.non0ao_idx[block_id]
+            if xctype == 'LDA':
+                ao_mask = ao[idx,:]
+            else:
+                ao_mask = ao[:,idx,:]
+        block_id += 1
         for i in range(nset):
             t0 = (logger.process_clock(), logger.perf_counter())
             #rho = eval_rho(opt.mol, ao, dms[i], xctype=xctype, hermi=1)
-            rho = _make_rho(ao, dms[i], xctype=xctype)
+            #rho = _make_rho(ao, dms[i], xctype=xctype)
+            if mo_coeff is None:
+                rho = eval_rho(mol, ao, dms[i], xctype=xctype, hermi=1)
+            else:
+                mo_coeff_mask = mo_coeff[idx,:]
+                rho = eval_rho2(mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype)
+
             t1 = log.timer_debug1('eval rho', *t0)
             exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
             vxc = cupy.asarray(vxc, order='C')
@@ -428,11 +454,8 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     _dot_ao_ao_sparse(ao, ao, wv, nbins, sindex, ao_loc,
                         pair2shls_full, pairs_locs_full, vmat[i])
                 elif USE_SPARSITY == 2:
-                    mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[1])
-                    idx = cupy.argwhere(mask).astype(np.int32)[:,0]
-                    ao_mask = ao[idx,:]
                     aow = _scale_ao(ao_mask, wv)
-                    #vmat[i][cupy.ix_(mask, mask)] += ao_mask.dot(aow.T)
+                    # vmat[i][cupy.ix_(mask, mask)] += ao_mask.dot(aow.T)
                     add_sparse(vmat[i], ao_mask.dot(aow.T), idx)
                 else:
                     raise NotImplementedError('Not implemented yet')
@@ -447,9 +470,6 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
                         pair2shls_full, pairs_locs_full, vmat[i])
                 elif USE_SPARSITY == 2:
-                    mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
-                    idx = cupy.argwhere(mask).astype(np.int32)[:,0]
-                    ao_mask = ao[:,idx,:]
                     aow = _scale_ao(ao_mask, wv)
                     #vmat[i][cupy.ix_(mask, mask)] += ao_mask[0].dot(aow.T)
                     add_sparse(vmat[i], ao_mask[0].dot(aow.T), idx)
@@ -471,9 +491,6 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     _tau_dot_sparse(ao, ao, wv[4], nbins, sindex, ao_loc,
                         pair2shls_full, pairs_locs_full, vmat[i])
                 else:
-                    mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
-                    idx = cupy.argwhere(mask).astype(np.int32)[:,0]
-                    ao_mask = ao[:,idx,:]
                     aow = _scale_ao(ao_mask, wv[:4])
                     vtmp = ao_mask[0].dot(aow.T)
                     vtmp+= _tau_dot(ao_mask, ao_mask, wv[4])
@@ -1061,7 +1078,9 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             coords = grids.coords[ip0:ip1]
             weight = grids.weights[ip0:ip1]
             sindex = None#ni.screen_index[ip0//GRID_BLKSIZE:]
+            t0 = (logger.process_clock(), logger.perf_counter())
             ao = eval_ao(ni, mol, coords, deriv)
+            log.timer_debug1('eval ao', *t0)
             yield ao, sindex, weight, coords
 
 class NumInt(numint.NumInt):
@@ -1090,6 +1109,11 @@ class NumInt(numint.NumInt):
             screen_index = make_screen_index(pmol, coords, blksize=GRID_BLKSIZE)
             screen_index = screen_index.reshape(-1, nbas4, BAS_ALIGNED).max(axis=2)
             self.screen_index = np.asarray(screen_index, dtype=np.uint8)
+        elif USE_SPARSITY == 2:
+            # blocksize will be fixed, once it is determined,
+            # nonzero ao index will be saved
+            self.grid_blksize = None
+            self.non0ao_idx = {}
         return self
 
     get_rho = get_rho

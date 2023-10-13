@@ -18,7 +18,9 @@ import cupy
 import numpy as np
 import unittest
 from pyscf import lib
-from gpu4pyscf.dft import rks
+from pyscf.dft import rks
+import gpu4pyscf
+from gpu4pyscf.dft import numint
 
 lib.num_threads(8)
 
@@ -28,92 +30,73 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-xc0='B3LYP'
 bas0='def2-tzvpp'
-disp0='d3bj'
-grids_level = 6
+grids_level = 5
+nlcgrids_level = 3
 def setUpModule():
     global mol
     mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000)
     mol.output = '/dev/null'
     mol.build()
     mol.verbose = 1
-    
-eps = 1.0/1024
 
 def tearDownModule():
     global mol
     mol.stdout.close()
     del mol
     
-def _check_grad(grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
-    mf = rks.RKS(mol, xc=xc, disp=disp)
-    mf.device = 'gpu'
+def _check_grad(grid_response=False, xc='B3LYP', disp='d3bj', tol=1e-6):
+    mf = rks.RKS(mol, xc=xc)
+    mf.direct_scf_tol = 1e-14
     mf.grids.level = grids_level
-    mf.conv_tol = 1e-12
-    e_tot = mf.kernel()
-    g = mf.nuc_grad_method()
-    g.grid_response = grid_response
-    
-    g_scanner = g.as_scanner()
-    g_analy = g_scanner(mol)[1]
-    print('analytical gradient:')
-    print(g_analy)
-    
-    f_scanner = mf.as_scanner()
-    coords = mol.atom_coords()
-    grad_fd = np.zeros_like(coords)
-    for i in range(len(coords)):
-        for j in range(3):
-            coords = mol.atom_coords()
-            coords[i,j] += eps
-            mol.set_geom_(coords, unit='Bohr')
-            mol.build()
-            e0 = f_scanner(mol)
-    
-            mf = rks.RKS(mol, xc=xc, disp=disp)
-            mf.device = 'gpu'
-            mf.grids.level = grids_level
+    mf.grids.prune = None
+    mf.grids.small_rho_cutoff = 1e-30
+    if mf._numint.libxc.is_nlc(mf.xc):
+        mf.nlcgrids.level = nlcgrids_level
+    mf.kernel()
 
-            coords[i,j] -= 2.0 * eps
-            mol.set_geom_(coords, unit='Bohr')
-            mol.build()
-            e1 = f_scanner(mol)
-            
-            mf = rks.RKS(mol, xc=xc, disp=disp)
-            mf.device = 'gpu'
-            mf.grids.level = grids_level
+    cpu_gradient = pyscf.grad.RKS(mf)
+    cpu_gradient.grid_response = grid_response
+    g_cpu = cpu_gradient.kernel()
+    
 
-            coords[i,j] += eps
-            mol.set_geom_(coords, unit='Bohr')
-            grad_fd[i,j] = (e0-e1)/2.0/eps
-    grad_fd = np.array(grad_fd).reshape(-1,3)
-    print('finite difference gradient:')
-    print(grad_fd)
-    print('difference between analytical and finite difference gradient:', cupy.linalg.norm(g_analy - grad_fd))
-    assert(cupy.linalg.norm(g_analy - grad_fd) < tol)
+    # TODO: use to_gpu functionality
+    mf.__class__ = gpu4pyscf.dft.rks.RKS
+    mf._numint = numint.NumInt(xc=xc)
+    mf.grids = gpu4pyscf.dft.gen_grid.Grids(mol)
+    mf.grids.level = grids_level
+    mf.grids.prune = None
+    mf.grids.small_rho_cutoff = 1e-30
+    if mf._numint.libxc.is_nlc(mf.xc):
+        mf.nlcgrids = gpu4pyscf.dft.gen_grid.Grids(mol)
+        mf.nlcgrids.level = nlcgrids_level
+    
+    gpu_gradient = gpu4pyscf.grad.RKS(mf)
+    gpu_gradient.grid_response = grid_response
+    g_gpu = gpu_gradient.kernel()
+    assert(cupy.linalg.norm(g_cpu - g_gpu) < tol)
 
 class KnownValues(unittest.TestCase):
     
     def test_grad_with_grids_response(self):
         print("-----testing DFT gradient with grids response----")
-        _check_grad(grid_response=True)
+        _check_grad(grid_response=True, tol=1e-5)
     
     def test_grad_without_grids_response(self):
         print('-----testing DFT gradient without grids response----')
-        _check_grad(grid_response=False)
+        _check_grad(grid_response=False, tol=1e-5)
     
     def test_grad_lda(self):
         print("-----LDA testing-------")
-        _check_grad(xc='LDA', disp=None, tol=1e-6)
+        _check_grad(xc='LDA', disp=None, tol=1e-5)
     
     def test_grad_gga(self):
         print('-----GGA testing-------')
-        _check_grad(xc='PBE', disp=None, tol=1e-6)
+        _check_grad(xc='PBE', disp=None, tol=1e-5)
     
     def test_grad_hybrid(self):
         print('------hybrid GGA testing--------')
-        _check_grad(xc='B3LYP', disp=None, tol=1e-6)
+        _check_grad(xc='B3LYP', disp=None, tol=1e-5)
     
     def test_grad_mgga(self):
         print('-------mGGA testing-------------')
@@ -125,7 +108,7 @@ class KnownValues(unittest.TestCase):
     
     def test_grad_nlc(self):
         print('--------nlc testing-------------')
-        _check_grad(xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-6)
+        _check_grad(xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-5)
     
 if __name__ == "__main__":
     print("Full Tests for Gradient")

@@ -24,7 +24,7 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-xc='B3LYP'
+xc='LDA'
 bas='def2-tzvpp'
 auxbasis='def2-tzvpp-jkfit'
 scf_tol = 1e-10

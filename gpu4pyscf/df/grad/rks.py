@@ -16,8 +16,8 @@
 
 import numpy
 import cupy
+import pyscf
 from pyscf import lib
-from pyscf.df.grad import rks
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.df.grad.rhf import get_jk, grad_elec
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
@@ -39,8 +39,7 @@ def get_veff(ks_grad, mol=None, dm=None):
         grids = mf.grids
 
     if grids.coords is None:
-        grids.build(sort_grids=False)
-        #grids.build(with_non0tab=True)
+        grids.build(with_non0tab=False)
 
     nlcgrids = None
     if mf.nlc or ni.libxc.is_nlc(mf.xc):
@@ -49,7 +48,7 @@ def get_veff(ks_grad, mol=None, dm=None):
         else:
             nlcgrids = mf.nlcgrids
         if nlcgrids.coords is None:
-            nlcgrids.build(sort_grids=False)
+            nlcgrids.build(with_non0tab=False)
 
     if mf.nlc != '':
         raise NotImplementedError
@@ -116,7 +115,7 @@ def get_veff(ks_grad, mol=None, dm=None):
     vxc = tag_array(vxc, aux=e1_aux)
     return vxc
 
-class Gradients(rks.Gradients):
+class Gradients(rks_grad.Gradients):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     get_jk = get_jk
@@ -130,28 +129,7 @@ class Gradients(rks.Gradients):
     def get_k(self, mol=None, dm=None, hermi=0, omega=None):
         _, vk, _, vkaux = self.get_jk(mol, dm, with_j=False, omega=omega)
         return vk, vkaux
-
-    def get_dispersion(self):
-        if self.base.disp[:2].upper() == 'D3':
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                import dftd3.pyscf as disp
-                d3 = disp.DFTD3Dispersion(self.mol, xc=self.base.xc, version=self.base.disp)
-                _, g_d3 = d3.kernel()
-            return g_d3
-
-        if self.base.disp[:2].upper() == 'D4':
-            from pyscf.data.elements import charge
-            atoms = numpy.array([ charge(a[0]) for a in self.mol._atom])
-            coords = self.mol.atom_coords()
-
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                from dftd4.interface import DampingParam, DispersionModel
-                model = DispersionModel(atoms, coords)
-                res = model.get_dispersion(DampingParam(method=self.base.xc), grad=True)
-            return res.get("gradient")
-
+        
     def extra_force(self, atom_id, envs):
         if self.auxbasis_response:
             return envs['dvhf'].aux[atom_id]

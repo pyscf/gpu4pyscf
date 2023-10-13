@@ -33,9 +33,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     if mol is None: mol = mf_grad.mol
     #TODO: dm has to be the SCF density matrix in this version.  dm should be
     # extended to any 1-particle density matrix
-    # TODO: fix this
-    #with_j = True; with_k = True
-
+    
     if(dm0 is None): dm0 = mf_grad.base.make_rdm1()
     mf = mf_grad.base
     if omega is None:

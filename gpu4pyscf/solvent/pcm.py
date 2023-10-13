@@ -47,35 +47,35 @@ scf.hf.SCF.PCM    = scf.hf.SCF.PCM    = pcm_for_scf
 
 # TABLE II,  J. Chem. Phys. 122, 194110 (2005)
 XI = {
-6: 4.84566077868,
-14: 4.86458714334,
-26: 4.85478226219,
-38: 4.90105812685,
-50: 4.89250673295,
-86: 4.89741372580,
-110: 4.90101060987,
-146: 4.89825187392,
-170: 4.90685517725,
-194: 4.90337644248,
-302: 4.90498088169,
-350: 4.86879474832,
-434: 4.90567349080,
-590: 4.90624071359,
-770: 4.90656435779,
-974: 4.90685167998,
-1202: 4.90704098216,
-1454: 4.90721023869,
-1730: 4.90733270691,
-2030: 4.90744499142,
-2354: 4.90753082825,
-2702: 4.90760972766,
-3074: 4.90767282394,
-3470: 4.90773141371,
-3890: 4.90777965981,
-4334: 4.90782469526,
-4802: 4.90749125553,
-5294: 4.90762073452,
-5810: 4.90792902522,
+    6: 4.84566077868,
+    14: 4.86458714334,
+    26: 4.85478226219,
+    38: 4.90105812685,
+    50: 4.89250673295,
+    86: 4.89741372580,
+    110: 4.90101060987,
+    146: 4.89825187392,
+    170: 4.90685517725,
+    194: 4.90337644248,
+    302: 4.90498088169,
+    350: 4.86879474832,
+    434: 4.90567349080,
+    590: 4.90624071359,
+    770: 4.90656435779,
+    974: 4.90685167998,
+    1202: 4.90704098216,
+    1454: 4.90721023869,
+    1730: 4.90733270691,
+    2030: 4.90744499142,
+    2354: 4.90753082825,
+    2702: 4.90760972766,
+    3074: 4.90767282394,
+    3470: 4.90773141371,
+    3890: 4.90777965981,
+    4334: 4.90782469526,
+    4802: 4.90749125553,
+    5294: 4.90762073452,
+    5810: 4.90792902522,
 }
 
 Bondi = radii.VDW
@@ -325,12 +325,10 @@ def grad_kernel(pcmobj, dm):
     gridslice    = pcmobj.surface['gslice_by_atom']
     grid_coords  = pcmobj.surface['grid_coords']
     exponents    = pcmobj.surface['charge_exp']
-    switch_fun   = pcmobj.surface['switch_fun']
     v_grids      = pcmobj._intermediates['v_grids']
     A            = pcmobj._intermediates['A']
     D            = pcmobj._intermediates['D']
     S            = pcmobj._intermediates['S']
-    R            = pcmobj._intermediates['R']
     K            = pcmobj._intermediates['K']
     q            = pcmobj._intermediates['q']
     q_sym        = pcmobj._intermediates['q_sym']
@@ -550,10 +548,8 @@ class PCM(ddcosmo.DDCOSMO):
         if not self._intermediates or self.grids.coords is None:
             self.build()
 
-        mol = self.mol
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)
-        n_dm = dms.shape[0]
 
         K = self._intermediates['K']
         R = self._intermediates['R']
@@ -609,11 +605,8 @@ class PCM(ddcosmo.DDCOSMO):
     def _get_vmat(self, q):
         mol = self.mol
         nao = mol.nao
-        atom_coords = mol.atom_coords(unit='B')
-        atom_charges = mol.atom_charges()
         grid_coords = self.surface['grid_coords']
         exponents   = self.surface['charge_exp']
-
         max_memory = self.max_memory - lib.current_memory()[0]
         blksize = int(max(max_memory*.9e6/8/nao**2, 400))
         ngrids = grid_coords.shape[0]
