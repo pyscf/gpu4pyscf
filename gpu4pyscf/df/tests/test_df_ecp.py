@@ -24,8 +24,8 @@ lib.num_threads(8)
 xc='pbe0'
 bas='def2-tzvpp'
 auxbasis='def2-tzvpp-jkfit'
-grids_level = 5
-eps=1e-4
+grids_level = 6
+eps=0.001
 
 def setUpModule():
     global mol
@@ -43,10 +43,6 @@ def setUpModule():
 def tearDownModule():
     global mol
     mol.stdout.close()
-    del mol
-
-def tearDownModule():
-    global mol
     del mol
 
 def run_dft(xc):
@@ -80,16 +76,10 @@ def _check_grad(grid_response=False, tol=1e-5):
             mol.build()
             e0 = f_scanner(mol)
 
-            mf = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
-            mf.grids.level = grids_level
-
             coords[i,j] -= 2.0 * eps
             mol.set_geom_(coords, unit='Bohr')
             mol.build()
             e1 = f_scanner(mol)
-
-            mf = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
-            mf.grids.level = grids_level
 
             coords[i,j] += eps
             mol.set_geom_(coords, unit='Bohr')
@@ -122,7 +112,7 @@ def _check_dft_hessian(disp=None, ix=0, iy=0, tol=1e-3):
     pmol.set_geom_(coords + v, unit='Bohr')
     pmol.build()
     _, g0 = g_scanner(pmol)
-
+    
     pmol.set_geom_(coords - v, unit='Bohr')
     pmol.build()
     _, g1 = g_scanner(pmol)
@@ -159,7 +149,6 @@ class KnownValues(unittest.TestCase):
     def test_rks_hessian(self):
         _check_dft_hessian(ix=0, iy=0)
         _check_dft_hessian(ix=0, iy=1)
-
 
 if __name__ == "__main__":
     print("Full Tests for DF ECP")

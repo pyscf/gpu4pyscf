@@ -31,6 +31,7 @@ static void GINTint2e_ip1_jk_kernel_0021(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -204,10 +205,14 @@ static void GINTint2e_ip1_jk_kernel_0021(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -542,6 +547,7 @@ static void GINTint2e_ip1_jk_kernel_0022(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -823,10 +829,14 @@ static void GINTint2e_ip1_jk_kernel_0022(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -1364,6 +1374,7 @@ static void GINTint2e_ip1_jk_kernel_0030(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -1487,10 +1498,14 @@ static void GINTint2e_ip1_jk_kernel_0030(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -1757,6 +1772,7 @@ static void GINTint2e_ip1_jk_kernel_0031(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -2002,10 +2018,14 @@ static void GINTint2e_ip1_jk_kernel_0031(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -2501,6 +2521,7 @@ static void GINTint2e_ip1_jk_kernel_1011(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -2728,10 +2749,14 @@ static void GINTint2e_ip1_jk_kernel_1011(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -3153,6 +3178,7 @@ static void GINTint2e_ip1_jk_kernel_1020(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -3324,10 +3350,14 @@ static void GINTint2e_ip1_jk_kernel_1020(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -3683,6 +3713,7 @@ static void GINTint2e_ip1_jk_kernel_1021(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -4072,10 +4103,14 @@ static void GINTint2e_ip1_jk_kernel_1021(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -4777,6 +4812,7 @@ static void GINTint2e_ip1_jk_kernel_1030(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -5020,10 +5056,14 @@ static void GINTint2e_ip1_jk_kernel_1030(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -5552,6 +5592,7 @@ static void GINTint2e_ip1_jk_kernel_1110(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -5777,10 +5818,14 @@ static void GINTint2e_ip1_jk_kernel_1110(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -6209,6 +6254,7 @@ static void GINTint2e_ip1_jk_kernel_1111(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -6760,10 +6806,14 @@ static void GINTint2e_ip1_jk_kernel_1111(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -7660,6 +7710,7 @@ static void GINTint2e_ip1_jk_kernel_1120(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -8047,10 +8098,14 @@ static void GINTint2e_ip1_jk_kernel_1120(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -8761,6 +8816,7 @@ static void GINTint2e_ip1_jk_kernel_2010(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -8932,10 +8988,14 @@ static void GINTint2e_ip1_jk_kernel_2010(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -9300,6 +9360,7 @@ static void GINTint2e_ip1_jk_kernel_2011(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -9689,10 +9750,14 @@ static void GINTint2e_ip1_jk_kernel_2011(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -10414,6 +10479,7 @@ static void GINTint2e_ip1_jk_kernel_2020(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -10693,10 +10759,14 @@ static void GINTint2e_ip1_jk_kernel_2020(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -11298,6 +11368,7 @@ static void GINTint2e_ip1_jk_kernel_2100(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -11467,10 +11538,14 @@ static void GINTint2e_ip1_jk_kernel_2100(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -11854,6 +11929,7 @@ static void GINTint2e_ip1_jk_kernel_2110(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -12241,10 +12317,14 @@ static void GINTint2e_ip1_jk_kernel_2110(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -12972,6 +13052,7 @@ static void GINTint2e_ip1_jk_kernel_2200(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -13249,10 +13330,14 @@ static void GINTint2e_ip1_jk_kernel_2200(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -13900,6 +13985,7 @@ static void GINTint2e_ip1_jk_kernel_3000(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -14021,10 +14107,14 @@ static void GINTint2e_ip1_jk_kernel_3000(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -14321,6 +14411,7 @@ static void GINTint2e_ip1_jk_kernel_3010(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -14564,10 +14655,14 @@ static void GINTint2e_ip1_jk_kernel_3010(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];
@@ -15118,6 +15213,7 @@ static void GINTint2e_ip1_jk_kernel_3100(GINTEnvVars envs, JKMatrix jk,
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
+    double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
@@ -15359,10 +15455,14 @@ static void GINTint2e_ip1_jk_kernel_3100(GINTEnvVars envs, JKMatrix jk,
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
+        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
 
         GINTrys_root<3>(x, rw);
+        GINTscale_u<3>(rw, theta);
       for (irys = 0; irys < 3; ++irys) {
             double weight0 = rw[irys+3] * fac;
             double root0 = rw[irys];

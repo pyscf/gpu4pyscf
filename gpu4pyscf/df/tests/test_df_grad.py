@@ -79,16 +79,10 @@ def _check_grad(grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
             mol.build()
             e0 = f_scanner(mol)
 
-            mf = rks.RKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
-            mf.grids.level = grids_level
-
             coords[i,j] -= 2.0 * eps
             mol.set_geom_(coords, unit='Bohr')
             mol.build()
             e1 = f_scanner(mol)
-
-            mf = rks.RKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
-            mf.grids.level = grids_level
 
             coords[i,j] += eps
             mol.set_geom_(coords, unit='Bohr')

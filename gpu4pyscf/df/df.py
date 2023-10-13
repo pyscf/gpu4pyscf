@@ -130,8 +130,8 @@ class DF(df.DF):
             raise RuntimeError("Not enough GPU memory")
         return blksize
 
-
-    def loop(self, blksize=None):
+    
+    def loop(self, blksize=None, unpack=True):
         '''
         loop over all cderi and unpack
         '''
@@ -160,9 +160,12 @@ class DF(df.DF):
                 if isinstance(cderi_sparse, np.ndarray) and p1 < p2:
                     buf_prefetch.set(cderi_sparse[p1:p2,:])
                 stop_event = data_stream.record()
-            buf2 = cupy.zeros([p1-p0,nao,nao])
-            buf2[:p1-p0,rows,cols] = buf
-            buf2[:p1-p0,cols,rows] = buf
+            if unpack:
+                buf2 = cupy.zeros([p1-p0,nao,nao])
+                buf2[:p1-p0,rows,cols] = buf
+                buf2[:p1-p0,cols,rows] = buf
+            else:
+                buf2 = None
             yield buf2, buf.T
             compute_stream.wait_event(stop_event)
             cupy.cuda.Device().synchronize()
