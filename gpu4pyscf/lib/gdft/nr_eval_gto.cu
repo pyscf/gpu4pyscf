@@ -23,7 +23,7 @@
 #include <string.h>
 #include <assert.h>
 #include <cuda_runtime.h>
-#include <cint.h>
+#include "gint/gint.h"
 #include "gint/cuda_alloc.cuh"
 #include "nr_eval_gto.cuh"
 #include "contract_rho.cuh"
@@ -1481,7 +1481,14 @@ void GDFTdel_envs(GTOValEnvVars **envs_cache)
     *envs_cache = NULL;
 }
 
-double CINTcommon_fac_sp(int l);
+inline double CINTcommon_fac_sp(int l)
+{
+        switch (l) {
+                case 0: return 0.282094791773878143;
+                case 1: return 0.488602511902919921;
+                default: return 1;
+        }
+}
 
 int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                  double *grids, int ngrids, int *bas_loc, int nbuckets,

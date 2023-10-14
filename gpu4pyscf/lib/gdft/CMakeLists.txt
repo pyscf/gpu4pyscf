@@ -25,5 +25,3 @@ add_library(gdft SHARED
 
 set_target_properties(gdft PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-
-target_link_libraries(gdft cint)
