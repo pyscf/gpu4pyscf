@@ -65,13 +65,6 @@ if (BUILD_MARCH_NATIVE)
   endif()
 endif()
 
-find_package(OpenMP)
-if(OPENMP_FOUND)
-  set(HAVE_OPENMP 1)
-else ()
-  set(OpenMP_C_FLAGS " ")
-endif()
-
 # See also https://gitlab.kitware.com/cmake/community/wikis/doc/cmake/RPATH-handling
 if (WIN32)
   #?
