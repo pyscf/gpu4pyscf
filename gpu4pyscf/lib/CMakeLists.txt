@@ -105,31 +105,6 @@ add_subdirectory(gvhf)
 add_subdirectory(gdft)
 add_subdirectory(cupy_helper)
 
-include(ExternalProject)
-option(BUILD_LIBCINT "Using libcint for analytical gaussian integral" ON)
-if(BUILD_LIBCINT)
-if(NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/include/cint.h")
-  ExternalProject_Add(libcint
-    GIT_REPOSITORY https://github.com/sunqm/libcint.git
-    GIT_TAG v5.1.8
-    PREFIX ${PROJECT_BINARY_DIR}/deps
-    INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
-    CMAKE_ARGS -DWITH_F12=0 -DWITH_RANGE_COULOMB=1
-            -DWITH_FORTRAN=0 -DWITH_CINT2_INTERFACE=0 -DMIN_EXPCUTOFF=20
-            -DKEEP_GOING=1
-            -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
-            -DCMAKE_INSTALL_LIBDIR:PATH=lib -DBLA_VENDOR=${BLA_VENDOR}
-            -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
-            -DBLAS_LIBRARIES=${BLAS_LIBRARIES}
-            -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
-            -DBUILD_MARCH_NATIVE=${BUILD_MARCH_NATIVE}
-  )
-  add_dependencies(gint libcint)
-  add_dependencies(gdft libcint)
-endif()
-endif()
-
-
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
   ExternalProject_Add(libxc

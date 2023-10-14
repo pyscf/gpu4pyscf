@@ -23,7 +23,21 @@
 #include <assert.h>
 #include "g2e.h"
 
-void CINTcart_comp(int *nx, int *ny, int *nz, int lmax);
+static void CINTcart_comp(int *nx, int *ny, int *nz, int lmax);
+{
+        FINT inc = 0;
+        FINT lx, ly, lz;
+
+        for (lx = lmax; lx >= 0; lx--) {
+                for (ly = lmax - lx; ly >= 0; ly--) {
+                        lz = lmax - lx - ly;
+                        nx[inc] = lx;
+                        ny[inc] = ly;
+                        nz[inc] = lz;
+                        inc++;
+                }
+        }
+}
 void CINTrys_roots(int nroots, double x, double *u, double *w);
 
 void GINTinit_EnvVars(GINTEnvVars *envs,
@@ -306,116 +320,6 @@ void GINTinit_index1d_xyz(int *idx, int *l_locs)
                 l_locs[l+1] = n;
         }
 }
-
-void GINTinit_uw_s2(double *uw_buf, BasisProdOffsets *offsets,
-                    GINTEnvVars *envs, BasisProdCache *bpcache)
-{
-        size_t ntasks_ij = offsets->ntasks_ij;
-        size_t ntasks_kl = offsets->ntasks_kl;
-        int nprim_ij = envs->nprim_ij;
-        int nprim_kl = envs->nprim_kl;
-        int nroots = envs->nrys_roots;
-        int strides = envs->nprim_ij * envs->nprim_kl * nroots * 2;
-        int n_primitive_pairs = bpcache->primitive_pairs_locs[bpcache->ncptype];
-        double *a12 = bpcache->aexyz;
-        double *x12 = bpcache->aexyz + n_primitive_pairs * 2;
-        double *y12 = bpcache->aexyz + n_primitive_pairs * 3;
-        double *z12 = bpcache->aexyz + n_primitive_pairs * 4;
-
-#pragma omp parallel
-{
-        int ij, kl, task_ij, task_kl, bas_ij, bas_kl, prim_ij, prim_kl;
-        size_t n;
-        double *uw;
-#pragma omp for schedule(static)
-        for (n = 0; n < ntasks_ij*ntasks_kl; n++) {
-                task_ij = n % ntasks_ij;
-                task_kl = n / ntasks_ij;
-                bas_ij = offsets->bas_ij + task_ij;
-                bas_kl = offsets->bas_kl + task_kl;
-                if (bas_ij < bas_kl) {
-                        continue;
-                }
-                prim_ij = offsets->primitive_ij + task_ij * nprim_ij;
-                prim_kl = offsets->primitive_kl + task_kl * nprim_kl;
-                uw = uw_buf + n * strides;
-                for (ij = prim_ij; ij < prim_ij+nprim_ij; ij++) {
-                for (kl = prim_kl; kl < prim_kl+nprim_kl; kl++) {
-                        double aij = a12[ij];
-                        double xij = x12[ij];
-                        double yij = y12[ij];
-                        double zij = z12[ij];
-                        double akl = a12[kl];
-                        double xkl = x12[kl];
-                        double ykl = y12[kl];
-                        double zkl = z12[kl];
-                        double rx = xij - xkl;
-                        double ry = yij - ykl;
-                        double rz = zij - zkl;
-                        double aijkl = aij + akl;
-                        double a0 = aij * akl / aijkl;
-                        double x = a0 * (rx * rx + ry * ry + rz * rz);
-                        double *u = uw;
-                        double *w = uw + nroots;
-                        CINTrys_roots(nroots, x, u, w);
-                        uw += nroots * 2;
-                } }
-        }
-}
-}
-
-void GINTinit_uw_s1(double *uw_buf, BasisProdOffsets *offsets,
-                    GINTEnvVars *envs, BasisProdCache *bpcache)
-{
-        size_t ntasks_ij = offsets->ntasks_ij;
-        size_t ntasks_kl = offsets->ntasks_kl;
-        int nprim_ij = envs->nprim_ij;
-        int nprim_kl = envs->nprim_kl;
-        int nroots = envs->nrys_roots;
-        int strides = envs->nprim_ij * envs->nprim_kl * nroots * 2;
-        int n_primitive_pairs = bpcache->primitive_pairs_locs[bpcache->ncptype];
-        double *a12 = bpcache->aexyz;
-        double *x12 = bpcache->aexyz + n_primitive_pairs * 2;
-        double *y12 = bpcache->aexyz + n_primitive_pairs * 3;
-        double *z12 = bpcache->aexyz + n_primitive_pairs * 4;
-
-#pragma omp parallel
-{
-        int ij, kl, task_ij, task_kl, prim_ij, prim_kl;
-        size_t n;
-        double *uw;
-#pragma omp for schedule(static)
-        for (n = 0; n < ntasks_ij*ntasks_kl; n++) {
-                task_ij = n % ntasks_ij;
-                task_kl = n / ntasks_ij;
-                prim_ij = offsets->primitive_ij + task_ij * nprim_ij;
-                prim_kl = offsets->primitive_kl + task_kl * nprim_kl;
-                uw = uw_buf + n * strides;
-                for (ij = prim_ij; ij < prim_ij+nprim_ij; ij++) {
-                for (kl = prim_kl; kl < prim_kl+nprim_kl; kl++) {
-                        double aij = a12[ij];
-                        double xij = x12[ij];
-                        double yij = y12[ij];
-                        double zij = z12[ij];
-                        double akl = a12[kl];
-                        double xkl = x12[kl];
-                        double ykl = y12[kl];
-                        double zkl = z12[kl];
-                        double rx = xij - xkl;
-                        double ry = yij - ykl;
-                        double rz = zij - zkl;
-                        double aijkl = aij + akl;
-                        double a0 = aij * akl / aijkl;
-                        double x = a0 * (rx * rx + ry * ry + rz * rz);
-                        double *u = uw;
-                        double *w = uw + nroots;
-                        CINTrys_roots(nroots, x, u, w);
-                        uw += nroots * 2;
-                } }
-        }
-}
-}
-
 
 void GINTinit_EnvVars_nabla1i(GINTEnvVars *envs,
                               ContractionProdType *cp_ij,
