@@ -26,7 +26,7 @@ set(CMAKE_C_STANDARD "99")
 if(DEFINED CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCHITECTURES}")
 else()
-  set(CMAKE_CUDA_ARCHITECTURES "70")
+  set(CMAKE_CUDA_ARCHITECTURES "70-real;80-real")
 endif()
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -100,6 +100,7 @@ add_subdirectory(cupy_helper)
 
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
+  include(ExternalProject)
   ExternalProject_Add(libxc
     GIT_REPOSITORY https://gitlab.com/libxc/libxc.git
     GIT_TAG 6af8da52125a05e5997fb65751eee7fe4bc2f171

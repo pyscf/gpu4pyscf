@@ -18,7 +18,6 @@
  */
 
 #include <stdlib.h>
-#include <cint.h>
 #include <stddef.h>
 
 // boundaries for gint
