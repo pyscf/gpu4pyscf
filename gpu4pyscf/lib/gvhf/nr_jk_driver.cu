@@ -164,10 +164,7 @@ int GINTbuild_jk(BasisProdCache *bpcache,
 
     // Data and buffers to be allocated on-device. Allocate them here to
     // reduce the calls to malloc
-    int nroots2 = envs.nrys_roots * 2;
     int kl_bin, ij_bin1;
-    double *uw_buf, *d_uw;
-    size_t uw_size = 0;
     assert(nao < 32768);
     envs.nao = nao;
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));

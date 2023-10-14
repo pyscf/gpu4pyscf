@@ -176,10 +176,7 @@ int GINTfill_int2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, in
     
     // Data and buffers to be allocated on-device. Allocate them here to
     // reduce the calls to malloc
-    int nroots2 = envs.nrys_roots * 2;
     int kl_bin, ij_bin1;
-    double *uw_buf, *d_uw;
-    size_t uw_size = 0;
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));

@@ -20,7 +20,7 @@
 #include <string.h>
 #include <assert.h>
 #include <cuda_runtime.h>
-#include <cint.h>
+#include "gint/gint.h"
 #include "gint/cuda_alloc.cuh"
 
 #define THREADSX        32

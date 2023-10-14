@@ -23,10 +23,10 @@
 #include <assert.h>
 #include "g2e.h"
 
-static void CINTcart_comp(int *nx, int *ny, int *nz, int lmax);
+static void CINTcart_comp(int *nx, int *ny, int *nz, int lmax)
 {
-        FINT inc = 0;
-        FINT lx, ly, lz;
+        int inc = 0;
+        int lx, ly, lz;
 
         for (lx = lmax; lx >= 0; lx--) {
                 for (ly = lmax - lx; ly >= 0; ly--) {
@@ -38,7 +38,6 @@ static void CINTcart_comp(int *nx, int *ny, int *nz, int lmax);
                 }
         }
 }
-void CINTrys_roots(int nroots, double x, double *u, double *w);
 
 void GINTinit_EnvVars(GINTEnvVars *envs,
                       ContractionProdType *cp_ij, ContractionProdType *cp_kl, int *ng)

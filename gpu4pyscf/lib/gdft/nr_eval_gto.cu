@@ -23,7 +23,7 @@
 #include <string.h>
 #include <assert.h>
 #include <cuda_runtime.h>
-#include <cint.h>
+#include "gint/gint.h"
 #include "gint/cuda_alloc.cuh"
 #include "nr_eval_gto.cuh"
 #include "contract_rho.cuh"
