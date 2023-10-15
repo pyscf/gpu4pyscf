@@ -43,12 +43,3 @@ add_library(gint SHARED
 set_target_properties(gint PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
   CUDA_SEPARABLE_COMPILATION ON)
-
-#target_link_libraries(gint gint cint)
-if(OPENMP_FOUND)
-  target_link_libraries(gint
-    PUBLIC OpenMP::OpenMP_C
-    cint)
-else()
-  target_link_libraries(gint cint)
-endif()

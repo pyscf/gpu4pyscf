@@ -14,13 +14,10 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import pyscf
-import cupy
 import numpy as np
 import unittest
-from pyscf import lib, scf
 import gpu4pyscf
-
-lib.num_threads(8)
+from pyscf import scf
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000

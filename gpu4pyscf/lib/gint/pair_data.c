@@ -20,7 +20,14 @@
 #include <math.h>
 #include "g2e.h"
 
-double CINTcommon_fac_sp(int l);
+static double CINTcommon_fac_sp(int l)
+{
+        switch (l) {
+                case 0: return 0.282094791773878143;
+                case 1: return 0.488602511902919921;
+                default: return 1;
+        }
+}
 
 void GINTinit_contraction_types(BasisProdCache *bpcache,
                                 int *bas_pair2shls, int *bas_pairs_locs, int ncptype,

@@ -38,4 +38,4 @@ set_target_properties(gvhf PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
   CUDA_SEPARABLE_COMPILATION ON)
 
-target_link_libraries(gvhf gint cint)
+target_link_libraries(gvhf gint)
