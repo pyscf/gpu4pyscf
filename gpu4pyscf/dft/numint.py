@@ -1031,10 +1031,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None
 
 def _init_xcfuns(xc_code):
     xc_upper = xc_code.upper()
-    if(xc_upper == 'B3LYP'):
-        xc_names = [('HYB_GGA_XC_B3LYP',1)]
-    else:
-        xc_names = dft.libxc.parse_xc(xc_upper)[1:][0]
+    xc_names = dft.libxc.parse_xc(xc_upper)[1:][0]
 
     xcfuns = []
     for xc, w in xc_names:
