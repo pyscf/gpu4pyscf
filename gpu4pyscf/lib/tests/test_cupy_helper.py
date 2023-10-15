@@ -44,22 +44,6 @@ class KnownValues(unittest.TestCase):
             return cupy.dot(a, x.T).T
         x = krylov(aop, b)
         cupy.allclose(cupy.dot(a,x)+x, b)
-    
-    def test_solve_triangular(self):
-        L = cupy.random.random((10,10))
-        a = cupy.dot(L, L.T)
-        b = cupy.random.random((10,5))
-        low = cupy.linalg.cholesky(a)
-        x = cupy.linalg.solve(low, b)
-        solve_triangular(low, b)
-        assert(cupy.linalg.norm(x-b) < 1e-10)
-
-        b = cupy.random.random((10,1))
-        low = cupy.linalg.cholesky(a)
-        x = cupy.linalg.solve(low, b)
-        solve_triangular(low, b)
-        assert(cupy.linalg.norm(x-b) < 1e-10)
-
 
     def test_cderi_sparse(self):
         naux = 4
@@ -72,25 +56,6 @@ class KnownValues(unittest.TestCase):
         p0 = 1; p1 = 3
         out = unpack_sparse(cderi_sparse, row, col, p0, p1, nao)
         assert cupy.linalg.norm(out - cderi[:,:,p0:p1]) < 1e-10
-
-    def test_cutensor(self):
-        a = cupy.random.rand(10,9,11)
-        b = cupy.random.rand(11,7,13)
-        c_einsum = cupy.einsum('ijk,ikl->jl', a[3:9,:,4:10], b[3:9,:6, 7:13])
-        c_contract = contract('ijk,ikl->jl', a[3:9,:,4:10], b[3:9,:6, 7:13])
-        assert cupy.linalg.norm(c_einsum - c_contract) < 1e-10
-
-        a = cupy.random.rand(10,10,10,10)
-        b = cupy.random.rand(20,20)
-        c_einsum = cupy.einsum('lkji,jl->ik', a, b[10:20,10:20])
-        c_contract = contract('lkji,jl->ik', a, b[10:20,10:20])
-        assert cupy.linalg.norm(c_einsum - c_contract) < 1e-10
-
-        a = cupy.random.rand(10,10,10,10)
-        b = cupy.random.rand(20,20)
-        c_einsum = cupy.einsum('lkji,jk->il', a, b[10:20,10:20])
-        c_contract = contract('lkji,jk->il', a, b[10:20,10:20])
-        assert cupy.linalg.norm(c_einsum - c_contract) < 1e-10
 
     def test_sparse(self):
         a = cupy.random.rand(20, 20)

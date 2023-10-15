@@ -1,6 +1,4 @@
-# gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
-#
-# Copyright (C) 2022 Qiming Sun
+# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,18 +13,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80")
 
-add_library(cupy_helper SHARED 
-  transpose.cu
-  block_diag.cu
-  contract_cderi_k.cu
-  take_last2d.cu
-  async_d2h_2d.cu
-  add_sparse.cu
-)
+import ctypes
+from cupy.cuda import device
+from cupy_backends.cuda.libs import cublas
 
-set_target_properties(cupy_helper PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+libcublas = ctypes.CDLL('libcublas.so')
+_handle = device.get_cublas_handle()
 
-target_link_libraries(cupy_helper)
+# NOTE: add modified culbas function here

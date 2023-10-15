@@ -23,7 +23,7 @@ from pyscf import lib, scf, __config__
 from pyscf.lib import logger
 from pyscf.scf import dhf
 from pyscf.df import df_jk, addons
-from gpu4pyscf.lib.cupy_helper import contract, solve_triangular, take_last2d, transpose_sum, load_library, get_avail_mem
+from gpu4pyscf.lib.cupy_helper import contract, take_last2d, transpose_sum, load_library, get_avail_mem
 from gpu4pyscf.dft import rks, numint
 from gpu4pyscf.scf import hf
 from gpu4pyscf.df import df, int3c2e
