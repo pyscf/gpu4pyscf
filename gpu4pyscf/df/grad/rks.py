@@ -115,7 +115,7 @@ def get_veff(ks_grad, mol=None, dm=None):
     vxc = tag_array(vxc, aux=e1_aux)
     return vxc
 
-class Gradients(rks_grad.Gradients):
+class Gradients(rks_grad.Gradients, pyscf.df.grad.rks.Gradients):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     get_jk = get_jk

@@ -22,7 +22,7 @@ import cupy
 from pyscf import dft
 
 libxc = np.ctypeslib.load_library(
-    'libxc', os.path.abspath(os.path.join(__file__, '..', 'lib', 'deps', 'lib')))
+    'libxc', os.path.abspath(os.path.join(__file__, '..', '..', 'lib', 'deps', 'lib')))
 
 def _check_arrays(current_arrays, fields, factor, required):
     """

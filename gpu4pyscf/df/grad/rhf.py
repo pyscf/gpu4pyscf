@@ -16,6 +16,7 @@
 
 import numpy
 import cupy
+import pyscf
 from cupyx.scipy.linalg import solve_triangular
 from pyscf.df.grad import rhf
 from pyscf.lib import logger
