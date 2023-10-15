@@ -2,9 +2,8 @@ GPU plugin for PySCF
 ====================
 Installation
 --------
-**pip installation**
 
-For CUDA 11.x
+For **CUDA 11.x**
 ```
 pip3 install gpu4pyscf-cuda11x
 ```
@@ -13,7 +12,7 @@ and install cutensor
 python -m cupyx.tools.install_library --cuda 11.x --library cutensor
 ```
 
-For CUDA 12.x
+For **CUDA 12.x**
 ```
 pip3 install gpu4pyscf-cuda12x
 ```
@@ -22,13 +21,13 @@ and install cutensor
 python -m cupyx.tools.install_library --cuda 12.x --library cutensor
 ```
 
-**manual installation**
-
-Create an environment with dockerfiles/compile/Dockerfile. Then, compile the package with
+Compilation
+--------
+The package provides ```dockerfiles/compile/Dockerfile``` for creating the CUDA environment. One can compile the package with
 ```
 sh build.sh
 ```
-This will automatically download LibXC, and compile it with CUDA. The script will also build the wheel for installation. The compilation can take more than 5 mins. Then, one can either install the wheel with
+This script will automatically download LibXC, and compile it with CUDA. The script will also build the wheel for installation. The compilation can take more than 5 mins. Then, one can either install the wheel with
 ```
 cd output
 pip3 install gpu4pyscf-*
