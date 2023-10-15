@@ -17,7 +17,7 @@
 
 from pyscf.dft import uks
 from gpu4pyscf.dft import numint
-from gpu4pyscf.scf.hf import UHF
+from gpu4pyscf.scf.uhf import UHF
 
 class UKS(uks.UKS):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device

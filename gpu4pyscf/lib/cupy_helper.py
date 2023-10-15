@@ -20,15 +20,10 @@ import sys
 import numpy as np
 import cupy
 import ctypes
-from cupyx import cutensor
-from cupy.cuda import device
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
-from cupy_backends.cuda.libs import cusolver
-from cupy_backends.cuda.libs import cublas
-
-from gpu4pyscf.lib import cutensor as cutensor_lib
-
+from gpu4pyscf.lib.cutensor import contract
+from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 LMAX_ON_GPU = 8
 DSOLVE_LINDEP = 1e-15
 
@@ -162,69 +157,6 @@ def add_sparse(a, b, indices):
     if err != 0:
         raise RecursionError('failed in sparse_add2d')
     return a
-
-def eigh(h, s):
-    '''
-    solve generalized eigenvalue problem
-    '''
-    n = h.shape[0]
-    w = cupy.zeros(n)
-    A = h.copy()
-    B = s.copy()
-    cusolver_handle = device.get_cusolver_handle()
-    err = libcupy_helper.eigh(
-        ctypes.cast(cusolver_handle, ctypes.c_void_p),
-        ctypes.cast(A.data.ptr, ctypes.c_void_p),
-        ctypes.cast(B.data.ptr, ctypes.c_void_p),
-        ctypes.cast(w.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n))
-    if err != 0:
-        raise RuntimeError("failed in eigh kernel")
-    return w, A.T
-
-def cholesky(A):
-    n = len(A)
-    assert A.flags['C_CONTIGUOUS']
-    x = A.copy()
-    handle = device.get_cusolver_handle()
-    potrf = cusolver.dpotrf
-    potrf_bufferSize = cusolver.dpotrf_bufferSize
-    buffersize = potrf_bufferSize(handle, cublas.CUBLAS_FILL_MODE_UPPER, n, x.data.ptr, n)
-    workspace = cupy.empty(buffersize)
-    dev_info = cupy.empty(1, dtype=np.int32)
-    potrf(handle, cublas.CUBLAS_FILL_MODE_UPPER, n, x.data.ptr, n,
-        workspace.data.ptr, buffersize, dev_info.data.ptr)
-    
-    if dev_info[0] > 0:
-        raise RuntimeError('failed to perform Cholesky Decomposition')
-    cupy.linalg._util._tril(x,k=0)
-    return x
-
-def solve_triangular(A, B, lower=True):
-    '''
-    solve triangular linear system, overwrite b
-    '''
-    assert A.flags['C_CONTIGUOUS']
-    assert B.flags['C_CONTIGUOUS']
-    if B.ndim == 1:
-        m, n = (1, B.size)
-    else:
-        m = np.prod(B.shape[1:])
-        n = B.shape[0]
-    
-    uplo = 1 if lower else 0
-    cublas_handle = device.get_cublas_handle()
-    stat = libcupy_helper.cho_solve(
-        ctypes.cast(cublas_handle, ctypes.c_void_p),
-        ctypes.cast(A.data.ptr, ctypes.c_void_p),
-        ctypes.cast(B.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(m),
-        ctypes.c_int(n),
-        ctypes.c_int(uplo)
-    )
-    if stat != 0:
-        raise RuntimeError('failed to solve triangular linear system')
-    return B
 
 def block_c2s_diag(ncart, nsph, angular, counts):
     '''
@@ -386,48 +318,8 @@ def cart2sph(t, axis=0, ang=1, out=None):
     t_cart = t.reshape([i0*nli, li_size[0], i3])
     if(out is not None): 
         out = out.reshape([i0*nli, li_size[1], i3])
-    #t_sph = contract('min,ip->mpn', t_cart, c2s, out=out, order='C')
-    t_sph = contract323(t_cart, c2s, out=out)
+    t_sph = contract('min,ip->mpn', t_cart, c2s, out=out)
     return t_sph.reshape(out_shape)
-
-def contract323(a, b, alpha=1.0, beta=0.0, out=None):
-    '''
-    only support ijk,jp->ipk
-    '''
-    mode_a = ('i', 'j', 'k')
-    mode_b = ('j', 'p')
-    mode_c = ('i', 'p', 'k')
-
-    if(out is not None):
-        c = out
-    else:
-        c = cupy.zeros([a.shape[0], b.shape[1], a.shape[2]], order='C')
-
-    if not a.flags['OWNDATA']:
-        a = a.copy(order='C')
-    if not b.flags['OWNDATA']:
-        a = a.copy(order='C')
-    
-    desc_a = cutensor.create_tensor_descriptor(a)
-    desc_b = cutensor.create_tensor_descriptor(b)
-    desc_c = cutensor.create_tensor_descriptor(c)
-
-    mode_a = cutensor.create_mode(*mode_a)
-    mode_b = cutensor.create_mode(*mode_b)
-    mode_c = cutensor.create_mode(*mode_c)
-
-    cutensor.contraction(alpha, a, desc_a, mode_a, b, desc_b, mode_b, beta, c, desc_c, mode_c)
-
-    return c
-    
-def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
-    '''
-    a wrapper for general tensor contraction
-    pattern has to be a standard einsum notation
-    '''
-    c = cutensor_lib.contraction(pattern, a, b, alpha, beta, out=out)
-
-    return c
 
 # a copy with modification from 
 # https://github.com/pyscf/pyscf/blob/9219058ac0a1bcdd8058166cad0fb9127b82e9bf/pyscf/lib/linalg_helper.py#L1536

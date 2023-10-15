@@ -19,7 +19,6 @@ import numpy as np
 import unittest
 import pyscf
 from gpu4pyscf.dft import rks
-#from pyscf.dft import rks
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
