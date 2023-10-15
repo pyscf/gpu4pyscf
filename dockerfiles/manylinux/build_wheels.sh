@@ -9,17 +9,13 @@ function repair_wheel {
     fi
 }
 
-export PATH=/usr/local/cuda/bin:$PATH
-export CUDA_HOME="/usr/local/cuda" 
-export CUTENSOR_DIR="/usr/local/cuda"
-export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}"
-
-echo "export CUDA_HOME=/usr/local/cuda" >> /etc/bash.bashrc
-echo "export CUTENSOR_DIR=/usr/local/cuda" >> /etc/bash.bashrc
-echo "export PATH=${CUDA_HOME}/bin:\$PATH" >> /etc/bash.bashrc
-echo "export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:\$LD_LIBRARY_PATH" >> /etc/bash.bashrc
+export CUDA_HOME=/usr/local/cuda
+export CUTENSOR_DIR=/usr/local/cuda
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 
 # Compile wheels
+rm -rf /gpu4pyscf/wheelhouse
 for PYBIN in /opt/python/cp311-cp311/bin; do
     rm -rf /gpu4pyscf/build
     rm -rf /gpu4pyscf/gpu4pyscf/lib/deps

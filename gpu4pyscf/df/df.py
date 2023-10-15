@@ -18,10 +18,11 @@ import copy
 import cupy
 import ctypes
 import numpy as np
+from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from pyscf.df import df, addons
 from gpu4pyscf.lib.cupy_helper import (
-    cholesky, tag_array, get_avail_mem, cart2sph, solve_triangular)
+    cholesky, tag_array, get_avail_mem, cart2sph)
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
@@ -258,13 +259,13 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
         if cpi == cpj:
             ints_slices = ints_slices + ints_slices.transpose([0,2,1])
         ints_slices = ints_slices[:,col,row]
-
+        
         if cd_low.tag == 'eig':
             cderi_block = cupy.dot(cd_low.T, ints_slices)
             ints_slices = None
         elif cd_low.tag == 'cd':
-            cderi_block = solve_triangular(cd_low, ints_slices)
-
+            #cderi_block = solve_triangular(cd_low, ints_slices)
+            cderi_block = solve_triangular(cd_low, ints_slices, lower=True, overwrite_b=True)
         ij0, ij1 = count, count+cderi_block.shape[1]
         count = ij1
         if isinstance(cderi, cupy.ndarray):
