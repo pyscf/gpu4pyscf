@@ -26,7 +26,7 @@ set(CMAKE_C_STANDARD "99")
 if(DEFINED CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCHITECTURES}")
 else()
-  set(CMAKE_CUDA_ARCHITECTURES "70")
+  set(CMAKE_CUDA_ARCHITECTURES "70-real;80-real")
 endif()
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -65,13 +65,6 @@ if (BUILD_MARCH_NATIVE)
   endif()
 endif()
 
-find_package(OpenMP)
-if(OPENMP_FOUND)
-  set(HAVE_OPENMP 1)
-else ()
-  set(OpenMP_C_FLAGS " ")
-endif()
-
 # See also https://gitlab.kitware.com/cmake/community/wikis/doc/cmake/RPATH-handling
 if (WIN32)
   #?
@@ -105,33 +98,9 @@ add_subdirectory(gvhf)
 add_subdirectory(gdft)
 add_subdirectory(cupy_helper)
 
-include(ExternalProject)
-option(BUILD_LIBCINT "Using libcint for analytical gaussian integral" ON)
-if(BUILD_LIBCINT)
-if(NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/include/cint.h")
-  ExternalProject_Add(libcint
-    GIT_REPOSITORY https://github.com/sunqm/libcint.git
-    GIT_TAG v5.1.8
-    PREFIX ${PROJECT_BINARY_DIR}/deps
-    INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
-    CMAKE_ARGS -DWITH_F12=0 -DWITH_RANGE_COULOMB=1
-            -DWITH_FORTRAN=0 -DWITH_CINT2_INTERFACE=0 -DMIN_EXPCUTOFF=20
-            -DKEEP_GOING=1
-            -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
-            -DCMAKE_INSTALL_LIBDIR:PATH=lib -DBLA_VENDOR=${BLA_VENDOR}
-            -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
-            -DBLAS_LIBRARIES=${BLAS_LIBRARIES}
-            -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
-            -DBUILD_MARCH_NATIVE=${BUILD_MARCH_NATIVE}
-  )
-  add_dependencies(gint libcint)
-  add_dependencies(gdft libcint)
-endif()
-endif()
-
-
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
+  include(ExternalProject)
   ExternalProject_Add(libxc
     GIT_REPOSITORY https://gitlab.com/libxc/libxc.git
     GIT_TAG 6af8da52125a05e5997fb65751eee7fe4bc2f171

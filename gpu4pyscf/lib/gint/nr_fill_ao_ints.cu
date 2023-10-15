@@ -145,7 +145,8 @@ int GINTfill_int2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, in
     int ng[4] = {0,0,0,0};
     GINTinit_EnvVars(&envs, cp_ij, cp_kl, ng);
     envs.omega = omega;
-    if (envs.nrys_roots > 8) {
+    if (envs.nrys_roots > POLYFIT_ORDER) {
+        fprintf(stderr, "GINTfill_int2e: unsupported rys order %d\n", envs.nrys_roots);
         return 2;
     }
     
@@ -175,27 +176,7 @@ int GINTfill_int2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, in
     
     // Data and buffers to be allocated on-device. Allocate them here to
     // reduce the calls to malloc
-    int nroots2 = envs.nrys_roots * 2;
     int kl_bin, ij_bin1;
-    double *uw_buf, *d_uw;
-    size_t uw_size = 0;
-    if (envs.nrys_roots > POLYFIT_ORDER) {
-        for (kl_bin = 0; kl_bin < nbins_kl; ++kl_bin) {
-            ij_bin1 = nbins_kl - kl_bin;
-            int bas_ij0 = bins_locs_ij[0];
-            int bas_ij1 = bins_locs_ij[ij_bin1];
-            int bas_kl0 = bins_locs_kl[kl_bin];
-            int bas_kl1 = bins_locs_kl[kl_bin+1];
-            int ntasks_ij = bas_ij1 - bas_ij0;
-            int ntasks_kl = bas_kl1 - bas_kl0;
-            uw_size = MAX(uw_size, ntasks_ij * ntasks_kl);
-        }
-        uw_size *= envs.nprim_ij * envs.nprim_kl * nroots2;
-        checkCudaErrors(cudaHostAlloc(&uw_buf, sizeof(double) * uw_size,
-                                      cudaHostAllocMapped));
-        checkCudaErrors(cudaMalloc(&d_uw, sizeof(double) * uw_size));
-        envs.uw = d_uw;
-    }
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
@@ -246,22 +227,10 @@ int GINTfill_int2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, in
         offsets.primitive_ij = primitive_pairs_locs[cp_ij_id] + bas_ij0 * envs.nprim_ij;
         offsets.primitive_kl = primitive_pairs_locs[cp_kl_id] + bas_kl0 * envs.nprim_kl;
         
-        if (envs.nrys_roots > POLYFIT_ORDER) {
-            // move rys roots and weights to device
-            GINTinit_uw_s1(uw_buf, &offsets, &envs, bpcache);
-            uw_size = (size_t)ntasks_ij * ntasks_kl * envs.nprim_ij * envs.nprim_kl * nroots2;
-            checkCudaErrors(cudaMemcpy(d_uw, uw_buf, sizeof(double) * uw_size,
-                                       cudaMemcpyHostToDevice));
-        }
         int err = GINTfill_int2e_tasks(&eritensor, &offsets, &envs, stream);
         if (err != 0) {
             return err;
         }
-    }
-    
-    if (envs.nrys_roots > POLYFIT_ORDER) {
-        checkCudaErrors(cudaFreeHost(uw_buf));
-        FREE(d_uw);
     }
     
     if (envs.nrys_roots > 2) {

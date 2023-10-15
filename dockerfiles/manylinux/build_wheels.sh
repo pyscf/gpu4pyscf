@@ -20,7 +20,7 @@ echo "export PATH=${CUDA_HOME}/bin:\$PATH" >> /etc/bash.bashrc
 echo "export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:\$LD_LIBRARY_PATH" >> /etc/bash.bashrc
 
 # Compile wheels
-for PYBIN in /opt/python/{cp38-cp38,cp39-cp39,cp310-cp310,cp311-cp311}/bin; do
+for PYBIN in /opt/python/cp311-cp311/bin; do
     rm -rf /gpu4pyscf/build
     rm -rf /gpu4pyscf/gpu4pyscf/lib/deps
     rm -rf /gpu4pyscf/tmp/*

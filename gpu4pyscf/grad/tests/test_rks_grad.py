@@ -15,14 +15,10 @@
 
 import pyscf
 import cupy
-import numpy as np
 import unittest
-from pyscf import lib
 from pyscf.dft import rks
 import gpu4pyscf
 from gpu4pyscf.dft import numint
-
-lib.num_threads(8)
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000

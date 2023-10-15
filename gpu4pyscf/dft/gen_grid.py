@@ -399,13 +399,11 @@ def arg_group_grids(mol, coords, box_size=GROUP_BOX_SIZE):
                 atom_coords.max(axis=0) + GROUP_BOUNDARY_PENALTY]
     # how many boxes inside the boundary
     boxes = ((boundary[1] - boundary[0]) * (1./box_size)).round().astype(int)
-    boxes = cupy.asarray(boxes)
-    boundary = [cupy.asarray(boundary[0]), cupy.asarray(boundary[1])]
-    tot_boxes = cupy.prod(boxes + 2)
+    tot_boxes = numpy.prod(boxes + 2)
     logger.debug(mol, 'tot_boxes %d, boxes in each direction %s', tot_boxes, boxes)
     # box_size is the length of each edge of the box
-    box_size = (boundary[1] - boundary[0]) / boxes
-    frac_coords = (coords - boundary[0]) * (1./box_size)
+    box_size = cupy.asarray((boundary[1] - boundary[0]) / boxes)
+    frac_coords = (coords - cupy.asarray(boundary[0])) * (1./box_size)
     box_ids = cupy.floor(frac_coords).astype(int)
     box_ids[box_ids<-1] = -1
     box_ids[box_ids[:,0] > boxes[0], 0] = boxes[0]
