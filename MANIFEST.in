@@ -11,9 +11,11 @@ global-exclude *.py[cod]
 prune gpu4pyscf/lib/build
 prune bytedance
 prune benchmarks
-prune Dockerfiles
+prune dockerfiles
+prune examples
+prune wheelhouse
 
 recursive-include gpu4pyscf *.dat
 recursive-include gpu4pyscf/lib/deps *.so
 include gpu4pyscf/lib/*.so
-
+exclude gpu4pyscf/lib.deps *.so.*

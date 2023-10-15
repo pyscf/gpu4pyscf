@@ -28,7 +28,7 @@ for lib_path in _preload_libs['cutensor']:
     try:
         libcutensor = _preload_libs['cutensor'][lib_path]
         break
-    except:
+    except Exception:
         continue
 
 if libcutensor is None:

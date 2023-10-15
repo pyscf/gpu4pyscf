@@ -96,7 +96,7 @@ def eigh(h, s):
             ctypes.byref(lwork)
         )
         lwork = lwork.value
-
+    
     work = cupy.empty(lwork)
     
     status = libcusolver.cusolverDnDsygvd(
