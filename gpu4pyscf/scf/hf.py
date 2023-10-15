@@ -599,7 +599,7 @@ class RHF(hf.RHF):
     def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
         import gpu4pyscf.df.df_jk
         return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
-    
+
 class _VHFOpt(_vhf.VHFOpt):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 

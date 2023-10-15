@@ -16,11 +16,12 @@
 
 import numpy
 import cupy
+from cupyx.scipy.linalg import solve_triangular
 from pyscf.df.grad import rhf
 from pyscf.lib import logger
 from pyscf import lib, scf, gto
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.cupy_helper import print_mem_info, solve_triangular, tag_array, unpack_tril, contract, load_library
+from gpu4pyscf.lib.cupy_helper import print_mem_info, tag_array, unpack_tril, contract, load_library
 from gpu4pyscf.grad.rhf import grad_elec
 from gpu4pyscf import __config__
 
@@ -103,7 +104,8 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         if low.tag == 'eig':
             rhoj = cupy.dot(low_t.T, rhoj)
         elif low.tag == 'cd':
-            rhoj = solve_triangular(low_t, rhoj, lower=False)
+            #rhoj = solve_triangular(low_t, rhoj, lower=False)
+            rhoj = solve_triangular(low_t, rhoj, lower=False, overwrite_b=True)
         rhoj_cart = contract('pq,q->p', aux_cart2sph, rhoj)
         rhoj = rhoj[rev_aux_idx]
         tmp = contract('xpq,q->xp', int2c_e1, rhoj)
@@ -114,7 +116,8 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         if low.tag == 'eig':
             rhok = contract('pq,qij->pij', low_t.T, rhok)
         elif low.tag == 'cd':
-            rhok = solve_triangular(low_t, rhok, lower=False)
+            #rhok = solve_triangular(low_t, rhok, lower=False)
+            rhok = solve_triangular(low_t, rhok.reshape(naux, -1), lower=False, overwrite_b=True).reshape(naux, nocc, nocc)
         tmp = contract('pij,qij->pq', rhok, rhok)
         tmp = tmp[cupy.ix_(rev_aux_idx, rev_aux_idx)]
         vkaux = -contract('xpq,pq->xp', int2c_e1, tmp)

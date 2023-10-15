@@ -15,6 +15,7 @@ export PATH=$CUDA_HOME/bin:$PATH
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 
 # Compile wheels
+rm -rf /gpu4pyscf/wheelhouse
 for PYBIN in /opt/python/cp311-cp311/bin; do
     rm -rf /gpu4pyscf/build
     rm -rf /gpu4pyscf/gpu4pyscf/lib/deps
