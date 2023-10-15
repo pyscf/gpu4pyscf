@@ -16,6 +16,7 @@
 
 import numpy
 import cupy
+import pyscf
 from cupyx.scipy.linalg import solve_triangular
 from pyscf.df.grad import rhf
 from pyscf.lib import logger
@@ -223,7 +224,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     return vj, vk, vjaux, vkaux
 
 
-class Gradients(rhf.Gradients):
+class Gradients(rhf.Gradients, pyscf.df.grad.rhf.Gradients):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     get_jk = get_jk
