@@ -6,15 +6,18 @@ on:
 jobs:
   release-pypi-linux:
     runs-on: ubuntu-latest
-    env:
-      img: wxj6000/manylinux2014:cuda118
+    strategy:
+      matrix:
+        cuda-version:
+        - cuda118
+        - cuda121
     steps:
     - name: Checkout
       uses: actions/checkout@v3
     - name: Build wheels
       run: |
         docker run --rm -v ${{ github.workspace }}:/gpu4pyscf:rw \
-        ${{ env.img }} \
+        wxj6000/manylinux2014:${{ matrix.cuda-version }} \
         bash -exc 'sh /gpu4pyscf/builder/build_libxc.sh'
     - name: List available wheels
       run: |
