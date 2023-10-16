@@ -96,8 +96,6 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
         with_df.verbose = mf.verbose
         with_df.auxbasis = auxbasis
 
-    mf_class = mf.__class__
-
     if isinstance(mf, df_jk._DFHF):
         if mf.with_df is None:
             mf.with_df = with_df
@@ -108,139 +106,101 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
             mf.only_dfj = only_dfj
         return mf
 
-    class DensityFitting(df_jk._DFHF, mf_class):
-        __doc__ = '''
-        Density fitting SCF class
-        Attributes for density-fitting SCF:
-            auxbasis : str or basis dict
-                Same format to the input attribute mol.basis.
-                The default basis 'weigend+etb' means weigend-coulomb-fit basis
-                for light elements and even-tempered basis for heavy elements.
-            with_df : DF object
-                Set mf.with_df = None to switch off density fitting mode.
-        See also the documents of class %s for other SCF attributes.
-        ''' % mf_class
+    dfmf = _DFHF(mf, with_df, only_dfj)
+    return lib.set_class(dfmf, (_DFHF, mf.__class__))
 
-        from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+class _DFHF(df_jk._DFHF):
+    '''
+    Density fitting SCF class
+    Attributes for density-fitting SCF:
+        auxbasis : str or basis dict
+            Same format to the input attribute mol.basis.
+            The default basis 'weigend+etb' means weigend-coulomb-fit basis
+            for light elements and even-tempered basis for heavy elements.
+        with_df : DF object
+            Set mf.with_df = None to switch off density fitting mode.
+    '''
 
-        def __init__(self, mf, dfobj, only_dfj):
-            self.__dict__.update(mf.__dict__)
-            self._eri = None
-            self.rhoj = None
-            self.rhok = None
-            self.direct_scf = False
-            self.with_df = dfobj
-            self.only_dfj = only_dfj
-            self._keys = self._keys.union(['with_df', 'only_dfj'])
+    from gpu4pyscf.lib.utils import to_gpu, device
 
-        init_workflow = init_workflow
+    def __init__(self, mf, dfobj, only_dfj):
+        self.__dict__.update(mf.__dict__)
+        self._eri = None
+        self.rhoj = None
+        self.rhok = None
+        self.direct_scf = False
+        self.with_df = dfobj
+        self.only_dfj = only_dfj
+        self._keys = self._keys.union(['with_df', 'only_dfj'])
 
-        def reset(self, mol=None):
-            self.with_df.reset(mol)
-            return mf_class.reset(self, mol)
+    def undo_df(self):
+        '''Remove the DFHF Mixin'''
+        obj = lib.view(self, lib.drop_class(self.__class__, _DFHF))
+        del obj.rhoj, obj.rhok, obj.with_df, obj.only_dfj
+        return obj
 
-        def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
-                   omega=None):
-            if dm is None: dm = self.make_rdm1()
-            if self.with_df and self.only_dfj:
-                vj = vk = None
-                if with_j:
-                    vj, vk = self.with_df.get_jk(dm, hermi, True, False,
-                                                 self.direct_scf_tol, omega)
-                if with_k:
-                    vk = mf_class.get_jk(self, mol, dm, hermi, False, True, omega)[1]
-            elif self.with_df:
-                vj, vk = self.with_df.get_jk(dm, hermi, with_j, with_k,
+    def reset(self, mol=None):
+        self.with_df.reset(mol)
+        return super().reset(mol)
+
+    init_workflow = init_workflow
+
+    def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
+               omega=None):
+        if dm is None: dm = self.make_rdm1()
+        if self.with_df and self.only_dfj:
+            vj = vk = None
+            if with_j:
+                vj, vk = self.with_df.get_jk(dm, hermi, True, False,
                                              self.direct_scf_tol, omega)
+            if with_k:
+                vk = super().get_jk(mol, dm, hermi, False, True, omega)[1]
+        elif self.with_df:
+            vj, vk = self.with_df.get_jk(dm, hermi, with_j, with_k,
+                                         self.direct_scf_tol, omega)
+        else:
+            vj, vk = super().get_jk(mol, dm, hermi, with_j, with_k, omega)
+        return vj, vk
+
+    def nuc_grad_method(self):
+        if isinstance(self, rks.RKS):
+            from gpu4pyscf.df.grad import rks as rks_grad
+            return rks_grad.Gradients(self)
+        if isinstance(self, hf.RHF):
+            from gpu4pyscf.df.grad import rhf as rhf_grad
+            return rhf_grad.Gradients(self)
+        raise NotImplementedError()
+
+    def Hessian(self):
+        from pyscf.dft.rks import KohnShamDFT
+        from gpu4pyscf.df.hessian import rhf, rks
+        if isinstance(self, scf.rhf.RHF):
+            if isinstance(self, KohnShamDFT):
+                return rks.Hessian(self)
             else:
-                vj, vk = mf_class.get_jk(self, mol, dm, hermi, with_j, with_k, omega)
-            return vj, vk
+                return rhf.Hessian(self)
+        else:
+            raise NotImplementedError
 
-        def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1):
-            '''
-            effective potential
-            '''
-            if mol is None: mol = self.mol
-            if dm is None: dm = self.make_rdm1()
-            
-            # for DFT
-            if mf_class == rks.RKS:
-                return rks.get_veff(self, dm=dm)
+    @property
+    def auxbasis(self):
+        return getattr(self.with_df, 'auxbasis', None)
 
-            if self.direct_scf:
-                ddm = cupy.asarray(dm) - dm_last
-                vj, vk = self.get_jk(mol, ddm, hermi=hermi)
-                return vhf_last + vj - vk * .5
-            else:
-                vj, vk = self.get_jk(mol, dm, hermi=hermi)
-                return vj - vk * .5
+    def to_cpu(self):
+        obj = self.undo_df().to_cpu().density_fit()
+        keys = dir(obj)
+        obj.__dict__.update(self.__dict__)
 
-        def energy_elec(self, dm=None, h1e=None, vhf=None):
-            '''
-            electronic energy
-            '''
-            if dm is None: dm = self.make_rdm1()
-            if h1e is None: h1e = self.get_hcore()
-            if vhf is None: vhf = self.get_veff(self.mol, dm)
-            # for DFT
-            if mf_class == rks.RKS:
-                e1 = cupy.sum(h1e*dm)
-                ecoul = self.ecoul
-                exc = self.exc
-                e2 = ecoul + exc
-                #logger.debug(self, f'E1 = {e1}, Ecoul = {ecoul}, Exc = {exc}')
-                return e1+e2, e2
+        for key in set(dir(self)).difference(keys):
+            delattr(obj, key)
 
-            e1 = cupy.einsum('ij,ji->', h1e, dm).real
-            e_coul = cupy.einsum('ij,ji->', vhf, dm).real * .5
-            self.scf_summary['e1'] = e1
-            self.scf_summary['e2'] = e_coul
-            #logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
-            return e1+e_coul, e_coul
-
-        def energy_tot(self, dm, h1e, vhf=None):
-            '''
-            compute tot energy
-            '''
-            nuc = self.energy_nuc()
-            e_tot = self.energy_elec(dm, h1e, vhf)[0] + nuc
-            self.scf_summary['nuc'] = nuc.real
-            return e_tot
-
-        def nuc_grad_method(self):
-            if mf_class == rks.RKS:
-                from gpu4pyscf.df.grad import rks as rks_grad
-                return rks_grad.Gradients(self)
-            if mf_class == hf.RHF:
-                from gpu4pyscf.df.grad import rhf as rhf_grad
-                return rhf_grad.Gradients(self)
-            raise NotImplementedError()
-
-
-        def Hessian(self):
-            from gpu4pyscf.df.hessian import rhf, rks
-            if isinstance(self, scf.rhf.RHF):
-                if isinstance(self, scf.hf.KohnShamDFT):
-                    return rks.Hessian(self)
-                else:
-                    return rhf.Hessian(self)
-            else:
-                raise NotImplementedError
-
-        # for pyscf 1.0, 1.1 compatibility
-        @property
-        def _cderi(self):
-            naux = self.with_df.get_naoaux()
-            return next(self.with_df.loop(blksize=naux))
-        @_cderi.setter
-        def _cderi(self, x):
-            self.with_df._cderi = x
-
-        @property
-        def auxbasis(self):
-            return getattr(self.with_df, 'auxbasis', None)
-
-    return DensityFitting(mf, with_df, only_dfj)
+        for key in keys:
+            val = getattr(obj, key)
+            if isinstance(val, cupy.ndarray):
+                setattr(obj, key, cupy.asnumpy(val))
+            elif hasattr(val, 'to_cpu'):
+                setattr(obj, key, val.to_cpu())
+        return obj
 
 def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-14, omega=None):
     '''
@@ -248,7 +208,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     outputs and input are on the same device
     TODO: separate into three cases: j only, k only, j and k
     '''
-    
+
     log = logger.new_logger(dfobj.mol, dfobj.verbose)
     out_shape = dms_tag.shape
     out_cupy = isinstance(dms_tag, cupy.ndarray)
@@ -290,7 +250,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
         vj_tmp[:,cols,rows] = vj_sparse
         vj_sparse = None
         return vj_tmp
-    
+
     # SCF K matrix with occ
     if nset == 1 and hasattr(dms_tag, 'occ_coeff'):
         occ_coeff = cupy.asarray(dms_tag.occ_coeff[ao_idx, :], order='C')

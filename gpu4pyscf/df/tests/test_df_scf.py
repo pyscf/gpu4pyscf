@@ -17,7 +17,9 @@ import unittest
 import numpy as np
 import pyscf
 from pyscf import lib
+from pyscf.df import df_jk as cpu_df_jk
 from gpu4pyscf import scf
+from gpu4pyscf.df import df_jk
 from gpu4pyscf.dft import rks
 
 lib.num_threads(8)
@@ -37,7 +39,7 @@ def setUpModule():
     mol.output = '/dev/null'
     mol.build()
     mol.verbose = 1
-    
+
 def tearDownModule():
     global mol
     mol.stdout.close()
@@ -57,7 +59,7 @@ class KnownValues(unittest.TestCase):
         mf = scf.RHF(mol).density_fit(auxbasis='def2-tzvpp-jkfit')
         e_tot = mf.kernel()
         assert np.allclose(e_tot, -76.0624582299)
-    
+
     def test_rks_lda(self):
         print('------- LDA ----------------')
         e_tot = run_dft("LDA_X,LDA_C_VWN")
@@ -67,17 +69,17 @@ class KnownValues(unittest.TestCase):
         print('------- PBE ----------------')
         e_tot = run_dft('PBE')
         assert np.allclose(e_tot, -76.3800181250)
-    
+
     def test_rks_b3lyp(self):
         print('-------- B3LYP -------------')
         e_tot = run_dft('B3LYP')
         assert np.allclose(e_tot, -76.4666493796)
-    
+
     def test_rks_m06(self):
         print('--------- M06 --------------')
         e_tot = run_dft("M06")
         assert np.allclose(e_tot, -76.4265841359)
-    
+
     def test_rks_wb97(self):
         print('-------- wB97 --------------')
         e_tot = run_dft("HYB_GGA_XC_WB97")
@@ -87,6 +89,19 @@ class KnownValues(unittest.TestCase):
         print('-------- wB97 --------------')
         e_tot = run_dft("HYB_MGGA_XC_WB97M_V")
         assert np.allclose(e_tot, -76.4334567297)
+
+    def test_to_cpu(self):
+        mf = scf.RHF(mol).density_fit().to_cpu()
+        assert isinstance(mf, cpu_df_jk._DFHF)
+        mf = mf.to_gpu()
+        assert isinstance(mf, df_jk._DFHF)
+
+        mf = rks.RKS(mol).density_fit().to_cpu()
+        assert isinstance(mf, cpu_df_jk._DFHF)
+        assert 'gpu' not in mf.grids.__module__
+        mf = mf.to_gpu()
+        assert isinstance(mf, df_jk._DFHF)
+        assert 'gpu' in mf.grids.__module__
 
 if __name__ == "__main__":
     print("Full Tests for SCF")
