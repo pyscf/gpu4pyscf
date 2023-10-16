@@ -214,9 +214,9 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     Returns:
         RKS electronic energy and the 2-electron contribution
     '''
-    if dm is None: dm = self.make_rdm1()
-    if h1e is None: h1e = self.get_hcore()
-    if vhf is None: vhf = self.get_veff(self.mol, dm)
+    if dm is None: dm = ks.make_rdm1()
+    if h1e is None: h1e = ks.get_hcore()
+    if vhf is None: vhf = ks.get_veff(ks.mol, dm)
     e1 = cupy.einsum('ij,ji->', h1e, dm).real
     ecoul = vhf.ecoul.real
     exc = vhf.exc.real
