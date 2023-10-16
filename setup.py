@@ -22,7 +22,7 @@ import sys
 import subprocess
 import re
 
-from setuptools import setup, find_packages, Extension, find_namespace_packages
+from setuptools import setup, find_packages, Extension
 from setuptools.command.build_py import build_py
 from distutils.util import get_platform
 
@@ -113,7 +113,7 @@ setup(
     package_dir={'gpu4pyscf': 'gpu4pyscf'},  # packages are under directory pyscf
     # include *.so *.dat files. They are now placed in MANIFEST.in
     include_package_data=True,  # include everything in source control
-    packages=['gpu4pyscf', 'gpu4pyscf.lib'],
+    packages=find_packages(exclude=['*test*', '*examples*', '*docker*']),
     tests_require=[
         "pytest==7.2.0",
         "pytest-cov==4.0.0",
