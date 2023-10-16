@@ -24,7 +24,8 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
-LMAX_ON_GPU = 8
+
+LMAX_ON_GPU = 6
 DSOLVE_LINDEP = 1e-15
 
 c2s_l = mole.get_cart2sph(lmax=LMAX_ON_GPU)
@@ -64,7 +65,7 @@ def print_mem_info():
     #mem_stack = stack_size_per_thread
     GB = 1024 * 1024 * 1024
     print(f'mem_avail: {mem_avail/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB, used_mem: {used_mem/GB:.3f} GB,mem_limt: {mem_limit/GB:.3f} GB')
-    
+
 def get_avail_mem():
     mempool = cupy.get_default_memory_pool()
     used_mem = mempool.used_bytes()
@@ -83,7 +84,7 @@ def device2host_2d(a_cpu, a_gpu, stream=None):
     libcupy_helper.async_d2h_2d(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         a_cpu.ctypes.data_as(ctypes.c_void_p),
-        ctypes.c_int(a_cpu.strides[0]), 
+        ctypes.c_int(a_cpu.strides[0]),
         ctypes.cast(a_gpu.data.ptr, ctypes.c_void_p),
         ctypes.c_int(a_gpu.strides[0]),
         ctypes.c_int(a_gpu.shape[0]),
@@ -146,7 +147,7 @@ def add_sparse(a, b, indices):
     '''
     n = a.shape[0]
     m = b.shape[0]
-    
+
     err = libcupy_helper.add_sparse(
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         ctypes.cast(b.data.ptr, ctypes.c_void_p),
@@ -205,7 +206,7 @@ def block_diag(blocks, out=None):
     rows = np.cumsum(np.asarray([0] + [x.shape[0] for x in blocks]))
     cols = np.cumsum(np.asarray([0] + [x.shape[1] for x in blocks]))
     offsets = np.cumsum(np.asarray([0] + [x.shape[0]*x.shape[1] for x in blocks]))
-    
+
     m, n = rows[-1], cols[-1]
     if out is None: out = cupy.zeros([m, n])
     rows = cupy.asarray(rows, dtype='int32')
@@ -227,7 +228,7 @@ def block_diag(blocks, out=None):
     if err != 0:
         raise RuntimeError('failed in block_diag kernel')
     return out
-    
+
 def take_last2d(a, indices, out=None):
     '''
     reorder the last 2 dimensions with 'indices', the first n-2 indices do not change
@@ -303,7 +304,7 @@ def cart2sph(t, axis=0, ang=1, out=None):
     '''
     transform 'axis' of a tensor from cartesian basis into spherical basis
     '''
-    if(ang <= 1): 
+    if(ang <= 1):
         if(out is not None): out[:] = t
         return t
     size = list(t.shape)
@@ -314,14 +315,14 @@ def cart2sph(t, axis=0, ang=1, out=None):
     i0 = max(1, np.prod(size[:axis]))
     i3 = max(1, np.prod(size[axis+1:]))
     out_shape = size[:axis] + [nli*li_size[1]] + size[axis+1:]
-    
+
     t_cart = t.reshape([i0*nli, li_size[0], i3])
-    if(out is not None): 
+    if(out is not None):
         out = out.reshape([i0*nli, li_size[1], i3])
     t_sph = contract('min,ip->mpn', t_cart, c2s, out=out)
     return t_sph.reshape(out_shape)
 
-# a copy with modification from 
+# a copy with modification from
 # https://github.com/pyscf/pyscf/blob/9219058ac0a1bcdd8058166cad0fb9127b82e9bf/pyscf/lib/linalg_helper.py#L1536
 def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
            lindep=DSOLVE_LINDEP, callback=None, hermi=False,
@@ -364,7 +365,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
 
     if not (isinstance(b, cupy.ndarray) and b.ndim == 1):
         b = cupy.asarray(b)
-    
+
     if x0 is None:
         x1 = b
     else:
@@ -402,7 +403,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         ax.extend(axt)
         if callable(callback):
             callback(cycle, xs, ax)
-        
+
         x1 = axt.copy()
         for i in range(len(xs)):
             xsi = cupy.asarray(xs[i])
@@ -419,22 +420,22 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
                 idx.append(i)
                 innerprod.append(innerprod1)
         log.debug('krylov cycle %d  r = %g', cycle, max_innerprod**.5)
-        
+
         if max_innerprod < lindep or max_innerprod < tol**2:
             break
 
         x1 = x1[idx]
-        
+
     xs = cupy.asarray(xs)
     ax = cupy.asarray(ax)
     nd = cycle + 1
 
     h = cupy.einsum('in,jn->ij', xs, ax)
-    
+
     # Add the contribution of I in (1+a)
     h += cupy.diag(cupy.asarray(innerprod[:nd]))
     g = cupy.zeros((nd,nroots), dtype=x1.dtype)
-    
+
     if b.ndim == 1:
         g[0] = innerprod[0]
     else:
@@ -447,7 +448,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
             for j in range(nroots):
                 g[i,j] = cupy.dot(xsi.conj(), b[j])
         '''
-    
+
     c = cupy.linalg.solve(h, g)
     x = _gen_x0(c, cupy.asarray(xs))
     if b.ndim == 1:
