@@ -21,14 +21,8 @@ import ctypes
 import cupy
 from pyscf import dft
 
-from gpu4pyscf import __path__ as path
-try:
-    libxc = np.ctypeslib.load_library("libxc", os.path.join(path[-1], 'lib', 'deps', 'lib'))
-except OSError:
-    try:
-        libxc = np.ctypeslib.load_library("libxc", path[-1] + '/lib/build/libxc/objdir')
-    except OSError:
-        raise ImportError('libxc library not found')
+libxc = np.ctypeslib.load_library(
+    'libxc', os.path.abspath(os.path.join(__file__, '..', '..', 'lib', 'deps', 'lib')))
 
 def _check_arrays(current_arrays, fields, factor, required):
     """

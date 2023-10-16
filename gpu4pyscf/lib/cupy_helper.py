@@ -322,7 +322,7 @@ def cart2sph(t, axis=0, ang=1, out=None):
     t_sph = contract('min,ip->mpn', t_cart, c2s, out=out)
     return t_sph.reshape(out_shape)
 
-# a copy with modification from
+# a copy with modification from 
 # https://github.com/pyscf/pyscf/blob/9219058ac0a1bcdd8058166cad0fb9127b82e9bf/pyscf/lib/linalg_helper.py#L1536
 def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
            lindep=DSOLVE_LINDEP, callback=None, hermi=False,

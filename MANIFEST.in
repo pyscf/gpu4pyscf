@@ -8,13 +8,20 @@ global-exclude *.py[cod]
 #global-exclude *.cuh
 #global-exclude *.sh
 
+prune */__pycache__ 
+recursive-exclude */__pycache__ *
+
 prune gpu4pyscf/lib/build
 prune bytedance
 prune benchmarks
+
+prune builder
 prune dockerfiles
+prune docker
 prune examples
 prune wheelhouse
 
+recursive-exclude *test*
 recursive-include gpu4pyscf *.dat
 recursive-include gpu4pyscf/lib/deps *.so
 include gpu4pyscf/lib/*.so
