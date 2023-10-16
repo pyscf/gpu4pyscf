@@ -501,8 +501,7 @@ def grids_response_cc(grids):
         yield coords, w0, w1
 
 class Gradients(rhf_grad.Gradients, pyscf.grad.rks.Gradients):
-    device = 'gpu'
-    get_veff = patch_cpu_kernel(pyscf.grad.rks.Gradients.get_veff)(_get_veff)
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
     
     def get_dispersion(self):
         if self.base.disp[:2].upper() == 'D3':
