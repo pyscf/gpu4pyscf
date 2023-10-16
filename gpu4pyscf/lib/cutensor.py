@@ -131,13 +131,6 @@ def contraction(pattern, a, b, alpha, beta, out=None):
                              ws.data.ptr, ws_size)
     return out
 
-def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
-    '''
-    a wrapper for general tensor contraction
-    pattern has to be a standard einsum notation
-    '''
-    return contraction(pattern, a, b, alpha, beta, out=out)
-
 import os
 if 'CONTRACT_ENGINE' in os.environ:
     contract_engine = os.environ['CONTRACT_ENGINE']
@@ -146,7 +139,7 @@ else:
 
 if libcutensor is None:
     contract_engine = 'cupy'
-print(contract_engine)
+
 # override the 'contract' function if einsum is customized or cutensor is not found
 if contract_engine is not None:
     einsum = None
@@ -168,4 +161,10 @@ if contract_engine is not None:
         else:
             out[:] = alpha*einsum(pattern, a, b) + beta*out
             return cupy.asarray(out, order='C')
-
+else:
+    def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
+        '''
+        a wrapper for general tensor contraction
+        pattern has to be a standard einsum notation
+        '''
+        return contraction(pattern, a, b, alpha, beta, out=out)
