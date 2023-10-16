@@ -113,7 +113,7 @@ setup(
     package_dir={'gpu4pyscf': 'gpu4pyscf'},  # packages are under directory pyscf
     # include *.so *.dat files. They are now placed in MANIFEST.in
     include_package_data=True,  # include everything in source control
-    packages=[*find_namespace_packages('.'), 'gpu4pyscf', 'gpu4pyscf.lib'],
+    packages=['gpu4pyscf', 'gpu4pyscf.lib'],
     tests_require=[
         "pytest==7.2.0",
         "pytest-cov==4.0.0",
