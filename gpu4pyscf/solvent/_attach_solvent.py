@@ -17,6 +17,7 @@ from pyscf import lib
 from pyscf.lib import logger
 from pyscf.solvent._attach_solvent import _Solvation
 from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf import scf
 
 # NOTE: copied from pyscf, different from the latest version
 

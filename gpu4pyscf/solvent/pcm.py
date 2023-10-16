@@ -92,18 +92,6 @@ def switch_h(x):
     y[x>1] = 1.0
     return y
 
-def grad_switch_h(x):
-    ''' first derivative of h(x)'''
-    dy = 30.0*x**2 - 60.0*x**3 + 30.0*x**4
-    dy[x<0|x>1] = 0.0
-    return dy
-
-def gradgrad_switch_h(x):
-    ''' 2nd derivative of h(x) '''
-    ddy = 60.0*x - 180.0*x**2 + 120*x**3
-    ddy[x<0|x>1] = 0.0
-    return ddy
-
 def gen_surface(mol, ng=302, vdw_scale=1.2):
     '''J. Phys. Chem. A 1999, 103, 11060-11079'''
     unit_sphere = numpy.empty((ng,4))
