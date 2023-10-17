@@ -28,6 +28,7 @@ from pyscf.dft import gen_grid
 from pyscf.data import radii
 from pyscf.solvent import ddcosmo
 from gpu4pyscf.solvent import _attach_solvent
+from gpu4pyscf.df import int3c2e
 
 libdft = lib.load_library('libdft')
 
@@ -37,10 +38,9 @@ def pcm_for_scf(mf, solvent_obj=None, dm=None):
         solvent_obj = PCM(mf.mol)
     return _attach_solvent._for_scf(mf, solvent_obj, dm)
 
-
-# Inject ddPCM to other methods
-from pyscf import scf
-scf.hf.SCF.PCM    = scf.hf.SCF.PCM    = pcm_for_scf
+# Inject PCM to SCF, TODO: add it to other methods later
+from gpu4pyscf import scf
+scf.hf.RHF.PCM    = scf.hf.RHF.PCM    = pcm_for_scf
 
 # TABLE II,  J. Chem. Phys. 122, 194110 (2005)
 XI = {
@@ -215,10 +215,7 @@ class PCM(ddcosmo.DDCOSMO):
         self._intermediates = {}
 
     def dump_flags(self, verbose=None):
-        logger.info(self, '******** %s (In testing) ********', self.__class__)
-        logger.warn(self, 'ddPCM is an experimental feature. It is '
-                    'still in testing.\nFeatures and APIs may be changed '
-                    'in the future.')
+        logger.info(self, '******** %s ********', self.__class__)
         logger.info(self, 'lebedev_order = %s (%d grids per sphere)',
                     self.lebedev_order, gen_grid.LEBEDEV_ORDER[self.lebedev_order])
         logger.info(self, 'lmax = %s'         , self.lmax)
@@ -278,6 +275,23 @@ class PCM(ddcosmo.DDCOSMO):
         }
         self._intermediates.update(intermediates)
 
+        charge_exp  = self.surface['charge_exp']
+        grid_coords = self.surface['grid_coords']
+        atom_coords = mol.atom_coords(unit='B')
+        atom_charges = mol.atom_charges()
+
+        # Move this to GPU
+        auxmol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
+        intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
+        intopt.build(1e-14, diag_block_with_triu=False, aosym=True, group_size=256)
+        self.intopt = intopt
+
+        int2c2e = mol._add_suffix('int2c2e')
+        fakemol_nuc = gto.fakemol_for_charges(atom_coords)
+        v_ng = gto.mole.intor_cross(int2c2e, fakemol_nuc, auxmol)
+        v_grids_n = numpy.dot(atom_charges, v_ng)
+        self.v_grids_n = cupy.asarray(v_grids_n)
+
     def _get_vind(self, dms):
         if not self._intermediates or self.grids.coords is None:
             self.build()
@@ -287,15 +301,15 @@ class PCM(ddcosmo.DDCOSMO):
 
         K = self._intermediates['K']
         R = self._intermediates['R']
-        v_grids = self._get_v(self.surface, dms)
+        v_grids = self._get_v(dms)
         b = cupy.dot(R, v_grids)
         q = cupy.linalg.solve(K, b)
 
-        vK_1 = numpy.linalg.solve(K.T, v_grids)
-        q_sym = (q + numpy.dot(R.T, vK_1))/2.0
+        vK_1 = cupy.linalg.solve(K.T, v_grids)
+        q_sym = (q + cupy.dot(R.T, vK_1))/2.0
 
         vmat = self._get_vmat(q_sym)
-        epcm = 0.5 * numpy.dot(q_sym, v_grids)
+        epcm = 0.5 * cupy.dot(q_sym, v_grids)
 
         self._intermediates['K'] = K
         self._intermediates['R'] = R
@@ -305,59 +319,26 @@ class PCM(ddcosmo.DDCOSMO):
 
         return epcm, vmat
 
-    def _get_v(self, surface, dms):
+    def _get_v(self, dms):
         '''
         return electrostatic potential on surface
         '''
-        mol = self.mol
-        nao = dms.shape[-1]
-        atom_coords = mol.atom_coords(unit='B')
-        atom_charges = cupy.asarray(mol.atom_charges())
-        grid_coords = surface['grid_coords']
-        exponents   = surface['charge_exp']
-
-        max_memory = self.max_memory - lib.current_memory()[0]
-        blksize = int(max(max_memory*.9e6/8/nao**2, 400))
-        ngrids = grid_coords.shape[0]
-        int3c2e = mol._add_suffix('int3c2e')
-        cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e)
-        v_grids_e = cupy.empty(ngrids)
-        for p0, p1 in lib.prange(0, ngrids, blksize):
-            # TODO: move this to GPU
-            fakemol = gto.fakemol_for_charges(grid_coords[p0:p1].get(), expnt=exponents.get()**2)
-            v_nj = df.incore.aux_e2(mol, fakemol, intor=int3c2e, aosym='s1', cintopt=cintopt)
-            v_nj = cupy.asarray(v_nj)
-            v_grids_e[p0:p1] = cupy.einsum('ijL,ij->L',v_nj, dms[0])
-
-        int2c2e = mol._add_suffix('int2c2e')
-
-        fakemol_nuc = gto.fakemol_for_charges(atom_coords)
-        v_ng = gto.mole.intor_cross(int2c2e, fakemol_nuc, fakemol)
-        v_ng = cupy.asarray(v_ng)
-        v_grids_n = cupy.dot(atom_charges, v_ng)
-
-        v_grids = v_grids_n - v_grids_e
+        v_grids_e = 2.0*int3c2e.get_j_int3c2e_pass1(self.intopt, dms[0])
+        v_grids = self.v_grids_n - v_grids_e
         return v_grids
 
     def _get_vmat(self, q):
-        mol = self.mol
-        nao = mol.nao
-        grid_coords = self.surface['grid_coords']
-        exponents   = self.surface['charge_exp']
-        max_memory = self.max_memory - lib.current_memory()[0]
-        blksize = int(max(max_memory*.9e6/8/nao**2, 400))
-        ngrids = grid_coords.shape[0]
-        int3c2e = mol._add_suffix('int3c2e')
-        cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e)
-        vmat = cupy.zeros([nao,nao])
-        for p0, p1 in lib.prange(0, ngrids, blksize):
-            # TODO: move this to GPU
-            fakemol = gto.fakemol_for_charges(grid_coords[p0:p1].get(), expnt=exponents.get()**2)
-            v_nj = df.incore.aux_e2(mol, fakemol, intor=int3c2e, aosym='s1', cintopt=cintopt)
-            v_nj = cupy.asarray(v_nj)
-            vmat += -cupy.einsum('ijL,L->ij', v_nj, q[p0:p1])
-        return vmat
+        return -int3c2e.get_j_int3c2e_pass2(self.intopt, q)
 
     def nuc_grad_method(self, grad_method):
-        pass
+        from gpu4pyscf.solvent.grad import pcm as pcm_grad
+        if self.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
+        from gpu4pyscf import scf
+        if isinstance(grad_method.base, scf.hf.RHF):
+            return pcm_grad.make_grad_object(grad_method)
+        else:
+            raise RuntimeError('Only SCF gradient is supported')
 
+    def Hessian(self):
+        raise NotImplementedError('not implemented yet')

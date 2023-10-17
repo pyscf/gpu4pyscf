@@ -1097,7 +1097,7 @@ def get_dh1e(mol, dm0):
     intopt = VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
     dm0_sorted = dm0[cupy.ix_(intopt.sph_ao_idx, intopt.sph_ao_idx)]
-    
+
     dh1e = cupy.zeros([natm,3])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip1'):
         dh1e[k0:k1,:3] += cupy.einsum('xkji,ij->kx', int3c_blk, dm0_sorted[i0:i1,j0:j1])
@@ -1120,7 +1120,7 @@ def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, aosym=None, out=None, omega=N
 
     log_q_ij = intopt.log_qs[cp_ij_id]
     log_q_kl = intopt.aux_log_qs[cp_aux_id]
-    
+
     nbins = 1
     bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
     bins_locs_kl = np.array([0, len(log_q_kl)], dtype=np.int32)

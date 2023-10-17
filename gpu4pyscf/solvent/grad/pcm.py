@@ -19,14 +19,14 @@ Gradient of PCM family solvent model
 # pylint: disable=C0103
 
 import numpy
-#import scipy
 import cupy
 from cupyx import scipy
 from pyscf import lib
 from pyscf.lib import logger
 from pyscf import gto, df
-from gpu4pyscf.solvent import pcm
+from pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.solvent.pcm import PI, switch_h
+from gpu4pyscf.df import int3c2e
 
 libdft = lib.load_library('libdft')
 
@@ -145,7 +145,7 @@ def grad_kernel(pcmobj, dm):
     '''
     mol = pcmobj.mol
     nao = mol.nao
-    aoslice = mol.aoslice_by_atom()
+
     gridslice    = pcmobj.surface['gslice_by_atom']
     grid_coords  = pcmobj.surface['grid_coords']
     exponents    = pcmobj.surface['charge_exp']
@@ -157,35 +157,33 @@ def grad_kernel(pcmobj, dm):
     q            = pcmobj._intermediates['q']
     q_sym        = pcmobj._intermediates['q_sym']
 
-    vK_1 = numpy.linalg.solve(K.T, v_grids)
+    vK_1 = cupy.linalg.solve(K.T, v_grids)
 
     # ----------------- potential response -----------------------
-    max_memory = pcmobj.max_memory - lib.current_memory()[0]
-    blksize = int(max(max_memory*.9e6/8/nao**2, 400))
-    ngrids = grid_coords.shape[0]
     atom_coords = mol.atom_coords(unit='B')
 
-    dvj = cupy.zeros([nao,3])
-    dq = cupy.zeros([ngrids,3])
-    for p0, p1 in lib.prange(0, ngrids, blksize):
-        fakemol = gto.fakemol_for_charges(grid_coords[p0:p1].get(), expnt=exponents.get()**2)
-        # charge response
-        v_nj_ip1 = df.incore.aux_e2(mol, fakemol, intor='int3c2e_ip1', aosym='s1', comp=3)
-        vj = cupy.einsum('xijn,n->xij', v_nj_ip1, q_sym)
-        dvj += cupy.einsum('xij,ij->ix', vj, dm)
-        dvj += cupy.einsum('xij,ji->ix', vj, dm)
+    intopt = pcmobj.intopt
+    intopt.clear()
+    # rebuild with aosym
+    intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
+    coeff = intopt.coeff
+    dm_cart = cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
 
-        # electronic potential response
-        v_nj_ip2 = df.incore.aux_e2(mol, fakemol, intor='int3c2e_ip2', aosym='s1', comp=3)
-        dq_slice = cupy.einsum('xijn,ij->nx', v_nj_ip2, dm)
-        dq[p0:p1] = cupy.einsum('nx,n->nx', dq_slice, q_sym[p0:p1])
+    dvj, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip1', q_sym, None, dm_cart)
+    dq, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip2', q_sym, None, dm_cart)
 
-    de = cupy.zeros_like(atom_coords)
-    de += cupy.asarray([cupy.sum(dq[p0:p1], axis=0) for p0,p1 in gridslice])
-    de += cupy.asarray([cupy.sum(dvj[p0:p1], axis=0) for p0,p1 in aoslice[:,2:]])
+    cart_ao_idx = intopt.cart_ao_idx
+    rev_cart_ao_idx = numpy.argsort(cart_ao_idx)
+    dvj = dvj[:,rev_cart_ao_idx]
+
+    aoslice = intopt.mol.aoslice_by_atom()
+    dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
+    dvj= 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
+    de = dq + dvj
 
     atom_charges = mol.atom_charges()
     fakemol_nuc = gto.fakemol_for_charges(atom_coords)
+    fakemol = gto.fakemol_for_charges(grid_coords.get(), expnt=exponents.get()**2)
 
     # nuclei response
     int2c2e_ip1 = mol._add_suffix('int2c2e_ip1')
@@ -263,7 +261,7 @@ def grad_kernel(pcmobj, dm):
 
     return de.get()
 
-def make_grad_object(mf, grad_method):
+def make_grad_object(grad_method):
     '''
     return solvent gradient object
     '''
@@ -288,6 +286,7 @@ def make_grad_object(mf, grad_method):
                 logger.note(self, '--------------- %s (+%s) gradients ---------------',
                             self.base.__class__.__name__,
                             self.base.with_solvent.__class__.__name__)
+                rhf_grad._write(self, self.mol, self.de, self.atmlst)
                 logger.note(self, '----------------------------------------------')
             return self.de
 
@@ -298,4 +297,4 @@ def make_grad_object(mf, grad_method):
 
     return WithSolventGrad(grad_method)
 
-pcm.PCM.nuc_grad_method = make_grad_object
+#pcm.PCM.nuc_grad_method = make_grad_object
