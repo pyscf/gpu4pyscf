@@ -144,7 +144,6 @@ def grad_kernel(pcmobj, dm):
     v^T* d(K^-1 R)v = v^T*K^-1(dR - dK K^-1R)v = v^T K^-1(dR - dK q)
     '''
     mol = pcmobj.mol
-    nao = mol.nao
 
     gridslice    = pcmobj.surface['gslice_by_atom']
     grid_coords  = pcmobj.surface['grid_coords']
