@@ -40,7 +40,7 @@ class CDERI():
             ctypes.c_int(nblocks),
             ctypes.c_int(nao))
         return
-    
+
     def __del__(self):
         self.row = []
         self.col = []
@@ -57,8 +57,8 @@ class CDERI():
         assert rows.dtype == cupy.int64 and cols.dtype == cupy.int64
         nij = len(rows)
         err = libcupy_helper.add_block(
-            ctypes.byref(self.handle), 
-            ctypes.c_int(nij), 
+            ctypes.byref(self.handle),
+            ctypes.c_int(nij),
             ctypes.c_int(self.naux),
             ctypes.cast(rows.data.ptr, ctypes.c_void_p),
             ctypes.cast(cols.data.ptr, ctypes.c_void_p),
