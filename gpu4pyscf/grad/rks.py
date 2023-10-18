@@ -50,7 +50,7 @@ def _get_veff(ks_grad, mol=None, dm=None):
         grids = ks_grad.grids
     else:
         grids = mf.grids
-    
+
     if grids.coords is None:
         grids.build(sort_grids=True)
 
@@ -89,7 +89,7 @@ def _get_veff(ks_grad, mol=None, dm=None):
     occ_coeff = cupy.asarray(mf.mo_coeff[:, mf.mo_occ>0.5], order='C')
     tmp = contract('nij,jk->nik', vxc, occ_coeff)
     vxc = 2.0*contract('nik,ik->ni', tmp, occ_coeff)
-    
+
     aoslices = mol.aoslice_by_atom()
     vxc = [vxc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
     vxc = cupy.asarray(vxc)
@@ -116,7 +116,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         opt = ni.gdftopt
     mo_occ = cupy.asarray(dms.mo_occ)
     mo_coeff = cupy.asarray(dms.mo_coeff)
-    
+
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
@@ -124,7 +124,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
            for dm in dms.reshape(-1,nao0,nao0)]
     mo_coeff = coeff @ mo_coeff
     nset = len(dms)
-    
+
     with opt.gdft_envs_cache():
         if xctype == 'LDA':
             ao_deriv = 1
@@ -136,10 +136,10 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         block_size = int((mem_avail*.4/8/(comp+1)/nao - 3*nao*2)/ ALIGNED) * ALIGNED
         block_size = min(block_size, MIN_BLK_SIZE)
         log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
-        
+
         if block_size < ALIGNED:
             raise RuntimeError('Not enough GPU memory')
-        
+
         vmat = cupy.zeros((nset,3,nao,nao))
         if xctype == 'LDA':
             ao_deriv = 1
@@ -207,7 +207,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     exc = None
     if nset == 1:
         vmat = vmat[0]
-    
+
     # - sign because nabla_X = -nabla_x
     return exc, -vmat
 
@@ -221,7 +221,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     mo_occ = cupy.asarray(dms.mo_occ)
     mo_coeff = cupy.asarray(dms.mo_coeff)
-    
+
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
@@ -255,9 +255,9 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         wv = vv_vxc[:,p0:p1] * weight
         wv[0] *= .5  # *.5 because vmat + vmat.T at the end
         vmat += _gga_grad_sum_(ao, wv)
-    
+
     vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
-    
+
     exc = None
     # - sign because nabla_X = -nabla_x
     return exc, -vmat
@@ -288,7 +288,7 @@ def _d1_dot_(ao1, ao2):
     vmat1 = cupy.dot(ao1[1], ao2)
     vmat2 = cupy.dot(ao1[2], ao2)
     return cupy.stack([vmat0,vmat1,vmat2])
-    
+
 def _gga_grad_sum_(ao, wv):
     #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
     aow = numint._scale_ao(ao[:4], wv[:4])
@@ -296,7 +296,7 @@ def _gga_grad_sum_(ao, wv):
     aow = _make_dR_dao_w(ao, wv[:4])
     vmat += _d1_dot_(aow, ao[0].T)
     return vmat
-    
+
 # XX, XY, XZ = 4, 5, 6
 # YX, YY, YZ = 5, 7, 8
 # ZX, ZY, ZZ = 6, 8, 9
@@ -342,10 +342,10 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         block_size = int((mem_avail*.4/8/(comp+1)/nao - 3*nao*2)/ ALIGNED) * ALIGNED
         block_size = min(block_size, MIN_BLK_SIZE)
         log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
-        
+
         if block_size < ALIGNED:
             raise RuntimeError('Not enough GPU memory')
-        
+
         for atm_id, (coords, weight, weight1) in enumerate(grids_response_cc(grids)):
             ngrids = weight.size
             for p0, p1 in lib.prange(0,ngrids,block_size):
@@ -371,7 +371,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     wv = weight[p0:p1] * vxc
                     wv[0] *= .5
                     wv[4] *= .5  # for the factor 1/2 in tau
-                    
+
                     vmat += _gga_grad_sum_(ao, wv)
                     vmat += _tau_grad_dot_(ao, wv[4])
 
@@ -502,7 +502,9 @@ def grids_response_cc(grids):
 
 class Gradients(rhf_grad.Gradients, pyscf.grad.rks.Gradients):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
-    
+
+    get_veff = _get_veff
+
     def get_dispersion(self):
         if self.base.disp[:2].upper() == 'D3':
             from pyscf import lib
@@ -511,12 +513,12 @@ class Gradients(rhf_grad.Gradients, pyscf.grad.rks.Gradients):
                 d3 = disp.DFTD3Dispersion(self.mol, xc=self.base.xc, version=self.base.disp)
                 _, g_d3 = d3.kernel()
             return g_d3
-        
+
         if self.base.disp[:2].upper() == 'D4':
             from pyscf.data.elements import charge
             atoms = numpy.array([ charge(a[0]) for a in self.mol._atom])
             coords = self.mol.atom_coords()
-            
+
             from pyscf import lib
             with lib.with_omp_threads(1):
                 from dftd4.interface import DampingParam, DispersionModel

@@ -31,7 +31,6 @@ import numpy
 import cupy
 from pyscf import lib
 from pyscf.lib import logger
-#from pyscf.dft import radi
 from pyscf import gto
 from pyscf.gto.eval_gto import BLKSIZE, NBINS, CUTOFF, make_screen_index
 from pyscf import __config__
@@ -262,7 +261,7 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                 vol.append(cupy.einsum('i,j->ji', rad_weight[idx], grid[:,3]).ravel())
 
             atom_grids_tab[symb] = (cupy.vstack(coords), cupy.hstack(vol))
-            
+
     return atom_grids_tab
 
 def get_partition(mol, atom_grids_tab,
@@ -291,26 +290,6 @@ def get_partition(mol, atom_grids_tab,
         (radii_adjust is radi.treutler_atomic_radii_adjust or
          radii_adjust is radi.becke_atomic_radii_adjust or
          f_radii_adjust is None)):
-        '''
-        if f_radii_adjust is None:
-            p_radii_table = lib.c_null_ptr()
-        else:
-            f_radii_table = numpy.asarray([f_radii_adjust(i, j, 0)
-                                           for i in range(mol.natm)
-                                           for j in range(mol.natm)])
-            p_radii_table = f_radii_table.ctypes.data_as(ctypes.c_void_p)
-
-        def gen_grid_partition0(coords):
-            coords = numpy.asarray(coords, order='F')
-            ngrids = coords.shape[0]
-            pbecke = numpy.empty((mol.natm,ngrids))
-            libdft.VXCgen_grid(pbecke.ctypes.data_as(ctypes.c_void_p),
-                               coords.ctypes.data_as(ctypes.c_void_p),
-                               atm_coords.ctypes.data_as(ctypes.c_void_p),
-                               p_radii_table,
-                               ctypes.c_int(mol.natm), ctypes.c_int(ngrids))
-            return pbecke
-        '''
         def gen_grid_partition(coords):
             grid_dist = cupy.linalg.norm(coords[None,:,:] - atm_coords[:,None,:], axis=-1)
             r12 = grid_dist[:,None,:] - grid_dist[None,:,:]
@@ -426,7 +405,8 @@ def _load_conf(mod, name, default):
     else:
         return var
 
-class Grids(lib.StreamObject):
+from pyscf.dft import gen_grid
+class Grids(gen_grid.Grids):
     '''DFT mesh grids
 
     Attributes for Grids:
@@ -501,50 +481,12 @@ class Grids(lib.StreamObject):
 
     alignment = ALIGNMENT_UNIT
     cutoff = CUTOFF
-    
-    def __init__(self, mol):
-        self.mol = mol
-        self.stdout = mol.stdout
-        self.verbose = mol.verbose
-        self.symmetry = mol.symmetry
-        self.atom_grid = {}
-
-##################################################
-# don't modify the following attributes, they are not input options
-        self.non0tab = None
-        # Integral screen index ~= NBINS + log(ao).
-        # screen_index > 0 for non-zero AOs
-        self.screen_index = None
-        self.coords  = None
-        self.weights = None
-        self._keys = set(self.__dict__.keys()).update([
-            'atomic_radii', 'radii_adjust', 'radi_method', 'becke_scheme',
-            'prune', 'level', 'alignment', 'cutoff',
-        ])
-
-    @property
-    def size(self):
-        return getattr(self.weights, 'size', 0)
 
     def __setattr__(self, key, val):
         if key in ('atom_grid', 'atomic_radii', 'radii_adjust', 'radi_method',
                    'becke_scheme', 'prune', 'level'):
             self.reset()
         super(Grids, self).__setattr__(key, val)
-
-    def dump_flags(self, verbose=None):
-        logger.info(self, 'radial grids: %s', self.radi_method.__doc__)
-        logger.info(self, 'becke partition: %s', self.becke_scheme.__doc__)
-        logger.info(self, 'pruning grids: %s', self.prune)
-        logger.info(self, 'grids dens level: %d', self.level)
-        logger.info(self, 'symmetrized grids: %s', self.symmetry)
-        if self.radii_adjust is not None:
-            logger.info(self, 'atomic radii adjust function: %s',
-                        self.radii_adjust)
-            logger.debug2(self, 'atomic_radii : %s', self.atomic_radii)
-        if self.atom_grid:
-            logger.info(self, 'User specified grid scheme %s', str(self.atom_grid))
-        return self
 
     def build(self, mol=None, with_non0tab=False, sort_grids=True, **kwargs):
         if mol is None: mol = self.mol
@@ -564,10 +506,10 @@ class Grids(lib.StreamObject):
             padding = _padding_size(self.size, self.alignment)
             logger.debug(self, 'Padding %d grids', padding)
             if padding > 0:
-                self.coords = numpy.vstack(
+                # cupy.vstack and cupy.hstack convert numpy array into cupy array first
+                self.coords = cupy.vstack(
                     [self.coords, numpy.repeat([[1e4]*3], padding, axis=0)])
-                self.weights = numpy.hstack([self.weights, numpy.zeros(padding)])
-
+                self.weights = cupy.hstack([self.weights, numpy.zeros(padding)])
         if with_non0tab:
             self.non0tab = self.make_mask(mol, self.coords)
             self.screen_index = self.non0tab
@@ -612,62 +554,27 @@ class Grids(lib.StreamObject):
             return self
 
         mol = self.mol
-        n = numpy.dot(rho, self.weights)
+        n = cupy.dot(rho, self.weights)
         if abs(n-mol.nelectron) < NELEC_ERROR_TOL*n:
             rho *= self.weights
             idx = abs(rho) > threshold / self.weights.size
             logger.debug(self, 'Drop grids %d',
-                         self.weights.size - numpy.count_nonzero(idx))
-            self.coords  = numpy.asarray(self.coords [idx], order='C')
-            self.weights = numpy.asarray(self.weights[idx], order='C')
+                         self.weights.size - cupy.count_nonzero(idx))
+            self.coords  = cupy.asarray(self.coords [idx], order='C')
+            self.weights = cupy.asarray(self.weights[idx], order='C')
             if self.alignment > 1:
                 padding = _padding_size(self.size, self.alignment)
                 logger.debug(self, 'prune_by_density_: %d padding grids', padding)
                 if padding > 0:
-                    self.coords = numpy.vstack(
-                        [self.coords, numpy.repeat([[1e4]*3], padding, axis=0)])
-                    self.weights = numpy.hstack([self.weights, numpy.zeros(padding)])
+                    self.coords = cupy.vstack(
+                        [self.coords, cupy.repeat([[1e4]*3], padding, axis=0)])
+                    self.weights = cupy.hstack([self.weights, cupy.zeros(padding)])
             self.non0tab = self.make_mask(mol, self.coords)
             self.screen_index = self.non0tab
         return self
 
-
-def _default_rad(nuc, level=3):
-    '''Number of radial grids '''
-    tab   = numpy.array( (2 , 10, 18, 36, 54, 86, 118))
-    period = (nuc > tab).sum()
-    return RAD_GRIDS[level,period]
-#                Period    1   2   3   4   5   6   7        # level
-RAD_GRIDS = numpy.array((( 10, 15, 20, 30, 35, 40, 50),     # 0
-                         ( 30, 40, 50, 60, 65, 70, 75),     # 1
-                         ( 40, 60, 65, 75, 80, 85, 90),     # 2
-                         ( 50, 75, 80, 90, 95,100,105),     # 3
-                         ( 60, 90, 95,105,110,115,120),     # 4
-                         ( 70,105,110,120,125,130,135),     # 5
-                         ( 80,120,125,135,140,145,150),     # 6
-                         ( 90,135,140,150,155,160,165),     # 7
-                         (100,150,155,165,170,175,180),     # 8
-                         (200,200,200,200,200,200,200),))   # 9
-
-def _default_ang(nuc, level=3):
-    '''Order of angular grids. See LEBEDEV_ORDER for the mapping of
-    the order and the number of angular grids'''
-    tab   = numpy.array( (2 , 10, 18, 36, 54, 86, 118))
-    period = (nuc > tab).sum()
-    return LEBEDEV_ORDER[ANG_ORDER[level,period]]
-#               Period    1   2   3   4   5   6   7         # level
-ANG_ORDER = numpy.array(((11, 15, 17, 17, 17, 17, 17 ),     # 0
-                         (17, 23, 23, 23, 23, 23, 23 ),     # 1
-                         (23, 29, 29, 29, 29, 29, 29 ),     # 2
-                         (29, 29, 35, 35, 35, 35, 35 ),     # 3
-                         (35, 41, 41, 41, 41, 41, 41 ),     # 4
-                         (41, 47, 47, 47, 47, 47, 47 ),     # 5
-                         (47, 53, 53, 53, 53, 53, 53 ),     # 6
-                         (53, 59, 59, 59, 59, 59, 59 ),     # 7
-                         (59, 59, 59, 59, 59, 59, 59 ),     # 8
-                         (65, 65, 65, 65, 65, 65, 65 ),))   # 9
-
-def _padding_size(ngrids, alignment):
-    if alignment <= 1:
-        return 0
-    return (ngrids + alignment - 1) // alignment * alignment - ngrids
+_default_rad = gen_grid._default_rad
+RAD_GRIDS = gen_grid.RAD_GRIDS
+_default_ang = gen_grid._default_ang
+ANG_ORDER = gen_grid.ANG_ORDER
+_padding_size = gen_grid._padding_size
