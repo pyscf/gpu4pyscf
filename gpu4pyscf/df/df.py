@@ -47,6 +47,7 @@ class DF(df.DF):
     def to_cpu(self):
         from gpu4pyscf.lib.utils import to_cpu
         obj = to_cpu(self)
+        del obj.intopt, obj.cd_low, obj.nao, obj.naux
         return obj.reset()
 
     def build(self, direct_scf_tol=1e-14, omega=None):
