@@ -23,26 +23,28 @@ lib.num_threads(8)
 import argparse
 
 parser = argparse.ArgumentParser(description='Run DFT with GPU4PySCF for molecules')
-parser.add_argument("--input", type=str, default='benzene/coord')
-parser.add_argument("--basis", type=str, default='def2-tzvpp')
-parser.add_argument("--auxbasis", type=str, default='def2-tzvpp-jkfit')
+parser.add_argument("--input",    type=str,  default='benzene/coord')
+parser.add_argument("--basis",    type=str,  default='def2-tzvpp')
+parser.add_argument("--auxbasis", type=str,  default='def2-tzvpp-jkfit')
+parser.add_argument("--solvent",  type=bool, default=False)
 args = parser.parse_args()
 
 start_time = time.time()
 bas = args.basis
 mol = pyscf.M(
-    atom=args.input, 
-    basis=bas, 
+    atom=args.input,
+    basis=bas,
     max_memory=32000)
 # set verbose >= 6 for debugging timer
-mol.verbose = 6
-print(mol.nao)
+mol.verbose = 4
 
 mf_df = rks.RKS(mol, xc='HYB_GGA_XC_B3LYP').density_fit(auxbasis=args.auxbasis)
+if args.solvent:
+    mf_df = mf_df.PCM()
 mf_df.grids.atom_grid = (99,590)
 mf_df.kernel()
+
 print('compute time for energy: {}s'.format((time.time() - start_time)))
-exit()
 start_time = time.time()
 g = mf_df.nuc_grad_method()
 g.auxbasis_response = True
