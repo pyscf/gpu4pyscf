@@ -13,8 +13,25 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import os
-import numpy
-from gpu4pyscf.lib import diis
-from gpu4pyscf.lib import cupy_helper
-from gpu4pyscf.lib import cutensor
+from gpu4pyscf.solvent import pcm
+
+def PCM(method_or_mol, solvent_obj=None, dm=None):
+    '''Initialize PCM model.
+
+    Examples:
+
+    >>> mf = PCM(scf.RHF(mol))
+    >>> mf.kernel()
+    >>> sol = PCM(mol)
+    >>> mc = PCM(CASCI(mf, 6, 6), sol)
+    >>> mc.kernel()
+    '''
+    from pyscf import gto
+    from pyscf import scf
+
+    if isinstance(method_or_mol, gto.mole.Mole):
+        return pcm.PCM(method_or_mol)
+    elif isinstance(method_or_mol, scf.hf.SCF):
+        return pcm.pcm_for_scf(method_or_mol, solvent_obj, dm)
+    else:
+        raise NotImplementedError('PCM model only support SCF')

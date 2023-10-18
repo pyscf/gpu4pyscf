@@ -185,6 +185,58 @@ class _DFHF(df_jk._DFHF):
     @property
     def auxbasis(self):
         return getattr(self.with_df, 'auxbasis', None)
+     
+    def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1):
+        '''
+        effective potential
+        '''
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+
+        # for DFT
+        if mf_class == rks.RKS:
+            return rks.get_veff(self, dm=dm)
+
+        if self.direct_scf:
+            ddm = cupy.asarray(dm) - dm_last
+            vj, vk = self.get_jk(mol, ddm, hermi=hermi)
+            return vhf_last + vj - vk * .5
+        else:
+            vj, vk = self.get_jk(mol, dm, hermi=hermi)
+            return vj - vk * .5
+
+    def energy_elec(self, dm=None, h1e=None, vhf=None):
+        '''
+        electronic energy
+        '''
+        if dm is None: dm = self.make_rdm1()
+        if h1e is None: h1e = self.get_hcore()
+        if vhf is None: vhf = self.get_veff(self.mol, dm)
+        # for DFT
+        if mf_class == rks.RKS:
+            e1 = cupy.sum(h1e*dm)
+            ecoul = self.ecoul
+            exc = self.exc
+            e2 = ecoul + exc
+            #logger.debug(self, f'E1 = {e1}, Ecoul = {ecoul}, Exc = {exc}')
+            return e1+e2, e2
+
+        e1 = cupy.einsum('ij,ji->', h1e, dm).real
+        e_coul = cupy.einsum('ij,ji->', vhf, dm).real * .5
+        self.scf_summary['e1'] = e1
+        self.scf_summary['e2'] = e_coul
+        #logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
+        return e1+e_coul, e_coul
+
+    def energy_tot(self, dm, h1e, vhf=None):
+        '''
+        compute tot energy
+        '''
+        nuc = self.energy_nuc()
+        e_tot = self.energy_elec(dm, h1e, vhf)[0] + nuc
+        self.scf_summary['nuc'] = nuc.real
+        return e_tot
+
 
     def to_cpu(self):
         obj = self.undo_df().to_cpu().density_fit()

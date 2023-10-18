@@ -15,13 +15,14 @@
 
 import unittest
 import numpy
-from pyscf import scf, gto, df
-from gpu4pyscf.solvent import pcm 
+from pyscf import gto, df
+from gpu4pyscf import scf
+from gpu4pyscf.solvent import pcm
 
 def setUpModule():
     global mol, epsilon, lebedev_order
     mol = gto.Mole()
-    mol.atom = ''' 
+    mol.atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
@@ -59,7 +60,7 @@ class KnownValues(unittest.TestCase):
         e_tot = mf.kernel()
         print(f"Energy error in COSMO: {numpy.abs(e_tot - -74.96900351922464)}")
         assert numpy.abs(e_tot - -74.96900351922464) < 1e-9
-    
+
     def test_IEFPCM(self):
         cm = pcm.PCM(mol)
         cm.eps = epsilon
@@ -70,7 +71,7 @@ class KnownValues(unittest.TestCase):
         e_tot = mf.kernel()
         print(f"Energy error in IEF-PCM: {numpy.abs(e_tot - -74.9690111344)}")
         assert numpy.abs(e_tot - -74.9690111344) < 1e-9
-    
+
     def test_SSVPE(self):
         cm = pcm.PCM(mol)
         cm.eps = epsilon
@@ -81,7 +82,7 @@ class KnownValues(unittest.TestCase):
         e_tot = mf.kernel()
         print(f"Energy error in SS(V)PE: {numpy.abs(e_tot - -74.9689577454)}")
         assert numpy.abs(e_tot - -74.9689577454) < 1e-9
-    
+
 if __name__ == "__main__":
     print("Full Tests for PCMs")
     unittest.main()

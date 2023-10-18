@@ -2,18 +2,37 @@ GPU plugin for PySCF
 ====================
 Installation
 --------
-Create an environment with dockerfiles/compile/Dockerfile. The same dockerfile can also be used for runtime.
 
-Compile with
+For **CUDA 11.x**
+```
+pip3 install gpu4pyscf-cuda11x
+```
+and install cutensor
+```
+python -m cupyx.tools.install_library --cuda 11.x --library cutensor
+```
+
+For **CUDA 12.x**
+```
+pip3 install gpu4pyscf-cuda12x
+```
+and install cutensor
+```
+python -m cupyx.tools.install_library --cuda 12.x --library cutensor
+```
+
+Compilation
+--------
+The package provides ```dockerfiles/compile/Dockerfile``` for creating the CUDA environment. One can compile the package with
 ```
 sh build.sh
 ```
-This will automatically download LibXC, and compile it with CUDA. It will also build the wheel for installation. It will take about 5 mins. Then, one can either install it with
+This script will automatically download LibXC, and compile it with CUDA. The script will also build the wheel for installation. The compilation can take more than 5 mins. Then, one can either install the wheel with
 ```
 cd output
 pip3 install gpu4pyscf-*
 ```
-or
+or simply add it to ```PYTHONPATH```
 ```
 export PYTHONPATH="${PYTHONPATH}:/your-local-path/gpu4pyscf"
 ```
@@ -28,9 +47,10 @@ Features
 - SCF, analytical Gradient, and analytical Hessian calculations for Hartree-Fock and DFT;
 - LDA, GGA, mGGA, hybrid, and range-separated functionals via [libXC](https://gitlab.com/libxc/libxc/-/tree/master/);
 - Geometry optimization and transition state search via [geomeTRIC](https://geometric.readthedocs.io/en/latest/);
-- Dispersion corrections via [DFT3](https://github.com/dftd3/simple-dftd3) and [DFT4](https://github.com/dftd4/dftd4);
+- Dispersion corrections via [DFTD3](https://github.com/dftd3/simple-dftd3) and [DFTD4](https://github.com/dftd4/dftd4);
 - Nonlocal functional correction (vv10) for SCF and gradient;
 - ECP is supported and calculated on CPU;
+- PCM solvent models and their analytical gradients;
 
 Limitations
 --------
@@ -44,7 +64,30 @@ Limitations
 
 Examples
 --------
-Find examples in gpu4pyscf/examples
+```
+import pyscf
+from gpu4pyscf.dft import rks
+
+atom =''' 
+O       0.0000000000    -0.0000000000     0.1174000000
+H      -0.7570000000    -0.0000000000    -0.4696000000
+H       0.7570000000     0.0000000000    -0.4696000000
+'''
+
+mol = pyscf.M(atom=atom, basis='def2-tzvpp')
+mf = rks.RKS(mol, xc='LDA').density_fit()
+
+e_dft = mf.kernel()  # compute total energy
+print(f"total energy = {e_dft}")
+
+g = mf.nuc_grad_method()
+g_dft = g.kernel()   # compute analytical gradient
+
+h = mf.Hessian()
+h_dft = h.kernel()   # compute analytical Hessian
+
+```
+Find more examples in gpu4pyscf/examples
 
 Benchmarks
 --------
