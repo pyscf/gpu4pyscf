@@ -194,7 +194,7 @@ class _DFHF(df_jk._DFHF):
         if dm is None: dm = self.make_rdm1()
 
         # for DFT
-        if mf_class == rks.RKS:
+        if super() == rks.RKS:
             return rks.get_veff(self, dm=dm)
 
         if self.direct_scf:
@@ -213,7 +213,7 @@ class _DFHF(df_jk._DFHF):
         if h1e is None: h1e = self.get_hcore()
         if vhf is None: vhf = self.get_veff(self.mol, dm)
         # for DFT
-        if mf_class == rks.RKS:
+        if super() == rks.RKS:
             e1 = cupy.sum(h1e*dm)
             ecoul = self.ecoul
             exc = self.exc
