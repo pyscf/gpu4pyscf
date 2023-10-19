@@ -1,4 +1,6 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+#
+# Copyright (C) 2022 Qiming Sun
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,7 +16,19 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import numpy
-from gpu4pyscf.lib import diis
-from gpu4pyscf.lib import cupy_helper
-from gpu4pyscf.lib import cutensor
+os.environ['CONTRACT_ENGINE'] = 'opt_einsum' # 'cupy', 'cuquantum'
+
+import pyscf
+from gpu4pyscf.dft import rks
+
+atom ='''
+O       0.0000000000    -0.0000000000     0.1174000000
+H      -0.7570000000    -0.0000000000    -0.4696000000
+H       0.7570000000     0.0000000000    -0.4696000000
+'''
+
+mol = pyscf.M(atom=atom, basis='def2-tzvpp')
+mf = rks.RKS(mol, xc='LDA').density_fit()
+
+e_dft = mf.kernel()  # compute total energy
+print(f"total energy = {e_dft}")

@@ -301,7 +301,7 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     return mo_occ
 
 def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1, vhfopt=None):
-    if dm_last is None:
+    if dm_last is None or not mf.direct_scf:
         vj, vk = mf.get_jk(mol, cupy.asarray(dm), hermi)
         return vj - vk * .5
     else:
@@ -351,6 +351,20 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         f = level_shift(s1e, dm*.5, f, level_shift_factor)
     return f
 
+def energy_elec(self, dm=None, h1e=None, vhf=None):
+    '''
+    electronic energy
+    '''
+    if dm is None: dm = self.make_rdm1()
+    if h1e is None: h1e = self.get_hcore()
+    if vhf is None: vhf = self.get_veff(self.mol, dm)
+    e1 = cupy.einsum('ij,ji->', h1e, dm).real
+    e_coul = cupy.einsum('ij,ji->', vhf, dm).real * .5
+    self.scf_summary['e1'] = e1
+    self.scf_summary['e2'] = e_coul
+    logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
+    return e1+e_coul, e_coul
+
 def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
            dump_chk=True, dm0=None, callback=None, conv_check=True, **kwargs):
     conv_tol = mf.conv_tol
@@ -371,7 +385,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         mo_occ = cupy.asarray(dm0.mo_occ)
         occ_coeff = cupy.asarray(mo_coeff[:,mo_occ>0])
         dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
-    
+
     # use optimized workflow if possible
     if hasattr(mf, 'init_workflow'):
         mf.init_workflow(dm0=dm)
@@ -552,6 +566,7 @@ class RHF(hf.RHF):
     #_eigh = staticmethod(_eigh)
     _eigh = _eigh
     make_rdm1 = make_rdm1
+    energy_elec = energy_elec
     get_fock = get_fock
     get_occ = get_occ
     get_veff = get_veff
@@ -595,7 +610,7 @@ class RHF(hf.RHF):
     def nuc_grad_method(self):
         from gpu4pyscf.grad import rhf
         return rhf.Gradients(self)
-    
+
     def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
         import gpu4pyscf.df.df_jk
         return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)

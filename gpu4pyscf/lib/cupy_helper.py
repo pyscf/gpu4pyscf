@@ -24,7 +24,8 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
-LMAX_ON_GPU = 8
+
+LMAX_ON_GPU = 6
 DSOLVE_LINDEP = 1e-15
 
 c2s_l = mole.get_cart2sph(lmax=LMAX_ON_GPU)

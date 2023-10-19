@@ -47,8 +47,8 @@ if args.solvent:
 mf_df.grids.atom_grid = (99,590)
 mf_df.kernel()
 scf_time = time.time() - start_time
-
 print(f'compute time for energy: {scf_time:.3f} s')
+
 start_time = time.time()
 g = mf_df.nuc_grad_method()
 g.auxbasis_response = True

@@ -47,9 +47,10 @@ Features
 - SCF, analytical Gradient, and analytical Hessian calculations for Hartree-Fock and DFT;
 - LDA, GGA, mGGA, hybrid, and range-separated functionals via [libXC](https://gitlab.com/libxc/libxc/-/tree/master/);
 - Geometry optimization and transition state search via [geomeTRIC](https://geometric.readthedocs.io/en/latest/);
-- Dispersion corrections via [DFT3](https://github.com/dftd3/simple-dftd3) and [DFT4](https://github.com/dftd4/dftd4);
+- Dispersion corrections via [DFTD3](https://github.com/dftd3/simple-dftd3) and [DFTD4](https://github.com/dftd4/dftd4);
 - Nonlocal functional correction (vv10) for SCF and gradient;
 - ECP is supported and calculated on CPU;
+- PCM solvent models and their analytical gradients;
 
 Limitations
 --------
