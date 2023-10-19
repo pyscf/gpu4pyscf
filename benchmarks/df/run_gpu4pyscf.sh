@@ -3,7 +3,7 @@
 DIR="./organic/xc"
 [ ! -d "$DIR" ] && mkdir -p "$DIR"
 for xc in LDA PBE B3LYP M06 wB97m-v
-do 
+do
     python3 dft_driver.py --input_path ../molecules/organic/ --output_path ./organic/xc/$xc/ --xc $xc
 done
 exit

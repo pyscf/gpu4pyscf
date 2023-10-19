@@ -38,7 +38,7 @@ import cupy
 import numpy as np
 from pyscf import lib, df
 from gpu4pyscf.hessian import rhf as rhf_hess
-from gpu4pyscf.lib.cupy_helper import contract, tag_array, release_gpu_stack
+from gpu4pyscf.lib.cupy_helper import contract, tag_array, release_gpu_stack, print_mem_info
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
 

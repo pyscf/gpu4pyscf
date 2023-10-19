@@ -131,7 +131,7 @@ class DF(df.DF):
             raise RuntimeError("Not enough GPU memory")
         return blksize
 
-    
+
     def loop(self, blksize=None, unpack=True):
         '''
         loop over all cderi and unpack
@@ -207,12 +207,13 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
     else:
         use_gpu_memory = False
     if(not use_gpu_memory):
-        import warnings
-        warnings.warn("Not enough GPU memory")
+        log.debug("Not enough GPU memory")
         # TODO: async allocate memory
         mem = cupy.cuda.alloc_pinned_memory(naux * npair * 8)
-        cderi = np.ndarray([naux, npair], dtype=np.float64, order='C', buffer=mem)
-
+        try:
+            cderi = np.ndarray([naux, npair], dtype=np.float64, order='C', buffer=mem)
+        except Exception:
+            raise RuntimeError('out of CPU memory')
     data_stream = cupy.cuda.stream.Stream(non_blocking=False)
     count = 0
     nq = len(intopt.log_qs)
@@ -259,7 +260,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
         if cpi == cpj:
             ints_slices = ints_slices + ints_slices.transpose([0,2,1])
         ints_slices = ints_slices[:,col,row]
-        
+
         if cd_low.tag == 'eig':
             cderi_block = cupy.dot(cd_low.T, ints_slices)
             ints_slices = None

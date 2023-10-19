@@ -293,7 +293,7 @@ class PCM(ddcosmo.DDCOSMO):
         self.v_grids_n = cupy.asarray(v_grids_n)
 
     def _get_vind(self, dms):
-        if not self._intermediates or self.grids.coords is None:
+        if not self._intermediates:
             self.build()
 
         nao = dms.shape[-1]

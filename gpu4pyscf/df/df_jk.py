@@ -162,7 +162,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
             '''
             if mol is None: mol = self.mol
             if dm is None: dm = self.make_rdm1()
-            
+
             # for DFT
             if mf_class == rks.RKS:
                 return rks.get_veff(self, dm=dm)
@@ -248,7 +248,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     outputs and input are on the same device
     TODO: separate into three cases: j only, k only, j and k
     '''
-    
+
     log = logger.new_logger(dfobj.mol, dfobj.verbose)
     out_shape = dms_tag.shape
     out_cupy = isinstance(dms_tag, cupy.ndarray)
@@ -262,7 +262,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     nset = dms.shape[0]
     t0 = (logger.process_clock(), logger.perf_counter())
     if dfobj._cderi is None:
-        log.warn('CDERI not found, build...')
+        log.debug('CDERI not found, build...')
         dfobj.build(direct_scf_tol=direct_scf_tol, omega=omega)
 
     assert nao == dfobj.nao
@@ -290,7 +290,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
         vj_tmp[:,cols,rows] = vj_sparse
         vj_sparse = None
         return vj_tmp
-    
+
     # SCF K matrix with occ
     if nset == 1 and hasattr(dms_tag, 'occ_coeff'):
         occ_coeff = cupy.asarray(dms_tag.occ_coeff[ao_idx, :], order='C')
