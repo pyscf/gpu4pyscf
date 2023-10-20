@@ -21,7 +21,8 @@ import cupy
 from pyscf import gto, df, lib
 from pyscf.scf import _vhf
 from gpu4pyscf.scf.hf import BasisProdCache, _make_s_index_offsets
-from gpu4pyscf.lib.cupy_helper import block_c2s_diag, cart2sph, block_diag, contract, load_library, c2s_l
+from gpu4pyscf.lib.cupy_helper import (
+    block_c2s_diag, cart2sph, block_diag, contract, load_library, c2s_l, get_avail_mem)
 from gpu4pyscf.lib import logger
 
 LMAX_ON_GPU = 8
@@ -316,13 +317,14 @@ class VHFOpt(_vhf.VHFOpt):
         cput1 = logger.timer_debug1(tot_mol, 'Initialize GPU cache', *cput1)
         self.bas_pairs_locs = bas_pairs_locs
         ncptype = len(self.log_qs)
+        self.aosym = aosym
         if aosym:
             self.cp_idx, self.cp_jdx = np.tril_indices(ncptype)
         else:
             nl = int(round(np.sqrt(ncptype)))
             self.cp_idx, self.cp_jdx = np.unravel_index(np.arange(ncptype), (nl, nl))
 
-def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None):
+def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(thred, diag_block_with_triu=True, aosym=True, group_size_aux=64)
     orbo = dm0_tag.occ_coeff
@@ -331,7 +333,23 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None):
     nocc = orbo.shape[1]
     row, col = np.tril_indices(nao)
     wj = cupy.zeros([naux])
-    wk = cupy.zeros([naux,nao,nocc])
+    if with_k:
+        wk_P__ = cupy.zeros([naux, nocc, nocc]) # assuming naux*nocc*nocc < max_gpu_memory
+    else:
+        wk_P__ = None
+    avail_mem = get_avail_mem()
+    use_gpu_memory = True
+    if naux*nao*nocc*8 < 0.4*avail_mem:
+        try:
+            wk = cupy.zeros([naux,nao,nocc])
+        except Exception:
+            use_gpu_memory = False
+    else:
+        use_gpu_memory = False
+
+    if not use_gpu_memory:
+        wk = np.zeros([naux,nao,nocc])
+
     for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
         k0 = intopt.sph_aux_loc[cp_kl_id]
         k1 = intopt.sph_aux_loc[cp_kl_id+1]
@@ -347,10 +365,17 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None):
             i0, i1 = intopt.sph_ao_loc[cpi], intopt.sph_ao_loc[cpi+1]
             j0, j1 = intopt.sph_ao_loc[cpj], intopt.sph_ao_loc[cpj+1]
             ints_slices[:,j0:j1,i0:i1] = int3c_blk
+
         ints_slices[:, row, col] = ints_slices[:, col, row]
         wj[k0:k1] = contract('Lij,ij->L', ints_slices, dm0_tag)
-        wk[k0:k1] = contract('Lij,jo->Lio', ints_slices, orbo)
-    return wj, wk
+        if with_k:
+            wk_tmp = contract('Lij,jo->Lio', ints_slices, orbo)
+            wk_P__[k0:k1] = contract('Lio,ir->Lro', wk_tmp, orbo)
+            if isinstance(wk, cupy.ndarray):
+                wk[k0:k1] = contract('Lij,jo->Lio', ints_slices, orbo)
+            else:
+                wk[k0:k1] = contract('Lij,jo->Lio', ints_slices, orbo).get()
+    return wj, wk, wk_P__
 
 def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None):
     '''
@@ -688,7 +713,7 @@ def get_int3c2e_jk(intopt, dm0_tag, with_k=True, omega=None):
             i0, i1 = intopt.sph_ao_loc[cpi], intopt.sph_ao_loc[cpi+1]
             j0, j1 = intopt.sph_ao_loc[cpj], intopt.sph_ao_loc[cpj+1]
             ints_slices[:,j0:j1,i0:i1] = int3c_blk
-            if cpi != cpj:
+            if cpi != cpj and intopt.aosym:
                 ints_slices[:,i0:i1,j0:j1] = int3c_blk.transpose([0,2,1])
 
         rhoj[k0:k1] += cupy.einsum('pji,ij->p', ints_slices, dm0_tag)
@@ -715,12 +740,13 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
         k0, k1 = intopt.sph_aux_loc[aux_id], intopt.sph_aux_loc[aux_id+1]
         vj1_buf += cupy.einsum('xpji,p->xij', int3c_blk, rhoj[k0:k1])
 
+        rhok_tmp = cupy.asarray(rhok[k0:k1])
         if with_k:
-            rhok0_slice = cupy.einsum('pio,Jo->piJ', rhok[k0:k1], orbo) * 2
+            rhok0_slice = cupy.einsum('pio,Jo->piJ', rhok_tmp, orbo) * 2
             vk1_buf += cupy.einsum('xpji,plj->xil', int3c_blk, rhok0_slice)
 
         rhoj0 = cupy.einsum('xpji,ij->xpi', int3c_blk, dm0_tag)
-        vj1_ao = cupy.einsum('pjo,xpi->xijo', rhok[k0:k1], rhoj0)
+        vj1_ao = cupy.einsum('pjo,xpi->xijo', rhok_tmp, rhoj0)
         vj1 += 2.0*cupy.einsum('xiko,ia->axko', vj1_ao, ao2atom)
         if with_k:
             int3c_ip1_occ = cupy.einsum('xpji,jo->xpio', int3c_blk, orbo)
@@ -748,15 +774,16 @@ def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices, with_k=True, ome
         wj2 = cupy.einsum('xpji,ji->xp', int3c_blk, dm0_tag)
         wk2_P__ = cupy.einsum('xpji,jo->xpio', int3c_blk, orbo)
 
-        vj1_tmp = -cupy.einsum('pio,xp->xpio', rhok[k0:k1], wj2)
+        rhok_tmp = cupy.asarray(rhok[k0:k1])
+        vj1_tmp = -cupy.einsum('pio,xp->xpio', rhok_tmp, wj2)
         vj1_tmp -= cupy.einsum('xpio,p->xpio', wk2_P__, rhoj[k0:k1])
 
         vj1 += cupy.einsum('xpio,pa->axio', vj1_tmp, aux2atom[k0:k1])
         if with_k:
-            rhok0_slice = cupy.einsum('pio,jo->pij', rhok[k0:k1], orbo)
+            rhok0_slice = cupy.einsum('pio,jo->pij', rhok_tmp, orbo)
             vk1_tmp = -cupy.einsum('xpjo,pij->xpio', wk2_P__, rhok0_slice) * 2
 
-            rhok0_oo = cupy.einsum('pio,ir->pro', rhok[k0:k1], orbo)
+            rhok0_oo = cupy.einsum('pio,ir->pro', rhok_tmp, orbo)
             vk1_tmp -= cupy.einsum('xpio,pro->xpir', wk2_P__, rhok0_oo) * 2
 
             vk1 += cupy.einsum('xpir,pa->axir', vk1_tmp, aux2atom[k0:k1])
@@ -790,7 +817,7 @@ def get_int3c2e_ip2_wjk(intopt, dm0_tag, with_k=True, omega=None):
     wk = cupy.empty([naux_sph,nocc,nocc,3])
     for aux_id, int3c_blk in loop_aux_jk(intopt, ip_type='ip2', omega=omega):
         k0, k1 = intopt.sph_aux_loc[aux_id], intopt.sph_aux_loc[aux_id+1]
-        wj[k0:k1] = cupy.einsum('xpji,ij->px', int3c_blk, dm0_tag)
+        wj[k0:k1] = cupy.einsum('xpji,ji->px', int3c_blk, dm0_tag)
         tmp = cupy.einsum('xpji,jo->piox', int3c_blk, orbo)
         wk[k0:k1] = cupy.einsum('piox,ir->prox', tmp, orbo)
     return wj, wk

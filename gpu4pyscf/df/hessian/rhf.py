@@ -94,7 +94,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     # ================================ sorted AO begin ===============================================
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size_aux=128, group_size=128)
+    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size_aux=64, group_size=64)
     sph_ao_idx = intopt.sph_ao_idx
     sph_aux_idx = intopt.sph_aux_idx
 
@@ -117,13 +117,12 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         hk_ao_aux = cupy.zeros([nao,naux,3,3])
 
     #  int3c contributions
-    wj, wk_Pl_ = int3c2e.get_int3c2e_wjk(mol, auxmol, dm0_tag, omega=omega)
+    wj, _, wk_P__ = int3c2e.get_int3c2e_wjk(mol, auxmol, dm0_tag, omega=omega)
     rhoj0_P = contract('pq,q->p', int2c_inv, wj)
-    wk_P__ = contract('Lio,ir->Lro', wk_Pl_, mocc_2)
     rhok0_P__ = contract('pq,qij->pij', int2c_inv, wk_P__)
-    wj = wk_P__ = wk_Pl_ = None
+    wj = wk_P__ = None
     t1 = log.timer_debug1('intermediate variables with int3c2e', *t1)
-
+    print(rhok0_P__.nbytes/1e9)
     # int3c_ip2 contributions
     wj_ip2, wk_ip2_P__ = int3c2e.get_int3c2e_ip2_wjk(intopt, dm0_tag, omega=omega)
     t1 = log.timer_debug1('interdeidate variables with int3c2e_ip2', *t1)
@@ -413,12 +412,17 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     int2c = int2c[cupy.ix_(sph_aux_idx, sph_aux_idx)]
     int2c_inv = cupy.linalg.pinv(int2c, rcond=1e-12)
 
-    wj, wk_Pl_ = int3c2e.get_int3c2e_wjk(mol, auxmol, dm0_tag, omega=omega)
-    wk_P__ = contract('pio,ir->pro', wk_Pl_, mocc)
+    wj, wk_Pl_, wk_P__ = int3c2e.get_int3c2e_wjk(mol, auxmol, dm0_tag, omega=omega)
     rhoj0 = contract('pq,q->p', int2c_inv, wj)
-    rhok0_Pl_ = contract('pq,qio->pio', int2c_inv, wk_Pl_)
     if with_k:
         rhok0_P__ = contract('pq,qij->pij', int2c_inv, wk_P__)
+    if isinstance(wk_Pl_, cupy.ndarray):
+        rhok0_Pl_ = contract('pq,qio->pio', int2c_inv, wk_Pl_)
+    else:
+        rhok0_Pl_ = np.empty_like(wk_Pl_)
+        for p0, p1 in lib.prange(0,nao,64):
+            wk_tmp = cupy.asarray(wk_Pl_[:,p0:p1])
+            rhok0_Pl_[:,p0:p1] = cupy.einsum('pq,qio->pio', int2c_inv, wk_tmp).get()
     wj = wk_Pl_ = wk_P__ = int2c_inv = int2c = None
 
     # int3c_ip1 contributions
@@ -451,14 +455,15 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         wk0_10_P__ = contract('xqp,pro->xqro', int2c_ip1, rhok0_P__)
 
         for p0, p1 in lib.prange(0,nao,64):
-            vj1_tmp = cupy.einsum('pio,xp->xpio', rhok0_Pl_[:,p0:p1], wj0_10)
+            rhok_tmp = cupy.asarray(rhok0_Pl_[:,p0:p1])
+            vj1_tmp = cupy.einsum('pio,xp->xpio', rhok_tmp, wj0_10)
 
-            wk0_10_Pl_ = cupy.einsum('xqp,pio->xqio', int2c_ip1, rhok0_Pl_[:,p0:p1])
+            wk0_10_Pl_ = cupy.einsum('xqp,pio->xqio', int2c_ip1, rhok_tmp)
             vj1_tmp += cupy.einsum('xpio,p->xpio', wk0_10_Pl_, rhoj0)
             vj1_int3c_ip2[:,:,p0:p1] += cupy.einsum('xpio,pa->axio', vj1_tmp, aux2atom)
             if with_k:
                 vk1_tmp = 2.0 * cupy.einsum('xpio,pro->xpir', wk0_10_Pl_, rhok0_P__)
-                vk1_tmp += 2.0 * cupy.einsum('xpro,pir->xpio', wk0_10_P__, rhok0_Pl_[:,p0:p1])
+                vk1_tmp += 2.0 * cupy.einsum('xpro,pir->xpio', wk0_10_P__, rhok_tmp)
                 vk1_int3c_ip2[:,:,p0:p1] += cupy.einsum('xpio,pa->axio', vk1_tmp, aux2atom)
         wj0_10 = wk0_10_P__ = rhok0_P__ = int2c_ip1 = None
         vj1_tmp = vk1_tmp = wk0_10_Pl_ = rhoj0 = rhok0_Pl_ = None
