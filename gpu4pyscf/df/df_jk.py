@@ -121,7 +121,7 @@ class _DFHF(df_jk._DFHF):
             Set mf.with_df = None to switch off density fitting mode.
     '''
 
-    from gpu4pyscf.lib.utils import to_gpu, device
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     def __init__(self, mf, dfobj, only_dfj):
         self.__dict__.update(mf.__dict__)
@@ -131,7 +131,7 @@ class _DFHF(df_jk._DFHF):
         self.direct_scf = False
         self.with_df = dfobj
         self.only_dfj = only_dfj
-        self._keys = self._keys.union(['with_df', 'only_dfj'])
+        self._keys = mf._keys.union(['with_df', 'only_dfj'])
 
     def undo_df(self):
         '''Remove the DFHF Mixin'''
@@ -185,7 +185,7 @@ class _DFHF(df_jk._DFHF):
     @property
     def auxbasis(self):
         return getattr(self.with_df, 'auxbasis', None)
-     
+
     def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1):
         '''
         effective potential
@@ -194,7 +194,7 @@ class _DFHF(df_jk._DFHF):
         if dm is None: dm = self.make_rdm1()
 
         # for DFT
-        if super() == rks.RKS:
+        if isinstance(self, scf.hf.KohnShamDFT):
             return rks.get_veff(self, dm=dm)
 
         if self.direct_scf:
@@ -205,29 +205,6 @@ class _DFHF(df_jk._DFHF):
             vj, vk = self.get_jk(mol, dm, hermi=hermi)
             return vj - vk * .5
 
-    def energy_elec(self, dm=None, h1e=None, vhf=None):
-        '''
-        electronic energy
-        '''
-        if dm is None: dm = self.make_rdm1()
-        if h1e is None: h1e = self.get_hcore()
-        if vhf is None: vhf = self.get_veff(self.mol, dm)
-        # for DFT
-        if super() == rks.RKS:
-            e1 = cupy.sum(h1e*dm)
-            ecoul = self.ecoul
-            exc = self.exc
-            e2 = ecoul + exc
-            #logger.debug(self, f'E1 = {e1}, Ecoul = {ecoul}, Exc = {exc}')
-            return e1+e2, e2
-
-        e1 = cupy.einsum('ij,ji->', h1e, dm).real
-        e_coul = cupy.einsum('ij,ji->', vhf, dm).real * .5
-        self.scf_summary['e1'] = e1
-        self.scf_summary['e2'] = e_coul
-        #logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
-        return e1+e_coul, e_coul
-
     def energy_tot(self, dm, h1e, vhf=None):
         '''
         compute tot energy
@@ -237,13 +214,13 @@ class _DFHF(df_jk._DFHF):
         self.scf_summary['nuc'] = nuc.real
         return e_tot
 
-
+    '''
     def to_cpu(self):
         obj = self.undo_df().to_cpu().density_fit()
         keys = dir(obj)
         obj.__dict__.update(self.__dict__)
-
         for key in set(dir(self)).difference(keys):
+            print(key)
             delattr(obj, key)
 
         for key in keys:
@@ -253,6 +230,7 @@ class _DFHF(df_jk._DFHF):
             elif hasattr(val, 'to_cpu'):
                 setattr(obj, key, val.to_cpu())
         return obj
+    '''
 
 def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-14, omega=None):
     '''
