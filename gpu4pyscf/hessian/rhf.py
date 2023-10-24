@@ -36,7 +36,7 @@ from pyscf.scf import _response_functions  # noqa
 # import pyscf.grad.rhf to activate nuc_grad_method method
 from pyscf.grad import rhf  # noqa
 from gpu4pyscf.scf import cphf
-from gpu4pyscf.lib.cupy_helper import contract, tag_array
+from gpu4pyscf.lib.cupy_helper import contract, tag_array, print_mem_info
 from gpu4pyscf.lib import logger
 
 def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
@@ -55,7 +55,6 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     mo_energy = cupy.asarray(mo_energy)
     mo_occ = cupy.asarray(mo_occ)
     mo_coeff = cupy.asarray(mo_coeff)
-
     de2 = hessobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ, atmlst,
                                     max_memory, log)
     if h1ao is None:

@@ -37,7 +37,6 @@ def to_cpu(method):
         if 'gpu4pyscf' not in pyscf_cls.__module__:
             break
     method = method.view(pyscf_cls)
-
     keys = []
     for cls in pyscf_cls.__mro__[:-1]:
         if hasattr(cls, '_keys'):

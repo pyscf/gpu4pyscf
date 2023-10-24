@@ -15,17 +15,16 @@
 
 import pyscf
 import time
+import argparse
 from pyscf import lib
-
 from gpu4pyscf.dft import rks
 lib.num_threads(8)
-
-import argparse
 
 parser = argparse.ArgumentParser(description='Run DFT with GPU4PySCF for molecules')
 parser.add_argument("--input",    type=str,  default='benzene/coord')
 parser.add_argument("--basis",    type=str,  default='def2-tzvpp')
 parser.add_argument("--auxbasis", type=str,  default='def2-tzvpp-jkfit')
+parser.add_argument("--xc",       type=str,  default='B3LYP')
 parser.add_argument("--solvent",  type=bool, default=False)
 args = parser.parse_args()
 
@@ -36,23 +35,28 @@ mol = pyscf.M(
     basis=bas,
     max_memory=32000)
 # set verbose >= 6 for debugging timer
-mol.verbose = 4
+mol.verbose = 6
 
-mf_df = rks.RKS(mol, xc='HYB_GGA_XC_B3LYP').density_fit(auxbasis=args.auxbasis)
+mf_df = rks.RKS(mol, xc=args.xc).density_fit(auxbasis=args.auxbasis)
 if args.solvent:
     mf_df = mf_df.PCM()
+    mf_df.lebedev_order = 29
+    mf_df.method = 'IEF-PCM'
 mf_df.grids.atom_grid = (99,590)
 mf_df.kernel()
+scf_time = time.time() - start_time
+print(f'compute time for energy: {scf_time:.3f} s')
 
-print('compute time for energy: {}s'.format((time.time() - start_time)))
 start_time = time.time()
 g = mf_df.nuc_grad_method()
 g.auxbasis_response = True
 f = g.kernel()
-print('compute time for gradient: {}s'.format((time.time() - start_time)))
+grad_time = time.time() - start_time
+print(f'compute time for gradient: {grad_time:.3f} s')
 
 start_time = time.time()
 h = mf_df.Hessian()
 h.auxbasis_response = 2
 h_dft = h.kernel()
-print('compute time for hessian: {}s'.format((time.time() - start_time)))
+hess_time = time.time() - start_time
+print(f'compute time for hessian: {hess_time:.3f} s')

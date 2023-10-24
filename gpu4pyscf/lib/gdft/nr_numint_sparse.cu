@@ -13,7 +13,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
- 
+
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -206,13 +206,13 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
 
     __shared__ double s_bra[THREADSXY];
     __shared__ double s_ket[THREADSXY];
-    
+
     int grid_blk;
     for (grid_blk = 0; grid_blk < ngrids/THREADSX; grid_blk++) {
         int grid0 = grid_blk * THREADSX;
         uint8_t si = screen_index[grid_blk*bas_blocks+ish4];
         uint8_t sj = screen_index[grid_blk*bas_blocks+jsh4];
-        //printf("%d %d %d %d %d ***", si, sj, nbins, grid_blk*bas_blocks+ish4, grid_blk*bas_blocks+jsh4);    
+        //printf("%d %d %d %d %d ***", si, sj, nbins, grid_blk*bas_blocks+ish4, grid_blk*bas_blocks+jsh4);
         if (si + sj >= 0) { //nbins) {
             int grid_id = grid0 + txy;
             for (int n = 0; n < THREADSY; n++) {

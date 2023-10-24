@@ -49,34 +49,34 @@ static void vv10_kernel(double *Fvec, double *Uvec, double *Wvec,
     double F = 0.0;
     double U = 0.0;
     double W = 0.0;
-    
+
     double *xj = vvcoords;
     double *yj = vvcoords + vvngrids;
     double *zj = vvcoords + 2*vvngrids;
 
     __shared__ double3 xj_t[THREADS];
     __shared__ double3 kp_t[THREADS];
-    
+
     const int tx = threadIdx.x;
     for (int j = 0; j < vvngrids; j+=blockDim.x) {
         int idx = j + threadIdx.x;
 
         xj_t[tx] = {xj[idx], yj[idx], zj[idx]};
-        kp_t[tx] = {Kp[idx], W0p[idx], RpW[idx]}; 
-        
+        kp_t[tx] = {Kp[idx], W0p[idx], RpW[idx]};
+
         __syncthreads();
         for (int l = 0, M = min(THREADS, vvngrids - j); l < M; ++l){
             double3 xj_tmp = xj_t[l];
             double pjx = xj_tmp.x;
             double pjy = xj_tmp.y;
             double pjz = xj_tmp.z;
-            
+
             // about 23 operations for each pair
             double DX = pjx - xi;
-            double DY = pjy - yi; 
+            double DY = pjy - yi;
             double DZ = pjz - zi;
             double R2 = DX*DX + DY*DY + DZ*DZ;
-            
+
             double3 kp_tmp = kp_t[l];
             double Kpj = kp_tmp.x;
             double W0pj = kp_tmp.y;
@@ -87,7 +87,7 @@ static void vv10_kernel(double *Fvec, double *Uvec, double *Wvec,
             double gt = g + gp;
             double ggt = g * gt;
             double T = RpWj / (gp*ggt);
-            
+
             F += T;
             T *= (g + gt)/ggt;
             U += T;
@@ -126,7 +126,7 @@ static void vv10_grad_kernel(double *Fvec, double *vvcoords, double *coords,
     double *xj = vvcoords;
     double *yj = vvcoords + vvngrids;
     double *zj = vvcoords + 2*vvngrids;
-    
+
     __shared__ double3 xj_t[THREADS];
     __shared__ double3 kp_t[THREADS];
 
@@ -135,7 +135,7 @@ static void vv10_grad_kernel(double *Fvec, double *vvcoords, double *coords,
         int idx = j + threadIdx.x;
 
         xj_t[tx] = {xj[idx], yj[idx], zj[idx]};
-        kp_t[tx] = {Kp[idx], W0p[idx], RpW[idx]}; 
+        kp_t[tx] = {Kp[idx], W0p[idx], RpW[idx]};
 
         __syncthreads();
         for (int l = 0, M = min(THREADS, vvngrids - j); l < M; ++l){
@@ -143,10 +143,10 @@ static void vv10_grad_kernel(double *Fvec, double *vvcoords, double *coords,
             double pjx = xj_tmp.x;
             double pjy = xj_tmp.y;
             double pjz = xj_tmp.z;
-            
+
             // about 23 operations for each pair
             double DX = pjx - xi;
-            double DY = pjy - yi; 
+            double DY = pjy - yi;
             double DZ = pjz - zi;
             double R2 = DX*DX + DY*DY + DZ*DZ;
 
@@ -154,7 +154,7 @@ static void vv10_grad_kernel(double *Fvec, double *vvcoords, double *coords,
             double Kpj = kp_tmp.x;
             double W0pj = kp_tmp.y;
             double RpWj = kp_tmp.z;
-            
+
             double gp = R2*W0pj + Kpj;
             double g  = R2*W0i + Ki;
             double gt = g + gp;

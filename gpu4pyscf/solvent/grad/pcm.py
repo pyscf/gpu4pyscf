@@ -296,4 +296,3 @@ def make_grad_object(grad_method):
 
     return WithSolventGrad(grad_method)
 
-#pcm.PCM.nuc_grad_method = make_grad_object

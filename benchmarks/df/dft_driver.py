@@ -16,6 +16,8 @@ parser.add_argument('--device',       type=str, default='GPU')
 parser.add_argument('--input_path',   type=str, default='./')
 parser.add_argument('--output_path',  type=str, default='./')
 parser.add_argument('--with_hessian', type=bool, default=False)
+parser.add_argument('--solvent',      type=str, default='')
+
 args = parser.parse_args()
 bas = args.basis
 verbose = args.verbose
@@ -39,13 +41,18 @@ else:
     output_file = 'PySCF-16-cores-CPU.csv'
 output_file = args.output_path + output_file
 
-def run_dft(filename):  
+def run_dft(filename):
     mol = pyscf.M(atom=filename, basis=bas, max_memory=64000)
-    start_time = time.time()  
+    start_time = time.time()
     # set verbose >= 6 for debugging timer
     mol.verbose = 4 #verbose
     mol.max_memory = 40000
     mf = rks.RKS(mol, xc=xc).density_fit(auxbasis='def2-universal-jkfit')
+    if args.solvent:
+        mf = mf.PCM()
+        mf.lebedev_order = 29
+        mf.method = 'IEF-PCM'
+
     mf.grids.atom_grid = (99,590)
     mf.chkfile = None
     prep_time = time.time() - start_time
@@ -75,7 +82,7 @@ def run_dft(filename):
     # calculate hessian
     if args.device == 'GPU':
         cupy.get_default_memory_pool().free_all_blocks()
-    
+
     hess_time = -1
     if args.with_hessian:
         try:

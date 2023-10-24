@@ -57,7 +57,6 @@ def print_mem_info():
     cupy.get_default_memory_pool().free_all_blocks()
     cupy.get_default_pinned_memory_pool().free_all_blocks()
     mem_avail = cupy.cuda.runtime.memGetInfo()[0]
-    print(cupy.cuda.runtime.memGetInfo())
     total_mem = mempool.total_bytes()
     used_mem = mempool.used_bytes()
     mem_limit = mempool.get_limit()
@@ -322,7 +321,7 @@ def cart2sph(t, axis=0, ang=1, out=None):
     t_sph = contract('min,ip->mpn', t_cart, c2s, out=out)
     return t_sph.reshape(out_shape)
 
-# a copy with modification from 
+# a copy with modification from
 # https://github.com/pyscf/pyscf/blob/9219058ac0a1bcdd8058166cad0fb9127b82e9bf/pyscf/lib/linalg_helper.py#L1536
 def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
            lindep=DSOLVE_LINDEP, callback=None, hermi=False,
