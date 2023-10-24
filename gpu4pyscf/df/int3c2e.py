@@ -22,7 +22,7 @@ from pyscf import gto, df, lib
 from pyscf.scf import _vhf
 from gpu4pyscf.scf.hf import BasisProdCache, _make_s_index_offsets
 from gpu4pyscf.lib.cupy_helper import (
-    block_c2s_diag, cart2sph, block_diag, contract, load_library, c2s_l, get_avail_mem)
+    block_c2s_diag, cart2sph, block_diag, contract, load_library, c2s_l, get_avail_mem, print_mem_info)
 from gpu4pyscf.lib import logger
 
 LMAX_ON_GPU = 8
@@ -348,8 +348,10 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
         use_gpu_memory = False
 
     if not use_gpu_memory:
-        wk = np.zeros([naux,nao,nocc])
+        mem = cupy.cuda.alloc_pinned_memory(naux*nao*nocc*8)
+        wk = np.ndarray([naux,nao,nocc], dtype=np.float64, order='C', buffer=mem)
 
+    # TODO: async data transfer
     for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
         k0 = intopt.sph_aux_loc[cp_kl_id]
         k1 = intopt.sph_aux_loc[cp_kl_id+1]
@@ -716,9 +718,9 @@ def get_int3c2e_jk(intopt, dm0_tag, with_k=True, omega=None):
             if cpi != cpj and intopt.aosym:
                 ints_slices[:,i0:i1,j0:j1] = int3c_blk.transpose([0,2,1])
 
-        rhoj[k0:k1] += cupy.einsum('pji,ij->p', ints_slices, dm0_tag)
-        rhok_tmp = cupy.einsum('pji,jo->poi', ints_slices, orbo)
-        rhok[k0:k1] += cupy.einsum('poi,ir->por', rhok_tmp, orbo)
+        rhoj[k0:k1] += contract('pji,ij->p', ints_slices, dm0_tag)
+        rhok_tmp = contract('pji,jo->poi', ints_slices, orbo)
+        rhok[k0:k1] += contract('poi,ir->por', rhok_tmp, orbo)
 
     return rhoj, rhok
 
@@ -738,24 +740,24 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
 
     for aux_id, int3c_blk in loop_aux_jk(intopt, ip_type='ip1', omega=omega):
         k0, k1 = intopt.sph_aux_loc[aux_id], intopt.sph_aux_loc[aux_id+1]
-        vj1_buf += cupy.einsum('xpji,p->xij', int3c_blk, rhoj[k0:k1])
+        vj1_buf += contract('xpji,p->xij', int3c_blk, rhoj[k0:k1])
 
         rhok_tmp = cupy.asarray(rhok[k0:k1])
         if with_k:
-            rhok0_slice = cupy.einsum('pio,Jo->piJ', rhok_tmp, orbo) * 2
-            vk1_buf += cupy.einsum('xpji,plj->xil', int3c_blk, rhok0_slice)
+            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, orbo) * 2
+            vk1_buf += contract('xpji,plj->xil', int3c_blk, rhok0_slice)
 
-        rhoj0 = cupy.einsum('xpji,ij->xpi', int3c_blk, dm0_tag)
-        vj1_ao = cupy.einsum('pjo,xpi->xijo', rhok_tmp, rhoj0)
-        vj1 += 2.0*cupy.einsum('xiko,ia->axko', vj1_ao, ao2atom)
+        rhoj0 = contract('xpji,ij->xpi', int3c_blk, dm0_tag)
+        vj1_ao = contract('pjo,xpi->xijo', rhok_tmp, rhoj0)
+        vj1 += 2.0*contract('xiko,ia->axko', vj1_ao, ao2atom)
         if with_k:
-            int3c_ip1_occ = cupy.einsum('xpji,jo->xpio', int3c_blk, orbo)
-            vk1_ao = cupy.einsum('xpio,pki->xiko', int3c_ip1_occ, rhok0_slice)
-            vk1 += cupy.einsum('xiko,ia->axko', vk1_ao, ao2atom)
+            int3c_ip1_occ = contract('xpji,jo->xpio', int3c_blk, orbo)
+            vk1_ao = contract('xpio,pki->xiko', int3c_ip1_occ, rhok0_slice)
+            vk1 += contract('xiko,ia->axko', vk1_ao, ao2atom)
 
-            rhok0 = cupy.einsum('pli,lo->poi', rhok0_slice, orbo)
-            vk1_ao = cupy.einsum('xpji,poi->xijo', int3c_blk, rhok0)
-            vk1 += cupy.einsum('xiko,ia->axko', vk1_ao, ao2atom)
+            rhok0 = contract('pli,lo->poi', rhok0_slice, orbo)
+            vk1_ao = contract('xpji,poi->xijo', int3c_blk, rhok0)
+            vk1 += contract('xiko,ia->axko', vk1_ao, ao2atom)
     return vj1_buf, vk1_buf, vj1, vk1
 
 def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices, with_k=True, omega=None):
@@ -771,22 +773,22 @@ def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices, with_k=True, ome
     vk1 = cupy.zeros([natom,3,nao_sph,nocc])
     for aux_id, int3c_blk in loop_aux_jk(intopt, ip_type='ip2', omega=omega):
         k0, k1 = intopt.sph_aux_loc[aux_id], intopt.sph_aux_loc[aux_id+1]
-        wj2 = cupy.einsum('xpji,ji->xp', int3c_blk, dm0_tag)
-        wk2_P__ = cupy.einsum('xpji,jo->xpio', int3c_blk, orbo)
+        wj2 = contract('xpji,ji->xp', int3c_blk, dm0_tag)
+        wk2_P__ = contract('xpji,jo->xpio', int3c_blk, orbo)
 
         rhok_tmp = cupy.asarray(rhok[k0:k1])
-        vj1_tmp = -cupy.einsum('pio,xp->xpio', rhok_tmp, wj2)
-        vj1_tmp -= cupy.einsum('xpio,p->xpio', wk2_P__, rhoj[k0:k1])
+        vj1_tmp = -contract('pio,xp->xpio', rhok_tmp, wj2)
+        vj1_tmp -= contract('xpio,p->xpio', wk2_P__, rhoj[k0:k1])
 
-        vj1 += cupy.einsum('xpio,pa->axio', vj1_tmp, aux2atom[k0:k1])
+        vj1 += contract('xpio,pa->axio', vj1_tmp, aux2atom[k0:k1])
         if with_k:
-            rhok0_slice = cupy.einsum('pio,jo->pij', rhok_tmp, orbo)
-            vk1_tmp = -cupy.einsum('xpjo,pij->xpio', wk2_P__, rhok0_slice) * 2
+            rhok0_slice = contract('pio,jo->pij', rhok_tmp, orbo)
+            vk1_tmp = -contract('xpjo,pij->xpio', wk2_P__, rhok0_slice) * 2
 
-            rhok0_oo = cupy.einsum('pio,ir->pro', rhok_tmp, orbo)
-            vk1_tmp -= cupy.einsum('xpio,pro->xpir', wk2_P__, rhok0_oo) * 2
+            rhok0_oo = contract('pio,ir->pro', rhok_tmp, orbo)
+            vk1_tmp -= contract('xpio,pro->xpir', wk2_P__, rhok0_oo) * 2
 
-            vk1 += cupy.einsum('xpir,pa->axir', vk1_tmp, aux2atom[k0:k1])
+            vk1 += contract('xpir,pa->axir', vk1_tmp, aux2atom[k0:k1])
         wj2 = wk2_P__ = rhok0_slice = rhok0_oo = None
     return vj1, vk1
 
@@ -799,11 +801,29 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     nocc = orbo.shape[1]
     wj = cupy.empty([nao_sph,naux_sph,3])
-    wk = cupy.empty([nao_sph,naux_sph,nocc,3])
+    avail_mem = get_avail_mem()
+    use_gpu_memory = True
+    if nao_sph*naux_sph*nocc*3*8 < 0.4*avail_mem:
+        try:
+            wk = cupy.empty([nao_sph,naux_sph,nocc,3])
+        except Exception:
+            use_gpu_memory = False
+    else:
+        use_gpu_memory = False
+
+    if not use_gpu_memory:
+        mem = cupy.cuda.alloc_pinned_memory(nao_sph*naux_sph*nocc*3*8)
+        wk = np.ndarray([nao_sph,naux_sph,nocc,3], dtype=np.float64, order='C', buffer=mem)
+
+    # TODO: async data transfer
     for aux_id, int3c_blk in loop_aux_jk(intopt, ip_type='ip1', omega=omega):
         k0, k1 = intopt.sph_aux_loc[aux_id], intopt.sph_aux_loc[aux_id+1]
-        wj[:,k0:k1] = cupy.einsum('xpji,ij->ipx', int3c_blk, dm0_tag)
-        wk[:,k0:k1] = cupy.einsum('xpji,jo->ipox', int3c_blk, orbo)
+        wj[:,k0:k1] = contract('xpji,ij->ipx', int3c_blk, dm0_tag)
+        wk_tmp = contract('xpji,jo->ipox', int3c_blk, orbo)
+        if use_gpu_memory:
+            wk[:,k0:k1] = wk_tmp
+        else:
+            wk[:,k0:k1] = wk_tmp.get()
     return wj, wk
 
 def get_int3c2e_ip2_wjk(intopt, dm0_tag, with_k=True, omega=None):
@@ -813,13 +833,12 @@ def get_int3c2e_ip2_wjk(intopt, dm0_tag, with_k=True, omega=None):
     naux_sph = len(intopt.sph_aux_idx)
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     nocc = orbo.shape[1]
-    wj = cupy.empty([naux_sph,3])
-    wk = cupy.empty([naux_sph,nocc,nocc,3])
-    for aux_id, int3c_blk in loop_aux_jk(intopt, ip_type='ip2', omega=omega):
-        k0, k1 = intopt.sph_aux_loc[aux_id], intopt.sph_aux_loc[aux_id+1]
-        wj[k0:k1] = cupy.einsum('xpji,ji->px', int3c_blk, dm0_tag)
-        tmp = cupy.einsum('xpji,jo->piox', int3c_blk, orbo)
-        wk[k0:k1] = cupy.einsum('piox,ir->prox', tmp, orbo)
+    wj = cupy.zeros([naux_sph,3])
+    wk = cupy.zeros([naux_sph,nocc,nocc,3])
+    for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip2', omega=omega):
+        wj[k0:k1] += contract('xpji,ji->px', int3c_blk, dm0_tag[j0:j1,i0:i1])
+        tmp = contract('xpji,jo->piox', int3c_blk, orbo[j0:j1])
+        wk[k0:k1] += contract('piox,ir->prox', tmp, orbo[i0:i1])
     return wj, wk
 
 def get_int3c2e_ipip1_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None):
@@ -831,11 +850,11 @@ def get_int3c2e_ipip1_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None):
     hj = cupy.zeros([nao_sph,9])
     hk = cupy.zeros([nao_sph,9])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipip1', omega=omega):
-        rhok_tmp = cupy.einsum('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
-        rhok_tmp = cupy.einsum('pio,jo->pij', rhok_tmp, orbo[j0:j1])
-        tmp = cupy.einsum('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
-        hj[i0:i1] += cupy.einsum('xpi,p->ix', tmp, rhoj[k0:k1])
-        hk[i0:i1] += cupy.einsum('xpji,pij->ix', int3c_blk, rhok_tmp)
+        rhok_tmp = contract('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
+        rhok_tmp = contract('pio,jo->pij', rhok_tmp, orbo[j0:j1])
+        tmp = contract('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
+        hj[i0:i1] += contract('xpi,p->ix', tmp, rhoj[k0:k1])
+        hk[i0:i1] += contract('xpji,pij->ix', int3c_blk, rhok_tmp)
     hj = hj.reshape([nao_sph,3,3])
     hk = hk.reshape([nao_sph,3,3])
     return hj, hk
@@ -849,11 +868,11 @@ def get_int3c2e_ipvip1_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None)
     hj = cupy.zeros([nao_sph,nao_sph,9])
     hk = cupy.zeros([nao_sph,nao_sph,9])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipvip1', omega=omega):
-        rhok_tmp = cupy.einsum('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
-        rhok_tmp = cupy.einsum('pio,jo->pji', rhok_tmp, orbo[j0:j1])
-        tmp = cupy.einsum('xpji,ij->xpij', int3c_blk, dm0_tag[i0:i1,j0:j1])
-        hj[i0:i1,j0:j1] += cupy.einsum('xpij,p->ijx', tmp, rhoj[k0:k1])
-        hk[i0:i1,j0:j1] += cupy.einsum('xpji,pji->ijx', int3c_blk, rhok_tmp)
+        rhok_tmp = contract('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
+        rhok_tmp = contract('pio,jo->pji', rhok_tmp, orbo[j0:j1])
+        tmp = contract('xpji,ij->xpij', int3c_blk, dm0_tag[i0:i1,j0:j1])
+        hj[i0:i1,j0:j1] += contract('xpij,p->ijx', tmp, rhoj[k0:k1])
+        hk[i0:i1,j0:j1] += contract('xpji,pji->ijx', int3c_blk, rhok_tmp)
     hj = hj.reshape([nao_sph,nao_sph,3,3])
     hk = hk.reshape([nao_sph,nao_sph,3,3])
     return hj, hk
@@ -868,11 +887,11 @@ def get_int3c2e_ip1ip2_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None)
     hj = cupy.zeros([nao_sph,naux_sph,9])
     hk = cupy.zeros([nao_sph,naux_sph,9])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip1ip2', omega=omega):
-        rhok_tmp = cupy.einsum('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
-        rhok_tmp = cupy.einsum('pio,jo->pij', rhok_tmp, orbo[j0:j1])
-        tmp = cupy.einsum('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
-        hj[i0:i1,k0:k1] += cupy.einsum('xpi,p->ipx', tmp, rhoj[k0:k1])
-        hk[i0:i1,k0:k1] += cupy.einsum('xpji,pij->ipx', int3c_blk, rhok_tmp)
+        rhok_tmp = contract('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
+        rhok_tmp = contract('pio,jo->pij', rhok_tmp, orbo[j0:j1])
+        tmp = contract('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
+        hj[i0:i1,k0:k1] += contract('xpi,p->ipx', tmp, rhoj[k0:k1])
+        hk[i0:i1,k0:k1] += contract('xpji,pij->ipx', int3c_blk, rhok_tmp)
     hj = hj.reshape([nao_sph,naux_sph,3,3])
     hk = hk.reshape([nao_sph,naux_sph,3,3])
     return hj, hk
@@ -886,11 +905,11 @@ def get_int3c2e_ipip2_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None):
     hj = cupy.zeros([naux_sph,9])
     hk = cupy.zeros([naux_sph,9])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipip2', omega=omega):
-        rhok_tmp = cupy.einsum('por,jr->pjo', rhok[k0:k1], orbo[j0:j1])
-        rhok_tmp = cupy.einsum('pjo,io->pji', rhok_tmp, orbo[i0:i1])
-        tmp = cupy.einsum('xpji,ij->xp', int3c_blk, dm0_tag[i0:i1,j0:j1])
-        hj[k0:k1] += cupy.einsum('xp,p->px', tmp, rhoj[k0:k1])
-        hk[k0:k1] += cupy.einsum('xpji,pji->px', int3c_blk, rhok_tmp)
+        rhok_tmp = contract('por,jr->pjo', rhok[k0:k1], orbo[j0:j1])
+        rhok_tmp = contract('pjo,io->pji', rhok_tmp, orbo[i0:i1])
+        tmp = contract('xpji,ij->xp', int3c_blk, dm0_tag[i0:i1,j0:j1])
+        hj[k0:k1] += contract('xp,p->px', tmp, rhoj[k0:k1])
+        hk[k0:k1] += contract('xpji,pji->px', int3c_blk, rhok_tmp)
     hj = hj.reshape([naux_sph,3,3])
     hk = hk.reshape([naux_sph,3,3])
     return hj, hk

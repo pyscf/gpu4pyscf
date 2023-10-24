@@ -34,7 +34,9 @@ bas='def2-qzvpp'
 def setUpModule():
     global mol
     mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
+    mol.output = '/dev/null'
     mol.verbose = 0
+    mol.build()
 
 def tearDownModule():
     global mol

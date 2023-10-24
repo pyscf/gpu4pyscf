@@ -94,7 +94,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     # ================================ sorted AO begin ===============================================
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size_aux=64, group_size=64)
+    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size=64, group_size_aux=32)
     sph_ao_idx = intopt.sph_ao_idx
     sph_aux_idx = intopt.sph_aux_idx
 
@@ -122,7 +122,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     rhok0_P__ = contract('pq,qij->pij', int2c_inv, wk_P__)
     wj = wk_P__ = None
     t1 = log.timer_debug1('intermediate variables with int3c2e', *t1)
-    print(rhok0_P__.nbytes/1e9)
+
     # int3c_ip2 contributions
     wj_ip2, wk_ip2_P__ = int3c2e.get_int3c2e_ip2_wjk(intopt, dm0_tag, omega=omega)
     t1 = log.timer_debug1('interdeidate variables with int3c2e_ip2', *t1)
@@ -142,34 +142,46 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         wj1_01 = None
 
     if with_k:
-        for p0, p1 in lib.prange(0,naux,64):
-            rhok1_Pko = contract('pq,iqox->pxio', int2c_inv[p0:p1], wk1_Pko)
-            # (10|0)(0|10) without response of RI basis
-            vk2_ip1_ip1 = cupy.einsum('ipox,pyko->kixy', wk1_Pko[:,p0:p1], rhok1_Pko)
-            hk_ao_ao += cupy.einsum('kixy,ki->ikxy', vk2_ip1_ip1, dm0)
-            vk2_ip1_ip1 = None
-            # (10|0)(0|01) without response of RI basis
-            bra = cupy.einsum('pyko,io->ikpy', rhok1_Pko, mocc_2)
-            ket = cupy.einsum('ipox,ko->ipkx', wk1_Pko[:,p0:p1], mocc_2)
-            hk_ao_ao += cupy.einsum('ikpy,ipkx->ikxy', bra, ket)
-            bra = ket = None
+        if hessobj.auxbasis_response:
+            wk1_P__ = contract('ypq,qor->ypor', int2c_ip1, rhok0_P__)
+            int2c_ip1_inv = cupy.asarray(int2c_ip1_inv)
+
+        for i0, i1 in lib.prange(0,nao,64):
+            wk1_Pko_islice = cupy.asarray(wk1_Pko[i0:i1])
+            rhok1_Pko = contract('pq,iqox->ipox', int2c_inv, wk1_Pko_islice)
+            for k0, k1 in lib.prange(0,nao,64):
+                wk1_Pko_kslice = cupy.asarray(wk1_Pko[k0:k1])
+
+                # (10|0)(0|10) without response of RI basis
+                vk2_ip1_ip1 = contract('ipox,kpoy->ikxy', rhok1_Pko, wk1_Pko_kslice)
+                hk_ao_ao[i0:i1,k0:k1] += contract('ikxy,ik->ikxy', vk2_ip1_ip1, dm0[i0:i1,k0:k1])
+                vk2_ip1_ip1 = None
+
+                # (10|0)(0|01) without response of RI basis
+                bra = contract('ipox,ko->ipkx', rhok1_Pko, mocc_2[k0:k1])
+                ket = contract('kpoy,io->kpiy', wk1_Pko_kslice, mocc_2[i0:i1])
+                hk_ao_ao[i0:i1,k0:k1] += contract('ipkx,kpiy->ikxy', bra, ket)
+                bra = ket = None
+            wk1_Pko_kslice = None
             if hessobj.auxbasis_response:
                 # (10|0)(1|00)
-                wk_ip2_Ipo = cupy.einsum('porx,io->ipxr', wk_ip2_P__[p0:p1], mocc_2)
-                hk_ao_aux[:,p0:p1] += cupy.einsum('pxio,ipyo->ipxy', rhok1_Pko, wk_ip2_Ipo)
+                wk_ip2_Ipo = contract('porx,io->iprx', wk_ip2_P__, mocc_2[i0:i1])
+                hk_ao_aux[i0:i1] += contract('ipox,ipoy->ipxy', rhok1_Pko, wk_ip2_Ipo)
                 wk_ip2_Ipo = None
+
                 # (10|0)(1|0)(0|00)
-                wk1_P__ = cupy.einsum('ypq,qor->ypor', int2c_ip1[:,p0:p1], rhok0_P__)
-                wk1_P_I = cupy.einsum('ypor,ir->ypoi', wk1_P__, mocc_2)
-                hk_ao_aux[:,p0:p1] -= cupy.einsum('pxio,ypoi->ipxy', rhok1_Pko, wk1_P_I)
-                wk1_P_I = wk1_P__ = None
+                wk1_P_I = contract('ypor,ir->ipoy', wk1_P__, mocc_2[i0:i1])
+                hk_ao_aux[i0:i1] -= contract("ipox,ipoy->ipxy", rhok1_Pko, wk1_P_I)
+                wk1_P_I = rhok1_Pko = None
+
                 # (10|0)(0|1)(0|00)
-                int2c_tmp = cupy.asarray(int2c_ip1_inv[:,p0:p1], order='C')
-                wk1_I = contract('yqp,ipox->qxyio', int2c_tmp, wk1_Pko)
-                rhok0_tmp = cupy.einsum('qor,ir->qoi', rhok0_P__[p0:p1], mocc_2)
-                hk_ao_aux[:,p0:p1] -= cupy.einsum('qoi,qxyio->iqxy', rhok0_tmp, wk1_I)
+                wk1_I = contract('yqp,ipox->iqoxy', int2c_ip1_inv, wk1_Pko_islice)
+                rhok0_tmp = contract('qor,ir->iqo', rhok0_P__, mocc_2[i0:i1])
+                hk_ao_aux[i0:i1] -= contract('iqo,iqoxy->iqxy', rhok0_tmp, wk1_I)
                 wk1_I = rhok0_tmp = None
-        wk1_Pko = rhok1_Pko = int2c_tmp = None
+            wk1_Pko_islice = None
+        wk1_P__ = None
+    wk1_Pko = None
     t1 = log.timer_debug1('intermediate variables with int3c2e_ip1', *t1)
 
     cupy.get_default_memory_pool().free_all_blocks()
@@ -183,6 +195,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     hj, hk = int3c2e.get_int3c2e_ipvip1_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag, omega=omega)
     hj_ao_ao += 2.0*hj
     hk_ao_ao += hk
+    hj = hk = None
     t1 = log.timer_debug1('intermediate variables with int3c2e_ipvip1', *t1)
 
     #  int3c_ip1ip2 contributions
@@ -191,6 +204,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         hj, hk = int3c2e.get_int3c2e_ip1ip2_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag, omega=omega)
         hj_ao_aux += hj
         hk_ao_aux += hk
+        hj = hk = None
         t1 = log.timer_debug1('intermediate variables with int3c2e_ip1ip2', *t1)
 
     #  int3c_ipip2 contributions
@@ -199,11 +213,12 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         hj, hk = int3c2e.get_int3c2e_ipip2_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag, omega=omega)
         hj_aux_diag = hj
         hk_aux_diag = .5*hk
+        hj = hk = None
         t1 = log.timer_debug1('intermediate variables with int3c2e_ipip2', *t1)
 
     # int2c contributions
     if hessobj.auxbasis_response > 1:
-        aux_aux_9 = cupy.ix_(np.arange(9), sph_aux_idx, sph_aux_idx)
+        aux_aux_9 = np.ix_(np.arange(9), sph_aux_idx, sph_aux_idx)
         if omega and omega > 1e-10:
             with auxmol.with_range_coulomb(omega):
                 int2c_ipip1 = auxmol.intor('int2c2e_ipip1', aosym='s1')
@@ -211,12 +226,12 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             int2c_ipip1 = auxmol.intor('int2c2e_ipip1', aosym='s1')
         int2c_ipip1 = cupy.asarray(int2c_ipip1)
         int2c_ipip1 = int2c_ipip1[aux_aux_9]
-        rhoj2c_P = cupy.einsum('xpq,q->xp', int2c_ipip1, rhoj0_P)
+        rhoj2c_P = contract('xpq,q->xp', int2c_ipip1, rhoj0_P)
         # (00|0)(2|0)(0|00)
         hj_aux_diag -= cupy.einsum('p,xp->px', rhoj0_P, rhoj2c_P).reshape(-1,3,3)
         if with_k:
-            rho2c_0 = cupy.einsum('pij,qji->pq', rhok0_P__, rhok0_P__)
-            hk_aux_diag -= .5 * cupy.einsum('pq,xpq->px', rho2c_0, int2c_ipip1).reshape(-1,3,3)
+            rho2c_0 = contract('pij,qji->pq', rhok0_P__, rhok0_P__)
+            hk_aux_diag -= .5 * contract('pq,xpq->px', rho2c_0, int2c_ipip1).reshape(-1,3,3)
         int2c_ipip1 = None
 
         if omega and omega > 1e-10:
@@ -228,39 +243,41 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         int2c_ip1ip2 = int2c_ip1ip2[aux_aux_9]
         hj_aux_aux = -.5 * cupy.einsum('p,xpq,q->pqx', rhoj0_P, int2c_ip1ip2, rhoj0_P).reshape(naux, naux,3,3)
         if with_k:
-            hk_aux_aux = -.5 * cupy.einsum('xpq,pq->pqx', int2c_ip1ip2, rho2c_0).reshape(naux,naux,3,3)
+            hk_aux_aux = -.5 * contract('xpq,pq->pqx', int2c_ip1ip2, rho2c_0).reshape(naux,naux,3,3)
         t1 = log.timer_debug1('intermediate variables with int2c_*', *t1)
         int2c_ip1ip2 = aux_aux_9 = None
 
+    cupy.get_default_memory_pool().free_all_blocks()
+    release_gpu_stack()
     # aux-aux pair
     if hessobj.auxbasis_response > 1:
-        wj0_10 = cupy.einsum('ypq,p->ypq', int2c_ip1, rhoj0_P)
-        rhoj1 = cupy.einsum('px,pq->xpq', wj_ip2, int2c_inv)             # (0|0)(1|00)
-        rhoj0_01 = cupy.einsum('xp,pq->xpq', wj0_01, int2c_inv)          # (0|1)(0|00)
-        rhoj0_10 = cupy.einsum('p,xpq->xpq', rhoj0_P, int2c_ip1_inv)     # (1|0)(0|00)
+        wj0_10 = contract('ypq,p->ypq', int2c_ip1, rhoj0_P)
+        rhoj1 = contract('px,pq->xpq', wj_ip2, int2c_inv)             # (0|0)(1|00)
+        rhoj0_01 = contract('xp,pq->xpq', wj0_01, int2c_inv)          # (0|1)(0|00)
+        rhoj0_10 = contract('p,xpq->xpq', rhoj0_P, int2c_ip1_inv)     # (1|0)(0|00)
 
-        hj_aux_aux += .5 * cupy.einsum('xpr,yqr->pqxy', rhoj0_10, wj0_10)  # (00|0)(1|0), (0|1)(0|00)
-        hj_aux_aux -=      cupy.einsum('xpq,yq->pqxy',  rhoj1,    wj0_01)  # (00|1),      (1|0)(0|00)
-        hj_aux_aux += .5 * cupy.einsum('xpq,qy->pqxy',  rhoj1,    wj_ip2)  # (00|1),      (1|00)
-        hj_aux_aux -=      cupy.einsum('xpr,yqr->pqxy', rhoj1,    wj0_10)  # (00|1),      (0|1)(0|00)
-        hj_aux_aux += .5 * cupy.einsum('xpq,yq->pqxy',  rhoj0_01, wj0_01)  # (00|0)(0|1), (1|0)(0|00)
-        hj_aux_aux +=      cupy.einsum('xpq,yq->pqxy',  rhoj0_10, wj0_01)  # (00|0)(1|0), (1|0)(0|00)
+        hj_aux_aux += .5 * contract('xpr,yqr->pqxy', rhoj0_10, wj0_10)  # (00|0)(1|0), (0|1)(0|00)
+        hj_aux_aux -=      contract('xpq,yq->pqxy',  rhoj1,    wj0_01)  # (00|1),      (1|0)(0|00)
+        hj_aux_aux += .5 * contract('xpq,qy->pqxy',  rhoj1,    wj_ip2)  # (00|1),      (1|00)
+        hj_aux_aux -=      contract('xpr,yqr->pqxy', rhoj1,    wj0_10)  # (00|1),      (0|1)(0|00)
+        hj_aux_aux += .5 * contract('xpq,yq->pqxy',  rhoj0_01, wj0_01)  # (00|0)(0|1), (1|0)(0|00)
+        hj_aux_aux +=      contract('xpq,yq->pqxy',  rhoj0_10, wj0_01)  # (00|0)(1|0), (1|0)(0|00)
         wj0_01 = wj0_10 = rhoj1 = rhoj0_01 = rhoj0_10 = rhoj0_P = wj_ip2 = None
 
         if with_k:
-            rho2c_10 = cupy.einsum('rijx,qij->rqx', wk_ip2_P__, rhok0_P__)
-            rho2c_11 = cupy.einsum('pijx,qijy->pqxy', wk_ip2_P__, wk_ip2_P__)
-            rho2c0_10 = cupy.einsum('xpq,qr->xpr', int2c_ip1, rho2c_0)              # (00|0)(0|1)_(0|00)
-            rho2c1_10 = cupy.einsum('xpr,qry->pqxy', int2c_ip1, rho2c_10)           # (00|1)_(1|0)(0|00)
-            rho2c0_11 = cupy.einsum('xpr,yqr->pqxy', rho2c0_10, int2c_ip1)          # (00|0)(0|1)_(1|0)(0|00)
-            int2c_ip_ip = cupy.einsum('xpr,ysr->xyps', int2c_ip1_inv, int2c_ip1)    # (0|1)(0|0)(1|0)
+            rho2c_10 = contract('rijx,qij->rqx', wk_ip2_P__, rhok0_P__)
+            rho2c_11 = contract('pijx,qijy->pqxy', wk_ip2_P__, wk_ip2_P__)
+            rho2c0_10 = contract('xpq,qr->xpr', int2c_ip1, rho2c_0)              # (00|0)(0|1)_(0|00)
+            rho2c1_10 = contract('xpr,qry->pqxy', int2c_ip1, rho2c_10)           # (00|1)_(1|0)(0|00)
+            rho2c0_11 = contract('xpr,yqr->pqxy', rho2c0_10, int2c_ip1)          # (00|0)(0|1)_(1|0)(0|00)
+            int2c_ip_ip = contract('xpr,ysr->xyps', int2c_ip1_inv, int2c_ip1)    # (0|1)(0|0)(1|0)
 
-            hk_aux_aux += .5 * cupy.einsum('xypq,pq->pqxy', int2c_ip_ip, rho2c_0)     # (00|0)(1|0)(0|1)(0|00)
-            hk_aux_aux += .5 * cupy.einsum('pqxy,pq->pqxy', rho2c0_11, int2c_inv)     # (00|0)(0|1)(1|0)(0|00)
-            hk_aux_aux +=      cupy.einsum('xpq,yqp->pqxy', int2c_ip1_inv, rho2c0_10) # (00|0)(1|0)(1|0)(0|00)
-            hk_aux_aux -=      cupy.einsum('pqxy,pq->pqxy', rho2c1_10, int2c_inv)     # (00|1)(1|0)(0|00)
-            hk_aux_aux -=      cupy.einsum('pqx,yqp->pqxy', rho2c_10, int2c_ip1_inv)  # (00|1)(0|1)(0|00)
-            hk_aux_aux += .5 * cupy.einsum('pqxy,pq->pqxy', rho2c_11, int2c_inv)      # (00|1)(1|00)
+            hk_aux_aux += .5 * contract('xypq,pq->pqxy', int2c_ip_ip, rho2c_0)     # (00|0)(1|0)(0|1)(0|00)
+            hk_aux_aux += .5 * contract('pqxy,pq->pqxy', rho2c0_11, int2c_inv)     # (00|0)(0|1)(1|0)(0|00)
+            hk_aux_aux +=      contract('xpq,yqp->pqxy', int2c_ip1_inv, rho2c0_10) # (00|0)(1|0)(1|0)(0|00)
+            hk_aux_aux -=      contract('pqxy,pq->pqxy', rho2c1_10, int2c_inv)     # (00|1)(1|0)(0|00)
+            hk_aux_aux -=      contract('pqx,yqp->pqxy', rho2c_10, int2c_ip1_inv)  # (00|1)(0|1)(0|00)
+            hk_aux_aux += .5 * contract('pqxy,pq->pqxy', rho2c_11, int2c_inv)      # (00|1)(1|00)
             rho2c_0 = rho2c_10 = rho2c_11 = rho2c0_10 = rho2c1_10 = rho2c0_11 = int2c_ip_ip = None
             wk_ip2_P__ = int2c_ip1_inv = None
     ao_idx = np.argsort(intopt.sph_ao_idx)

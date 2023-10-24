@@ -211,10 +211,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
         log.debug("Not enough GPU memory")
         # TODO: async allocate memory
         mem = cupy.cuda.alloc_pinned_memory(naux * npair * 8)
-        try:
-            cderi = np.ndarray([naux, npair], dtype=np.float64, order='C', buffer=mem)
-        except Exception:
-            raise RuntimeError('out of CPU memory')
+        cderi = np.ndarray([naux, npair], dtype=np.float64, order='C', buffer=mem)
     data_stream = cupy.cuda.stream.Stream(non_blocking=False)
     count = 0
     nq = len(intopt.log_qs)
