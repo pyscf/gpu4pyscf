@@ -769,6 +769,7 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
                 vk1_ao += contract('xpio,pki->xiko', int3c_ip1_occ, rhok0_slice)
                 vk1 += contract('xiko,ia->axko', vk1_ao, ao2atom)
         count += 1
+
     return vj1_buf, vk1_buf, vj1, vk1
 
 def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices, with_k=True, omega=None):
@@ -822,6 +823,7 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
     naux_sph = len(intopt.sph_aux_idx)
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     nocc = orbo.shape[1]
+
     wj = cupy.zeros([nao_sph,naux_sph,3])
     avail_mem = get_avail_mem()
     use_gpu_memory = True
