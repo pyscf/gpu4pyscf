@@ -678,6 +678,11 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 c0 = cupy.empty([4,occ_coeff.shape[1],p1-p0])
                 for i in range(4):
                     c0[i] = _dot_ao_dm(mol, ao[i], occ_coeff_mask, None, None, None)
+        # precompute fxc_w
+        if xctype == 'LDA':
+            fxc_w = fxc[0,0,p0:p1] * weights
+        else:
+            fxc_w = fxc[:,:,p0:p1] * weights
         # loop perturbed molecular orbitals
         for i in range(nset):
             if with_mocc:
@@ -686,18 +691,18 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 rho1 = eval_rho(opt.mol, ao, dms[i][np.ix_(mask,mask)], xctype=xctype, hermi=hermi, with_lapl=False)
 
             if xctype == 'LDA':
-                wv = rho1 * fxc[0,0,p0:p1] * weights
+                wv = rho1 * fxc_w
                 vmat_tmp = ao.dot(_scale_ao(ao, wv).T)
                 add_sparse(vmat[i], vmat_tmp, mask)
             elif xctype == 'GGA':
-                wv = cupy.einsum('xg,xyg->yg', rho1, fxc[:,:,p0:p1]) * weights
+                wv = cupy.einsum('xg,xyg->yg', rho1, fxc_w)
                 wv[0] *= .5
                 vmat_tmp = ao[0].dot(_scale_ao(ao, wv).T)
                 add_sparse(vmat[i], vmat_tmp, mask)
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             else:
-                wv = cupy.einsum('xg,xyg->yg', rho1, fxc[:,:,p0:p1]) * weights
+                wv = cupy.einsum('xg,xyg->yg', rho1, fxc_w)
                 wv[[0, 4]] *= .5
                 vmat_tmp = ao[0].dot(_scale_ao(ao[:4], wv[:4]).T)
                 vmat_tmp+= _tau_dot(ao, ao, wv[4])
