@@ -382,7 +382,6 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     dm_shape = dms.shape
     dms = [coeff @ dm @ coeff.T for dm in dms.reshape(-1,nao0,nao0)]
     nset = len(dms)
-    ao_loc = mol.ao_loc_nr()
 
     if mo_coeff is not None:
         mo_coeff = coeff @ mo_coeff
@@ -390,6 +389,8 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nelec = cupy.zeros(nset)
     excsum = cupy.zeros(nset)
     vmat = cupy.zeros((nset, nao, nao))
+    '''
+    ao_loc = mol.ao_loc_nr()
     if USE_SPARSITY == 1:
         nbins = NBINS * 2 - int(NBINS * np.log(ni.cutoff) / np.log(grids.cutoff))
         pair2shls, pairs_locs = _make_pairs2shls_idx(ni.pair_mask, opt.l_bas_offsets, hermi)
@@ -398,7 +399,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                                                                opt.l_bas_offsets)
         else:
             pair2shls_full, pairs_locs_full = pair2shls, pairs_locs
-
+    '''
     release_gpu_stack()
     if xctype == 'LDA':
         ao_deriv = 0
@@ -882,7 +883,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         wv[0] *= .5
         aow = _scale_ao(ao, wv)
         #vmat += ao[0].dot(aow.T)
-        add_sparse(vmat, ao.dot(aow.T), mask)
+        add_sparse(vmat, ao[0].dot(aow.T), mask)
 
     vmat = vmat + vmat.T
     vmat = contract('pi,pq->iq', coeff, vmat)

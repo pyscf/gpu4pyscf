@@ -108,7 +108,6 @@ def _get_veff(ks_grad, mol=None, dm=None):
 
 def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             max_memory=2000, verbose=None):
-    log = logger.new_logger(mol, verbose)
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
@@ -116,14 +115,15 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         opt = ni.gdftopt
     mo_occ = cupy.asarray(dms.mo_occ)
     mo_coeff = cupy.asarray(dms.mo_coeff)
-
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
     dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
            for dm in dms.reshape(-1,nao0,nao0)]
     mo_coeff = coeff @ mo_coeff
+
     nset = len(dms)
+    assert nset == 1
 
     if xctype == 'LDA':
         ao_deriv = 1
@@ -139,9 +139,6 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 rho = numint.eval_rho2(opt.mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype)
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                 wv = weight * vxc[0]
-                #mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
-                #idx = cupy.argwhere(mask).astype(numpy.int32)[:,0]
-                #ao_mask = ao[:,idx,:]
                 aow = numint._scale_ao(ao_mask[0], wv)
                 vtmp = _d1_dot_(ao_mask[1:4], aow.T)
                 #idx = cupy.ix_(mask, mask)
@@ -160,9 +157,6 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                 wv = weight * vxc
                 wv[0] *= .5
-                #mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
-                #idx = cupy.argwhere(mask).astype(numpy.int32)[:,0]
-                #ao_mask = ao[:,idx,:]
                 vtmp = _gga_grad_sum_(ao_mask, wv)
                 #idx = cupy.ix_(mask, mask)
                 #vmat[idm][0][idx] += vtmp[0]
@@ -184,9 +178,6 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 wv = weight * vxc
                 wv[0] *= .5
                 wv[4] *= .5  # for the factor 1/2 in tau
-                #mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
-                #idx = cupy.argwhere(mask).astype(numpy.int32)[:,0]
-                #ao_mask = ao[:,idx,:]
                 vtmp = _gga_grad_sum_(ao_mask, wv)
                 vtmp += _tau_grad_dot_(ao_mask, wv[4])
                 #idx = cupy.ix_(mask, mask)

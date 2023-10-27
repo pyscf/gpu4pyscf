@@ -59,8 +59,10 @@ def _check_grad(grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
     mf = rks.RKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
     mf.grids.level = grids_level
     mf.nlcgrids.level = nlcgrids_level
-    mf.conv_tol = 1e-12
+    mf.conv_tol = 1e-10
+    mf.verbose = 1
     e_tot = mf.kernel()
+
     g = mf.nuc_grad_method()
     g.auxbasis_response = True
     g.grid_response = grid_response
