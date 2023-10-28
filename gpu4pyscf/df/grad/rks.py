@@ -129,7 +129,7 @@ class Gradients(rks_grad.Gradients, pyscf.df.grad.rks.Gradients):
     def get_k(self, mol=None, dm=None, hermi=0, omega=None):
         _, vk, _, vkaux = self.get_jk(mol, dm, with_j=False, omega=omega)
         return vk, vkaux
-        
+
     def extra_force(self, atom_id, envs):
         if self.auxbasis_response:
             return envs['dvhf'].aux[atom_id]

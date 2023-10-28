@@ -79,7 +79,6 @@ def initialize_grids(ks, mol=None, dm=None):
             # Filter grids the first time setup grids
             ks.grids = prune_small_rho_grids_(ks, ks.mol, dm, ks.grids)
         t0 = logger.timer_debug1(ks, 'setting up grids', *t0)
-
         is_nlc = ks.nlc or ks._numint.libxc.is_nlc(ks.xc)
         if is_nlc and ks.nlcgrids.coords is None:
             if ks.nlcgrids.coords is None:
@@ -235,7 +234,14 @@ class RKS(scf.hf.RHF, rks.RKS):
         self._numint = numint.NumInt(xc=xc)
         self.disp = disp
         self.screen_tol = 1e-14
+
+        grids_level = self.grids.level
         self.grids = gen_grid.Grids(mol)
+        self.grids.level = grids_level
+
+        nlcgrids_level = self.nlcgrids.level
+        self.nlcgrids = gen_grid.Grids(mol)
+        self.nlcgrids.level = nlcgrids_level
 
     def get_dispersion(self):
         if self.disp is None:

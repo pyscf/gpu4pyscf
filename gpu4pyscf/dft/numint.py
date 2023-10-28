@@ -160,7 +160,7 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
 
     shls_slice = (0, mol.nbas)
     ao_loc = mol.ao_loc_nr()
-    
+
     #cpos = cupy.einsum('ij,j->ij', mo_coeff[:,mo_occ>0], cupy.sqrt(mo_occ[mo_occ>0]))
     cpos = mo_coeff[:,mo_occ>0] * cupy.sqrt(mo_occ[mo_occ>0])
     if xctype == 'LDA' or xctype == 'HF':
@@ -228,10 +228,10 @@ def eval_rho3(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
     elif xctype in ('GGA', 'NLC'):
         rho = cupy.empty((4,ngrids))
         c_0 = contract('nig,io->nog', ao, cpos1)
-        rho[0] = _contract_rho(c0[0], c_0[0])
+        _contract_rho(c0[0], c_0[0], rho=rho[0])
         for i in range(1, 4):
-            rho[i] = _contract_rho(c_0[0], c0[i])
-            rho[i]+= _contract_rho(c0[0], c_0[i])
+            _contract_rho(c_0[0], c0[i], rho=rho[i])
+            rho[i] += _contract_rho(c0[0], c_0[i])
         rho *= 2.0
     else: # meta-GGA
         # TODO: complete this
@@ -382,14 +382,15 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     dm_shape = dms.shape
     dms = [coeff @ dm @ coeff.T for dm in dms.reshape(-1,nao0,nao0)]
     nset = len(dms)
-    ao_loc = mol.ao_loc_nr()
-    
-    if mo_coeff is not None: 
+
+    if mo_coeff is not None:
         mo_coeff = coeff @ mo_coeff
 
     nelec = cupy.zeros(nset)
     excsum = cupy.zeros(nset)
     vmat = cupy.zeros((nset, nao, nao))
+    '''
+    ao_loc = mol.ao_loc_nr()
     if USE_SPARSITY == 1:
         nbins = NBINS * 2 - int(NBINS * np.log(ni.cutoff) / np.log(grids.cutoff))
         pair2shls, pairs_locs = _make_pairs2shls_idx(ni.pair_mask, opt.l_bas_offsets, hermi)
@@ -398,89 +399,69 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                                                                opt.l_bas_offsets)
         else:
             pair2shls_full, pairs_locs_full = pair2shls, pairs_locs
-
+    '''
     release_gpu_stack()
     if xctype == 'LDA':
         ao_deriv = 0
     else:
         ao_deriv = 1
-    
-    block_id = 0
-    for ao, sindex, weight, _ in ni.block_loop(mol, grids, nao, ao_deriv, blksize=ni.grid_blksize):
-        if ni.grid_blksize is None:
-            ni.grid_blksize = weight.shape[0]
-        
-        # cache ao indices
-        if block_id not in ni.non0ao_idx:
-            t0 = (logger.process_clock(), logger.perf_counter())
-            if xctype == 'LDA':
-                mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[1])
-                idx = cupy.argwhere(mask).astype(np.int32)[:,0]
-                ao_mask = ao[idx,:]
-            else:
-                mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
-                idx = cupy.argwhere(mask).astype(np.int32)[:,0]
-                ao_mask = ao[:,idx,:]
-            ni.non0ao_idx[block_id] = idx
-            t1 = log.timer_debug1('initialize ao sparsity', *t0)
-        else:
-            idx = ni.non0ao_idx[block_id]
-            if xctype == 'LDA':
-                ao_mask = ao[idx,:]
-            else:
-                ao_mask = ao[:,idx,:]
-        block_id += 1
+
+    for ao_mask, idx, weight, _ in ni.block_loop(mol, grids, nao, ao_deriv):
         for i in range(nset):
             t0 = (logger.process_clock(), logger.perf_counter())
             #rho = eval_rho(opt.mol, ao, dms[i], xctype=xctype, hermi=1)
             #rho = _make_rho(ao, dms[i], xctype=xctype)
             if mo_coeff is None:
-                rho = eval_rho(mol, ao, dms[i], xctype=xctype, hermi=1)
+                rho = eval_rho(mol, ao_mask, dms[i][np.ix_(idx,idx)], xctype=xctype, hermi=1)
             else:
                 mo_coeff_mask = mo_coeff[idx,:]
                 rho = eval_rho2(mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype)
 
-            t1 = log.timer_debug1('eval rho', *t0)
             exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
             vxc = cupy.asarray(vxc, order='C')
             exc = cupy.asarray(exc, order='C')
-            t1 = log.timer_debug1('eval vxc', *t1)
+            t1 = log.timer_debug1('eval vxc', *t0)
             if xctype == 'LDA':
                 den = rho * weight
                 wv = weight * vxc[0]
+                '''
                 if USE_SPARSITY == 0:
                     vmat[i] += ao.dot(_scale_ao(ao, wv).T)
                 elif USE_SPARSITY == 1:
                     _dot_ao_ao_sparse(ao, ao, wv, nbins, sindex, ao_loc,
                         pair2shls_full, pairs_locs_full, vmat[i])
-                elif USE_SPARSITY == 2:
+                '''
+                if USE_SPARSITY == 2:
                     aow = _scale_ao(ao_mask, wv)
                     # vmat[i][cupy.ix_(mask, mask)] += ao_mask.dot(aow.T)
                     add_sparse(vmat[i], ao_mask.dot(aow.T), idx)
                 else:
-                    raise NotImplementedError('Not implemented yet')
+                    raise NotImplementedError(f'USE_SPARSITY = {USE_SPARSITY} is not implemented')
             elif xctype == 'GGA':
                 den = rho[0] * weight
                 wv = vxc * weight
                 wv[0] *= .5
+                '''
                 if USE_SPARSITY == 0:
                     vmat[i] += ao[0].dot(_scale_ao(ao, wv).T)
                 elif USE_SPARSITY == 1:
                     aow = _scale_ao(ao, wv)
                     _dot_ao_ao_sparse(ao[0], aow, None, nbins, sindex, ao_loc,
                         pair2shls_full, pairs_locs_full, vmat[i])
-                elif USE_SPARSITY == 2:
+                '''
+                if USE_SPARSITY == 2:
                     aow = _scale_ao(ao_mask, wv)
                     #vmat[i][cupy.ix_(mask, mask)] += ao_mask[0].dot(aow.T)
                     add_sparse(vmat[i], ao_mask[0].dot(aow.T), idx)
                 else:
-                    raise NotImplementedError('Not implemented yet')
+                    raise NotImplementedError(f'USE_SPARSITY = {USE_SPARSITY} is not implemented')
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             elif xctype == 'MGGA':
                 den = rho[0] * weight
                 wv = vxc * weight
                 wv[[0, 4]] *= .5  # *.5 for v+v.T
+                '''
                 if USE_SPARSITY == 0:
                     aow = _scale_ao(ao[:4], wv[:4])
                     vmat[i] += ao[0].dot(aow.T)
@@ -490,12 +471,15 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                         pair2shls_full, pairs_locs_full, vmat[i])
                     _tau_dot_sparse(ao, ao, wv[4], nbins, sindex, ao_loc,
                         pair2shls_full, pairs_locs_full, vmat[i])
-                else:
+                '''
+                if USE_SPARSITY == 2:
                     aow = _scale_ao(ao_mask, wv[:4])
                     vtmp = ao_mask[0].dot(aow.T)
                     vtmp+= _tau_dot(ao_mask, ao_mask, wv[4])
                     #vmat[i][cupy.ix_(mask, mask)] += vtmp
                     add_sparse(vmat[i], vtmp, idx)
+                else:
+                    raise NotImplementedError(f'USE_SPARSITY = {USE_SPARSITY} is not implemented')
             elif xctype == 'HF':
                 pass
             else:
@@ -503,7 +487,6 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             #nelec[i] += den.sum()
             excsum[i] += cupy.dot(den, exc)[0]
             t1 = log.timer_debug1('integration', *t1)
-        ao = None
 
     vmat = contract('pi,npq->niq', coeff, vmat)
     vmat = contract('qj,niq->nij', coeff, vmat)
@@ -666,8 +649,8 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     # AO basis -> gdftopt AO basis
     with_mocc = hasattr(dms, 'mo1')
     if with_mocc:
-        mo1 = cupy.einsum('nio,pi->npo', dms.mo1, coeff) * 2.0**0.5
-        occ_coeff = cupy.einsum('io,pi->po', dms.occ_coeff, coeff) * 2.0**0.5
+        mo1 = contract('nio,pi->npo', dms.mo1, coeff) * 2.0**0.5
+        occ_coeff = contract('io,pi->po', dms.occ_coeff, coeff) * 2.0**0.5
     dms = contract('nij,qj->niq', dms, coeff)
     dms = contract('pi,niq->npq', coeff, dms)
     nset = len(dms)
@@ -682,43 +665,52 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     t0 = (logger.process_clock(), logger.perf_counter())
     for ao, mask, weights, coords in ni.block_loop(opt.mol, grids, nao, ao_deriv):
         p0, p1 = p1, p1+len(weights)
-        # precompute the first half
+        # precompute molecular orbitals
         if with_mocc:
+            occ_coeff_mask = occ_coeff[mask]
             if xctype == 'LDA':
-                c0 = _dot_ao_dm(mol, ao, occ_coeff, None, None, None)
+                c0 = _dot_ao_dm(mol, ao, occ_coeff_mask, None, None, None)
             elif xctype == "GGA":
                 c0 = cupy.empty([4,occ_coeff.shape[1],p1-p0])
                 for i in range(4):
-                    c0[i] = _dot_ao_dm(mol, ao[i], occ_coeff, None, None, None)
+                    c0[i] = _dot_ao_dm(mol, ao[i], occ_coeff_mask, None, None, None)
             else: # mgga
                 c0 = cupy.empty([4,occ_coeff.shape[1],p1-p0])
                 for i in range(4):
-                    c0[i] = _dot_ao_dm(mol, ao[i], occ_coeff, None, None, None)
-        # loop the second half
+                    c0[i] = _dot_ao_dm(mol, ao[i], occ_coeff_mask, None, None, None)
+        # precompute fxc_w
+        if xctype == 'LDA':
+            fxc_w = fxc[0,0,p0:p1] * weights
+        else:
+            fxc_w = fxc[:,:,p0:p1] * weights
+        # loop perturbed molecular orbitals
         for i in range(nset):
             if with_mocc:
-                rho1 = eval_rho3(opt.mol, ao, c0, mo1[i], xctype=xctype, with_lapl=False)
+                rho1 = eval_rho3(opt.mol, ao, c0, mo1[i][mask], xctype=xctype, with_lapl=False)
             else:
-                rho1 = eval_rho(opt.mol, ao, dms[i], xctype=xctype, hermi=hermi, with_lapl=False)
+                rho1 = eval_rho(opt.mol, ao, dms[i][np.ix_(mask,mask)], xctype=xctype, hermi=hermi, with_lapl=False)
 
             if xctype == 'LDA':
-                wv = rho1 * fxc[0,0,p0:p1] * weights
-                vmat[i] += ao.dot(_scale_ao(ao, wv).T)
+                wv = rho1 * fxc_w
+                vmat_tmp = ao.dot(_scale_ao(ao, wv).T)
+                add_sparse(vmat[i], vmat_tmp, mask)
             elif xctype == 'GGA':
-                wv = cupy.einsum('xg,xyg->yg', rho1, fxc[:,:,p0:p1]) * weights
+                wv = cupy.einsum('xg,xyg->yg', rho1, fxc_w)
                 wv[0] *= .5
-                vmat[i] += ao[0].dot(_scale_ao(ao, wv).T)
+                vmat_tmp = ao[0].dot(_scale_ao(ao, wv).T)
+                add_sparse(vmat[i], vmat_tmp, mask)
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             else:
-                wv = cupy.einsum('xg,xyg->yg', rho1, fxc[:,:,p0:p1]) * weights
+                wv = cupy.einsum('xg,xyg->yg', rho1, fxc_w)
                 wv[[0, 4]] *= .5
-                vmat[i] += ao[0].dot(_scale_ao(ao[:4], wv[:4]).T)
-                vmat[i] += _tau_dot(ao, ao, wv[4])
+                vmat_tmp = ao[0].dot(_scale_ao(ao[:4], wv[:4]).T)
+                vmat_tmp+= _tau_dot(ao, ao, wv[4])
+                add_sparse(vmat[i], vmat_tmp, mask)
         t0 = log.timer_debug1('vxc', *t0)
         ao = c0 = rho1 = None
-    vmat = cupy.einsum('pi,npq->niq', coeff, vmat)
-    vmat = cupy.einsum('qj,niq->nij', coeff, vmat)
+    vmat = contract('pi,npq->niq', coeff, vmat)
+    vmat = contract('qj,niq->nij', coeff, vmat)
     if xctype != 'LDA':
         #transpose_sum(vmat)
         vmat = vmat + vmat.transpose([0,2,1])
@@ -872,7 +864,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     vvrho = []
     for ao, mask, weight, coords \
             in ni.block_loop(mol, grids, nao, ao_deriv, max_memory=max_memory):
-        rho = eval_rho(opt.mol, ao, dms[0], xctype='GGA', hermi=1)
+        rho = eval_rho(opt.mol, ao, dms[0][np.ix_(mask,mask)], xctype='GGA', hermi=1)
         vvrho.append(rho)
     rho = cupy.hstack(vvrho)
     exc = 0
@@ -895,7 +887,9 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         wv = vv_vxc[:,p0:p1] * weight
         wv[0] *= .5
         aow = _scale_ao(ao, wv)
-        vmat += ao[0].dot(aow.T)
+        #vmat += ao[0].dot(aow.T)
+        add_sparse(vmat, ao[0].dot(aow.T), mask)
+
     vmat = vmat + vmat.T
     vmat = contract('pi,pq->iq', coeff, vmat)
     vmat = contract('qj,iq->ij', coeff, vmat)
@@ -1058,7 +1052,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     if blksize is None:
         cupy.get_default_memory_pool().free_all_blocks()
         mem_avail = get_avail_mem()
-        blksize = int((mem_avail*.2/8/((comp+1)*nao + extra) - nao*2)/ ALIGNED) * ALIGNED
+        blksize = int((mem_avail*.2/8/((comp+1)*nao + extra))/ ALIGNED) * ALIGNED
         blksize = min(blksize, MIN_BLK_SIZE)
         log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, blksize)
         if blksize < ALIGNED:
@@ -1071,14 +1065,37 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
 
     mol = opt.mol
     with opt.gdft_envs_cache():
+        block_id = 0
         for ip0, ip1 in lib.prange(0, ngrids, blksize):
             coords = grids.coords[ip0:ip1]
             weight = grids.weights[ip0:ip1]
-            sindex = None#ni.screen_index[ip0//GRID_BLKSIZE:]
+            #sindex = ni.screen_index[ip0//GRID_BLKSIZE:]
             t0 = (logger.process_clock(), logger.perf_counter())
             ao = eval_ao(ni, mol, coords, deriv)
             log.timer_debug1('eval ao', *t0)
-            yield ao, sindex, weight, coords
+
+            # cache ao indices
+            if (deriv, block_id, blksize, ngrids) not in ni.non0ao_idx:
+                t0 = (logger.process_clock(), logger.perf_counter())
+                if deriv == 0:
+                    mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[1])
+                    idx = cupy.argwhere(mask).astype(np.int32)[:,0]
+                    ao_mask = ao[idx,:]
+                else:
+                    mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
+                    idx = cupy.argwhere(mask).astype(np.int32)[:,0]
+                    ao_mask = ao[:,idx,:]
+                ni.non0ao_idx[deriv, block_id, blksize, ngrids] = idx
+                log.timer_debug1('initialize ao sparsity', *t0)
+            else:
+                idx = ni.non0ao_idx[deriv, block_id, blksize, ngrids]
+                if deriv == 0:
+                    ao_mask = ao[idx,:]
+                else:
+                    ao_mask = ao[:,idx,:]
+            block_id += 1
+            log.timer_debug1('eval rho', *t0)
+            yield ao_mask, idx, weight, coords
 
 class NumInt(numint.NumInt):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
@@ -1149,11 +1166,12 @@ def _make_pairs2shls_idx(pair_mask, l_bas_loc, hermi=0):
             pair2bra + pair2ket).astype(np.int32).reshape(2,-1)
     return bas_pair2shls, bas_pairs_locs
 
-def _contract_rho(bra, ket):
+def _contract_rho(bra, ket, rho=None):
     if bra.flags.c_contiguous and ket.flags.c_contiguous:
         assert bra.shape == ket.shape
         nao, ngrids = bra.shape
-        rho = cupy.empty(ngrids)
+        if rho is None:
+            rho = cupy.empty(ngrids)
         stream = cupy.cuda.get_current_stream()
         err = libgdft.GDFTcontract_rho(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
