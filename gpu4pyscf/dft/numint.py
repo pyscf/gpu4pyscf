@@ -451,11 +451,12 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             else:
                 mo_coeff_mask = mo_coeff[idx,:]
                 rho = eval_rho2(mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype)
+
             t1 = log.timer_debug1('eval rho', *t0)
             exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
             vxc = cupy.asarray(vxc, order='C')
             exc = cupy.asarray(exc, order='C')
-            t1 = log.timer_debug1('eval vxc', *t1)
+            t1 = log.timer_debug1('eval vxc', *t0)
             if xctype == 'LDA':
                 den = rho * weight
                 wv = weight * vxc[0]
@@ -728,6 +729,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         else:
             fxc_w = fxc[:,:,p0:p1] * weights
             wv = contract('axg,xyg->ayg', rho1, fxc_w)
+
 
         for i in range(nset):
             if xctype == 'LDA':

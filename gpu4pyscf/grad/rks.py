@@ -128,7 +128,6 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     nset = len(dms)
     assert nset == 1
-
     if xctype == 'LDA':
         ao_deriv = 1
     else:
