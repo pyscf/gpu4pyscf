@@ -20,9 +20,9 @@ import copy
 import cupy
 import numpy
 from pyscf import lib, scf, __config__
-from pyscf.lib import logger
 from pyscf.scf import dhf
 from pyscf.df import df_jk, addons
+from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, take_last2d, transpose_sum, load_library, get_avail_mem
 from gpu4pyscf.dft import rks, numint
 from gpu4pyscf.scf import hf
@@ -250,7 +250,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     nao = dms_tag.shape[-1]
     dms = dms_tag.reshape([-1,nao,nao])
     nset = dms.shape[0]
-    t0 = (logger.process_clock(), logger.perf_counter())
+    t0 = log.init_timer()
     if dfobj._cderi is None:
         log.debug('CDERI not found, build...')
         dfobj.build(direct_scf_tol=direct_scf_tol, omega=omega)
@@ -310,8 +310,8 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
                 rhok = contract('Lij,jk->Lki', cderi, occ_coeff)
                 for i in range(mo1.shape[0]):
                     rhok1 = contract('Lij,jk->Lki', cderi, mo1[i])
-                    vk[i] += contract('Lki,Lkj->ij', rhok, rhok1)
-                    #contract('Lki,Lkj->ij', rhok, rhok1, alpha=1.0, beta=1.0, out=vk[i])
+                    #vk[i] += contract('Lki,Lkj->ij', rhok, rhok1)
+                    contract('Lki,Lkj->ij', rhok, rhok1, alpha=1.0, beta=1.0, out=vk[i])
         occ_coeff = rhok1 = rhok = mo1 = None
         if with_k:
             vk = vk + vk.transpose(0,2,1)

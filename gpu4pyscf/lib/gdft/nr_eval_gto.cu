@@ -1640,31 +1640,4 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
     //FREE(d_grids);
     return 0;
 }
-
-int GDFTcontract_rho(cudaStream_t stream, double *rho, double *bra, double *ket, int ngrids, int nao)
-{
-    dim3 threads(BLKSIZEX, BLKSIZEY);
-    dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX);
-    GDFTcontract_rho_kernel<<<blocks, threads, 0, stream>>>(rho, bra, ket, ngrids, nao);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error of GDFTcontract_rho: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
-}
-
-int GDFTscale_ao(cudaStream_t stream, double *out, double *ket, double *wv,
-                 int ngrids, int nao, int nvar)
-{
-    dim3 threads(BLKSIZEX, BLKSIZEY);
-    dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX, (nao+BLKSIZEY-1)/BLKSIZEY);
-    GDFTscale_ao_kernel<<<blocks, threads, 0, stream>>>(out, ket, wv, ngrids, nao, nvar);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error of GDFTscale_ao: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
-}
 }

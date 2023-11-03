@@ -67,8 +67,8 @@ class DF(df.DF):
         idx = np.arange(nao)
         self.diag_idx = cupy.asarray(idx*(idx+1)//2+idx)
 
-        t0 = (logger.process_clock(), logger.perf_counter())
         log = logger.new_logger(mol, mol.verbose)
+        t0 = log.init_timer()
         if auxmol is None:
             self.auxmol = auxmol = addons.make_auxmol(mol, self.auxbasis)
 
@@ -217,7 +217,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
     nq = len(intopt.log_qs)
     for cp_ij_id, _ in enumerate(intopt.log_qs):
         if len(intopt.ao_pairs_row[cp_ij_id]) == 0: continue
-        t1 = (logger.process_clock(), logger.perf_counter())
+        t1 = log.init_timer()
         cpi = intopt.cp_idx[cp_ij_id]
         cpj = intopt.cp_jdx[cp_ij_id]
         li = intopt.angular[cpi]

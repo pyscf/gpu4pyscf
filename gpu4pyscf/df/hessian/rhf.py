@@ -42,6 +42,8 @@ from gpu4pyscf.lib.cupy_helper import contract, tag_array, release_gpu_stack, pr
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
 
+BLKSIZE = 128
+
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
     e1, ej, ek = _partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
@@ -53,7 +55,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     '''Partial derivative
     '''
     log = logger.new_logger(hessobj, verbose)
-    time0 = t1 = (logger.process_clock(), logger.perf_counter())
+    time0 = t1 = log.init_timer()
 
     mol = hessobj.mol
     mf = hessobj.base
@@ -94,7 +96,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     # ================================ sorted AO begin ===============================================
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size=64, group_size_aux=32)
+    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
     sph_ao_idx = intopt.sph_ao_idx
     sph_aux_idx = intopt.sph_aux_idx
 
@@ -391,12 +393,14 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
 def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             verbose=None, with_k=True, omega=None):
     log = logger.new_logger(hessobj, verbose)
-    t0 = (logger.process_clock(), logger.perf_counter())
+    t0 = log.init_timer()
     mol = hessobj.mol
     if atmlst is None:
         atmlst = range(mol.natm)
     # FIXME
     with_k = True
+    mo_coeff = cupy.asarray(mo_coeff)
+    mo_occ = cupy.asarray(mo_occ)
 
     mf = hessobj.base
     #auxmol = hessobj.base.with_df.auxmol
@@ -416,7 +420,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     int2c = cupy.asarray(int2c)
     # ======================= sorted AO begin ======================================
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size_aux=64, group_size=64)
+    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size_aux=BLKSIZE, group_size=BLKSIZE)
     sph_ao_idx = intopt.sph_ao_idx
     sph_aux_idx = intopt.sph_aux_idx
     rev_ao_idx = np.argsort(intopt.sph_ao_idx)
@@ -439,7 +443,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         rhok0_Pl_ = np.empty_like(wk_Pl_)
         for p0, p1 in lib.prange(0,nao,64):
             wk_tmp = cupy.asarray(wk_Pl_[:,p0:p1])
-            rhok0_Pl_[:,p0:p1] = cupy.einsum('pq,qio->pio', int2c_inv, wk_tmp).get()
+            rhok0_Pl_[:,p0:p1] = contract('pq,qio->pio', int2c_inv, wk_tmp).get()
     wj = wk_Pl_ = wk_P__ = int2c_inv = int2c = None
 
     # int3c_ip1 contributions
@@ -447,8 +451,8 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     vj1_buf = vj1_buf[cupy.ix_(numpy.arange(3), rev_ao_idx, rev_ao_idx)]
     vk1_buf = vk1_buf[cupy.ix_(numpy.arange(3), rev_ao_idx, rev_ao_idx)]
 
-    vj1_int3c_ip1 = -cupy.einsum('nxiq,ip->nxpq', vj1_ao, mo_coeff)
-    vk1_int3c_ip1 = -cupy.einsum('nxiq,ip->nxpq', vk1_ao, mo_coeff)
+    vj1_int3c_ip1 = -contract('nxiq,ip->nxpq', vj1_ao, mo_coeff)
+    vk1_int3c_ip1 = -contract('nxiq,ip->nxpq', vk1_ao, mo_coeff)
     vj1_ao = vk1_ao = None
     t0 = log.timer_debug1('Fock matrix due to int3c2e_ip1', *t0)
 
@@ -473,15 +477,15 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
 
         for p0, p1 in lib.prange(0,nao,64):
             rhok_tmp = cupy.asarray(rhok0_Pl_[:,p0:p1])
-            vj1_tmp = cupy.einsum('pio,xp->xpio', rhok_tmp, wj0_10)
+            vj1_tmp = contract('pio,xp->xpio', rhok_tmp, wj0_10)
 
-            wk0_10_Pl_ = cupy.einsum('xqp,pio->xqio', int2c_ip1, rhok_tmp)
-            vj1_tmp += cupy.einsum('xpio,p->xpio', wk0_10_Pl_, rhoj0)
-            vj1_int3c_ip2[:,:,p0:p1] += cupy.einsum('xpio,pa->axio', vj1_tmp, aux2atom)
+            wk0_10_Pl_ = contract('xqp,pio->xqio', int2c_ip1, rhok_tmp)
+            vj1_tmp += contract('xpio,p->xpio', wk0_10_Pl_, rhoj0)
+            vj1_int3c_ip2[:,:,p0:p1] += contract('xpio,pa->axio', vj1_tmp, aux2atom)
             if with_k:
-                vk1_tmp = 2.0 * cupy.einsum('xpio,pro->xpir', wk0_10_Pl_, rhok0_P__)
-                vk1_tmp += 2.0 * cupy.einsum('xpro,pir->xpio', wk0_10_P__, rhok_tmp)
-                vk1_int3c_ip2[:,:,p0:p1] += cupy.einsum('xpio,pa->axio', vk1_tmp, aux2atom)
+                vk1_tmp = 2.0 * contract('xpio,pro->xpir', wk0_10_Pl_, rhok0_P__)
+                vk1_tmp += 2.0 * contract('xpro,pir->xpio', wk0_10_P__, rhok_tmp)
+                vk1_int3c_ip2[:,:,p0:p1] += contract('xpio,pa->axio', vk1_tmp, aux2atom)
         wj0_10 = wk0_10_P__ = rhok0_P__ = int2c_ip1 = None
         vj1_tmp = vk1_tmp = wk0_10_Pl_ = rhoj0 = rhok0_Pl_ = None
         aux2atom = None
@@ -496,8 +500,8 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
 
     # ========================== sorted AO end ================================
     def _ao2mo(mat):
-        tmp = cupy.einsum('xij,jo->xio', mat, mocc)
-        return cupy.einsum('xik,ip->xpk', tmp, mo_coeff)
+        tmp = contract('xij,jo->xio', mat, mocc)
+        return contract('xik,ip->xpk', tmp, mo_coeff)
 
     vj1_int3c = vj1_int3c_ip1 + vj1_int3c_ip2
     vj1_int3c_ip1 = vj1_int3c_ip2 = None
@@ -520,7 +524,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             vk1_ao[:,:,p0:p1] -= vk1_buf[:,p0:p1,:].transpose(0,2,1)
 
         h1 = hcore_deriv(ia)
-        h1 = _ao2mo(h1)
+        h1 = _ao2mo(cupy.asarray(h1))
         vj1 = vj1_int3c[ia] + _ao2mo(vj1_ao)
         if with_k:
             vk1 = vk1_int3c[ia] + _ao2mo(vk1_ao)

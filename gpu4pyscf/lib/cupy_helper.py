@@ -142,17 +142,25 @@ def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
 
 def add_sparse(a, b, indices):
     '''
-    a[np.ix_(indices, indices)] += b
+    a[:,...,:np.ix_(indices, indices)] += b
     '''
-    n = a.shape[0]
-    m = b.shape[0]
-
+    assert a.flags.c_contiguous
+    assert b.flags.c_contiguous
+    n = a.shape[-1]
+    m = b.shape[-1]
+    if a.ndim > 2:
+        count = np.prod(a.shape[:-2])
+    elif a.ndim == 2:
+        count = 1
+    else:
+        raise RuntimeError('add_sparse only supports 2d or 3d tensor')
     err = libcupy_helper.add_sparse(
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         ctypes.cast(b.data.ptr, ctypes.c_void_p),
         ctypes.cast(indices.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n),
-        ctypes.c_int(m)
+        ctypes.c_int(m),
+        ctypes.c_int(count)
     )
     if err != 0:
         raise RecursionError('failed in sparse_add2d')

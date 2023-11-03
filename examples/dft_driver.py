@@ -35,7 +35,7 @@ mol = pyscf.M(
     basis=bas,
     max_memory=32000)
 # set verbose >= 6 for debugging timer
-mol.verbose = 6
+mol.verbose = 1
 
 mf_df = rks.RKS(mol, xc=args.xc).density_fit(auxbasis=args.auxbasis)
 if args.solvent:

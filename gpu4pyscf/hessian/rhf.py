@@ -84,11 +84,11 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         s1ao[:,p0:p1] += s1a[:,p0:p1]
         s1ao[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
 
-        tmp = cupy.einsum('xpq,pi->xiq', s1ao, mocc)
-        s1oo = cupy.einsum('xiq,qj->xij', tmp, mocc)
+        tmp = contract('xpq,pi->xiq', s1ao, mocc)
+        s1oo = contract('xiq,qj->xij', tmp, mocc)
 
         #s1oo = cupy.einsum('xpq,pi,qj->xij', s1ao, mocc, mocc)
-        s1mo = cupy.einsum('xij,ip->xpj', s1ao, mo_coeff)
+        s1mo = contract('xij,ip->xpj', s1ao, mo_coeff)
 
         for j0 in range(i0+1):
             ja = atmlst[j0]
@@ -96,10 +96,10 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 # *2 for double occupancy, *2 for +c.c.
             #dm1 = cupy.einsum('ypi,qi->ypq', mo1[ja], mocc)
             #de2_gpu[i0,j0] += cupy.einsum('xpq,ypq->xy', h1ao[ia], dm1) * 4
-            de2[i0,j0] += cupy.einsum('xpi,ypi->xy', h1ao[ia], mo1[ja]) * 4
+            de2[i0,j0] += contract('xpi,ypi->xy', h1ao[ia], mo1[ja]) * 4
             dm1 = cupy.einsum('ypi,qi,i->ypq', mo1[ja], mocc, mo_energy[mo_occ>0])
-            de2[i0,j0] -= cupy.einsum('xpq,ypq->xy', s1mo, dm1) * 4
-            de2[i0,j0] -= cupy.einsum('xpq,ypq->xy', s1oo, mo_e1[ja]) * 2
+            de2[i0,j0] -= contract('xpq,ypq->xy', s1mo, dm1) * 4
+            de2[i0,j0] -= contract('xpq,ypq->xy', s1oo, mo_e1[ja]) * 2
         for j0 in range(i0):
             de2[j0,i0] = de2[i0,j0].T
 
@@ -325,11 +325,11 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     s1a = cupy.asarray(s1a)
 
     def _ao2mo(mat):
-        tmp = cupy.einsum('xij,jo->xio', mat, mocc)
-        return cupy.einsum('xik,ip->xpk', tmp, mo_coeff)
+        tmp = contract('xij,jo->xio', mat, mocc)
+        return contract('xik,ip->xpk', tmp, mo_coeff)
     cupy.get_default_memory_pool().free_all_blocks()
     # TODO: calculate blksize dynamically
-    blksize = 10
+    blksize = 8
     mo1s = [None] * mol.natm
     e1s = [None] * mol.natm
     aoslices = mol.aoslice_by_atom()
@@ -371,13 +371,13 @@ def gen_vind(mf, mo_coeff, mo_occ):
     def fx(mo1):
         mo1 = cupy.asarray(mo1)
         mo1 = mo1.reshape(-1,nmo,nocc)
-        mo1_mo = cupy.einsum('npo,ip->nio', mo1, mo_coeff)
-        dm1 = cupy.einsum('nio,jo->nij', 2.0*mo1_mo, mocc)
+        mo1_mo = contract('npo,ip->nio', mo1, mo_coeff)
+        dm1 = contract('nio,jo->nij', 2.0*mo1_mo, mocc)
         dm1 = dm1 + dm1.transpose(0,2,1)
         dm1 = tag_array(dm1, mo1=mo1_mo, occ_coeff=mocc, mo_occ=mo_occ)
         v1 = vresp(dm1)
-        tmp = cupy.einsum('nij,jo->nio', v1, mocc)
-        v1vo = cupy.einsum('nio,ip->npo', tmp, mo_coeff)
+        tmp = contract('nij,jo->nio', v1, mocc)
+        v1vo = contract('nio,ip->npo', tmp, mo_coeff)
         return v1vo
     return fx
 
