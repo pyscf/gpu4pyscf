@@ -62,21 +62,16 @@ void GDFTcontract_rho4_kernel(double *rho, double *bra, double *ket, int ngrids,
 {
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     const bool active = grid_id < ngrids;
-
-    size_t Ngrids = ngrids;
     size_t ket_stride = nao * ngrids;
     size_t rho_stride = count * ngrids;
 
     __shared__ double buf[BLKSIZEX*(BLKSIZEY+1)];
-    int ix = threadIdx.x;
-    int iy = threadIdx.y;
-    int ixy = ix + BLKSIZEX * iy;
 
     for (int ia = 0; ia < count; ia++){
         double v[4] = {0.0, 0.0, 0.0, 0.0};
         if (active){
             for (int ao_id = threadIdx.y; ao_id < nao; ao_id += BLKSIZEY) {
-                int ket_idx = grid_id + ao_id * Ngrids;
+                int ket_idx = grid_id + ao_id * ngrids;
                 double bra_tmp = bra[ket_idx + ia * ket_stride];
                 v[0] += bra_tmp * ket[0*ket_stride + ket_idx];
                 v[1] += bra_tmp * ket[1*ket_stride + ket_idx];
@@ -85,6 +80,9 @@ void GDFTcontract_rho4_kernel(double *rho, double *bra, double *ket, int ngrids,
             }
         }
 
+        int ix = threadIdx.x;
+        int iy = threadIdx.y;
+        int ixy = ix + BLKSIZEX * iy;
         for (int i = 0; i < 4; i++){
             buf[ixy] = v[i];   __syncthreads();
             if (blockDim.y >= 32 && iy < 16) buf[ixy] += buf[ixy + BLKSIZEX * 16]; __syncthreads();
@@ -279,37 +277,6 @@ void GDFT_make_dR_dao_w_kernel(double *out, double *ket, double *wv,
 }
 
 
-__global__
-void GDFTscale_ao4_kernel(double *out, double *ket, double *wv,
-                            int ngrids, int nao, int nwv)
-{
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    int ao_id = blockIdx.y * blockDim.y + threadIdx.y;
-    if (grid_id >= ngrids || ao_id >= nao) {
-        return;
-    }
-
-    size_t Ngrids = ngrids;
-    size_t Nag = nao * Ngrids;
-    size_t Nwg = nwv * Ngrids;
-    size_t ixy = grid_id + ao_id * Ngrids;
-    double ket0 = ket[ixy + Nag * 0];
-    double ket1 = ket[ixy + Nag * 1];
-    double ket2 = ket[ixy + Nag * 2];
-    double ket3 = ket[ixy + Nag * 3];
-    int n;
-    for (n = 0; n < nwv; n++){
-        double val = 0;
-        int iwv = grid_id + ngrids * n;
-        val += ket0 * wv[iwv + Nwg * 0];
-        val += ket1 * wv[iwv + Nwg * 1];
-        val += ket2 * wv[iwv + Nwg * 2];
-        val += ket3 * wv[iwv + Nwg * 3];
-        out[ixy + Nag * n] = val;
-    }
-}
-
-
 extern "C"{
 __host__
 int GDFTcontract_rho(cudaStream_t stream, double *rho, double *bra, double *ket, int ngrids, int nao)
@@ -392,17 +359,4 @@ int GDFTscale_ao(cudaStream_t stream, double *out, double *ket, double *wv,
     return 0;
 }
 
-int GDFTscale_ao4(cudaStream_t stream, double *out, double *ket, double *wv,
-                 int ngrids, int nao, int nwv)
-{
-    dim3 threads(BLKSIZEX, BLKSIZEY);
-    dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX, (nao+BLKSIZEY-1)/BLKSIZEY);
-    GDFTscale_ao4_kernel<<<blocks, threads, 0, stream>>>(out, ket, wv, ngrids, nao, nwv);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error of GDFTscale_ao4: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
-}
 }

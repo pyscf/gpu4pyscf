@@ -17,7 +17,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#define BLKSIZEX        16
+#define BLKSIZEX        32
 #define BLKSIZEY        32
 
 __global__

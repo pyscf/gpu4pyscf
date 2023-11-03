@@ -1398,26 +1398,6 @@ def _scale_ao(ao, wv, out=None):
         raise RuntimeError('CUDA Error')
     return out
 
-def _scale_ao4(ao, wv, out=None):
-    ''' nip,nap->aip
-    '''
-    nvar, nao, ngrids = ao.shape
-    _, nwv, _ = wv.shape
-    assert nvar == 4
-    wv = cupy.asarray(wv, order='C')
-    if out is None:
-        out = cupy.empty((nwv, nao, ngrids), order='C')
-    stream = cupy.cuda.get_current_stream()
-    err = libgdft.GDFTscale_ao4(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.cast(ao.data.ptr, ctypes.c_void_p),
-        ctypes.cast(wv.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ngrids), ctypes.c_int(nao), ctypes.c_int(nwv))
-    if err != 0:
-        raise RuntimeError('CUDA Error')
-    return out
-
 def _tau_dot(bra, ket, wv):
     '''1/2 <nabla i| v | nabla j>'''
     wv = cupy.asarray(.5 * wv)
