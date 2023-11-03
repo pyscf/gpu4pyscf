@@ -383,6 +383,11 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     coeff = cupy.asarray(opt.coeff)
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
 
+    ## transform object in sorted AO
+    #mo_coeff = coeff @ mo_coeff
+    #dm0 = coeff @ dm0
+    #dm0 = dm0 @ coeff.T
+
     vmat = cupy.zeros((mol.natm,3,3,nao,nao))
     ipip = cupy.zeros((3,3,nao,nao))
     if xctype == 'LDA':
