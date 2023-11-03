@@ -29,7 +29,7 @@ def get_veff(ks_grad, mol=None, dm=None):
     '''
     if mol is None: mol = ks_grad.mol
     if dm is None: dm = ks_grad.base.make_rdm1()
-    t0 = (logger.process_clock(), logger.perf_counter())
+    t0 = logger.init_timer(ks_grad)
 
     mf = ks_grad.base
     ni = mf._numint

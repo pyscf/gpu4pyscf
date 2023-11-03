@@ -19,6 +19,7 @@ from cupy._environment import _preload_libs
 from cupyx import cutensor
 from cupy_backends.cuda.libs import cutensor as cutensor_backend
 from cupy_backends.cuda.libs.cutensor import Handle
+from gpu4pyscf.lib import logger
 
 libcutensor = None
 for lib_path in _preload_libs['cutensor']:
@@ -31,6 +32,8 @@ for lib_path in _preload_libs['cutensor']:
 _handle = Handle()
 _modes = {}
 _contraction_descriptors = {}
+_contraction_plans = {}
+_contraction_finds = {}
 
 cutensor_backend.init(_handle)
 
@@ -82,9 +85,24 @@ def create_contraction_descriptor(handle,
     return desc
 
 def create_contraction_find(handle, algo=cutensor_backend.ALGO_DEFAULT):
-    find = cutensor_backend.ContractionFind()
-    cutensor_backend.initContractionFind(handle, find, algo)
+    key = (handle.ptr, algo)
+    if key in _contraction_finds:
+        find = _contraction_finds[key]
+    else:
+        find = cutensor_backend.ContractionFind()
+        cutensor_backend.initContractionFind(handle, find, algo)
+        _contraction_finds[key] = find
     return find
+
+def create_contraction_plan(handle, desc, find, ws_size):
+    key = (handle.ptr, desc.ptr, find.ptr, ws_size)
+    if key in _contraction_plans:
+        plan = _contraction_plans[key]
+    else:
+        plan = cutensor_backend.ContractionPlan()
+        cutensor_backend.initContractionPlan(handle, plan, desc, find, ws_size)
+        _contraction_plans[key] = plan
+    return plan
 
 def contraction(pattern, a, b, alpha, beta, out=None):
     pattern = pattern.replace(" ", "")
@@ -121,14 +139,15 @@ def contraction(pattern, a, b, alpha, beta, out=None):
         ws_size = cutensor_backend.contractionGetWorkspaceSize(_handle, desc, find, cutensor_backend.WORKSPACE_MIN)
         ws = cupy.empty(ws_size, dtype=np.int8)
 
-    plan = cutensor_backend.ContractionPlan()
-    cutensor_backend.initContractionPlan(_handle, plan, desc, find, ws_size)
+    plan = create_contraction_plan(_handle, desc, find, ws_size)
     alpha = np.asarray(alpha)
     beta = np.asarray(beta)
+
     cutensor_backend.contraction(_handle, plan,
                              alpha.ctypes.data, a.data.ptr, b.data.ptr,
                              beta.ctypes.data, c.data.ptr, out.data.ptr,
                              ws.data.ptr, ws_size)
+
     return out
 
 import os

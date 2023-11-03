@@ -68,7 +68,7 @@ def initialize_grids(ks, mol=None, dm=None):
     # Initialize self.grids the first time call get_veff
     if mol is None: mol = ks.mol
     if ks.grids.coords is None:
-        t0 = (logger.process_clock(), logger.perf_counter())
+        t0 = logger.init_timer(ks)
         ks.grids.build()
         #ks.grids.build(with_non0tab=True)
         ks.grids.weights = cupy.asarray(ks.grids.weights)
@@ -82,7 +82,7 @@ def initialize_grids(ks, mol=None, dm=None):
         is_nlc = ks.nlc or ks._numint.libxc.is_nlc(ks.xc)
         if is_nlc and ks.nlcgrids.coords is None:
             if ks.nlcgrids.coords is None:
-                t0 = (logger.process_clock(), logger.perf_counter())
+                t0 = logger.init_timer(ks)
                 #ks.nlcgrids.build(with_non0tab=True)
                 ks.nlcgrids.build()
                 ks.nlcgrids.weights = cupy.asarray(ks.nlcgrids.weights)
@@ -124,7 +124,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
 
     if mol is None: mol = ks.mol
     if dm is None: dm = ks.make_rdm1()
-    t0 = (logger.process_clock(), logger.perf_counter())
+    t0 = logger.init_timer(ks)
     if ks.grids.coords is None:
         ks.grids.ao_values = None
     initialize_grids(ks, mol, dm)

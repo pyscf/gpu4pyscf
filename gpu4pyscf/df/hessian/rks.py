@@ -37,7 +37,7 @@ from gpu4pyscf.lib import logger
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
     log = logger.new_logger(hessobj, verbose)
-    time0 = t1 = (logger.process_clock(), logger.perf_counter())
+    time0 = t1 = log.init_timer()
 
     mol = hessobj.mol
     mf = hessobj.base

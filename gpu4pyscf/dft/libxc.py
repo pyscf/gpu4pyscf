@@ -21,7 +21,7 @@ import ctypes
 import cupy
 from pyscf import dft
 
-libxc = np.ctypeslib.load_library(
+_libxc = np.ctypeslib.load_library(
     'libxc', os.path.abspath(os.path.join(__file__, '..', '..', 'lib', 'deps', 'lib')))
 
 def _check_arrays(current_arrays, fields, factor, required):
@@ -45,21 +45,21 @@ class _xcfun(ctypes.Structure):
     pass
 
 _xc_func_p = ctypes.POINTER(_xcfun)
-libxc.xc_func_alloc.restype = _xc_func_p
-libxc.xc_func_init.argtypes = (_xc_func_p, ctypes.c_int, ctypes.c_int)
-libxc.xc_func_end.argtypes = (_xc_func_p, )
-libxc.xc_func_free.argtypes = (_xc_func_p, )
+_libxc.xc_func_alloc.restype = _xc_func_p
+_libxc.xc_func_init.argtypes = (_xc_func_p, ctypes.c_int, ctypes.c_int)
+_libxc.xc_func_end.argtypes = (_xc_func_p, )
+_libxc.xc_func_free.argtypes = (_xc_func_p, )
 
 class XCfun:
     def __init__(self, xc, spin):
         assert spin == 'unpolarized'
         self._spin = 1
-        self.xc_func = libxc.xc_func_alloc()
+        self.xc_func = _libxc.xc_func_alloc()
         if isinstance(xc, str):
-            self.func_id = libxc.xc_functional_get_number(ctypes.c_char_p(xc.encode()))
+            self.func_id = _libxc.xc_functional_get_number(ctypes.c_char_p(xc.encode()))
         else:
             self.func_id = xc
-        ret = libxc.xc_func_init(self.xc_func, self.func_id, self._spin)
+        ret = _libxc.xc_func_init(self.xc_func, self.func_id, self._spin)
         if ret != 0:
             raise RuntimeError('failed to initialize xc fun')
         self._family = dft.libxc.xc_type(xc)
@@ -67,9 +67,10 @@ class XCfun:
     def __del__(self):
         if self.xc_func is None:
             return
-        libxc.xc_func_end(self.xc_func)
-        libxc.xc_func_free(self.xc_func)
-        
+        # TODO: deallocate xc func
+        #_libxc.xc_func_end(self.xc_func)
+        #_libxc.xc_func_free(self.xc_func)
+
     def needs_laplacian(self):
         return dft.libxc.needs_laplacian(self.func_id)
 
@@ -85,7 +86,7 @@ class XCfun:
         npoints = int(inp["rho"].size / self._spin)
         if (inp["rho"].size % self._spin):
             raise ValueError("Rho input has an invalid shape, must be divisible by %d" % self._spin)
-        
+
         # Find the right compute function
         args = [self.xc_func, ctypes.c_size_t(npoints)]
         if self._family == 'LDA':
@@ -114,7 +115,7 @@ class XCfun:
                 if(isinstance(arg, cupy.ndarray)):
                     arg = ctypes.cast(arg.data.ptr, ctypes.c_void_p)
                 cuda_args.append(arg)
-            libxc.xc_lda(*cuda_args)
+            _libxc.xc_lda(*cuda_args)
         elif self._family == 'GGA':
             input_labels   = ["rho", "sigma"]
             input_num_args = 2
@@ -141,7 +142,7 @@ class XCfun:
                 if(isinstance(arg, cupy.ndarray)):
                     arg = ctypes.cast(arg.data.ptr, ctypes.c_void_p)
                 cuda_args.append(arg)
-            libxc.xc_gga(*cuda_args)
+            _libxc.xc_gga(*cuda_args)
 
         elif self._family == 'MGGA':
             # Build input args
@@ -178,7 +179,7 @@ class XCfun:
             output = _check_arrays(output, output_labels[5:15], npoints, do_fxc)
             output = _check_arrays(output, output_labels[15:35], npoints, do_kxc)
             output = _check_arrays(output, output_labels[35:70], npoints, do_lxc)
-            
+
             args.extend([   inp[x] for x in  input_labels])
             if not self.needs_laplacian():
                 args.insert(-1, cupy.empty((1)))  # Add none ptr to laplacian
@@ -189,10 +190,10 @@ class XCfun:
                 if(isinstance(arg, cupy.ndarray)):
                     arg = ctypes.cast(arg.data.ptr, ctypes.c_void_p)
                 cuda_args.append(arg)
-            libxc.xc_mgga(*cuda_args)
+            _libxc.xc_mgga(*cuda_args)
         else:
             raise KeyError("Functional kind not recognized!")
-        
+
         return {k: v for k, v in zip(output_labels, args[2+input_num_args:]) if v is not None}
 
 
