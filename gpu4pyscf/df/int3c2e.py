@@ -184,7 +184,7 @@ class VHFOpt(_vhf.VHFOpt):
         a tot_mol is created with concatenating [mol, fake_mol, aux_mol]
         we will pair (ao,ao) and (aux,1) separately.
         '''
-        cput0 = (logger.process_clock(), logger.perf_counter())
+        cput0 = logger.init_timer(self.mol)
         sorted_mol, sorted_idx, uniq_l_ctr, l_ctr_counts = sort_mol(self.mol)
         if group_size is not None :
             uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size)
@@ -314,6 +314,7 @@ class VHFOpt(_vhf.VHFOpt):
             tot_mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(tot_mol.natm),
             tot_mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(tot_mol.nbas),
             tot_mol._env.ctypes.data_as(ctypes.c_void_p))
+
         cput1 = logger.timer_debug1(tot_mol, 'Initialize GPU cache', *cput1)
         self.bas_pairs_locs = bas_pairs_locs
         ncptype = len(self.log_qs)
@@ -745,29 +746,24 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
         vj1_buf[:,i0:i1,j0:j1] += contract('xpji,p->xij', int3c_blk, rhoj[k0:k1])
         # initialize intermediate variables
         if count % ncp_ij == 0:
-            rhoj0 = cupy.zeros([3,k1-k0,nao_sph])
             rhok_tmp = cupy.asarray(rhok[k0:k1])
-            vj1_ao = cupy.zeros([3,nao_sph,nao_sph,nocc])
             if with_k:
                 rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, orbo) * 2
                 rhok0 = contract('pli,lo->poi', rhok0_slice, orbo)
-                int3c_ip1_occ = cupy.zeros([3,k1-k0,nao_sph,nocc])
-                vk1_ao = cupy.zeros([3,nao_sph,nao_sph,nocc])
 
-        # contraction
-        rhoj0[:,:,i0:i1] += contract('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
+        rhoj0 = contract('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
+        vj1_ao = contract('pJo,xpi->xiJo', rhok_tmp, rhoj0)
+        vj1 += 2.0*contract('xiJo,ia->axJo', vj1_ao, ao2atom[i0:i1])
+
         if with_k:
-            int3c_ip1_occ[:,:,i0:i1] += contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])
-            vk1_ao[:,i0:i1,j0:j1] += contract('xpji,poi->xijo', int3c_blk, rhok0[:,:,i0:i1])
             vk1_buf[:,i0:i1] += contract('xpji,plj->xil', int3c_blk, rhok0_slice[:,:,j0:j1])
 
-        # reduction
-        if (count+1) % ncp_ij == 0:
-            vj1_ao += contract('pjo,xpi->xijo', rhok_tmp, rhoj0)
-            vj1 += 2.0*contract('xiko,ia->axko', vj1_ao, ao2atom)
-            if with_k:
-                vk1_ao += contract('xpio,pki->xiko', int3c_ip1_occ, rhok0_slice)
-                vk1 += contract('xiko,ia->axko', vk1_ao, ao2atom)
+            vk1_ao = contract('xpji,poi->xijo', int3c_blk, rhok0[:,:,i0:i1])
+            vk1[:,:,j0:j1] += contract('xijo,ia->axjo', vk1_ao, ao2atom[i0:i1])
+
+            int3c_ip1_occ = contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])
+            vk1_ao = contract('xpio,pJi->xiJo', int3c_ip1_occ, rhok0_slice[:,:,i0:i1])
+            vk1 += contract('xiJo,ia->axJo', vk1_ao, ao2atom[i0:i1])
         count += 1
 
     return vj1_buf, vk1_buf, vj1, vk1

@@ -22,8 +22,8 @@
 #define THREADS        32
 #define BLOCK_DIM   32
 
-__global__ 
-void _add_sparse(double *a, double *b, int *indices, int n, int m)
+__global__
+void _add_sparse(double *a, double *b, int *indices, int n, int m, int count)
 {
 	int row = blockIdx.x * BLOCK_DIM + threadIdx.x;
     int col = blockIdx.y * BLOCK_DIM + threadIdx.y;
@@ -32,17 +32,18 @@ void _add_sparse(double *a, double *b, int *indices, int n, int m)
     }
     int idx_a = indices[row] * n + indices[col];
     int idx_b = row * m + col;
-
-    a[idx_a] += b[idx_b];
+    for (int i = 0; i < count; i++){
+        a[idx_a + i*n*n] += b[idx_b + i*m*m];
+    }
 }
 
 extern "C" {
 __host__
-int add_sparse(double *a, double *b, int *indices, int n, int m){
+int add_sparse(double *a, double *b, int *indices, int n, int m, int count){
     int ntile = (m + THREADS - 1) / THREADS;
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ntile, ntile);
-    _add_sparse<<<blocks, threads>>>(a, b, indices, n, m);
+    _add_sparse<<<blocks, threads>>>(a, b, indices, n, m, count);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

@@ -17,6 +17,7 @@
 # Modified by Xiaojie Wu <wxj6000@gmail.com>
 
 '''Non-relativistic RKS analytical nuclear gradients'''
+import ctypes
 import numpy
 import cupy
 import pyscf
@@ -27,11 +28,14 @@ from gpu4pyscf.lib.utils import patch_cpu_kernel
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.dft import numint, xc_deriv, rks
 from gpu4pyscf.dft.numint import _GDFTOpt, AO_THRESHOLD
-from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, add_sparse, tag_array
+from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, add_sparse, tag_array, load_library
 from pyscf import __config__
 
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 128*128)
 ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
+
+libgdft = load_library('libgdft')
+libgdft.GDFT_make_dR_dao_w.restype = ctypes.c_int
 
 def _get_veff(ks_grad, mol=None, dm=None):
     '''
@@ -141,13 +145,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 wv = weight * vxc[0]
                 aow = numint._scale_ao(ao_mask[0], wv)
                 vtmp = _d1_dot_(ao_mask[1:4], aow.T)
-                #idx = cupy.ix_(mask, mask)
-                #vmat[idm][0][idx] += vtmp[0]
-                #vmat[idm][1][idx] += vtmp[1]
-                #vmat[idm][2][idx] += vtmp[2]
-                add_sparse(vmat[idm][0], vtmp[0], idx)
-                add_sparse(vmat[idm][1], vtmp[1], idx)
-                add_sparse(vmat[idm][2], vtmp[2], idx)
+                add_sparse(vmat[idm], vtmp, idx)
     elif xctype == 'GGA':
         ao_deriv = 2
         for ao_mask, idx, weight, _ in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
@@ -158,13 +156,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 wv = weight * vxc
                 wv[0] *= .5
                 vtmp = _gga_grad_sum_(ao_mask, wv)
-                #idx = cupy.ix_(mask, mask)
-                #vmat[idm][0][idx] += vtmp[0]
-                #vmat[idm][1][idx] += vtmp[1]
-                #vmat[idm][2][idx] += vtmp[2]
-                add_sparse(vmat[idm][0], vtmp[0], idx)
-                add_sparse(vmat[idm][1], vtmp[1], idx)
-                add_sparse(vmat[idm][2], vtmp[2], idx)
+                add_sparse(vmat[idm], vtmp, idx)
     elif xctype == 'NLC':
         raise NotImplementedError('NLC')
 
@@ -180,14 +172,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 wv[4] *= .5  # for the factor 1/2 in tau
                 vtmp = _gga_grad_sum_(ao_mask, wv)
                 vtmp += _tau_grad_dot_(ao_mask, wv[4])
-                #idx = cupy.ix_(mask, mask)
-                #vmat[idm][0][idx] += vtmp[0]
-                #vmat[idm][1][idx] += vtmp[1]
-                #vmat[idm][2][idx] += vtmp[2]
-                add_sparse(vmat[idm][0], vtmp[0], idx)
-                add_sparse(vmat[idm][1], vtmp[1], idx)
-                add_sparse(vmat[idm][2], vtmp[2], idx)
-
+                add_sparse(vmat[idm], vtmp, idx)
     vmat = [cupy.einsum('pi,npq,qj->nij', coeff, v, coeff) for v in vmat]
     exc = None
     if nset == 1:
@@ -243,9 +228,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         wv = vv_vxc[:,p0:p1] * weight
         wv[0] *= .5  # *.5 because vmat + vmat.T at the end
         vmat_tmp = _gga_grad_sum_(ao_mask, wv)
-        add_sparse(vmat[0], vmat_tmp[0], mask)
-        add_sparse(vmat[1], vmat_tmp[1], mask)
-        add_sparse(vmat[2], vmat_tmp[2], mask)
+        add_sparse(vmat, vmat_tmp, mask)
 
     vmat = contract('npq,qj->npj', vmat, coeff)
     vmat = contract('pi,npj->nij', coeff, vmat)
@@ -255,6 +238,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
 def _make_dR_dao_w(ao, wv):
     #:aow = numpy.einsum('npi,p->npi', ao[1:4], wv[0])
+    '''
     aow = [
         numint._scale_ao(ao[1], wv[0]),  # dX nabla_x
         numint._scale_ao(ao[2], wv[0]),  # dX nabla_y
@@ -272,13 +256,34 @@ def _make_dR_dao_w(ao, wv):
     aow[2] += numint._scale_ao(ao[6], wv[1])  # dZ nabla_x
     aow[2] += numint._scale_ao(ao[8], wv[2])  # dZ nabla_y
     aow[2] += numint._scale_ao(ao[9], wv[3])  # dZ nabla_z
+    '''
+    assert ao.flags.c_contiguous
+    assert wv.flags.c_contiguous
+
+    _, nao, ngrids = ao.shape
+    aow = cupy.empty([3,nao,ngrids])
+    stream = cupy.cuda.get_current_stream()
+    err = libgdft.GDFT_make_dR_dao_w(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(aow.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ao.data.ptr, ctypes.c_void_p),
+        ctypes.cast(wv.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids), ctypes.c_int(nao))
+    if err != 0:
+        raise RuntimeError('CUDA Error')
     return aow
 
-def _d1_dot_(ao1, ao2):
-    vmat0 = cupy.dot(ao1[0], ao2)
-    vmat1 = cupy.dot(ao1[1], ao2)
-    vmat2 = cupy.dot(ao1[2], ao2)
-    return cupy.stack([vmat0,vmat1,vmat2])
+def _d1_dot_(ao1, ao2, out=None):
+    if out is None:
+        vmat0 = cupy.dot(ao1[0], ao2)
+        vmat1 = cupy.dot(ao1[1], ao2)
+        vmat2 = cupy.dot(ao1[2], ao2)
+        return cupy.stack([vmat0,vmat1,vmat2])
+    else:
+        cupy.dot(ao1[0], ao2, out=out[0])
+        cupy.dot(ao1[1], ao2, out=out[1])
+        cupy.dot(ao1[2], ao2, out=out[2])
+        return out
 
 def _gga_grad_sum_(ao, wv):
     #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
