@@ -4,40 +4,40 @@ Installation
 --------
 
 For **CUDA 11.x**
-```
+```sh
 pip3 install gpu4pyscf-cuda11x
 ```
 and install cutensor
-```
+```sh
 python -m cupyx.tools.install_library --cuda 11.x --library cutensor
 ```
 
 For **CUDA 12.x**
-```
+```sh
 pip3 install gpu4pyscf-cuda12x
 ```
 and install cutensor
-```
+```sh
 python -m cupyx.tools.install_library --cuda 12.x --library cutensor
 ```
 
 Compilation
 --------
 The package provides ```dockerfiles/compile/Dockerfile``` for creating the CUDA environment. One can compile the package with
-```
+```sh
 sh build.sh
 ```
 This script will automatically download LibXC, and compile it with CUDA. The script will also build the wheel for installation. The compilation can take more than 5 mins. Then, one can either install the wheel with
-```
+```sh
 cd output
 pip3 install gpu4pyscf-*
 ```
 or simply add it to ```PYTHONPATH```
-```
+```sh
 export PYTHONPATH="${PYTHONPATH}:/your-local-path/gpu4pyscf"
 ```
 Then install cutensor for acceleration
-```
+```sh
 python -m cupyx.tools.install_library --cuda 11.x --library cutensor
 ```
 
@@ -64,7 +64,7 @@ Limitations
 
 Examples
 --------
-```
+```python
 import pyscf
 from gpu4pyscf.dft import rks
 
