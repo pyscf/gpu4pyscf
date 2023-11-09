@@ -1,6 +1,7 @@
 **/__pycache__
 *.so
 *.npz
+*.out
 *current_revision
 **/build
 **/launch_logs
