@@ -25,11 +25,11 @@ import scipy.linalg
 from functools import reduce
 from pyscf import gto
 from pyscf import lib as pyscf_lib
-from pyscf.lib import logger
 from pyscf.scf import hf, jk, _vhf
 from gpu4pyscf import lib
 from gpu4pyscf.lib.cupy_helper import eigh, load_library, tag_array
 from gpu4pyscf.scf import diis
+from gpu4pyscf.lib import logger
 
 LMAX_ON_GPU = 4
 FREE_CUPY_CACHE = True
@@ -40,8 +40,8 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
            verbose=None):
     '''Compute J, K matrices with CPU-GPU hybrid algorithm
     '''
-    cput0 = (logger.process_clock(), logger.perf_counter())
     log = logger.new_logger(mol, verbose)
+    cput0 = log.init_timer()
     if hermi != 1:
         raise NotImplementedError('JK-builder only supports hermitian density matrix')
     if omega is None:
@@ -253,8 +253,8 @@ def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
     if omega is not None:
         assert omega >= 0
 
-    cput0 = (logger.process_clock(), logger.perf_counter())
     log = logger.new_logger(mf)
+    cput0 = log.init_timer()
     log.debug3('apply get_jk on gpu')
     if omega is None:
         if hasattr(mf, '_opt_gpu'):
@@ -301,7 +301,7 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     return mo_occ
 
 def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1, vhfopt=None):
-    if dm_last is None:
+    if dm_last is None or not mf.direct_scf:
         vj, vk = mf.get_jk(mol, cupy.asarray(dm), hermi)
         return vj - vk * .5
     else:
@@ -351,13 +351,27 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         f = level_shift(s1e, dm*.5, f, level_shift_factor)
     return f
 
+def energy_elec(self, dm=None, h1e=None, vhf=None):
+    '''
+    electronic energy
+    '''
+    if dm is None: dm = self.make_rdm1()
+    if h1e is None: h1e = self.get_hcore()
+    if vhf is None: vhf = self.get_veff(self.mol, dm)
+    e1 = cupy.einsum('ij,ji->', h1e, dm).real
+    e_coul = cupy.einsum('ij,ji->', vhf, dm).real * .5
+    self.scf_summary['e1'] = e1
+    self.scf_summary['e2'] = e_coul
+    logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
+    return e1+e_coul, e_coul
+
 def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
            dump_chk=True, dm0=None, callback=None, conv_check=True, **kwargs):
     conv_tol = mf.conv_tol
     mol = mf.mol
-    t0 = (logger.process_clock(), logger.perf_counter())
     verbose = mf.verbose
     log = logger.new_logger(mol, verbose)
+    t0 = log.init_timer()
     if(conv_tol_grad is None):
         conv_tol_grad = conv_tol**.5
         logger.info(mf, 'Set gradient conv threshold to %g', conv_tol_grad)
@@ -371,7 +385,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         mo_occ = cupy.asarray(dm0.mo_occ)
         occ_coeff = cupy.asarray(mo_coeff[:,mo_occ>0])
         dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
-    
+
     # use optimized workflow if possible
     if hasattr(mf, 'init_workflow'):
         mf.init_workflow(dm0=dm)
@@ -401,7 +415,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     t_beg = time.time()
     for cycle in range(mf.max_cycle):
-        t0 = (logger.process_clock(), logger.perf_counter())
+        t0 = log.init_timer()
         dm_last = dm
         last_hf_e = e_tot
 
@@ -552,6 +566,7 @@ class RHF(hf.RHF):
     #_eigh = staticmethod(_eigh)
     _eigh = _eigh
     make_rdm1 = make_rdm1
+    energy_elec = energy_elec
     get_fock = get_fock
     get_occ = get_occ
     get_veff = get_veff
@@ -560,7 +575,7 @@ class RHF(hf.RHF):
     quad_moment = _quad_moment
 
     def scf(self, dm0=None, **kwargs):
-        cput0 = (logger.process_clock(), logger.perf_counter())
+        cput0 = logger.init_timer(self)
 
         self.dump_flags()
         self.build(self.mol)
@@ -595,7 +610,7 @@ class RHF(hf.RHF):
     def nuc_grad_method(self):
         from gpu4pyscf.grad import rhf
         return rhf.Gradients(self)
-    
+
     def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
         import gpu4pyscf.df.df_jk
         return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
@@ -615,8 +630,8 @@ class _VHFOpt(_vhf.VHFOpt):
         self._dmcondname = dmcondname
 
     def build(self, cutoff=1e-13, group_size=None, diag_block_with_triu=False):
-        cput0 = (logger.process_clock(), logger.perf_counter())
         mol = self.mol
+        cput0 = logger.init_timer(mol)
         # Sort basis according to angular momentum and contraction patterns so
         # as to group the basis functions to blocks in GPU kernel.
         l_ctrs = mol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]

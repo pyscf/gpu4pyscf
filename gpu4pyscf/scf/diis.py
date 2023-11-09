@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 # Author: Qiming Sun <osirpt.sun@gmail.com>
-# 
+#
 # modified by Xiaojie Wu <wxj6000@gmail.com>
 
 """
@@ -26,9 +26,10 @@ import numpy
 import cupy
 import scipy.linalg
 import scipy.optimize
-import gpu4pyscf.lib as lib
-from pyscf.lib import logger
 import pyscf.scf.diis as cpu_diis
+import gpu4pyscf.lib as lib
+from gpu4pyscf.lib import logger
+
 DEBUG = False
 
 # J. Mol. Struct. 114, 31-34 (1984); DOI:10.1016/S0022-2860(84)87198-7

@@ -68,7 +68,7 @@ def initialize_grids(ks, mol=None, dm=None):
     # Initialize self.grids the first time call get_veff
     if mol is None: mol = ks.mol
     if ks.grids.coords is None:
-        t0 = (logger.process_clock(), logger.perf_counter())
+        t0 = logger.init_timer(ks)
         ks.grids.build()
         #ks.grids.build(with_non0tab=True)
         ks.grids.weights = cupy.asarray(ks.grids.weights)
@@ -79,11 +79,10 @@ def initialize_grids(ks, mol=None, dm=None):
             # Filter grids the first time setup grids
             ks.grids = prune_small_rho_grids_(ks, ks.mol, dm, ks.grids)
         t0 = logger.timer_debug1(ks, 'setting up grids', *t0)
-
         is_nlc = ks.nlc or ks._numint.libxc.is_nlc(ks.xc)
         if is_nlc and ks.nlcgrids.coords is None:
             if ks.nlcgrids.coords is None:
-                t0 = (logger.process_clock(), logger.perf_counter())
+                t0 = logger.init_timer(ks)
                 #ks.nlcgrids.build(with_non0tab=True)
                 ks.nlcgrids.build()
                 ks.nlcgrids.weights = cupy.asarray(ks.nlcgrids.weights)
@@ -125,7 +124,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
 
     if mol is None: mol = ks.mol
     if dm is None: dm = ks.make_rdm1()
-    t0 = (logger.process_clock(), logger.perf_counter())
+    t0 = logger.init_timer(ks)
     if ks.grids.coords is None:
         ks.grids.ao_values = None
     initialize_grids(ks, mol, dm)
@@ -195,10 +194,37 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     else:
         ecoul = None
     t0 = logger.timer_debug1(ks, 'jk total', *t0)
-    ks.ecoul = ecoul
-    ks.exc = exc
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
     return vxc
+
+def energy_elec(ks, dm=None, h1e=None, vhf=None):
+    r'''Electronic part of RKS energy.
+
+    Note this function has side effects which cause mf.scf_summary updated.
+
+    Args:
+        ks : an instance of DFT class
+
+        dm : 2D ndarray
+            one-partical density matrix
+        h1e : 2D ndarray
+            Core hamiltonian
+
+    Returns:
+        RKS electronic energy and the 2-electron contribution
+    '''
+    if dm is None: dm = ks.make_rdm1()
+    if h1e is None: h1e = ks.get_hcore()
+    if vhf is None: vhf = ks.get_veff(ks.mol, dm)
+    e1 = cupy.einsum('ij,ji->', h1e, dm).real
+    ecoul = vhf.ecoul.real
+    exc = vhf.exc.real
+    e2 = ecoul + exc
+    ks.scf_summary['e1'] = e1
+    ks.scf_summary['coul'] = ecoul
+    ks.scf_summary['exc'] = exc
+    logger.debug(ks, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
+    return e1+e2, e2
 
 class RKS(scf.hf.RHF, rks.RKS):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
@@ -208,7 +234,14 @@ class RKS(scf.hf.RHF, rks.RKS):
         self._numint = numint.NumInt(xc=xc)
         self.disp = disp
         self.screen_tol = 1e-14
+
+        grids_level = self.grids.level
         self.grids = gen_grid.Grids(mol)
+        self.grids.level = grids_level
+
+        nlcgrids_level = self.nlcgrids.level
+        self.nlcgrids = gen_grid.Grids(mol)
+        self.nlcgrids.level = nlcgrids_level
 
     def get_dispersion(self):
         if self.disp is None:
@@ -241,27 +274,11 @@ class RKS(scf.hf.RHF, rks.RKS):
         self._numint.gdftopt = None
         return self
 
-    def energy_elec(self, dm=None, h1e=None, vhf=None):
-        if dm is None: dm = self.make_rdm1()
-        if h1e is None: h1e = self.get_hcore()
-        if vhf is None: vhf = self.get_veff(self.mol, dm)
-
-        e1 = cupy.sum(h1e*dm)
-        ecoul = self.ecoul
-        exc = self.exc
-        e2 = ecoul + exc
-        return e1+e2, e2
-
-    def energy_tot(self, dm, h1e, vhf=None):
-        nuc = self.energy_nuc()
-        e_tot = self.energy_elec(dm, h1e, vhf)[0] + nuc
-        self.scf_summary['nuc'] = nuc.real
-        return e_tot
-
     def nuc_grad_method(self):
         from gpu4pyscf.grad import rks as rks_grad
         return rks_grad.Gradients(self)
-    
+
+    energy_elec = energy_elec
     get_jk = RHF.get_jk
     get_veff = get_veff
     _eigh = RHF._eigh

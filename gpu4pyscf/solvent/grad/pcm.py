@@ -22,11 +22,12 @@ import numpy
 import cupy
 from cupyx import scipy
 from pyscf import lib
-from pyscf.lib import logger
 from pyscf import gto, df
 from pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.solvent.pcm import PI, switch_h
 from gpu4pyscf.df import int3c2e
+from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib import logger
 
 libdft = lib.load_library('libdft')
 
@@ -69,9 +70,9 @@ def get_dF_dA(surface):
         riJ = cupy.linalg.norm(ri_rJ, axis=-1)
         diJ = (riJ - R_in_J) / R_sw_J
         diJ[:,ia] = 1.0
-        diJ[diJ < 1e-8] = 0.0
+        diJ[diJ < 1e-12] = 0.0
         ri_rJ[:,ia,:] = 0.0
-        ri_rJ[diJ < 1e-8] = 0.0
+        ri_rJ[diJ < 1e-12] = 0.0
 
         fiJ = switch_h(diJ)
         dfiJ = grad_switch_h(diJ) / (fiJ * riJ * R_sw_J)
@@ -143,6 +144,8 @@ def grad_kernel(pcmobj, dm):
     dE = 0.5*v* d(K^-1 R) *v + q*dv
     v^T* d(K^-1 R)v = v^T*K^-1(dR - dK K^-1R)v = v^T K^-1(dR - dK q)
     '''
+    if not pcmobj._intermediates:
+        pcmobj.build()
     mol = pcmobj.mol
 
     gridslice    = pcmobj.surface['gslice_by_atom']
@@ -180,7 +183,7 @@ def grad_kernel(pcmobj, dm):
     dvj= 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     de = dq + dvj
 
-    atom_charges = mol.atom_charges()
+    atom_charges = cupy.asarray(mol.atom_charges(), dtype=numpy.float64)
     fakemol_nuc = gto.fakemol_for_charges(atom_coords)
     fakemol = gto.fakemol_for_charges(grid_coords.get(), expnt=exponents.get()**2)
 
@@ -188,15 +191,15 @@ def grad_kernel(pcmobj, dm):
     int2c2e_ip1 = mol._add_suffix('int2c2e_ip1')
     v_ng_ip1 = gto.mole.intor_cross(int2c2e_ip1, fakemol_nuc, fakemol)
     v_ng_ip1 = cupy.asarray(v_ng_ip1)
-    dv_g = cupy.einsum('g,xng->nx', q_sym, v_ng_ip1)
-    de -= cupy.einsum('nx,n->nx', dv_g, atom_charges)
+    dv_g = contract('g,xng->nx', q_sym, v_ng_ip1)
+    de -= contract('nx,n->nx', dv_g, atom_charges)
 
     # nuclei potential response
     int2c2e_ip2 = mol._add_suffix('int2c2e_ip2')
     v_ng_ip2 = gto.mole.intor_cross(int2c2e_ip2, fakemol_nuc, fakemol)
     v_ng_ip2 = cupy.asarray(v_ng_ip2)
-    dv_g = cupy.einsum('n,xng->gx', atom_charges, v_ng_ip2)
-    dv_g = cupy.einsum('gx,g->gx', dv_g, q_sym)
+    dv_g = contract('n,xng->gx', atom_charges, v_ng_ip2)
+    dv_g = contract('gx,g->gx', dv_g, q_sym)
     de -= cupy.asarray([cupy.sum(dv_g[p0:p1], axis=0) for p0,p1 in gridslice])
 
     ## --------------- response from stiffness matrices ----------------
@@ -296,4 +299,3 @@ def make_grad_object(grad_method):
 
     return WithSolventGrad(grad_method)
 
-#pcm.PCM.nuc_grad_method = make_grad_object

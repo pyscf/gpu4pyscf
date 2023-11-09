@@ -98,11 +98,16 @@ def _for_scf(mf, solvent_obj, dm=None):
 
         Gradients = nuc_grad_method
 
+        def Hessian(self):
+            hess_method = oldMF.Hessian(self)
+            return self.with_solvent.Hessian(hess_method)
+
         def gen_response(self, *args, **kwargs):
             vind = oldMF.gen_response(self, *args, **kwargs)
             is_uhf = isinstance(self, scf.uhf.UHF)
             # singlet=None is orbital hessian or CPHF type response function
             singlet = kwargs.get('singlet', True)
+            print('-----here')
             singlet = singlet or singlet is None
             def vind_with_solvent(dm1):
                 v = vind(dm1)

@@ -17,21 +17,26 @@
 # Modified by Xiaojie Wu <wxj6000@gmail.com>
 
 '''Non-relativistic RKS analytical nuclear gradients'''
+import ctypes
 import numpy
 import cupy
 import pyscf
 from pyscf import lib, gto
-from pyscf.lib import logger
 from pyscf.dft import radi
 from gpu4pyscf.lib.utils import patch_cpu_kernel
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.dft import numint, xc_deriv, rks
 from gpu4pyscf.dft.numint import _GDFTOpt, AO_THRESHOLD
-from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, add_sparse, tag_array
+from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, add_sparse, tag_array, load_library
+from gpu4pyscf.lib import logger
+
 from pyscf import __config__
 
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 128*128)
 ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
+
+libgdft = load_library('libgdft')
+libgdft.GDFT_make_dR_dao_w.restype = ctypes.c_int
 
 def _get_veff(ks_grad, mol=None, dm=None):
     '''
@@ -50,7 +55,7 @@ def _get_veff(ks_grad, mol=None, dm=None):
         grids = ks_grad.grids
     else:
         grids = mf.grids
-    
+
     if grids.coords is None:
         grids.build(sort_grids=True)
 
@@ -89,7 +94,7 @@ def _get_veff(ks_grad, mol=None, dm=None):
     occ_coeff = cupy.asarray(mf.mo_coeff[:, mf.mo_occ>0.5], order='C')
     tmp = contract('nij,jk->nik', vxc, occ_coeff)
     vxc = 2.0*contract('nik,ik->ni', tmp, occ_coeff)
-    
+
     aoslices = mol.aoslice_by_atom()
     vxc = [vxc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
     vxc = cupy.asarray(vxc)
@@ -108,7 +113,6 @@ def _get_veff(ks_grad, mol=None, dm=None):
 
 def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             max_memory=2000, verbose=None):
-    log = logger.new_logger(mol, verbose)
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
@@ -116,98 +120,64 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         opt = ni.gdftopt
     mo_occ = cupy.asarray(dms.mo_occ)
     mo_coeff = cupy.asarray(dms.mo_coeff)
-    
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
     dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
            for dm in dms.reshape(-1,nao0,nao0)]
     mo_coeff = coeff @ mo_coeff
+
     nset = len(dms)
-    
-    with opt.gdft_envs_cache():
-        if xctype == 'LDA':
-            ao_deriv = 1
-        else:
-            ao_deriv = 2
+    assert nset == 1
+    if xctype == 'LDA':
+        ao_deriv = 1
+    else:
+        ao_deriv = 2
 
-        mem_avail = get_avail_mem()
-        comp = (ao_deriv+1)*(ao_deriv+2)*(ao_deriv+3)//6
-        block_size = int((mem_avail*.4/8/(comp+1)/nao - 3*nao*2)/ ALIGNED) * ALIGNED
-        block_size = min(block_size, MIN_BLK_SIZE)
-        log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
-        
-        if block_size < ALIGNED:
-            raise RuntimeError('Not enough GPU memory')
-        
-        vmat = cupy.zeros((nset,3,nao,nao))
-        if xctype == 'LDA':
-            ao_deriv = 1
-            for ao, _, weight, _ in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
-                for idm in range(nset):
-                    rho = numint.eval_rho2(opt.mol, ao[0], mo_coeff, mo_occ, None, xctype)
-                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
-                    wv = weight * vxc[0]
-                    mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
-                    idx = cupy.argwhere(mask).astype(numpy.int32)[:,0]
-                    ao_mask = ao[:,idx,:]
-                    aow = numint._scale_ao(ao_mask[0], wv)
-                    vtmp = _d1_dot_(ao_mask[1:4], aow.T)
-                    #idx = cupy.ix_(mask, mask)
-                    #vmat[idm][0][idx] += vtmp[0]
-                    #vmat[idm][1][idx] += vtmp[1]
-                    #vmat[idm][2][idx] += vtmp[2]
-                    add_sparse(vmat[idm][0], vtmp[0], idx)
-                    add_sparse(vmat[idm][1], vtmp[1], idx)
-                    add_sparse(vmat[idm][2], vtmp[2], idx)
-        elif xctype == 'GGA':
-            ao_deriv = 2
-            for ao, _, weight, _ in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
-                for idm in range(nset):
-                    rho = numint.eval_rho2(opt.mol, ao[:4], mo_coeff, mo_occ, None, xctype)
-                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
-                    wv = weight * vxc
-                    wv[0] *= .5
-                    mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
-                    idx = cupy.argwhere(mask).astype(numpy.int32)[:,0]
-                    ao_mask = ao[:,idx,:]
-                    vtmp = _gga_grad_sum_(ao_mask, wv)
-                    #idx = cupy.ix_(mask, mask)
-                    #vmat[idm][0][idx] += vtmp[0]
-                    #vmat[idm][1][idx] += vtmp[1]
-                    #vmat[idm][2][idx] += vtmp[2]
-                    add_sparse(vmat[idm][0], vtmp[0], idx)
-                    add_sparse(vmat[idm][1], vtmp[1], idx)
-                    add_sparse(vmat[idm][2], vtmp[2], idx)
-        elif xctype == 'NLC':
-            raise NotImplementedError('NLC')
+    vmat = cupy.zeros((nset,3,nao,nao))
+    if xctype == 'LDA':
+        ao_deriv = 1
+        for ao_mask, idx, weight, _ in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
+            for idm in range(nset):
+                mo_coeff_mask = mo_coeff[idx,:]
+                rho = numint.eval_rho2(opt.mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype)
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
+                wv = weight * vxc[0]
+                aow = numint._scale_ao(ao_mask[0], wv)
+                vtmp = _d1_dot_(ao_mask[1:4], aow.T)
+                add_sparse(vmat[idm], vtmp, idx)
+    elif xctype == 'GGA':
+        ao_deriv = 2
+        for ao_mask, idx, weight, _ in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
+            for idm in range(nset):
+                mo_coeff_mask = mo_coeff[idx,:]
+                rho = numint.eval_rho2(opt.mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype)
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
+                wv = weight * vxc
+                wv[0] *= .5
+                vtmp = _gga_grad_sum_(ao_mask, wv)
+                add_sparse(vmat[idm], vtmp, idx)
+    elif xctype == 'NLC':
+        raise NotImplementedError('NLC')
 
-        elif xctype == 'MGGA':
-            ao_deriv = 2
-            for ao, _, weight, _ in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
-                for idm in range(nset):
-                    rho = numint.eval_rho2(opt.mol, ao[:10], mo_coeff, mo_occ, None, xctype)
-                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
-                    wv = weight * vxc
-                    wv[0] *= .5
-                    wv[4] *= .5  # for the factor 1/2 in tau
-                    mask = cupy.any(cupy.abs(ao) > AO_THRESHOLD, axis=[0,2])
-                    idx = cupy.argwhere(mask).astype(numpy.int32)[:,0]
-                    ao_mask = ao[:,idx,:]
-                    vtmp = _gga_grad_sum_(ao_mask, wv)
-                    vtmp += _tau_grad_dot_(ao_mask, wv[4])
-                    #idx = cupy.ix_(mask, mask)
-                    #vmat[idm][0][idx] += vtmp[0]
-                    #vmat[idm][1][idx] += vtmp[1]
-                    #vmat[idm][2][idx] += vtmp[2]
-                    add_sparse(vmat[idm][0], vtmp[0], idx)
-                    add_sparse(vmat[idm][1], vtmp[1], idx)
-                    add_sparse(vmat[idm][2], vtmp[2], idx)
+    elif xctype == 'MGGA':
+        ao_deriv = 2
+        for ao_mask, idx, weight, _ in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
+            for idm in range(nset):
+                mo_coeff_mask = mo_coeff[idx,:]
+                rho = numint.eval_rho2(opt.mol, ao_mask[:10], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
+                wv = weight * vxc
+                wv[0] *= .5
+                wv[4] *= .5  # for the factor 1/2 in tau
+                vtmp = _gga_grad_sum_(ao_mask, wv)
+                vtmp += _tau_grad_dot_(ao_mask, wv[4])
+                add_sparse(vmat[idm], vtmp, idx)
     vmat = [cupy.einsum('pi,npq,qj->nij', coeff, v, coeff) for v in vmat]
     exc = None
     if nset == 1:
         vmat = vmat[0]
-    
+
     # - sign because nabla_X = -nabla_x
     return exc, -vmat
 
@@ -221,7 +191,8 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     mo_occ = cupy.asarray(dms.mo_occ)
     mo_coeff = cupy.asarray(dms.mo_coeff)
-    
+
+    mol = opt.mol
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
@@ -238,32 +209,36 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     ao_deriv = 2
     vvrho = []
-    for ao, mask, weight, coords \
+    for ao_mask, mask, weight, coords \
             in ni.block_loop(mol, grids, nao, ao_deriv, max_memory=max_memory):
-        rho = numint.eval_rho2(opt.mol, ao[:4], mo_coeff, mo_occ, None, xctype)
+        mo_coeff_mask = mo_coeff[mask]
+        rho = numint.eval_rho2(mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
         vvrho.append(rho)
     rho = cupy.hstack(vvrho)
+
     vxc = numint._vv10nlc(rho, grids.coords, rho, grids.weights,
                           grids.coords, nlc_pars)[1]
     vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
 
     vmat = cupy.zeros((3,nao,nao))
     p1 = 0
-    for ao, mask, weight, coords \
+    for ao_mask, mask, weight, coords \
             in ni.block_loop(mol, grids, nao, ao_deriv, max_memory):
         p0, p1 = p1, p1 + weight.size
         wv = vv_vxc[:,p0:p1] * weight
         wv[0] *= .5  # *.5 because vmat + vmat.T at the end
-        vmat += _gga_grad_sum_(ao, wv)
-    
-    vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
-    
+        vmat_tmp = _gga_grad_sum_(ao_mask, wv)
+        add_sparse(vmat, vmat_tmp, mask)
+
+    vmat = contract('npq,qj->npj', vmat, coeff)
+    vmat = contract('pi,npj->nij', coeff, vmat)
     exc = None
     # - sign because nabla_X = -nabla_x
     return exc, -vmat
 
 def _make_dR_dao_w(ao, wv):
     #:aow = numpy.einsum('npi,p->npi', ao[1:4], wv[0])
+    '''
     aow = [
         numint._scale_ao(ao[1], wv[0]),  # dX nabla_x
         numint._scale_ao(ao[2], wv[0]),  # dX nabla_y
@@ -281,14 +256,35 @@ def _make_dR_dao_w(ao, wv):
     aow[2] += numint._scale_ao(ao[6], wv[1])  # dZ nabla_x
     aow[2] += numint._scale_ao(ao[8], wv[2])  # dZ nabla_y
     aow[2] += numint._scale_ao(ao[9], wv[3])  # dZ nabla_z
+    '''
+    assert ao.flags.c_contiguous
+    assert wv.flags.c_contiguous
+
+    _, nao, ngrids = ao.shape
+    aow = cupy.empty([3,nao,ngrids])
+    stream = cupy.cuda.get_current_stream()
+    err = libgdft.GDFT_make_dR_dao_w(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(aow.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ao.data.ptr, ctypes.c_void_p),
+        ctypes.cast(wv.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids), ctypes.c_int(nao))
+    if err != 0:
+        raise RuntimeError('CUDA Error')
     return aow
 
-def _d1_dot_(ao1, ao2):
-    vmat0 = cupy.dot(ao1[0], ao2)
-    vmat1 = cupy.dot(ao1[1], ao2)
-    vmat2 = cupy.dot(ao1[2], ao2)
-    return cupy.stack([vmat0,vmat1,vmat2])
-    
+def _d1_dot_(ao1, ao2, out=None):
+    if out is None:
+        vmat0 = cupy.dot(ao1[0], ao2)
+        vmat1 = cupy.dot(ao1[1], ao2)
+        vmat2 = cupy.dot(ao1[2], ao2)
+        return cupy.stack([vmat0,vmat1,vmat2])
+    else:
+        cupy.dot(ao1[0], ao2, out=out[0])
+        cupy.dot(ao1[1], ao2, out=out[1])
+        cupy.dot(ao1[2], ao2, out=out[2])
+        return out
+
 def _gga_grad_sum_(ao, wv):
     #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
     aow = numint._scale_ao(ao[:4], wv[:4])
@@ -296,7 +292,7 @@ def _gga_grad_sum_(ao, wv):
     aow = _make_dR_dao_w(ao, wv[:4])
     vmat += _d1_dot_(aow, ao[0].T)
     return vmat
-    
+
 # XX, XY, XZ = 4, 5, 6
 # YX, YY, YZ = 5, 7, 8
 # ZX, ZY, ZZ = 6, 8, 9
@@ -342,10 +338,10 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         block_size = int((mem_avail*.4/8/(comp+1)/nao - 3*nao*2)/ ALIGNED) * ALIGNED
         block_size = min(block_size, MIN_BLK_SIZE)
         log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
-        
+
         if block_size < ALIGNED:
             raise RuntimeError('Not enough GPU memory')
-        
+
         for atm_id, (coords, weight, weight1) in enumerate(grids_response_cc(grids)):
             ngrids = weight.size
             for p0, p1 in lib.prange(0,ngrids,block_size):
@@ -371,7 +367,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     wv = weight[p0:p1] * vxc
                     wv[0] *= .5
                     wv[4] *= .5  # for the factor 1/2 in tau
-                    
+
                     vmat += _gga_grad_sum_(ao, wv)
                     vmat += _tau_grad_dot_(ao, wv[4])
 
@@ -502,7 +498,9 @@ def grids_response_cc(grids):
 
 class Gradients(rhf_grad.Gradients, pyscf.grad.rks.Gradients):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
-    
+
+    get_veff = _get_veff
+
     def get_dispersion(self):
         if self.base.disp[:2].upper() == 'D3':
             from pyscf import lib
@@ -511,12 +509,12 @@ class Gradients(rhf_grad.Gradients, pyscf.grad.rks.Gradients):
                 d3 = disp.DFTD3Dispersion(self.mol, xc=self.base.xc, version=self.base.disp)
                 _, g_d3 = d3.kernel()
             return g_d3
-        
+
         if self.base.disp[:2].upper() == 'D4':
             from pyscf.data.elements import charge
             atoms = numpy.array([ charge(a[0]) for a in self.mol._atom])
             coords = self.mol.atom_coords()
-            
+
             from pyscf import lib
             with lib.with_omp_threads(1):
                 from dftd4.interface import DampingParam, DispersionModel

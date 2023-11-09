@@ -13,15 +13,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
-import os
-import ctypes
 import numpy as np
 import cupy
 from cupy._environment import _preload_libs
 from cupyx import cutensor
 from cupy_backends.cuda.libs import cutensor as cutensor_backend
 from cupy_backends.cuda.libs.cutensor import Handle
+from gpu4pyscf.lib import logger
 
 libcutensor = None
 for lib_path in _preload_libs['cutensor']:
@@ -31,12 +29,11 @@ for lib_path in _preload_libs['cutensor']:
     except Exception:
         continue
 
-if libcutensor is None:
-    print('cannot find cutensor')
-
 _handle = Handle()
 _modes = {}
 _contraction_descriptors = {}
+_contraction_plans = {}
+_contraction_finds = {}
 
 cutensor_backend.init(_handle)
 
@@ -50,7 +47,7 @@ def _create_mode_with_cache(mode):
         else:
             raise TypeError('Cannot create tensor mode: {}'.format(type(x)))
     key = tuple(integer_mode)
-    
+
     if key in _modes:
         mode = _modes[key]
     else:
@@ -70,11 +67,11 @@ def create_contraction_descriptor(handle,
            desc_a.ptr, mode_a.data, alignment_req_A,
            desc_b.ptr, mode_b.data, alignment_req_B,
            desc_c.ptr, mode_c.data, alignment_req_C)
-    
+
     if key in _contraction_descriptors:
         desc = _contraction_descriptors[key]
         return desc
-    
+
     desc = cutensor_backend.ContractionDescriptor()
     cutensor_backend.initContractionDescriptor(
         handle,
@@ -88,9 +85,24 @@ def create_contraction_descriptor(handle,
     return desc
 
 def create_contraction_find(handle, algo=cutensor_backend.ALGO_DEFAULT):
-    find = cutensor_backend.ContractionFind()
-    cutensor_backend.initContractionFind(handle, find, algo)
+    key = (handle.ptr, algo)
+    if key in _contraction_finds:
+        find = _contraction_finds[key]
+    else:
+        find = cutensor_backend.ContractionFind()
+        cutensor_backend.initContractionFind(handle, find, algo)
+        _contraction_finds[key] = find
     return find
+
+def create_contraction_plan(handle, desc, find, ws_size):
+    key = (handle.ptr, desc.ptr, find.ptr, ws_size)
+    if key in _contraction_plans:
+        plan = _contraction_plans[key]
+    else:
+        plan = cutensor_backend.ContractionPlan()
+        cutensor_backend.initContractionPlan(handle, plan, desc, find, ws_size)
+        _contraction_plans[key] = plan
+    return plan
 
 def contraction(pattern, a, b, alpha, beta, out=None):
     pattern = pattern.replace(" ", "")
@@ -99,11 +111,11 @@ def contraction(pattern, a, b, alpha, beta, out=None):
     key = str_a + str_b
     val = list(a.shape) + list(b.shape)
     shape = {k:v for k, v in zip(key, val)}
-    
+
     mode_a = list(str_a)
     mode_b = list(str_b)
     mode_c = list(str_c)
-    
+
     if(out is not None):
         c = out
     else:
@@ -126,22 +138,52 @@ def contraction(pattern, a, b, alpha, beta, out=None):
     except Exception:
         ws_size = cutensor_backend.contractionGetWorkspaceSize(_handle, desc, find, cutensor_backend.WORKSPACE_MIN)
         ws = cupy.empty(ws_size, dtype=np.int8)
-    
-    plan = cutensor_backend.ContractionPlan()
-    cutensor_backend.initContractionPlan(_handle, plan, desc, find, ws_size)
+
+    plan = create_contraction_plan(_handle, desc, find, ws_size)
     alpha = np.asarray(alpha)
     beta = np.asarray(beta)
+
     cutensor_backend.contraction(_handle, plan,
                              alpha.ctypes.data, a.data.ptr, b.data.ptr,
                              beta.ctypes.data, c.data.ptr, out.data.ptr,
                              ws.data.ptr, ws_size)
+
     return out
 
-def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
-    '''
-    a wrapper for general tensor contraction
-    pattern has to be a standard einsum notation
-    '''
-    c = contraction(pattern, a, b, alpha, beta, out=out)
+import os
+if 'CONTRACT_ENGINE' in os.environ:
+    contract_engine = os.environ['CONTRACT_ENGINE']
+else:
+    contract_engine = None
 
-    return c
+if libcutensor is None:
+    contract_engine = 'cupy'
+
+# override the 'contract' function if einsum is customized or cutensor is not found
+if contract_engine is not None:
+    einsum = None
+    if contract_engine == 'opt_einsum':
+        import opt_einsum
+        einsum = opt_einsum.contract
+    elif contract_engine == 'cuquantum':
+        from cuquantum import contract as einsum
+    elif contract_engine == 'cupy':
+        einsum = cupy.einsum
+    else:
+        raise RuntimeError('unknown tensor contraction engine.')
+
+    import warnings
+    warnings.warn(f'using {contract_engine} as the tensor contraction engine.')
+    def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
+        if out is None:
+            return cupy.asarray(einsum(pattern, a, b), order='C')
+        else:
+            out[:] = alpha*einsum(pattern, a, b) + beta*out
+            return cupy.asarray(out, order='C')
+else:
+    def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
+        '''
+        a wrapper for general tensor contraction
+        pattern has to be a standard einsum notation
+        '''
+        return contraction(pattern, a, b, alpha, beta, out=out)

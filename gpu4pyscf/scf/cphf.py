@@ -26,6 +26,7 @@ import cupy
 from pyscf import lib
 from gpu4pyscf.lib.cupy_helper import krylov
 from gpu4pyscf.lib import logger
+
 def solve(fvind, mo_energy, mo_occ, h1, s1=None,
           max_cycle=20, tol=1e-9, hermi=False, verbose=logger.WARN):
     '''
@@ -36,7 +37,7 @@ def solve(fvind, mo_energy, mo_occ, h1, s1=None,
         hermi : boolean
             Whether the matrix defined by fvind is Hermitian or not.
     '''
-    
+
     if s1 is None:
         return solve_nos1(fvind, mo_energy, mo_occ, h1,
                           max_cycle, tol, hermi, verbose)
@@ -96,7 +97,7 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
     s1 = s1.reshape(-1,nmo,nocc)
     hs = mo1base = h1.reshape(-1,nmo,nocc) - s1*e_i
     mo_e1 = hs[:,occidx,:].copy()
-    
+
     mo1base[:,viridx] *= -e_ai
     mo1base[:,occidx] = -s1[:,occidx] * .5
 

@@ -47,6 +47,7 @@ class DF(df.DF):
     def to_cpu(self):
         from gpu4pyscf.lib.utils import to_cpu
         obj = to_cpu(self)
+        del obj.intopt, obj.cd_low, obj.nao, obj.naux
         return obj.reset()
 
     def build(self, direct_scf_tol=1e-14, omega=None):
@@ -66,8 +67,8 @@ class DF(df.DF):
         idx = np.arange(nao)
         self.diag_idx = cupy.asarray(idx*(idx+1)//2+idx)
 
-        t0 = (logger.process_clock(), logger.perf_counter())
         log = logger.new_logger(mol, mol.verbose)
+        t0 = log.init_timer()
         if auxmol is None:
             self.auxmol = auxmol = addons.make_auxmol(mol, self.auxbasis)
 
@@ -131,7 +132,7 @@ class DF(df.DF):
             raise RuntimeError("Not enough GPU memory")
         return blksize
 
-    
+
     def loop(self, blksize=None, unpack=True):
         '''
         loop over all cderi and unpack
@@ -207,18 +208,16 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
     else:
         use_gpu_memory = False
     if(not use_gpu_memory):
-        import warnings
-        warnings.warn("Not enough GPU memory")
+        log.debug("Not enough GPU memory")
         # TODO: async allocate memory
         mem = cupy.cuda.alloc_pinned_memory(naux * npair * 8)
         cderi = np.ndarray([naux, npair], dtype=np.float64, order='C', buffer=mem)
-
     data_stream = cupy.cuda.stream.Stream(non_blocking=False)
     count = 0
     nq = len(intopt.log_qs)
     for cp_ij_id, _ in enumerate(intopt.log_qs):
         if len(intopt.ao_pairs_row[cp_ij_id]) == 0: continue
-        t1 = (logger.process_clock(), logger.perf_counter())
+        t1 = log.init_timer()
         cpi = intopt.cp_idx[cp_ij_id]
         cpj = intopt.cp_jdx[cp_ij_id]
         li = intopt.angular[cpi]
@@ -259,7 +258,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
         if cpi == cpj:
             ints_slices = ints_slices + ints_slices.transpose([0,2,1])
         ints_slices = ints_slices[:,col,row]
-        
+
         if cd_low.tag == 'eig':
             cderi_block = cupy.dot(cd_low.T, ints_slices)
             ints_slices = None

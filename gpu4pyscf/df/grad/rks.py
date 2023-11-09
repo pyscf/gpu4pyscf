@@ -29,7 +29,7 @@ def get_veff(ks_grad, mol=None, dm=None):
     '''
     if mol is None: mol = ks_grad.mol
     if dm is None: dm = ks_grad.base.make_rdm1()
-    t0 = (logger.process_clock(), logger.perf_counter())
+    t0 = logger.init_timer(ks_grad)
 
     mf = ks_grad.base
     ni = mf._numint
@@ -129,7 +129,7 @@ class Gradients(rks_grad.Gradients, pyscf.df.grad.rks.Gradients):
     def get_k(self, mol=None, dm=None, hermi=0, omega=None):
         _, vk, _, vkaux = self.get_jk(mol, dm, with_j=False, omega=omega)
         return vk, vkaux
-        
+
     def extra_force(self, atom_id, envs):
         if self.auxbasis_response:
             return envs['dvhf'].aux[atom_id]

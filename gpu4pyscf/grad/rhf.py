@@ -19,12 +19,12 @@ import numpy as np
 import cupy
 import numpy
 from pyscf import lib, gto
-from pyscf.lib import logger
 from pyscf.grad import rhf
 from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf.scf.hf import _VHFOpt
-from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf.lib.cupy_helper import tag_array, contract
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
+from gpu4pyscf.lib import logger
 
 LMAX_ON_GPU = 3
 FREE_CUPY_CACHE = True
@@ -255,8 +255,8 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     if atmlst is None:
         atmlst = range(mol.natm)
 
-    cput0 = (logger.process_clock(), logger.perf_counter())
     log = logger.new_logger(mol, verbose)
+    cput0 = log.init_timer()
     if hermi != 1:
         raise NotImplementedError('JK-builder only supports hermitian density matrix')
     if omega is None:
@@ -328,7 +328,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     dm_shl = cupy.asarray(np.log(dm_shl))
     nshls = dm_shl.shape[0]
     t0 = time.perf_counter()
-    
+
     if hermi != 1:
         dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
     fn = libgvhf.GINTget_veff_ip1
@@ -347,7 +347,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             ll = vhfopt.uniq_l_ctr[cpl,0]
             if lk > LMAX_ON_GPU or ll > LMAX_ON_GPU or log_q_kl.size == 0:
                 continue
-            
+
             # TODO: determine cutoff based on the relevant maximum value of dm blocks?
             sub_dm_cond = max(dm_ctr_cond[cpi,cpj], dm_ctr_cond[cpk,cpl],
                               dm_ctr_cond[cpi,cpk], dm_ctr_cond[cpj,cpk],
@@ -416,8 +416,6 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         coeff = dms = None
         cupy.get_default_memory_pool().free_all_blocks()
 
-    #if vj is not None: vj_per_atom = vj_per_atom.T
-    #if vk is not None: vk_per_atom = vk_per_atom.T
     if out_cupy:
         return vj_per_atom, vk_per_atom
     else:
@@ -427,8 +425,8 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
 def _get_jk(gradient_object, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
             omega=None):
     mf = gradient_object.base
-    cput0 = (logger.process_clock(), logger.perf_counter())
     log = logger.new_logger(gradient_object)
+    cput0 = log.init_timer()
     log.debug3('apply get_grad_jk on gpu')
     if hasattr(mf, '_opt_gpu'):
         vhfopt = mf._opt_gpu
@@ -457,7 +455,7 @@ def get_dh1e_ecp(mol, dm):
     for ia in ecp_atoms:
         with mol.with_rinv_at_nucleus(ia):
             ecp = mol.intor('ECPscalar_iprinv', comp=3)
-            dh1e_ecp[ia] = cupy.einsum('xij,ij->x', ecp, dm)
+            dh1e_ecp[ia] = contract('xij,ij->x', cupy.asarray(ecp), dm)
     return 2.0 * dh1e_ecp
 
 def grad_nuc(mf_grad, atmlst=None):
@@ -489,11 +487,11 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         atmlst = range(mol.natm)
     aoslices = mol.aoslice_by_atom()
 
-    t0 = (logger.process_clock(), logger.perf_counter())
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
     log = logger.Logger(mf_grad.stdout, mf_grad.verbose)
+    t0 = log.init_timer()
 
     mo_energy = cupy.asarray(mo_energy)
     mo_occ = cupy.asarray(mo_occ)
@@ -515,9 +513,9 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     with lib.call_in_background(calculate_h1e) as calculate_hs:
         calculate_hs(h1, s1)
         # (i | \nabla hcore | j)
-        t3 = log.timer_debug1("get_dh1e", *t0)
+        t3 = log.init_timer()
         dh1e = int3c2e.get_dh1e(mol, dm0)
-        
+
         t4 = log.timer_debug1("get_dh1e", *t3)
         if mol.has_ecp():
             dh1e += get_dh1e_ecp(mol, dm0)
@@ -527,20 +525,20 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         log.debug('Computing Gradients of NR-HF Coulomb repulsion')
 
         dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
-        
+
         extra_force = cupy.zeros((len(atmlst),3))
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals())
-        
+
         t2 = log.timer_debug1('gradients of 2e part', *t1)
-        
-    dh = cupy.einsum('xij,ij->xi', h1, dm0)
-    ds = cupy.einsum('xij,ij->xi', s1, dme0)
+
+    dh = contract('xij,ij->xi', h1, dm0)
+    ds = contract('xij,ij->xi', s1, dme0)
     delec = 2.0*(dh - ds)
-    
+
     delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
     de = 2.0 * dvhf + dh1e + delec + extra_force
-    
+
     if(hasattr(mf, 'disp') and mf.disp is not None):
         g_disp = mf_grad.get_dispersion()
         mf_grad.grad_disp = g_disp
@@ -565,13 +563,13 @@ class Gradients(rhf.Gradients):
     def get_j(self, mol=None, dm=None, hermi=0, omega=None):
         vj, _ = self.get_jk(mol, dm, with_k=False, omega=omega)
         return vj
-    
+
     def get_k(self, mol=None, dm=None, hermi=0, omega=None):
         _, vk = self.get_jk(mol, dm, with_j=False, omega=omega)
         return vk
 
     def extra_force(self, atom_id, envs):
-        ''' 
+        '''
         grid response is implemented get_veff
         '''
         return 0

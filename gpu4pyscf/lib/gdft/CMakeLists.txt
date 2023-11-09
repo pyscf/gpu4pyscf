@@ -15,7 +15,7 @@
 
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80 --ptxas-options=-v")
 
-add_library(gdft SHARED 
+add_library(gdft SHARED
   nr_eval_gto.cu
   contract_rho.cu
   gen_grids.cu

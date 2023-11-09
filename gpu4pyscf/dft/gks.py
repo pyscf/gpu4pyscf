@@ -23,8 +23,7 @@ class GKS(gks.GKS):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     def __init__(self, mol, xc='LDA,VWN'):
-        super().__init__(mol, xc)
-        self._numint = numint.NumInt()
+        raise NotImplementedError
 
     get_jk = GHF.get_jk
     _eigh = GHF._eigh

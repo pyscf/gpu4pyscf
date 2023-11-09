@@ -13,8 +13,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import numpy as np
 import pyscf
-from pyscf import lib
+from pyscf import lib, df
 from gpu4pyscf.dft import rks
 lib.num_threads(8)
 
@@ -23,16 +24,31 @@ O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
-mol = pyscf.M(atom=atom, basis='def2-tzvpp', verbose=4)
+mol = pyscf.M(atom=atom, basis='def2-tzvpp', verbose=0)
 
 mf = rks.RKS(mol, xc='HYB_GGA_XC_B3LYP').density_fit()
 mf = mf.PCM()
+mf.verbose = 6
 mf.grids.atom_grid = (99,590)
+mf.small_rho_cutoff = 1e-10
 mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
-mf.with_solvent.method = 'IEF-PCM'
+mf.with_solvent.method = 'C-PCM'
 mf.with_solvent.eps = 78.3553
 mf.kernel()
 
 g = mf.nuc_grad_method()
 g.auxbasis_response = True
 f = g.kernel()
+
+h = mf.Hessian()
+hess = h.kernel()
+
+mass = [15.99491, 1.00783, 1.00783]
+for i in range(3):
+    for j in range(3):
+        hess[i,j] = hess[i,j]/np.sqrt(mass[i]*mass[j])
+n = hess.shape[0]
+#hess = hess.transpose([0,2,1,3])#.reshape(3*n,3*n)
+print(hess[0,0])
+print(hess[1,0])
+print(hess[2,0])

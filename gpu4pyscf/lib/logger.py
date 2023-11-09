@@ -25,6 +25,8 @@ NOTE = lib.logger.NOTE
 WARN = lib.logger.WARN
 DEBUG = lib.logger.DEBUG
 DEBUG1= lib.logger.DEBUG1
+TIMER_LEVEL = lib.logger.TIMER_LEVEL
+flush = lib.logger.flush
 
 if sys.version_info < (3, 0):
     process_clock = time.clock
@@ -33,27 +35,67 @@ else:
     process_clock = time.process_time
     perf_counter = time.perf_counter
 
-def _timer_debug1(rec, msg, cpu0=None, wall0=None, sync=True):
+
+def init_timer(rec):
+    if rec.verbose >= TIMER_LEVEL:
+        e0 = cupy.cuda.Event()
+        e0.record()
+        return (process_clock(), perf_counter(), e0)
+    elif rec.verbose >= DEBUG:
+        return (process_clock(), perf_counter())
+    else:
+        return process_clock(),
+
+def timer(rec, msg, cpu0=None, wall0=None, gpu0=None):
+    if cpu0 is None:
+        cpu0 = rec._t0
+    if wall0 and gpu0:
+        rec._t0, rec._w0, rec._e0 = process_clock(), perf_counter(), cupy.cuda.Event()
+        if rec.verbose >= TIMER_LEVEL:
+            rec._e0.record()
+            rec._e0.synchronize()
+            flush(rec, '    CPU time for %50s %9.2f sec, wall time %9.2f sec, GPU time for %9.2f ms'
+                  % (msg, rec._t0-cpu0, rec._w0-wall0, cupy.cuda.get_elapsed_time(gpu0,rec._e0)))
+        return rec._t0, rec._w0, rec._e0
+    elif wall0:
+        rec._t0, rec._w0 = process_clock(), perf_counter()
+        if rec.verbose >= TIMER_LEVEL:
+            flush(rec, '    CPU time for %50s %9.2f sec, wall time %9.2f sec'
+                  % (msg, rec._t0-cpu0, rec._w0-wall0))
+        return rec._t0, rec._w0
+    else:
+        rec._t0 = process_clock()
+        if rec.verbose >= TIMER_LEVEL:
+            flush(rec, '    CPU time for %50s %9.2f sec' % (msg, rec._t0-cpu0))
+        return rec._t0,
+
+def _timer_debug1(rec, msg, cpu0=None, wall0=None, gpu0=None, sync=True):
     if rec.verbose >= DEBUG1:
-        if(sync): cupy.cuda.stream.get_current_stream().synchronize()
-        return timer(rec, msg, cpu0, wall0)
+        return timer(rec, msg, cpu0, wall0, gpu0)
+    elif wall0 and gpu0:
+        rec._t0, rec._w0, rec._e0 = process_clock(), perf_counter(), cupy.cuda.Event()
+        rec._e0.record()
+        return rec._t0, rec._w0, rec._e0
     elif wall0:
         rec._t0, rec._w0 = process_clock(), perf_counter()
         return rec._t0, rec._w0
     else:
         rec._t0 = process_clock()
-        return rec._t0
+        return rec._t0,
 
 info = lib.logger.info
+note = lib.logger.note
 debug = lib.logger.debug
 debug1 = lib.logger.debug1
-timer = lib.logger.timer
+debug2 = lib.logger.debug2
 timer_debug1 = _timer_debug1
 
 class Logger(lib.logger.Logger):
     def __init__(self, stdout=sys.stdout, verbose=NOTE):
         super().__init__(stdout=stdout, verbose=verbose)
     timer_debug1 = _timer_debug1
+    timer = timer
+    init_timer = init_timer
 
 def new_logger(rec=None, verbose=None):
     '''Create and return a :class:`Logger` object

@@ -16,15 +16,14 @@
 
 import numpy
 import cupy
-import pyscf
 from cupyx.scipy.linalg import solve_triangular
 from pyscf.df.grad import rhf
-from pyscf.lib import logger
 from pyscf import lib, scf, gto
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import print_mem_info, tag_array, unpack_tril, contract, load_library
 from gpu4pyscf.grad.rhf import grad_elec
 from gpu4pyscf import __config__
+from gpu4pyscf.lib import logger
 
 libcupy_helper = load_library('libcupy_helper')
 
@@ -35,7 +34,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     if mol is None: mol = mf_grad.mol
     #TODO: dm has to be the SCF density matrix in this version.  dm should be
     # extended to any 1-particle density matrix
-    
+
     if(dm0 is None): dm0 = mf_grad.base.make_rdm1()
     mf = mf_grad.base
     if omega is None:
@@ -155,7 +154,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         vkaux = cupy.zeros((3,naux_cart))
     cupy.get_default_memory_pool().free_all_blocks()
     for cp_kl_id in range(len(intopt.aux_log_qs)):
-        t1 = (logger.process_clock(), logger.perf_counter())
+        t1 = log.init_timer()
         k0, k1 = intopt.cart_aux_loc[cp_kl_id], intopt.cart_aux_loc[cp_kl_id+1]
         assert k1-k0 <= block_size
         if with_j:

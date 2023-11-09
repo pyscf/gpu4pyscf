@@ -18,13 +18,13 @@ from pyscf import lib
 from gpu4pyscf.dft import rks
 lib.num_threads(8)
 
-atom =''' 
+atom ='''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-xc='LDA'
+xc='B3LYP'
 bas='def2-tzvpp'
 auxbasis='def2-tzvpp-jkfit'
 scf_tol = 1e-10
@@ -34,7 +34,7 @@ grids_level = 3
 
 mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
 
-mol.verbose = 1
+mol.verbose = 6
 mf_GPU = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
 mf_GPU.grids.level = grids_level
 mf_GPU.conv_tol = scf_tol
