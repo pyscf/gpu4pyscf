@@ -54,6 +54,7 @@ def timer(rec, msg, cpu0=None, wall0=None, gpu0=None):
         if rec.verbose >= TIMER_LEVEL:
             rec._e0.record()
             rec._e0.synchronize()
+
             flush(rec, '    CPU time for %50s %9.2f sec, wall time %9.2f sec, GPU time for %9.2f ms'
                   % (msg, rec._t0-cpu0, rec._w0-wall0, cupy.cuda.get_elapsed_time(gpu0,rec._e0)))
         return rec._t0, rec._w0, rec._e0

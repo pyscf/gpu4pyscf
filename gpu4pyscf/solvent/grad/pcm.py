@@ -26,6 +26,7 @@ from pyscf import gto, df
 from pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.solvent.pcm import PI, switch_h
 from gpu4pyscf.df import int3c2e
+
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 
@@ -191,6 +192,7 @@ def grad_kernel(pcmobj, dm):
     int2c2e_ip1 = mol._add_suffix('int2c2e_ip1')
     v_ng_ip1 = gto.mole.intor_cross(int2c2e_ip1, fakemol_nuc, fakemol)
     v_ng_ip1 = cupy.asarray(v_ng_ip1)
+
     dv_g = contract('g,xng->nx', q_sym, v_ng_ip1)
     de -= contract('nx,n->nx', dv_g, atom_charges)
 
@@ -198,8 +200,10 @@ def grad_kernel(pcmobj, dm):
     int2c2e_ip2 = mol._add_suffix('int2c2e_ip2')
     v_ng_ip2 = gto.mole.intor_cross(int2c2e_ip2, fakemol_nuc, fakemol)
     v_ng_ip2 = cupy.asarray(v_ng_ip2)
+
     dv_g = contract('n,xng->gx', atom_charges, v_ng_ip2)
     dv_g = contract('gx,g->gx', dv_g, q_sym)
+
     de -= cupy.asarray([cupy.sum(dv_g[p0:p1], axis=0) for p0,p1 in gridslice])
 
     ## --------------- response from stiffness matrices ----------------

@@ -124,7 +124,8 @@ def gen_surface(mol, ng=302, vdw_scale=1.2):
         riJ = cupy.sum((atom_grid[:,None,:] - atom_coords[None,:,:])**2, axis=2)**0.5
         diJ = (riJ - R_in_J) / R_sw_J
         diJ[:,ia] = 1.0
-        diJ[diJ<1e-12] = 0.0
+        diJ[diJ<1e-8] = 0.0
+
         fiJ = switch_h(diJ)
 
         w = unit_sphere[:,3] * 4.0 * PI
@@ -302,6 +303,7 @@ class PCM(ddcosmo.DDCOSMO):
         K = self._intermediates['K']
         R = self._intermediates['R']
         v_grids = self._get_v(dms)
+
         b = cupy.dot(R, v_grids.T)
         q = cupy.linalg.solve(K, b.T)
 
@@ -393,3 +395,5 @@ class PCM(ddcosmo.DDCOSMO):
         return vmat
 
 
+    def Hessian(self):
+        raise NotImplementedError('not implemented yet')

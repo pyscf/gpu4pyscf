@@ -24,6 +24,7 @@ O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
+
 mol = pyscf.M(atom=atom, basis='def2-tzvpp', verbose=0)
 
 mf = rks.RKS(mol, xc='HYB_GGA_XC_B3LYP').density_fit()
@@ -33,6 +34,7 @@ mf.grids.atom_grid = (99,590)
 mf.small_rho_cutoff = 1e-10
 mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
 mf.with_solvent.method = 'C-PCM'
+
 mf.with_solvent.eps = 78.3553
 mf.kernel()
 
@@ -52,3 +54,4 @@ n = hess.shape[0]
 print(hess[0,0])
 print(hess[1,0])
 print(hess[2,0])
+

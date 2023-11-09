@@ -35,10 +35,12 @@ mol = pyscf.M(
     basis=bas,
     max_memory=32000)
 # set verbose >= 6 for debugging timer
+
 mol.verbose = 0
 
 mf_df = rks.RKS(mol, xc=args.xc).density_fit(auxbasis=args.auxbasis)
 mf_df.verbose = 6
+
 if args.solvent:
     mf_df = mf_df.PCM()
     mf_df.lebedev_order = 29
