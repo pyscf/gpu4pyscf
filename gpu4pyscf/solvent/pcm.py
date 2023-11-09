@@ -394,6 +394,3 @@ class PCM(ddcosmo.DDCOSMO):
 
         return vmat
 
-
-    def Hessian(self):
-        raise NotImplementedError('not implemented yet')
