@@ -52,7 +52,7 @@ class KnownValues(unittest.TestCase):
         mf.with_solvent.lebedev_order = lebedev_order
         mf.conv_tol = 1e-12
         mf.grids.atom_grid = (99,590)
-        mf.verbose = 6
+        mf.verbose = 0
         mf.kernel()
 
         g = mf.nuc_grad_method()
@@ -88,6 +88,51 @@ class KnownValues(unittest.TestCase):
         print('Norm of diff', np.linalg.norm(h[ix,:,iy,:] - h_fd))
         assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
 
+    def test_hess_iefpcm(self):
+        pmol = mol.copy()
+        pmol.build()
+
+        mf = dft.rks.RKS(pmol, xc=xc).density_fit().PCM()
+        mf.with_solvent.method = 'IEF-PCM'
+        mf.with_solvent.eps = epsilon
+        mf.with_solvent.lebedev_order = lebedev_order
+        mf.conv_tol = 1e-12
+        mf.grids.atom_grid = (99,590)
+        mf.verbose = 0
+        mf.kernel()
+
+        g = mf.nuc_grad_method()
+        g.auxbasis_response = True
+        g.kernel()
+        g_scanner = g.as_scanner()
+
+        ix = 0
+        iy = 1
+        coords = pmol.atom_coords()
+        v = np.zeros_like(coords)
+        v[ix,iy] = eps
+        pmol.set_geom_(coords + v, unit='Bohr')
+        pmol.build()
+        _, g0 = g_scanner(pmol)
+
+        pmol.set_geom_(coords - v, unit='Bohr')
+        pmol.build()
+        _, g1 = g_scanner(pmol)
+
+        h_fd = (g0 - g1)/2.0/eps
+        pmol.set_geom_(coords, unit='Bohr')
+        pmol.build()
+
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+
+        print(f"analytical Hessian H({ix},{iy})")
+        print(h[ix,:,iy,:])
+        print(f"finite different Hessian H({ix},{iy})")
+        print(h_fd)
+        print('Norm of diff', np.linalg.norm(h[ix,:,iy,:] - h_fd))
+        assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
 if __name__ == "__main__":
     print("Full Tests for Hessian of PCMs")
     unittest.main()
