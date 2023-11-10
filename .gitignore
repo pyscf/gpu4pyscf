@@ -15,6 +15,7 @@ output/
 *.swo
 *.swp
 *~
+**/qchem_input.in
 #*
 dockerfiles/manylinux/wheelhouse
 gpu4pyscf/lib/bin
