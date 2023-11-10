@@ -140,7 +140,36 @@ def get_dD_dS(surface, dF, with_S=True, with_D=False):
 
     return dD, dS, dSii
 
-def grad_kernel(pcmobj, dm):
+def grad_nuc(pcmobj):
+    if not pcmobj._intermediates:
+        pcmobj.build()
+    mol = pcmobj.mol
+    q_sym        = pcmobj._intermediates['q_sym'].get()
+    gridslice    = pcmobj.surface['gslice_by_atom']
+    grid_coords  = pcmobj.surface['grid_coords'].get()
+    exponents    = pcmobj.surface['charge_exp'].get()
+
+    atom_coords = mol.atom_coords(unit='B')
+    atom_charges = numpy.asarray(mol.atom_charges(), dtype=numpy.float64)
+    fakemol_nuc = gto.fakemol_for_charges(atom_coords)
+    fakemol = gto.fakemol_for_charges(grid_coords, expnt=exponents**2)
+
+    int2c2e_ip1 = mol._add_suffix('int2c2e_ip1')
+
+    v_ng_ip1 = gto.mole.intor_cross(int2c2e_ip1, fakemol_nuc, fakemol)
+
+    dv_g = numpy.einsum('g,xng->nx', q_sym, v_ng_ip1)
+    de = -numpy.einsum('nx,n->nx', dv_g, atom_charges)
+
+    v_ng_ip1 = gto.mole.intor_cross(int2c2e_ip1, fakemol, fakemol_nuc)
+
+    dv_g = numpy.einsum('n,xgn->gx', atom_charges, v_ng_ip1)
+    dv_g = numpy.einsum('gx,g->gx', dv_g, q_sym)
+
+    de -= numpy.asarray([numpy.sum(dv_g[p0:p1], axis=0) for p0,p1 in gridslice])
+    return de
+
+def grad_elec(pcmobj, dm):
     '''
     dE = 0.5*v* d(K^-1 R) *v + q*dv
     v^T* d(K^-1 R)v = v^T*K^-1(dR - dK K^-1R)v = v^T K^-1(dR - dK q)
@@ -163,7 +192,6 @@ def grad_kernel(pcmobj, dm):
     vK_1 = cupy.linalg.solve(K.T, v_grids)
 
     # ----------------- potential response -----------------------
-    atom_coords = mol.atom_coords(unit='B')
 
     intopt = pcmobj.intopt
     intopt.clear()
@@ -184,6 +212,10 @@ def grad_kernel(pcmobj, dm):
     dvj= 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     de = dq + dvj
 
+    #de += grad_nuc(mol, pcmobj.surface, q_sym)
+
+    '''
+    atom_coords = mol.atom_coords(unit='B')
     atom_charges = cupy.asarray(mol.atom_charges(), dtype=numpy.float64)
     fakemol_nuc = gto.fakemol_for_charges(atom_coords)
     fakemol = gto.fakemol_for_charges(grid_coords.get(), expnt=exponents.get()**2)
@@ -205,7 +237,7 @@ def grad_kernel(pcmobj, dm):
     dv_g = contract('gx,g->gx', dv_g, q_sym)
 
     de -= cupy.asarray([cupy.sum(dv_g[p0:p1], axis=0) for p0,p1 in gridslice])
-
+    '''
     ## --------------- response from stiffness matrices ----------------
     gridslice = pcmobj.surface['gslice_by_atom']
     dF, dA = get_dF_dA(pcmobj.surface)
@@ -284,7 +316,9 @@ def make_grad_object(grad_method):
             if dm is None:
                 dm = self.base.make_rdm1(ao_repr=True)
 
-            self.de_solvent = grad_kernel(self.base.with_solvent, dm)
+            self.de_solvent = grad_elec(self.base.with_solvent, dm)
+            self.de_solvent+= grad_nuc(self.base.with_solvent)
+
             self.de_solute = grad_method_class.kernel(self, *args, **kwargs)
             self.de = self.de_solute + self.de_solvent
 

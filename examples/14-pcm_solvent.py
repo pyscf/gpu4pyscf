@@ -34,24 +34,24 @@ mf.grids.atom_grid = (99,590)
 mf.small_rho_cutoff = 1e-10
 mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
 mf.with_solvent.method = 'C-PCM'
-
 mf.with_solvent.eps = 78.3553
 mf.kernel()
 
-g = mf.nuc_grad_method()
-g.auxbasis_response = True
-f = g.kernel()
+gradobj = mf.nuc_grad_method()
+gradobj.auxbasis_response = True
+f = gradobj.kernel()
 
-h = mf.Hessian()
-hess = h.kernel()
+hessobj = mf.Hessian()
+hess = hessobj.kernel()
 
+print(hess[0,0])
+print(hess[1,0])
+print(hess[2,0])
+
+# mass weighted hessian
 mass = [15.99491, 1.00783, 1.00783]
 for i in range(3):
     for j in range(3):
         hess[i,j] = hess[i,j]/np.sqrt(mass[i]*mass[j])
-n = hess.shape[0]
-#hess = hess.transpose([0,2,1,3])#.reshape(3*n,3*n)
-print(hess[0,0])
-print(hess[1,0])
-print(hess[2,0])
+
 

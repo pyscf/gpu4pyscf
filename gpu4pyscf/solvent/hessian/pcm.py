@@ -25,14 +25,61 @@ from pyscf import lib
 from pyscf import gto, df
 from pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.solvent.pcm import PI, switch_h
-from gpu4pyscf.solvent.grad.pcm import grad_switch_h, get_dF_dA, get_dD_dS, grad_kernel
+from gpu4pyscf.solvent.grad.pcm import grad_switch_h, get_dF_dA, get_dD_dS, grad_elec, grad_nuc
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 
 libdft = lib.load_library('libdft')
 
-def hess_kernel(pcmobj, dm, verbose=None):
+def hess_nuc(pcmobj):
+    if not pcmobj._intermediates:
+        pcmobj.build()
+    mol = pcmobj.mol
+    q_sym        = pcmobj._intermediates['q_sym'].get()
+    gridslice    = pcmobj.surface['gslice_by_atom']
+    grid_coords  = pcmobj.surface['grid_coords'].get()
+    exponents    = pcmobj.surface['charge_exp'].get()
+
+    atom_coords = mol.atom_coords(unit='B')
+    atom_charges = numpy.asarray(mol.atom_charges(), dtype=numpy.float64)
+    fakemol_nuc = gto.fakemol_for_charges(atom_coords)
+    fakemol = gto.fakemol_for_charges(grid_coords, expnt=exponents**2)
+
+    # nuclei potential response
+    int2c2e_ip1ip2 = mol._add_suffix('int2c2e_ip1ip2')
+    v_ng_ip1ip2 = gto.mole.intor_cross(int2c2e_ip1ip2, fakemol_nuc, fakemol).reshape([3,3,mol.natm,-1])
+    charge3 = numpy.tile(atom_charges, [3,1])
+
+    q3 = numpy.tile(q_sym, [3,1])
+    dv_g = numpy.einsum('xn,xyng->ngxy', charge3, v_ng_ip1ip2)
+    dv_g = numpy.einsum('ngxy,yg->ngxy', dv_g, q3)
+
+    de = numpy.zeros([mol.natm, mol.natm, 3, 3])
+    for ia in range(mol.natm):
+        p0, p1 = gridslice[ia]
+        de_tmp = numpy.sum(dv_g[:,p0:p1], axis=1)
+        de[:,ia] -= de_tmp
+        de[ia,:] -= de_tmp.transpose([0,2,1])
+
+    int2c2e_ipip1 = mol._add_suffix('int2c2e_ipip1')
+    v_ng_ipip1 = gto.mole.intor_cross(int2c2e_ipip1, fakemol_nuc, fakemol).reshape([3,3,mol.natm,-1])
+
+    dv_g = numpy.einsum('g,xyng->nxy', q_sym, v_ng_ipip1)
+    for ia in range(mol.natm):
+        de[ia,ia] -= dv_g[ia] * atom_charges[ia]
+
+    v_ng_ipip1 = gto.mole.intor_cross(int2c2e_ipip1, fakemol, fakemol_nuc).reshape([3,3,-1,mol.natm])
+
+    dv_g = numpy.einsum('n,xygn->gxy', atom_charges, v_ng_ipip1)
+    dv_g = numpy.einsum('g,gxy->gxy', q_sym, dv_g)
+    for ia in range(mol.natm):
+        p0, p1 = gridslice[ia]
+        de[ia,ia] -= numpy.sum(dv_g[p0:p1], axis=0)
+
+    return de
+
+def hess_elec(pcmobj, dm, verbose=None):
     '''
     slow version with finite difference
     '''
@@ -43,7 +90,8 @@ def hess_kernel(pcmobj, dm, verbose=None):
     def pcm_grad_scanner(mol):
         pcmobj.reset(mol)
         e, v = pcmobj._get_vind(dm)
-        return grad_kernel(pcmobj, dm)
+        #return grad_elec(pcmobj, dm)
+        return grad_nuc(pcmobj) + grad_elec(pcmobj, dm)
 
     de = numpy.zeros([mol.natm, mol.natm, 3, 3])
     eps = 1e-3
@@ -60,6 +108,7 @@ def hess_kernel(pcmobj, dm, verbose=None):
             g1 = pcm_grad_scanner(mol)
             de[ia,:,ix] = (g0 - g1)/2.0/eps
     t1 = log.timer_debug1('solvent energy', *t1)
+
     return de
 
 def grad_qv(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
@@ -94,6 +143,7 @@ def grad_qv(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
             mol.set_geom_(coords - dv, unit='Bohr')
             mol.build()
             vmat1 = pcm_vmat_scanner(mol)
+
             grad_vmat = (vmat0 - vmat1)/2.0/eps
             grad_vmat = contract("ij,jq->iq", grad_vmat, mocc)
             grad_vmat = contract("iq,ip->pq", grad_vmat, mo_coeff)
@@ -117,9 +167,13 @@ def make_hess_object(hess_method):
             dm = kwargs.pop('dm', None)
             if dm is None:
                 dm = self.base.make_rdm1(ao_repr=True)
-            self.de_solvent = hess_kernel(self.base.with_solvent, dm, verbose=self.verbose)
+            is_equilibrium = self.base.with_solvent.equilibrium_solvation
+            self.base.with_solvent.equilibrium_solvation = True
+            self.de_solvent = hess_elec(self.base.with_solvent, dm, verbose=self.verbose)
+            #self.de_solvent+= hess_nuc(self.base.with_solvent)
             self.de_solute = hess_method_class.kernel(self, *args, **kwargs)
             self.de = self.de_solute + self.de_solvent
+            self.base.with_solvent.equilibrium_solvation = is_equilibrium
             return self.de
 
         def make_h1(self, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):

@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import cupy
 from pyscf import lib
 from pyscf.lib import logger
 from pyscf.solvent._attach_solvent import _Solvation
@@ -107,7 +108,6 @@ def _for_scf(mf, solvent_obj, dm=None):
             is_uhf = isinstance(self, scf.uhf.UHF)
             # singlet=None is orbital hessian or CPHF type response function
             singlet = kwargs.get('singlet', True)
-            
             singlet = singlet or singlet is None
             def vind_with_solvent(dm1):
                 v = vind(dm1)

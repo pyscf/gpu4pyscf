@@ -132,7 +132,7 @@ def gen_surface(mol, ng=302, vdw_scale=1.2):
         swf = cupy.prod(fiJ, axis=1)
         idx = w*swf > 1e-16
 
-        p0, p1 = p1, p1+sum(idx)
+        p0, p1 = p1, p1+sum(idx).get()
         gslice_by_atom.append([p0,p1])
         grid_coords.append(atom_grid[idx,:3])
         weights.append(w[idx])
@@ -302,24 +302,26 @@ class PCM(ddcosmo.DDCOSMO):
 
         K = self._intermediates['K']
         R = self._intermediates['R']
-        v_grids = self._get_v(dms)
+        v_grids_e = self._get_v(dms)
+        v_grids = self.v_grids_n - v_grids_e
 
         b = cupy.dot(R, v_grids.T)
-        q = cupy.linalg.solve(K, b.T)
+        q = cupy.linalg.solve(K, b).T
 
-        vK_1 = cupy.linalg.solve(K.T, v_grids)
-        q_sym = (q + cupy.dot(R.T, vK_1))/2.0
+        vK_1 = cupy.linalg.solve(K.T, v_grids.T)
+        qt = cupy.dot(R.T, vK_1).T
+        q_sym = (q + qt)/2.0
 
         vmat = self._get_vmat(q_sym)
-        epcm = 0.5 * cupy.dot(q_sym, v_grids)
+        epcm = 0.5 * cupy.dot(v_grids[0], q_sym[0])
 
         self._intermediates['K'] = K
         self._intermediates['R'] = R
-        self._intermediates['q'] = q
-        self._intermediates['q_sym'] = q_sym
-        self._intermediates['v_grids'] = v_grids
+        self._intermediates['q'] = q[0]
+        self._intermediates['q_sym'] = q_sym[0]
+        self._intermediates['v_grids'] = v_grids[0]
 
-        return epcm, vmat
+        return epcm, vmat[0]
 
     def _get_v(self, dms):
         '''
@@ -327,20 +329,18 @@ class PCM(ddcosmo.DDCOSMO):
         '''
         nset = dms.shape[0]
         ngrids = self.surface['grid_coords'].shape[0]
-        v_grids = cupy.empty([nset, ngrids])
+        v_grids_e = cupy.empty([nset, ngrids])
         for i in range(nset):
-            v_grids_e = 2.0*int3c2e.get_j_int3c2e_pass1(self.intopt, dms[0])
-            v_grids[i] = self.v_grids_n - v_grids_e
-        return v_grids
+            v_grids_e[i] = 2.0*int3c2e.get_j_int3c2e_pass1(self.intopt, dms[i])
+        return v_grids_e
 
     def _get_vmat(self, q):
+        assert q.ndim == 2
         nset = q.shape[0]
         nao = self.mol.nao
         vmat = cupy.empty([nset, nao, nao])
         for i in range(nset):
             vmat[i] = -int3c2e.get_j_int3c2e_pass2(self.intopt, q[i])
-        if nset == 1:
-            return vmat[0]
         return vmat
 
     def nuc_grad_method(self, grad_method):
@@ -377,20 +377,16 @@ class PCM(ddcosmo.DDCOSMO):
 
         K = self._intermediates['K']
         R = self._intermediates['R']
-        v_grids = self._get_v(dms)
+        v_grids = -self._get_v(dms)
+
         b = cupy.dot(R, v_grids.T)
-        q = cupy.linalg.solve(K, b.T)
+        q = cupy.linalg.solve(K, b).T
 
         vK_1 = cupy.linalg.solve(K.T, v_grids.T)
-        q_sym = (q + cupy.dot(R.T, vK_1))/2.0
+        qt = cupy.dot(R.T, vK_1).T
+        q_sym = (q + qt)/2.0
 
         vmat = self._get_vmat(q_sym)
-
-        self._intermediates['K'] = K
-        self._intermediates['R'] = R
-        self._intermediates['q'] = q
-        self._intermediates['q_sym'] = q_sym
-        self._intermediates['v_grids'] = v_grids
 
         return vmat
 
