@@ -49,11 +49,8 @@ def hess_nuc(pcmobj):
     # nuclei potential response
     int2c2e_ip1ip2 = mol._add_suffix('int2c2e_ip1ip2')
     v_ng_ip1ip2 = gto.mole.intor_cross(int2c2e_ip1ip2, fakemol_nuc, fakemol).reshape([3,3,mol.natm,-1])
-    charge3 = numpy.tile(atom_charges, [3,1])
-
-    q3 = numpy.tile(q_sym, [3,1])
-    dv_g = numpy.einsum('xn,xyng->ngxy', charge3, v_ng_ip1ip2)
-    dv_g = numpy.einsum('ngxy,yg->ngxy', dv_g, q3)
+    dv_g = numpy.einsum('n,xyng->ngxy', atom_charges, v_ng_ip1ip2)
+    dv_g = numpy.einsum('ngxy,g->ngxy', dv_g, q_sym)
 
     de = numpy.zeros([mol.natm, mol.natm, 3, 3])
     for ia in range(mol.natm):
@@ -64,13 +61,10 @@ def hess_nuc(pcmobj):
 
     int2c2e_ipip1 = mol._add_suffix('int2c2e_ipip1')
     v_ng_ipip1 = gto.mole.intor_cross(int2c2e_ipip1, fakemol_nuc, fakemol).reshape([3,3,mol.natm,-1])
-
-    dv_g = numpy.einsum('g,xyng->nxy', q_sym, v_ng_ipip1)
     for ia in range(mol.natm):
         de[ia,ia] -= dv_g[ia] * atom_charges[ia]
 
     v_ng_ipip1 = gto.mole.intor_cross(int2c2e_ipip1, fakemol, fakemol_nuc).reshape([3,3,-1,mol.natm])
-
     dv_g = numpy.einsum('n,xygn->gxy', atom_charges, v_ng_ipip1)
     dv_g = numpy.einsum('g,gxy->gxy', q_sym, dv_g)
     for ia in range(mol.natm):
@@ -82,11 +76,14 @@ def hess_nuc(pcmobj):
 def hess_elec(pcmobj, dm, verbose=None):
     '''
     slow version with finite difference
+    TODO: use analytical hess_nuc
     '''
     log = logger.new_logger(pcmobj, verbose)
     t1 = log.init_timer()
-    mol = pcmobj.mol.copy()
+    pmol = pcmobj.mol.copy()
+    mol = pmol
     coords = mol.atom_coords(unit='Bohr')
+
     def pcm_grad_scanner(mol):
         pcmobj.reset(mol)
         e, v = pcmobj._get_vind(dm)
@@ -108,7 +105,6 @@ def hess_elec(pcmobj, dm, verbose=None):
             g1 = pcm_grad_scanner(mol)
             de[ia,:,ix] = (g0 - g1)/2.0/eps
     t1 = log.timer_debug1('solvent energy', *t1)
-
     return de
 
 def grad_qv(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):

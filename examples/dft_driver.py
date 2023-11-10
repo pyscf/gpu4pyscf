@@ -25,7 +25,7 @@ parser.add_argument("--input",    type=str,  default='benzene/coord')
 parser.add_argument("--basis",    type=str,  default='def2-tzvpp')
 parser.add_argument("--auxbasis", type=str,  default='def2-tzvpp-jkfit')
 parser.add_argument("--xc",       type=str,  default='B3LYP')
-parser.add_argument("--solvent",  type=bool, default=False)
+parser.add_argument("--solvent",  type=str, default='')
 args = parser.parse_args()
 
 start_time = time.time()
@@ -44,11 +44,11 @@ mf_df.verbose = 6
 if args.solvent:
     mf_df = mf_df.PCM()
     mf_df.lebedev_order = 29
-    mf_df.method = 'IEF-PCM'
+    mf_df.method = args.solvent
 mf_df.grids.atom_grid = (99,590)
 mf_df.direct_scf_tol = 1e-14
 mf_df.direct_scf = 1e-14
-mf_df.kernel()
+e_tot = mf_df.kernel()
 scf_time = time.time() - start_time
 print(f'compute time for energy: {scf_time:.3f} s')
 
@@ -65,3 +65,6 @@ h.auxbasis_response = 2
 h_dft = h.kernel()
 hess_time = time.time() - start_time
 print(f'compute time for hessian: {hess_time:.3f} s')
+
+import numpy
+numpy.savez('gpu4pyscf_out.npz', e_tot=e_tot, f=f, h_dft=h_dft)
