@@ -22,13 +22,13 @@ import numpy
 import cupy
 import pyscf
 from pyscf import lib, gto
-from pyscf.lib import logger
 from pyscf.dft import radi
 from gpu4pyscf.lib.utils import patch_cpu_kernel
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.dft import numint, xc_deriv, rks
 from gpu4pyscf.dft.numint import _GDFTOpt, AO_THRESHOLD
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, add_sparse, tag_array, load_library
+from gpu4pyscf.lib import logger
 from pyscf import __config__
 
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 128*128)

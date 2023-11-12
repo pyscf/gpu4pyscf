@@ -26,8 +26,9 @@ import cupy
 from pyscf import lib
 from gpu4pyscf.lib.cupy_helper import krylov
 from gpu4pyscf.lib import logger
+
 def solve(fvind, mo_energy, mo_occ, h1, s1=None,
-          max_cycle=20, tol=1e-9, hermi=False, verbose=logger.WARN):
+          max_cycle=50, tol=1e-9, hermi=False, verbose=logger.WARN):
     '''
     Args:
         fvind : function
@@ -36,7 +37,7 @@ def solve(fvind, mo_energy, mo_occ, h1, s1=None,
         hermi : boolean
             Whether the matrix defined by fvind is Hermitian or not.
     '''
-    
+
     if s1 is None:
         return solve_nos1(fvind, mo_energy, mo_occ, h1,
                           max_cycle, tol, hermi, verbose)
@@ -69,7 +70,7 @@ def solve_nos1(fvind, mo_energy, mo_occ, h1,
 
 # h1 shape is (:,nocc+nvir,nocc)
 def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
-                 max_cycle=20, tol=1e-9, hermi=False, verbose=logger.WARN):
+                 max_cycle=50, tol=1e-9, hermi=False, verbose=logger.WARN):
     '''For field dependent basis. First order overlap matrix is non-zero.
     The first order orbitals are set to
     C^1_{ij} = -1/2 S1
@@ -96,7 +97,7 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
     s1 = s1.reshape(-1,nmo,nocc)
     hs = mo1base = h1.reshape(-1,nmo,nocc) - s1*e_i
     mo_e1 = hs[:,occidx,:].copy()
-    
+
     mo1base[:,viridx] *= -e_ai
     mo1base[:,occidx] = -s1[:,occidx] * .5
 

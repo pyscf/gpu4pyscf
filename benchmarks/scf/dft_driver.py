@@ -15,7 +15,10 @@ parser.add_argument('--xc',           type=str, default='B3LYP')
 parser.add_argument('--device',       type=str, default='GPU')
 parser.add_argument('--input_path',   type=str, default='./')
 parser.add_argument('--output_path',  type=str, default='./')
+parser.add_argument('--with_gradient', type=bool, default=False)
 parser.add_argument('--with_hessian', type=bool, default=False)
+parser.add_argument("--solvent",  type=bool, default=False)
+
 args = parser.parse_args()
 bas = args.basis
 verbose = args.verbose
@@ -39,23 +42,29 @@ else:
     output_file = 'PySCF-16-cores-CPU.csv'
 output_file = args.output_path + output_file
 
-def run_dft(filename):  
+def run_dft(filename):
     mol = pyscf.M(atom=filename, basis=bas, max_memory=64000)
-    start_time = time.time()  
+    start_time = time.time()
     # set verbose >= 6 for debugging timer
     mol.verbose = 4 #verbose
     mol.max_memory = 40000
     mf = rks.RKS(mol, xc=xc)
+    if args.solvent:
+        mf = mf.PCM()
+        mf.with_solvent.lebedev_order = 29
+        mf.with_solvent.method = 'IEF-PCM'
+        mf.with_solvent.eps = 78.3553
     mf.grids.atom_grid = (99,590)
     mf.chkfile = None
     prep_time = time.time() - start_time
     mf.conv_tol = 1e-9
     mf.nlcgrids.atom_grid = (50,194)
     mf.max_cycle = 100
+    print(mf.scf_summary)
     try:
         e_dft = mf.kernel()
         scf_time = time.time() - start_time
-    except:
+    except Exception:
         scf_time = -1
         e_dft = 0
 
@@ -68,13 +77,13 @@ def run_dft(filename):
         g.max_memory = 40000
         f = g.kernel()
         grad_time = time.time() - start_time
-    except:
+    except Exception:
         grad_time = -1
 
     # calculate hessian
     if args.device == 'GPU':
         cupy.get_default_memory_pool().free_all_blocks()
-    
+
     hess_time = -1
     if args.with_hessian:
         try:
@@ -83,7 +92,7 @@ def run_dft(filename):
             h.max_memory = 40000
             hess = h.kernel()
             hess_time = time.time() - start_time
-        except:
+        except Exception:
             hess_time = -1
 
     return mol.natm, mol.nao, scf_time, grad_time, hess_time, e_dft

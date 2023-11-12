@@ -22,13 +22,13 @@ import numpy
 import cupy
 import cupyx.scipy as scipy
 from pyscf import lib
-from pyscf.lib import logger
 from pyscf import gto, df
 from pyscf.dft import gen_grid
 from pyscf.data import radii
 from pyscf.solvent import ddcosmo
 from gpu4pyscf.solvent import _attach_solvent
 from gpu4pyscf.df import int3c2e
+from gpu4pyscf.lib import logger
 
 libdft = lib.load_library('libdft')
 
@@ -124,14 +124,15 @@ def gen_surface(mol, ng=302, vdw_scale=1.2):
         riJ = cupy.sum((atom_grid[:,None,:] - atom_coords[None,:,:])**2, axis=2)**0.5
         diJ = (riJ - R_in_J) / R_sw_J
         diJ[:,ia] = 1.0
-        diJ[diJ<1e-8] = 0.0
+        diJ[diJ<1e-12] = 0.0
+
         fiJ = switch_h(diJ)
 
         w = unit_sphere[:,3] * 4.0 * PI
         swf = cupy.prod(fiJ, axis=1)
         idx = w*swf > 1e-16
 
-        p0, p1 = p1, p1+sum(idx)
+        p0, p1 = p1, p1+sum(idx).get()
         gslice_by_atom.append([p0,p1])
         grid_coords.append(atom_grid[idx,:3])
         weights.append(w[idx])
@@ -301,34 +302,46 @@ class PCM(ddcosmo.DDCOSMO):
 
         K = self._intermediates['K']
         R = self._intermediates['R']
-        v_grids = self._get_v(dms)
-        b = cupy.dot(R, v_grids)
-        q = cupy.linalg.solve(K, b)
+        v_grids_e = self._get_v(dms)
+        v_grids = self.v_grids_n - v_grids_e
 
-        vK_1 = cupy.linalg.solve(K.T, v_grids)
-        q_sym = (q + cupy.dot(R.T, vK_1))/2.0
+        b = cupy.dot(R, v_grids.T)
+        q = cupy.linalg.solve(K, b).T
+
+        vK_1 = cupy.linalg.solve(K.T, v_grids.T)
+        qt = cupy.dot(R.T, vK_1).T
+        q_sym = (q + qt)/2.0
 
         vmat = self._get_vmat(q_sym)
-        epcm = 0.5 * cupy.dot(q_sym, v_grids)
+        epcm = 0.5 * cupy.dot(v_grids[0], q_sym[0])
 
         self._intermediates['K'] = K
         self._intermediates['R'] = R
-        self._intermediates['q'] = q
-        self._intermediates['q_sym'] = q_sym
-        self._intermediates['v_grids'] = v_grids
+        self._intermediates['q'] = q[0]
+        self._intermediates['q_sym'] = q_sym[0]
+        self._intermediates['v_grids'] = v_grids[0]
 
-        return epcm, vmat
+        return epcm, vmat[0]
 
     def _get_v(self, dms):
         '''
         return electrostatic potential on surface
         '''
-        v_grids_e = 2.0*int3c2e.get_j_int3c2e_pass1(self.intopt, dms[0])
-        v_grids = self.v_grids_n - v_grids_e
-        return v_grids
+        nset = dms.shape[0]
+        ngrids = self.surface['grid_coords'].shape[0]
+        v_grids_e = cupy.empty([nset, ngrids])
+        for i in range(nset):
+            v_grids_e[i] = 2.0*int3c2e.get_j_int3c2e_pass1(self.intopt, dms[i])
+        return v_grids_e
 
     def _get_vmat(self, q):
-        return -int3c2e.get_j_int3c2e_pass2(self.intopt, q)
+        assert q.ndim == 2
+        nset = q.shape[0]
+        nao = self.mol.nao
+        vmat = cupy.empty([nset, nao, nao])
+        for i in range(nset):
+            vmat[i] = -int3c2e.get_j_int3c2e_pass2(self.intopt, q[i])
+        return vmat
 
     def nuc_grad_method(self, grad_method):
         from gpu4pyscf.solvent.grad import pcm as pcm_grad
@@ -340,5 +353,41 @@ class PCM(ddcosmo.DDCOSMO):
         else:
             raise RuntimeError('Only SCF gradient is supported')
 
-    def Hessian(self):
-        raise NotImplementedError('not implemented yet')
+    def Hessian(self, hess_method):
+        from gpu4pyscf.solvent.hessian import pcm as pcm_hess
+        if self.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
+        from gpu4pyscf import scf
+        if isinstance(hess_method.base, scf.hf.RHF):
+            return pcm_hess.make_hess_object(hess_method)
+        else:
+            raise RuntimeError('Only SCF gradient is supported')
+
+    def reset(self, mol=None):
+        self.surface = None
+        self.intopt = None
+        super().reset(mol)
+        return self
+
+    def _B_dot_x(self, dms):
+        if not self._intermediates:
+            self.build()
+
+        nao = dms.shape[-1]
+        dms = dms.reshape(-1,nao,nao)
+
+        K = self._intermediates['K']
+        R = self._intermediates['R']
+        v_grids = -self._get_v(dms)
+
+        b = cupy.dot(R, v_grids.T)
+        q = cupy.linalg.solve(K, b).T
+
+        vK_1 = cupy.linalg.solve(K.T, v_grids.T)
+        qt = cupy.dot(R.T, vK_1).T
+        q_sym = (q + qt)/2.0
+
+        vmat = self._get_vmat(q_sym)
+
+        return vmat
+

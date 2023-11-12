@@ -8,6 +8,7 @@ parser.add_argument('--basis',       type=str, default='def2-tzvpp')
 parser.add_argument('--xc',          type=str, default='B3LYP')
 parser.add_argument('--input_path',  type=str, default='./')
 parser.add_argument('--output_path', type=str, default='./')
+
 args = parser.parse_args()
 bas = args.basis
 xc = args.xc
@@ -43,9 +44,9 @@ def run_dft(filename):
         input.write("THRESH        14\n")
         input.write("BASIS_LIN_DEP_THRESH 12\n")
         input.write("$end\n")
-    
+
     filename = args.xc + '_' + args.basis
-    subprocess.run(['qchem', '-np', '32', 'qchem_input.in', filename])
+    subprocess.run(['qchem', '-save', '-np', '32', 'qchem_input.in', filename, args.output_path+'/qcarchive_'+filename])
     with open(filename, 'w') as output_file:
         lines = output_file.readlines()
         for line in lines:

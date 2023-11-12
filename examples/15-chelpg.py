@@ -17,7 +17,6 @@ from pyscf import gto
 from gpu4pyscf.dft import rks
 from gpu4pyscf.qmmm import chelpg
 
-    
 mol = gto.Mole()
 mol.verbose = 0
 mol.output = None
@@ -30,7 +29,7 @@ mol.basis = '631g'
 mol.unit = 'B'
 mol.build()
 mol.verbose = 6
-    
+
 xc = 'b3lyp'
 mf = rks.RKS(mol, xc=xc)
 mf.grids.level = 5

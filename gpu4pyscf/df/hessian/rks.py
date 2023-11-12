@@ -33,6 +33,7 @@ from pyscf import lib
 from gpu4pyscf.hessian import rks as rks_hess
 from gpu4pyscf.df.hessian import rhf as df_rhf_hess
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import contract
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -74,10 +75,10 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     for i0, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = aoslices[ia]
         veff = vxc[ia]
-        de2[i0,i0] += cupy.einsum('xypq,pq->xy', veff_diag[:,:,p0:p1], dm0[p0:p1])*2
+        de2[i0,i0] += contract('xypq,pq->xy', veff_diag[:,:,p0:p1], dm0[p0:p1])*2
         for j0, ja in enumerate(atmlst[:i0+1]):
             q0, q1 = aoslices[ja][2:]
-            de2[i0,j0] += cupy.einsum('xypq,pq->xy', veff[:,:,q0:q1], dm0[q0:q1])*2
+            de2[i0,j0] += contract('xypq,pq->xy', veff[:,:,q0:q1], dm0[q0:q1])*2
         for j0 in range(i0):
             de2[j0,i0] = de2[i0,j0].T
     log.timer('RKS partial hessian', *time0)
