@@ -28,7 +28,7 @@ from gpu4pyscf.lib.cupy_helper import krylov
 from gpu4pyscf.lib import logger
 
 def solve(fvind, mo_energy, mo_occ, h1, s1=None,
-          max_cycle=20, tol=1e-9, hermi=False, verbose=logger.WARN):
+          max_cycle=50, tol=1e-9, hermi=False, verbose=logger.WARN):
     '''
     Args:
         fvind : function
@@ -70,7 +70,7 @@ def solve_nos1(fvind, mo_energy, mo_occ, h1,
 
 # h1 shape is (:,nocc+nvir,nocc)
 def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
-                 max_cycle=20, tol=1e-9, hermi=False, verbose=logger.WARN):
+                 max_cycle=50, tol=1e-9, hermi=False, verbose=logger.WARN):
     '''For field dependent basis. First order overlap matrix is non-zero.
     The first order orbitals are set to
     C^1_{ij} = -1/2 S1

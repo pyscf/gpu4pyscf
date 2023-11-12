@@ -18,7 +18,6 @@ import time
 import argparse
 from pyscf import lib
 from gpu4pyscf.dft import rks
-lib.num_threads(8)
 
 parser = argparse.ArgumentParser(description='Run DFT with GPU4PySCF for molecules')
 parser.add_argument("--input",    type=str,  default='benzene/coord')
@@ -43,11 +42,14 @@ mf_df.verbose = 6
 
 if args.solvent:
     mf_df = mf_df.PCM()
-    mf_df.lebedev_order = 29
-    mf_df.method = args.solvent
+    mf_df.with_solvent.lebedev_order = 29
+    mf_df.with_solvent.method = args.solvent
+    mf_df.with_solvent.eps = 78.3553
+
 mf_df.grids.atom_grid = (99,590)
 mf_df.direct_scf_tol = 1e-14
 mf_df.direct_scf = 1e-14
+mf_df.conv_tol = 1e-12
 e_tot = mf_df.kernel()
 scf_time = time.time() - start_time
 print(f'compute time for energy: {scf_time:.3f} s')

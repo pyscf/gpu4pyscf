@@ -44,10 +44,6 @@ f = gradobj.kernel()
 hessobj = mf.Hessian()
 hess = hessobj.kernel()
 
-print(hess[0,0])
-print(hess[1,0])
-print(hess[2,0])
-
 # mass weighted hessian
 mass = [15.99491, 1.00783, 1.00783]
 for i in range(3):

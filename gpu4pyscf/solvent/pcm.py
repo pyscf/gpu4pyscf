@@ -124,7 +124,7 @@ def gen_surface(mol, ng=302, vdw_scale=1.2):
         riJ = cupy.sum((atom_grid[:,None,:] - atom_coords[None,:,:])**2, axis=2)**0.5
         diJ = (riJ - R_in_J) / R_sw_J
         diJ[:,ia] = 1.0
-        diJ[diJ<1e-8] = 0.0
+        diJ[diJ<1e-12] = 0.0
 
         fiJ = switch_h(diJ)
 
@@ -365,6 +365,7 @@ class PCM(ddcosmo.DDCOSMO):
 
     def reset(self, mol=None):
         self.surface = None
+        self.intopt = None
         super().reset(mol)
         return self
 

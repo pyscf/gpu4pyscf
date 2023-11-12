@@ -57,10 +57,23 @@ def hess_nuc(pcmobj):
         p0, p1 = gridslice[ia]
         de_tmp = numpy.sum(dv_g[:,p0:p1], axis=1)
         de[:,ia] -= de_tmp
-        de[ia,:] -= de_tmp.transpose([0,2,1])
+        #de[ia,:] -= de_tmp.transpose([0,2,1])
+
+
+    int2c2e_ip1ip2 = mol._add_suffix('int2c2e_ip1ip2')
+    v_ng_ip1ip2 = gto.mole.intor_cross(int2c2e_ip1ip2, fakemol, fakemol_nuc).reshape([3,3,-1,mol.natm])
+    dv_g = numpy.einsum('n,xygn->gnxy', atom_charges, v_ng_ip1ip2)
+    dv_g = numpy.einsum('gnxy,g->gnxy', dv_g, q_sym)
+
+    for ia in range(mol.natm):
+        p0, p1 = gridslice[ia]
+        de_tmp = numpy.sum(dv_g[p0:p1], axis=0)
+        de[ia,:] -= de_tmp
+        #de[ia,:] -= de_tmp.transpose([0,2,1])
 
     int2c2e_ipip1 = mol._add_suffix('int2c2e_ipip1')
     v_ng_ipip1 = gto.mole.intor_cross(int2c2e_ipip1, fakemol_nuc, fakemol).reshape([3,3,mol.natm,-1])
+    dv_g = numpy.einsum('g,xyng->nxy', q_sym, v_ng_ipip1)
     for ia in range(mol.natm):
         de[ia,ia] -= dv_g[ia] * atom_charges[ia]
 
@@ -81,7 +94,7 @@ def hess_elec(pcmobj, dm, verbose=None):
     log = logger.new_logger(pcmobj, verbose)
     t1 = log.init_timer()
     pmol = pcmobj.mol.copy()
-    mol = pmol
+    mol = pmol.copy()
     coords = mol.atom_coords(unit='Bohr')
 
     def pcm_grad_scanner(mol):
@@ -105,15 +118,18 @@ def hess_elec(pcmobj, dm, verbose=None):
             g1 = pcm_grad_scanner(mol)
             de[ia,:,ix] = (g0 - g1)/2.0/eps
     t1 = log.timer_debug1('solvent energy', *t1)
+    pcmobj.reset(pmol)
     return de
 
 def grad_qv(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
     '''
+    dv_solv / da
     slow version with finite difference
     '''
     log = logger.new_logger(pcmobj, verbose)
     t1 = log.init_timer()
-    mol = pcmobj.mol.copy()
+    pmol = pcmobj.mol.copy()
+    mol = pmol.copy()
     if atmlst is None:
         atmlst = range(mol.natm)
     nao, nmo = mo_coeff.shape
@@ -127,7 +143,7 @@ def grad_qv(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
         return v
 
     vmat = cupy.zeros([len(atmlst), 3, nao, nocc])
-    eps = 1e-4
+    eps = 1e-3
     for i0, ia in enumerate(atmlst):
         for ix in range(3):
             dv = numpy.zeros_like(coords)
@@ -145,6 +161,7 @@ def grad_qv(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
             grad_vmat = contract("iq,ip->pq", grad_vmat, mo_coeff)
             vmat[i0,ix] = grad_vmat
     t1 = log.timer_debug1('computing solvent grad veff', *t1)
+    pcmobj.reset(pmol)
     return vmat
 
 def make_hess_object(hess_method):

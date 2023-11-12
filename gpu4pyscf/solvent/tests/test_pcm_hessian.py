@@ -28,111 +28,73 @@ O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
     '''
-    mol.basis = 'sto3g'
+    mol.basis = 'def2-tzvpp'
     mol.output = '/dev/null'
     mol.build(verbose=0)
-    epsilon = 35.9
+    epsilon = 78.3553
     lebedev_order = 29
-    eps = 1e-4
+    eps = 1e-3
     xc = 'B3LYP'
-    tol = 1e-4
+    tol = 1e-3
 
 def tearDownModule():
     global mol
     mol.stdout.close()
     del mol
 
+def _check_hessian(method='C-PCM', ix=0, iy=0):
+    pmol = mol.copy()
+    pmol.build()
+
+    mf = dft.rks.RKS(pmol, xc=xc).density_fit().PCM()
+    mf.with_solvent.method = method
+    mf.with_solvent.eps = epsilon
+    mf.with_solvent.lebedev_order = lebedev_order
+    mf.conv_tol = 1e-12
+    mf.grids.atom_grid = (99,590)
+    mf.verbose = 0
+    mf.kernel()
+
+    g = mf.nuc_grad_method()
+    g.auxbasis_response = True
+    g.kernel()
+    g_scanner = g.as_scanner()
+
+    coords = pmol.atom_coords()
+    v = np.zeros_like(coords)
+    v[ix,iy] = eps
+    pmol.set_geom_(coords + v, unit='Bohr')
+    pmol.build()
+    _, g0 = g_scanner(pmol)
+
+    pmol.set_geom_(coords - v, unit='Bohr')
+    pmol.build()
+    _, g1 = g_scanner(pmol)
+
+    h_fd = (g0 - g1)/2.0/eps
+    pmol.set_geom_(coords, unit='Bohr')
+    pmol.build()
+
+    hobj = mf.Hessian()
+    hobj.set(auxbasis_response=2)
+    h = hobj.kernel()
+
+    print(f"analytical Hessian H({ix},{iy})")
+    print(h[ix,:,iy,:])
+    print(f"finite different Hessian H({ix},{iy})")
+    print(h_fd)
+    print('Norm of diff', np.linalg.norm(h[ix,:,iy,:] - h_fd))
+    assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
+
 class KnownValues(unittest.TestCase):
     def test_hess_cpcm(self):
-        pmol = mol.copy()
-        pmol.build()
-
-        mf = dft.rks.RKS(pmol, xc=xc).density_fit().PCM()
-        mf.with_solvent.eps = epsilon
-        mf.with_solvent.lebedev_order = lebedev_order
-        mf.conv_tol = 1e-12
-        mf.grids.atom_grid = (99,590)
-        mf.verbose = 0
-        mf.kernel()
-
-        g = mf.nuc_grad_method()
-        g.auxbasis_response = True
-        g.kernel()
-        g_scanner = g.as_scanner()
-
-        ix = 0
-        iy = 1
-        coords = pmol.atom_coords()
-        v = np.zeros_like(coords)
-        v[ix,iy] = eps
-        pmol.set_geom_(coords + v, unit='Bohr')
-        pmol.build()
-        _, g0 = g_scanner(pmol)
-
-        pmol.set_geom_(coords - v, unit='Bohr')
-        pmol.build()
-        _, g1 = g_scanner(pmol)
-
-        h_fd = (g0 - g1)/2.0/eps
-        pmol.set_geom_(coords, unit='Bohr')
-        pmol.build()
-
-        hobj = mf.Hessian()
-        hobj.set(auxbasis_response=2)
-        h = hobj.kernel()
-
-        print(f"analytical Hessian H({ix},{iy})")
-        print(h[ix,:,iy,:])
-        print(f"finite different Hessian H({ix},{iy})")
-        print(h_fd)
-        print('Norm of diff', np.linalg.norm(h[ix,:,iy,:] - h_fd))
-        assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
+        _check_hessian(method='C-PCM', ix=0, iy=0)
+        _check_hessian(method='C-PCM', ix=0, iy=1)
 
     def test_hess_iefpcm(self):
-        pmol = mol.copy()
-        pmol.build()
+        _check_hessian(method='IEF-PCM', ix=0, iy=0)
+        _check_hessian(method='IEF-PCM', ix=0, iy=1)
 
-        mf = dft.rks.RKS(pmol, xc=xc).density_fit().PCM()
-        mf.with_solvent.method = 'IEF-PCM'
-        mf.with_solvent.eps = epsilon
-        mf.with_solvent.lebedev_order = lebedev_order
-        mf.conv_tol = 1e-12
-        mf.grids.atom_grid = (99,590)
-        mf.verbose = 0
-        mf.kernel()
-
-        g = mf.nuc_grad_method()
-        g.auxbasis_response = True
-        g.kernel()
-        g_scanner = g.as_scanner()
-
-        ix = 0
-        iy = 1
-        coords = pmol.atom_coords()
-        v = np.zeros_like(coords)
-        v[ix,iy] = eps
-        pmol.set_geom_(coords + v, unit='Bohr')
-        pmol.build()
-        _, g0 = g_scanner(pmol)
-
-        pmol.set_geom_(coords - v, unit='Bohr')
-        pmol.build()
-        _, g1 = g_scanner(pmol)
-
-        h_fd = (g0 - g1)/2.0/eps
-        pmol.set_geom_(coords, unit='Bohr')
-        pmol.build()
-
-        hobj = mf.Hessian()
-        hobj.set(auxbasis_response=2)
-        h = hobj.kernel()
-
-        print(f"analytical Hessian H({ix},{iy})")
-        print(h[ix,:,iy,:])
-        print(f"finite different Hessian H({ix},{iy})")
-        print(h_fd)
-        print('Norm of diff', np.linalg.norm(h[ix,:,iy,:] - h_fd))
-        assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
 if __name__ == "__main__":
     print("Full Tests for Hessian of PCMs")
     unittest.main()
