@@ -22,11 +22,13 @@ import numpy
 import cupy
 from cupyx import scipy
 from pyscf import lib
-from pyscf.lib import logger
 from pyscf import gto, df
 from pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.solvent.pcm import PI, switch_h
 from gpu4pyscf.df import int3c2e
+
+from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib import logger
 
 libdft = lib.load_library('libdft')
 
@@ -69,9 +71,9 @@ def get_dF_dA(surface):
         riJ = cupy.linalg.norm(ri_rJ, axis=-1)
         diJ = (riJ - R_in_J) / R_sw_J
         diJ[:,ia] = 1.0
-        diJ[diJ < 1e-8] = 0.0
+        diJ[diJ < 1e-12] = 0.0
         ri_rJ[:,ia,:] = 0.0
-        ri_rJ[diJ < 1e-8] = 0.0
+        ri_rJ[diJ < 1e-12] = 0.0
 
         fiJ = switch_h(diJ)
         dfiJ = grad_switch_h(diJ) / (fiJ * riJ * R_sw_J)
@@ -138,16 +140,44 @@ def get_dD_dS(surface, dF, with_S=True, with_D=False):
 
     return dD, dS, dSii
 
-def grad_kernel(pcmobj, dm):
+def grad_nuc(pcmobj):
+    if not pcmobj._intermediates:
+        pcmobj.build()
+    mol = pcmobj.mol
+    q_sym        = pcmobj._intermediates['q_sym'].get()
+    gridslice    = pcmobj.surface['gslice_by_atom']
+    grid_coords  = pcmobj.surface['grid_coords'].get()
+    exponents    = pcmobj.surface['charge_exp'].get()
+
+    atom_coords = mol.atom_coords(unit='B')
+    atom_charges = numpy.asarray(mol.atom_charges(), dtype=numpy.float64)
+    fakemol_nuc = gto.fakemol_for_charges(atom_coords)
+    fakemol = gto.fakemol_for_charges(grid_coords, expnt=exponents**2)
+
+    int2c2e_ip1 = mol._add_suffix('int2c2e_ip1')
+
+    v_ng_ip1 = gto.mole.intor_cross(int2c2e_ip1, fakemol_nuc, fakemol)
+
+    dv_g = numpy.einsum('g,xng->nx', q_sym, v_ng_ip1)
+    de = -numpy.einsum('nx,n->nx', dv_g, atom_charges)
+
+    v_ng_ip1 = gto.mole.intor_cross(int2c2e_ip1, fakemol, fakemol_nuc)
+
+    dv_g = numpy.einsum('n,xgn->gx', atom_charges, v_ng_ip1)
+    dv_g = numpy.einsum('gx,g->gx', dv_g, q_sym)
+
+    de -= numpy.asarray([numpy.sum(dv_g[p0:p1], axis=0) for p0,p1 in gridslice])
+    return de
+
+def grad_elec(pcmobj, dm):
     '''
     dE = 0.5*v* d(K^-1 R) *v + q*dv
     v^T* d(K^-1 R)v = v^T*K^-1(dR - dK K^-1R)v = v^T K^-1(dR - dK q)
     '''
-    mol = pcmobj.mol
+    if not pcmobj._intermediates:
+        pcmobj.build()
 
     gridslice    = pcmobj.surface['gslice_by_atom']
-    grid_coords  = pcmobj.surface['grid_coords']
-    exponents    = pcmobj.surface['charge_exp']
     v_grids      = pcmobj._intermediates['v_grids']
     A            = pcmobj._intermediates['A']
     D            = pcmobj._intermediates['D']
@@ -159,7 +189,6 @@ def grad_kernel(pcmobj, dm):
     vK_1 = cupy.linalg.solve(K.T, v_grids)
 
     # ----------------- potential response -----------------------
-    atom_coords = mol.atom_coords(unit='B')
 
     intopt = pcmobj.intopt
     intopt.clear()
@@ -179,25 +208,6 @@ def grad_kernel(pcmobj, dm):
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
     dvj= 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     de = dq + dvj
-
-    atom_charges = mol.atom_charges()
-    fakemol_nuc = gto.fakemol_for_charges(atom_coords)
-    fakemol = gto.fakemol_for_charges(grid_coords.get(), expnt=exponents.get()**2)
-
-    # nuclei response
-    int2c2e_ip1 = mol._add_suffix('int2c2e_ip1')
-    v_ng_ip1 = gto.mole.intor_cross(int2c2e_ip1, fakemol_nuc, fakemol)
-    v_ng_ip1 = cupy.asarray(v_ng_ip1)
-    dv_g = cupy.einsum('g,xng->nx', q_sym, v_ng_ip1)
-    de -= cupy.einsum('nx,n->nx', dv_g, atom_charges)
-
-    # nuclei potential response
-    int2c2e_ip2 = mol._add_suffix('int2c2e_ip2')
-    v_ng_ip2 = gto.mole.intor_cross(int2c2e_ip2, fakemol_nuc, fakemol)
-    v_ng_ip2 = cupy.asarray(v_ng_ip2)
-    dv_g = cupy.einsum('n,xng->gx', atom_charges, v_ng_ip2)
-    dv_g = cupy.einsum('gx,g->gx', dv_g, q_sym)
-    de -= cupy.asarray([cupy.sum(dv_g[p0:p1], axis=0) for p0,p1 in gridslice])
 
     ## --------------- response from stiffness matrices ----------------
     gridslice = pcmobj.surface['gslice_by_atom']
@@ -277,7 +287,9 @@ def make_grad_object(grad_method):
             if dm is None:
                 dm = self.base.make_rdm1(ao_repr=True)
 
-            self.de_solvent = grad_kernel(self.base.with_solvent, dm)
+            self.de_solvent = grad_elec(self.base.with_solvent, dm)
+            self.de_solvent+= grad_nuc(self.base.with_solvent)
+
             self.de_solute = grad_method_class.kernel(self, *args, **kwargs)
             self.de = self.de_solute + self.de_solvent
 

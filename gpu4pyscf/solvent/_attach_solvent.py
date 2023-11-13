@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import cupy
 from pyscf import lib
 from pyscf.lib import logger
 from pyscf.solvent._attach_solvent import _Solvation
@@ -97,6 +98,10 @@ def _for_scf(mf, solvent_obj, dm=None):
             return self.with_solvent.nuc_grad_method(grad_method)
 
         Gradients = nuc_grad_method
+
+        def Hessian(self):
+            hess_method = oldMF.Hessian(self)
+            return self.with_solvent.Hessian(hess_method)
 
         def gen_response(self, *args, **kwargs):
             vind = oldMF.gen_response(self, *args, **kwargs)

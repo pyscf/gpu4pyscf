@@ -3,6 +3,7 @@ import csv
 import pyscf
 import time
 import argparse
+import numpy as np
 from pyscf import lib
 from pyscf.dft import rks
 
@@ -41,18 +42,19 @@ else:
     output_file = 'PySCF-16-cores-CPU.csv'
 output_file = args.output_path + output_file
 
-def run_dft(filename):
-    mol = pyscf.M(atom=filename, basis=bas, max_memory=64000)
+def run_dft(path, filename):
+    mol = pyscf.M(atom=path+filename, basis=bas, max_memory=64000)
     start_time = time.time()
     # set verbose >= 6 for debugging timer
-    mol.verbose = 4 #verbose
+    mol.verbose = 1 #verbose
     mol.max_memory = 40000
     mf = rks.RKS(mol, xc=xc).density_fit(auxbasis='def2-universal-jkfit')
     if args.solvent:
         mf = mf.PCM()
-        mf.lebedev_order = 29
-        mf.method = 'IEF-PCM'
-
+        mf.with_solvent.lebedev_order = 29
+        mf.with_solvent.method = 'IEF-PCM'
+        mf.with_solvent.eps = 78.3553
+    mf.verbose = 6
     mf.grids.atom_grid = (99,590)
     mf.chkfile = None
     prep_time = time.time() - start_time
@@ -62,7 +64,7 @@ def run_dft(filename):
     try:
         e_dft = mf.kernel()
         scf_time = time.time() - start_time
-    except:
+    except Exception:
         scf_time = -1
         e_dft = 0
 
@@ -76,8 +78,9 @@ def run_dft(filename):
         g.auxbasis_response = True
         f = g.kernel()
         grad_time = time.time() - start_time
-    except:
+    except Exception:
         grad_time = -1
+        f = -1
 
     # calculate hessian
     if args.device == 'GPU':
@@ -85,16 +88,18 @@ def run_dft(filename):
 
     hess_time = -1
     if args.with_hessian:
-        try:
-            start_time = time.time()
-            h = mf.Hessian()
-            h.auxbasis_response = 1
-            h.max_memory = 40000
-            hess = h.kernel()
-            hess_time = time.time() - start_time
-        except:
-            hess_time = -1
+        #try:
+        start_time = time.time()
+        h = mf.Hessian()
+        h.auxbasis_response = 1
+        h.max_memory = 40000
+        hess = h.kernel().reshape([3*mol.natm, 3*mol.natm])
+        hess_time = time.time() - start_time
+        #except Exception:
+        #   hess_time = -1
+        #    hess = -1
 
+    np.savez(args.output_path+filename+'.npz', e_dft=e_dft, grad=f, hess=hess)
     return mol.natm, mol.nao, scf_time, grad_time, hess_time, e_dft
 
 fields = ['mol','natm', 'nao', 't_scf', 't_gradient', 't_hessian', 'e_tot']
@@ -105,7 +110,7 @@ csvwriter.writerow(fields)
 for filename in sorted(os.listdir(args.input_path)):
     if filename.endswith(".xyz"):
         print(f'running DFT {filename}')
-        info = run_dft(args.input_path+filename)
+        info = run_dft(args.input_path, filename)
         row = [filename[:-4]]+list(info)
         csvwriter.writerow(row)
         csvfile.flush()

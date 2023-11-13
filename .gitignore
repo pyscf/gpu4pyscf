@@ -1,5 +1,7 @@
 **/__pycache__
 *.so
+*.npz
+*.out
 *current_revision
 **/build
 **/launch_logs
@@ -13,6 +15,7 @@ output/
 *.swo
 *.swp
 *~
+**/qchem_input.in
 #*
 dockerfiles/manylinux/wheelhouse
 gpu4pyscf/lib/bin
