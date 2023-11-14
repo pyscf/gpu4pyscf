@@ -50,7 +50,7 @@ Features
 - Dispersion corrections via [DFTD3](https://github.com/dftd3/simple-dftd3) and [DFTD4](https://github.com/dftd4/dftd4);
 - Nonlocal functional correction (vv10) for SCF and gradient;
 - ECP is supported and calculated on CPU;
-- PCM solvent models and their analytical gradients;
+- PCM solvent models, analytical gradients, and semi-analytical Hessian matrix;
 
 Limitations
 --------
@@ -68,7 +68,7 @@ Examples
 import pyscf
 from gpu4pyscf.dft import rks
 
-atom =''' 
+atom ='''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
@@ -91,7 +91,7 @@ Find more examples in gpu4pyscf/examples
 
 Benchmarks
 --------
-Speedup with GPU4PySCF v0.6.0 over Q-Chem 6.1 (Desity fitting, SCF, def2-tzvpp, def2-universal-jkfit, (99,590))
+Speedup with GPU4PySCF v0.6.0 on A100-80G over Q-Chem 6.1 on 32-cores CPU (Desity fitting, SCF, def2-tzvpp, def2-universal-jkfit, B3LYP, (99,590))
 
 | mol               |   natm |    LDA |    PBE |   B3LYP |    M06 |   wB97m-v |
 |:------------------|-------:|-------:|-------:|--------:|-------:|----------:|
