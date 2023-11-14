@@ -140,9 +140,10 @@ def get_dD_dS(surface, dF, with_S=True, with_D=False):
 
     return dD, dS, dSii
 
-def grad_nuc(pcmobj):
-    if not pcmobj._intermediates:
-        pcmobj.build()
+def grad_nuc(pcmobj, dm):
+    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+        pcmobj._get_vind(dm)
+
     mol = pcmobj.mol
     q_sym        = pcmobj._intermediates['q_sym'].get()
     gridslice    = pcmobj.surface['gslice_by_atom']
@@ -174,8 +175,8 @@ def grad_elec(pcmobj, dm):
     dE = 0.5*v* d(K^-1 R) *v + q*dv
     v^T* d(K^-1 R)v = v^T*K^-1(dR - dK K^-1R)v = v^T K^-1(dR - dK q)
     '''
-    if not pcmobj._intermediates:
-        pcmobj.build()
+    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+        pcmobj._get_vind(dm)
 
     gridslice    = pcmobj.surface['gslice_by_atom']
     v_grids      = pcmobj._intermediates['v_grids']
@@ -288,7 +289,7 @@ def make_grad_object(grad_method):
                 dm = self.base.make_rdm1(ao_repr=True)
 
             self.de_solvent = grad_elec(self.base.with_solvent, dm)
-            self.de_solvent+= grad_nuc(self.base.with_solvent)
+            self.de_solvent+= grad_nuc(self.base.with_solvent, dm)
 
             self.de_solute = grad_method_class.kernel(self, *args, **kwargs)
             self.de = self.de_solute + self.de_solvent

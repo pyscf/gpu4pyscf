@@ -88,16 +88,16 @@ def run_dft(path, filename):
 
     hess_time = -1
     if args.with_hessian:
-        #try:
-        start_time = time.time()
-        h = mf.Hessian()
-        h.auxbasis_response = 1
-        h.max_memory = 40000
-        hess = h.kernel().reshape([3*mol.natm, 3*mol.natm])
-        hess_time = time.time() - start_time
-        #except Exception:
-        #   hess_time = -1
-        #    hess = -1
+        try:
+            start_time = time.time()
+            h = mf.Hessian()
+            h.auxbasis_response = 1
+            h.max_memory = 40000
+            hess = h.kernel().reshape([3*mol.natm, 3*mol.natm])
+            hess_time = time.time() - start_time
+        except Exception:
+            hess_time = -1
+            hess = -1
 
     np.savez(args.output_path+filename+'.npz', e_dft=e_dft, grad=f, hess=hess)
     return mol.natm, mol.nao, scf_time, grad_time, hess_time, e_dft
