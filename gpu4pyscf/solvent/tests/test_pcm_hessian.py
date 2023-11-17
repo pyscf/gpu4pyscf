@@ -28,7 +28,6 @@ O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
     '''
-    mol.atom = '/mlx_devbox/users/xiaojie.wu/playground/gpu4pyscf/benchmarks/molecules/organic/020_Vitamin_C.xyz'
     mol.basis = 'def2-tzvpp'
     mol.output = '/dev/null'
     mol.build(verbose=0)
