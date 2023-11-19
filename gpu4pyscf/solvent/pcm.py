@@ -243,7 +243,7 @@ class PCM(ddcosmo.DDCOSMO):
         D, S = get_D_S(self.surface, with_S=True, with_D=True)
 
         epsilon = self.eps
-        if self.method.upper() == 'C-PCM':
+        if self.method.upper() in ['C-PCM', 'CPCM']:
             f_epsilon = (epsilon-1.)/epsilon
             K = S
             R = -f_epsilon * cupy.eye(K.shape[0])
@@ -251,7 +251,7 @@ class PCM(ddcosmo.DDCOSMO):
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0/2.0)
             K = S
             R = -f_epsilon * cupy.eye(K.shape[0])
-        elif self.method.upper() == 'IEF-PCM':
+        elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
             DA = D*A
             DAS = cupy.dot(DA, S)

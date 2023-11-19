@@ -165,8 +165,8 @@ if contract_engine is not None:
     if contract_engine == 'opt_einsum':
         import opt_einsum
         einsum = opt_einsum.contract
-    elif contract_engine == 'cuquantum':
-        from cuquantum import contract as einsum
+    #elif contract_engine == 'cuquantum':
+    #    from cuquantum import contract as einsum
     elif contract_engine == 'cupy':
         einsum = cupy.einsum
     else:
