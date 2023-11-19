@@ -54,7 +54,7 @@ def _make_mf(method='C-PCM'):
     return mf
 
 def _check_hessian(mf, h, ix=0, iy=0):
-    pmol = mol.copy()
+    pmol = mf.mol.copy()
     pmol.build()
 
     g = mf.nuc_grad_method()
@@ -81,7 +81,6 @@ def _check_hessian(mf, h, ix=0, iy=0):
     assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
 
 class KnownValues(unittest.TestCase):
-
     def test_hess_cpcm(self):
         mf = _make_mf(method='C-PCM')
         hobj = mf.Hessian()

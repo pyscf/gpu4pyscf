@@ -193,7 +193,7 @@ def fd_grad_vmat(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
     pcmobj.reset(pmol)
     return vmat
 
-'''
+"""
 def analytic_grad_vmat(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
     '''
     dv_solv / da
@@ -221,7 +221,7 @@ def analytic_grad_vmat(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
     t1 = log.timer_debug1('computing solvent grad veff', *t1)
     pcmobj.reset(pmol)
     return vmat
-'''
+"""
 def make_hess_object(hess_method):
     '''
     return solvent hessian object

@@ -51,11 +51,19 @@ def run_dft(xc):
     e_dft = mf.kernel()
     return e_dft
 
+def _make_mf():
+    mf = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
+    mf.conv_tol = 1e-12
+    mf.grids.level = grids_level
+    mf.verbose = 1
+    mf.kernel()
+    return mf
+
 def _check_grad(grid_response=False, tol=1e-5):
     mf = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
     mf.grids.level = grids_level
     mf.conv_tol = 1e-12
-    e_tot = mf.kernel()
+    mf.kernel()
     g = mf.nuc_grad_method()
     g.auxbasis_response = True
     g.grid_response = grid_response
@@ -85,22 +93,14 @@ def _check_grad(grid_response=False, tol=1e-5):
             mol.set_geom_(coords, unit='Bohr')
             grad_fd[i,j] = (e0-e1)/2.0/eps
     grad_fd = np.array(grad_fd).reshape(-1,3)
-    print('finite difference gradient:')
-    print(grad_fd)
-    print('difference between analytical and finite difference gradient:', np.linalg.norm(g_analy - grad_fd))
+    print('norm of analytical - finite difference gradient:', np.linalg.norm(g_analy - grad_fd))
     assert(np.linalg.norm(g_analy - grad_fd) < tol)
 
 
-def _check_dft_hessian(disp=None, ix=0, iy=0, tol=1e-3):
-    pmol = mol.copy()
+def _check_dft_hessian(mf, h, ix=0, iy=0, tol=1e-3):
+    pmol = mf.mol.copy()
     pmol.build()
 
-    mf = rks.RKS(pmol, xc=xc).density_fit(auxbasis=auxbasis)
-    mf.conv_tol = 1e-12
-    mf.grids.level = grids_level
-    mf.verbose = 1
-    mf.kernel()
-    
     g = mf.nuc_grad_method()
     g.auxbasis_response = True
     g.kernel()
@@ -112,31 +112,19 @@ def _check_dft_hessian(disp=None, ix=0, iy=0, tol=1e-3):
     pmol.set_geom_(coords + v, unit='Bohr')
     pmol.build()
     _, g0 = g_scanner(pmol)
-    
+
     pmol.set_geom_(coords - v, unit='Bohr')
     pmol.build()
     _, g1 = g_scanner(pmol)
-    
+
     h_fd = (g0 - g1)/2.0/eps
     pmol.set_geom_(coords, unit='Bohr')
     pmol.build()
 
-    mf = rks.RKS(pmol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis)
-    mf.grids.level = grids_level
-    mf.kernel()
-    hobj = mf.Hessian()
-    hobj.set(auxbasis_response=2)
-    hobj.verbose=0
-    h = hobj.kernel()
-    
-    print(f"analytical Hessian H({ix},{iy})")
-    print(h[ix,:,iy,:])
-    print(f"finite different Hessian H({ix},{iy})")
-    print(h_fd)
-    print('Norm of diff', np.linalg.norm(h[ix,:,iy,:] - h_fd))
+    print(f'Norm of finite difference - analytical Hessian({ix},{iy})', np.linalg.norm(h[ix,:,iy,:] - h_fd))
     assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
 
-class KnownValues(unittest.TestCase):    
+class KnownValues(unittest.TestCase):
     def test_rks_scf(self):
         mf = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
         mf.conv_tol = 1e-12
@@ -145,10 +133,16 @@ class KnownValues(unittest.TestCase):
 
     def test_rks_gradient(self):
         _check_grad()
-    
+
     def test_rks_hessian(self):
-        _check_dft_hessian(ix=0, iy=0)
-        _check_dft_hessian(ix=0, iy=1)
+        mf = _make_mf()
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        hobj.verbose=0
+        h = hobj.kernel()
+
+        _check_dft_hessian(mf, h, ix=0, iy=0)
+        _check_dft_hessian(mf, h, ix=0, iy=1)
 
 if __name__ == "__main__":
     print("Full Tests for DF ECP")
