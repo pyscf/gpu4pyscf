@@ -185,7 +185,8 @@ def grad_qv(pcmobj, dm):
     # rebuild with aosym
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
     coeff = intopt.coeff
-    dm_cart = cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
+    dm_cart = coeff @ dm @ coeff.T
+    #dm_cart = cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
 
     dvj, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip1', q_sym, None, dm_cart)
     dq, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip2', q_sym, None, dm_cart)

@@ -97,7 +97,8 @@ def hess_qv(pcmobj, dm, verbose=None):
     # rebuild with aosym
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
     coeff = intopt.coeff
-    dm_cart = cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
+    dm_cart = coeff @ dm @ coeff.T
+    #dm_cart = cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
 
     dvj, _ = int3c2e.get_int3c2e_ipip1_hjk(intopt, q_sym, None, dm_cart, with_k=False)
     dq, _ = int3c2e.get_int3c2e_ipvip1_hjk(intopt, q_sym, None, dm_cart, with_k=False)

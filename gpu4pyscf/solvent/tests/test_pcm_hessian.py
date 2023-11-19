@@ -74,14 +74,13 @@ def _check_hessian(mf, h, ix=0, iy=0):
     _, g1 = g_scanner(pmol)
 
     h_fd = (g0 - g1)/2.0/eps
-    pmol.set_geom_(coords, unit='Bohr')
-    pmol.build()
 
     print(f'Norm of H({ix},{iy}) diff, {np.linalg.norm(h[ix,:,iy,:] - h_fd)}')
     assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
 
 class KnownValues(unittest.TestCase):
     def test_hess_cpcm(self):
+        print('testing C-PCM Hessian')
         mf = _make_mf(method='C-PCM')
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
@@ -90,6 +89,7 @@ class KnownValues(unittest.TestCase):
         _check_hessian(mf, h, ix=0, iy=1)
 
     def test_hess_iefpcm(self):
+        print("testing IEF-PCM hessian")
         mf = _make_mf(method='IEF-PCM')
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
