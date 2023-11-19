@@ -188,33 +188,36 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     cupy.get_default_memory_pool().free_all_blocks()
     #  int3c_ipip1 contributions
-    hj_ao_diag, hk_ao_diag = int3c2e.get_int3c2e_ipip1_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag, omega=omega)
+    hj_ao_diag, hk_ao_diag = int3c2e.get_int3c2e_ipip1_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag, omega=omega, with_k=with_k)
     hj_ao_diag *= 2.0
     t1 = log.timer_debug1('intermediate variables with int3c2e_ipip1', *t1)
 
     #  int3c_ipvip1 contributions
     # (11|0), (0|00) without response of RI basis
-    hj, hk = int3c2e.get_int3c2e_ipvip1_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag, omega=omega)
+    hj, hk = int3c2e.get_int3c2e_ipvip1_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag, omega=omega, with_k=with_k)
     hj_ao_ao += 2.0*hj
-    hk_ao_ao += hk
+    if with_k:
+        hk_ao_ao += hk
     hj = hk = None
     t1 = log.timer_debug1('intermediate variables with int3c2e_ipvip1', *t1)
 
     #  int3c_ip1ip2 contributions
     # (10|1), (0|0)(0|00)
     if hessobj.auxbasis_response:
-        hj, hk = int3c2e.get_int3c2e_ip1ip2_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag, omega=omega)
+        hj, hk = int3c2e.get_int3c2e_ip1ip2_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag, omega=omega, with_k=with_k)
         hj_ao_aux += hj
-        hk_ao_aux += hk
+        if with_k:
+            hk_ao_aux += hk
         hj = hk = None
         t1 = log.timer_debug1('intermediate variables with int3c2e_ip1ip2', *t1)
 
     #  int3c_ipip2 contributions
     if hessobj.auxbasis_response > 1:
         # (00|2), (0|0)(0|00)
-        hj, hk = int3c2e.get_int3c2e_ipip2_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag, omega=omega)
+        hj, hk = int3c2e.get_int3c2e_ipip2_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag, omega=omega, with_k=with_k)
         hj_aux_diag = hj
-        hk_aux_diag = .5*hk
+        if with_k:
+            hk_aux_diag = .5*hk
         hj = hk = None
         t1 = log.timer_debug1('intermediate variables with int3c2e_ipip2', *t1)
 

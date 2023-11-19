@@ -42,11 +42,8 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-def _check_hessian(method='C-PCM', ix=0, iy=0):
-    pmol = mol.copy()
-    pmol.build()
-
-    mf = dft.rks.RKS(pmol, xc=xc).density_fit().PCM()
+def _make_mf(method='C-PCM'):
+    mf = dft.rks.RKS(mol, xc=xc).density_fit().PCM()
     mf.with_solvent.method = method
     mf.with_solvent.eps = epsilon
     mf.with_solvent.lebedev_order = lebedev_order
@@ -54,6 +51,11 @@ def _check_hessian(method='C-PCM', ix=0, iy=0):
     mf.grids.atom_grid = (99,590)
     mf.verbose = 0
     mf.kernel()
+    return mf
+
+def _check_hessian(mf, h, ix=0, iy=0):
+    pmol = mf.mol.copy()
+    pmol.build()
 
     g = mf.nuc_grad_method()
     g.auxbasis_response = True
@@ -72,28 +74,28 @@ def _check_hessian(method='C-PCM', ix=0, iy=0):
     _, g1 = g_scanner(pmol)
 
     h_fd = (g0 - g1)/2.0/eps
-    pmol.set_geom_(coords, unit='Bohr')
-    pmol.build()
 
-    hobj = mf.Hessian()
-    hobj.set(auxbasis_response=2)
-    h = hobj.kernel()
-
-    print(f"analytical Hessian H({ix},{iy})")
-    print(h[ix,:,iy,:])
-    print(f"finite different Hessian H({ix},{iy})")
-    print(h_fd)
-    print('Norm of diff', np.linalg.norm(h[ix,:,iy,:] - h_fd))
+    print(f'Norm of H({ix},{iy}) diff, {np.linalg.norm(h[ix,:,iy,:] - h_fd)}')
     assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
 
 class KnownValues(unittest.TestCase):
     def test_hess_cpcm(self):
-        _check_hessian(method='C-PCM', ix=0, iy=0)
-        _check_hessian(method='C-PCM', ix=0, iy=1)
+        print('testing C-PCM Hessian')
+        mf = _make_mf(method='C-PCM')
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_hessian(mf, h, ix=0, iy=0)
+        _check_hessian(mf, h, ix=0, iy=1)
 
     def test_hess_iefpcm(self):
-        _check_hessian(method='IEF-PCM', ix=0, iy=0)
-        _check_hessian(method='IEF-PCM', ix=0, iy=1)
+        print("testing IEF-PCM hessian")
+        mf = _make_mf(method='IEF-PCM')
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_hessian(mf, h, ix=0, iy=0)
+        _check_hessian(mf, h, ix=0, iy=1)
 
 if __name__ == "__main__":
     print("Full Tests for Hessian of PCMs")
