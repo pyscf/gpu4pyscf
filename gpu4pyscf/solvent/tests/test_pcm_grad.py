@@ -109,14 +109,14 @@ class KnownValues(unittest.TestCase):
         mf = scf.RHF(mol).PCM(cm)
         mf.verbose = 0
         mf.conv_tol = 1e-12
-        e_tot = mf.kernel()
+        mf.kernel()
 
         g = mf.nuc_grad_method()
         grad = g.kernel()
 
         g0 = numpy.asarray([
-             [0.49773047433563E-15,  -0.12128126037559E-15,  -0.58936988992306E-01],
-             [0.22810111996954E-01,  -0.68951901317025E-17,   0.29468494708267E-01],
+            [0.49773047433563E-15,  -0.12128126037559E-15,  -0.58936988992306E-01],
+            [0.22810111996954E-01,  -0.68951901317025E-17,   0.29468494708267E-01],
             [-0.22810111996957E-01,   0.12949813945902E-15,   0.29468494708266E-01]])
 
         print(f"Gradient error in CPCM: {numpy.linalg.norm(g0 - grad)}")
@@ -131,7 +131,7 @@ class KnownValues(unittest.TestCase):
         mf = scf.RHF(mol).PCM(cm)
         mf.verbose = 0
         mf.conv_tol = 1e-12
-        e_tot = mf.kernel()
+        mf.kernel()
 
         g = mf.nuc_grad_method()
         grad = g.kernel()
@@ -153,14 +153,14 @@ class KnownValues(unittest.TestCase):
         mf = scf.RHF(mol).PCM(cm)
         mf.verbose = 0
         mf.conv_tol = 1e-12
-        e_tot = mf.kernel()
+        mf.kernel()
 
         g = mf.nuc_grad_method()
         grad = g.kernel()
 
         g0 = numpy.asarray([
-             [0.18357915015649E-14,   0.14192681822347E-15,  -0.58988087999658E-01],
-             [0.22822709179063E-01,  -0.10002010417168E-15,   0.29494044211805E-01],
+            [0.18357915015649E-14,   0.14192681822347E-15,  -0.58988087999658E-01],
+            [0.22822709179063E-01,  -0.10002010417168E-15,   0.29494044211805E-01],
             [-0.22822709179066E-01,  -0.31051364515588E-16,   0.29494044211806E-01]])
         print(f"Gradient error in IEFPCM: {numpy.linalg.norm(g0 - grad)}")
         assert numpy.linalg.norm(g0 - grad) < 1e-9
@@ -174,14 +174,14 @@ class KnownValues(unittest.TestCase):
         mf = scf.RHF(mol).PCM(cm)
         mf.verbose = 0
         mf.conv_tol = 1e-12
-        e_tot = mf.kernel()
+        mf.kernel()
 
         g = mf.nuc_grad_method()
         grad = g.kernel()
 
         g0 = numpy.asarray([
-             [0.76104817971710E-15,   0.11185701540547E-15,  -0.58909172879217E-01],
-             [0.22862990009767E-01,  -0.13861633974903E-15,   0.29454586651678E-01],
+            [0.76104817971710E-15,   0.11185701540547E-15,  -0.58909172879217E-01],
+            [0.22862990009767E-01,  -0.13861633974903E-15,   0.29454586651678E-01],
             [-0.22862990009769E-01,   0.34988765678591E-16,   0.29454586651679E-01]])
         print(f"Gradient error in SS(V)PE: {numpy.linalg.norm(g0 - grad)}")
         assert numpy.linalg.norm(g0 - grad) < 1e-9

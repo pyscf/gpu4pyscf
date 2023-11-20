@@ -15,27 +15,24 @@
 
 import numpy as np
 import cupy
-from cupy._environment import _preload_libs
-from cupyx import cutensor
-from cupy_backends.cuda.libs import cutensor as cutensor_backend
-from cupy_backends.cuda.libs.cutensor import Handle
 from gpu4pyscf.lib import logger
 
-libcutensor = None
-for lib_path in _preload_libs['cutensor']:
-    try:
-        libcutensor = _preload_libs['cutensor'][lib_path]
-        break
-    except Exception:
-        continue
+try:
+    import cupy_backends.cuda.libs.cutensor  # NOQA
+    from cupyx import cutensor
+    from cupy_backends.cuda.libs import cutensor as cutensor_backend
+    from cupy_backends.cuda.libs.cutensor import Handle
 
-_handle = Handle()
-_modes = {}
-_contraction_descriptors = {}
-_contraction_plans = {}
-_contraction_finds = {}
+    _handle = Handle()
+    _modes = {}
+    _contraction_descriptors = {}
+    _contraction_plans = {}
+    _contraction_finds = {}
 
-cutensor_backend.init(_handle)
+    cutensor_backend.init(_handle)
+
+except ImportError:
+    cutensor = None
 
 def _create_mode_with_cache(mode):
     integer_mode = []
@@ -156,8 +153,8 @@ if 'CONTRACT_ENGINE' in os.environ:
 else:
     contract_engine = None
 
-if libcutensor is None:
-    contract_engine = 'cupy'
+if cutensor is None:
+    contract_engine = 'cupy'  # default contraction engine
 
 # override the 'contract' function if einsum is customized or cutensor is not found
 if contract_engine is not None:
