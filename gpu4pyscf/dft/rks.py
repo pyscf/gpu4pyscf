@@ -125,8 +125,6 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     if mol is None: mol = ks.mol
     if dm is None: dm = ks.make_rdm1()
     t0 = logger.init_timer(ks)
-    if ks.grids.coords is None:
-        ks.grids.ao_values = None
     initialize_grids(ks, mol, dm)
 
     if hasattr(ks, 'screen_tol') and ks.screen_tol is not None:

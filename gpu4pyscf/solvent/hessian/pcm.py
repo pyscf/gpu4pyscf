@@ -25,7 +25,7 @@ from pyscf import lib
 from pyscf import gto, df
 from pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.solvent.pcm import PI, switch_h
-from gpu4pyscf.solvent.grad.pcm import grad_switch_h, get_dF_dA, get_dD_dS, grad_elec, grad_nuc
+from gpu4pyscf.solvent.grad.pcm import grad_switch_h, get_dF_dA, get_dD_dS, grad_qv, grad_solver, grad_nuc
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
@@ -86,6 +86,35 @@ def hess_nuc(pcmobj):
 
     return de
 
+def hess_qv(pcmobj, dm, verbose=None):
+    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+        pcmobj._get_vind(dm)
+    gridslice    = pcmobj.surface['gslice_by_atom']
+    q_sym        = pcmobj._intermediates['q_sym']
+
+    intopt = pcmobj.intopt
+    intopt.clear()
+    # rebuild with aosym
+    intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
+    coeff = intopt.coeff
+    dm_cart = coeff @ dm @ coeff.T
+    #dm_cart = cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
+
+    dvj, _ = int3c2e.get_int3c2e_ipip1_hjk(intopt, q_sym, None, dm_cart, with_k=False)
+    dq, _ = int3c2e.get_int3c2e_ipvip1_hjk(intopt, q_sym, None, dm_cart, with_k=False)
+    dvj, _ = int3c2e.get_int3c2e_ip1ip2_hjk(intopt, q_sym, None, dm_cart, with_k=False)
+    dq, _ = int3c2e.get_int3c2e_ipip2_hjk(intopt, q_sym, None, dm_cart, with_k=False)
+
+    cart_ao_idx = intopt.cart_ao_idx
+    rev_cart_ao_idx = numpy.argsort(cart_ao_idx)
+    dvj = dvj[:,rev_cart_ao_idx]
+
+    aoslice = intopt.mol.aoslice_by_atom()
+    dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
+    dvj= 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
+    de = dq + dvj
+    return de.get()
+
 def hess_elec(pcmobj, dm, verbose=None):
     '''
     slow version with finite difference
@@ -98,10 +127,11 @@ def hess_elec(pcmobj, dm, verbose=None):
     coords = mol.atom_coords(unit='Bohr')
 
     def pcm_grad_scanner(mol):
+        # TODO: use more analytical forms
         pcmobj.reset(mol)
         e, v = pcmobj._get_vind(dm)
         #return grad_elec(pcmobj, dm)
-        return grad_nuc(pcmobj) + grad_elec(pcmobj, dm)
+        return grad_nuc(pcmobj, dm) + grad_solver(pcmobj, dm) + grad_qv(pcmobj, dm)
 
     de = numpy.zeros([mol.natm, mol.natm, 3, 3])
     eps = 1e-3
@@ -121,7 +151,7 @@ def hess_elec(pcmobj, dm, verbose=None):
     pcmobj.reset(pmol)
     return de
 
-def grad_qv(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
+def fd_grad_vmat(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
     '''
     dv_solv / da
     slow version with finite difference
@@ -164,6 +194,35 @@ def grad_qv(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
     pcmobj.reset(pmol)
     return vmat
 
+"""
+def analytic_grad_vmat(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
+    '''
+    dv_solv / da
+    slow version with finite difference
+    '''
+    log = logger.new_logger(pcmobj, verbose)
+    t1 = log.init_timer()
+    pmol = pcmobj.mol.copy()
+    mol = pmol.copy()
+    if atmlst is None:
+        atmlst = range(mol.natm)
+    nao, nmo = mo_coeff.shape
+    mocc = mo_coeff[:,mo_occ>0]
+    nocc = mocc.shape[1]
+    dm = cupy.dot(mocc, mocc.T) * 2
+    coords = mol.atom_coords(unit='Bohr')
+
+    # TODO: add those contributions
+    # contribution due to _get_v
+    # contribution due to linear solver
+    # contribution due to _get_vmat
+
+    vmat = cupy.zeros([len(atmlst), 3, nao, nocc])
+
+    t1 = log.timer_debug1('computing solvent grad veff', *t1)
+    pcmobj.reset(pmol)
+    return vmat
+"""
 def make_hess_object(hess_method):
     '''
     return solvent hessian object
@@ -193,7 +252,7 @@ def make_hess_object(hess_method):
             if atmlst is None:
                 atmlst = range(self.mol.natm)
             h1ao = hess_method_class.make_h1(self, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
-            dv = grad_qv(self.base.with_solvent, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
+            dv = fd_grad_vmat(self.base.with_solvent, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
             for i0, ia in enumerate(atmlst):
                 h1ao[i0] += dv[i0]
             return h1ao

@@ -41,18 +41,28 @@ def tearDownModule():
     global mol
     del mol
 
-def _check_rhf_hessian(ix=0, iy=0, tol=1e-3):
-    pmol = mol.copy()
-    pmol.build()
-
-    mf = scf.RHF(pmol).density_fit(auxbasis='ccpvtz-jkfit')
+def _make_rhf():
+    mf = scf.RHF(mol).density_fit(auxbasis='ccpvtz-jkfit')
     mf.conv_tol = 1e-12
     mf.kernel()
+    return mf
+
+def _make_rks(xc, disp=None):
+    mf = dft.rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis0)
+    mf.conv_tol = 1e-12
+    mf.disp = disp
+    mf.grids.level = grids_level
+    mf.verbose = 1
+    mf.kernel()
+    return mf
+
+def _check_rhf_hessian(mf, h, ix=0, iy=0, tol=1e-3):
+    pmol = mf.mol.copy()
+    pmol.build()
+
     g = mf.nuc_grad_method()
     g.kernel()
     g_scanner = g.as_scanner()
-    hobj = mf.Hessian()
-    hobj.set(auxbasis_response=2)
 
     coords = pmol.atom_coords()
     v = np.zeros_like(coords)
@@ -66,24 +76,12 @@ def _check_rhf_hessian(ix=0, iy=0, tol=1e-3):
     _, g1 = g_scanner(pmol)
     h_fd = (g0 - g1)/2.0/eps
 
-    pmol.set_geom_(coords, unit='Bohr')
-    h = hobj.kernel()
-    print(f"analytical Hessian H({ix},{iy})")
-    print(h[ix,:,iy,:])
-    print(f"finite different Hessian H({ix},{iy})")
-    print(h_fd)
-    print('Norm of diff', np.linalg.norm(h[ix,:,iy,:] - h_fd))
+    print(f'Norm of analytical - finite difference Hessian H({ix},{iy})', np.linalg.norm(h[ix,:,iy,:] - h_fd))
     assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
 
-def _check_dft_hessian(xc=xc0, disp=None, ix=0, iy=0, tol=1e-3):
-    pmol = mol.copy()
+def _check_dft_hessian(mf, h, ix=0, iy=0, tol=1e-3):
+    pmol = mf.mol.copy()
     pmol.build()
-
-    mf = dft.rks.RKS(pmol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
-    mf.conv_tol = 1e-12
-    mf.grids.level = grids_level
-    mf.verbose = 1
-    mf.kernel()
 
     g = mf.nuc_grad_method()
     g.auxbasis_response = True
@@ -102,54 +100,64 @@ def _check_dft_hessian(xc=xc0, disp=None, ix=0, iy=0, tol=1e-3):
     _, g1 = g_scanner(pmol)
 
     h_fd = (g0 - g1)/2.0/eps
-    pmol.set_geom_(coords, unit='Bohr')
-    pmol.build()
 
-    mf = dft.rks.RKS(pmol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
-    mf.grids.level = grids_level
-    mf.kernel()
-    hobj = mf.Hessian()
-    hobj.set(auxbasis_response=2)
-    hobj.verbose=0
-    h = hobj.kernel()
-
-    print(f"analytical Hessian H({ix},{iy})")
-    print(h[ix,:,iy,:])
-    print(f"finite different Hessian H({ix},{iy})")
-    print(h_fd)
-    print('Norm of diff', np.linalg.norm(h[ix,:,iy,:] - h_fd))
+    print(f'Norm of analytical - finite difference Hessian H({ix},{iy})', np.linalg.norm(h[ix,:,iy,:] - h_fd))
     assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
 
 class KnownValues(unittest.TestCase):
     def test_hessian_rhf(self):
         print('-----testing DF RHF Hessian----')
-        _check_rhf_hessian(ix=0, iy=0)
-        _check_rhf_hessian(ix=0, iy=1)
+        mf = _make_rhf()
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_rhf_hessian(mf, h, ix=0, iy=0)
+        _check_rhf_hessian(mf, h, ix=0, iy=1)
 
     def test_hessian_lda(self):
         print('-----testing DF LDA Hessian----')
-        _check_dft_hessian(xc='LDA', disp=None, ix=0,iy=0)
-        _check_dft_hessian(xc='LDA', disp=None, ix=0,iy=1)
+        mf = _make_rks('LDA')
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+        _check_dft_hessian(mf, h, ix=0,iy=1)
 
     def test_hessian_gga(self):
         print('-----testing DF PBE Hessian----')
-        _check_dft_hessian(xc='PBE', disp=None, ix=0,iy=0)
-        _check_dft_hessian(xc='PBE', disp=None, ix=0,iy=1)
+        mf = _make_rks('PBE')
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+        _check_dft_hessian(mf, h, ix=0,iy=1)
 
     def test_hessian_hybrid(self):
         print('-----testing DF B3LYP Hessian----')
-        _check_dft_hessian(xc='B3LYP', disp=None, ix=0,iy=0)
-        _check_dft_hessian(xc='B3LYP', disp=None, ix=0,iy=1)
+        mf = _make_rks('b3lyp')
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+        _check_dft_hessian(mf, h, ix=0,iy=1)
 
     def test_hessian_mgga(self):
         print('-----testing DF M06 Hessian----')
-        _check_dft_hessian(xc='m06', disp=None, ix=0,iy=0)
-        _check_dft_hessian(xc='m06', disp=None, ix=0,iy=1)
+        mf = _make_rks('m06')
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+        _check_dft_hessian(mf, h, ix=0,iy=1)
 
     def test_hessian_rsh(self):
         print('-----testing DF wb97 Hessian----')
-        _check_dft_hessian(xc='wb97', disp=None, ix=0,iy=0)
-        _check_dft_hessian(xc='wb97', disp=None, ix=0,iy=1)
+        mf = _make_rks('wb97')
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+        _check_dft_hessian(mf, h, ix=0,iy=1)
 
     def test_hessian_D3(self):
         pmol = mol.copy()

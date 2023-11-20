@@ -873,15 +873,19 @@ def get_int3c2e_ipip1_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None):
     nao_sph = dm0_tag.shape[0]
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     hj = cupy.zeros([nao_sph,9])
-    hk = cupy.zeros([nao_sph,9])
+    hk = None
+    if with_k:
+        hk = cupy.zeros([nao_sph,9])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipip1', omega=omega):
-        rhok_tmp = contract('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
-        rhok_tmp = contract('pio,jo->pij', rhok_tmp, orbo[j0:j1])
         tmp = contract('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
         hj[i0:i1] += contract('xpi,p->ix', tmp, rhoj[k0:k1])
-        hk[i0:i1] += contract('xpji,pij->ix', int3c_blk, rhok_tmp)
+        if with_k:
+            rhok_tmp = contract('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
+            rhok_tmp = contract('pio,jo->pij', rhok_tmp, orbo[j0:j1])
+            hk[i0:i1] += contract('xpji,pij->ix', int3c_blk, rhok_tmp)
     hj = hj.reshape([nao_sph,3,3])
-    hk = hk.reshape([nao_sph,3,3])
+    if with_k:
+        hk = hk.reshape([nao_sph,3,3])
     return hj, hk
 
 def get_int3c2e_ipvip1_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None):
@@ -891,15 +895,19 @@ def get_int3c2e_ipvip1_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None)
     nao_sph = dm0_tag.shape[0]
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     hj = cupy.zeros([nao_sph,nao_sph,9])
-    hk = cupy.zeros([nao_sph,nao_sph,9])
+    hk = None
+    if with_k:
+        hk = cupy.zeros([nao_sph,nao_sph,9])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipvip1', omega=omega):
-        rhok_tmp = contract('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
-        rhok_tmp = contract('pio,jo->pji', rhok_tmp, orbo[j0:j1])
         tmp = contract('xpji,ij->xpij', int3c_blk, dm0_tag[i0:i1,j0:j1])
         hj[i0:i1,j0:j1] += contract('xpij,p->ijx', tmp, rhoj[k0:k1])
-        hk[i0:i1,j0:j1] += contract('xpji,pji->ijx', int3c_blk, rhok_tmp)
+        if with_k:
+            rhok_tmp = contract('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
+            rhok_tmp = contract('pio,jo->pji', rhok_tmp, orbo[j0:j1])
+            hk[i0:i1,j0:j1] += contract('xpji,pji->ijx', int3c_blk, rhok_tmp)
     hj = hj.reshape([nao_sph,nao_sph,3,3])
-    hk = hk.reshape([nao_sph,nao_sph,3,3])
+    if with_k:
+        hk = hk.reshape([nao_sph,nao_sph,3,3])
     return hj, hk
 
 def get_int3c2e_ip1ip2_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None):
@@ -910,15 +918,19 @@ def get_int3c2e_ip1ip2_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None)
     naux_sph = rhok.shape[0]
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     hj = cupy.zeros([nao_sph,naux_sph,9])
-    hk = cupy.zeros([nao_sph,naux_sph,9])
+    hk = None
+    if with_k:
+        hk = cupy.zeros([nao_sph,naux_sph,9])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip1ip2', omega=omega):
-        rhok_tmp = contract('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
-        rhok_tmp = contract('pio,jo->pij', rhok_tmp, orbo[j0:j1])
         tmp = contract('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
         hj[i0:i1,k0:k1] += contract('xpi,p->ipx', tmp, rhoj[k0:k1])
-        hk[i0:i1,k0:k1] += contract('xpji,pij->ipx', int3c_blk, rhok_tmp)
+        if with_k:
+            rhok_tmp = contract('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
+            rhok_tmp = contract('pio,jo->pij', rhok_tmp, orbo[j0:j1])
+            hk[i0:i1,k0:k1] += contract('xpji,pij->ipx', int3c_blk, rhok_tmp)
     hj = hj.reshape([nao_sph,naux_sph,3,3])
-    hk = hk.reshape([nao_sph,naux_sph,3,3])
+    if with_k:
+        hk = hk.reshape([nao_sph,naux_sph,3,3])
     return hj, hk
 
 def get_int3c2e_ipip2_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None):
@@ -928,15 +940,19 @@ def get_int3c2e_ipip2_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None):
     naux_sph = rhok.shape[0]
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     hj = cupy.zeros([naux_sph,9])
-    hk = cupy.zeros([naux_sph,9])
+    hk = None
+    if with_k:
+        hk = cupy.zeros([naux_sph,9])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipip2', omega=omega):
-        rhok_tmp = contract('por,jr->pjo', rhok[k0:k1], orbo[j0:j1])
-        rhok_tmp = contract('pjo,io->pji', rhok_tmp, orbo[i0:i1])
         tmp = contract('xpji,ij->xp', int3c_blk, dm0_tag[i0:i1,j0:j1])
         hj[k0:k1] += contract('xp,p->px', tmp, rhoj[k0:k1])
-        hk[k0:k1] += contract('xpji,pji->px', int3c_blk, rhok_tmp)
+        if with_k:
+            rhok_tmp = contract('por,jr->pjo', rhok[k0:k1], orbo[j0:j1])
+            rhok_tmp = contract('pjo,io->pji', rhok_tmp, orbo[i0:i1])
+            hk[k0:k1] += contract('xpji,pji->px', int3c_blk, rhok_tmp)
     hj = hj.reshape([naux_sph,3,3])
-    hk = hk.reshape([naux_sph,3,3])
+    if with_k:
+        hk = hk.reshape([naux_sph,3,3])
     return hj, hk
 
 def get_int3c2e_ip_slice(intopt, cp_aux_id, ip_type, out=None, omega=None, stream=None):

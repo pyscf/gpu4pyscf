@@ -15,8 +15,8 @@ output/
 *.swo
 *.swp
 *~
-*.h5
 *.log
+*.h5
 **/qchem_input.in
 #*
 dockerfiles/manylinux/wheelhouse
