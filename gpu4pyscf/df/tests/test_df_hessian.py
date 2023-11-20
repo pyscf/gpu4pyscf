@@ -15,7 +15,6 @@
 
 import numpy as np
 import pyscf
-from pyscf import scf, dft
 from gpu4pyscf import dft, scf
 import unittest
 
@@ -45,7 +44,7 @@ def tearDownModule():
 def _check_rhf_hessian(ix=0, iy=0, tol=1e-3):
     pmol = mol.copy()
     pmol.build()
-    
+
     mf = scf.RHF(pmol).density_fit(auxbasis='ccpvtz-jkfit')
     mf.conv_tol = 1e-12
     mf.kernel()
@@ -54,7 +53,7 @@ def _check_rhf_hessian(ix=0, iy=0, tol=1e-3):
     g_scanner = g.as_scanner()
     hobj = mf.Hessian()
     hobj.set(auxbasis_response=2)
-    
+
     coords = pmol.atom_coords()
     v = np.zeros_like(coords)
     v[ix,iy] = eps
@@ -85,7 +84,7 @@ def _check_dft_hessian(xc=xc0, disp=None, ix=0, iy=0, tol=1e-3):
     mf.grids.level = grids_level
     mf.verbose = 1
     mf.kernel()
-    
+
     g = mf.nuc_grad_method()
     g.auxbasis_response = True
     g.kernel()
@@ -101,7 +100,7 @@ def _check_dft_hessian(xc=xc0, disp=None, ix=0, iy=0, tol=1e-3):
     pmol.set_geom_(coords - v, unit='Bohr')
     pmol.build()
     _, g1 = g_scanner(pmol)
-    
+
     h_fd = (g0 - g1)/2.0/eps
     pmol.set_geom_(coords, unit='Bohr')
     pmol.build()
@@ -113,30 +112,30 @@ def _check_dft_hessian(xc=xc0, disp=None, ix=0, iy=0, tol=1e-3):
     hobj.set(auxbasis_response=2)
     hobj.verbose=0
     h = hobj.kernel()
-    
+
     print(f"analytical Hessian H({ix},{iy})")
     print(h[ix,:,iy,:])
     print(f"finite different Hessian H({ix},{iy})")
     print(h_fd)
     print('Norm of diff', np.linalg.norm(h[ix,:,iy,:] - h_fd))
     assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
-    
+
 class KnownValues(unittest.TestCase):
     def test_hessian_rhf(self):
         print('-----testing DF RHF Hessian----')
         _check_rhf_hessian(ix=0, iy=0)
         _check_rhf_hessian(ix=0, iy=1)
-    
+
     def test_hessian_lda(self):
         print('-----testing DF LDA Hessian----')
         _check_dft_hessian(xc='LDA', disp=None, ix=0,iy=0)
         _check_dft_hessian(xc='LDA', disp=None, ix=0,iy=1)
-    
+
     def test_hessian_gga(self):
         print('-----testing DF PBE Hessian----')
         _check_dft_hessian(xc='PBE', disp=None, ix=0,iy=0)
         _check_dft_hessian(xc='PBE', disp=None, ix=0,iy=1)
-    
+
     def test_hessian_hybrid(self):
         print('-----testing DF B3LYP Hessian----')
         _check_dft_hessian(xc='B3LYP', disp=None, ix=0,iy=0)
@@ -146,12 +145,12 @@ class KnownValues(unittest.TestCase):
         print('-----testing DF M06 Hessian----')
         _check_dft_hessian(xc='m06', disp=None, ix=0,iy=0)
         _check_dft_hessian(xc='m06', disp=None, ix=0,iy=1)
-    
+
     def test_hessian_rsh(self):
         print('-----testing DF wb97 Hessian----')
         _check_dft_hessian(xc='wb97', disp=None, ix=0,iy=0)
         _check_dft_hessian(xc='wb97', disp=None, ix=0,iy=1)
-    
+
     def test_hessian_D3(self):
         pmol = mol.copy()
         pmol.build()
@@ -161,11 +160,11 @@ class KnownValues(unittest.TestCase):
         mf.grids.level = grids_level
         mf.verbose = 1
         mf.kernel()
-        
+
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         hobj.verbose=0
-        h = hobj.kernel()
+        hobj.kernel()
 
     def test_hessian_D4(self):
         pmol = mol.copy()
@@ -180,7 +179,7 @@ class KnownValues(unittest.TestCase):
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         hobj.verbose=0
-        h = hobj.kernel()
+        hobj.kernel()
 
 if __name__ == "__main__":
     print("Full Tests for DF Hessian")
