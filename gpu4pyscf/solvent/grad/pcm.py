@@ -140,9 +140,10 @@ def get_dD_dS(surface, dF, with_S=True, with_D=False):
 
     return dD, dS, dSii
 
-def grad_nuc(pcmobj):
-    if not pcmobj._intermediates:
-        pcmobj.build()
+def grad_nuc(pcmobj, dm):
+    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+        pcmobj._get_vind(dm)
+
     mol = pcmobj.mol
     q_sym        = pcmobj._intermediates['q_sym'].get()
     gridslice    = pcmobj.surface['gslice_by_atom']
@@ -169,33 +170,23 @@ def grad_nuc(pcmobj):
     de -= numpy.asarray([numpy.sum(dv_g[p0:p1], axis=0) for p0,p1 in gridslice])
     return de
 
-def grad_elec(pcmobj, dm):
+def grad_qv(pcmobj, dm):
     '''
-    dE = 0.5*v* d(K^-1 R) *v + q*dv
-    v^T* d(K^-1 R)v = v^T*K^-1(dR - dK K^-1R)v = v^T K^-1(dR - dK q)
+    contributions due to integrals
     '''
-    if not pcmobj._intermediates:
-        pcmobj.build()
+    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+        pcmobj._get_vind(dm)
 
     gridslice    = pcmobj.surface['gslice_by_atom']
-    v_grids      = pcmobj._intermediates['v_grids']
-    A            = pcmobj._intermediates['A']
-    D            = pcmobj._intermediates['D']
-    S            = pcmobj._intermediates['S']
-    K            = pcmobj._intermediates['K']
-    q            = pcmobj._intermediates['q']
     q_sym        = pcmobj._intermediates['q_sym']
-
-    vK_1 = cupy.linalg.solve(K.T, v_grids)
-
-    # ----------------- potential response -----------------------
 
     intopt = pcmobj.intopt
     intopt.clear()
     # rebuild with aosym
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
     coeff = intopt.coeff
-    dm_cart = cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
+    dm_cart = coeff @ dm @ coeff.T
+    #dm_cart = cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
 
     dvj, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip1', q_sym, None, dm_cart)
     dq, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip2', q_sym, None, dm_cart)
@@ -208,15 +199,32 @@ def grad_elec(pcmobj, dm):
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
     dvj= 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     de = dq + dvj
+    return de.get()
 
-    ## --------------- response from stiffness matrices ----------------
-    gridslice = pcmobj.surface['gslice_by_atom']
+def grad_solver(pcmobj, dm):
+    '''
+    dE = 0.5*v* d(K^-1 R) *v + q*dv
+    v^T* d(K^-1 R)v = v^T*K^-1(dR - dK K^-1R)v = v^T K^-1(dR - dK q)
+    '''
+    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+        pcmobj._get_vind(dm)
+
+    gridslice    = pcmobj.surface['gslice_by_atom']
+    v_grids      = pcmobj._intermediates['v_grids']
+    A            = pcmobj._intermediates['A']
+    D            = pcmobj._intermediates['D']
+    S            = pcmobj._intermediates['S']
+    K            = pcmobj._intermediates['K']
+    q            = pcmobj._intermediates['q']
+
+    vK_1 = cupy.linalg.solve(K.T, v_grids)
+
     dF, dA = get_dF_dA(pcmobj.surface)
 
-    with_D = pcmobj.method.upper() == 'IEF-PCM' or pcmobj.method.upper() == 'SS(V)PE'
+    with_D = pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE']
     dD, dS, dSii = get_dD_dS(pcmobj.surface, dF, with_D=with_D, with_S=True)
 
-    if pcmobj.method.upper() == 'IEF-PCM' or pcmobj.method.upper() == 'SS(V)PE':
+    if pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE']:
         DA = D*A
 
     epsilon = pcmobj.eps
@@ -224,13 +232,31 @@ def grad_elec(pcmobj, dm):
     #de_dF = v0 * -dSii_dF * q
     #de += 0.5*numpy.einsum('i,inx->nx', de_dF, dF)
     # dQ = v^T K^-1 (dR - dK K^-1 R) v
-    if pcmobj.method.upper() == 'C-PCM' or pcmobj.method.upper() == 'COSMO':
-        # dR = 0, dK = dS
-        de_dS = cupy.einsum('i,ijx,j->ix', vK_1, dS, q)
-        de -= cupy.asarray([cupy.sum(de_dS[p0:p1], axis=0) for p0,p1, in gridslice])
-        de -= 0.5*cupy.einsum('i,ijx,i->jx', vK_1, dSii, q)
+    de = cupy.zeros([pcmobj.mol.natm,3])
+    if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
+        dS = dS.transpose([2,0,1])
+        dSii = dSii.transpose([2,0,1])
 
-    elif pcmobj.method.upper() == 'IEF-PCM' or pcmobj.method.upper() == 'SS(V)PE':
+        # dR = 0, dK = dS
+        de_dS = (vK_1 * dS.dot(q)).T                  # cupy.einsum('i,xij,j->ix', vK_1, dS, q)
+        de -= cupy.asarray([cupy.sum(de_dS[p0:p1], axis=0) for p0,p1, in gridslice])
+        de -= 0.5*contract('i,xij->jx', vK_1*q, dSii) # 0.5*cupy.einsum('i,xij,i->jx', vK_1, dSii, q)
+
+    elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE']:
+        dD = dD.transpose([2,0,1])
+        dS = dS.transpose([2,0,1])
+        dSii = dSii.transpose([2,0,1])
+        dA = dA.transpose([2,0,1])
+        def contract_bra(a, B, c):
+            ''' i,xij,j->jx '''
+            tmp = contract('i,xij->xj', a, B)
+            return (tmp * c).T
+
+        def contract_ket(a, B, c):
+            ''' i,xij,j->ix '''
+            tmp = B.dot(c)
+            return (a*tmp).T
+
         # IEF-PCM and SS(V)PE formally are the same in gradient calculation
         # dR = f_eps/(2*pi) * (dD*A + D*dA),
         # dK = dS - f_eps/(2*pi) * (dD*A*S + D*dA*S + D*A*dS)
@@ -238,30 +264,37 @@ def grad_elec(pcmobj, dm):
         fac = f_epsilon/(2.0*PI)
 
         Av = A*v_grids
-        de_dR  = 0.5*fac * cupy.einsum('i,ijx,j->ix', vK_1, dD, Av)
-        de_dR -= 0.5*fac * cupy.einsum('i,ijx,j->jx', vK_1, dD, Av)
+        de_dR  = 0.5*fac * contract_ket(vK_1, dD, Av)
+        de_dR -= 0.5*fac * contract_bra(vK_1, dD, Av)
         de_dR  = cupy.asarray([cupy.sum(de_dR[p0:p1], axis=0) for p0,p1 in gridslice])
-        de_dR += 0.5*fac * cupy.einsum('i,ij,jnx,j->nx', vK_1, D, dA, v_grids)
 
-        de_dS0  = 0.5*cupy.einsum('i,ijx,j->ix', vK_1, dS, q)
-        de_dS0 -= 0.5*cupy.einsum('i,ijx,j->jx', vK_1, dS, q)
+        vK_1_D = vK_1.dot(D)
+        vK_1_Dv = vK_1_D * v_grids
+        de_dR += 0.5*fac * cupy.einsum('j,xjn->nx', vK_1_Dv, dA)
+
+        de_dS0  = 0.5*contract_ket(vK_1, dS, q)
+        de_dS0 -= 0.5*contract_bra(vK_1, dS, q)
         de_dS0  = cupy.asarray([cupy.sum(de_dS0[p0:p1], axis=0) for p0,p1 in gridslice])
-        de_dS0 += 0.5*cupy.einsum('i,inx,i->nx', vK_1, dSii, q)
+
+        vK_1_q = vK_1 * q
+        de_dS0 += 0.5*contract('i,xin->nx', vK_1_q, dSii)
 
         vK_1_DA = cupy.dot(vK_1, DA)
-        de_dS1  = 0.5*cupy.einsum('j,jkx,k->jx', vK_1_DA, dS, q)
-        de_dS1 -= 0.5*cupy.einsum('j,jkx,k->kx', vK_1_DA, dS, q)
+        de_dS1  = 0.5*contract_ket(vK_1_DA, dS, q)
+        de_dS1 -= 0.5*contract_bra(vK_1_DA, dS, q)
         de_dS1  = cupy.asarray([cupy.sum(de_dS1[p0:p1], axis=0) for p0,p1 in gridslice])
-        de_dS1 += 0.5*cupy.einsum('j,jnx,j->nx', vK_1_DA, dSii, q)
+
+        vK_1_DAq = vK_1_DA*q
+        de_dS1 += 0.5*contract('j,xjn->nx', vK_1_DAq, dSii)
 
         Sq = cupy.dot(S,q)
         ASq = A*Sq
-        de_dD  = 0.5*cupy.einsum('i,ijx,j->ix', vK_1, dD, ASq)
-        de_dD -= 0.5*cupy.einsum('i,ijx,j->jx', vK_1, dD, ASq)
+        de_dD  = 0.5*contract_ket(vK_1, dD, ASq)
+        de_dD -= 0.5*contract_bra(vK_1, dD, ASq)
         de_dD  = cupy.asarray([cupy.sum(de_dD[p0:p1], axis=0) for p0,p1 in gridslice])
 
         vK_1_D = cupy.dot(vK_1, D)
-        de_dA = 0.5*cupy.einsum('j,jnx,j->nx', vK_1_D, dA, Sq)
+        de_dA = 0.5*contract('j,xjn->nx', vK_1_D*Sq, dA)   # 0.5*cupy.einsum('j,xjn,j->nx', vK_1_D, dA, Sq)
 
         de_dK = de_dS0 - fac * (de_dD + de_dA + de_dS1)
         de += de_dR - de_dK
@@ -287,8 +320,9 @@ def make_grad_object(grad_method):
             if dm is None:
                 dm = self.base.make_rdm1(ao_repr=True)
 
-            self.de_solvent = grad_elec(self.base.with_solvent, dm)
-            self.de_solvent+= grad_nuc(self.base.with_solvent)
+            self.de_solvent = grad_qv(self.base.with_solvent, dm)
+            self.de_solvent+= grad_solver(self.base.with_solvent, dm)
+            self.de_solvent+= grad_nuc(self.base.with_solvent, dm)
 
             self.de_solute = grad_method_class.kernel(self, *args, **kwargs)
             self.de = self.de_solute + self.de_solvent
