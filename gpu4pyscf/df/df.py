@@ -22,7 +22,7 @@ from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from pyscf.df import df, addons
 from gpu4pyscf.lib.cupy_helper import (
-    cholesky, tag_array, get_avail_mem, cart2sph)
+    cholesky, tag_array, get_avail_mem, cart2sph, take_last2d)
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
@@ -77,13 +77,13 @@ class DF(df.DF):
                 j2c_cpu = auxmol.intor('int2c2e', hermi=1)
         else:
             j2c_cpu = auxmol.intor('int2c2e', hermi=1)
-        j2c = cupy.asarray(j2c_cpu)
+        j2c = cupy.asarray(j2c_cpu, order='C')
         t0 = log.timer_debug1('2c2e', *t0)
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
         intopt.build(direct_scf_tol, diag_block_with_triu=False, aosym=True, group_size=256)
         log.timer_debug1('prepare intopt', *t0)
         self.j2c = j2c.copy()
-        j2c = j2c[cupy.ix_(intopt.sph_aux_idx, intopt.sph_aux_idx)]
+        j2c = take_last2d(j2c, intopt.sph_aux_idx)
         try:
             self.cd_low = cholesky(j2c)
             self.cd_low = tag_array(self.cd_low, tag='cd')

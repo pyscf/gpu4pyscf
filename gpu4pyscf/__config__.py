@@ -20,9 +20,9 @@ elif props['totalGlobalMem'] >= 32 * GB:
     number_of_threads = 1024 * 80
 # such as A30-24GB
 elif props['totalGlobalMem'] >= 16 * GB:
-    min_ao_blksize = 64
-    min_grid_blksize = 64*64
-    ao_aligned = 16
+    min_ao_blksize = 128
+    min_grid_blksize = 128*128
+    ao_aligned = 32
     grid_aligned = 128
     mem_fraction = 0.9
     number_of_threads = 1024 * 80
