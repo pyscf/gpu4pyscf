@@ -22,7 +22,7 @@ from pyscf import gto, df, lib
 from pyscf.scf import _vhf
 from gpu4pyscf.scf.hf import BasisProdCache, _make_s_index_offsets
 from gpu4pyscf.lib.cupy_helper import (
-    block_c2s_diag, cart2sph, block_diag, contract, load_library, c2s_l, get_avail_mem, print_mem_info)
+    block_c2s_diag, cart2sph, block_diag, contract, load_library, c2s_l, get_avail_mem, print_mem_info, take_last2d)
 from gpu4pyscf.lib import logger
 
 LMAX_ON_GPU = 8
@@ -1183,8 +1183,8 @@ def get_dh1e(mol, dm0):
     fakemol = gto.fakemol_for_charges(coords)
     intopt = VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
-    dm0_sorted = dm0[cupy.ix_(intopt.sph_ao_idx, intopt.sph_ao_idx)]
-
+    #dm0_sorted = dm0[cupy.ix_(intopt.sph_ao_idx, intopt.sph_ao_idx)]
+    dm0_sorted = take_last2d(dm0, intopt.sph_ao_idx)
     dh1e = cupy.zeros([natm,3])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip1'):
         dh1e[k0:k1,:3] += cupy.einsum('xkji,ij->kx', int3c_blk, dm0_sorted[i0:i1,j0:j1])

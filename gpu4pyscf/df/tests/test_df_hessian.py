@@ -39,6 +39,7 @@ def setUpModule():
 
 def tearDownModule():
     global mol
+    mol.stdout.close()
     del mol
 
 def _make_rhf():

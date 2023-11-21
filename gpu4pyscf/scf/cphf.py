@@ -28,7 +28,7 @@ from gpu4pyscf.lib.cupy_helper import krylov
 from gpu4pyscf.lib import logger
 
 def solve(fvind, mo_energy, mo_occ, h1, s1=None,
-          max_cycle=50, tol=1e-9, hermi=False, verbose=logger.WARN):
+          max_cycle=50, tol=1e-7, hermi=False, verbose=logger.WARN):
     '''
     Args:
         fvind : function
