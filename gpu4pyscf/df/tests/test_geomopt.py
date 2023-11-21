@@ -15,7 +15,6 @@
 
 import pyscf
 import numpy as np
-import dftd3.pyscf as disp
 import unittest
 from pyscf import lib
 from gpu4pyscf import scf
@@ -32,6 +31,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
 xc='B3LYP'
 bas='def2-tzvpp'
+disp='d3bj'
 auxbasis='ccpvtz-jkfit'
 grids_level = 8
 
@@ -64,9 +64,9 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(coords - coords_qchem) < 1e-4
 
     def test_rhf_geomopt(self):
-        mf_GPU = scf.RHF(mol).density_fit()
-        mf_GPU.kernel()
-        mol_eq = optimize(mf_GPU, maxsteps=20)
+        mf = scf.RHF(mol).density_fit()
+        mf.kernel()
+        mol_eq = optimize(mf, maxsteps=20)
         coords = mol_eq.atom_coords(unit='Ang')
         # reference from q-chem
         coords_qchem = np.array([
