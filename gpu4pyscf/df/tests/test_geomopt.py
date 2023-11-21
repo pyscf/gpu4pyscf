@@ -15,7 +15,6 @@
 
 import pyscf
 import numpy as np
-import dftd3.pyscf as disp
 import unittest
 from pyscf import lib
 from gpu4pyscf import scf
@@ -32,8 +31,8 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
 xc='B3LYP'
 bas='def2-tzvpp'
-auxbasis='ccpvtz-jkfit'
 disp='d3bj'
+auxbasis='ccpvtz-jkfit'
 grids_level = 8
 
 def setUpModule():
@@ -46,14 +45,14 @@ def tearDownModule():
     global mol
     mol.stdout.close()
     del mol
-    
+
 eps = 1e-3
 
 class KnownValues(unittest.TestCase):
-    def test_geomopt(self):
+    def test_rks_geomopt(self):
         mf = rks.RKS(mol, xc=xc, disp=disp).density_fit()
         mf.grids.level = grids_level
-        e_tot = mf.kernel()
+        mf.kernel()
         mol_eq = optimize(mf, maxsteps=20)
         coords = mol_eq.atom_coords(unit='Ang')
         # reference from q-chem
@@ -61,22 +60,22 @@ class KnownValues(unittest.TestCase):
             [ 0.0000000000,     0.0000000000,     0.1164022656],
             [-0.7617088263,    -0.0000000000,    -0.4691011328],
             [0.7617088263,    -0.0000000000,    -0.4691011328]])
-        
+
         assert np.linalg.norm(coords - coords_qchem) < 1e-4
-    
-    def test_geomopt(self):
-        mf_GPU = scf.RHF(mol).density_fit()
-        e_tot = mf_GPU.kernel()
-        mol_eq = optimize(mf_GPU, maxsteps=20)
+
+    def test_rhf_geomopt(self):
+        mf = scf.RHF(mol).density_fit()
+        mf.kernel()
+        mol_eq = optimize(mf, maxsteps=20)
         coords = mol_eq.atom_coords(unit='Ang')
         # reference from q-chem
         coords_qchem = np.array([
             [0.0000000000,     0.0000000000,     0.1021249784],
             [-0.7519034531,    -0.0000000000,    -0.4619624892],
             [0.7519034531,    -0.0000000000,    -0.4619624892]])
-        
+
         assert np.linalg.norm(coords - coords_qchem) < 1e-4
-    
+
 if __name__ == "__main__":
     print("Full Tests for geometry optimization")
     unittest.main()

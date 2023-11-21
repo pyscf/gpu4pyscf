@@ -617,7 +617,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0 = aow = None
     elif xctype == 'MGGA':
         if grids.level < 5:
-            logger.warn(mol, 'MGGA Hessian is sensitive to dft grids.')
+            log.warn(mol, 'MGGA Hessian is sensitive to dft grids.')
         ao_deriv = 2
         for ao, mask, weight, coords \
                 in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):

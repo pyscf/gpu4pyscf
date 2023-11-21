@@ -19,7 +19,7 @@ from pyscf import lib, gto
 from gpu4pyscf.dft import rks
 lib.num_threads(8)
 
-atom =''' 
+atom ='''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
@@ -35,7 +35,7 @@ grids_level = 3
 mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
 
 auxbasis = {}
-from pyscf import df, gto
+from pyscf import df
 etb_basis = df.aug_etb(mol, beta=2.0)
 for i in range(mol.natm):
     sym = mol.atom_pure_symbol(i)
@@ -57,7 +57,7 @@ mf_GPU.screen_tol = screen_tol
 
 # Compute Energy
 print('------------------- Energy -----------------------------')
-e_dft = mf_GPU.kernel() 
+e_dft = mf_GPU.kernel()
 print('DFT energy by GPU4PySCF')
 print(e_dft)
 

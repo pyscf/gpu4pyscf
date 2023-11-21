@@ -61,7 +61,7 @@ def _check_grad(grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
     mf.nlcgrids.level = nlcgrids_level
     mf.conv_tol = 1e-10
     mf.verbose = 1
-    e_tot = mf.kernel()
+    mf.kernel()
 
     g = mf.nuc_grad_method()
     g.auxbasis_response = True

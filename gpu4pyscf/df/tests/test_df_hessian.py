@@ -15,7 +15,6 @@
 
 import numpy as np
 import pyscf
-from pyscf import scf, dft
 from gpu4pyscf import dft, scf
 import unittest
 
