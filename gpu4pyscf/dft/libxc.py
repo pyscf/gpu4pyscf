@@ -20,11 +20,12 @@ import numpy as np
 import ctypes
 import cupy
 from pyscf import dft
+from gpu4pyscf.dft.libxc_structs import xc_func_type
 
 _libxc = np.ctypeslib.load_library(
     'libxc', os.path.abspath(os.path.join(__file__, '..', '..', 'lib', 'deps', 'lib')))
 
-def _check_arrays(current_arrays, fields, factor, required):
+def _check_arrays(current_arrays, fields, sizes, factor, required):
     """
     A specialized function built to construct and check the sizes of arrays given to the LibXCFunctional class.
     """
@@ -35,7 +36,8 @@ def _check_arrays(current_arrays, fields, factor, required):
 
     for label in fields:
         if required:
-            current_arrays[label] = cupy.zeros((factor, 1))
+            size = sizes[label]
+            current_arrays[label] = cupy.zeros((factor, size), dtype=np.float64)
         else:
             current_arrays[label] = None # cupy.empty((1))
 
@@ -44,7 +46,7 @@ def _check_arrays(current_arrays, fields, factor, required):
 class _xcfun(ctypes.Structure):
     pass
 
-_xc_func_p = ctypes.POINTER(_xcfun)
+_xc_func_p = ctypes.POINTER(xc_func_type)
 _libxc.xc_func_alloc.restype = _xc_func_p
 _libxc.xc_func_init.argtypes = (_xc_func_p, ctypes.c_int, ctypes.c_int)
 _libxc.xc_func_end.argtypes = (_xc_func_p, )
@@ -52,8 +54,7 @@ _libxc.xc_func_free.argtypes = (_xc_func_p, )
 
 class XCfun:
     def __init__(self, xc, spin):
-        assert spin == 'unpolarized'
-        self._spin = 1
+        self._spin = 1 if spin == 'unpolarized' else 2
         self.xc_func = _libxc.xc_func_alloc()
         if isinstance(xc, str):
             self.func_id = _libxc.xc_functional_get_number(ctypes.c_char_p(xc.encode()))
@@ -64,6 +65,10 @@ class XCfun:
             raise RuntimeError('failed to initialize xc fun')
         self._family = dft.libxc.xc_type(xc)
 
+        self.xc_func_sizes = {}
+        for attr in dir(self.xc_func.contents.dim):
+            if "_" not in attr:
+                self.xc_func_sizes[attr] = getattr(self.xc_func.contents.dim, attr)
     def __del__(self):
         if self.xc_func is None:
             return
@@ -89,6 +94,7 @@ class XCfun:
 
         # Find the right compute function
         args = [self.xc_func, ctypes.c_size_t(npoints)]
+        xc_func_sizes = self.xc_func_sizes
         if self._family == 'LDA':
             input_labels   = ["rho"]
             input_num_args = 1
@@ -102,11 +108,11 @@ class XCfun:
             ]
 
             # Build input args
-            output = _check_arrays(output, output_labels[0:1], npoints, do_exc)
-            output = _check_arrays(output, output_labels[1:2], npoints, do_vxc)
-            output = _check_arrays(output, output_labels[2:3], npoints, do_fxc)
-            output = _check_arrays(output, output_labels[3:4], npoints, do_kxc)
-            output = _check_arrays(output, output_labels[4:5], npoints, do_lxc)
+            output = _check_arrays(output, output_labels[0:1], xc_func_sizes, npoints, do_exc)
+            output = _check_arrays(output, output_labels[1:2], xc_func_sizes, npoints, do_vxc)
+            output = _check_arrays(output, output_labels[2:3], xc_func_sizes, npoints, do_fxc)
+            output = _check_arrays(output, output_labels[3:4], xc_func_sizes, npoints, do_kxc)
+            output = _check_arrays(output, output_labels[4:5], xc_func_sizes, npoints, do_lxc)
 
             args.extend([   inp[x] for x in  input_labels])
             args.extend([output[x] for x in output_labels])
@@ -129,11 +135,11 @@ class XCfun:
             ]
 
             # Build input args
-            output = _check_arrays(output, output_labels[0:1], npoints, do_exc)
-            output = _check_arrays(output, output_labels[1:3], npoints, do_vxc)
-            output = _check_arrays(output, output_labels[3:6], npoints, do_fxc)
-            output = _check_arrays(output, output_labels[6:10], npoints, do_kxc)
-            output = _check_arrays(output, output_labels[10:15], npoints, do_lxc)
+            output = _check_arrays(output, output_labels[0:1], xc_func_sizes, npoints, do_exc)
+            output = _check_arrays(output, output_labels[1:3], xc_func_sizes, npoints, do_vxc)
+            output = _check_arrays(output, output_labels[3:6], xc_func_sizes, npoints, do_fxc)
+            output = _check_arrays(output, output_labels[6:10], xc_func_sizes, npoints, do_kxc)
+            output = _check_arrays(output, output_labels[10:15], xc_func_sizes, npoints, do_lxc)
 
             args.extend([   inp[x] for x in  input_labels])
             args.extend([output[x] for x in output_labels])
@@ -174,11 +180,11 @@ class XCfun:
             ]
 
             # Build input args
-            output = _check_arrays(output, output_labels[0:1], npoints, do_exc)
-            output = _check_arrays(output, output_labels[1:5], npoints, do_vxc)
-            output = _check_arrays(output, output_labels[5:15], npoints, do_fxc)
-            output = _check_arrays(output, output_labels[15:35], npoints, do_kxc)
-            output = _check_arrays(output, output_labels[35:70], npoints, do_lxc)
+            output = _check_arrays(output, output_labels[0:1], xc_func_sizes, npoints, do_exc)
+            output = _check_arrays(output, output_labels[1:5], xc_func_sizes, npoints, do_vxc)
+            output = _check_arrays(output, output_labels[5:15], xc_func_sizes, npoints, do_fxc)
+            output = _check_arrays(output, output_labels[15:35], xc_func_sizes, npoints, do_kxc)
+            output = _check_arrays(output, output_labels[35:70], xc_func_sizes, npoints, do_lxc)
 
             args.extend([   inp[x] for x in  input_labels])
             if not self.needs_laplacian():
