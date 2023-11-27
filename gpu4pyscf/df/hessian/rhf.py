@@ -68,7 +68,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     mo_coeff = cupy.asarray(mo_coeff, order='C')
     nao, nmo = mo_coeff.shape
     mocc = mo_coeff[:,mo_occ>0]
-    mocc_2 = cupy.einsum('pi,i->pi', mocc, mo_occ[mo_occ>0]**.5)
+    mocc_2 = mocc * mo_occ[mo_occ>0]**.5
     dm0 = cupy.dot(mocc, mocc.T) * 2
 
     hcore_deriv = hessobj.hcore_generator(mol)
@@ -232,7 +232,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         int2c_ipip1 = take_last2d(int2c_ipip1, sph_aux_idx)
         rhoj2c_P = contract('xpq,q->xp', int2c_ipip1, rhoj0_P)
         # (00|0)(2|0)(0|00)
-        hj_aux_diag -= cupy.einsum('p,xp->px', rhoj0_P, rhoj2c_P).reshape(-1,3,3)
+        # p,xp->px
+        hj_aux_diag -= (rhoj0_P*rhoj2c_P).T.reshape(-1,3,3)
         if with_k:
             rho2c_0 = contract('pij,qji->pq', rhok0_P__, rhok0_P__)
             hk_aux_diag -= .5 * contract('pq,xpq->px', rho2c_0, int2c_ipip1).reshape(-1,3,3)
@@ -245,7 +246,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             int2c_ip1ip2 = auxmol.intor('int2c2e_ip1ip2', aosym='s1')
         int2c_ip1ip2 = cupy.asarray(int2c_ip1ip2, order='C')
         int2c_ip1ip2 = take_last2d(int2c_ip1ip2, sph_aux_idx)
-        hj_aux_aux = -.5 * cupy.einsum('p,xpq,q->pqx', rhoj0_P, int2c_ip1ip2, rhoj0_P).reshape(naux, naux,3,3)
+        hj_aux_aux = -.5 * contract('p,xpq->pqx', rhoj0_P, int2c_ip1ip2*rhoj0_P).reshape(naux, naux,3,3)
         if with_k:
             hk_aux_aux = -.5 * contract('xpq,pq->pqx', int2c_ip1ip2, rho2c_0).reshape(naux,naux,3,3)
         t1 = log.timer_debug1('intermediate variables with int2c_*', *t1)
@@ -309,7 +310,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     #======================================== sort AO end ===========================================
     # Energy weighted density matrix
-    dme0 = cupy.einsum('pi,qi,i->pq', mocc, mocc, mo_energy[mo_occ>0]) * 2.0
+    # pi,qi,i->pq
+    dme0 = cupy.dot(mocc, (mocc * mo_energy[mo_occ>0] * 2).T)
     # -----------------------------------------
     #        collecting all
     # -----------------------------------------
@@ -318,18 +320,18 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     ek = cupy.zeros([len(atmlst),len(atmlst),3,3])
     for i0, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = aoslices[ia]
-        e1[i0,i0] -= cupy.einsum('xypq,pq->xy', s1aa[:,:,p0:p1], dme0[p0:p1]) * 2.0
+        e1[i0,i0] -= contract('xypq,pq->xy', s1aa[:,:,p0:p1], dme0[p0:p1]) * 2.0
         ej[i0,i0] += cupy.sum(hj_ao_diag[p0:p1,:,:], axis=0)
         if with_k:
             ek[i0,i0] += cupy.sum(hk_ao_diag[p0:p1,:,:], axis=0)
         for j0, ja in enumerate(atmlst[:i0+1]):
             q0, q1 = aoslices[ja][2:]
             ej[i0,j0] += cupy.sum(hj_ao_ao[p0:p1,q0:q1], axis=[0,1])
-            e1[i0,j0] -= 2.0 * cupy.einsum('xypq,pq->xy', s1ab[:,:,p0:p1,q0:q1], dme0[p0:p1,q0:q1])
+            e1[i0,j0] -= 2.0 * contract('xypq,pq->xy', s1ab[:,:,p0:p1,q0:q1], dme0[p0:p1,q0:q1])
             if with_k:
                 ek[i0,j0] += cupy.sum(hk_ao_ao[p0:p1,q0:q1], axis=[0,1])
             h1ao = hcore_deriv(ia, ja)
-            e1[i0,j0] += cupy.einsum('xypq,pq->xy', h1ao, dm0)
+            e1[i0,j0] += contract('xypq,pq->xy', h1ao, dm0)
         #
         # The first order RI basis response
         #

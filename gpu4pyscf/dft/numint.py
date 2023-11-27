@@ -632,8 +632,8 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             excsum[i] += cupy.dot(den_b, exc[:,0])
             t1 = log.timer_debug1('integration', *t1)
 
-    vmata = [cupy.einsum('pi,pq,qj->ij', coeff, v, coeff) for v in vmata]
-    vmatb = [cupy.einsum('pi,pq,qj->ij', coeff, v, coeff) for v in vmatb]
+    vmata = [coeff.T @ v @ coeff for v in vmata]
+    vmatb = [coeff.T @ v @ coeff for v in vmatb]
     if xctype != 'LDA':
         for i in range(nset):
             vmata[i] = vmata[i] + vmata[i].T
@@ -894,8 +894,8 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 vb += _tau_dot(ao, ao, wv[1,4])
                 add_sparse(vmata[i], va, mask)
                 add_sparse(vmatb[i], vb, mask)
-    vmata = [cupy.einsum('pi,pq,qj->ij', coeff, v, coeff) for v in vmata]
-    vmatb = [cupy.einsum('pi,pq,qj->ij', coeff, v, coeff) for v in vmatb]
+    vmata = [coeff.T @ v @ coeff for v in vmata]
+    vmatb = [coeff.T @ v @ coeff for v in vmatb]
     if xctype != 'LDA':
         # For real orbitals, K_{ia,bj} = K_{ia,jb}. It simplifies real fxc_jb
         # [(\nabla mu) nu + mu (\nabla nu)] * fxc_jb = ((\nabla mu) nu f_jb) + h.c.
@@ -1037,6 +1037,10 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
     vxc, fxc = ni.eval_xc_eff(xc_code, rho, deriv=2, xctype=xctype)[1:3]
     return rho, vxc, fxc
 
+@cupy.fuse()
+def batch_square(a):
+    return a[0]**2 + a[1]**2 + a[2]**2
+
 def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None):
     '''
     Different from PySCF, this function employ cuda version libxc
@@ -1056,25 +1060,25 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None
             inp['rho'] = rho
         if xctype == 'GGA':
             inp['rho'] = rho[0]
-            inp['sigma'] = rho[1]*rho[1] + rho[2]*rho[2] + rho[3]*rho[3]
+            inp['sigma'] = batch_square(rho[1:4])
         if xctype == 'MGGA':
             inp['rho'] = rho[0]
-            inp['sigma'] = rho[1]*rho[1] + rho[2]*rho[2] + rho[3]*rho[3]
+            inp['sigma'] = batch_square(rho[1:4])
             inp['tau'] = rho[-1]     # can be 4 (without laplacian) or 5 (with laplacian)
     else:
         if xctype == 'LDA':
             inp['rho'] = cupy.stack([rho[0], rho[1]], axis=1)
         if xctype == 'GGA':
             inp['rho'] = cupy.stack([rho[0,0], rho[1,0]], axis=1)
-            sigma0 = rho[0,1]*rho[0,1] + rho[0,2]*rho[0,2] + rho[0,3]*rho[0,3]
+            sigma0 = batch_square(rho[0,1:4])
             sigma1 = rho[0,1]*rho[1,1] + rho[0,2]*rho[1,2] + rho[0,3]*rho[1,3]
-            sigma2 = rho[1,1]*rho[1,1] + rho[1,2]*rho[1,2] + rho[1,3]*rho[1,3]
+            sigma2 = batch_square(rho[1,1:4])
             inp['sigma'] = cupy.stack([sigma0, sigma1, sigma2], axis=1)
         if xctype == 'MGGA':
             inp['rho'] = cupy.stack([rho[0,0], rho[1,0]], axis=1)
-            sigma0 = rho[0,1]*rho[0,1] + rho[0,2]*rho[0,2] + rho[0,3]*rho[0,3]
+            sigma0 = batch_square(rho[0,1:4])
             sigma1 = rho[0,1]*rho[1,1] + rho[0,2]*rho[1,2] + rho[0,3]*rho[1,3]
-            sigma2 = rho[1,1]*rho[1,1] + rho[1,2]*rho[1,2] + rho[1,3]*rho[1,3]
+            sigma2 = batch_square(rho[1,1:4])
             inp['sigma'] = cupy.stack([sigma0, sigma1, sigma2], axis=1)
             inp['tau'] = cupy.stack([rho[0,-1], rho[1,-1]], axis=1)     # can be 4 (without laplacian) or 5 (with laplacian)
     do_vxc = True
@@ -1294,7 +1298,7 @@ def _contract_rho(bra, ket, rho=None):
         if err != 0:
             raise RuntimeError('CUDA Error')
     else:
-        rho = cupy.einsum('ig,ig->g', bra, ket)
+        rho = contract('ig,ig->g', bra, ket)
     return rho
 
 def _contract_rho1(bra, ket, rho=None):
@@ -1435,13 +1439,13 @@ def _tau_dot_sparse(bra, ket, wv, nbins, screen_index, ao_loc,
 def _scale_ao(ao, wv, out=None):
     if wv.ndim == 1:
         if ao.flags.f_contiguous:
-            return cupy.einsum('ip,p->ip', ao, wv)
+            return ao * wv
         nvar = 1
         nao, ngrids = ao.shape
         assert wv.size == ngrids
     else:
         if ao[0].flags.f_contiguous:
-            return cupy.einsum('nip,np->ip', ao, wv)
+            return contract('nip,np->ip', ao, wv)
         nvar, nao, ngrids = ao.shape
         assert wv.shape == (nvar, ngrids)
 

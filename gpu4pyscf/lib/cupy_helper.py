@@ -437,7 +437,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     ax = cupy.asarray(ax)
     nd = cycle + 1
 
-    h = cupy.einsum('in,jn->ij', xs, ax)
+    h = cupy.dot(xs, ax.T)
 
     # Add the contribution of I in (1+a)
     h += cupy.diag(cupy.asarray(innerprod[:nd]))
@@ -447,7 +447,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         g[0] = innerprod[0]
     else:
         ng = min(nd, nroots)
-        g[:ng, :nroots] += cupy.einsum('in,jn->ij', xs[:ng], b[:nroots])
+        g[:ng, :nroots] += cupy.dot(xs[:ng], b[:nroots].T)
         '''
         # Restore the first nroots vectors, which are array b or b-(1+a)x0
         for i in range(min(nd, nroots)):
@@ -492,4 +492,4 @@ def _qr(xs, dot, lindep=1e-14):
     return qs[:nv], cupy.linalg.inv(rmat[:nv,:nv])
 
 def _gen_x0(v, xs):
-    return cupy.einsum('nk,nj->kj', v, xs)
+    return cupy.dot(v.T, xs)

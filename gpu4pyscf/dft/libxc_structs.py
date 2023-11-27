@@ -18,7 +18,7 @@ Wrappers to the LibXC C structs
 """
 
 """
-Modified source code from libxc
+Modified source code from libXC
 """
 
 import ctypes
