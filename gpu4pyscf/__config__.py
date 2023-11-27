@@ -21,7 +21,7 @@ elif props['totalGlobalMem'] >= 32 * GB:
 # such as A30-24GB
 elif props['totalGlobalMem'] >= 16 * GB:
     min_ao_blksize = 128
-    min_grid_blksize = 128*128*16
+    min_grid_blksize = 128*128
     ao_aligned = 32
     grid_aligned = 128
     mem_fraction = 0.9
