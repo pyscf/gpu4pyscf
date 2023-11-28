@@ -71,8 +71,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     mocc_2 = mocc * mo_occ[mo_occ>0]**.5
     dm0 = cupy.dot(mocc, mocc.T) * 2
 
-    hcore_deriv = hessobj.hcore_generator(mol)
-
     # ------------------------------------
     #      overlap matrix contributions
     # ------------------------------------
@@ -107,10 +105,10 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     int2c = cupy.asarray(int2c, order='C')
     int2c = take_last2d(int2c, sph_aux_idx)
     int2c_inv = cupy.linalg.pinv(int2c, rcond=1e-12)
+    int2c = None
 
     int2c_ip1 = cupy.asarray(int2c_ip1, order='C')
     int2c_ip1 = take_last2d(int2c_ip1, sph_aux_idx)
-    int2c_ip1_inv = contract('yqp,pr->yqr', int2c_ip1, int2c_inv)
 
     hj_ao_ao = cupy.zeros([nao,nao,3,3])
     hk_ao_ao = cupy.zeros([nao,nao,3,3])
@@ -143,10 +141,10 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         hj_ao_aux -= contract('q,iqxy->iqxy', rhoj0_P, wj1_01)   # (10|0)(0|1)(0|00)
         wj1_01 = None
 
+    int2c_ip1_inv = contract('yqp,pr->yqr', int2c_ip1, int2c_inv)
     if with_k:
         if hessobj.auxbasis_response:
             wk1_P__ = contract('ypq,qor->ypor', int2c_ip1, rhok0_P__)
-            int2c_ip1_inv = cupy.asarray(int2c_ip1_inv)
 
         for i0, i1 in lib.prange(0,nao,64):
             wk1_Pko_islice = cupy.asarray(wk1_Pko[i0:i1])
@@ -312,6 +310,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     # Energy weighted density matrix
     # pi,qi,i->pq
     dme0 = cupy.dot(mocc, (mocc * mo_energy[mo_occ>0] * 2).T)
+    hcore_deriv = hessobj.hcore_generator(mol)
     # -----------------------------------------
     #        collecting all
     # -----------------------------------------
@@ -427,7 +426,6 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size_aux=BLKSIZE, group_size=BLKSIZE)
     sph_ao_idx = intopt.sph_ao_idx
     sph_aux_idx = intopt.sph_aux_idx
-    rev_ao_idx = np.argsort(intopt.sph_ao_idx)
 
     mocc = mocc[sph_ao_idx, :]
     mo_coeff = mo_coeff[sph_ao_idx,:]
@@ -436,11 +434,13 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
 
     int2c = take_last2d(int2c, sph_aux_idx)
     int2c_inv = cupy.linalg.pinv(int2c, rcond=1e-12)
+    int2c = None
 
     wj, wk_Pl_, wk_P__ = int3c2e.get_int3c2e_wjk(mol, auxmol, dm0_tag, omega=omega)
     rhoj0 = contract('pq,q->p', int2c_inv, wj)
     if with_k:
         rhok0_P__ = contract('pq,qij->pij', int2c_inv, wk_P__)
+    wj = wk_P__ = None
     if isinstance(wk_Pl_, cupy.ndarray):
         rhok0_Pl_ = contract('pq,qio->pio', int2c_inv, wk_Pl_)
     else:
@@ -448,10 +448,13 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         for p0, p1 in lib.prange(0,nao,64):
             wk_tmp = cupy.asarray(wk_Pl_[:,p0:p1])
             rhok0_Pl_[:,p0:p1] = contract('pq,qio->pio', int2c_inv, wk_tmp).get()
-    wj = wk_Pl_ = wk_P__ = int2c_inv = int2c = None
+        wk_tmp = None
+    wk_Pl_ = int2c_inv = None
 
     # int3c_ip1 contributions
+    cupy.get_default_memory_pool().free_all_blocks()
     vj1_buf, vk1_buf, vj1_ao, vk1_ao = int3c2e.get_int3c2e_ip1_vjk(intopt, rhoj0, rhok0_Pl_, dm0_tag, aoslices, omega=omega)
+    rev_ao_idx = np.argsort(sph_ao_idx)
     vj1_buf = take_last2d(vj1_buf, rev_ao_idx)
     vk1_buf = take_last2d(vk1_buf, rev_ao_idx)
 
@@ -491,7 +494,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
                 vk1_tmp += 2.0 * contract('xpro,pir->xpio', wk0_10_P__, rhok_tmp)
                 vk1_int3c_ip2[:,:,p0:p1] += contract('xpio,pa->axio', vk1_tmp, aux2atom)
         wj0_10 = wk0_10_P__ = rhok0_P__ = int2c_ip1 = None
-        vj1_tmp = vk1_tmp = wk0_10_Pl_ = rhoj0 = rhok0_Pl_ = None
+        rhok_tmp = vj1_tmp = vk1_tmp = wk0_10_Pl_ = rhoj0 = rhok0_Pl_ = None
         aux2atom = None
 
         vj1_int3c_ip2 = contract('nxiq,ip->nxpq', vj1_int3c_ip2, mo_coeff)
