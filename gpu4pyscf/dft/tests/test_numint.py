@@ -19,35 +19,39 @@ import unittest
 import numpy as np
 import pyscf
 import cupy
-from pyscf import lib
+from pyscf import lib, scf
 from pyscf.dft import Grids
 from pyscf.dft.numint import NumInt as pyscf_numint
 from gpu4pyscf.dft.numint import NumInt
 from gpu4pyscf import dft
 
 mol = pyscf.M(
-    atom='''
-C  -0.65830719,  0.61123287, -0.00800148
-C   0.73685281,  0.61123287, -0.00800148
-''',
-    basis='ccpvtz',
-    spin=None,
+    atom = '''
+O        0.000000    0.000000    0.117790
+H        0.000000    0.755453   -0.471161
+H        0.000000   -0.755453   -0.471161''',
+    basis = 'ccpvdz',
+    charge = 1,
+    spin = 1  # = 2S = spin_up - spin_down
 )
+
 mol.verbose=1
 np.random.seed(2)
 nao = mol.nao
-dm = np.random.random((2,nao,nao))
-dm1 = dm + dm.transpose(0,2,1)
-mo_coeff = np.random.rand(nao, nao)
-mo_occ = (np.random.rand(nao) > .5).astype(np.double)
-dm0 = (mo_coeff*mo_occ).dot(mo_coeff.T)
+mf = scf.UHF(mol)
+mf.kernel()
+dm1 = mf.make_rdm1().copy()
+dm = dm1
+mo_coeff = mf.mo_coeff
+mo_occ = mf.mo_occ
+dm0 = (mo_coeff[0]*mo_occ[0]).dot(mo_coeff[0].T)
 
 grids_cpu = Grids(mol)
-grids_cpu.level = 5
+grids_cpu.level = 1
 grids_cpu.build()
 
 grids_gpu = Grids(mol)
-grids_gpu.level = 5
+grids_gpu.level = 1
 grids_gpu.build()
 
 grids_gpu.weights = cupy.asarray(grids_gpu.weights)
@@ -66,16 +70,18 @@ class KnownValues(unittest.TestCase):
     def _check_vxc(self, method, xc):
         ni = NumInt(xc=xc)
         fn = getattr(ni, method)
-        n, e, v = fn(mol, grids_gpu, xc, dm0, hermi=1)
-        v = [i.get() for i in v]
+        n, e, v = fn(mol, grids_gpu, xc, dm1, hermi=1)
+        v = [x.get() for x in v]
 
         ni_pyscf = pyscf_numint()
         fn = getattr(ni_pyscf, method)
-        nref, eref, vref = fn(mol, grids_cpu, xc, dm0, hermi=1)
+        nref, eref, vref = fn(mol, grids_cpu, xc, dm1, hermi=1)
 
-        cupy.allclose(e, eref)
-        cupy.allclose(n, nref)
-        cupy.allclose(v, vref)
+        v = cupy.asarray(v)
+        vref = cupy.asarray(vref)
+        assert cupy.allclose(e, eref)
+        assert cupy.allclose(n, nref)
+        assert cupy.allclose(v, vref)
 
     def _check_rks_fxc(self, xc, hermi=1):
         if hermi == 1:
@@ -84,7 +90,7 @@ class KnownValues(unittest.TestCase):
             t1 = dm
         spin = 0
         ni_pyscf = pyscf_numint()
-        rho, vxc, fxc = ni_pyscf.cache_xc_kernel(mol, grids_cpu, xc, mo_coeff, mo_occ, spin)
+        rho, vxc, fxc = ni_pyscf.cache_xc_kernel(mol, grids_cpu, xc, mo_coeff[0], mo_occ[0], spin)
         vref = ni_pyscf.nr_rks_fxc(
             mol, grids_cpu, xc, dm0=dm0, dms=t1, rho0=rho, vxc=vxc, fxc=fxc, hermi=hermi)
 
@@ -92,7 +98,7 @@ class KnownValues(unittest.TestCase):
         vxc0 = vxc.copy()
         fxc0 = fxc.copy()
         ni = NumInt()
-        rho, vxc, fxc = ni.cache_xc_kernel(mol, grids_gpu, xc, cupy.asarray(mo_coeff), cupy.asarray(mo_occ), spin)
+        rho, vxc, fxc = ni.cache_xc_kernel(mol, grids_gpu, xc, cupy.asarray(mo_coeff[0]), cupy.asarray(mo_occ[0]), spin)
         v = ni.nr_rks_fxc(mol, grids_gpu, xc, dms=t1, fxc=fxc, hermi=hermi)
         if xc == MGGA_M06:
             assert cupy.allclose(rho[[0,1,2,3,5]], rho0[[0,1,2,3,5]])
@@ -107,18 +113,18 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         spin = 1
         rho, vxc, fxc = ni.cache_xc_kernel(
-            mol, grids_gpu, xc, [mo_coeff]*2, [mo_occ*.5]*2, spin)
+            mol, grids_gpu, xc, mo_coeff, mo_occ, spin)
         v = ni.nr_rks_fxc_st(mol, grids_gpu, xc, dms_alpha=dm, fxc=fxc)
         self.assertAlmostEqual(lib.fp(v), fpref, 12)
 
         ni_pyscf = pyscf_numint()
         rho, vxc, fxc = ni_pyscf.cache_xc_kernel(
-            mol, grids_cpu, xc, [mo_coeff]*2, [mo_occ*.5]*2, spin)
+            mol, grids_cpu, xc, mo_coeff, mo_occ, spin)
         vref = ni_pyscf.nr_rks_fxc_st(
             mol, grids_cpu, xc, dm0=dm0, dms_alpha=dm, rho0=rho, vxc=vxc, fxc=fxc)
         self.assertAlmostEqual(abs(v - vref).max(), 0, 12)
 
-    def _check_uks_fxc(self, xc, fpref, hermi=1):
+    def _check_uks_fxc(self, xc, hermi=1):
         if hermi == 1:
             t1 = dm1
         else:
@@ -126,17 +132,21 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         spin = 1
         rho, vxc, fxc = ni.cache_xc_kernel(
-            mol, grids_gpu, xc, [mo_coeff]*2, [mo_occ, 1-mo_occ], spin)
+            mol, grids_gpu, xc, cupy.asarray(mo_coeff), cupy.asarray(mo_occ), spin)
         v = ni.nr_uks_fxc(mol, grids_gpu, xc, dms=t1, fxc=fxc, hermi=hermi)
-        self.assertAlmostEqual(lib.fp(v), fpref, 12)
 
         ni = ni.to_cpu()
         dm0 = mo_coeff.dot(mo_coeff.T)
-        rho, vxc, fxc = ni.cache_xc_kernel(
-            mol, grids_cpu, xc, [mo_coeff]*2, [mo_occ, 1-mo_occ], spin)
-        vref = ni.nr_uks_fxc(
-            mol, grids_cpu, xc, dm0=dm0, dms=t1, rho0=rho, vxc=vxc, fxc=fxc, hermi=hermi)
-        self.assertAlmostEqual(abs(v - vref).max(), 0, 12)
+        rho_ref, vxc_ref, fxc_ref = ni.cache_xc_kernel(
+            mol, grids_cpu, xc, mo_coeff, mo_occ, spin)
+        v_ref = ni.nr_uks_fxc(
+            mol, grids_cpu, xc, dm0=dm0, dms=t1, rho0=rho_ref, vxc=vxc_ref, fxc=fxc_ref, hermi=hermi)
+        vxc_ref = np.asarray(vxc_ref)
+        rho_ref = np.asarray(rho_ref)
+        assert cupy.linalg.norm(rho - cupy.asarray(rho_ref)) < 1e-6 * cupy.linalg.norm(rho)
+        assert cupy.linalg.norm(vxc - cupy.asarray(vxc_ref)) < 1e-6 * cupy.linalg.norm(vxc)
+        assert cupy.linalg.norm(fxc - cupy.asarray(fxc_ref)) < 1e-6 * cupy.linalg.norm(fxc)
+        assert cupy.linalg.norm(v - cupy.asarray(v_ref)) < 1e-6 * cupy.linalg.norm(v)
 
     def test_rks_lda(self):
         self._check_vxc('nr_rks', LDA)
@@ -148,16 +158,14 @@ class KnownValues(unittest.TestCase):
         self._check_vxc('nr_rks', MGGA_M06)
 
     # Not implemented yet
-    '''
     def test_uks_lda(self):
-        self._check_vxc('nr_uks', 'lda', -6.362059440515177)
+        self._check_vxc('nr_uks', LDA)#'lda', -6.362059440515177)
 
     def test_uks_gga(self):
-        self._check_vxc('nr_uks', 'pbe', -6.732546841646528)
+        self._check_vxc('nr_uks', GGA_PBE)#'pbe', -6.732546841646528)
 
     def test_uks_mgga(self):
-        self._check_vxc('nr_uks', 'm06', 83.5606316500255)
-    '''
+        self._check_vxc('nr_uks', MGGA_M06)#'m06', 83.5606316500255)
 
     def test_rks_fxc_lda(self):
         self._check_rks_fxc(LDA, hermi=1)
@@ -168,19 +176,17 @@ class KnownValues(unittest.TestCase):
     def test_rks_fxc_mgga(self):
         self._check_rks_fxc(MGGA_M06, hermi=1)
 
-    '''
     def test_uks_fxc_lda(self):
-        self._check_uks_fxc('lda', -0.1125902447294953, hermi=1)
-        self._check_uks_fxc('lda', -0.05629512236474782, hermi=0)
+        self._check_uks_fxc(LDA, hermi=1)
 
     def test_uks_fxc_gga(self):
-        self._check_uks_fxc('pbe', -0.0752237471800169, hermi=1)
-        self._check_uks_fxc('pbe', -0.03761187359000853, hermi=0)
+        self._check_uks_fxc(GGA_PBE, hermi=1)
 
     def test_uks_fxc_mgga(self):
-        self._check_uks_fxc('m06', 0.7005336565753997, hermi=1)
-        self._check_uks_fxc('m06', 0.35026682828770006, hermi=0)
+        self._check_uks_fxc(MGGA_M06, hermi=1)
 
+    # Not implemented yet
+    '''
     def test_rks_fxc_st_lda(self):
         self._check_rks_fxc_st('lda', -0.06358425564270553)
 

@@ -294,8 +294,9 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
     vmat = vmat[[0,1,2,
                  1,3,4,
                  2,4,5]]
-    vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
 
+    vmat = contract('npq,qj->npj', vmat, coeff)
+    vmat = contract('pi,npj->nij', coeff, vmat)
     return vmat.reshape(3,3,nao_sph,nao_sph)
 
 def _make_dR_rho1(ao, ao_dm0, atm_id, aoslices, xctype):
@@ -584,7 +585,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             for ia in range(mol.natm):
                 p0, p1 = aoslices[ia][2:]
 # First order density = rho1 * 2.  *2 is not applied because + c.c. in the end
-                rho1 = cupy.einsum('xig,ig->xg', ao[1:,p0:p1,:], ao_dm0[p0:p1,:])
+                rho1 = contract('xig,ig->xg', ao[1:,p0:p1,:], ao_dm0[p0:p1,:])
                 wv = wf * rho1
                 aow = [numint._scale_ao(ao[0], wv[i]) for i in range(3)]
                 vmat[ia] += rks_grad._d1_dot_(aow, ao[0].T)
