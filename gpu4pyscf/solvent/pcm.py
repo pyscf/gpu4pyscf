@@ -40,7 +40,7 @@ def pcm_for_scf(mf, solvent_obj=None, dm=None):
 
 # Inject PCM to SCF, TODO: add it to other methods later
 from gpu4pyscf import scf
-scf.hf.RHF.PCM    = scf.hf.RHF.PCM    = pcm_for_scf
+scf.hf.RHF.PCM = pcm_for_scf
 
 # TABLE II,  J. Chem. Phys. 122, 194110 (2005)
 XI = {
@@ -75,8 +75,8 @@ XI = {
     5810: 4.90792902522,
 }
 
-Bondi = radii.VDW
-Bondi[1] = 1.1/radii.BOHR      # modified version
+modified_Bondi = radii.VDW.copy()
+modified_Bondi[1] = 1.1/radii.BOHR      # modified version
 #radii_table = bondi * 1.2
 PI = numpy.pi
 
@@ -91,7 +91,7 @@ def switch_h(x):
     y[x>1] = 1.0
     return y
 
-def gen_surface(mol, ng=302, vdw_scale=1.2):
+def gen_surface(mol, ng=302, rad=modified_Bondi, vdw_scale=1.2, r_probe=0.0):
     '''J. Phys. Chem. A 1999, 103, 11060-11079'''
     unit_sphere = numpy.empty((ng,4))
     libdft.MakeAngularGrid(unit_sphere.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ng))
@@ -100,7 +100,7 @@ def gen_surface(mol, ng=302, vdw_scale=1.2):
     atom_coords = cupy.asarray(mol.atom_coords(unit='B'))
     charges = mol.atom_charges()
     N_J = ng * cupy.ones(mol.natm)
-    R_J = cupy.asarray([vdw_scale*Bondi[chg] for chg in charges])
+    R_J = cupy.asarray([rad[chg] for chg in charges])
     R_sw_J = R_J * (14.0 / N_J)**0.5
     alpha_J = 1.0/2.0 + R_J/R_sw_J - ((R_J/R_sw_J)**2 - 1.0/28)**0.5
     R_in_J = R_J - alpha_J * R_sw_J
@@ -117,20 +117,20 @@ def gen_surface(mol, ng=302, vdw_scale=1.2):
     for ia in range(mol.natm):
         symb = mol.atom_symbol(ia)
         chg = gto.charge(symb)
-        r_vdw = vdw_scale*Bondi[chg]
+        r_vdw = rad[chg]
 
         atom_grid = r_vdw * unit_sphere[:,:3] + atom_coords[ia,:]
         #riJ = scipy.spatial.distance.cdist(atom_grid[:,:3], atom_coords)
         riJ = cupy.sum((atom_grid[:,None,:] - atom_coords[None,:,:])**2, axis=2)**0.5
         diJ = (riJ - R_in_J) / R_sw_J
         diJ[:,ia] = 1.0
-        diJ[diJ<1e-12] = 0.0
+        diJ[diJ<1e-8] = 0.0
 
         fiJ = switch_h(diJ)
 
         w = unit_sphere[:,3] * 4.0 * PI
         swf = cupy.prod(fiJ, axis=1)
-        idx = w*swf > 1e-16
+        idx = w*swf > 1e-12
 
         p0, p1 = p1, p1+sum(idx).get()
         gslice_by_atom.append([p0,p1])
@@ -208,10 +208,15 @@ def get_D_S(surface, with_S=True, with_D=False):
     return D, S
 
 class PCM(ddcosmo.DDCOSMO):
+    _keys = {
+        'method', 'vdw_scale', 'surface'
+    }
     def __init__(self, mol):
         ddcosmo.DDCOSMO.__init__(self, mol)
         self.method = 'C-PCM'
         self.vdw_scale = 1.2 # default value in qchem
+        self.r_probe = 0.0
+        self.radii_table = None
         self.surface = {}
         self._intermediates = {}
 
@@ -231,13 +236,14 @@ class PCM(ddcosmo.DDCOSMO):
         return self
 
     def build(self, ng=None):
-        vdw_scale = self.vdw_scale
-        self.radii_table = vdw_scale * Bondi
+        if self.radii_table is None:
+            vdw_scale = self.vdw_scale
+            self.radii_table = vdw_scale * modified_Bondi + self.r_probe
         mol = self.mol
         if ng is None:
             ng = gen_grid.LEBEDEV_ORDER[self.lebedev_order]
 
-        self.surface = gen_surface(mol, ng=ng, vdw_scale=vdw_scale)
+        self.surface = gen_surface(mol, rad=self.radii_table, ng=ng)
         self._intermediates = {}
         F, A = get_F_A(self.surface)
         D, S = get_D_S(self.surface, with_S=True, with_D=True)
@@ -251,7 +257,7 @@ class PCM(ddcosmo.DDCOSMO):
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0/2.0)
             K = S
             R = -f_epsilon * cupy.eye(K.shape[0])
-        elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
+        elif self.method.upper() in ['IEF-PCM', 'IEFPCM', 'SMD']:
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
             DA = D*A
             DAS = cupy.dot(DA, S)
