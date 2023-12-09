@@ -61,7 +61,7 @@ def init_workflow(mf, dm0=None):
             ni = mf._numint
             rks.initialize_grids(mf, mf.mol, dm0)
             ni.build(mf.mol, mf.grids.coords)
-            mf._numint.xcfuns = numint._init_xcfuns(mf.xc)
+            mf._numint.xcfuns = numint._init_xcfuns(mf.xc, dm0.ndim==3)
     dm0 = cupy.asarray(dm0)
     return
 

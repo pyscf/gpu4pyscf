@@ -270,7 +270,7 @@ def grad_solver(pcmobj, dm):
 
         vK_1_D = vK_1.dot(D)
         vK_1_Dv = vK_1_D * v_grids
-        de_dR += 0.5*fac * cupy.einsum('j,xjn->nx', vK_1_Dv, dA)
+        de_dR += 0.5*fac * contract('j,xjn->nx', vK_1_Dv, dA)
 
         de_dS0  = 0.5*contract_ket(vK_1, dS, q)
         de_dS0 -= 0.5*contract_bra(vK_1, dS, q)

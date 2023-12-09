@@ -55,7 +55,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     nao, nao0 = coeff.shape
     dm0 = dm
     dms = cupy.asarray(dm0.reshape(-1,nao0,nao0))
-    dms = [cupy.einsum('pi,ij,qj->pq', coeff, x, coeff) for x in dms]
+    dms = [coeff @ x @ coeff.T for x in dms]
     if dm0.ndim == 2:
         dms = cupy.asarray(dms[0], order='C').reshape(1,nao,nao)
     else:
@@ -180,16 +180,18 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         vj_ao = []
         #vj = [cupy.einsum('pi,pq,qj->ij', coeff, x, coeff) for x in vj]
         for x in vj:
-            x = cupy.einsum('pi,pq->iq', coeff, x)
-            x = cupy.einsum('iq,qj->ij', x, coeff)
+            #x = cupy.einsum('pi,pq->iq', coeff, x)
+            #x = cupy.einsum('iq,qj->ij', x, coeff)
+            x = coeff.T @ x @ coeff
             vj_ao.append(2.0*(x + x.T))
         vj = vj_ao
 
     if with_k:
         vk_ao = []
         for x in vk:
-            x = cupy.einsum('pi,pq->iq', coeff, x)
-            x = cupy.einsum('iq,qj->ij', x, coeff)
+            #x = cupy.einsum('pi,pq->iq', coeff, x)
+            #x = cupy.einsum('iq,qj->ij', x, coeff)
+            x = coeff.T @ x @ coeff
             vk_ao.append(x + x.T)
         vk = vk_ao
 

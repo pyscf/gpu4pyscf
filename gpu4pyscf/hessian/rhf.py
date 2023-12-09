@@ -97,7 +97,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             #dm1 = cupy.einsum('ypi,qi->ypq', mo1[ja], mocc)
             #de2_gpu[i0,j0] += cupy.einsum('xpq,ypq->xy', h1ao[ia], dm1) * 4
             de2[i0,j0] += contract('xpi,ypi->xy', h1ao[ia], mo1[ja]) * 4
-            dm1 = cupy.einsum('ypi,qi,i->ypq', mo1[ja], mocc, mo_energy[mo_occ>0])
+            dm1 = contract('ypi,qi->ypq', mo1[ja], mocc*mo_energy[mo_occ>0])
             de2[i0,j0] -= contract('xpq,ypq->xy', s1mo, dm1) * 4
             de2[i0,j0] -= contract('xpq,ypq->xy', s1oo, mo_e1[ja]) * 2
         for j0 in range(i0):
@@ -176,19 +176,19 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         vk1 = vk1.reshape(3,3,nao,nao)
         t1 = log.timer_debug1('contracting int2e_ipvip1 for atom %d'%ia, *t1)
 
-        ej[i0,i0] += cupy.einsum('xypq,pq->xy', vj1_diag[:,:,p0:p1], dm0[p0:p1])*2
-        ek[i0,i0] += cupy.einsum('xypq,pq->xy', vk1_diag[:,:,p0:p1], dm0[p0:p1])
-        e1[i0,i0] -= cupy.einsum('xypq,pq->xy', s1aa[:,:,p0:p1], dme0[p0:p1])*2
+        ej[i0,i0] += contract('xypq,pq->xy', vj1_diag[:,:,p0:p1], dm0[p0:p1])*2
+        ek[i0,i0] += contract('xypq,pq->xy', vk1_diag[:,:,p0:p1], dm0[p0:p1])
+        e1[i0,i0] -= contract('xypq,pq->xy', s1aa[:,:,p0:p1], dme0[p0:p1])*2
 
         for j0, ja in enumerate(atmlst[:i0+1]):
             q0, q1 = aoslices[ja][2:]
             # *2 for +c.c.
-            ej[i0,j0] += cupy.einsum('xypq,pq->xy', vj1[:,:,q0:q1], dm0[q0:q1])*4
-            ek[i0,j0] += cupy.einsum('xypq,pq->xy', vk1[:,:,q0:q1], dm0[q0:q1])
-            e1[i0,j0] -= cupy.einsum('xypq,pq->xy', s1ab[:,:,p0:p1,q0:q1], dme0[p0:p1,q0:q1])*2
+            ej[i0,j0] += contract('xypq,pq->xy', vj1[:,:,q0:q1], dm0[q0:q1])*4
+            ek[i0,j0] += contract('xypq,pq->xy', vk1[:,:,q0:q1], dm0[q0:q1])
+            e1[i0,j0] -= contract('xypq,pq->xy', s1ab[:,:,p0:p1,q0:q1], dme0[p0:p1,q0:q1])*2
 
             h1ao = hcore_deriv(ia, ja)
-            e1[i0,j0] += cupy.einsum('xypq,pq->xy', h1ao, dm0)
+            e1[i0,j0] += contract('xypq,pq->xy', h1ao, dm0)
 
         for j0 in range(i0):
             e1[j0,i0] = e1[i0,j0].T
