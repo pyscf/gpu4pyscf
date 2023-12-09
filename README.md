@@ -51,6 +51,7 @@ Features
 - Nonlocal functional correction (vv10) for SCF and gradient;
 - ECP is supported and calculated on CPU;
 - PCM solvent models, analytical gradients, and semi-analytical Hessian matrix;
+- SMD solvent models and solvation free energy
 
 Limitations
 --------

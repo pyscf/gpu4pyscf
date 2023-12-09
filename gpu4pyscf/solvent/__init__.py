@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from gpu4pyscf.solvent import pcm
+from gpu4pyscf.solvent import pcm, smd
 
 def PCM(method_or_mol, solvent_obj=None, dm=None):
     '''Initialize PCM model.
@@ -35,3 +35,24 @@ def PCM(method_or_mol, solvent_obj=None, dm=None):
         return pcm.pcm_for_scf(method_or_mol, solvent_obj, dm)
     else:
         raise NotImplementedError('PCM model only support SCF')
+
+def SMD(method_or_mol, solvent_obj=None, dm=None):
+    '''Initialize SMD model.
+
+    Examples:
+
+    >>> mf = PCM(scf.RHF(mol))
+    >>> mf.kernel()
+    >>> sol = PCM(mol)
+    >>> mc = PCM(CASCI(mf, 6, 6), sol)
+    >>> mc.kernel()
+    '''
+    from pyscf import gto
+    from pyscf import scf
+
+    if isinstance(method_or_mol, gto.mole.Mole):
+        return smd.SMD(method_or_mol)
+    elif isinstance(method_or_mol, scf.hf.SCF):
+        return pcm.pcm_for_scf(method_or_mol, solvent_obj, dm)
+    else:
+        raise NotImplementedError('SMD model only support SCF')

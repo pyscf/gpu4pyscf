@@ -71,9 +71,9 @@ def get_dF_dA(surface):
         riJ = cupy.linalg.norm(ri_rJ, axis=-1)
         diJ = (riJ - R_in_J) / R_sw_J
         diJ[:,ia] = 1.0
-        diJ[diJ < 1e-12] = 0.0
+        diJ[diJ < 1e-8] = 0.0
         ri_rJ[:,ia,:] = 0.0
-        ri_rJ[diJ < 1e-12] = 0.0
+        ri_rJ[diJ < 1e-8] = 0.0
 
         fiJ = switch_h(diJ)
         dfiJ = grad_switch_h(diJ) / (fiJ * riJ * R_sw_J)
