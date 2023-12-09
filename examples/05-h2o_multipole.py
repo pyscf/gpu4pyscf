@@ -29,6 +29,9 @@ mf.kernel()
 dm = mf.make_rdm1()
 
 dip = mf.dip_moment(unit='DEBYE', dm=dm.get())
+print('dipole moment:')
 print(dip)
+
 quad = mf.quad_moment(unit='DEBYE-ANG', dm=dm.get())
+print('quadrupole moment:')
 print(quad)

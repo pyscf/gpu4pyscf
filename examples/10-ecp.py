@@ -20,7 +20,7 @@ atom = '''
 I 0 0 0
 I 1 0 0
 '''
-bas='def2-qzvpp'
+bas = 'def2-qzvpp'
 grids_level = 6
 
 mol = pyscf.M(atom=atom, basis=bas, ecp=bas)

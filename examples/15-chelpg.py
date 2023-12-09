@@ -35,4 +35,5 @@ mf = rks.RKS(mol, xc=xc)
 mf.grids.level = 5
 mf.kernel()
 q = chelpg.eval_chelpg_layer_gpu(mf)
+print('partial charge with CHELPG')
 print(q) # [ 0.04402311  0.11333945 -0.25767919  0.10031663]

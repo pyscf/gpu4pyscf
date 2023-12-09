@@ -47,9 +47,9 @@ atom='''
    H          1.06461        2.50818       -0.45885'''
 
 
-xc='B3LYP'
-bas='def2-tzvpp'
-auxbasis='def2-tzvpp-jkfit'
+xc = 'B3LYP'
+bas = 'def2-tzvpp'
+auxbasis = 'def2-tzvpp-jkfit'
 scf_tol = 1e-10
 max_scf_cycles = 50
 screen_tol = 1e-14
