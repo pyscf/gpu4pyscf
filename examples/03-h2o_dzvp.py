@@ -25,8 +25,8 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-xc='B3LYP'
-bas='dzvp'
+xc = 'B3LYP'
+bas = 'dzvp'
 scf_tol = 1e-10
 max_scf_cycles = 50
 screen_tol = 1e-1

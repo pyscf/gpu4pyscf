@@ -1409,7 +1409,7 @@ def sort_mol(mol0, cart=True):
     # Sort basis according to angular momentum and contraction patterns so
     # as to group the basis functions to blocks in GPU kernel.
     '''
-    mol = copy.copy(mol0)
+    mol = mol0.copy(deep=True)
     l_ctrs = mol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
 
     uniq_l_ctr, _, inv_idx, l_ctr_counts = np.unique(

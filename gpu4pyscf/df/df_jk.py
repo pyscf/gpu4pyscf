@@ -123,6 +123,8 @@ class _DFHF(df_jk._DFHF):
 
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
+    _keys = {'rhoj', 'rhok', 'disp', 'screen_tol'}
+
     def __init__(self, mf, dfobj, only_dfj):
         self.__dict__.update(mf.__dict__)
         self._eri = None
