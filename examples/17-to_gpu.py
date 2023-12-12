@@ -13,12 +13,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import time
 import pyscf
 from pyscf import lib
-from pyscf.geomopt.geometric_solver import optimize
-from gpu4pyscf.dft import rks
-
+from pyscf.dft import rks
 lib.num_threads(8)
 
 atom = '''
@@ -28,27 +25,33 @@ H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
 xc = 'B3LYP'
-bas = 'def2-tzvpp'
-auxbasis = 'def2-tzvpp-jkfit'
+bas = 'sto3g'
 scf_tol = 1e-10
 max_scf_cycles = 50
 screen_tol = 1e-14
 grids_level = 3
-mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
 
-mol.verbose = 1
-mf_GPU = rks.RKS(mol, xc=xc, disp='d3bj').density_fit(auxbasis=auxbasis)
+mol = pyscf.M(atom=atom, basis=bas, max_memory=32000, output='./pyscf.log')
+
+mol.verbose = 4
+mf = rks.RKS(mol, xc=xc).density_fit()
+mf_GPU = mf.to_gpu()
 mf_GPU.grids.level = grids_level
 mf_GPU.conv_tol = scf_tol
 mf_GPU.max_cycle = max_scf_cycles
 mf_GPU.screen_tol = screen_tol
 
-gradients = []
-def callback(envs):
-    gradients.append(envs['gradients'])
+# Compute Energy
+e_dft = mf_GPU.kernel()
+print(f"total energy = {e_dft}")
 
-start_time = time.time()
-mol_eq = optimize(mf_GPU, maxsteps=20, callback=callback)
-print("Optimized coordinate:")
-print(mol_eq.atom_coords())
-print(time.time() - start_time)
+# Compute Gradient
+g = mf_GPU.nuc_grad_method()
+g.max_memory = 20000
+g.auxbasis_response = True
+g_dft = g.kernel()
+
+# Compute Hessian
+h = mf_GPU.Hessian()
+h.auxbasis_response = 2
+h_dft = h.kernel()
