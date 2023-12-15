@@ -511,6 +511,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     h1 = cupy.empty([3, dm0.shape[0], dm0.shape[1]])
     s1 = cupy.empty([3, dm0.shape[0], dm0.shape[1]])
     with lib.call_in_background(calculate_h1e) as calculate_hs:
+        calculate_hs = calculate_h1e
         calculate_hs(h1, s1)
         # (i | \nabla hcore | j)
         t3 = log.init_timer()
@@ -547,7 +548,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     if log.verbose >= logger.DEBUG:
         log.timer_debug1('gradients of electronic part', *t0)
 
-    ## net force should be zero
+    # net force may not be zero
     #de -= cupy.sum(de, axis=0)/len(atmlst)
     return de.get()
 
