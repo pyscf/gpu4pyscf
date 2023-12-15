@@ -13,7 +13,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
- 
+
 #pragma once
 
 #include <stdio.h>
@@ -32,14 +32,14 @@ static void GINTgout3c2e_ip(GINTEnvVars envs, double* __restrict__ gout, double*
         int16_t *idy = idx + nf;
         int16_t *idz = idx + nf * 2;
         int i, n, ix, iy, iz;
-        
+
         for (i = 0; i < nf; i++) {
-            ix = idx[i];         
-            iy = idy[i];         
+            ix = idx[i];
+            iy = idy[i];
             iz = idz[i];
 
-            double sx = gout[3*i + 0]; 
-            double sy = gout[3*i + 1];  
+            double sx = gout[3*i + 0];
+            double sy = gout[3*i + 1];
             double sz = gout[3*i + 2];
 #pragma unroll
             for (n = 0; n < NROOTS; ++n) {
@@ -64,21 +64,27 @@ static void GINTgout3c2e_ip(GINTEnvVars envs, double* __restrict__ gout, double*
         int i, n, ix, iy, iz;
 
         for (i = 0; i < nf; i++) {
-            ix = idx[i];         iy = idy[i];         iz = idz[i];
-            sx = gout[3*i + 0];  sy = gout[3*i + 1];  sz = gout[3*i + 2];
+            ix = idx[i];
+            iy = idy[i];
+            iz = idz[i];
+            sx = gout[3*i + 0];
+            sy = gout[3*i + 1];
+            sz = gout[3*i + 2];
 #pragma unroll
             for (n = 0; n < NROOTS; ++n) {
                 sx += f[ix+n] * g[iy+n] * g[iz+n];
                 sy += g[ix+n] * f[iy+n] * g[iz+n];
                 sz += g[ix+n] * g[iy+n] * f[iz+n];
             }
-            gout[3*i + 0] = sx; gout[3*i + 1] = sy;  gout[3*i + 2] = sz;
+            gout[3*i + 0] = sx;
+            gout[3*i + 1] = sy;
+            gout[3*i + 2] = sz;
         }
     }
 }
 
 template <int NROOTS> __device__
-static void GINTgout3c2e_ipip(GINTEnvVars envs, double* __restrict__ gout, double* __restrict__ g0, double* __restrict__ g1, double* __restrict__ g2, 
+static void GINTgout3c2e_ipip(GINTEnvVars envs, double* __restrict__ gout, double* __restrict__ g0, double* __restrict__ g1, double* __restrict__ g2,
 double* __restrict__ g3)
 {
     int nf = envs.nf;
@@ -86,19 +92,19 @@ double* __restrict__ g3)
     int16_t *idy = idx + nf;
     int16_t *idz = idx + nf * 2;
     int i, n, ix, iy, iz;
-        
+
     for (i = 0; i < nf; i++) {
-        ix = idx[i];         
-        iy = idy[i];         
+        ix = idx[i];
+        iy = idy[i];
         iz = idz[i];
 
-        double sxx = gout[9*i + 0]; 
+        double sxx = gout[9*i + 0];
         double sxy = gout[9*i + 1];
         double sxz = gout[9*i + 2];
-        double syx = gout[9*i + 3]; 
+        double syx = gout[9*i + 3];
         double syy = gout[9*i + 4];
         double syz = gout[9*i + 5];
-        double szx = gout[9*i + 6]; 
+        double szx = gout[9*i + 6];
         double szy = gout[9*i + 7];
         double szz = gout[9*i + 8];
 #pragma unroll
@@ -135,7 +141,7 @@ static void GINTgout3c2e(GINTEnvVars envs, double* __restrict__ gout, double* __
         int16_t *idz = idx + nf * 2;
         double s;
         int i, n, ix, iy, iz;
-        
+
         for (i = 0; i < nf; i++) {
             ix = idx[i];
             iy = idy[i];
@@ -157,7 +163,7 @@ static void GINTgout3c2e(GINTEnvVars envs, double* __restrict__ gout, double* __
         int16_t *idz = idx + nf * 2;
         double s;
         int i, n, ix, iy, iz;
-        
+
         for (i = 0; i < nf; i++) {
             ix = idx[i];
             iy = idy[i];
@@ -201,7 +207,7 @@ static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, doubl
     int16_t *idy = idx + nf;
     int16_t *idz = idx + nf * 2;
     int ix, iy, iz, off;
-    
+
     for (n = 0, k = k0; k < k1; ++k) {
         pxx_eri = eri.data + 0 * lstride + k * kstride;
         pxy_eri = eri.data + 1 * lstride + k * kstride;
@@ -216,9 +222,9 @@ static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, doubl
         for (j = j0; j < j1; ++j) {
             for (i = i0; i < i1; ++i, ++n) {
                 ix = idx[n];
-                iy = idy[n];         
+                iy = idy[n];
                 iz = idz[n];
-                
+
                 double eri_xx = 0;
                 double eri_xy = 0;
                 double eri_xz = 0;
@@ -278,7 +284,7 @@ static void GINTwrite_int3c2e_ip_direct(GINTEnvVars envs, ERITensor eri, double*
     int16_t *idy = idx + nf;
     int16_t *idz = idx + nf * 2;
     int ix, iy, iz, off;
-    
+
     for (n = 0, k = k0; k < k1; ++k) {
         px_eri = eri.data + 0 * lstride + k * kstride;
         py_eri = eri.data + 1 * lstride + k * kstride;
@@ -287,9 +293,9 @@ static void GINTwrite_int3c2e_ip_direct(GINTEnvVars envs, ERITensor eri, double*
         for (j = j0; j < j1; ++j) {
             for (i = i0; i < i1; ++i, ++n) {
                 ix = idx[n];
-                iy = idy[n];         
+                iy = idy[n];
                 iz = idz[n];
-                
+
                 double eri_x = 0;
                 double eri_y = 0;
                 double eri_z = 0;
@@ -329,16 +335,16 @@ static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, double* g,
     int16_t *idy = idx + nf;
     int16_t *idz = idx + nf * 2;
     int ix, iy, iz, off;
-    
+
     for (n = 0, k = k0; k < k1; ++k) {
         p_eri = eri.data + 0 * lstride + k * kstride;
 
         for (j = j0; j < j1; ++j) {
             for (i = i0; i < i1; ++i, ++n) {
                 ix = idx[n];
-                iy = idy[n];         
+                iy = idy[n];
                 iz = idz[n];
-                
+
                 double eri = 0;
 #pragma unroll
                 for (int ir = 0; ir < NROOTS; ++ir){
@@ -399,7 +405,7 @@ static void GINTwrite_int3c2e_ip(ERITensor eri, double* __restrict__ gout,
     double* __restrict__ px_eri;
     double* __restrict__ py_eri;
     double* __restrict__ pz_eri;
-    
+
     for (n = 0, k = k0; k < k1; ++k) {
         px_eri = eri.data + 0 * lstride + k * kstride;
         py_eri = eri.data + 1 * lstride + k * kstride;
@@ -410,7 +416,7 @@ static void GINTwrite_int3c2e_ip(ERITensor eri, double* __restrict__ gout,
                 sx = gout[3 * n];
                 sy = gout[3 * n + 1];
                 sz = gout[3 * n + 2];
-                
+
                 off = i + jstride * j;
                 px_eri[off] = sx;
                 py_eri[off] = sy;

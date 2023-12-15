@@ -5,8 +5,8 @@ GB = 1024*1024*1024
 # such as A100-80G
 if props['totalGlobalMem'] >= 64 * GB:
     min_ao_blksize = 256
-    min_grid_blksize = 256*256
-    ao_aligned = 64
+    min_grid_blksize = 128*128
+    ao_aligned = 32
     grid_aligned = 128
     mem_fraction = 0.9
     number_of_threads = 2048 * 108

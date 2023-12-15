@@ -215,6 +215,7 @@ class VHFOpt(_vhf.VHFOpt):
             l_ctr_offsets, l_ctr_offsets, q_cond,
             diag_block_with_triu=diag_block_with_triu, aosym=aosym)
         self.log_qs = log_qs.copy()
+        cput1 = logger.timer_debug1(sorted_mol, 'Get pairing', *cput1)
 
         # contraction coefficient for ao basis
         cart_ao_loc = self.sorted_mol.ao_loc_nr(cart=True)
@@ -239,6 +240,7 @@ class VHFOpt(_vhf.VHFOpt):
         inv_idx = np.argsort(self.sph_ao_idx, kind='stable').astype(np.int32)
         self.rev_ao_idx = inv_idx
         self.coeff = self.cart2sph[:, inv_idx]
+        cput1 = logger.timer_debug1(sorted_mol, 'AO cart2sph coeff', *cput1)
 
         # pairing auxiliary basis with fake basis set
         fake_l_ctr_offsets = np.append(0, np.cumsum(fake_l_ctr_counts))
@@ -268,6 +270,7 @@ class VHFOpt(_vhf.VHFOpt):
         inv_idx = np.argsort(self.sph_aux_idx, kind='stable').astype(np.int32)
         self.aux_coeff = self.aux_cart2sph[:, inv_idx]
         aux_l_ctr_offsets += fake_l_ctr_offsets[-1]
+        cput1 = logger.timer_debug1(tot_mol, 'aux cart2sph coeff', *cput1)
 
         ao_loc = self.sorted_mol.ao_loc_nr(cart=False)
         self.ao_pairs_row, self.ao_pairs_col = get_ao_pairs(pair2bra, pair2ket, ao_loc)
@@ -276,6 +279,7 @@ class VHFOpt(_vhf.VHFOpt):
         self.cderi_row = cderi_row
         self.cderi_col = cderi_col
         self.cderi_diag = cupy.argwhere(cderi_row == cderi_col)[:,0]
+        cput1 = logger.timer_debug1(tot_mol, 'Get AO pairs', *cput1)
 
         aux_pair2bra = []
         aux_pair2ket = []
@@ -1434,28 +1438,43 @@ def get_pairing(p_offsets, q_offsets, q_cond,
     log_qs = []
     pair2bra = []
     pair2ket = []
+
     for p0, p1 in zip(p_offsets[:-1], p_offsets[1:]):
         for q0, q1 in zip(q_offsets[:-1], q_offsets[1:]):
             if aosym and q0 < p0 or not aosym:
                 q_sub = q_cond[p0:p1,q0:q1].ravel()
+                '''
                 idx = q_sub.argsort(axis=None)[::-1]
                 q_sorted = q_sub[idx]
                 mask = q_sorted > cutoff
                 idx = idx[mask]
                 ishs, jshs = np.unravel_index(idx, (p1-p0, q1-q0))
+                print(ishs.shape)
+                '''
+                mask = q_sub > cutoff
+                ishs, jshs = np.indices((p1-p0,q1-q0))
+                ishs = ishs.ravel()[mask]
+                jshs = jshs.ravel()[mask]
                 ishs += p0
                 jshs += q0
                 pair2bra.append(ishs)
                 pair2ket.append(jshs)
-                log_q = np.log(q_sorted[mask])
+                log_q = np.log(q_sub[mask])
                 log_q[log_q > 0] = 0
                 log_qs.append(log_q)
             elif aosym and p0 == q0 and p1 == q1:
                 q_sub = q_cond[p0:p1,p0:p1].ravel()
+                '''
                 idx = q_sub.argsort(axis=None)[::-1]
                 q_sorted = q_sub[idx]
                 ishs, jshs = np.unravel_index(idx, (p1-p0, p1-p0))
                 mask = q_sorted > cutoff
+                '''
+
+                ishs, jshs = np.indices((p1-p0, p1-p0))
+                ishs = ishs.ravel()
+                jshs = jshs.ravel()
+                mask = q_sub > cutoff
                 if not diag_block_with_triu:
                     # Drop the shell pairs in the upper triangle for diagonal blocks
                     mask &= ishs >= jshs
@@ -1469,7 +1488,7 @@ def get_pairing(p_offsets, q_offsets, q_cond,
                 pair2bra.append(ishs)
                 pair2ket.append(jshs)
 
-                log_q = np.log(q_sorted[mask])
+                log_q = np.log(q_sub[mask])
                 log_q[log_q > 0] = 0
                 log_qs.append(log_q)
     return log_qs, pair2bra, pair2ket

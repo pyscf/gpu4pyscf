@@ -25,7 +25,7 @@
 #include "nr_eval_gto.cuh"
 #include "contract_rho.cuh"
 
-#define THREADS       256
+#define NG_PER_BLOCK      128
 #define NG_PER_THREADS    1
 
 __global__
@@ -46,6 +46,7 @@ static void vv10_kernel(double *Fvec, double *Uvec, double *Wvec,
         W0i = W0[grid_id];
         Ki = K[grid_id];
     }
+
     double F = 0.0;
     double U = 0.0;
     double W = 0.0;
@@ -54,42 +55,39 @@ static void vv10_kernel(double *Fvec, double *Uvec, double *Wvec,
     double *yj = vvcoords + vvngrids;
     double *zj = vvcoords + 2*vvngrids;
 
-    __shared__ double3 xj_t[THREADS];
-    __shared__ double3 kp_t[THREADS];
+    __shared__ double3 xj_t[NG_PER_BLOCK];
+    __shared__ double3 kp_t[NG_PER_BLOCK];
 
     const int tx = threadIdx.x;
+
     for (int j = 0; j < vvngrids; j+=blockDim.x) {
-        int idx = j + threadIdx.x;
+        int idx = j + tx;
 
         xj_t[tx] = {xj[idx], yj[idx], zj[idx]};
         kp_t[tx] = {Kp[idx], W0p[idx], RpW[idx]};
 
         __syncthreads();
-        for (int l = 0, M = min(THREADS, vvngrids - j); l < M; ++l){
+
+        for (int l = 0, M = min(NG_PER_BLOCK, vvngrids - j); l < M; ++l){
             double3 xj_tmp = xj_t[l];
-            double pjx = xj_tmp.x;
-            double pjy = xj_tmp.y;
-            double pjz = xj_tmp.z;
 
             // about 23 operations for each pair
-            double DX = pjx - xi;
-            double DY = pjy - yi;
-            double DZ = pjz - zi;
+            double DX = xj_tmp.x - xi;
+            double DY = xj_tmp.y - yi;
+            double DZ = xj_tmp.z - zi;
             double R2 = DX*DX + DY*DY + DZ*DZ;
 
-            double3 kp_tmp = kp_t[l];
-            double Kpj = kp_tmp.x;
-            double W0pj = kp_tmp.y;
-            double RpWj = kp_tmp.z;
+            double3 kp_tmp = kp_t[l]; // (Kpj, W0pj, RpWj)
 
-            double gp = R2*W0pj + Kpj;
+            double gp = R2*kp_tmp.y + kp_tmp.x;
             double g  = R2*W0i + Ki;
             double gt = g + gp;
             double ggt = g * gt;
-            double T = RpWj / (gp*ggt);
+            double g_gt = (g + gt)/ggt;
+            double T = kp_tmp.z / (gp*ggt);
 
             F += T;
-            T *= (g + gt)/ggt;
+            T *= g_gt;
             U += T;
             W += T * R2;
         }
@@ -100,6 +98,7 @@ static void vv10_kernel(double *Fvec, double *Uvec, double *Wvec,
         Uvec[grid_id] = U;
         Wvec[grid_id] = W;
     }
+
 }
 
 __global__
@@ -127,8 +126,8 @@ static void vv10_grad_kernel(double *Fvec, double *vvcoords, double *coords,
     double *yj = vvcoords + vvngrids;
     double *zj = vvcoords + 2*vvngrids;
 
-    __shared__ double3 xj_t[THREADS];
-    __shared__ double3 kp_t[THREADS];
+    __shared__ double3 xj_t[NG_PER_BLOCK];
+    __shared__ double3 kp_t[NG_PER_BLOCK];
 
     const int tx = threadIdx.x;
     for (int j = 0; j < vvngrids; j+=blockDim.x) {
@@ -138,7 +137,7 @@ static void vv10_grad_kernel(double *Fvec, double *vvcoords, double *coords,
         kp_t[tx] = {Kp[idx], W0p[idx], RpW[idx]};
 
         __syncthreads();
-        for (int l = 0, M = min(THREADS, vvngrids - j); l < M; ++l){
+        for (int l = 0, M = min(NG_PER_BLOCK, vvngrids - j); l < M; ++l){
             double3 xj_tmp = xj_t[l];
             double pjx = xj_tmp.x;
             double pjy = xj_tmp.y;
@@ -181,8 +180,8 @@ int VXC_vv10nlc(cudaStream_t stream, double *Fvec, double *Uvec, double *Wvec,
                  double *W0p, double *W0, double *K, double *Kp, double *RpW,
                  int vvngrids, int ngrids)
 {
-    dim3 threads(THREADS);
-    dim3 blocks((ngrids/NG_PER_THREADS+1+THREADS-1)/THREADS);
+    dim3 threads(NG_PER_BLOCK);
+    dim3 blocks((ngrids/NG_PER_THREADS+1+NG_PER_BLOCK-1)/NG_PER_BLOCK);
     vv10_kernel<<<blocks, threads, 0, stream>>>(Fvec, Uvec, Wvec,
                  vvcoords, coords,
                  W0p, W0, K, Kp, RpW, vvngrids, ngrids);
@@ -199,8 +198,8 @@ int VXC_vv10nlc_grad(cudaStream_t stream, double *Fvec, double *vvcoords, double
                       double *W0p, double *W0, double *K, double *Kp, double *RpW,
                       int vvngrids, int ngrids)
 {
-    dim3 threads(THREADS);
-    dim3 blocks((ngrids+THREADS-1)/THREADS);
+    dim3 threads(NG_PER_BLOCK);
+    dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
     vv10_grad_kernel<<<blocks, threads, 0, stream>>>(Fvec, vvcoords, coords,
                       W0p, W0, K, Kp, RpW, vvngrids, ngrids);
     cudaError_t err = cudaGetLastError();
