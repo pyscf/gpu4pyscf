@@ -41,8 +41,9 @@ from gpu4pyscf.lib.cupy_helper import load_library
 libdft = lib.load_library('libdft')
 libgdft = load_library('libgdft')
 
-from pyscf.dft.gen_grid import GROUP_BOX_SIZE, GROUP_BOUNDARY_PENALTY, NELEC_ERROR_TOL, LEBEDEV_ORDER, LEBEDEV_NGRID
+from pyscf.dft.gen_grid import GROUP_BOUNDARY_PENALTY, NELEC_ERROR_TOL, LEBEDEV_ORDER, LEBEDEV_NGRID
 
+GROUP_BOX_SIZE = 3.0
 ALIGNMENT_UNIT = 32
 # SG0
 # S. Chien and P. Gill,  J. Comput. Chem. 27 (2006) 730-739.
@@ -388,8 +389,12 @@ def arg_group_grids(mol, coords, box_size=GROUP_BOX_SIZE):
     box_ids[box_ids[:,0] > boxes[0], 0] = boxes[0]
     box_ids[box_ids[:,1] > boxes[1], 1] = boxes[1]
     box_ids[box_ids[:,2] > boxes[2], 2] = boxes[2]
-    rev_idx = numpy.unique(box_ids.get(), axis=0, return_inverse=True)[1]
-    return rev_idx.argsort(kind='stable')
+
+    boxes *= 2 # for safety
+    box_id = box_ids[:,0] + box_ids[:,1] * boxes[0] + box_ids[:,2] * boxes[0] * boxes[1]
+    #rev_idx = numpy.unique(box_ids.get(), axis=0, return_inverse=True)[1]
+    rev_idx = cupy.unique(box_id, return_inverse=True)[1]
+    return rev_idx.argsort()
 
 def _load_conf(mod, name, default):
     var = getattr(__config__, name, None)

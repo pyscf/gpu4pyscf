@@ -29,8 +29,12 @@ typedef struct {
 
 typedef struct {
     int ngrids;
+    int nbas;
+    int nao;
     int bas_off;
     int nprim;
+    int *ao_loc;
+    int *bas_indices;
     double fac;
     double *gridx;
     double *data;
