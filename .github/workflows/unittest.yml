@@ -23,6 +23,7 @@ jobs:
         uses: machulav/ec2-github-runner@v2
         with:
           mode: start
+          runner-home-dir: /opt/github-runner
           github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           ec2-image-id: ami-0407cd905c30f1254 # pyscf-ci-p3-cuda12-v1
           ec2-instance-type: p3.2xlarge
@@ -31,7 +32,7 @@ jobs:
           #iam-role-name: github-ci-actions # optional, requires additional permissions
           aws-resource-tags: > # optional, requires additional permissions
             [
-              {"Key": "Name", "Value": "ec2-github-runner"},
+              {"Key": "Name", "Value": "gpu4pyscf-github-action"},
               {"Key": "GitHubRepository", "Value": "${{ github.repository }}"}
             ]
   run-test:
@@ -39,16 +40,11 @@ jobs:
     needs: start-runner # required to start the main job when the runner is ready
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
     steps:
+      - uses: actions/checkout@v2
+      - name: Install
+        run: .github/workflows/run_ci.sh
       - name: Run tests
-        run: |
-            pwd
-            ls
-            which python
-            cd gpu4pyscf
-            git log -n 1
-            bash .github/workflows/install_deps.sh
-            #bash .github/workflows/run_ci.sh
-            bash .github/workflows/unitest.sh
+        run: .github/workflows/unitest.sh
   stop-runner:
     name: Stop self-hosted EC2 runner
     needs:
