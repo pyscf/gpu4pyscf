@@ -42,9 +42,13 @@ jobs:
     steps:
       - name: Run tests
         run: |
-            echo 'hello github action!'
+            git log -n 1
+            pwd
+            ls
+            which python
+            bash .github/workflows/install_deps.sh
             #bash .github/workflows/run_ci.sh
-            bash unitest.sh
+            bash .github/workflows/unitest.sh
   stop-runner:
     name: Stop self-hosted EC2 runner
     needs:
