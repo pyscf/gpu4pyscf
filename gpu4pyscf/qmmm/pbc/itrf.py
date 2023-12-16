@@ -696,55 +696,57 @@ def qmmm_grad_for_scf(scf_grad):
             all_mm_charges = cp.hstack([mm_charges] * len(Lall))
             dist2 = all_mm_coords - cp.mean(qm_coords, axis=0)[None]
             dist2 = cp.einsum('jx,jx->j', dist2, dist2)
-            R = qm_coords[:,None,:] - all_mm_coords[None,:,:]
-            r = cp.sqrt(cp.einsum('ijx,ijx->ij', R, R))
-            r[r<1e-16] = cp.inf
             if with_mm:
                 mm_ewovrl_grad = np.zeros_like(all_mm_coords)
+            blksize = max(1, int(8e8/64/3/len(all_mm_coords)))
+            for i0, i1 in lib.prange(0, mol.natm, blksize):
+                R = qm_coords[i0:i1,None,:] - all_mm_coords[None,:,:]
+                r = cp.sqrt(cp.einsum('ijx,ijx->ij', R, R))
+                r[r<1e-16] = cp.inf
 
-            # substract the real-space Coulomb within rcut_hcore
-            mask = dist2 <= cell.rcut_hcore**2
-            Tija, Tijab, Tijabc = grad_Tij(R[:,mask], r[:,mask])
-            qm_ewovrl_grad -= cp.einsum('i,ijx,j->ix', qm_charges, Tija, all_mm_charges[mask])
-            qm_ewovrl_grad -= cp.einsum('ia,ijxa,j->ix', qm_dipoles, Tijab, all_mm_charges[mask])
-            qm_ewovrl_grad -= cp.einsum('iab,ijxab,j->ix', qm_quads, Tijabc, all_mm_charges[mask]) / 3
-            if with_mm:
-                mm_ewovrl_grad[mask] += cp.einsum('i,ijx,j->jx', qm_charges, Tija, all_mm_charges[mask])
-                mm_ewovrl_grad[mask] += cp.einsum('ia,ijxa,j->jx', qm_dipoles, Tijab, all_mm_charges[mask])
-                mm_ewovrl_grad[mask] += cp.einsum('iab,ijxab,j->jx', qm_quads, Tijabc, all_mm_charges[mask]) / 3
+                # substract the real-space Coulomb within rcut_hcore
+                mask = dist2 <= cell.rcut_hcore**2
+                Tija, Tijab, Tijabc = grad_Tij(R[:,mask], r[:,mask])
+                qm_ewovrl_grad -= cp.einsum('i,ijx,j->ix', qm_charges, Tija, all_mm_charges[mask])
+                qm_ewovrl_grad -= cp.einsum('ia,ijxa,j->ix', qm_dipoles, Tijab, all_mm_charges[mask])
+                qm_ewovrl_grad -= cp.einsum('iab,ijxab,j->ix', qm_quads, Tijabc, all_mm_charges[mask]) / 3
+                if with_mm:
+                    mm_ewovrl_grad[mask] += cp.einsum('i,ijx,j->jx', qm_charges, Tija, all_mm_charges[mask])
+                    mm_ewovrl_grad[mask] += cp.einsum('ia,ijxa,j->jx', qm_dipoles, Tijab, all_mm_charges[mask])
+                    mm_ewovrl_grad[mask] += cp.einsum('iab,ijxab,j->jx', qm_quads, Tijabc, all_mm_charges[mask]) / 3
 
-            # difference between MM gaussain charges and MM point charges
-            mask = dist2 > cell.rcut_hcore**2
-            zetas = cp.asarray(cell.get_zetas())
-            min_expnt = min(zetas)
-            max_ewrcut = pbc.gto.cell._estimate_rcut(min_expnt, 0, 1., cell.precision)
-            cut2 = (max_ewrcut + rmax_qm)**2
-            mask = mask & (dist2 <= cut2)
-            expnts = cp.hstack([cp.sqrt(zetas)] * len(Lall))[mask]
-            Tija, Tijab, Tijabc = grad_kTij(R[:,mask], r[:,mask], expnts)
-            qm_ewovrl_grad -= cp.einsum('i,ijx,j->ix', qm_charges, Tija, all_mm_charges[mask])
-            qm_ewovrl_grad -= cp.einsum('ia,ijxa,j->ix', qm_dipoles, Tijab, all_mm_charges[mask])
-            qm_ewovrl_grad -= cp.einsum('iab,ijxab,j->ix', qm_quads, Tijabc, all_mm_charges[mask]) / 3
-            if with_mm:
-                mm_ewovrl_grad[mask] += cp.einsum('i,ijx,j->jx', qm_charges, Tija, all_mm_charges[mask])
-                mm_ewovrl_grad[mask] += cp.einsum('ia,ijxa,j->jx', qm_dipoles, Tijab, all_mm_charges[mask])
-                mm_ewovrl_grad[mask] += cp.einsum('iab,ijxab,j->jx', qm_quads, Tijabc, all_mm_charges[mask]) / 3
+                # difference between MM gaussain charges and MM point charges
+                mask = dist2 > cell.rcut_hcore**2
+                zetas = cp.asarray(cell.get_zetas())
+                min_expnt = min(zetas)
+                max_ewrcut = pbc.gto.cell._estimate_rcut(min_expnt, 0, 1., cell.precision)
+                cut2 = (max_ewrcut + rmax_qm)**2
+                mask = mask & (dist2 <= cut2)
+                expnts = cp.hstack([cp.sqrt(zetas)] * len(Lall))[mask]
+                Tija, Tijab, Tijabc = grad_kTij(R[:,mask], r[:,mask], expnts)
+                qm_ewovrl_grad -= cp.einsum('i,ijx,j->ix', qm_charges, Tija, all_mm_charges[mask])
+                qm_ewovrl_grad -= cp.einsum('ia,ijxa,j->ix', qm_dipoles, Tijab, all_mm_charges[mask])
+                qm_ewovrl_grad -= cp.einsum('iab,ijxab,j->ix', qm_quads, Tijabc, all_mm_charges[mask]) / 3
+                if with_mm:
+                    mm_ewovrl_grad[mask] += cp.einsum('i,ijx,j->jx', qm_charges, Tija, all_mm_charges[mask])
+                    mm_ewovrl_grad[mask] += cp.einsum('ia,ijxa,j->jx', qm_dipoles, Tijab, all_mm_charges[mask])
+                    mm_ewovrl_grad[mask] += cp.einsum('iab,ijxab,j->jx', qm_quads, Tijabc, all_mm_charges[mask]) / 3
 
-            # ewald real-space sum
-            cut2 = (ew_cut + rmax_qm)**2
-            mask = dist2 <= cut2
-            Tija, Tijab, Tijabc = grad_kTij(R[:,mask], r[:,mask], ew_eta)
-            qm_ewovrl_grad += cp.einsum('i,ijx,j->ix', qm_charges, Tija, all_mm_charges[mask])
-            qm_ewovrl_grad += cp.einsum('ia,ijxa,j->ix', qm_dipoles, Tijab, all_mm_charges[mask])
-            qm_ewovrl_grad += cp.einsum('iab,ijxab,j->ix', qm_quads, Tijabc, all_mm_charges[mask]) / 3
-            if with_mm:
-                mm_ewovrl_grad[mask] -= cp.einsum('i,ijx,j->jx', qm_charges, Tija, all_mm_charges[mask])
-                mm_ewovrl_grad[mask] -= cp.einsum('ia,ijxa,j->jx', qm_dipoles, Tijab, all_mm_charges[mask])
-                mm_ewovrl_grad[mask] -= cp.einsum('iab,ijxab,j->jx', qm_quads, Tijabc, all_mm_charges[mask]) / 3
+                # ewald real-space sum
+                cut2 = (ew_cut + rmax_qm)**2
+                mask = dist2 <= cut2
+                Tija, Tijab, Tijabc = grad_kTij(R[:,mask], r[:,mask], ew_eta)
+                qm_ewovrl_grad += cp.einsum('i,ijx,j->ix', qm_charges, Tija, all_mm_charges[mask])
+                qm_ewovrl_grad += cp.einsum('ia,ijxa,j->ix', qm_dipoles, Tijab, all_mm_charges[mask])
+                qm_ewovrl_grad += cp.einsum('iab,ijxab,j->ix', qm_quads, Tijabc, all_mm_charges[mask]) / 3
+                if with_mm:
+                    mm_ewovrl_grad[mask] -= cp.einsum('i,ijx,j->jx', qm_charges, Tija, all_mm_charges[mask])
+                    mm_ewovrl_grad[mask] -= cp.einsum('ia,ijxa,j->jx', qm_dipoles, Tijab, all_mm_charges[mask])
+                    mm_ewovrl_grad[mask] -= cp.einsum('iab,ijxab,j->jx', qm_quads, Tijabc, all_mm_charges[mask]) / 3
 
             if with_mm:
                 mm_ewovrl_grad = mm_ewovrl_grad.reshape(len(Lall), -1, 3)
-                mm_ewovrl_grad = np.sum(mm_ewovrl_grad, axis=0)
+                mm_ewovrl_grad = cp.sum(mm_ewovrl_grad, axis=0)
             all_mm_coords = all_mm_charges = None
 
             #------ qm - qm clasiical ewald energy gradient ------#
