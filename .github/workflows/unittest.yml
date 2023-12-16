@@ -1,8 +1,8 @@
 # based on https://github.com/machulav/ec2-github-runner
 name: Unittest
 
-#on:
-#- workflow_dispatch
+on:
+- workflow_dispatch
 
 jobs:
   start-runner:
@@ -23,14 +23,13 @@ jobs:
         uses: machulav/ec2-github-runner@v2
         with:
           mode: start
-          pre-runner-script: |
-            sudo apt-get update -y && sudo apt-get install -y python3-pip python-is-python3 && sudo systemctl enable docker
           github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           ec2-image-id: ami-0407cd905c30f1254 # pyscf-ci-p3-v1
-          ec2-instance-type: t3.nano
-          subnet-id: subnet-123?
-          security-group-id: sg-123?
-          iam-role-name: my-role-name # optional, requires additional permissions
+          ec2-instance-type: p3.2xlarge
+          subnet-id: subnet-0126c758b16464379
+          # TODO config spot instance
+          security-group-id: sg-090491dda6aea3d72 # TODO: change to github-actions SG
+          #iam-role-name: github-ci-actions # optional, requires additional permissions
           aws-resource-tags: > # optional, requires additional permissions
             [
               {"Key": "Name", "Value": "ec2-github-runner"},
@@ -42,7 +41,10 @@ jobs:
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
     steps:
       - name: Run tests
-        run: echo 'Hello World!'
+        run: |
+            echo 'hello github action!'
+            #bash .github/workflows/run_ci.sh
+            bash unitest.sh
   stop-runner:
     name: Stop self-hosted EC2 runner
     needs:
