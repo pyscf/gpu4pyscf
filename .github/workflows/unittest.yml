@@ -24,11 +24,10 @@ jobs:
         with:
           mode: start
           github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          ec2-image-id: ami-0407cd905c30f1254 # pyscf-ci-p3-v1
+          ec2-image-id: ami-0407cd905c30f1254 # pyscf-ci-p3-cuda12-v1
           ec2-instance-type: p3.2xlarge
           subnet-id: subnet-0126c758b16464379
-          # TODO config spot instance
-          security-group-id: sg-090491dda6aea3d72 # TODO: change to github-actions SG
+          security-group-id: sg-06f04f17d5875c6c7
           #iam-role-name: github-ci-actions # optional, requires additional permissions
           aws-resource-tags: > # optional, requires additional permissions
             [
@@ -42,10 +41,11 @@ jobs:
     steps:
       - name: Run tests
         run: |
-            git log -n 1
             pwd
             ls
             which python
+            cd gpu4pyscf
+            git log -n 1
             bash .github/workflows/install_deps.sh
             #bash .github/workflows/run_ci.sh
             bash .github/workflows/unitest.sh
