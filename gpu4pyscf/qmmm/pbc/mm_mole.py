@@ -10,6 +10,8 @@ from cupyx.scipy.special import erf, erfc
 from pyscf import lib
 
 import cupy as cp
+from gpu4pyscf.df.df import ALIGNED, MIN_BLK_SIZE
+from gpu4pyscf.lib import cupy_helper
 
 class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
     '''Cell class for MM particles.
@@ -133,20 +135,24 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
         dist2 = cp.einsum('jx,jx->j', dist2, dist2)
 
         if all_charges2 is not None:
-            ewovrl0 = 0
-            ewovrl1 = 0
-            ewovrl2 = 0
+            ewovrl0 = cp.zeros(len(coords1))
+            ewovrl1 = cp.zeros((len(coords1), 3))
+            ewovrl2 = cp.zeros((len(coords1), 3, 3))
         else:
-            ewovrl00 = 0
-            ewovrl01 = 0
-            ewovrl11 = 0
-            ewovrl02 = 0
-            ewself00 = 0
-            ewself01 = 0
-            ewself11 = 0
-            ewself02 = 0
+            ewovrl00 = cp.zeros((len(coords1), len(coords1))) 
+            ewovrl01 = cp.zeros((len(coords1), len(coords1), 3)) 
+            ewovrl11 = cp.zeros((len(coords1), len(coords1), 3, 3)) 
+            ewovrl02 = cp.zeros((len(coords1), len(coords1), 3, 3)) 
+            ewself00 = cp.zeros((len(coords1), len(coords1))) 
+            ewself01 = cp.zeros((len(coords1), len(coords1), 3)) 
+            ewself11 = cp.zeros((len(coords1), len(coords1), 3, 3)) 
+            ewself02 = cp.zeros((len(coords1), len(coords1), 3, 3)) 
 
-        blksize = max(1, int(8e8/64/3/len(all_coords2)))
+        mem_avail = cupy_helper.get_avail_mem()
+        blksize = int(mem_avail/64/3/len(all_coords2) / ALIGNED) * ALIGNED
+        blksize = min(blksize, MIN_BLK_SIZE)
+        if blksize < ALIGNED:
+            raise RuntimeError(f"Not enough GPU memory, mem_avail = {mem_avail}, blkszie = {blksize}")
         for i0, i1 in lib.prange(0, len(coords1), blksize):
             R = coords1[i0:i1,None,:] - all_coords2[None,:,:]
             r = cp.linalg.norm(R, axis=-1)
@@ -167,23 +173,24 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                 # ew1 = -d^2 E / dDia dqj qj
                 # ew2 = -d^2 E / dOiab dqj qj
                 # qm pc - mm pc
-                ewovrl0 += -cp.einsum('ij,j->i', Tij, charges)
+                ewovrl0[i0:i1] += -cp.einsum('ij,j->i', Tij, charges)
                 # qm dip - mm pc
-                ewovrl1 += -cp.einsum('j,ija->ia', charges, Tija)
+                ewovrl1[i0:i1] += -cp.einsum('j,ija->ia', charges, Tija)
                 # qm quad - mm pc
-                ewovrl2 += -cp.einsum('j,ijab->iab', charges, Tijab) / 3
+                ewovrl2[i0:i1] += -cp.einsum('j,ijab->iab', charges, Tijab) / 3
             else:
                 # FIXME a too small rcut_hcore truncates QM atoms, while this correction
                 # should be applied to all QM pairs regardless of rcut_hcore
-                assert r[:,mask].shape[0] == r[:,mask].shape[1]   # real-space should not see qm images
+                # FIXME do this check in another way
+                #assert r[:,mask].shape[0] == r[:,mask].shape[1]   # real-space should not see qm images
                 # ew00 = -d^2 E / dQi dQj
                 # ew01 = -d^2 E / dQi dDja
                 # ew11 = -d^2 E / dDia dDjb
                 # ew02 = -d^2 E / dQi dOjab
-                ewovrl00 += -Tij
-                ewovrl01 +=  Tija
-                ewovrl11 +=  Tijab
-                ewovrl02 += -Tijab / 3
+                ewovrl00[i0:i1] += -Tij
+                ewovrl01[i0:i1] +=  Tija
+                ewovrl11[i0:i1] +=  Tijab
+                ewovrl02[i0:i1] += -Tijab / 3
     
             # difference between MM gaussain charges and MM point charges
             if all_charges2 is not None and self.charge_model == 'gaussian':
@@ -205,9 +212,9 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                 invr5 = invr3 + cp.einsum('j,ij->ij', expnts**3, 4/3/cp.sqrt(cp.pi) * ekR)
                 Tijab = cp.einsum('ijab,ij->ijab', Tijab, invr5)
                 Tijab += cp.einsum('j,ij,ab->ijab', expnts**3, 4/3/cp.sqrt(cp.pi)*ekR, cp.eye(3))
-                ewovrl0 -= cp.einsum('ij,j->i', Tij, all_charges2[mask])
-                ewovrl1 -= cp.einsum('j,ija->ia', all_charges2[mask], Tija)
-                ewovrl2 -= cp.einsum('j,ijab->iab', all_charges2[mask], Tijab) / 3
+                ewovrl0[i0:i1] -= cp.einsum('ij,j->i', Tij, all_charges2[mask])
+                ewovrl1[i0:i1] -= cp.einsum('j,ija->ia', all_charges2[mask], Tija)
+                ewovrl2[i0:i1] -= cp.einsum('j,ijab->iab', all_charges2[mask], Tijab) / 3
     
             # ewald real-space sum
             cut2 = (ew_cut + rmax_qm)**2
@@ -217,8 +224,10 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
             if all_charges2 is not None:
                 all_charges2_ = all_charges2[mask]
             else:
-                if r_.shape[0] != r_.shape[1]:
-                    raise NotImplementedError("QM image cannot be within ewald cutoff of QM")
+                pass
+                # FIXME check this in another way
+                #if r_.shape[0] != r_.shape[1]:
+                #    raise NotImplementedError("QM image cannot be within ewald cutoff of QM")
             ekR = cp.exp(-ew_eta**2 * r_**2)
             # Tij = \hat{1/r} = f0 / r = erfc(r) / r
             Tij = erfc(ew_eta * r_) / r_
@@ -234,25 +243,25 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
             Tijab += 4/3*ew_eta**3/cp.sqrt(cp.pi)*cp.einsum('ij,ab->ijab', ekR, cp.eye(3))
     
             if all_charges2 is not None:
-                ewovrl0 += cp.einsum('ij,j->i', Tij, all_charges2_)
-                ewovrl1 += cp.einsum('j,ija->ia', all_charges2_, Tija)
-                ewovrl2 += cp.einsum('j,ijab->iab', all_charges2_, Tijab) / 3
+                ewovrl0[i0:i1] += cp.einsum('ij,j->i', Tij, all_charges2_)
+                ewovrl1[i0:i1] += cp.einsum('j,ija->ia', all_charges2_, Tija)
+                ewovrl2[i0:i1] += cp.einsum('j,ijab->iab', all_charges2_, Tijab) / 3
             else:
-                ewovrl00 += Tij
-                ewovrl01 -= Tija
-                ewovrl11 -= Tijab
-                ewovrl02 += Tijab / 3
+                ewovrl00[i0:i1] += Tij
+                ewovrl01[i0:i1] -= Tija
+                ewovrl11[i0:i1] -= Tijab
+                ewovrl02[i0:i1] += Tijab / 3
             ekR = Tij = invr3 = Tijab = invr5 = None
     
             if all_charges2 is not None:
                 pass
             else:
-                ewself01 += 0
-                ewself02 += 0
+                ewself01[i0:i1] += 0
+                ewself02[i0:i1] += 0
                 # -d^2 Eself / dQi dQj
-                ewself00 += -cp.eye(len(coords1)) * 2 * ew_eta / cp.sqrt(cp.pi)
+                ewself00[i0:i1] += -cp.eye(len(coords1))[i0:i1] * 2 * ew_eta / cp.sqrt(cp.pi)
                 # -d^2 Eself / dDia dDjb
-                ewself11 += -cp.einsum('ij,ab->ijab', cp.eye(len(coords1)), cp.eye(3)) \
+                ewself11[i0:i1] += -cp.einsum('ij,ab->ijab', cp.eye(len(coords1))[i0:i1], cp.eye(3)) \
                         * 4 * ew_eta**3 / 3 / cp.sqrt(cp.pi)
 
             r_ = R_ = all_charges2_ = None
@@ -285,11 +294,13 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
             ewg0  = cp.einsum('ig,g,g->i', cosGvR1, zcosGvR2, Gpref)
             ewg0 += cp.einsum('ig,g,g->i', sinGvR1, zsinGvR2, Gpref)
             # qm dip - mm pc
-            ewg1  = cp.einsum('gx,ig,g,g->ix', Gv, cosGvR1, zsinGvR2, Gpref)
-            ewg1 -= cp.einsum('gx,ig,g,g->ix', Gv, sinGvR1, zcosGvR2, Gpref)
+            p = ['einsum_path', (2, 3), (0, 2), (0, 1)]
+            ewg1  = cp.einsum('gx,ig,g,g->ix', Gv, cosGvR1, zsinGvR2, Gpref, optimize=p)
+            ewg1 -= cp.einsum('gx,ig,g,g->ix', Gv, sinGvR1, zcosGvR2, Gpref, optimize=p)
             # qm quad - mm pc
-            ewg2  = -cp.einsum('gx,gy,ig,g,g->ixy', Gv, Gv, cosGvR1, zcosGvR2, Gpref)
-            ewg2 += -cp.einsum('gx,gy,ig,g,g->ixy', Gv, Gv, sinGvR1, zsinGvR2, Gpref)
+            p = ['einsum_path', (3, 4), (0, 3), (0, 2), (0, 1)]
+            ewg2  = -cp.einsum('gx,gy,ig,g,g->ixy', Gv, Gv, cosGvR1, zcosGvR2, Gpref, optimize=p)
+            ewg2 += -cp.einsum('gx,gy,ig,g,g->ixy', Gv, Gv, sinGvR1, zsinGvR2, Gpref, optimize=p)
             ewg2 /= 3
         else:
             # qm pc - qm pc
