@@ -19,17 +19,20 @@ import pyscf
 from pyscf import lib
 from gpu4pyscf import scf
 
-lib.num_threads(8)
-atom = '''
-I 0 0 0 
+def setUpModule():
+    global mol
+    atom = '''
+I 0 0 0
 I 1 0 0
 '''
-bas='def2-svp'
-mol = pyscf.M(atom=atom, basis=bas, ecp=bas)
-mol.verbose = 4
+    bas='def2-svp'
+    mol = pyscf.M(atom=atom, basis=bas, ecp=bas)
+    mol.output = '/dev/null'
+    mol.build()
 
 def tearDownModule():
     global mol
+    mol.stdout.close()
     del mol
 
 class KnownValues(unittest.TestCase):

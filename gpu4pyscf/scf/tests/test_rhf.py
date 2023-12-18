@@ -31,6 +31,7 @@ C   0.73673681,  3.02749287, -0.00920048
 ''',
     basis='ccpvtz',
     spin=None,
+    output = '/dev/null'
 )
 
 mol1 = pyscf.M(
@@ -40,7 +41,7 @@ C   1.28636081, -0.34128013, -0.00668648
 H   2.53407081,  1.81906387, -0.00736748
 H   1.28693681,  3.97963587, -0.00925948
 ''',
-basis='''unc
+    basis='''unc
 #BASIS SET:
 H    S
       1.815041   1
@@ -68,10 +69,13 @@ C    G
 C    H
       0.4        1
       ''',
+    output = '/dev/null'
 )
 
 def tearDownModule():
     global mol, mol1
+    mol.stdout.close()
+    mol1.stdout.close()
     del mol, mol1
 
 class KnownValues(unittest.TestCase):

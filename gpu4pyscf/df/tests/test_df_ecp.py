@@ -37,9 +37,6 @@ def setUpModule():
         output = '/dev/null'
     )
 
-    mol.build()
-    mol.verbose = 3
-
 def tearDownModule():
     global mol
     mol.stdout.close()
