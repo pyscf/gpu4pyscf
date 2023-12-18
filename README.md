@@ -3,6 +3,9 @@ GPU plugin for PySCF
 Installation
 --------
 
+> [!NOTE]
+> The compiled binary packages support compute capability 7.0 and later (Volta and later, such as Tesla V100, RTX 20 series and later). For older GPUs, please compile the package with the source code as follows.
+
 For **CUDA 11.x**
 ```sh
 pip3 install gpu4pyscf-cuda11x

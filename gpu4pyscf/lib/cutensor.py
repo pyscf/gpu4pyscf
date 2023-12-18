@@ -30,10 +30,11 @@ try:
     _contraction_finds = {}
 
     cutensor_backend.init(_handle)
-
+    CUTENSOR_ALGO_DEFAULT = cutensor_backend.ALGO_DEFAULT
 except ImportError:
     cutensor = None
-
+    CUTENSOR_ALGO_DEFAULT = None
+    
 def _create_mode_with_cache(mode):
     integer_mode = []
     for x in mode:
@@ -81,7 +82,7 @@ def create_contraction_descriptor(handle,
     _contraction_descriptors[key] = desc
     return desc
 
-def create_contraction_find(handle, algo=cutensor_backend.ALGO_DEFAULT):
+def create_contraction_find(handle, algo=CUTENSOR_ALGO_DEFAULT):
     key = (handle.ptr, algo)
     if key in _contraction_finds:
         find = _contraction_finds[key]
