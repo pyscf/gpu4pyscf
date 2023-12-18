@@ -415,7 +415,6 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     else:
         mf_diis = None
 
-    t_beg = time.time()
     for cycle in range(mf.max_cycle):
         t0 = log.init_timer()
         dm_last = dm
@@ -446,8 +445,6 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     if(cycle == mf.max_cycle):
         logger.warn("SCF failed to converge")
 
-    t_end = time.time()
-    mf.scf_time = t_end - t_beg
     # for dispersion correction
     e_tot = e_tot.get()
     if(hasattr(mf, 'get_dispersion')):
@@ -560,6 +557,8 @@ def _eigh(mf, h, s):
 
 class RHF(hf.RHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+
+    _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'e_disp', 'screen_tol'}
 
     screen_tol = 1e-14
     DIIS = diis.SCF_DIIS

@@ -185,13 +185,22 @@ def gen_grids_partition(atm_coords, coords, a):
     stream = cupy.cuda.get_current_stream()
     natm = atm_coords.shape[0]
     ngrids = coords.shape[0]
-    pbecke = cupy.ones([natm, ngrids], order='C')
     assert ngrids < 65535 * 16
+    x_i = cupy.expand_dims(atm_coords, axis=1)
+    x_g = cupy.expand_dims(coords, axis=0)
+    squared_diff = (x_i - x_g)**2
+    dist_ig = cupy.sum(squared_diff, axis=2)**0.5
+
+    x_j = cupy.expand_dims(atm_coords, axis=0)
+    squared_diff = (x_i - x_j)**2
+    dist_ij = cupy.sum(squared_diff, axis=2)**0.5
+
+    pbecke = cupy.ones([natm, ngrids], order='C')
     err = libgdft.GDFTgen_grid_partition(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(pbecke.data.ptr, ctypes.c_void_p),
-        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dist_ig.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dist_ij.data.ptr, ctypes.c_void_p),
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(natm)
@@ -243,13 +252,6 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
             logger.debug(mol, 'atom %s rad-grids = %d, ang-grids = %s',
                          symb, n_rad, angs)
 
-            ang_grids = {}
-            for n in sorted(set(angs)):
-                grid = numpy.empty((n,4))
-                libdft.MakeAngularGrid(grid.ctypes.data_as(ctypes.c_void_p),
-                                       ctypes.c_int(n))
-                ang_grids[n] = grid
-
             angs = numpy.array(angs)
             coords = []
             vol = []
@@ -258,8 +260,13 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                 libdft.MakeAngularGrid(grid.ctypes.data_as(ctypes.c_void_p),
                                        ctypes.c_int(n))
                 idx = numpy.where(angs==n)[0]
-                coords.append(cupy.einsum('i,jk->jik', rad[idx], grid[:,:3]).reshape(-1,3))
-                vol.append(cupy.einsum('i,j->ji', rad_weight[idx], grid[:,3]).ravel())
+                for i0, i1 in lib.prange(0, len(idx), 12):  # 12 radi-grids as a group
+                    coords.append(numpy.einsum('i,jk->jik',rad[idx[i0:i1]],
+                                               grid[:,:3]).reshape(-1,3))
+                    vol.append(numpy.einsum('i,j->ji', rad_weight[idx[i0:i1]],
+                                            grid[:,3]).ravel())
+                #coords.append(cupy.einsum('i,jk->jik', rad[idx], grid[:,:3]).reshape(-1,3))
+                #vol.append(cupy.einsum('i,j->ji', rad_weight[idx], grid[:,3]).ravel())
 
             atom_grids_tab[symb] = (cupy.vstack(coords), cupy.hstack(vol))
 
@@ -327,6 +334,7 @@ def get_partition(mol, atom_grids_tab,
 
     coords_all = []
     weights_all = []
+    assert radii_adjust == radi.treutler_atomic_radii_adjust
     a = -radi.get_treutler_fac(mol, atomic_radii)
     for ia in range(mol.natm):
         coords, vol = atom_grids_tab[mol.atom_symbol(ia)]

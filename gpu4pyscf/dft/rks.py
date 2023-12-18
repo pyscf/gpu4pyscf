@@ -93,7 +93,6 @@ def initialize_grids(ks, mol=None, dm=None):
                     # Filter grids the first time setup grids
                     ks.nlcgrids = prune_small_rho_grids_(ks, ks.mol, dm, ks.nlcgrids)
                 t0 = logger.timer_debug1(ks, 'setting up nlc grids', *t0)
-
     return ks
 
 def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):

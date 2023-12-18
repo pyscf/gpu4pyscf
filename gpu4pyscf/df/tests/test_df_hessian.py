@@ -24,10 +24,10 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-xc0='B3LYP'
-bas0='def2-tzvpp'
-auxbasis0='def2-tzvpp-jkfit'
-disp0='d3bj'
+xc0 = 'B3LYP'
+bas0 = 'def2-tzvpp'
+auxbasis0 = 'def2-tzvpp-jkfit'
+disp0 = 'd3bj'
 grids_level = 6
 eps = 1e-3
 

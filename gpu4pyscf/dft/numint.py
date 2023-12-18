@@ -34,8 +34,8 @@ BAS_ALIGNED = 4
 GRID_BLKSIZE = 32
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 64*64)
 ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
+AO_ALIGNMENT = getattr(__config__, 'ao_aligned', 16)
 AO_THRESHOLD = 1e-12
-AO_ALIGNMENT = 32
 
 # Should we release the cupy cache?
 FREE_CUPY_CACHE = False
@@ -564,6 +564,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         nelec = nelec[0]
         excsum = excsum[0]
         vmat = vmat[0]
+
     return nelec, excsum, vmat#np.asarray(vmat)
 
 def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
@@ -984,16 +985,31 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
+
+    mo_coeff = getattr(dms, 'mo_coeff', None)
+    mo_occ = getattr(dms,'mo_occ', None)
+
     nao, nao0 = opt.coeff.shape
     mol = opt.mol
     coeff = cupy.asarray(opt.coeff)
     dms = [coeff @ dm @ coeff.T for dm in dms.reshape(-1,nao0,nao0)]
+    assert len(dms) == 1
+
+    if mo_coeff is not None:
+        mo_coeff = coeff @ mo_coeff
+
     ao_deriv = 1
     vvrho = []
-    for ao, mask, weight, coords \
+    for ao, idx, weight, coords \
             in ni.block_loop(mol, grids, nao, ao_deriv, max_memory=max_memory):
-        rho = eval_rho(opt.mol, ao, dms[0][np.ix_(mask,mask)], xctype='GGA', hermi=1)
+        #rho = eval_rho(opt.mol, ao, dms[0][np.ix_(mask,mask)], xctype='GGA', hermi=1)
+        if mo_coeff is None:
+            rho = eval_rho(mol, ao, dms[0][np.ix_(idx,idx)], xctype='GGA', hermi=1)
+        else:
+            mo_coeff_mask = mo_coeff[idx,:]
+            rho = eval_rho2(mol, ao, mo_coeff_mask, mo_occ, None, 'GGA')
         vvrho.append(rho)
+
     rho = cupy.hstack(vvrho)
     t1 = log.timer_debug1('eval rho', *t0)
     exc = 0
@@ -1227,7 +1243,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             # cache ao indices
             if (deriv, block_id, blksize, ngrids) not in ni.non0ao_idx:
                 stream = cupy.cuda.get_current_stream()
-                cutoff = 1e-12
+                cutoff = AO_THRESHOLD
                 ng = ip1 - ip0
                 ao_loc = mol.ao_loc_nr()
                 nbas = mol.nbas

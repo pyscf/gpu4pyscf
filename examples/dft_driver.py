@@ -51,7 +51,7 @@ if mf_df._numint.libxc.is_nlc(mf_df.xc):
     mf_df.nlcgrids.atom_grid = (50,194)
 mf_df.direct_scf_tol = 1e-14
 mf_df.direct_scf = 1e-14
-mf_df.conv_tol = 1e-12
+mf_df.conv_tol = 1e-10
 e_tot = mf_df.kernel()
 scf_time = time.time() - start_time
 print(f'compute time for energy: {scf_time:.3f} s')

@@ -41,13 +41,14 @@ def setUpModule():
     mol.build()
     mol.verbose = 1
     auxmol = df.addons.make_auxmol(mol, auxbasis='sto3g')
-    
+
 def tearDownModule():
     global mol, auxmol
+    mol.stdout.close()
     del mol, auxmol
 
 class KnownValues(unittest.TestCase):
-    
+
     def test_vj_incore(self):
         int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym=True, direct_scf_tol=1e-14)
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
@@ -66,7 +67,7 @@ class KnownValues(unittest.TestCase):
         vj_outcore = cupy.einsum('ijL,L->ij', int3c_gpu, rhoj_outcore)
         vj_incore = int3c2e.get_j_int3c2e_pass2(intopt, rhoj_incore)
         assert cupy.linalg.norm(vj_outcore - vj_incore) < 1e-9
-    
+
     def test_j_outcore(self):
         cupy.random.seed(1)
         nao = mol.nao
@@ -77,7 +78,7 @@ class KnownValues(unittest.TestCase):
         vj0, _ = mf.get_jk(dm=dm, with_j=True, with_k=False)
         vj = df_jk.get_j(mf.with_df, dm)
         assert cupy.linalg.norm(vj - vj0) < 1e-9
-    
+
 
 if __name__ == "__main__":
     print("Full Tests for DF JK")
