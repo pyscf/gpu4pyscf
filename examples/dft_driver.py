@@ -55,7 +55,6 @@ mf_df.conv_tol = 1e-10
 e_tot = mf_df.kernel()
 scf_time = time.time() - start_time
 print(f'compute time for energy: {scf_time:.3f} s')
-exit()
 
 start_time = time.time()
 g = mf_df.nuc_grad_method()
@@ -70,6 +69,3 @@ h.auxbasis_response = 2
 h_dft = h.kernel()
 hess_time = time.time() - start_time
 print(f'compute time for hessian: {hess_time:.3f} s')
-
-import numpy
-numpy.savez('gpu4pyscf_out.npz', e_tot=e_tot, f=f, h_dft=h_dft)

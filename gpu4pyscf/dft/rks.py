@@ -226,6 +226,8 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
 class RKS(scf.hf.RHF, rks.RKS):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
+    _keys = {'disp'}
+
     def __init__(self, mol, xc='LDA,VWN', disp=None):
         super().__init__(mol, xc)
         self._numint = numint.NumInt(xc=xc)

@@ -43,7 +43,7 @@ mf_GPU.screen_tol = screen_tol
 
 # Compute Energy
 e_dft = mf_GPU.kernel()
-print(f"total energy = {e_dft}")
+print(f"total energy = {e_dft}") # -76.26736519501688
 
 # Compute Gradient
 g = mf_GPU.nuc_grad_method()

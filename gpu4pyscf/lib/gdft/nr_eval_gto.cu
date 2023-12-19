@@ -76,7 +76,7 @@ void _screen_index(int *non0shl_idx, double cutoff, int l, int ish, int nprim, d
     double min_exp = 1e9;
     for (int ip = 0; ip < nprim; ++ip) {
         min_exp = MIN(min_exp, exps[ip]);
-        maxc = MAX(maxc, coeffs[ip]);
+        maxc = MAX(maxc, fabs(coeffs[ip]));
     }
     double gto_sup = -min_exp * rr + .5 * log(rr) * l + log(maxc);
     int is_large = gto_sup > log(cutoff);
