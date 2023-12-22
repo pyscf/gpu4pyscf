@@ -202,7 +202,8 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
 
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
-        raise RuntimeError("DFT Options are not initialized")
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
 
     coeff = cupy.asarray(opt.coeff)
     mo_coeff = coeff @ mo_coeff
@@ -224,12 +225,11 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
             aow = None
 
     elif xctype == 'GGA':
-        def contract_(mat, ao, aoidx, wv, mask):
+        def contract_(ao, aoidx, wv, mask):
             aow = numint._scale_ao(ao[aoidx[0]], wv[1])
             aow+= numint._scale_ao(ao[aoidx[1]], wv[2])
             aow+= numint._scale_ao(ao[aoidx[2]], wv[3])
-            mat_tmp = numint._dot_ao_ao(mol, aow, ao[0], mask, shls_slice, ao_loc)
-            add_sparse(mat, mat_tmp, mask)
+            return numint._dot_ao_ao(mol, aow, ao[0], mask, shls_slice, ao_loc)
 
         ao_deriv = 3
         for ao, mask, weight, coords \
@@ -241,24 +241,25 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
             #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
             aow = numint._scale_ao(ao[:4], wv[:4])
 
+            vmat_tmp = [0]*6
             for i in range(6):
-                vmat_tmp = numint._dot_ao_ao(mol, ao[i+4], aow, mask, shls_slice, ao_loc)
-                add_sparse(vmat[i], vmat_tmp, mask)
-            contract_(vmat[0], ao, [XXX,XXY,XXZ], wv, mask)
-            contract_(vmat[1], ao, [XXY,XYY,XYZ], wv, mask)
-            contract_(vmat[2], ao, [XXZ,XYZ,XZZ], wv, mask)
-            contract_(vmat[3], ao, [XYY,YYY,YYZ], wv, mask)
-            contract_(vmat[4], ao, [XYZ,YYZ,YZZ], wv, mask)
-            contract_(vmat[5], ao, [XZZ,YZZ,ZZZ], wv, mask)
+                vmat_tmp[i] = numint._dot_ao_ao(mol, ao[i+4], aow, mask, shls_slice, ao_loc)
 
+            vmat_tmp[0] += contract_(ao, [XXX,XXY,XXZ], wv, mask)
+            vmat_tmp[1] += contract_(ao, [XXY,XYY,XYZ], wv, mask)
+            vmat_tmp[2] += contract_(ao, [XXZ,XYZ,XZZ], wv, mask)
+            vmat_tmp[3] += contract_(ao, [XYY,YYY,YYZ], wv, mask)
+            vmat_tmp[4] += contract_(ao, [XYZ,YYZ,YZZ], wv, mask)
+            vmat_tmp[5] += contract_(ao, [XZZ,YZZ,ZZZ], wv, mask)
+            for i in range(6):
+                add_sparse(vmat[i], vmat_tmp[i], mask)
             rho = vxc = wv = aow = None
     elif xctype == 'MGGA':
-        def contract_(mat, ao, aoidx, wv, mask):
+        def contract_(ao, aoidx, wv, mask):
             aow = numint._scale_ao(ao[aoidx[0]], wv[1])
             aow+= numint._scale_ao(ao[aoidx[1]], wv[2])
             aow+= numint._scale_ao(ao[aoidx[2]], wv[3])
-            mat_tmp = numint._dot_ao_ao(mol, aow, ao[0], mask, shls_slice, ao_loc)
-            add_sparse(mat, mat_tmp, mask)
+            return numint._dot_ao_ao(mol, aow, ao[0], mask, shls_slice, ao_loc)
 
         ao_deriv = 3
         for ao, mask, weight, coords \
@@ -269,28 +270,31 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
             wv = weight * vxc
             wv[4] *= .5  # for the factor 1/2 in tau
             #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
+            vmat_tmp = [0]*6
             aow = numint._scale_ao(ao[:4], wv[:4])
             for i in range(6):
-                vmat_tmp = numint._dot_ao_ao(mol, ao[i+4], aow, mask, shls_slice, ao_loc)
-                add_sparse(vmat[i], vmat_tmp, mask)
+                vmat_tmp[i] = numint._dot_ao_ao(mol, ao[i+4], aow, mask, shls_slice, ao_loc)
 
-            contract_(vmat[0], ao, [XXX,XXY,XXZ], wv, mask)
-            contract_(vmat[1], ao, [XXY,XYY,XYZ], wv, mask)
-            contract_(vmat[2], ao, [XXZ,XYZ,XZZ], wv, mask)
-            contract_(vmat[3], ao, [XYY,YYY,YYZ], wv, mask)
-            contract_(vmat[4], ao, [XYZ,YYZ,YZZ], wv, mask)
-            contract_(vmat[5], ao, [XZZ,YZZ,ZZZ], wv, mask)
+            vmat_tmp[0] += contract_(ao, [XXX,XXY,XXZ], wv, mask)
+            vmat_tmp[1] += contract_(ao, [XXY,XYY,XYZ], wv, mask)
+            vmat_tmp[2] += contract_(ao, [XXZ,XYZ,XZZ], wv, mask)
+            vmat_tmp[3] += contract_(ao, [XYY,YYY,YYZ], wv, mask)
+            vmat_tmp[4] += contract_(ao, [XYZ,YYZ,YZZ], wv, mask)
+            vmat_tmp[5] += contract_(ao, [XZZ,YZZ,ZZZ], wv, mask)
 
             aow = [numint._scale_ao(ao[i], wv[4]) for i in range(1, 4)]
             for i, j in enumerate([XXX, XXY, XXZ, XYY, XYZ, XZZ]):
-                vmat_tmp = numint._dot_ao_ao(mol, ao[j], aow[0], mask, shls_slice, ao_loc)
-                add_sparse(vmat[i], vmat_tmp, mask)
+                vmat_tmp[i] += numint._dot_ao_ao(mol, ao[j], aow[0], mask, shls_slice, ao_loc)
+
             for i, j in enumerate([XXY, XYY, XYZ, YYY, YYZ, YZZ]):
-                vmat_tmp = numint._dot_ao_ao(mol, ao[j], aow[1], mask, shls_slice, ao_loc)
-                add_sparse(vmat[i], vmat_tmp, mask)
+                vmat_tmp[i] += numint._dot_ao_ao(mol, ao[j], aow[1], mask, shls_slice, ao_loc)
+
             for i, j in enumerate([XXZ, XYZ, XZZ, YYZ, YZZ, ZZZ]):
-                vmat_tmp = numint._dot_ao_ao(mol, ao[j], aow[2], mask, shls_slice, ao_loc)
-                add_sparse(vmat[i], vmat_tmp, mask)
+                vmat_tmp[i] += numint._dot_ao_ao(mol, ao[j], aow[2], mask, shls_slice, ao_loc)
+
+            for i in range(6):
+                add_sparse(vmat[i], vmat_tmp[i], mask)
+
     vmat = vmat[[0,1,2,
                  1,3,4,
                  2,4,5]]
@@ -380,14 +384,10 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
 
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
-        raise RuntimeError("DFT Options are not initialized")
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
     coeff = cupy.asarray(opt.coeff)
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-
-    ## transform object in sorted AO
-    #mo_coeff = coeff @ mo_coeff
-    #dm0 = coeff @ dm0
-    #dm0 = dm0 @ coeff.T
 
     vmat = cupy.zeros((mol.natm,3,3,nao,nao))
     ipip = cupy.zeros((3,3,nao,nao))
@@ -559,7 +559,9 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
-        raise RuntimeError("DFT Options are not initialized")
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+
     coeff = cupy.asarray(opt.coeff)
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
 

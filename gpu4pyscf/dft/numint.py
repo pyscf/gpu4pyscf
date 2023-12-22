@@ -1306,6 +1306,8 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
 class NumInt(numint.NumInt):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
+    _keys = {'screen_idx', 'xcfuns', 'gdftopt'}
+
     def __init__(self, xc='LDA'):
         super().__init__()
         self.gdftopt = None

@@ -35,10 +35,10 @@ mol = pyscf.M(
     max_memory=32000)
 # set verbose >= 6 for debugging timer
 
-mol.verbose = 6
+mol.verbose = 4
 
 mf_df = rks.RKS(mol, xc=args.xc).density_fit(auxbasis=args.auxbasis)
-mf_df.verbose = 6
+mf_df.verbose = 4
 
 if args.solvent:
     mf_df = mf_df.PCM()
@@ -69,3 +69,4 @@ h.auxbasis_response = 2
 h_dft = h.kernel()
 hess_time = time.time() - start_time
 print(f'compute time for hessian: {hess_time:.3f} s')
+print(h_dft)
