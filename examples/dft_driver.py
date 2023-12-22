@@ -69,4 +69,3 @@ h.auxbasis_response = 2
 h_dft = h.kernel()
 hess_time = time.time() - start_time
 print(f'compute time for hessian: {hess_time:.3f} s')
-print(h_dft)
