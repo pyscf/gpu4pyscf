@@ -19,7 +19,7 @@
 #include <math.h>
 #include <cuda_runtime.h>
 
-#define NG_PER_BLOCK        256
+#define NATOM_PER_BLOCK        128
 
 __global__
 void GDFTgen_grid_kernel(double *pbecke, const double *dist_ig, const double *dist_ij,
@@ -28,8 +28,8 @@ void GDFTgen_grid_kernel(double *pbecke, const double *dist_ig, const double *di
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     const bool active = grid_id < ngrids;
 
-    __shared__ double dij_smem[NG_PER_BLOCK];
-    __shared__ double a_smem[NG_PER_BLOCK];
+    __shared__ double dij_smem[NATOM_PER_BLOCK];
+    __shared__ double a_smem[NATOM_PER_BLOCK];
     const int tx = threadIdx.x;
 
     for (int atom_i = 0; atom_i < natm; atom_i++){
@@ -48,7 +48,7 @@ void GDFTgen_grid_kernel(double *pbecke, const double *dist_ig, const double *di
             }
             __syncthreads();
 
-            for (int l = 0, M = min(NG_PER_BLOCK, natm-j); l < M; ++l){
+            for (int l = 0, M = min(NATOM_PER_BLOCK, natm-j); l < M; ++l){
                 int atom_j = j + l;
                 // distance between grids and atom j
                 double djg = 0;
@@ -80,14 +80,53 @@ void GDFTgen_grid_kernel(double *pbecke, const double *dist_ig, const double *di
     }
 }
 
+__global__
+void GDFTgroup_grids_kernel(int* group_ids, const double* atom_coords, const double* coords, int natm, int ngrids){
+    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+
+    double xg = coords[grid_id];
+    double yg = coords[grid_id + ngrids];
+    double zg = coords[grid_id + 2*ngrids];
+
+    double r2min = 1e30;
+    int idx = 0;
+    const int tx = threadIdx.x;
+    double __shared__ x_atom[NATOM_PER_BLOCK];
+    double __shared__ y_atom[NATOM_PER_BLOCK];
+    double __shared__ z_atom[NATOM_PER_BLOCK];
+    for (int j = 0; j < natm; j+=blockDim.x){
+        int atom_idx = j + tx;
+        if (atom_idx < natm){
+            // distance between atom i and atom j
+            x_atom[tx] = atom_coords[atom_idx];
+            y_atom[tx] = atom_coords[atom_idx + natm];
+            z_atom[tx] = atom_coords[atom_idx + 2*natm];
+        }
+        __syncthreads();
+
+        for (int l = 0, M = min(NATOM_PER_BLOCK, natm-j); l < M; ++l){
+            int atom_j = j + l;
+            double xa = x_atom[l] - xg;
+            double ya = y_atom[l] - yg;
+            double za = z_atom[l] - zg;
+            double r2 = xa*xa + ya*ya + za*za;
+            if (r2 < r2min){
+                r2min = r2;
+                idx = atom_j;
+            }
+        }
+    }
+    group_ids[grid_id] = idx;
+}
+
 extern "C"{
 __host__
 int GDFTgen_grid_partition(cudaStream_t stream, double *pbecke,
     const double *dist_ig, const double *dist_ij,
     const double *a, int ngrids, int natm)
 {
-    dim3 threads(NG_PER_BLOCK);
-    dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
+    dim3 threads(NATOM_PER_BLOCK);
+    dim3 blocks((ngrids+NATOM_PER_BLOCK-1)/NATOM_PER_BLOCK);
     GDFTgen_grid_kernel<<<blocks, threads, 0, stream>>>(pbecke, dist_ig, dist_ij, a, ngrids, natm);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess){
@@ -96,4 +135,23 @@ int GDFTgen_grid_partition(cudaStream_t stream, double *pbecke,
     }
     return 0;
     }
+
+__host__
+int GDFTgroup_grids(cudaStream_t stream, int* group_ids, const double* atom_coords, const double* coords,
+    int natm, int ngrids){
+    if (ngrids % NATOM_PER_BLOCK != 0){
+        fprintf(stderr, "CUDA Error of gen grids: grids alignment must be %d.", NATOM_PER_BLOCK);
+        return 1;
+    }
+    dim3 threads(NATOM_PER_BLOCK);
+    dim3 blocks((ngrids+NATOM_PER_BLOCK-1)/NATOM_PER_BLOCK);
+    GDFTgroup_grids_kernel<<<blocks, threads, 0, stream>>>(group_ids, atom_coords, coords, natm, ngrids);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess){
+        fprintf(stderr, "CUDA Error of group grids: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
 }

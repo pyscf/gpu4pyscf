@@ -14,6 +14,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import numpy as np
+import cupy
 import pyscf
 from pyscf import lib
 from pyscf.hessian import thermo
@@ -40,7 +41,6 @@ mol.verbose = 4
 mf_GPU = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
 mf_GPU.grids.level = grids_level
 mf_GPU.grids.atom_grid = (99,590)
-mf_GPU.small_rho_cutoff = 1e-10
 mf_GPU.conv_tol = scf_tol
 mf_GPU.max_cycle = max_scf_cycles
 mf_GPU.screen_tol = screen_tol
