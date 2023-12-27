@@ -6,7 +6,7 @@ Installation
 > [!NOTE]
 > The compiled binary packages support compute capability 7.0 and later (Volta and later, such as Tesla V100, RTX 20 series and later). For older GPUs (GTX 10**, Tesla P100), please compile the package with the source code as follows.
 
-Run ```nvidia-smi``` in your terminal to check the installed CUDA version. 
+Run ```nvidia-smi``` in your terminal to check the installed CUDA version.
 
 Choose the proper package based on your CUDA environment.
 
@@ -15,7 +15,7 @@ Choose the proper package based on your CUDA environment.
 | **CUDA 11.x** |  ```pip3 install gpu4pyscf-cuda11x``` |
 | **CUDA 12.x** |  ```pip3 install gpu4pyscf-cuda12x``` |
 
-```cuTensor``` is **highly recommended** to be installed for accelerating tensor contractions. 
+```cuTensor``` is **highly recommended** for accelerating tensor contractions.
 
 For **CUDA 11.x**, ```python -m cupyx.tools.install_library --cuda 11.x --library cutensor```
 
@@ -59,7 +59,7 @@ Limitations
 - Rys roots up to 9 for direct scf scheme;
 - Atomic basis up to g orbitals;
 - Auxiliary basis up to h orbitals;
-- Up to ~168 atoms with def2-tzvpd basis, consuming a large amount of CPU memory;
+- Density fitting scheme up to ~168 atoms with def2-tzvpd basis, bounded CPU memory;
 - Hessian is unavailable for Direct SCF yet;
 - meta-GGA without density laplacian;
 

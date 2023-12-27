@@ -103,13 +103,17 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
         for ia, h1, vj1_lr, vk1_lr in df_rhf_hess._gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
                                                 atmlst, verbose, True, omega=omega):
             h1ao[ia] -= .5 * (alpha - hyb) * vk1_lr
+    return h1ao
+
+    # support chkfile?
+    '''
     if chkfile is None:
         return h1ao
     else:
         for ia in atmlst:
             lib.chkfile.save(chkfile, 'scf_f1ao/%d'%ia, h1ao[ia])
         return chkfile
-
+    '''
 
 class Hessian(rks_hess.Hessian):
     '''Non-relativistic RKS hessian'''

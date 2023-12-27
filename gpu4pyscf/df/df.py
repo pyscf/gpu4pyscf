@@ -35,6 +35,8 @@ LINEAR_DEP_TOL = 1e-7
 class DF(df.DF):
     from gpu4pyscf.lib.utils import to_gpu, device
 
+    _keys = {'intopt'}
+
     def __init__(self, mol, auxbasis=None):
         super().__init__(mol, auxbasis)
         self.auxmol = None
@@ -210,8 +212,12 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
     if(not use_gpu_memory):
         log.debug("Not enough GPU memory")
         # TODO: async allocate memory
-        mem = cupy.cuda.alloc_pinned_memory(naux * npair * 8)
-        cderi = np.ndarray([naux, npair], dtype=np.float64, order='C', buffer=mem)
+        try:
+            mem = cupy.cuda.alloc_pinned_memory(naux * npair * 8)
+            cderi = np.ndarray([naux, npair], dtype=np.float64, order='C', buffer=mem)
+        except Exception:
+            raise RuntimeError('Out of CPU memory')
+
     data_stream = cupy.cuda.stream.Stream(non_blocking=False)
     count = 0
     nq = len(intopt.log_qs)

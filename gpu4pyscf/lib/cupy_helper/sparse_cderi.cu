@@ -36,7 +36,7 @@ typedef struct {
     CDERI_BLOCK *blocks;
 }CDERI;
 
-__global__ 
+__global__
 void _unpack(CDERI_BLOCK block, int nao, int offset, double *out){
     int ij = blockIdx.x * blockDim.x + threadIdx.x;
     int k = blockIdx.y * blockDim.y + threadIdx.y;
@@ -48,7 +48,7 @@ void _unpack(CDERI_BLOCK block, int nao, int offset, double *out){
     }
     int i = block.row[ij];
     int j = block.col[ij];
-    
+
     double e = block.data[idx_aux * nij + ij];
     out[k * nao * nao + i * nao + j] = e;
     out[k * nao * nao + j * nao + i] = e;

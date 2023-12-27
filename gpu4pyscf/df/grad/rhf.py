@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
+import copy
 import numpy
 import cupy
 from cupyx.scipy.linalg import solve_triangular
@@ -44,9 +44,13 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         if key in mf_grad.base.with_df._rsh_df:
             with_df = mf_grad.base.with_df._rsh_df[key]
         else:
-            raise RuntimeError(f'omega={omega} is not calculated in SCF')
+            dfobj = mf_grad.base.with_df
+            with_df = dfobj._rsh_df[key] = copy.copy(dfobj).reset()
+            #raise RuntimeError(f'omega={omega} is not calculated in SCF')
 
     auxmol = with_df.auxmol
+    if not hasattr(with_df, 'intopt') or with_df._cderi is None:
+        with_df.build(omega=omega)
     intopt = with_df.intopt
 
     naux = with_df.naux
