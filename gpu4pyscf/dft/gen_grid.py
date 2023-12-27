@@ -37,14 +37,14 @@ from pyscf import __config__
 from cupyx.scipy.spatial.distance import cdist
 from gpu4pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import load_library
-
+from gpu4pyscf import __config__ as __gpu4pyscf_config__
 libdft = lib.load_library('libdft')
 libgdft = load_library('libgdft')
 
 from pyscf.dft.gen_grid import GROUP_BOUNDARY_PENALTY, NELEC_ERROR_TOL, LEBEDEV_ORDER, LEBEDEV_NGRID
 
 GROUP_BOX_SIZE = 3.0
-ALIGNMENT_UNIT = 128
+ALIGNMENT_UNIT = getattr(__gpu4pyscf_config__, 'grid_aligned', 128)
 # SG0
 # S. Chien and P. Gill,  J. Comput. Chem. 27 (2006) 730-739.
 
