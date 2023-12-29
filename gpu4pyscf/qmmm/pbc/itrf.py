@@ -195,6 +195,7 @@ def qmmm_for_scf(scf_method, mm_mol):
                             j3c[:,i0:i1,j0:j1] = int3c_blk.transpose([0,2,1])
                     v += cp.einsum('kji,k->ji', j3c, -charges[k0:k1])
                 h1e += cupy_helper.take_last2d(v, intopt.rev_ao_idx)
+                intopt = int3c_blk = None
             else:
                 # TODO test this block
                 nao = mol.nao
@@ -205,6 +206,7 @@ def qmmm_for_scf(scf_method, mm_mol):
                     j3c = mol.intor('int1e_grids', hermi=1, grids=coords[i0:i1].get())
                     h1e += cp.einsum('kpq,k->pq', cp.asarray(j3c), -charges[i0:i1])
 
+            j3c = None
             logger.timer(self, 'get_hcore', *cput0)
             return h1e
 
@@ -702,9 +704,8 @@ def qmmm_grad_for_scf(scf_grad):
             if with_mm:
                 mm_ewovrl_grad = np.zeros_like(all_mm_coords)
             mem_avail = cupy_helper.get_avail_mem()
-            blksize = int(mem_avail/64/3/len(all_mm_coords) / ALIGNED) * ALIGNED
-            blksize = min(blksize, MIN_BLK_SIZE)
-            if blksize < ALIGNED:
+            blksize = int(mem_avail/64/3/len(all_mm_coords))
+            if blksize == 0:
                 raise RuntimeError(f"Not enough GPU memory, mem_avail = {mem_avail}, blkszie = {blksize}")
             for i0, i1 in lib.prange(0, mol.natm, blksize):
                 R = qm_coords[i0:i1,None,:] - all_mm_coords[None,:,:]

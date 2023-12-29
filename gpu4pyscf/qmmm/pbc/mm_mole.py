@@ -149,9 +149,8 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
             ewself02 = cp.zeros((len(coords1), len(coords1), 3, 3)) 
 
         mem_avail = cupy_helper.get_avail_mem()
-        blksize = int(mem_avail/64/3/len(all_coords2) / ALIGNED) * ALIGNED
-        blksize = min(blksize, MIN_BLK_SIZE)
-        if blksize < ALIGNED:
+        blksize = int(mem_avail/64/3/len(all_coords2))
+        if blksize == 0:
             raise RuntimeError(f"Not enough GPU memory, mem_avail = {mem_avail}, blkszie = {blksize}")
         for i0, i1 in lib.prange(0, len(coords1), blksize):
             R = coords1[i0:i1,None,:] - all_coords2[None,:,:]
