@@ -22,7 +22,7 @@ from gpu4pyscf.dft import rks
 
 
 atom = '''
-I 0 0 0 
+I 0 0 0
 I 1 0 0
 '''
 bas='def2-qzvpp'
@@ -34,7 +34,7 @@ def setUpModule():
     mol.output='/dev/null'
     mol.verbose = 1
     mol.build()
-    
+
 def tearDownModule():
     global mol
     mol.stdout.close()
@@ -51,17 +51,17 @@ class KnownValues(unittest.TestCase):
         print('------- LDA ----------------')
         e_tot = run_dft("LDA, vwn5")
         assert np.allclose(e_tot, -582.3202757689)
-    
+
     def test_rks_pbe(self):
         print('------- PBE ----------------')
         e_tot = run_dft('PBE')
         assert np.allclose(e_tot, -583.0195322248)
-    
+
     def test_rks_b3lyp(self):
         print('-------- B3LYP -------------')
         e_tot = run_dft('B3LYP')
         assert np.allclose(e_tot, -583.1585397913)
-    
+
     def test_rks_m06(self):
         print('--------- M06 --------------')
         e_tot = run_dft("M06")

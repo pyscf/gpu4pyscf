@@ -35,18 +35,18 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-xc0='B3LYP'
-bas0='def2-tzvpp'
-auxbasis0='def2-tzvpp-jkfit'
-disp0='d3bj'
+xc0 = 'B3LYP'
+bas0 = 'def2-tzvpp'
+auxbasis0 = 'def2-tzvpp-jkfit'
+disp0 = 'd3bj'
 grids_level = 6
 nlcgrids_level = 3
 def setUpModule():
     global mol
     mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000)
     mol.output = '/dev/null'
-    mol.build()
     mol.verbose = 1
+    mol.build()
 
 eps = 1.0/1024
 

@@ -28,7 +28,7 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
     '''
     mol.basis = 'def2-tzvpp'
-    #mol.output = '/dev/null'
+    mol.output = '/dev/null'
     mol.build()
     lebedev_order = 29
 

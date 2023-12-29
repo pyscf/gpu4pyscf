@@ -25,45 +25,46 @@ from pyscf.dft.numint import NumInt as pyscf_numint
 from gpu4pyscf.dft.numint import NumInt
 from gpu4pyscf import dft
 
-mol = pyscf.M(
-    atom = '''
+def setUpModule():
+    global mol, grids_cpu, grids_gpu, dm, dm0, dm1, mo_occ, mo_coeff
+    mol = pyscf.M(
+        atom = '''
 O        0.000000    0.000000    0.117790
 H        0.000000    0.755453   -0.471161
 H        0.000000   -0.755453   -0.471161''',
-    basis = 'ccpvdz',
-    charge = 1,
-    spin = 1  # = 2S = spin_up - spin_down
-)
+        basis = 'ccpvdz',
+        charge = 1,
+        spin = 1,  # = 2S = spin_up - spin_down
+        output = '/dev/null')
 
-mol.verbose=1
-np.random.seed(2)
-nao = mol.nao
-mf = scf.UHF(mol)
-mf.kernel()
-dm1 = mf.make_rdm1().copy()
-dm = dm1
-mo_coeff = mf.mo_coeff
-mo_occ = mf.mo_occ
-dm0 = (mo_coeff[0]*mo_occ[0]).dot(mo_coeff[0].T)
+    np.random.seed(2)
+    mf = scf.UHF(mol)
+    mf.kernel()
+    dm1 = mf.make_rdm1().copy()
+    dm = dm1
+    mo_coeff = mf.mo_coeff
+    mo_occ = mf.mo_occ
+    dm0 = (mo_coeff[0]*mo_occ[0]).dot(mo_coeff[0].T)
 
-grids_cpu = Grids(mol)
-grids_cpu.level = 1
-grids_cpu.build()
+    grids_cpu = Grids(mol)
+    grids_cpu.level = 1
+    grids_cpu.build()
 
-grids_gpu = Grids(mol)
-grids_gpu.level = 1
-grids_gpu.build()
+    grids_gpu = Grids(mol)
+    grids_gpu.level = 1
+    grids_gpu.build()
 
-grids_gpu.weights = cupy.asarray(grids_gpu.weights)
-grids_gpu.coords = cupy.asarray(grids_gpu.coords)
+    grids_gpu.weights = cupy.asarray(grids_gpu.weights)
+    grids_gpu.coords = cupy.asarray(grids_gpu.coords)
+
+def tearDownModule():
+    global mol, grids_cpu, grids_gpu
+    mol.stdout.close()
+    del mol, grids_cpu, grids_gpu
 
 LDA = 'LDA_C_VWN'
 GGA_PBE = 'GGA_C_PBE'
 MGGA_M06 = 'MGGA_C_M06'
-
-def tearDownModule():
-    global mol
-    del mol
 
 class KnownValues(unittest.TestCase):
 

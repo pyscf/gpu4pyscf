@@ -22,30 +22,37 @@ from gpu4pyscf.dft.numint import NumInt as numint_gpu
 from pyscf.dft.numint import NumInt as numint_cpu
 import cupy
 
-mol = pyscf.M(
-    atom='''
+def setUpModule():
+    global mol, dm1, dm0
+    mol = pyscf.M(
+        atom='''
 C  -0.65830719,  0.61123287, -0.00800148
 C   0.73685281,  0.61123287, -0.00800148
 ''',
-    basis='ccpvtz',
-    spin=None,
-)
+        basis='ccpvtz',
+        spin=None,
+        output = '/dev/null'
+    )
+    np.random.seed(2)
+    nao = mol.nao
+    dm = np.random.random((2,nao,nao))
+    dm1 = dm + dm.transpose(0,2,1)
+    np.random.seed(1)
+    mo_coeff = np.random.rand(nao, nao)
+    mo_occ = (np.random.rand(nao) > .5).astype(np.double)
+    dm0 = (mo_coeff*mo_occ).dot(mo_coeff.T)
 
-np.random.seed(2)
-nao = mol.nao
-dm = np.random.random((2,nao,nao))
-dm1 = dm + dm.transpose(0,2,1)
-np.random.seed(1)
-mo_coeff = np.random.rand(nao, nao)
-mo_occ = (np.random.rand(nao) > .5).astype(np.double)
-dm0 = (mo_coeff*mo_occ).dot(mo_coeff.T)
+def tearDownModule():
+    global mol
+    mol.stdout.close()
+    del mol
 
 class KnownValues(unittest.TestCase):
     def _check_xc(self, xc):
         ni_cpu = numint_cpu()
         ni_gpu = numint_gpu()
         xctype = ni_cpu._xc_type(xc)
-        
+
         if xctype == 'LDA':
             ao_deriv = 0
         else:
@@ -53,10 +60,10 @@ class KnownValues(unittest.TestCase):
         grids = Grids(mol).build()
         ao = ni_cpu.eval_ao(mol, grids.coords, ao_deriv)
         rho = ni_cpu.eval_rho(mol, ao, dm0, xctype=xctype)
-        
+
         exc_cpu, vxc_cpu, fxc_cpu, kxc_cpu = ni_cpu.eval_xc_eff(xc, rho, deriv=2, xctype=xctype)
         exc_gpu, vxc_gpu, fxc_gpu, kxc_gpu = ni_gpu.eval_xc_eff(xc, cupy.array(rho), deriv=2, xctype=xctype)
-        
+
         assert(np.linalg.norm((exc_gpu[:,0].get() - exc_cpu)) < 1e-10)
         assert(np.linalg.norm((vxc_gpu.get() - vxc_cpu)) < 1e-10)
         if fxc_gpu is not None:
@@ -66,10 +73,10 @@ class KnownValues(unittest.TestCase):
 
     def test_LDA(self):
         self._check_xc('LDA_C_VWN')
-    
+
     def test_GGA(self):
         self._check_xc('GGA_C_PBE')
-        
+
     def test_mGGA(self):
         self._check_xc('MGGA_C_M06')
 

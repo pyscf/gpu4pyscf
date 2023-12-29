@@ -22,7 +22,7 @@ import numpy as np
 import cupy
 import unittest
 
-from gpu4pyscf.scf import int4c2e 
+from gpu4pyscf.scf import int4c2e
 from gpu4pyscf.lib.cupy_helper import load_library
 libgint = load_library('libgint')
 
@@ -30,16 +30,24 @@ libgint = load_library('libgint')
 compare int4c2e by pyscf and gpu4pyscf
 '''
 
-mol = pyscf.M(atom='''
+def setUpModule():
+    global mol, ao_labels
+    mol = pyscf.M(atom='''
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
     ''',
-basis= 'sto3g',
-verbose=1
-)
+    basis= 'sto3g',
+    verbose=1,
+    output = '/dev/null')
+    mol.build()
+    ao_labels = mol.ao_labels()
 
-ao_labels = mol.ao_labels()
 omega = 0.2
+
+def tearDownModule():
+    global mol
+    mol.stdout.close()
+    del mol
 
 class KnownValues(unittest.TestCase):
     def test_int4c2e(self):

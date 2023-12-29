@@ -93,7 +93,6 @@ def initialize_grids(ks, mol=None, dm=None):
                     # Filter grids the first time setup grids
                     ks.nlcgrids = prune_small_rho_grids_(ks, ks.mol, dm, ks.nlcgrids)
                 t0 = logger.timer_debug1(ks, 'setting up nlc grids', *t0)
-
     return ks
 
 def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
@@ -226,6 +225,8 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
 
 class RKS(scf.hf.RHF, rks.RKS):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+
+    _keys = {'disp'}
 
     def __init__(self, mol, xc='LDA,VWN', disp=None):
         super().__init__(mol, xc)

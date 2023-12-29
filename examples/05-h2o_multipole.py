@@ -16,7 +16,7 @@
 import pyscf
 from gpu4pyscf.dft import rks
 
-atom =''' 
+atom ='''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
@@ -26,8 +26,12 @@ mol = pyscf.M(atom=atom, basis='def2-tzvpp', max_memory=32000)
 mol.verbose = 1
 mf = rks.RKS(mol, xc='B3LYP').density_fit(auxbasis='def2-tzvpp-jkfit')
 mf.kernel()
+dm = mf.make_rdm1()
 
-dip = mf.dip_moment(unit='DEBYE')
+dip = mf.dip_moment(unit='DEBYE', dm=dm.get())
+print('dipole moment:')
 print(dip)
-quad = mf.quad_moment(unit='DEBYE-ANG')
+
+quad = mf.quad_moment(unit='DEBYE-ANG', dm=dm.get())
+print('quadrupole moment:')
 print(quad)

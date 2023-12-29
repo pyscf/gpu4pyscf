@@ -28,11 +28,20 @@ H       0.7570000000     0.0000000000    -0.4696000000
 bas='def2-qzvpp'
 grids_level = 3
 nlcgrids_level = 1
-mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
-mol.verbose = 1
+
+def setUpModule():
+    global mol
+    mol = pyscf.M(
+        atom=atom,
+        basis=bas,
+        max_memory=32000,
+        verbose = 1,
+        output = '/dev/null'
+    )
 
 def tearDownModule():
     global mol
+    mol.stdout.close()
     del mol
 
 def run_dft(xc):
@@ -50,17 +59,17 @@ class KnownValues(unittest.TestCase):
         print('------- LDA ----------------')
         e_tot = run_dft("LDA, vwn5")
         assert np.allclose(e_tot, -75.9117117360)
-    
+
     def test_rks_pbe(self):
         print('------- PBE ----------------')
         e_tot = run_dft('PBE')
         assert np.allclose(e_tot, -76.3866453049)
-    
+
     def test_rks_b3lyp(self):
         print('-------- B3LYP -------------')
         e_tot = run_dft('B3LYP')
         assert np.allclose(e_tot, -76.4728129216)
-    
+
     def test_rks_m06(self):
         print('--------- M06 --------------')
         e_tot = run_dft("M06")
@@ -70,14 +79,14 @@ class KnownValues(unittest.TestCase):
         print('-------- wB97 --------------')
         e_tot = run_dft("HYB_GGA_XC_WB97")
         assert np.allclose(e_tot, -76.4543067064)
-    
+
     def test_rks_vv10(self):
         print("------- wB97m-v -------------")
         e_tot = run_dft('HYB_MGGA_XC_WB97M_V')
         assert np.allclose(e_tot, -76.4391208632)
-        
+
     #TODO: add test cases for D3/D4 and gradient
-    
+
 if __name__ == "__main__":
     print("Full Tests for dft")
     unittest.main()

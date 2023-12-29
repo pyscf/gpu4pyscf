@@ -35,4 +35,4 @@ mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
 mf.with_solvent.method = 'SMD'
 mf.with_solvent.solvent = 'water'
 e_tot = mf.kernel()
-print(e_tot)
+print('total energy with SMD:', e_tot)

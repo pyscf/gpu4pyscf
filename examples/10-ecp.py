@@ -17,10 +17,10 @@ import pyscf
 from gpu4pyscf.dft import rks
 
 atom = '''
-I 0 0 0 
+I 0 0 0
 I 1 0 0
 '''
-bas='def2-qzvpp'
+bas = 'def2-qzvpp'
 grids_level = 6
 
 mol = pyscf.M(atom=atom, basis=bas, ecp=bas)
@@ -28,5 +28,4 @@ mol.verbose = 1
 
 mf = rks.RKS(mol, xc='b3lyp')
 mf.grids.level = grids_level
-mf.device = 'gpu'
 e_dft = mf.kernel()

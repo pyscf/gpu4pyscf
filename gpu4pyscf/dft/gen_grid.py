@@ -37,13 +37,14 @@ from pyscf import __config__
 from cupyx.scipy.spatial.distance import cdist
 from gpu4pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import load_library
-
+from gpu4pyscf import __config__ as __gpu4pyscf_config__
 libdft = lib.load_library('libdft')
 libgdft = load_library('libgdft')
 
-from pyscf.dft.gen_grid import GROUP_BOX_SIZE, GROUP_BOUNDARY_PENALTY, NELEC_ERROR_TOL, LEBEDEV_ORDER, LEBEDEV_NGRID
+from pyscf.dft.gen_grid import GROUP_BOUNDARY_PENALTY, NELEC_ERROR_TOL, LEBEDEV_ORDER, LEBEDEV_NGRID
 
-ALIGNMENT_UNIT = 32
+GROUP_BOX_SIZE = 3.0
+ALIGNMENT_UNIT = getattr(__gpu4pyscf_config__, 'grid_aligned', 128)
 # SG0
 # S. Chien and P. Gill,  J. Comput. Chem. 27 (2006) 730-739.
 
@@ -184,13 +185,22 @@ def gen_grids_partition(atm_coords, coords, a):
     stream = cupy.cuda.get_current_stream()
     natm = atm_coords.shape[0]
     ngrids = coords.shape[0]
-    pbecke = cupy.ones([natm, ngrids], order='C')
     assert ngrids < 65535 * 16
+    x_i = cupy.expand_dims(atm_coords, axis=1)
+    x_g = cupy.expand_dims(coords, axis=0)
+    squared_diff = (x_i - x_g)**2
+    dist_ig = cupy.sum(squared_diff, axis=2)**0.5
+
+    x_j = cupy.expand_dims(atm_coords, axis=0)
+    squared_diff = (x_i - x_j)**2
+    dist_ij = cupy.sum(squared_diff, axis=2)**0.5
+
+    pbecke = cupy.ones([natm, ngrids], order='C')
     err = libgdft.GDFTgen_grid_partition(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(pbecke.data.ptr, ctypes.c_void_p),
-        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dist_ig.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dist_ij.data.ptr, ctypes.c_void_p),
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(natm)
@@ -242,13 +252,6 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
             logger.debug(mol, 'atom %s rad-grids = %d, ang-grids = %s',
                          symb, n_rad, angs)
 
-            ang_grids = {}
-            for n in sorted(set(angs)):
-                grid = numpy.empty((n,4))
-                libdft.MakeAngularGrid(grid.ctypes.data_as(ctypes.c_void_p),
-                                       ctypes.c_int(n))
-                ang_grids[n] = grid
-
             angs = numpy.array(angs)
             coords = []
             vol = []
@@ -257,8 +260,13 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                 libdft.MakeAngularGrid(grid.ctypes.data_as(ctypes.c_void_p),
                                        ctypes.c_int(n))
                 idx = numpy.where(angs==n)[0]
-                coords.append(cupy.einsum('i,jk->jik', rad[idx], grid[:,:3]).reshape(-1,3))
-                vol.append(cupy.einsum('i,j->ji', rad_weight[idx], grid[:,3]).ravel())
+                for i0, i1 in lib.prange(0, len(idx), 12):  # 12 radi-grids as a group
+                    coords.append(numpy.einsum('i,jk->jik',rad[idx[i0:i1]],
+                                               grid[:,:3]).reshape(-1,3))
+                    vol.append(numpy.einsum('i,j->ji', rad_weight[idx[i0:i1]],
+                                            grid[:,3]).ravel())
+                #coords.append(cupy.einsum('i,jk->jik', rad[idx], grid[:,:3]).reshape(-1,3))
+                #vol.append(cupy.einsum('i,j->ji', rad_weight[idx], grid[:,3]).ravel())
 
             atom_grids_tab[symb] = (cupy.vstack(coords), cupy.hstack(vol))
 
@@ -326,6 +334,8 @@ def get_partition(mol, atom_grids_tab,
 
     coords_all = []
     weights_all = []
+    # support atomic_radii_adjust = None
+    assert radii_adjust == radi.treutler_atomic_radii_adjust
     a = -radi.get_treutler_fac(mol, atomic_radii)
     for ia in range(mol.natm):
         coords, vol = atom_grids_tab[mol.atom_symbol(ia)]
@@ -368,6 +378,49 @@ def make_mask(mol, coords, relativity=0, shls_slice=None, cutoff=CUTOFF,
     '''
     return make_screen_index(mol, coords, shls_slice, cutoff)
 
+def atomic_group_grids(mol, coords):
+    '''
+    partition the entire space based on atomic position
+    '''
+    from scipy.spatial import distance_matrix
+    natm = mol.natm
+    ngrids = coords.shape[0]
+    atom_coords = mol.atom_coords()
+    dist = distance_matrix(atom_coords, atom_coords)
+    visited = numpy.zeros(natm, dtype=bool)
+    current_node = numpy.argmin(atom_coords[:,0])
+    # greedy traverse atoms
+    path = [current_node]
+    while len(path) < natm:
+        visited[current_node] = True
+        # Set distances to visited nodes as infinity so they won't be chosen
+        distances_to_unvisited = numpy.where(visited, numpy.inf, dist[current_node])
+        next_node = numpy.argmin(distances_to_unvisited)
+        path.append(next_node)
+        current_node = next_node
+
+    atom_coords = cupy.asarray(atom_coords[path])
+    #dij = cupy.sum((atom_coords[:,None,:] - coords[None,:,:])**2, axis=2)
+    #group_ids = cupy.argmin(dij, axis=0)
+
+    coords = cupy.asarray(coords, order='F')
+    atom_coords = cupy.asarray(atom_coords, order='F')
+    group_ids = cupy.empty([ngrids], dtype=numpy.int32)
+    stream = cupy.cuda.get_current_stream()
+    err = libgdft.GDFTgroup_grids(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(group_ids.data.ptr, ctypes.c_void_p),
+        ctypes.cast(atom_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(natm),
+        ctypes.c_int(ngrids)
+    )
+    if err != 0:
+        raise RuntimeError('CUDA Error')
+
+    return group_ids.argsort()
+
+
 def arg_group_grids(mol, coords, box_size=GROUP_BOX_SIZE):
     '''
     Parition the entire space into small boxes according to the input box_size.
@@ -388,8 +441,12 @@ def arg_group_grids(mol, coords, box_size=GROUP_BOX_SIZE):
     box_ids[box_ids[:,0] > boxes[0], 0] = boxes[0]
     box_ids[box_ids[:,1] > boxes[1], 1] = boxes[1]
     box_ids[box_ids[:,2] > boxes[2], 2] = boxes[2]
-    rev_idx = numpy.unique(box_ids.get(), axis=0, return_inverse=True)[1]
-    return rev_idx.argsort(kind='stable')
+
+    boxes *= 2 # for safety
+    box_id = box_ids[:,0] + box_ids[:,1] * boxes[0] + box_ids[:,2] * boxes[0] * boxes[1]
+    #rev_idx = numpy.unique(box_ids.get(), axis=0, return_inverse=True)[1]
+    rev_idx = cupy.unique(box_id, return_inverse=True)[1]
+    return rev_idx.argsort()
 
 def _load_conf(mod, name, default):
     var = getattr(__config__, name, None)
@@ -497,11 +554,6 @@ class Grids(gen_grid.Grids):
         self.coords, self.weights = self.get_partition(
             mol, atom_grids_tab, self.radii_adjust, self.atomic_radii, self.becke_scheme)
 
-        if sort_grids:
-            idx = arg_group_grids(mol, self.coords)
-            self.coords = self.coords[idx]
-            self.weights = self.weights[idx]
-
         if self.alignment > 1:
             padding = _padding_size(self.size, self.alignment)
             logger.debug(self, 'Padding %d grids', padding)
@@ -510,6 +562,13 @@ class Grids(gen_grid.Grids):
                 self.coords = cupy.vstack(
                     [self.coords, numpy.repeat([[1e4]*3], padding, axis=0)])
                 self.weights = cupy.hstack([self.weights, numpy.zeros(padding)])
+
+        if sort_grids:
+            #idx = arg_group_grids(mol, self.coords)
+            idx = atomic_group_grids(mol, self.coords)
+            self.coords = self.coords[idx]
+            self.weights = self.weights[idx]
+
         if with_non0tab:
             self.non0tab = self.make_mask(mol, self.coords)
             self.screen_index = self.non0tab
