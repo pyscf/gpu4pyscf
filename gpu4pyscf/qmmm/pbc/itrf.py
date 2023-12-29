@@ -428,6 +428,7 @@ def qmmm_for_scf(scf_method, mm_mol):
     qmmm.mm_ewald_pot = None
     qmmm.qm_ewald_hess = None
     qmmm.e_nuc = None
+    qmmm.h1_on_cpu = False
     qmmm._keys.update(['s1r'])
     qmmm._keys.update(['s1rr'])
     qmmm._keys.update(['mm_mol'])
@@ -600,18 +601,20 @@ def qmmm_grad_for_scf(scf_grad):
                 # d E_qm_dip / d Ri
                 qm_multipole_grad[jatm] -= \
                      cp.einsum('auv,axuv->x', dEdsr[:,p0:p1], s1r[jatm])
+                s1r_ = list()
                 for iatm in range(mol.natm):
-                    q0, q1 = aoslices[iatm, 2:]
-                    qm_multipole_grad[jatm] += \
-                     cp.einsum('auv,axuv->x', dEdsr[:,q0:q1,p0:p1], s1r[iatm][...,p0:p1])
+                    s1r_.append(s1r[iatm][...,p0:p1])
+                s1r_ = cp.concatenate(s1r_, axis=-2)
+                qm_multipole_grad[jatm] += cp.einsum('auv,axuv->x', dEdsr[...,p0:p1], s1r_)
 
                 # d E_qm_quad / d Ri
                 qm_multipole_grad[jatm] -= \
                         cp.einsum('abuv,abxuv->x', dEdsrr[:,:,p0:p1], s1rr[jatm])
+                s1rr_ = list()
                 for iatm in range(mol.natm):
-                    q0, q1 = aoslices[iatm, 2:]
-                    qm_multipole_grad[jatm] += \
-                     cp.einsum('abuv,abxuv->x', dEdsrr[:,:,q0:q1,p0:p1], s1rr[iatm][...,p0:p1])
+                    s1rr_.append(s1rr[iatm][...,p0:p1])
+                s1rr_ = cp.concatenate(s1rr_, axis=-2)
+                qm_multipole_grad[jatm] += cp.einsum('abuv,abxuv->x', dEdsrr[...,p0:p1], s1rr_)
 
             cput1 = logger.timer(self, 'grad_ewald pulay', *cput0)
             s1 = s1r = s1rr = dEds = dEdsr = dEdsrr = None

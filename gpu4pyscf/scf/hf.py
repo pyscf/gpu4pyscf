@@ -713,6 +713,7 @@ class RHF(SCF):
     get_veff = get_veff
     get_grad = staticmethod(get_grad)
     quad_moment = _quad_moment
+    h1_on_cpu = True
     energy_tot = energy_tot
 
     get_hcore = return_cupy_array(hf.RHF.get_hcore)
