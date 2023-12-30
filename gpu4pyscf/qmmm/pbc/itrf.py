@@ -211,6 +211,7 @@ def qmmm_for_scf(scf_method, mm_mol):
             return h1e
 
         def get_qm_charges(self, dm):
+            dm = cp.asarray(dm)
             aoslices = self.mol.aoslice_by_atom()
             chg = self.mol.atom_charges()
             dmS = cp.dot(dm, cp.asarray(self.get_ovlp()))
@@ -236,6 +237,7 @@ def qmmm_for_scf(scf_method, mm_mol):
             return self.s1r
 
         def get_qm_dipoles(self, dm, s1r=None):
+            dm = cp.asarray(dm)
             if s1r is None:
                 s1r = self.get_s1r()
             aoslices = self.mol.aoslice_by_atom()
@@ -271,6 +273,7 @@ def qmmm_for_scf(scf_method, mm_mol):
             return self.s1rr
 
         def get_qm_quadrupoles(self, dm, s1rr=None):
+            dm = cp.asarray(dm)
             if s1rr is None:
                 s1rr = self.get_s1rr()
             aoslices = self.mol.aoslice_by_atom()
@@ -921,6 +924,7 @@ def qmmm_grad_for_scf(scf_grad):
             r'''Nuclear gradients of the electronic energy
             '''
             cput0 = (logger.process_clock(), logger.perf_counter())
+            dm = cp.asarray(dm)
             mm_mol = self.base.mm_mol
             if mol is None:
                 mol = self.mol
@@ -945,26 +949,6 @@ def qmmm_grad_for_scf(scf_grad):
             coords = all_coords[mask]
             expnts = all_expnts[mask]
 
-#            # FIXME do this more like mf.get_hcore() to make it faster?
-#            mem_avail = cupy_helper.get_avail_mem()
-#            nao = mol.nao
-#            blksize = int(mem_avail*0.2/8/3/nao**2 / ALIGNED) * ALIGNED
-#            blksize = min(blksize, MIN_BLK_SIZE)
-#            if blksize < ALIGNED:
-#                raise RuntimeError("Not enough GPU memory")
-#            g = cp.zeros_like(all_coords)
-#            g_ = cp.empty_like(coords)
-#            expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
-#            for i0, i1 in lib.prange(0, len(coords), blksize):
-#                fakemol = gto.fakemol_for_charges(coords[i0:i1].get(), expnts[i0:i1].get())
-#                j3c = int3c2e.get_int3c2e_ip(mol, fakemol, ip_type="ip2",
-#                                        direct_scf_tol=self.base.direct_scf_tol)
-#                g_[i0:i1] = cp.einsum('xijk,ji->kx', j3c * charges[i0:i1], dm)
-#            g[mask] = g_
-#            g = g.reshape(len(Ls), -1, 3)
-#            g = np.sum(g, axis=0)
-#
-#
             g = cp.zeros_like(all_coords)
             g_ = cp.zeros_like(coords)
             expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
