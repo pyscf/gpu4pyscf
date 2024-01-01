@@ -30,7 +30,7 @@ C   0.73685281,  0.61123287, -0.00800148
 '''
     mol_sph = pyscf.M(
         atom=atom,
-        basis='ccpvdz',
+        basis='ccpvqz',
         spin=None,
         cart = 0,
         output = '/dev/null')

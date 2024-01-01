@@ -185,7 +185,8 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
     ao_loc = mol.ao_loc_nr()
 
     #cpos = cupy.einsum('ij,j->ij', mo_coeff[:,mo_occ>0], cupy.sqrt(mo_occ[mo_occ>0]))
-    cpos = mo_coeff[:,mo_occ>0] * cupy.sqrt(mo_occ[mo_occ>0])
+    #cpos = mo_coeff[:,mo_occ>0] * cupy.sqrt(mo_occ[mo_occ>0])
+    cpos = (mo_coeff * mo_occ**0.5)[:,mo_occ>0]
     if xctype == 'LDA' or xctype == 'HF':
         c0 = _dot_ao_dm(mol, ao, cpos, non0tab, shls_slice, ao_loc)
         #:rho = numpy.einsum('pi,pi->p', c0, c0)
@@ -194,11 +195,12 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
         rho = cupy.empty((4,ngrids))
         c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc)
         #:rho[0] = numpy.einsum('pi,pi->p', c0, c0)
-        rho[0] = _contract_rho(c0, c0)
+        _contract_rho(c0, c0, rho=rho[0])
         for i in range(1, 4):
             c1 = _dot_ao_dm(mol, ao[i], cpos, non0tab, shls_slice, ao_loc)
             #:rho[i] = numpy.einsum('pi,pi->p', c0, c1) * 2 # *2 for +c.c.
-            rho[i] = _contract_rho(c0, c1) * 2
+            _contract_rho(c0, c1, rho=rho[i])
+            rho[i] *= 2
     else: # meta-GGA
         if with_lapl:
             # rho[4] = \nabla^2 rho, rho[5] = 1/2 |nabla f|^2
@@ -209,7 +211,7 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
             tau_idx = 4
         c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc)
         #:rho[0] = numpy.einsum('pi,pi->p', c0, c0)
-        rho[0] = _contract_rho(c0, c0)
+        _contract_rho(c0, c0, rho=rho[0])
 
         rho[tau_idx] = 0
         for i in range(1, 4):
@@ -1212,7 +1214,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     sorted_ao: by default ao_value is sorted for GPU
     '''
     if grids.coords is None:
-        grids.build(with_non0tab=True)
+        grids.build(with_non0tab=False, sort_grids=True)
     if nao is None:
         nao = mol.nao
     ngrids = grids.coords.shape[0]

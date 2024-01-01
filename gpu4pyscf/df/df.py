@@ -279,7 +279,6 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
             with data_stream:
                 for i in range(naux):
                     cderi_block[i].get(out=cderi[i,ij0:ij1])
-
         t1 = log.timer_debug1(f'solve {cp_ij_id} / {nq}', *t1)
 
     cupy.cuda.Device().synchronize()
