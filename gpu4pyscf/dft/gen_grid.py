@@ -186,21 +186,33 @@ def gen_grids_partition(atm_coords, coords, a):
     natm = atm_coords.shape[0]
     ngrids = coords.shape[0]
     assert ngrids < 65535 * 16
-    x_i = cupy.expand_dims(atm_coords, axis=1)
-    x_g = cupy.expand_dims(coords, axis=0)
-    squared_diff = (x_i - x_g)**2
-    dist_ig = cupy.sum(squared_diff, axis=2)**0.5
+    #x_i = cupy.expand_dims(atm_coords, axis=1)
+    #x_g = cupy.expand_dims(coords, axis=0)
+    #squared_diff = (x_i - x_g)**2
+    #dist_ig = cupy.sum(squared_diff, axis=2)**0.5
 
-    x_j = cupy.expand_dims(atm_coords, axis=0)
-    squared_diff = (x_i - x_j)**2
-    dist_ij = cupy.sum(squared_diff, axis=2)**0.5
+    #x_j = cupy.expand_dims(atm_coords, axis=0)
+    #squared_diff = (x_i - x_j)**2
+    #dist_ij = cupy.sum(squared_diff, axis=2)**0.5
 
     pbecke = cupy.ones([natm, ngrids], order='C')
+    '''
     err = libgdft.GDFTgen_grid_partition(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(pbecke.data.ptr, ctypes.c_void_p),
         ctypes.cast(dist_ig.data.ptr, ctypes.c_void_p),
         ctypes.cast(dist_ij.data.ptr, ctypes.c_void_p),
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+        ctypes.c_int(natm)
+    )
+    '''
+    atm_coords = cupy.asarray(atm_coords, order='F')
+    err = libgdft.GDFTgen_grid_partition(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(pbecke.data.ptr, ctypes.c_void_p),
+        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(natm)
