@@ -290,15 +290,14 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
                 vj_packed += cupy.dot(rhoj, cderi_sparse.T)
             if with_k:
                 rhok = contract('Lij,jk->Lki', cderi, occ_coeff)
-                #vk[0] += contract('Lki,Lkj->ij', rhok, rhok)
-                cublas.syrk('T', rhok.reshape([-1,nao]), out=vk[0], alpha=1.0, beta=1.0, lower=True)
+                #vk[0] += 2.0 * contract('Lki,Lkj->ij', rhok, rhok)
+                cublas.syrk('T', rhok.reshape([-1,nao]), out=vk[0], alpha=2.0, beta=1.0, lower=True)
         if with_j:
             vj[:,rows,cols] = vj_packed
             vj[:,cols,rows] = vj_packed
         if with_k:
             vk[0][numpy.diag_indices(nao)] *= 0.5
             transpose_sum(vk)
-            vk *= 2.0
     # CP-HF K matrix
     elif hasattr(dms_tag, 'mo1'):
         if with_j:

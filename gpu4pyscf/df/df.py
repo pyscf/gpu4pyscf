@@ -22,7 +22,7 @@ from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from pyscf.df import df, addons
 from gpu4pyscf.lib.cupy_helper import (
-    cholesky, tag_array, get_avail_mem, cart2sph, take_last2d)
+    cholesky, tag_array, get_avail_mem, cart2sph, take_last2d, transpose_sum)
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
@@ -262,7 +262,8 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
         row = intopt.ao_pairs_row[cp_ij_id] - i0
         col = intopt.ao_pairs_col[cp_ij_id] - j0
         if cpi == cpj:
-            ints_slices = ints_slices + ints_slices.transpose([0,2,1])
+            #ints_slices = ints_slices + ints_slices.transpose([0,2,1])
+            transpose_sum(ints_slices)
         ints_slices = ints_slices[:,col,row]
 
         if cd_low.tag == 'eig':

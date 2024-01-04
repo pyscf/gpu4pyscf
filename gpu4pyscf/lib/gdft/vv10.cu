@@ -168,28 +168,20 @@ static void vv10_grad_kernel(double *Fvec, const double *vvcoords, const double 
         __syncthreads();
         for (int l = 0, M = min(NG_PER_BLOCK, vvngrids - j); l < M; ++l){
             double3 xj_tmp = xj_t[l];
-            double pjx = xj_tmp.x;
-            double pjy = xj_tmp.y;
-            double pjz = xj_tmp.z;
-
             // about 23 operations for each pair
-            double DX = pjx - xi;
-            double DY = pjy - yi;
-            double DZ = pjz - zi;
+            double DX = xj_tmp.x - xi;
+            double DY = xj_tmp.y - yi;
+            double DZ = xj_tmp.z - zi;
             double R2 = DX*DX + DY*DY + DZ*DZ;
 
             double3 kp_tmp = kp_t[l];
-            double Kpj = kp_tmp.x;
-            double W0pj = kp_tmp.y;
-            double RpWj = kp_tmp.z;
-
-            double gp = R2*W0pj + Kpj;
+            double gp = R2*kp_tmp.y + kp_tmp.x;
             double g  = R2*W0i + Ki;
             double gt = g + gp;
             double ggp = g * gp;
             double ggt_gp = gt * ggp;
-            double T = RpWj / (ggt_gp * ggt_gp);
-            double Q = T * ((W0i*gp + W0pj*g)*gt + (W0i+W0pj)*ggp);
+            double T = kp_tmp.z / (ggt_gp * ggt_gp);
+            double Q = T * ((W0i*gp + kp_tmp.y*g)*gt + (W0i+kp_tmp.y)*ggp);
 
             FX += Q * DX;
             FY += Q * DY;
