@@ -57,7 +57,6 @@ class KnownValues(unittest.TestCase):
         ao_cpu = cupy.asarray(ao)
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=0)
-        print('sph_deriv0', cupy.linalg.norm(ao_cpu - ao_gpu))
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_sph_deriv1(self):
@@ -66,7 +65,6 @@ class KnownValues(unittest.TestCase):
         ao_cpu = cupy.asarray(ao)
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=1)
-        print('sph_deriv1', cupy.linalg.norm(ao_cpu - ao_gpu))
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_sph_deriv2(self):
@@ -75,7 +73,6 @@ class KnownValues(unittest.TestCase):
         ao_cpu = cupy.asarray(ao)
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=2)
-        print('sph_deriv2', cupy.linalg.norm(ao_cpu - ao_gpu))
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_sph_deriv3(self):
@@ -84,7 +81,6 @@ class KnownValues(unittest.TestCase):
         ao_cpu = cupy.asarray(ao)
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=3)
-        print('sph_deriv3', cupy.linalg.norm(ao_cpu - ao_gpu))
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_sph_deriv4(self):
@@ -93,7 +89,6 @@ class KnownValues(unittest.TestCase):
         ao_cpu = cupy.asarray(ao)
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=4)
-        print('sph_deriv4', cupy.linalg.norm(ao_cpu - ao_gpu))
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     # cart mol
@@ -103,7 +98,6 @@ class KnownValues(unittest.TestCase):
         ao_cpu = cupy.asarray(ao)
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=0)
-        print('cart_deriv0', cupy.linalg.norm(ao_cpu - ao_gpu))
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_cart_deriv1(self):
@@ -112,7 +106,6 @@ class KnownValues(unittest.TestCase):
         ao_cpu = cupy.asarray(ao)
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=1)
-        print('cart_deriv1', cupy.linalg.norm(ao_cpu - ao_gpu))
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_cart_deriv2(self):
@@ -121,7 +114,6 @@ class KnownValues(unittest.TestCase):
         ao_cpu = cupy.asarray(ao)
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=2)
-        print('cart_deriv2', cupy.linalg.norm(ao_cpu - ao_gpu))
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_cart_deriv3(self):
@@ -130,7 +122,6 @@ class KnownValues(unittest.TestCase):
         ao_cpu = cupy.asarray(ao)
         ni = NumInt(xc='LDA')
         ao_gpu = ni.eval_ao(mol_cart, coords, deriv=3)
-        print('cart_deriv3', cupy.linalg.norm(ao_cpu - ao_gpu))
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_cart_deriv4(self):
@@ -139,7 +130,6 @@ class KnownValues(unittest.TestCase):
         ao_cpu = cupy.asarray(ao)
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=4)
-        print('cart_deriv4', cupy.linalg.norm(ao_cpu - ao_gpu))
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
 if __name__ == "__main__":
