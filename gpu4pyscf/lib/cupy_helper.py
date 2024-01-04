@@ -264,9 +264,9 @@ def take_last2d(a, indices, out=None):
         raise RuntimeError('failed in take_last2d kernel')
     return out
 
-def transpose_sum(a):
+def transpose_sum(a, stream=None):
     '''
-    transpose (0,2,1)
+    return a + a.transpose(0,2,1)
     '''
     assert a.flags.c_contiguous
     assert a.ndim == 3

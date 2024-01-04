@@ -40,7 +40,6 @@ int ngrids, int natm)
     __shared__ double zj[NATOM_PER_BLOCK];
     __shared__ double a_smem[NATOM_PER_BLOCK];
     __shared__ double dij_smem[NATOM_PER_BLOCK];
-
     const int tx = threadIdx.x;
 
     for (int atom_i = 0; atom_i < natm; atom_i++){

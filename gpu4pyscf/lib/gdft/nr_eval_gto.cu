@@ -28,7 +28,7 @@
 #include "nr_eval_gto.cuh"
 #include "contract_rho.cuh"
 
-#define THREADS         128
+#define NG_PER_BLOCK       128
 #define LMAX            8
 #define GTO_MAX_CART     15
 
@@ -1121,15 +1121,15 @@ static void _sph_kernel_deriv1(BasOffsets offsets)
         g12 = ax * ry * ry * rz * rz;
         g13 = ax * ry * rz * rz * rz;
         g14 = ax * rz * rz * rz * rz;
-        gtox[          grid_id] = 2.503342941796704538 * g1 - 2.503342941796704530 * g6 ;
+        gtox[          grid_id] = 2.503342941796704538 * (g1 - g6) ;
         gtox[1 *ngrids+grid_id] = 5.310392309339791593 * g4 - 1.770130769779930530 * g11;
-        gtox[2 *ngrids+grid_id] = 5.677048174545360108 * g8 - 0.946174695757560014 * g1 - 0.946174695757560014 * g6 ;
-        gtox[3 *ngrids+grid_id] = 2.676186174229156671 * g13 - 2.007139630671867500 * g4 - 2.007139630671867500 * g11;
-        gtox[4 *ngrids+grid_id] = 0.317356640745612911 * g0 + 0.634713281491225822 * g3 - 2.538853125964903290 * g5 + 0.317356640745612911 * g10 - 2.538853125964903290 * g12 + 0.846284375321634430 * g14;
-        gtox[5 *ngrids+grid_id] = 2.676186174229156671 * g9 - 2.007139630671867500 * g2 - 2.007139630671867500 * g7 ;
-        gtox[6 *ngrids+grid_id] = 2.838524087272680054 * g5 + 0.473087347878780009 * g10 - 0.473087347878780002 * g0 - 2.838524087272680050 * g12;
+        gtox[2 *ngrids+grid_id] = 5.677048174545360108 * g8 - 0.946174695757560014 * (g1 + g6);
+        gtox[3 *ngrids+grid_id] = 2.676186174229156671 * g13 - 2.007139630671867500 * (g4 + g11);
+        gtox[4 *ngrids+grid_id] = 0.317356640745612911 * (g0 + g10) + 0.634713281491225822 * g3 - 2.538853125964903290 * (g5 + g12) + 0.846284375321634430 * g14;
+        gtox[5 *ngrids+grid_id] = 2.676186174229156671 * g9 - 2.007139630671867500 * (g2 + g7);
+        gtox[6 *ngrids+grid_id] = 2.838524087272680054 * (g5 - g12) + 0.473087347878780009 * (g10 - g0);
         gtox[7 *ngrids+grid_id] = 1.770130769779930531 * g2 - 5.310392309339791590 * g7 ;
-        gtox[8 *ngrids+grid_id] = 0.625835735449176134 * g0 - 3.755014412695056800 * g3 + 0.625835735449176134 * g10;
+        gtox[8 *ngrids+grid_id] = 0.625835735449176134 * (g0 + g10) - 3.755014412695056800 * g3;
 
         double ay = ce_2a * ry;
         g0  = ay * rx * rx * rx * rx;
@@ -1147,15 +1147,15 @@ static void _sph_kernel_deriv1(BasOffsets offsets)
         g12 = (ay * ry + 2 * ce) * ry * rz * rz;
         g13 = (ay * ry +     ce) * rz * rz * rz;
         g14 = ay * rz * rz * rz * rz;
-        gtoy[          grid_id] = 2.503342941796704538 * g1 - 2.503342941796704530 * g6 ;
+        gtoy[          grid_id] = 2.503342941796704538 * (g1 - g6) ;
         gtoy[1 *ngrids+grid_id] = 5.310392309339791593 * g4 - 1.770130769779930530 * g11;
-        gtoy[2 *ngrids+grid_id] = 5.677048174545360108 * g8 - 0.946174695757560014 * g1 - 0.946174695757560014 * g6 ;
-        gtoy[3 *ngrids+grid_id] = 2.676186174229156671 * g13 - 2.007139630671867500 * g4 - 2.007139630671867500 * g11;
-        gtoy[4 *ngrids+grid_id] = 0.317356640745612911 * g0 + 0.634713281491225822 * g3 - 2.538853125964903290 * g5 + 0.317356640745612911 * g10 - 2.538853125964903290 * g12 + 0.846284375321634430 * g14;
-        gtoy[5 *ngrids+grid_id] = 2.676186174229156671 * g9 - 2.007139630671867500 * g2 - 2.007139630671867500 * g7 ;
-        gtoy[6 *ngrids+grid_id] = 2.838524087272680054 * g5 + 0.473087347878780009 * g10 - 0.473087347878780002 * g0 - 2.838524087272680050 * g12;
+        gtoy[2 *ngrids+grid_id] = 5.677048174545360108 * g8 - 0.946174695757560014 * (g1 + g6);
+        gtoy[3 *ngrids+grid_id] = 2.676186174229156671 * g13 - 2.007139630671867500 * (g4 + g11);
+        gtoy[4 *ngrids+grid_id] = 0.317356640745612911 * (g0 + g10) + 0.634713281491225822 * g3 - 2.538853125964903290 * (g5 + g12) + 0.846284375321634430 * g14;
+        gtoy[5 *ngrids+grid_id] = 2.676186174229156671 * g9 - 2.007139630671867500 * (g2 + g7);
+        gtoy[6 *ngrids+grid_id] = 2.838524087272680054 * (g5 - g12) + 0.473087347878780009 * (g10 - g0);
         gtoy[7 *ngrids+grid_id] = 1.770130769779930531 * g2 - 5.310392309339791590 * g7 ;
-        gtoy[8 *ngrids+grid_id] = 0.625835735449176134 * g0 - 3.755014412695056800 * g3 + 0.625835735449176134 * g10;
+        gtoy[8 *ngrids+grid_id] = 0.625835735449176134 * (g0 + g10) - 3.755014412695056800 * g3;
 
         double az = ce_2a * rz;
         g0  = az * rx * rx * rx * rx;
@@ -1173,15 +1173,15 @@ static void _sph_kernel_deriv1(BasOffsets offsets)
         g12 = (az * rz + 2 * ce) * ry * ry * rz;
         g13 = (az * rz + 3 * ce) * ry * rz * rz;
         g14 = (az * rz + 4 * ce) * rz * rz * rz;
-        gtoz[          grid_id] = 2.503342941796704538 * g1 - 2.503342941796704530 * g6 ;
+        gtoz[          grid_id] = 2.503342941796704538 * (g1 - g6) ;
         gtoz[1 *ngrids+grid_id] = 5.310392309339791593 * g4 - 1.770130769779930530 * g11;
-        gtoz[2 *ngrids+grid_id] = 5.677048174545360108 * g8 - 0.946174695757560014 * g1 - 0.946174695757560014 * g6 ;
-        gtoz[3 *ngrids+grid_id] = 2.676186174229156671 * g13 - 2.007139630671867500 * g4 - 2.007139630671867500 * g11;
-        gtoz[4 *ngrids+grid_id] = 0.317356640745612911 * g0 + 0.634713281491225822 * g3 - 2.538853125964903290 * g5 + 0.317356640745612911 * g10 - 2.538853125964903290 * g12 + 0.846284375321634430 * g14;
-        gtoz[5 *ngrids+grid_id] = 2.676186174229156671 * g9 - 2.007139630671867500 * g2 - 2.007139630671867500 * g7 ;
-        gtoz[6 *ngrids+grid_id] = 2.838524087272680054 * g5 + 0.473087347878780009 * g10 - 0.473087347878780002 * g0 - 2.838524087272680050 * g12;
+        gtoz[2 *ngrids+grid_id] = 5.677048174545360108 * g8 - 0.946174695757560014 * (g1 + g6);
+        gtoz[3 *ngrids+grid_id] = 2.676186174229156671 * g13 - 2.007139630671867500 * (g4 + g11);
+        gtoz[4 *ngrids+grid_id] = 0.317356640745612911 * (g0 + g10) + 0.634713281491225822 * g3 - 2.538853125964903290 * (g5 + g12) + 0.846284375321634430 * g14;
+        gtoz[5 *ngrids+grid_id] = 2.676186174229156671 * g9 - 2.007139630671867500 * (g2 + g7);
+        gtoz[6 *ngrids+grid_id] = 2.838524087272680054 * (g5 - g12) + 0.473087347878780009 * (g10 - g0);
         gtoz[7 *ngrids+grid_id] = 1.770130769779930531 * g2 - 5.310392309339791590 * g7 ;
-        gtoz[8 *ngrids+grid_id] = 0.625835735449176134 * g0 - 3.755014412695056800 * g3 + 0.625835735449176134 * g10;
+        gtoz[8 *ngrids+grid_id] = 0.625835735449176134 * (g0 + g10) - 3.755014412695056800 * g3;
     }
 }
 
@@ -1559,8 +1559,8 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
     offsets.bas_indices = bas_indices;
     offsets.nbas = local_ctr_offsets[nctr];
     offsets.nao = nao;
-    dim3 threads(THREADS);
-    dim3 blocks((ngrids+THREADS-1)/THREADS);
+    dim3 threads(NG_PER_BLOCK);
+    dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
 
     for (int ictr = 0; ictr < nctr; ++ictr) {
         int local_ish = local_ctr_offsets[ictr];
@@ -1706,8 +1706,8 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
 int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
                  double *grids, int ngrids, int *bas_loc, int nbas, int *bas)
 {
-    dim3 threads(THREADS);
-    dim3 blocks((ngrids+THREADS-1)/THREADS);
+    dim3 threads(NG_PER_BLOCK);
+    dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
 
     for (int shl_id = 0; shl_id < nbas; ++shl_id) {
         int l = bas[ANG_OF+shl_id*BAS_SLOTS];
