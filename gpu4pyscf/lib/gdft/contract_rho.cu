@@ -30,7 +30,6 @@ void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, 
 {
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     const bool active = grid_id < ngrids;
-
     size_t Ngrids = ngrids;
     double v = 0;
     if (active){

@@ -27,7 +27,7 @@ static void _take(double *a, const double *b, int *indices, int n)
     if (j >= n || k >= n) {
         return;
     }
-    
+
     int j_b = indices[j];
     int k_b = indices[k];
     int off = i * n * n;

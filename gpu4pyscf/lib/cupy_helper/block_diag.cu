@@ -24,7 +24,7 @@ static void _block_diag(double *out, int m, int n, double *diags, int ndiags, in
     int i = threadIdx.x;
     int j = threadIdx.y;
     int r = blockIdx.x;
-    
+
     if (r >= ndiags){
         return;
     }
