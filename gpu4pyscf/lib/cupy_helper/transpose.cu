@@ -88,11 +88,11 @@ int CPdsymm_triu(double *a, int n, int counts)
 }
 
 __host__
-int transpose_sum(double *a, int n, int counts){
+int transpose_sum(cudaStream_t stream, double *a, int n, int counts){
     int ntile = (n + THREADS - 1) / THREADS;
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ntile, ntile, counts);
-    _transpose_sum<<<blocks, threads>>>(a, n);
+    _transpose_sum<<<blocks, threads, 0, stream>>>(a, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
