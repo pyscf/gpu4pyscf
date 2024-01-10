@@ -497,3 +497,17 @@ def _qr(xs, dot, lindep=1e-14):
 
 def _gen_x0(v, xs):
     return cupy.dot(v.T, xs)
+
+def empty_mapped(shape, dtype=float, order='C'):
+    '''
+    Returns a new, uninitialized NumPy array with the given shape and dtype.
+
+    This is a convenience function which is just :func:`numpy.empty`,
+    except that the underlying buffer is a pinned and mapped memory.
+    This array can be used as the buffer of zero-copy memory.
+    '''
+    nbytes = np.prod(shape) * np.dtype(dtype).itemsize
+    mem = cp.cuda.PinnedMemoryPointer(
+        cp.cuda.PinnedMemory(nbytes, cp.cuda.runtime.hostAllocMapped), 0)
+    out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)
+    return out
