@@ -273,15 +273,16 @@ def takebak(out, a, indices, axis=-1):
     '''
     assert axis == -1
     assert isinstance(a, np.ndarray)
-    assert isinstance(out, cp.ndarray)
+    assert isinstance(out, cupy.ndarray)
     assert out.ndim == a.ndim
-    n_a = a.shape[-1]
-    n_o = out.shape[-1]
-    assert n_a == len(indices)
+    assert a.shape[-1] == len(indices)
     if a.ndim == 1:
         count = 1
     else:
+        assert out.shape[:-1] == a.shape[:-1]
         count = np.prod(a.shape[:-1])
+    n_a = a.shape[-1]
+    n_o = out.shape[-1]
     indices_int32 = cupy.asarray(indices, dtype=cupy.int32)
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.takebak(
@@ -291,7 +292,7 @@ def takebak(out, a, indices, axis=-1):
         ctypes.c_int(count), ctypes.c_int(n_o), ctypes.c_int(n_a)
     )
     if err != 0: # Not the mapped host memory
-        out[...,indicies] = cupy.asarray(a)
+        out[...,indices] = cupy.asarray(a)
     return out
 
 def transpose_sum(a, stream=None):
@@ -535,7 +536,7 @@ def empty_mapped(shape, dtype=float, order='C'):
     This array can be used as the buffer of zero-copy memory.
     '''
     nbytes = np.prod(shape) * np.dtype(dtype).itemsize
-    mem = cp.cuda.PinnedMemoryPointer(
-        cp.cuda.PinnedMemory(nbytes, cp.cuda.runtime.hostAllocMapped), 0)
+    mem = cupy.cuda.PinnedMemoryPointer(
+        cupy.cuda.PinnedMemory(nbytes, cupy.cuda.runtime.hostAllocMapped), 0)
     out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)
     return out
