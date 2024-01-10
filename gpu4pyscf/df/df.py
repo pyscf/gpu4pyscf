@@ -57,18 +57,6 @@ class DF(df.DF):
         auxmol = self.auxmol
         self.nao = mol.nao
 
-        # cache indices for better performance
-        nao = mol.nao
-        tril_row, tril_col = cupy.tril_indices(nao)
-        tril_row = cupy.asarray(tril_row)
-        tril_col = cupy.asarray(tril_col)
-
-        self.tril_row = tril_row
-        self.tril_col = tril_col
-
-        idx = np.arange(nao)
-        self.diag_idx = cupy.asarray(idx*(idx+1)//2+idx)
-
         log = logger.new_logger(mol, mol.verbose)
         t0 = log.init_timer()
         if auxmol is None:
@@ -234,20 +222,20 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
         nj = j1 - j0
         if sr_only:
             # TODO: in-place implementation or short-range kernel
-            ints_slices = cupy.zeros([naoaux, nj, ni], order='C')
+            ints_slices = cupy.empty([naoaux, nj, ni], order='C')
             for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
                 k0 = intopt.sph_aux_loc[cp_kl_id]
                 k1 = intopt.sph_aux_loc[cp_kl_id+1]
                 int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1])
             if omega is not None:
-                ints_slices_lr = cupy.zeros([naoaux, nj, ni], order='C')
+                ints_slices_lr = cupy.empty([naoaux, nj, ni], order='C')
                 for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
                     k0 = intopt.sph_aux_loc[cp_kl_id]
                     k1 = intopt.sph_aux_loc[cp_kl_id+1]
                     int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1], omega=omega)
                 ints_slices -= ints_slices_lr
         else:
-            ints_slices = cupy.zeros([naoaux, nj, ni], order='C')
+            ints_slices = cupy.empty([naoaux, nj, ni], order='C')
             for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
                 k0 = intopt.sph_aux_loc[cp_kl_id]
                 k1 = intopt.sph_aux_loc[cp_kl_id+1]
@@ -261,11 +249,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
 
         row = intopt.ao_pairs_row[cp_ij_id] - i0
         col = intopt.ao_pairs_col[cp_ij_id] - j0
-        if cpi == cpj:
-            #ints_slices = ints_slices + ints_slices.transpose([0,2,1])
-            transpose_sum(ints_slices)
         ints_slices = ints_slices[:,col,row]
-
         if cd_low.tag == 'eig':
             cderi_block = cupy.dot(cd_low.T, ints_slices)
             ints_slices = None

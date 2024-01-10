@@ -27,6 +27,7 @@ parser.add_argument("--xc",       type=str,  default='B3LYP')
 parser.add_argument("--solvent",  type=str, default='')
 args = parser.parse_args()
 
+lib.num_threads(16)
 start_time = time.time()
 bas = args.basis
 mol = pyscf.M(
@@ -34,10 +35,10 @@ mol = pyscf.M(
     basis=bas,
     max_memory=32000)
 # set verbose >= 6 for debugging timer
-mol.verbose = 4
+mol.verbose = 7
 
 mf_df = rks.RKS(mol, xc=args.xc).density_fit(auxbasis=args.auxbasis)
-mf_df.verbose = 4
+mf_df.verbose = 7
 
 if args.solvent:
     mf_df = mf_df.PCM()

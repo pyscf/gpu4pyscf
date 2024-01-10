@@ -57,6 +57,7 @@ def prune_small_rho_grids_(ks, mol, dm, grids):
                 grids.coords = cupy.vstack(
                         [grids.coords, pad])
                 grids.weights = cupy.hstack([grids.weights, cupy.zeros(padding)])
+
         # make_mask has to be executed on cpu for now.
         #grids.non0tab = grids.make_mask(mol, grids.coords)
         #grids.screen_index = grids.non0tab

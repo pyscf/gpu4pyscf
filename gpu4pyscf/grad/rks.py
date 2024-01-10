@@ -27,7 +27,8 @@ from gpu4pyscf.lib.utils import patch_cpu_kernel
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.dft import numint, xc_deriv, rks
 from gpu4pyscf.dft.numint import _GDFTOpt, AO_THRESHOLD
-from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, add_sparse, tag_array, load_library
+from gpu4pyscf.lib.cupy_helper import (
+    contract, get_avail_mem, add_sparse, tag_array, load_library, take_last2d)
 from gpu4pyscf.lib import logger
 from pyscf import __config__
 
@@ -121,10 +122,12 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     mo_coeff = cupy.asarray(dms.mo_coeff)
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
-    dms = cupy.asarray(dms)
-    dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
-           for dm in dms.reshape(-1,nao0,nao0)]
-    mo_coeff = coeff @ mo_coeff
+    dms = cupy.asarray(dms).reshape(-1,nao0,nao0)
+    dms = take_last2d(dms, opt.ao_idx)
+    #dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
+    #       for dm in dms.reshape(-1,nao0,nao0)]
+    #mo_coeff = coeff @ mo_coeff
+    mo_coeff = mo_coeff[opt.ao_idx]
 
     nset = len(dms)
     assert nset == 1
@@ -172,7 +175,8 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 vtmp = _gga_grad_sum_(ao_mask, wv)
                 vtmp += _tau_grad_dot_(ao_mask, wv[4])
                 add_sparse(vmat[idm], vtmp, idx)
-    vmat = [cupy.einsum('pi,npq,qj->nij', coeff, v, coeff) for v in vmat]
+    #vmat = [cupy.einsum('pi,npq,qj->nij', coeff, v, coeff) for v in vmat]
+    vmat = take_last2d(vmat, opt.rev_ao_idx)
     exc = None
     if nset == 1:
         vmat = vmat[0]

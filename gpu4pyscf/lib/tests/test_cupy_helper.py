@@ -18,7 +18,7 @@ import numpy
 import cupy
 from gpu4pyscf.lib.cupy_helper import (
     take_last2d, transpose_sum, krylov, unpack_sparse,
-    add_sparse)
+    add_sparse, dist_matrix)
 
 class KnownValues(unittest.TestCase):
     def test_take_last2d(self):
@@ -68,6 +68,13 @@ class KnownValues(unittest.TestCase):
         a0[cupy.ix_(indices, indices)] += b
         add_sparse(a, b, indices)
         assert cupy.linalg.norm(a - a0) < 1e-10
+
+    def test_dist_matrix(self):
+        a = cupy.random.rand(4, 3)
+        rij = cupy.sum((a[:,None,:] - a[None,:,:])**2, axis=2)**0.5
+
+        rij0 = dist_matrix(a)
+        assert cupy.linalg.norm(rij - rij0) < 1e-10
 
 if __name__ == "__main__":
     print("Full tests for cupy helper module")

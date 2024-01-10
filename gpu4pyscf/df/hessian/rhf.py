@@ -37,6 +37,7 @@ import numpy
 import cupy
 import numpy as np
 from pyscf import lib, df
+from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, release_gpu_stack, print_mem_info, take_last2d
 from gpu4pyscf.df import int3c2e
@@ -283,6 +284,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             hk_aux_aux += .5 * contract('pqxy,pq->pqxy', rho2c_11, int2c_inv)      # (00|1)(1|00)
             rho2c_0 = rho2c_10 = rho2c_11 = rho2c0_10 = rho2c1_10 = rho2c0_11 = int2c_ip_ip = None
             wk_ip2_P__ = int2c_ip1_inv = None
+    t1 = log.timer_debug1('contract int2c_*', *t1)
+
     ao_idx = np.argsort(intopt.sph_ao_idx)
     aux_idx = np.argsort(intopt.sph_aux_idx)
     rev_ao_ao = cupy.ix_(ao_idx, ao_idx)
@@ -372,7 +375,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             e1[j0,i0] = e1[i0,j0].T
             ej[j0,i0] = ej[i0,j0].T
             ek[j0,i0] = ek[i0,j0].T
-
+    t1 = log.timer_debug1('hcore contribution', *t1)
     log.timer('RHF partial hessian', *time0)
     return e1, ej, ek
 
@@ -398,6 +401,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     else:
         return chkfile
     '''
+
 def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             verbose=None, with_k=True, omega=None):
     log = logger.new_logger(hessobj, verbose)
@@ -521,8 +525,9 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         vk1_int3c = vk1_int3c_ip1 + vk1_int3c_ip2
         vk1_int3c_ip1 = vk1_int3c_ip2 = None
 
+    grad_hcore = rhf_grad.get_grad_hcore(hessobj.base.nuc_grad_method())
     cupy.get_default_memory_pool().free_all_blocks()
-    hcore_deriv = hessobj.base.nuc_grad_method().hcore_generator(mol)
+    #hcore_deriv = hessobj.base.nuc_grad_method().hcore_generator(mol)
     vk1 = None
     for i0, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = aoslices[ia]
@@ -535,8 +540,9 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             vk1_ao[:,p0:p1,:] -= vk1_buf[:,p0:p1,:]
             vk1_ao[:,:,p0:p1] -= vk1_buf[:,p0:p1,:].transpose(0,2,1)
 
-        h1 = hcore_deriv(ia)
-        h1 = _ao2mo(cupy.asarray(h1, order='C'))
+        h1 =  grad_hcore[:,i0]
+        #h1 = hcore_deriv(ia)
+        #h1 = _ao2mo(cupy.asarray(h1, order='C'))
         vj1 = vj1_int3c[ia] + _ao2mo(vj1_ao)
         if with_k:
             vk1 = vk1_int3c[ia] + _ao2mo(vk1_ao)
