@@ -240,12 +240,12 @@ def block_diag(blocks, out=None):
 
 def take_last2d(a, indices, out=None):
     '''
-    reorder the last 2 dimensions with 'indices', the first n-2 indices do not change
-    shape in the last 2 dimensions have to be the same
+    Reorder the last 2 dimensions as a[..., indices[:,None], indices]
     '''
     assert a.flags.c_contiguous
     assert a.shape[-1] == a.shape[-2]
     nao = a.shape[-1]
+    assert len(indices) == nao
     if a.ndim == 2:
         count = 1
     else:
@@ -264,6 +264,34 @@ def take_last2d(a, indices, out=None):
     )
     if err != 0:
         raise RuntimeError('failed in take_last2d kernel')
+    return out
+
+def takebak(out, a, indices, axis=-1):
+    '''(experimental)
+    Take elements from a NumPy array along an axis and write to CuPy array.
+    out[..., indices] = a
+    '''
+    assert axis == -1
+    assert isinstance(a, np.ndarray)
+    assert isinstance(out, cp.ndarray)
+    assert out.ndim == a.ndim
+    n_a = a.shape[-1]
+    n_o = out.shape[-1]
+    assert n_a == len(indices)
+    if a.ndim == 1:
+        count = 1
+    else:
+        count = np.prod(a.shape[:-1])
+    indices_int32 = cupy.asarray(indices, dtype=cupy.int32)
+    stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.takebak(
+        ctypes.c_void_p(stream.ptr),
+        ctypes.c_void_p(out.data.ptr), a.ctypes,
+        ctypes.c_void_p(indices_int32.data.ptr),
+        ctypes.c_int(count), ctypes.c_int(n_o), ctypes.c_int(n_a)
+    )
+    if err != 0: # Not the mapped host memory
+        out[...,indicies] = cupy.asarray(a)
     return out
 
 def transpose_sum(a, stream=None):
@@ -499,7 +527,7 @@ def _gen_x0(v, xs):
     return cupy.dot(v.T, xs)
 
 def empty_mapped(shape, dtype=float, order='C'):
-    '''
+    '''(experimental)
     Returns a new, uninitialized NumPy array with the given shape and dtype.
 
     This is a convenience function which is just :func:`numpy.empty`,
