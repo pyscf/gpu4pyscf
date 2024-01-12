@@ -85,25 +85,30 @@ class CMakeBuildPy(build_py):
             self.announce(' '.join(cmd))
         else:
             self.spawn(cmd)
+
+        self.build_dftd()
+
         super().run()
 
+    def build_dftd(self):
+        self.plat_name = get_platform()
+        self.build_base = 'build'
+        self.build_lib = os.path.join(self.build_base, 'lib')
+        self.build_temp = os.path.join(self.build_base, f'temp.{self.plat_name}')
 
-class DFTD3Build(build_py):
-    def run(self):
         script_path = 'builder/build_dftd3.sh'
         if not os.path.exists(script_path):
             raise FileNotFoundError("Cannot find build script: {}".format(script_path))
 
         check_call(['sh', script_path])
 
-        build_dir = 'tmp/lib/python3/dist-packages/dftd3'
+        build_dir = 'tmp/dftd3-1.0.0/tmp/dftd3-build/lib/python3/dist-packages/dftd3'
         if not os.path.exists(build_dir):
             raise FileNotFoundError("Cannot find build directory: {}".format(build_dir))
 
-        super().run()
-
         target_dir = os.path.join(self.build_lib, 'gpu4pyscf', 'dftd3')
         self.copy_tree(build_dir, target_dir)
+
 
 # build_py will produce plat_name = 'any'. Patch the bdist_wheel to change the
 # platform tag because the C extensions are platform dependent.
@@ -139,10 +144,7 @@ setup(
         "pytest-cover==3.0.0",
         "pytest-coverage==0.0",
     ],
-    cmdclass={
-        'build_py': CMakeBuildPy,
-        'build_dftd3': DFTD3Build,
-    },
+    cmdclass={'build_py': CMakeBuildPy},
     install_requires=[
         'pyscf>=2.4.0',
         f'cupy-cuda{CUDA_VERSION}>=12.0',
