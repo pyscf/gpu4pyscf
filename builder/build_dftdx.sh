@@ -1,6 +1,7 @@
 #!/bin/bash
 
 WORK_DIR="./tmp"
+rm -r ${WORK_DIR}
 mkdir -p ${WORK_DIR}
 
 PROJECT_NAME=${PROJECT_NAME:-"dftd3"}

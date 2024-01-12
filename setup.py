@@ -102,12 +102,7 @@ class CMakeBuildPy(build_py):
         if not os.path.exists(script_path):
             raise FileNotFoundError("Cannot find build script: {}".format(script_path))
 
-        env_vars = {
-            'PROJECT_NAME': project_name,
-            'SOURCE_URL': source_url
-        }
-
-        subprocess.run(['sh', script_path], env=env_vars, shell=True, check=True)
+        subprocess.run(f"PROJECT_NAME={project_name} SOURCE_URL={source_url} sh {script_path}", shell=True, check=True)
 
         build_dir_pattern = f'tmp/{project_name}-*/tmp/{project_name}-build/lib/python3/dist-packages/{project_name}'
         build_dirs = glob.glob(build_dir_pattern)
