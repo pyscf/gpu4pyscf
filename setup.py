@@ -25,6 +25,7 @@ import re
 from setuptools import setup, find_packages, Extension
 from setuptools.command.build_py import build_py
 from distutils.util import get_platform
+from subprocess import check_call
 
 NAME = 'gpu4pyscf'
 AUTHOR = 'Qiming Sun'
@@ -86,6 +87,23 @@ class CMakeBuildPy(build_py):
             self.spawn(cmd)
         super().run()
 
+class DFTD3Build(build_py):
+    def run(self):
+        script_path = 'builder/build_dftd3.sh'
+        if not os.path.exists(script_path):
+            raise FileNotFoundError("Cannot find build script: {}".format(script_path))
+
+        check_call(['sh', script_path])
+
+        build_dir = 'tmp/lib/python3/dist-packages/dftd3'
+        if not os.path.exists(build_dir):
+            raise FileNotFoundError("Cannot find build directory: {}".format(build_dir))
+
+        super().run()
+
+        target_dir = os.path.join(self.build_lib, 'gpu4pyscf', 'dftd3')
+        self.copy_tree(build_dir, target_dir)
+
 # build_py will produce plat_name = 'any'. Patch the bdist_wheel to change the
 # platform tag because the C extensions are platform dependent.
 from wheel.bdist_wheel import bdist_wheel
@@ -124,9 +142,10 @@ setup(
     install_requires=[
         'pyscf>=2.4.0',
         f'cupy-cuda{CUDA_VERSION}>=12.0',
-        'dftd3==0.7.0',
+        # 'dftd3==0.7.0',
         'dftd4==3.5.0',
         'geometric',
         f'gpu4pyscf-libxc-cuda{CUDA_VERSION}',
     ],
+    package_data={"gpu4pyscf.dftd3": ["_libdftd3*.so", "parameters.toml"]},
 )

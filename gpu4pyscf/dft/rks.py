@@ -250,7 +250,7 @@ class RKS(scf.hf.RHF, rks.RKS):
             # multi-threads in DFTD3 conflicts with PyTorch, set it to be 1 for safty
             from pyscf import lib
             with lib.with_omp_threads(1):
-                import dftd3.pyscf as disp
+                import gpu4pyscf.dftd3.pyscf as disp
                 d3 = disp.DFTD3Dispersion(self.mol, xc=self.xc, version=self.disp)
                 e_d3, _ = d3.kernel()
             return e_d3
