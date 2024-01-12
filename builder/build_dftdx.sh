@@ -3,12 +3,14 @@
 WORK_DIR="./tmp"
 mkdir -p ${WORK_DIR}
 
-SOURCE_URL="https://github.com/dftd3/simple-dftd3/releases/download/v1.0.0/dftd3-1.0.0-sdist.tar.gz"
+PROJECT_NAME=${PROJECT_NAME:-"dftd3"}
 
-TAR_GZ_NAME="dftd3-1.0.0-sdist.tar.gz"
+SOURCE_URL=${SOURCE_URL:-"https://github.com/dftd3/simple-dftd3/releases/download/v1.0.0/dftd3-1.0.0-sdist.tar.gz"}
+
+TAR_GZ_NAME=$(basename ${SOURCE_URL})
 
 BUILD_DIR="${WORK_DIR}/_build"
-INSTALL_DIR="${WORK_DIR}/dftd3-build"
+INSTALL_DIR="${WORK_DIR}/${PROJECT_NAME}-build"
 
 pip3 install meson ninja
 
@@ -48,4 +50,4 @@ echo "Installation complete."
 
 cd ../../
 
-echo "All operations completed in tmp/lib/python3/dist-packages/dftd3."
+echo "All operations completed."
