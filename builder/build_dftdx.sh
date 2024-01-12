@@ -35,7 +35,7 @@ option(
 )" >> meson_options.txt
 
 echo "Setting up build system with meson..."
-meson setup $BUILD_DIR -Dopenmp=false
+meson setup --wipe $BUILD_DIR -Dopenmp=false
 
 echo "Compiling the code..."
 meson compile -C $BUILD_DIR

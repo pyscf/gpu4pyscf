@@ -107,7 +107,7 @@ class CMakeBuildPy(build_py):
             'SOURCE_URL': source_url
         }
 
-        check_call(['sh', script_path], env=env_vars)
+        check_call(['bash', script_path], env=env_vars, shell=True)
 
         build_dir_pattern = f'tmp/{project_name}-*/tmp/{project_name}-build/lib/python3/dist-packages/{project_name}'
         build_dirs = glob.glob(build_dir_pattern)
@@ -158,7 +158,7 @@ setup(
         'pyscf>=2.4.0',
         f'cupy-cuda{CUDA_VERSION}>=12.0',
         # 'dftd3==0.7.0',
-        'dftd4==3.5.0',
+        # 'dftd4==3.5.0',
         'geometric',
         f'gpu4pyscf-libxc-cuda{CUDA_VERSION}',
     ],
