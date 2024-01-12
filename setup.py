@@ -87,6 +87,7 @@ class CMakeBuildPy(build_py):
             self.spawn(cmd)
         super().run()
 
+
 class DFTD3Build(build_py):
     def run(self):
         script_path = 'builder/build_dftd3.sh'
@@ -138,7 +139,10 @@ setup(
         "pytest-cover==3.0.0",
         "pytest-coverage==0.0",
     ],
-    cmdclass={'build_py': CMakeBuildPy},
+    cmdclass={
+        'build_py': CMakeBuildPy,
+        'build_dftd3': DFTD3Build,
+    },
     install_requires=[
         'pyscf>=2.4.0',
         f'cupy-cuda{CUDA_VERSION}>=12.0',
