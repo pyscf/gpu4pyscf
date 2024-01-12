@@ -29,6 +29,7 @@ from pyscf.solvent import ddcosmo
 from gpu4pyscf.solvent import _attach_solvent
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import dist_matrix
 
 libdft = lib.load_library('libdft')
 
@@ -191,7 +192,8 @@ def get_D_S(surface, with_S=True, with_D=False):
     xi_i, xi_j = cupy.meshgrid(charge_exp, charge_exp, indexing='ij')
     xi_ij = xi_i * xi_j / (xi_i**2 + xi_j**2)**0.5
     #rij = scipy.spatial.distance.cdist(grid_coords, grid_coords)
-    rij = cupy.sum((grid_coords[:,None,:] - grid_coords[None,:,:])**2, axis=2)**0.5
+    #rij = cupy.sum((grid_coords[:,None,:] - grid_coords[None,:,:])**2, axis=2)**0.5
+    rij = dist_matrix(grid_coords)
     xi_r_ij = xi_ij * rij
     cupy.fill_diagonal(rij, 1)
     S = scipy.special.erf(xi_r_ij) / rij
@@ -209,7 +211,7 @@ def get_D_S(surface, with_S=True, with_D=False):
 
 class PCM(ddcosmo.DDCOSMO):
     _keys = {
-        'method', 'vdw_scale', 'surface'
+        'method', 'vdw_scale', 'surface', 'r_probe', 'intopt'
     }
     def __init__(self, mol):
         ddcosmo.DDCOSMO.__init__(self, mol)

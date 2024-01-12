@@ -306,10 +306,7 @@ class VHFOpt(_vhf.VHFOpt):
         ncptype = len(log_qs)
 
         self.bpcache = ctypes.POINTER(BasisProdCache)()
-        if diag_block_with_triu:
-            scale_shellpair_diag = 1.
-        else:
-            scale_shellpair_diag = 0.5
+        scale_shellpair_diag = 1.
         libgint.GINTinit_basis_prod(
             ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),
             ao_loc.ctypes.data_as(ctypes.c_void_p),
@@ -1194,6 +1191,32 @@ def get_dh1e(mol, dm0):
         dh1e[k0:k1,:3] += cupy.einsum('xkji,ij->kx', int3c_blk, dm0_sorted[i0:i1,j0:j1])
     return 2.0 * cupy.einsum('kx,k->kx', dh1e, -charges)
 
+def get_d2h1e(mol, dm0):
+    natm = mol.natm
+    coords = mol.atom_coords()
+    charges = mol.atom_charges()
+    fakemol = gto.fakemol_for_charges(coords)
+
+    nao = mol.nao
+    d2h1e_diag = cupy.zeros([natm,9])
+    d2h1e_offdiag = cupy.zeros([natm, nao, 9])
+    intopt = VHFOpt(mol, fakemol, 'int2e')
+    intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
+    dm0_sorted = take_last2d(dm0, intopt.sph_ao_idx)
+    for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipip1'):
+        d2h1e_diag[k0:k1,:9] -= contract('xaji,ij->ax', int3c_blk, dm0_sorted[i0:i1,j0:j1])
+        d2h1e_offdiag[k0:k1,i0:i1,:9] += contract('xaji,ij->aix', int3c_blk, dm0_sorted[i0:i1,j0:j1])
+
+    for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipvip1'):
+        d2h1e_diag[k0:k1,:9] -= contract('xaji,ij->ax', int3c_blk, dm0_sorted[i0:i1,j0:j1])
+        d2h1e_offdiag[k0:k1,i0:i1,:9] += contract('xaji,ij->aix', int3c_blk, dm0_sorted[i0:i1,j0:j1])
+    aoslices = mol.aoslice_by_atom()
+    ao2atom = get_ao2atom(intopt, aoslices)
+    d2h1e = contract('aix,ib->abx', d2h1e_offdiag, ao2atom)
+    d2h1e[np.diag_indices(natm), :] += d2h1e_diag
+    return 2.0 * cupy.einsum('abx,a->xab', d2h1e, charges)
+    #return 2.0 * cupy.einsum('ijx,i->kx', dh1e, -charges)
+
 def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, aosym=None, out=None, omega=None, stream=None):
     '''
     Generate one int3c2e block for given ij, k
@@ -1443,14 +1466,6 @@ def get_pairing(p_offsets, q_offsets, q_cond,
         for q0, q1 in zip(q_offsets[:-1], q_offsets[1:]):
             if aosym and q0 < p0 or not aosym:
                 q_sub = q_cond[p0:p1,q0:q1].ravel()
-                '''
-                idx = q_sub.argsort(axis=None)[::-1]
-                q_sorted = q_sub[idx]
-                mask = q_sorted > cutoff
-                idx = idx[mask]
-                ishs, jshs = np.unravel_index(idx, (p1-p0, q1-q0))
-                print(ishs.shape)
-                '''
                 mask = q_sub > cutoff
                 ishs, jshs = np.indices((p1-p0,q1-q0))
                 ishs = ishs.ravel()[mask]
@@ -1464,13 +1479,6 @@ def get_pairing(p_offsets, q_offsets, q_cond,
                 log_qs.append(log_q)
             elif aosym and p0 == q0 and p1 == q1:
                 q_sub = q_cond[p0:p1,p0:p1].ravel()
-                '''
-                idx = q_sub.argsort(axis=None)[::-1]
-                q_sorted = q_sub[idx]
-                ishs, jshs = np.unravel_index(idx, (p1-p0, p1-p0))
-                mask = q_sorted > cutoff
-                '''
-
                 ishs, jshs = np.indices((p1-p0, p1-p0))
                 ishs = ishs.ravel()
                 jshs = jshs.ravel()

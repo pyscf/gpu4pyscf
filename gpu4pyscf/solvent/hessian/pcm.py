@@ -132,7 +132,7 @@ def hess_elec(pcmobj, dm, verbose=None):
         e, v = pcmobj._get_vind(dm)
         #return grad_elec(pcmobj, dm)
         return grad_nuc(pcmobj, dm) + grad_solver(pcmobj, dm) + grad_qv(pcmobj, dm)
-
+    mol.verbose = 0
     de = numpy.zeros([mol.natm, mol.natm, 3, 3])
     eps = 1e-3
     for ia in range(mol.natm):
@@ -172,7 +172,8 @@ def fd_grad_vmat(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
         e, v = pcmobj._get_vind(dm)
         return v
 
-    vmat = cupy.zeros([len(atmlst), 3, nao, nocc])
+    mol.verbose = 0
+    vmat = cupy.empty([len(atmlst), 3, nao, nocc])
     eps = 1e-3
     for i0, ia in enumerate(atmlst):
         for ix in range(3):

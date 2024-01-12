@@ -67,7 +67,7 @@ int ngrids, int natm)
                 dx = xi - xj_t;
                 dy = yi - yj_t;
                 dz = zi - zj_t;
-                double dij = norm3d(dx, dy, dz);
+                double dij = rnorm3d(dx, dy, dz);
 
                 // distance between atom i and atom j
                 dij_smem[tx] = dij;
@@ -88,7 +88,7 @@ int ngrids, int natm)
 
                 double dij = dij_smem[l];
                 double aij = a_smem[l];
-                double g = (atom_i == atom_j) ? 0.0 : (dig - djg) / dij;
+                double g = (atom_i == atom_j) ? 0.0 : (dig - djg) * dij;
 
                 // atomic radii adjust function
                 double g1 = g*g - 1.0;

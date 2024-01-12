@@ -57,18 +57,6 @@ class DF(df.DF):
         auxmol = self.auxmol
         self.nao = mol.nao
 
-        # cache indices for better performance
-        nao = mol.nao
-        tril_row, tril_col = cupy.tril_indices(nao)
-        tril_row = cupy.asarray(tril_row)
-        tril_col = cupy.asarray(tril_col)
-
-        self.tril_row = tril_row
-        self.tril_col = tril_col
-
-        idx = np.arange(nao)
-        self.diag_idx = cupy.asarray(idx*(idx+1)//2+idx)
-
         log = logger.new_logger(mol, mol.verbose)
         t0 = log.init_timer()
         if auxmol is None:
@@ -147,7 +135,7 @@ class DF(df.DF):
         rows = self.intopt.cderi_row
         cols = self.intopt.cderi_col
         buf_prefetch = None
-
+        buf_cderi = cupy.zeros([blksize,nao,nao])
         data_stream = cupy.cuda.stream.Stream(non_blocking=True)
         compute_stream = cupy.cuda.get_current_stream()
         #compute_stream = cupy.cuda.stream.Stream()
@@ -165,14 +153,15 @@ class DF(df.DF):
                     buf_prefetch.set(cderi_sparse[p1:p2,:])
                 stop_event = data_stream.record()
             if unpack:
-                buf2 = cupy.zeros([p1-p0,nao,nao])
-                buf2[:p1-p0,rows,cols] = buf
-                buf2[:p1-p0,cols,rows] = buf
+                buf_cderi[:p1-p0,rows,cols] = buf
+                buf_cderi[:p1-p0,cols,rows] = buf
+                buf2 = buf_cderi[:p1-p0]
             else:
                 buf2 = None
             yield buf2, buf.T
             compute_stream.wait_event(stop_event)
-            cupy.cuda.Device().synchronize()
+            if isinstance(cderi_sparse, np.ndarray):
+                cupy.cuda.Device().synchronize()
 
             if buf_prefetch is not None:
                 buf = buf_prefetch
@@ -217,8 +206,8 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
             cderi = np.ndarray([naux, npair], dtype=np.float64, order='C', buffer=mem)
         except Exception:
             raise RuntimeError('Out of CPU memory')
-
-    data_stream = cupy.cuda.stream.Stream(non_blocking=False)
+    if(not use_gpu_memory):
+        data_stream = cupy.cuda.stream.Stream(non_blocking=False)
     count = 0
     nq = len(intopt.log_qs)
     for cp_ij_id, _ in enumerate(intopt.log_qs):
@@ -234,20 +223,20 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
         nj = j1 - j0
         if sr_only:
             # TODO: in-place implementation or short-range kernel
-            ints_slices = cupy.zeros([naoaux, nj, ni], order='C')
+            ints_slices = cupy.empty([naoaux, nj, ni], order='C')
             for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
                 k0 = intopt.sph_aux_loc[cp_kl_id]
                 k1 = intopt.sph_aux_loc[cp_kl_id+1]
                 int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1])
             if omega is not None:
-                ints_slices_lr = cupy.zeros([naoaux, nj, ni], order='C')
+                ints_slices_lr = cupy.empty([naoaux, nj, ni], order='C')
                 for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
                     k0 = intopt.sph_aux_loc[cp_kl_id]
                     k1 = intopt.sph_aux_loc[cp_kl_id+1]
                     int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1], omega=omega)
                 ints_slices -= ints_slices_lr
         else:
-            ints_slices = cupy.zeros([naoaux, nj, ni], order='C')
+            ints_slices = cupy.empty([naoaux, nj, ni], order='C')
             for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
                 k0 = intopt.sph_aux_loc[cp_kl_id]
                 k1 = intopt.sph_aux_loc[cp_kl_id+1]
@@ -261,11 +250,8 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
 
         row = intopt.ao_pairs_row[cp_ij_id] - i0
         col = intopt.ao_pairs_col[cp_ij_id] - j0
-        if cpi == cpj:
-            #ints_slices = ints_slices + ints_slices.transpose([0,2,1])
-            transpose_sum(ints_slices)
-        ints_slices = ints_slices[:,col,row]
 
+        ints_slices = ints_slices[:,col,row]
         if cd_low.tag == 'eig':
             cderi_block = cupy.dot(cd_low.T, ints_slices)
             ints_slices = None
@@ -281,8 +267,8 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
                 for i in range(naux):
                     cderi_block[i].get(out=cderi[i,ij0:ij1])
         t1 = log.timer_debug1(f'solve {cp_ij_id} / {nq}', *t1)
-
-    cupy.cuda.Device().synchronize()
+    if not use_gpu_memory:
+        cupy.cuda.Device().synchronize()
     return cderi
 
 

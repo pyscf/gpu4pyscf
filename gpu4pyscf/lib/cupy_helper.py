@@ -165,8 +165,26 @@ def add_sparse(a, b, indices):
         ctypes.c_int(count)
     )
     if err != 0:
-        raise RecursionError('failed in sparse_add2d')
+        raise RuntimeError('failed in sparse_add2d')
     return a
+
+def dist_matrix(coords, out=None):
+    assert coords.flags.c_contiguous
+    n = coords.shape[0]
+    if out is None:
+        out = cupy.empty([n,n])
+
+    stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.dist_matrix(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n),
+    )
+    if err != 0:
+        raise RuntimeError('failed in calculating distance matrix')
+    return out
 
 def block_c2s_diag(ncart, nsph, angular, counts):
     '''
@@ -175,21 +193,18 @@ def block_c2s_diag(ncart, nsph, angular, counts):
 
     nshells = np.sum(counts)
     cart2sph = cupy.zeros([ncart, nsph])
-    rows = [0]
-    cols = [0]
+
+    rows = [np.array([0], dtype='int32')]
+    cols = [np.array([0], dtype='int32')]
     offsets = []
     for l, count in zip(angular, counts):
-        for _ in range(count):
-            r, c = c2s_l[l].shape
-            rows.append(rows[-1] + r)
-            cols.append(cols[-1] + c)
-            offsets.append(c2s_offset[l])
-    rows = np.asarray(rows, dtype='int32')
-    cols = np.asarray(cols, dtype='int32')
-    offsets = np.asarray(offsets, dtype='int32')
+        r, c = c2s_l[l].shape
+        rows.append(rows[-1][-1] + np.arange(1,count+1, dtype='int32') * r)
+        cols.append(cols[-1][-1] + np.arange(1,count+1, dtype='int32') * c)
+        offsets += [c2s_offset[l]] * count
 
-    rows = cupy.asarray(rows, dtype='int32')
-    cols = cupy.asarray(cols, dtype='int32')
+    rows = cupy.hstack(rows)
+    cols = cupy.hstack(cols)
     offsets = cupy.asarray(offsets, dtype='int32')
 
     stream = cupy.cuda.get_current_stream()
@@ -300,8 +315,10 @@ def transpose_sum(a, stream=None):
     return a + a.transpose(0,2,1)
     '''
     assert a.flags.c_contiguous
-    assert a.ndim == 3
     n = a.shape[-1]
+    if a.ndim == 2:
+        a = a.reshape([-1,n,n])
+    assert a.ndim == 3
     count = a.shape[0]
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.transpose_sum(

@@ -41,6 +41,9 @@ static void GINTint3c2e_pass1_j_kernel0000(GINTEnvVars envs, JKMatrix jk, BasisP
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    if (ish == jsh){
+        norm *= .5;
+    }
     int ij, kl;
     double gout0 = 0;
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
@@ -70,7 +73,7 @@ static void GINTint3c2e_pass1_j_kernel0000(GINTEnvVars envs, JKMatrix jk, BasisP
         }
         gout0 += fac;
     } }
-    
+
     int *ao_loc = c_bpcache.ao_loc;
     int nao = jk.nao;
     int i0 = ao_loc[ish] - jk.ao_offsets_i;
@@ -107,6 +110,9 @@ static void GINTint3c2e_pass1_j_kernel0010(GINTEnvVars envs, JKMatrix jk, BasisP
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    if (ish == jsh){
+        norm *= .5;
+    }
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;
@@ -215,6 +221,9 @@ static void GINTint3c2e_pass1_j_kernel1000(GINTEnvVars envs, JKMatrix jk, BasisP
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
+    if (ish == jsh){
+        norm *= .5;
+    }
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
     int nbas = c_bpcache.nbas;

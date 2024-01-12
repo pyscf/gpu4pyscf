@@ -279,14 +279,16 @@ def get_partition(mol, atom_grids_tab,
         grid_coord and grid_weight arrays.  grid_coord array has shape (N,3);
         weight 1D array has N elements.
     '''
+    atm_coords = numpy.asarray(mol.atom_coords() , order='C')
+    atm_coords = cupy.asarray(atm_coords)
+    '''
     if callable(radii_adjust) and atomic_radii is not None:
         f_radii_adjust = radii_adjust(mol, atomic_radii)
     else:
         f_radii_adjust = None
-    atm_coords = numpy.asarray(mol.atom_coords() , order='C')
     atm_dist = gto.inter_distance(mol)
-    atm_coords = cupy.asarray(atm_coords)
     atm_dist = cupy.asarray(atm_dist)
+
     if (becke_scheme is original_becke and
         (radii_adjust is radi.treutler_atomic_radii_adjust or
          radii_adjust is radi.becke_atomic_radii_adjust or
@@ -324,7 +326,7 @@ def get_partition(mol, atom_grids_tab,
                     pbecke[i] *= .5 * (1-g)
                     pbecke[j] *= .5 * (1+g)
             return pbecke
-
+    '''
     coords_all = []
     weights_all = []
     # support atomic_radii_adjust = None

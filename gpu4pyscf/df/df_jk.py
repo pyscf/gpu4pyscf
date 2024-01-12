@@ -63,7 +63,6 @@ def init_workflow(mf, dm0=None):
             rks.initialize_grids(mf, mf.mol, dm0)
             ni.build(mf.mol, mf.grids.coords)
             mf._numint.xcfuns = numint._init_xcfuns(mf.xc, dm0.ndim==3)
-    dm0 = cupy.asarray(dm0)
     return
 
 def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
@@ -253,10 +252,11 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     nao = dms_tag.shape[-1]
     dms = dms_tag.reshape([-1,nao,nao])
     nset = dms.shape[0]
-    t0 = log.init_timer()
+    t1 = t0 = log.init_timer()
     if dfobj._cderi is None:
         log.debug('CDERI not found, build...')
         dfobj.build(direct_scf_tol=direct_scf_tol, omega=omega)
+        t1 = log.timer_debug1('init jk', *t0)
 
     assert nao == dfobj.nao
     vj = None
@@ -264,7 +264,6 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     ao_idx = dfobj.intopt.sph_ao_idx
     dms = take_last2d(dms, ao_idx)
 
-    t1 = log.timer_debug1('init jk', *t0)
     rows = dfobj.intopt.cderi_row
     cols = dfobj.intopt.cderi_col
     if with_j:

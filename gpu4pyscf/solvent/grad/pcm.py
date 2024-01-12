@@ -114,6 +114,7 @@ def get_dD_dS(surface, dF, with_S=True, with_D=False):
     rij = cupy.linalg.norm(ri_rj, axis=-1)
     xi_r_ij = xi_ij * rij
     cupy.fill_diagonal(rij, 1)
+    xi_i = xi_j = None
 
     dS_dr = -(scipy.special.erf(xi_r_ij) - 2.0*xi_r_ij/PI**0.5*cupy.exp(-xi_r_ij**2))/rij**2
     cupy.fill_diagonal(dS_dr, 0)
@@ -134,13 +135,16 @@ def get_dD_dS(surface, dF, with_S=True, with_D=False):
         dD_dri = cupy.expand_dims(dD_dri, axis=-1)
 
         dD = dD_dri * drij + dS_dr * (-nj/rij + 3.0*nj_rij/rij**2 * drij)
-
+        dD_dri = None
     dSii_dF = -exponents * (2.0/PI)**0.5 / switch_fun**2
     dSii = cupy.expand_dims(dSii_dF, axis=(1,2)) * dF
 
     return dD, dS, dSii
 
 def grad_nuc(pcmobj, dm):
+    mol = pcmobj.mol
+    log = logger.new_logger(mol, mol.verbose)
+    t1 = log.init_timer()
     if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
         pcmobj._get_vind(dm)
 
@@ -168,6 +172,7 @@ def grad_nuc(pcmobj, dm):
     dv_g = numpy.einsum('gx,g->gx', dv_g, q_sym)
 
     de -= numpy.asarray([numpy.sum(dv_g[p0:p1], axis=0) for p0,p1 in gridslice])
+    t1 = log.timer_debug1('grad nuc', *t1)
     return de
 
 def grad_qv(pcmobj, dm):
@@ -176,7 +181,9 @@ def grad_qv(pcmobj, dm):
     '''
     if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
         pcmobj._get_vind(dm)
-
+    mol = pcmobj.mol
+    log = logger.new_logger(mol, mol.verbose)
+    t1 = log.init_timer()
     gridslice    = pcmobj.surface['gslice_by_atom']
     q_sym        = pcmobj._intermediates['q_sym']
 
@@ -199,6 +206,7 @@ def grad_qv(pcmobj, dm):
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
     dvj= 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     de = dq + dvj
+    t1 = log.timer_debug1('grad qv', *t1)
     return de.get()
 
 def grad_solver(pcmobj, dm):
@@ -206,6 +214,9 @@ def grad_solver(pcmobj, dm):
     dE = 0.5*v* d(K^-1 R) *v + q*dv
     v^T* d(K^-1 R)v = v^T*K^-1(dR - dK K^-1R)v = v^T K^-1(dR - dK q)
     '''
+    mol = pcmobj.mol
+    log = logger.new_logger(mol, mol.verbose)
+    t1 = log.init_timer()
     if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
         pcmobj._get_vind(dm)
 
@@ -300,7 +311,7 @@ def grad_solver(pcmobj, dm):
         de += de_dR - de_dK
     else:
         raise RuntimeError(f"Unknown implicit solvent model: {pcmobj.method}")
-
+    t1 = log.timer_debug1('grad solver', *t1)
     return de.get()
 
 def make_grad_object(grad_method):
