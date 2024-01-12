@@ -115,3 +115,27 @@ if(BUILD_LIBXC)
     CMAKE_CACHE_ARGS -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}
   )
 endif()
+
+option(BUILD_DFTD3 "Using DFTD3 for DFT" ON)
+if(BUILD_DFTD3)
+  include(ExternalProject)
+  ExternalProject_Add(dftd3
+    GIT_REPOSITORY "https://github.com/dftd3/simple-dftd3"
+    GIT_TAG v1.0.0
+    PREFIX ${PROJECT_BINARY_DIR}/deps
+    INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
+    CMAKE_ARGS -DWITH_OpenMP=OFF
+  )
+endif()
+
+option(BUILD_DFTD4 "Using DFTD4 for DFT" ON)
+if(BUILD_DFTD4)
+  include(ExternalProject)
+  ExternalProject_Add(dftd4
+    GIT_REPOSITORY "https://github.com/dftd4/dftd4"
+    GIT_TAG v3.6.0
+    PREFIX ${PROJECT_BINARY_DIR}/deps
+    INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
+    CMAKE_ARGS -DWITH_OpenMP=OFF
+  )
+endif()

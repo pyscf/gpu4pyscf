@@ -22,7 +22,6 @@ import sys
 import subprocess
 import re
 import glob
-import subprocess
 
 from setuptools import setup, find_packages, Extension
 from setuptools.command.build_py import build_py
@@ -87,8 +86,8 @@ class CMakeBuildPy(build_py):
         else:
             self.spawn(cmd)
 
-        self.build_dftd('dftd3', 'https://github.com/dftd3/simple-dftd3/releases/download/v1.0.0/dftd3-1.0.0-sdist.tar.gz')
-        self.build_dftd('dftd4', 'https://github.com/dftd4/dftd4/releases/download/v3.6.0/dftd4-sdist-3.6.0.tar.gz')
+        #self.build_dftd('dftd3', 'https://github.com/dftd3/simple-dftd3/releases/download/v1.0.0/dftd3-1.0.0-sdist.tar.gz')
+        #self.build_dftd('dftd4', 'https://github.com/dftd4/dftd4/releases/download/v3.6.0/dftd4-sdist-3.6.0.tar.gz')
 
         super().run()
 
