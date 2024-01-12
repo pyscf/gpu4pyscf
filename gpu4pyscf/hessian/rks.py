@@ -681,7 +681,7 @@ class Hessian(rhf_hess.Hessian):
         if self.base.disp[:2].upper() == 'D3':
             from pyscf import lib
             with lib.with_omp_threads(1):
-                import dftd3.pyscf as disp
+                import gpu4pyscf.dftd3.pyscf as disp
                 coords = self.mol.atom_coords()
                 natm = self.mol.natm
                 h_d3 = numpy.zeros([self.mol.natm, self.mol.natm, 3,3])
@@ -710,7 +710,7 @@ class Hessian(rhf_hess.Hessian):
             natm = self.mol.natm
             from pyscf import lib
             with lib.with_omp_threads(1):
-                from dftd4.interface import DampingParam, DispersionModel
+                from gpu4pyscf.dftd4.interface import DampingParam, DispersionModel
                 params = DampingParam(method=self.base.xc)
                 mol = self.mol.copy()
                 h_d3 = numpy.zeros([self.mol.natm, self.mol.natm, 3,3])

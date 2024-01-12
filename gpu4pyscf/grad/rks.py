@@ -504,7 +504,7 @@ class Gradients(rhf_grad.Gradients, pyscf.grad.rks.Gradients):
         if self.base.disp[:2].upper() == 'D3':
             from pyscf import lib
             with lib.with_omp_threads(1):
-                import dftd3.pyscf as disp
+                import gpu4pyscf.dftd3.pyscf as disp
                 d3 = disp.DFTD3Dispersion(self.mol, xc=self.base.xc, version=self.base.disp)
                 _, g_d3 = d3.kernel()
             return g_d3
@@ -516,7 +516,7 @@ class Gradients(rhf_grad.Gradients, pyscf.grad.rks.Gradients):
 
             from pyscf import lib
             with lib.with_omp_threads(1):
-                from dftd4.interface import DampingParam, DispersionModel
+                from gpu4pyscf.dftd4.interface import DampingParam, DispersionModel
                 model = DispersionModel(atoms, coords)
                 res = model.get_dispersion(DampingParam(method=self.base.xc), grad=True)
             return res.get("gradient")
