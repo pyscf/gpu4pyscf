@@ -1305,6 +1305,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 shls_slice=non0shl_idx,
                 ao_loc_slice=ao_loc_slice,
                 ctr_offsets_slice=ctr_offsets_slice)
+
             t1 = log.timer_debug2('evaluate ao slice', *t1)
             if pad > 0:
                 if deriv == 0:

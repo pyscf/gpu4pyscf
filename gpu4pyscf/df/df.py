@@ -250,6 +250,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
 
         row = intopt.ao_pairs_row[cp_ij_id] - i0
         col = intopt.ao_pairs_col[cp_ij_id] - j0
+
         ints_slices = ints_slices[:,col,row]
         if cd_low.tag == 'eig':
             cderi_block = cupy.dot(cd_low.T, ints_slices)
