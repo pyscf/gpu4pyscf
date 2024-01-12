@@ -211,7 +211,7 @@ def get_D_S(surface, with_S=True, with_D=False):
 
 class PCM(ddcosmo.DDCOSMO):
     _keys = {
-        'method', 'vdw_scale', 'surface'
+        'method', 'vdw_scale', 'surface', 'r_probe', 'intopt'
     }
     def __init__(self, mol):
         ddcosmo.DDCOSMO.__init__(self, mol)

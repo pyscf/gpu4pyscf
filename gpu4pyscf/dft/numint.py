@@ -36,7 +36,7 @@ GRID_BLKSIZE = 32
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 64*64)
 ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
 AO_ALIGNMENT = getattr(__config__, 'ao_aligned', 16)
-AO_THRESHOLD = 1e-12
+AO_THRESHOLD = 1e-10
 
 # Should we release the cupy cache?
 FREE_CUPY_CACHE = False
@@ -199,14 +199,15 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
         rho = _contract_rho(c0, c0)
     elif xctype in ('GGA', 'NLC'):
         rho = cupy.empty((4,ngrids))
-        c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc)
+        #c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc)
+        c0 = contract('nig,io->nog', ao, cpos)
         #:rho[0] = numpy.einsum('pi,pi->p', c0, c0)
-        _contract_rho(c0, c0, rho=rho[0])
+        _contract_rho(c0[0], c0[0], rho=rho[0])
         for i in range(1, 4):
-            c1 = _dot_ao_dm(mol, ao[i], cpos, non0tab, shls_slice, ao_loc)
+            #c1 = _dot_ao_dm(mol, ao[i], cpos, non0tab, shls_slice, ao_loc)
             #:rho[i] = numpy.einsum('pi,pi->p', c0, c1) * 2 # *2 for +c.c.
-            _contract_rho(c0, c1, rho=rho[i])
-            rho[i] *= 2
+            _contract_rho(c0[0], c0[i], rho=rho[i])
+        rho[1:] *= 2
     else: # meta-GGA
         if with_lapl:
             # rho[4] = \nabla^2 rho, rho[5] = 1/2 |nabla f|^2
@@ -215,17 +216,18 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
         else:
             rho = cupy.empty((5,ngrids))
             tau_idx = 4
-        c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc)
+        #c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc)
+        c0 = contract('nig,io->nog', ao, cpos)
         #:rho[0] = numpy.einsum('pi,pi->p', c0, c0)
-        _contract_rho(c0, c0, rho=rho[0])
+        _contract_rho(c0[0], c0[0], rho=rho[0])
 
         rho[tau_idx] = 0
         for i in range(1, 4):
-            c1 = _dot_ao_dm(mol, ao[i], cpos, non0tab, shls_slice, ao_loc)
+            #c1 = _dot_ao_dm(mol, ao[i], cpos, non0tab, shls_slice, ao_loc)
             #:rho[i] = numpy.einsum('pi,pi->p', c0, c1) * 2 # *2 for +c.c.
             #:rho[5] += numpy.einsum('pi,pi->p', c1, c1)
-            rho[i] = _contract_rho(c0, c1) * 2
-            rho[tau_idx] += _contract_rho(c1, c1)
+            rho[i] = _contract_rho(c0[0], c0[i])
+            rho[tau_idx] += _contract_rho(c0[i], c0[i])
 
         if with_lapl:
             if ao.shape[0] > 4:
@@ -233,11 +235,12 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
                 ao2 = ao[XX] + ao[YY] + ao[ZZ]
                 c1 = _dot_ao_dm(mol, ao2, cpos, non0tab, shls_slice, ao_loc)
                 #:rho[4] = numpy.einsum('pi,pi->p', c0, c1)
-                rho[4] = _contract_rho(c0, c1)
+                rho[4] = _contract_rho(c0[0], c1)
                 rho[4] += rho[5]
                 rho[4] *= 2
             else:
                 rho[4] = 0
+        rho[1:4] *= 2
         rho[tau_idx] *= .5
     return rho
 
@@ -321,11 +324,14 @@ def eval_rho4(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
             rho[i] = _contract_rho(c0, c_0[i])
         rho *= 2.0
     elif xctype in ('GGA', 'NLC'):
+        log = logger.new_logger(mol, mol.verbose)
+        t0 = log.init_timer()
         c_0 = contract('nig,aio->anog', ao, cpos1)
+        t0 = log.timer_debug1('ao * cpos', *t0)
         rho = cupy.empty([na, 4, ngrids])
         for i in range(na):
             _contract_rho_gga(c0, c_0[i], rho=rho[i])
-
+        t0 = log.timer_debug1('contract rho', *t0)
     else: # meta-GGA
         if with_lapl:
             raise NotImplementedError("mGGA with lapl not implemented")
@@ -454,7 +460,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nset = len(dms)
 
     if mo_coeff is not None:
-        mo_coeff = coeff @ mo_coeff
+        mo_coeff = mo_coeff[opt.ao_idx]
 
     nelec = cupy.zeros(nset)
     excsum = cupy.zeros(nset)
@@ -494,7 +500,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 mo_coeff_mask = mo_coeff[idx,:]
                 rho_tot[i,:,p0:p1] = eval_rho2(mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype)
         p0 = p1
-        t1 = log.timer_debug2('eval rho', *t1)
+        t1 = log.timer_debug2('eval rho slice', *t1)
     t0 = log.timer_debug1('eval rho', *t0)
 
     wv = []
@@ -755,7 +761,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 c0 = contract('nig,io->nog', ao, occ_coeff_mask)
             else: # mgga
                 c0 = contract('nig,io->nog', ao, occ_coeff_mask)
-
+        t1 = log.timer_debug2(f'eval occ_coeff, with mocc: {with_mocc}', *t1)
         if with_mocc:
             rho1 = eval_rho4(opt.mol, ao, c0, mo1[:,mask], xctype=xctype, with_lapl=False)
         else:
@@ -1242,7 +1248,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         for ip0, ip1 in lib.prange(0, ngrids, blksize):
             coords = grids.coords[ip0:ip1]
             weight = grids.weights[ip0:ip1]
-
+            t1 = log.init_timer()
             # cache ao indices
             if (block_id, blksize, ngrids) not in ni.non0ao_idx:
                 stream = cupy.cuda.get_current_stream()

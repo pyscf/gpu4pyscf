@@ -354,12 +354,13 @@ def _d1d2_dot_(vmat, mol, ao1, ao2, mask, ao_loc, dR1_on_bra=True):
             for d2 in range(3):
                 vmat[d1,d2] += numint._dot_ao_ao(mol, ao1[d1], ao2[d2], mask,
                                                  shls_slice, ao_loc)
+        #vmat += contract('xig,yjg->xyij', ao1, ao2)
     else:  # (d/dR2 bra) * (d/dR1 ket)
         for d1 in range(3):
             for d2 in range(3):
                 vmat[d1,d2] += numint._dot_ao_ao(mol, ao1[d2], ao2[d1], mask,
                                                  shls_slice, ao_loc)
-
+        #vmat += contract('yig,xjg->xyij', ao1, ao2)
 def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     mol = hessobj.mol
     mf = hessobj.base
@@ -461,7 +462,10 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 for i in range(3):
                     aow = rks_grad._make_dR_dao_w(ao_mask, wv[i])
                     rks_grad._d1_dot_(aow, ao_mask[0].T, out=vmat_tmp[i])
-                aow = [numint._scale_ao(ao_mask[:4], wv[i,:4]) for i in range(3)]
+                ng = len(weight)
+                aow = cupy.empty([3,nao_non0,ng])
+                for i in range(3):
+                    aow[i] = numint._scale_ao(ao_mask[:4], wv[i,:4])
                 _d1d2_dot_(vmat_tmp, mol, ao_mask[1:4], aow, mask, ao_loc, False)
                 #vmat_tmp = contract('pi,xypq->xyiq', coeff[mask], vmat_tmp)
                 #vmat_tmp = contract('qj,xyiq->xyij', coeff[mask], vmat_tmp)

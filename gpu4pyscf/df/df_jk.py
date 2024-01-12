@@ -63,7 +63,6 @@ def init_workflow(mf, dm0=None):
             rks.initialize_grids(mf, mf.mol, dm0)
             ni.build(mf.mol, mf.grids.coords)
             mf._numint.xcfuns = numint._init_xcfuns(mf.xc, dm0.ndim==3)
-    dm0 = cupy.asarray(dm0)
     return
 
 def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):

@@ -28,7 +28,7 @@
 #include "nr_eval_gto.cuh"
 #include "contract_rho.cuh"
 
-#define NG_PER_BLOCK       128
+#define NG_PER_BLOCK       256
 #define LMAX            8
 #define GTO_MAX_CART     15
 
@@ -354,9 +354,10 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
     double ce_2a = 0;
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double c = coeffs[ip];
-        double e = exp(-exps[ip] * rr);
+        double exp_ip = exps[ip];
+        double e = exp(-exp_ip * rr);
         ce += c * e;
-        ce_2a += c * e * exps[ip];
+        ce_2a += c * e * exp_ip;
     }
     ce *= offsets.fac;
     ce_2a *= -2 * offsets.fac;
@@ -1025,9 +1026,10 @@ static void _sph_kernel_deriv1(BasOffsets offsets)
     double ce_2a = 0;
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double c = coeffs[ip];
-        double e = exp(-exps[ip] * rr);
+        double exp_ip = exps[ip];
+        double e = exp(-exp_ip * rr);
         ce += c * e;
-        ce_2a += c * e * exps[ip];
+        ce_2a += c * e * exp_ip;
     }
     ce *= offsets.fac;
     ce_2a *= -2 * offsets.fac;

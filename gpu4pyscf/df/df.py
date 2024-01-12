@@ -135,7 +135,7 @@ class DF(df.DF):
         rows = self.intopt.cderi_row
         cols = self.intopt.cderi_col
         buf_prefetch = None
-
+        buf_cderi = cupy.zeros([blksize,nao,nao])
         data_stream = cupy.cuda.stream.Stream(non_blocking=True)
         compute_stream = cupy.cuda.get_current_stream()
         #compute_stream = cupy.cuda.stream.Stream()
@@ -153,14 +153,15 @@ class DF(df.DF):
                     buf_prefetch.set(cderi_sparse[p1:p2,:])
                 stop_event = data_stream.record()
             if unpack:
-                buf2 = cupy.zeros([p1-p0,nao,nao])
-                buf2[:p1-p0,rows,cols] = buf
-                buf2[:p1-p0,cols,rows] = buf
+                buf_cderi[:p1-p0,rows,cols] = buf
+                buf_cderi[:p1-p0,cols,rows] = buf
+                buf2 = buf_cderi[:p1-p0]
             else:
                 buf2 = None
             yield buf2, buf.T
             compute_stream.wait_event(stop_event)
-            cupy.cuda.Device().synchronize()
+            if isinstance(cderi_sparse, np.ndarray):
+                cupy.cuda.Device().synchronize()
 
             if buf_prefetch is not None:
                 buf = buf_prefetch
@@ -205,8 +206,8 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
             cderi = np.ndarray([naux, npair], dtype=np.float64, order='C', buffer=mem)
         except Exception:
             raise RuntimeError('Out of CPU memory')
-
-    data_stream = cupy.cuda.stream.Stream(non_blocking=False)
+    if(not use_gpu_memory):
+        data_stream = cupy.cuda.stream.Stream(non_blocking=False)
     count = 0
     nq = len(intopt.log_qs)
     for cp_ij_id, _ in enumerate(intopt.log_qs):
@@ -265,8 +266,8 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
                 for i in range(naux):
                     cderi_block[i].get(out=cderi[i,ij0:ij1])
         t1 = log.timer_debug1(f'solve {cp_ij_id} / {nq}', *t1)
-
-    cupy.cuda.Device().synchronize()
+    if not use_gpu_memory:
+        cupy.cuda.Device().synchronize()
     return cderi
 
 
