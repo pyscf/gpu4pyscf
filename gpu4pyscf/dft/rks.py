@@ -261,7 +261,7 @@ class RKS(scf.hf.RHF, rks.RKS):
             coords = self.mol.atom_coords()
             from pyscf import lib
             with lib.with_omp_threads(1):
-                from dftd4.interface import DampingParam, DispersionModel
+                from gpu4pyscf.dftd4.interface import DampingParam, DispersionModel
                 model = DispersionModel(atoms, coords)
                 res = model.get_dispersion(DampingParam(method=self.xc), grad=False)
             return res.get("energy")

@@ -516,7 +516,7 @@ class Gradients(rhf_grad.Gradients, pyscf.grad.rks.Gradients):
 
             from pyscf import lib
             with lib.with_omp_threads(1):
-                from dftd4.interface import DampingParam, DispersionModel
+                from gpu4pyscf.dftd4.interface import DampingParam, DispersionModel
                 model = DispersionModel(atoms, coords)
                 res = model.get_dispersion(DampingParam(method=self.base.xc), grad=True)
             return res.get("gradient")
