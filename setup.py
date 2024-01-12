@@ -22,11 +22,11 @@ import sys
 import subprocess
 import re
 import glob
+import subprocess
 
 from setuptools import setup, find_packages, Extension
 from setuptools.command.build_py import build_py
 from distutils.util import get_platform
-from subprocess import check_call
 
 NAME = 'gpu4pyscf'
 AUTHOR = 'Qiming Sun'
@@ -107,7 +107,7 @@ class CMakeBuildPy(build_py):
             'SOURCE_URL': source_url
         }
 
-        check_call(['bash', script_path], env=env_vars, shell=True)
+        subprocess.run(['sh', script_path], env=env_vars, shell=True, check=True)
 
         build_dir_pattern = f'tmp/{project_name}-*/tmp/{project_name}-build/lib/python3/dist-packages/{project_name}'
         build_dirs = glob.glob(build_dir_pattern)
