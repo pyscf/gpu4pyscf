@@ -510,21 +510,13 @@ class Gradients(rhf_grad.Gradients, pyscf.grad.rks.Gradients):
 
     def get_dispersion(self):
         if self.base.disp[:2].upper() == 'D3':
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                import gpu4pyscf.dftd3.pyscf as disp
-                d3 = disp.DFTD3Dispersion(self.mol, xc=self.base.xc, version=self.base.disp)
-                _, g_d3 = d3.kernel()
-            return g_d3
+            from gpu4pyscf.lib import dftd3
+            dftd3_model = dftd3.DFTD3Dispersion(self.base.mol, xc=self.base.xc, version=self.base.disp)
+            res = dftd3_model.get_dispersion(grad=True)
+            return res['gradient']
 
         if self.base.disp[:2].upper() == 'D4':
-            from pyscf.data.elements import charge
-            atoms = numpy.array([ charge(a[0]) for a in self.mol._atom])
-            coords = self.mol.atom_coords()
-
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                from gpu4pyscf.dftd4.interface import DampingParam, DispersionModel
-                model = DispersionModel(atoms, coords)
-                res = model.get_dispersion(DampingParam(method=self.base.xc), grad=True)
+            from gpu4pyscf.lib import dftd4
+            dftd4_model = dftd4.DFTD4Dispersion(self.base.mol, xc=self.base.xc)
+            res = dftd4_model.get_dispersion(grad=True)
             return res.get("gradient")

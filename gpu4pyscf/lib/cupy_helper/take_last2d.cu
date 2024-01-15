@@ -42,7 +42,7 @@ static void _takebak(double *out, double *a, int *indices,
 {
     int i0 = blockIdx.y * COUNT_BLOCK;
     int j = blockIdx.x * blockDim.x + threadIdx.x;
-    if (j > n_a) {
+    if (j >= n_a) {
         return;
     }
 
