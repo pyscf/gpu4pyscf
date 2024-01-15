@@ -1,6 +1,6 @@
 #!/bin/bash
 
-WORK_DIR="./tmp"
+WORK_DIR="/tmp/build_dftdx"
 rm -r ${WORK_DIR}
 mkdir -p ${WORK_DIR}
 

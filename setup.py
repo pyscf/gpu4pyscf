@@ -104,7 +104,8 @@ class CMakeBuildPy(build_py):
 
         subprocess.run(f"PROJECT_NAME={project_name} SOURCE_URL={source_url} sh {script_path}", shell=True, check=True)
 
-        build_dir_pattern = f'tmp/{project_name}-*/tmp/{project_name}-build/lib/python3/dist-packages/{project_name}'
+        work_dir = "/tmp/build_dftdx"
+        build_dir_pattern = f'{work_dir}/{project_name}-build/lib/python3/dist-packages/{project_name}'
         build_dirs = glob.glob(build_dir_pattern)
         if not len(build_dirs) == 1:
             raise FileNotFoundError("Cannot find build directory: {}".format(build_dir_pattern))
