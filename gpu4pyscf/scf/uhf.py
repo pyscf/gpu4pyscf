@@ -18,7 +18,7 @@
 
 from functools import reduce
 from pyscf.scf import uhf
-from gpu4pyscf.scf.hf import _get_jk, eigh, damping, level_shift
+from gpu4pyscf.scf.hf import _get_jk, eigh, damping, level_shift, _kernel
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import tag_array
 import numpy as np
@@ -104,95 +104,6 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         f = (level_shift(s1e, dm[0], f[0], shifta),
              level_shift(s1e, dm[1], f[1], shiftb))
     return f
-
-
-def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
-           dump_chk=True, dm0=None, callback=None, conv_check=True, **kwargs):
-    conv_tol = mf.conv_tol
-    mol = mf.mol
-    verbose = mf.verbose
-    log = logger.new_logger(mol, verbose)
-    t0 = log.init_timer()
-    if(conv_tol_grad is None):
-        conv_tol_grad = conv_tol**.5
-        logger.info(mf, 'Set gradient conv threshold to %g', conv_tol_grad)
-
-    if(dm0 is None):
-        dm0 = mf.get_init_guess(mol)
-
-    dm = cupy.asarray(dm0, order='C')
-    if hasattr(dm0, 'mo_coeff') and hasattr(dm0, 'mo_occ'):
-        mo_coeff = cupy.asarray(dm0.mo_coeff)
-        mo_occ = cupy.asarray(dm0.mo_occ)
-        occ_coeff = cupy.asarray(mo_coeff[:,mo_occ>0])
-        dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
-
-    # use optimized workflow if possible
-    if hasattr(mf, 'init_workflow'):
-        mf.init_workflow(dm0=dm)
-        h1e = mf.h1e
-        s1e = mf.s1e
-    else:
-        h1e = cupy.asarray(mf.get_hcore(mol))
-        s1e = cupy.asarray(mf.get_ovlp(mol))
-
-    vhf = mf.get_veff(mol, dm)
-    e_tot = mf.energy_tot(dm, h1e, vhf)
-    logger.info(mf, 'init E= %.15g', e_tot)
-    t1 = log.timer_debug1('total prep', *t0)
-    scf_conv = False
-
-    if isinstance(mf.diis, lib.diis.DIIS):
-        mf_diis = mf.diis
-    elif mf.diis:
-        assert issubclass(mf.DIIS, lib.diis.DIIS)
-        mf_diis = mf.DIIS(mf, mf.diis_file)
-        mf_diis.space = mf.diis_space
-        mf_diis.rollback = mf.diis_space_rollback
-        fock = mf.get_fock(h1e, s1e, vhf, dm)
-        _, mf_diis.Corth = mf.eig(fock, s1e)
-    else:
-        mf_diis = None
-
-    for cycle in range(mf.max_cycle):
-        t0 = log.init_timer()
-        dm_last = dm
-        last_hf_e = e_tot
-
-        f = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis)
-        t1 = log.timer_debug1('DIIS', *t0)
-        mo_energy, mo_coeff = mf.eig(f, s1e)
-        t1 = log.timer_debug1('eig', *t1)
-        mo_occ = mf.get_occ(mo_energy, mo_coeff)
-        dm = mf.make_rdm1(mo_coeff, mo_occ)
-        t1 = log.timer_debug1('dm', *t1)
-        vhf = mf.get_veff(mol, dm, dm_last, vhf)
-        t1 = log.timer_debug1('veff', *t1)
-        e_tot = mf.energy_tot(dm, h1e, vhf)
-        t1 = log.timer_debug1('energy', *t1)
-
-        norm_ddm = cupy.linalg.norm(dm-dm_last)
-        t1 = log.timer_debug1('total', *t0)
-        logger.info(mf, 'cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
-                    cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
-        e_diff = abs(e_tot-last_hf_e)
-        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, f))
-        if(e_diff < conv_tol and norm_gorb < conv_tol_grad):
-            scf_conv = True
-            break
-
-    if(cycle == mf.max_cycle):
-        logger.warn("SCF failed to converge")
-
-    # for dispersion correction
-    e_tot = e_tot.get()
-    if(hasattr(mf, 'get_dispersion')):
-        e_disp = mf.get_dispersion()
-        mf.e_disp = e_disp
-        mf.e_mf = e_tot
-        e_tot += e_disp
-
-    return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
 
 class UHF(uhf.UHF):
