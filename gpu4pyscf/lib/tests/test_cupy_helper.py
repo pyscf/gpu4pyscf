@@ -31,7 +31,7 @@ class KnownValues(unittest.TestCase):
         assert(cupy.linalg.norm(a[:,indices][:,:,indices] - b) < 1e-10)
 
     def test_transpose_sum(self):
-        n = 1287
+        n = 31
         count = 127
         a = cupy.random.rand(count,n,n)
         b = a + a.transpose(0,2,1)

@@ -22,7 +22,6 @@ import sys
 import subprocess
 import re
 import glob
-import subprocess
 
 from setuptools import setup, find_packages, Extension
 from setuptools.command.build_py import build_py
@@ -87,32 +86,7 @@ class CMakeBuildPy(build_py):
         else:
             self.spawn(cmd)
 
-        self.build_dftd('dftd3', 'https://github.com/dftd3/simple-dftd3/releases/download/v1.0.0/dftd3-1.0.0-sdist.tar.gz')
-        self.build_dftd('dftd4', 'https://github.com/dftd4/dftd4/releases/download/v3.6.0/dftd4-sdist-3.6.0.tar.gz')
-
         super().run()
-
-    def build_dftd(self,project_name,source_url):
-        self.plat_name = get_platform()
-        self.build_base = 'build'
-        self.build_lib = os.path.join(self.build_base, 'lib')
-        self.build_temp = os.path.join(self.build_base, f'temp.{self.plat_name}')
-
-        script_path = 'builder/build_dftdx.sh'
-        if not os.path.exists(script_path):
-            raise FileNotFoundError("Cannot find build script: {}".format(script_path))
-
-        subprocess.run(f"PROJECT_NAME={project_name} SOURCE_URL={source_url} sh {script_path}", shell=True, check=True)
-
-        build_dir_pattern = f'tmp/{project_name}-*/tmp/{project_name}-build/lib/python3/dist-packages/{project_name}'
-        build_dirs = glob.glob(build_dir_pattern)
-        if not len(build_dirs) == 1:
-            raise FileNotFoundError("Cannot find build directory: {}".format(build_dir_pattern))
-        build_dir = build_dirs[0]
-
-        target_dir = os.path.join(self.build_lib, 'gpu4pyscf', project_name)
-        self.copy_tree(build_dir, target_dir)
-
 
 # build_py will produce plat_name = 'any'. Patch the bdist_wheel to change the
 # platform tag because the C extensions are platform dependent.
@@ -152,13 +126,7 @@ setup(
     install_requires=[
         'pyscf>=2.4.0',
         f'cupy-cuda{CUDA_VERSION}>=12.0',
-        # 'dftd3==0.7.0',
-        # 'dftd4==3.5.0',
         'geometric',
         f'gpu4pyscf-libxc-cuda{CUDA_VERSION}',
-    ],
-    package_data={
-        "gpu4pyscf.dftd3": ["_libdftd3*.so", "parameters.toml"],
-        "gpu4pyscf.dftd4": ["_libdftd4*.so", "*.toml", "*.json"],
-    },
+    ]
 )

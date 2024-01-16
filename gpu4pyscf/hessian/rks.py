@@ -688,60 +688,59 @@ class Hessian(rhf_hess.Hessian):
 
     def get_dispersion(self):
         if self.base.disp[:2].upper() == 'D3':
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                import gpu4pyscf.dftd3.pyscf as disp
-                coords = self.mol.atom_coords()
-                natm = self.mol.natm
-                h_d3 = numpy.zeros([self.mol.natm, self.mol.natm, 3,3])
-                mol = self.mol.copy()
-                eps = 1e-5
-                for i in range(natm):
-                    for j in range(3):
-                        coords[i,j] += eps
-                        mol.set_geom_(coords, unit='Bohr')
-                        d3 = disp.DFTD3Dispersion(mol, xc=self.base.xc, version=self.base.disp)
-                        _, g1 = d3.kernel()
+            from gpu4pyscf.lib import dftd3
+            coords = self.mol.atom_coords()
+            natm = self.mol.natm
+            h_d3 = numpy.zeros([self.mol.natm, self.mol.natm, 3,3])
+            mol = self.mol.copy()
+            eps = 1e-5
+            for i in range(natm):
+                for j in range(3):
+                    coords[i,j] += eps
+                    mol.set_geom_(coords, unit='Bohr')
+                    mol.build()
+                    dftd3_model = dftd3.DFTD3Dispersion(mol, xc=self.base.xc, version=self.base.disp)
+                    res = dftd3_model.get_dispersion(grad=True)
+                    g1 = res['gradient']
 
-                        coords[i,j] -= 2.0*eps
-                        mol.set_geom_(coords, unit='Bohr')
-                        d3 = disp.DFTD3Dispersion(mol, xc=self.base.xc, version=self.base.disp)
-                        _, g2 = d3.kernel()
+                    coords[i,j] -= 2.0*eps
+                    mol.set_geom_(coords, unit='Bohr')
+                    mol.build()
+                    dftd3_model = dftd3.DFTD3Dispersion(mol, xc=self.base.xc, version=self.base.disp)
+                    res = dftd3_model.get_dispersion(grad=True)
+                    g2 = res['gradient']
 
-                        coords[i,j] += eps
-                        h_d3[i,:,j,:] = (g1 - g2)/(2.0*eps)
+                    coords[i,j] += eps
+                    h_d3[i,:,j,:] = (g1 - g2)/(2.0*eps)
             return h_d3
 
         if self.base.disp[:2].upper() == 'D4':
-            from pyscf.data.elements import charge
-            atoms = numpy.array([ charge(a[0]) for a in self.mol._atom])
+            from gpu4pyscf.lib import dftd4
             coords = self.mol.atom_coords()
             natm = self.mol.natm
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                from gpu4pyscf.dftd4.interface import DampingParam, DispersionModel
-                params = DampingParam(method=self.base.xc)
-                mol = self.mol.copy()
-                h_d3 = numpy.zeros([self.mol.natm, self.mol.natm, 3,3])
-                eps = 1e-5
-                for i in range(natm):
-                    for j in range(3):
-                        coords[i,j] += eps
-                        mol.set_geom_(coords, unit='Bohr')
-                        model = DispersionModel(atoms, coords)
-                        res = model.get_dispersion(params, grad=True)
-                        g1 = res.get("gradient")
+            mol = self.mol.copy()
+            h_d4 = numpy.zeros([mol.natm, mol.natm, 3,3])
+            eps = 1e-5
+            for i in range(natm):
+                for j in range(3):
+                    coords[i,j] += eps
+                    mol.set_geom_(coords, unit='Bohr')
+                    mol.build()
+                    dftd4_model = dftd4.DFTD4Dispersion(mol, xc=self.base.xc)
+                    res = dftd4_model.get_dispersion(grad=True)
+                    g1 = res.get("gradient")
 
-                        coords[i,j] -= 2.0*eps
-                        mol.set_geom_(coords, unit='Bohr')
-                        model = DispersionModel(atoms, coords)
-                        res = model.get_dispersion(params, grad=True)
-                        g2 = res.get("gradient")
+                    coords[i,j] -= 2.0*eps
+                    mol.set_geom_(coords, unit='Bohr')
+                    mol.build()
+                    dftd4_model = dftd4.DFTD4Dispersion(mol, xc=self.base.xc)
+                    res = dftd4_model.get_dispersion(grad=True)
+                    g2 = res.get("gradient")
 
-                        coords[i,j] += eps
-                        h_d3[i,:,j,:] = (g1 - g2)/(2.0*eps)
+                    coords[i,j] += eps
+                    h_d4[i,:,j,:] = (g1 - g2)/(2.0*eps)
 
-            return h_d3
+            return h_d4
 
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
