@@ -116,7 +116,9 @@ if(BUILD_LIBXC)
   )
 endif()
 
-# build static dependencies first, build dftd3 and dftd3 shared libs then
+# ---- compilation for dftd3 and dft4
+# 1. build static dependencies
+# 2. build dftd3 and dftd4 shared libs, dftd3 and dftd4 will automatically search their dependencies
 # https://github.com/dftd4/dftd4/blob/3fc00439c6abea2639868b644c52f0920d6c2e22/config/cmake/Findmstore.cmake#L24
 option(BUILD_DFTD3 "Using DFTD3 for DFT" ON)
 if(BUILD_DFTD3)
