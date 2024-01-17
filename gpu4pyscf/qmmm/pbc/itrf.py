@@ -144,16 +144,25 @@ def qmmm_for_scf(scf_method, mm_mol):
                 raise RuntimeError('mm_charge function cannot be applied on post-HF methods')
 
             Ls = mm_mol.get_lattice_Ls()
+            qm_center = np.mean(mol.atom_coords(), axis=0)
 
             mask = np.linalg.norm(Ls, axis=-1) < 1e-12
             Ls[mask] = [np.inf] * 3
-            r_qm_qm = mol.atom_coords()[:,None,:] - mol.atom_coords()[None,:,:] \
-                    + Ls[:,None,None,:]
-            r_qm_qm = np.sqrt(cp.einsum('Lijx,Lijx->Lij', r_qm_qm, r_qm_qm))
-            assert rcut_hcore < np.min(r_qm_qm), "QM image is within rcut_hcore of QM"
+            r_qm = (mol.atom_coords() - qm_center)[None,:,:] - Ls[:,None,:]
+            r_qm = np.einsum('Lix,Lix->Li', r_qm, r_qm)
+            assert rcut_hcore**2 < np.min(r_qm), \
+                f"QM image is within rcut_hcore of QM center. " + \
+                f"rcut_hcore = {rcut_hcore} >= min(r_qm) = {np.sqrt(np.min(r_qm))}"
             Ls[Ls == np.inf] = 0.0
 
-            qm_center = cp.asarray(np.mean(mol.atom_coords(), axis=0))
+            r_qm = mol.atom_coords() - qm_center
+            r_qm = np.einsum('ix,ix->i', r_qm, r_qm)
+            assert rcut_hcore**2 > np.max(r_qm), \
+                f"Not all QM atoms are within rcut_hcore of QM center. " + \
+                f"rcut_hcore = {rcut_hcore} <= max(r_qm) = {np.sqrt(np.max(r_qm))}"
+            r_qm = None
+
+            qm_center = cp.asarray(qm_center)
             all_coords = cp.asarray((mm_mol.atom_coords()[None,:,:] \
                     + Ls[:,None,:]).reshape(-1,3))
             all_charges = cp.hstack([mm_mol.atom_charges()] * len(Ls))
@@ -198,6 +207,7 @@ def qmmm_for_scf(scf_method, mm_mol):
                 intopt = int3c_blk = None
             else:
                 # TODO test this block
+                raise RuntimeError("Not tested yet")
                 nao = mol.nao
                 max_memory = self.max_memory - lib.current_memory()[0]
                 blksize = int(min(max_memory*1e6/8/nao**2, 200))
@@ -761,8 +771,6 @@ def qmmm_grad_for_scf(scf_grad):
             all_mm_coords = all_mm_charges = None
 
             #------ qm - qm clasiical ewald energy gradient ------#
-            # NOTE here I assume QM images are beyond any cutoff of QM
-            # which was checked in mm_mol.get_ewald_pot
             R = qm_coords[:,None,:] - qm_coords[None,:,:]
             r = np.sqrt(cp.einsum('ijx,ijx->ij', R, R))
             r[r<1e-16] = 1e100
@@ -777,13 +785,21 @@ def qmmm_grad_for_scf(scf_grad):
             qm_ewovrl_grad += cp.einsum('i,ijxab,jab->jx', qm_charges, Tijabc, qm_quads) / 3 #
 
             # ewald real-space sum
+            # NOTE here I assume ewald real-space sum is over all qm images
+            # consistent with mm_mole.get_ewald_pot
+            R = (R[:,:,None,:] - Lall[None,None]).reshape(len(qm_coords), len(Lall)*len(qm_coords), 3)
+            r = np.sqrt(cp.einsum('ijx,ijx->ij', R, R))
+            r[r<1e-16] = 1e100
             Tija, Tijab, Tijabc = grad_kTij(R, r, ew_eta)
-            qm_ewovrl_grad += cp.einsum('i,ijx,j->ix', qm_charges, Tija, qm_charges)
-            qm_ewovrl_grad -= cp.einsum('i,ijxa,ja->ix', qm_charges, Tijab, qm_dipoles)
-            qm_ewovrl_grad += cp.einsum('i,ijxa,ja->jx', qm_charges, Tijab, qm_dipoles) #
-            qm_ewovrl_grad -= cp.einsum('ia,ijxab,jb->ix', qm_dipoles, Tijabc, qm_dipoles)
-            qm_ewovrl_grad += cp.einsum('i,ijxab,jab->ix', qm_charges, Tijabc, qm_quads) / 3
-            qm_ewovrl_grad -= cp.einsum('i,ijxab,jab->jx', qm_charges, Tijabc, qm_quads) / 3 #
+            Tija = Tija.reshape(len(qm_coords), len(qm_coords), len(Lall), 3)
+            Tijab = Tijab.reshape(len(qm_coords), len(qm_coords), len(Lall), 3, 3)
+            Tijabc = Tijabc.reshape(len(qm_coords), len(qm_coords), len(Lall), 3, 3, 3)
+            qm_ewovrl_grad += cp.einsum('i,ijLx,j->ix', qm_charges, Tija, qm_charges)
+            qm_ewovrl_grad -= cp.einsum('i,ijLxa,ja->ix', qm_charges, Tijab, qm_dipoles)
+            qm_ewovrl_grad += cp.einsum('i,ijLxa,ja->jx', qm_charges, Tijab, qm_dipoles) #
+            qm_ewovrl_grad -= cp.einsum('ia,ijLxab,jb->ix', qm_dipoles, Tijabc, qm_dipoles)
+            qm_ewovrl_grad += cp.einsum('i,ijLxab,jab->ix', qm_charges, Tijabc, qm_quads) / 3
+            qm_ewovrl_grad -= cp.einsum('i,ijLxab,jab->jx', qm_charges, Tijabc, qm_quads) / 3 #
 
             cput2 = logger.timer(self, 'grad_ewald real-space', *cput1)
 

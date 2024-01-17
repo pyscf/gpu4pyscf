@@ -46,7 +46,8 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
             logger.warn(self, "Setting rcut_ewald to be half box size")
         if rcut_hcore is None:
             rcut_hcore = numpy.linalg.norm(numpy.diag(a)) / 2
-            logger.warn(self, "Setting rcut_hcore to be half box size")
+            logger.warn(self, "Setting rcut_hcore to be half box diagonal")
+        # rcut_ewald has to be < box size cuz my get_lattice_Ls only considers nearest cell
         assert rcut_ewald < min(numpy.diag(a)), "Only rcut_ewald < box size implemented"
         self.rcut_ewald = rcut_ewald
         self.rcut_hcore = rcut_hcore
@@ -178,9 +179,9 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                 # qm quad - mm pc
                 ewovrl2[i0:i1] += -cp.einsum('j,ijab->iab', charges, Tijab) / 3
             else:
-                # FIXME a too small rcut_hcore truncates QM atoms, while this correction
+                # NOTE a too small rcut_hcore truncates QM atoms, while this correction
                 # should be applied to all QM pairs regardless of rcut_hcore
-                # FIXME do this check in another way
+                # NOTE this is now checked in get_hcore
                 #assert r[:,mask].shape[0] == r[:,mask].shape[1]   # real-space should not see qm images
                 # ew00 = -d^2 E / dQi dQj
                 # ew01 = -d^2 E / dQi dDja
@@ -216,17 +217,17 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                 ewovrl2[i0:i1] -= cp.einsum('j,ijab->iab', all_charges2[mask], Tijab) / 3
     
             # ewald real-space sum
-            cut2 = (ew_cut + rmax_qm)**2
-            mask = dist2 <= cut2
-            r_ = r[:,mask]
-            R_ = R[:,mask]
             if all_charges2 is not None:
+                cut2 = (ew_cut + rmax_qm)**2
+                mask = dist2 <= cut2
+                r_ = r[:,mask]
+                R_ = R[:,mask]
                 all_charges2_ = all_charges2[mask]
             else:
-                pass
-                # FIXME check this in another way
-                #if r_.shape[0] != r_.shape[1]:
-                #    raise NotImplementedError("QM image cannot be within ewald cutoff of QM")
+                # ewald sum will run over all qm images regardless of ew_cut
+                # this is to ensure r and R will always have the shape of (i1-i0, L*num_qm)
+                r_ = r
+                R_ = R
             ekR = cp.exp(-ew_eta**2 * r_**2)
             # Tij = \hat{1/r} = f0 / r = erfc(r) / r
             Tij = erfc(ew_eta * r_) / r_
@@ -246,6 +247,9 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                 ewovrl1[i0:i1] += cp.einsum('j,ija->ia', all_charges2_, Tija)
                 ewovrl2[i0:i1] += cp.einsum('j,ijab->iab', all_charges2_, Tijab) / 3
             else:
+                Tij = cp.sum(Tij.reshape(i1-i0, len(Lall), len(coords1)), axis=1)
+                Tija = cp.sum(Tija.reshape(i1-i0, len(Lall), len(coords1), 3), axis=1)
+                Tijab = cp.sum(Tijab.reshape(i1-i0, len(Lall), len(coords1), 3, 3), axis=1)
                 ewovrl00[i0:i1] += Tij
                 ewovrl01[i0:i1] -= Tija
                 ewovrl11[i0:i1] -= Tijab
