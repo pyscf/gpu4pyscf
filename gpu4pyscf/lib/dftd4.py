@@ -20,8 +20,10 @@ from pyscf import lib, gto
 
 libdftd4 = np.ctypeslib.load_library('libdftd4',  os.path.abspath(os.path.join(__file__, '..', 'deps', 'lib')))
 
-libdftd4.dftd4_new_error.restype     = ctypes.c_void_p
-libdftd4.dftd4_new_structure.restype = ctypes.c_void_p
+libdftd4.dftd4_new_error.restype             = ctypes.c_void_p
+libdftd4.dftd4_new_structure.restype         = ctypes.c_void_p
+libdftd4.dftd4_new_d4_model.restype          = ctypes.c_void_p
+libdftd4.dftd4_load_rational_damping.restype = ctypes.c_void_p
 
 class DFTD4Dispersion(lib.StreamObject):
     def __init__(self, mol, xc, atm=False):
@@ -54,8 +56,9 @@ class DFTD4Dispersion(lib.StreamObject):
 
     def __del__(self):
         err = libdftd4.dftd4_new_error()
+        param = ctypes.cast(self._param, ctypes.c_void_p)
+        libdftd4.dftd4_delete_param(ctypes.byref(param))
         libdftd4.dftd4_delete_structure(err, self._mol)
-        libdftd4.dftd4_delete_param(err, self._param)
         libdftd4.dftd4_delete_model(err, self._disp)
         libdftd4.dftd4_delete_error(err)
 

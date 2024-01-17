@@ -49,7 +49,7 @@ def run_dft_chelpg(xc, deltaR):
     e_dft = mf.kernel()
     q = chelpg.eval_chelpg_layer_gpu(mf, deltaR=deltaR)
     return e_dft, q
-    
+
 
 class KnownValues(unittest.TestCase):
     '''
@@ -63,7 +63,7 @@ class KnownValues(unittest.TestCase):
     CHELPG        TRUE
     SCF_CONVERGENCE 10
     $end
-    
+
         Ground-State ChElPG Net Atomic Charges
 
      Atom                 Charge (a.u.)
@@ -78,7 +78,7 @@ class KnownValues(unittest.TestCase):
         e_tot, q = run_dft_chelpg('B3LYP', 0.1)
         assert np.allclose(e_tot, -76.4666495181)
         assert np.allclose(q, np.array([-0.712558, 0.356292, 0.356266]))
-        
+
 
 if __name__ == "__main__":
     print("Full Tests for SCF")

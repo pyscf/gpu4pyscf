@@ -94,6 +94,7 @@ class KnownValues(unittest.TestCase):
         dftd4_model = dftd4.DFTD4Dispersion(mol, "r2SCAN", atm=False)
         res = dftd4_model.get_dispersion(grad=True)
         assert np.linalg.norm(ref - res['gradient']) < 1e-10
+
 if __name__ == "__main__":
     print("Full tests for DFTD4 module")
     unittest.main()
