@@ -30,9 +30,14 @@ _load_damping_param = {
     "d3op":   libdftd3.dftd3_load_optimizedpower_damping #OptimizedPowerDampingParam,
 }
 
-
-libdftd3.dftd3_new_error.restype     = ctypes.c_void_p
-libdftd3.dftd3_new_structure.restype = ctypes.c_void_p
+libdftd3.dftd3_new_error.restype                   = ctypes.c_void_p
+libdftd3.dftd3_new_structure.restype               = ctypes.c_void_p
+libdftd3.dftd3_load_optimizedpower_damping.restype = ctypes.c_void_p
+libdftd3.dftd3_load_mzero_damping.restype          = ctypes.c_void_p
+libdftd3.dftd3_load_mrational_damping.restype      = ctypes.c_void_p
+libdftd3.dftd3_load_zero_damping.restype           = ctypes.c_void_p
+libdftd3.dftd3_load_rational_damping.restype       = ctypes.c_void_p
+libdftd3.dftd3_new_d3_model.restype                = ctypes.c_void_p
 
 class DFTD3Dispersion(lib.StreamObject):
     def __init__(self, mol, xc, version='d3bj', atm=False):
@@ -63,8 +68,9 @@ class DFTD3Dispersion(lib.StreamObject):
 
     def __del__(self):
         err = libdftd3.dftd3_new_error()
+        param = ctypes.cast(self._param, ctypes.c_void_p)
+        libdftd3.dftd3_delete_param(ctypes.byref(param))
         libdftd3.dftd3_delete_structure(err, self._mol)
-        libdftd3.dftd3_delete_param(err, self._param)
         libdftd3.dftd3_delete_model(err, self._disp)
         libdftd3.dftd3_delete_error(err)
 
