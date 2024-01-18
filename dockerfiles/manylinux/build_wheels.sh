@@ -15,7 +15,7 @@ export PATH=$CUDA_HOME/bin:$PATH
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 
 # blas is required by DFTD3 and DFTD4
-yum install openblas-devel
+yum install -y openblas-devel
 
 # Compile wheels
 rm -rf /gpu4pyscf/wheelhouse
