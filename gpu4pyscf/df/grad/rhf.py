@@ -64,7 +64,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     mo_occ = cupy.asarray(mf_grad.base.mo_occ)
     sph_ao_idx = intopt.sph_ao_idx
     dm = take_last2d(dm0, sph_ao_idx)
-    orbo = contract('pi,i->pi', mo_coeff[:,mo_occ>0], numpy.sqrt(mo_occ[mo_occ>0]))
+    orbo = mo_coeff[:,mo_occ>0] * mo_occ[mo_occ>0] ** 0.5
     orbo = orbo[sph_ao_idx, :]
     nocc = orbo.shape[-1]
 
