@@ -223,20 +223,21 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
         nj = j1 - j0
         if sr_only:
             # TODO: in-place implementation or short-range kernel
-            ints_slices = cupy.empty([naoaux, nj, ni], order='C')
+            ints_slices = cupy.zeros([naoaux, nj, ni], order='C')
             for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
                 k0 = intopt.sph_aux_loc[cp_kl_id]
                 k1 = intopt.sph_aux_loc[cp_kl_id+1]
                 int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1])
             if omega is not None:
-                ints_slices_lr = cupy.empty([naoaux, nj, ni], order='C')
+                ints_slices_lr = cupy.zeros([naoaux, nj, ni], order='C')
                 for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
                     k0 = intopt.sph_aux_loc[cp_kl_id]
                     k1 = intopt.sph_aux_loc[cp_kl_id+1]
                     int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1], omega=omega)
                 ints_slices -= ints_slices_lr
         else:
-            ints_slices = cupy.empty([naoaux, nj, ni], order='C')
+            # Initialization is required due to cutensor operations later
+            ints_slices = cupy.zeros([naoaux, nj, ni], order='C')
             for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
                 k0 = intopt.sph_aux_loc[cp_kl_id]
                 k1 = intopt.sph_aux_loc[cp_kl_id+1]

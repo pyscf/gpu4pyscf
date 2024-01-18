@@ -230,10 +230,10 @@ class VHFOpt(_vhf.VHFOpt):
         ncptype = len(log_qs)
 
         self.bpcache = ctypes.POINTER(BasisProdCache)()
-        if diag_block_with_triu:
-            scale_shellpair_diag = 1.
-        else:
-            scale_shellpair_diag = 0.5
+        #if diag_block_with_triu:
+        scale_shellpair_diag = 1.
+        #else:
+        #    scale_shellpair_diag = 0.5
         libgint.GINTinit_basis_prod(
             ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),
             ao_loc.ctypes.data_as(ctypes.c_void_p),

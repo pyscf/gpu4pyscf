@@ -20,10 +20,15 @@ from pyscf import lib, gto
 
 libdftd4 = np.ctypeslib.load_library('libdftd4',  os.path.abspath(os.path.join(__file__, '..', 'deps', 'lib')))
 
-libdftd4.dftd4_new_error.restype             = ctypes.c_void_p
-libdftd4.dftd4_new_structure.restype         = ctypes.c_void_p
-libdftd4.dftd4_new_d4_model.restype          = ctypes.c_void_p
-libdftd4.dftd4_load_rational_damping.restype = ctypes.c_void_p
+class _d4_restype(ctypes.Structure):
+    pass
+
+_d4_p = ctypes.POINTER(_d4_restype)
+
+libdftd4.dftd4_new_error.restype             = _d4_p
+libdftd4.dftd4_new_structure.restype         = _d4_p
+libdftd4.dftd4_new_d4_model.restype          = _d4_p
+libdftd4.dftd4_load_rational_damping.restype = _d4_p
 
 class DFTD4Dispersion(lib.StreamObject):
     def __init__(self, mol, xc, atm=False):
@@ -52,15 +57,14 @@ class DFTD4Dispersion(lib.StreamObject):
             err,
             ctypes.create_string_buffer(xc.encode(), size=50),
             ctypes.c_bool(atm))
-        libdftd4.dftd4_delete_error(err)
+        libdftd4.dftd4_delete_error(ctypes.byref(err))
 
     def __del__(self):
         err = libdftd4.dftd4_new_error()
-        param = ctypes.cast(self._param, ctypes.c_void_p)
-        libdftd4.dftd4_delete_param(ctypes.byref(param))
-        libdftd4.dftd4_delete_structure(err, self._mol)
-        libdftd4.dftd4_delete_model(err, self._disp)
-        libdftd4.dftd4_delete_error(err)
+        libdftd4.dftd4_delete_param(ctypes.byref(self._param))
+        libdftd4.dftd4_delete_structure(err, ctypes.byref(self._mol))
+        libdftd4.dftd4_delete_model(err, ctypes.byref(self._disp))
+        libdftd4.dftd4_delete_error(ctypes.byref(err))
 
     def get_dispersion(self, grad=False):
         res = {}
@@ -90,5 +94,5 @@ class DFTD4Dispersion(lib.StreamObject):
             res.update(gradient=_gradient)
         if _sigma is not None:
             res.update(virial=_sigma)
-        libdftd4.dftd4_delete_error(err)
+        libdftd4.dftd4_delete_error(ctypes.byref(err))
         return res
