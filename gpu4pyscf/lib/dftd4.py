@@ -57,6 +57,7 @@ class DFTD4Dispersion(lib.StreamObject):
             err,
             ctypes.create_string_buffer(xc.encode(), size=50),
             ctypes.c_bool(atm))
+
         libdftd4.dftd4_delete_error(ctypes.byref(err))
 
     def __del__(self):
@@ -94,5 +95,7 @@ class DFTD4Dispersion(lib.StreamObject):
             res.update(gradient=_gradient)
         if _sigma is not None:
             res.update(virial=_sigma)
+
         libdftd4.dftd4_delete_error(ctypes.byref(err))
+
         return res
