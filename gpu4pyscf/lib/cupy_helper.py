@@ -17,9 +17,11 @@
 
 import os
 import sys
+import functools
 import numpy as np
 import cupy
 import ctypes
+from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
 from gpu4pyscf.lib.cutensor import contract
@@ -93,11 +95,20 @@ def device2host_2d(a_cpu, a_gpu, stream=None):
 class CPArrayWithTag(cupy.ndarray):
     pass
 
+@functools.wraps(lib.tag_array)
 def tag_array(a, **kwargs):
-    ''' attach attributes to cupy ndarray'''
-    t = cupy.asarray(a).view(CPArrayWithTag)
-    if isinstance(a, CPArrayWithTag):
-        t.__dict__.update(a.__dict__)
+    '''
+    attach attributes to cupy ndarray for cupy array
+    attach attributes to numpy ndarray for numpy array
+    '''
+    if isinstance(a, cupy.ndarray):
+        t = cupy.asarray(a).view(CPArrayWithTag)
+        if isinstance(a, CPArrayWithTag):
+            t.__dict__.update(a.__dict__)
+    else:
+        t = np.asarray(a).view(lib.NPArrayWithTag)
+        if isinstance(a, lib.NPArrayWithTag):
+            t.__dict__.update(a.__dict__)
     t.__dict__.update(kwargs)
     return t
 

@@ -24,9 +24,10 @@ from cupyx import scipy
 from pyscf import lib
 from pyscf import gto, df
 from pyscf.grad import rhf as rhf_grad
+from pyscf.solvent import ddcosmo_grad
+
 from gpu4pyscf.solvent.pcm import PI, switch_h
 from gpu4pyscf.df import int3c2e
-
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 
@@ -232,10 +233,10 @@ def grad_solver(pcmobj, dm):
 
     dF, dA = get_dF_dA(pcmobj.surface)
 
-    with_D = pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE']
+    with_D = pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE', 'SMD']
     dD, dS, dSii = get_dD_dS(pcmobj.surface, dF, with_D=with_D, with_S=True)
 
-    if pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE']:
+    if pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE', 'SMD']:
         DA = D*A
 
     epsilon = pcmobj.eps
@@ -253,7 +254,7 @@ def grad_solver(pcmobj, dm):
         de -= cupy.asarray([cupy.sum(de_dS[p0:p1], axis=0) for p0,p1, in gridslice])
         de -= 0.5*contract('i,xij->jx', vK_1*q, dSii) # 0.5*cupy.einsum('i,xij,i->jx', vK_1, dSii, q)
 
-    elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE']:
+    elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE', 'SMD']:
         dD = dD.transpose([2,0,1])
         dS = dS.transpose([2,0,1])
         dSii = dSii.transpose([2,0,1])
@@ -315,41 +316,32 @@ def grad_solver(pcmobj, dm):
     return de.get()
 
 def make_grad_object(grad_method):
-    '''
-    return solvent gradient object
-    '''
-    grad_method_class = grad_method.__class__
-    class WithSolventGrad(grad_method_class):
-        def __init__(self, grad_method):
-            self.__dict__.update(grad_method.__dict__)
-            self.de_solvent = None
-            self.de_solute = None
-            self._keys = self._keys.union(['de_solvent', 'de_solute'])
+    '''For grad_method in vacuum, add nuclear gradients of solvent pcmobj'''
+    if grad_method.base.with_solvent.frozen:
+        raise RuntimeError('Frozen solvent model is not avialbe for energy gradients')
 
-        def kernel(self, *args, dm=None, atmlst=None, **kwargs):
-            dm = kwargs.pop('dm', None)
-            if dm is None:
-                dm = self.base.make_rdm1(ao_repr=True)
+    name = (grad_method.base.with_solvent.__class__.__name__
+            + grad_method.__class__.__name__)
+    return lib.set_class(WithSolventGrad(grad_method),
+                         (grad_method.__class__, WithSolventGrad), name)
 
-            self.de_solvent = grad_qv(self.base.with_solvent, dm)
-            self.de_solvent+= grad_solver(self.base.with_solvent, dm)
-            self.de_solvent+= grad_nuc(self.base.with_solvent, dm)
+class WithSolventGrad(ddcosmo_grad.WithSolventGrad):
+    def kernel(self, *args, dm=None, atmlst=None, **kwargs):
+        dm = kwargs.pop('dm', None)
+        if dm is None:
+            dm = self.base.make_rdm1(ao_repr=True)
 
-            self.de_solute = grad_method_class.kernel(self, *args, **kwargs)
-            self.de = self.de_solute + self.de_solvent
+        self.de_solvent = grad_qv(self.base.with_solvent, dm)
+        self.de_solvent+= grad_solver(self.base.with_solvent, dm)
+        self.de_solvent+= grad_nuc(self.base.with_solvent, dm)
 
-            if self.verbose >= logger.NOTE:
-                logger.note(self, '--------------- %s (+%s) gradients ---------------',
-                            self.base.__class__.__name__,
-                            self.base.with_solvent.__class__.__name__)
-                rhf_grad._write(self, self.mol, self.de, self.atmlst)
-                logger.note(self, '----------------------------------------------')
-            return self.de
+        self.de_solute = super().kernel(self, *args, **kwargs)
+        self.de = self.de_solute + self.de_solvent
 
-        def _finalize(self):
-            # disable _finalize. It is called in grad_method.kernel method
-            # where self.de was not yet initialized.
-            pass
-
-    return WithSolventGrad(grad_method)
-
+        if self.verbose >= logger.NOTE:
+            logger.note(self, '--------------- %s (+%s) gradients ---------------',
+                        self.base.__class__.__name__,
+                        self.base.with_solvent.__class__.__name__)
+            rhf_grad._write(self, self.mol, self.de, self.atmlst)
+            logger.note(self, '----------------------------------------------')
+        return self.de

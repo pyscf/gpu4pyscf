@@ -25,7 +25,7 @@ from pyscf import lib
 from pyscf import gto, df
 from pyscf.dft import gen_grid
 from pyscf.data import radii
-from pyscf.solvent import ddcosmo
+from pyscf.solvent import ddcosmo#, _attach_solvent
 from gpu4pyscf.solvent import _attach_solvent
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger

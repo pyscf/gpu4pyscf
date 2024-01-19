@@ -64,6 +64,8 @@ class KnownValues(unittest.TestCase):
         e_tot = mf.kernel()
         assert numpy.abs(e_tot - -76.0756052903) < 2e-4
 
+    # TODO: add more test for other molecules
+
 if __name__ == "__main__":
     print("Full Tests for SMDs")
     unittest.main()

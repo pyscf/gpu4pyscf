@@ -493,7 +493,6 @@ def get_cds(smdobj):
     SASA *= radii.BOHR**2
     mol_cds = mol_tension * cupy.sum(SASA) / 1000 # in kcal/mol
     atm_cds = cupy.sum(SASA * atm_tension) / 1000 # in kcal/mol
-
     return (mol_cds + atm_cds)/hartree2kcal # hartree
 
 class SMD(pcm.PCM):
@@ -566,7 +565,14 @@ class SMD(pcm.PCM):
         return get_cds(self)
 
     def nuc_grad_method(self, grad_method):
-        raise RuntimeError('SMD gradient is not implemented')
+        from gpu4pyscf.solvent.grad import smd as smd_grad
+        if self.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
+        from gpu4pyscf import scf
+        if isinstance(grad_method.base, scf.hf.RHF):
+            return smd_grad.make_grad_object(grad_method)
+        else:
+            raise RuntimeError('Only SCF gradient is supported')
 
     def Hessian(self, hess_method):
         raise RuntimeError('SMD Hessian is not implemented')

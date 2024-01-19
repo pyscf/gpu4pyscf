@@ -36,3 +36,6 @@ mf.with_solvent.method = 'SMD'
 mf.with_solvent.solvent = 'water'
 e_tot = mf.kernel()
 print('total energy with SMD:', e_tot)
+
+g = mf.nuc_grad_method()
+f = g.kernel()
