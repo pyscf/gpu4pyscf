@@ -57,32 +57,32 @@ class KnownValues(unittest.TestCase):
     '''
     known values are obtained by pyscf
     '''
-    def test_rks_lda(self):
+    def test_uks_lda(self):
         print('------- LDA ----------------')
         e_tot = run_dft("LDA, vwn5")
         assert np.allclose(e_tot, -75.42821982483972)
 
-    def test_rks_pbe(self):
+    def test_uks_pbe(self):
         print('------- PBE ----------------')
         e_tot = run_dft('PBE')
         assert np.allclose(e_tot, -75.91732813416843)
 
-    def test_rks_b3lyp(self):
+    def test_uks_b3lyp(self):
         print('-------- B3LYP -------------')
         e_tot = run_dft('B3LYP')
         assert np.allclose(e_tot, -76.00306439862237)
 
-    def test_rks_m06(self):
+    def test_uks_m06(self):
         print('--------- M06 --------------')
         e_tot = run_dft("M06")
         assert np.allclose(e_tot, -75.96551006522827)
 
-    def test_rks_wb97(self):
+    def test_uks_wb97(self):
         print('-------- wB97 --------------')
         e_tot = run_dft("HYB_GGA_XC_WB97")
         assert np.allclose(e_tot, -75.987601337562)
 
-    def test_rks_vv10(self):
+    def test_uks_vv10(self):
         print("------- wB97m-v -------------")
         e_tot = run_dft('HYB_MGGA_XC_WB97M_V')
         assert np.allclose(e_tot, -75.97363094678428)
@@ -92,4 +92,4 @@ class KnownValues(unittest.TestCase):
 if __name__ == "__main__":
     print("Full Tests for dft")
     unittest.main()
-    
+
