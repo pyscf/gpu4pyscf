@@ -215,8 +215,9 @@ def get_cds(smdobj):
     SASA *= radii.BOHR**2
     grad_SASA *= radii.BOHR**2
     mol_cds = mol_tension * np.sum(grad_SASA, axis=0) / 1000
-    atm_cds = SASA.dot(grad_tension) / 1000
-    atm_cds = 0.0*np.einsum('i,ijx->jx', atm_tension, grad_SASA) / 1000
+    grad_tension *= radii.BOHR
+    atm_cds = np.einsum('i,ijx->jx', SASA, grad_tension) / 1000
+    atm_cds+= np.einsum('i,ijx->jx', atm_tension, grad_SASA) / 1000
     return (mol_cds + atm_cds)/hartree2kcal # hartree
 
 def make_grad_object(grad_method):
@@ -229,7 +230,22 @@ def make_grad_object(grad_method):
     return lib.set_class(WithSolventGrad(grad_method),
                          (grad_method.__class__, WithSolventGrad), name)
 
-class WithSolventGrad(ddcosmo_grad.WithSolventGrad):
+class WithSolventGrad:
+    _keys = {'de_solvent', 'de_solute'}
+
+    def __init__(self, grad_method):
+        self.__dict__.update(grad_method.__dict__)
+        self.de_solvent = None
+        self.de_solute = None
+
+    def undo_solvent(self):
+        cls = self.__class__
+        name_mixin = self.base.with_solvent.__class__.__name__
+        obj = lib.view(self, lib.drop_class(cls, WithSolventGrad, name_mixin))
+        del obj.de_solvent
+        del obj.de_solute
+        return obj
+
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         dm = kwargs.pop('dm', None)
         if dm is None:
@@ -239,10 +255,9 @@ class WithSolventGrad(ddcosmo_grad.WithSolventGrad):
         self.de_solvent+= pcm_grad.grad_solver(self.base.with_solvent, dm)
         self.de_solvent+= pcm_grad.grad_nuc(self.base.with_solvent, dm)
 
-        self.de_solute = super().kernel(self, *args, **kwargs)
+        self.de_solute = super().kernel(*args, **kwargs)
         self.de = self.de_solute + self.de_solvent
         self.de += get_cds(self.base.with_solvent)
-
         if self.verbose >= logger.NOTE:
             logger.note(self, '--------------- %s (+%s) gradients ---------------',
                         self.base.__class__.__name__,
@@ -250,5 +265,10 @@ class WithSolventGrad(ddcosmo_grad.WithSolventGrad):
             rhf_grad._write(self, self.mol, self.de, self.atmlst)
             logger.note(self, '----------------------------------------------')
         return self.de
+
+    def _finalize(self):
+        # disable _finalize. It is called in grad_method.kernel method
+        # where self.de was not yet initialized.
+        pass
 
 

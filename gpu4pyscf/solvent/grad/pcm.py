@@ -323,9 +323,24 @@ def make_grad_object(grad_method):
     name = (grad_method.base.with_solvent.__class__.__name__
             + grad_method.__class__.__name__)
     return lib.set_class(WithSolventGrad(grad_method),
-                         (grad_method.__class__, WithSolventGrad), name)
+                         (WithSolventGrad, grad_method.__class__), name)
 
-class WithSolventGrad(ddcosmo_grad.WithSolventGrad):
+class WithSolventGrad:
+    _keys = {'de_solvent', 'de_solute'}
+
+    def __init__(self, grad_method):
+        self.__dict__.update(grad_method.__dict__)
+        self.de_solvent = None
+        self.de_solute = None
+
+    def undo_solvent(self):
+        cls = self.__class__
+        name_mixin = self.base.with_solvent.__class__.__name__
+        obj = lib.view(self, lib.drop_class(cls, WithSolventGrad, name_mixin))
+        del obj.de_solvent
+        del obj.de_solute
+        return obj
+
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         dm = kwargs.pop('dm', None)
         if dm is None:
@@ -335,7 +350,7 @@ class WithSolventGrad(ddcosmo_grad.WithSolventGrad):
         self.de_solvent+= grad_solver(self.base.with_solvent, dm)
         self.de_solvent+= grad_nuc(self.base.with_solvent, dm)
 
-        self.de_solute = super().kernel(self, *args, **kwargs)
+        self.de_solute = super().kernel(*args, **kwargs)
         self.de = self.de_solute + self.de_solvent
 
         if self.verbose >= logger.NOTE:
@@ -345,3 +360,8 @@ class WithSolventGrad(ddcosmo_grad.WithSolventGrad):
             rhf_grad._write(self, self.mol, self.de, self.atmlst)
             logger.note(self, '----------------------------------------------')
         return self.de
+
+    def _finalize(self):
+        # disable _finalize. It is called in grad_method.kernel method
+        # where self.de was not yet initialized.
+        pass

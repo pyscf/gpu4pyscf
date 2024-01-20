@@ -43,7 +43,7 @@ def tearDownModule():
 def _check_grad(mol, solvent='water'):
     natm = mol.natm
     fd_cds = numpy.zeros([natm,3])
-    eps = 1e-5
+    eps = 1e-4
     for ia in range(mol.natm):
         for j in range(3):
             coords = mol.atom_coords(unit='B')
