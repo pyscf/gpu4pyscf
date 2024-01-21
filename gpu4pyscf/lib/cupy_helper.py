@@ -98,10 +98,12 @@ class CPArrayWithTag(cupy.ndarray):
 @functools.wraps(lib.tag_array)
 def tag_array(a, **kwargs):
     '''
+    a should be cupy/numpy array or tuple of cupy/numpy array
+
     attach attributes to cupy ndarray for cupy array
     attach attributes to numpy ndarray for numpy array
     '''
-    if isinstance(a, cupy.ndarray):
+    if isinstance(a, cupy.ndarray) or isinstance(a[0], cupy.ndarray):
         t = cupy.asarray(a).view(CPArrayWithTag)
         if isinstance(a, CPArrayWithTag):
             t.__dict__.update(a.__dict__)

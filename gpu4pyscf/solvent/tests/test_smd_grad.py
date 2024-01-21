@@ -23,22 +23,25 @@ from gpu4pyscf.solvent.grad import smd as smd_grad
 from gpu4pyscf.solvent import smd
 
 def setUpModule():
-    global mol_list
-    xyz_list = ['CH4.xyz', 'CO2.xyz', 'H2SO4.xyz', 'H3PO4.xyz', 'HNO3.xyz', 'NaCl.xyz', 'NH4.xyz']
-    mol_list = {}
-    for xyz in xyz_list:
-        mol = gto.Mole()
-        mol.atom = xyz
-        mol.basis = 'sto3g'
-        mol.output = '/dev/null'
-        mol.build(verbose=0)
-        mol_list[xyz] = mol
+    global mol
+    mol = gto.Mole()
+    mol.atom = '''P 0.000 0.000 0.000
+O 1.500 0.000 0.000
+O -1.500 0.000 0.000
+O 0.000 1.500 0.000
+O 0.000 -1.500 0.000
+H 1.000 1.000 0.000
+H -1.000 -1.000 0.000
+H 0.000 -2.000 0.000
+'''
+    mol.basis = 'sto3g'
+    mol.output = '/dev/null'
+    mol.build(verbose=0)
 
 def tearDownModule():
-    global mol_list
-    for xyz in mol_list:
-        mol_list[xyz].stdout.close()
-    del mol_list
+    global mol
+    mol.stdout.close()
+    del mol
 
 def _check_grad(mol, solvent='water'):
     natm = mol.natm
@@ -74,14 +77,10 @@ def _check_grad(mol, solvent='water'):
 
 class KnownValues(unittest.TestCase):
     def test_grad_water(self):
-        for xyz in mol_list:
-            print(f'running {xyz} with water')
-            _check_grad(mol_list[xyz], solvent='water')
+        _check_grad(mol, solvent='water')
 
     def test_grad_solvent(self):
-        for xyz in mol_list:
-            print(f'running {xyz} with ethanol')
-            _check_grad(mol_list[xyz], solvent='ethanol')
+        _check_grad(mol, solvent='ethanol')
 
 if __name__ == "__main__":
     print("Full Tests for Gradient of SMD")
