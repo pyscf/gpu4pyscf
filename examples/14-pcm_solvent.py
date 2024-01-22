@@ -33,7 +33,7 @@ mf.verbose = 6
 mf.grids.atom_grid = (99,590)
 mf.small_rho_cutoff = 1e-10
 mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
-mf.with_solvent.method = 'C-PCM'
+mf.with_solvent.method = 'IEF-PCM'
 mf.with_solvent.eps = 78.3553
 mf.kernel()
 

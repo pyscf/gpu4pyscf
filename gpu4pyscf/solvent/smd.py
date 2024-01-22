@@ -374,10 +374,10 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             t_HO = 0.0
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
-                    r, dr = r_zz['H','C']
+                    r, dr = r_zz.get(('H','C'), (0.0, 0.0))
                     t_HC += swtich_function(rij[i,j], r, dr)
                 if sym_j == 'O':
-                    r, dr = r_zz['H','O']
+                    r, dr = r_zz.get(('H','O'), (0.0, 0.0))
                     t_HO += swtich_function(rij[i,j], r, dr)
             sig_HC = get_bond_tension(('H','C'))
             sig_HO = get_bond_tension(('H','O'))
@@ -389,10 +389,10 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             t_CN = 0.0
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C' and i != j:
-                    r, dr = r_zz['C', 'C']
+                    r, dr = r_zz.get(('C', 'C'), (0.0, 0.0))
                     t_CC += swtich_function(rij[i,j], r, dr)
                 if sym_j == 'N':
-                    r, dr = r_zz['C', 'N']
+                    r, dr = r_zz.get(('C', 'N'), (0.0, 0.0))
                     t_CN += swtich_function(rij[i,j], r, dr)
             sig_CC = get_bond_tension(('C','C'))
             sig_CN = get_bond_tension(('C','N'))
@@ -404,15 +404,15 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             t_NC3 = 0.0
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
-                    r, dr = r_zz['N','C']
+                    r, dr = r_zz.get(('N','C'), (0.0,0.0))
                     tk = 0.0
                     for k, sym_k in enumerate(symbols):
                         if k != i and k != j:
-                            rjk, drjk = r_zz['C', sym_k]
+                            rjk, drjk = r_zz.get(('C', sym_k), (0.0,0.0))
                             tk += swtich_function(rij[j,k], rjk, drjk)
                     t_NC += swtich_function(rij[i,j], r, dr) * tk**2
 
-                    r, dr = r_zz['N','C3']
+                    r, dr = r_zz.get(('N','C3'), (0.0, 0.0))
                     t_NC3 += swtich_function(rij[i,j], r, dr)
             sig_NC = get_bond_tension(('N','C'))
             sig_NC3= get_bond_tension(('N','C3'))
@@ -426,16 +426,16 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             t_OP = 0.0
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
-                    r, dr = r_zz['O','C']
+                    r, dr = r_zz.get(('O','C'), (0.0, 0.0))
                     t_OC += swtich_function(rij[i,j], r, dr)
                 if sym_j == 'N':
-                    r, dr = r_zz['O','N']
+                    r, dr = r_zz.get(('O','N'), (0.0, 0.0))
                     t_ON += swtich_function(rij[i,j], r, dr)
                 if sym_j == 'O' and j != i:
-                    r, dr = r_zz['O','O']
+                    r, dr = r_zz.get(('O','O'), (0.0, 0.0))
                     t_OO += swtich_function(rij[i,j], r, dr)
                 if sym_j == 'P':
-                    r, dr = r_zz['O','P']
+                    r, dr = r_zz.get(('O','P'), (0.0, 0.0))
                     t_OP += swtich_function(rij[i,j], r, dr)
             sig_OC = get_bond_tension(('O','C'))
             sig_ON = get_bond_tension(('O','N'))

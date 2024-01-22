@@ -87,12 +87,12 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             dt_HO = np.zeros([natm,3])
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
-                    r, dr = r_zz['H','C']
+                    r, dr = r_zz.get(('H','C'), (0.0, 0.0))
                     dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
                     dt_HC[i] += dt_drij
                     dt_HC[j] -= dt_drij
                 if sym_j == 'O':
-                    r, dr = r_zz['H','O']
+                    r, dr = r_zz.get(('H','O'), (0.0, 0.0))
                     dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
                     dt_HO[i] += dt_drij
                     dt_HO[j] -= dt_drij
@@ -107,12 +107,12 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             t_CN = 0.0
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C' and i != j:
-                    r, dr = r_zz['C', 'C']
+                    r, dr = r_zz.get(('C', 'C'), (0.0, 0.0))
                     dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
                     dt_CC[i] += dt_drij
                     dt_CC[j] -= dt_drij
                 if sym_j == 'N':
-                    r, dr = r_zz['C', 'N']
+                    r, dr = r_zz.get(('C', 'N'), (0.0, 0.0))
                     t_CN += swtich_function(rij[i,j], r, dr)
                     dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
                     dt_CN[i] += dt_drij
@@ -128,12 +128,12 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             dt_NC3 = np.zeros([natm,3])
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
-                    r, dr = r_zz['N','C']
+                    r, dr = r_zz.get(('N','C'), (0.0, 0.0))
                     tk = 0.0
-                    dtk = cupy.zeros([natm,3])
+                    dtk = np.zeros([natm,3])
                     for k, sym_k in enumerate(symbols):
                         if k != i and k != j:
-                            rjk, drjk = r_zz['C', sym_k]
+                            rjk, drjk = r_zz.get(('C', sym_k), (0.0, 0.0))
                             tk += swtich_function(rij[j,k], rjk, drjk)
                             dtk_rjk = grad_swtich_function(rij[j,k], rjk, drjk) * drij[j,k]
                             dtk[j] += dtk_rjk
@@ -144,10 +144,10 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
                     dt_NC[j] -= dt_drij
 
                     t = swtich_function(rij[i,j], r, dr)
-                    dt_NC += t * (2 * dtk)
+                    dt_NC += t * (2 * tk * dtk)
                     t_NC += t * tk**2
 
-                    r, dr = r_zz['N','C3']
+                    r, dr = r_zz.get(('N','C3'), (0.0, 0.0))
                     dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
                     dt_NC3[i] += dt_drij
                     dt_NC3[j] -= dt_drij
@@ -163,22 +163,22 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             dt_OP = np.zeros([natm,3])
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
-                    r, dr = r_zz['O','C']
+                    r, dr = r_zz.get(('O','C'), (0.0, 0.0))
                     dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
                     dt_OC[i] += dt_drij
                     dt_OC[j] -= dt_drij
                 if sym_j == 'N':
-                    r, dr = r_zz['O','N']
+                    r, dr = r_zz.get(('O','N'), (0.0, 0.0))
                     dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
                     dt_ON[i] += dt_drij
                     dt_ON[j] -= dt_drij
                 if sym_j == 'O' and j != i:
-                    r, dr = r_zz['O','O']
+                    r, dr = r_zz.get(('O','O'), (0.0, 0.0))
                     dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
                     dt_OO[i] += dt_drij
                     dt_OO[j] -= dt_drij
                 if sym_j == 'P':
-                    r, dr = r_zz['O','P']
+                    r, dr = r_zz.get(('O','P'), (0.0, 0.0))
                     dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
                     dt_OP[i] += dt_drij
                     dt_OP[j] -= dt_drij

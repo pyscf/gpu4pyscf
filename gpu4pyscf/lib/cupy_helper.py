@@ -181,19 +181,23 @@ def add_sparse(a, b, indices):
         raise RuntimeError('failed in sparse_add2d')
     return a
 
-def dist_matrix(coords, out=None):
-    assert coords.flags.c_contiguous
-    n = coords.shape[0]
+def dist_matrix(x, y, out=None):
+    assert x.flags.c_contiguous
+    assert y.flags.c_contiguous
+
+    m = x.shape[0]
+    n = y.shape[0]
     if out is None:
-        out = cupy.empty([n,n])
+        out = cupy.empty([m,n])
 
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.dist_matrix(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n),
+        ctypes.cast(x.data.ptr, ctypes.c_void_p),
+        ctypes.cast(y.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(m),
+        ctypes.c_int(n)
     )
     if err != 0:
         raise RuntimeError('failed in calculating distance matrix')
