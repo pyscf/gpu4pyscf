@@ -173,3 +173,7 @@ class UHF(uhf.UHF):
             s = self.get_ovlp()
         return spin_square(mo_coeff, s)
 
+    def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
+        import gpu4pyscf.df.df_jk
+        return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
+    
