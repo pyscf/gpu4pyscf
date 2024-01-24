@@ -16,32 +16,30 @@
 
 #include <cuda_runtime.h>
 #include <stdio.h>
-#define THREADS        16
+#define THREADS        32
 
 __global__
-static void _block_diag(double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols)
+static void _calc_distances(double *dist, const double *x, const double *y, int n)
 {
-    int i = threadIdx.x;
-    int j = threadIdx.y;
-    int r = blockIdx.x;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    if (i >= n || j >= n){
+        return;
+    }
 
-    if (r >= ndiags){
-        return;
-    }
-    int m0 = rows[r+1] - rows[r];
-    int n0 = cols[r+1] - cols[r];
-    if (i >= m0 || j >= n0) {
-        return;
-    }
-    out[(i+rows[r])*n + (j+cols[r])] = diags[offsets[r] + i*n0 + j];
+    double dx = x[3*i]   - y[3*j];
+    double dy = x[3*i+1] - y[3*j+1];
+    double dz = x[3*i+2] - y[3*j+2];
+    dist[i*n+j] = norm3d(dx, dy, dz);
 }
 
 extern "C" {
-int block_diag(cudaStream_t stream, double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols)
+int dist_matrix(cudaStream_t stream, double *dist, const double *x, const double *y, int n)
 {
+    int ntile = (n + THREADS - 1) / THREADS;
     dim3 threads(THREADS, THREADS);
-    dim3 blocks(ndiags);
-    _block_diag<<<blocks, threads, 0, stream>>>(out, m, n, diags, ndiags, offsets, rows, cols);
+    dim3 blocks(ntile, ntile);
+    _calc_distances<<<blocks, threads, 0, stream>>>(dist, x, y, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

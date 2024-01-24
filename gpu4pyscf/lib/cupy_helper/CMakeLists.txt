@@ -17,13 +17,14 @@
 
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80")
 
-add_library(cupy_helper SHARED 
+add_library(cupy_helper SHARED
   transpose.cu
   block_diag.cu
   contract_cderi_k.cu
   take_last2d.cu
   async_d2h_2d.cu
   add_sparse.cu
+  dist_matrix.cu
 )
 
 set_target_properties(cupy_helper PROPERTIES

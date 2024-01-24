@@ -57,6 +57,7 @@ def prune_small_rho_grids_(ks, mol, dm, grids):
                 grids.coords = cupy.vstack(
                         [grids.coords, pad])
                 grids.weights = cupy.hstack([grids.weights, cupy.zeros(padding)])
+
         # make_mask has to be executed on cpu for now.
         #grids.non0tab = grids.make_mask(mol, grids.coords)
         #grids.screen_index = grids.non0tab
@@ -247,23 +248,15 @@ class RKS(scf.hf.RHF, rks.RKS):
             return 0.0
 
         if self.disp[:2].upper() == 'D3':
-            # multi-threads in DFTD3 conflicts with PyTorch, set it to be 1 for safty
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                import dftd3.pyscf as disp
-                d3 = disp.DFTD3Dispersion(self.mol, xc=self.xc, version=self.disp)
-                e_d3, _ = d3.kernel()
-            return e_d3
+            from gpu4pyscf.lib import dftd3
+            dftd3_model = dftd3.DFTD3Dispersion(self.mol, xc=self.xc, version=self.disp)
+            res = dftd3_model.get_dispersion()
+            return res['energy']
 
         if self.disp[:2].upper() == 'D4':
-            from pyscf.data.elements import charge
-            atoms = numpy.array([ charge(a[0]) for a in self.mol._atom])
-            coords = self.mol.atom_coords()
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                from dftd4.interface import DampingParam, DispersionModel
-                model = DispersionModel(atoms, coords)
-                res = model.get_dispersion(DampingParam(method=self.xc), grad=False)
+            from gpu4pyscf.lib import dftd4
+            dftd4_model = dftd4.DFTD4Dispersion(self.mol, xc=self.xc)
+            res = dftd4_model.get_dispersion()
             return res.get("energy")
 
     def reset(self, mol=None):

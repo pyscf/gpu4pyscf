@@ -116,6 +116,32 @@ class KnownValues(unittest.TestCase):
             h1ao = mol.intor('int1e_iprinv', comp=3) # <\nabla|1/r|>
             assert np.linalg.norm(int3c[:,:,:,i] - h1ao) < 1e-8
 
+    def test_int1e_ipiprinv(self):
+        from pyscf import gto
+        coords = mol.atom_coords()
+        charges = mol.atom_charges()
+
+        fakemol = gto.fakemol_for_charges(coords)
+        int3c = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipip1').get()
+
+        for i,q in enumerate(charges):
+            mol.set_rinv_origin(coords[i])
+            h1ao = mol.intor('int1e_ipiprinv', comp=9) # <\nabla|1/r|>
+            assert np.linalg.norm(int3c[:,:,:,i] - h1ao) < 1e-8
+
+    def test_int1e_iprinvip(self):
+        from pyscf import gto
+        coords = mol.atom_coords()
+        charges = mol.atom_charges()
+
+        fakemol = gto.fakemol_for_charges(coords)
+        int3c = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipvip1').get()
+
+        for i,q in enumerate(charges):
+            mol.set_rinv_origin(coords[i])
+            h1ao = mol.intor('int1e_iprinvip', comp=9) # <\nabla|1/r|>
+            assert np.linalg.norm(int3c[:,:,:,i] - h1ao) < 1e-8
+
 if __name__ == "__main__":
     print("Full Tests for int3c")
     unittest.main()

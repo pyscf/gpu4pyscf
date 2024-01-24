@@ -186,27 +186,8 @@ def gen_grids_partition(atm_coords, coords, a):
     natm = atm_coords.shape[0]
     ngrids = coords.shape[0]
     assert ngrids < 65535 * 16
-    #x_i = cupy.expand_dims(atm_coords, axis=1)
-    #x_g = cupy.expand_dims(coords, axis=0)
-    #squared_diff = (x_i - x_g)**2
-    #dist_ig = cupy.sum(squared_diff, axis=2)**0.5
 
-    #x_j = cupy.expand_dims(atm_coords, axis=0)
-    #squared_diff = (x_i - x_j)**2
-    #dist_ij = cupy.sum(squared_diff, axis=2)**0.5
-
-    pbecke = cupy.ones([natm, ngrids], order='C')
-    '''
-    err = libgdft.GDFTgen_grid_partition(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(pbecke.data.ptr, ctypes.c_void_p),
-        ctypes.cast(dist_ig.data.ptr, ctypes.c_void_p),
-        ctypes.cast(dist_ij.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ngrids),
-        ctypes.c_int(natm)
-    )
-    '''
+    pbecke = cupy.empty([natm, ngrids], order='C')
     atm_coords = cupy.asarray(atm_coords, order='F')
     err = libgdft.GDFTgen_grid_partition(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -298,14 +279,16 @@ def get_partition(mol, atom_grids_tab,
         grid_coord and grid_weight arrays.  grid_coord array has shape (N,3);
         weight 1D array has N elements.
     '''
+    atm_coords = numpy.asarray(mol.atom_coords() , order='C')
+    atm_coords = cupy.asarray(atm_coords)
+    '''
     if callable(radii_adjust) and atomic_radii is not None:
         f_radii_adjust = radii_adjust(mol, atomic_radii)
     else:
         f_radii_adjust = None
-    atm_coords = numpy.asarray(mol.atom_coords() , order='C')
     atm_dist = gto.inter_distance(mol)
-    atm_coords = cupy.asarray(atm_coords)
     atm_dist = cupy.asarray(atm_dist)
+
     if (becke_scheme is original_becke and
         (radii_adjust is radi.treutler_atomic_radii_adjust or
          radii_adjust is radi.becke_atomic_radii_adjust or
@@ -343,7 +326,7 @@ def get_partition(mol, atom_grids_tab,
                     pbecke[i] *= .5 * (1-g)
                     pbecke[j] *= .5 * (1+g)
             return pbecke
-
+    '''
     coords_all = []
     weights_all = []
     # support atomic_radii_adjust = None

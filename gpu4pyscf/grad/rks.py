@@ -27,7 +27,8 @@ from gpu4pyscf.lib.utils import patch_cpu_kernel
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.dft import numint, xc_deriv, rks
 from gpu4pyscf.dft.numint import _GDFTOpt, AO_THRESHOLD
-from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, add_sparse, tag_array, load_library
+from gpu4pyscf.lib.cupy_helper import (
+    contract, get_avail_mem, add_sparse, tag_array, load_library, take_last2d)
 from gpu4pyscf.lib import logger
 from pyscf import __config__
 
@@ -121,10 +122,12 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     mo_coeff = cupy.asarray(dms.mo_coeff)
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
-    dms = cupy.asarray(dms)
-    dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
-           for dm in dms.reshape(-1,nao0,nao0)]
-    mo_coeff = coeff @ mo_coeff
+    dms = cupy.asarray(dms).reshape(-1,nao0,nao0)
+    dms = take_last2d(dms, opt.ao_idx)
+    #dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
+    #       for dm in dms.reshape(-1,nao0,nao0)]
+    #mo_coeff = coeff @ mo_coeff
+    mo_coeff = mo_coeff[opt.ao_idx]
 
     nset = len(dms)
     assert nset == 1
@@ -172,7 +175,8 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 vtmp = _gga_grad_sum_(ao_mask, wv)
                 vtmp += _tau_grad_dot_(ao_mask, wv[4])
                 add_sparse(vmat[idm], vtmp, idx)
-    vmat = [cupy.einsum('pi,npq,qj->nij', coeff, v, coeff) for v in vmat]
+    #vmat = [cupy.einsum('pi,npq,qj->nij', coeff, v, coeff) for v in vmat]
+    vmat = take_last2d(vmat, opt.rev_ao_idx)
     exc = None
     if nset == 1:
         vmat = vmat[0]
@@ -229,8 +233,10 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         vmat_tmp = _gga_grad_sum_(ao_mask, wv)
         add_sparse(vmat, vmat_tmp, mask)
 
-    vmat = contract('npq,qj->npj', vmat, coeff)
-    vmat = contract('pi,npj->nij', coeff, vmat)
+    #vmat = contract('npq,qj->npj', vmat, coeff)
+    #vmat = contract('pi,npj->nij', coeff, vmat)
+    rev_ao_idx = opt.rev_ao_idx
+    vmat = take_last2d(vmat, rev_ao_idx)
     exc = None
     # - sign because nabla_X = -nabla_x
     return exc, -vmat
@@ -274,10 +280,12 @@ def _make_dR_dao_w(ao, wv):
 
 def _d1_dot_(ao1, ao2, out=None):
     if out is None:
-        vmat0 = cupy.dot(ao1[0], ao2)
-        vmat1 = cupy.dot(ao1[1], ao2)
-        vmat2 = cupy.dot(ao1[2], ao2)
-        return cupy.stack([vmat0,vmat1,vmat2])
+        out = cupy.empty([3, ao1[0].shape[0], ao2.shape[1]])
+        out[0] = cupy.dot(ao1[0], ao2)
+        out[1] = cupy.dot(ao1[1], ao2)
+        out[2] = cupy.dot(ao1[2], ao2)
+        return out
+        #return cupy.stack([vmat0,vmat1,vmat2])
     else:
         cupy.dot(ao1[0], ao2, out=out[0])
         cupy.dot(ao1[1], ao2, out=out[1])
@@ -502,21 +510,13 @@ class Gradients(rhf_grad.Gradients, pyscf.grad.rks.Gradients):
 
     def get_dispersion(self):
         if self.base.disp[:2].upper() == 'D3':
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                import dftd3.pyscf as disp
-                d3 = disp.DFTD3Dispersion(self.mol, xc=self.base.xc, version=self.base.disp)
-                _, g_d3 = d3.kernel()
-            return g_d3
+            from gpu4pyscf.lib import dftd3
+            dftd3_model = dftd3.DFTD3Dispersion(self.base.mol, xc=self.base.xc, version=self.base.disp)
+            res = dftd3_model.get_dispersion(grad=True)
+            return res['gradient']
 
         if self.base.disp[:2].upper() == 'D4':
-            from pyscf.data.elements import charge
-            atoms = numpy.array([ charge(a[0]) for a in self.mol._atom])
-            coords = self.mol.atom_coords()
-
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                from dftd4.interface import DampingParam, DispersionModel
-                model = DispersionModel(atoms, coords)
-                res = model.get_dispersion(DampingParam(method=self.base.xc), grad=True)
+            from gpu4pyscf.lib import dftd4
+            dftd4_model = dftd4.DFTD4Dispersion(self.base.mol, xc=self.base.xc)
+            res = dftd4_model.get_dispersion(grad=True)
             return res.get("gradient")

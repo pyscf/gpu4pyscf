@@ -32,7 +32,7 @@ def setUpModule():
 O        0.000000    0.000000    0.117790
 H        0.000000    0.755453   -0.471161
 H        0.000000   -0.755453   -0.471161''',
-        basis = 'ccpvdz',
+        basis = 'ccpvqz',
         charge = 1,
         spin = 1,  # = 2S = spin_up - spin_down
         output = '/dev/null')

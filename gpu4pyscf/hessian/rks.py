@@ -27,7 +27,7 @@ from pyscf import lib
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
-from gpu4pyscf.lib.cupy_helper import contract, add_sparse
+from gpu4pyscf.lib.cupy_helper import contract, add_sparse, take_last2d
 from gpu4pyscf.lib import logger
 
 # import pyscf.grad.rks to activate nuc_grad_method method
@@ -354,12 +354,13 @@ def _d1d2_dot_(vmat, mol, ao1, ao2, mask, ao_loc, dR1_on_bra=True):
             for d2 in range(3):
                 vmat[d1,d2] += numint._dot_ao_ao(mol, ao1[d1], ao2[d2], mask,
                                                  shls_slice, ao_loc)
+        #vmat += contract('xig,yjg->xyij', ao1, ao2)
     else:  # (d/dR2 bra) * (d/dR1 ket)
         for d1 in range(3):
             for d2 in range(3):
                 vmat[d1,d2] += numint._dot_ao_ao(mol, ao1[d2], ao2[d1], mask,
                                                  shls_slice, ao_loc)
-
+        #vmat += contract('yig,xjg->xyij', ao1, ao2)
 def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     mol = hessobj.mol
     mf = hessobj.base
@@ -393,15 +394,15 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     ipip = cupy.zeros((3,3,nao,nao))
     if xctype == 'LDA':
         ao_deriv = 1
+        t1 = log.init_timer()
         for ao_mask, mask, weight, coords \
                 in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
-            t0 = log.init_timer()
             nao_non0 = len(mask)
             ao = contract('nip,ij->njp', ao_mask, coeff[mask])
             rho = numint.eval_rho2(opt.mol, ao[0], mo_coeff, mo_occ, mask, xctype)
-            t0 = log.timer_debug1('eval rho', *t0)
+            t1 = log.timer_debug2('eval rho', *t1)
             vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
-            t0 = log.timer_debug1('eval vxc', *t0)
+            t1 = log.timer_debug2('eval vxc', *t1)
             wv = weight * vxc[0]
             aow = [numint._scale_ao(ao[i], wv) for i in range(1, 4)]
             _d1d2_dot_(ipip, mol, aow, ao[1:4], mask, ao_loc, False)
@@ -417,27 +418,28 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 vmat_tmp = cupy.zeros([3,3,nao_non0,nao_non0])
                 aow = [numint._scale_ao(ao_mask[0], wv[i]) for i in range(3)]
                 _d1d2_dot_(vmat_tmp, mol, ao_mask[1:4], aow, mask, ao_loc, False)
-                vmat_tmp = contract('pi,xypq->xyiq', coeff[mask], vmat_tmp)
-                vmat_tmp = contract('qj,xyiq->xyij', coeff[mask], vmat_tmp)
-                vmat[ia] += vmat_tmp
+                #vmat_tmp = contract('pi,xypq->xyiq', coeff[mask], vmat_tmp)
+                #vmat_tmp = contract('qj,xyiq->xyij', coeff[mask], vmat_tmp)
+                #vmat[ia] += vmat_tmp
+                add_sparse(vmat[ia], vmat_tmp, mask)
             ao_dm0 = aow = None
-            t0 = log.timer_debug1('integration', *t0)
+            t1 = log.timer_debug2('integration', *t1)
         for ia in range(mol.natm):
+            vmat[ia] = take_last2d(vmat[ia], opt.rev_ao_idx)
             p0, p1 = aoslices[ia][2:]
             vmat[ia,:,:,:,p0:p1] += ipip[:,:,:,p0:p1]
 
     elif xctype == 'GGA':
         ao_deriv = 2
-        comp = (ao_deriv+1)*(ao_deriv+2)*(ao_deriv+3)//6
+        t1 = log.init_timer()
         for ao_mask, mask, weight, coords \
-                in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory, extra=5*comp*nao):
-            t0 = log.init_timer()
+                in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
             nao_non0 = len(mask)
             ao = contract('nip,ij->njp', ao_mask, coeff[mask])
             rho = numint.eval_rho2(opt.mol, ao[:4], mo_coeff, mo_occ, mask, xctype)
-            t0 = log.timer_debug1('eval rho', *t0)
+            t1 = log.timer_debug2('eval rho', *t1)
             vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
-            t0 = log.timer_debug1('eval vxc', *t0)
+            t1 = log.timer_debug2('eval vxc', *t1)
             wv = weight * vxc
             wv[0] *= .5
             aow = rks_grad._make_dR_dao_w(ao, wv)
@@ -460,14 +462,19 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 for i in range(3):
                     aow = rks_grad._make_dR_dao_w(ao_mask, wv[i])
                     rks_grad._d1_dot_(aow, ao_mask[0].T, out=vmat_tmp[i])
-                aow = [numint._scale_ao(ao_mask[:4], wv[i,:4]) for i in range(3)]
+                ng = len(weight)
+                aow = cupy.empty([3,nao_non0,ng])
+                for i in range(3):
+                    aow[i] = numint._scale_ao(ao_mask[:4], wv[i,:4])
                 _d1d2_dot_(vmat_tmp, mol, ao_mask[1:4], aow, mask, ao_loc, False)
-                vmat_tmp = contract('pi,xypq->xyiq', coeff[mask], vmat_tmp)
-                vmat_tmp = contract('qj,xyiq->xyij', coeff[mask], vmat_tmp)
-                vmat[ia] += vmat_tmp
+                #vmat_tmp = contract('pi,xypq->xyiq', coeff[mask], vmat_tmp)
+                #vmat_tmp = contract('qj,xyiq->xyij', coeff[mask], vmat_tmp)
+                #vmat[ia] += vmat_tmp
+                add_sparse(vmat[ia], vmat_tmp, mask)
             ao_dm0 = aow = None
-            t0 = log.timer_debug1('integration', *t0)
+            t1 = log.timer_debug2('integration', *t1)
         for ia in range(mol.natm):
+            vmat[ia] = take_last2d(vmat[ia], opt.rev_ao_idx)
             p0, p1 = aoslices[ia][2:]
             vmat[ia,:,:,:,p0:p1] += ipip[:,:,:,p0:p1]
             vmat[ia,:,:,:,p0:p1] += ipip[:,:,p0:p1].transpose(1,0,3,2)
@@ -477,15 +484,15 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
         YX, YY, YZ = 5, 7, 8
         ZX, ZY, ZZ = 6, 8, 9
         ao_deriv = 2
+        t1 = log.init_timer()
         for ao_mask, mask, weight, coords \
                 in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
-            t0 = log.init_timer()
             nao_non0 = len(mask)
             ao = contract('nip,ij->njp', ao_mask, coeff[mask])
             rho = numint.eval_rho2(opt.mol, ao[:10], mo_coeff, mo_occ, mask, xctype)
-            t0 = log.timer_debug1('eval rho', *t0)
+            t1 = log.timer_debug2('eval rho', *t1)
             vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
-            t0 = log.timer_debug1('eval vxc', *t0)
+            t1 = log.timer_debug2('eval vxc', *t1)
             wv = weight * vxc
             wv[0] *= .5
             wv[4] *= .25
@@ -522,11 +529,13 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 _d1d2_dot_(vmat_tmp, mol, [ao_mask[YX], ao_mask[YY], ao_mask[YZ]], aow, mask, ao_loc, False)
                 aow = [numint._scale_ao(ao_mask[3], wv[i,4]) for i in range(3)]
                 _d1d2_dot_(vmat_tmp, mol, [ao_mask[ZX], ao_mask[ZY], ao_mask[ZZ]], aow, mask, ao_loc, False)
-                vmat_tmp = contract('pi,xypq->xyiq', coeff[mask], vmat_tmp)
-                vmat_tmp = contract('qj,xyiq->xyij', coeff[mask], vmat_tmp)
-                vmat[ia] += vmat_tmp
-            t0 = log.timer_debug1('integration', *t0)
+                #vmat_tmp = contract('pi,xypq->xyiq', coeff[mask], vmat_tmp)
+                #vmat_tmp = contract('qj,xyiq->xyij', coeff[mask], vmat_tmp)
+                #vmat[ia] += vmat_tmp
+                add_sparse(vmat[ia], vmat_tmp, mask)
+            t1 = log.timer_debug2('integration', *t1)
         for ia in range(mol.natm):
+            vmat[ia] = take_last2d(vmat[ia], opt.rev_ao_idx)
             p0, p1 = aoslices[ia][2:]
             vmat[ia,:,:,:,p0:p1] += ipip[:,:,:,p0:p1]
             vmat[ia,:,:,:,p0:p1] += ipip[:,:,p0:p1].transpose(1,0,3,2)
@@ -570,14 +579,14 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     max_memory = max(2000, max_memory-vmat.size*8/1e6)
     if xctype == 'LDA':
         ao_deriv = 1
+        t1 = t0 = log.init_timer()
         for ao, mask, weight, coords \
                 in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
-            t0 = log.init_timer()
             ao = contract('nip,ij->njp', ao, coeff[mask])
             rho = numint.eval_rho2(opt.mol, ao[0], mo_coeff, mo_occ, mask, xctype)
-            t0 = log.timer_debug1('eval rho', *t0)
+            t1 = log.timer_debug2('eval rho', *t1)
             vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
-            t0 = log.timer_debug1('eval vxc', *t0)
+            t1 = log.timer_debug2('eval vxc', *t1)
             wv = weight * vxc[0]
             aow = numint._scale_ao(ao[0], wv)
             v_ip += rks_grad._d1_dot_(ao[1:4], aow.T)
@@ -592,17 +601,17 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
                 aow = [numint._scale_ao(ao[0], wv[i]) for i in range(3)]
                 vmat[ia] += rks_grad._d1_dot_(aow, ao[0].T)
             ao_dm0 = aow = None
-            t0 = log.timer_debug1('integration', *t0)
+            t1 = log.timer_debug2('integration', *t1)
     elif xctype == 'GGA':
         ao_deriv = 2
+        t1 = t0 = log.init_timer()
         for ao, mask, weight, coords \
                 in ni.block_loop(mol, grids, nao, ao_deriv, max_memory):
-            t0 = log.init_timer()
             ao = contract('nip,ij->njp', ao, coeff[mask])
             rho = numint.eval_rho2(mol, ao[:4], mo_coeff, mo_occ, mask, xctype)
-            t0 = log.timer_debug1('eval rho', *t0)
+            t1 = log.timer_debug2('eval rho', *t1)
             vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
-            t0 = log.timer_debug1('eval vxc', *t0)
+            t1 = log.timer_debug2('eval vxc', *t1)
             wv = weight * vxc
             wv[0] *= .5
             v_ip += rks_grad._gga_grad_sum_(ao, wv)
@@ -616,20 +625,20 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
                 wv[:,0] *= .5
                 aow = [numint._scale_ao(ao[:4], wv[i,:4]) for i in range(3)]
                 vmat[ia] += rks_grad._d1_dot_(aow, ao[0].T)
-            t0 = log.timer_debug1('integration', *t0)
+            t1 = log.timer_debug2('integration', *t1)
             ao_dm0 = aow = None
     elif xctype == 'MGGA':
         if grids.level < 5:
             log.warn('MGGA Hessian is sensitive to dft grids.')
         ao_deriv = 2
+        t1 = t0 = log.init_timer()
         for ao, mask, weight, coords \
                 in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
-            t0 = log.init_timer()
             ao = contract('nip,ij->njp', ao, coeff[mask])
             rho = numint.eval_rho2(opt.mol, ao[:10], mo_coeff, mo_occ, mask, xctype)
-            t0 = log.timer_debug1('eval rho', *t0)
+            t1 = log.timer_debug2('eval rho', *t1)
             vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
-            t0 = log.timer_debug1('eval vxc', *t0)
+            t1 = log.timer_debug2('eval vxc', *t0)
             wv = weight * vxc
             wv[0] *= .5
             wv[4] *= .5  # for the factor 1/2 in tau
@@ -649,7 +658,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
                     aow = [numint._scale_ao(ao[j], wv[i,4]) for i in range(3)]
                     vmat[ia] += rks_grad._d1_dot_(aow, ao[j].T)
             ao_dm0 = aow = None
-            t0 = log.timer_debug1('integration', *t0)
+            t1 = log.timer_debug2('integration', *t1)
     for ia in range(mol.natm):
         p0, p1 = aoslices[ia][2:]
         vmat[ia,:,p0:p1] += v_ip[:,p0:p1]
@@ -679,60 +688,59 @@ class Hessian(rhf_hess.Hessian):
 
     def get_dispersion(self):
         if self.base.disp[:2].upper() == 'D3':
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                import dftd3.pyscf as disp
-                coords = self.mol.atom_coords()
-                natm = self.mol.natm
-                h_d3 = numpy.zeros([self.mol.natm, self.mol.natm, 3,3])
-                mol = self.mol.copy()
-                eps = 1e-5
-                for i in range(natm):
-                    for j in range(3):
-                        coords[i,j] += eps
-                        mol.set_geom_(coords, unit='Bohr')
-                        d3 = disp.DFTD3Dispersion(mol, xc=self.base.xc, version=self.base.disp)
-                        _, g1 = d3.kernel()
+            from gpu4pyscf.lib import dftd3
+            coords = self.mol.atom_coords()
+            natm = self.mol.natm
+            h_d3 = numpy.zeros([self.mol.natm, self.mol.natm, 3,3])
+            mol = self.mol.copy()
+            eps = 1e-5
+            for i in range(natm):
+                for j in range(3):
+                    coords[i,j] += eps
+                    mol.set_geom_(coords, unit='Bohr')
+                    mol.build()
+                    dftd3_model = dftd3.DFTD3Dispersion(mol, xc=self.base.xc, version=self.base.disp)
+                    res = dftd3_model.get_dispersion(grad=True)
+                    g1 = res['gradient']
 
-                        coords[i,j] -= 2.0*eps
-                        mol.set_geom_(coords, unit='Bohr')
-                        d3 = disp.DFTD3Dispersion(mol, xc=self.base.xc, version=self.base.disp)
-                        _, g2 = d3.kernel()
+                    coords[i,j] -= 2.0*eps
+                    mol.set_geom_(coords, unit='Bohr')
+                    mol.build()
+                    dftd3_model = dftd3.DFTD3Dispersion(mol, xc=self.base.xc, version=self.base.disp)
+                    res = dftd3_model.get_dispersion(grad=True)
+                    g2 = res['gradient']
 
-                        coords[i,j] += eps
-                        h_d3[i,:,j,:] = (g1 - g2)/(2.0*eps)
+                    coords[i,j] += eps
+                    h_d3[i,:,j,:] = (g1 - g2)/(2.0*eps)
             return h_d3
 
         if self.base.disp[:2].upper() == 'D4':
-            from pyscf.data.elements import charge
-            atoms = numpy.array([ charge(a[0]) for a in self.mol._atom])
+            from gpu4pyscf.lib import dftd4
             coords = self.mol.atom_coords()
             natm = self.mol.natm
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                from dftd4.interface import DampingParam, DispersionModel
-                params = DampingParam(method=self.base.xc)
-                mol = self.mol.copy()
-                h_d3 = numpy.zeros([self.mol.natm, self.mol.natm, 3,3])
-                eps = 1e-5
-                for i in range(natm):
-                    for j in range(3):
-                        coords[i,j] += eps
-                        mol.set_geom_(coords, unit='Bohr')
-                        model = DispersionModel(atoms, coords)
-                        res = model.get_dispersion(params, grad=True)
-                        g1 = res.get("gradient")
+            mol = self.mol.copy()
+            h_d4 = numpy.zeros([mol.natm, mol.natm, 3,3])
+            eps = 1e-5
+            for i in range(natm):
+                for j in range(3):
+                    coords[i,j] += eps
+                    mol.set_geom_(coords, unit='Bohr')
+                    mol.build()
+                    dftd4_model = dftd4.DFTD4Dispersion(mol, xc=self.base.xc)
+                    res = dftd4_model.get_dispersion(grad=True)
+                    g1 = res.get("gradient")
 
-                        coords[i,j] -= 2.0*eps
-                        mol.set_geom_(coords, unit='Bohr')
-                        model = DispersionModel(atoms, coords)
-                        res = model.get_dispersion(params, grad=True)
-                        g2 = res.get("gradient")
+                    coords[i,j] -= 2.0*eps
+                    mol.set_geom_(coords, unit='Bohr')
+                    mol.build()
+                    dftd4_model = dftd4.DFTD4Dispersion(mol, xc=self.base.xc)
+                    res = dftd4_model.get_dispersion(grad=True)
+                    g2 = res.get("gradient")
 
-                        coords[i,j] += eps
-                        h_d3[i,:,j,:] = (g1 - g2)/(2.0*eps)
+                    coords[i,j] += eps
+                    h_d4[i,:,j,:] = (g1 - g2)/(2.0*eps)
 
-            return h_d3
+            return h_d4
 
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
