@@ -32,7 +32,6 @@
 
 #include "g3c2e.cuh"
 #include "g3c2e_ip1.cu"
-#include "g2e_get_veff_ip1_root2.cu"
 
 __host__
 static int GINTrun_tasks_int3c2e_ip1_jk(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars *envs, cudaStream_t stream)
