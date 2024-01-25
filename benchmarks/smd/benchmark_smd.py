@@ -19,7 +19,50 @@ from pyscf import gto
 from gpu4pyscf.solvent import smd
 from gpu4pyscf.solvent.grad import smd as smd_grad
 
-def _check_grad(mol, solvent='water'):
+'''
+Benchmark CDS, gradient, hessian in the SMD model
+'''
+
+path = '../molecules/organic/'
+
+# calculated with qchem 6.1, in kcal/mol
+e_cds_qchem = {}
+e_cds_qchem['water'] = {
+    '020_Vitamin_C.xyz': 5.0737,
+    '031_Inosine.xyz': 2.7129,
+    '033_Bisphenol_A.xyz': 6.2620,
+    '037_Mg_Porphin.xyz': 6.0393,
+    '042_Penicillin_V.xyz': 6.4349,
+    '045_Ochratoxin_A.xyz': 8.8526,
+    '052_Cetirizine.xyz': 4.6430,
+    '057_Tamoxifen.xyz': 5.4743,
+    '066_Raffinose.xyz': 10.2543,
+    '084_Sphingomyelin.xyz': 15.0308,
+    '095_Azadirachtin.xyz': 16.9321,
+    '113_Taxol.xyz': 17.2585,
+    '168_Valinomycin.xyz': 27.3499,
+}
+
+e_cds_qchem['ethanol'] = {
+    '020_Vitamin_C.xyz': 4.2119,
+    '031_Inosine.xyz': 1.0175,
+    '033_Bisphenol_A.xyz': -0.2454,
+    '037_Mg_Porphin.xyz': -2.2391,
+    '042_Penicillin_V.xyz': 1.8338,
+    '045_Ochratoxin_A.xyz': 1.0592,
+    '052_Cetirizine.xyz': -2.5099,
+    '057_Tamoxifen.xyz': -3.9320,
+    '066_Raffinose.xyz': 3.1120,
+    '084_Sphingomyelin.xyz': -3.1963,
+    '095_Azadirachtin.xyz': 6.5286,
+    '113_Taxol.xyz': 2.7271,
+    '168_Valinomycin.xyz': 4.0013,
+}
+
+def _check_energy_grad(filename, solvent='water'):
+    xyz = os.path.join(path, filename)
+    mol = gto.Mole(atom=xyz)
+    mol.build()
     natm = mol.natm
     fd_cds = numpy.zeros([natm,3])
     eps = 1e-4
@@ -48,17 +91,18 @@ def _check_grad(mol, solvent='water'):
 
     smdobj = smd.SMD(mol)
     smdobj.solvent = solvent
+    e_cds = smd.get_cds(smdobj) * smd.hartree2kcal
     grad_cds = smd_grad.get_cds(smdobj)
-    print(numpy.linalg.norm(fd_cds - grad_cds.get()))
+    print(f'e_cds by GPU4PySCF: {e_cds}')
+    print(f'e_cds by Q-Chem: {e_cds_qchem[solvent][filename]}')
+    print(f'e_cds(Q-Chem) - e_cds(GPU4PySCF): {e_cds - e_cds_qchem[solvent][filename]}')
+    print(f'norm (fd gradient - analy gradient: {numpy.linalg.norm(fd_cds - grad_cds.get())}')
     assert numpy.linalg.norm(fd_cds - grad_cds.get()) < 1e-8
 
 if __name__ == "__main__":
-    path = '../molecules/organic/'
     for filename in os.listdir(path):
-        f = os.path.join(path, filename)
-        mol = gto.Mole(atom=f)
-        mol.build()
-        print(f'benchmarking {f} in water')
-        _check_grad(mol, solvent='water')
-        print(f'benchmarking {f} in ethanol')
-        _check_grad(mol, solvent='ethanol')
+        print(f'---- benchmarking {filename} ----------')
+        print('in water')
+        _check_energy_grad(filename, solvent='water')
+        print('in ethanol')
+        _check_energy_grad(filename, solvent='ethanol')

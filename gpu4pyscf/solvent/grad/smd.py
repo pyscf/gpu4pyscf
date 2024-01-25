@@ -100,6 +100,7 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             sig_HO = get_bond_tension(('H','O'))
             tension += sig_HC * dt_HC + sig_HO * dt_HO
             tensions.append(tension)
+            continue
 
         if sym_i == 'C':
             dt_CC = np.zeros([natm,3])
@@ -121,6 +122,7 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             sig_CN = get_bond_tension(('C','N'))
             tension += sig_CC * dt_CC + sig_CN * (2 * t_CN * dt_CN)
             tensions.append(tension)
+            continue
 
         if sym_i == 'N':
             t_NC = 0.0
@@ -155,6 +157,7 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             sig_NC3= get_bond_tension(('N','C3'))
             tension += sig_NC * (1.3 * t_NC**0.3 * dt_NC) + sig_NC3 * dt_NC3
             tensions.append(tension)
+            continue
 
         if sym_i == 'O':
             dt_OC = np.zeros([natm,3])
@@ -188,6 +191,8 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             sig_OP = get_bond_tension(('O','P'))
             tension += sig_OC * dt_OC + sig_ON * dt_ON + sig_OO * dt_OO + sig_OP * dt_OP
             tensions.append(tension)
+            continue
+
     return cupy.asarray(tensions)
 
 def get_cds(smdobj):
@@ -206,18 +211,18 @@ def get_cds(smdobj):
 
     # generate surface for calculating SASA
     rad = radii.VDW + 0.4/radii.BOHR
-    surface = pcm.gen_surface(mol, ng=302, rad=rad)
+    surface = pcm.gen_surface(mol, ng=smdobj.sasa_ng, rad=rad)
     _, grad_area = pcm_grad.get_dF_dA(surface)
     area = surface['area']
     gridslice = surface['gslice_by_atom']
-    SASA = cupy.asarray([cupy.sum(area[p0:p1], axis=0) for p0,p1, in gridslice])
-    grad_SASA = cupy.asarray([cupy.sum(grad_area[p0:p1], axis=0) for p0,p1, in gridslice])
+    SASA = cupy.asarray([cupy.sum(area[p0:p1], axis=0) for p0,p1, in gridslice]).get()
+    grad_SASA = cupy.asarray([cupy.sum(grad_area[p0:p1], axis=0) for p0,p1, in gridslice]).get()
     SASA *= radii.BOHR**2
     grad_SASA *= radii.BOHR**2
     mol_cds = mol_tension * np.sum(grad_SASA, axis=0) / 1000
     grad_tension *= radii.BOHR
-    atm_cds = np.einsum('i,ijx->jx', SASA, grad_tension) / 1000
-    atm_cds+= np.einsum('i,ijx->jx', atm_tension, grad_SASA) / 1000
+    atm_cds = np.einsum('i,ijx->jx', SASA, grad_tension.get()) / 1000
+    atm_cds+= np.einsum('i,ijx->jx', atm_tension.get(), grad_SASA) / 1000
     return (mol_cds + atm_cds)/hartree2kcal # hartree
 
 def make_grad_object(grad_method):
@@ -228,7 +233,7 @@ def make_grad_object(grad_method):
     name = (grad_method.base.with_solvent.__class__.__name__
             + grad_method.__class__.__name__)
     return lib.set_class(WithSolventGrad(grad_method),
-                         (grad_method.__class__, WithSolventGrad), name)
+                         (WithSolventGrad, grad_method.__class__), name)
 
 class WithSolventGrad:
     _keys = {'de_solvent', 'de_solute'}
@@ -251,11 +256,11 @@ class WithSolventGrad:
         if dm is None:
             dm = self.base.make_rdm1(ao_repr=True)
 
+        self.de_solute = super().kernel(*args, **kwargs)
         self.de_solvent = pcm_grad.grad_qv(self.base.with_solvent, dm)
         self.de_solvent+= pcm_grad.grad_solver(self.base.with_solvent, dm)
         self.de_solvent+= pcm_grad.grad_nuc(self.base.with_solvent, dm)
 
-        self.de_solute = super().kernel(*args, **kwargs)
         self.de = self.de_solute + self.de_solvent
         self.de += get_cds(self.base.with_solvent)
         if self.verbose >= logger.NOTE:

@@ -17,9 +17,7 @@ import unittest
 import numpy
 from pyscf import gto
 from gpu4pyscf import scf
-from gpu4pyscf.solvent import pcm
-from gpu4pyscf.solvent.grad import pcm as pcm_grad
-from gpu4pyscf.solvent.grad import smd as smd_grad
+from gpu4pyscf.solvent.hessian import smd as smd_hess
 from gpu4pyscf.solvent import smd
 
 def setUpModule():
@@ -43,45 +41,18 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-def _check_grad(mol, solvent='water'):
-    natm = mol.natm
-    fd_cds = numpy.zeros([natm,3])
-    eps = 1e-4
-    for ia in range(mol.natm):
-        for j in range(3):
-            coords = mol.atom_coords(unit='B')
-            coords[ia,j] += eps
-            mol.set_geom_(coords, unit='B')
-            mol.build()
-
-            smdobj = smd.SMD(mol)
-            smdobj.solvent = solvent
-            e0_cds = smdobj.get_cds()
-
-            coords[ia,j] -= 2.0*eps
-            mol.set_geom_(coords, unit='B')
-            mol.build()
-
-            smdobj = smd.SMD(mol)
-            smdobj.solvent = solvent
-            e1_cds = smdobj.get_cds()
-
-            coords[ia,j] += eps
-            mol.set_geom_(coords, unit='B')
-            fd_cds[ia,j] = (e0_cds - e1_cds) / (2.0 * eps)
-
+def _check_hess(mol, solvent='water'):
     smdobj = smd.SMD(mol)
     smdobj.solvent = solvent
-    grad_cds = smd_grad.get_cds(smdobj)
-    assert numpy.linalg.norm(fd_cds - grad_cds) < 1e-8
+    smd_hess.get_cds(smdobj)
 
 class KnownValues(unittest.TestCase):
-    def test_grad_water(self):
-        _check_grad(mol, solvent='water')
+    def test_hess_water(self):
+        _check_hess(mol, solvent='water')
 
-    def test_grad_solvent(self):
-        _check_grad(mol, solvent='ethanol')
+    def test_hess_solvent(self):
+        _check_hess(mol, solvent='ethanol')
 
 if __name__ == "__main__":
-    print("Full Tests for Gradient of SMD")
+    print("Full Tests for Hessian of SMD")
     unittest.main()

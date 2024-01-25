@@ -131,7 +131,11 @@ def hess_elec(pcmobj, dm, verbose=None):
         pcmobj.reset(mol)
         e, v = pcmobj._get_vind(dm)
         #return grad_elec(pcmobj, dm)
-        return grad_nuc(pcmobj, dm) + grad_solver(pcmobj, dm) + grad_qv(pcmobj, dm)
+        pcm_grad = grad_nuc(pcmobj, dm)
+        pcm_grad+= grad_solver(pcmobj, dm)
+        pcm_grad+= grad_qv(pcmobj, dm)
+        return pcm_grad
+
     mol.verbose = 0
     de = numpy.zeros([mol.natm, mol.natm, 3, 3])
     eps = 1e-3

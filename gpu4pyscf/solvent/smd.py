@@ -18,12 +18,14 @@ SMD solvent model
 '''
 
 import numpy as np
+import scipy
 import cupy
 from pyscf import lib
 from pyscf.data import radii
 from pyscf.dft import gen_grid
 from gpu4pyscf.solvent import pcm, _attach_solvent
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import dist_matrix
 
 @lib.with_doc(_attach_solvent._for_scf.__doc__)
 def smd_for_scf(mf, solvent_obj=None, dm=None):
@@ -353,17 +355,13 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
         t += sigma_beta.get(sym_i, 0.0) * beta
         return t
 
-    rij = cupy.sum((coords[:,None,:] - coords[None,:,:])**2, axis=2)**0.5
+    rij = scipy.spatial.distance.cdist(coords, coords)
     tensions = []
     for i, sym_i in enumerate(symbols):
         if sym_i not in ['H', 'C', 'N', 'O', 'F', 'Si', 'S', 'Cl', 'Br']:
             tensions.append(0)
             continue
 
-        #sig_n = sigma_n.get(sym_i, 0.0)
-        #sig_a = sigma_alpha.get(sym_i, 0.0)
-        #sig_b = sigma_beta.get(sym_i, 0.0)
-        #tension = sig_n * n + sig_a * alpha + sig_b * beta
         tension = get_atom_tension(sym_i)
         if sym_i in ['F', 'Si', 'S', 'Cl', 'Br']:
             tensions.append(tension)
@@ -383,6 +381,7 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             sig_HO = get_bond_tension(('H','O'))
             tension += sig_HC * t_HC + sig_HO * t_HO
             tensions.append(tension)
+            continue
 
         if sym_i == 'C':
             t_CC = 0.0
@@ -398,6 +397,7 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             sig_CN = get_bond_tension(('C','N'))
             tension += sig_CC * t_CC + sig_CN * t_CN**2
             tensions.append(tension)
+            continue
 
         if sym_i == 'N':
             t_NC = 0.0
@@ -418,6 +418,7 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             sig_NC3= get_bond_tension(('N','C3'))
             tension += sig_NC * t_NC**1.3 + sig_NC3 * t_NC3
             tensions.append(tension)
+            continue
 
         if sym_i == 'O':
             t_OC = 0.0
@@ -443,6 +444,7 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             sig_OP = get_bond_tension(('O','P'))
             tension += sig_OC * t_OC + sig_ON * t_ON + sig_OO * t_OO + sig_OP * t_OP
             tensions.append(tension)
+            continue
     return cupy.asarray(tensions)
 
 def molecular_surface_tension(beta, gamma, phi, psi):
@@ -486,7 +488,7 @@ def get_cds(smdobj):
 
     # generate surface for calculating SASA
     rad = radii.VDW + 0.4/radii.BOHR
-    surface = pcm.gen_surface(mol, ng=302, rad=rad)
+    surface = pcm.gen_surface(mol, ng=smdobj.sasa_ng, rad=rad)
     area = surface['area']
     gridslice = surface['gslice_by_atom']
     SASA = cupy.asarray([cupy.sum(area[p0:p1], axis=0) for p0,p1, in gridslice])
@@ -497,11 +499,12 @@ def get_cds(smdobj):
 
 class SMD(pcm.PCM):
     _keys = {
-        'intopt', 'method', 'e_cds', 'solvent_descriptors', 'r_probe'
+        'intopt', 'method', 'e_cds', 'solvent_descriptors', 'r_probe', 'sasa_ng'
     }
     def __init__(self, mol, solvent=''):
         super().__init__(mol)
         self.vdw_scale = 1.0
+        self.sasa_ng = 590 # quadrature grids for calculating SASA
         self.r_probe = 0.4/radii.BOHR
         self.method = 'SMD'  # use IEFPCM for electrostatic
         if solvent not in solvent_db:
@@ -575,7 +578,14 @@ class SMD(pcm.PCM):
             raise RuntimeError('Only SCF gradient is supported')
 
     def Hessian(self, hess_method):
-        raise RuntimeError('SMD Hessian is not implemented')
+        from gpu4pyscf.solvent.hessian import smd as smd_hess
+        if self.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
+        from gpu4pyscf import scf
+        if isinstance(hess_method.base, scf.hf.RHF):
+            return smd_hess.make_hess_object(hess_method)
+        else:
+            raise RuntimeError('Only SCF gradient is supported')
 
     def reset(self, mol=None):
         super().reset(mol)

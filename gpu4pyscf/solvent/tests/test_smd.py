@@ -42,13 +42,13 @@ class KnownValues(unittest.TestCase):
         smdobj = smd.SMD(mol)
         smdobj.solvent = 'toluene'
         e_cds = smdobj.get_cds()
-        assert numpy.abs(e_cds - -0.0013476060879874362) < 1e-8
+        assert numpy.abs(e_cds - -0.0013476016530476354) < 1e-8
 
     def test_cds_water(self):
         smdobj = smd.SMD(mol)
         smdobj.solvent = 'water'
         e_cds = smdobj.get_cds()
-        assert numpy.abs(e_cds - 0.0022847142144050057) < 1e-8
+        assert numpy.abs(e_cds - 0.0022903044356530726) < 1e-8
 
     def test_smd_solvent(self):
         mf = scf.RHF(mol)

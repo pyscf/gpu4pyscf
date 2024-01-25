@@ -32,6 +32,7 @@
 
 #include "g3c2e.cuh"
 #include "g3c2e_ip1.cu"
+#include "g2e_get_veff_ip1_root2.cu"
 
 __host__
 static int GINTrun_tasks_int3c2e_ip1_jk(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars *envs, cudaStream_t stream)
@@ -68,17 +69,17 @@ static int GINTrun_tasks_int3c2e_ip1_jk(JKMatrix *jk, BasisProdOffsets *offsets,
 
 extern "C" { __host__
 int GINTbuild_int3c2e_ip1_jk(BasisProdCache *bpcache,
-                 double *vj, double *vk, double *dm, double *rhoj, double *rhok, 
+                 double *vj, double *vk, double *dm, double *rhoj, double *rhok,
                  int *ao_offsets, int nao, int naux, int n_dm,
                  int *bins_locs_ij, int ntasks_kl, int ncp_ij, int cp_kl_id, double omega)
 {
     ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
-    
+
     int ng[4] = {1,0,0,0};
-    
+
     // move bpcache to constant memory
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
-    
+
     JKMatrix jk;
     jk.n_dm = n_dm;
     jk.nao = nao;
@@ -92,8 +93,7 @@ int GINTbuild_int3c2e_ip1_jk(BasisProdCache *bpcache,
     jk.ao_offsets_j = ao_offsets[1];
     jk.ao_offsets_k = ao_offsets[2];
     jk.ao_offsets_l = ao_offsets[3];
-    BasisProdOffsets offsets;
-    
+
     int *bas_pairs_locs = bpcache->bas_pairs_locs;
     int *primitive_pairs_locs = bpcache->primitive_pairs_locs;
 
@@ -101,9 +101,9 @@ int GINTbuild_int3c2e_ip1_jk(BasisProdCache *bpcache,
     for (int n = 0; n < MAX_STREAMS; n++){
         checkCudaErrors(cudaStreamCreate(&streams[n]));
     }
-    
+
     int *idx = (int *)malloc(sizeof(int) * TOT_NF * 3);
-    int *l_locs = (int *)malloc(sizeof(int) * (GPU_LMAX + 2)); 
+    int *l_locs = (int *)malloc(sizeof(int) * (GPU_LMAX + 2));
     GINTinit_index1d_xyz(idx, l_locs);
     checkCudaErrors(cudaMemcpyToSymbol(c_idx, idx, sizeof(int) * TOT_NF*3));
     checkCudaErrors(cudaMemcpyToSymbol(c_l_locs, l_locs, sizeof(int) * (GPU_LMAX + 2)));
@@ -122,7 +122,8 @@ int GINTbuild_int3c2e_ip1_jk(BasisProdCache *bpcache,
 
         int ntasks_ij = bins_locs_ij[cp_ij_id+1] - bins_locs_ij[cp_ij_id];
         if (ntasks_ij <= 0) continue;
-        
+
+        BasisProdOffsets offsets;
         offsets.ntasks_ij = ntasks_ij;
         offsets.ntasks_kl = ntasks_kl;
         offsets.bas_ij = bas_pairs_locs[cp_ij_id];
@@ -140,7 +141,7 @@ int GINTbuild_int3c2e_ip1_jk(BasisProdCache *bpcache,
         checkCudaErrors(cudaStreamSynchronize(streams[n]));
         checkCudaErrors(cudaStreamDestroy(streams[n]));
     }
-    
+
     return 0;
 }
 

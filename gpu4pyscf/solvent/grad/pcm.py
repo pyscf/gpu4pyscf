@@ -194,7 +194,6 @@ def grad_qv(pcmobj, dm):
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
     coeff = intopt.coeff
     dm_cart = coeff @ dm @ coeff.T
-    #dm_cart = cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
 
     dvj, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip1', q_sym, None, dm_cart)
     dq, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip2', q_sym, None, dm_cart)
@@ -346,11 +345,10 @@ class WithSolventGrad:
         if dm is None:
             dm = self.base.make_rdm1(ao_repr=True)
 
+        self.de_solute = super().kernel(*args, **kwargs)
         self.de_solvent = grad_qv(self.base.with_solvent, dm)
         self.de_solvent+= grad_solver(self.base.with_solvent, dm)
         self.de_solvent+= grad_nuc(self.base.with_solvent, dm)
-
-        self.de_solute = super().kernel(*args, **kwargs)
         self.de = self.de_solute + self.de_solvent
 
         if self.verbose >= logger.NOTE:
