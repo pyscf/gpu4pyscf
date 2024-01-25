@@ -393,10 +393,8 @@ def cart2sph(t, axis=0, ang=1, out=None):
     t_cart = t.reshape([i0*nli, li_size[0], i3])
     if(out is not None):
         out = out.reshape([i0*nli, li_size[1], i3])
-        out[:] = cupy.einsum('min,ip->mpn', t_cart, c2s)
-    else:
-        out = cupy.einsum('min,ip->mpn', t_cart, c2s)
-    return out.reshape(out_shape)
+    t_sph = contract('min,ip->mpn', t_cart, c2s, out=out)
+    return t_sph.reshape(out_shape)
 
 # a copy with modification from
 # https://github.com/pyscf/pyscf/blob/9219058ac0a1bcdd8058166cad0fb9127b82e9bf/pyscf/lib/linalg_helper.py#L1536

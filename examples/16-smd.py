@@ -41,6 +41,5 @@ print('total energy with SMD:', e_tot)
 gradobj = mf.nuc_grad_method()
 f = gradobj.kernel()
 
-exit()
 hessobj = mf.Hessian()
 h = hessobj.kernel()
