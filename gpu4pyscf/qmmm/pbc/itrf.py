@@ -174,7 +174,7 @@ def qmmm_for_scf(scf_method, mm_mol):
             charges = all_charges[mask]
             coords = all_coords[mask]
             logger.note(self, '%d MM charges see directly QM density'%charges.shape[0])
-            if mm_mol.charge_model == 'gaussian':
+            if mm_mol.charge_model == 'gaussian' and len(coords) != 0:
                 expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
                 # FIXME slice mm coords when memory not enough
                 fakemol = gto.fakemol_for_charges(coords.get(), expnts.get())
@@ -205,7 +205,7 @@ def qmmm_for_scf(scf_method, mm_mol):
                     v += cp.einsum('kji,k->ji', j3c, -charges[k0:k1])
                 h1e += cupy_helper.take_last2d(v, intopt.rev_ao_idx)
                 intopt = int3c_blk = None
-            else:
+            elif mm_mol.charge_model != 'point' and len(coords) != 0:
                 # TODO test this block
                 raise RuntimeError("Not tested yet")
                 nao = mol.nao
@@ -215,6 +215,8 @@ def qmmm_for_scf(scf_method, mm_mol):
                 for i0, i1 in lib.prange(0, charges.size, blksize):
                     j3c = mol.intor('int1e_grids', hermi=1, grids=coords[i0:i1].get())
                     h1e += cp.einsum('kpq,k->pq', cp.asarray(j3c), -charges[i0:i1])
+            else: # no MM charges
+                pass
 
             j3c = None
             logger.timer(self, 'get_hcore', *cput0)
@@ -913,7 +915,7 @@ def qmmm_grad_for_scf(scf_grad):
             coords = all_coords[mask]
             g_qm = cp.asarray(grad_class.get_hcore(self, mol))
             nao = mol.nao
-            if mm_mol.charge_model == 'gaussian':
+            if mm_mol.charge_model == 'gaussian' and len(coords) != 0:
                 expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
                 fakemol = gto.fakemol_for_charges(coords.get(), expnts.get())
 
@@ -925,7 +927,7 @@ def qmmm_grad_for_scf(scf_grad):
                 for i0,i1,j0,j1,k0,k1,j3c in int3c2e.loop_int3c2e_general(intopt, ip_type='ip1'):
                     v[:,i0:i1,j0:j1] += cp.einsum('xkji,k->xij', j3c, charges[k0:k1])
                 g_qm += cupy_helper.take_last2d(v, intopt.rev_ao_idx)
-            else:
+            elif mm_mol.charge_model == 'point' and len(coords) != 0:
                 max_memory = self.max_memory - lib.current_memory()[0]
                 blksize = int(min(max_memory*1e6/8/nao**2/3, 200))
                 blksize = max(blksize, 1)
@@ -933,6 +935,8 @@ def qmmm_grad_for_scf(scf_grad):
                 for i0, i1 in lib.prange(0, len(coords), blksize):
                     j3c = cp.asarray(mol.intor('int1e_grids_ip', grids=coords[i0:i1]))
                     g_qm += cp.einsum('ikpq,k->ipq', j3c, charges[i0:i1])
+            else: # len(coords) == 0
+                pass
             logger.timer(self, 'get_hcore', *cput0)
             return g_qm
 
@@ -966,19 +970,20 @@ def qmmm_grad_for_scf(scf_grad):
             expnts = all_expnts[mask]
 
             g = cp.zeros_like(all_coords)
-            g_ = cp.zeros_like(coords)
-            expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
-            fakemol = gto.fakemol_for_charges(coords.get(), expnts.get())
+            if len(coords) != 0:
+                g_ = cp.zeros_like(coords)
+                expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
+                fakemol = gto.fakemol_for_charges(coords.get(), expnts.get())
 
-            intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
-            intopt.build(self.base.direct_scf_tol, diag_block_with_triu=True, aosym=False, 
-                         group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
+                intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
+                intopt.build(self.base.direct_scf_tol, diag_block_with_triu=True, aosym=False, 
+                             group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
 
-            dm_ = cupy_helper.take_last2d(dm, intopt.sph_ao_idx)
-            for i0,i1,j0,j1,k0,k1,j3c in int3c2e.loop_int3c2e_general(intopt, ip_type='ip2'):
-                j3c = cp.einsum('xkji,k->xkji', j3c, charges[k0:k1])
-                g_[k0:k1] += cp.einsum('xkji,ij->kx', j3c, dm_[i0:i1,j0:j1])
-            g[mask] = g_
+                dm_ = cupy_helper.take_last2d(dm, intopt.sph_ao_idx)
+                for i0,i1,j0,j1,k0,k1,j3c in int3c2e.loop_int3c2e_general(intopt, ip_type='ip2'):
+                    j3c = cp.einsum('xkji,k->xkji', j3c, charges[k0:k1])
+                    g_[k0:k1] += cp.einsum('xkji,ij->kx', j3c, dm_[i0:i1,j0:j1])
+                g[mask] = g_
             g = g.reshape(len(Ls), -1, 3)
             g = np.sum(g, axis=0)
 
