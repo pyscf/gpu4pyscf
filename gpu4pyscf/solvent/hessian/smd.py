@@ -264,7 +264,7 @@ def make_hess_object(hess_method):
     name = (hess_method.base.with_solvent.__class__.__name__
             + hess_method.__class__.__name__)
     return lib.set_class(WithSolventHess(hess_method),
-                         (hess_method.__class__, WithSolventHess), name)
+                         (WithSolventHess, hess_method.__class__), name)
 
 class WithSolventHess:
     _keys = {'de_solvent', 'de_solute'}
