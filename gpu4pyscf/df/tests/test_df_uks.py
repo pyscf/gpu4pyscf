@@ -18,8 +18,6 @@ import numpy as np
 import pyscf
 from pyscf import lib
 from pyscf.df import df_jk as cpu_df_jk
-from gpu4pyscf import scf
-from gpu4pyscf.df import df_jk
 from gpu4pyscf.dft import uks
 
 lib.num_threads(8)
@@ -57,14 +55,6 @@ class KnownValues(unittest.TestCase):
     '''
     known values are obtained by PySCF
     '''
-    def test_uhf(self):
-        print('------- HF -----------------')
-        mf = scf.UHF(mol).density_fit(auxbasis='def2-tzvpp-jkfit')
-        e_tot = mf.kernel()
-        e_pyscf = -75.6599919479438
-        print(f'diff from pyscf {e_tot - e_pyscf}')
-        assert np.allclose(e_tot, e_pyscf)
-
     def test_uks_lda(self):
         print('------- LDA ----------------')
         e_tot = run_dft("LDA,VWN5")
@@ -108,12 +98,6 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(e_tot, e_pyscf)
 
     def test_to_cpu(self):
-        mf = scf.UHF(mol).density_fit().to_cpu()
-        assert isinstance(mf, cpu_df_jk._DFHF)
-        # TODO: coming soon
-        #mf = mf.to_gpu()
-        #assert isinstance(mf, df_jk._DFHF)
-
         mf = uks.UKS(mol).density_fit().to_cpu()
         assert isinstance(mf, cpu_df_jk._DFHF)
         # grids are still not df._key
@@ -125,5 +109,5 @@ class KnownValues(unittest.TestCase):
         #assert 'gpu' in mf.grids.__module__
 
 if __name__ == "__main__":
-    print("Full Tests for SCF")
+    print("Full Tests for unrestricted Kohn-Sham")
     unittest.main()
