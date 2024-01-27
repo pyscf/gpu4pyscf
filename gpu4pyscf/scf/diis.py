@@ -15,7 +15,7 @@
 #
 # Author: Qiming Sun <osirpt.sun@gmail.com>
 #
-# modified by Xiaojie Wu <wxj6000@gmail.com>
+# modified by Xiaojie Wu <wxj6000@gmail.com>; Zhichen Pu <hoshishin@163.com>
 
 """
 DIIS
@@ -64,9 +64,13 @@ SCFDIIS = SCF_DIIS = DIIS = CDIIS
 
 def get_err_vec(s, d, f):
     '''error vector = SDF - FDS'''
-    if isinstance(f, cupy.ndarray):
+    if isinstance(f, cupy.ndarray) and f.ndim == 2:
         sdf = reduce(cupy.dot, (s,d,f))
-        errvec = (sdf.T.conj() - sdf)
-        return errvec
+        errvec = (sdf.conj().T - sdf).ravel()
+    elif f.ndim == s.ndim+1 and f.shape[0] == 2:  # for UHF
+        errvec = cupy.hstack([
+            get_err_vec(s, d[0], f[0]).ravel(),
+            get_err_vec(s, d[1], f[1]).ravel()])
     else:
-        cpu_diis.get_err_vec(s, d, f)
+        raise RuntimeError('Unknown SCF DIIS type')
+    return errvec

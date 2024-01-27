@@ -22,32 +22,34 @@ import cupy
 from gpu4pyscf.dft.numint import NumInt
 from gpu4pyscf.dft import numint
 
-mol_sph = pyscf.M(
+def setUpModule():
+    global mol_sph, mol_cart
     atom='''
 C  -0.65830719,  0.61123287, -0.00800148
 C   0.73685281,  0.61123287, -0.00800148
-''',
-    basis='ccpvdz',
-    spin=None,
-    cart = 0
-)
+'''
+    mol_sph = pyscf.M(
+        atom=atom,
+        basis='ccpvqz',
+        spin=None,
+        cart = 0,
+        output = '/dev/null')
 
-mol_cart = pyscf.M(
-    atom='''
-C  -0.65830719,  0.61123287, -0.00800148
-C   0.73685281,  0.61123287, -0.00800148
-''',
-    basis='ccpvqz',
-    spin=None,
-    cart=1
-)
+    mol_cart = pyscf.M(
+        atom=atom,
+        basis='ccpvqz',
+        spin=None,
+        cart=1,
+        output = '/dev/null')
 
 def tearDownModule():
     global mol_sph, mol_cart
+    mol_sph.stdout.close()
+    mol_cart.stdout.close()
     del mol_sph, mol_cart
 
 class KnownValues(unittest.TestCase):
-    
+
     # sph mol
     def test_ao_sph_deriv0(self):
         coords = np.random.random((100,3))
@@ -56,7 +58,7 @@ class KnownValues(unittest.TestCase):
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=0)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
-    
+
     def test_ao_sph_deriv1(self):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv1', coords)
@@ -64,16 +66,15 @@ class KnownValues(unittest.TestCase):
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=1)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
-    
+
     def test_ao_sph_deriv2(self):
         coords = np.random.random((4,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv2', coords)
         ao_cpu = cupy.asarray(ao)
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=2)
-        #idx = cupy.argwhere(cupy.abs(ao_gpu - ao_cpu) > 1e-10)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
-    
+
     def test_ao_sph_deriv3(self):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv3', coords)
@@ -89,7 +90,7 @@ class KnownValues(unittest.TestCase):
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=4)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
-    
+
     # cart mol
     def test_ao_cart_deriv0(self):
         coords = np.random.random((100,3))
@@ -98,7 +99,7 @@ class KnownValues(unittest.TestCase):
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=0)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
-    
+
     def test_ao_cart_deriv1(self):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv1', coords)
@@ -130,7 +131,7 @@ class KnownValues(unittest.TestCase):
         ni = NumInt(xc='LDA')
         ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=4)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
-    
+
 if __name__ == "__main__":
     print("Full Tests for dft numint")
     unittest.main()

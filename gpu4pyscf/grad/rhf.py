@@ -22,7 +22,7 @@ from pyscf import lib, gto
 from pyscf.grad import rhf
 from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf.scf.hf import _VHFOpt
-from gpu4pyscf.lib.cupy_helper import tag_array, contract
+from gpu4pyscf.lib.cupy_helper import tag_array, contract, take_last2d
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
 
@@ -552,6 +552,50 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     de -= cupy.sum(de, axis=0)/len(atmlst)
     return de.get()
 
+def get_grad_hcore(mf_grad):
+    mf = mf_grad.base
+    mol = mf.mol
+    natm = mol.natm
+    nao = mol.nao
+    mo_occ = mf.mo_occ
+    mo_coeff = cupy.asarray(mf.mo_coeff)
+    orbo = mo_coeff[:,mo_occ>0]
+    nocc = orbo.shape[1]
+
+    dh1e = cupy.zeros([3,natm,nao,nocc])
+    coords = mol.atom_coords()
+    charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
+    fakemol = gto.fakemol_for_charges(coords)
+    intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
+    intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
+    orbo_sorted = orbo[intopt.sph_ao_idx]
+    mo_coeff_sorted = mo_coeff[intopt.sph_ao_idx]
+    for i0,i1,j0,j1,k0,k1,int3c_blk in int3c2e.loop_int3c2e_general(intopt, ip_type='ip1'):
+        dh1e[:,k0:k1,j0:j1,:] += contract('xkji,io->xkjo', int3c_blk, orbo_sorted[i0:i1])
+        dh1e[:,k0:k1,i0:i1,:] += contract('xkji,jo->xkio', int3c_blk, orbo_sorted[j0:j1])
+    dh1e = contract('xkjo,k->xkjo', dh1e, -charges)
+    dh1e = contract('xkjo,jp->xkpo', dh1e, mo_coeff_sorted)
+
+    h1 = mf_grad.get_hcore(mol)
+    aoslices = mol.aoslice_by_atom()
+    with_ecp = mol.has_ecp()
+    if with_ecp:
+        ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
+    else:
+        ecp_atoms = ()
+    for atm_id in range(natm):
+        shl0, shl1, p0, p1 = aoslices[atm_id]
+        h1ao = numpy.zeros([3,nao,nao])
+        with mol.with_rinv_at_nucleus(atm_id):
+            if with_ecp and atm_id in ecp_atoms:
+                h1ao += mol.intor('ECPscalar_iprinv', comp=3)
+        h1ao[:,p0:p1] += h1[:,p0:p1]
+        h1ao += h1ao.transpose([0,2,1])
+        h1ao = cupy.asarray(h1ao)
+        h1mo = contract('xij,jo->xio', h1ao, orbo)
+        dh1e[:,atm_id] += contract('xio,ip->xpo', h1mo, mo_coeff)
+    return dh1e#2.0 * cupy.einsum('kx,k->kx', dh1e, -charges)
+
 class Gradients(rhf.Gradients):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
@@ -559,6 +603,8 @@ class Gradients(rhf.Gradients):
     grad_nuc = grad_nuc
     get_veff = get_veff
     get_jk = _get_jk
+
+    _keys = {'auxbasis_response'}
 
     def get_j(self, mol=None, dm=None, hermi=0, omega=None):
         vj, _ = self.get_jk(mol, dm, with_k=False, omega=omega)

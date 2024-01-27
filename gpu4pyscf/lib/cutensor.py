@@ -34,7 +34,7 @@ try:
 except ImportError:
     cutensor = None
     CUTENSOR_ALGO_DEFAULT = None
-    
+
 def _create_mode_with_cache(mode):
     integer_mode = []
     for x in mode:

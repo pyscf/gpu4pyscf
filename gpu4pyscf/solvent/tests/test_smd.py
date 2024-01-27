@@ -40,20 +40,23 @@ def tearDownModule():
 class KnownValues(unittest.TestCase):
     def test_cds_solvent(self):
         smdobj = smd.SMD(mol)
+        smdobj.sasa_ng = 590
         smdobj.solvent = 'toluene'
         e_cds = smdobj.get_cds()
-        assert numpy.abs(e_cds - -0.0013476060879874362) < 1e-8
+        assert numpy.abs(e_cds - -0.0013476016530476354) < 1e-8
 
     def test_cds_water(self):
         smdobj = smd.SMD(mol)
+        smdobj.sasa_ng = 590
         smdobj.solvent = 'water'
         e_cds = smdobj.get_cds()
-        assert numpy.abs(e_cds - 0.0022847142144050057) < 1e-8
+        assert numpy.abs(e_cds - 0.0022903044356530726) < 1e-8
 
     def test_smd_solvent(self):
         mf = scf.RHF(mol)
         mf = mf.SMD()
         mf.with_solvent.solvent = 'ethanol'
+        mf.with_solvent.sasa_ng = 590
         e_tot = mf.kernel()
         assert numpy.abs(e_tot - -76.075066568) < 2e-4
 
@@ -61,8 +64,11 @@ class KnownValues(unittest.TestCase):
         mf = scf.RHF(mol)
         mf = mf.SMD()
         mf.with_solvent.solvent = 'water'
+        mf.with_solvent.sasa_ng = 590
         e_tot = mf.kernel()
         assert numpy.abs(e_tot - -76.0756052903) < 2e-4
+
+    # TODO: add more test for other molecules
 
 if __name__ == "__main__":
     print("Full Tests for SMDs")

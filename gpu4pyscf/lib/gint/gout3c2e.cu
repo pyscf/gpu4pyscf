@@ -235,15 +235,18 @@ static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, doubl
                 double eri_zy = 0;
                 double eri_zz = 0;
                 for (int ir = 0; ir < NROOTS; ++ir){
-                    eri_xx += g3[ix + ir] * g0[iy + ir] * g0[iz + ir];
-                    eri_xy += g2[ix + ir] * g1[iy + ir] * g0[iz + ir];
-                    eri_xz += g2[ix + ir] * g0[iy + ir] * g1[iz + ir];
-                    eri_yx += g1[ix + ir] * g2[iy + ir] * g0[iz + ir];
-                    eri_yy += g0[ix + ir] * g3[iy + ir] * g0[iz + ir];
-                    eri_yz += g0[ix + ir] * g2[iy + ir] * g1[iz + ir];
-                    eri_zx += g1[ix + ir] * g0[iy + ir] * g2[iz + ir];
-                    eri_zy += g0[ix + ir] * g1[iy + ir] * g2[iz + ir];
-                    eri_zz += g0[ix + ir] * g0[iy + ir] * g3[iz + ir];
+                    double g0_x = g0[ix + ir];
+                    double g0_y = g0[iy + ir];
+                    double g0_z = g0[iz + ir];
+                    eri_xx += g3[ix + ir] * g0_y        * g0_z       ;
+                    eri_xy += g2[ix + ir] * g1[iy + ir] * g0_z       ;
+                    eri_xz += g2[ix + ir] * g0_y        * g1[iz + ir];
+                    eri_yx += g1[ix + ir] * g2[iy + ir] * g0_z       ;
+                    eri_yy += g0_x        * g3[iy + ir] * g0_z       ;
+                    eri_yz += g0_x        * g2[iy + ir] * g1[iz + ir];
+                    eri_zx += g1[ix + ir] * g0_y        * g2[iz + ir];
+                    eri_zy += g0_x        * g1[iy + ir] * g2[iz + ir];
+                    eri_zz += g0_x        * g0_y        * g3[iz + ir];
                 }
                 off = i+jstride*j;
                 pxx_eri[off] += eri_xx;
@@ -315,12 +318,37 @@ static void GINTwrite_int3c2e_ip_direct(GINTEnvVars envs, ERITensor eri, double*
 }
 
 template <int NROOTS> __device__
+static void GINTmemset_int3c2e(GINTEnvVars envs, ERITensor eri, int ish, int jsh, int ksh)
+{
+    int *ao_loc = c_bpcache.ao_loc;
+    size_t jstride = eri.stride_j;
+    size_t kstride = eri.stride_k;
+    int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
+    int i1 = ao_loc[ish+1] - eri.ao_offsets_i;
+    int j0 = ao_loc[jsh  ] - eri.ao_offsets_j;
+    int j1 = ao_loc[jsh+1] - eri.ao_offsets_j;
+    int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
+    int k1 = ao_loc[ksh+1] - eri.ao_offsets_k;
+    int i, j, k, n;
+    double* __restrict__ p_eri;
+
+    for (n = 0, k = k0; k < k1; ++k) {
+        p_eri = eri.data + k * kstride;
+
+        for (j = j0; j < j1; ++j) {
+            for (i = i0; i < i1; ++i, ++n) {
+                p_eri[i+jstride*j] = 0;
+            }
+        }
+    }
+}
+
+template <int NROOTS> __device__
 static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, double* g, int ish, int jsh, int ksh)
 {
     int *ao_loc = c_bpcache.ao_loc;
     size_t jstride = eri.stride_j;
     size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
     int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
     int i1 = ao_loc[ish+1] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh  ] - eri.ao_offsets_j;
@@ -337,7 +365,7 @@ static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, double* g,
     int ix, iy, iz, off;
 
     for (n = 0, k = k0; k < k1; ++k) {
-        p_eri = eri.data + 0 * lstride + k * kstride;
+        p_eri = eri.data + k * kstride;
 
         for (j = j0; j < j1; ++j) {
             for (i = i0; i < i1; ++i, ++n) {

@@ -16,7 +16,9 @@
 import unittest
 import numpy
 import cupy
-from gpu4pyscf.lib.cupy_helper import *
+from gpu4pyscf.lib.cupy_helper import (
+    take_last2d, transpose_sum, krylov, unpack_sparse,
+    add_sparse, takebak, empty_mapped, dist_matrix)
 
 class KnownValues(unittest.TestCase):
     def test_take_last2d(self):
@@ -26,16 +28,16 @@ class KnownValues(unittest.TestCase):
         numpy.random.shuffle(indices)
         a = cupy.random.rand(count,n,n)
         b = take_last2d(a, indices)
-        assert(cupy.linalg.norm(a[:,indices][:,:,indices] - b) < 1e-10)    
-    
+        assert(cupy.linalg.norm(a[:,indices][:,:,indices] - b) < 1e-10)
+
     def test_transpose_sum(self):
-        n = 3
-        count = 4
+        n = 31
+        count = 127
         a = cupy.random.rand(count,n,n)
         b = a + a.transpose(0,2,1)
         transpose_sum(a)
         assert(cupy.linalg.norm(a - b) < 1e-10)
-    
+
     def test_krylov(self):
         a = cupy.random.random((10,10)) * 1e-2
         b = cupy.random.random(10)
@@ -53,18 +55,34 @@ class KnownValues(unittest.TestCase):
 
         row, col = cupy.tril_indices(nao)
         cderi_sparse = cderi[row,col,:]
-        p0 = 1; p1 = 3
+        p0 = 1
+        p1 = 3
         out = unpack_sparse(cderi_sparse, row, col, p0, p1, nao)
         assert cupy.linalg.norm(out - cderi[:,:,p0:p1]) < 1e-10
 
     def test_sparse(self):
         a = cupy.random.rand(20, 20)
         b = cupy.random.rand(5,5)
-        indices = cupy.array([3,4,8,10,12]).astype(np.int32)
+        indices = cupy.array([3,4,8,10,12]).astype(numpy.int32)
         a0 = a.copy()
         a0[cupy.ix_(indices, indices)] += b
         add_sparse(a, b, indices)
         assert cupy.linalg.norm(a - a0) < 1e-10
+
+    def test_dist_matrix(self):
+        a = cupy.random.rand(4, 3)
+        rij = cupy.sum((a[:,None,:] - a[None,:,:])**2, axis=2)**0.5
+        rij0 = dist_matrix(a, a)
+        assert cupy.linalg.norm(rij - rij0) < 1e-10
+
+    def test_takebak(self):
+        a = empty_mapped((5, 8))
+        a[:] = 1.
+        idx = numpy.arange(8) * 2
+        out = cupy.zeros((5, 16))
+        takebak(out, a, idx)
+        out[:,idx] -= 1.
+        assert abs(out).sum() == 0.
 
 if __name__ == "__main__":
     print("Full tests for cupy helper module")

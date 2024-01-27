@@ -21,13 +21,13 @@
 #define THREADS       32
 #define BDIM 32
 
-__global__ 
+__global__
 void _unpack_tril(const double *eri_tril, double *eri, int nao){
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
     int p = blockIdx.z;
     int stride = ((nao + 1) * nao) / 2;
-    
+
     if(i >= nao || j >= nao || i < j){
         return;
     }
@@ -35,13 +35,13 @@ void _unpack_tril(const double *eri_tril, double *eri, int nao){
     eri[p*nao*nao + j*nao + i] = eri_tril[ptr + p*stride];
 }
 
-__global__ 
+__global__
 void _unpack_triu(const double *eri_tril, double *eri, int nao){
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
     int p = blockIdx.z;
     int stride = ((nao + 1) * nao) / 2;
-    
+
     if(i >= nao || j >= nao || i > j){
         return;
     }
@@ -51,16 +51,16 @@ void _unpack_triu(const double *eri_tril, double *eri, int nao){
 }
 
 __global__
-void _unpack_sparse(const double *cderi_sparse, const long *row, const long *col, 
+void _unpack_sparse(const double *cderi_sparse, const long *row, const long *col,
                     double *out, int nao, int nij, int stride_sparse, int p0, int p1){
     int ij = blockIdx.x * blockDim.x + threadIdx.x;
     int k = blockIdx.y * blockDim.y + threadIdx.y;
-    
+
     int idx_aux = k + p0;
     if (idx_aux >= p1 || ij >= nij){
         return;
     }
-    
+
     int i = row[ij];
     int j = col[ij];
     double e = cderi_sparse[ij*stride_sparse + idx_aux];
@@ -83,14 +83,13 @@ int unpack_tril(cudaStream_t stream, const double *eri_tril, double *eri, int na
     return 0;
 }
 
-// TODO: add test case
 int unpack_sparse(cudaStream_t stream, const double *cderi_sparse, const long *row, const long *col,
                 double *eri, int nao, int nij, int naux, int p0, int p1){
     int blockx = (nij + THREADS - 1) / THREADS;
     int blocky = (p1 - p0 + THREADS - 1) / THREADS;
     dim3 threads(THREADS, THREADS);
     dim3 blocks(blockx, blocky);
-    
+
     _unpack_sparse<<<blocks, threads, 0, stream>>>(cderi_sparse, row, col, eri, nao, nij, naux, p0, p1);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

@@ -17,9 +17,11 @@
 
 import os
 import sys
+import functools
 import numpy as np
 import cupy
 import ctypes
+from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
 from gpu4pyscf.lib.cutensor import contract
@@ -93,11 +95,22 @@ def device2host_2d(a_cpu, a_gpu, stream=None):
 class CPArrayWithTag(cupy.ndarray):
     pass
 
+@functools.wraps(lib.tag_array)
 def tag_array(a, **kwargs):
-    ''' attach attributes to cupy ndarray'''
-    t = cupy.asarray(a).view(CPArrayWithTag)
-    if isinstance(a, CPArrayWithTag):
-        t.__dict__.update(a.__dict__)
+    '''
+    a should be cupy/numpy array or tuple of cupy/numpy array
+
+    attach attributes to cupy ndarray for cupy array
+    attach attributes to numpy ndarray for numpy array
+    '''
+    if isinstance(a, cupy.ndarray) or isinstance(a[0], cupy.ndarray):
+        t = cupy.asarray(a).view(CPArrayWithTag)
+        if isinstance(a, CPArrayWithTag):
+            t.__dict__.update(a.__dict__)
+    else:
+        t = np.asarray(a).view(lib.NPArrayWithTag)
+        if isinstance(a, lib.NPArrayWithTag):
+            t.__dict__.update(a.__dict__)
     t.__dict__.update(kwargs)
     return t
 
@@ -154,7 +167,9 @@ def add_sparse(a, b, indices):
         count = 1
     else:
         raise RuntimeError('add_sparse only supports 2d or 3d tensor')
+    stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.add_sparse(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         ctypes.cast(b.data.ptr, ctypes.c_void_p),
         ctypes.cast(indices.data.ptr, ctypes.c_void_p),
@@ -163,8 +178,30 @@ def add_sparse(a, b, indices):
         ctypes.c_int(count)
     )
     if err != 0:
-        raise RecursionError('failed in sparse_add2d')
+        raise RuntimeError('failed in sparse_add2d')
     return a
+
+def dist_matrix(x, y, out=None):
+    assert x.flags.c_contiguous
+    assert y.flags.c_contiguous
+
+    m = x.shape[0]
+    n = y.shape[0]
+    if out is None:
+        out = cupy.empty([m,n])
+
+    stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.dist_matrix(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.cast(x.data.ptr, ctypes.c_void_p),
+        ctypes.cast(y.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(m),
+        ctypes.c_int(n)
+    )
+    if err != 0:
+        raise RuntimeError('failed in calculating distance matrix')
+    return out
 
 def block_c2s_diag(ncart, nsph, angular, counts):
     '''
@@ -173,21 +210,18 @@ def block_c2s_diag(ncart, nsph, angular, counts):
 
     nshells = np.sum(counts)
     cart2sph = cupy.zeros([ncart, nsph])
-    rows = [0]
-    cols = [0]
+
+    rows = [np.array([0], dtype='int32')]
+    cols = [np.array([0], dtype='int32')]
     offsets = []
     for l, count in zip(angular, counts):
-        for _ in range(count):
-            r, c = c2s_l[l].shape
-            rows.append(rows[-1] + r)
-            cols.append(cols[-1] + c)
-            offsets.append(c2s_offset[l])
-    rows = np.asarray(rows, dtype='int32')
-    cols = np.asarray(cols, dtype='int32')
-    offsets = np.asarray(offsets, dtype='int32')
+        r, c = c2s_l[l].shape
+        rows.append(rows[-1][-1] + np.arange(1,count+1, dtype='int32') * r)
+        cols.append(cols[-1][-1] + np.arange(1,count+1, dtype='int32') * c)
+        offsets += [c2s_offset[l]] * count
 
-    rows = cupy.asarray(rows, dtype='int32')
-    cols = cupy.asarray(cols, dtype='int32')
+    rows = cupy.hstack(rows)
+    cols = cupy.hstack(cols)
     offsets = cupy.asarray(offsets, dtype='int32')
 
     stream = cupy.cuda.get_current_stream()
@@ -238,12 +272,12 @@ def block_diag(blocks, out=None):
 
 def take_last2d(a, indices, out=None):
     '''
-    reorder the last 2 dimensions with 'indices', the first n-2 indices do not change
-    shape in the last 2 dimensions have to be the same
+    Reorder the last 2 dimensions as a[..., indices[:,None], indices]
     '''
     assert a.flags.c_contiguous
     assert a.shape[-1] == a.shape[-2]
     nao = a.shape[-1]
+    assert len(indices) == nao
     if a.ndim == 2:
         count = 1
     else:
@@ -264,15 +298,48 @@ def take_last2d(a, indices, out=None):
         raise RuntimeError('failed in take_last2d kernel')
     return out
 
-def transpose_sum(a):
+def takebak(out, a, indices, axis=-1):
+    '''(experimental)
+    Take elements from a NumPy array along an axis and write to CuPy array.
+    out[..., indices] = a
     '''
-    transpose (0,2,1)
+    assert axis == -1
+    assert isinstance(a, np.ndarray)
+    assert isinstance(out, cupy.ndarray)
+    assert out.ndim == a.ndim
+    assert a.shape[-1] == len(indices)
+    if a.ndim == 1:
+        count = 1
+    else:
+        assert out.shape[:-1] == a.shape[:-1]
+        count = np.prod(a.shape[:-1])
+    n_a = a.shape[-1]
+    n_o = out.shape[-1]
+    indices_int32 = cupy.asarray(indices, dtype=cupy.int32)
+    stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.takebak(
+        ctypes.c_void_p(stream.ptr),
+        ctypes.c_void_p(out.data.ptr), a.ctypes,
+        ctypes.c_void_p(indices_int32.data.ptr),
+        ctypes.c_int(count), ctypes.c_int(n_o), ctypes.c_int(n_a)
+    )
+    if err != 0: # Not the mapped host memory
+        out[...,indices] = cupy.asarray(a)
+    return out
+
+def transpose_sum(a, stream=None):
+    '''
+    return a + a.transpose(0,2,1)
     '''
     assert a.flags.c_contiguous
-    assert a.ndim == 3
     n = a.shape[-1]
+    if a.ndim == 2:
+        a = a.reshape([-1,n,n])
+    assert a.ndim == 3
     count = a.shape[0]
+    stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.transpose_sum(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n),
         ctypes.c_int(count)
@@ -493,3 +560,17 @@ def _qr(xs, dot, lindep=1e-14):
 
 def _gen_x0(v, xs):
     return cupy.dot(v.T, xs)
+
+def empty_mapped(shape, dtype=float, order='C'):
+    '''(experimental)
+    Returns a new, uninitialized NumPy array with the given shape and dtype.
+
+    This is a convenience function which is just :func:`numpy.empty`,
+    except that the underlying buffer is a pinned and mapped memory.
+    This array can be used as the buffer of zero-copy memory.
+    '''
+    nbytes = np.prod(shape) * np.dtype(dtype).itemsize
+    mem = cupy.cuda.PinnedMemoryPointer(
+        cupy.cuda.PinnedMemory(nbytes, cupy.cuda.runtime.hostAllocMapped), 0)
+    out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)
+    return out

@@ -27,6 +27,7 @@ parser.add_argument("--xc",       type=str,  default='B3LYP')
 parser.add_argument("--solvent",  type=str, default='')
 args = parser.parse_args()
 
+lib.num_threads(16)
 start_time = time.time()
 bas = args.basis
 mol = pyscf.M(
@@ -34,11 +35,10 @@ mol = pyscf.M(
     basis=bas,
     max_memory=32000)
 # set verbose >= 6 for debugging timer
-
-mol.verbose = 6
+mol.verbose = 4
 
 mf_df = rks.RKS(mol, xc=args.xc).density_fit(auxbasis=args.auxbasis)
-mf_df.verbose = 6
+mf_df.verbose = 4
 
 if args.solvent:
     mf_df = mf_df.PCM()
@@ -51,11 +51,11 @@ if mf_df._numint.libxc.is_nlc(mf_df.xc):
     mf_df.nlcgrids.atom_grid = (50,194)
 mf_df.direct_scf_tol = 1e-14
 mf_df.direct_scf = 1e-14
-mf_df.conv_tol = 1e-12
+mf_df.conv_tol = 1e-10
+mf_df.chkfile = None
 e_tot = mf_df.kernel()
 scf_time = time.time() - start_time
 print(f'compute time for energy: {scf_time:.3f} s')
-exit()
 
 start_time = time.time()
 g = mf_df.nuc_grad_method()
@@ -70,6 +70,3 @@ h.auxbasis_response = 2
 h_dft = h.kernel()
 hess_time = time.time() - start_time
 print(f'compute time for hessian: {hess_time:.3f} s')
-
-import numpy
-numpy.savez('gpu4pyscf_out.npz', e_tot=e_tot, f=f, h_dft=h_dft)

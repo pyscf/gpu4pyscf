@@ -21,6 +21,7 @@ import os
 import sys
 import subprocess
 import re
+import glob
 
 from setuptools import setup, find_packages, Extension
 from setuptools.command.build_py import build_py
@@ -84,6 +85,7 @@ class CMakeBuildPy(build_py):
             self.announce(' '.join(cmd))
         else:
             self.spawn(cmd)
+
         super().run()
 
 # build_py will produce plat_name = 'any'. Patch the bdist_wheel to change the
@@ -123,10 +125,8 @@ setup(
     cmdclass={'build_py': CMakeBuildPy},
     install_requires=[
         'pyscf>=2.4.0',
-        f'cupy-cuda{CUDA_VERSION}>=12.0',
-        'dftd3==0.7.0',
-        'dftd4==3.5.0',
+        f'cupy-cuda{CUDA_VERSION}>=12.3',
         'geometric',
         f'gpu4pyscf-libxc-cuda{CUDA_VERSION}',
-    ],
+    ]
 )
