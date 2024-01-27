@@ -25,7 +25,7 @@ from pyscf.scf import dhf
 from pyscf.df import df_jk, addons
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, take_last2d, transpose_sum, load_library, get_avail_mem
-from gpu4pyscf.dft import rks, numint
+from gpu4pyscf.dft import rks, numint, uks
 from gpu4pyscf.scf import hf
 from gpu4pyscf.df import df, int3c2e
 
@@ -197,15 +197,31 @@ class _DFHF(df_jk._DFHF):
 
         # for DFT
         if isinstance(self, scf.hf.KohnShamDFT):
-            return rks.get_veff(self, dm=dm)
+            if dm.ndim == 2:
+                return rks.get_veff(self, dm=dm)
+            elif dm.ndim == 3:
+                return uks.get_veff(self, dm=dm)
 
-        if self.direct_scf:
-            ddm = cupy.asarray(dm) - dm_last
-            vj, vk = self.get_jk(mol, ddm, hermi=hermi)
-            return vhf_last + vj - vk * .5
+        if dm.ndim == 2:
+            if self.direct_scf:
+                ddm = cupy.asarray(dm) - dm_last
+                vj, vk = self.get_jk(mol, ddm, hermi=hermi)
+                return vhf_last + vj - vk * .5
+            else:
+                vj, vk = self.get_jk(mol, dm, hermi=hermi)
+                return vj - vk * .5
+        elif dm.ndim == 3:
+            if self.direct_scf:
+                ddm = cupy.asarray(dm) - dm_last
+                vj, vk = self.get_jk(mol, ddm, hermi=hermi)
+                vhf = vj[0] + vj[1] - vk
+                vhf += cupy.asarray(vhf_last)
+                return vhf
+            else:
+                vj, vk = self.get_jk(mol, dm, hermi=hermi)
+                return vj[0] + vj[1] - vk
         else:
-            vj, vk = self.get_jk(mol, dm, hermi=hermi)
-            return vj - vk * .5
+            raise NotImplementedError("Please check the dimension of the density matrix, it should not reach here.")
 
     def energy_tot(self, dm, h1e, vhf=None):
         '''
