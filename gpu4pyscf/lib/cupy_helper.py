@@ -17,9 +17,11 @@
 
 import os
 import sys
+import functools
 import numpy as np
 import cupy
 import ctypes
+from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
 from gpu4pyscf.lib.cutensor import contract
@@ -93,11 +95,22 @@ def device2host_2d(a_cpu, a_gpu, stream=None):
 class CPArrayWithTag(cupy.ndarray):
     pass
 
+@functools.wraps(lib.tag_array)
 def tag_array(a, **kwargs):
-    ''' attach attributes to cupy ndarray'''
-    t = cupy.asarray(a).view(CPArrayWithTag)
-    if isinstance(a, CPArrayWithTag):
-        t.__dict__.update(a.__dict__)
+    '''
+    a should be cupy/numpy array or tuple of cupy/numpy array
+
+    attach attributes to cupy ndarray for cupy array
+    attach attributes to numpy ndarray for numpy array
+    '''
+    if isinstance(a, cupy.ndarray) or isinstance(a[0], cupy.ndarray):
+        t = cupy.asarray(a).view(CPArrayWithTag)
+        if isinstance(a, CPArrayWithTag):
+            t.__dict__.update(a.__dict__)
+    else:
+        t = np.asarray(a).view(lib.NPArrayWithTag)
+        if isinstance(a, lib.NPArrayWithTag):
+            t.__dict__.update(a.__dict__)
     t.__dict__.update(kwargs)
     return t
 
@@ -168,19 +181,23 @@ def add_sparse(a, b, indices):
         raise RuntimeError('failed in sparse_add2d')
     return a
 
-def dist_matrix(coords, out=None):
-    assert coords.flags.c_contiguous
-    n = coords.shape[0]
+def dist_matrix(x, y, out=None):
+    assert x.flags.c_contiguous
+    assert y.flags.c_contiguous
+
+    m = x.shape[0]
+    n = y.shape[0]
     if out is None:
-        out = cupy.empty([n,n])
+        out = cupy.empty([m,n])
 
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.dist_matrix(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n),
+        ctypes.cast(x.data.ptr, ctypes.c_void_p),
+        ctypes.cast(y.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(m),
+        ctypes.c_int(n)
     )
     if err != 0:
         raise RuntimeError('failed in calculating distance matrix')
@@ -376,10 +393,8 @@ def cart2sph(t, axis=0, ang=1, out=None):
     t_cart = t.reshape([i0*nli, li_size[0], i3])
     if(out is not None):
         out = out.reshape([i0*nli, li_size[1], i3])
-        out[:] = cupy.einsum('min,ip->mpn', t_cart, c2s)
-    else:
-        out = cupy.einsum('min,ip->mpn', t_cart, c2s)
-    return out.reshape(out_shape)
+    t_sph = contract('min,ip->mpn', t_cart, c2s, out=out)
+    return t_sph.reshape(out_shape)
 
 # a copy with modification from
 # https://github.com/pyscf/pyscf/blob/9219058ac0a1bcdd8058166cad0fb9127b82e9bf/pyscf/lib/linalg_helper.py#L1536

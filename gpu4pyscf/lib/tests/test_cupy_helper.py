@@ -72,8 +72,7 @@ class KnownValues(unittest.TestCase):
     def test_dist_matrix(self):
         a = cupy.random.rand(4, 3)
         rij = cupy.sum((a[:,None,:] - a[None,:,:])**2, axis=2)**0.5
-
-        rij0 = dist_matrix(a)
+        rij0 = dist_matrix(a, a)
         assert cupy.linalg.norm(rij - rij0) < 1e-10
 
     def test_takebak(self):

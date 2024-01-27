@@ -18,12 +18,14 @@ SMD solvent model
 '''
 
 import numpy as np
+import scipy
 import cupy
 from pyscf import lib
 from pyscf.data import radii
 from pyscf.dft import gen_grid
 from gpu4pyscf.solvent import pcm, _attach_solvent
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import dist_matrix
 
 @lib.with_doc(_attach_solvent._for_scf.__doc__)
 def smd_for_scf(mf, solvent_obj=None, dm=None):
@@ -353,17 +355,13 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
         t += sigma_beta.get(sym_i, 0.0) * beta
         return t
 
-    rij = cupy.sum((coords[:,None,:] - coords[None,:,:])**2, axis=2)**0.5
+    rij = scipy.spatial.distance.cdist(coords, coords)
     tensions = []
     for i, sym_i in enumerate(symbols):
         if sym_i not in ['H', 'C', 'N', 'O', 'F', 'Si', 'S', 'Cl', 'Br']:
             tensions.append(0)
             continue
 
-        #sig_n = sigma_n.get(sym_i, 0.0)
-        #sig_a = sigma_alpha.get(sym_i, 0.0)
-        #sig_b = sigma_beta.get(sym_i, 0.0)
-        #tension = sig_n * n + sig_a * alpha + sig_b * beta
         tension = get_atom_tension(sym_i)
         if sym_i in ['F', 'Si', 'S', 'Cl', 'Br']:
             tensions.append(tension)
@@ -374,50 +372,53 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             t_HO = 0.0
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
-                    r, dr = r_zz['H','C']
+                    r, dr = r_zz.get(('H','C'), (0.0, 0.0))
                     t_HC += swtich_function(rij[i,j], r, dr)
                 if sym_j == 'O':
-                    r, dr = r_zz['H','O']
+                    r, dr = r_zz.get(('H','O'), (0.0, 0.0))
                     t_HO += swtich_function(rij[i,j], r, dr)
             sig_HC = get_bond_tension(('H','C'))
             sig_HO = get_bond_tension(('H','O'))
             tension += sig_HC * t_HC + sig_HO * t_HO
             tensions.append(tension)
+            continue
 
         if sym_i == 'C':
             t_CC = 0.0
             t_CN = 0.0
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C' and i != j:
-                    r, dr = r_zz['C', 'C']
+                    r, dr = r_zz.get(('C', 'C'), (0.0, 0.0))
                     t_CC += swtich_function(rij[i,j], r, dr)
                 if sym_j == 'N':
-                    r, dr = r_zz['C', 'N']
+                    r, dr = r_zz.get(('C', 'N'), (0.0, 0.0))
                     t_CN += swtich_function(rij[i,j], r, dr)
             sig_CC = get_bond_tension(('C','C'))
             sig_CN = get_bond_tension(('C','N'))
             tension += sig_CC * t_CC + sig_CN * t_CN**2
             tensions.append(tension)
+            continue
 
         if sym_i == 'N':
             t_NC = 0.0
             t_NC3 = 0.0
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
-                    r, dr = r_zz['N','C']
+                    r, dr = r_zz.get(('N','C'), (0.0,0.0))
                     tk = 0.0
                     for k, sym_k in enumerate(symbols):
                         if k != i and k != j:
-                            rjk, drjk = r_zz['C', sym_k]
+                            rjk, drjk = r_zz.get(('C', sym_k), (0.0,0.0))
                             tk += swtich_function(rij[j,k], rjk, drjk)
                     t_NC += swtich_function(rij[i,j], r, dr) * tk**2
 
-                    r, dr = r_zz['N','C3']
+                    r, dr = r_zz.get(('N','C3'), (0.0, 0.0))
                     t_NC3 += swtich_function(rij[i,j], r, dr)
             sig_NC = get_bond_tension(('N','C'))
             sig_NC3= get_bond_tension(('N','C3'))
             tension += sig_NC * t_NC**1.3 + sig_NC3 * t_NC3
             tensions.append(tension)
+            continue
 
         if sym_i == 'O':
             t_OC = 0.0
@@ -426,16 +427,16 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             t_OP = 0.0
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
-                    r, dr = r_zz['O','C']
+                    r, dr = r_zz.get(('O','C'), (0.0, 0.0))
                     t_OC += swtich_function(rij[i,j], r, dr)
                 if sym_j == 'N':
-                    r, dr = r_zz['O','N']
+                    r, dr = r_zz.get(('O','N'), (0.0, 0.0))
                     t_ON += swtich_function(rij[i,j], r, dr)
                 if sym_j == 'O' and j != i:
-                    r, dr = r_zz['O','O']
+                    r, dr = r_zz.get(('O','O'), (0.0, 0.0))
                     t_OO += swtich_function(rij[i,j], r, dr)
                 if sym_j == 'P':
-                    r, dr = r_zz['O','P']
+                    r, dr = r_zz.get(('O','P'), (0.0, 0.0))
                     t_OP += swtich_function(rij[i,j], r, dr)
             sig_OC = get_bond_tension(('O','C'))
             sig_ON = get_bond_tension(('O','N'))
@@ -443,6 +444,7 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             sig_OP = get_bond_tension(('O','P'))
             tension += sig_OC * t_OC + sig_ON * t_ON + sig_OO * t_OO + sig_OP * t_OP
             tensions.append(tension)
+            continue
     return cupy.asarray(tensions)
 
 def molecular_surface_tension(beta, gamma, phi, psi):
@@ -486,23 +488,23 @@ def get_cds(smdobj):
 
     # generate surface for calculating SASA
     rad = radii.VDW + 0.4/radii.BOHR
-    surface = pcm.gen_surface(mol, ng=302, rad=rad)
+    surface = pcm.gen_surface(mol, ng=smdobj.sasa_ng, rad=rad)
     area = surface['area']
     gridslice = surface['gslice_by_atom']
     SASA = cupy.asarray([cupy.sum(area[p0:p1], axis=0) for p0,p1, in gridslice])
     SASA *= radii.BOHR**2
     mol_cds = mol_tension * cupy.sum(SASA) / 1000 # in kcal/mol
     atm_cds = cupy.sum(SASA * atm_tension) / 1000 # in kcal/mol
-
     return (mol_cds + atm_cds)/hartree2kcal # hartree
 
 class SMD(pcm.PCM):
     _keys = {
-        'intopt', 'method', 'e_cds', 'solvent_descriptors', 'r_probe'
+        'intopt', 'method', 'e_cds', 'solvent_descriptors', 'r_probe', 'sasa_ng'
     }
     def __init__(self, mol, solvent=''):
         super().__init__(mol)
         self.vdw_scale = 1.0
+        self.sasa_ng = 590 # quadrature grids for calculating SASA
         self.r_probe = 0.4/radii.BOHR
         self.method = 'SMD'  # use IEFPCM for electrostatic
         if solvent not in solvent_db:
@@ -566,10 +568,24 @@ class SMD(pcm.PCM):
         return get_cds(self)
 
     def nuc_grad_method(self, grad_method):
-        raise RuntimeError('SMD gradient is not implemented')
+        from gpu4pyscf.solvent.grad import smd as smd_grad
+        if self.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
+        from gpu4pyscf import scf
+        if isinstance(grad_method.base, scf.hf.RHF):
+            return smd_grad.make_grad_object(grad_method)
+        else:
+            raise RuntimeError('Only SCF gradient is supported')
 
     def Hessian(self, hess_method):
-        raise RuntimeError('SMD Hessian is not implemented')
+        from gpu4pyscf.solvent.hessian import smd as smd_hess
+        if self.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
+        from gpu4pyscf import scf
+        if isinstance(hess_method.base, scf.hf.RHF):
+            return smd_hess.make_hess_object(hess_method)
+        else:
+            raise RuntimeError('Only SCF gradient is supported')
 
     def reset(self, mol=None):
         super().reset(mol)

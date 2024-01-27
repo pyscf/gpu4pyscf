@@ -50,8 +50,7 @@ Features
 - Dispersion corrections via [DFTD3](https://github.com/dftd3/simple-dftd3) and [DFTD4](https://github.com/dftd4/dftd4);
 - Nonlocal functional correction (vv10) for SCF and gradient;
 - ECP is supported and calculated on CPU;
-- PCM solvent models, analytical gradients, and semi-analytical Hessian matrix;
-- SMD solvent models and solvation free energy
+- PCM models, SMD model, their analytical gradients, and semi-analytical Hessian matrix;
 
 Limitations
 --------
