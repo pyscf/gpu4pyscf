@@ -38,12 +38,8 @@ def _auto_create_mode(array, mode):
 def _create_tensor_descriptor(a):
     handle = cutensor._get_handle()
     key = (handle.ptr, a.dtype, tuple(a.shape), tuple(a.strides))
-    #alignment_req = a.data.ptr % 256
-    #alignment_req = 256 #if alignment_req == 0 else alignment_req
+    # hard coded
     alignment_req = 8
-    #print(alignment_req)
-    #if a.data.ptr & (alignment_req - 1) != 0:
-    #    raise ValueError("Missaligned array")
     if key not in _tensor_descriptors:
         num_modes = a.ndim
         extent = np.array(a.shape, dtype=np.int64)
