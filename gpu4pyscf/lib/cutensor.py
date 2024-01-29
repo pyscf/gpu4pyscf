@@ -55,14 +55,16 @@ def _create_tensor_descriptor(a):
     return _tensor_descriptors[key]
 
 def contraction(
-    pattern, a, b, alpha, beta, out=None,
+    pattern, a, b, alpha, beta,
+    out=None,
     op_a=cutensor_backend.OP_IDENTITY,
     op_b=cutensor_backend.OP_IDENTITY,
     op_c=cutensor_backend.OP_IDENTITY,
     algo=cutensor_backend.ALGO_DEFAULT,
     jit_mode=cutensor_backend.JIT_MODE_NONE,
     compute_desc=0,
-    ws_pref=cutensor_backend.WORKSPACE_RECOMMENDED):
+    ws_pref=cutensor_backend.WORKSPACE_RECOMMENDED
+):
 
     pattern = pattern.replace(" ", "")
     str_a, rest = pattern.split(',')
