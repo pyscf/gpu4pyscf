@@ -178,6 +178,9 @@ class DF(df.DF):
         self._cderi = None
         return self
 
+    get_ao_eri = get_eri = NotImplemented
+    get_mo_eri = ao2mo = NotImplemented
+
 def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
     '''
     Returns:

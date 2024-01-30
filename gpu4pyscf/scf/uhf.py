@@ -15,17 +15,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
 from functools import reduce
-from pyscf.scf import uhf
-from gpu4pyscf.scf.hf import _get_jk, eigh, damping, level_shift, _kernel
-from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import tag_array
 import numpy as np
 import cupy
+from pyscf.scf import uhf
+from pyscf import lib as pyscf_lib
+from gpu4pyscf.scf.hf import _get_jk, damping, level_shift, RHF
+from gpu4pyscf.scf import hf
+from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import tag_array, eigh
 from gpu4pyscf import lib
 from gpu4pyscf.scf import diis
-from pyscf import lib as pyscf_lib
 
 
 def make_rdm1(mo_coeff, mo_occ, **kwargs):
@@ -43,10 +43,6 @@ def make_rdm1(mo_coeff, mo_occ, **kwargs):
     mo_b = mo_coeff[1]
     dm_a = cupy.dot(mo_a*mo_occ[0], mo_a.conj().T)
     dm_b = cupy.dot(mo_b*mo_occ[1], mo_b.conj().T)
-# DO NOT make tag_array for DM here because the DM arrays may be modified and
-# passed to functions like get_jk, get_vxc.  These functions may take the tags
-# (mo_coeff, mo_occ) to compute the potential if tags were found in the DM
-# arrays and modifications to DM arrays may be ignored.
     return tag_array((dm_a, dm_b), mo_coeff=mo_coeff, mo_occ=mo_occ)
 
 
@@ -69,8 +65,14 @@ def spin_square(mo, s=1):
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
-    if h1e is None: h1e = cupy.asarray(mf.get_hcore())
+    if s1e is None: s1e = mf.get_ovlp()
+    if dm is None: dm = mf.make_rdm1()
+    if h1e is None: h1e = mf.get_hcore()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
+    if not isinstance(s1e, cupy.ndarray): s1e = cupy.asarray(s1e)
+    if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
+    if not isinstance(h1e, cupy.ndarray): h1e = cupy.asarray(h1e)
+    if not isinstance(vhf, cupy.ndarray): vhf = cupy.asarray(vhf)
     f = h1e + vhf
     if f.ndim == 2:
         f = (f, f)
@@ -83,8 +85,6 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         level_shift_factor = mf.level_shift
     if damp_factor is None:
         damp_factor = mf.damp
-    if s1e is None: s1e = mf.get_ovlp()
-    if dm is None: dm = mf.make_rdm1()
 
     if isinstance(level_shift_factor, (tuple, list, np.ndarray)):
         shifta, shiftb = level_shift_factor
@@ -111,9 +111,34 @@ class UHF(uhf.UHF):
 
     DIIS = diis.SCF_DIIS
     get_jk = _get_jk
-    _eigh = staticmethod(eigh)
+    _eigh = hf.RHF._eigh
+    scf = kernel = RHF.kernel
     get_fock = get_fock
-    
+    get_hcore = hf.RHF.get_hcore
+    get_ovlp = hf.RHF.get_ovlp
+    get_init_guess = hf.return_cupy_array(uhf.UHF.get_init_guess)
+    density_fit = hf.RHF.density_fit
+    make_rdm2 = NotImplemented
+    dump_chk = NotImplemented
+    newton = NotImplemented
+    x2c = x2c1e = sfx2c1e = NotImplemented
+    to_rhf = NotImplemented
+    to_uhf = NotImplemented
+    to_ghf = NotImplemented
+    to_rks = NotImplemented
+    to_uks = NotImplemented
+    to_gks = NotImplemented
+    to_ks = NotImplemented
+    canonicalize = NotImplemented
+    # TODO: Enable followings after testing
+    analyze = NotImplemented
+    stability = NotImplemented
+    mulliken_pop = NotImplemented
+    mulliken_spin_pop = NotImplemented
+    mulliken_meta = NotImplemented
+    mulliken_meta_spin = NotImplemented
+    det_ovlp = NotImplemented
+
     def make_rdm1(self, mo_coeff=None, mo_occ=None, **kwargs):
         if mo_coeff is None:
             mo_coeff = self.mo_coeff
@@ -126,44 +151,21 @@ class UHF(uhf.UHF):
         e_b, c_b = self._eigh(fock[1], s)
         return cupy.array((e_a,e_b)), cupy.array((c_a,c_b))
     
-    def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+    def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
-        
-        if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
+        if getattr(dm, 'ndim', 0) == 2:
             dm = cupy.asarray((dm*.5,dm*.5))
-            
-        if self._eri is not None or not self.direct_scf:
-            vj, vk = self.get_jk(mol, cupy.asarray(dm), hermi)
+
+        if dm_last is None or not self.direct_scf:
+            vj, vk = self.get_jk(mol, dm, hermi)
             vhf = vj[0] + vj[1] - vk
         else:
             ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
             vj, vk = self.get_jk(mol, ddm, hermi)
             vhf = vj[0] + vj[1] - vk
-            vhf += cupy.asarray(vhf_last)
+            vhf += vhf_last
         return vhf
-    
-    def scf(self, dm0=None, **kwargs):
-        cput0 = logger.init_timer(self)
-
-        self.dump_flags()
-        self.build(self.mol)
-
-        if self.max_cycle > 0 or self.mo_coeff is None:
-            self.converged, self.e_tot, \
-                    self.mo_energy, self.mo_coeff, self.mo_occ = \
-                    _kernel(self, self.conv_tol, self.conv_tol_grad,
-                           dm0=dm0, callback=self.callback,
-                           conv_check=self.conv_check, **kwargs)
-        else:
-            self.e_tot = _kernel(self, self.conv_tol, self.conv_tol_grad,
-                                dm0=dm0, callback=self.callback,
-                                conv_check=self.conv_check, **kwargs)[1]
-
-        logger.timer(self, 'SCF', *cput0)
-        self._finalize()
-        return self.e_tot
-    kernel = pyscf_lib.alias(scf, alias_name='kernel')
     
     def spin_square(self, mo_coeff=None, s=None):
         if mo_coeff is None:
@@ -172,8 +174,3 @@ class UHF(uhf.UHF):
         if s is None:
             s = self.get_ovlp()
         return spin_square(mo_coeff, s)
-
-    def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
-        import gpu4pyscf.df.df_jk
-        return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
-    

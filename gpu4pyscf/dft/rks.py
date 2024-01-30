@@ -22,11 +22,14 @@ import cupy
 from pyscf import lib
 from pyscf.dft import rks
 
-from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
 from gpu4pyscf.scf.hf import RHF
 from gpu4pyscf.lib.cupy_helper import load_library, tag_array
+
+__all__ = [
+    'get_veff', 'RKS'
+]
 
 libcupy_helper = load_library('libcupy_helper')
 
@@ -74,9 +77,8 @@ def initialize_grids(ks, mol=None, dm=None):
         #ks.grids.build(with_non0tab=True)
         ks.grids.weights = cupy.asarray(ks.grids.weights)
         ks.grids.coords = cupy.asarray(ks.grids.coords)
-        if (ks.small_rho_cutoff > 1e-20 and
-            # dm.ndim == 2 indicates ground state
-            isinstance(dm, cupy.ndarray) and dm.ndim == 2):
+        ground_state = getattr(dm, 'ndim', 0) == 2
+        if ks.small_rho_cutoff > 1e-20 and ground_state:
             # Filter grids the first time setup grids
             ks.grids = prune_small_rho_grids_(ks, ks.mol, dm, ks.grids)
         t0 = logger.timer_debug1(ks, 'setting up grids', *t0)
@@ -88,9 +90,7 @@ def initialize_grids(ks, mol=None, dm=None):
                 ks.nlcgrids.build()
                 ks.nlcgrids.weights = cupy.asarray(ks.nlcgrids.weights)
                 ks.nlcgrids.coords = cupy.asarray(ks.nlcgrids.coords)
-                if (ks.small_rho_cutoff > 1e-20 and
-                    # dm.ndim == 2 indicates ground state
-                    isinstance(dm, cupy.ndarray) and dm.ndim == 2):
+                if ks.small_rho_cutoff > 1e-20 and ground_state:
                     # Filter grids the first time setup grids
                     ks.nlcgrids = prune_small_rho_grids_(ks, ks.mol, dm, ks.nlcgrids)
                 t0 = logger.timer_debug1(ks, 'setting up nlc grids', *t0)
@@ -129,7 +129,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
 
     if hasattr(ks, 'screen_tol') and ks.screen_tol is not None:
         ks.direct_scf_tol = ks.screen_tol
-    ground_state = (isinstance(dm, cupy.ndarray) and dm.ndim == 2)
+    ground_state = getattr(dm, 'ndim', 0) == 2
 
     ni = ks._numint
     if hermi == 2:  # because rho = 0
@@ -224,7 +224,7 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     logger.debug(ks, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
     return e1+e2, e2
 
-class RKS(scf.hf.RHF, rks.RKS):
+class RKS(rks.RKS, RHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     _keys = {'disp'}
@@ -271,6 +271,5 @@ class RKS(scf.hf.RHF, rks.RKS):
         return rks_grad.Gradients(self)
 
     energy_elec = energy_elec
-    get_jk = RHF.get_jk
     get_veff = get_veff
-    _eigh = RHF._eigh
+    to_hf = NotImplemented
