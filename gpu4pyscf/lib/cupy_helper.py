@@ -18,9 +18,9 @@
 import os
 import sys
 import functools
+import ctypes
 import numpy as np
 import cupy
-import ctypes
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
@@ -113,6 +113,25 @@ def tag_array(a, **kwargs):
             t.__dict__.update(a.__dict__)
     t.__dict__.update(kwargs)
     return t
+
+def to_cupy(a):
+    '''Converts a numpy (and subclass) object to a cupy object'''
+    if isinstance(a, lib.NPArrayWithTag):
+        attrs = {k: to_cupy(v) for k, v in a.__dict__.items()}
+        return tag_array(cupy.asarray(a), **attrs)
+    if isinstance(a, np.ndarray):
+        return cupy.asarray(a)
+    return a
+
+def return_cupy_array(fn):
+    '''Ensure that arrays in returns are cupy objects'''
+    @functools.wraps(fn)
+    def filter_ret(*args, **kwargs):
+        ret = fn(*args, **kwargs)
+        if isinstance(ret, tuple):
+            return tuple(to_cupy(x) for x in ret)
+        return to_cupy(ret)
+    return filter_ret
 
 def unpack_tril(cderi_tril, cderi, stream=None):
     nao = cderi.shape[1]
