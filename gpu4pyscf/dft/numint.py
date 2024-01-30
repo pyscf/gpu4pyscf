@@ -86,11 +86,14 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_sl
 
     # ao must be set to zero due to implementation
     if deriv > 1:
-        ao = cupy.zeros((comp, nao_slice, ngrids), order='C')
+        if out is None:
+            out = cupy.zeros((comp, nao_slice, ngrids), order='C')
+        else:
+            out[:] = 0
     else:
-        ao = cupy.empty((comp, nao_slice, ngrids), order='C')
+        if out is None:
+            out = cupy.empty((comp, nao_slice, ngrids), order='C')
 
-    #ao = cupy.zeros((comp, nao_slice, ngrids), order='C')
     if not with_opt:
         # mol may be different to _GDFTOpt.mol.
         # nao should be consistent with the _GDFTOpt.mol object
@@ -98,7 +101,7 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_sl
         with opt.gdft_envs_cache():
             err = libgdft.GDFTeval_gto(
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
-                ctypes.cast(ao.data.ptr, ctypes.c_void_p),
+                ctypes.cast(out.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(deriv), ctypes.c_int(opt.mol.cart),
                 ctypes.cast(coords.data.ptr, ctypes.c_void_p), ctypes.c_int(ngrids),
                 ctypes.cast(shls_slice.data.ptr, ctypes.c_void_p),
@@ -107,11 +110,11 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_sl
                 ctr_offsets.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(nctr),
                 ctr_offsets_slice.ctypes.data_as(ctypes.c_void_p),
                 mol._bas.ctypes.data_as(ctypes.c_void_p))
-            ao = contract('nig,ij->njg', ao, coeff).transpose([0,2,1])
+            out = contract('nig,ij->njg', out, coeff).transpose([0,2,1])
     else:
         err = libgdft.GDFTeval_gto(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(ao.data.ptr, ctypes.c_void_p),
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
             ctypes.c_int(deriv), ctypes.c_int(opt.mol.cart),
             ctypes.cast(coords.data.ptr, ctypes.c_void_p), ctypes.c_int(ngrids),
             ctypes.cast(shls_slice.data.ptr, ctypes.c_void_p),
@@ -124,8 +127,8 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_sl
         raise RuntimeError('CUDA Error in evaluating AO')
 
     if deriv == 0:
-        ao = ao[0]
-    return ao
+        out = out[0]
+    return out
 
 def eval_rho(mol, ao, dm, non0tab=None, xctype='LDA', hermi=0,
              with_lapl=True, verbose=None):
@@ -190,11 +193,10 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
     shls_slice = (0, mol.nbas)
     ao_loc = mol.ao_loc_nr()
 
-    #cpos = cupy.einsum('ij,j->ij', mo_coeff[:,mo_occ>0], cupy.sqrt(mo_occ[mo_occ>0]))
-    #cpos = mo_coeff[:,mo_occ>0] * cupy.sqrt(mo_occ[mo_occ>0])
     cpos = (mo_coeff * mo_occ**0.5)[:,mo_occ>0]
     if xctype == 'LDA' or xctype == 'HF':
-        c0 = _dot_ao_dm(mol, ao, cpos, non0tab, shls_slice, ao_loc)
+        #c0 = _dot_ao_dm(mol, ao, cpos, non0tab, shls_slice, ao_loc)
+        c0 = cupy.dot(cpos.T, ao)
         #:rho = numpy.einsum('pi,pi->p', c0, c0)
         rho = _contract_rho(c0, c0)
     elif xctype in ('GGA', 'NLC'):
@@ -1211,6 +1213,58 @@ def _init_xcfuns(xc_code, spin):
         if dft.libxc.needs_laplacian(xcfun.func_id):
             raise NotImplementedError()
     return xcfuns
+
+def _sparse_index(mol, coords, l_ctr_offsets):
+    '''
+    determine sparse AO indices
+    '''
+    log = logger.new_logger(mol, mol.verbose)
+    t1 = log.init_timer()
+    stream = cupy.cuda.get_current_stream()
+    cutoff = AO_THRESHOLD
+    ng = coords.shape[0]
+    ao_loc = mol.ao_loc_nr()
+    nbas = mol.nbas
+    non0shl_idx = cupy.zeros(len(ao_loc)-1, dtype=np.int32)
+    libgdft.GDFTscreen_index(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(non0shl_idx.data.ptr, ctypes.c_void_p),
+        ctypes.c_double(cutoff),
+        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ng),
+        ao_loc.ctypes.data_as(ctypes.c_void_p),
+        ctypes.c_int(nbas),
+        mol._bas.ctypes.data_as(ctypes.c_void_p))
+    non0shl_idx = non0shl_idx.get()
+
+    # offset of contraction pattern, used in eval_ao
+    cumsum = np.cumsum(non0shl_idx, dtype=np.int32)
+    glob_ctr_offsets = l_ctr_offsets
+    ctr_offsets_slice = cumsum[glob_ctr_offsets-1]
+    ctr_offsets_slice[0] = 0
+
+    from pyscf import gto
+    gto_type = 'cart' if mol.cart else 'sph'
+    non0shl_idx = non0shl_idx == 1
+    ao_loc_slice = gto.moleintor.make_loc(mol._bas[non0shl_idx,:], gto_type)
+    ao_loc_slice = cupy.asarray(ao_loc_slice, dtype=np.int32)
+    non0ao_idx = []
+    zero_idx = []
+    for sh_idx in range(len(ao_loc)-1):
+        p0, p1 = ao_loc[sh_idx], ao_loc[sh_idx+1]
+        if non0shl_idx[sh_idx]:
+            non0ao_idx += range(p0,p1)
+        else:
+            zero_idx += range(p0,p1)
+
+    idx = cupy.asarray(non0ao_idx, dtype=np.int32)
+    zero_idx = cupy.asarray(zero_idx, dtype=np.int32)
+    pad = (len(idx) + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT - len(idx)
+    idx = cupy.hstack([idx, zero_idx[:pad]])
+    pad = min(pad, len(zero_idx))
+    non0shl_idx = cupy.asarray(np.where(non0shl_idx)[0], dtype=np.int32)
+    t1 = log.timer_debug2('init ao sparsity', *t1)
+    return pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice
 
 def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 non0tab=None, blksize=None, buf=None, extra=0):
