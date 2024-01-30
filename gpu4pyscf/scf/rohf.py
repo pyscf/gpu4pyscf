@@ -15,6 +15,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import numpy as np
+import cupy
 from pyscf.scf import rohf
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.lib.cupy_helper import tag_array
@@ -60,8 +62,8 @@ class ROHF(rohf.ROHF, hf.RHF):
         if dm_last is None or not self.direct_scf:
             if getattr(dm, 'mo_coeff', None) is not None:
                 mo_coeff = dm.mo_coeff
-                mo_occ_a = (dm.mo_occ > 0).astype(numpy.double)
-                mo_occ_b = (dm.mo_occ ==2).astype(numpy.double)
+                mo_occ_a = (dm.mo_occ > 0).astype(np.double)
+                mo_occ_b = (dm.mo_occ ==2).astype(np.double)
                 dm = tag_array(dm, mo_coeff=(mo_coeff,mo_coeff),
                                mo_occ=(mo_occ_a,mo_occ_b))
             vj, vk = self.get_jk(mol, dm, hermi)

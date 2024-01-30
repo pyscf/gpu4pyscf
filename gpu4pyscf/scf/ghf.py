@@ -53,7 +53,7 @@ class GHF(ghf.GHF):
         dm = cupy.asarray(dm)
 
         def jkbuild(mol, dm, hermi, with_j, with_k, omega=None):
-            return _get_jk_nr(self, mol, dm, hermi, with_j, with_k, omega)
+            return hf._get_jk(self, mol, dm, hermi, with_j, with_k, omega)
 
         if nao == dm.shape[-1]:
             vj, vk = jkbuild(mol, dm, hermi, with_j, with_k, omega)

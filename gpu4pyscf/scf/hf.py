@@ -307,7 +307,7 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     return mo_occ
 
 def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1, vhfopt=None):
-    if dm is None: dm = self.make_rdm1()
+    if dm is None: dm = mf.make_rdm1()
     if dm_last is None or not mf.direct_scf:
         vj, vk = mf.get_jk(mol, dm, hermi)
         return vj - vk * .5
