@@ -21,88 +21,47 @@ try:
     import cupy_backends.cuda.libs.cutensor  # NOQA
     from cupyx import cutensor
     from cupy_backends.cuda.libs import cutensor as cutensor_backend
-    from cupy_backends.cuda.libs.cutensor import Handle
-
-    _handle = Handle()
-    _modes = {}
-    _contraction_descriptors = {}
-    _contraction_plans = {}
-    _contraction_finds = {}
-
-    cutensor_backend.init(_handle)
     CUTENSOR_ALGO_DEFAULT = cutensor_backend.ALGO_DEFAULT
+    _tensor_descriptors = {}
 except ImportError:
     cutensor = None
     CUTENSOR_ALGO_DEFAULT = None
 
-def _create_mode_with_cache(mode):
-    integer_mode = []
-    for x in mode:
-        if isinstance(x, int):
-            integer_mode.append(x)
-        elif isinstance(x, str):
-            integer_mode.append(ord(x))
-        else:
-            raise TypeError('Cannot create tensor mode: {}'.format(type(x)))
-    key = tuple(integer_mode)
-
-    if key in _modes:
-        mode = _modes[key]
-    else:
+def _auto_create_mode(array, mode):
+    if not isinstance(mode, cutensor.Mode):
         mode = cutensor.create_mode(*mode)
-        _modes[key] = mode
+    if array.ndim != mode.ndim:
+        raise ValueError(
+            'ndim mismatch: {} != {}'.format(array.ndim, mode.ndim))
     return mode
 
-def create_contraction_descriptor(handle,
-                                  a, desc_a, mode_a,
-                                  b, desc_b, mode_b,
-                                  c, desc_c, mode_c):
-    alignment_req_A = cutensor_backend.getAlignmentRequirement(handle, a.data.ptr, desc_a)
-    alignment_req_B = cutensor_backend.getAlignmentRequirement(handle, b.data.ptr, desc_b)
-    alignment_req_C = cutensor_backend.getAlignmentRequirement(handle, c.data.ptr, desc_c)
+def _create_tensor_descriptor(a):
+    handle = cutensor._get_handle()
+    key = (handle.ptr, a.dtype, tuple(a.shape), tuple(a.strides))
+    # hard coded
+    alignment_req = 8
+    if key not in _tensor_descriptors:
+        num_modes = a.ndim
+        extent = np.array(a.shape, dtype=np.int64)
+        stride = np.array(a.strides, dtype=np.int64) // a.itemsize
+        cutensor_dtype = cutensor._get_cutensor_dtype(a.dtype)
+        _tensor_descriptors[key] = cutensor.TensorDescriptor(
+            handle.ptr, num_modes, extent.ctypes.data, stride.ctypes.data,
+            cutensor_dtype, alignment_req=alignment_req)
+    return _tensor_descriptors[key]
 
-    key = (handle.ptr, cutensor_backend.COMPUTE_64F,
-           desc_a.ptr, mode_a.data, alignment_req_A,
-           desc_b.ptr, mode_b.data, alignment_req_B,
-           desc_c.ptr, mode_c.data, alignment_req_C)
+def contraction(
+    pattern, a, b, alpha, beta,
+    out=None,
+    op_a=cutensor_backend.OP_IDENTITY,
+    op_b=cutensor_backend.OP_IDENTITY,
+    op_c=cutensor_backend.OP_IDENTITY,
+    algo=cutensor_backend.ALGO_DEFAULT,
+    jit_mode=cutensor_backend.JIT_MODE_NONE,
+    compute_desc=0,
+    ws_pref=cutensor_backend.WORKSPACE_RECOMMENDED
+):
 
-    if key in _contraction_descriptors:
-        desc = _contraction_descriptors[key]
-        return desc
-
-    desc = cutensor_backend.ContractionDescriptor()
-    cutensor_backend.initContractionDescriptor(
-        handle,
-        desc,
-        desc_a, mode_a.data, alignment_req_A,
-        desc_b, mode_b.data, alignment_req_B,
-        desc_c, mode_c.data, alignment_req_C,
-        desc_c, mode_c.data, alignment_req_C,
-        cutensor_backend.COMPUTE_64F)
-    _contraction_descriptors[key] = desc
-    return desc
-
-def create_contraction_find(handle, algo=CUTENSOR_ALGO_DEFAULT):
-    key = (handle.ptr, algo)
-    if key in _contraction_finds:
-        find = _contraction_finds[key]
-    else:
-        find = cutensor_backend.ContractionFind()
-        cutensor_backend.initContractionFind(handle, find, algo)
-        _contraction_finds[key] = find
-    return find
-
-def create_contraction_plan(handle, desc, find, ws_size):
-    key = (handle.ptr, desc.ptr, find.ptr, ws_size)
-    if key in _contraction_plans:
-        plan = _contraction_plans[key]
-    else:
-        plan = cutensor_backend.ContractionPlan()
-        cutensor_backend.initContractionPlan(handle, plan, desc, find, ws_size)
-        _contraction_plans[key] = plan
-    return plan
-
-def contraction(pattern, a, b, alpha, beta, out=None):
     pattern = pattern.replace(" ", "")
     str_a, rest = pattern.split(',')
     str_b, str_c = rest.split('->')
@@ -119,29 +78,27 @@ def contraction(pattern, a, b, alpha, beta, out=None):
     else:
         c = cupy.empty([shape[k] for k in str_c], order='C')
 
-    desc_a = cutensor.create_tensor_descriptor(a)
-    desc_b = cutensor.create_tensor_descriptor(b)
-    desc_c = cutensor.create_tensor_descriptor(c)
+    desc_a = _create_tensor_descriptor(a)
+    desc_b = _create_tensor_descriptor(b)
+    desc_c = _create_tensor_descriptor(c)
 
-    mode_a = _create_mode_with_cache(mode_a)
-    mode_b = _create_mode_with_cache(mode_b)
-    mode_c = _create_mode_with_cache(mode_c)
-
+    mode_a = _auto_create_mode(a, mode_a)
+    mode_b = _auto_create_mode(b, mode_b)
+    mode_c = _auto_create_mode(c, mode_c)
+    operator = cutensor.create_contraction(
+        desc_a, mode_a, op_a, desc_b, mode_b, op_b, desc_c, mode_c, op_c,
+        compute_desc)
+    plan_pref = cutensor.create_plan_preference(algo=algo, jit_mode=jit_mode)
+    ws_size = cutensor_backend.estimateWorkspaceSize(
+        cutensor._get_handle().ptr, operator.ptr, plan_pref.ptr, ws_pref)
+    plan = cutensor.create_plan(operator, plan_pref, ws_limit=ws_size)
+    ws = cupy.empty(ws_size, dtype=np.int8)
     out = c
-    desc = create_contraction_descriptor(_handle, a, desc_a, mode_a, b, desc_b, mode_b, c, desc_c, mode_c)
-    find = create_contraction_find(_handle)
-    ws_size = cutensor_backend.contractionGetWorkspaceSize(_handle, desc, find, cutensor_backend.WORKSPACE_RECOMMENDED)
-    try:
-        ws = cupy.empty(ws_size, dtype=np.int8)
-    except Exception:
-        ws_size = cutensor_backend.contractionGetWorkspaceSize(_handle, desc, find, cutensor_backend.WORKSPACE_MIN)
-        ws = cupy.empty(ws_size, dtype=np.int8)
 
-    plan = create_contraction_plan(_handle, desc, find, ws_size)
     alpha = np.asarray(alpha)
     beta = np.asarray(beta)
 
-    cutensor_backend.contraction(_handle, plan,
+    cutensor_backend.contract(cutensor._get_handle().ptr, plan.ptr,
                              alpha.ctypes.data, a.data.ptr, b.data.ptr,
                              beta.ctypes.data, c.data.ptr, out.data.ptr,
                              ws.data.ptr, ws_size)
