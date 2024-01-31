@@ -55,7 +55,6 @@ def update_amps(mycc, t1, t2, eris):
 
     wpq, t1new, t2new, wVOov, wVooV = _direct_ovvv_vvvv(mycc, t1, t2)
     t2new *= .5  # *.5 because t2+t2.transpose(1,0,3,2) at the end
-    time1 = log.timer_debug1('vvvv', *time0)
 
     _einsum = cupy.einsum
 
@@ -177,7 +176,6 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     mol = vhfopt.mol
 
     _einsum = cupy.einsum
-    _dot = cupy.dot
 
     mo = vhfopt.coeff.dot(cupy.asarray(mycc.mo_coeff))
     orbo = cupy.asarray(mo[:,:nocc])
@@ -303,7 +301,7 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
             #mempool.free_all_blocks()
             wVvoO[i0:i1] += _einsum('prqs,ri,qj->psij',
                                     aoblk, orbo, t1po[j0:j1]).get()
-        aoblk = tmp = None
+        aoblk = None
     eribuf = loadbuf = x2 = None
 
     #:t1new += 2*lib.einsum('edac,ikcd->ikea', eris_ovvv, t2)
@@ -352,19 +350,15 @@ def _unpack_t2_tril(t2tril, nocc, nvir):
     return t2
 
 def _fill_eri_block(eri, strides, ao_offsets, vhfopt, group_id):
-    l_symb = lib.param.ANGULAR
     log_qs = vhfopt.log_qs
-    nbins = 10
-    cp_idx, cp_jdx = np.tril_indices(len(vhfopt.uniq_l_ctr))
-
     cp_kl_id = group_id
-    log_q_kl = log_qs[group_id]
+    log_q_kl = log_qs[cp_kl_id]
     if log_q_kl.size == 0:
         return eri
 
-    nao = vhfopt.coeff.shape[0]
-    cpk = cp_idx[group_id]
-    cpl = cp_jdx[group_id]
+    cp_idx, cp_jdx = np.tril_indices(len(vhfopt.uniq_l_ctr))
+    cpk = cp_idx[cp_kl_id]
+    cpl = cp_jdx[cp_kl_id]
     lk = vhfopt.uniq_l_ctr[cpk,0]
     ll = vhfopt.uniq_l_ctr[cpl,0]
     if lk > gpu_hf.LMAX_ON_GPU or ll > gpu_hf.LMAX_ON_GPU:
@@ -374,6 +368,8 @@ def _fill_eri_block(eri, strides, ao_offsets, vhfopt, group_id):
     log_cutoff = np.log(vhfopt.direct_scf_tol)
     omega = 0.
 
+    l_symb = lib.param.ANGULAR
+    nao = vhfopt.coeff.shape[0]
     bins_locs_kl = vhfopt.bins[cp_kl_id]
     bins_floor_kl = vhfopt.bins_floor[cp_kl_id]
     nbins_kl = len(bins_locs_kl) - 1
