@@ -21,12 +21,17 @@ jobs:
     - uses: actions/checkout@v3
     - name: Install dependencies
       run: |
+        export 
         python3 -m pip install --upgrade pip
         pip3 install flake8 pytest
     - name: build
       run: |
+        export CUDA_HOME=/usr/local/cuda
+        export PATH=${CUDA_HOME}/bin:${PATH}
+        export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
         sh build.sh
-        pwd
     - name: Test with pytest
       run: |
+        echo $GITHUB_WORKSPACE
+        export PYTHONPATH="${PYTHONPATH}:$GITHUB_WORKSPACE"
         pytest
