@@ -81,8 +81,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     l_symb = pyscf_lib.param.ANGULAR
     log_qs = vhfopt.log_qs
     direct_scf_tol = vhfopt.direct_scf_tol
-    ncptype = len(log_qs)
-    cp_idx, cp_jdx = np.tril_indices(ncptype)
+    cp_idx, cp_jdx = np.tril_indices(len(vhfopt.uniq_l_ctr))
     l_ctr_shell_locs = vhfopt.l_ctr_offsets
     l_ctr_ao_locs = vhfopt.mol.ao_loc[l_ctr_shell_locs]
     dm_ctr_cond = np.max(
