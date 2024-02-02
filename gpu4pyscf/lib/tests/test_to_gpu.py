@@ -17,8 +17,10 @@ import unittest
 import numpy
 import cupy
 import pyscf
+import pytest
 from pyscf import scf, lib
 from pyscf.dft import rks
+from packaging import version
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -41,6 +43,7 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
+pyscf_24 = version.parse(pyscf.__version__) <= version.parse('2.4.0')
 
 class KnownValues(unittest.TestCase):
     def test_rhf(self):
@@ -127,5 +130,6 @@ class KnownValues(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    print("Full tests for to_gpu module")
-    unittest.main()
+    if not pyscf_24:
+        print("Full tests for to_gpu module")
+        unittest.main()
