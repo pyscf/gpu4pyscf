@@ -182,7 +182,8 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     orbv = cupy.asarray(mo[:,nocc:])
     t1po = orbv.dot(cupy.asarray(t1).T)
     tau = make_tau_tril(t1, t2)
-    x2 = _einsum('xab,pa,qb->xpq', tau, orbv, orbv)
+    x2 = _einsum('xab,pa->xpb', tau, orbv)
+    x2 = _einsum('xpb,qb->xpq', x2, orbv)
     tau = None
 
     nao, nmo = mo.shape
@@ -225,8 +226,10 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
         def fint(ish0, ish1, jsh0, jsh1, group_id):
             i0, i1 = ao_loc[ish0], ao_loc[ish1]
             j0, j1 = ao_loc[jsh0], ao_loc[jsh1]
-            eri = cupy.ndarray((i1-i0, nao, j1-j0, nao), memptr=eribuf.data)
-            eri.fill(0.)
+            #eri = cupy.ndarray((i1-i0, nao, j1-j0, nao), memptr=eribuf.data)
+            #eri.fill(0.)
+            eri = cupy.zeros([i1-i0,nao,j1-j0,nao])
+
             # strides to ensure data order consistent with eri(k1-k0,nao,l1-l0,nao)
             strides = [1, (j1-j0)*nao, (j1-j0)*nao**2, nao]
             ao_offsets = [0, 0, i0, j0]
@@ -312,14 +315,19 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     t1new = t1tmp.dot(orbv).get()
 
     # vvvv-t2 contractions back to MO repr.
-    Ht2tril = _einsum('xpq,pa,qb->xab', Ht2ao, orbv, orbv)
+    Ht2tril = _einsum('xpq,pa->xaq', Ht2ao, orbv)
+    Ht2tril = _einsum('xaq,qb->xab', Ht2tril, orbv)
 
     # part of ovvv-t2 contractions back to MO repr.
     #: tmp = np.einsum('ijcd,ka,kdcb->ijba', tau, t1, eris.ovvv)
     #: t2new -= tmp + tmp.transpose(1,0,3,2)
     t1pv = orbo.dot(cupy.asarray(t1))
-    Ht2tril -= _einsum('xpq,pa,qb->xab', Ht2ao, orbv, t1pv)
-    Ht2tril -= _einsum('xpq,pa,qb->xab', Ht2ao, t1pv, orbv)
+    tmp = _einsum('xpq,pa->xaq', Ht2ao, orbv)
+    Ht2tril -= _einsum('xaq,qb->xab', tmp, t1pv)
+
+    tmp = _einsum('xpq,pa->xaq', Ht2ao, t1pv)
+    Ht2tril -= _einsum('xaq,qb->xab', tmp, orbv)#_einsum('xpq,pa,qb->xab', Ht2ao, t1pv, orbv)
+
     t2new = _unpack_t2_tril(Ht2tril, nocc, nvir).get()
     Ht2ao = Ht2full = None
 
@@ -327,8 +335,13 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     wpq = 2 * lib.einsum('pqkk,pi,qj->ij', wVVoo, c, c)
     wpq -= lib.einsum('pqkk,pi,qj->ji', wVvoO, c, c)
 
-    wVOov = _einsum('pqji,qb,pa->bjia', cupy.asarray(wVvoO), orbv, orbv).get()
-    wVooV = _einsum('pqji,pa,qb->bjia', cupy.asarray(wVVoo),-orbv, orbv).get()
+    tmp = _einsum('pqji,qb->pbji', cupy.asarray(wVvoO), orbv)
+    wVOov = _einsum('pbji,pa->bjia', tmp, orbv).get()
+    #wVOov = _einsum('pqji,qb,pa->bjia', cupy.asarray(wVvoO), orbv, orbv).get()
+
+    tmp = _einsum('pqji,pa->aqji', cupy.asarray(wVVoo), -orbv)
+    wVooV = _einsum('aqji,qb->bjia', tmp, orbv).get()
+    #wVooV = _einsum('pqji,pa,qb->bjia', cupy.asarray(wVVoo),-orbv, orbv).get()
     wVVoo = None
 
     if FREE_CUPY_CACHE:
@@ -521,7 +534,7 @@ class CCSD(ccsd.CCSD):
     def __init__(self, mf, *args, **kwargs):
         if hasattr(mf, 'to_cpu'):
             mf = mf.to_cpu()
-        if mf.with_df:
+        if hasattr(mf, 'with_df') and mf.with_df:
             lib.logger.warn(mf.mol, 'DF-CCSD not available. Run the standard CCSD.')
         ccsd.CCSD.__init__(self, mf, *args, **kwargs)
 
