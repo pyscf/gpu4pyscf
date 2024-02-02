@@ -1,6 +1,7 @@
 import re
 
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.ticker import MaxNLocator
 
 
@@ -41,8 +42,11 @@ def plot_scan(records: list):
 
     color = 'tab:red'
     ax1.set_xlabel('Dihedral (degree)')
-    ax1.set_ylabel('Energy (Hartree)', color=color)
-    ax1.plot(degrees, hartree, color=color)
+    ax1.set_ylabel('Energy (kcal/mol)', color=color)
+    ax1.plot(degrees,
+             627.5096080305927 * (hartree - np.min(hartree)),
+             'x-',
+             color=color)
     ax1.tick_params(axis='y', labelcolor=color)
 
     ax2 = ax1.twinx()
@@ -50,7 +54,7 @@ def plot_scan(records: list):
     color = 'tab:blue'
     ax2.set_ylabel('Geometric Optimization Iterations',
                    color=color)  # we already handled the x-label with ax1
-    ax2.plot(degrees, iteration_numbers, color=color)
+    ax2.plot(degrees, iteration_numbers, 'o-', color=color)
     ax2.tick_params(axis='y', labelcolor=color)
     ax2.yaxis.set_major_locator(MaxNLocator(integer=True))
 
