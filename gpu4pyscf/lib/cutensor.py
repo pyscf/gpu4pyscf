@@ -21,11 +21,17 @@ try:
     import cupy_backends.cuda.libs.cutensor  # NOQA
     from cupyx import cutensor
     from cupy_backends.cuda.libs import cutensor as cutensor_backend
-    CUTENSOR_ALGO_DEFAULT = cutensor_backend.ALGO_DEFAULT
+    ALGO_DEFAULT = cutensor_backend.ALGO_DEFAULT
+    OP_IDENTITY = cutensor_backend.OP_IDENTITY
+    JIT_MODE_NONE = cutensor_backend.JIT_MODE_NONE
+    WORKSPACE_RECOMMENDED = cutensor_backend.WORKSPACE_RECOMMENDED
     _tensor_descriptors = {}
 except ImportError:
     cutensor = None
-    CUTENSOR_ALGO_DEFAULT = None
+    ALGO_DEFAULT = None
+    OP_IDENTITY = None
+    JIT_MODE_NONE = None
+    WORKSPACE_RECOMMENDED = None
 
 def _auto_create_mode(array, mode):
     if not isinstance(mode, cutensor.Mode):
@@ -53,13 +59,13 @@ def _create_tensor_descriptor(a):
 def contraction(
     pattern, a, b, alpha, beta,
     out=None,
-    op_a=cutensor_backend.OP_IDENTITY,
-    op_b=cutensor_backend.OP_IDENTITY,
-    op_c=cutensor_backend.OP_IDENTITY,
-    algo=cutensor_backend.ALGO_DEFAULT,
-    jit_mode=cutensor_backend.JIT_MODE_NONE,
+    op_a=OP_IDENTITY,
+    op_b=OP_IDENTITY,
+    op_c=OP_IDENTITY,
+    algo=ALGO_DEFAULT,
+    jit_mode=JIT_MODE_NONE,
     compute_desc=0,
-    ws_pref=cutensor_backend.WORKSPACE_RECOMMENDED
+    ws_pref=WORKSPACE_RECOMMENDED
 ):
 
     pattern = pattern.replace(" ", "")

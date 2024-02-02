@@ -1,6 +1,8 @@
 import unittest
 import numpy as np
 import pyscf
+import pytest
+from packaging import version
 from gpu4pyscf.cc import ccsd_incore
 
 def setUpModule():
@@ -42,6 +44,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(r1 - t1).max(), 0, 9)
         self.assertAlmostEqual(abs(r2 - t2).max(), 0, 9)
 
+    @pytest.mark.skipif(version.parse(pyscf.__version__) <= version.parse('2.4.0'), reason='requires pyscf 2.5 or higher')
     def test_ccsd_incore_kernel(self):
         ref = mf.CCSD().run()
         mcc = ccsd_incore.CCSD(mf.to_gpu()).run()
