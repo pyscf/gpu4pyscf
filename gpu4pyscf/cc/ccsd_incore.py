@@ -222,7 +222,7 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     if vhfopt.uniq_l_ctr[:,0].max() <= gpu_hf.LMAX_ON_GPU:
         # Computing ERIs on GPU
         idx, idy = cupy.tril_indices(nao)
-        eribuf = cupy.empty(blksize**2*nao**2)
+        #eribuf = cupy.empty(blksize**2*nao**2)
         def fint(ish0, ish1, jsh0, jsh1, group_id):
             i0, i1 = ao_loc[ish0], ao_loc[ish1]
             j0, j1 = ao_loc[jsh0], ao_loc[jsh1]
