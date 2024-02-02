@@ -17,11 +17,6 @@ import numpy as np
 import pyscf
 from gpu4pyscf.cc import ccsd_incore
 
-atom = [
-        [8 , (0. , 0.     , 0.)],
-        [1 , (0. , -0.757 , 0.587)],
-        [1 , (0. , 0.757  , 0.587)],]
-
 mol = pyscf.M(
     atom = 'Vitamin_C.xyz',
     basis = 'cc-pvdz',
