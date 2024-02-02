@@ -55,7 +55,7 @@ def run_dft(xc):
 
 class KnownValues(unittest.TestCase):
     '''
-    known values are obtained by pyscf, # def2-qzvpp
+    known values are obtained by pyscf,           # def2-qzvpp
     '''
     def test_uks_lda(self):
         print('------- LDA ----------------')
