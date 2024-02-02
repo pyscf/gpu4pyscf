@@ -25,7 +25,7 @@ O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
-bas='def2-qzvpp'
+bas='def2-tzvpp'
 grids_level = 3
 nlcgrids_level = 1
 
@@ -55,37 +55,37 @@ def run_dft(xc):
 
 class KnownValues(unittest.TestCase):
     '''
-    known values are obtained by pyscf
+    known values are obtained by pyscf, # def2-qzvpp
     '''
     def test_uks_lda(self):
         print('------- LDA ----------------')
         e_tot = run_dft("LDA, vwn5")
-        assert np.allclose(e_tot, -75.42821982483972)
+        assert np.allclose(e_tot, -75.4231504131) #-75.42821982483972)
 
     def test_uks_pbe(self):
         print('------- PBE ----------------')
         e_tot = run_dft('PBE')
-        assert np.allclose(e_tot, -75.91732813416843)
+        assert np.allclose(e_tot, -75.9128621398)# -75.91732813416843)
 
     def test_uks_b3lyp(self):
         print('-------- B3LYP -------------')
         e_tot = run_dft('B3LYP')
-        assert np.allclose(e_tot, -76.00306439862237)
+        assert np.allclose(e_tot, -75.9987351592) #-76.00306439862237)
 
     def test_uks_m06(self):
         print('--------- M06 --------------')
         e_tot = run_dft("M06")
-        assert np.allclose(e_tot, -75.96551006522827)
+        assert np.allclose(e_tot, -75.9609384616) #-75.96551006522827)
 
     def test_uks_wb97(self):
         print('-------- wB97 --------------')
         e_tot = run_dft("HYB_GGA_XC_WB97")
-        assert np.allclose(e_tot, -75.987601337562)
+        assert np.allclose(e_tot, -75.9833214499) #-75.987601337562)
 
     def test_uks_vv10(self):
         print("------- wB97m-v -------------")
         e_tot = run_dft('HYB_MGGA_XC_WB97M_V')
-        assert np.allclose(e_tot, -75.97363094678428)
+        assert np.allclose(e_tot, -75.9697577968)# -75.97363094678428)
 
     #TODO: add test cases for D3/D4 and gradient
 

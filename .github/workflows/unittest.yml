@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         python3 -m pip install --upgrade pip
-        pip3 install flake8 pytest
+        pip3 install flake8 pytest coverage
     - name: Build GPU4PySCF
       run: |
         export CUDA_HOME=/usr/local/cuda
@@ -33,4 +33,4 @@ jobs:
       run: |
         echo $GITHUB_WORKSPACE
         export PYTHONPATH="${PYTHONPATH}:$GITHUB_WORKSPACE"
-        pytest
+        coverage run -m pytest
