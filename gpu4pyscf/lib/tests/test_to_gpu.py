@@ -17,8 +17,10 @@ import unittest
 import numpy
 import cupy
 import pyscf
+import pytest
 from pyscf import scf, lib
 from pyscf.dft import rks
+from packaging import version
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -28,6 +30,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
 bas='sto3g'
 grids_level = 1
+pyscf_24 = version.parse(pyscf.__version__) <= version.parse('2.4.0')
 
 def setUpModule():
     global mol
@@ -41,8 +44,8 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-
 class KnownValues(unittest.TestCase):
+    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_rhf(self):
         mf = scf.RHF(mol).to_gpu()
         e_tot = mf.to_gpu().kernel()
@@ -57,6 +60,7 @@ class KnownValues(unittest.TestCase):
         # h = mf.Hessian().to_gpu()
         # h.kernel()
 
+    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_rks(self):
         mf = rks.RKS(mol).to_gpu()
         e_tot = mf.to_gpu().kernel()
@@ -72,6 +76,7 @@ class KnownValues(unittest.TestCase):
         # h = mf.Hessian().to_gpu()
         # h.kernel()
 
+    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_df_RHF(self):
         mf = scf.RHF(mol).density_fit().to_gpu()
         e_tot = mf.to_gpu().kernel()
@@ -87,6 +92,7 @@ class KnownValues(unittest.TestCase):
         h = hobj.kernel()
         assert numpy.abs(lib.fp(h) - 2.198079352288524) < 1e-7
 
+    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_df_b3lyp(self):
         mf = rks.RKS(mol, xc='b3lyp').density_fit().to_gpu()
         e_tot = mf.to_gpu().kernel()
@@ -105,6 +111,7 @@ class KnownValues(unittest.TestCase):
         print('DF b3lyp hessian:', lib.fp(h))
         assert numpy.abs(lib.fp(h) - 2.1527804103141848) < 1e-7
 
+    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_df_RKS(self):
         mf = rks.RKS(mol, xc='wb97x').density_fit().to_gpu()
         e_tot = mf.to_gpu().kernel()
