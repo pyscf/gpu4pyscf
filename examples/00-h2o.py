@@ -35,7 +35,7 @@ max_scf_cycles = 50
 screen_tol = 1e-14
 grids_level = 5
 
-mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
+mol = pyscf.M(atom=atom, basis=bas, max_memory=32000, cart=1)
 
 mol.verbose = 4
 mf_GPU = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
@@ -54,6 +54,7 @@ g = mf_GPU.nuc_grad_method()
 g.max_memory = 20000
 g.auxbasis_response = True
 g_dft = g.kernel()
+exit()
 
 # Compute Hessian
 h = mf_GPU.Hessian()
