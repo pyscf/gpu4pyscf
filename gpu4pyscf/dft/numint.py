@@ -344,6 +344,58 @@ def eval_rho4(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
 
     return rho
 
+# TODO: implement this for grouped ao's
+def eval_rho5(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
+              with_lapl=True, verbose=None, out=None):
+    xctype = xctype.upper()
+    if xctype == 'LDA' or xctype == 'HF':
+        _, ngrids = ao.shape
+    else:
+        _, ngrids = ao[0].shape
+
+    shls_slice = (0, mol.nbas)
+    ao_loc = mol.ao_loc_nr()
+
+    cpos = (mo_coeff * mo_occ**0.5)[:,mo_occ>0]
+    if xctype == 'LDA' or xctype == 'HF':
+        c0 = cupy.dot(cpos.T, ao)
+        rho = _contract_rho(c0, c0)
+    elif xctype in ('GGA', 'NLC'):
+        rho = cupy.empty((4,ngrids))
+        c0 = contract('nig,io->nog', ao, cpos)
+        _contract_rho(c0[0], c0[0], rho=rho[0])
+        for i in range(1, 4):
+            _contract_rho(c0[0], c0[i], rho=rho[i])
+        rho[1:] *= 2
+    else: # meta-GGA
+        if with_lapl:
+            rho = cupy.empty((6,ngrids))
+            tau_idx = 5
+        else:
+            rho = cupy.empty((5,ngrids))
+            tau_idx = 4
+        c0 = contract('nig,io->nog', ao, cpos)
+        _contract_rho(c0[0], c0[0], rho=rho[0])
+
+        rho[tau_idx] = 0
+        for i in range(1, 4):
+            rho[i] = _contract_rho(c0[0], c0[i])
+            rho[tau_idx] += _contract_rho(c0[i], c0[i])
+
+        if with_lapl:
+            if ao.shape[0] > 4:
+                XX, YY, ZZ = 4, 7, 9
+                ao2 = ao[XX] + ao[YY] + ao[ZZ]
+                c1 = _dot_ao_dm(mol, ao2, cpos, non0tab, shls_slice, ao_loc)
+                rho[4] = _contract_rho(c0[0], c1)
+                rho[4] += rho[5]
+                rho[4] *= 2
+            else:
+                rho[4] = 0
+        rho[1:4] *= 2
+        rho[tau_idx] *= .5
+    return rho
+
 def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     thresh=1e-10
 
@@ -467,17 +519,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nelec = cupy.zeros(nset)
     excsum = cupy.zeros(nset)
     vmat = cupy.zeros((nset, nao, nao))
-    '''
-    ao_loc = mol.ao_loc_nr()
-    if USE_SPARSITY == 1:
-        nbins = NBINS * 2 - int(NBINS * np.log(ni.cutoff) / np.log(grids.cutoff))
-        pair2shls, pairs_locs = _make_pairs2shls_idx(ni.pair_mask, opt.l_bas_offsets, hermi)
-        if hermi:
-            pair2shls_full, pairs_locs_full = _make_pairs2shls_idx(ni.pair_mask,
-                                                               opt.l_bas_offsets)
-        else:
-            pair2shls_full, pairs_locs_full = pair2shls, pairs_locs
-    '''
+
     release_gpu_stack()
     if xctype == 'LDA':
         ao_deriv = 0
@@ -493,6 +535,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     p0 = p1 = 0
     t1 = t0 = log.init_timer()
+    # TODO: replace ni.block_loop with ni.grouped_block_loop
     for ao_mask, idx, weight, _ in ni.block_loop(mol, grids, nao, ao_deriv):
         p1 = p0 + weight.size
         for i in range(nset):
@@ -500,6 +543,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 rho_tot[i,:,p0:p1] = eval_rho(mol, ao_mask, dms[i][np.ix_(idx,idx)], xctype=xctype, hermi=1)
             else:
                 mo_coeff_mask = mo_coeff[idx,:]
+                # TODO: create eval_rho5 for grouped ao_mask
                 rho_tot[i,:,p0:p1] = eval_rho2(mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype)
         p0 = p1
         t1 = log.timer_debug2('eval rho slice', *t1)
@@ -525,31 +569,24 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     t1 = t0
     p0 = p1 = 0
+    # TODO: repalce ni.block_loop with ni.grouped_block_loop
     for ao_mask, idx, weight, _ in ni.block_loop(mol, grids, nao, ao_deriv):
         p1 = p0 + weight.size
         for i in range(nset):
+            #TODO: replace dot with grouped gemm, loop for other operations
             if xctype == 'LDA':
-                if USE_SPARSITY == 2:
-                    aow = _scale_ao(ao_mask, wv[i][0,p0:p1])
-                    add_sparse(vmat[i], ao_mask.dot(aow.T), idx)
-                else:
-                    raise NotImplementedError(f'USE_SPARSITY = {USE_SPARSITY} is not implemented')
+                aow = _scale_ao(ao_mask, wv[i][0,p0:p1])
+                add_sparse(vmat[i], ao_mask.dot(aow.T), idx)
             elif xctype == 'GGA':
-                if USE_SPARSITY == 2:
-                    aow = _scale_ao(ao_mask, wv[i][:,p0:p1])
-                    add_sparse(vmat[i], ao_mask[0].dot(aow.T), idx)
-                else:
-                    raise NotImplementedError(f'USE_SPARSITY = {USE_SPARSITY} is not implemented')
+                aow = _scale_ao(ao_mask, wv[i][:,p0:p1])
+                add_sparse(vmat[i], ao_mask[0].dot(aow.T), idx)
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             elif xctype == 'MGGA':
-                if USE_SPARSITY == 2:
-                    aow = _scale_ao(ao_mask, wv[i][:4,p0:p1])
-                    vtmp = ao_mask[0].dot(aow.T)
-                    vtmp+= _tau_dot(ao_mask, ao_mask, wv[i][4,p0:p1])
-                    add_sparse(vmat[i], vtmp, idx)
-                else:
-                    raise NotImplementedError(f'USE_SPARSITY = {USE_SPARSITY} is not implemented')
+                aow = _scale_ao(ao_mask, wv[i][:4,p0:p1])
+                vtmp = ao_mask[0].dot(aow.T)
+                vtmp+= _tau_dot(ao_mask, ao_mask, wv[i][4,p0:p1])
+                add_sparse(vmat[i], vtmp, idx)
             elif xctype == 'HF':
                 pass
             else:
@@ -1295,6 +1332,9 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
 
+    # TODO:
+    # pre-allocate space based on available GPU memory
+    # fill the allocated space with eval_ao
     mol = opt.mol
     with opt.gdft_envs_cache():
         block_id = 0
@@ -1305,51 +1345,69 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             t1 = log.init_timer()
             # cache ao indices
             if (block_id, blksize, ngrids) not in ni.non0ao_idx:
-                stream = cupy.cuda.get_current_stream()
-                cutoff = AO_THRESHOLD
-                ng = ip1 - ip0
-                ao_loc = mol.ao_loc_nr()
-                nbas = mol.nbas
-                non0shl_idx = cupy.zeros(len(ao_loc)-1, dtype=np.int32)
-                libgdft.GDFTscreen_index(
-                    ctypes.cast(stream.ptr, ctypes.c_void_p),
-                    ctypes.cast(non0shl_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.c_double(cutoff),
-                    ctypes.cast(coords.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(ng),
-                    ao_loc.ctypes.data_as(ctypes.c_void_p),
-                    ctypes.c_int(nbas),
-                    mol._bas.ctypes.data_as(ctypes.c_void_p))
-                non0shl_idx = non0shl_idx.get()
+                ni.non0ao_idx[block_id, blksize, ngrids] = _sparse_index(mol, coords, opt.l_ctr_offsets)
+            else:
+                pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[block_id, blksize, ngrids]
 
-                # offset of contraction pattern, used in eval_ao
-                cumsum = np.cumsum(non0shl_idx, dtype=np.int32)
-                glob_ctr_offsets = opt.l_ctr_offsets
-                ctr_offsets_slice = cumsum[glob_ctr_offsets-1]
-                ctr_offsets_slice[0] = 0
+            ao_mask = eval_ao(
+                ni, mol, coords, deriv,
+                out=None,
+                nao_slice=len(idx),
+                shls_slice=non0shl_idx,
+                ao_loc_slice=ao_loc_slice,
+                ctr_offsets_slice=ctr_offsets_slice)
 
-                from pyscf import gto
-                gto_type = 'cart' if mol.cart else 'sph'
-                non0shl_idx = non0shl_idx == 1
-                ao_loc_slice = gto.moleintor.make_loc(mol._bas[non0shl_idx,:], gto_type)
-                ao_loc_slice = cupy.asarray(ao_loc_slice, dtype=np.int32)
-                non0ao_idx = []
-                zero_idx = []
-                for sh_idx in range(len(ao_loc)-1):
-                    p0, p1 = ao_loc[sh_idx], ao_loc[sh_idx+1]
-                    if non0shl_idx[sh_idx]:
-                        non0ao_idx += range(p0,p1)
-                    else:
-                        zero_idx += range(p0,p1)
+            t1 = log.timer_debug2('evaluate ao slice', *t1)
+            if pad > 0:
+                if deriv == 0:
+                    ao_mask[-pad:,:] = 0.0
+                else:
+                    ao_mask[:,-pad:,:] = 0.0
+            block_id += 1
+            yield ao_mask, idx, weight, coords
 
-                idx = cupy.asarray(non0ao_idx, dtype=np.int32)
-                zero_idx = cupy.asarray(zero_idx, dtype=np.int32)
-                pad = (len(idx) + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT - len(idx)
-                idx = cupy.hstack([idx, zero_idx[:pad]])
-                pad = min(pad, len(zero_idx))
-                non0shl_idx = cupy.asarray(np.where(non0shl_idx)[0], dtype=np.int32)
-                ni.non0ao_idx[block_id, blksize, ngrids] = (pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice)
-                t1 = log.timer_debug2('init ao sparsity', *t1)
+# TODO: concatenate AO's for grouped gemm
+def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
+                non0tab=None, blksize=None, buf=None, extra=0):
+    '''
+    Define this macro to loop over grids by blocks.
+    Sparsity is not implemented yet
+    sorted_ao: by default ao_value is sorted for GPU
+    '''
+    if grids.coords is None:
+        grids.build(with_non0tab=False, sort_grids=True)
+    if nao is None:
+        nao = mol.nao
+    ngrids = grids.coords.shape[0]
+    comp = (deriv+1)*(deriv+2)*(deriv+3)//6
+    log = logger.new_logger(mol, mol.verbose)
+
+    if blksize is None:
+        #cupy.get_default_memory_pool().free_all_blocks()
+        mem_avail = get_avail_mem()
+        blksize = int((mem_avail*.2/8/((comp+1)*nao + extra))/ ALIGNED) * ALIGNED
+        blksize = min(blksize, MIN_BLK_SIZE)
+        log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, blksize)
+        if blksize < ALIGNED:
+            raise RuntimeError('Not enough GPU memory')
+
+    opt = getattr(ni, 'gdftopt', None)
+    if opt is None:
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+
+
+    mol = opt.mol
+    with opt.gdft_envs_cache():
+        block_id = 0
+        t1 = log.init_timer()
+        for ip0, ip1 in lib.prange(0, ngrids, blksize):
+            coords = grids.coords[ip0:ip1]
+            weight = grids.weights[ip0:ip1]
+            t1 = log.init_timer()
+            # cache ao indices
+            if (block_id, blksize, ngrids) not in ni.non0ao_idx:
+                ni.non0ao_idx[block_id, blksize, ngrids] = _sparse_index(mol, coords, opt.l_ctr_offsets)
             else:
                 pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[block_id, blksize, ngrids]
 
