@@ -26,7 +26,7 @@ try:
     JIT_MODE_NONE = cutensor_backend.JIT_MODE_NONE
     WORKSPACE_RECOMMENDED = cutensor_backend.WORKSPACE_RECOMMENDED
     _tensor_descriptors = {}
-except ImportError:
+except (ImportError, AttributeError):
     cutensor = None
     ALGO_DEFAULT = None
     OP_IDENTITY = None
