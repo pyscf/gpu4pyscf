@@ -1,0 +1,36 @@
+# This workflow will install Python dependencies, run tests and lint with a single version of Python
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+
+name: self hosted CI
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+
+    runs-on: self-hosted
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        pip3 install flake8 pytest coverage
+    - name: Build GPU4PySCF
+      run: |
+        export CUDA_HOME=/usr/local/cuda
+        export PATH=${CUDA_HOME}/bin:${PATH}
+        export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+        sh build.sh
+    - name: Test with pytest
+      run: |
+        echo $GITHUB_WORKSPACE
+        export PYTHONPATH="${PYTHONPATH}:$GITHUB_WORKSPACE"
+        coverage run -m pytest

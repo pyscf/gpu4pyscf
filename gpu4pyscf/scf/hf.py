@@ -27,9 +27,15 @@ from pyscf import gto
 from pyscf import lib as pyscf_lib
 from pyscf.scf import hf, jk, _vhf
 from gpu4pyscf import lib
-from gpu4pyscf.lib.cupy_helper import eigh, load_library, tag_array
+from gpu4pyscf.lib.cupy_helper import (eigh, load_library, tag_array,
+                                       return_cupy_array, to_cupy)
 from gpu4pyscf.scf import diis
 from gpu4pyscf.lib import logger
+
+__all__ = [
+    'get_jk', 'get_occ', 'get_grad', 'damping', 'level_shift', 'get_fock',
+    'energy_elec', 'RHF'
+]
 
 LMAX_ON_GPU = 4
 FREE_CUPY_CACHE = True
@@ -49,17 +55,13 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     if vhfopt is None:
         vhfopt = _VHFOpt(mol, 'int2e').build()
     out_cupy = isinstance(dm, cupy.ndarray)
-    if not isinstance(dm, cupy.ndarray):
-        dm = cupy.asarray(dm)
+    if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
     coeff = cupy.asarray(vhfopt.coeff)
     nao, nao0 = coeff.shape
     dm0 = dm
-    dms = cupy.asarray(dm0.reshape(-1,nao0,nao0))
-    dms = [coeff @ x @ coeff.T for x in dms]
-    if dm0.ndim == 2:
-        dms = cupy.asarray(dms[0], order='C').reshape(1,nao,nao)
-    else:
-        dms = cupy.asarray(dms, order='C')
+    dms = dm0.reshape(-1,nao0,nao0)
+    dms = cupy.einsum('pi,xij,qj->xpq', coeff, dms, coeff.conj())
+    dms = cupy.asarray(dms, order='C')
     n_dm = dms.shape[0]
     scripts = []
     vj = vk = None
@@ -79,8 +81,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     l_symb = pyscf_lib.param.ANGULAR
     log_qs = vhfopt.log_qs
     direct_scf_tol = vhfopt.direct_scf_tol
-    ncptype = len(log_qs)
-    cp_idx, cp_jdx = np.tril_indices(ncptype)
+    cp_idx, cp_jdx = np.tril_indices(len(vhfopt.uniq_l_ctr))
     l_ctr_shell_locs = vhfopt.l_ctr_offsets
     l_ctr_ao_locs = vhfopt.mol.ao_loc[l_ctr_shell_locs]
     dm_ctr_cond = np.max(
@@ -105,7 +106,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             c += nj_shls
         r += ni_shls
 
-    dm_shl = cupy.asarray(np.log(dm_shl))
+    dm_shl = cupy.log(dm_shl)
     nshls = dm_shl.shape[0]
     if hermi != 1:
         dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
@@ -287,6 +288,8 @@ def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
 def make_rdm1(mf, mo_coeff=None, mo_occ=None, **kwargs):
     if mo_occ is None: mo_occ = mf.mo_occ
     if mo_coeff is None: mo_coeff = mf.mo_coeff
+    mo_coeff = cupy.asarray(mo_coeff)
+    mo_occ = cupy.asarray(mo_occ)
     is_occ = mo_occ > 0
     mocc = mo_coeff[:, is_occ]
     dm = cupy.dot(mocc*mo_occ[is_occ], mocc.conj().T)
@@ -302,14 +305,15 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     mo_occ[e_idx[:nocc]] = 2
     return mo_occ
 
-def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1, vhfopt=None):
+def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1, vhfopt=None):
+    if dm is None: dm = mf.make_rdm1()
     if dm_last is None or not mf.direct_scf:
-        vj, vk = mf.get_jk(mol, cupy.asarray(dm), hermi)
+        vj, vk = mf.get_jk(mol, dm, hermi)
         return vj - vk * .5
     else:
         ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
         vj, vk = mf.get_jk(mol, ddm, hermi)
-        return vj - vk * .5 + cupy.asarray(vhf_last)
+        return vj - vk * .5 + vhf_last
 
 def get_grad(mo_coeff, mo_occ, fock_ao):
     occidx = mo_occ > 0
@@ -330,8 +334,14 @@ def level_shift(s, d, f, factor):
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
+    if s1e is None: s1e = mf.get_ovlp()
+    if dm is None: dm = mf.make_rdm1()
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
+    if not isinstance(s1e, cupy.ndarray): s1e = cupy.asarray(s1e)
+    if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
+    if not isinstance(h1e, cupy.ndarray): h1e = cupy.asarray(h1e)
+    if not isinstance(vhf, cupy.ndarray): vhf = cupy.asarray(vhf)
     f = h1e + vhf
     if cycle < 0 and diis is None:  # Not inside the SCF iteration
         return f
@@ -342,8 +352,6 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         level_shift_factor = mf.level_shift
     if damp_factor is None:
         damp_factor = mf.damp
-    if s1e is None: s1e = mf.get_ovlp()
-    if dm is None: dm = mf.make_rdm1()
 
     if 0 <= cycle < diis_start_cycle-1 and abs(damp_factor) > 1e-4:
         f = damping(s1e, dm*.5, f, damp_factor)
@@ -552,19 +560,15 @@ def _quad_moment(mf, mol=None, dm=None, unit='Debye-Ang'):
         mol_quad *= nist.AU2DEBYE * nist.BOHR
     return mol_quad
 
-def _eigh(mf, h, s):
-    return eigh(h, s)
-
 class RHF(hf.RHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
-    _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'e_disp', 'screen_tol'}
+    _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'screen_tol'}
 
     screen_tol = 1e-14
     DIIS = diis.SCF_DIIS
     get_jk = _get_jk
-    #_eigh = staticmethod(_eigh)
-    _eigh = _eigh
+    _eigh = staticmethod(eigh)
     make_rdm1 = make_rdm1
     energy_elec = energy_elec
     get_fock = get_fock
@@ -573,6 +577,28 @@ class RHF(hf.RHF):
     get_grad = staticmethod(get_grad)
     gen_response = _gen_rhf_response
     quad_moment = _quad_moment
+
+    get_hcore = return_cupy_array(hf.RHF.get_hcore)
+    get_ovlp = return_cupy_array(hf.RHF.get_ovlp)
+    get_init_guess = return_cupy_array(hf.RHF.get_init_guess)
+    init_direct_scf = NotImplemented
+    make_rdm2 = NotImplemented
+    dump_chk = NotImplemented
+    newton = NotImplemented
+    x2c = x2c1e = sfx2c1e = NotImplemented
+    to_rhf = NotImplemented
+    to_uhf = NotImplemented
+    to_ghf = NotImplemented
+    to_rks = NotImplemented
+    to_uks = NotImplemented
+    to_gks = NotImplemented
+    to_ks = NotImplemented
+    canonicalize = NotImplemented
+    # TODO: Enable followings after testing
+    analyze = NotImplemented
+    stability = NotImplemented
+    mulliken_pop = NotImplemented
+    mulliken_meta = NotImplemented
 
     def scf(self, dm0=None, **kwargs):
         cput0 = logger.init_timer(self)
@@ -597,14 +623,12 @@ class RHF(hf.RHF):
         logger.timer(self, 'SCF', *cput0)
         self._finalize()
         return self.e_tot
-    kernel = pyscf_lib.alias(scf, alias_name='kernel')
+    kernel = scf
 
     def reset(self, mol=None):
-        if mol is not None:
-            self.mol = mol
+        super().reset(mol)
         self._opt_gpu = None
         self._opt_gpu_omega = None
-        self._eri = None
         return self
 
     def nuc_grad_method(self):

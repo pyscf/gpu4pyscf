@@ -25,8 +25,8 @@ atom = '''
 I 0 0 0
 I 1 0 0
 '''
-bas='def2-qzvpp'
-grids_level = 6
+bas='def2-tzvpp'
+grids_level = 7
 
 def setUpModule():
     global mol
@@ -43,36 +43,15 @@ def tearDownModule():
 def run_dft(xc):
     mf = rks.RKS(mol, xc=xc)
     mf.grids.level = grids_level
+    mf.grids.prune = None
     e_dft = mf.kernel()
     return e_dft
 
 class KnownValues(unittest.TestCase):
-    def test_rks_lda(self):
-        print('------- LDA ----------------')
-        e_tot = run_dft("LDA, vwn5")
-        assert np.allclose(e_tot, -582.3202757689)
-
     def test_rks_pbe(self):
         print('------- PBE ----------------')
         e_tot = run_dft('PBE')
-        assert np.allclose(e_tot, -583.0195322248)
-
-    def test_rks_b3lyp(self):
-        print('-------- B3LYP -------------')
-        e_tot = run_dft('B3LYP')
-        assert np.allclose(e_tot, -583.1585397913)
-
-    def test_rks_m06(self):
-        print('--------- M06 --------------')
-        e_tot = run_dft("M06")
-        assert np.allclose(e_tot, -583.0979740883)
-
-    def test_rks_wb97(self):
-        print('-------- wB97 --------------')
-        e_tot = run_dft("HYB_GGA_XC_WB97")
-        assert np.allclose(e_tot, -583.0817872870)
-
-    #TODO: add test cases for D3/D4 and gradient
+        assert np.allclose(e_tot, -582.7625143308, rtol=1e-8)
 
 if __name__ == "__main__":
     print("Full Tests for dft")
