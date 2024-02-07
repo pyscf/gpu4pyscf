@@ -101,11 +101,8 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         rho, vxc, fxc = ni.cache_xc_kernel(mol, grids_gpu, xc, cupy.asarray(mo_coeff[0]), cupy.asarray(mo_occ[0]), spin)
         v = ni.nr_rks_fxc(mol, grids_gpu, xc, dms=t1, fxc=fxc, hermi=hermi)
-        if xc == MGGA_M06:
-            assert cupy.allclose(rho[[0,1,2,3,5]], rho0[[0,1,2,3,5]])
-        else:
-            assert cupy.allclose(rho, rho0)
 
+        assert cupy.linalg.norm(rho - cupy.asarray(rho0)) < 1e-6 * cupy.linalg.norm(rho)
         assert cupy.linalg.norm(vxc - cupy.asarray(vxc0)) < 1e-6 * cupy.linalg.norm(vxc)
         assert cupy.linalg.norm(fxc - cupy.asarray(fxc0)) < 1e-6 * cupy.linalg.norm(fxc)
         assert cupy.allclose(v, vref)
@@ -144,6 +141,7 @@ class KnownValues(unittest.TestCase):
             mol, grids_cpu, xc, dm0=dm0, dms=t1, rho0=rho_ref, vxc=vxc_ref, fxc=fxc_ref, hermi=hermi)
         vxc_ref = np.asarray(vxc_ref)
         rho_ref = np.asarray(rho_ref)
+
         assert cupy.linalg.norm(rho - cupy.asarray(rho_ref)) < 1e-6 * cupy.linalg.norm(rho)
         assert cupy.linalg.norm(vxc - cupy.asarray(vxc_ref)) < 1e-6 * cupy.linalg.norm(vxc)
         assert cupy.linalg.norm(fxc - cupy.asarray(fxc_ref)) < 1e-6 * cupy.linalg.norm(fxc)
