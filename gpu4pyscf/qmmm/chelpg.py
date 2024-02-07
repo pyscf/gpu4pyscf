@@ -85,9 +85,6 @@ class VHFOpt(_vhf.VHFOpt):
 
         self.bpcache = None
 
-        self.sorted_auxmol = None
-        self.sorted_mol = None
-
         self.cart_ao_idx = None
         self.sph_ao_idx = None
         self.cart_aux_idx = None
@@ -133,7 +130,6 @@ class VHFOpt(_vhf.VHFOpt):
         if group_size is not None:
             uniq_l_ctr, l_ctr_counts = int3c2e._split_l_ctr_groups(
                 uniq_l_ctr, l_ctr_counts, group_size)
-        self.sorted_mol = sorted_mol
 
         # sort fake mol
         fake_mol = int3c2e.make_fake_mol()
@@ -145,7 +141,7 @@ class VHFOpt(_vhf.VHFOpt):
         if group_size_aux is not None:
             aux_uniq_l_ctr, aux_l_ctr_counts = int3c2e._split_l_ctr_groups(
                 aux_uniq_l_ctr, aux_l_ctr_counts, group_size_aux)
-        self.sorted_auxmol = sorted_auxmol
+
         tmp_mol = gto.mole.conc_mol(fake_mol, sorted_auxmol)
         tot_mol = gto.mole.conc_mol(sorted_mol, tmp_mol)
 
@@ -163,8 +159,8 @@ class VHFOpt(_vhf.VHFOpt):
         self.log_qs = log_qs.copy()
 
         # contraction coefficient for ao basis
-        cart_ao_loc = self.sorted_mol.ao_loc_nr(cart=True)
-        sph_ao_loc = self.sorted_mol.ao_loc_nr(cart=False)
+        cart_ao_loc = sorted_mol.ao_loc_nr(cart=True)
+        sph_ao_loc = sorted_mol.ao_loc_nr(cart=False)
         self.cart_ao_loc = [cart_ao_loc[cp] for cp in l_ctr_offsets]
         self.sph_ao_loc = [sph_ao_loc[cp] for cp in l_ctr_offsets]
         self.angular = [l[0] for l in uniq_l_ctr]
@@ -192,8 +188,8 @@ class VHFOpt(_vhf.VHFOpt):
         aux_l_ctr_offsets = np.append(0, np.cumsum(aux_l_ctr_counts))
 
         # contraction coefficient for auxiliary basis
-        cart_aux_loc = self.sorted_auxmol.ao_loc_nr(cart=True)
-        sph_aux_loc = self.sorted_auxmol.ao_loc_nr(cart=False)
+        cart_aux_loc = sorted_auxmol.ao_loc_nr(cart=True)
+        sph_aux_loc = sorted_auxmol.ao_loc_nr(cart=False)
         self.cart_aux_loc = [cart_aux_loc[cp] for cp in aux_l_ctr_offsets]
         self.sph_aux_loc = [sph_aux_loc[cp] for cp in aux_l_ctr_offsets]
         self.aux_angular = [l[0] for l in aux_uniq_l_ctr]
