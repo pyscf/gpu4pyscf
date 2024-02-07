@@ -83,6 +83,16 @@ class KnownValues(unittest.TestCase):
         print(f"Energy error in SS(V)PE: {numpy.abs(e_tot - -74.9689577454)}")
         assert numpy.abs(e_tot - -74.9689577454) < 1e-9
 
+    def test_uhf(self):
+        cm = pcm.PCM(mol)
+        cm.eps = epsilon
+        cm.verbose = 0
+        cm.lebedev_order = 29
+        cm.method = 'IEF-PCM'
+        mf = scf.UHF(mol).PCM(cm)
+        e_tot = mf.kernel()
+        assert numpy.abs(e_tot - -74.96901113434953) < 1e-9
+
 if __name__ == "__main__":
     print("Full Tests for PCMs")
     unittest.main()

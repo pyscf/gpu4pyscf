@@ -36,7 +36,7 @@ def smd_for_scf(mf, solvent_obj=None, dm=None):
 # Inject PCM to SCF, TODO: add it to other methods later
 from gpu4pyscf import scf
 scf.hf.RHF.SMD = smd_for_scf
-
+scf.uhf.UHF.SMD = smd_for_scf
 hartree2kcal = 627.5
 # see https://pubs.acs.org/doi/epdf/10.1021/jp810292n
 
