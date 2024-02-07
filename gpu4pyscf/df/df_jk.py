@@ -277,7 +277,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     assert nao == dfobj.nao
     vj = None
     vk = None
-    ao_idx = dfobj.intopt.sph_ao_idx
+    ao_idx = dfobj.intopt.ao_idx
     dms = take_last2d(dms, ao_idx)
 
     rows = dfobj.intopt.cderi_row

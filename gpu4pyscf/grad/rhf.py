@@ -568,8 +568,8 @@ def get_grad_hcore(mf_grad):
     fakemol = gto.fakemol_for_charges(coords)
     intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
-    orbo_sorted = orbo[intopt.sph_ao_idx]
-    mo_coeff_sorted = mo_coeff[intopt.sph_ao_idx]
+    orbo_sorted = orbo[intopt.ao_idx]
+    mo_coeff_sorted = mo_coeff[intopt.ao_idx]
     for i0,i1,j0,j1,k0,k1,int3c_blk in int3c2e.loop_int3c2e_general(intopt, ip_type='ip1'):
         dh1e[:,k0:k1,j0:j1,:] += contract('xkji,io->xkjo', int3c_blk, orbo_sorted[i0:i1])
         dh1e[:,k0:k1,i0:i1,:] += contract('xkji,jo->xkio', int3c_blk, orbo_sorted[j0:j1])

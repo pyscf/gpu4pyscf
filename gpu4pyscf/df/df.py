@@ -56,7 +56,6 @@ class DF(df.DF):
         mol = self.mol
         auxmol = self.auxmol
         self.nao = mol.nao
-
         log = logger.new_logger(mol, mol.verbose)
         t0 = log.init_timer()
         if auxmol is None:
@@ -73,7 +72,8 @@ class DF(df.DF):
         intopt.build(direct_scf_tol, diag_block_with_triu=False, aosym=True, group_size=256)
         log.timer_debug1('prepare intopt', *t0)
         self.j2c = j2c.copy()
-        j2c = take_last2d(j2c, intopt.sph_aux_idx)
+
+        j2c = take_last2d(j2c, intopt.aux_ao_idx)
         try:
             self.cd_low = cholesky(j2c)
             self.cd_low = tag_array(self.cd_low, tag='cd')
@@ -228,29 +228,29 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
             # TODO: in-place implementation or short-range kernel
             ints_slices = cupy.zeros([naoaux, nj, ni], order='C')
             for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-                k0 = intopt.sph_aux_loc[cp_kl_id]
-                k1 = intopt.sph_aux_loc[cp_kl_id+1]
+                k0 = intopt.aux_ao_loc[cp_kl_id]
+                k1 = intopt.aux_ao_loc[cp_kl_id+1]
                 int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1])
             if omega is not None:
                 ints_slices_lr = cupy.zeros([naoaux, nj, ni], order='C')
                 for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-                    k0 = intopt.sph_aux_loc[cp_kl_id]
-                    k1 = intopt.sph_aux_loc[cp_kl_id+1]
+                    k0 = intopt.aux_ao_loc[cp_kl_id]
+                    k1 = intopt.aux_ao_loc[cp_kl_id+1]
                     int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1], omega=omega)
                 ints_slices -= ints_slices_lr
         else:
             # Initialization is required due to cutensor operations later
             ints_slices = cupy.zeros([naoaux, nj, ni], order='C')
             for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-                k0 = intopt.sph_aux_loc[cp_kl_id]
-                k1 = intopt.sph_aux_loc[cp_kl_id+1]
+                k0 = intopt.aux_ao_loc[cp_kl_id]
+                k1 = intopt.aux_ao_loc[cp_kl_id+1]
+
                 int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1], omega=omega)
+        if lj>1 and not mol.cart: ints_slices = cart2sph(ints_slices, axis=1, ang=lj)
+        if li>1 and not mol.cart: ints_slices = cart2sph(ints_slices, axis=2, ang=li)
 
-        if lj>1: ints_slices = cart2sph(ints_slices, axis=1, ang=lj)
-        if li>1: ints_slices = cart2sph(ints_slices, axis=2, ang=li)
-
-        i0, i1 = intopt.sph_ao_loc[cpi], intopt.sph_ao_loc[cpi+1]
-        j0, j1 = intopt.sph_ao_loc[cpj], intopt.sph_ao_loc[cpj+1]
+        i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
+        j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
 
         row = intopt.ao_pairs_row[cp_ij_id] - i0
         col = intopt.ao_pairs_col[cp_ij_id] - j0
@@ -261,7 +261,8 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
             ints_slices = None
         elif cd_low.tag == 'cd':
             #cderi_block = solve_triangular(cd_low, ints_slices)
-            cderi_block = solve_triangular(cd_low, ints_slices, lower=True, overwrite_b=True)
+            # TODO: create array in f-contiguous to avoid memory copy
+            cderi_block = solve_triangular(cd_low, ints_slices, lower=True, overwrite_b=False)
         ij0, ij1 = count, count+cderi_block.shape[1]
         count = ij1
         if isinstance(cderi, cupy.ndarray):
