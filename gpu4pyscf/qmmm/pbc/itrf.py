@@ -894,51 +894,59 @@ def qmmm_grad_for_scf(scf_grad):
 
         def get_hcore(self, mol=None):
             cput0 = (logger.process_clock(), logger.perf_counter())
-            mm_mol = self.base.mm_mol
-            if mol is None:
-                mol = self.mol
-            rcut_hcore = mm_mol.rcut_hcore
-            coords = cp.asarray(mm_mol.atom_coords())
-            charges = cp.asarray(mm_mol.atom_charges())
+            def calculate_h1e(h1_gpu):
+                h1 = grad_class.get_hcore(self, mol)
+                h1_gpu[:] = cp.asarray(h1)
+                return
 
-            Ls = cp.asarray(mm_mol.get_lattice_Ls())
+            g_qm_orig = cp.empty([3, mol.nao, mol.nao])
+            g_qm = cp.zeros_like(g_qm_orig)
+            with lib.call_in_background(calculate_h1e) as calculate_hs:
+                calculate_hs(g_qm_orig)
+                mm_mol = self.base.mm_mol
+                if mol is None:
+                    mol = self.mol
+                rcut_hcore = mm_mol.rcut_hcore
+                coords = cp.asarray(mm_mol.atom_coords())
+                charges = cp.asarray(mm_mol.atom_charges())
 
-            qm_center = cp.mean(cp.asarray(mol.atom_coords()), axis=0)
-            all_coords = (coords[None,:,:] + Ls[:,None,:]).reshape(-1,3)
-            all_charges = cp.hstack([charges] * len(Ls))
-            dist2 = all_coords - qm_center
-            dist2 = cp.einsum('ix,ix->i', dist2, dist2)
+                Ls = cp.asarray(mm_mol.get_lattice_Ls())
 
-            # charges within rcut_hcore exactly go into hcore
-            mask = dist2 <= rcut_hcore**2
-            charges = all_charges[mask]
-            coords = all_coords[mask]
-            g_qm = cp.asarray(grad_class.get_hcore(self, mol))
-            nao = mol.nao
-            if mm_mol.charge_model == 'gaussian' and len(coords) != 0:
-                expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
-                fakemol = gto.fakemol_for_charges(coords.get(), expnts.get())
+                qm_center = cp.mean(cp.asarray(mol.atom_coords()), axis=0)
+                all_coords = (coords[None,:,:] + Ls[:,None,:]).reshape(-1,3)
+                all_charges = cp.hstack([charges] * len(Ls))
+                dist2 = all_coords - qm_center
+                dist2 = cp.einsum('ix,ix->i', dist2, dist2)
 
-                intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
-                intopt.build(self.base.direct_scf_tol, diag_block_with_triu=True, aosym=False, 
-                             group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
+                # charges within rcut_hcore exactly go into hcore
+                mask = dist2 <= rcut_hcore**2
+                charges = all_charges[mask]
+                coords = all_coords[mask]
+                nao = mol.nao
+                if mm_mol.charge_model == 'gaussian' and len(coords) != 0:
+                    expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
+                    fakemol = gto.fakemol_for_charges(coords.get(), expnts.get())
 
-                v = cp.zeros_like(g_qm)
-                for i0,i1,j0,j1,k0,k1,j3c in int3c2e.loop_int3c2e_general(intopt, ip_type='ip1'):
-                    v[:,i0:i1,j0:j1] += cp.einsum('xkji,k->xij', j3c, charges[k0:k1])
-                g_qm += cupy_helper.take_last2d(v, intopt.rev_ao_idx)
-            elif mm_mol.charge_model == 'point' and len(coords) != 0:
-                max_memory = self.max_memory - lib.current_memory()[0]
-                blksize = int(min(max_memory*1e6/8/nao**2/3, 200))
-                blksize = max(blksize, 1)
-                coords = coords.get()
-                for i0, i1 in lib.prange(0, len(coords), blksize):
-                    j3c = cp.asarray(mol.intor('int1e_grids_ip', grids=coords[i0:i1]))
-                    g_qm += cp.einsum('ikpq,k->ipq', j3c, charges[i0:i1])
-            else: # len(coords) == 0
-                pass
+                    intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
+                    intopt.build(self.base.direct_scf_tol, diag_block_with_triu=True, aosym=False, 
+                                 group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
+
+                    v = cp.zeros_like(g_qm)
+                    for i0,i1,j0,j1,k0,k1,j3c in int3c2e.loop_int3c2e_general(intopt, ip_type='ip1'):
+                        v[:,i0:i1,j0:j1] += cp.einsum('xkji,k->xij', j3c, charges[k0:k1])
+                    g_qm += cupy_helper.take_last2d(v, intopt.rev_ao_idx)
+                elif mm_mol.charge_model == 'point' and len(coords) != 0:
+                    max_memory = self.max_memory - lib.current_memory()[0]
+                    blksize = int(min(max_memory*1e6/8/nao**2/3, 200))
+                    blksize = max(blksize, 1)
+                    coords = coords.get()
+                    for i0, i1 in lib.prange(0, len(coords), blksize):
+                        j3c = cp.asarray(mol.intor('int1e_grids_ip', grids=coords[i0:i1]))
+                        g_qm += cp.einsum('ikpq,k->ipq', j3c, charges[i0:i1])
+                else: # len(coords) == 0
+                    pass
             logger.timer(self, 'get_hcore', *cput0)
-            return g_qm
+            return g_qm_orig + g_qm
 
         def grad_hcore_mm(self, dm, mol=None):
             r'''Nuclear gradients of the electronic energy

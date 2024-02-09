@@ -105,6 +105,7 @@ def determine_hcore_cutoff(mol, mm_coords, a, mm_charges, rcut_min, dm, rcut_ste
         a = a / param.BOHR
         rcut_min = rcut_min / param.BOHR
         rcut_step = rcut_step / param.BOHR
+        rcut_max = rcut_max / param.BOHR
 
     qm_coords = cp.asarray(mol.atom_coords())
     qm_cen = cp.mean(qm_coords, axis=0)
