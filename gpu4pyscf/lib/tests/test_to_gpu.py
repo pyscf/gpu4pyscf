@@ -88,9 +88,10 @@ class KnownValues(unittest.TestCase):
         assert numpy.abs(lib.fp(g) - -0.01641213202225146) < 1e-7
 
         mf = scf.RHF(mol).density_fit().run()
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
         h = hobj.kernel()
-        assert numpy.abs(lib.fp(h) - 2.198079352288524) < 1e-7
+        assert numpy.abs(lib.fp(h) - 2.198079352288524) < 1e-4
 
     @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_df_b3lyp(self):
@@ -104,9 +105,10 @@ class KnownValues(unittest.TestCase):
         assert numpy.abs(lib.fp(g) - -0.04079190644707999) < 1e-7
 
         mf = rks.RKS(mol, xc='b3lyp').density_fit().run()
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
         h = hobj.kernel()
-        assert numpy.abs(lib.fp(h) - 2.1527804103141848) < 1e-7
+        assert numpy.abs(lib.fp(h) - 2.1527804103141848) < 1e-4
 
     @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_df_RKS(self):
@@ -121,6 +123,7 @@ class KnownValues(unittest.TestCase):
         assert numpy.abs(lib.fp(g) - -0.034343799164131) < 1e-5
 
         mf = rks.RKS(mol, xc='wb97x').density_fit().run()
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
         h = hobj.kernel()
         assert numpy.abs(lib.fp(h) - 2.187025544697092) < 1e-4

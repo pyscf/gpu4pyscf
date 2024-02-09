@@ -563,9 +563,10 @@ def _quad_moment(mf, mol=None, dm=None, unit='Debye-Ang'):
 class RHF(hf.RHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
-    _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'screen_tol'}
+    _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'screen_tol', 'conv_tol_cpscf'}
 
     screen_tol = 1e-14
+    conv_tol_cpscf = 1e-3
     DIIS = diis.SCF_DIIS
     get_jk = _get_jk
     _eigh = staticmethod(eigh)

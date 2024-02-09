@@ -114,6 +114,7 @@ class KnownValues(unittest.TestCase):
     def test_hessian_rhf(self):
         print('-----testing DF RHF Hessian----')
         mf = _make_rhf(mol_sph)
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
@@ -123,6 +124,7 @@ class KnownValues(unittest.TestCase):
     def test_hessian_lda(self):
         print('-----testing DF LDA Hessian----')
         mf = _make_rks(mol_sph, 'LDA')
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
@@ -132,6 +134,7 @@ class KnownValues(unittest.TestCase):
     def test_hessian_gga(self):
         print('-----testing DF PBE Hessian----')
         mf = _make_rks(mol_sph, 'PBE')
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
@@ -141,6 +144,7 @@ class KnownValues(unittest.TestCase):
     def test_hessian_hybrid(self):
         print('-----testing DF B3LYP Hessian----')
         mf = _make_rks(mol_sph, 'b3lyp')
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
@@ -150,6 +154,7 @@ class KnownValues(unittest.TestCase):
     def test_hessian_mgga(self):
         print('-----testing DF M06 Hessian----')
         mf = _make_rks(mol_sph, 'm06')
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
@@ -159,6 +164,7 @@ class KnownValues(unittest.TestCase):
     def test_hessian_rsh(self):
         print('-----testing DF wb97 Hessian----')
         mf = _make_rks(mol_sph, 'wb97')
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
@@ -171,6 +177,7 @@ class KnownValues(unittest.TestCase):
 
         mf = dft.rks.RKS(pmol, xc='B3LYP', disp='d3bj').density_fit(auxbasis=auxbasis0)
         mf.conv_tol = 1e-12
+        mf.conv_tol_cpscf = 1e-7
         mf.grids.level = grids_level
         mf.verbose = 1
         mf.kernel()
@@ -186,6 +193,7 @@ class KnownValues(unittest.TestCase):
 
         mf = dft.rks.RKS(pmol, xc='B3LYP', disp='d4').density_fit(auxbasis=auxbasis0)
         mf.conv_tol = 1e-12
+        mf.conv_tol_cpscf = 1e-7
         mf.grids.level = grids_level
         mf.verbose = 1
         mf.kernel()
@@ -198,6 +206,7 @@ class KnownValues(unittest.TestCase):
     def test_hessian_cart(self):
         print('-----testing DF Hessian (cartesian)----')
         mf = _make_rks(mol_cart, 'b3lyp')
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()

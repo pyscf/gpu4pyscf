@@ -348,7 +348,8 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
 
         h1vo = cupy.vstack(h1vo)
         s1vo = cupy.vstack(s1vo)
-        mo1, e1 = cphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo, verbose=verbose)
+        tol = mf.conv_tol_cpscf * (ia1 - ia0)
+        mo1, e1 = cphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo, tol=tol, verbose=verbose)
         # Different from PySCF, mo1 is in AO
         mo1 = mo1.reshape(-1,3,nao,nocc)
         e1 = e1.reshape(-1,3,nocc,nocc)
