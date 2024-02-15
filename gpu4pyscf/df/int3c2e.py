@@ -641,7 +641,7 @@ def get_j_int3c2e_pass1(intopt, dm0):
     naux = len(intopt.cart_aux_idx)
     rhoj = cupy.zeros([naux])
     coeff = intopt.coeff
-    dm_cart = coeff @ dm0 @ coeff.T #cupy.einsum('pi,ij,qj->pq', coeff, dm0, coeff)
+    dm_cart = coeff @ dm0 @ coeff.T
 
     num_cp_ij = [len(log_qs) for log_qs in intopt.log_qs]
     num_cp_kl = [len(log_qs) for log_qs in intopt.aux_log_qs]
