@@ -641,7 +641,7 @@ def get_j_int3c2e_pass1(intopt, dm0):
     naux = len(intopt.cart_aux_idx)
     rhoj = cupy.zeros([naux])
     coeff = intopt.coeff
-    dm_cart = cupy.einsum('pi,ij,qj->pq', coeff, dm0, coeff)
+    dm_cart = coeff @ dm0 @ coeff.T #cupy.einsum('pi,ij,qj->pq', coeff, dm0, coeff)
 
     num_cp_ij = [len(log_qs) for log_qs in intopt.log_qs]
     num_cp_kl = [len(log_qs) for log_qs in intopt.aux_log_qs]
@@ -977,6 +977,52 @@ def get_int3c2e_ipip2_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None):
     if with_k:
         hk = hk.reshape([naux_sph,3,3])
     return hj, hk
+
+def get_hess_nuc_elec(mol, dm):
+    '''
+    calculate int1e_ipiprinv contribution
+    '''
+    coords = mol.atom_coords()
+    charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
+
+    fakemol = gto.fakemol_for_charges(coords)
+    intopt = VHFOpt(mol, fakemol, 'int2e')
+    intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
+    ao_idx = intopt.ao_idx
+    dm = take_last2d(cupy.asarray(dm), ao_idx)
+
+    natm = mol.natm
+    nao = mol.nao
+    hcore_diag = cupy.zeros([9,natm])
+    hcore_aa = cupy.zeros([9,natm,nao])
+    for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipip1'):
+        haa = contract('xpji,ij->xpi', int3c_blk, dm[i0:i1,j0:j1])
+        hcore_aa[:,k0:k1,i0:i1] += haa
+        hcore_diag[:,k0:k1] -= contract('xpji,ij->xp', int3c_blk, dm[i0:i1,j0:j1])
+
+    hcore_ab = cupy.zeros([9,natm,nao])
+    for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipvip1'):
+        hab = contract('xpji,ij->xpi', int3c_blk, dm[i0:i1,j0:j1])
+        hcore_ab[:,k0:k1,i0:i1] += hab
+        hcore_diag[:,k0:k1] -= contract('xpji,ij->xp', int3c_blk, dm[i0:i1,j0:j1])
+
+    hcore_diag = contract('xp,p->xp', hcore_diag, charges)
+    hcore_aa = contract('xpj,p->xpj', hcore_aa, charges)
+    hcore_ab = contract('xpj,p->xpj', hcore_ab, charges)
+
+    aoslices = mol.aoslice_by_atom()
+    ao2atom = get_ao2atom(intopt, aoslices)
+
+    hcore_aa = contract('xpj,jq->xpq', hcore_aa, ao2atom).reshape([3,3,natm,natm])
+    hcore_ab = contract('xpj,jq->xpq', hcore_ab, ao2atom).reshape([3,3,natm,natm])
+    hcore = hcore_aa + hcore_aa.transpose([1,0,3,2])
+    hcore+= hcore_ab.transpose([1,0,2,3]) + hcore_ab.transpose([0,1,3,2])
+    hcore_diag = hcore_diag.reshape([3,3,natm])
+    idx = np.arange(natm)
+    for x in range(3):
+        for y in range(3):
+            hcore[x,y,idx,idx] += hcore_diag[x,y]
+    return hcore
 
 def get_int3c2e_ip_slice(intopt, cp_aux_id, ip_type, out=None, omega=None, stream=None):
     '''
