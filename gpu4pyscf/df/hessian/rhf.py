@@ -349,10 +349,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             if with_k:
                 ek[i0,j0] += cupy.sum(hk_ao_ao[p0:p1,q0:q1], axis=[0,1])
             h1ao = hcore_deriv(ia, ja)
-            #h1 = contract('xypq,pq->xy', h1ao, dm0)
-            #print(h1)
-            #print(hess_nuc_elec[:,:,ia,ja])
-            #print(ia, ja, numpy.linalg.norm(h1.get() - hess_nuc_elec[:,:,ia,ja]))
             e1[i0,j0] += contract('xypq,pq->xy', h1ao, dm0)
             e1[i0,j0] += hess_nuc_elec[:,:,ia,ja]
         #
@@ -408,20 +404,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
                                     atmlst, verbose, True):
         h1 += vj1 - vk1 * .5
         h1ao[ia] = h1
-        '''
-        if chkfile is None:
-            h1ao[ia] = h1
-        else:
-            key = 'scf_f1ao/%d' % ia
-            lib.chkfile.save(chkfile, key, h1)
-        '''
     return h1ao
-    '''
-    if chkfile is None:
-        return h1ao
-    else:
-        return chkfile
-    '''
 
 def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             verbose=None, with_k=True, omega=None):
