@@ -186,4 +186,6 @@ def contract_2e(eri, ci0, norb, nelec, link_index):
     return out.get()
 
 class FCI(direct_spin1.FCI):
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+
     contract_2e = staticmethod(contract_2e)
