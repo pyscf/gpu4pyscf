@@ -28,7 +28,7 @@ from gpu4pyscf.lib import logger
 LMAX_ON_GPU = 8
 FREE_CUPY_CACHE = True
 STACK_SIZE_PER_THREAD = 8192 * 4
-BLKSIZE = 256
+BLKSIZE = 128
 
 libgvhf = load_library('libgvhf')
 libgint = load_library('libgint')
@@ -340,22 +340,18 @@ class VHFOpt(_vhf.VHFOpt):
 
 def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
     intopt = VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(thred, diag_block_with_triu=True, aosym=True, group_size_aux=64)
+    intopt.build(thred, diag_block_with_triu=True, aosym=True, group_size=BLKSIZE, group_size_aux=BLKSIZE)
     orbo = dm0_tag.occ_coeff
     nao = mol.nao
     naux = auxmol.nao
     nocc = orbo.shape[1]
     row, col = np.tril_indices(nao)
-    wj = cupy.zeros([naux])
-    if with_k:
-        wk_P__ = cupy.zeros([naux, nocc, nocc]) # assuming naux*nocc*nocc < max_gpu_memory
-    else:
-        wk_P__ = None
+    wj = cupy.empty([naux])
     avail_mem = get_avail_mem()
     use_gpu_memory = True
     if naux*nao*nocc*8 < 0.4*avail_mem:
         try:
-            wk = cupy.zeros([naux,nao,nocc])
+            wk = cupy.empty([naux,nao,nocc])
         except Exception:
             use_gpu_memory = False
     else:
@@ -369,7 +365,9 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
     for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
         k0 = intopt.aux_ao_loc[cp_kl_id]
         k1 = intopt.aux_ao_loc[cp_kl_id+1]
-        ints_slices = cupy.zeros([k1-k0, nao, nao], order='C')
+        rhoj_tmp = cupy.zeros([k1-k0], order='C')
+        rhok_tmp = cupy.zeros([k1-k0, nao, nocc], order='C')
+
         for cp_ij_id, _ in enumerate(intopt.log_qs):
             cpi = intopt.cp_idx[cp_ij_id]
             cpj = intopt.cp_jdx[cp_ij_id]
@@ -381,18 +379,21 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
                 int3c_blk = cart2sph(int3c_blk, axis=2, ang=li)
             i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
             j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
-            ints_slices[:,j0:j1,i0:i1] = int3c_blk
 
-        ints_slices[:, row, col] = ints_slices[:, col, row]
-        wj[k0:k1] = contract('Lij,ij->L', ints_slices, dm0_tag)
+            tmp = contract('Lji,ij->L', int3c_blk, dm0_tag[i0:i1,j0:j1])
+            rhoj_tmp += tmp
+            rhok_tmp[:,j0:j1] += contract('Lji,io->Ljo', int3c_blk, orbo[i0:i1])
+
+            if cpi != cpj and intopt.aosym:
+                rhoj_tmp += tmp
+                rhok_tmp[:,i0:i1] += contract('Lji,jo->Lio', int3c_blk, orbo[j0:j1])
+        wj[k0:k1] = rhoj_tmp
         if with_k:
-            wk_tmp = contract('Lij,jo->Lio', ints_slices, orbo)
-            wk_P__[k0:k1] = contract('Lio,ir->Lro', wk_tmp, orbo)
             if isinstance(wk, cupy.ndarray):
-                wk[k0:k1] = contract('Lij,jo->Lio', ints_slices, orbo)
+                wk[k0:k1] = rhok_tmp
             else:
-                wk[k0:k1] = contract('Lij,jo->Lio', ints_slices, orbo).get()
-    return wj, wk, wk_P__
+                wk[k0:k1] = rhok_tmp.get()
+    return wj, wk
 
 def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None):
     '''
@@ -712,22 +713,25 @@ def get_j_int3c2e_pass2(intopt, rhoj):
     vj = vj + vj.T
     return vj
 
-def get_int3c2e_jk(intopt, dm0_tag, with_k=True, omega=None):
+def get_int3c2e_jk(mol, auxmol, dm0_tag, with_k=True, omega=None):
     '''
     get rhoj and rhok for int3c2e
     '''
+    intopt = VHFOpt(mol, auxmol, 'int2e')
+    intopt.build(1e-14, diag_block_with_triu=True, aosym=True, group_size=BLKSIZE, group_size_aux=BLKSIZE)
+
     if omega is None: omega = 0.0
-    nao = len(intopt.ao_idx)
     naux = len(intopt.aux_ao_idx)
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     nocc = orbo.shape[1]
-    rhoj = cupy.zeros([naux])
-    rhok = cupy.zeros([naux,nocc,nocc])
+    rhoj = cupy.empty([naux])
+    rhok = cupy.empty([naux,nocc,nocc])
 
     for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
         k0 = intopt.aux_ao_loc[cp_kl_id]
         k1 = intopt.aux_ao_loc[cp_kl_id+1]
-        ints_slices = cupy.zeros([k1-k0, nao, nao], order='C')
+        rhoj_tmp = cupy.zeros([k1-k0], order='C')
+        rhok_tmp = cupy.zeros([k1-k0, nocc, nocc], order='C')
         for cp_ij_id, _ in enumerate(intopt.log_qs):
             cpi = intopt.cp_idx[cp_ij_id]
             cpj = intopt.cp_jdx[cp_ij_id]
@@ -739,14 +743,19 @@ def get_int3c2e_jk(intopt, dm0_tag, with_k=True, omega=None):
                 int3c_blk = cart2sph(int3c_blk, axis=2, ang=li)
             i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
             j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
-            ints_slices[:,j0:j1,i0:i1] = int3c_blk
-            if cpi != cpj and intopt.aosym:
-                ints_slices[:,i0:i1,j0:j1] = int3c_blk.transpose([0,2,1])
+            if cpi == cpj and intopt.aosym:
+                int3c_blk *= 0.5
 
-        rhoj[k0:k1] += contract('pji,ij->p', ints_slices, dm0_tag)
-        rhok_tmp = contract('pji,jo->poi', ints_slices, orbo)
-        rhok[k0:k1] += contract('poi,ir->por', rhok_tmp, orbo)
+            rhoj_tmp += contract('pji,ij->p', int3c_blk, dm0_tag[i0:i1,j0:j1])
+            ints_o = contract('pji,jo->poi', int3c_blk, orbo[j0:j1])
+            rhok_tmp += contract('poi,ir->por', ints_o, orbo[i0:i1])
 
+        if intopt.aosym:
+            rhoj[k0:k1] = 2.0 * rhoj_tmp
+            rhok[k0:k1] = rhok_tmp + rhok_tmp.transpose([0,2,1])
+        else:
+            rhoj[k0:k1] = rhoj_tmp
+            rhok[k0:k1] = rhok_tmp
     return rhoj, rhok
 
 def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omega=None):
@@ -771,22 +780,26 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
         if count % ncp_ij == 0:
             rhok_tmp = cupy.asarray(rhok[k0:k1])
             if with_k:
-                rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, orbo) * 2
-                rhok0 = contract('pli,lo->poi', rhok0_slice, orbo)
+                rhok0 = contract('pio,ir->pro', rhok_tmp, orbo) * 2.0
+                rhok0 = contract('pro,Jo->prJ', rhok0, orbo)
 
         rhoj0 = contract('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
         vj1_ao = contract('pJo,xpi->xiJo', rhok_tmp, rhoj0)
         vj1 += 2.0*contract('xiJo,ia->axJo', vj1_ao, ao2atom[i0:i1])
+        vj1_ao = rhoj0 = None
 
         if with_k:
-            vk1_buf[:,i0:i1] += contract('xpji,plj->xil', int3c_blk, rhok0_slice[:,:,j0:j1])
+            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, orbo[j0:j1]) * 2.0
+            vk1_buf[:,i0:i1] += contract('xpji,plj->xil', int3c_blk, rhok0_slice)
 
             vk1_ao = contract('xpji,poi->xijo', int3c_blk, rhok0[:,:,i0:i1])
             vk1[:,:,j0:j1] += contract('xijo,ia->axjo', vk1_ao, ao2atom[i0:i1])
 
             int3c_ip1_occ = contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])
-            vk1_ao = contract('xpio,pJi->xiJo', int3c_ip1_occ, rhok0_slice[:,:,i0:i1])
+            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, orbo[i0:i1]) * 2.0
+            vk1_ao = contract('xpio,pJi->xiJo', int3c_ip1_occ, rhok0_slice)
             vk1 += contract('xiJo,ia->axJo', vk1_ao, ao2atom[i0:i1])
+            vk1_ao = int3c_ip1_occ = None
         count += 1
 
     return vj1_buf, vk1_buf, vj1, vk1
@@ -831,6 +844,7 @@ def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices, with_k=True, ome
 
                 vk1 += contract('xpir,pa->axir', vk1_tmp, aux2atom[k0:k1])
             wj2 = wk2_P__ = rhok0_slice = rhok0_oo = None
+            rhok_tmp = vk1_tmp = None
         count += 1
     return vj1, vk1
 

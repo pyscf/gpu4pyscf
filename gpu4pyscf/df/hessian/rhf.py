@@ -111,7 +111,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         hk_ao_aux = cupy.zeros([nao,naux,3,3])
 
     #  int3c contributions
-    wj, _, wk_P__ = int3c2e.get_int3c2e_wjk(mol, auxmol, dm0_tag, omega=omega)
+    wj, wk_P__ = int3c2e.get_int3c2e_jk(mol, auxmol, dm0_tag, omega=omega)
     rhoj0_P = contract('pq,q->p', int2c_inv, wj)
     rhok0_P__ = contract('pq,qij->pij', int2c_inv, wk_P__)
     wj = wk_P__ = None
@@ -449,11 +449,9 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     int2c_inv = cupy.linalg.pinv(int2c, rcond=1e-12)
     int2c = None
 
-    wj, wk_Pl_, wk_P__ = int3c2e.get_int3c2e_wjk(mol, auxmol, dm0_tag, omega=omega)
+    wj, wk_Pl_ = int3c2e.get_int3c2e_wjk(mol, auxmol, dm0_tag, omega=omega)
     rhoj0 = contract('pq,q->p', int2c_inv, wj)
-    if with_k:
-        rhok0_P__ = contract('pq,qij->pij', int2c_inv, wk_P__)
-    wj = wk_P__ = None
+    wj = None
     if isinstance(wk_Pl_, cupy.ndarray):
         rhok0_Pl_ = contract('pq,qio->pio', int2c_inv, wk_Pl_)
     else:
@@ -464,7 +462,9 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         wk_tmp = None
     wk_Pl_ = int2c_inv = None
 
+    # -----------------------------
     # int3c_ip1 contributions
+    # ------------------------------
     cupy.get_default_memory_pool().free_all_blocks()
     vj1_buf, vk1_buf, vj1_ao, vk1_ao = int3c2e.get_int3c2e_ip1_vjk(intopt, rhoj0, rhok0_Pl_, dm0_tag, aoslices, omega=omega)
     rev_ao_idx = np.argsort(ao_idx)
@@ -481,7 +481,6 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     # --------------------------
     cupy.get_default_memory_pool().free_all_blocks()
     if hessobj.auxbasis_response:
-        aux2atom = int3c2e.get_aux2atom(intopt, auxslices)
         vj1_int3c_ip2, vk1_int3c_ip2 = int3c2e.get_int3c2e_ip2_vjk(intopt, rhoj0, rhok0_Pl_, dm0_tag, auxslices, omega=omega)
         # Responses due to int2c2e_ip1
         if omega and omega > 1e-10:
@@ -492,9 +491,22 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         int2c_ip1 = cupy.asarray(int2c_ip1, order='C')
         int2c_ip1 = take_last2d(int2c_ip1, aux_ao_idx)
 
+        # generate rhok0_P__
+        if isinstance(rhok0_Pl_, cupy.ndarray):
+            rhok0_P__ = contract('pio,ir->pro', rhok0_Pl_, mocc)
+        else:
+            naux = len(aux_ao_idx)
+            nocc = mocc.shape[1]
+            rhok0_P__ = cupy.empty([naux,nocc,nocc])
+            for p0, p1 in lib.prange(0,naux,64):
+                rhok0_Pl_tmp = cupy.asarray(rhok0_Pl_[p0:p1])
+                rhok0_P__[p0:p1] = contract('pio,ir->pro', rhok0_Pl_tmp, mocc)
+            rhok0_Pl_tmp = None
+
         wj0_10 = contract('xpq,q->xp', int2c_ip1, rhoj0)
         wk0_10_P__ = contract('xqp,pro->xqro', int2c_ip1, rhok0_P__)
 
+        aux2atom = int3c2e.get_aux2atom(intopt, auxslices)
         for p0, p1 in lib.prange(0,nao,64):
             rhok_tmp = cupy.asarray(rhok0_Pl_[:,p0:p1])
             vj1_tmp = contract('pio,xp->xpio', rhok_tmp, wj0_10)
