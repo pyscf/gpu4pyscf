@@ -156,7 +156,7 @@ def contract_2e(eri, ci0, norb, nelec, link_index):
     link_indexa, link_indexb = link_index
     addra, signa = _link_index_to_addrs(link_indexa, nnorb)
     if link_indexa is link_indexb:
-        addra, signa = addrb, signb
+        addrb, signb = addra, signa
     else:
         addrb, signb = _link_index_to_addrs(link_indexb, nnorb)
 
