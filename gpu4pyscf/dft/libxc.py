@@ -30,15 +30,19 @@ for path in path_list:
     try:
         _libxc = np.ctypeslib.load_library(
             'libxc', os.path.abspath(os.path.join(path, 'gpu4pyscf', 'lib', 'deps', 'lib')))
-        print(f'find libxc in {path}')
     except Exception:
         _libxc = None
     if _libxc is not None:
         break
 
 if _libxc is None:
-    raise ImportError(
-        "Canot find libXC. Please install libXC by \n pip3 install gpu4pyscf-libxc-cuda11x \n OR \n pip3 install gpu4pyscf-libxc-cuda12x"
+    import warnings
+    warnings.warn(
+        "Cannot find installed libXC. DFT modules may not work.\n \
+        You can install libXC by \n \
+        `pip3 install gpu4pyscf-libxc-cuda11x` \n \
+        OR \n \
+        `pip3 install gpu4pyscf-libxc-cuda12x`"
     )
 
 def _check_arrays(current_arrays, fields, sizes, factor, required):
@@ -62,11 +66,12 @@ def _check_arrays(current_arrays, fields, sizes, factor, required):
 class _xcfun(ctypes.Structure):
     pass
 
-_xc_func_p = ctypes.POINTER(xc_func_type)
-_libxc.xc_func_alloc.restype = _xc_func_p
-_libxc.xc_func_init.argtypes = (_xc_func_p, ctypes.c_int, ctypes.c_int)
-_libxc.xc_func_end.argtypes = (_xc_func_p, )
-_libxc.xc_func_free.argtypes = (_xc_func_p, )
+if _libxc is not None:
+    _xc_func_p = ctypes.POINTER(xc_func_type)
+    _libxc.xc_func_alloc.restype = _xc_func_p
+    _libxc.xc_func_init.argtypes = (_xc_func_p, ctypes.c_int, ctypes.c_int)
+    _libxc.xc_func_end.argtypes = (_xc_func_p, )
+    _libxc.xc_func_free.argtypes = (_xc_func_p, )
 
 class XCfun:
     def __init__(self, xc, spin):
