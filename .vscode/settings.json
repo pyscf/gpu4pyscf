@@ -1,4 +1,5 @@
 {
     "C_Cpp.errorSquiggles": "disabled",
-    "cmake.sourceDirectory": "/mlx_devbox/users/xiaojie.wu/playground/gpu4pyscf/build/lib.linux-x86_64-cpython-39/gpu4pyscf/lib"
+    "python.defaultInterpreterPath": "python3",
+    "editor.defaultFormatter": "ms-python.flake8",
 }
