@@ -16,7 +16,7 @@
 import pyscf
 import cupy
 import unittest
-from pyscf.dft import rks
+from pyscf.dft import uks
 import gpu4pyscf
 from gpu4pyscf.dft import numint
 
@@ -31,7 +31,7 @@ grids_level = 5
 nlcgrids_level = 3
 def setUpModule():
     global mol
-    mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000)
+    mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000, charge=1, spin=1)
     mol.output = '/dev/null'
     mol.build()
     mol.verbose = 1
@@ -42,7 +42,7 @@ def tearDownModule():
     del mol
 
 def _check_grad(grid_response=False, xc='B3LYP', disp='d3bj', tol=1e-6):
-    mf = rks.RKS(mol, xc=xc)
+    mf = uks.UKS(mol, xc=xc)
     mf.direct_scf_tol = 1e-14
     mf.grids.level = grids_level
     mf.grids.prune = None
@@ -50,13 +50,13 @@ def _check_grad(grid_response=False, xc='B3LYP', disp='d3bj', tol=1e-6):
     if mf._numint.libxc.is_nlc(mf.xc):
         mf.nlcgrids.level = nlcgrids_level
     mf.kernel()
-    cpu_gradient = pyscf.grad.RKS(mf)
+    cpu_gradient = pyscf.grad.UKS(mf)
     cpu_gradient.grid_response = grid_response
     g_cpu = cpu_gradient.kernel()
 
 
     # TODO: use to_gpu functionality
-    mf.__class__ = gpu4pyscf.dft.rks.RKS
+    mf.__class__ = gpu4pyscf.dft.uks.UKS
     mf._numint = numint.NumInt(xc=xc)
     mf.grids = gpu4pyscf.dft.gen_grid.Grids(mol)
     mf.grids.level = grids_level
@@ -68,7 +68,7 @@ def _check_grad(grid_response=False, xc='B3LYP', disp='d3bj', tol=1e-6):
         mf.nlcgrids.level = nlcgrids_level
         mf.nlcgrids.build()
 
-    gpu_gradient = gpu4pyscf.grad.RKS(mf)
+    gpu_gradient = gpu4pyscf.grad.UKS(mf)
     gpu_gradient.grid_response = grid_response
     g_gpu = gpu_gradient.kernel()
     assert(cupy.linalg.norm(g_cpu - g_gpu) < tol)
@@ -76,11 +76,11 @@ def _check_grad(grid_response=False, xc='B3LYP', disp='d3bj', tol=1e-6):
 class KnownValues(unittest.TestCase):
 
     def test_grad_with_grids_response(self):
-        print("-----testing DFT gradient with grids response----")
+        print("-----testing unrestricted DFT gradient with grids response----")
         _check_grad(grid_response=True, tol=1e-5)
 
     def test_grad_without_grids_response(self):
-        print('-----testing DFT gradient without grids response----')
+        print('-----testing unrestricted DFT gradient without grids response----')
         _check_grad(grid_response=False, tol=1e-5)
 
     def test_grad_lda(self):
@@ -108,5 +108,5 @@ class KnownValues(unittest.TestCase):
         _check_grad(xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-5)
 
 if __name__ == "__main__":
-    print("Full Tests for Gradient")
+    print("Full Tests for UKS Gradient")
     unittest.main()

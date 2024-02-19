@@ -26,7 +26,7 @@ from pyscf import lib
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
-from gpu4pyscf.lib.cupy_helper import  contract, get_avail_mem, add_sparse, load_library, take_last2d
+from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, add_sparse, load_library, take_last2d, tag_array
 from gpu4pyscf.lib import logger
 from pyscf import __config__
 
@@ -35,6 +35,8 @@ ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
 
 libgdft = load_library('libgdft')
 libgdft.GDFT_make_dR_dao_w.restype = ctypes.c_int
+
+# TODO: there are many get_jk, which can be replaced by get_j or get_k!
 
 def get_veff(ks_grad, mol=None, dm=None):
     '''
@@ -75,7 +77,6 @@ def get_veff(ks_grad, mol=None, dm=None):
                                          verbose=ks_grad.verbose)
         if mf.nlc or ni.libxc.is_nlc(mf.xc):
             raise NotImplementedError
-        logger.debug1(ks_grad, 'sum(grids response) %s', exc.sum(axis=0))
     else:
         exc, vxc_tmp = get_vxc(ni, mol, grids, mf.xc, dm,
                            max_memory=max_memory, verbose=ks_grad.verbose)
@@ -84,10 +85,18 @@ def get_veff(ks_grad, mol=None, dm=None):
                 xc = mf.xc
             else:
                 xc = mf.nlc
+            dma =  dm[0]
+            dma = tag_array(dma, mo_coeff=mf.mo_coeff[0], mo_occ=mf.mo_occ[0])
+            dmb =  dm[1]
+            dmb = tag_array(dmb, mo_coeff=mf.mo_coeff[1], mo_occ=mf.mo_occ[1])
             enlc, vnlc = rks_grad.get_nlc_vxc(
-                ni, mol, nlcgrids, xc, dm[0]+dm[1],
+                ni, mol, nlcgrids, xc, dma,
                 max_memory=max_memory, verbose=ks_grad.verbose)
-            vxc_tmp += vnlc
+            vxc_tmp[0] += vnlc
+            enlc, vnlc = rks_grad.get_nlc_vxc(
+                ni, mol, nlcgrids, xc, dmb,
+                max_memory=max_memory, verbose=ks_grad.verbose)
+            vxc_tmp[1] += vnlc
     t0 = logger.timer(ks_grad, 'vxc', *t0)
 
     mo_coeff_alpha = mf.mo_coeff[0]
@@ -217,8 +226,11 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
-    dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
-           for dm in dms.reshape(-1,nao0,nao0)] # in ao space
+    dms = take_last2d(dms, opt.ao_idx)
+    # dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
+    #        for dm in dms.reshape(-1,nao0,nao0)]
+    # mo_coeff = cupy.einsum('pq,sqt->spt',coeff,mo_coeff)
+    # mo_coeff = coeff @ mo_coeff
     
     excsum = 0
     vmat = cupy.zeros((2,3,nao,nao))
@@ -241,31 +253,34 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             ngrids = weight.size
             for p0, p1 in lib.prange(0,ngrids,block_size):
                 ao = numint.eval_ao(ni, opt.mol, coords[p0:p1, :], ao_deriv)
-                rho_a = numint.eval_rho(opt.mol, ao, dms[0],
-                                      xctype=xctype, hermi=1, with_lapl=False)
-                rho_b = numint.eval_rho(opt.mol, ao, dms[1],
-                                      xctype=xctype, hermi=1, with_lapl=False)
-                vxc = ni.eval_xc_eff(xc_code, cupy.array([rho_a,rho_b]), 1, xctype=xctype)[1]
+                if xctype == 'LDA':
+                    rho_a = numint.eval_rho(opt.mol, ao, dms[0],
+                                        xctype='GGA', hermi=1, with_lapl=False)
+                    rho_b = numint.eval_rho(opt.mol, ao, dms[1],
+                                        xctype='GGA', hermi=1, with_lapl=False)
+                    vxc = ni.eval_xc_eff(xc_code, cupy.array([rho_a[0],rho_b[0]]), 1, xctype=xctype)[1]
+                else:
+                    rho_a = numint.eval_rho(opt.mol, ao, dms[0],
+                                        xctype=xctype, hermi=1, with_lapl=False)
+                    rho_b = numint.eval_rho(opt.mol, ao, dms[1],
+                                        xctype=xctype, hermi=1, with_lapl=False)
+                    vxc = ni.eval_xc_eff(xc_code, cupy.array([rho_a,rho_b]), 1, xctype=xctype)[1]
 
                 if xctype == 'LDA':
                     wv = weight[p0:p1] * vxc[:,0]
                     aow = numint._scale_ao(ao[0], wv[0])
-                    rks_grad._d1_dot_(vtmp, mol, ao[1:4], aow)
+                    vtmp = rks_grad._d1_dot_(ao[1:4], aow.T)
                     vmat[0] += vtmp
-                    vtmp = cupy.zeros((3,nao,nao))
                     aow = numint._scale_ao(ao[0], wv[1])
-                    rks_grad._d1_dot_(vtmp, mol, ao[1:4], aow)
+                    vtmp = rks_grad._d1_dot_(ao[1:4], aow.T)
                     vmat[1] += vtmp
 
                 elif xctype == 'GGA':
                     wv = weight[p0:p1] * vxc
                     wv[:,0] *= .5
-
-                    vtmp = cupy.zeros((3,nao,nao))
-                    rks_grad._gga_grad_sum_(vtmp, mol, ao, wv[0])
+                    vtmp = rks_grad._gga_grad_sum_(ao, wv[0])
                     vmat[0] += vtmp
-                    vtmp = cupy.zeros((3,nao,nao))
-                    rks_grad._gga_grad_sum_(vtmp, mol, ao, wv[1])
+                    vtmp = rks_grad._gga_grad_sum_(ao, wv[1])
                     vmat[1] += vtmp
                 elif xctype == 'NLC':
                     raise NotImplementedError('NLC')
@@ -275,18 +290,17 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     wv[:,0] *= .5
                     wv[:,4] *= .5
 
-                    vtmp = cupy.zeros((3,nao,nao))
-                    rks_grad._gga_grad_sum_(vtmp, mol, ao, wv[0])
-                    rks_grad._tau_grad_dot_(vtmp, mol, ao, wv[0,4])
+                    vtmp = rks_grad._gga_grad_sum_(ao, wv[0])
+                    vtmp += rks_grad._tau_grad_dot_(ao, wv[0,4])
                     vmat[0] += vtmp
 
-                    vtmp = cupy.zeros((3,nao,nao))
-                    rks_grad._gga_grad_sum_(vtmp, mol, ao, wv[1])
-                    rks_grad._tau_grad_dot_(vtmp, mol, ao, wv[1,4])
+                    vtmp = rks_grad._gga_grad_sum_(ao, wv[1])
+                    vtmp += rks_grad._tau_grad_dot_(ao, wv[1,4])
                     vmat[1] += vtmp
 
     excsum = None
-    vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
+    vmat = take_last2d(vmat, opt.rev_ao_idx)
+    # vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
 
     # - sign because nabla_X = -nabla_x
     return excsum, -vmat

@@ -133,3 +133,6 @@ class UKS(scf.uhf.UHF, uks.UKS):
     energy_elec = energy_elec
     get_veff = get_veff
     
+    def nuc_grad_method(self):
+        from gpu4pyscf.grad import uks as uks_grad
+        return uks_grad.Gradients(self)

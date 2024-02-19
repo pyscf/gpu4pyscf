@@ -176,4 +176,8 @@ class UHF(uhf.UHF):
     def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
         import gpu4pyscf.df.df_jk
         return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
+
+    def nuc_grad_method(self):
+        from gpu4pyscf.grad import uhf
+        return uhf.Gradients(self)
     

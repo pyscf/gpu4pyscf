@@ -349,8 +349,22 @@ class Gradients(uhf.Gradients):
     #     logger.timer(self, 'vj and vk', *cpu0)
     #     return vj, vk
     
+    def get_j(self, mol=None, dm=None, hermi=0, omega=None):
+        vj, _ = self.get_jk(mol, dm, with_k=False, omega=omega)
+        return vj
+
+    def get_k(self, mol=None, dm=None, hermi=0, omega=None):
+        _, vk = self.get_jk(mol, dm, with_j=False, omega=omega)
+        return vk
+    
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         if mo_energy is None: mo_energy = self.base.mo_energy
         if mo_coeff is None: mo_coeff = self.base.mo_coeff
         if mo_occ is None: mo_occ = self.base.mo_occ
         return make_rdm1e(mo_energy, mo_coeff, mo_occ)
+    
+    def extra_force(self, atom_id, envs):
+        '''
+        grid response is implemented get_veff
+        '''
+        return 0

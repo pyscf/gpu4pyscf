@@ -19,14 +19,13 @@
 import copy
 import cupy
 import numpy
-from cupy import cublas
 from pyscf import lib, scf, __config__
 from pyscf.scf import dhf
 from pyscf.df import df_jk, addons
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, take_last2d, transpose_sum, load_library, get_avail_mem
-from gpu4pyscf.dft import rks, numint, uks
-from gpu4pyscf.scf import hf
+from gpu4pyscf.dft import rks, uks, numint
+from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.df import df, int3c2e
 
 libcupy_helper = load_library('libcupy_helper')
@@ -63,6 +62,7 @@ def init_workflow(mf, dm0=None):
             rks.initialize_grids(mf, mf.mol, dm0)
             ni.build(mf.mol, mf.grids.coords)
             mf._numint.xcfuns = numint._init_xcfuns(mf.xc, dm0.ndim==3)
+    dm0 = cupy.asarray(dm0)
     return
 
 def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
@@ -171,6 +171,12 @@ class _DFHF(df_jk._DFHF):
         if isinstance(self, hf.RHF):
             from gpu4pyscf.df.grad import rhf as rhf_grad
             return rhf_grad.Gradients(self)
+        if isinstance(self, uks.UKS):
+            from gpu4pyscf.df.grad import uks as uks_grad
+            return uks_grad.Gradients(self)
+        if isinstance(self, uhf.UHF):
+            from gpu4pyscf.df.grad import uhf as uhf_grad
+            return uhf_grad.Gradients(self)
         raise NotImplementedError()
 
     def Hessian(self):
@@ -268,11 +274,10 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     nao = dms_tag.shape[-1]
     dms = dms_tag.reshape([-1,nao,nao])
     nset = dms.shape[0]
-    t1 = t0 = log.init_timer()
+    t0 = log.init_timer()
     if dfobj._cderi is None:
         log.debug('CDERI not found, build...')
         dfobj.build(direct_scf_tol=direct_scf_tol, omega=omega)
-        t1 = log.timer_debug1('init jk', *t0)
 
     assert nao == dfobj.nao
     vj = None
@@ -280,43 +285,43 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     ao_idx = dfobj.intopt.sph_ao_idx
     dms = take_last2d(dms, ao_idx)
 
-    rows = dfobj.intopt.cderi_row
-    cols = dfobj.intopt.cderi_col
+    t1 = log.timer_debug1('init jk', *t0)
     if with_j:
+        rows = dfobj.intopt.cderi_row
+        cols = dfobj.intopt.cderi_col
         dm_sparse = dms[:,rows,cols]
         dm_sparse[:, dfobj.intopt.cderi_diag] *= .5
         vj = cupy.zeros_like(dms)
+        vj_tmp = cupy.zeros_like(dms)
 
     if with_k:
         vk = cupy.zeros_like(dms)
+
+    def get_j(cderi_sparse):
+        rhoj = 2.0*dm_sparse.dot(cderi_sparse)
+        vj_sparse = cupy.dot(rhoj, cderi_sparse.T)
+        vj_tmp[:,rows,cols] = vj_sparse
+        vj_tmp[:,cols,rows] = vj_sparse
+        vj_sparse = None
+        return vj_tmp
 
     # SCF K matrix with occ
     if nset == 1 and hasattr(dms_tag, 'occ_coeff'):
         occ_coeff = cupy.asarray(dms_tag.occ_coeff[ao_idx, :], order='C')
         nocc = occ_coeff.shape[1]
         blksize = dfobj.get_blksize(extra=nao*nocc)
-        if with_j:
-            vj_packed = cupy.zeros_like(dm_sparse)
-
         for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
             # leading dimension is 1
             if with_j:
-                rhoj = 2.0*dm_sparse.dot(cderi_sparse)
-                vj_packed += cupy.dot(rhoj, cderi_sparse.T)
+                vj += get_j(cderi_sparse)
             if with_k:
                 rhok = contract('Lij,jk->Lki', cderi, occ_coeff)
-                #vk[0] += 2.0 * contract('Lki,Lkj->ij', rhok, rhok)
-                cublas.syrk('T', rhok.reshape([-1,nao]), out=vk[0], alpha=2.0, beta=1.0, lower=True)
-        if with_j:
-            vj[:,rows,cols] = vj_packed
-            vj[:,cols,rows] = vj_packed
+                #vk[0] += contract('Lki,Lkj->ij', rhok, rhok)
+                contract('Lki,Lkj->ij', rhok, rhok, alpha=1.0, beta=1.0, out=vk[0])
         if with_k:
-            vk[0][numpy.diag_indices(nao)] *= 0.5
-            transpose_sum(vk)
+            vk *= 2.0
     # CP-HF K matrix
     elif hasattr(dms_tag, 'mo1'):
-        if with_j:
-            vj_sparse = cupy.zeros_like(dm_sparse)
         mo1 = dms_tag.mo1[:,ao_idx,:]
         nocc = mo1.shape[2]
         # 2.0 due to rhok and rhok1, put it here for symmetry
@@ -324,9 +329,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
         blksize = dfobj.get_blksize(extra=2*nao*nocc)
         for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
             if with_j:
-                #vj += get_j(cderi_sparse)
-                rhoj = 2.0*dm_sparse.dot(cderi_sparse)
-                vj_sparse += cupy.dot(rhoj, cderi_sparse.T)
+                vj += get_j(cderi_sparse)
             if with_k:
                 rhok = contract('Lij,jk->Lki', cderi, occ_coeff)
                 for i in range(mo1.shape[0]):
@@ -334,28 +337,18 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
                     #vk[i] += contract('Lki,Lkj->ij', rhok, rhok1)
                     contract('Lki,Lkj->ij', rhok, rhok1, alpha=1.0, beta=1.0, out=vk[i])
         occ_coeff = rhok1 = rhok = mo1 = None
-        if with_j:
-            vj[:,rows,cols] = vj_sparse
-            vj[:,cols,rows] = vj_sparse
         if with_k:
-            #vk = vk + vk.transpose(0,2,1)
-            transpose_sum(vk)
+            vk = vk + vk.transpose(0,2,1)
     # general K matrix with density matrix
     else:
-        if with_j:
-            vj_sparse = cupy.zeros_like(dm_sparse)
         blksize = dfobj.get_blksize()
         for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
             if with_j:
-                rhoj = 2.0*dm_sparse.dot(cderi_sparse)
-                vj_sparse += cupy.dot(rhoj, cderi_sparse.T)
+                vj += get_j(cderi_sparse)
             if with_k:
                 for k in range(nset):
                     rhok = contract('Lij,jk->Lki', cderi, dms[k])
                     vk[k] += contract('Lki,Lkj->ij', cderi, rhok)
-        if with_j:
-            vj[:,rows,cols] = vj_sparse
-            vj[:,cols,rows] = vj_sparse
         rhok = None
 
     rev_ao_idx = dfobj.intopt.rev_ao_idx
