@@ -408,6 +408,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             aow = [numint._scale_ao(ao[i], wv) for i in range(1, 4)]
             _d1d2_dot_(ipip, mol, aow, ao[1:4], mask, ao_loc, False)
             dm0_mask = dm0_sorted[numpy.ix_(mask, mask)]
+            
             ao_dm_mask = contract('nig,ij->njg', ao_mask[:4], dm0_mask)
             ao_dm0 = numint._dot_ao_dm(mol, ao[0], dm0, mask, shls_slice, ao_loc)
             wf = weight * fxc[0,0]
