@@ -28,7 +28,7 @@ from gpu4pyscf.lib import logger
 LMAX_ON_GPU = 8
 FREE_CUPY_CACHE = True
 STACK_SIZE_PER_THREAD = 8192 * 4
-BLKSIZE = 256
+BLKSIZE = 128
 
 libgvhf = load_library('libgvhf')
 libgint = load_library('libgint')
@@ -797,6 +797,7 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
 
             int3c_ip1_occ = contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])
             rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, 2.0*orbo[i0:i1])
+
             vk1_ao = contract('xpio,pJi->xiJo', int3c_ip1_occ, rhok0_slice)
             vk1 += contract('xiJo,ia->axJo', vk1_ao, ao2atom[i0:i1])
             vk1_ao = int3c_ip1_occ = None
