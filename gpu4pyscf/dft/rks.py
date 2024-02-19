@@ -243,22 +243,6 @@ class RKS(rks.RKS, RHF):
         self.nlcgrids = gen_grid.Grids(mol)
         self.nlcgrids.level = nlcgrids_level
 
-    def get_dispersion(self):
-        if self.disp is None:
-            return 0.0
-
-        if self.disp[:2].upper() == 'D3':
-            from gpu4pyscf.lib import dftd3
-            dftd3_model = dftd3.DFTD3Dispersion(self.mol, xc=self.xc, version=self.disp)
-            res = dftd3_model.get_dispersion()
-            return res['energy']
-
-        if self.disp[:2].upper() == 'D4':
-            from gpu4pyscf.lib import dftd4
-            dftd4_model = dftd4.DFTD4Dispersion(self.mol, xc=self.xc)
-            res = dftd4_model.get_dispersion()
-            return res.get("energy")
-
     def reset(self, mol=None):
         super().reset(mol)
         self.grids.reset(mol)

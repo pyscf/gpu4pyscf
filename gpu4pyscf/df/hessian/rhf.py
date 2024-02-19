@@ -43,7 +43,7 @@ from gpu4pyscf.lib.cupy_helper import contract, tag_array, release_gpu_stack, pr
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
 
-BLKSIZE = 128
+BLKSIZE = 256
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -436,6 +436,8 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     int2c = cupy.asarray(int2c, order='C')
     # ======================= sorted AO begin ======================================
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
+
+    # group_size_aux has to be small for int3c2e_ip1_vjk calculation
     intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size_aux=BLKSIZE, group_size=BLKSIZE)
     ao_idx = intopt.ao_idx
     aux_ao_idx = intopt.aux_ao_idx

@@ -361,6 +361,7 @@ def _d1d2_dot_(vmat, mol, ao1, ao2, mask, ao_loc, dR1_on_bra=True):
                 vmat[d1,d2] += numint._dot_ao_ao(mol, ao1[d2], ao2[d1], mask,
                                                  shls_slice, ao_loc)
         #vmat += contract('yig,xjg->xyij', ao1, ao2)
+
 def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     mol = hessobj.mol
     mf = hessobj.base
@@ -407,6 +408,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             aow = [numint._scale_ao(ao[i], wv) for i in range(1, 4)]
             _d1d2_dot_(ipip, mol, aow, ao[1:4], mask, ao_loc, False)
             dm0_mask = dm0_sorted[numpy.ix_(mask, mask)]
+            ao_dm_mask = contract('nig,ij->njg', ao_mask[:4], dm0_mask)
             ao_dm0 = numint._dot_ao_dm(mol, ao[0], dm0, mask, shls_slice, ao_loc)
             wf = weight * fxc[0,0]
             for ia in range(mol.natm):
@@ -415,10 +417,10 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 rho1 = contract('xig,ig->xg', ao[1:,p0:p1,:], ao_dm0[p0:p1,:]) * 2
                 # aow ~ rho1 ~ d/dR1
                 wv = wf * rho1
-                vmat_tmp = cupy.zeros([3,3,nao_non0,nao_non0])
-                aow = [numint._scale_ao(ao_mask[0], wv[i]) for i in range(3)]
-                _d1d2_dot_(vmat_tmp, mol, ao_mask[1:4], aow, mask, ao_loc, False)
-                vmat_dm[ia][:,:,mask] += contract('xypq,pq->xyp', vmat_tmp, dm0_mask)
+                aow = cupy.empty_like(ao_dm_mask[1:4])
+                for i in range(3):
+                    aow[i] = numint._scale_ao(ao_dm_mask[0], wv[i])
+                vmat_dm[ia][:,:,mask] += contract('yjg,xjg->xyj', ao_mask[1:4], aow)
             ao_dm0 = aow = None
             t1 = log.timer_debug2('integration', *t1)
         for ia in range(mol.natm):
@@ -443,20 +445,19 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0 = [numint._dot_ao_dm(mol, ao[i], dm0, mask, shls_slice, ao_loc) for i in range(4)]
             wf = weight * fxc
             dm0_mask = dm0_sorted[numpy.ix_(mask, mask)]
+            ao_dm_mask = contract('nig,ij->njg', ao_mask[:4], dm0_mask)
+            vmat_dm_tmp = cupy.empty([3,3,nao_non0])
             for ia in range(mol.natm):
                 dR_rho1 = _make_dR_rho1(ao, ao_dm0, ia, aoslices, xctype)
                 wv = contract('xyg,sxg->syg', wf, dR_rho1)
                 wv[:,0] *= .5
-                vmat_tmp = cupy.empty([3,3,nao_non0,nao_non0])
                 for i in range(3):
                     aow = rks_grad._make_dR_dao_w(ao_mask, wv[i])
-                    rks_grad._d1_dot_(aow, ao_mask[0].T, out=vmat_tmp[i])
-                ng = len(weight)
-                aow = cupy.empty([3,nao_non0,ng])
+                    vmat_dm_tmp[i] = contract('xjg,jg->xj', aow, ao_dm_mask[0])
                 for i in range(3):
-                    aow[i] = numint._scale_ao(ao_mask[:4], wv[i,:4])
-                _d1d2_dot_(vmat_tmp, mol, ao_mask[1:4], aow, mask, ao_loc, False)
-                vmat_dm[ia][:,:,mask] += contract('xypq,pq->xyp', vmat_tmp, dm0_mask)
+                    aow[i] = numint._scale_ao(ao_dm_mask[:4], wv[i,:4])
+                vmat_dm_tmp += contract('yjg,xjg->xyj', ao_mask[1:4], aow)
+                vmat_dm[ia][:,:,mask] += vmat_dm_tmp
             ao_dm0 = aow = None
             t1 = log.timer_debug2('integration', *t1)
         for ia in range(mol.natm):
@@ -490,26 +491,41 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             _d1d2_dot_(ipip, mol, [aow[2], aow[4], aow[5]], [ao[ZX], ao[ZY], ao[ZZ]], mask, ao_loc, False)
             dm0_mask = dm0_sorted[numpy.ix_(mask, mask)]
             ao_dm0 = [numint._dot_ao_dm(mol, ao[i], dm0, mask, shls_slice, ao_loc) for i in range(4)]
+            ao_dm_mask = contract('nig,ij->njg', ao_mask[:4], dm0_mask)
             wf = weight * fxc
             for ia in range(mol.natm):
                 dR_rho1 = _make_dR_rho1(ao, ao_dm0, ia, aoslices, xctype)
                 wv = contract('xyg,sxg->syg', wf, dR_rho1)
                 wv[:,0] *= .5
                 wv[:,4] *= .5  # for the factor 1/2 in tau
-                vmat_tmp = cupy.empty([3,3,nao_non0,nao_non0])
+                vmat_dm_tmp = cupy.empty([3,3,nao_non0])
                 for i in range(3):
                     aow = rks_grad._make_dR_dao_w(ao_mask, wv[i])
-                    rks_grad._d1_dot_(aow, ao_mask[0].T, out=vmat_tmp[i])
-                aow = [numint._scale_ao(ao_mask[:4], wv[i,:4]) for i in range(3)]
-                _d1d2_dot_(vmat_tmp, mol, ao_mask[1:4], aow, mask, ao_loc, False)
+                    vmat_dm_tmp[i] = contract('xjg,jg->xj', aow, ao_dm_mask[0])
 
-                aow = [numint._scale_ao(ao_mask[1], wv[i,4]) for i in range(3)]
-                _d1d2_dot_(vmat_tmp, mol, [ao_mask[XX], ao_mask[XY], ao_mask[XZ]], aow, mask, ao_loc, False)
-                aow = [numint._scale_ao(ao_mask[2], wv[i,4]) for i in range(3)]
-                _d1d2_dot_(vmat_tmp, mol, [ao_mask[YX], ao_mask[YY], ao_mask[YZ]], aow, mask, ao_loc, False)
-                aow = [numint._scale_ao(ao_mask[3], wv[i,4]) for i in range(3)]
-                _d1d2_dot_(vmat_tmp, mol, [ao_mask[ZX], ao_mask[ZY], ao_mask[ZZ]], aow, mask, ao_loc, False)
-                vmat_dm[ia][:,:,mask] += contract('xypq,pq->xyp', vmat_tmp, dm0_mask)
+                for i in range(3):
+                    aow[i] = numint._scale_ao(ao_dm_mask[:4], wv[i,:4])
+                vmat_dm_tmp += contract('yjg,xjg->xyj', ao_mask[1:4], aow)
+
+                for i in range(3):
+                    aow[i] = numint._scale_ao(ao_dm_mask[1], wv[i,4])
+                vmat_dm_tmp[:,0] += contract('jg,xjg->xj', ao_mask[XX], aow)
+                vmat_dm_tmp[:,1] += contract('jg,xjg->xj', ao_mask[XY], aow)
+                vmat_dm_tmp[:,2] += contract('jg,xjg->xj', ao_mask[XZ], aow)
+
+                for i in range(3):
+                    aow[i] = numint._scale_ao(ao_dm_mask[2], wv[i,4])
+                vmat_dm_tmp[:,0] += contract('jg,xjg->xj', ao_mask[YX], aow)
+                vmat_dm_tmp[:,1] += contract('jg,xjg->xj', ao_mask[YY], aow)
+                vmat_dm_tmp[:,2] += contract('jg,xjg->xj', ao_mask[YZ], aow)
+
+                for i in range(3):
+                    aow[i] = numint._scale_ao(ao_dm_mask[3], wv[i,4])
+                vmat_dm_tmp[:,0] += contract('jg,xjg->xj', ao_mask[ZX], aow)
+                vmat_dm_tmp[:,1] += contract('jg,xjg->xj', ao_mask[ZY], aow)
+                vmat_dm_tmp[:,2] += contract('jg,xjg->xj', ao_mask[ZZ], aow)
+
+                vmat_dm[ia][:,:,mask] += vmat_dm_tmp
             t1 = log.timer_debug2('integration', *t1)
         for ia in range(mol.natm):
             vmat_dm[ia] = vmat_dm[ia][:,:,opt.rev_ao_idx]
@@ -675,62 +691,6 @@ class Hessian(rhf_hess.Hessian):
         # to_cpu returns an rhf.Hessian object
         obj = to_cpu(self)
         return obj.view(Hessian)
-
-    def get_dispersion(self):
-        if self.base.disp[:2].upper() == 'D3':
-            from gpu4pyscf.lib import dftd3
-            coords = self.mol.atom_coords()
-            natm = self.mol.natm
-            h_d3 = numpy.zeros([self.mol.natm, self.mol.natm, 3,3])
-            mol = self.mol.copy()
-            eps = 1e-5
-            for i in range(natm):
-                for j in range(3):
-                    coords[i,j] += eps
-                    mol.set_geom_(coords, unit='Bohr')
-                    mol.build()
-                    dftd3_model = dftd3.DFTD3Dispersion(mol, xc=self.base.xc, version=self.base.disp)
-                    res = dftd3_model.get_dispersion(grad=True)
-                    g1 = res['gradient']
-
-                    coords[i,j] -= 2.0*eps
-                    mol.set_geom_(coords, unit='Bohr')
-                    mol.build()
-                    dftd3_model = dftd3.DFTD3Dispersion(mol, xc=self.base.xc, version=self.base.disp)
-                    res = dftd3_model.get_dispersion(grad=True)
-                    g2 = res['gradient']
-
-                    coords[i,j] += eps
-                    h_d3[i,:,j,:] = (g1 - g2)/(2.0*eps)
-            return h_d3
-
-        if self.base.disp[:2].upper() == 'D4':
-            from gpu4pyscf.lib import dftd4
-            coords = self.mol.atom_coords()
-            natm = self.mol.natm
-            mol = self.mol.copy()
-            h_d4 = numpy.zeros([mol.natm, mol.natm, 3,3])
-            eps = 1e-5
-            for i in range(natm):
-                for j in range(3):
-                    coords[i,j] += eps
-                    mol.set_geom_(coords, unit='Bohr')
-                    mol.build()
-                    dftd4_model = dftd4.DFTD4Dispersion(mol, xc=self.base.xc)
-                    res = dftd4_model.get_dispersion(grad=True)
-                    g1 = res.get("gradient")
-
-                    coords[i,j] -= 2.0*eps
-                    mol.set_geom_(coords, unit='Bohr')
-                    mol.build()
-                    dftd4_model = dftd4.DFTD4Dispersion(mol, xc=self.base.xc)
-                    res = dftd4_model.get_dispersion(grad=True)
-                    g2 = res.get("gradient")
-
-                    coords[i,j] += eps
-                    h_d4[i,:,j,:] = (g1 - g2)/(2.0*eps)
-
-            return h_d4
 
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1

@@ -28,7 +28,7 @@ from gpu4pyscf.lib import logger
 LMAX_ON_GPU = 8
 FREE_CUPY_CACHE = True
 STACK_SIZE_PER_THREAD = 8192 * 4
-BLKSIZE = 128
+BLKSIZE = 256
 
 libgvhf = load_library('libgvhf')
 libgint = load_library('libgint')
@@ -709,7 +709,7 @@ def get_j_int3c2e_pass2(intopt, rhoj):
     if err != 0:
         raise RuntimeError('CUDA error in get_j_pass2')
     coeff = intopt.coeff
-    vj = cupy.einsum('pi,pq,qj->ij', coeff, vj, coeff)
+    vj = coeff.T @ vj @ coeff
     vj = vj + vj.T
     return vj
 
@@ -780,7 +780,7 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
         if count % ncp_ij == 0:
             rhok_tmp = cupy.asarray(rhok[k0:k1])
             if with_k:
-                rhok0 = contract('pio,ir->pro', rhok_tmp, orbo) * 2.0
+                rhok0 = contract('pio,ir->pro', rhok_tmp, 2.0*orbo)
                 rhok0 = contract('pro,Jo->prJ', rhok0, orbo)
 
         rhoj0 = contract('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
@@ -789,14 +789,14 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
         vj1_ao = rhoj0 = None
 
         if with_k:
-            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, orbo[j0:j1]) * 2.0
+            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, 2.0*orbo[j0:j1])
             vk1_buf[:,i0:i1] += contract('xpji,plj->xil', int3c_blk, rhok0_slice)
 
             vk1_ao = contract('xpji,poi->xijo', int3c_blk, rhok0[:,:,i0:i1])
             vk1[:,:,j0:j1] += contract('xijo,ia->axjo', vk1_ao, ao2atom[i0:i1])
 
             int3c_ip1_occ = contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])
-            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, orbo[i0:i1]) * 2.0
+            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, 2.0*orbo[i0:i1])
             vk1_ao = contract('xpio,pJi->xiJo', int3c_ip1_occ, rhok0_slice)
             vk1 += contract('xiJo,ia->axJo', vk1_ao, ao2atom[i0:i1])
             vk1_ao = int3c_ip1_occ = None
@@ -1268,20 +1268,20 @@ def get_dh1e(mol, dm0):
     '''
     natm = mol.natm
     coords = mol.atom_coords()
-    charges = mol.atom_charges()
+    charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
     fakemol = gto.fakemol_for_charges(coords)
     intopt = VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
     dm0_sorted = take_last2d(dm0, intopt.ao_idx)
     dh1e = cupy.zeros([natm,3])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip1'):
-        dh1e[k0:k1,:3] += cupy.einsum('xkji,ij->kx', int3c_blk, dm0_sorted[i0:i1,j0:j1])
-    return 2.0 * cupy.einsum('kx,k->kx', dh1e, -charges)
+        dh1e[k0:k1,:3] += contract('xkji,ij->kx', int3c_blk, dm0_sorted[i0:i1,j0:j1])
+    return 2.0 * contract('kx,k->kx', dh1e, -charges)
 
 def get_d2h1e(mol, dm0):
     natm = mol.natm
     coords = mol.atom_coords()
-    charges = mol.atom_charges()
+    charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
     fakemol = gto.fakemol_for_charges(coords)
 
     nao = mol.nao
@@ -1301,8 +1301,7 @@ def get_d2h1e(mol, dm0):
     ao2atom = get_ao2atom(intopt, aoslices)
     d2h1e = contract('aix,ib->abx', d2h1e_offdiag, ao2atom)
     d2h1e[np.diag_indices(natm), :] += d2h1e_diag
-    return 2.0 * cupy.einsum('abx,a->xab', d2h1e, charges)
-    #return 2.0 * cupy.einsum('ijx,i->kx', dh1e, -charges)
+    return 2.0 * contract('abx,a->xab', d2h1e, charges)
 
 def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, cart=False, aosym=None, out=None, omega=None, stream=None):
     '''
