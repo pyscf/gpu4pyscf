@@ -1352,8 +1352,8 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             # cache ao indices
             if (block_id, blksize, ngrids) not in ni.non0ao_idx:
                 ni.non0ao_idx[block_id, blksize, ngrids] = _sparse_index(mol, coords, opt.l_ctr_offsets)
-            else:
-                pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[block_id, blksize, ngrids]
+
+            pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[block_id, blksize, ngrids]
 
             ao_mask = eval_ao(
                 ni, mol, coords, deriv,
