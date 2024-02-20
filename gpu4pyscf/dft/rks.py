@@ -217,6 +217,12 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     e1 = cupy.einsum('ij,ji->', h1e, dm).real
     ecoul = vhf.ecoul.real
     exc = vhf.exc.real
+    if isinstance(ecoul, cupy.ndarray):
+        ecoul = ecoul.get()
+    if isinstance(exc, cupy.ndarray):
+        exc = exc.get()
+    if isinstance(e1, cupy.ndarray):
+        e1 = e1.get()
     e2 = ecoul + exc
     ks.scf_summary['e1'] = e1
     ks.scf_summary['coul'] = ecoul
