@@ -68,6 +68,13 @@ class KnownValues(unittest.TestCase):
         e_tot = mf.kernel()
         assert numpy.abs(e_tot - -76.0756052903) < 2e-4
 
+    def test_uhf(self):
+        mf = scf.UHF(mol)
+        mf = mf.SMD()
+        mf.with_solvent.solvent = 'water'
+        mf.with_solvent.sasa_ng = 590
+        e_tot = mf.kernel()
+        assert numpy.abs(e_tot - -76.07550951172617) < 2e-4
     # TODO: add more test for other molecules
 
 if __name__ == "__main__":

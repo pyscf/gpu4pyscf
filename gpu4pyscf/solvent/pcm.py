@@ -42,7 +42,7 @@ def pcm_for_scf(mf, solvent_obj=None, dm=None):
 # Inject PCM to SCF, TODO: add it to other methods later
 from gpu4pyscf import scf
 scf.hf.RHF.PCM = pcm_for_scf
-
+scf.uhf.UHF.PCM = pcm_for_scf
 # TABLE II,  J. Chem. Phys. 122, 194110 (2005)
 XI = {
     6: 4.84566077868,
@@ -313,7 +313,8 @@ class PCM(ddcosmo.DDCOSMO):
 
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)
-
+        if dms.shape[0] == 2:
+            dms = (dms[0] + dms[1]).reshape(-1,nao,nao)
         K = self._intermediates['K']
         R = self._intermediates['R']
         v_grids_e = self._get_v(dms)

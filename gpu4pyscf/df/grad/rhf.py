@@ -46,7 +46,6 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         else:
             dfobj = mf_grad.base.with_df
             with_df = dfobj._rsh_df[key] = copy.copy(dfobj).reset()
-            #raise RuntimeError(f'omega={omega} is not calculated in SCF')
 
     auxmol = with_df.auxmol
     if not hasattr(with_df, 'intopt') or with_df._cderi is None:
@@ -62,10 +61,11 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         raise NotImplementedError()
     mo_coeff = cupy.asarray(mf_grad.base.mo_coeff)
     mo_occ = cupy.asarray(mf_grad.base.mo_occ)
-    sph_ao_idx = intopt.sph_ao_idx
-    dm = take_last2d(dm0, sph_ao_idx)
+    ao_idx = intopt.ao_idx
+
+    dm = take_last2d(dm0, ao_idx)
     orbo = mo_coeff[:,mo_occ>0] * mo_occ[mo_occ>0] ** 0.5
-    orbo = orbo[sph_ao_idx, :]
+    orbo = orbo[ao_idx, :]
     nocc = orbo.shape[-1]
 
     # (L|ij) -> rhoj: (L), rhok: (L|oo)
@@ -99,8 +99,8 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     else:
         int2c_e1 = auxmol.intor('int2c2e_ip1')
     int2c_e1 = cupy.asarray(int2c_e1)
-    sph_aux_idx = intopt.sph_aux_idx
-    rev_aux_idx = numpy.argsort(sph_aux_idx)
+    aux_ao_idx = intopt.aux_ao_idx
+    rev_aux_idx = numpy.argsort(aux_ao_idx)
     auxslices = auxmol.aoslice_by_atom()
     aux_cart2sph = intopt.aux_cart2sph
     low_t = low.T.copy()
@@ -110,7 +110,10 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         elif low.tag == 'cd':
             #rhoj = solve_triangular(low_t, rhoj, lower=False)
             rhoj = solve_triangular(low_t, rhoj, lower=False, overwrite_b=True)
-        rhoj_cart = contract('pq,q->p', aux_cart2sph, rhoj)
+        if not auxmol.cart:
+            rhoj_cart = contract('pq,q->p', aux_cart2sph, rhoj)
+        else:
+            rhoj_cart = rhoj
         rhoj = rhoj[rev_aux_idx]
         tmp = contract('xpq,q->xp', int2c_e1, rhoj)
         vjaux = -contract('xp,p->xp', tmp, rhoj)
@@ -127,7 +130,10 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         vkaux = -contract('xpq,pq->xp', int2c_e1, tmp)
         vkaux_2c = cupy.array([-vkaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
         vkaux = tmp = None
-        rhok_cart = contract('pq,qkl->pkl', aux_cart2sph, rhok)
+        if not auxmol.cart:
+            rhok_cart = contract('pq,qkl->pkl', aux_cart2sph, rhok)
+        else:
+            rhok_cart = rhok
         rhok = None
     low_t = None
     t0 = log.timer_debug1('rhoj and rhok', *t0)
@@ -140,10 +146,14 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False,
                  group_size_aux=block_size)#, group_size=block_size)
 
-    # sph2cart for ao
-    cart2sph = intopt.cart2sph
-    orbo_cart = cart2sph @ orbo
-    dm_cart = cart2sph @ dm @ cart2sph.T
+    if not intopt._mol.cart:
+        # sph2cart for ao
+        cart2sph = intopt.cart2sph
+        orbo_cart = cart2sph @ orbo
+        dm_cart = cart2sph @ dm @ cart2sph.T
+    else:
+        dm_cart = dm
+        orbo_cart = orbo
     dm = orbo = None
 
     vj = vk = rhoj_tmp = rhok_tmp = None
@@ -198,6 +208,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         rhoj_tmp = rhok_tmp = vj_tmp = vk_tmp = None
         t1 = log.timer_debug1(f'calculate {cp_kl_id:3d} / {len(intopt.aux_log_qs):3d}, {k1-k0:3d} slices', *t1)
 
+    # vj and vk are still in cartesian
     cart_ao_idx = intopt.cart_ao_idx
     rev_cart_ao_idx = numpy.argsort(cart_ao_idx)
     aoslices = intopt.mol.aoslice_by_atom()
@@ -210,7 +221,6 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         vk = [-vk[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
         vk = cupy.asarray(vk)
     t0 = log.timer_debug1('(di,j|P) and (i,j|dP)', *t0)
-
     cart_aux_idx = intopt.cart_aux_idx
     rev_cart_aux_idx = numpy.argsort(cart_aux_idx)
     auxslices = intopt.auxmol.aoslice_by_atom()

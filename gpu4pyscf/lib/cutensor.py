@@ -24,9 +24,10 @@ try:
     ALGO_DEFAULT = cutensor_backend.ALGO_DEFAULT
     OP_IDENTITY = cutensor_backend.OP_IDENTITY
     JIT_MODE_NONE = cutensor_backend.JIT_MODE_NONE
-    WORKSPACE_RECOMMENDED = cutensor_backend.WORKSPACE_RECOMMENDED
+    WORKSPACE_RECOMMENDED = cutensor_backend.WORKSPACE_MIN
+    #WORKSPACE_RECOMMENDED = cutensor_backend.WORKSPACE_RECOMMENDED
     _tensor_descriptors = {}
-except ImportError:
+except (ImportError, AttributeError):
     cutensor = None
     ALGO_DEFAULT = None
     OP_IDENTITY = None

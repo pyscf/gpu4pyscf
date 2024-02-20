@@ -38,6 +38,7 @@ from pyscf.grad import rhf  # noqa
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, print_mem_info
 from gpu4pyscf.lib import logger
+from gpu4pyscf.df import int3c2e
 
 def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
               mo1=None, mo_e1=None, h1ao=None,
@@ -348,7 +349,8 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
 
         h1vo = cupy.vstack(h1vo)
         s1vo = cupy.vstack(s1vo)
-        mo1, e1 = cphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo, verbose=verbose)
+        tol = mf.conv_tol_cpscf * (ia1 - ia0)
+        mo1, e1 = cphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo, tol=tol, verbose=verbose)
         # Different from PySCF, mo1 is in AO
         mo1 = mo1.reshape(-1,3,nao,nocc)
         e1 = e1.reshape(-1,3,nocc,nocc)
@@ -381,6 +383,48 @@ def gen_vind(mf, mo_coeff, mo_occ):
         v1vo = contract('nio,ip->npo', tmp, mo_coeff)
         return v1vo
     return fx
+
+def hess_nuc_elec(mol, dm):
+    '''
+    calculate hessian contribution due to (nuc, elec) pair
+    '''
+    hcore = int3c2e.get_hess_nuc_elec(mol, dm)
+
+    '''
+    nao = mol.nao
+    aoslices = mol.aoslice_by_atom()
+    natm = mol.natm
+    hcore = numpy.zeros([3,3,natm,natm])
+    # CPU version
+    for ia in range(mol.natm):
+        ish0, ish1, i0, i1 = aoslices[ia]
+        zi = mol.atom_charge(ia)
+        with mol.with_rinv_at_nucleus(ia):
+            rinv2aa = mol.intor('int1e_ipiprinv', comp=9).reshape([3,3,nao,nao])
+            rinv2ab = mol.intor('int1e_iprinvip', comp=9).reshape([3,3,nao,nao])
+            rinv2aa *= zi
+            rinv2ab *= zi
+
+            hcore[:,:,ia,ia] -= numpy.einsum('xypq,pq->xy', rinv2aa+rinv2ab, dm)
+
+            haa = numpy.einsum('xypq,pq->xyp', rinv2aa, dm)
+            hab = numpy.einsum('xypq,pq->xyp', rinv2ab, dm)
+
+            haa = [haa[:,:,p0:p1].sum(axis=2) for p0,p1 in aoslices[:,2:]]
+            hab = [hab[:,:,p0:p1].sum(axis=2) for p0,p1 in aoslices[:,2:]]
+
+            haa = numpy.stack(haa, axis=2)
+            hab = numpy.stack(hab, axis=2)
+
+            hcore[:,:,ia] += haa
+            hcore[:,:,ia] += hab.transpose([1,0,2])
+
+            hcore[:,:,:,ia] += haa.transpose([1,0,2])
+            hcore[:,:,:,ia] += hab
+
+    hcore = cupy.asarray(hcore)
+    '''
+    return hcore * 2.0
 
 def hess_nuc(mol, atmlst=None):
     h = numpy.zeros((mol.natm,mol.natm,3,3))
@@ -504,88 +548,58 @@ class Hessian(rhf_hess.Hessian):
         else:
             ecp_atoms = ()
         aoslices = mol.aoslice_by_atom()
+        nbas = mol.nbas
         nao = mol.nao_nr()
         h1aa, h1ab = self.get_hcore(mol)
         h1aa = cupy.asarray(h1aa)
         h1ab = cupy.asarray(h1ab)
-
-        rinv2aa_all = {}
-        rinv2ab_all = {}
         def get_hcore(iatm, jatm):
             ish0, ish1, i0, i1 = aoslices[iatm]
             jsh0, jsh1, j0, j1 = aoslices[jatm]
-            zi = mol.atom_charge(iatm)
-            zj = mol.atom_charge(jatm)
+            rinv2aa = rinv2ab = None
             if iatm == jatm:
                 with mol.with_rinv_at_nucleus(iatm):
-                    if iatm not in rinv2aa_all:
-                        rinv2aa = zi * mol.intor('int1e_ipiprinv', comp=9)
-                        if with_ecp and iatm in ecp_atoms:
-                            rinv2aa -= mol.intor('ECPscalar_ipiprinv', comp=9)
-                        rinv2aa_all[iatm] = rinv2aa
-                    rinv2aa = cupy.asarray(rinv2aa_all[iatm])
-
-                    if iatm not in rinv2ab_all:
-                        rinv2ab = zi * mol.intor('int1e_iprinvip', comp=9)
-                        if with_ecp and iatm in ecp_atoms:
-                            rinv2ab -= mol.intor('ECPscalar_iprinvip', comp=9)
-                        rinv2ab_all[iatm] = rinv2ab
-                    rinv2ab = cupy.asarray(rinv2ab_all[iatm])
-
-                rinv2aa = rinv2aa.reshape(3,3,nao,nao)
-                rinv2ab = rinv2ab.reshape(3,3,nao,nao)
-                hcore = -rinv2aa - rinv2ab
+                    if with_ecp and iatm in ecp_atoms:
+                        rinv2aa = -mol.intor('ECPscalar_ipiprinv', comp=9)
+                        rinv2ab = -mol.intor('ECPscalar_iprinvip', comp=9)
+                        rinv2aa = cupy.asarray(rinv2aa)
+                        rinv2ab = cupy.asarray(rinv2ab)
+                        rinv2aa = rinv2aa.reshape(3,3,nao,nao)
+                        rinv2ab = rinv2ab.reshape(3,3,nao,nao)
+                hcore = cupy.zeros([3,3,nao,nao])
                 hcore[:,:,i0:i1] += h1aa[:,:,i0:i1]
-                hcore[:,:,i0:i1] += rinv2aa[:,:,i0:i1]
-                hcore[:,:,i0:i1] += rinv2ab[:,:,i0:i1]
-                hcore[:,:,:,i0:i1] += rinv2aa[:,:,i0:i1].transpose(0,1,3,2)
-                hcore[:,:,:,i0:i1] += rinv2ab[:,:,:,i0:i1]
                 hcore[:,:,i0:i1,i0:i1] += h1ab[:,:,i0:i1,i0:i1]
+                if rinv2aa is not None or rinv2ab is not None:
+                    hcore -= rinv2aa + rinv2ab
+                    hcore[:,:,i0:i1] += rinv2aa[:,:,i0:i1]
+                    hcore[:,:,i0:i1] += rinv2ab[:,:,i0:i1]
+                    hcore[:,:,:,i0:i1] += rinv2aa[:,:,i0:i1].transpose(0,1,3,2)
+                    hcore[:,:,:,i0:i1] += rinv2ab[:,:,:,i0:i1]
 
             else:
                 hcore = cupy.zeros((3,3,nao,nao))
                 hcore[:,:,i0:i1,j0:j1] += h1ab[:,:,i0:i1,j0:j1]
                 with mol.with_rinv_at_nucleus(iatm):
-                    #rinv2aa = mol.intor('int1e_ipiprinv', comp=9, shls_slice=shls_slice)
-                    if iatm not in rinv2aa_all:
-                        rinv2aa = zi * mol.intor('int1e_ipiprinv', comp=9)
-                        if with_ecp and iatm in ecp_atoms:
-                            rinv2aa -= mol.intor('ECPscalar_ipiprinv', comp=9)
-                        rinv2aa_all[iatm] = rinv2aa
-                    rinv2aa = cupy.asarray(rinv2aa_all[iatm][:,j0:j1])
-
-                    #rinv2ab = mol.intor('int1e_iprinvip', comp=9, shls_slice=shls_slice)
-                    if iatm not in rinv2ab_all:
-                        rinv2ab = zi * mol.intor('int1e_iprinvip', comp=9)
-                        if with_ecp and iatm in ecp_atoms:
-                            rinv2ab -= mol.intor('ECPscalar_iprinvip', comp=9)
-                        rinv2ab_all[iatm] = rinv2ab
-                    rinv2ab = cupy.asarray(rinv2ab_all[iatm][:,j0:j1])
-
-                    hcore[:,:,j0:j1] += rinv2aa.reshape(3,3,j1-j0,nao)
-                    hcore[:,:,j0:j1] += rinv2ab.reshape(3,3,j1-j0,nao).transpose(1,0,2,3)
+                    shls_slice = (jsh0, jsh1, 0, nbas)
+                    if with_ecp and iatm in ecp_atoms:
+                        rinv2aa = -mol.intor('ECPscalar_ipiprinv', comp=9, shls_slice=shls_slice)
+                        rinv2ab = -mol.intor('ECPscalar_iprinvip', comp=9, shls_slice=shls_slice)
+                        rinv2aa = cupy.asarray(rinv2aa)
+                        rinv2ab = cupy.asarray(rinv2ab)
+                    if rinv2aa is not None or rinv2ab is not None:
+                        hcore[:,:,j0:j1] += rinv2aa.reshape(3,3,j1-j0,nao)
+                        hcore[:,:,j0:j1] += rinv2ab.reshape(3,3,j1-j0,nao).transpose(1,0,2,3)
 
                 with mol.with_rinv_at_nucleus(jatm):
-                    # rinv2aa = zj * mol.intor('int1e_ipiprinv', comp=9, shls_slice=shls_slice)
-                    if jatm not in rinv2aa_all:
-                        rinv2aa = zj * mol.intor('int1e_ipiprinv', comp=9)
-                        if with_ecp and jatm in ecp_atoms:
-                            rinv2aa -= mol.intor('ECPscalar_ipiprinv', comp=9)
-                        rinv2aa_all[jatm] = rinv2aa
-                    rinv2aa = cupy.asarray(rinv2aa_all[jatm][:,i0:i1])
-
-                    # rinv2ab = mol.intor('int1e_iprinvip', comp=9, shls_slice=shls_slice)
-                    if jatm not in rinv2ab_all:
-                        rinv2ab = zj * mol.intor('int1e_iprinvip', comp=9)
-                        if with_ecp and jatm in ecp_atoms:
-                            rinv2ab -= mol.intor('ECPscalar_iprinvip', comp=9)
-                        rinv2ab_all[jatm] = rinv2ab
-                    rinv2ab = cupy.asarray(rinv2ab_all[jatm][:,i0:i1])
-
-                    rinv2aa = cupy.asarray(rinv2aa)
-                    rinv2ab = cupy.asarray(rinv2ab)
-                    hcore[:,:,i0:i1] += rinv2aa.reshape(3,3,i1-i0,nao)
-                    hcore[:,:,i0:i1] += rinv2ab.reshape(3,3,i1-i0,nao)
+                    shls_slice = (ish0, ish1, 0, nbas)
+                    if with_ecp and jatm in ecp_atoms:
+                        rinv2aa = -mol.intor('ECPscalar_ipiprinv', comp=9, shls_slice=shls_slice)
+                        rinv2ab = -mol.intor('ECPscalar_iprinvip', comp=9, shls_slice=shls_slice)
+                        rinv2aa = cupy.asarray(rinv2aa)
+                        rinv2ab = cupy.asarray(rinv2ab)
+                    if rinv2aa is not None or rinv2ab is not None:
+                        hcore[:,:,i0:i1] += rinv2aa.reshape(3,3,i1-i0,nao)
+                        hcore[:,:,i0:i1] += rinv2ab.reshape(3,3,i1-i0,nao)
             return hcore + hcore.conj().transpose(0,1,3,2)
         return get_hcore
 

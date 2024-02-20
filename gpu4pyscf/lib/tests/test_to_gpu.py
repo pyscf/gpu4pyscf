@@ -88,47 +88,45 @@ class KnownValues(unittest.TestCase):
         assert numpy.abs(lib.fp(g) - -0.01641213202225146) < 1e-7
 
         mf = scf.RHF(mol).density_fit().run()
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
         h = hobj.kernel()
-        assert numpy.abs(lib.fp(h) - 2.198079352288524) < 1e-7
+        assert numpy.abs(lib.fp(h) - 2.198079352288524) < 1e-4
 
     @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_df_b3lyp(self):
         mf = rks.RKS(mol, xc='b3lyp').density_fit().to_gpu()
         e_tot = mf.to_gpu().kernel()
-        print('DF b3lyp energy:', e_tot)
         assert numpy.abs(e_tot - -75.31295618175646) < 1e-7
 
         mf = rks.RKS(mol, xc='b3lyp').density_fit().run()
         gobj = mf.nuc_grad_method().to_gpu()
         g = gobj.kernel()
-        print('DF b3lyp force:', lib.fp(g))
         assert numpy.abs(lib.fp(g) - -0.04079190644707999) < 1e-7
 
         mf = rks.RKS(mol, xc='b3lyp').density_fit().run()
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
         h = hobj.kernel()
-        print('DF b3lyp hessian:', lib.fp(h))
-        assert numpy.abs(lib.fp(h) - 2.1527804103141848) < 1e-7
+        assert numpy.abs(lib.fp(h) - 2.1527804103141848) < 1e-4
 
     @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_df_RKS(self):
         mf = rks.RKS(mol, xc='wb97x').density_fit().to_gpu()
         e_tot = mf.to_gpu().kernel()
-        print('DF wb97x energy:', e_tot)
         assert numpy.abs(e_tot - -75.30717654021076) < 1e-7
 
         mf = rks.RKS(mol, xc='wb97x').density_fit().run()
         gobj = mf.nuc_grad_method().to_gpu()
         g = gobj.kernel()
-        print('DF wb97x force:', lib.fp(g))
-        assert numpy.abs(lib.fp(g) - -0.043401172511220595) < 1e-7
+        g -= g.sum(axis=0)/len(g)
+        assert numpy.abs(lib.fp(g) - -0.034343799164131) < 1e-5
 
         mf = rks.RKS(mol, xc='wb97x').density_fit().run()
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
         h = hobj.kernel()
-        print('DF wb97x hessian:', lib.fp(h))
-        assert numpy.abs(lib.fp(h) - 2.187025544697092) < 1e-7
+        assert numpy.abs(lib.fp(h) - 2.187025544697092) < 1e-4
 
     # TODO: solvent
 

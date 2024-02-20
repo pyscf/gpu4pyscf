@@ -38,7 +38,7 @@ export PYTHONPATH="${PYTHONPATH}:/your-local-path/gpu4pyscf"
 ```
 Then install cutensor for acceleration
 ```sh
-python -m cupyx.tools.install_library --cuda 11.x --library cutensor
+pip3 install cutensor-cu11
 ```
 
 Features
