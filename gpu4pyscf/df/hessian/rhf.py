@@ -37,9 +37,11 @@ import numpy
 import cupy
 import numpy as np
 from pyscf import lib, df
+from pyscf.df.grad.rhf import LINEAR_DEP_THRESHOLD
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
-from gpu4pyscf.lib.cupy_helper import contract, tag_array, release_gpu_stack, print_mem_info, take_last2d
+from gpu4pyscf.lib.cupy_helper import (
+    contract, tag_array, release_gpu_stack, print_mem_info, take_last2d, pinv)
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
 
@@ -98,7 +100,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     int2c = cupy.asarray(int2c, order='C')
     int2c = take_last2d(int2c, aux_ao_idx)
-    int2c_inv = cupy.linalg.pinv(int2c, rcond=1e-12)
+    int2c_inv = pinv(int2c, lindep=LINEAR_DEP_THRESHOLD)
     int2c = None
 
     int2c_ip1 = cupy.asarray(int2c_ip1, order='C')
@@ -446,7 +448,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     dm0_tag = tag_array(dm0, occ_coeff=mocc)
 
     int2c = take_last2d(int2c, aux_ao_idx)
-    int2c_inv = cupy.linalg.pinv(int2c, rcond=1e-12)
+    int2c_inv = pinv(int2c, lindep=LINEAR_DEP_THRESHOLD)
     int2c = None
 
     wj, wk_Pl_ = int3c2e.get_int3c2e_wjk(mol, auxmol, dm0_tag, omega=omega)

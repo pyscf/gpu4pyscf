@@ -64,7 +64,7 @@ g.auxbasis_response = True
 f = g.kernel()
 grad_time = time.time() - start_time
 print(f'compute time for gradient: {grad_time:.3f} s')
-
+exit()
 start_time = time.time()
 h = mf_df.Hessian()
 h.auxbasis_response = 2
