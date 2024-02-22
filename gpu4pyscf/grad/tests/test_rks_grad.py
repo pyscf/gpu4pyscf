@@ -97,7 +97,7 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_mgga(self):
         print('-------mGGA testing-------------')
-        _check_grad(xc='m06', disp=None, tol=1e-4)
+        _check_grad(xc='tpss', disp=None, tol=1e-4)
 
     def test_grad_rsh(self):
         print('--------RSH testing-------------')
