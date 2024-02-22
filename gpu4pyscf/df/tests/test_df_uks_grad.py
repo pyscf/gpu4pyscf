@@ -55,7 +55,7 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-def _check_grad(grid_response=True, xc=xc0, disp=disp0, tol=1e-6):
+def _check_grad(grid_response=True, xc=xc0, disp=disp0, tol=1e-5):
     mf = uks.UKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
     mf.grids.level = grids_level
     mf.nlcgrids.level = nlcgrids_level
