@@ -16,10 +16,13 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # 3.18 for CUDAToolkit and CMAKE_CUDA_ARCHITECTURES
-cmake_minimum_required (VERSION 3.18)
-project (gpu4pyscf C CUDA)
+cmake_minimum_required (VERSION 3.19 FATAL_ERROR)
+project (gpu4pyscf C CXX CUDA)
 
 set(CMAKE_C_STANDARD "99")
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # For better performance on A100, the option
 # -DCUDA_ARCHITECTURES="70-real;80-real" can be added to cmake command
@@ -93,6 +96,22 @@ link_directories(${PROJECT_SOURCE_DIR}/deps/lib)
 
 set(C_LINK_TEMPLATE "<CMAKE_C_COMPILER> <CMAKE_SHARED_LIBRARY_C_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
 set(CXX_LINK_TEMPLATE "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
+
+option(BUILD_CUTLASS "Using cutlass" ON)
+if(BUILD_CUTLASS)
+  include(FetchContent)
+  FetchContent_Declare(
+    cutlass
+    GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
+    GIT_TAG        v3.4.0
+  )
+  # FetchContent_MakeAvailable(cutlass) # this command leads to building cutlass which we don't want
+  FetchContent_GetProperties(cutlass)
+  if(NOT cutlass_POPULATED)
+    FetchContent_Populate(cutlass)
+    # now we can use cmake variable cutlass_SOURCE_DIR
+  endif()
+endif()
 
 add_subdirectory(gint)
 add_subdirectory(gvhf)

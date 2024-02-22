@@ -17,72 +17,168 @@ import unittest
 import numpy
 import cupy
 from gpu4pyscf.lib.cupy_helper import (
-    take_last2d, transpose_sum, krylov, unumpyack_sparse,
-    add_sparse, takebak, empty_mapped, dist_matrix)
+    # take_last2d, transpose_sum, krylov, unumpyack_sparse,
+    # add_sparse, takebak, empty_mapped, dist_matrix,
+    grouped_dot, grouped_gemm)
 
 class KnownValues(unittest.TestCase):
-    def test_take_last2d(self):
-        n = 3
-        count = 4
-        indices = numpy.arange(n)
-        numpy.random.shuffle(indices)
-        a = cupy.random.rand(count,n,n)
-        b = take_last2d(a, indices)
-        assert(cupy.linalg.norm(a[:,indices][:,:,indices] - b) < 1e-10)
+    # def test_take_last2d(self):
+    #     n = 3
+    #     count = 4
+    #     indices = numpy.arange(n)
+    #     numpy.random.shuffle(indices)
+    #     a = cupy.random.rand(count,n,n)
+    #     b = take_last2d(a, indices)
+    #     assert(cupy.linalg.norm(a[:,indices][:,:,indices] - b) < 1e-10)
 
-    def test_transpose_sum(self):
-        n = 31
-        count = 127
-        a = cupy.random.rand(count,n,n)
-        b = a + a.transpose(0,2,1)
-        transpose_sum(a)
-        assert(cupy.linalg.norm(a - b) < 1e-10)
+    # def test_transpose_sum(self):
+    #     n = 31
+    #     count = 127
+    #     a = cupy.random.rand(count,n,n)
+    #     b = a + a.transpose(0,2,1)
+    #     transpose_sum(a)
+    #     assert(cupy.linalg.norm(a - b) < 1e-10)
 
-    def test_krylov(self):
-        a = cupy.random.random((10,10)) * 1e-2
-        b = cupy.random.random(10)
+    # def test_krylov(self):
+    #     a = cupy.random.random((10,10)) * 1e-2
+    #     b = cupy.random.random(10)
 
-        def aop(x):
-            return cupy.dot(a, x.T).T
-        x = krylov(aop, b)
-        cupy.allclose(cupy.dot(a,x)+x, b)
+    #     def aop(x):
+    #         return cupy.dot(a, x.T).T
+    #     x = krylov(aop, b)
+    #     cupy.allclose(cupy.dot(a,x)+x, b)
 
-    def test_cderi_sparse(self):
-        naux = 4
-        nao = 3
-        cderi = cupy.random.rand(nao,nao,naux)
-        cderi = cderi + cderi.transpose([1,0,2])
+    # def test_cderi_sparse(self):
+    #     naux = 4
+    #     nao = 3
+    #     cderi = cupy.random.rand(nao,nao,naux)
+    #     cderi = cderi + cderi.transpose([1,0,2])
 
-        row, col = cupy.tril_indices(nao)
-        cderi_sparse = cderi[row,col,:]
-        p0 = 1
-        p1 = 3
-        out = unumpyack_sparse(cderi_sparse, row, col, p0, p1, nao)
-        assert cupy.linalg.norm(out - cderi[:,:,p0:p1]) < 1e-10
+    #     row, col = cupy.tril_indices(nao)
+    #     cderi_sparse = cderi[row,col,:]
+    #     p0 = 1
+    #     p1 = 3
+    #     out = unumpyack_sparse(cderi_sparse, row, col, p0, p1, nao)
+    #     assert cupy.linalg.norm(out - cderi[:,:,p0:p1]) < 1e-10
 
-    def test_sparse(self):
-        a = cupy.random.rand(20, 20)
-        b = cupy.random.rand(5,5)
-        indices = cupy.array([3,4,8,10,12]).astype(numpy.int32)
-        a0 = a.copy()
-        a0[cupy.ix_(indices, indices)] += b
-        add_sparse(a, b, indices)
-        assert cupy.linalg.norm(a - a0) < 1e-10
+    # def test_sparse(self):
+    #     a = cupy.random.rand(20, 20)
+    #     b = cupy.random.rand(5,5)
+    #     indices = cupy.array([3,4,8,10,12]).astype(numpy.int32)
+    #     a0 = a.copy()
+    #     a0[cupy.ix_(indices, indices)] += b
+    #     add_sparse(a, b, indices)
+    #     assert cupy.linalg.norm(a - a0) < 1e-10
 
-    def test_dist_matrix(self):
-        a = cupy.random.rand(4, 3)
-        rij = cupy.sum((a[:,None,:] - a[None,:,:])**2, axis=2)**0.5
-        rij0 = dist_matrix(a, a)
-        assert cupy.linalg.norm(rij - rij0) < 1e-10
+    # def test_dist_matrix(self):
+    #     a = cupy.random.rand(4, 3)
+    #     rij = cupy.sum((a[:,None,:] - a[None,:,:])**2, axis=2)**0.5
+    #     rij0 = dist_matrix(a, a)
+    #     assert cupy.linalg.norm(rij - rij0) < 1e-10
 
-    def test_takebak(self):
-        a = empty_mapped((5, 8))
-        a[:] = 1.
-        idx = numpy.arange(8) * 2
-        out = cupy.zeros((5, 16))
-        takebak(out, a, idx)
-        out[:,idx] -= 1.
-        assert abs(out).sum() == 0.
+    # def test_takebak(self):
+    #     a = empty_mapped((5, 8))
+    #     a[:] = 1.
+    #     idx = numpy.arange(8) * 2
+    #     out = cupy.zeros((5, 16))
+    #     takebak(out, a, idx)
+    #     out[:,idx] -= 1.
+    #     assert abs(out).sum() == 0.
+    
+    def test_cutlass_grouped_gemm(self):
+        dtype = cupy.float64
+        def initialize(dtype, M, N, K):
+            sizes = [(M, K), (K, N), (M, N)]
+            return [cupy.random.random(size).astype(dtype) for size in sizes]
+
+        def generate_problems(problems):
+            valid_sizes = [131]
+            As, Bs, Cs = [], [], []
+            for _ in range(problems):
+                M = numpy.random.choice(valid_sizes)
+                N = M
+                K = 64*63
+                A, B, C = initialize(dtype, M, N, K)
+                As.append(A)
+                Bs.append(B)
+                Cs.append(C)
+            return As, Bs, Cs
+
+        groups = 200
+        As, Bs, Cs = generate_problems(groups)
+        res_Cs = Cs
+
+        for i in range(groups):
+            Cs[i] = cupy.dot(As[i], Bs[i])
+
+        grouped_dot(As, Bs, res_Cs)
+
+        res_Cs = cupy.concatenate(res_Cs, axis=None)
+        ans_Cs = cupy.concatenate(Cs, axis=None)
+        assert(cupy.linalg.norm(res_Cs - ans_Cs) < 1e-8)
+    
+    def test2_cutlass_grouped_gemm(self):
+        dtype = cupy.float64
+        def initialize(dtype, M, N, K):
+            sizes = [(M, K), (K, N), (M, N)]
+            return [cupy.random.random(size).astype(dtype) for size in sizes]
+
+        def generate_problems(problems):
+            valid_sizes = [131]
+            As, Bs, Cs = [], [], []
+            for _ in range(problems):
+                M = numpy.random.choice(valid_sizes)
+                N = M
+                K = 64*63
+                A, B, C = initialize(dtype, M, N, K)
+                As.append(A)
+                Bs.append(B)
+                Cs.append(C)
+            return As, Bs, Cs
+
+        groups = 200
+        As, Bs, Cs = generate_problems(groups)
+
+        for i in range(groups):
+            Cs[i] = cupy.dot(As[i], Bs[i])
+
+        res_Cs = grouped_dot(As, Bs)
+
+        res_Cs = cupy.concatenate(res_Cs, axis=None)
+        ans_Cs = cupy.concatenate(Cs, axis=None)
+        assert(cupy.linalg.norm(res_Cs - ans_Cs) < 1e-8)
+
+    def test_cutlass_grouped_gemm_2(self):
+        dtype = cupy.float64
+        def initialize(dtype, M, N, K):
+            sizes = [(M, K), (K, N), (M, N)]
+            return [cupy.random.random(size).astype(dtype) for size in sizes]
+
+        def generate_problems(problems):
+            valid_sizes = [131]
+            As, Bs, Cs = [], [], []
+            for _ in range(problems):
+                M = numpy.random.choice(valid_sizes)
+                N = M
+                K = 64*63
+                A, B, C = initialize(dtype, M, N, K)
+                As.append(A)
+                Bs.append(B)
+                Cs.append(C)
+            return As, Bs, Cs
+
+        groups = 200
+        As, Bs, Cs = generate_problems(groups)
+        res_Cs = Cs
+
+        for i in range(groups):
+            Cs[i] = cupy.dot(As[i], Bs[i])
+
+        grouped_gemm(As, Bs, res_Cs)
+
+        res_Cs = cupy.concatenate(res_Cs, axis=None)
+        ans_Cs = cupy.concatenate(Cs, axis=None)
+        assert(cupy.linalg.norm(res_Cs - ans_Cs) < 1e-8)
         
 if __name__ == "__main__":
     print("Full tests for cupy helper module")

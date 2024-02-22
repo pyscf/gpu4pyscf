@@ -593,3 +593,100 @@ def empty_mapped(shape, dtype=float, order='C'):
         cupy.cuda.PinnedMemory(nbytes, cupy.cuda.runtime.hostAllocMapped), 0)
     out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)
     return out
+
+def grouped_dot(As, Bs, Cs=None):
+    '''
+    todo: layout of cutlass kernel
+    As: cupy 2D array list.
+    Bs: cupy 2D array list.
+    Cs: cupy 2D array list.
+    einsum('ik,jk->ij', A, B, C)
+    '''
+    groups = len(As)
+    Ms, Ns, Ks = [], [], []
+    for a, b in zip(As, Bs):
+        Ms.append(a.shape[0])
+        Ns.append(b.shape[1])
+        Ks.append(a.shape[1])
+    
+    if Cs is None:
+        Cs = []
+        for i in range(groups):
+            Cs.append(cupy.empty((Ms[i], Ns[i])))
+    
+    As_ptr, Bs_ptr, Cs_ptr = [], [], []
+    for a, b, c in zip(As, Bs, Cs):
+        As_ptr.append(a.data.ptr)
+        Bs_ptr.append(b.data.ptr)
+        Cs_ptr.append(c.data.ptr)
+    As_ptr = np.array(As_ptr)
+    Bs_ptr = np.array(Bs_ptr)
+    Cs_ptr = np.array(Cs_ptr)
+    
+    Ms = np.array(Ms)
+    Ns = np.array(Ns)
+    Ks = np.array(Ks)
+
+    stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.grouped_dgemm(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(Cs_ptr.ctypes.data, ctypes.c_void_p),
+        ctypes.cast(As_ptr.ctypes.data, ctypes.c_void_p),
+        ctypes.cast(Bs_ptr.ctypes.data, ctypes.c_void_p),
+        ctypes.cast(Ms.ctypes.data, ctypes.c_void_p),
+        ctypes.cast(Ns.ctypes.data, ctypes.c_void_p),
+        ctypes.cast(Ks.ctypes.data, ctypes.c_void_p),
+        ctypes.c_int(groups)
+    )
+    if err != 0:
+        raise RuntimeError('failed in cutlass_grouped_gemm kernel')
+    return Cs
+
+def grouped_gemm(As, Bs, Cs=None):
+    '''
+    As: cupy 2D array list.
+    Bs: cupy 2D array list.
+    Cs: cupy 2D array list.
+    assuming (X, 64).T @ (X, Y)
+    einsum('ik,jk->ij', A, B, C)
+    Compare with grouped_dot, this function handles the case M < 128
+    '''
+    groups = len(As)
+    Ms, Ns, Ks = [], [], []
+    for a, b in zip(As, Bs):
+        Ms.append(a.shape[0])
+        Ns.append(b.shape[1])
+        Ks.append(a.shape[1])
+    
+    if Cs is None:
+        Cs = []
+        for i in range(groups):
+            Cs.append(cupy.empty((Ms[i], Ns[i])))
+    
+    As_ptr, Bs_ptr, Cs_ptr = [], [], []
+    for a, b, c in zip(As, Bs, Cs):
+        As_ptr.append(a.data.ptr)
+        Bs_ptr.append(b.data.ptr)
+        Cs_ptr.append(c.data.ptr)
+    As_ptr = np.array(As_ptr)
+    Bs_ptr = np.array(Bs_ptr)
+    Cs_ptr = np.array(Cs_ptr)
+    
+    Ms = np.array(Ms)
+    Ns = np.array(Ns)
+    Ks = np.array(Ks)
+
+    stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.grouped_dgemm_2(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(Cs_ptr.ctypes.data, ctypes.c_void_p),
+        ctypes.cast(As_ptr.ctypes.data, ctypes.c_void_p),
+        ctypes.cast(Bs_ptr.ctypes.data, ctypes.c_void_p),
+        ctypes.cast(Ms.ctypes.data, ctypes.c_void_p),
+        ctypes.cast(Ns.ctypes.data, ctypes.c_void_p),
+        ctypes.cast(Ks.ctypes.data, ctypes.c_void_p),
+        ctypes.c_int(groups)
+    )
+    if err != 0:
+        raise RuntimeError('failed in cutlass_grouped_gemm kernel')
+    return Cs

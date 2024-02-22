@@ -25,7 +25,7 @@ from pyscf.dft import numint
 from pyscf.gto.eval_gto import NBINS, CUTOFF, make_screen_index
 from gpu4pyscf.scf.hf import basis_seg_contraction
 from gpu4pyscf.lib.cupy_helper import (
-    contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, take_last2d, transpose_sum)
+    contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, take_last2d, transpose_sum, grouped_dot, grouped_gemm)
 from gpu4pyscf.dft import xc_deriv, xc_alias, libxc
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
@@ -345,56 +345,119 @@ def eval_rho4(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
     return rho
 
 # TODO: implement this for grouped ao's
-def eval_rho5(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
+def eval_rho5(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='LDA',
               with_lapl=True, verbose=None, out=None):
+    groups = len(ao_group)
     xctype = xctype.upper()
     if xctype == 'LDA' or xctype == 'HF':
-        _, ngrids = ao.shape
+        ngrids_group = []
+        for groups_idx in range(groups):
+            _, ngrids = ao_group[groups_idx].shape
+            ngrids_group.append(ngrids)
     else:
-        _, ngrids = ao[0].shape
+        ngrids_group = []
+        for groups_idx in range(groups):
+            _, ngrids = ao_group[groups_idx][0].shape
+            ngrids_group.append(ngrids)
 
     shls_slice = (0, mol.nbas)
     ao_loc = mol.ao_loc_nr()
 
-    cpos = (mo_coeff * mo_occ**0.5)[:,mo_occ>0]
+    cpos_group = []
+    for groups_idx in range(groups):
+        cpos = (mo_coeff_group[groups_idx] * mo_occ**0.5)[:,mo_occ>0]
+        cpos_group.append(cpos.T)
     if xctype == 'LDA' or xctype == 'HF':
-        c0 = cupy.dot(cpos.T, ao)
-        rho = _contract_rho(c0, c0)
+        # c0 = cupy.dot(cpos.T, ao) # 替换成 group
+        # rho = _contract_rho(c0, c0)
+        c0_group = grouped_gemm(cpos_group, ao_group)
+        rho_group = []
+        for groups_idx in range(groups):
+            rho = _contract_rho(c0_group[groups_idx], c0_group[groups_idx])
+            rho_group.append(rho)
     elif xctype in ('GGA', 'NLC'):
-        rho = cupy.empty((4,ngrids))
-        c0 = contract('nig,io->nog', ao, cpos)
-        _contract_rho(c0[0], c0[0], rho=rho[0])
-        for i in range(1, 4):
-            _contract_rho(c0[0], c0[i], rho=rho[i])
-        rho[1:] *= 2
+        # rho = cupy.empty((4,ngrids))
+        # c0 = contract('nig,io->nog', ao, cpos)  # 替换成 group, n = 4 拆成 4 个 group dot
+        # _contract_rho(c0[0], c0[0], rho=rho[0])
+        # for i in range(1, 4):
+        #     _contract_rho(c0[0], c0[i], rho=rho[i])
+        # rho[1:] *= 2
+        c0_group = []
+        for _ in range(4):
+            ao_group_tmp = []
+            for groups_idx in range(groups):
+                ao_group_tmp.append(ao_group[groups_idx][0])
+            c0_group_tmp = grouped_gemm(cpos_group, ao_group_tmp)
+            c0_group.append(c0_group_tmp)
+        rho_group = []
+        for groups_idx in range(groups):
+            rho = cupy.empty((4, ngrids_group[groups_idx]))
+            _contract_rho(c0_group[0][groups_idx], c0_group[0][groups_idx], rho=rho[0])
+            for i in range(1, 4):
+                _contract_rho(c0_group[0][groups_idx], c0_group[i][groups_idx], rho=rho[i])
+            rho[1:] *= 2
+            rho_group.append(rho)
     else: # meta-GGA
-        if with_lapl:
-            rho = cupy.empty((6,ngrids))
-            tau_idx = 5
-        else:
-            rho = cupy.empty((5,ngrids))
-            tau_idx = 4
-        c0 = contract('nig,io->nog', ao, cpos)
-        _contract_rho(c0[0], c0[0], rho=rho[0])
+        # if with_lapl:
+        #     rho = cupy.empty((6,ngrids))
+        #     tau_idx = 5
+        # else:
+        #     rho = cupy.empty((5,ngrids))
+        #     tau_idx = 4
+        # c0 = contract('nig,io->nog', ao, cpos) # 替换成 group，剩下的地方换成循环
+        # _contract_rho(c0[0], c0[0], rho=rho[0])
 
-        rho[tau_idx] = 0
-        for i in range(1, 4):
-            rho[i] = _contract_rho(c0[0], c0[i])
-            rho[tau_idx] += _contract_rho(c0[i], c0[i])
+        # rho[tau_idx] = 0
+        # for i in range(1, 4):
+        #     rho[i] = _contract_rho(c0[0], c0[i])
+        #     rho[tau_idx] += _contract_rho(c0[i], c0[i])
 
-        if with_lapl:
-            if ao.shape[0] > 4:
-                XX, YY, ZZ = 4, 7, 9
-                ao2 = ao[XX] + ao[YY] + ao[ZZ]
-                c1 = _dot_ao_dm(mol, ao2, cpos, non0tab, shls_slice, ao_loc)
-                rho[4] = _contract_rho(c0[0], c1)
-                rho[4] += rho[5]
-                rho[4] *= 2
+        # if with_lapl:
+        #     if ao.shape[0] > 4:
+        #         XX, YY, ZZ = 4, 7, 9
+        #         ao2 = ao[XX] + ao[YY] + ao[ZZ]
+        #         c1 = _dot_ao_dm(mol, ao2, cpos, non0tab, shls_slice, ao_loc)
+        #         rho[4] = _contract_rho(c0[0], c1)
+        #         rho[4] += rho[5]
+        #         rho[4] *= 2
+        #     else:
+        #         rho[4] = 0
+        # rho[1:4] *= 2
+        # rho[tau_idx] *= .5
+        c0_group = []
+        for _ in range(4):
+            ao_group_tmp = []
+            for groups_idx in range(groups):
+                ao_group_tmp.append(ao_group[groups_idx][0])
+            c0_group_tmp = grouped_gemm(cpos_group, ao_group_tmp)
+            c0_group.append(c0_group_tmp)
+        rho_group = []
+        for groups_idx in range(groups):
+            if with_lapl:
+                rho = cupy.empty((6, ngrids))
+                tau_idx = 5
             else:
-                rho[4] = 0
-        rho[1:4] *= 2
-        rho[tau_idx] *= .5
-    return rho
+                rho = cupy.empty((5, ngrids))
+                tau_idx = 4
+            rho[tau_idx] = 0
+            for i in range(1, 4):
+                rho[i] = _contract_rho(c0_group[0][groups_idx], c0_group[i][groups_idx])
+                rho[tau_idx] += _contract_rho(c0_group[i][groups_idx], c0_group[i][groups_idx])
+
+            if with_lapl:
+                if ao_group[groups_idx].shape[0] > 4:
+                    XX, YY, ZZ = 4, 7, 9
+                    ao2 = ao_group[groups_idx][XX] + ao_group[groups_idx][YY] + ao_group[groups_idx][ZZ]
+                    c1 = _dot_ao_dm(mol, ao2, cpos, non0tab, shls_slice, ao_loc)
+                    rho[4] = _contract_rho(c0_group[0][groups_idx], c1)
+                    rho[4] += rho[5]
+                    rho[4] *= 2
+                else:
+                    rho[4] = 0
+            rho[1:4] *= 2
+            rho[tau_idx] *= .5
+            rho_group.append(rho)
+    return rho_group
 
 def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     thresh=1e-10
@@ -493,6 +556,7 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
 
 def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
            max_memory=2000, verbose=None):
+    print("========== INFO: enter nr_rks function")
     log = logger.new_logger(mol, verbose)
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
@@ -539,15 +603,24 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     p0 = p1 = 0
     t1 = t0 = log.init_timer()
     # TODO: replace ni.block_loop with ni.grouped_block_loop
-    for ao_mask, idx, weight, _ in ni.block_loop(mol, grids, nao, ao_deriv):
-        p1 = p0 + weight.size
+    for ao_mask_group, idx_group, weight_group, _ in ni.grouped_block_loop(mol, grids, nao, ao_deriv):
+        groups = len(ao_mask_group)
         for i in range(nset):
             if mo_coeff is None:
-                rho_tot[i,:,p0:p1] = eval_rho(mol, ao_mask, dms[i][np.ix_(idx,idx)], xctype=xctype, hermi=1, with_lapl=with_lapl)
+                for groups_idx in range(groups):
+                    p1 = p0 + weight_group[groups_idx].size
+                    rho_tot[i,:,p0:p1] = eval_rho(mol, ao_mask_group[groups_idx], dms[i][np.ix_(idx_group[groups_idx], idx_group[groups_idx])], xctype=xctype, hermi=1, with_lapl=with_lapl)
+                    p0 = p1
             else:
-                mo_coeff_mask = mo_coeff[idx,:]
-                rho_tot[i,:,p0:p1] = eval_rho2(mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype, with_lapl)
-        p0 = p1
+                mo_coeff_mask_group = [mo_coeff[idx,:] for idx in idx_group]
+                # TODO: create eval_rho5 for grouped ao_mask
+                # eval_rho5 input: ao(256,128x128), mo(256, 64)
+                # ao 是一个 list, mo 是一个 list, 由上面那行代码创建
+                eval_rho5_res = eval_rho5(mol, ao_mask_group, mo_coeff_mask_group, mo_occ, None, xctype, with_lapl)
+                for groups_idx in range(groups):
+                    p1 = p0 + weight_group[groups_idx].size
+                    rho_tot[i,:,p0:p1] = eval_rho5_res[groups_idx]
+                    p0 = p1
         t1 = log.timer_debug2('eval rho slice', *t1)
     t0 = log.timer_debug1('eval rho', *t0)
 
@@ -572,28 +645,62 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     t1 = t0
     p0 = p1 = 0
     # TODO: repalce ni.block_loop with ni.grouped_block_loop
-    for ao_mask, idx, weight, _ in ni.block_loop(mol, grids, nao, ao_deriv):
-        p1 = p0 + weight.size
+    for ao_mask_group, idx_group, weight_group, _ in ni.grouped_block_loop(mol, grids, nao, ao_deriv):
+        groups = len(ao_mask_group)
         for i in range(nset):
             #TODO: replace dot with grouped gemm, loop for other operations
             if xctype == 'LDA':
-                aow = _scale_ao(ao_mask, wv[i][0,p0:p1])
-                add_sparse(vmat[i], ao_mask.dot(aow.T), idx)
+                # aow = _scale_ao(ao_mask, wv[i][0,p0:p1])
+                # add_sparse(vmat[i], ao_mask.dot(aow.T), idx) # 把 dot 换成 group gemm, _scale_ao 改成循环
+                aow_group = []
+                for groups_idx in range(groups):
+                    p1 = p0 + weight_group[groups_idx].size
+                    aow = _scale_ao(ao_mask_group[groups_idx], wv[i][0,p0:p1])
+                    p0 = p1
+                    aow_group.append(aow.T)
+                dot_res_group = grouped_dot(ao_mask_group, aow_group)
+                for groups_idx in range(groups):
+                    add_sparse(vmat[i], dot_res_group[groups_idx], idx_group[groups_idx])
             elif xctype == 'GGA':
-                aow = _scale_ao(ao_mask, wv[i][:,p0:p1])
-                add_sparse(vmat[i], ao_mask[0].dot(aow.T), idx)
+                # aow = _scale_ao(ao_mask, wv[i][:,p0:p1])
+                # add_sparse(vmat[i], ao_mask[0].dot(aow.T), idx) # 把 dot 换成 group gemm, _scale_ao 改成循环
+                aow_group = []
+                ao_mask_0_group = []
+                for groups_idx in range(groups):
+                    p1 = p0 + weight_group[groups_idx].size
+                    aow = _scale_ao(ao_mask_group[groups_idx], wv[i][:,p0:p1])
+                    p0 = p1
+                    aow_group.append(aow.T)
+                    ao_mask_0_group.append(ao_mask_group[groups_idx][0])
+                dot_res_group = grouped_dot(ao_mask_0_group, aow_group)
+                for groups_idx in range(groups):
+                    add_sparse(vmat[i], dot_res_group[groups_idx], idx_group[groups_idx])
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             elif xctype == 'MGGA':
-                aow = _scale_ao(ao_mask, wv[i][:4,p0:p1])
-                vtmp = ao_mask[0].dot(aow.T)
-                vtmp+= _tau_dot(ao_mask, ao_mask, wv[i][4,p0:p1])
-                add_sparse(vmat[i], vtmp, idx)
+                # aow = _scale_ao(ao_mask, wv[i][:4,p0:p1])
+                # vtmp = ao_mask[0].dot(aow.T) # 把 dot 换成 group gemm, _scale_ao 改成循环
+                # vtmp+= _tau_dot(ao_mask, ao_mask, wv[i][4,p0:p1])
+                # add_sparse(vmat[i], vtmp, idx)
+                aow_group = []
+                ao_mask_0_group = []
+                p0_raw = p0
+                for groups_idx in range(groups):
+                    p1 = p0 + weight_group[groups_idx].size
+                    aow = _scale_ao(ao_mask_group[groups_idx], wv[i][:4,p0:p1])
+                    p0 = p1
+                    aow_group.append(aow.T)
+                    ao_mask_0_group.append(ao_mask_group[groups_idx][0])
+                dot_res_group = grouped_dot(ao_mask_0_group, aow_group)
+                p0 = p0_raw
+                for groups_idx in range(groups):
+                    p1 = p0 + weight_group[groups_idx].size
+                    add_sparse(vmat[i], dot_res_group[groups_idx] + _tau_dot(ao_mask_group[groups_idx], ao_mask_group[groups_idx], wv[i][4,p0:p1]), idx_group[groups_idx])
+                    p0 = p1
             elif xctype == 'HF':
                 pass
             else:
                 raise NotImplementedError(f'numint.nr_rks for functional {xc_code}')
-        p0 = p1
         t1 = log.timer_debug2('integration', *t1)
     t0 = log.timer_debug1('vxc integration', *t0)
     rev_ao_idx = opt.rev_ao_idx
@@ -1402,6 +1509,12 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
 
+    ao_mask_group = []
+    idx_group = []
+    weight_group = []
+    coords_group = []
+    total_used_bytes = 0
+    mem_limit = get_avail_mem()
 
     mol = opt.mol
     with opt.gdft_envs_cache():
@@ -1414,8 +1527,8 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             # cache ao indices
             if (block_id, blksize, ngrids) not in ni.non0ao_idx:
                 ni.non0ao_idx[block_id, blksize, ngrids] = _sparse_index(mol, coords, opt.l_ctr_offsets)
-            else:
-                pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[block_id, blksize, ngrids]
+
+            pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[block_id, blksize, ngrids]
 
             ao_mask = eval_ao(
                 ni, mol, coords, deriv,
@@ -1431,7 +1544,21 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 else:
                     ao_mask[:,-pad:,:] = 0.0
             block_id += 1
-            yield ao_mask, idx, weight, coords
+            total_used_bytes += ao_mask.nbytes
+            if total_used_bytes < 0.4 * mem_limit:
+                ao_mask_group.append(ao_mask)
+                idx_group.append(idx)
+                weight_group.append(weight)
+                coords_group.append(coords)
+            else:
+                yield ao_mask_group, idx_group, weight_group, coords_group
+                ao_mask_group = []
+                idx_group = []
+                weight_group = []
+                coords_group = []
+                total_used_bytes = 0
+        if total_used_bytes > 0:
+            yield ao_mask_group, idx_group, weight_group, coords_group
 
 class NumInt(numint.NumInt):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
@@ -1480,7 +1607,9 @@ class NumInt(numint.NumInt):
     # cannot patch this function
     eval_xc_eff = eval_xc_eff
     block_loop = _block_loop
+    grouped_block_loop = _grouped_block_loop
     eval_rho2 = eval_rho2
+    eval_rho5 = eval_rho5
     eval_ao = eval_ao
     #eval_rho2 = staticmethod(eval_rho2)
 

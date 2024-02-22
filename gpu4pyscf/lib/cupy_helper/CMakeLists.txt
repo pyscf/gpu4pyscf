@@ -17,6 +17,8 @@
 
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80")
 
+set(ARCH "70;80")
+
 add_library(cupy_helper SHARED
   transpose.cu
   block_diag.cu
@@ -25,9 +27,10 @@ add_library(cupy_helper SHARED
   async_d2h_2d.cu
   add_sparse.cu
   dist_matrix.cu
+  dgemm_cutlass_grouped_gemm.cu
+  dgemm_cutlass_grouped_gemm_2.cu
 )
+target_include_directories(cupy_helper PRIVATE ${cutlass_SOURCE_DIR}/tools/util/include ${cutlass_SOURCE_DIR}/include)
 
-set_target_properties(cupy_helper PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-
-target_link_libraries(cupy_helper)
+set_target_properties(cupy_helper PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+set_target_properties(cupy_helper PROPERTIES CUDA_ARCHITECTURES "${ARCH}")
