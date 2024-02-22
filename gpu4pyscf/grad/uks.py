@@ -25,7 +25,7 @@ import pyscf
 from pyscf import lib
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.grad import rks as rks_grad
-from gpu4pyscf.dft import numint
+from gpu4pyscf.dft import numint, xc_deriv
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, add_sparse, load_library, take_last2d, tag_array
 from gpu4pyscf.lib import logger
 from pyscf import __config__
@@ -85,17 +85,22 @@ def get_veff(ks_grad, mol=None, dm=None):
                 xc = mf.xc
             else:
                 xc = mf.nlc
-            dma =  dm[0]
-            dma = tag_array(dma, mo_coeff=mf.mo_coeff[0], mo_occ=mf.mo_occ[0])
-            dmb =  dm[1]
-            dmb = tag_array(dmb, mo_coeff=mf.mo_coeff[1], mo_occ=mf.mo_occ[1])
-            enlc, vnlc = rks_grad.get_nlc_vxc(
-                ni, mol, nlcgrids, xc, dma,
+            # dma =  dm[0]
+            # dma = tag_array(dma, mo_coeff=mf.mo_coeff[0], mo_occ=mf.mo_occ[0])
+            # dmb =  dm[1]
+            # dmb = tag_array(dmb, mo_coeff=mf.mo_coeff[1], mo_occ=mf.mo_occ[1])
+            # enlc, vnlc = rks_grad.get_nlc_vxc(
+            #     ni, mol, nlcgrids, xc, dma,
+            #     max_memory=max_memory, verbose=ks_grad.verbose)
+            # vxc_tmp[0] += vnlc
+            # enlc, vnlc = rks_grad.get_nlc_vxc(
+            #     ni, mol, nlcgrids, xc, dmb,
+            #     max_memory=max_memory, verbose=ks_grad.verbose)
+            # vxc_tmp[1] += vnlc
+            enlc, vnlc = get_nlc_vxc(
+                ni, mol, nlcgrids, xc, dm, mf.mo_coeff, mf.mo_occ,
                 max_memory=max_memory, verbose=ks_grad.verbose)
             vxc_tmp[0] += vnlc
-            enlc, vnlc = rks_grad.get_nlc_vxc(
-                ni, mol, nlcgrids, xc, dmb,
-                max_memory=max_memory, verbose=ks_grad.verbose)
             vxc_tmp[1] += vnlc
     t0 = logger.timer(ks_grad, 'vxc', *t0)
 
@@ -226,9 +231,9 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
-    dms = take_last2d(dms, opt.ao_idx)
-    # dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
-    #        for dm in dms.reshape(-1,nao0,nao0)]
+    # dms = take_last2d(dms, opt.ao_idx)
+    dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
+           for dm in dms.reshape(-1,nao0,nao0)]
     # mo_coeff = cupy.einsum('pq,sqt->spt',coeff,mo_coeff)
     # mo_coeff = coeff @ mo_coeff
     
@@ -243,7 +248,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         mem_avail = get_avail_mem()
         comp = (ao_deriv+1)*(ao_deriv+2)*(ao_deriv+3)//6
         block_size = int((mem_avail*.4/8/(comp+1)/nao - 3*nao*2)/ ALIGNED) * ALIGNED
-        block_size = min(block_size//2, MIN_BLK_SIZE)
+        block_size = min(block_size, MIN_BLK_SIZE)
         log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
 
         if block_size < ALIGNED:
@@ -299,11 +304,69 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     vmat[1] += vtmp
 
     excsum = None
-    vmat = take_last2d(vmat, opt.rev_ao_idx)
-    # vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
+    # vmat = take_last2d(vmat, opt.rev_ao_idx)
+    vmat = cupy.einsum('pi,snpq,qj->snij', coeff, vmat, coeff)
 
     # - sign because nabla_X = -nabla_x
     return excsum, -vmat
+
+
+def get_nlc_vxc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, hermi=1,
+                max_memory=2000, verbose=None):
+    xctype = ni._xc_type(xc_code)
+    opt = getattr(ni, 'gdftopt', None)
+    if opt is None:
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+
+    mo_occ = cupy.asarray(mo_occ)
+    mo_coeff = cupy.asarray(mo_coeff)
+
+    mol = opt.mol
+    coeff = cupy.asarray(opt.coeff)
+    nao, nao0 = coeff.shape
+    mo_coeff_0 = coeff @ mo_coeff[0]
+    mo_coeff_1 = coeff @ mo_coeff[1]
+    nset = 1
+    assert nset == 1
+
+    nlc_coefs = ni.nlc_coeff(xc_code)
+    if len(nlc_coefs) != 1:
+        raise NotImplementedError('Additive NLC')
+    nlc_pars, fac = nlc_coefs[0]
+
+    ao_deriv = 2
+    vvrho = []
+    for ao_mask, mask, weight, coords \
+            in ni.block_loop(mol, grids, nao, ao_deriv, max_memory=max_memory):
+        mo_coeff_mask_0 = mo_coeff_0[mask]
+        mo_coeff_mask_1 = mo_coeff_1[mask]
+        rhoa = numint.eval_rho2(mol, ao_mask[:4], mo_coeff_mask_0, mo_occ[0], None, xctype, with_lapl=False)
+        rhob = numint.eval_rho2(mol, ao_mask[:4], mo_coeff_mask_1, mo_occ[1], None, xctype, with_lapl=False)
+        vvrho.append(rhoa + rhob)
+    rho = cupy.hstack(vvrho)
+
+    vxc = numint._vv10nlc(rho, grids.coords, rho, grids.weights,
+                          grids.coords, nlc_pars)[1]
+    vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
+
+    vmat = cupy.zeros((3,nao,nao))
+    p1 = 0
+    for ao_mask, mask, weight, coords \
+            in ni.block_loop(mol, grids, nao, ao_deriv, max_memory):
+        p0, p1 = p1, p1 + weight.size
+        wv = vv_vxc[:,p0:p1] * weight
+        wv[0] *= .5  # *.5 because vmat + vmat.T at the end
+        vmat_tmp = rks_grad._gga_grad_sum_(ao_mask, wv)
+        add_sparse(vmat, vmat_tmp, mask)
+
+    #vmat = contract('npq,qj->npj', vmat, coeff)
+    #vmat = contract('pi,npj->nij', coeff, vmat)
+    rev_ao_idx = opt.rev_ao_idx
+    vmat = take_last2d(vmat, rev_ao_idx)
+    exc = None
+    # - sign because nabla_X = -nabla_x
+    return exc, -vmat
 
 
 class Gradients(uhf_grad.Gradients, pyscf.grad.uks.Gradients):

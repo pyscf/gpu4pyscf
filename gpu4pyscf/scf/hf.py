@@ -383,10 +383,11 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     dm = cupy.asarray(dm0, order='C')
     if hasattr(dm0, 'mo_coeff') and hasattr(dm0, 'mo_occ'):
-        mo_coeff = cupy.asarray(dm0.mo_coeff)
-        mo_occ = cupy.asarray(dm0.mo_occ)
-        occ_coeff = cupy.asarray(mo_coeff[:,mo_occ>0])
-        dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
+        if dm0.ndim == 2:
+            mo_coeff = cupy.asarray(dm0.mo_coeff)
+            mo_occ = cupy.asarray(dm0.mo_occ)
+            occ_coeff = cupy.asarray(mo_coeff[:,mo_occ>0])
+            dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
 
     # use optimized workflow if possible
     if hasattr(mf, 'init_workflow'):

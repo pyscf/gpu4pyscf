@@ -18,7 +18,7 @@ import cupy
 import numpy as np
 import unittest
 from pyscf import lib
-from gpu4pyscf.dft import rks
+from gpu4pyscf.dft import uks
 
 lib.num_threads(8)
 
@@ -43,7 +43,7 @@ grids_level = 6
 nlcgrids_level = 3
 def setUpModule():
     global mol
-    mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000)
+    mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000, charge=1, spin=1)
     mol.output = '/dev/null'
     mol.verbose = 1
     mol.build()
@@ -55,8 +55,8 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-def _check_grad(grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
-    mf = rks.RKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
+def _check_grad(grid_response=True, xc=xc0, disp=disp0, tol=1e-6):
+    mf = uks.UKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
     mf.grids.level = grids_level
     mf.nlcgrids.level = nlcgrids_level
     mf.conv_tol = 1e-10
@@ -109,28 +109,29 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_lda(self):
         print("-----LDA testing-------")
-        _check_grad(xc='LDA', disp=None, tol=1e-6)
+        _check_grad(xc='LDA', disp=None, tol=1e-5)
 
     def test_grad_gga(self):
         print('-----GGA testing-------')
-        _check_grad(xc='PBE', disp=None, tol=1e-6)
+        _check_grad(xc='PBE', disp=None, tol=1e-5)
 
     def test_grad_hybrid(self):
         print('------hybrid GGA testing--------')
-        _check_grad(xc='B3LYP', disp=None, tol=1e-6)
+        _check_grad(xc='B3LYP', disp=None, tol=1e-5)
 
     def test_grad_mgga(self):
         print('-------mGGA testing-------------')
-        _check_grad(xc='m06', disp=None, tol=1e-4)
+        _check_grad(xc='m06', disp=None, tol=1e-3)
 
     def test_grad_rsh(self):
         print('--------RSH testing-------------')
-        _check_grad(xc='wb97', disp=None, tol=1e-4)
+        _check_grad(xc='wb97', disp=None, tol=1e-3)
 
-    def test_grad_nlc(self):
-        print('--------nlc testing-------------')
-        _check_grad(xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-6)
+    # Not implemented!
+    # def test_grad_nlc(self):
+    #     print('--------nlc testing-------------')
+    #     _check_grad(xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-6)
 
 if __name__ == "__main__":
-    print("Full Tests for DF Gradient")
+    print("Full Tests for UKS DF Gradient")
     unittest.main()

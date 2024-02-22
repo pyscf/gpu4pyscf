@@ -57,12 +57,11 @@ def get_veff(ks_grad, mol=None, dm=None):
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, ks_grad.max_memory*.9-mem_now)
     if ks_grad.grid_response:
-        exc, vxc = uks_grad.get_vxc_full_response(ni, mol, grids, mf.xc, dm,
+        exc, vxc_tmp = uks_grad.get_vxc_full_response(ni, mol, grids, mf.xc, dm,
                                          max_memory=max_memory,
                                          verbose=ks_grad.verbose)
         if mf.nlc or ni.libxc.is_nlc(mf.xc):
             raise NotImplementedError
-        logger.debug1(ks_grad, 'sum(grids response) %s', exc.sum(axis=0))
     else:
         exc, vxc_tmp = uks_grad.get_vxc(ni, mol, grids, mf.xc, dm,
                            max_memory=max_memory, verbose=ks_grad.verbose)
@@ -71,10 +70,23 @@ def get_veff(ks_grad, mol=None, dm=None):
                 xc = mf.xc
             else:
                 xc = mf.nlc
-            enlc, vnlc = rks_grad.get_nlc_vxc(
-                ni, mol, nlcgrids, xc, dm[0]+dm[1],
+            # dma =  dm[0]
+            # dma = tag_array(dma, mo_coeff=mf.mo_coeff[0], mo_occ=mf.mo_occ[0])
+            # dmb =  dm[1]
+            # dmb = tag_array(dmb, mo_coeff=mf.mo_coeff[1], mo_occ=mf.mo_occ[1])
+            # enlc, vnlc = rks_grad.get_nlc_vxc(
+            #     ni, mol, nlcgrids, xc, dma,
+            #     max_memory=max_memory, verbose=ks_grad.verbose)
+            # vxc_tmp[0] += vnlc
+            # enlc, vnlc = rks_grad.get_nlc_vxc(
+            #     ni, mol, nlcgrids, xc, dmb,
+            #     max_memory=max_memory, verbose=ks_grad.verbose)
+            # vxc_tmp[1] += vnlc
+            enlc, vnlc = uks_grad.get_nlc_vxc(
+                ni, mol, nlcgrids, xc, dm, mf.mo_coeff, mf.mo_occ,
                 max_memory=max_memory, verbose=ks_grad.verbose)
-            vxc_tmp += vnlc
+            vxc_tmp[0] += vnlc
+            vxc_tmp[1] += vnlc
     t0 = logger.timer(ks_grad, 'vxc', *t0)
 
     mo_coeff_alpha = mf.mo_coeff[0]
@@ -121,9 +133,9 @@ def get_veff(ks_grad, mol=None, dm=None):
         if omega != 0:
             vk_lr0, vkaux_lr0 = ks_grad.get_k(mol, dm[0], mo_coeff=ks_grad.base.mo_coeff[0], mo_occ=ks_grad.base.mo_occ[0], omega=omega)
             vk_lr1, vkaux_lr1 = ks_grad.get_k(mol, dm[1], mo_coeff=ks_grad.base.mo_coeff[1], mo_occ=ks_grad.base.mo_occ[1], omega=omega) 
-            vk += (vk_lr0-vk_lr1) * (alpha-hyb)
+            vk += (vk_lr0 + vk_lr1) * (alpha-hyb)
             if ks_grad.auxbasis_response:
-                vk_aux += (vkaux_lr0-vkaux_lr1) * (alpha-hyb)
+                vk_aux += (vkaux_lr0 + vkaux_lr1) * (alpha-hyb)
                 
         vxc += vj - vk
         if ks_grad.auxbasis_response:
