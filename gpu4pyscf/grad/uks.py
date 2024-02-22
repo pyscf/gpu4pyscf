@@ -120,7 +120,7 @@ def get_veff(ks_grad, mol=None, dm=None):
     aoslices = mol.aoslice_by_atom()
     vxc = [vxc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
     vxc = cupy.asarray(vxc)
-    
+
     if not ni.libxc.is_hybrid_xc(mf.xc):
         vj = ks_grad.get_j(mol, dm[0]+dm[1])
         vxc += vj
@@ -131,10 +131,10 @@ def get_veff(ks_grad, mol=None, dm=None):
         vj0 = ks_grad.get_jk(mol, dm[0]+dm[1])[0]
         vk = (vk0+vk1) * hyb
         if omega != 0:
-            vk_lr0 = ks_grad.get_k(mol, dm[0], omega=omega) 
-            vk_lr1 = ks_grad.get_k(mol, dm[1], omega=omega) 
+            vk_lr0 = ks_grad.get_k(mol, dm[0], omega=omega)
+            vk_lr1 = ks_grad.get_k(mol, dm[1], omega=omega)
             vk += (vk_lr0+vk_lr1) * (alpha - hyb)
-            
+
         vxc += vj0 - vk
 
     return vxc
@@ -167,7 +167,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             mo_coeff_mask = mo_coeff[:,idx,:]
             rho_a = numint.eval_rho2(opt.mol, ao_mask[0], mo_coeff_mask[0], mo_occ[0], None, xctype)
             rho_b = numint.eval_rho2(opt.mol, ao_mask[0], mo_coeff_mask[1], mo_occ[1], None, xctype)
-            
+
             vxc = ni.eval_xc_eff(xc_code, cupy.array([rho_a,rho_b]), 1, xctype=xctype)[1]
             wv = weight * vxc[:,0]
             aow = numint._scale_ao(ao_mask[0], wv[0])
@@ -182,7 +182,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             mo_coeff_mask = mo_coeff[:,idx,:]
             rho_a = numint.eval_rho2(opt.mol, ao_mask[:4], mo_coeff_mask[0], mo_occ[0], None, xctype)
             rho_b = numint.eval_rho2(opt.mol, ao_mask[:4], mo_coeff_mask[1], mo_occ[1], None, xctype)
-            
+
             vxc = ni.eval_xc_eff(xc_code, cupy.array([rho_a,rho_b]), 1, xctype=xctype)[1]
             wv = weight * vxc
             wv[:,0] *= .5
@@ -236,7 +236,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
            for dm in dms.reshape(-1,nao0,nao0)]
     # mo_coeff = cupy.einsum('pq,sqt->spt',coeff,mo_coeff)
     # mo_coeff = coeff @ mo_coeff
-    
+
     excsum = 0
     vmat = cupy.zeros((2,3,nao,nao))
     with opt.gdft_envs_cache():
@@ -371,26 +371,5 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
 
 class Gradients(uhf_grad.Gradients, pyscf.grad.uks.Gradients):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
-    
+
     get_veff = get_veff
-    
-    def get_dispersion(self):
-        if self.base.disp[:2].upper() == 'D3':
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                import dftd3.pyscf as disp
-                d3 = disp.DFTD3Dispersion(self.mol, xc=self.base.xc, version=self.base.disp)
-                _, g_d3 = d3.kernel()
-            return g_d3
-
-        if self.base.disp[:2].upper() == 'D4':
-            from pyscf.data.elements import charge
-            atoms = np.array([ charge(a[0]) for a in self.mol._atom])
-            coords = self.mol.atom_coords()
-
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                from dftd4.interface import DampingParam, DispersionModel
-                model = DispersionModel(atoms, coords)
-                res = model.get_dispersion(DampingParam(method=self.base.xc), grad=True)
-            return res.get("gradient")

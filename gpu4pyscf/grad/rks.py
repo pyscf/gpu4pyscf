@@ -199,7 +199,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
-    dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
+    dms = [coeff @ dm @ coeff.T
            for dm in dms.reshape(-1,nao0,nao0)]
     mo_coeff = coeff @ mo_coeff
     nset = len(dms)
@@ -507,16 +507,3 @@ class Gradients(rhf_grad.Gradients, pyscf.grad.rks.Gradients):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     get_veff = _get_veff
-
-    def get_dispersion(self):
-        if self.base.disp[:2].upper() == 'D3':
-            from gpu4pyscf.lib import dftd3
-            dftd3_model = dftd3.DFTD3Dispersion(self.base.mol, xc=self.base.xc, version=self.base.disp)
-            res = dftd3_model.get_dispersion(grad=True)
-            return res['gradient']
-
-        if self.base.disp[:2].upper() == 'D4':
-            from gpu4pyscf.lib import dftd4
-            dftd4_model = dftd4.DFTD4Dispersion(self.base.mol, xc=self.base.xc)
-            res = dftd4_model.get_dispersion(grad=True)
-            return res.get("gradient")

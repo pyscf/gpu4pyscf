@@ -15,18 +15,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
 from functools import reduce
-from pyscf.scf import uhf
-from gpu4pyscf.scf.hf import _get_jk, eigh, damping, level_shift, _kernel
-from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import tag_array
 import numpy as np
 import cupy
+from pyscf.scf import uhf
+from pyscf import lib as pyscf_lib
+from gpu4pyscf.scf.hf import _get_jk, eigh, damping, level_shift, _kernel
+from gpu4pyscf.scf import hf
+from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf import lib
 from gpu4pyscf.scf import diis
-from pyscf import lib as pyscf_lib
-
 
 def make_rdm1(mo_coeff, mo_occ, **kwargs):
     '''One-particle density matrix in AO representation
@@ -54,7 +53,7 @@ def spin_square(mo, s=1):
     r'''Spin square and multiplicity of UHF determinant
 
     Detailed derivataion please refers to the cpu pyscf.
-        
+
     '''
     mo_a, mo_b = mo
     nocc_a = mo_a.shape[1]
@@ -109,30 +108,60 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
 class UHF(uhf.UHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
+    _keys = {'e_disp', 'screen_tol', 'conv_tol_cpscf'}
+
+    screen_tol = 1e-14
+    conv_tol_cpscf = 1e-3
     DIIS = diis.SCF_DIIS
     get_jk = _get_jk
     _eigh = staticmethod(eigh)
     get_fock = get_fock
-    
+    get_hcore = hf.RHF.get_hcore
+    get_ovlp = hf.RHF.get_ovlp
+    get_init_guess = hf.return_cupy_array(uhf.UHF.get_init_guess)
+    density_fit = hf.RHF.density_fit
+    energy_tot = hf.RHF.energy_tot
+
+    make_rdm2 = NotImplemented
+    dump_chk = NotImplemented
+    newton = NotImplemented
+    x2c = x2c1e = sfx2c1e = NotImplemented
+    to_rhf = NotImplemented
+    to_uhf = NotImplemented
+    to_ghf = NotImplemented
+    to_rks = NotImplemented
+    to_uks = NotImplemented
+    to_gks = NotImplemented
+    to_ks = NotImplemented
+    canonicalize = NotImplemented
+    # TODO: Enable followings after testing
+    analyze = NotImplemented
+    stability = NotImplemented
+    mulliken_pop = NotImplemented
+    mulliken_spin_pop = NotImplemented
+    mulliken_meta = NotImplemented
+    mulliken_meta_spin = NotImplemented
+    det_ovlp = NotImplemented
+
     def make_rdm1(self, mo_coeff=None, mo_occ=None, **kwargs):
         if mo_coeff is None:
             mo_coeff = self.mo_coeff
         if mo_occ is None:
             mo_occ = self.mo_occ
         return make_rdm1(mo_coeff, mo_occ, **kwargs)
-    
+
     def eig(self, fock, s):
         e_a, c_a = self._eigh(fock[0], s)
         e_b, c_b = self._eigh(fock[1], s)
         return cupy.array((e_a,e_b)), cupy.array((c_a,c_b))
-    
+
     def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
-        
+
         if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
             dm = cupy.asarray((dm*.5,dm*.5))
-            
+
         if self._eri is not None or not self.direct_scf:
             vj, vk = self.get_jk(mol, cupy.asarray(dm), hermi)
             vhf = vj[0] + vj[1] - vk
@@ -142,7 +171,7 @@ class UHF(uhf.UHF):
             vhf = vj[0] + vj[1] - vk
             vhf += cupy.asarray(vhf_last)
         return vhf
-    
+
     def scf(self, dm0=None, **kwargs):
         cput0 = logger.init_timer(self)
 
@@ -164,7 +193,7 @@ class UHF(uhf.UHF):
         self._finalize()
         return self.e_tot
     kernel = pyscf_lib.alias(scf, alias_name='kernel')
-    
+
     def spin_square(self, mo_coeff=None, s=None):
         if mo_coeff is None:
             mo_coeff = (self.mo_coeff[0][:,self.mo_occ[0]>0],
@@ -173,11 +202,7 @@ class UHF(uhf.UHF):
             s = self.get_ovlp()
         return spin_square(mo_coeff, s)
 
-    def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
-        import gpu4pyscf.df.df_jk
-        return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
-
     def nuc_grad_method(self):
         from gpu4pyscf.grad import uhf
         return uhf.Gradients(self)
-    
+

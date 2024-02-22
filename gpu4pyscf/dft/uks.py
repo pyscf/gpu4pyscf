@@ -18,9 +18,9 @@
 import cupy
 from pyscf.dft import uks
 from pyscf import lib
-from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid, rks
+from gpu4pyscf.scf.uhf import UHF
 from gpu4pyscf.lib.cupy_helper import tag_array
 
 
@@ -35,7 +35,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
 
     if hasattr(ks, 'screen_tol') and ks.screen_tol is not None:
         ks.direct_scf_tol = ks.screen_tol
-    ground_state = (isinstance(dm, cupy.ndarray) and dm.ndim == 3)
+    ground_state = getattr(dm, 'ndim', 0) == 3
 
     ni = ks._numint
     if hermi == 2:  # because rho = 0
@@ -112,7 +112,7 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     return rks.energy_elec(ks, dm, h1e, vhf)
 
 
-class UKS(scf.uhf.UHF, uks.UKS):
+class UKS(uks.UKS, UHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
     _keys = {'disp', 'screen_tol'}
 
@@ -121,7 +121,7 @@ class UKS(scf.uhf.UHF, uks.UKS):
         self.disp = disp
         self._numint = numint.NumInt()
         self.screen_tol = 1e-14
-        
+
         grids_level = self.grids.level
         self.grids = gen_grid.Grids(mol)
         self.grids.level = grids_level
@@ -129,10 +129,10 @@ class UKS(scf.uhf.UHF, uks.UKS):
         nlcgrids_level = self.nlcgrids.level
         self.nlcgrids = gen_grid.Grids(mol)
         self.nlcgrids.level = nlcgrids_level
-        
+
     energy_elec = energy_elec
     get_veff = get_veff
-    
+    to_hf = NotImplemented
     def nuc_grad_method(self):
         from gpu4pyscf.grad import uks as uks_grad
         return uks_grad.Gradients(self)

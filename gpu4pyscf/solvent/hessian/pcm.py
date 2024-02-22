@@ -131,7 +131,11 @@ def hess_elec(pcmobj, dm, verbose=None):
         pcmobj.reset(mol)
         e, v = pcmobj._get_vind(dm)
         #return grad_elec(pcmobj, dm)
-        return grad_nuc(pcmobj, dm) + grad_solver(pcmobj, dm) + grad_qv(pcmobj, dm)
+        pcm_grad = grad_nuc(pcmobj, dm)
+        pcm_grad+= grad_solver(pcmobj, dm)
+        pcm_grad+= grad_qv(pcmobj, dm)
+        return pcm_grad
+
     mol.verbose = 0
     de = numpy.zeros([mol.natm, mol.natm, 3, 3])
     eps = 1e-3
@@ -224,44 +228,49 @@ def analytic_grad_vmat(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
     pcmobj.reset(pmol)
     return vmat
 """
+
 def make_hess_object(hess_method):
-    '''
-    return solvent hessian object
-    '''
-    hess_method_class = hess_method.__class__
-    class WithSolventHess(hess_method_class):
-        def __init__(self, hess_method):
-            self.__dict__.update(hess_method.__dict__)
-            self.de_solvent = None
-            self.de_solute = None
-            self._keys = self._keys.union(['de_solvent', 'de_solute'])
+    if hess_method.base.with_solvent.frozen:
+        raise RuntimeError('Frozen solvent model is not avialbe for energy hessian')
 
-        def kernel(self, *args, dm=None, atmlst=None, **kwargs):
-            dm = kwargs.pop('dm', None)
-            if dm is None:
-                dm = self.base.make_rdm1(ao_repr=True)
-            is_equilibrium = self.base.with_solvent.equilibrium_solvation
-            self.base.with_solvent.equilibrium_solvation = True
-            self.de_solvent = hess_elec(self.base.with_solvent, dm, verbose=self.verbose)
-            #self.de_solvent+= hess_nuc(self.base.with_solvent)
-            self.de_solute = hess_method_class.kernel(self, *args, **kwargs)
-            self.de = self.de_solute + self.de_solvent
-            self.base.with_solvent.equilibrium_solvation = is_equilibrium
-            return self.de
+    name = (hess_method.base.with_solvent.__class__.__name__
+            + hess_method.__class__.__name__)
+    return lib.set_class(WithSolventHess(hess_method),
+                         (WithSolventHess, hess_method.__class__), name)
 
-        def make_h1(self, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
-            if atmlst is None:
-                atmlst = range(self.mol.natm)
-            h1ao = hess_method_class.make_h1(self, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
-            dv = fd_grad_vmat(self.base.with_solvent, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
-            for i0, ia in enumerate(atmlst):
-                h1ao[i0] += dv[i0]
-            return h1ao
+class WithSolventHess:
+    _keys = {'de_solvent', 'de_solute'}
 
-        def _finalize(self):
-            # disable _finalize. It is called in grad_method.kernel method
-            # where self.de was not yet initialized.
-            pass
+    def __init__(self, hess_method):
+        self.__dict__.update(hess_method.__dict__)
+        self.de_solvent = None
+        self.de_solute = None
 
-    return WithSolventHess(hess_method)
+    def kernel(self, *args, dm=None, atmlst=None, **kwargs):
+        dm = kwargs.pop('dm', None)
+        if dm is None:
+            dm = self.base.make_rdm1(ao_repr=True)
+        is_equilibrium = self.base.with_solvent.equilibrium_solvation
+        self.base.with_solvent.equilibrium_solvation = True
+        self.de_solvent = hess_elec(self.base.with_solvent, dm, verbose=self.verbose)
+        #self.de_solvent+= hess_nuc(self.base.with_solvent)
+        self.de_solute = super().kernel(*args, **kwargs)
+        self.de = self.de_solute + self.de_solvent
+        self.base.with_solvent.equilibrium_solvation = is_equilibrium
+        return self.de
+
+    def make_h1(self, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
+        if atmlst is None:
+            atmlst = range(self.mol.natm)
+        h1ao = super().make_h1(mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
+        dv = fd_grad_vmat(self.base.with_solvent, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
+        for i0, ia in enumerate(atmlst):
+            h1ao[i0] += dv[i0]
+        return h1ao
+
+    def _finalize(self):
+        # disable _finalize. It is called in grad_method.kernel method
+        # where self.de was not yet initialized.
+        pass
+
 

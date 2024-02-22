@@ -32,23 +32,28 @@ grids_level = 6
 eps = 1e-3
 
 def setUpModule():
-    global mol
-    mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000)
-    mol.build(output='/dev/null')
-    mol.verbose = 1
+    global mol_sph, mol_cart
+    mol_sph = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=0)
+    mol_sph.build(output='/dev/null')
+    mol_sph.verbose = 1
+
+    mol_cart = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=1)
+    mol_cart.build(output='/dev/null')
+    mol_cart.verbose = 1
 
 def tearDownModule():
-    global mol
-    mol.stdout.close()
-    del mol
+    global mol_sph, mol_cart
+    mol_sph.stdout.close()
+    mol_cart.stdout.close()
+    del mol_sph, mol_cart
 
-def _make_rhf():
+def _make_rhf(mol):
     mf = scf.RHF(mol).density_fit(auxbasis='ccpvtz-jkfit')
     mf.conv_tol = 1e-12
     mf.kernel()
     return mf
 
-def _make_rks(xc, disp=None):
+def _make_rks(mol, xc, disp=None):
     mf = dft.rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis0)
     mf.conv_tol = 1e-12
     mf.disp = disp
@@ -108,7 +113,8 @@ def _check_dft_hessian(mf, h, ix=0, iy=0, tol=1e-3):
 class KnownValues(unittest.TestCase):
     def test_hessian_rhf(self):
         print('-----testing DF RHF Hessian----')
-        mf = _make_rhf()
+        mf = _make_rhf(mol_sph)
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
@@ -117,7 +123,8 @@ class KnownValues(unittest.TestCase):
 
     def test_hessian_lda(self):
         print('-----testing DF LDA Hessian----')
-        mf = _make_rks('LDA')
+        mf = _make_rks(mol_sph, 'LDA')
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
@@ -126,7 +133,8 @@ class KnownValues(unittest.TestCase):
 
     def test_hessian_gga(self):
         print('-----testing DF PBE Hessian----')
-        mf = _make_rks('PBE')
+        mf = _make_rks(mol_sph, 'PBE')
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
@@ -135,7 +143,8 @@ class KnownValues(unittest.TestCase):
 
     def test_hessian_hybrid(self):
         print('-----testing DF B3LYP Hessian----')
-        mf = _make_rks('b3lyp')
+        mf = _make_rks(mol_sph, 'b3lyp')
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
@@ -144,7 +153,8 @@ class KnownValues(unittest.TestCase):
 
     def test_hessian_mgga(self):
         print('-----testing DF M06 Hessian----')
-        mf = _make_rks('m06')
+        mf = _make_rks(mol_sph, 'm06')
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
@@ -153,7 +163,8 @@ class KnownValues(unittest.TestCase):
 
     def test_hessian_rsh(self):
         print('-----testing DF wb97 Hessian----')
-        mf = _make_rks('wb97')
+        mf = _make_rks(mol_sph, 'wb97')
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
@@ -161,11 +172,12 @@ class KnownValues(unittest.TestCase):
         _check_dft_hessian(mf, h, ix=0,iy=1)
 
     def test_hessian_D3(self):
-        pmol = mol.copy()
+        pmol = mol_sph.copy()
         pmol.build()
 
         mf = dft.rks.RKS(pmol, xc='B3LYP', disp='d3bj').density_fit(auxbasis=auxbasis0)
         mf.conv_tol = 1e-12
+        mf.conv_tol_cpscf = 1e-7
         mf.grids.level = grids_level
         mf.verbose = 1
         mf.kernel()
@@ -176,11 +188,12 @@ class KnownValues(unittest.TestCase):
         hobj.kernel()
 
     def test_hessian_D4(self):
-        pmol = mol.copy()
+        pmol = mol_sph.copy()
         pmol.build()
 
         mf = dft.rks.RKS(pmol, xc='B3LYP', disp='d4').density_fit(auxbasis=auxbasis0)
         mf.conv_tol = 1e-12
+        mf.conv_tol_cpscf = 1e-7
         mf.grids.level = grids_level
         mf.verbose = 1
         mf.kernel()
@@ -189,6 +202,16 @@ class KnownValues(unittest.TestCase):
         hobj.set(auxbasis_response=2)
         hobj.verbose=0
         hobj.kernel()
+
+    def test_hessian_cart(self):
+        print('-----testing DF Hessian (cartesian)----')
+        mf = _make_rks(mol_cart, 'b3lyp')
+        mf.conv_tol_cpscf = 1e-7
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+        _check_dft_hessian(mf, h, ix=0,iy=1)
 
 if __name__ == "__main__":
     print("Full Tests for DF Hessian")

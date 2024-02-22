@@ -42,20 +42,25 @@ disp0 = 'd3bj'
 grids_level = 6
 nlcgrids_level = 3
 def setUpModule():
-    global mol
-    mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000)
-    mol.output = '/dev/null'
-    mol.verbose = 1
-    mol.build()
+    global mol_cart, mol_sph
+    mol_sph = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=0)
+    mol_sph.output = '/dev/null'
+    mol_sph.verbose = 1
+    mol_sph.build()
 
+    mol_cart = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=1)
+    mol_cart.output = '/dev/null'
+    mol_cart.verbose = 1
+    mol_cart.build()
 eps = 1.0/1024
 
 def tearDownModule():
-    global mol
-    mol.stdout.close()
-    del mol
+    global mol_sph, mol_cart
+    mol_sph.stdout.close()
+    mol_cart.stdout.close()
+    del mol_sph, mol_cart
 
-def _check_grad(grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
+def _check_grad(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
     mf = rks.RKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
     mf.grids.level = grids_level
     mf.nlcgrids.level = nlcgrids_level
@@ -101,36 +106,39 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_with_grids_response(self):
         print("-----testing DF DFT gradient with grids response----")
-        _check_grad(grid_response=True)
+        _check_grad(mol_sph, grid_response=True, disp=None)
 
     def test_grad_without_grids_response(self):
         print('-----testing DF DFT gradient without grids response----')
-        _check_grad(grid_response=False)
+        _check_grad(mol_sph, grid_response=False, disp=None)
 
     def test_grad_lda(self):
         print("-----LDA testing-------")
-        _check_grad(xc='LDA', disp=None, tol=1e-6)
+        _check_grad(mol_sph, xc='LDA', disp=None, tol=1e-6)
 
     def test_grad_gga(self):
         print('-----GGA testing-------')
-        _check_grad(xc='PBE', disp=None, tol=1e-6)
+        _check_grad(mol_sph, xc='PBE', disp=None, tol=1e-6)
 
     def test_grad_hybrid(self):
         print('------hybrid GGA testing--------')
-        _check_grad(xc='B3LYP', disp=None, tol=1e-6)
+        _check_grad(mol_sph, xc='B3LYP', disp=None, tol=1e-6)
 
     def test_grad_mgga(self):
         print('-------mGGA testing-------------')
-        _check_grad(xc='m06', disp=None, tol=1e-4)
+        _check_grad(mol_sph, xc='m06', disp=None, tol=1e-4)
 
     def test_grad_rsh(self):
         print('--------RSH testing-------------')
-        _check_grad(xc='wb97', disp=None, tol=1e-4)
+        _check_grad(mol_sph, xc='wb97', disp=None, tol=1e-4)
 
     def test_grad_nlc(self):
         print('--------nlc testing-------------')
-        _check_grad(xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-6)
+        _check_grad(mol_sph, xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-6)
 
+    def test_grad_cart(self):
+        print('------ Cart testing--------')
+        _check_grad(mol_cart, xc='B3LYP', disp=None, tol=1e-6)
 if __name__ == "__main__":
     print("Full Tests for DF Gradient")
     unittest.main()
