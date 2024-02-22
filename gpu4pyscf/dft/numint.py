@@ -609,7 +609,8 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             if mo_coeff is None:
                 for groups_idx in range(groups):
                     p1 = p0 + weight_group[groups_idx].size
-                    rho_tot[i,:,p0:p1] = eval_rho(mol, ao_mask_group[groups_idx], dms[i][np.ix_(idx_group[groups_idx], idx_group[groups_idx])], xctype=xctype, hermi=1, with_lapl=with_lapl)
+                    rho_tot[i,:,p0:p1] = eval_rho(mol, ao_mask_group[groups_idx], dms[i][np.ix_(idx_group[groups_idx], idx_group[groups_idx])],
+                                                  xctype=xctype, hermi=1, with_lapl=with_lapl)
                     p0 = p1
             else:
                 mo_coeff_mask_group = [mo_coeff[idx,:] for idx in idx_group]
@@ -695,7 +696,8 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 p0 = p0_raw
                 for groups_idx in range(groups):
                     p1 = p0 + weight_group[groups_idx].size
-                    add_sparse(vmat[i], dot_res_group[groups_idx] + _tau_dot(ao_mask_group[groups_idx], ao_mask_group[groups_idx], wv[i][4,p0:p1]), idx_group[groups_idx])
+                    add_sparse(vmat[i], dot_res_group[groups_idx] + _tau_dot(ao_mask_group[groups_idx], ao_mask_group[groups_idx], wv[i][4,p0:p1]),
+                               idx_group[groups_idx])
                     p0 = p1
             elif xctype == 'HF':
                 pass
