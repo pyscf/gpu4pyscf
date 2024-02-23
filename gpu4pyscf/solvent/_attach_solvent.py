@@ -89,7 +89,10 @@ def _for_scf(mf, solvent_obj, dm=None):
                 vhf = self.get_veff(self.mol, dm)
 
             e_tot, e_coul = oldMF.energy_elec(self, dm, h1e, vhf)
-            e_tot += vhf.e_solvent
+            e_solvent = vhf.e_solvent
+            if isinstance(e_solvent, cupy.ndarray):
+                e_solvent = e_solvent.get()[()]
+            e_tot += e_solvent
             self.scf_summary['e_solvent'] = vhf.e_solvent.real
 
             if self.with_solvent.method.upper() == 'SMD':
@@ -98,10 +101,13 @@ def _for_scf(mf, solvent_obj, dm=None):
                     self.with_solvent.e_cds = e_cds
                 else:
                     e_cds = self.with_solvent.e_cds
+                if isinstance(e_cds, cupy.ndarray):
+                    e_cds = e_cds.get()[()]
                 e_tot += e_cds
                 self.scf_summary['e_cds'] = e_cds
                 logger.info(self, f'CDS correction = {e_cds:.15f}')
             logger.info(self, 'Solvent Energy = %.15g', vhf.e_solvent)
+
             return e_tot, e_coul
 
         def nuc_grad_method(self):
