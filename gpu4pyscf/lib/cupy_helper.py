@@ -593,3 +593,13 @@ def empty_mapped(shape, dtype=float, order='C'):
         cupy.cuda.PinnedMemory(nbytes, cupy.cuda.runtime.hostAllocMapped), 0)
     out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)
     return out
+
+def pinv(a, lindep=1e-10):
+    '''psudo-inverse with eigh, to be consistent with pyscf
+    '''
+    a = cupy.asarray(a)
+    w, v = cupy.linalg.eigh(a)
+    mask = w > lindep
+    v1 = v[:,mask]
+    j2c = cupy.dot(v1/w[mask], v1.conj().T)
+    return j2c
