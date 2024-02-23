@@ -383,12 +383,12 @@ def eval_rho5(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='LDA',
         #     _contract_rho(c0[0], c0[i], rho=rho[i])
         # rho[1:] *= 2
         c0_group = []
-        for _ in range(4):
+        for i in range(4):
             ao_group_tmp = []
             for groups_idx in range(groups):
-                ao_group_tmp.append(ao_group[groups_idx][0])
+                ao_group_tmp.append(ao_group[groups_idx][i])
             c0_group_tmp = grouped_gemm(cpos_group, ao_group_tmp)
-            c0_group.append(c0_group_tmp)
+            c0_group.append(c0_group_tmp) # c0_group.shape: (4, groups, ……)
         rho_group = []
         for groups_idx in range(groups):
             rho = cupy.empty((4, ngrids_group[groups_idx]))
@@ -425,10 +425,10 @@ def eval_rho5(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='LDA',
         # rho[1:4] *= 2
         # rho[tau_idx] *= .5
         c0_group = []
-        for _ in range(4):
+        for i in range(4):
             ao_group_tmp = []
             for groups_idx in range(groups):
-                ao_group_tmp.append(ao_group[groups_idx][0])
+                ao_group_tmp.append(ao_group[groups_idx][i])
             c0_group_tmp = grouped_gemm(cpos_group, ao_group_tmp)
             c0_group.append(c0_group_tmp)
         rho_group = []
@@ -556,7 +556,6 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
 
 def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
            max_memory=2000, verbose=None):
-    print("========== INFO: enter nr_rks function")
     log = logger.new_logger(mol, verbose)
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
@@ -658,7 +657,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     p1 = p0 + weight_group[groups_idx].size
                     aow = _scale_ao(ao_mask_group[groups_idx], wv[i][0,p0:p1])
                     p0 = p1
-                    aow_group.append(aow.T)
+                    aow_group.append(aow.T.copy())
                 dot_res_group = grouped_dot(ao_mask_group, aow_group)
                 for groups_idx in range(groups):
                     add_sparse(vmat[i], dot_res_group[groups_idx], idx_group[groups_idx])
@@ -671,7 +670,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     p1 = p0 + weight_group[groups_idx].size
                     aow = _scale_ao(ao_mask_group[groups_idx], wv[i][:,p0:p1])
                     p0 = p1
-                    aow_group.append(aow.T)
+                    aow_group.append(aow.T.copy())
                     ao_mask_0_group.append(ao_mask_group[groups_idx][0])
                 dot_res_group = grouped_dot(ao_mask_0_group, aow_group)
                 for groups_idx in range(groups):
