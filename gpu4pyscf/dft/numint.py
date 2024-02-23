@@ -366,7 +366,7 @@ def eval_rho5(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='LDA',
     cpos_group = []
     for groups_idx in range(groups):
         cpos = (mo_coeff_group[groups_idx] * mo_occ**0.5)[:,mo_occ>0]
-        cpos_group.append(cpos.T)
+        cpos_group.append(cpos)
     if xctype == 'LDA' or xctype == 'HF':
         # c0 = cupy.dot(cpos.T, ao) # 替换成 group
         # rho = _contract_rho(c0, c0)
@@ -742,7 +742,9 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     # TODO: replace ni.block_loop with ni.grouped_block_loop
     for ao_mask_group, idx_group, weight_group, _ in ni.grouped_block_loop(mol, grids, nao, ao_deriv):
         groups = len(ao_mask_group)
+        p0_raw = p0
         for i in range(nset):
+            p0 = p0_raw
             if mo_coeff is None:
                 for groups_idx in range(groups):
                     p1 = p0 + weight_group[groups_idx].size
@@ -752,8 +754,6 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             else:
                 mo_coeff_mask_group = [mo_coeff[idx,:] for idx in idx_group]
                 # TODO: create eval_rho5 for grouped ao_mask
-                # eval_rho5 input: ao(256,128x128), mo(256, 64)
-                # ao 是一个 list, mo 是一个 list, 由上面那行代码创建
                 eval_rho5_res = eval_rho5(mol, ao_mask_group, mo_coeff_mask_group, mo_occ, None, xctype, with_lapl)
                 for groups_idx in range(groups):
                     p1 = p0 + weight_group[groups_idx].size
@@ -785,30 +785,28 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     # TODO: repalce ni.block_loop with ni.grouped_block_loop
     for ao_mask_group, idx_group, weight_group, _ in ni.grouped_block_loop(mol, grids, nao, ao_deriv):
         groups = len(ao_mask_group)
+        p0_raw = p0
         for i in range(nset):
             #TODO: replace dot with grouped gemm, loop for other operations
+            p0 = p0_raw
             if xctype == 'LDA':
-                # aow = _scale_ao(ao_mask, wv[i][0,p0:p1])
-                # add_sparse(vmat[i], ao_mask.dot(aow.T), idx) # 把 dot 换成 group gemm, _scale_ao 改成循环
                 aow_group = []
                 for groups_idx in range(groups):
                     p1 = p0 + weight_group[groups_idx].size
                     aow = _scale_ao(ao_mask_group[groups_idx], wv[i][0,p0:p1])
                     p0 = p1
-                    aow_group.append(aow.T.copy())
+                    aow_group.append(aow)
                 dot_res_group = grouped_dot(ao_mask_group, aow_group)
                 for groups_idx in range(groups):
                     add_sparse(vmat[i], dot_res_group[groups_idx], idx_group[groups_idx])
             elif xctype == 'GGA':
-                # aow = _scale_ao(ao_mask, wv[i][:,p0:p1])
-                # add_sparse(vmat[i], ao_mask[0].dot(aow.T), idx) # 把 dot 换成 group gemm, _scale_ao 改成循环
                 aow_group = []
                 ao_mask_0_group = []
                 for groups_idx in range(groups):
                     p1 = p0 + weight_group[groups_idx].size
                     aow = _scale_ao(ao_mask_group[groups_idx], wv[i][:,p0:p1])
                     p0 = p1
-                    aow_group.append(aow.T.copy())
+                    aow_group.append(aow)
                     ao_mask_0_group.append(ao_mask_group[groups_idx][0])
                 dot_res_group = grouped_dot(ao_mask_0_group, aow_group)
                 for groups_idx in range(groups):
@@ -816,10 +814,6 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             elif xctype == 'MGGA':
-                # aow = _scale_ao(ao_mask, wv[i][:4,p0:p1])
-                # vtmp = ao_mask[0].dot(aow.T) # 把 dot 换成 group gemm, _scale_ao 改成循环
-                # vtmp+= _tau_dot(ao_mask, ao_mask, wv[i][4,p0:p1])
-                # add_sparse(vmat[i], vtmp, idx)
                 aow_group = []
                 ao_mask_0_group = []
                 p0_raw = p0
@@ -827,7 +821,7 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     p1 = p0 + weight_group[groups_idx].size
                     aow = _scale_ao(ao_mask_group[groups_idx], wv[i][:4,p0:p1])
                     p0 = p1
-                    aow_group.append(aow.T)
+                    aow_group.append(aow)
                     ao_mask_0_group.append(ao_mask_group[groups_idx][0])
                 dot_res_group = grouped_dot(ao_mask_0_group, aow_group)
                 p0 = p0_raw

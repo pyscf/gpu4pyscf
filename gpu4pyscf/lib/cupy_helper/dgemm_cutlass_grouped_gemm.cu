@@ -32,7 +32,7 @@ static int get_device_compute_capability() {
 using cutlass_tensorop_d884gemm_grouped_128x128_16x3_tt_align1_base =
   typename cutlass::gemm::kernel::DefaultGemmGrouped<
     double, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 1,
-    double, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 1,
+    double, cutlass::layout::ColumnMajor, cutlass::ComplexTransform::kNone, 1,
     double, cutlass::layout::RowMajor,
     double,
     cutlass::arch::OpClassTensorOp,
@@ -42,7 +42,6 @@ using cutlass_tensorop_d884gemm_grouped_128x128_16x3_tt_align1_base =
     cutlass::gemm::GemmShape<8, 8, 4>,
     cutlass::epilogue::thread::LinearCombination<double, 1, double, double>,
     cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<1>,
-    // cutlass::gemm::threadblock::ThreadblockSwizzleStreamK,
     3,
     cutlass::gemm::kernel::GroupScheduleMode::kDeviceOnly,
     cutlass::arch::OpMultiplyAdd
@@ -58,7 +57,7 @@ using cutlass_tensorop_d884gemm_grouped_128x128_16x3_tt_align1_base =
 using cutlass_simt_dgemm_grouped_128x128_8x2_tt_align1_base =
   typename cutlass::gemm::kernel::DefaultGemmGrouped<
     double, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 1,
-    double, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 1,
+    double, cutlass::layout::ColumnMajor, cutlass::ComplexTransform::kNone, 1,
     double, cutlass::layout::RowMajor,
     double,
     cutlass::arch::OpClassSimt,
@@ -68,7 +67,6 @@ using cutlass_simt_dgemm_grouped_128x128_8x2_tt_align1_base =
     cutlass::gemm::GemmShape<1, 1, 1>,
     cutlass::epilogue::thread::LinearCombination<double, 1, double, double>,
     cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<1>,
-    // cutlass::gemm::threadblock::ThreadblockSwizzleStreamK,
     2,
     cutlass::gemm::kernel::GroupScheduleMode::kDeviceOnly,
     cutlass::arch::OpMultiplyAdd
@@ -175,10 +173,6 @@ void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t
       int K = Ks[i];
       *(problem_sizes_host + i) = {M, N, K};
 
-      // *(ptr_A_host + i) = reinterpret_cast<typename DeviceKernel::ElementA*>(A[i].contiguous().data_ptr());
-      // *(ptr_B_host + i) = reinterpret_cast<typename DeviceKernel::ElementB*>(B[i].contiguous().data_ptr());
-      // *(ptr_C_host + i) = nullptr;
-      // *(ptr_D_host + i) = reinterpret_cast<typename DeviceKernel::ElementC*>(D[i].contiguous().data_ptr());
       *(ptr_A_host + i) = reinterpret_cast<typename DeviceKernel::ElementA*>(x[i]);
       *(ptr_B_host + i) = reinterpret_cast<typename DeviceKernel::ElementB*>(y[i]);
       *(ptr_C_host + i) = nullptr;
@@ -211,7 +205,7 @@ void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t
 
 extern "C" {
 // int dgemm(cudaStream_t stream, double **ptr_out, double **ptr_x, double **ptr_y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int64_t *MNKs, int groups)
-int grouped_dgemm(cudaStream_t stream, uint64_t *out, uint64_t *x, uint64_t *y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int num)
+int grouped_dot(cudaStream_t stream, uint64_t *out, uint64_t *x, uint64_t *y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int num)
 {
     int compute_capability = get_device_compute_capability();
 
