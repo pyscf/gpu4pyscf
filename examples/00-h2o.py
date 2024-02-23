@@ -45,13 +45,9 @@ mf_GPU.conv_tol = scf_tol
 mf_GPU.max_cycle = max_scf_cycles
 mf_GPU.screen_tol = screen_tol
 
-print("========== INFO: kernel() start")
-
 # Compute Energy
 e_dft = mf_GPU.kernel()
 print(f"total energy = {e_dft}") # -76.26736519501688
-
-print("========== INFO: kernel() end")
 
 # # Compute Gradient
 # g = mf_GPU.nuc_grad_method()
