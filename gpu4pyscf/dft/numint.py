@@ -351,13 +351,13 @@ def eval_rho5(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='LDA',
     xctype = xctype.upper()
     if xctype == 'LDA' or xctype == 'HF':
         ngrids_group = []
-        for groups_idx in range(groups):
-            _, ngrids = ao_group[groups_idx].shape
+        for ao in ao_group:
+            _, ngrids = ao.shape
             ngrids_group.append(ngrids)
     else:
         ngrids_group = []
-        for groups_idx in range(groups):
-            _, ngrids = ao_group[groups_idx][0].shape
+        for ao in ao_group:
+            _, ngrids = ao[0].shape
             ngrids_group.append(ngrids)
 
     shls_slice = (0, mol.nbas)
@@ -368,25 +368,17 @@ def eval_rho5(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='LDA',
         cpos = (mo_coeff_group[groups_idx] * mo_occ**0.5)[:,mo_occ>0]
         cpos_group.append(cpos)
     if xctype == 'LDA' or xctype == 'HF':
-        # c0 = cupy.dot(cpos.T, ao) # 替换成 group
-        # rho = _contract_rho(c0, c0)
         c0_group = grouped_gemm(cpos_group, ao_group)
         rho_group = []
-        for groups_idx in range(groups):
-            rho = _contract_rho(c0_group[groups_idx], c0_group[groups_idx])
+        for c0 in c0_group:
+            rho = _contract_rho(c0, c0)
             rho_group.append(rho)
     elif xctype in ('GGA', 'NLC'):
-        # rho = cupy.empty((4,ngrids))
-        # c0 = contract('nig,io->nog', ao, cpos)  # 替换成 group, n = 4 拆成 4 个 group dot
-        # _contract_rho(c0[0], c0[0], rho=rho[0])
-        # for i in range(1, 4):
-        #     _contract_rho(c0[0], c0[i], rho=rho[i])
-        # rho[1:] *= 2
         c0_group = []
         for i in range(4):
             ao_group_tmp = []
-            for groups_idx in range(groups):
-                ao_group_tmp.append(ao_group[groups_idx][i])
+            for ao in ao_group:
+                ao_group_tmp.append(ao[i])
             c0_group_tmp = grouped_gemm(cpos_group, ao_group_tmp)
             c0_group.append(c0_group_tmp) # c0_group.shape: (4, groups, ……)
         rho_group = []
@@ -398,37 +390,11 @@ def eval_rho5(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='LDA',
             rho[1:] *= 2
             rho_group.append(rho)
     else: # meta-GGA
-        # if with_lapl:
-        #     rho = cupy.empty((6,ngrids))
-        #     tau_idx = 5
-        # else:
-        #     rho = cupy.empty((5,ngrids))
-        #     tau_idx = 4
-        # c0 = contract('nig,io->nog', ao, cpos) # 替换成 group，剩下的地方换成循环
-        # _contract_rho(c0[0], c0[0], rho=rho[0])
-
-        # rho[tau_idx] = 0
-        # for i in range(1, 4):
-        #     rho[i] = _contract_rho(c0[0], c0[i])
-        #     rho[tau_idx] += _contract_rho(c0[i], c0[i])
-
-        # if with_lapl:
-        #     if ao.shape[0] > 4:
-        #         XX, YY, ZZ = 4, 7, 9
-        #         ao2 = ao[XX] + ao[YY] + ao[ZZ]
-        #         c1 = _dot_ao_dm(mol, ao2, cpos, non0tab, shls_slice, ao_loc)
-        #         rho[4] = _contract_rho(c0[0], c1)
-        #         rho[4] += rho[5]
-        #         rho[4] *= 2
-        #     else:
-        #         rho[4] = 0
-        # rho[1:4] *= 2
-        # rho[tau_idx] *= .5
         c0_group = []
         for i in range(4):
             ao_group_tmp = []
-            for groups_idx in range(groups):
-                ao_group_tmp.append(ao_group[groups_idx][i])
+            for ao in ao_group:
+                ao_group_tmp.append(ao[i])
             c0_group_tmp = grouped_gemm(cpos_group, ao_group_tmp)
             c0_group.append(c0_group_tmp)
         rho_group = []
@@ -783,7 +749,6 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     p0 = p1 = 0
     # TODO: repalce ni.block_loop with ni.grouped_block_loop
     for ao_mask_group, idx_group, weight_group, _ in ni.grouped_block_loop(mol, grids, nao, ao_deriv):
-        groups = len(ao_mask_group)
         p0_raw = p0
         for i in range(nset):
             #TODO: replace dot with grouped gemm, loop for other operations
