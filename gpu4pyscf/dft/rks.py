@@ -217,6 +217,12 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     e1 = cupy.einsum('ij,ji->', h1e, dm).real
     ecoul = vhf.ecoul.real
     exc = vhf.exc.real
+    if isinstance(ecoul, cupy.ndarray):
+        ecoul = ecoul.get()[()]
+    if isinstance(exc, cupy.ndarray):
+        exc = exc.get()[()]
+    if isinstance(e1, cupy.ndarray):
+        e1 = e1.get()[()]
     e2 = ecoul + exc
     ks.scf_summary['e1'] = e1
     ks.scf_summary['coul'] = ecoul
@@ -242,22 +248,6 @@ class RKS(rks.RKS, RHF):
         nlcgrids_level = self.nlcgrids.level
         self.nlcgrids = gen_grid.Grids(mol)
         self.nlcgrids.level = nlcgrids_level
-
-    def get_dispersion(self):
-        if self.disp is None:
-            return 0.0
-
-        if self.disp[:2].upper() == 'D3':
-            from gpu4pyscf.lib import dftd3
-            dftd3_model = dftd3.DFTD3Dispersion(self.mol, xc=self.xc, version=self.disp)
-            res = dftd3_model.get_dispersion()
-            return res['energy']
-
-        if self.disp[:2].upper() == 'D4':
-            from gpu4pyscf.lib import dftd4
-            dftd4_model = dftd4.DFTD4Dispersion(self.mol, xc=self.xc)
-            res = dftd4_model.get_dispersion()
-            return res.get("energy")
 
     def reset(self, mol=None):
         super().reset(mol)

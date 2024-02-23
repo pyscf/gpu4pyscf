@@ -370,6 +370,8 @@ def energy_elec(self, dm=None, h1e=None, vhf=None):
     if vhf is None: vhf = self.get_veff(self.mol, dm)
     e1 = cupy.einsum('ij,ji->', h1e, dm).real
     e_coul = cupy.einsum('ij,ji->', vhf, dm).real * .5
+    e1 = e1.get()[()]
+    e_coul = e_coul.get()[()]
     self.scf_summary['e1'] = e1
     self.scf_summary['e2'] = e_coul
     logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
@@ -452,14 +454,6 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     if(cycle == mf.max_cycle):
         logger.warn("SCF failed to converge")
-
-    # for dispersion correction
-    e_tot = e_tot.get()
-    if(hasattr(mf, 'get_dispersion')):
-        e_disp = mf.get_dispersion()
-        mf.e_disp = e_disp
-        mf.e_mf = e_tot
-        e_tot += e_disp
 
     return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
@@ -560,6 +554,27 @@ def _quad_moment(mf, mol=None, dm=None, unit='Debye-Ang'):
         mol_quad *= nist.AU2DEBYE * nist.BOHR
     return mol_quad
 
+def energy_tot(mf, dm=None, h1e=None, vhf=None):
+    r'''Total Hartree-Fock energy, electronic part plus nuclear repulstion
+    See :func:`scf.hf.energy_elec` for the electron part
+
+    Note this function has side effects which cause mf.scf_summary updated.
+
+    '''
+    nuc = mf.energy_nuc()
+    e_tot = mf.energy_elec(dm, h1e, vhf)[0] + nuc
+    if mf.disp is not None:
+        if 'dispersion' in mf.scf_summary:
+            e_tot += mf.scf_summary['dispersion']
+        else:
+            e_disp = mf.get_dispersion()
+            mf.scf_summary['dispersion'] = e_disp
+            e_tot += e_disp
+    mf.scf_summary['nuc'] = nuc.real
+    if isinstance(e_tot, cupy.ndarray):
+        e_tot = e_tot.get()
+    return e_tot
+
 class RHF(hf.RHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
@@ -578,6 +593,7 @@ class RHF(hf.RHF):
     get_grad = staticmethod(get_grad)
     gen_response = _gen_rhf_response
     quad_moment = _quad_moment
+    energy_tot = energy_tot
 
     get_hcore = return_cupy_array(hf.RHF.get_hcore)
     get_ovlp = return_cupy_array(hf.RHF.get_ovlp)

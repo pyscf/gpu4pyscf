@@ -329,11 +329,11 @@ def eval_rho4(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
         log = logger.new_logger(mol, mol.verbose)
         t0 = log.init_timer()
         c_0 = contract('nig,aio->anog', ao, cpos1)
-        t0 = log.timer_debug1('ao * cpos', *t0)
+        t0 = log.timer_debug2('ao * cpos', *t0)
         rho = cupy.empty([na, 4, ngrids])
         for i in range(na):
             _contract_rho_gga(c0, c_0[i], rho=rho[i])
-        t0 = log.timer_debug1('contract rho', *t0)
+        t0 = log.timer_debug2('contract rho', *t0)
     else: # meta-GGA
         if with_lapl:
             raise NotImplementedError("mGGA with lapl not implemented")

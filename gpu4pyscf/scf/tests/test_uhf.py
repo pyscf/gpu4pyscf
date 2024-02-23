@@ -244,7 +244,7 @@ class KnownValues(unittest.TestCase):
         mf1 = mf.to_cpu()
         refk = mf1.get_k(mol1, dm, hermi=0)
         self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
-    
+
     # end to end test
     def test_uhf_scf(self):
         e_tot = scf.UHF(mol).kernel()

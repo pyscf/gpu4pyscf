@@ -43,7 +43,7 @@ from gpu4pyscf.lib.cupy_helper import contract, tag_array, release_gpu_stack, pr
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
 
-BLKSIZE = 128
+BLKSIZE = 256
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):

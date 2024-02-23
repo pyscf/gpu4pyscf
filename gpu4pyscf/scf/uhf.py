@@ -122,6 +122,8 @@ class UHF(uhf.UHF):
     get_ovlp = hf.RHF.get_ovlp
     get_init_guess = hf.return_cupy_array(uhf.UHF.get_init_guess)
     density_fit = hf.RHF.density_fit
+    energy_tot = hf.RHF.energy_tot
+
     make_rdm2 = NotImplemented
     dump_chk = NotImplemented
     newton = NotImplemented
