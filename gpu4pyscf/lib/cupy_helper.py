@@ -602,6 +602,10 @@ def grouped_dot(As, Bs, Cs=None):
     Cs: cupy 2D array list.
     einsum('ik,jk->ij', A, B, C)
     '''
+    assert len(As) > 0
+    assert len(As) == len(Bs)
+    assert As[0].flags.c_contiguous
+    assert Bs[0].flags.c_contiguous
     groups = len(As)
     Ms, Ns, Ks = [], [], []
     for a, b in zip(As, Bs):
@@ -648,9 +652,13 @@ def grouped_gemm(As, Bs, Cs=None):
     Bs: cupy 2D array list.
     Cs: cupy 2D array list.
     assuming (X, 64).T @ (X, Y)
-    einsum('ik,jk->ij', A, B, C)
+    einsum('ij,ik->jk', A, B, C)
     Compare with grouped_dot, this function handles the case M < 128
     '''
+    assert len(As) > 0
+    assert len(As) == len(Bs)
+    assert As[0].flags.c_contiguous
+    assert Bs[0].flags.c_contiguous
     groups = len(As)
     Ms, Ns, Ks = [], [], []
     for a, b in zip(As, Bs):
