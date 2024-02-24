@@ -698,3 +698,14 @@ def grouped_gemm(As, Bs, Cs=None):
     if err != 0:
         raise RuntimeError('failed in cutlass_grouped_gemm kernel')
     return Cs
+
+def pinv(a, lindep=1e-10):
+    '''psudo-inverse with eigh, to be consistent with pyscf
+    '''
+    a = cupy.asarray(a)
+    w, v = cupy.linalg.eigh(a)
+    mask = w > lindep
+    v1 = v[:,mask]
+    j2c = cupy.dot(v1/w[mask], v1.conj().T)
+    return j2c
+
