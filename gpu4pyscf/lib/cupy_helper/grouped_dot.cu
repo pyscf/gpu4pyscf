@@ -42,7 +42,7 @@ using cutlass_tensorop_d884gemm_grouped_64x128_16x3_tt_align1_base =
     cutlass::gemm::GemmShape<8, 8, 4>,
     cutlass::epilogue::thread::LinearCombination<double, 1, double, double>,
     cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<1>,
-    3,
+    4,
     cutlass::gemm::kernel::GroupScheduleMode::kDeviceOnly,
     cutlass::arch::OpMultiplyAdd
 >::GemmKernel;
@@ -187,7 +187,7 @@ void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t
       typename DeviceKernel::EpilogueOutputOp::ElementCompute(alpha), typename DeviceKernel::EpilogueOutputOp::ElementCompute(beta));
 
   delete[] host_data;
-  
+
   CUTLASS_CHECK(status);
 }
 
@@ -197,12 +197,12 @@ int grouped_gemm(cudaStream_t stream, uint64_t *out, uint64_t *x, uint64_t *y, i
 {
     int compute_capability = get_device_compute_capability();
 
-    if(compute_capability == 70)
+    if(compute_capability < 80)
     {
       using DeviceKernel = cutlass::gemm::device::GemmGrouped<cutlass_simt_dgemm_grouped_64x128_8x2_tt_align1_base>;
       grouped_gemm_kernel_launch<DeviceKernel>(out, x, y, Ms, Ns, Ks, num);
     }
-    else if(compute_capability == 80)
+    else if(compute_capability >= 80)
     {
       using DeviceKernel = cutlass::gemm::device::GemmGrouped<cutlass_tensorop_d884gemm_grouped_64x128_16x3_tt_align1_base>;
       grouped_gemm_kernel_launch<DeviceKernel>(out, x, y, Ms, Ns, Ks, num);

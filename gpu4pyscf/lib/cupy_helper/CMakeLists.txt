@@ -27,8 +27,8 @@ add_library(cupy_helper SHARED
   async_d2h_2d.cu
   add_sparse.cu
   dist_matrix.cu
-  dgemm_cutlass_grouped_gemm.cu
-  dgemm_cutlass_grouped_gemm_2.cu
+  grouped_gemm.cu
+  grouped_dot.cu
 )
 target_include_directories(cupy_helper PRIVATE ${cutlass_SOURCE_DIR}/tools/util/include ${cutlass_SOURCE_DIR}/include)
 

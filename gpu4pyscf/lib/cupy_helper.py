@@ -612,21 +612,22 @@ def grouped_dot(As, Bs, Cs=None):
         Ms.append(a.shape[0])
         Ns.append(b.shape[0])
         Ks.append(a.shape[1])
-    
+
     if Cs is None:
         Cs = []
         for i in range(groups):
             Cs.append(cupy.empty((Ms[i], Ns[i])))
-    
+
     As_ptr, Bs_ptr, Cs_ptr = [], [], []
     for a, b, c in zip(As, Bs, Cs):
         As_ptr.append(a.data.ptr)
         Bs_ptr.append(b.data.ptr)
         Cs_ptr.append(c.data.ptr)
+
     As_ptr = np.array(As_ptr)
     Bs_ptr = np.array(Bs_ptr)
     Cs_ptr = np.array(Cs_ptr)
-    
+
     Ms = np.array(Ms)
     Ns = np.array(Ns)
     Ks = np.array(Ks)
@@ -643,7 +644,7 @@ def grouped_dot(As, Bs, Cs=None):
         ctypes.c_int(groups)
     )
     if err != 0:
-        raise RuntimeError('failed in cutlass_grouped_gemm kernel')
+        raise RuntimeError('failed in grouped_gemm kernel')
     return Cs
 
 def grouped_gemm(As, Bs, Cs=None):
@@ -665,12 +666,12 @@ def grouped_gemm(As, Bs, Cs=None):
         Ms.append(a.shape[1])
         Ns.append(b.shape[1])
         Ks.append(a.shape[0])
-    
+
     if Cs is None:
         Cs = []
         for i in range(groups):
             Cs.append(cupy.empty((Ms[i], Ns[i])))
-    
+
     As_ptr, Bs_ptr, Cs_ptr = [], [], []
     for a, b, c in zip(As, Bs, Cs):
         As_ptr.append(a.data.ptr)
@@ -679,7 +680,7 @@ def grouped_gemm(As, Bs, Cs=None):
     As_ptr = np.array(As_ptr)
     Bs_ptr = np.array(Bs_ptr)
     Cs_ptr = np.array(Cs_ptr)
-    
+
     Ms = np.array(Ms)
     Ns = np.array(Ns)
     Ks = np.array(Ks)
@@ -696,7 +697,7 @@ def grouped_gemm(As, Bs, Cs=None):
         ctypes.c_int(groups)
     )
     if err != 0:
-        raise RuntimeError('failed in cutlass_grouped_gemm kernel')
+        raise RuntimeError('failed in grouped_gemm kernel')
     return Cs
 
 def pinv(a, lindep=1e-10):

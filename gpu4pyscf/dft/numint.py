@@ -345,7 +345,7 @@ def eval_rho4(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
     return rho
 
 # TODO: implement this for grouped ao's
-def eval_rho5(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='LDA',
+def eval_rho_group(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='LDA',
               with_lapl=True, verbose=None, out=None):
     groups = len(ao_group)
     xctype = xctype.upper()
@@ -375,47 +375,56 @@ def eval_rho5(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='LDA',
             rho_group.append(rho)
     elif xctype in ('GGA', 'NLC'):
         c0_group = []
-        for i in range(4):
-            ao_group_tmp = []
-            for ao in ao_group:
-                ao_group_tmp.append(ao[i])
-            c0_group_tmp = grouped_gemm(cpos_group, ao_group_tmp)
-            c0_group.append(c0_group_tmp) # c0_group.shape: (4, groups, ……)
+        cpos_group4 = []
+        ao_group4 = []
+        for ao, cpos in zip(ao_group, cpos_group):
+            for i in range(4):
+                cpos_group4.append(cpos)
+                ao_group4.append(ao[i])
+        c0_group = grouped_gemm(cpos_group4, ao_group4)
+
         rho_group = []
         for groups_idx in range(groups):
             rho = cupy.empty((4, ngrids_group[groups_idx]))
-            _contract_rho(c0_group[0][groups_idx], c0_group[0][groups_idx], rho=rho[0])
+            c0 = c0_group[4*groups_idx:4*(groups_idx+1)]
+            _contract_rho(c0[0], c0[0], rho=rho[0])
             for i in range(1, 4):
-                _contract_rho(c0_group[0][groups_idx], c0_group[i][groups_idx], rho=rho[i])
+                _contract_rho(c0[0], c0[i], rho=rho[i])
             rho[1:] *= 2
             rho_group.append(rho)
     else: # meta-GGA
         c0_group = []
-        for i in range(4):
-            ao_group_tmp = []
-            for ao in ao_group:
-                ao_group_tmp.append(ao[i])
-            c0_group_tmp = grouped_gemm(cpos_group, ao_group_tmp)
-            c0_group.append(c0_group_tmp)
+        cpos_group4 = []
+        ao_group4 = []
+        for ao, cpos in zip(ao_group, cpos_group):
+            for i in range(4):
+                cpos_group4.append(cpos)
+                ao_group4.append(ao[i])
+        c0_group = grouped_gemm(cpos_group4, ao_group4)
+
         rho_group = []
         for groups_idx in range(groups):
+            ngrids = ngrids_group[groups_idx]
+            c0 = c0_group[4*groups_idx:4*(groups_idx+1)]
             if with_lapl:
                 rho = cupy.empty((6, ngrids))
                 tau_idx = 5
             else:
                 rho = cupy.empty((5, ngrids))
                 tau_idx = 4
+            _contract_rho(c0[0], c0[0], rho=rho[0])
             rho[tau_idx] = 0
             for i in range(1, 4):
-                rho[i] = _contract_rho(c0_group[0][groups_idx], c0_group[i][groups_idx])
-                rho[tau_idx] += _contract_rho(c0_group[i][groups_idx], c0_group[i][groups_idx])
+                _contract_rho(c0[0], c0[i], rho[i])
+                rho[tau_idx] += _contract_rho(c0[i], c0[i])
 
             if with_lapl:
-                if ao_group[groups_idx].shape[0] > 4:
+                ao = ao_group[groups_idx]
+                if ao.shape[0] > 4:
                     XX, YY, ZZ = 4, 7, 9
-                    ao2 = ao_group[groups_idx][XX] + ao_group[groups_idx][YY] + ao_group[groups_idx][ZZ]
+                    ao2 = ao[XX] + ao[YY] + ao[ZZ]
                     c1 = _dot_ao_dm(mol, ao2, cpos, non0tab, shls_slice, ao_loc)
-                    rho[4] = _contract_rho(c0_group[0][groups_idx], c1)
+                    rho[4] = _contract_rho(c0[0], c1)
                     rho[4] += rho[5]
                     rho[4] *= 2
                 else:
@@ -718,11 +727,11 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     p0 = p1
             else:
                 mo_coeff_mask_group = [mo_coeff[idx,:] for idx in idx_group]
-                # TODO: create eval_rho5 for grouped ao_mask
-                eval_rho5_res_group = eval_rho5(mol, ao_mask_group, mo_coeff_mask_group, mo_occ, None, xctype, with_lapl)
-                for weight, eval_rho5_res in zip(weight_group, eval_rho5_res_group):
+                # TODO: create eval_rho_group for grouped ao_mask
+                rho_group = eval_rho_group(mol, ao_mask_group, mo_coeff_mask_group, mo_occ, None, xctype, with_lapl)
+                for weight, eval_rho_group_res in zip(weight_group, rho_group):
                     p1 = p0 + weight.size
-                    rho_tot[i,:,p0:p1] = eval_rho5_res
+                    rho_tot[i,:,p0:p1] = eval_rho_group_res
                     p0 = p1
         t1 = log.timer_debug2('eval rho slice', *t1)
     t0 = log.timer_debug1('eval rho', *t0)
@@ -765,33 +774,34 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     add_sparse(vmat[i], dot_res, idx)
             elif xctype == 'GGA':
                 aow_group = []
-                ao_mask_0_group = []
+                ao0_mask_group = []
                 for weight, ao_mask in zip(weight_group, ao_mask_group):
                     p1 = p0 + weight.size
                     aow = _scale_ao(ao_mask, wv[i][:,p0:p1])
                     p0 = p1
                     aow_group.append(aow)
-                    ao_mask_0_group.append(ao_mask[0])
-                dot_res_group = grouped_dot(ao_mask_0_group, aow_group)
-                for dot_res, idx in zip(dot_res_group, idx_group):
-                    add_sparse(vmat[i], dot_res, idx)
+                    ao0_mask_group.append(ao_mask[0])
+                vmat_group = grouped_dot(ao0_mask_group, aow_group)
+                for vmat_tmp, idx in zip(vmat_group, idx_group):
+                    add_sparse(vmat[i], vmat_tmp, idx)
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             elif xctype == 'MGGA':
                 aow_group = []
-                ao_mask_0_group = []
+                ao0_mask_group = []
                 p0_tmp = p0
                 for weight, ao_mask in zip(weight_group, ao_mask_group):
                     p1 = p0 + weight.size
                     aow = _scale_ao(ao_mask, wv[i][:4,p0:p1])
                     p0 = p1
                     aow_group.append(aow)
-                    ao_mask_0_group.append(ao_mask[0])
-                dot_res_group = grouped_dot(ao_mask_0_group, aow_group)
+                    ao0_mask_group.append(ao_mask[0])
+                vmat_group = grouped_dot(ao0_mask_group, aow_group)
                 p0 = p0_tmp
-                for weight, dot_res, ao_mask, idx in zip(weight_group, dot_res_group, ao_mask_group, idx_group):
+                for weight, vmat_tmp, ao_mask, idx in zip(weight_group, vmat_group, ao_mask_group, idx_group):
                     p1 = p0 + weight.size
-                    add_sparse(vmat[i], dot_res + _tau_dot(ao_mask, ao_mask, wv[i][4,p0:p1]), idx)
+                    vmat_tmp += _tau_dot(ao_mask, ao_mask, wv[i][4,p0:p1])
+                    add_sparse(vmat[i], vmat_tmp, idx)
                     p0 = p1
             elif xctype == 'HF':
                 pass
@@ -1619,7 +1629,6 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         for ip0, ip1 in lib.prange(0, ngrids, blksize):
             coords = grids.coords[ip0:ip1]
             weight = grids.weights[ip0:ip1]
-            t1 = log.init_timer()
             # cache ao indices
             if (block_id, blksize, ngrids) not in ni.non0ao_idx:
                 ni.non0ao_idx[block_id, blksize, ngrids] = _sparse_index(mol, coords, opt.l_ctr_offsets)
@@ -1633,7 +1642,6 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 ao_loc_slice=ao_loc_slice,
                 ctr_offsets_slice=ctr_offsets_slice)
 
-            t1 = log.timer_debug2('evaluate ao slice', *t1)
             if pad > 0:
                 if deriv == 0:
                     ao_mask[-pad:,:] = 0.0
@@ -1641,12 +1649,13 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                     ao_mask[:,-pad:,:] = 0.0
             block_id += 1
             total_used_bytes += ao_mask.nbytes
-            if total_used_bytes < 0.4 * mem_limit:
+            if total_used_bytes < 0.2 * mem_limit:
                 ao_mask_group.append(ao_mask)
                 idx_group.append(idx)
                 weight_group.append(weight)
                 coords_group.append(coords)
             else:
+                t1 = log.timer_debug2('evaluate ao slice', *t1)
                 yield ao_mask_group, idx_group, weight_group, coords_group
                 ao_mask_group = []
                 idx_group = []
@@ -1654,6 +1663,7 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 coords_group = []
                 total_used_bytes = 0
         if total_used_bytes > 0:
+            t1 = log.timer_debug2('evaluate ao slice', *t1)
             yield ao_mask_group, idx_group, weight_group, coords_group
 
 class NumInt(numint.NumInt):
@@ -1706,7 +1716,7 @@ class NumInt(numint.NumInt):
     block_loop = _block_loop
     grouped_block_loop = _grouped_block_loop
     eval_rho2 = eval_rho2
-    eval_rho5 = eval_rho5
+    eval_rho_group = eval_rho_group
     eval_ao = eval_ao
     #eval_rho2 = staticmethod(eval_rho2)
 

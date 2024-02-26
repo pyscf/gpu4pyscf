@@ -97,7 +97,6 @@ cutlass::Status grouped_gemm_kernel_run(int problem_count, cutlass::gemm::GemmCo
 
   size_t workspace_size = DeviceKernel::get_workspace_size(arguments);
   cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
-
   DeviceKernel gemm_op;
   cutlass::Status status = gemm_op.initialize(arguments,
                                               workspace.get(),
@@ -163,10 +162,10 @@ void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t
   int64_t ldc_offset = start - host_data;
   int64_t* ldc_host = reinterpret_cast<int64_t*>(start);
   start += num * sizeof(int64_t);
-  
+
   double alpha = 1.0;
   double beta = 0.0;
-  
+
   for (size_t i = 0; i < num; ++i) {
       int M = Ms[i];
       int N = Ns[i];
@@ -199,7 +198,7 @@ void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t
       typename DeviceKernel::EpilogueOutputOp::ElementCompute(alpha), typename DeviceKernel::EpilogueOutputOp::ElementCompute(beta));
 
   delete[] host_data;
-  
+
   CUTLASS_CHECK(status);
 }
 
@@ -209,12 +208,12 @@ int grouped_dot(cudaStream_t stream, uint64_t *out, uint64_t *x, uint64_t *y, in
 {
     int compute_capability = get_device_compute_capability();
 
-    if(compute_capability == 70)
+    if(compute_capability < 80)
     {
       using DeviceKernel = cutlass::gemm::device::GemmGrouped<cutlass_simt_dgemm_grouped_128x128_8x2_tt_align1_base>;
       grouped_gemm_kernel_launch<DeviceKernel>(out, x, y, Ms, Ns, Ks, num);
     }
-    else if(compute_capability == 80)
+    else if(compute_capability >= 80)
     {
       using DeviceKernel = cutlass::gemm::device::GemmGrouped<cutlass_tensorop_d884gemm_grouped_128x128_16x3_tt_align1_base>;
       grouped_gemm_kernel_launch<DeviceKernel>(out, x, y, Ms, Ns, Ks, num);
