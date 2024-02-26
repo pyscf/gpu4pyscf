@@ -31,7 +31,7 @@ print('---------- benchmarking ik,jk->ij ----------')
 perf = profiler.benchmark(grouped_dot, (As, Bs), n_repeat=20, n_warmup=3)
 flops = 2*m*n*k*count
 print('grouped dot')
-print(flops/perf.gpu_times.mean()/1024**3, 'GFLOPS')
+print(flops/perf.gpu_times.mean()/1e9, 'GFLOPS')
 
 def grouped_cupy_dot(As,Bs):
     Cs = []
@@ -41,7 +41,7 @@ def grouped_cupy_dot(As,Bs):
 perf = profiler.benchmark(grouped_cupy_dot, (As, Bs), n_repeat=20, n_warmup=3)
 flops = 2*m*n*k*count
 print('cupy dot')
-print(flops/perf.gpu_times.mean()/1024**3, 'GFLOPS')
+print(flops/perf.gpu_times.mean()/1e9, 'GFLOPS')
 
 # ------------------ grouped DGEMM -------------------------
 print('---------- benchmarking ki,kj->ij ----------')
@@ -58,7 +58,7 @@ for i in range(count):
 perf = profiler.benchmark(grouped_gemm, (Bs, As), n_repeat=20, n_warmup=3)
 flops = 2*m*n*k*count
 print('grouped gemm')
-print(flops/perf.gpu_times.mean()/1024**3, 'GFLOPS')
+print(flops/perf.gpu_times.mean()/1e9, 'GFLOPS')
 
 def grouped_cupy_dot(As,Bs):
     Cs = []
@@ -68,4 +68,4 @@ def grouped_cupy_dot(As,Bs):
 perf = profiler.benchmark(grouped_cupy_dot, (As, Bs), n_repeat=20, n_warmup=3)
 flops = 2*m*n*k*count
 print('cupy dot')
-print(flops/perf.gpu_times.mean()/1024**3, 'GFLOPS')
+print(flops/perf.gpu_times.mean()/1e9, 'GFLOPS')
