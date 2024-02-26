@@ -29,15 +29,15 @@ static int get_device_compute_capability() {
 }
 
 // A100
-using cutlass_tensorop_d884gemm_grouped_128x128_16x3_tt_align1_base =
+using cutlass_tensorop_d884gemm_grouped_64x128_16x3_tt_align1_base =
   typename cutlass::gemm::kernel::DefaultGemmGrouped<
-    double, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 1,
     double, cutlass::layout::ColumnMajor, cutlass::ComplexTransform::kNone, 1,
+    double, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 1,
     double, cutlass::layout::RowMajor,
     double,
     cutlass::arch::OpClassTensorOp,
     cutlass::arch::Sm80,
-    cutlass::gemm::GemmShape<128, 128, 16>,
+    cutlass::gemm::GemmShape<64, 128, 16>,
     cutlass::gemm::GemmShape<32, 64, 16>,
     cutlass::gemm::GemmShape<8, 8, 4>,
     cutlass::epilogue::thread::LinearCombination<double, 1, double, double>,
@@ -47,22 +47,16 @@ using cutlass_tensorop_d884gemm_grouped_128x128_16x3_tt_align1_base =
     cutlass::arch::OpMultiplyAdd
 >::GemmKernel;
 
-// Define named type
-// struct cutlass_tensorop_d884gemm_grouped_128x128_16x3_tt_align1_type :
-//   public cutlass_tensorop_d884gemm_grouped_128x128_16x3_tt_align1_base { };
-
-// using DeviceKernel = cutlass::gemm::device::GemmGrouped<cutlass_tensorop_d884gemm_grouped_128x128_16x3_tt_align1_base>;
-
 // V100
-using cutlass_simt_dgemm_grouped_128x128_8x2_tt_align1_base =
+using cutlass_simt_dgemm_grouped_64x128_8x2_tt_align1_base =
   typename cutlass::gemm::kernel::DefaultGemmGrouped<
-    double, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 1,
     double, cutlass::layout::ColumnMajor, cutlass::ComplexTransform::kNone, 1,
+    double, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 1,
     double, cutlass::layout::RowMajor,
     double,
     cutlass::arch::OpClassSimt,
     cutlass::arch::Sm70,
-    cutlass::gemm::GemmShape<128, 128, 8>,
+    cutlass::gemm::GemmShape<64, 128, 8>,
     cutlass::gemm::GemmShape<32, 64, 8>,
     cutlass::gemm::GemmShape<1, 1, 1>,
     cutlass::epilogue::thread::LinearCombination<double, 1, double, double>,
@@ -71,12 +65,6 @@ using cutlass_simt_dgemm_grouped_128x128_8x2_tt_align1_base =
     cutlass::gemm::kernel::GroupScheduleMode::kDeviceOnly,
     cutlass::arch::OpMultiplyAdd
 >::GemmKernel;
-
-// Define named type
-// struct cutlass_simt_dgemm_grouped_128x128_8x2_tt_align1_type :
-//   public cutlass_simt_dgemm_grouped_128x128_8x2_tt_align1_base { };
-
-// using DeviceKernel = cutlass::gemm::device::GemmGrouped<cutlass_simt_dgemm_grouped_128x128_8x2_tt_align1_base>;
 
 template<typename DeviceKernel>
 cutlass::Status grouped_gemm_kernel_run(int problem_count, cutlass::gemm::GemmCoord* problem_sizes,
@@ -97,6 +85,7 @@ cutlass::Status grouped_gemm_kernel_run(int problem_count, cutlass::gemm::GemmCo
 
   size_t workspace_size = DeviceKernel::get_workspace_size(arguments);
   cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
+
   DeviceKernel gemm_op;
   cutlass::Status status = gemm_op.initialize(arguments,
                                               workspace.get(),
@@ -204,18 +193,18 @@ void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t
 
 extern "C" {
 // int dgemm(cudaStream_t stream, double **ptr_out, double **ptr_x, double **ptr_y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int64_t *MNKs, int groups)
-int grouped_dot(cudaStream_t stream, uint64_t *out, uint64_t *x, uint64_t *y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int num)
+int grouped_gemm(cudaStream_t stream, uint64_t *out, uint64_t *x, uint64_t *y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int num)
 {
     int compute_capability = get_device_compute_capability();
 
     if(compute_capability < 80)
     {
-      using DeviceKernel = cutlass::gemm::device::GemmGrouped<cutlass_simt_dgemm_grouped_128x128_8x2_tt_align1_base>;
+      using DeviceKernel = cutlass::gemm::device::GemmGrouped<cutlass_simt_dgemm_grouped_64x128_8x2_tt_align1_base>;
       grouped_gemm_kernel_launch<DeviceKernel>(out, x, y, Ms, Ns, Ks, num);
     }
     else if(compute_capability >= 80)
     {
-      using DeviceKernel = cutlass::gemm::device::GemmGrouped<cutlass_tensorop_d884gemm_grouped_128x128_16x3_tt_align1_base>;
+      using DeviceKernel = cutlass::gemm::device::GemmGrouped<cutlass_tensorop_d884gemm_grouped_64x128_16x3_tt_align1_base>;
       grouped_gemm_kernel_launch<DeviceKernel>(out, x, y, Ms, Ns, Ks, num);
     }
     else

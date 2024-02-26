@@ -55,7 +55,7 @@ for i in range(count):
     As.append(cupy.random.random([m,k]))
     Bs.append(cupy.random.random([m,n]))
 
-perf = profiler.benchmark(grouped_gemm, (As, Bs), n_repeat=20, n_warmup=3)
+perf = profiler.benchmark(grouped_gemm, (Bs, As), n_repeat=20, n_warmup=3)
 flops = 2*m*n*k*count
 print('grouped gemm')
 print(flops/perf.gpu_times.mean()/1024**3, 'GFLOPS')
