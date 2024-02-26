@@ -1649,12 +1649,11 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                     ao_mask[:,-pad:,:] = 0.0
             block_id += 1
             total_used_bytes += ao_mask.nbytes
-            if total_used_bytes < 0.2 * mem_limit:
-                ao_mask_group.append(ao_mask)
-                idx_group.append(idx)
-                weight_group.append(weight)
-                coords_group.append(coords)
-            else:
+            ao_mask_group.append(ao_mask)
+            idx_group.append(idx)
+            weight_group.append(weight)
+            coords_group.append(coords)
+            if total_used_bytes > 0.2 * mem_limit:
                 t1 = log.timer_debug2('evaluate ao slice', *t1)
                 yield ao_mask_group, idx_group, weight_group, coords_group
                 ao_mask_group = []
@@ -1702,7 +1701,7 @@ class NumInt(numint.NumInt):
         return self
 
     get_rho = get_rho
-    #nr_rks = nr_rks
+    # nr_rks = nr_rks
     nr_rks = nr_rks_group
     nr_uks = nr_uks
     nr_nlc_vxc = nr_nlc_vxc
