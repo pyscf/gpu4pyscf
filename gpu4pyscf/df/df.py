@@ -25,6 +25,7 @@ from gpu4pyscf.lib.cupy_helper import (
     cholesky, tag_array, get_avail_mem, cart2sph, take_last2d, transpose_sum)
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.utils import total_cpu_mem
 from gpu4pyscf import __config__
 from cupyx import scipy
 
@@ -204,11 +205,12 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
     if(not use_gpu_memory):
         log.debug("Not enough GPU memory")
         # TODO: async allocate memory
-        try:
-            mem = cupy.cuda.alloc_pinned_memory(naux * npair * 8)
-            cderi = np.ndarray([naux, npair], dtype=np.float64, order='C', buffer=mem)
-        except Exception:
-            raise RuntimeError('Out of CPU memory')
+        total_mem = total_cpu_mem()
+        avail_mem = lib.current_memory()
+        if naux * npair * 8 < 1e6 * (total_mem - avail_mem) * 0.7:
+            raise MemoryError('Out of CPU memory')
+        mem = cupy.cuda.alloc_pinned_memory(naux * npair * 8)
+        cderi = np.ndarray([naux, npair], dtype=np.float64, order='C', buffer=mem)
     if(not use_gpu_memory):
         data_stream = cupy.cuda.stream.Stream(non_blocking=False)
     count = 0

@@ -24,6 +24,7 @@ from gpu4pyscf.scf.hf import BasisProdCache, _make_s_index_offsets
 from gpu4pyscf.lib.cupy_helper import (
     block_c2s_diag, cart2sph, block_diag, contract, load_library, c2s_l, get_avail_mem, print_mem_info, take_last2d)
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.utils import total_cpu_mem
 
 LMAX_ON_GPU = 8
 FREE_CUPY_CACHE = True
@@ -358,6 +359,11 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
         use_gpu_memory = False
 
     if not use_gpu_memory:
+        total_mem = total_cpu_mem()
+        avail_mem = lib.current_memory()
+        if naux*nao*nocc*8 < 1e6 * (total_mem - avail_mem) * 0.7:
+            raise MemoryError('Out of CPU memory')
+
         mem = cupy.cuda.alloc_pinned_memory(naux*nao*nocc*8)
         wk = np.ndarray([naux,nao,nocc], dtype=np.float64, order='C', buffer=mem)
 
@@ -870,6 +876,11 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
         use_gpu_memory = False
 
     if not use_gpu_memory:
+        total_mem = total_cpu_mem()
+        avail_mem = lib.current_memory()
+        if naux*nao*nocc*8*3 < 1e6 * (total_mem - avail_mem) * 0.7:
+            raise MemoryError('Out of CPU memory')
+
         mem = cupy.cuda.alloc_pinned_memory(nao*naux*nocc*3*8)
         wk = np.ndarray([nao,naux,nocc,3], dtype=np.float64, order='C', buffer=mem)
 

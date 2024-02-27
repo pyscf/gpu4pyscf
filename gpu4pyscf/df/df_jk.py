@@ -121,7 +121,7 @@ class _DFHF(df_jk._DFHF):
             Set mf.with_df = None to switch off density fitting mode.
     '''
 
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     _keys = {'rhoj', 'rhok', 'disp', 'screen_tol'}
 
@@ -232,23 +232,10 @@ class _DFHF(df_jk._DFHF):
         self.scf_summary['nuc'] = nuc.real
         return e_tot
 
-    '''
     def to_cpu(self):
-        obj = self.undo_df().to_cpu().density_fit()
-        keys = dir(obj)
-        obj.__dict__.update(self.__dict__)
-        for key in set(dir(self)).difference(keys):
-            print(key)
-            delattr(obj, key)
-
-        for key in keys:
-            val = getattr(obj, key)
-            if isinstance(val, cupy.ndarray):
-                setattr(obj, key, cupy.asnumpy(val))
-            elif hasattr(val, 'to_cpu'):
-                setattr(obj, key, val.to_cpu())
-        return obj
-    '''
+        auxbasis = self.with_df.auxbasis
+        obj = self.undo_df().to_cpu()
+        return obj.density_fit(auxbasis=auxbasis)
 
 def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-14, omega=None):
     '''

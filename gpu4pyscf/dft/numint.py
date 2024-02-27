@@ -1326,7 +1326,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             yield ao_mask, idx, weight, coords
 
 class NumInt(numint.NumInt):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     _keys = {'screen_idx', 'xcfuns', 'gdftopt'}
 
@@ -1359,6 +1359,10 @@ class NumInt(numint.NumInt):
             self.grid_blksize = None
             self.non0ao_idx = {}
         return self
+
+    def to_cpu(self):
+        from pyscf.dft.numint import NumInt
+        return NumInt()
 
     get_rho = get_rho
     nr_rks = nr_rks

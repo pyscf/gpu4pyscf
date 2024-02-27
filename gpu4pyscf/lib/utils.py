@@ -15,6 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import os
 import functools
 import cupy
 
@@ -33,16 +34,26 @@ def patch_cpu_kernel(cpu_kernel):
 
 def to_cpu(method):
     # Search for the class in pyscf closest to the one defined in gpu4pyscf
-    for pyscf_cls in method.__class__.__mro__:
-        if 'gpu4pyscf' not in pyscf_cls.__module__:
+    pyscf_cls = None
+    for c in method.__class__.__mro__:
+        if 'gpu4pyscf' not in c.__module__:
+            pyscf_cls = c
             break
+
+    # If the corresponding PySCF class is not found
+    if pyscf_cls is None:
+        return None
+
     method = method.view(pyscf_cls)
+    '''
     keys = []
     for cls in pyscf_cls.__mro__[:-1]:
         if hasattr(cls, '_keys'):
             keys.extend(cls._keys)
+    '''
+    keys = method.__dict__.keys()
     if keys:
-        keys = set(keys).intersection(method.__dict__)
+        keys = set(keys).intersection(method.__dict__.keys())
 
     for key in keys:
         val = getattr(method, key)
@@ -61,3 +72,8 @@ def device(obj):
         return 'gpu'
     else:
         return 'cpu'
+
+def total_cpu_mem():
+    ''' return total memory in Mb
+    '''
+    return os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / 1e6
