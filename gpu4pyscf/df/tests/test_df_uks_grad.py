@@ -101,11 +101,11 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_with_grids_response(self):
         print("-----testing DF DFT gradient with grids response----")
-        _check_grad(grid_response=True)
+        _check_grad(grid_response=True, disp=None)
 
     def test_grad_without_grids_response(self):
         print('-----testing DF DFT gradient without grids response----')
-        _check_grad(grid_response=False)
+        _check_grad(grid_response=False, disp=None)
 
     def test_grad_lda(self):
         print("-----LDA testing-------")
@@ -121,7 +121,7 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_mgga(self):
         print('-------mGGA testing-------------')
-        _check_grad(xc='m06', disp=None, tol=1e-3)
+        _check_grad(xc='tpss', disp=None, tol=1e-3)
 
     def test_grad_rsh(self):
         print('--------RSH testing-------------')

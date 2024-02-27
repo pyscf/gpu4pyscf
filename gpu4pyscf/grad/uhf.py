@@ -225,11 +225,6 @@ def get_veff(mf_grad, mol, dm):
 
     return vj0 - vk0 - vk1
 
-# def get_veff(mf_grad, mol, dm):
-#     vj0, vk0 = mf_grad.get_jk(mol, dm[0])
-#     vj1, vk1 = mf_grad.get_jk(mol, dm[1])
-
-#     return vj0 + vj1 - vk0 - vk1
 
 def make_rdm1e(mo_energy, mo_coeff, mo_occ):
     '''Energy weighted density matrix'''
@@ -307,16 +302,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     delec = 2.0*(dh - ds)
     delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
     
-    # dvhf = mf_grad.get_veff(mol, dm0)
-#     for k, ia in enumerate(atmlst):
-#         shl0, shl1, p0, p1 = aoslices[ia]
-# # s1, vhf are \nabla <i|h|j>, the nuclear gradients = -\nabla
-#         de[k] += cupy.einsum('sxij,sij->x', vhf[:,:,p0:p1], dm0[:,p0:p1]) * 2
-    # de += 2*dvhf
-    # de += dh1e + delec + extra_force
     de = 2.0 * dvhf + dh1e + delec + extra_force
     
-
     if(hasattr(mf, 'disp') and mf.disp is not None):
         g_disp = mf_grad.get_dispersion()
         mf_grad.grad_disp = g_disp
@@ -335,18 +322,6 @@ class Gradients(uhf.Gradients):
     # get_veff = rhf_grad.get_veff 
     get_veff =  get_veff
     get_jk = rhf_grad._get_jk 
-    
-    # def get_jk(self, mol=None, dm=None, hermi=0, omega=None):
-    #     if mol is None: mol = self.mol
-    #     if dm is None: dm = self.base.make_rdm1()
-    #     cpu0 = (logger.process_clock(), logger.perf_counter())
-    #     if omega is None:
-    #         vj, vk = get_jk(mol, dm)
-    #     else:
-    #         with mol.with_range_coulomb(omega):
-    #             vj, vk = get_jk(mol, dm)
-    #     logger.timer(self, 'vj and vk', *cpu0)
-    #     return vj, vk
     
     def get_j(self, mol=None, dm=None, hermi=0, omega=None):
         vj, _ = self.get_jk(mol, dm, with_k=False, omega=omega)

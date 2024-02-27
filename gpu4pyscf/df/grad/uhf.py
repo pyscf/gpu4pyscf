@@ -50,7 +50,6 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         else:
             dfobj = mf_grad.base.with_df
             with_df = dfobj._rsh_df[key] = copy.copy(dfobj).reset()
-            #raise RuntimeError(f'omega={omega} is not calculated in SCF')
 
     auxmol = with_df.auxmol
     if not hasattr(with_df, 'intopt') or with_df._cderi is None:

@@ -70,18 +70,6 @@ def get_veff(ks_grad, mol=None, dm=None):
                 xc = mf.xc
             else:
                 xc = mf.nlc
-            # dma =  dm[0]
-            # dma = tag_array(dma, mo_coeff=mf.mo_coeff[0], mo_occ=mf.mo_occ[0])
-            # dmb =  dm[1]
-            # dmb = tag_array(dmb, mo_coeff=mf.mo_coeff[1], mo_occ=mf.mo_occ[1])
-            # enlc, vnlc = rks_grad.get_nlc_vxc(
-            #     ni, mol, nlcgrids, xc, dma,
-            #     max_memory=max_memory, verbose=ks_grad.verbose)
-            # vxc_tmp[0] += vnlc
-            # enlc, vnlc = rks_grad.get_nlc_vxc(
-            #     ni, mol, nlcgrids, xc, dmb,
-            #     max_memory=max_memory, verbose=ks_grad.verbose)
-            # vxc_tmp[1] += vnlc
             enlc, vnlc = uks_grad.get_nlc_vxc(
                 ni, mol, nlcgrids, xc, dm, mf.mo_coeff, mf.mo_occ,
                 max_memory=max_memory, verbose=ks_grad.verbose)
@@ -93,10 +81,6 @@ def get_veff(ks_grad, mol=None, dm=None):
     mo_coeff_beta = mf.mo_coeff[1]
     occ_coeff0 = cupy.asarray(mo_coeff_alpha[:, mf.mo_occ[0]>0.5], order='C')
     occ_coeff1 = cupy.asarray(mo_coeff_beta[:, mf.mo_occ[1]>0.5], order='C')
-    # print(mf.mo_coeff.shape)
-    # print(mf.mo_occ.shape)
-    # print(mf.mo_coeff[1, :, mf.mo_occ[1]>0.5].shape)
-    # print(vxc_tmp.shape, occ_coeff0.shape, type(vxc_tmp), type(occ_coeff0))
     tmp = contract('nij,jk->nik', vxc_tmp[0], occ_coeff0)
     vxc = contract('nik,ik->ni', tmp, occ_coeff0)
     tmp = contract('nij,jk->nik', vxc_tmp[1], occ_coeff1)
@@ -116,9 +100,6 @@ def get_veff(ks_grad, mol=None, dm=None):
         vxc += vj0 + vj1 + vj0_m1 + vj1_m0
     else:
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
-        
-        # vj, vk = ks_grad.get_jk(mol, dm)
-        # vk *= hyb
         
         vj0, vk0, vjaux0, vkaux0 = ks_grad.get_jk(mol, dm[0], mo_coeff=ks_grad.base.mo_coeff[0], mo_occ=ks_grad.base.mo_occ[0])
         vj1, vk1, vjaux1, vkaux1 = ks_grad.get_jk(mol, dm[1], mo_coeff=ks_grad.base.mo_coeff[1], mo_occ=ks_grad.base.mo_occ[1])
