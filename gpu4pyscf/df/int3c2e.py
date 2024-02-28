@@ -360,8 +360,8 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
 
     if not use_gpu_memory:
         total_mem = total_cpu_mem()
-        avail_mem = lib.current_memory()
-        if naux*nao*nocc*8 < 1e6 * (total_mem - avail_mem) * 0.7:
+        used_mem = lib.current_memory()[0]
+        if naux*nao*nocc*8 > 1e6 * (total_mem - used_mem) * 0.7:
             raise MemoryError('Out of CPU memory')
 
         mem = cupy.cuda.alloc_pinned_memory(naux*nao*nocc*8)
@@ -877,8 +877,9 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
 
     if not use_gpu_memory:
         total_mem = total_cpu_mem()
-        avail_mem = lib.current_memory()
-        if naux*nao*nocc*8*3 < 1e6 * (total_mem - avail_mem) * 0.7:
+        used_mem = lib.current_memory()[0]
+        print(naux*nao*nocc*8*3/1e9, 'GB', (total_mem - used_mem))
+        if naux*nao*nocc*8*3 > 1e6 * (total_mem - used_mem) * 0.7:
             raise MemoryError('Out of CPU memory')
 
         mem = cupy.cuda.alloc_pinned_memory(nao*naux*nocc*3*8)
@@ -898,6 +899,7 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
             else:
                 wk[:,k0:k1] = wk_tmp.get()
         count += 1
+        print(count)
     return wj, wk
 
 def get_int3c2e_ip2_wjk(intopt, dm0_tag, with_k=True, omega=None):

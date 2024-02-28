@@ -73,7 +73,17 @@ def device(obj):
     else:
         return 'cpu'
 
+PAGESIZE = os.sysconf("SC_PAGE_SIZE")
 def total_cpu_mem():
     ''' return total memory in Mb
     '''
-    return os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / 1e6
+    import sys
+    if sys.platform.startswith('linux'):
+        with open("/proc/%s/statm" % os.getpid()) as f:
+            print(f.readline().split())
+            vms, rss = [int(x)*PAGESIZE for x in f.readline().split()[:2]]
+            return rss/1e6, vms/1e6
+    else:
+        return 0, 0
+
+    #return os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / 1e6
