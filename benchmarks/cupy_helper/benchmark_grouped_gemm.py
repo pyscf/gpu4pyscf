@@ -45,15 +45,15 @@ print(flops/perf.gpu_times.mean()/1e9, 'GFLOPS')
 
 # ------------------ grouped DGEMM -------------------------
 print('---------- benchmarking ki,kj->ij ----------')
-count = 108
-m = 256
-n = 68
-k = 128*128
+count = 200
+m = 68
+n = 128*128
+k = 256
 As = []
 Bs = []
 for i in range(count):
-    As.append(cupy.random.random([m,k]))
-    Bs.append(cupy.random.random([m,n]))
+    As.append(cupy.random.random([k,n]))
+    Bs.append(cupy.random.random([k,m]))
 
 perf = profiler.benchmark(grouped_gemm, (Bs, As), n_repeat=20, n_warmup=3)
 flops = 2*m*n*k*count

@@ -41,8 +41,7 @@ using cutlass_tensorop_d884gemm_grouped_64x128_16x3_tt_align1_base =
     cutlass::gemm::GemmShape<32, 64, 16>,
     cutlass::gemm::GemmShape<8, 8, 4>,
     cutlass::epilogue::thread::LinearCombination<double, 1, double, double>,
-    // cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<1>,
-    cutlass::gemm::threadblock::ThreadblockSwizzleStreamK,
+    cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<1>,
     3,
     cutlass::gemm::kernel::GroupScheduleMode::kDeviceOnly,
     cutlass::arch::OpMultiplyAdd
@@ -61,8 +60,8 @@ using cutlass_simt_dgemm_grouped_64x128_8x2_tt_align1_base =
     cutlass::gemm::GemmShape<32, 64, 8>,
     cutlass::gemm::GemmShape<1, 1, 1>,
     cutlass::epilogue::thread::LinearCombination<double, 1, double, double>,
-    // cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<1>,
-    cutlass::gemm::threadblock::ThreadblockSwizzleStreamK,
+    cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<1>,
+    // cutlass::gemm::threadblock::ThreadblockSwizzleStreamK,
     2,
     cutlass::gemm::kernel::GroupScheduleMode::kDeviceOnly,
     cutlass::arch::OpMultiplyAdd

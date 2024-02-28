@@ -714,25 +714,15 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             rho_tot = cupy.empty([nset,5,ngrids])
     p0 = p1 = 0
     t1 = t0 = log.init_timer()
-    # TODO: replace ni.block_loop with ni.grouped_block_loop
-    for ao_mask_group, idx_group, weight_group, _ in ni.grouped_block_loop(mol, grids, nao, ao_deriv):
-        p0_raw = p0
+    for ao_mask, idx, weight, _ in ni.block_loop(mol, grids, nao, ao_deriv):
+        p1 = p0 + weight.size
         for i in range(nset):
-            p0 = p0_raw
             if mo_coeff is None:
-                for ao_mask, idx, weight in zip(ao_mask_group, idx_group, weight_group):
-                    p1 = p0 + weight.size
-                    rho_tot[i,:,p0:p1] = eval_rho(mol, ao_mask, dms[i][np.ix_(idx, idx)],
-                                                  xctype=xctype, hermi=1, with_lapl=with_lapl)
-                    p0 = p1
+                rho_tot[i,:,p0:p1] = eval_rho(mol, ao_mask, dms[i][np.ix_(idx,idx)], xctype=xctype, hermi=1, with_lapl=with_lapl)
             else:
-                mo_coeff_mask_group = [mo_coeff[idx,:] for idx in idx_group]
-                # TODO: create eval_rho_group for grouped ao_mask
-                rho_group = eval_rho_group(mol, ao_mask_group, mo_coeff_mask_group, mo_occ, None, xctype, with_lapl)
-                for weight, eval_rho_group_res in zip(weight_group, rho_group):
-                    p1 = p0 + weight.size
-                    rho_tot[i,:,p0:p1] = eval_rho_group_res
-                    p0 = p1
+                mo_coeff_mask = mo_coeff[idx,:]
+                rho_tot[i,:,p0:p1] = eval_rho2(mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype, with_lapl)
+        p0 = p1
         t1 = log.timer_debug2('eval rho slice', *t1)
     t0 = log.timer_debug1('eval rho', *t0)
 
