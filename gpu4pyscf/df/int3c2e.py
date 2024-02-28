@@ -359,7 +359,7 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
         use_gpu_memory = False
 
     if not use_gpu_memory:
-        total_mem = total_cpu_mem()
+        total_mem = mol.max_memory
         used_mem = lib.current_memory()[0]
         if naux*nao*nocc*8 > 1e6 * (total_mem - used_mem) * 0.7:
             raise MemoryError('Out of CPU memory')
@@ -876,7 +876,7 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
         use_gpu_memory = False
 
     if not use_gpu_memory:
-        total_mem = total_cpu_mem()
+        total_mem = intopt.mol.max_memory
         used_mem = lib.current_memory()[0]
         print(naux*nao*nocc*8*3/1e9, 'GB', (total_mem - used_mem))
         if naux*nao*nocc*8*3 > 1e6 * (total_mem - used_mem) * 0.7:
@@ -899,7 +899,6 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
             else:
                 wk[:,k0:k1] = wk_tmp.get()
         count += 1
-        print(count)
     return wj, wk
 
 def get_int3c2e_ip2_wjk(intopt, dm0_tag, with_k=True, omega=None):

@@ -205,7 +205,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
     if(not use_gpu_memory):
         log.debug("Not enough GPU memory")
         # TODO: async allocate memory
-        total_mem = total_cpu_mem()
+        total_mem = mol.max_memory
         used_mem = lib.current_memory()[0]
         if naux * npair * 8 > 1e6 * (total_mem - used_mem) * 0.7:
             raise MemoryError('Out of CPU memory')
