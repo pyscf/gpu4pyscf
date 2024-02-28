@@ -261,7 +261,6 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dme0_sf = dme0[0] + dme0[1] 
     
     s1 = mf_grad.get_ovlp(mol)
-    # vhf = mf_grad.get_veff(mol, dm0)
     
     if atmlst is None:
         atmlst = range(mol.natm)
@@ -319,7 +318,6 @@ class Gradients(uhf.Gradients):
     
     grad_elec = grad_elec
     grad_nuc = rhf_grad.grad_nuc 
-    # get_veff = rhf_grad.get_veff 
     get_veff =  get_veff
     get_jk = rhf_grad._get_jk 
     
