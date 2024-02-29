@@ -249,6 +249,18 @@ class KnownValues(unittest.TestCase):
         e_tot = scf.RHF(mol).kernel()
         self.assertAlmostEqual(e_tot, -151.08447712520285)
     '''
+
+    # TODO:
+    #test analyze
+    #test mulliken_pop
+    #test mulliken_meta
+    #test chkfile
+    #test stability
+    #test newton
+    #test x2c
+    #test dipole
+    #test canonicalize
+
 if __name__ == "__main__":
     print("Full Tests for rhf")
     unittest.main()

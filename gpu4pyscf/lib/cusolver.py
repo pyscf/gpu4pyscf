@@ -86,7 +86,7 @@ def eigh(h, s):
             _handle,
             CUSOLVER_EIG_TYPE_1,
             CUSOLVER_EIG_MODE_VECTOR,
-            cublas.CUBLAS_FILL_MODE_LOWER, 
+            cublas.CUBLAS_FILL_MODE_LOWER,
             n,
             A.data.ptr,
             n,
@@ -96,9 +96,9 @@ def eigh(h, s):
             ctypes.byref(lwork)
         )
         lwork = lwork.value
-    
+
     work = cupy.empty(lwork)
-    
+
     status = libcusolver.cusolverDnDsygvd(
         _handle,
         CUSOLVER_EIG_TYPE_1,
@@ -114,7 +114,7 @@ def eigh(h, s):
         lwork,
         devInfo.data.ptr
     )
-    
+
     if status != 0:
         raise RuntimeError("failed in eigh kernel")
     return w, A.T
@@ -131,8 +131,8 @@ def cholesky(A):
     dev_info = cupy.empty(1, dtype=np.int32)
     potrf(handle, cublas.CUBLAS_FILL_MODE_UPPER, n, x.data.ptr, n,
         workspace.data.ptr, buffersize, dev_info.data.ptr)
-    
-    if dev_info[0] > 0:
+
+    if dev_info[0] != 0:
         raise RuntimeError('failed to perform Cholesky Decomposition')
     cupy.linalg._util._tril(x,k=0)
     return x

@@ -28,7 +28,7 @@ from gpu4pyscf.lib import logger
 LMAX_ON_GPU = 8
 FREE_CUPY_CACHE = True
 STACK_SIZE_PER_THREAD = 8192 * 4
-BLKSIZE = 256
+BLKSIZE = 128
 
 libgvhf = load_library('libgvhf')
 libgint = load_library('libgint')
@@ -127,6 +127,9 @@ class VHFOpt(_vhf.VHFOpt):
         # use local basis_seg_contraction for efficiency
         self.mol = basis_seg_contraction(mol,allow_replica=True)
         self.auxmol = basis_seg_contraction(auxmol, allow_replica=True)
+        self._mol = mol
+        self._auxmol = auxmol
+
         '''
         # Note mol._bas will be sorted in .build() method. VHFOpt should be
         # initialized after mol._bas updated.
@@ -140,9 +143,6 @@ class VHFOpt(_vhf.VHFOpt):
         self._dmcondname = dmcondname
 
         self.bpcache = None
-
-        self.sorted_auxmol = None
-        self.sorted_mol = None
 
         self.cart_ao_idx = None
         self.sph_ao_idx = None
@@ -188,7 +188,6 @@ class VHFOpt(_vhf.VHFOpt):
         sorted_mol, sorted_idx, uniq_l_ctr, l_ctr_counts = sort_mol(self.mol)
         if group_size is not None :
             uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size)
-        self.sorted_mol = sorted_mol
 
         # sort fake mol
         fake_mol = make_fake_mol()
@@ -198,7 +197,7 @@ class VHFOpt(_vhf.VHFOpt):
         sorted_auxmol, sorted_aux_idx, aux_uniq_l_ctr, aux_l_ctr_counts = sort_mol(self.auxmol)
         if group_size_aux is not None:
             aux_uniq_l_ctr, aux_l_ctr_counts = _split_l_ctr_groups(aux_uniq_l_ctr, aux_l_ctr_counts, group_size_aux)
-        self.sorted_auxmol = sorted_auxmol
+
         tmp_mol = gto.mole.conc_mol(fake_mol, sorted_auxmol)
         tot_mol = gto.mole.conc_mol(sorted_mol, tmp_mol)
 
@@ -218,8 +217,8 @@ class VHFOpt(_vhf.VHFOpt):
         cput1 = logger.timer_debug1(sorted_mol, 'Get pairing', *cput1)
 
         # contraction coefficient for ao basis
-        cart_ao_loc = self.sorted_mol.ao_loc_nr(cart=True)
-        sph_ao_loc = self.sorted_mol.ao_loc_nr(cart=False)
+        cart_ao_loc = sorted_mol.ao_loc_nr(cart=True)
+        sph_ao_loc = sorted_mol.ao_loc_nr(cart=False)
         self.cart_ao_loc = [cart_ao_loc[cp] for cp in l_ctr_offsets]
         self.sph_ao_loc = [sph_ao_loc[cp] for cp in l_ctr_offsets]
         self.angular = [l[0] for l in uniq_l_ctr]
@@ -238,7 +237,6 @@ class VHFOpt(_vhf.VHFOpt):
         nsph = sph_ao_loc[-1]
         self.cart2sph = block_c2s_diag(ncart, nsph, self.angular, l_ctr_counts)
         inv_idx = np.argsort(self.sph_ao_idx, kind='stable').astype(np.int32)
-        self.rev_ao_idx = inv_idx
         self.coeff = self.cart2sph[:, inv_idx]
         cput1 = logger.timer_debug1(sorted_mol, 'AO cart2sph coeff', *cput1)
 
@@ -248,8 +246,8 @@ class VHFOpt(_vhf.VHFOpt):
         aux_l_ctr_offsets = np.append(0, np.cumsum(aux_l_ctr_counts))
 
         # contraction coefficient for auxiliary basis
-        cart_aux_loc = self.sorted_auxmol.ao_loc_nr(cart=True)
-        sph_aux_loc = self.sorted_auxmol.ao_loc_nr(cart=False)
+        cart_aux_loc = sorted_auxmol.ao_loc_nr(cart=True)
+        sph_aux_loc = sorted_auxmol.ao_loc_nr(cart=False)
         self.cart_aux_loc = [cart_aux_loc[cp] for cp in aux_l_ctr_offsets]
         self.sph_aux_loc = [sph_aux_loc[cp] for cp in aux_l_ctr_offsets]
         self.aux_angular = [l[0] for l in aux_uniq_l_ctr]
@@ -272,7 +270,7 @@ class VHFOpt(_vhf.VHFOpt):
         aux_l_ctr_offsets += fake_l_ctr_offsets[-1]
         cput1 = logger.timer_debug1(tot_mol, 'aux cart2sph coeff', *cput1)
 
-        ao_loc = self.sorted_mol.ao_loc_nr(cart=False)
+        ao_loc = sorted_mol.ao_loc_nr(cart=self._mol.cart)
         self.ao_pairs_row, self.ao_pairs_col = get_ao_pairs(pair2bra, pair2ket, ao_loc)
         cderi_row = cupy.hstack(self.ao_pairs_row)
         cderi_col = cupy.hstack(self.ao_pairs_col)
@@ -326,24 +324,34 @@ class VHFOpt(_vhf.VHFOpt):
             nl = int(round(np.sqrt(ncptype)))
             self.cp_idx, self.cp_jdx = np.unravel_index(np.arange(ncptype), (nl, nl))
 
+        if self._mol.cart:
+            self.ao_loc = self.cart_ao_loc
+            self.ao_idx = self.cart_ao_idx
+        else:
+            self.ao_loc = self.sph_ao_loc
+            self.ao_idx = self.sph_ao_idx
+        if self._auxmol.cart:
+            self.aux_ao_loc = self.cart_aux_loc
+            self.aux_ao_idx = self.cart_aux_idx
+        else:
+            self.aux_ao_loc = self.sph_aux_loc
+            self.aux_ao_idx = self.sph_aux_idx
+        self.rev_ao_idx = np.argsort(self.ao_idx, kind='stable').astype(np.int32)
+
 def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
     intopt = VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(thred, diag_block_with_triu=True, aosym=True, group_size_aux=64)
+    intopt.build(thred, diag_block_with_triu=True, aosym=True, group_size=BLKSIZE, group_size_aux=BLKSIZE)
     orbo = dm0_tag.occ_coeff
     nao = mol.nao
     naux = auxmol.nao
     nocc = orbo.shape[1]
     row, col = np.tril_indices(nao)
-    wj = cupy.zeros([naux])
-    if with_k:
-        wk_P__ = cupy.zeros([naux, nocc, nocc]) # assuming naux*nocc*nocc < max_gpu_memory
-    else:
-        wk_P__ = None
+    wj = cupy.empty([naux])
     avail_mem = get_avail_mem()
     use_gpu_memory = True
     if naux*nao*nocc*8 < 0.4*avail_mem:
         try:
-            wk = cupy.zeros([naux,nao,nocc])
+            wk = cupy.empty([naux,nao,nocc])
         except Exception:
             use_gpu_memory = False
     else:
@@ -355,31 +363,37 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
 
     # TODO: async data transfer
     for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-        k0 = intopt.sph_aux_loc[cp_kl_id]
-        k1 = intopt.sph_aux_loc[cp_kl_id+1]
-        ints_slices = cupy.zeros([k1-k0, nao, nao], order='C')
+        k0 = intopt.aux_ao_loc[cp_kl_id]
+        k1 = intopt.aux_ao_loc[cp_kl_id+1]
+        rhoj_tmp = cupy.zeros([k1-k0], order='C')
+        rhok_tmp = cupy.zeros([k1-k0, nao, nocc], order='C')
+
         for cp_ij_id, _ in enumerate(intopt.log_qs):
             cpi = intopt.cp_idx[cp_ij_id]
             cpj = intopt.cp_jdx[cp_ij_id]
             li = intopt.angular[cpi]
             lj = intopt.angular[cpj]
             int3c_blk = get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, omega=omega)
-            int3c_blk = cart2sph(int3c_blk, axis=1, ang=lj)
-            int3c_blk = cart2sph(int3c_blk, axis=2, ang=li)
-            i0, i1 = intopt.sph_ao_loc[cpi], intopt.sph_ao_loc[cpi+1]
-            j0, j1 = intopt.sph_ao_loc[cpj], intopt.sph_ao_loc[cpj+1]
-            ints_slices[:,j0:j1,i0:i1] = int3c_blk
+            if not intopt._mol.cart:
+                int3c_blk = cart2sph(int3c_blk, axis=1, ang=lj)
+                int3c_blk = cart2sph(int3c_blk, axis=2, ang=li)
+            i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
+            j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
 
-        ints_slices[:, row, col] = ints_slices[:, col, row]
-        wj[k0:k1] = contract('Lij,ij->L', ints_slices, dm0_tag)
+            tmp = contract('Lji,ij->L', int3c_blk, dm0_tag[i0:i1,j0:j1])
+            rhoj_tmp += tmp
+            rhok_tmp[:,j0:j1] += contract('Lji,io->Ljo', int3c_blk, orbo[i0:i1])
+
+            if cpi != cpj and intopt.aosym:
+                rhoj_tmp += tmp
+                rhok_tmp[:,i0:i1] += contract('Lji,jo->Lio', int3c_blk, orbo[j0:j1])
+        wj[k0:k1] = rhoj_tmp
         if with_k:
-            wk_tmp = contract('Lij,jo->Lio', ints_slices, orbo)
-            wk_P__[k0:k1] = contract('Lio,ir->Lro', wk_tmp, orbo)
             if isinstance(wk, cupy.ndarray):
-                wk[k0:k1] = contract('Lij,jo->Lio', ints_slices, orbo)
+                wk[k0:k1] = rhok_tmp
             else:
-                wk[k0:k1] = contract('Lij,jo->Lio', ints_slices, orbo).get()
-    return wj, wk, wk_P__
+                wk[k0:k1] = rhok_tmp.get()
+    return wj, wk
 
 def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None):
     '''
@@ -463,7 +477,8 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
     nao = intopt.mol.nao
     naux = intopt.auxmol.nao
     norb = nao + naux + 1
-
+    ao_loc = intopt.ao_loc
+    aux_ao_loc = intopt.aux_ao_loc
     comp = 3**order
 
     nbins = 1
@@ -507,13 +522,15 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
             if err != 0:
                 raise RuntimeError(f'GINT_fill_int3c2e general failed, err={err}')
 
-            int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
-            int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)
-            int3c_blk = cart2sph(int3c_blk, axis=3, ang=li)
+            if not intopt._auxmol.cart:
+                int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
+            if not intopt._mol.cart:
+                int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)
+                int3c_blk = cart2sph(int3c_blk, axis=3, ang=li)
 
-            i0, i1 = intopt.sph_ao_loc[cpi], intopt.sph_ao_loc[cpi+1]
-            j0, j1 = intopt.sph_ao_loc[cpj], intopt.sph_ao_loc[cpj+1]
-            k0, k1 = intopt.sph_aux_loc[aux_id], intopt.sph_aux_loc[aux_id+1]
+            i0, i1 = ao_loc[cpi], ao_loc[cpi+1]
+            j0, j1 = ao_loc[cpj], ao_loc[cpj+1]
+            k0, k1 = aux_ao_loc[aux_id], aux_ao_loc[aux_id+1]
 
             yield i0,i1,j0,j1,k0,k1,int3c_blk
 
@@ -536,20 +553,21 @@ def loop_aux_jk(intopt, ip_type='', omega=None, stream=None):
     if omega is None: omega = 0.0
     if stream is None: stream = cupy.cuda.get_current_stream()
 
-    nao_sph = len(intopt.sph_ao_idx)
-    nao = intopt.mol.nao
-    naux = intopt.auxmol.nao
-    norb = nao + naux + 1
-
+    nao = len(intopt.ao_idx)
+    nao_cart = intopt.mol.nao
+    naux_cart = intopt.auxmol.nao
+    norb_cart = nao_cart + naux_cart + 1
+    ao_loc = intopt.ao_loc
+    aux_ao_loc = intopt.aux_ao_loc
     comp = 3**order
 
     nbins = 1
     for aux_id, log_q_kl in enumerate(intopt.aux_log_qs):
         cp_kl_id = aux_id + len(intopt.log_qs)
-        k0_sph, k1_sph = intopt.sph_aux_loc[aux_id], intopt.sph_aux_loc[aux_id+1]
+        k0, k1 = intopt.aux_ao_loc[aux_id], intopt.aux_ao_loc[aux_id+1]
         lk = intopt.aux_angular[aux_id]
 
-        ints_slices = cupy.zeros([comp, k1_sph-k0_sph, nao_sph, nao_sph])
+        ints_slices = cupy.zeros([comp, k1-k0, nao, nao])
         for cp_ij_id, log_q_ij in enumerate(intopt.log_qs):
             cpi = intopt.cp_idx[cp_ij_id]
             cpj = intopt.cp_jdx[cp_ij_id]
@@ -566,7 +584,7 @@ def loop_aux_jk(intopt, ip_type='', omega=None, stream=None):
             bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
             bins_locs_kl = np.array([0, len(log_q_kl)], dtype=np.int32)
 
-            ao_offsets = np.array([i0,j0,nao+1+k0,nao], dtype=np.int32)
+            ao_offsets = np.array([i0,j0,nao_cart+1+k0,nao_cart], dtype=np.int32)
             strides = np.array([1, ni, ni*nj, ni*nj*nk], dtype=np.int32)
 
             int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
@@ -574,7 +592,7 @@ def loop_aux_jk(intopt, ip_type='', omega=None, stream=None):
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(norb),
+                ctypes.c_int(norb_cart),
                 strides.ctypes.data_as(ctypes.c_void_p),
                 ao_offsets.ctypes.data_as(ctypes.c_void_p),
                 bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
@@ -586,32 +604,34 @@ def loop_aux_jk(intopt, ip_type='', omega=None, stream=None):
             if err != 0:
                 raise RuntimeError(f'GINT_fill_int3c2e general failed, err={err}')
 
-            int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
-            int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)
-            int3c_blk = cart2sph(int3c_blk, axis=3, ang=li)
+            if not intopt._auxmol.cart:
+                int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
+            if not intopt._mol.cart:
+                int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)
+                int3c_blk = cart2sph(int3c_blk, axis=3, ang=li)
 
-            i0, i1 = intopt.sph_ao_loc[cpi], intopt.sph_ao_loc[cpi+1]
-            j0, j1 = intopt.sph_ao_loc[cpj], intopt.sph_ao_loc[cpj+1]
-            k0, k1 = intopt.sph_aux_loc[aux_id], intopt.sph_aux_loc[aux_id+1]
+            i0, i1 = ao_loc[cpi], ao_loc[cpi+1]
+            j0, j1 = ao_loc[cpj], ao_loc[cpj+1]
+            k0, k1 = aux_ao_loc[aux_id], aux_ao_loc[aux_id+1]
             ints_slices[:, :, j0:j1, i0:i1] = int3c_blk
         int3c_blk = None
         yield aux_id, ints_slices
 
 def get_ao2atom(intopt, aoslices):
-    sph_ao_idx = intopt.sph_ao_idx
-    ao2atom = cupy.zeros([len(sph_ao_idx), len(aoslices)])
+    ao_idx = intopt.ao_idx
+    ao2atom = cupy.zeros([len(ao_idx), len(aoslices)])
     for ia, aoslice in enumerate(aoslices):
         _, _, p0, p1 = aoslice
         ao2atom[p0:p1,ia] = 1.0
-    return ao2atom[sph_ao_idx,:]
+    return ao2atom[ao_idx,:]
 
 def get_aux2atom(intopt, auxslices):
-    sph_aux_idx = intopt.sph_aux_idx
-    aux2atom = cupy.zeros([len(sph_aux_idx), len(auxslices)])
+    aux_ao_idx = intopt.aux_ao_idx
+    aux2atom = cupy.zeros([len(aux_ao_idx), len(auxslices)])
     for ia, auxslice in enumerate(auxslices):
         _, _, p0, p1 = auxslice
         aux2atom[p0:p1,ia] = 1.0
-    return aux2atom[sph_aux_idx,:]
+    return aux2atom[aux_ao_idx,:]
 
 def get_j_int3c2e_pass1(intopt, dm0):
     '''
@@ -622,7 +642,7 @@ def get_j_int3c2e_pass1(intopt, dm0):
     naux = len(intopt.cart_aux_idx)
     rhoj = cupy.zeros([naux])
     coeff = intopt.coeff
-    dm_cart = cupy.einsum('pi,ij,qj->pq', coeff, dm0, coeff)
+    dm_cart = coeff @ dm0 @ coeff.T
 
     num_cp_ij = [len(log_qs) for log_qs in intopt.log_qs]
     num_cp_kl = [len(log_qs) for log_qs in intopt.aux_log_qs]
@@ -647,8 +667,9 @@ def get_j_int3c2e_pass1(intopt, dm0):
     if err != 0:
         raise RuntimeError('CUDA error in get_j_pass1')
 
-    aux_coeff = intopt.aux_coeff
-    rhoj = cupy.dot(rhoj, aux_coeff)
+    if not intopt._auxmol.cart:
+        aux_coeff = intopt.aux_coeff
+        rhoj = cupy.dot(rhoj, aux_coeff)
     return rhoj
 
 def get_j_int3c2e_pass2(intopt, rhoj):
@@ -669,8 +690,9 @@ def get_j_int3c2e_pass2(intopt, rhoj):
     ncp_ij = len(intopt.log_qs)
     ncp_kl = len(intopt.aux_log_qs)
 
-    aux_coeff = intopt.aux_coeff
-    rhoj = cupy.dot(aux_coeff, rhoj)
+    if not intopt._auxmol.cart:
+        aux_coeff = intopt.aux_coeff
+        rhoj = cupy.dot(aux_coeff, rhoj)
 
     err = libgvhf.GINTbuild_j_int3c2e_pass2(
         intopt.bpcache,
@@ -687,44 +709,53 @@ def get_j_int3c2e_pass2(intopt, rhoj):
     if err != 0:
         raise RuntimeError('CUDA error in get_j_pass2')
     coeff = intopt.coeff
-    vj = cupy.einsum('pi,pq,qj->ij', coeff, vj, coeff)
+    vj = coeff.T @ vj @ coeff
     vj = vj + vj.T
     return vj
 
-def get_int3c2e_jk(intopt, dm0_tag, with_k=True, omega=None):
+def get_int3c2e_jk(mol, auxmol, dm0_tag, with_k=True, omega=None):
     '''
     get rhoj and rhok for int3c2e
     '''
+    intopt = VHFOpt(mol, auxmol, 'int2e')
+    intopt.build(1e-14, diag_block_with_triu=True, aosym=True, group_size=BLKSIZE, group_size_aux=BLKSIZE)
+
     if omega is None: omega = 0.0
-    nao_sph = len(intopt.sph_ao_idx)
-    naux_sph = len(intopt.sph_aux_idx)
+    naux = len(intopt.aux_ao_idx)
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     nocc = orbo.shape[1]
-    rhoj = cupy.zeros([naux_sph])
-    rhok = cupy.zeros([naux_sph,nocc,nocc])
+    rhoj = cupy.empty([naux])
+    rhok = cupy.empty([naux,nocc,nocc])
 
     for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-        k0 = intopt.sph_aux_loc[cp_kl_id]
-        k1 = intopt.sph_aux_loc[cp_kl_id+1]
-        ints_slices = cupy.zeros([k1-k0, nao_sph, nao_sph], order='C')
+        k0 = intopt.aux_ao_loc[cp_kl_id]
+        k1 = intopt.aux_ao_loc[cp_kl_id+1]
+        rhoj_tmp = cupy.zeros([k1-k0], order='C')
+        rhok_tmp = cupy.zeros([k1-k0, nocc, nocc], order='C')
         for cp_ij_id, _ in enumerate(intopt.log_qs):
             cpi = intopt.cp_idx[cp_ij_id]
             cpj = intopt.cp_jdx[cp_ij_id]
             li = intopt.angular[cpi]
             lj = intopt.angular[cpj]
             int3c_blk = get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, omega=omega)
-            int3c_blk = cart2sph(int3c_blk, axis=1, ang=lj)
-            int3c_blk = cart2sph(int3c_blk, axis=2, ang=li)
-            i0, i1 = intopt.sph_ao_loc[cpi], intopt.sph_ao_loc[cpi+1]
-            j0, j1 = intopt.sph_ao_loc[cpj], intopt.sph_ao_loc[cpj+1]
-            ints_slices[:,j0:j1,i0:i1] = int3c_blk
-            if cpi != cpj and intopt.aosym:
-                ints_slices[:,i0:i1,j0:j1] = int3c_blk.transpose([0,2,1])
+            if not intopt._mol.cart:
+                int3c_blk = cart2sph(int3c_blk, axis=1, ang=lj)
+                int3c_blk = cart2sph(int3c_blk, axis=2, ang=li)
+            i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
+            j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
+            if cpi == cpj and intopt.aosym:
+                int3c_blk *= 0.5
 
-        rhoj[k0:k1] += contract('pji,ij->p', ints_slices, dm0_tag)
-        rhok_tmp = contract('pji,jo->poi', ints_slices, orbo)
-        rhok[k0:k1] += contract('poi,ir->por', rhok_tmp, orbo)
+            rhoj_tmp += contract('pji,ij->p', int3c_blk, dm0_tag[i0:i1,j0:j1])
+            ints_o = contract('pji,jo->poi', int3c_blk, orbo[j0:j1])
+            rhok_tmp += contract('poi,ir->por', ints_o, orbo[i0:i1])
 
+        if intopt.aosym:
+            rhoj[k0:k1] = 2.0 * rhoj_tmp
+            rhok[k0:k1] = rhok_tmp + rhok_tmp.transpose([0,2,1])
+        else:
+            rhoj[k0:k1] = rhoj_tmp
+            rhok[k0:k1] = rhok_tmp
     return rhoj, rhok
 
 def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omega=None):
@@ -733,13 +764,13 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
     '''
     ao2atom = get_ao2atom(intopt, aoslices)
     natom = len(aoslices)
-    nao_sph = len(intopt.sph_ao_idx)
+    nao = len(intopt.ao_idx)
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     nocc = orbo.shape[1]
-    vj1_buf = cupy.zeros([3,nao_sph,nao_sph])
-    vk1_buf = cupy.zeros([3,nao_sph,nao_sph])
-    vj1 = cupy.zeros([natom,3,nao_sph,nocc])
-    vk1 = cupy.zeros([natom,3,nao_sph,nocc])
+    vj1_buf = cupy.zeros([3,nao,nao])
+    vk1_buf = cupy.zeros([3,nao,nao])
+    vj1 = cupy.zeros([natom,3,nao,nocc])
+    vk1 = cupy.zeros([natom,3,nao,nocc])
 
     ncp_ij = len(intopt.log_qs)
     count = 0
@@ -749,22 +780,27 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
         if count % ncp_ij == 0:
             rhok_tmp = cupy.asarray(rhok[k0:k1])
             if with_k:
-                rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, orbo) * 2
-                rhok0 = contract('pli,lo->poi', rhok0_slice, orbo)
+                rhok0 = contract('pio,ir->pro', rhok_tmp, 2.0*orbo)
+                rhok0 = contract('pro,Jo->prJ', rhok0, orbo)
 
         rhoj0 = contract('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
         vj1_ao = contract('pJo,xpi->xiJo', rhok_tmp, rhoj0)
         vj1 += 2.0*contract('xiJo,ia->axJo', vj1_ao, ao2atom[i0:i1])
+        vj1_ao = rhoj0 = None
 
         if with_k:
-            vk1_buf[:,i0:i1] += contract('xpji,plj->xil', int3c_blk, rhok0_slice[:,:,j0:j1])
+            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, 2.0*orbo[j0:j1])
+            vk1_buf[:,i0:i1] += contract('xpji,plj->xil', int3c_blk, rhok0_slice)
 
             vk1_ao = contract('xpji,poi->xijo', int3c_blk, rhok0[:,:,i0:i1])
             vk1[:,:,j0:j1] += contract('xijo,ia->axjo', vk1_ao, ao2atom[i0:i1])
 
             int3c_ip1_occ = contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])
-            vk1_ao = contract('xpio,pJi->xiJo', int3c_ip1_occ, rhok0_slice[:,:,i0:i1])
+            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, 2.0*orbo[i0:i1])
+
+            vk1_ao = contract('xpio,pJi->xiJo', int3c_ip1_occ, rhok0_slice)
             vk1 += contract('xiJo,ia->axJo', vk1_ao, ao2atom[i0:i1])
+            vk1_ao = int3c_ip1_occ = None
         count += 1
 
     return vj1_buf, vk1_buf, vj1, vk1
@@ -775,11 +811,11 @@ def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices, with_k=True, ome
     '''
     aux2atom = get_aux2atom(intopt, auxslices)
     natom = len(auxslices)
-    nao_sph = len(intopt.sph_ao_idx)
+    nao = len(intopt.ao_idx)
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     nocc = orbo.shape[1]
-    vj1 = cupy.zeros([natom,3,nao_sph,nocc])
-    vk1 = cupy.zeros([natom,3,nao_sph,nocc])
+    vj1 = cupy.zeros([natom,3,nao,nocc])
+    vk1 = cupy.zeros([natom,3,nao,nocc])
 
     ncp_ij = len(intopt.log_qs)
     count = 0
@@ -787,7 +823,7 @@ def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices, with_k=True, ome
         # initialize intermediate variables
         if count % ncp_ij == 0:
             wj2 = cupy.zeros([3,k1-k0])
-            wk2_P__ = cupy.zeros([3,k1-k0,nao_sph,nocc])
+            wk2_P__ = cupy.zeros([3,k1-k0,nao,nocc])
 
         # contraction
         wj2 += contract('xpji,ji->xp', int3c_blk, dm0_tag[j0:j1,i0:i1])
@@ -809,6 +845,7 @@ def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices, with_k=True, ome
 
                 vk1 += contract('xpir,pa->axir', vk1_tmp, aux2atom[k0:k1])
             wj2 = wk2_P__ = rhok0_slice = rhok0_oo = None
+            rhok_tmp = vk1_tmp = None
         count += 1
     return vj1, vk1
 
@@ -816,32 +853,32 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
     '''
     get wj and wk for int3c2e_ip1
     '''
-    nao_sph = len(intopt.sph_ao_idx)
-    naux_sph = len(intopt.sph_aux_idx)
+    nao = len(intopt.ao_idx)
+    naux = len(intopt.aux_ao_idx)
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     nocc = orbo.shape[1]
 
-    wj = cupy.zeros([nao_sph,naux_sph,3])
+    wj = cupy.zeros([nao,naux,3])
     avail_mem = get_avail_mem()
     use_gpu_memory = True
-    if nao_sph*naux_sph*nocc*3*8 < 0.4*avail_mem:
+    if nao*naux*nocc*3*8 < 0.4*avail_mem:
         try:
-            wk = cupy.empty([nao_sph,naux_sph,nocc,3])
+            wk = cupy.empty([nao,naux,nocc,3])
         except Exception:
             use_gpu_memory = False
     else:
         use_gpu_memory = False
 
     if not use_gpu_memory:
-        mem = cupy.cuda.alloc_pinned_memory(nao_sph*naux_sph*nocc*3*8)
-        wk = np.ndarray([nao_sph,naux_sph,nocc,3], dtype=np.float64, order='C', buffer=mem)
+        mem = cupy.cuda.alloc_pinned_memory(nao*naux*nocc*3*8)
+        wk = np.ndarray([nao,naux,nocc,3], dtype=np.float64, order='C', buffer=mem)
 
     # TODO: async data transfer
     ncp_ij = len(intopt.log_qs)
     count = 0
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip1', omega=omega):
         if count % ncp_ij == 0:
-            wk_tmp = cupy.zeros([nao_sph, k1-k0, nocc, 3])
+            wk_tmp = cupy.zeros([nao, k1-k0, nocc, 3])
         wj[i0:i1,k0:k1] += contract('xpji,ij->ipx', int3c_blk, dm0_tag[i0:i1,j0:j1])
         wk_tmp[i0:i1,:] += contract('xpji,jo->ipox', int3c_blk, orbo[j0:j1])
         if (count+1) % ncp_ij == 0:
@@ -856,11 +893,11 @@ def get_int3c2e_ip2_wjk(intopt, dm0_tag, with_k=True, omega=None):
     '''
     get wj and wk for int3c2e_ip2
     '''
-    naux_sph = len(intopt.sph_aux_idx)
+    naux = len(intopt.aux_ao_idx)
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     nocc = orbo.shape[1]
-    wj = cupy.zeros([naux_sph,3])
-    wk = cupy.zeros([naux_sph,nocc,nocc,3])
+    wj = cupy.zeros([naux,3])
+    wk = cupy.zeros([naux,nocc,nocc,3])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip2', omega=omega):
         wj[k0:k1] += contract('xpji,ji->px', int3c_blk, dm0_tag[j0:j1,i0:i1])
         tmp = contract('xpji,jo->piox', int3c_blk, orbo[j0:j1])
@@ -956,6 +993,52 @@ def get_int3c2e_ipip2_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None):
         hk = hk.reshape([naux_sph,3,3])
     return hj, hk
 
+def get_hess_nuc_elec(mol, dm):
+    '''
+    calculate int1e_ipiprinv contribution
+    '''
+    coords = mol.atom_coords()
+    charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
+
+    fakemol = gto.fakemol_for_charges(coords)
+    intopt = VHFOpt(mol, fakemol, 'int2e')
+    intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
+    ao_idx = intopt.ao_idx
+    dm = take_last2d(cupy.asarray(dm), ao_idx)
+
+    natm = mol.natm
+    nao = mol.nao
+    hcore_diag = cupy.zeros([9,natm])
+    hcore_aa = cupy.zeros([9,natm,nao])
+    for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipip1'):
+        haa = contract('xpji,ij->xpi', int3c_blk, dm[i0:i1,j0:j1])
+        hcore_aa[:,k0:k1,i0:i1] += haa
+        hcore_diag[:,k0:k1] -= contract('xpji,ij->xp', int3c_blk, dm[i0:i1,j0:j1])
+
+    hcore_ab = cupy.zeros([9,natm,nao])
+    for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipvip1'):
+        hab = contract('xpji,ij->xpi', int3c_blk, dm[i0:i1,j0:j1])
+        hcore_ab[:,k0:k1,i0:i1] += hab
+        hcore_diag[:,k0:k1] -= contract('xpji,ij->xp', int3c_blk, dm[i0:i1,j0:j1])
+
+    hcore_diag = contract('xp,p->xp', hcore_diag, charges)
+    hcore_aa = contract('xpj,p->xpj', hcore_aa, charges)
+    hcore_ab = contract('xpj,p->xpj', hcore_ab, charges)
+
+    aoslices = mol.aoslice_by_atom()
+    ao2atom = get_ao2atom(intopt, aoslices)
+
+    hcore_aa = contract('xpj,jq->xpq', hcore_aa, ao2atom).reshape([3,3,natm,natm])
+    hcore_ab = contract('xpj,jq->xpq', hcore_ab, ao2atom).reshape([3,3,natm,natm])
+    hcore = hcore_aa + hcore_aa.transpose([1,0,3,2])
+    hcore+= hcore_ab.transpose([1,0,2,3]) + hcore_ab.transpose([0,1,3,2])
+    hcore_diag = hcore_diag.reshape([3,3,natm])
+    idx = np.arange(natm)
+    for x in range(3):
+        for y in range(3):
+            hcore[x,y,idx,idx] += hcore_diag[x,y]
+    return hcore
+
 def get_int3c2e_ip_slice(intopt, cp_aux_id, ip_type, out=None, omega=None, stream=None):
     '''
     Generate int3c2e_ip slice along k, full dimension in ij
@@ -1019,17 +1102,18 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
     if auxmol is None:
         auxmol = df.addons.make_auxmol(mol, auxbasis)
 
-    nao_sph = mol.nao
-    naux_sph = auxmol.nao
+    nao = mol.nao
+    naux = auxmol.nao
 
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
 
-    nao = intopt.mol.nao
-    naux = intopt.auxmol.nao
-    norb = nao + naux + 1
-
-    int3c = cupy.zeros([3, naux_sph, nao_sph, nao_sph], order='C')
+    nao_cart = intopt.mol.nao
+    naux_cart = intopt.auxmol.nao
+    norb_cart = nao_cart + naux_cart + 1
+    ao_loc = intopt.ao_loc
+    aux_ao_loc = intopt.aux_ao_loc
+    int3c = cupy.zeros([3, naux, nao, nao], order='C')
     nbins = 1
     for cp_ij_id, log_q_ij in enumerate(intopt.log_qs):
         cpi = intopt.cp_idx[cp_ij_id]
@@ -1058,7 +1142,7 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(norb),
+                ctypes.c_int(norb_cart),
                 strides.ctypes.data_as(ctypes.c_void_p),
                 ao_offsets.ctypes.data_as(ctypes.c_void_p),
                 bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
@@ -1071,17 +1155,19 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
             if err != 0:
                 raise RuntimeError("int3c2e_ip failed\n")
 
-            int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
-            int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)
-            int3c_blk = cart2sph(int3c_blk, axis=3, ang=li)
+            if not intopt._auxmol.cart:
+                int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
+            if not intopt._mol.cart:
+                int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)
+                int3c_blk = cart2sph(int3c_blk, axis=3, ang=li)
 
-            i0, i1 = intopt.sph_ao_loc[cpi], intopt.sph_ao_loc[cpi+1]
-            j0, j1 = intopt.sph_ao_loc[cpj], intopt.sph_ao_loc[cpj+1]
-            k0, k1 = intopt.sph_aux_loc[aux_id], intopt.sph_aux_loc[aux_id+1]
+            i0, i1 = ao_loc[cpi], ao_loc[cpi+1]
+            j0, j1 = ao_loc[cpj], ao_loc[cpj+1]
+            k0, k1 = aux_ao_loc[aux_id], aux_ao_loc[aux_id+1]
 
             int3c[:, k0:k1, j0:j1, i0:i1] = int3c_blk
-    ao_idx = np.argsort(intopt.sph_ao_idx)
-    aux_idx = np.argsort(intopt.sph_aux_idx)
+    ao_idx = np.argsort(intopt.ao_idx)
+    aux_idx = np.argsort(intopt.aux_ao_idx)
     int3c = int3c[cupy.ix_(np.arange(3), aux_idx, ao_idx, ao_idx)]
 
     return int3c.transpose([0,3,2,1])
@@ -1105,18 +1191,19 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
     if auxmol is None:
         auxmol = df.addons.make_auxmol(mol, auxbasis)
 
-    nao_sph = mol.nao
-    naux_sph = auxmol.nao
+    nao = mol.nao
+    naux = auxmol.nao
 
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
 
-    nao = intopt.mol.nao
-    naux = intopt.auxmol.nao
-    norb = nao + naux + 1
-
+    nao_cart = intopt.mol.nao
+    naux_cart = intopt.auxmol.nao
+    norb_cart = nao_cart + naux_cart + 1
+    ao_loc = intopt.ao_loc
+    aux_ao_loc = intopt.aux_ao_loc
     comp = 3**order
-    int3c = cupy.zeros([comp, naux_sph, nao_sph, nao_sph], order='C')
+    int3c = cupy.zeros([comp, naux, nao, nao], order='C')
     nbins = 1
     for cp_ij_id, log_q_ij in enumerate(intopt.log_qs):
         cpi = intopt.cp_idx[cp_ij_id]
@@ -1137,7 +1224,7 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
             bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
             bins_locs_kl = np.array([0, len(log_q_kl)], dtype=np.int32)
 
-            ao_offsets = np.array([i0,j0,nao+1+k0,nao], dtype=np.int32)
+            ao_offsets = np.array([i0,j0,nao_cart+1+k0,nao_cart], dtype=np.int32)
             strides = np.array([1, ni, ni*nj, ni*nj*nk], dtype=np.int32)
 
             int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
@@ -1145,7 +1232,7 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(norb),
+                ctypes.c_int(norb_cart),
                 strides.ctypes.data_as(ctypes.c_void_p),
                 ao_offsets.ctypes.data_as(ctypes.c_void_p),
                 bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
@@ -1157,18 +1244,20 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
             if err != 0:
                 raise RuntimeError("int3c2e failed\n")
 
-            int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
-            int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)
-            int3c_blk = cart2sph(int3c_blk, axis=3, ang=li)
+            if not intopt._auxmol.cart:
+                int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
+            if not intopt._mol.cart:
+                int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)
+                int3c_blk = cart2sph(int3c_blk, axis=3, ang=li)
 
-            i0, i1 = intopt.sph_ao_loc[cpi], intopt.sph_ao_loc[cpi+1]
-            j0, j1 = intopt.sph_ao_loc[cpj], intopt.sph_ao_loc[cpj+1]
-            k0, k1 = intopt.sph_aux_loc[aux_id], intopt.sph_aux_loc[aux_id+1]
+            i0, i1 = ao_loc[cpi], ao_loc[cpi+1]
+            j0, j1 = ao_loc[cpj], ao_loc[cpj+1]
+            k0, k1 = aux_ao_loc[aux_id], aux_ao_loc[aux_id+1]
 
             int3c[:, k0:k1, j0:j1, i0:i1] = int3c_blk
 
-    ao_idx = np.argsort(intopt.sph_ao_idx)
-    aux_idx = np.argsort(intopt.sph_aux_idx)
+    ao_idx = np.argsort(intopt.ao_idx)
+    aux_idx = np.argsort(intopt.aux_ao_idx)
     int3c = int3c[cupy.ix_(np.arange(comp), aux_idx, ao_idx, ao_idx)]
 
     return int3c.transpose([0,3,2,1])
@@ -1180,21 +1269,20 @@ def get_dh1e(mol, dm0):
     '''
     natm = mol.natm
     coords = mol.atom_coords()
-    charges = mol.atom_charges()
+    charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
     fakemol = gto.fakemol_for_charges(coords)
     intopt = VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
-    #dm0_sorted = dm0[cupy.ix_(intopt.sph_ao_idx, intopt.sph_ao_idx)]
-    dm0_sorted = take_last2d(dm0, intopt.sph_ao_idx)
+    dm0_sorted = take_last2d(dm0, intopt.ao_idx)
     dh1e = cupy.zeros([natm,3])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip1'):
-        dh1e[k0:k1,:3] += cupy.einsum('xkji,ij->kx', int3c_blk, dm0_sorted[i0:i1,j0:j1])
-    return 2.0 * cupy.einsum('kx,k->kx', dh1e, -charges)
+        dh1e[k0:k1,:3] += contract('xkji,ij->kx', int3c_blk, dm0_sorted[i0:i1,j0:j1])
+    return 2.0 * contract('kx,k->kx', dh1e, -charges)
 
 def get_d2h1e(mol, dm0):
     natm = mol.natm
     coords = mol.atom_coords()
-    charges = mol.atom_charges()
+    charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
     fakemol = gto.fakemol_for_charges(coords)
 
     nao = mol.nao
@@ -1202,7 +1290,7 @@ def get_d2h1e(mol, dm0):
     d2h1e_offdiag = cupy.zeros([natm, nao, 9])
     intopt = VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
-    dm0_sorted = take_last2d(dm0, intopt.sph_ao_idx)
+    dm0_sorted = take_last2d(dm0, intopt.ao_idx)
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipip1'):
         d2h1e_diag[k0:k1,:9] -= contract('xaji,ij->ax', int3c_blk, dm0_sorted[i0:i1,j0:j1])
         d2h1e_offdiag[k0:k1,i0:i1,:9] += contract('xaji,ij->aix', int3c_blk, dm0_sorted[i0:i1,j0:j1])
@@ -1214,19 +1302,17 @@ def get_d2h1e(mol, dm0):
     ao2atom = get_ao2atom(intopt, aoslices)
     d2h1e = contract('aix,ib->abx', d2h1e_offdiag, ao2atom)
     d2h1e[np.diag_indices(natm), :] += d2h1e_diag
-    return 2.0 * cupy.einsum('abx,a->xab', d2h1e, charges)
-    #return 2.0 * cupy.einsum('ijx,i->kx', dh1e, -charges)
+    return 2.0 * contract('abx,a->xab', d2h1e, charges)
 
-def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, aosym=None, out=None, omega=None, stream=None):
+def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, cart=False, aosym=None, out=None, omega=None, stream=None):
     '''
     Generate one int3c2e block for given ij, k
     '''
     if stream is None: stream = cupy.cuda.get_current_stream()
     if omega is None: omega = 0.0
-    nao = intopt.nao
-    naux = intopt.nao
-
-    norb = nao + naux + 1
+    nao_cart = intopt.mol.nao
+    naux_cart = intopt.auxmol.nao
+    norb_cart = nao_cart + naux_cart + 1
 
     cpi = intopt.cp_idx[cp_ij_id]
     cpj = intopt.cp_jdx[cp_ij_id]
@@ -1248,12 +1334,12 @@ def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, aosym=None, out=None, omega=N
     nk = k1 - k0
     lk = intopt.aux_angular[cp_aux_id]
 
-    ao_offsets = np.array([i0,j0,nao+1+k0,nao], dtype=np.int32)
+    ao_offsets = np.array([i0,j0,nao_cart+1+k0,nao_cart], dtype=np.int32)
     '''
     # if possible, write the data into the given allocated space
     # otherwise, need a temporary space for cart2sph
     '''
-    if out is None or lk > 1:
+    if out is None or (lk > 1 and not intopt._auxmol.cart):
         int3c_blk = cupy.zeros([nk,nj,ni], order='C')
         strides = np.array([1, ni, ni*nj, 1], dtype=np.int32)
     else:
@@ -1266,7 +1352,7 @@ def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, aosym=None, out=None, omega=N
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
         ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(norb),
+        ctypes.c_int(norb_cart),
         strides.ctypes.data_as(ctypes.c_void_p),
         ao_offsets.ctypes.data_as(ctypes.c_void_p),
         bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
@@ -1280,9 +1366,8 @@ def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, aosym=None, out=None, omega=N
         raise RuntimeError('GINT_fill_int2e failed')
 
     # move this operation to j2c?
-    if lk > 1:
+    if lk > 1 and intopt._auxmol.cart == 0:
         int3c_blk = cart2sph(int3c_blk, axis=0, ang=lk, out=out)
-
     return int3c_blk
 
 def get_int3c2e(mol, auxmol=None, auxbasis='weigend+etb', direct_scf_tol=1e-13, aosym=True, omega=None):
@@ -1293,12 +1378,11 @@ def get_int3c2e(mol, auxmol=None, auxbasis='weigend+etb', direct_scf_tol=1e-13, 
         auxmol = df.addons.make_auxmol(mol, auxbasis)
     assert(aosym)
 
-    nao_sph = mol.nao
-    naux_sph = auxmol.nao
+    nao = mol.nao
+    naux = auxmol.nao
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=aosym, group_size=BLKSIZE, group_size_aux=BLKSIZE)
-
-    int3c = cupy.zeros([naux_sph, nao_sph, nao_sph], order='C')
+    int3c = cupy.zeros([naux, nao, nao], order='C')
     for cp_ij_id, _ in enumerate(intopt.log_qs):
         cpi = intopt.cp_idx[cp_ij_id]
         cpj = intopt.cp_jdx[cp_ij_id]
@@ -1307,19 +1391,20 @@ def get_int3c2e(mol, auxmol=None, auxbasis='weigend+etb', direct_scf_tol=1e-13, 
         i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
         j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
 
-        int3c_slice = cupy.zeros([naux_sph, j1-j0, i1-i0], order='C')
+        int3c_slice = cupy.zeros([naux, j1-j0, i1-i0], order='C')
         for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-            k0, k1 = intopt.sph_aux_loc[cp_kl_id], intopt.sph_aux_loc[cp_kl_id+1]
+            k0, k1 = intopt.aux_ao_loc[cp_kl_id], intopt.aux_ao_loc[cp_kl_id+1]
             get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=int3c_slice[k0:k1], omega=omega)
-        i0, i1 = intopt.sph_ao_loc[cpi], intopt.sph_ao_loc[cpi+1]
-        j0, j1 = intopt.sph_ao_loc[cpj], intopt.sph_ao_loc[cpj+1]
-        int3c_slice = cart2sph(int3c_slice, axis=1, ang=lj)
-        int3c_slice = cart2sph(int3c_slice, axis=2, ang=li)
+        i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
+        j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
+        if not mol.cart:
+            int3c_slice = cart2sph(int3c_slice, axis=1, ang=lj)
+            int3c_slice = cart2sph(int3c_slice, axis=2, ang=li)
         int3c[:, j0:j1, i0:i1] = int3c_slice
-    row, col = np.tril_indices(nao_sph)
+    row, col = np.tril_indices(nao)
     int3c[:, row, col] = int3c[:, col, row]
-    ao_idx = np.argsort(intopt.sph_ao_idx)
-    aux_id = np.argsort(intopt.sph_aux_idx)
+    ao_idx = np.argsort(intopt.ao_idx)
+    aux_id = np.argsort(intopt.aux_ao_idx)
     int3c = int3c[np.ix_(aux_id, ao_idx, ao_idx)]
 
     return int3c.transpose([2,1,0])
@@ -1333,16 +1418,18 @@ def get_int2c2e_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, aosym=Non
     if intopt is None:
         intopt = VHFOpt(mol, auxmol, 'int2e')
         intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False)
-    nbins = 1
-
-    nao = intopt.sorted_mol.nao
-    naux = intopt.sorted_auxmol.nao
-    norb = nao + naux + 1
+    naux = auxmol.nao
     rows, cols = np.tril_indices(naux)
 
-    int2c = cupy.zeros([naux, naux], order='F')
-    ao_offsets = np.array([nao+1, nao, nao+1, nao], dtype=np.int32)
-    strides = np.array([1, naux, naux, naux*naux], dtype=np.int32)
+    nbins = 1
+
+    nao_cart = intopt.mol.nao
+    naux_cart = intopt.auxmol.nao
+    norb_cart = nao_cart + naux_cart + 1
+
+    int2c = cupy.zeros([naux_cart, naux_cart], order='F')
+    ao_offsets = np.array([nao_cart+1, nao_cart, nao_cart+1, nao_cart], dtype=np.int32)
+    strides = np.array([1, naux_cart, naux_cart, naux_cart*naux_cart], dtype=np.int32)
     for k_id, log_q_k in enumerate(intopt.aux_log_qs):
         bins_locs_k = _make_s_index_offsets(log_q_k, nbins)
         cp_k_id = k_id + len(intopt.log_qs)
@@ -1354,7 +1441,7 @@ def get_int2c2e_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, aosym=Non
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(int2c.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(norb),
+                ctypes.c_int(norb_cart),
                 strides.ctypes.data_as(ctypes.c_void_p),
                 ao_offsets.ctypes.data_as(ctypes.c_void_p),
                 bins_locs_k.ctypes.data_as(ctypes.c_void_p),
@@ -1368,8 +1455,9 @@ def get_int2c2e_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, aosym=Non
                 raise RuntimeError("int2c2e failed\n")
 
     int2c[rows, cols] = int2c[cols, rows]
-    coeff = intopt.aux_cart2sph
-    int2c = coeff.T @ int2c @ coeff
+    if not mol.cart:
+        coeff = intopt.aux_cart2sph
+        int2c = coeff.T @ int2c @ coeff
 
     return int2c
 
@@ -1381,16 +1469,17 @@ def get_int2c2e_ip_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, intor=
     if intopt is None:
         intopt = VHFOpt(mol, auxmol, 'int2e')
         intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False)
+
     nbins = 1
 
-    nao = intopt.sorted_mol.nao
-    naux = intopt.sorted_auxmol.nao
-    norb = nao + naux + 1
-    rows, cols = np.tril_indices(naux)
+    nao_cart = intopt.mol.nao
+    naux_cart = intopt.auxmol.nao
+    norb_cart = nao_cart + naux_cart + 1
+    rows, cols = np.tril_indices(naux_cart)
 
-    int2c = cupy.zeros([naux, naux], order='F')
-    ao_offsets = np.array([nao+1, nao, nao+1, nao], dtype=np.int32)
-    strides = np.array([1, naux, naux, naux*naux], dtype=np.int32)
+    int2c = cupy.zeros([naux_cart, naux_cart], order='F')
+    ao_offsets = np.array([nao_cart+1, nao_cart, nao_cart+1, nao_cart], dtype=np.int32)
+    strides = np.array([1, naux_cart, naux_cart, naux_cart*naux_cart], dtype=np.int32)
     for k_id, log_q_k in enumerate(intopt.aux_log_qs):
         bins_locs_k = _make_s_index_offsets(log_q_k, nbins)
         cp_k_id = k_id + len(intopt.log_qs)
@@ -1402,7 +1491,7 @@ def get_int2c2e_ip_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, intor=
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(int2c.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(norb),
+                ctypes.c_int(norb_cart),
                 strides.ctypes.data_as(ctypes.c_void_p),
                 ao_offsets.ctypes.data_as(ctypes.c_void_p),
                 bins_locs_k.ctypes.data_as(ctypes.c_void_p),
@@ -1415,8 +1504,9 @@ def get_int2c2e_ip_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, intor=
                 raise RuntimeError("int2c2e failed\n")
 
     int2c[rows, cols] = int2c[cols, rows]
-    coeff = intopt.aux_cart2sph
-    int2c = coeff.T @ int2c @ coeff
+    if not auxmol.cart:
+        coeff = intopt.aux_cart2sph
+        int2c = coeff.T @ int2c @ coeff
 
     return int2c
 
@@ -1427,7 +1517,7 @@ def get_int2c2e(mol, auxmol, direct_scf_tol=1e-13):
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=True)
     int2c = get_int2c2e_sorted(mol, auxmol, intopt=intopt)
-    aux_idx = np.argsort(intopt.sph_aux_idx)
+    aux_idx = np.argsort(intopt.aux_ao_idx)
     int2c = int2c[np.ix_(aux_idx, aux_idx)]
     return int2c
 

@@ -70,7 +70,7 @@ class CMakeBuildPy(build_py):
         self.announce('Configuring extensions', level=3)
         src_dir = os.path.abspath(os.path.join(__file__, '..', 'gpu4pyscf', 'lib'))
         dest_dir = os.path.join(self.build_temp, 'gpu4pyscf')
-        cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}']
+        cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}', '-DBUILD_LIBXC=OFF']
         configure_args = os.getenv('CMAKE_CONFIGURE_ARGS')
         if configure_args:
             cmd.extend(configure_args.split(' '))
@@ -124,8 +124,8 @@ setup(
     ],
     cmdclass={'build_py': CMakeBuildPy},
     install_requires=[
-        'pyscf>=2.4.0',
-        f'cupy-cuda{CUDA_VERSION}>=12.3',
+        'pyscf>=2.5.0',
+        f'cupy-cuda{CUDA_VERSION}>=13.0',
         'geometric',
         f'gpu4pyscf-libxc-cuda{CUDA_VERSION}',
     ]

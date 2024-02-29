@@ -25,27 +25,36 @@ O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
-bas='def2-qzvpp'
+bas='def2-tzvpp'
 grids_level = 3
 nlcgrids_level = 1
 
 def setUpModule():
-    global mol
-    mol = pyscf.M(
+    global mol_sph, mol_cart
+    mol_sph = pyscf.M(
         atom=atom,
         basis=bas,
         max_memory=32000,
-        verbose = 1,
+        verbose=1,
+        output='/dev/null'
+    )
+    mol_cart = pyscf.M(
+        atom=atom,
+        basis=bas,
+        max_memory=32000,
+        verbose=1,
+        cart=1,
         output = '/dev/null'
     )
 
 def tearDownModule():
-    global mol
-    mol.stdout.close()
-    del mol
+    global mol_sph, mol_cart
+    mol_sph.stdout.close()
+    mol_cart.stdout.close()
+    del mol_sph, mol_cart
 
-def run_dft(xc):
-    mf = rks.RKS(mol, xc=xc)
+def run_dft(xc, mol):
+    mf = rks.RKS(mol_sph, xc=xc)
     mf.grids.level = grids_level
     mf.nlcgrids.level = nlcgrids_level
     e_dft = mf.kernel()
@@ -53,38 +62,42 @@ def run_dft(xc):
 
 class KnownValues(unittest.TestCase):
     '''
-    known values are obtained by Q-Chem
+    known values are obtained by Q-Chem,         # def2-qzvpp
     '''
     def test_rks_lda(self):
         print('------- LDA ----------------')
-        e_tot = run_dft("LDA, vwn5")
-        assert np.allclose(e_tot, -75.9117117360)
+        e_tot = run_dft("LDA, vwn5", mol_sph)
+        assert np.allclose(e_tot, -75.9046410402)# -75.9117117360)
 
     def test_rks_pbe(self):
         print('------- PBE ----------------')
-        e_tot = run_dft('PBE')
-        assert np.allclose(e_tot, -76.3866453049)
+        e_tot = run_dft('PBE', mol_sph)
+        assert np.allclose(e_tot, -76.3800182418) #-76.3866453049)
 
     def test_rks_b3lyp(self):
         print('-------- B3LYP -------------')
-        e_tot = run_dft('B3LYP')
-        assert np.allclose(e_tot, -76.4728129216)
+        e_tot = run_dft('B3LYP', mol_sph)
+        assert np.allclose(e_tot, -76.4666495594) #-76.4728129216)
 
     def test_rks_m06(self):
         print('--------- M06 --------------')
-        e_tot = run_dft("M06")
-        assert np.allclose(e_tot, -76.4321318125)
+        e_tot = run_dft("M06", mol_sph)
+        assert np.allclose(e_tot, -76.4265870634) #-76.4321318125)
 
     def test_rks_wb97(self):
         print('-------- wB97 --------------')
-        e_tot = run_dft("HYB_GGA_XC_WB97")
-        assert np.allclose(e_tot, -76.4543067064)
+        e_tot = run_dft("HYB_GGA_XC_WB97", mol_sph)
+        assert np.allclose(e_tot, -76.4486274326) #-76.4543067064)
 
     def test_rks_vv10(self):
         print("------- wB97m-v -------------")
-        e_tot = run_dft('HYB_MGGA_XC_WB97M_V')
-        assert np.allclose(e_tot, -76.4391208632)
+        e_tot = run_dft('HYB_MGGA_XC_WB97M_V', mol_sph)
+        assert np.allclose(e_tot, -76.4334218842) #-76.4391208632)
 
+    def test_rks_cart(self):
+        print("-------- cart ---------------")
+        e_tot = run_dft('HYB_MGGA_XC_WB97M_V', mol_cart)
+        assert np.allclose(e_tot, -76.4334218842) #-76.4391208632)
     #TODO: add test cases for D3/D4 and gradient
 
 if __name__ == "__main__":

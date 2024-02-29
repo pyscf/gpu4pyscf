@@ -244,12 +244,26 @@ class KnownValues(unittest.TestCase):
         mf1 = mf.to_cpu()
         refk = mf1.get_k(mol1, dm, hermi=0)
         self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
-    
+
     # end to end test
     def test_uhf_scf(self):
         e_tot = scf.UHF(mol).kernel()
         self.assertAlmostEqual(e_tot, -150.76441654065087)
-    
+
+    # TODO:
+    #test analyze
+    #test mulliken_pop
+    #test mulliken_spin_pop
+    #test mulliken_meta
+    #test mulliken_meta_spin
+    #test chkfile
+    #test stability
+    #test newton
+    #test x2c
+    #test dipole
+    #test canonicalize
+    #test det_ovlp
+
 if __name__ == "__main__":
     print("Full Tests for UHF")
     unittest.main()

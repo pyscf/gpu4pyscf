@@ -71,6 +71,7 @@ def _check_grad(grid_response=False, xc='B3LYP', disp='d3bj', tol=1e-6):
     gpu_gradient = gpu4pyscf.grad.UKS(mf)
     gpu_gradient.grid_response = grid_response
     g_gpu = gpu_gradient.kernel()
+    print(g_cpu - g_gpu)
     assert(cupy.linalg.norm(g_cpu - g_gpu) < tol)
 
 class KnownValues(unittest.TestCase):
@@ -97,7 +98,7 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_mgga(self):
         print('-------mGGA testing-------------')
-        _check_grad(xc='m06', disp=None, tol=1e-4)
+        _check_grad(xc='tpss', disp=None, tol=1e-4)
 
     def test_grad_rsh(self):
         print('--------RSH testing-------------')

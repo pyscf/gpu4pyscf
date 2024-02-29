@@ -38,7 +38,7 @@ def tearDownModule():
     global mol
     mol.stdout.close()
     del mol
-    
+
 def _check_grad(tol=1e-6):
     mf = scf.uhf.UHF(mol)
     mf.direct_scf_tol = 1e-10
@@ -46,7 +46,7 @@ def _check_grad(tol=1e-6):
 
     cpu_gradient = pyscf.grad.UHF(mf)
     g_cpu = cpu_gradient.kernel()
-    
+
     # TODO: use to_gpu function
     mf.__class__ = gpu4pyscf.scf.uhf.UHF
     gpu_gradient = gpu4pyscf.grad.UHF(mf)
@@ -56,7 +56,7 @@ def _check_grad(tol=1e-6):
 class KnownValues(unittest.TestCase):
     def test_grad_uks(self):
         _check_grad(tol=1e-6)
-    
+
 if __name__ == "__main__":
     print("Full Tests for UHF Gradient")
     unittest.main()

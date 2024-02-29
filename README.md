@@ -17,9 +17,9 @@ Choose the proper package based on your CUDA environment.
 
 ```cuTensor``` is **highly recommended** for accelerating tensor contractions.
 
-For **CUDA 11.x**, ```python -m cupyx.tools.install_library --cuda 11.x --library cutensor```
+For **CUDA 11.x**, ```pip3 install cutensor-cu11```
 
-For **CUDA 12.x**, ```python -m cupyx.tools.install_library --cuda 12.x --library cutensor```
+For **CUDA 12.x**, ```pip3 install cutensor-cu12```
 
 Compilation
 --------
@@ -38,7 +38,7 @@ export PYTHONPATH="${PYTHONPATH}:/your-local-path/gpu4pyscf"
 ```
 Then install cutensor for acceleration
 ```sh
-python -m cupyx.tools.install_library --cuda 11.x --library cutensor
+pip3 install cutensor-cu11
 ```
 
 Features
@@ -50,8 +50,7 @@ Features
 - Dispersion corrections via [DFTD3](https://github.com/dftd3/simple-dftd3) and [DFTD4](https://github.com/dftd4/dftd4);
 - Nonlocal functional correction (vv10) for SCF and gradient;
 - ECP is supported and calculated on CPU;
-- PCM solvent models, analytical gradients, and semi-analytical Hessian matrix;
-- SMD solvent models and solvation free energy
+- PCM models, SMD model, their analytical gradients, and semi-analytical Hessian matrix;
 
 Limitations
 --------

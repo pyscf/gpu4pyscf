@@ -16,7 +16,7 @@
 import unittest
 import numpy
 import cupy
-from gpu4pyscf.lib.cupy_helper import *
+from gpu4pyscf.lib.cupy_helper import contract
 
 class KnownValues(unittest.TestCase):
     def test_contract(self):
@@ -49,7 +49,7 @@ class KnownValues(unittest.TestCase):
         c = contract('ijkl,jl->ik', a, b)
         c_einsum = cupy.einsum('ijkl,jl->ik', a, b)
         assert cupy.linalg.norm(c - c_einsum) < 1e-10
-    
+
 if __name__ == "__main__":
     print("Full tests for cutensor module")
     unittest.main()
