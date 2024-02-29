@@ -633,7 +633,7 @@ def grouped_dot(As, Bs, Cs=None):
     Ks = np.array(Ks)
 
     stream = cupy.cuda.get_current_stream()
-    err = libcupy_helper.grouped_dot(
+    err = libcupy_helper.grouped_dot_host(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(Cs_ptr.ctypes.data, ctypes.c_void_p),
         ctypes.cast(As_ptr.ctypes.data, ctypes.c_void_p),

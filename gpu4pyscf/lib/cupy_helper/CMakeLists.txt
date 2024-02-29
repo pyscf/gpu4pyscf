@@ -29,6 +29,7 @@ add_library(cupy_helper SHARED
   dist_matrix.cu
   grouped_gemm.cu
   grouped_dot.cu
+  grouped_dot_host.cu
 )
 target_include_directories(cupy_helper PRIVATE ${cutlass_SOURCE_DIR}/tools/util/include ${cutlass_SOURCE_DIR}/include)
 
