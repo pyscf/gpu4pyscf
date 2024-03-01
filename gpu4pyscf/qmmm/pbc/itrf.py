@@ -668,7 +668,7 @@ def qmmm_grad_for_scf(scf_grad):
             def grad_kTij(R, r, eta):
                 if isinstance(eta, float):
                     Tij = erfc(eta * r) / r
-                    ekR = np.exp(-eta**2 * r**2)
+                    ekR = cp.exp(-eta**2 * r**2)
                     Tij = erfc(eta * r) / r
                     invr3 = (Tij + 2*eta/np.sqrt(np.pi) * ekR) / r**2
                     Tija = -cp.einsum('ijx,ij->ijx', R, invr3)
