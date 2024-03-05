@@ -86,11 +86,14 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_sl
 
     # ao must be set to zero due to implementation
     if deriv > 1:
-        ao = cupy.zeros((comp, nao_slice, ngrids), order='C')
+        if out is None:
+            out = cupy.zeros((comp, nao_slice, ngrids), order='C')
+        else:
+            out[:] = 0
     else:
-        ao = cupy.empty((comp, nao_slice, ngrids), order='C')
+        if out is None:
+            out = cupy.empty((comp, nao_slice, ngrids), order='C')
 
-    #ao = cupy.zeros((comp, nao_slice, ngrids), order='C')
     if not with_opt:
         # mol may be different to _GDFTOpt.mol.
         # nao should be consistent with the _GDFTOpt.mol object
@@ -98,7 +101,7 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_sl
         with opt.gdft_envs_cache():
             err = libgdft.GDFTeval_gto(
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
-                ctypes.cast(ao.data.ptr, ctypes.c_void_p),
+                ctypes.cast(out.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(deriv), ctypes.c_int(opt.mol.cart),
                 ctypes.cast(coords.data.ptr, ctypes.c_void_p), ctypes.c_int(ngrids),
                 ctypes.cast(shls_slice.data.ptr, ctypes.c_void_p),
@@ -107,11 +110,11 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_sl
                 ctr_offsets.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(nctr),
                 ctr_offsets_slice.ctypes.data_as(ctypes.c_void_p),
                 mol._bas.ctypes.data_as(ctypes.c_void_p))
-            ao = contract('nig,ij->njg', ao, coeff).transpose([0,2,1])
+            out = contract('nig,ij->njg', out, coeff).transpose([0,2,1])
     else:
         err = libgdft.GDFTeval_gto(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(ao.data.ptr, ctypes.c_void_p),
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
             ctypes.c_int(deriv), ctypes.c_int(opt.mol.cart),
             ctypes.cast(coords.data.ptr, ctypes.c_void_p), ctypes.c_int(ngrids),
             ctypes.cast(shls_slice.data.ptr, ctypes.c_void_p),
@@ -124,8 +127,8 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_sl
         raise RuntimeError('CUDA Error in evaluating AO')
 
     if deriv == 0:
-        ao = ao[0]
-    return ao
+        out = out[0]
+    return out
 
 def eval_rho(mol, ao, dm, non0tab=None, xctype='LDA', hermi=0,
              with_lapl=True, verbose=None):
