@@ -181,7 +181,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                 wk_ip2_Ipo = contract('porx,io->iprx', wka_ip2_P__, mocca[i0:i1])
                 hk_ao_aux[i0:i1] += contract('ipox,ipoy->ipxy', rhok1a_Pko, wk_ip2_Ipo)
                 wk_ip2_Ipo = contract('porx,io->iprx', wkb_ip2_P__, moccb[i0:i1])
-                hk_ao_aux[i0:i1] += contract('ipox,ipoy->ipxy', rhok1a_Pko, wk_ip2_Ipo)
+                hk_ao_aux[i0:i1] += contract('ipox,ipoy->ipxy', rhok1b_Pko, wk_ip2_Ipo)
                 wk_ip2_Ipo = None
 
                 # (10|0)(1|0)(0|00)
@@ -543,19 +543,19 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     cupy.get_default_memory_pool().free_all_blocks()
     fn = int3c2e.get_int3c2e_ip1_vjk
     dm0_tag = tag_array(dm0, occ_coeff=mocca)
-    vj1_buf, vk1a_buf, vj1_ao, vk1a_ao = fn(intopt, rhoj0, rhok0a_Pl_, dm0_tag, aoslices, omega=omega)
+    vj1_buf, vk1a_buf, vj1a_ao, vk1a_ao = fn(intopt, rhoj0, rhok0a_Pl_, dm0_tag, aoslices, omega=omega)
     dm0_tag = tag_array(dm0, occ_coeff=moccb)
-    vj1_buf, vk1b_buf, vj1_ao, vk1b_ao = fn(intopt, rhoj0, rhok0b_Pl_, dm0_tag, aoslices, omega=omega)
+    vj1_buf, vk1b_buf, vj1b_ao, vk1b_ao = fn(intopt, rhoj0, rhok0b_Pl_, dm0_tag, aoslices, omega=omega)
     rev_ao_idx = np.argsort(ao_idx)
     vj1_buf = take_last2d(vj1_buf, rev_ao_idx)
     vk1a_buf = take_last2d(vk1a_buf, rev_ao_idx)
     vk1b_buf = take_last2d(vk1b_buf, rev_ao_idx)
 
-    vj1a_int3c = -contract('nxiq,ip->nxpq', vj1_ao, mo_coeff[0])
-    vj1b_int3c = -contract('nxiq,ip->nxpq', vj1_ao, mo_coeff[1])
+    vj1a_int3c = -contract('nxiq,ip->nxpq', vj1a_ao, mo_coeff[0])
+    vj1b_int3c = -contract('nxiq,ip->nxpq', vj1b_ao, mo_coeff[1])
     vk1a_int3c = -contract('nxiq,ip->nxpq', vk1a_ao, mo_coeff[0])
     vk1b_int3c = -contract('nxiq,ip->nxpq', vk1b_ao, mo_coeff[1])
-    vj1_ao = vk1a_ao = vk1b_ao = None
+    vj1a_ao = vj1b_ao = vk1a_ao = vk1b_ao = None
     t0 = log.timer_debug1('Fock matrix due to int3c2e_ip1', *t0)
 
     # --------------------------
@@ -568,8 +568,6 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         vj1a_int3c_ip2, vk1a_int3c_ip2 = fn(intopt, rhoj0, rhok0a_Pl_, dm0_tag, auxslices, omega=omega)
         dm0_tag = tag_array(dm0, occ_coeff=moccb)
         vj1b_int3c_ip2, vk1b_int3c_ip2 = fn(intopt, rhoj0, rhok0b_Pl_, dm0_tag, auxslices, omega=omega)
-        #vj1_int3c_ip2 = (vj1a_int3c_ip2 + vj1b_int3c_ip2)
-        #vj1a_int3c_ip2 = vj1b_int3c_ip2 = None
 
         # Responses due to int2c2e_ip1
         if omega and omega > 1e-10:
@@ -597,7 +595,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             rhok0b_P__ = contract('pio,ir->pro', rhok0b_Pl_, moccb)
         else:
             naux = len(aux_ao_idx)
-            nocc = mocca.shape[1]
+            nocc = moccb.shape[1]
             rhok0b_P__ = cupy.empty([naux,nocc,nocc])
             for p0, p1 in lib.prange(0,naux,64):
                 rhok0_Pl_tmp = cupy.asarray(rhok0b_Pl_[p0:p1])
@@ -635,6 +633,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         wj0_10 = wk0a_10_P__ = wk0b_10_P__ = rhok0a_P__ =rhok0b_P__ = int2c_ip1 = None
         rhoj0 = rhok0a_Pl_ = rhok0b_Pl_ = None
         aux2atom = None
+
         vj1a_int3c += contract('nxiq,ip->nxpq', vj1a_int3c_ip2, mo_coeff[0])
         vj1b_int3c += contract('nxiq,ip->nxpq', vj1b_int3c_ip2, mo_coeff[1])
         if with_k:

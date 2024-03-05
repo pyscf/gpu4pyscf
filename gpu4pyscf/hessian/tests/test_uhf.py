@@ -23,14 +23,15 @@ from gpu4pyscf.hessian import uhf as uhf_gpu
 def setUpModule():
     global mol
     mol = gto.Mole()
-    mol.verbose = 5
+    mol.verbose = 1
     mol.output = '/dev/null'
     mol.atom.extend([
         ["O" , (0. , 0.     , 0.)],
         [1   , (0. , -0.757 , 0.587)],
         [1   , (0. , 0.757  , 0.587)] ])
     mol.basis = '6-31g'
-    mol.spin = 2
+    mol.spin = 1
+    mol.charge = 1
     mol.build()
 
 def tearDownModule():

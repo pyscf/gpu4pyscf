@@ -243,7 +243,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
             wv = weight * vxc
             #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
             aowa = numint._scale_ao(ao[:4], wv[0,:4])
-            aowb = numint._scale_ao(ao[:4], wv[0,:4])
+            aowb = numint._scale_ao(ao[:4], wv[1,:4])
             vmata_tmp = [0]*6
             vmatb_tmp = [0]*6
             for i in range(6):
@@ -277,7 +277,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
                 in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
             mo_coeff_mask = mo_coeff[:,mask,:]
             rhoa = numint.eval_rho2(opt.mol, ao[:10], mo_coeff_mask[0], mo_occ[0], mask, xctype)
-            rhob = numint.eval_rho2(opt.mol, ao[:10], mo_coeff_mask[0], mo_occ[0], mask, xctype)
+            rhob = numint.eval_rho2(opt.mol, ao[:10], mo_coeff_mask[1], mo_occ[1], mask, xctype)
             vxc = ni.eval_xc_eff(mf.xc, cupy.asarray((rhoa,rhob)), 1, xctype=xctype)[1]
             wv = weight * vxc
             wv[:,4] *= .5  # for the factor 1/2 in tau
@@ -461,7 +461,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                     aow[i] = numint._scale_ao(ao_dma_mask[0], wv[0,i])
                 vmata_dm[ia][:,:,mask] += contract('yjg,xjg->xyj', ao_mask[1:4], aow)
                 for i in range(3):
-                    aow[i] = numint._scale_ao(ao_dmb_mask[0], wv[0,i])
+                    aow[i] = numint._scale_ao(ao_dmb_mask[0], wv[1,i])
                 vmatb_dm[ia][:,:,mask] += contract('yjg,xjg->xyj', ao_mask[1:4], aow)
             ao_dm0a = ao_dm0b = aow = None
             t1 = log.timer_debug2('integration', *t1)
@@ -593,7 +593,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                     vmatb_dm_tmp[i] = contract('xjg,jg->xj', aow, ao_dmb_mask[0])
 
                 for i in range(3):
-                    aow[i] = numint._scale_ao(ao_dma_mask[:4], wvb[i,:4])
+                    aow[i] = numint._scale_ao(ao_dmb_mask[:4], wvb[i,:4])
                 vmatb_dm_tmp += contract('yjg,xjg->xyj', ao_mask[1:4], aow)
 
                 # alpha

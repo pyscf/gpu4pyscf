@@ -34,6 +34,8 @@ def setUpModule():
         [1   , (0. , -0.757 , 0.587)],
         [1   , (0. , 0.757  , 0.587)] ])
     mol.basis = 'sto3g'
+    mol.spin = 1
+    mol.charge = 1
     mol.build()
 
 def tearDownModule():
