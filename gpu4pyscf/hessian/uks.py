@@ -203,8 +203,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
         opt = ni.gdftopt
 
     coeff = cupy.asarray(opt.coeff)
-    mo_coeff[0] = coeff @ mo_coeff[0]
-    mo_coeff[1] = coeff @ mo_coeff[1]
+    mo_coeff = contract('nij,pi->npj', mo_coeff, coeff)
     nao = mo_coeff.shape[1]
     # TODO: check mol in opt?
     vmata = cupy.zeros((6,nao,nao))
@@ -491,7 +490,6 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             aow = rks_grad._make_dR_dao_w(ao, wv[1])
             _d1d2_dot_(ipipb, mol, aow, ao[1:4], mask, ao_loc, False)
             ao_dm0a = [numint._dot_ao_dm(mol, ao[i], dm0a, mask, shls_slice, ao_loc) for i in range(4)]
-            wf = weight * fxc
             ao_dm0b = [numint._dot_ao_dm(mol, ao[i], dm0b, mask, shls_slice, ao_loc) for i in range(4)]
             wf = weight * fxc
             dm0a_mask = dm0a_sorted[numpy.ix_(mask, mask)]

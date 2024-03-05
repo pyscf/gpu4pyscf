@@ -86,22 +86,22 @@ class KnownValues(unittest.TestCase):
     '''
     def test_df_uks_hess_elec(self):
         mf = dft.UKS(mol, xc='b3lyp').density_fit()
-        mf.conv_tol = 1e-10
+        mf.conv_tol = 1e-12
         mf.conv_tol_cpscf = 1e-8
-        mf.grids.level = 1
+        mf.grids.level = 5
         mf.kernel()
         hobj = mf.Hessian()
         hobj.auxbasis_response = 2
         hess_cpu = hobj.partial_hess_elec()
 
         mf = mf.to_gpu()
+        mf.grids.level = 5
+        mf.kernel()
         hobj = mf.Hessian()
         hobj.auxbasis_response = 2
         hess_gpu = hobj.partial_hess_elec()
-        print(hess_cpu[0,0])
-        print(hess_gpu[0,0])
         assert numpy.linalg.norm(hess_cpu - hess_gpu.get()) < 1e-5
-    '''
+
     def test_df_uks(self):
         mf = dft.UKS(mol).density_fit()
         mf.conv_tol = 1e-10
@@ -115,10 +115,8 @@ class KnownValues(unittest.TestCase):
         mf = mf.to_gpu()
         hessobj = mf.Hessian()
         hess_gpu = hessobj.kernel()
-        print(hess_cpu[0,0])
-        print(hess_gpu[0,0])
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
-    '''
+
 if __name__ == "__main__":
     print("Full Tests for DF UKS Hessian")
     unittest.main()

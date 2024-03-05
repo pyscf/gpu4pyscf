@@ -71,6 +71,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     max_memory = None
     t1 = log.timer_debug1('computing ej, ek', *t1)
     veffa_diag, veffb_diag = uks_hess._get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory)
+    print(dm0a[:3,:3])
     t1 = log.timer_debug1('computing veff_diag', *t1)
     aoslices = mol.aoslice_by_atom()
     vxca_dm, vxcb_dm = uks_hess._get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)

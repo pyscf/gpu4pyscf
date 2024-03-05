@@ -41,7 +41,7 @@ def tearDownModule():
 def _check_vxc(method, xc='LDA'):
     mf = dft.uks.UKS(mol, xc=xc)
     mf.conv_tol = 1e-14
-    mf.grids_level = 1
+    mf.grids.level = 1
     mf.kernel()
     dm = mf.make_rdm1()
     hobj = mf.Hessian()
@@ -94,5 +94,5 @@ class KnownValues(unittest.TestCase):
         _check_vxc('_get_vxc_deriv2', xc='TPSS')
 
 if __name__ == "__main__":
-    print("Full Tests for UHF Hessian")
+    print("Full Tests for UKS Hessian")
     unittest.main()
