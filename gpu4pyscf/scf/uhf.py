@@ -68,8 +68,13 @@ def spin_square(mo, s=1):
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
+    if dm is None: dm = mf.make_rdm1()
     if h1e is None: h1e = cupy.asarray(mf.get_hcore())
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
+    if not isinstance(s1e, cupy.ndarray): s1e = cupy.asarray(s1e)
+    if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
+    if not isinstance(h1e, cupy.ndarray): h1e = cupy.asarray(h1e)
+    if not isinstance(vhf, cupy.ndarray): vhf = cupy.asarray(vhf)
     f = h1e + vhf
     if f.ndim == 2:
         f = (f, f)
@@ -172,26 +177,7 @@ class UHF(uhf.UHF):
             vhf += cupy.asarray(vhf_last)
         return vhf
 
-    def scf(self, dm0=None, **kwargs):
-        cput0 = logger.init_timer(self)
-
-        self.dump_flags()
-        self.build(self.mol)
-
-        if self.max_cycle > 0 or self.mo_coeff is None:
-            self.converged, self.e_tot, \
-                    self.mo_energy, self.mo_coeff, self.mo_occ = \
-                    _kernel(self, self.conv_tol, self.conv_tol_grad,
-                           dm0=dm0, callback=self.callback,
-                           conv_check=self.conv_check, **kwargs)
-        else:
-            self.e_tot = _kernel(self, self.conv_tol, self.conv_tol_grad,
-                                dm0=dm0, callback=self.callback,
-                                conv_check=self.conv_check, **kwargs)[1]
-
-        logger.timer(self, 'SCF', *cput0)
-        self._finalize()
-        return self.e_tot
+    scf = hf.scf
     kernel = pyscf_lib.alias(scf, alias_name='kernel')
 
     def spin_square(self, mo_coeff=None, s=None):
