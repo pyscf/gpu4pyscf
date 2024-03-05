@@ -85,18 +85,6 @@ def get_veff(ks_grad, mol=None, dm=None):
                 xc = mf.xc
             else:
                 xc = mf.nlc
-            # dma =  dm[0]
-            # dma = tag_array(dma, mo_coeff=mf.mo_coeff[0], mo_occ=mf.mo_occ[0])
-            # dmb =  dm[1]
-            # dmb = tag_array(dmb, mo_coeff=mf.mo_coeff[1], mo_occ=mf.mo_occ[1])
-            # enlc, vnlc = rks_grad.get_nlc_vxc(
-            #     ni, mol, nlcgrids, xc, dma,
-            #     max_memory=max_memory, verbose=ks_grad.verbose)
-            # vxc_tmp[0] += vnlc
-            # enlc, vnlc = rks_grad.get_nlc_vxc(
-            #     ni, mol, nlcgrids, xc, dmb,
-            #     max_memory=max_memory, verbose=ks_grad.verbose)
-            # vxc_tmp[1] += vnlc
             enlc, vnlc = get_nlc_vxc(
                 ni, mol, nlcgrids, xc, dm, mf.mo_coeff, mf.mo_occ,
                 max_memory=max_memory, verbose=ks_grad.verbose)
@@ -108,10 +96,6 @@ def get_veff(ks_grad, mol=None, dm=None):
     mo_coeff_beta = mf.mo_coeff[1]
     occ_coeff0 = cupy.asarray(mo_coeff_alpha[:, mf.mo_occ[0]>0.5], order='C')
     occ_coeff1 = cupy.asarray(mo_coeff_beta[:, mf.mo_occ[1]>0.5], order='C')
-    # print(mf.mo_coeff.shape)
-    # print(mf.mo_occ.shape)
-    # print(mf.mo_coeff[1, :, mf.mo_occ[1]>0.5].shape)
-    # print(vxc_tmp.shape, occ_coeff0.shape, type(vxc_tmp), type(occ_coeff0))
     tmp = contract('nij,jk->nik', vxc_tmp[0], occ_coeff0)
     vxc = contract('nik,ik->ni', tmp, occ_coeff0)
     tmp = contract('nij,jk->nik', vxc_tmp[1], occ_coeff1)
@@ -153,10 +137,6 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
     dms = take_last2d(dms, opt.ao_idx)
-    # dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
-    #        for dm in dms.reshape(-1,nao0,nao0)]
-    # mo_coeff = cupy.einsum('pq,sqt->spt',coeff,mo_coeff)
-    # mo_coeff = coeff @ mo_coeff
     mo_coeff = mo_coeff[:, opt.ao_idx]
 
     nset = len(dms)
@@ -209,7 +189,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[1])
             vtmp += rks_grad._tau_grad_dot_(ao_mask, wv[1,4])
             add_sparse(vmat[1], vtmp, idx)
-    # vmat = [cupy.einsum('pi,npq,qj->nij', coeff, v, coeff) for v in vmat]
+
     vmat = take_last2d(vmat, opt.rev_ao_idx)
     exc = None
     if nset == 1:
@@ -231,11 +211,8 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
-    # dms = take_last2d(dms, opt.ao_idx)
     dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
            for dm in dms.reshape(-1,nao0,nao0)]
-    # mo_coeff = cupy.einsum('pq,sqt->spt',coeff,mo_coeff)
-    # mo_coeff = coeff @ mo_coeff
 
     excsum = 0
     vmat = cupy.zeros((2,3,nao,nao))
@@ -304,7 +281,6 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     vmat[1] += vtmp
 
     excsum = None
-    # vmat = take_last2d(vmat, opt.rev_ao_idx)
     vmat = cupy.einsum('pi,snpq,qj->snij', coeff, vmat, coeff)
 
     # - sign because nabla_X = -nabla_x
@@ -360,8 +336,6 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
         vmat_tmp = rks_grad._gga_grad_sum_(ao_mask, wv)
         add_sparse(vmat, vmat_tmp, mask)
 
-    #vmat = contract('npq,qj->npj', vmat, coeff)
-    #vmat = contract('pi,npj->nij', coeff, vmat)
     rev_ao_idx = opt.rev_ao_idx
     vmat = take_last2d(vmat, rev_ao_idx)
     exc = None

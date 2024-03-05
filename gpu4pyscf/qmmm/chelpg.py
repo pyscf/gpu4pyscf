@@ -38,6 +38,8 @@ def get_j_int3c2e_pass1(intopt, dm0):
     naux = intopt.naux
     rhoj = cupy.zeros([naux])
     coeff = intopt.coeff
+    if dm0.ndim == 3:
+        dm0 = dm0[0] + dm0[1]
     dm_cart = cupy.einsum('pi,ij,qj->pq', coeff, dm0, coeff)
 
     num_cp_ij = [len(log_qs) for log_qs in intopt.log_qs]

@@ -135,7 +135,6 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         ao_deriv = 1
     else:
         ao_deriv = 2
-
     vmat = cupy.zeros((nset,3,nao,nao))
     if xctype == 'LDA':
         ao_deriv = 1
@@ -167,7 +166,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         for ao_mask, idx, weight, _ in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
             for idm in range(nset):
                 mo_coeff_mask = mo_coeff[idx,:]
-                rho = numint.eval_rho2(opt.mol, ao_mask[:10], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
+                rho = numint.eval_rho2(opt.mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                 wv = weight * vxc
                 wv[0] *= .5

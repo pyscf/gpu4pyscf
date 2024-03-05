@@ -516,21 +516,20 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         t3 = log.init_timer()
         dh1e = int3c2e.get_dh1e(mol, dm0)
 
-        t4 = log.timer_debug1("get_dh1e", *t3)
         if mol.has_ecp():
             dh1e += get_dh1e_ecp(mol, dm0)
+        t3 = log.timer_debug1('gradients of h1e', *t3)
 
         dvhf = mf_grad.get_veff(mol, dm0)
-        t1 = log.timer_debug1('gradients of h1e', *t0)
+        t4 = log.timer_debug1('gradients of veff', *t3)
         log.debug('Computing Gradients of NR-HF Coulomb repulsion')
 
         dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
-
         extra_force = cupy.zeros((len(atmlst),3))
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals())
 
-        t2 = log.timer_debug1('gradients of 2e part', *t1)
+        t2 = log.timer_debug1('gradients of 2e part', *t3)
 
     dh = contract('xij,ij->xi', h1, dm0)
     ds = contract('xij,ij->xi', s1, dme0)

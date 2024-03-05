@@ -23,7 +23,7 @@ rm -rf /gpu4pyscf/put4pyscf/lib/*.so
 
 setup_dir=$(dirname $0)
 
-cmake -S /gpu4pyscf/gpu4pyscf/lib -B build/temp.gpu4pyscf-libxc
+cmake -S /gpu4pyscf/gpu4pyscf/lib -B build/temp.gpu4pyscf-libxc -DBUILD_DFTD3=OFF -DBUILD_DFTD4=OFF
 cmake --build build/temp.gpu4pyscf-libxc -j 4
 
 mkdir -p build/lib.gpu4pyscf-libxc/gpu4pyscf/lib/deps/lib

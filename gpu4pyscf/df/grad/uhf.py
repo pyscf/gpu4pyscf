@@ -50,7 +50,6 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         else:
             dfobj = mf_grad.base.with_df
             with_df = dfobj._rsh_df[key] = copy.copy(dfobj).reset()
-            #raise RuntimeError(f'omega={omega} is not calculated in SCF')
 
     auxmol = with_df.auxmol
     if not hasattr(with_df, 'intopt') or with_df._cderi is None:
@@ -126,7 +125,6 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
             if dm2 is not None:
                 rhoj2 = cupy.dot(low_t.T, rhoj2)
         elif low.tag == 'cd':
-            #rhoj = solve_triangular(low_t, rhoj, lower=False)
             rhoj = solve_triangular(low_t, rhoj, lower=False, overwrite_b=True)
             if dm2 is not None:
                 rhoj2 = solve_triangular(low_t, rhoj2, lower=False, overwrite_b=True)
@@ -145,7 +143,6 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         if low.tag == 'eig':
             rhok = contract('pq,qij->pij', low_t.T, rhok)
         elif low.tag == 'cd':
-            #rhok = solve_triangular(low_t, rhok, lower=False)
             rhok = solve_triangular(low_t, rhok.reshape(naux, -1), lower=False, overwrite_b=True).reshape(naux, nocc, nocc)
         tmp = contract('pij,qij->pq', rhok, rhok)
         tmp = take_last2d(tmp, rev_aux_idx)

@@ -54,7 +54,7 @@ def _check_grad(tol=1e-6):
     assert(np.linalg.norm(g_cpu - g_gpu) < tol)
 
 class KnownValues(unittest.TestCase):
-    def test_grad_rhf(self):
+    def test_grad_uks(self):
         _check_grad(tol=1e-6)
 
 if __name__ == "__main__":
