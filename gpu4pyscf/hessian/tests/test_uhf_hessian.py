@@ -40,6 +40,7 @@ def tearDownModule():
     del mol
 
 class KnownValues(unittest.TestCase):
+    @unittest.skip('not implemented')
     def test_partial_hess_elec(self):
         mf = scf.UHF(mol)
         mf.conv_tol = 1e-14

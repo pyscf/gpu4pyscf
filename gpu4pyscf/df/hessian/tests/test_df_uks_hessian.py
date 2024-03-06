@@ -58,9 +58,6 @@ class KnownValues(unittest.TestCase):
         hobj = mf.Hessian()
         hobj.auxbasis_response = 2
         hess_gpu = hobj.partial_hess_elec()
-        print('---hess elec---')
-        print(hess_cpu[0,0])
-        print(hess_gpu[0,0])
         assert numpy.linalg.norm(hess_cpu - hess_gpu.get()) < 1e-5
 
     def test_df_lda(self):
@@ -76,10 +73,8 @@ class KnownValues(unittest.TestCase):
         mf = mf.to_gpu()
         hessobj = mf.Hessian()
         hess_gpu = hessobj.kernel()
-        print(hess_cpu[0,0])
-        print(hess_gpu[0,0])
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
-    '''
+
     def test_df_gga(self):
         mf = dft.UKS(mol, xc='b3lyp').density_fit()
         mf.conv_tol = 1e-10
@@ -109,7 +104,7 @@ class KnownValues(unittest.TestCase):
         hessobj = mf.Hessian()
         hess_gpu = hessobj.kernel()
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
-    '''
+
 if __name__ == "__main__":
     print("Full Tests for DF UKS Hessian")
     unittest.main()

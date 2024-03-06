@@ -320,7 +320,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     # Energy weighted density matrix
     # pi,qi,i->pq
     dme0 = cupy.dot(mocc, (mocc * mo_energy[mo_occ>0] * 2).T)
-    hcore_deriv = hessobj.hcore_generator(mol)
+    hcore_deriv = rhf_hess.hcore_generator(hessobj, mol)
     hess_nuc_elec = rhf_hess.hess_nuc_elec(mol, dm0.get())
 
     # ------------------------------------
