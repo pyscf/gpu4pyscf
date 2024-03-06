@@ -393,10 +393,11 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     dm = cupy.asarray(dm0, order='C')
     if hasattr(dm0, 'mo_coeff') and hasattr(dm0, 'mo_occ'):
-        mo_coeff = cupy.asarray(dm0.mo_coeff)
-        mo_occ = cupy.asarray(dm0.mo_occ)
-        occ_coeff = cupy.asarray(mo_coeff[:,mo_occ>0])
-        dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
+        if dm0.ndim == 2:
+            mo_coeff = cupy.asarray(dm0.mo_coeff)
+            mo_occ = cupy.asarray(dm0.mo_occ)
+            occ_coeff = cupy.asarray(mo_coeff[:,mo_occ>0])
+            dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
 
     # use optimized workflow if possible
     if hasattr(mf, 'init_workflow'):
@@ -575,6 +576,30 @@ def energy_tot(mf, dm=None, h1e=None, vhf=None):
         e_tot = e_tot.get()
     return e_tot
 
+def scf(mf, dm0=None, **kwargs):
+    cput0 = logger.init_timer(mf)
+
+    mf.dump_flags()
+    mf.build(mf.mol)
+
+    if mf.max_cycle > 0 or mf.mo_coeff is None:
+        mf.converged, mf.e_tot, \
+                mf.mo_energy, mf.mo_coeff, mf.mo_occ = \
+                _kernel(mf, mf.conv_tol, mf.conv_tol_grad,
+                        dm0=dm0, callback=mf.callback,
+                        conv_check=mf.conv_check, **kwargs)
+    else:
+        # Avoid to update SCF orbitals in the non-SCF initialization
+        # (issue #495).  But run regular SCF for initial guess if SCF was
+        # not initialized.
+        mf.e_tot = _kernel(mf, mf.conv_tol, mf.conv_tol_grad,
+                            dm0=dm0, callback=mf.callback,
+                            conv_check=mf.conv_check, **kwargs)[1]
+
+    logger.timer(mf, 'SCF', *cput0)
+    mf._finalize()
+    return mf.e_tot
+
 class RHF(hf.RHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
@@ -617,29 +642,7 @@ class RHF(hf.RHF):
     mulliken_pop = NotImplemented
     mulliken_meta = NotImplemented
 
-    def scf(self, dm0=None, **kwargs):
-        cput0 = logger.init_timer(self)
-
-        self.dump_flags()
-        self.build(self.mol)
-
-        if self.max_cycle > 0 or self.mo_coeff is None:
-            self.converged, self.e_tot, \
-                    self.mo_energy, self.mo_coeff, self.mo_occ = \
-                    _kernel(self, self.conv_tol, self.conv_tol_grad,
-                           dm0=dm0, callback=self.callback,
-                           conv_check=self.conv_check, **kwargs)
-        else:
-            # Avoid to update SCF orbitals in the non-SCF initialization
-            # (issue #495).  But run regular SCF for initial guess if SCF was
-            # not initialized.
-            self.e_tot = _kernel(self, self.conv_tol, self.conv_tol_grad,
-                                dm0=dm0, callback=self.callback,
-                                conv_check=self.conv_check, **kwargs)[1]
-
-        logger.timer(self, 'SCF', *cput0)
-        self._finalize()
-        return self.e_tot
+    scf = scf
     kernel = scf
 
     def reset(self, mol=None):
