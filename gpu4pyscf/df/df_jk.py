@@ -182,14 +182,18 @@ class _DFHF(df_jk._DFHF):
 
     def Hessian(self):
         from pyscf.dft.rks import KohnShamDFT
-        from gpu4pyscf.df.hessian import rhf, rks
         if isinstance(self, scf.rhf.RHF):
+            from gpu4pyscf.df.hessian import rhf, rks
             if isinstance(self, KohnShamDFT):
                 return rks.Hessian(self)
             else:
                 return rhf.Hessian(self)
         else:
-            raise NotImplementedError
+            from gpu4pyscf.df.hessian import uhf, uks
+            if isinstance(self, KohnShamDFT):
+                return uks.Hessian(self)
+            else:
+                return uhf.Hessian(self)
 
     @property
     def auxbasis(self):

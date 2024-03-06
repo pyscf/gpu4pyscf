@@ -551,16 +551,21 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     de -= cupy.sum(de, axis=0)/len(atmlst)
     return de.get()
 
-def get_grad_hcore(mf_grad):
+def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
+    '''
+    derivative of hcore in MO
+    '''
     mf = mf_grad.base
     mol = mf.mol
     natm = mol.natm
     nao = mol.nao
-    mo_occ = mf.mo_occ
-    mo_coeff = cupy.asarray(mf.mo_coeff)
+    if mo_coeff is None: mo_coeff = cupy.asarray(mf.mo_coeff)
+    if mo_occ is None: mo_occ = mf.mo_occ
+
     orbo = mo_coeff[:,mo_occ>0]
     nocc = orbo.shape[1]
 
+    # derivative w.r.t nuclie position
     dh1e = cupy.zeros([3,natm,nao,nocc])
     coords = mol.atom_coords()
     charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
@@ -575,6 +580,7 @@ def get_grad_hcore(mf_grad):
     dh1e = contract('xkjo,k->xkjo', dh1e, -charges)
     dh1e = contract('xkjo,jp->xkpo', dh1e, mo_coeff_sorted)
 
+    # derivative w.r.t. atomic orbitals
     h1 = mf_grad.get_hcore(mol)
     aoslices = mol.aoslice_by_atom()
     with_ecp = mol.has_ecp()
@@ -593,7 +599,7 @@ def get_grad_hcore(mf_grad):
         h1ao = cupy.asarray(h1ao)
         h1mo = contract('xij,jo->xio', h1ao, orbo)
         dh1e[:,atm_id] += contract('xio,ip->xpo', h1mo, mo_coeff)
-    return dh1e#2.0 * cupy.einsum('kx,k->kx', dh1e, -charges)
+    return dh1e
 
 class Gradients(rhf.Gradients):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
