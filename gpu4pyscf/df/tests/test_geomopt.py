@@ -18,7 +18,7 @@ import numpy as np
 import unittest
 from pyscf import lib
 from gpu4pyscf import scf
-from gpu4pyscf.dft import rks
+from gpu4pyscf.dft import rks, uks
 from pyscf.geomopt.geometric_solver import optimize
 
 lib.num_threads(8)
@@ -36,15 +36,22 @@ auxbasis='ccpvtz-jkfit'
 grids_level = 8
 
 def setUpModule():
-    global mol
+    global mol, mol1
     mol = pyscf.M(atom=atom, basis=bas, output='/dev/null')
     mol.build()
     mol.verbose = 1
 
+    mol1 = pyscf.M(atom=atom, basis=bas, output='/dev/null')
+    mol1.charge = 1
+    mol1.spin = 1
+    mol1.build()
+    mol1.verbose = 1
+
 def tearDownModule():
-    global mol
+    global mol, mol1
     mol.stdout.close()
-    del mol
+    mol1.stdout.close()
+    del mol, mol1
 
 eps = 1e-3
 
@@ -76,6 +83,32 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(coords - coords_qchem) < 1e-4
 
+    def test_uks_geomopt(self):
+        mf = uks.UKS(mol, xc=xc, disp=disp).density_fit()
+        mf.grids.level = grids_level
+        mf.kernel()
+        mol_eq = optimize(mf, maxsteps=20)
+        coords = mol_eq.atom_coords(unit='Ang')
+        # reference from q-chem
+        coords_qchem = np.array([
+            [ 0.0000000000,     0.0000000000,     0.1164022656],
+            [-0.7617088263,    -0.0000000000,    -0.4691011328],
+            [0.7617088263,    -0.0000000000,    -0.4691011328]])
+
+        assert np.linalg.norm(coords - coords_qchem) < 1e-4
+
+    def test_uhf_geomopt(self):
+        mf = scf.UHF(mol).density_fit()
+        mf.kernel()
+        mol_eq = optimize(mf, maxsteps=20)
+        coords = mol_eq.atom_coords(unit='Ang')
+        # reference from q-chem
+        coords_qchem = np.array([
+            [0.0000000000,     0.0000000000,     0.1021249784],
+            [-0.7519034531,    -0.0000000000,    -0.4619624892],
+            [0.7519034531,    -0.0000000000,    -0.4619624892]])
+
+        assert np.linalg.norm(coords - coords_qchem) < 1e-4
 if __name__ == "__main__":
     print("Full Tests for geometry optimization")
     unittest.main()
