@@ -276,13 +276,15 @@ class WithSolventHess:
         dm = kwargs.pop('dm', None)
         if dm is None:
             dm = self.base.make_rdm1(ao_repr=True)
+        if dm.ndim == 3:
+            dm = dm[0] + dm[1]
         is_equilibrium = self.base.with_solvent.equilibrium_solvation
         self.base.with_solvent.equilibrium_solvation = True
         self.de_solvent = pcm_hess.hess_elec(self.base.with_solvent, dm, verbose=self.verbose)
         #self.de_solvent+= hess_nuc(self.base.with_solvent)
         self.de_solute = super().kernel(*args, **kwargs)
-        self.de = self.de_solute + self.de_solvent
-        self.de += get_cds(self.base.with_solvent)
+        self.de_cds = get_cds(self.base.with_solvent)
+        self.de = self.de_solute + self.de_solvent + self.de_cds
         self.base.with_solvent.equilibrium_solvation = is_equilibrium
         return self.de
 
