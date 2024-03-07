@@ -42,12 +42,16 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-def _make_mf(method='C-PCM'):
-    mf = dft.rks.RKS(mol, xc=xc).density_fit().PCM()
+def _make_mf(method='C-PCM', restricted=True):
+    if restricted:
+        mf = dft.rks.RKS(mol, xc=xc).density_fit().PCM()
+    else:
+        mf = dft.uks.UKS(mol, xc=xc).density_fit().PCM()
     mf.with_solvent.method = method
     mf.with_solvent.eps = epsilon
     mf.with_solvent.lebedev_order = lebedev_order
     mf.conv_tol = 1e-12
+    mf.conv_tol_cpscf = 1e-7
     mf.grids.atom_grid = (99,590)
     mf.verbose = 0
     mf.kernel()
@@ -80,7 +84,7 @@ def _check_hessian(mf, h, ix=0, iy=0):
 
 class KnownValues(unittest.TestCase):
     def test_hess_cpcm(self):
-        print('testing C-PCM Hessian')
+        print('testing C-PCM Hessian with DF-RKS')
         mf = _make_mf(method='C-PCM')
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
@@ -89,8 +93,17 @@ class KnownValues(unittest.TestCase):
         _check_hessian(mf, h, ix=0, iy=1)
 
     def test_hess_iefpcm(self):
-        print("testing IEF-PCM hessian")
+        print("testing IEF-PCM hessian with DF-RKS")
         mf = _make_mf(method='IEF-PCM')
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_hessian(mf, h, ix=0, iy=0)
+        _check_hessian(mf, h, ix=0, iy=1)
+
+    def test_uhf_hess_iefpcm(self):
+        print("testing IEF-PCM hessian with DF-UKS")
+        mf = _make_mf(method='IEF-PCM', restricted=False)
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()

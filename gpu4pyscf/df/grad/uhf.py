@@ -254,6 +254,9 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
 
 class Gradients(uhf_grad.Gradients):
     '''Unrestricted density-fitting Hartree-Fock gradients'''
+
+    _keys = {'with_df', 'auxbasis_response'}
+
     def __init__(self, mf):
         # Whether to include the response of DF auxiliary basis when computing
         # nuclear gradients of J/K matrices
@@ -262,7 +265,7 @@ class Gradients(uhf_grad.Gradients):
         uhf_grad.Gradients.__init__(self, mf)
 
     get_jk = get_jk
-    
+
     # TODO: finish these two functions
     def get_j(self, mol=None, dm=None, hermi=0, mo_coeff=None, mo_occ=None, dm2 = None):
         vj, _, vjaux, _ =  self.get_jk(mol, dm, with_k=False, mo_coeff=mo_coeff, mo_occ=mo_occ, dm2=dm2)
@@ -271,7 +274,7 @@ class Gradients(uhf_grad.Gradients):
     def get_k(self, mol=None, dm=None, hermi=0, mo_coeff=None, mo_occ=None, dm2 = None):
         _, vk, _, vkaux = self.get_jk(mol, dm, with_j=False, mo_coeff=mo_coeff, mo_occ=mo_occ, dm2=dm2)
         return vk, vkaux
-        
+
 
     def get_veff(self, mol=None, dm=None):
         vj0, vk0, vjaux0, vkaux0 = self.get_jk(mol, dm[0], mo_coeff=self.base.mo_coeff[0], mo_occ=self.base.mo_occ[0])

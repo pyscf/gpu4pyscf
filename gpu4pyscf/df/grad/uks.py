@@ -100,7 +100,7 @@ def get_veff(ks_grad, mol=None, dm=None):
         vxc += vj0 + vj1 + vj0_m1 + vj1_m0
     else:
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
-        
+
         vj0, vk0, vjaux0, vkaux0 = ks_grad.get_jk(mol, dm[0], mo_coeff=ks_grad.base.mo_coeff[0], mo_occ=ks_grad.base.mo_occ[0])
         vj1, vk1, vjaux1, vkaux1 = ks_grad.get_jk(mol, dm[1], mo_coeff=ks_grad.base.mo_coeff[1], mo_occ=ks_grad.base.mo_occ[1])
         vj0_m1, vjaux0_m1 = ks_grad.get_j(mol, dm[0], mo_coeff=ks_grad.base.mo_coeff[0], mo_occ=ks_grad.base.mo_occ[0], dm2=dm[1])
@@ -110,29 +110,32 @@ def get_veff(ks_grad, mol=None, dm=None):
         if ks_grad.auxbasis_response:
             vj_aux = vjaux0 + vjaux1 + vjaux0_m1 + vjaux1_m0
             vk_aux = (vkaux0+vkaux1) * hyb
-        
+
         if omega != 0:
             vk_lr0, vkaux_lr0 = ks_grad.get_k(mol, dm[0], mo_coeff=ks_grad.base.mo_coeff[0], mo_occ=ks_grad.base.mo_occ[0], omega=omega)
-            vk_lr1, vkaux_lr1 = ks_grad.get_k(mol, dm[1], mo_coeff=ks_grad.base.mo_coeff[1], mo_occ=ks_grad.base.mo_occ[1], omega=omega) 
+            vk_lr1, vkaux_lr1 = ks_grad.get_k(mol, dm[1], mo_coeff=ks_grad.base.mo_coeff[1], mo_occ=ks_grad.base.mo_occ[1], omega=omega)
             vk += (vk_lr0 + vk_lr1) * (alpha-hyb)
             if ks_grad.auxbasis_response:
                 vk_aux += (vkaux_lr0 + vkaux_lr1) * (alpha-hyb)
-                
+
         vxc += vj - vk
         if ks_grad.auxbasis_response:
             e1_aux = vj_aux - vk_aux
-            
+
     if ks_grad.auxbasis_response:
         logger.debug1(ks_grad, 'sum(auxbasis response) %s', e1_aux.sum(axis=0))
     else:
-        e1_aux = None   
-             
+        e1_aux = None
+
     vxc = tag_array(vxc, aux=e1_aux)
-    
+
     return vxc
 
 
 class Gradients(uks_grad.Gradients):
+
+    _keys = {'with_df', 'auxbasis_response'}
+
     def __init__(self, mf):
         # Whether to include the response of DF auxiliary basis when computing
         # nuclear gradients of J/K matrices
@@ -140,7 +143,7 @@ class Gradients(uks_grad.Gradients):
         uks_grad.Gradients.__init__(self, mf)
 
     get_jk = get_jk
-    
+
     def get_j(self, mol=None, dm=None, hermi=0, mo_coeff=None, mo_occ=None, dm2 = None, omega=None):
         vj, _, vjaux, _ = self.get_jk(mol, dm, with_k=False, mo_coeff=mo_coeff, mo_occ=mo_occ, dm2=dm2, omega=omega)
         return vj, vjaux
@@ -148,7 +151,7 @@ class Gradients(uks_grad.Gradients):
     def get_k(self, mol=None, dm=None, hermi=0, mo_coeff=None, mo_occ=None, dm2 = None, omega=None):
         _, vk, _, vkaux = self.get_jk(mol, dm, with_j=False, mo_coeff=mo_coeff, mo_occ=mo_occ, dm2=dm2, omega=omega)
         return vk, vkaux
-    
+
     get_veff = get_veff
 
     def extra_force(self, atom_id, envs):
