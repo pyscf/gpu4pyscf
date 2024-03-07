@@ -66,7 +66,7 @@ using cutlass_simt_dgemm_grouped_128x128_8x2_tt_align1_base =
     cutlass::gemm::GemmShape<32, 64, 8>,
     cutlass::gemm::GemmShape<1, 1, 1>,
     cutlass::epilogue::thread::LinearCombination<double, 1, double, double>,
-    cutlass::gemm::threadblock::ThreadblockSwizzleStreamK,
+    cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<1>,
     2,
     cutlass::gemm::kernel::GroupScheduleMode::kDeviceOnly,
     cutlass::arch::OpMultiplyAdd
@@ -96,11 +96,22 @@ cutlass::Status grouped_gemm_kernel_run(int problem_count, cutlass::gemm::GemmCo
   };
 
   size_t workspace_size = DeviceKernel::get_workspace_size(arguments);
-  cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
   DeviceKernel gemm_op;
-  cutlass::Status status = gemm_op.initialize(arguments,
-                                              workspace.get(),
-                                              nullptr);     // CUDA stream
+  cutlass::Status status;
+  if(workspace_size != 0)
+  {
+    cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
+    status = gemm_op.initialize(arguments,
+                                workspace.get(),
+                                nullptr);     // CUDA stream
+  }
+  else
+  {
+    uint8_t *workspace = nullptr;
+    status = gemm_op.initialize(arguments,
+                                workspace,
+                                nullptr);     // CUDA stream
+  }
 
   if (status != cutlass::Status::kSuccess) {
     return status;
@@ -111,7 +122,7 @@ cutlass::Status grouped_gemm_kernel_run(int problem_count, cutlass::gemm::GemmCo
 }
 
 template<typename DeviceKernel>
-void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int num)
+void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t *Ms, int64_t *Ns, int64_t *Ks, uint8_t *device_data, int num)
 {
   size_t total_size = sizeof(cutlass::gemm::GemmCoord) +
                       sizeof(typename DeviceKernel::ElementA*) +
@@ -127,7 +138,7 @@ void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t
   total_size += padding;
 
   uint8_t* host_data = new uint8_t[total_size];
-  cutlass::DeviceAllocation<uint8_t> device_data(total_size);
+  // cutlass::DeviceAllocation<uint8_t> device_data(total_size);
 
   uint8_t* start = host_data;
   cutlass::gemm::GemmCoord* problem_sizes_host = reinterpret_cast<cutlass::gemm::GemmCoord*>(start);
@@ -182,19 +193,20 @@ void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t
       *(ldc_host + i) = DeviceKernel::LayoutC::packed({M, N}).stride(0);
   }
 
-  device_data.copy_from_host(host_data);
+  // device_data.copy_from_host(host_data);
+  cudaMemcpy(device_data, host_data, total_size, cudaMemcpyHostToDevice);
 
   cutlass::Status status = grouped_gemm_kernel_run<DeviceKernel>(
       num,
-      reinterpret_cast<cutlass::gemm::GemmCoord*>(device_data.get()),
-      reinterpret_cast<typename DeviceKernel::ElementA**>(device_data.get() + ptr_A_offset),
-      reinterpret_cast<typename DeviceKernel::ElementB**>(device_data.get() + ptr_B_offset),
-      reinterpret_cast<typename DeviceKernel::ElementC**>(device_data.get() + ptr_C_offset),
-      reinterpret_cast<typename DeviceKernel::ElementC**>(device_data.get() + ptr_D_offset),
-      reinterpret_cast<int64_t*>(device_data.get() + lda_offset),
-      reinterpret_cast<int64_t*>(device_data.get() + ldb_offset),
-      reinterpret_cast<int64_t*>(device_data.get() + ldc_offset),
-      reinterpret_cast<int64_t*>(device_data.get() + ldc_offset),
+      reinterpret_cast<cutlass::gemm::GemmCoord*>(device_data),
+      reinterpret_cast<typename DeviceKernel::ElementA**>(device_data + ptr_A_offset),
+      reinterpret_cast<typename DeviceKernel::ElementB**>(device_data + ptr_B_offset),
+      reinterpret_cast<typename DeviceKernel::ElementC**>(device_data + ptr_C_offset),
+      reinterpret_cast<typename DeviceKernel::ElementC**>(device_data + ptr_D_offset),
+      reinterpret_cast<int64_t*>(device_data + lda_offset),
+      reinterpret_cast<int64_t*>(device_data + ldb_offset),
+      reinterpret_cast<int64_t*>(device_data + ldc_offset),
+      reinterpret_cast<int64_t*>(device_data + ldc_offset),
       typename DeviceKernel::EpilogueOutputOp::ElementCompute(alpha), typename DeviceKernel::EpilogueOutputOp::ElementCompute(beta));
 
   delete[] host_data;
@@ -204,19 +216,19 @@ void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t
 
 extern "C" {
 // int dgemm(cudaStream_t stream, double **ptr_out, double **ptr_x, double **ptr_y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int64_t *MNKs, int groups)
-int grouped_dot(cudaStream_t stream, uint64_t *out, uint64_t *x, uint64_t *y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int num)
+int grouped_dot(cudaStream_t stream, uint64_t *out, uint64_t *x, uint64_t *y, int64_t *Ms, int64_t *Ns, int64_t *Ks, uint8_t *device_data, int num)
 {
     int compute_capability = get_device_compute_capability();
 
     if(compute_capability < 80)
     {
       using DeviceKernel = cutlass::gemm::device::GemmGrouped<cutlass_simt_dgemm_grouped_128x128_8x2_tt_align1_base>;
-      grouped_gemm_kernel_launch<DeviceKernel>(out, x, y, Ms, Ns, Ks, num);
+      grouped_gemm_kernel_launch<DeviceKernel>(out, x, y, Ms, Ns, Ks, device_data, num);
     }
     else if(compute_capability >= 80)
     {
       using DeviceKernel = cutlass::gemm::device::GemmGrouped<cutlass_tensorop_d884gemm_grouped_128x128_16x3_tt_align1_base>;
-      grouped_gemm_kernel_launch<DeviceKernel>(out, x, y, Ms, Ns, Ks, num);
+      grouped_gemm_kernel_launch<DeviceKernel>(out, x, y, Ms, Ns, Ks, device_data, num);
     }
     else
     {

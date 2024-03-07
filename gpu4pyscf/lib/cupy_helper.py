@@ -631,9 +631,13 @@ def grouped_dot(As, Bs, Cs=None):
     Ms = np.array(Ms)
     Ns = np.array(Ns)
     Ks = np.array(Ks)
+    total_size = 68 * groups # 68 is the result of sizeof(cutlass::gemm::GemmCoord) + sizeof(typename DeviceKernel::ElementA*) + sizeof(typename DeviceKernel::ElementB*) + sizeof(typename DeviceKernel::ElementC*) + sizeof(typename DeviceKernel::ElementC*) + sizeof(int64_t) + sizeof(int64_t) + sizeof(int64_t)
+    padding = 8 - (total_size % 8)
+    total_size += padding
+    cutlass_space = cupy.empty(total_size, dtype=cupy.uint8)
 
     stream = cupy.cuda.get_current_stream()
-    err = libcupy_helper.grouped_dot_host(
+    err = libcupy_helper.grouped_dot(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(Cs_ptr.ctypes.data, ctypes.c_void_p),
         ctypes.cast(As_ptr.ctypes.data, ctypes.c_void_p),
@@ -641,6 +645,7 @@ def grouped_dot(As, Bs, Cs=None):
         ctypes.cast(Ms.ctypes.data, ctypes.c_void_p),
         ctypes.cast(Ns.ctypes.data, ctypes.c_void_p),
         ctypes.cast(Ks.ctypes.data, ctypes.c_void_p),
+        ctypes.cast(cutlass_space.data.ptr, ctypes.c_void_p),
         ctypes.c_int(groups)
     )
     if err != 0:
