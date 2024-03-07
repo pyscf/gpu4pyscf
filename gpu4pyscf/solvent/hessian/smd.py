@@ -307,7 +307,8 @@ class WithSolventHess:
                 h1aoa[i0] += dva[i0]
                 h1aob[i0] += dvb[i0]
             return h1aoa, h1aob
-
+        else:
+            raise NotImplementedError('Base object is not supported')
     def _finalize(self):
         # disable _finalize. It is called in grad_method.kernel method
         # where self.de was not yet initialized.
