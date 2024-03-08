@@ -344,7 +344,8 @@ class WithSolventGrad:
         dm = kwargs.pop('dm', None)
         if dm is None:
             dm = self.base.make_rdm1(ao_repr=True)
-
+        if dm.ndim == 3:
+            dm = dm[0] + dm[1]
         self.de_solute = super().kernel(*args, **kwargs)
         self.de_solvent = grad_qv(self.base.with_solvent, dm)
         self.de_solvent+= grad_solver(self.base.with_solvent, dm)

@@ -24,7 +24,7 @@ O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
-atom = 'Vitamin_C.xyz'
+
 mol = pyscf.M(atom=atom, basis='def2-tzvpp', verbose=6)
 
 mf = dft.rks.RKS(mol, xc='HYB_GGA_XC_B3LYP').density_fit()

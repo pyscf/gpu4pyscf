@@ -310,7 +310,6 @@ class PCM(ddcosmo.DDCOSMO):
     def _get_vind(self, dms):
         if not self._intermediates:
             self.build()
-
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)
         if dms.shape[0] == 2:
@@ -335,7 +334,6 @@ class PCM(ddcosmo.DDCOSMO):
         self._intermediates['q'] = q[0]
         self._intermediates['q_sym'] = q_sym[0]
         self._intermediates['v_grids'] = v_grids[0]
-
         return epcm, vmat[0]
 
     def _get_v(self, dms):
@@ -363,7 +361,7 @@ class PCM(ddcosmo.DDCOSMO):
         if self.frozen:
             raise RuntimeError('Frozen solvent model is not supported')
         from gpu4pyscf import scf
-        if isinstance(grad_method.base, scf.hf.RHF):
+        if isinstance(grad_method.base, (scf.hf.RHF, scf.uhf.UHF)):
             return pcm_grad.make_grad_object(grad_method)
         else:
             raise RuntimeError('Only SCF gradient is supported')
@@ -373,7 +371,7 @@ class PCM(ddcosmo.DDCOSMO):
         if self.frozen:
             raise RuntimeError('Frozen solvent model is not supported')
         from gpu4pyscf import scf
-        if isinstance(hess_method.base, scf.hf.RHF):
+        if isinstance(hess_method.base, (scf.hf.RHF, scf.uhf.UHF)):
             return pcm_hess.make_hess_object(hess_method)
         else:
             raise RuntimeError('Only SCF gradient is supported')
@@ -387,7 +385,7 @@ class PCM(ddcosmo.DDCOSMO):
     def _B_dot_x(self, dms):
         if not self._intermediates:
             self.build()
-
+        out_shape = dms.shape
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)
 
@@ -403,6 +401,5 @@ class PCM(ddcosmo.DDCOSMO):
         q_sym = (q + qt)/2.0
 
         vmat = self._get_vmat(q_sym)
-
-        return vmat
+        return vmat.reshape(out_shape)
 

@@ -255,14 +255,15 @@ class WithSolventGrad:
         dm = kwargs.pop('dm', None)
         if dm is None:
             dm = self.base.make_rdm1(ao_repr=True)
-
-        self.de_solute = super().kernel(*args, **kwargs)
+        if dm.ndim == 3:
+            dm = dm[0] + dm[1]
+        self.de_solute  = super().kernel(*args, **kwargs)
         self.de_solvent = pcm_grad.grad_qv(self.base.with_solvent, dm)
         self.de_solvent+= pcm_grad.grad_solver(self.base.with_solvent, dm)
         self.de_solvent+= pcm_grad.grad_nuc(self.base.with_solvent, dm)
+        self.de_cds     = get_cds(self.base.with_solvent)
+        self.de = self.de_solute + self.de_solvent + self.de_cds
 
-        self.de = self.de_solute + self.de_solvent
-        self.de += get_cds(self.base.with_solvent)
         if self.verbose >= logger.NOTE:
             logger.note(self, '--------------- %s (+%s) gradients ---------------',
                         self.base.__class__.__name__,

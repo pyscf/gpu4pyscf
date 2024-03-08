@@ -113,7 +113,7 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
 class UHF(uhf.UHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
-    _keys = {'e_disp', 'screen_tol', 'conv_tol_cpscf'}
+    _keys = {'e_disp', 'screen_tol', 'conv_tol_cpscf', 'h1e', 's1e'}
 
     screen_tol = 1e-14
     conv_tol_cpscf = 1e-3

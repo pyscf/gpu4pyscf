@@ -62,6 +62,15 @@ def _make_rks(mol, xc, disp=None):
     mf.kernel()
     return mf
 
+def _make_uks(mol, xc, disp=None):
+    mf = dft.uks.UKS(mol, xc=xc).density_fit(auxbasis=auxbasis0)
+    mf.conv_tol = 1e-12
+    mf.disp = disp
+    mf.grids.level = grids_level
+    mf.verbose = 1
+    mf.kernel()
+    return mf
+
 def _check_rhf_hessian(mf, h, ix=0, iy=0, tol=1e-3):
     pmol = mf.mol.copy()
     pmol.build()
@@ -144,6 +153,16 @@ class KnownValues(unittest.TestCase):
     def test_hessian_hybrid(self):
         print('-----testing DF B3LYP Hessian----')
         mf = _make_rks(mol_sph, 'b3lyp')
+        mf.conv_tol_cpscf = 1e-7
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+        _check_dft_hessian(mf, h, ix=0,iy=1)
+
+    def test_uks_hessian_hybrid(self):
+        print('-----testing DF-UKS B3LYP Hessian----')
+        mf = _make_uks(mol_sph, 'b3lyp')
         mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
