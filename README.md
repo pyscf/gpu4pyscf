@@ -51,6 +51,7 @@ Features
 - Nonlocal functional correction (vv10) for SCF and gradient;
 - ECP is supported and calculated on CPU;
 - PCM models, SMD model, their analytical gradients, and semi-analytical Hessian matrix;
+- Unrestricted Hartree-Fock and Unrestricted DFT, gradient, and Hessian
 
 Limitations
 --------
@@ -87,7 +88,25 @@ h = mf.Hessian()
 h_dft = h.kernel()   # compute analytical Hessian
 
 ```
-Find more examples in gpu4pyscf/examples
+
+`to_gpu` is supported since PySCF 2.5.0
+```python
+import pyscf
+from pyscf.dft import rks
+
+atom ='''
+O       0.0000000000    -0.0000000000     0.1174000000
+H      -0.7570000000    -0.0000000000    -0.4696000000
+H       0.7570000000     0.0000000000    -0.4696000000
+'''
+
+mol = pyscf.M(atom=atom, basis='def2-tzvpp')
+mf = rks.RKS(mol, xc='LDA').density_fit().to_gpu()  # move PySCF object to GPU4PySCF object
+e_dft = mf.kernel()  # compute total energy
+
+```
+
+Find more examples in [gpu4pyscf/examples](https://github.com/pyscf/gpu4pyscf/tree/master/examples)
 
 Benchmarks
 --------
@@ -108,5 +127,5 @@ Speedup with GPU4PySCF v0.6.0 on A100-80G over Q-Chem 6.1 on 32-cores CPU (Desit
 | 095_Azadirachtin  |     95 |   5.58 |   7.72 |   24.18 |  26.84 |     25.21 |
 | 113_Taxol         |    113 |   5.44 |   6.81 |   24.58 |  29.14 |    nan    |
 
-Find more benchmarks in gpu4pyscf/benchmarks
+Find more benchmarks in [gpu4pyscf/benchmarks](https://github.com/pyscf/gpu4pyscf/tree/master/benchmarks)
 
