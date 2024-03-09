@@ -30,14 +30,20 @@ start_time = time.time()
 mol = pyscf.M(
     atom='Vitamin_C.xyz',
     verbose=4)
-# set verbose >= 6 for debugging timer
 
 print(f'{mol.nao} atomic orbitals')
 mf = rks.RKS(mol, xc='HYB_MGGA_XC_WB97M_V').density_fit()
-mf.grids.level = 5
+mf.grids.atom_grid = (99,590)
+mf.nlcgrids.atom_grid = (50,194)
 mf.conv_tol = 1e-8
 mf.direct_scf_tol = 1e-14
 mf.nlcgrids.level = 2
 e_tot = mf.kernel()
 end_time = time.time()
 print(f'Wallclock time: {end_time-start_time}')
+
+print('calculating gradient')
+gobj = mf.nuc_grad_method()
+gobj.kernel()
+
+# Hessian for nlc is not supported

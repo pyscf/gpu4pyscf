@@ -780,7 +780,7 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
         if count % ncp_ij == 0:
             rhok_tmp = cupy.asarray(rhok[k0:k1])
             if with_k:
-                rhok0 = contract('pio,ir->pro', rhok_tmp, 2.0*orbo)
+                rhok0 = contract('pio,ir->pro', rhok_tmp, orbo)
                 rhok0 = contract('pro,Jo->prJ', rhok0, orbo)
 
         rhoj0 = contract('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
@@ -789,14 +789,14 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
         vj1_ao = rhoj0 = None
 
         if with_k:
-            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, 2.0*orbo[j0:j1])
+            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, orbo[j0:j1])
             vk1_buf[:,i0:i1] += contract('xpji,plj->xil', int3c_blk, rhok0_slice)
 
             vk1_ao = contract('xpji,poi->xijo', int3c_blk, rhok0[:,:,i0:i1])
             vk1[:,:,j0:j1] += contract('xijo,ia->axjo', vk1_ao, ao2atom[i0:i1])
 
             int3c_ip1_occ = contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])
-            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, 2.0*orbo[i0:i1])
+            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, orbo[i0:i1])
 
             vk1_ao = contract('xpio,pJi->xiJo', int3c_ip1_occ, rhok0_slice)
             vk1 += contract('xiJo,ia->axJo', vk1_ao, ao2atom[i0:i1])
@@ -838,10 +838,10 @@ def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices, with_k=True, ome
             vj1 += contract('xpio,pa->axio', vj1_tmp, aux2atom[k0:k1])
             if with_k:
                 rhok0_slice = contract('pio,jo->pij', rhok_tmp, orbo)
-                vk1_tmp = -contract('xpjo,pij->xpio', wk2_P__, rhok0_slice) * 2
+                vk1_tmp = -contract('xpjo,pij->xpio', wk2_P__, rhok0_slice)
 
                 rhok0_oo = contract('pio,ir->pro', rhok_tmp, orbo)
-                vk1_tmp -= contract('xpio,pro->xpir', wk2_P__, rhok0_oo) * 2
+                vk1_tmp -= contract('xpio,pro->xpir', wk2_P__, rhok0_oo)
 
                 vk1 += contract('xpir,pa->axir', vk1_tmp, aux2atom[k0:k1])
             wj2 = wk2_P__ = rhok0_slice = rhok0_oo = None

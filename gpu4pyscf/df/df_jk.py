@@ -25,8 +25,8 @@ from pyscf.scf import dhf
 from pyscf.df import df_jk, addons
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, take_last2d, transpose_sum, load_library, get_avail_mem
-from gpu4pyscf.dft import rks, numint, uks
-from gpu4pyscf.scf import hf
+from gpu4pyscf.dft import rks, uks, numint
+from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.df import df, int3c2e
 
 libcupy_helper = load_library('libcupy_helper')
@@ -63,6 +63,7 @@ def init_workflow(mf, dm0=None):
             rks.initialize_grids(mf, mf.mol, dm0)
             ni.build(mf.mol, mf.grids.coords)
             mf._numint.xcfuns = numint._init_xcfuns(mf.xc, dm0.ndim==3)
+    dm0 = cupy.asarray(dm0)
     return
 
 def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
@@ -171,18 +172,28 @@ class _DFHF(df_jk._DFHF):
         if isinstance(self, hf.RHF):
             from gpu4pyscf.df.grad import rhf as rhf_grad
             return rhf_grad.Gradients(self)
+        if isinstance(self, uks.UKS):
+            from gpu4pyscf.df.grad import uks as uks_grad
+            return uks_grad.Gradients(self)
+        if isinstance(self, uhf.UHF):
+            from gpu4pyscf.df.grad import uhf as uhf_grad
+            return uhf_grad.Gradients(self)
         raise NotImplementedError()
 
     def Hessian(self):
         from pyscf.dft.rks import KohnShamDFT
-        from gpu4pyscf.df.hessian import rhf, rks
         if isinstance(self, scf.rhf.RHF):
+            from gpu4pyscf.df.hessian import rhf, rks
             if isinstance(self, KohnShamDFT):
                 return rks.Hessian(self)
             else:
                 return rhf.Hessian(self)
         else:
-            raise NotImplementedError
+            from gpu4pyscf.df.hessian import uhf, uks
+            if isinstance(self, KohnShamDFT):
+                return uks.Hessian(self)
+            else:
+                return uhf.Hessian(self)
 
     @property
     def auxbasis(self):

@@ -13,7 +13,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from . import rhf, rks
+from . import rhf, rks, uhf, uks
 
 RHF = rhf.Gradients
 RKS = rks.Gradients
+UHF = uhf.Gradients
+UKS = uks.Gradients

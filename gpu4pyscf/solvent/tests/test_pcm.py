@@ -38,59 +38,43 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
+def _energy_with_solvent(method, unrestricted=False):
+    cm = pcm.PCM(mol)
+    cm.eps = epsilon
+    cm.verbose = 0
+    cm.lebedev_order = 29
+    cm.method = method
+    if unrestricted:
+        mf = scf.RHF(mol).PCM(cm)
+    else:
+        mf = scf.RHF(mol).PCM(cm)
+    e_tot = mf.kernel()
+    return e_tot
+
 class KnownValues(unittest.TestCase):
     def test_CPCM(self):
-        cm = pcm.PCM(mol)
-        cm.eps = epsilon
-        cm.verbose = 0
-        cm.lebedev_order = 29
-        cm.method = 'C-PCM'
-        mf = scf.RHF(mol).PCM(cm)
-        e_tot = mf.kernel()
-        print(f"Energy error in C-PCM: {numpy.abs(e_tot - -74.9690902442)}")
+        e_tot = _energy_with_solvent('C-PCM')
+        print(f"Energy error in RHF with C-PCM: {numpy.abs(e_tot - -74.9690902442)}")
         assert numpy.abs(e_tot - -74.9690902442) < 1e-9
 
     def test_COSMO(self):
-        cm = pcm.PCM(mol)
-        cm.eps = epsilon
-        cm.verbose = 0
-        cm.lebedev_order = 29
-        cm.method = 'COSMO'
-        mf = scf.RHF(mol).PCM(cm)
-        e_tot = mf.kernel()
-        print(f"Energy error in COSMO: {numpy.abs(e_tot - -74.96900351922464)}")
+        e_tot = _energy_with_solvent('COSMO')
+        print(f"Energy error in RHF with COSMO: {numpy.abs(e_tot - -74.96900351922464)}")
         assert numpy.abs(e_tot - -74.96900351922464) < 1e-9
 
     def test_IEFPCM(self):
-        cm = pcm.PCM(mol)
-        cm.eps = epsilon
-        cm.verbose = 0
-        cm.lebedev_order = 29
-        cm.method = 'IEF-PCM'
-        mf = scf.RHF(mol).PCM(cm)
-        e_tot = mf.kernel()
-        print(f"Energy error in IEF-PCM: {numpy.abs(e_tot - -74.9690111344)}")
+        e_tot = _energy_with_solvent('IEF-PCM')
+        print(f"Energy error in RHF with IEF-PCM: {numpy.abs(e_tot - -74.9690111344)}")
         assert numpy.abs(e_tot - -74.9690111344) < 1e-9
 
     def test_SSVPE(self):
-        cm = pcm.PCM(mol)
-        cm.eps = epsilon
-        cm.verbose = 0
-        cm.lebedev_order = 29
-        cm.method = 'SS(V)PE'
-        mf = scf.RHF(mol).PCM(cm)
-        e_tot = mf.kernel()
-        print(f"Energy error in SS(V)PE: {numpy.abs(e_tot - -74.9689577454)}")
+        e_tot = _energy_with_solvent('SS(V)PE')
+        print(f"Energy error in RHF with SS(V)PE: {numpy.abs(e_tot - -74.9689577454)}")
         assert numpy.abs(e_tot - -74.9689577454) < 1e-9
 
     def test_uhf(self):
-        cm = pcm.PCM(mol)
-        cm.eps = epsilon
-        cm.verbose = 0
-        cm.lebedev_order = 29
-        cm.method = 'IEF-PCM'
-        mf = scf.UHF(mol).PCM(cm)
-        e_tot = mf.kernel()
+        e_tot = _energy_with_solvent('IEF-PCM', unrestricted=True)
+        print(f"Energy error in UHF with IEF-PCM: {numpy.abs(e_tot - -74.96901113434953)}")
         assert numpy.abs(e_tot - -74.96901113434953) < 1e-9
 
 if __name__ == "__main__":

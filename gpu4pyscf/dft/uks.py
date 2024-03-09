@@ -121,7 +121,7 @@ class UKS(uks.UKS, UHF):
         self.disp = disp
         self._numint = numint.NumInt()
         self.screen_tol = 1e-14
-        
+
         grids_level = self.grids.level
         self.grids = gen_grid.Grids(mol)
         self.grids.level = grids_level
@@ -129,7 +129,10 @@ class UKS(uks.UKS, UHF):
         nlcgrids_level = self.nlcgrids.level
         self.nlcgrids = gen_grid.Grids(mol)
         self.nlcgrids.level = nlcgrids_level
-        
+
     energy_elec = energy_elec
     get_veff = get_veff
     to_hf = NotImplemented
+    def nuc_grad_method(self):
+        from gpu4pyscf.grad import uks as uks_grad
+        return uks_grad.Gradients(self)

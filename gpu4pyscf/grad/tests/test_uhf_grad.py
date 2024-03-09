@@ -29,7 +29,7 @@ bas0='cc-pvtz'
 
 def setUpModule():
     global mol
-    mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000)
+    mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000, charge=1, spin=1)
     mol.output = '/dev/null'
     mol.build()
     mol.verbose = 1
@@ -40,21 +40,23 @@ def tearDownModule():
     del mol
 
 def _check_grad(tol=1e-6):
-    mf = scf.hf.RHF(mol)
+    mf = scf.uhf.UHF(mol)
     mf.direct_scf_tol = 1e-10
     mf.kernel()
 
-    cpu_gradient = pyscf.grad.RHF(mf)
+    cpu_gradient = pyscf.grad.UHF(mf)
     g_cpu = cpu_gradient.kernel()
 
-    gpu_gradient = cpu_gradient.to_gpu()
+    # TODO: use to_gpu function
+    mf.__class__ = gpu4pyscf.scf.uhf.UHF
+    gpu_gradient = gpu4pyscf.grad.UHF(mf)
     g_gpu = gpu_gradient.kernel()
     assert(np.linalg.norm(g_cpu - g_gpu) < tol)
 
 class KnownValues(unittest.TestCase):
-    def test_grad_rhf(self):
+    def test_grad_uks(self):
         _check_grad(tol=1e-6)
 
 if __name__ == "__main__":
-    print("Full Tests for Gradient")
+    print("Full Tests for UHF Gradient")
     unittest.main()

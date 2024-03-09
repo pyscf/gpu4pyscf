@@ -21,8 +21,7 @@ Gradient of PCM family solvent model
 import numpy
 import cupy
 from cupyx import scipy
-from pyscf import lib
-from pyscf import gto, df
+from pyscf import lib, scf, gto, df
 from pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.solvent.pcm import PI, switch_h
 from gpu4pyscf.solvent.grad.pcm import grad_switch_h, get_dF_dA, get_dD_dS, grad_qv, grad_solver, grad_nuc
@@ -155,7 +154,7 @@ def hess_elec(pcmobj, dm, verbose=None):
     pcmobj.reset(pmol)
     return de
 
-def fd_grad_vmat(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
+def fd_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
     '''
     dv_solv / da
     slow version with finite difference
@@ -169,7 +168,6 @@ def fd_grad_vmat(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
     nao, nmo = mo_coeff.shape
     mocc = mo_coeff[:,mo_occ>0]
     nocc = mocc.shape[1]
-    dm = cupy.dot(mocc, mocc.T) * 2
     coords = mol.atom_coords(unit='Bohr')
     def pcm_vmat_scanner(mol):
         pcmobj.reset(mol)
@@ -250,6 +248,8 @@ class WithSolventHess:
         dm = kwargs.pop('dm', None)
         if dm is None:
             dm = self.base.make_rdm1(ao_repr=True)
+        if dm.ndim == 3:
+            dm = dm[0] + dm[1]
         is_equilibrium = self.base.with_solvent.equilibrium_solvation
         self.base.with_solvent.equilibrium_solvation = True
         self.de_solvent = hess_elec(self.base.with_solvent, dm, verbose=self.verbose)
@@ -263,11 +263,25 @@ class WithSolventHess:
         if atmlst is None:
             atmlst = range(self.mol.natm)
         h1ao = super().make_h1(mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
-        dv = fd_grad_vmat(self.base.with_solvent, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
-        for i0, ia in enumerate(atmlst):
-            h1ao[i0] += dv[i0]
-        return h1ao
-
+        if isinstance(self.base, scf.hf.RHF):
+            dm = self.base.make_rdm1(ao_repr=True)
+            dv = fd_grad_vmat(self.base.with_solvent, dm, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
+            for i0, ia in enumerate(atmlst):
+                h1ao[i0] += dv[i0]
+            return h1ao
+        elif isinstance(self.base, scf.uhf.UHF):
+            h1aoa, h1aob = h1ao
+            solvent = self.base.with_solvent
+            dm = self.base.make_rdm1(ao_repr=True)
+            dm = dm[0] + dm[1]
+            dva = fd_grad_vmat(solvent, dm, mo_coeff[0], mo_occ[0], atmlst=atmlst, verbose=verbose)
+            dvb = fd_grad_vmat(solvent, dm, mo_coeff[1], mo_occ[1], atmlst=atmlst, verbose=verbose)
+            for i0, ia in enumerate(atmlst):
+                h1aoa[i0] += dva[i0]
+                h1aob[i0] += dvb[i0]
+            return h1aoa, h1aob
+        else:
+            raise NotImplementedError('Base object is not supported')
     def _finalize(self):
         # disable _finalize. It is called in grad_method.kernel method
         # where self.de was not yet initialized.

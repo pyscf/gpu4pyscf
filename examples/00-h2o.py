@@ -33,13 +33,11 @@ auxbasis = 'def2-tzvpp-jkfit'
 scf_tol = 1e-10
 max_scf_cycles = 50
 screen_tol = 1e-14
-grids_level = 5
 
 mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
 
 mol.verbose = 4
 mf_GPU = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
-mf_GPU.grids.level = grids_level
 mf_GPU.grids.atom_grid = (99,590)
 mf_GPU.conv_tol = scf_tol
 mf_GPU.max_cycle = max_scf_cycles
