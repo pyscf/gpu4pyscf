@@ -1,1 +1,1 @@
-from .cc import ccsd_incore
+from . import ccsd_incore
