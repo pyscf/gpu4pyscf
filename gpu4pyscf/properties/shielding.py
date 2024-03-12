@@ -1,3 +1,18 @@
+# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 from gpu4pyscf.scf import cphf
 import numpy as np
 from pyscf.data import nist
@@ -5,7 +20,7 @@ import cupy
 from pyscf.scf import _vhf, jk
 from gpu4pyscf.dft import numint
 import time
-from gpu4pyscf.lib.cupy_helper import contract, release_gpu_stack
+from gpu4pyscf.lib.cupy_helper import contract, release_gpu_stack, take_last2d, add_sparse
 
 
 def gen_vind(mf, mo_coeff, mo_occ):
@@ -52,80 +67,62 @@ def gen_vind(mf, mo_coeff, mo_occ):
 def nr_rks(ni, mol, grids, xc_code, dms):
 
     xctype = ni._xc_type(xc_code)
+    mo_coeff = getattr(dms, 'mo_coeff', None)
+    mo_occ = getattr(dms, 'mo_occ', None)
+    nao = mo_coeff.shape[1]
+    
+    ####
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
-
-    mo_coeff = getattr(dms, 'mo_coeff', None)
-    mo_occ = getattr(dms, 'mo_occ', None)
-
-    mol = opt.mol
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
-    dms = cupy.asarray(dms)
-    dms = coeff @ dms @ coeff.T
-
-    if mo_coeff is not None:
-        mo_coeff = coeff @ mo_coeff
-
-    def _make_rho(ao_value, dm, xctype=None):
-        if mo_coeff is not None and mo_occ is not None:
-            rho = numint.eval_rho2(mol, ao, mo_coeff, mo_occ, None, xctype)
-        else:
-            rho = numint.eval_rho(mol, ao_value, dm, xctype=xctype, hermi=1)
-        return rho
+    dms = cupy.asarray(dms).reshape(-1,nao0,nao0)
+    dms = take_last2d(dms, opt.ao_idx)
+    mo_coeff = mo_coeff[opt.ao_idx]
+    #####
 
     vmat = cupy.zeros((3, nao, nao))
-
-    release_gpu_stack()
     if xctype == 'LDA':
         ao_deriv = 0
     else:
         ao_deriv = 1
-    for ao, sindex, weight, coords in ni.block_loop(mol, grids, nao, ao_deriv):
-        rho = _make_rho(ao, dms, xctype=xctype)
+
+    for ao, index, weight, coords in ni.block_loop(opt.mol, grids, nao, ao_deriv):
+        mo_coeff_mask = mo_coeff[index,:]
+        rho = numint.eval_rho2(opt.mol, ao, mo_coeff_mask, mo_occ, None, xctype)
         vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
-        vxc = cupy.asarray(vxc, order='C')
         if xctype == 'LDA':
             wv = weight * vxc[0]
-            if numint.USE_SPARSITY == 2:
-                mask = cupy.any(cupy.abs(ao) > numint.AO_THRESHOLD, axis=[1])
-                ao_mask = ao[mask, :]
-                giao = mol.eval_gto('GTOval_ig', coords.get(),
-                                    comp=3)  # (#C(0 1) g) |AO>
-                giao = cupy.array(giao)
-                for idirect in range(3):
-                    giao_aux = giao[idirect, :, mask]
-                    aow = numint._scale_ao(giao_aux, wv)
-                    vmat[idirect][cupy.ix_(mask, mask)] -= ao_mask.dot(aow.T)
-            else:
-                raise NotImplementedError('Not implemented yet')
+            giao = opt.mol.eval_gto('GTOval_ig', coords.get(), comp=3)  # (#C(0 1) g) |AO>
+            giao = cupy.array(giao)
+            giao_aux = giao[:,:,index]
+            for idirect in range(3):
+                vtmp = np.einsum('pu,p,vp->uv', giao_aux[idirect], wv, ao)
+                vtmp = cupy.ascontiguousarray(vtmp)
+                add_sparse(vmat[idirect], vtmp, index)
+            
         elif xctype == 'GGA':
             wv = vxc * weight
-            if numint.USE_SPARSITY == 2:
-                mask = cupy.any(
-                    cupy.abs(ao) > numint.AO_THRESHOLD, axis=[0, 2])
-                ao_mask = ao[:, mask, :]
-                giao = mol.eval_gto('GTOval_ig', coords.get(), comp=3)
-                giao_nabla = mol.eval_gto(
-                    'GTOval_ipig', coords.get()).reshape(3, 3, -1, nao)
-                giao = cupy.array(giao)
-                giao_nabla = cupy.array(giao_nabla)
-                for idirect in range(3):
-                    # * write like the gpu4pyscf numint part, but explicitly use the einsum
-                    aow = cupy.einsum(
-                        'np,p->pn', giao[idirect, :, mask], wv[0])
-                    tmp = giao_nabla[:, idirect, :, :]
-                    aow += cupy.einsum('xpn,xp->pn', tmp[:, :, mask], wv[1:4])
-                    vmat[idirect][cupy.ix_(
-                        mask, mask)] += cupy.einsum('pn,mp->nm', aow, ao_mask[0])
-                    aow = cupy.einsum(
-                        'np,xp->xpn', giao[idirect, :, mask], wv[1:4])
-                    vmat[idirect][cupy.ix_(
-                        mask, mask)] += cupy.einsum('xpn,xmp->nm', aow, ao_mask[1:4])
-            else:
-                raise NotImplementedError('Not implemented yet')
+            giao = opt.mol.eval_gto('GTOval_ig', coords.get(), comp=3)
+            giao_nabla = opt.mol.eval_gto('GTOval_ipig', coords.get()).reshape(3, 3, -1, nao)
+            giao = cupy.array(giao)
+            giao_nabla = cupy.array(giao_nabla)
+            giao_aux = giao[:,:,index]
+            giao_nabla_aux = giao_nabla[:,:,:,index]
+            for idirect in range(3):
+                # * write like the gpu4pyscf numint part, but explicitly use the einsum
+                aow = cupy.einsum('pn,p->pn', giao_aux[idirect], wv[0])
+                aow += cupy.einsum('xpn,xp->pn', giao_nabla_aux[:, idirect, :, :], wv[1:4])
+                vtmp = cupy.einsum('pn,mp->nm', aow, ao[0])
+                vtmp = cupy.ascontiguousarray(vtmp)
+                add_sparse(vmat[idirect], vtmp, index)
+                aow = cupy.einsum('pn,xp->xpn', giao_aux[idirect], wv[1:4])
+                vtmp = cupy.einsum('xpn,xmp->nm', aow, ao[1:4])
+                vtmp = cupy.ascontiguousarray(vtmp)
+                add_sparse(vmat[idirect], vtmp, index)
+
         elif xctype == 'NLC':
             raise NotImplementedError('NLC')
         elif xctype == 'MGGA':
@@ -138,8 +135,9 @@ def nr_rks(ni, mol, grids, xc_code, dms):
 
         ao = None
 
-    vmat = contract('pi,npq->niq', coeff, vmat)
-    vmat = contract('qj,niq->nij', coeff, vmat)
+    # vmat = contract('pi,npq->niq', coeff, vmat)
+    # vmat = contract('qj,niq->nij', coeff, vmat)
+    vmat = take_last2d(vmat, opt.rev_ao_idx)
 
     if numint.FREE_CUPY_CACHE:
         dms = None
@@ -156,14 +154,14 @@ def get_jk(mol, dm0):
     intor = mol._add_suffix('int2e_ig1')
     vj, vk = _vhf.direct_mapdm(intor,  # (g i,j|k,l)
                                'a4ij', ('lk->s1ij', 'jk->s1il'),
-                               dm0, 3,  # xyz, 3 components
+                               dm0.get(), 3,  # xyz, 3 components
                                mol._atm, mol._bas, mol._env)
     vk = vk - np.swapaxes(vk, -1, -2)
     return -cupy.array(vj), -cupy.array(vk)
 
 
 def get_vxc(mf, dm0):
-    vxc = nr_rks(mf._numint, mf, mf.grids, mf.xc, mf.make_rdm1())
+    vxc = nr_rks(mf._numint, mf.mol, mf.grids, mf.xc, mf.make_rdm1())
     # ! imaginary part
     vj, vk = get_jk(mf.mol, dm0)
     if not mf._numint.libxc.is_hybrid_xc(mf.xc):
