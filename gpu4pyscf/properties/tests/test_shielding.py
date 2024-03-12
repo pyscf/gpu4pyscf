@@ -62,6 +62,56 @@ class KnownValues(unittest.TestCase):
     '''
     known values are obtained by Q-Chem
 
+    $rem
+    METHOD             b3lyp
+    BASIS         def2-tzvpp
+    SCF_CONVERGENCE     12
+    XC_GRID 000099000590
+    SYMMETRY FALSE
+    SYM_IGNORE  TRUE
+    MOPROP               1
+    MOPROP_PERTNUM       0  ! do all perturbations at once
+    MOPROP_CONV_1ST      10  ! sets the CPSCF convergence threshold
+    MOPROP_DIIS_DIM_SS   4  ! no. of DIIS subspace vectors
+    MOPROP_MAXITER_1ST 100  ! max iterations
+    MOPROP_DIIS          5  ! turns on DIIS (=0 to turn off)
+    MOPROP_DIIS_THRESH   1
+    MOPROP_DIIS_SAVE     0
+    $end
+
+       ATOM           ISOTROPIC        ANISOTROPIC       REL. SHIFTS
+------------------------------------------------------------------------
+   Atom O     1     332.07586444       45.66898820
+   Atom H     2      31.39150070       19.36432602
+   Atom H     3      31.39060707       19.36602790
+
+    $rem
+    METHOD             b3lyp
+    BASIS         def2-tzvpp
+    SCF_CONVERGENCE     10
+    XC_GRID 000099000590
+    ri_j        True
+    ri_k        True
+    aux_basis     RIJK-def2-tzvpp
+    THRESH        14
+    SYMMETRY FALSE
+    SYM_IGNORE  TRUE
+    MOPROP               1
+    MOPROP_PERTNUM       0  ! do all perturbations at once
+    MOPROP_CONV_1ST      10  ! sets the CPSCF convergence threshold
+    MOPROP_DIIS_DIM_SS   4  ! no. of DIIS subspace vectors
+    MOPROP_MAXITER_1ST 100  ! max iterations
+    MOPROP_DIIS          5  ! turns on DIIS (=0 to turn off)
+    MOPROP_DIIS_THRESH   1
+    MOPROP_DIIS_SAVE     0
+    $end
+
+    
+       ATOM           ISOTROPIC        ANISOTROPIC       REL. SHIFTS
+------------------------------------------------------------------------
+   Atom O     1     332.07961083       45.66777197
+   Atom H     2      31.39250594       19.36477246
+   Atom H     3      31.39160966       19.36647972
     
     '''
     def test_rks_b3lyp(self):
