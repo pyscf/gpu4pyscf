@@ -178,6 +178,7 @@ def add_sparse(a, b, indices):
     '''
     assert a.flags.c_contiguous
     assert b.flags.c_contiguous
+    if len(indices) == 0: return a
     n = a.shape[-1]
     m = b.shape[-1]
     if a.ndim > 2:
