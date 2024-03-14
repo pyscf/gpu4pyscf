@@ -99,7 +99,7 @@ set(CXX_LINK_TEMPLATE "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LA
 
 option(BUILD_CUTLASS "Using cutlass" ON)
 if(BUILD_CUTLASS)
-  include(Fetch)
+  include(FetchContent)
   FetchContent_Declare(
     cutlass
     GIT_REPOSITORY "https://github.com/NVIDIA/cutlass"
