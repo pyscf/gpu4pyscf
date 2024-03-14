@@ -99,10 +99,10 @@ set(CXX_LINK_TEMPLATE "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LA
 
 option(BUILD_CUTLASS "Using cutlass" ON)
 if(BUILD_CUTLASS)
-  include(FetchContent)
+  include(Fetch)
   FetchContent_Declare(
     cutlass
-    GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
+    GIT_REPOSITORY "https://github.com/NVIDIA/cutlass"
     GIT_TAG        v3.4.0
   )
   # FetchContent_MakeAvailable(cutlass) # this command leads to building cutlass which we don't want
