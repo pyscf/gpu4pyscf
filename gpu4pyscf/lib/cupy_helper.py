@@ -632,7 +632,16 @@ def grouped_dot(As, Bs, Cs=None):
     Ms = np.array(Ms)
     Ns = np.array(Ns)
     Ks = np.array(Ks)
-    total_size = 68 * groups # 68 is the result of sizeof(cutlass::gemm::GemmCoord) + sizeof(typename DeviceKernel::ElementA*) + sizeof(typename DeviceKernel::ElementB*) + sizeof(typename DeviceKernel::ElementC*) + sizeof(typename DeviceKernel::ElementC*) + sizeof(int64_t) + sizeof(int64_t) + sizeof(int64_t)
+    total_size = 68 * groups
+    '''
+    68 is the result of
+    sizeof(cutlass::gemm::GemmCoord) +
+    sizeof(typename DeviceKernel::ElementA*) +
+    sizeof(typename DeviceKernel::ElementB*) +
+    sizeof(typename DeviceKernel::ElementC*) +
+    sizeof(typename DeviceKernel::ElementC*) +
+    sizeof(int64_t) + sizeof(int64_t) + sizeof(int64_t)
+    '''
     padding = 8 - (total_size % 8)
     total_size += padding
     cutlass_space = cupy.empty(total_size, dtype=cupy.uint8)
@@ -715,4 +724,4 @@ def pinv(a, lindep=1e-10):
     v1 = v[:,mask]
     j2c = cupy.dot(v1/w[mask], v1.conj().T)
     return j2c
-  
+

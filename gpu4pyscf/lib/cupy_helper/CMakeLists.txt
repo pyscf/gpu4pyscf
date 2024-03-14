@@ -17,8 +17,6 @@
 
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80")
 
-set(ARCH "70;80")
-
 add_library(cupy_helper SHARED
   transpose.cu
   block_diag.cu
@@ -34,4 +32,4 @@ add_library(cupy_helper SHARED
 target_include_directories(cupy_helper PRIVATE ${cutlass_SOURCE_DIR}/tools/util/include ${cutlass_SOURCE_DIR}/include)
 
 set_target_properties(cupy_helper PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-set_target_properties(cupy_helper PROPERTIES CUDA_ARCHITECTURES "${ARCH}")
+set_target_properties(cupy_helper PROPERTIES CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
