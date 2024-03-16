@@ -270,7 +270,6 @@ def eval_rho3(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
             rho[i] += _contract_rho(c0[0], c_0[i])
         rho *= 2.0
     else: # meta-GGA
-        # TODO: complete this
         if with_lapl:
             raise NotImplementedError("mGGA with lapl not implemented")
             # rho[4] = \nabla^2 rho, rho[5] = 1/2 |nabla f|^2
@@ -344,7 +343,7 @@ def eval_rho4(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
 
     return rho
 
-# TODO: implement this for grouped ao's
+# eval rho with grouped gemm
 def eval_rho_group(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='LDA',
               with_lapl=True, verbose=None, out=None):
     groups = len(ao_group)
@@ -746,11 +745,9 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     t1 = t0
     p0 = p1 = 0
-    # TODO: repalce ni.block_loop with ni.grouped_block_loop
     for ao_mask_group, idx_group, weight_group, _ in ni.grouped_block_loop(mol, grids, nao, ao_deriv):
         p0_raw = p0
         for i in range(nset):
-            #TODO: replace dot with grouped gemm, loop for other operations
             p0 = p0_raw
             if xctype == 'LDA':
                 aow_group = []
@@ -1541,7 +1538,6 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
 
-    # TODO:
     # pre-allocate space based on available GPU memory
     # fill the allocated space with eval_ao
     mol = opt.mol
@@ -1575,7 +1571,6 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             block_id += 1
             yield ao_mask, idx, weight, coords
 
-# TODO: concatenate AO's for grouped gemm
 def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 non0tab=None, blksize=None, buf=None, extra=0):
     '''
