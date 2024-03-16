@@ -1691,8 +1691,8 @@ class NumInt(numint.NumInt):
         return self
 
     get_rho = get_rho
-    # nr_rks = nr_rks
-    nr_rks = nr_rks_group
+    nr_rks = nr_rks
+    #nr_rks = nr_rks_group
     nr_uks = nr_uks
     nr_nlc_vxc = nr_nlc_vxc
     nr_rks_fxc = nr_rks_fxc
