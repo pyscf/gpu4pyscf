@@ -36,7 +36,7 @@ screen_tol = 1e-14
 
 mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
 
-mol.verbose = 4
+mol.verbose = 7
 mf_GPU = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
 mf_GPU.grids.atom_grid = (99,590)
 mf_GPU.conv_tol = scf_tol

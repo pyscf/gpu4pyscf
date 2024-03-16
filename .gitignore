@@ -18,6 +18,7 @@ output/
 *.log
 *.h5
 **/qchem_input.in
+*.db
 #*
 dockerfiles/manylinux/wheelhouse
 gpu4pyscf/lib/bin
