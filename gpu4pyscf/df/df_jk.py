@@ -234,7 +234,7 @@ class _DFHF(df_jk._DFHF):
         else:
             raise NotImplementedError("Please check the dimension of the density matrix, it should not reach here.")
 
-    def energy_tot(self, dm, h1e, vhf=None):
+    def energy_tot(self, dm=None, h1e=None, vhf=None):
         '''
         compute tot energy
         '''

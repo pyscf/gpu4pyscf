@@ -302,8 +302,9 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
         if ish0 != jsh0:
             wVVoo[j0:j1,i0:i1] = wVVoo[i0:i1,j0:j1].transpose(1,0,2,3)
             #mempool.free_all_blocks()
-            wVvoO[i0:i1] += _einsum('prqs,ri,qj->psij',
-                                    aoblk, orbo, t1po[j0:j1]).get()
+            tmp = _einsum('prqs,ri->piqs', aoblk, orbo)
+            wVvoO[i0:i1] += _einsum('piqs,qj->psij', tmp, t1po[j0:j1]).get()
+
         aoblk = None
     eribuf = loadbuf = x2 = None
 
