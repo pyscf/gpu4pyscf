@@ -53,6 +53,7 @@ static int GINTfill_int3c2e_ip1_tasks(ERITensor *eri, BasisProdOffsets *offsets,
         case 6: GINTfill_int3c2e_ip1_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 7: GINTfill_int3c2e_ip1_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 8: GINTfill_int3c2e_ip1_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 9: GINTfill_int3c2e_ip1_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         default:
             fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
@@ -84,6 +85,7 @@ static int GINTfill_int3c2e_ip2_tasks(ERITensor *eri, BasisProdOffsets *offsets,
         case 6: GINTfill_int3c2e_ip2_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 7: GINTfill_int3c2e_ip2_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 8: GINTfill_int3c2e_ip2_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 9: GINTfill_int3c2e_ip2_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         default:
             fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
@@ -163,6 +165,14 @@ static int GINTfill_int3c2e_ipip_tasks(ERITensor *eri, BasisProdOffsets *offsets
                 case 002: GINTfill_int3c2e_ipip2_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
             }
             break;
+        case 8: 
+            switch (ip_type){
+                case 200: GINTfill_int3c2e_ipip1_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+                case 101: GINTfill_int3c2e_ip1ip2_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+                case 110: GINTfill_int3c2e_ipvip1_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+                case 002: GINTfill_int3c2e_ipip2_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+            }
+            break;
         default:
             fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
@@ -209,7 +219,7 @@ int GINTfill_int3c2e_ip(cudaStream_t stream, BasisProdCache *bpcache, double *er
     
     GINTinit_EnvVars(&envs, cp_ij, cp_kl, ng);
     envs.omega = omega;
-    if (envs.nrys_roots > 8) {
+    if (envs.nrys_roots > 9) {
         return 2;
     }
     
@@ -303,7 +313,7 @@ int GINTfill_int3c2e_general(cudaStream_t stream, BasisProdCache *bpcache, doubl
     
     GINTinit_EnvVars(&envs, cp_ij, cp_kl, ng);
     envs.omega = omega;
-    if (envs.nrys_roots > 8) {
+    if (envs.nrys_roots > 9) {
         return 2;
     }
     

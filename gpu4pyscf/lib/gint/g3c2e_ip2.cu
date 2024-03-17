@@ -1,5 +1,3 @@
-
-// general case, it is not supposed to be used in actual execution
 template <int NROOTS, int GSIZE> __global__
 void GINTfill_int3c2e_ip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
 {

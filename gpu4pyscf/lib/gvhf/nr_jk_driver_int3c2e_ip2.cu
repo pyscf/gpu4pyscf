@@ -51,6 +51,7 @@ static int GINTrun_tasks_int3c2e_ip2_jk(JKMatrix *jk, BasisProdOffsets *offsets,
         case 6: GINTint3c2e_ip2_jk_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
         case 7: GINTint3c2e_ip2_jk_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
         case 8: GINTint3c2e_ip2_jk_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 9: GINTint3c2e_ip2_jk_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
         default:
             fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
@@ -115,7 +116,7 @@ int GINTbuild_int3c2e_ip2_jk(BasisProdCache *bpcache,
         ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
         GINTinit_EnvVars(&envs, cp_ij, cp_kl, ng);
         envs.omega = omega;
-        if (envs.nrys_roots > 8) {
+        if (envs.nrys_roots > 9) {
             return 2;
         }
 

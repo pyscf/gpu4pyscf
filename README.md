@@ -55,8 +55,7 @@ Features
 
 Limitations
 --------
-- Rys roots up to 8 for density fitting scheme;
-- Rys roots up to 9 for direct scf scheme;
+- Rys roots up to 9 for density fitting scheme and direct scf scheme;
 - Atomic basis up to g orbitals;
 - Auxiliary basis up to h orbitals;
 - Density fitting scheme up to ~168 atoms with def2-tzvpd basis, bounded CPU memory;
