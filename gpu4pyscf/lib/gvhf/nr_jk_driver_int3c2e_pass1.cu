@@ -62,6 +62,7 @@ static int GINTrun_tasks_int3c2e_pass1_j(JKMatrix *jk, BasisProdOffsets *offsets
         case 6: GINTint3c2e_pass1_j_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
         case 7: GINTint3c2e_pass1_j_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
         case 8: GINTint3c2e_pass1_j_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 9: GINTint3c2e_pass1_j_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
         default: fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
     }
@@ -123,7 +124,7 @@ int GINTbuild_j_int3c2e_pass1(BasisProdCache *bpcache,
 
             GINTinit_EnvVars(&envs, cp_ij, cp_kl, ng);
             envs.omega = 0.0;
-            if (envs.nrys_roots > 8) {
+            if (envs.nrys_roots > 9) {
                 return 2;
             }
 
