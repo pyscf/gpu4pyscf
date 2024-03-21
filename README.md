@@ -25,16 +25,12 @@ Compilation
 --------
 The package provides ```dockerfiles/compile/Dockerfile``` for creating the CUDA environment. One can compile the package with
 ```sh
-sh build.sh
-```
-This script will automatically download LibXC, and compile it with CUDA. The script will also build the wheel for installation. The compilation can take more than 5 mins. Then, one can either install the wheel with
-```sh
-cd output
-pip3 install gpu4pyscf-*
-```
-or simply add it to ```PYTHONPATH```
-```sh
-export PYTHONPATH="${PYTHONPATH}:/your-local-path/gpu4pyscf"
+git clone https://github.com/pyscf/gpu4pyscf.git
+cd gpu4pyscf
+cmake -S gpu4pyscf/lib -B build/temp.gpu4pyscf
+cmake --build build/temp.gpu4pyscf -j 4
+CURRENT_PATH=`pwd`
+export PYTHONPATH="${PYTHONPATH}:${CURRENT_PATH}"
 ```
 Then install cutensor for acceleration
 ```sh
