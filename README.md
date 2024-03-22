@@ -4,7 +4,7 @@ Installation
 --------
 
 > [!NOTE]
-> The compiled binary packages support compute capability 7.0 and later (Volta and later, such as Tesla V100, RTX 20 series and later). For older GPUs (GTX 10**, Tesla P100), please compile the package with the source code as follows.
+> The compiled binary packages support compute capability 6.0 and later (Pascal and later, such as Tesla P100, RTX 10 series and later). For older GPUs (GTX 10**, Tesla P100), please compile the package with the source code as follows.
 
 Run ```nvidia-smi``` in your terminal to check the installed CUDA version.
 
@@ -23,7 +23,7 @@ For **CUDA 12.x**, ```pip3 install cutensor-cu12```
 
 Compilation
 --------
-The package provides ```dockerfiles/compile/Dockerfile``` for creating the CUDA environment. One can compile the package with
+One can compile the package with
 ```sh
 git clone https://github.com/pyscf/gpu4pyscf.git
 cd gpu4pyscf
@@ -37,6 +37,8 @@ Then install cutensor for acceleration
 pip3 install cutensor-cu11
 ```
 
+The package also provides multiple dockerfiles in ```dockerfiles```. One can use them as references to create the compilation envrionment. 
+
 Features
 --------
 - Density fitting scheme and direct SCF scheme;
@@ -48,6 +50,7 @@ Features
 - ECP is supported and calculated on CPU;
 - PCM models, SMD model, their analytical gradients, and semi-analytical Hessian matrix;
 - Unrestricted Hartree-Fock and Unrestricted DFT, gradient, and Hessian
+- MP2/DF-MP2 and CCSD (experimental)
 
 Limitations
 --------
