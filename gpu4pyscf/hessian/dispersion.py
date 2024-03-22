@@ -93,5 +93,6 @@ def get_dispersion(hessobj, disp_version=None):
         raise RuntimeError(f'dispersion correction: {disp_version} is not supported.')
 
 # Inject to SCF class
-from gpu4pyscf.hessian import rhf
+from gpu4pyscf.hessian import rhf, uhf
 rhf.Hessian.get_dispersion = get_dispersion
+uhf.Hessian.get_dispersion = get_dispersion

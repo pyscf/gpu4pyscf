@@ -609,7 +609,7 @@ class Gradients(rhf.Gradients):
     get_veff = get_veff
     get_jk = _get_jk
 
-    _keys = {'auxbasis_response'}
+    _keys = {'auxbasis_response', 'grad_disp', 'grad_mf'}
 
     def get_j(self, mol=None, dm=None, hermi=0, omega=None):
         vj, _ = self.get_jk(mol, dm, with_k=False, omega=omega)
