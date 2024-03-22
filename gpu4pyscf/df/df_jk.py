@@ -302,27 +302,38 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
         vk = cupy.zeros_like(dms)
 
     # SCF K matrix with occ
-    if nset == 1 and hasattr(dms_tag, 'occ_coeff'):
-        occ_coeff = cupy.asarray(dms_tag.occ_coeff[ao_idx, :], order='C')
-        nocc = occ_coeff.shape[1]
+    if getattr(dms_tag, 'mo_coeff', None) is not None:
+        #occ_coeff = cupy.asarray(dms_tag.occ_coeff[ao_idx, :], order='C')
+        mo_occ = dms_tag.mo_occ
+        mo_coeff = dms_tag.mo_coeff
+        nmo = mo_occ.shape[-1]
+        mo_coeff = mo_coeff.reshape(-1,nao,nmo)
+        mo_occ   = mo_occ.reshape(-1,nmo)
+        nocc = 0
+        occ_coeff = [0]*nset
+        for i in range(nset):
+            occ_coeff[i] = mo_coeff[i][:,mo_occ[i]>0][ao_idx] * mo_occ[i][mo_occ[i]>0]**0.5
+            nocc += mo_occ[i].sum()
         blksize = dfobj.get_blksize(extra=nao*nocc)
         if with_j:
             vj_packed = cupy.zeros_like(dm_sparse)
-
         for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
             # leading dimension is 1
             if with_j:
                 rhoj = 2.0*dm_sparse.dot(cderi_sparse)
                 vj_packed += cupy.dot(rhoj, cderi_sparse.T)
-            if with_k:
-                rhok = contract('Lij,jk->Lki', cderi, occ_coeff)
-                #vk[0] += 2.0 * contract('Lki,Lkj->ij', rhok, rhok)
-                cublas.syrk('T', rhok.reshape([-1,nao]), out=vk[0], alpha=2.0, beta=1.0, lower=True)
+            for i in range(nset):
+                if with_k:
+                    rhok = contract('Lij,jk->Lki', cderi, occ_coeff[i])
+                    #vk[0] += 2.0 * contract('Lki,Lkj->ij', rhok, rhok)
+                    cublas.syrk('T', rhok.reshape([-1,nao]), out=vk[i], alpha=1.0, beta=1.0, lower=True)
         if with_j:
             vj[:,rows,cols] = vj_packed
             vj[:,cols,rows] = vj_packed
         if with_k:
-            vk[0][numpy.diag_indices(nao)] *= 0.5
+            diag_idx = numpy.diag_indices(nao)
+            for i in range(nset):
+                vk[i][diag_idx] *= 0.5
             transpose_sum(vk)
     # CP-HF K matrix
     elif hasattr(dms_tag, 'mo1'):
