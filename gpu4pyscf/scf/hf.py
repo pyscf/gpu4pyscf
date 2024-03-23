@@ -660,7 +660,7 @@ class RHF(hf.RHF):
         return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
 
 class _VHFOpt(_vhf.VHFOpt):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     def __init__(self, mol, intor, prescreen='CVHFnoscreen',
                  qcondname='CVHFsetnr_direct_scf', dmcondname=None):
@@ -827,6 +827,9 @@ class _VHFOpt(_vhf.VHFOpt):
             self.clear()
         except AttributeError:
             pass
+    # TODO: match the attributes of pyscf object
+    def to_cpu(self):
+        return None
 
 class BasisProdCache(ctypes.Structure):
     pass

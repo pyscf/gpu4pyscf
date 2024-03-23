@@ -18,16 +18,28 @@ import cupy
 from cupyx import profiler
 from gpu4pyscf.lib.cutensor import contract
 
-print('benchmarking tensor contraction')
+print('test case #1')
+print('benchmarking tensor contraction with gpu4pyscf.lib.contract')
 a = cupy.random.random([512,512,512])
 b = cupy.random.random([512,512])
 perf = profiler.benchmark(contract, ('ijk,lk->ijl', a, b), n_repeat=20, n_warmup=3)
 flops = 2*np.prod(a.shape) * b.shape[0]
 print(flops/perf.gpu_times.mean()/1024**3, 'GFLOPS')
 
-print('benchmarking tensor contraction with stride')
+print('benchmarking tensor contraction with cupy.einsum')
+perf = profiler.benchmark(cupy.einsum, ('ijk,lk->ijl', a, b), n_repeat=20, n_warmup=3)
+flops = 2*np.prod(a.shape) * b.shape[0]
+print(flops/perf.gpu_times.mean()/1024**3, 'GFLOPS')
+
+print('test case #2')
+print('benchmarking tensor contraction with gpu4pyscf.lib.contract')
 a0 = a[64:480,:,64:480]
 b0 = b[:,64:480]
 perf = profiler.benchmark(contract, ('ijk,lk->ijl', a0, b0), n_repeat=20, n_warmup=3)
+flops = 2*np.prod(a0.shape) * b0.shape[0]
+print(flops/perf.gpu_times.mean()/1024**3, 'GFLOPS')
+
+print('benchmarking tensor contraction with cupy.einsum')
+perf = profiler.benchmark(cupy.einsum, ('ijk,lk->ijl', a0, b0), n_repeat=20, n_warmup=3)
 flops = 2*np.prod(a0.shape) * b0.shape[0]
 print(flops/perf.gpu_times.mean()/1024**3, 'GFLOPS')
