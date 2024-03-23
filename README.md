@@ -17,9 +17,9 @@ Choose the proper package based on your CUDA environment.
 
 ```cuTensor``` is **highly recommended** for accelerating tensor contractions.
 
-For **CUDA 11.x**, ```pip3 install cutensor-cu11```
+For **CUDA 11.x**, ```pip3 install cutensor-cu11``` (requires CuPy V13.0 and later)
 
-For **CUDA 12.x**, ```pip3 install cutensor-cu12```
+For **CUDA 12.x**, ```pip3 install cutensor-cu12``` (requires CuPy V13.0 and later)
 
 Compilation
 --------
