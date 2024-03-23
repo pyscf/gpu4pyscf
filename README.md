@@ -4,7 +4,7 @@ Installation
 --------
 
 > [!NOTE]
-> The compiled binary packages support compute capability 6.0 and later (Pascal and later, such as Tesla P100, RTX 10 series and later). For older GPUs (GTX 10**, Tesla P100), please compile the package with the source code as follows.
+> The compiled binary packages support compute capability 6.0 and later (Pascal and later, such as Tesla P100, RTX 10 series and later).
 
 Run ```nvidia-smi``` in your terminal to check the installed CUDA version.
 
