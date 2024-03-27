@@ -21,6 +21,7 @@ from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid, rks
 from gpu4pyscf.scf.uhf import UHF
+from gpu4pyscf.scf import hf
 from gpu4pyscf.lib.cupy_helper import tag_array
 
 
@@ -131,6 +132,7 @@ class UKS(uks.UKS, UHF):
         self.nlcgrids.level = nlcgrids_level
 
     energy_elec = energy_elec
+    energy_tot = hf.RHF.energy_tot
     get_veff = get_veff
     to_hf = NotImplemented
     def nuc_grad_method(self):

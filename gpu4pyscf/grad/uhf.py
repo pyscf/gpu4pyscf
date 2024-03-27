@@ -303,11 +303,11 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     
     de = 2.0 * dvhf + dh1e + delec + extra_force
     
+    # for backward compatiability
     if(hasattr(mf, 'disp') and mf.disp is not None):
         g_disp = mf_grad.get_dispersion()
         mf_grad.grad_disp = g_disp
         mf_grad.grad_mf = de
-        de += cupy.asarray(g_disp)
 
     de -= cupy.sum(de, axis=0)/len(atmlst)
     return de.get()

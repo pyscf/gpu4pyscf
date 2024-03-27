@@ -261,5 +261,6 @@ class RKS(rks.RKS, RHF):
         return rks_grad.Gradients(self)
 
     energy_elec = energy_elec
+    energy_tot = RHF.energy_tot
     get_veff = get_veff
     to_hf = NotImplemented

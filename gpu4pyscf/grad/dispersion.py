@@ -51,6 +51,8 @@ def get_dispersion(mf_grad, disp_version=None):
         raise RuntimeError(f'dispersion correction: {disp_version} is not supported.')
 
 # Inject to Gradient
-from gpu4pyscf.grad import rhf, uhf
+from gpu4pyscf.grad import rhf, uhf, rks, uks
 rhf.Gradients.get_dispersion = get_dispersion
 uhf.Gradients.get_dispersion = get_dispersion
+rks.Gradients.get_dispersion = get_dispersion
+uks.Gradients.get_dispersion = get_dispersion

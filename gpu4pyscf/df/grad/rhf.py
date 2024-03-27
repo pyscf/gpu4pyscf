@@ -185,22 +185,22 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         '''
         '''
         # outcore implementation
-        int3c2e.get_int3c2e_ip_slice(intopt, cp_kl_id, 1, out=buf)
+        buf = int3c2e.get_int3c2e_ip_slice(intopt, cp_kl_id, 1)
         size = 3*(k1-k0)*nao_cart*nao_cart
         int3c_ip = buf[:size].reshape([3,k1-k0,nao_cart,nao_cart], order='C')
-        rhoj_tmp = contract('xpji,ij->xip', int3c_ip, dm_cart)
-        vj += contract('xip,p->xi', rhoj_tmp, rhoj_cart[k0:k1])
-        vk += contract('pji,xpji->xi', rhok_tmp, int3c_ip)
+        rhoj_tmp0 = contract('xpji,ij->xip', int3c_ip, dm_cart)
+        vj_outcore = contract('xip,p->xi', rhoj_tmp0, rhoj_cart[k0:k1])
+        vk_outcore = contract('pji,xpji->xi', rhok_tmp, int3c_ip)
 
-        int3c2e.get_int3c2e_ip_slice(intopt, cp_kl_id, 2, out=buf)
-        rhoj_tmp = contract('xpji,ji->xp', int3c_ip, dm_cart)
-        vjaux[:, k0:k1] = contract('xp,p->xp', rhoj_tmp, rhoj_cart[k0:k1])
-        vkaux[:, k0:k1] = contract('xpji,pji->xp', int3c_ip, rhok_tmp)
+        buf = int3c2e.get_int3c2e_ip_slice(intopt, cp_kl_id, 2)
+        int3c_ip = buf[:size].reshape([3,k1-k0,nao_cart,nao_cart], order='C')
+        rhoj_tmp0 = contract('xpji,ji->xp', int3c_ip, dm_cart)
+        vjaux_outcore = contract('xp,p->xp', rhoj_tmp0, rhoj_cart[k0:k1])
+        vkaux_outcore = contract('xpji,pji->xp', int3c_ip, rhok_tmp)
         '''
         vj_tmp, vk_tmp = int3c2e.get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip1', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
         if with_j: vj += vj_tmp
         if with_k: vk += vk_tmp
-
         vj_tmp, vk_tmp = int3c2e.get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip2', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
         if with_j: vjaux[:, k0:k1] = vj_tmp
         if with_k: vkaux[:, k0:k1] = vk_tmp

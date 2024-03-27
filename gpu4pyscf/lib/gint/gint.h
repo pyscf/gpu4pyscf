@@ -65,12 +65,12 @@
 #define BAS_SLOTS       8
 
 // boundaries for gint
-#define GPU_AO_LMAX     4           //l = 0..5 
+#define GPU_AO_LMAX     4           //l = 0..4 
 #define GPU_AUX_LMAX    6   
 #define GPU_LMAX        6
 
 #define GPU_AO_NF       15          // up to g orbitals
-#define GPU_AUX_NF      28          // > (ANG_MAX*(ANG_MAX+1)/2)
+#define GPU_AUX_NF      28          // > ((ANG_MAX+1)*(ANG_MAX+2)/2)
 #define GPU_CART_MAX    28  
 #define NF_MAX_INT3C    (GPU_AO_NF * GPU_AO_NF * GPU_AUX_NF)
 

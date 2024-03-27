@@ -51,7 +51,9 @@ def get_dispersion(mf, disp_version=None):
         raise RuntimeError(f'dipersion correction: {disp_version} is not supported.')
 
 # Inject to SCF class
-from gpu4pyscf.scf import hf
-from gpu4pyscf.scf import uhf
+from gpu4pyscf.scf import hf, uhf
+from gpu4pyscf.dft import rks, uks
 hf.RHF.get_dispersion = get_dispersion
 uhf.UHF.get_dispersion = get_dispersion
+rks.RKS.get_dispersion = get_dispersion
+uks.UKS.get_dispersion = get_dispersion

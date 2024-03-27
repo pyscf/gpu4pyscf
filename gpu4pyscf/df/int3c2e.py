@@ -236,8 +236,13 @@ class VHFOpt(_vhf.VHFOpt):
         ncart = cart_ao_loc[-1]
         nsph = sph_ao_loc[-1]
         self.cart2sph = block_c2s_diag(ncart, nsph, self.angular, l_ctr_counts)
-        inv_idx = np.argsort(self.sph_ao_idx, kind='stable').astype(np.int32)
-        self.coeff = self.cart2sph[:, inv_idx]
+        
+        if self._mol.cart:
+            inv_idx = np.argsort(self.cart_ao_idx, kind='stable').astype(np.int32)
+            self.coeff = cupy.eye(ncart)[:,inv_idx]
+        else:
+            inv_idx = np.argsort(self.sph_ao_idx, kind='stable').astype(np.int32)
+            self.coeff = self.cart2sph[:, inv_idx]
         cput1 = logger.timer_debug1(sorted_mol, 'AO cart2sph coeff', *cput1)
 
         # pairing auxiliary basis with fake basis set
@@ -265,8 +270,13 @@ class VHFOpt(_vhf.VHFOpt):
         ncart = cart_aux_loc[-1]
         nsph = sph_aux_loc[-1]
         self.aux_cart2sph = block_c2s_diag(ncart, nsph, self.aux_angular, aux_l_ctr_counts)
-        inv_idx = np.argsort(self.sph_aux_idx, kind='stable').astype(np.int32)
-        self.aux_coeff = self.aux_cart2sph[:, inv_idx]
+
+        if self._auxmol.cart:
+            inv_idx = np.argsort(self.cart_aux_idx, kind='stable').astype(np.int32)
+            self.aux_coeff = cupy.eye(ncart)[:,inv_idx]
+        else:
+            inv_idx = np.argsort(self.sph_aux_idx, kind='stable').astype(np.int32)
+            self.aux_coeff = self.aux_cart2sph[:, inv_idx]
         aux_l_ctr_offsets += fake_l_ctr_offsets[-1]
         cput1 = logger.timer_debug1(tot_mol, 'aux cart2sph coeff', *cput1)
 
@@ -667,9 +677,8 @@ def get_j_int3c2e_pass1(intopt, dm0):
     if err != 0:
         raise RuntimeError('CUDA error in get_j_pass1')
 
-    if not intopt._auxmol.cart:
-        aux_coeff = intopt.aux_coeff
-        rhoj = cupy.dot(rhoj, aux_coeff)
+    aux_coeff = intopt.aux_coeff
+    rhoj = cupy.dot(rhoj, aux_coeff)
     return rhoj
 
 def get_j_int3c2e_pass2(intopt, rhoj):
@@ -690,9 +699,8 @@ def get_j_int3c2e_pass2(intopt, rhoj):
     ncp_ij = len(intopt.log_qs)
     ncp_kl = len(intopt.aux_log_qs)
 
-    if not intopt._auxmol.cart:
-        aux_coeff = intopt.aux_coeff
-        rhoj = cupy.dot(aux_coeff, rhoj)
+    aux_coeff = intopt.aux_coeff
+    rhoj = cupy.dot(aux_coeff, rhoj)
 
     err = libgvhf.GINTbuild_j_int3c2e_pass2(
         intopt.bpcache,
@@ -1067,10 +1075,15 @@ def get_int3c2e_ip_slice(intopt, cp_aux_id, ip_type, out=None, omega=None, strea
         int3c_blk = out
         # will be filled in f-contiguous
         strides = np.array([1, nao, nao*nao, nao*nao*nk], dtype=np.int32)
-
+    if ip_type == 1:
+        fn = libgint.GINTfill_int3c2e_ip1
+    elif ip_type == 2:
+        fn = libgint.GINTfill_int3c2e_ip2
+    else:
+        raise
     for cp_ij_id, log_q_ij in enumerate(intopt.log_qs):
         bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
-        err = libgint.GINTfill_int3c2e_ip(
+        err = fn(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
             intopt.bpcache,
             ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
@@ -1082,7 +1095,6 @@ def get_int3c2e_ip_slice(intopt, cp_aux_id, ip_type, out=None, omega=None, strea
             ctypes.c_int(nbins),
             ctypes.c_int(cp_ij_id),
             ctypes.c_int(cp_kl_id),
-            ctypes.c_int(ip_type),
             ctypes.c_double(omega))
 
         if err != 0:

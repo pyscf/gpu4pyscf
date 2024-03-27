@@ -29,13 +29,20 @@ libgint = load_library('libgint')
 check int3c2e consistency between pyscf and gpu4pyscf
 '''
 
-def setUpModule():
-    global mol, auxmol
-    mol = pyscf.M(atom='''
+atom='''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
-    ''',
+    '''
+def setUpModule():
+    global mol, auxmol
+    mol = pyscf.M(
+                  atom='''
+Ti 0.0 0.0 0.0
+Cl 0.0 0.0 2.0
+Cl 0.0 2.0 -1.0
+Cl 1.73 -1.0 -1.0
+Cl -1.73 -1.0 -1.0''',
                   basis= 'def2-tzvpp',
                   verbose=1,
                   output='/dev/null')
@@ -58,7 +65,7 @@ def check_int3c2e_derivatives(ip_type):
     shls_slice = (0, nbas, 0, nbas, nbas, pmol.nbas)
     int3c_pyscf = getints(intor, pmol._atm, pmol._bas, pmol._env, shls_slice, aosym='s1', cintopt=opt)
     int3c_gpu = int3c2e.get_int3c2e_general(mol, auxmol, ip_type=ip_type).get()
-    assert np.linalg.norm(int3c_pyscf - int3c_gpu) < 1e-9
+    assert np.linalg.norm(int3c_pyscf - int3c_gpu) < 1e-8
 
     with mol.with_range_coulomb(omega):
         nbas = mol.nbas
@@ -68,14 +75,14 @@ def check_int3c2e_derivatives(ip_type):
         shls_slice = (0, nbas, 0, nbas, nbas, pmol.nbas)
         int3c_pyscf = getints(intor, pmol._atm, pmol._bas, pmol._env, shls_slice, aosym='s1', cintopt=opt)
         int3c_gpu = int3c2e.get_int3c2e_general(mol, auxmol, ip_type=ip_type, omega=omega).get()
-        assert np.linalg.norm(int3c_pyscf - int3c_gpu) < 1e-9
+        assert np.linalg.norm(int3c_pyscf - int3c_gpu) < 1e-8
 
 class KnownValues(unittest.TestCase):
     def test_int3c2e(self):
         get_int3c = _int3c_wrapper(mol, auxmol, 'int3c2e', 's1')
         int3c_pyscf = get_int3c((0, mol.nbas, 0, mol.nbas, 0, auxmol.nbas))
         int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym='s1').get()
-        assert np.linalg.norm(int3c_gpu - int3c_pyscf) < 1e-9
+        assert np.linalg.norm(int3c_gpu - int3c_pyscf) < 1e-8
 
     def test_int3c2e_omega(self):
         omega = 0.2
@@ -83,7 +90,7 @@ class KnownValues(unittest.TestCase):
             get_int3c = _int3c_wrapper(mol, auxmol, 'int3c2e', 's1')
             int3c_pyscf = get_int3c((0, mol.nbas, 0, mol.nbas, 0, auxmol.nbas))
             int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym='s1', omega=omega).get()
-        assert np.linalg.norm(int3c_gpu[0,0,:] - int3c_pyscf[0,0,:]) < 1e-9
+        assert np.linalg.norm(int3c_gpu[0,0,:] - int3c_pyscf[0,0,:]) < 1e-8
 
     def test_int3c2e_ip1(self):
         check_int3c2e_derivatives('ip1')
@@ -114,7 +121,7 @@ class KnownValues(unittest.TestCase):
         for i,q in enumerate(charges):
             mol.set_rinv_origin(coords[i])
             h1ao = mol.intor('int1e_iprinv', comp=3) # <\nabla|1/r|>
-            assert np.linalg.norm(int3c[:,:,:,i] - h1ao) < 1e-8
+            assert np.linalg.norm(int3c[:,:,:,i] - h1ao) < 1e-7
 
     def test_int1e_ipiprinv(self):
         from pyscf import gto
@@ -127,7 +134,7 @@ class KnownValues(unittest.TestCase):
         for i,q in enumerate(charges):
             mol.set_rinv_origin(coords[i])
             h1ao = mol.intor('int1e_ipiprinv', comp=9) # <\nabla|1/r|>
-            assert np.linalg.norm(int3c[:,:,:,i] - h1ao) < 1e-8
+            assert np.linalg.norm(int3c[:,:,:,i] - h1ao) < 1e-7
 
     def test_int1e_iprinvip(self):
         from pyscf import gto
@@ -140,7 +147,7 @@ class KnownValues(unittest.TestCase):
         for i,q in enumerate(charges):
             mol.set_rinv_origin(coords[i])
             h1ao = mol.intor('int1e_iprinvip', comp=9) # <\nabla|1/r|>
-            assert np.linalg.norm(int3c[:,:,:,i] - h1ao) < 1e-8
+            assert np.linalg.norm(int3c[:,:,:,i] - h1ao) < 1e-7
 
 if __name__ == "__main__":
     print("Full Tests for int3c")

@@ -70,9 +70,9 @@ void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
         as_lsh = ksh;
     }
 
-    double j3[GPU_CART_MAX * 3];
-    double k3[GPU_CART_MAX * 3];
-    for (int k = 0; k < GPU_CART_MAX * 3; k++){
+    double j3[GPU_AO_NF * 3];
+    double k3[GPU_AO_NF * 3];
+    for (int k = 0; k < GPU_AO_NF * 3; k++){
         j3[k] = 0.0;
         k3[k] = 0.0;
     }
