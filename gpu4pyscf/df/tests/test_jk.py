@@ -35,8 +35,6 @@ Cl 0.0 2.0 -1.0
 Cl 1.73 -1.0 -1.0
 Cl -1.73 -1.0 -1.0''',
 
-atom='''/mlx_devbox/users/xiaojie.wu/playground/ct9b01266_si_002/12/start.xyz'''
-
 bas='def2-tzvpp'
 
 def setUpModule():
