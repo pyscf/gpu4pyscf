@@ -34,8 +34,7 @@ def get_dispersion(mf_grad, disp_version=None):
         method = mf_grad.base.xc
     else:
         method = 'hf'
-    #import traceback
-    #traceback.print_stack()
+
     if disp_version[:2].upper() == 'D3':
         # raised error in SCF module, assuming dftd3 installed
         from gpu4pyscf.lib import dftd3
