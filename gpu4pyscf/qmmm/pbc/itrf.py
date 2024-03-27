@@ -113,7 +113,7 @@ def qmmm_for_scf(scf_method, mm_mol):
         def get_mm_ewald_pot(self, mol, mm_mol):
             return self.mm_mol.get_ewald_pot(
                 mol.atom_coords(),
-                mm_mol.atom_coords(), mm_mol.atom_charges())
+                mm_mol.atom_coords(), mm_mol.atom_charges(), mm_mol.get_zetas())
 
         def get_qm_ewald_pot(self, mol, dm, qm_ewald_hess=None):
             # hess = d^2 E / dQ_i dQ_j, d^2 E / dQ_i dD_ja, d^2 E / dDia dDjb, d^2 E/ dQ_i dO_jab

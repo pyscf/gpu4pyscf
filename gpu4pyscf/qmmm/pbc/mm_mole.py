@@ -106,9 +106,10 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
         ew_eta = 1 / ew_cut * numpy.sqrt(lambertw(1/e*numpy.sqrt(Q/2/self.vol)).real)
         return ew_eta, ew_cut
 
-    def get_ewald_pot(self, coords1, coords2=None, charges2=None):
+    def get_ewald_pot(self, coords1, coords2=None, charges2=None, zetas2=None):
         assert self.dimension == 3
-        assert (coords2 is None and charges2 is None) or (coords2 is not None and charges2 is not None)
+        assert (coords2 is None and charges2 is None) or \
+            (coords2 is not None and charges2 is not None and zetas2 is not None)
         coords1 = cp.asarray(coords1)
         if coords2 is not None:
             coords2 = cp.asarray(coords2)
@@ -194,7 +195,7 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
     
             # difference between MM gaussain charges and MM point charges
             if all_charges2 is not None and self.charge_model == 'gaussian':
-                zetas = cp.asarray(self.get_zetas())
+                zetas = cp.asarray(zetas2)
                 mask = dist2 > self.rcut_hcore**2
                 min_expnt = cp.min(zetas)
                 max_ewrcut = pbc.gto.cell._estimate_rcut(min_expnt, 0, 1., self.precision)
