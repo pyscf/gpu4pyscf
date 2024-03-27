@@ -389,7 +389,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         logger.info(mf, 'Set gradient conv threshold to %g', conv_tol_grad)
 
     if(dm0 is None):
-        dm0 = mf.get_init_guess(mol)
+        dm0 = mf.get_init_guess(mol, mf.init_guess)
 
     dm = cupy.asarray(dm0, order='C')
     if hasattr(dm0, 'mo_coeff') and hasattr(dm0, 'mo_occ'):

@@ -234,6 +234,7 @@ class _DFHF(df_jk._DFHF):
         else:
             raise NotImplementedError("Please check the dimension of the density matrix, it should not reach here.")
 
+    """
     def energy_tot(self, dm=None, h1e=None, vhf=None):
         '''
         compute tot energy
@@ -242,7 +243,7 @@ class _DFHF(df_jk._DFHF):
         e_tot = self.energy_elec(dm, h1e, vhf)[0] + nuc
         self.scf_summary['nuc'] = nuc.real
         return e_tot
-
+    """
     '''
     def to_cpu(self):
         obj = self.undo_df().to_cpu().density_fit()
@@ -422,7 +423,7 @@ def get_j(dfobj, dm, hermi=1, direct_scf_tol=1e-13):
     j2c = dfobj.j2c
     rhoj = int3c2e.get_j_int3c2e_pass1(intopt, dm)
     if dfobj.cd_low.tag == 'eig':
-        rhoj = cupy.linalg.lstsq(j2c, rhoj)
+        rhoj, _, _, _ = cupy.linalg.lstsq(j2c, rhoj)
     else:
         rhoj = cupy.linalg.solve(j2c, rhoj)
 

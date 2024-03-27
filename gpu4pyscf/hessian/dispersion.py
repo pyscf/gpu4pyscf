@@ -41,6 +41,7 @@ def get_dispersion(hessobj, disp_version=None):
         natm = mol.natm
         h_d3 = numpy.zeros([mol.natm, mol.natm, 3,3])
         pmol = mol.copy()
+        pmol.verbose = 0
         eps = 1e-5
         for i in range(natm):
             for j in range(3):
@@ -67,6 +68,7 @@ def get_dispersion(hessobj, disp_version=None):
         coords = mol.atom_coords()
         natm = mol.natm
         pmol = mol.copy()
+        pmol.verbose = 0
         h_d4 = numpy.zeros([mol.natm, mol.natm, 3,3])
         eps = 1e-5
         for i in range(natm):
@@ -93,6 +95,8 @@ def get_dispersion(hessobj, disp_version=None):
         raise RuntimeError(f'dispersion correction: {disp_version} is not supported.')
 
 # Inject to SCF class
-from gpu4pyscf.hessian import rhf, uhf
+from gpu4pyscf.hessian import rhf, uhf, rks, uks
 rhf.Hessian.get_dispersion = get_dispersion
 uhf.Hessian.get_dispersion = get_dispersion
+rks.Hessian.get_dispersion = get_dispersion
+uks.Hessian.get_dispersion = get_dispersion
