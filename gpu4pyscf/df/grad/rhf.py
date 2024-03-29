@@ -21,7 +21,7 @@ from pyscf.df.grad import rhf
 from pyscf import lib, scf, gto
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import print_mem_info, tag_array, unpack_tril, contract, load_library, take_last2d
-from gpu4pyscf.grad.rhf import grad_elec
+from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
 
@@ -237,11 +237,19 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     return vj, vk, vjaux, vkaux
 
 
-class Gradients(rhf.Gradients):
+class Gradients(rhf_grad.Gradients):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
+    _keys = {'with_df', 'auxbasis_response'}
+    def __init__(self, mf):
+        # Whether to include the response of DF auxiliary basis when computing
+        # nuclear gradients of J/K matrices
+        self.auxbasis_response = True
+        rhf_grad.Gradients.__init__(self, mf)
+
     get_jk = get_jk
-    grad_elec = grad_elec
+    grad_elec = rhf_grad.grad_elec
+    check_sanity = NotImplemented
 
     def get_j(self, mol=None, dm=None, hermi=0):
         vj, _, vjaux, _ = self.get_jk(mol, dm, with_k=False)
@@ -267,3 +275,5 @@ class Gradients(rhf.Gradients):
             return envs['dvhf'].aux[atom_id]
         else:
             return 0
+
+Grad = Gradients

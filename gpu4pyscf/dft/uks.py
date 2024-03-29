@@ -20,8 +20,7 @@ from pyscf.dft import uks
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid, rks
-from gpu4pyscf.scf.uhf import UHF
-from gpu4pyscf.scf import hf
+from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.lib.cupy_helper import tag_array
 
 
@@ -113,10 +112,15 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     return rks.energy_elec(ks, dm, h1e, vhf)
 
 
-class UKS(uks.UKS, UHF):
+class UKS(rks.KohnShamDFT, uhf.UHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
     _keys = {'disp', 'screen_tol'}
 
+    def __init__(self, mol, xc='LDA,VWN', disp=None):
+        uhf.UHF.__init__(self, mol)
+        rks.KohnShamDFT.__init__(self, xc)
+        self.disp = disp
+    '''
     def __init__(self, mol, xc='LDA,VWN', disp=None):
         super().__init__(mol, xc)
         self.disp = disp
@@ -130,11 +134,21 @@ class UKS(uks.UKS, UHF):
         nlcgrids_level = self.nlcgrids.level
         self.nlcgrids = gen_grid.Grids(mol)
         self.nlcgrids.level = nlcgrids_level
-
+    '''
+    get_veff = get_veff
+    get_vasp = uks.get_vsap
     energy_elec = energy_elec
     energy_tot = hf.RHF.energy_tot
-    get_veff = get_veff
+    init_guess_by_vsap = uks.UKS.init_guess_by_vsap
+
     to_hf = NotImplemented
     def nuc_grad_method(self):
         from gpu4pyscf.grad import uks as uks_grad
         return uks_grad.Gradients(self)
+
+    def to_cpu(self):
+        from gpu4pyscf.lib import utils
+        mf = uks.UKS(self.mol, xc=self.xc)
+        mf.disp = self.disp
+        utils.to_cpu(self, mf)
+        return mf

@@ -166,6 +166,8 @@ class VHFOpt(_vhf.VHFOpt):
         self.log_qs = None
         self.aux_log_qs = None
 
+    init_cvhf_direct = _vhf.VHFOpt.init_cvhf_direct
+
     def clear(self):
         _vhf.VHFOpt.__del__(self)
         libgvhf.GINTdel_basis_prod(ctypes.byref(self.bpcache))
@@ -236,7 +238,7 @@ class VHFOpt(_vhf.VHFOpt):
         ncart = cart_ao_loc[-1]
         nsph = sph_ao_loc[-1]
         self.cart2sph = block_c2s_diag(ncart, nsph, self.angular, l_ctr_counts)
-        
+
         if self._mol.cart:
             inv_idx = np.argsort(self.cart_ao_idx, kind='stable').astype(np.int32)
             self.coeff = cupy.eye(ncart)[:,inv_idx]

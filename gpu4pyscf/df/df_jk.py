@@ -85,7 +85,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
     Examples:
     '''
 
-    assert isinstance(mf, scf.hf.SCF)
+    assert isinstance(mf, hf.SCF)
 
     if with_df is None:
         if isinstance(mf, dhf.UHF):
@@ -110,7 +110,8 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
     dfmf = _DFHF(mf, with_df, only_dfj)
     return lib.set_class(dfmf, (_DFHF, mf.__class__))
 
-class _DFHF(df_jk._DFHF):
+from gpu4pyscf.lib import utils
+class _DFHF:
     '''
     Density fitting SCF class
     Attributes for density-fitting SCF:
@@ -121,8 +122,8 @@ class _DFHF(df_jk._DFHF):
         with_df : DF object
             Set mf.with_df = None to switch off density fitting mode.
     '''
-
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    to_gpu = utils.to_gpu
+    device = utils.device
 
     _keys = {'rhoj', 'rhok', 'disp', 'screen_tol'}
 
@@ -181,20 +182,23 @@ class _DFHF(df_jk._DFHF):
         raise NotImplementedError()
 
     def Hessian(self):
-        from pyscf.dft.rks import KohnShamDFT
-        if isinstance(self, scf.rhf.RHF):
-            from gpu4pyscf.df.hessian import rhf, rks
+        from gpu4pyscf.dft.rks import KohnShamDFT
+        if isinstance(self, hf.RHF):
             if isinstance(self, KohnShamDFT):
-                return rks.Hessian(self)
+                from gpu4pyscf.df.hessian import rks as rks_hess
+                return rks_hess.Hessian(self)
             else:
-                return rhf.Hessian(self)
+                from gpu4pyscf.df.hessian import rhf as rhf_hess
+                return rhf_hess.Hessian(self)
+        elif isinstance(self, uhf.UHF):
+            if isinstance(self, KohnShamDFT):
+                from gpu4pyscf.df.hessian import uks as uks_hess
+                return uks_hess.Hessian(self)
+            else:
+                from gpu4pyscf.df.hessian import uhf as uhf_hess
+                return uhf_hess.Hessian(self)
         else:
-            from gpu4pyscf.df.hessian import uhf, uks
-            if isinstance(self, KohnShamDFT):
-                return uks.Hessian(self)
-            else:
-                return uhf.Hessian(self)
-
+            raise NotImplementedError
     @property
     def auxbasis(self):
         return getattr(self.with_df, 'auxbasis', None)
@@ -207,7 +211,7 @@ class _DFHF(df_jk._DFHF):
         if dm is None: dm = self.make_rdm1()
 
         # for DFT
-        if isinstance(self, scf.hf.KohnShamDFT):
+        if isinstance(self, rks.KohnShamDFT):
             if dm.ndim == 2:
                 return rks.get_veff(self, dm=dm)
             elif dm.ndim == 3:
@@ -234,6 +238,10 @@ class _DFHF(df_jk._DFHF):
         else:
             raise NotImplementedError("Please check the dimension of the density matrix, it should not reach here.")
 
+    def to_cpu(self):
+        obj = self.undo_df().to_cpu().density_fit()
+        print(type(obj))
+        return utils.to_cpu(self, obj)
     """
     def energy_tot(self, dm=None, h1e=None, vhf=None):
         '''
@@ -244,23 +252,6 @@ class _DFHF(df_jk._DFHF):
         self.scf_summary['nuc'] = nuc.real
         return e_tot
     """
-    '''
-    def to_cpu(self):
-        obj = self.undo_df().to_cpu().density_fit()
-        keys = dir(obj)
-        obj.__dict__.update(self.__dict__)
-        for key in set(dir(self)).difference(keys):
-            print(key)
-            delattr(obj, key)
-
-        for key in keys:
-            val = getattr(obj, key)
-            if isinstance(val, cupy.ndarray):
-                setattr(obj, key, cupy.asnumpy(val))
-            elif hasattr(val, 'to_cpu'):
-                setattr(obj, key, val.to_cpu())
-        return obj
-    '''
 
 def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-14, omega=None):
     '''

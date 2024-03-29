@@ -15,8 +15,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import sys
 import functools
 import cupy
+import numpy
+from pyscf import lib
+from pyscf.lib import parameters as param
 
 def patch_cpu_kernel(cpu_kernel):
     '''Generate a decorator to patch cpu function to gpu function'''
@@ -31,26 +35,57 @@ def patch_cpu_kernel(cpu_kernel):
         return hybrid_kernel
     return patch
 
-def to_cpu(method):
-    # Search for the class in pyscf closest to the one defined in gpu4pyscf
-    for pyscf_cls in method.__class__.__mro__:
-        if 'gpu4pyscf' not in pyscf_cls.__module__:
-            break
-    method = method.view(pyscf_cls)
-    keys = []
-    for cls in pyscf_cls.__mro__[:-1]:
-        if hasattr(cls, '_keys'):
-            keys.extend(cls._keys)
-    if keys:
-        keys = set(keys).intersection(method.__dict__)
+class _OmniObject:
+    '''Class with default attributes. When accessing an attribute that is not
+    initialized, a default value will be returned than raising an AttributeError.
+    '''
+    verbose = 0
+    max_memory = param.MAX_MEMORY
+    stdout = sys.stdout
 
+    def __init__(self, default_factory=None):
+        self._default = default_factory
+
+    def __getattr__(self, key):
+        return self._default
+
+omniobj = _OmniObject()
+omniobj.mol = omniobj
+omniobj._scf = omniobj
+omniobj.base = omniobj
+
+def to_cpu(method, out=None):
+    if method.__module__.startswith('pyscf'):
+        return method
+
+    if out is None:
+        import pyscf
+
+        if isinstance(method, (lib.SinglePointScanner, lib.GradScanner)):
+            method = method.undo_scanner()
+
+        from importlib import import_module
+        mod = import_module(method.__module__.replace('gpu4pyscf', 'pyscf'))
+        cls = getattr(mod, method.__class__.__name__)
+
+        # A temporary CPU instance. This ensures to initialize private
+        # attributes that are only available for CPU code.
+        out = cls(omniobj)
+
+    # Convert only the keys that are defined in the corresponding CPU class
+    cls_keys = [getattr(cls, '_keys', ()) for cls in out.__class__.__mro__[:-1]]
+    out_keys = set(out.__dict__).union(*cls_keys)
+    # Only overwrite the attributes of the same name.
+    keys = set(method.__dict__).intersection(out_keys)
     for key in keys:
         val = getattr(method, key)
         if isinstance(val, cupy.ndarray):
-            setattr(method, key, cupy.asnumpy(val))
+            val = val.get()
         elif hasattr(val, 'to_cpu'):
-            setattr(method, key, val.to_cpu())
-    return method
+            val = val.to_cpu()
+        setattr(out, key, val)
+    out.reset()
+    return out
 
 def to_gpu(method, device=None):
     return method

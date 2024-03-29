@@ -21,7 +21,9 @@ Non-relativistic UKS analytical Hessian
 import numpy
 import cupy
 from pyscf import lib
-from pyscf.hessian import rhf as rhf_hess
+from gpu4pyscf.hessian import rhf as rhf_hess
+from gpu4pyscf.hessian import uhf as uhf_hess
+from gpu4pyscf.hessian import uks as uks_hess
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
 from gpu4pyscf.lib.cupy_helper import contract, add_sparse, take_last2d
@@ -853,15 +855,16 @@ class Hessian(rhf_hess.HessianBase):
         rhf_hess.Hessian.__init__(self, mf)
         self.grids = None
         self.grid_response = False
-        self._keys = self._keys.union(['grids'])
 
     def to_cpu(self):
-        from gpu4pyscf.lib.utils import to_cpu
-        from pyscf.hessian.rks import Hessian
-        # to_cpu returns an rhf.Hessian object
-        obj = to_cpu(self)
-        return obj.view(Hessian)
+        from gpu4pyscf.lib import utils
+        mf = self.base.to_cpu()
+        gobj = uks_hess.Hessian(mf)
+        utils.to_cpu(self, out=gobj)
+        return gobj
 
+    hess_elec = uhf_hess.hess_elec
+    solve_mo1 = uhf_hess.Hessian.solve_mo1
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
     kernel = rhf_hess_gpu.kernel

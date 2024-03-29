@@ -18,7 +18,9 @@ import numpy as np
 import pyscf
 from pyscf import lib
 from pyscf.df import df_jk as cpu_df_jk
-from gpu4pyscf.dft import rks
+from pyscf.dft import rks as cpu_rks
+from gpu4pyscf.dft import rks as gpu_rks
+from gpu4pyscf.df import df_jk as gpu_df_jk
 
 lib.num_threads(8)
 
@@ -49,7 +51,7 @@ def tearDownModule():
     del mol_sph, mol_cart
 
 def run_dft(xc, mol):
-    mf = rks.RKS(mol, xc=xc).density_fit(auxbasis='def2-tzvpp-jkfit')
+    mf = gpu_rks.RKS(mol, xc=xc).density_fit(auxbasis='def2-tzvpp-jkfit')
     mf.grids.atom_grid = (99,590)
     mf.nlcgrids.atom_grid = (50,194)
     mf.conv_tol = 1e-10
@@ -104,15 +106,20 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(e_tot, e_qchem)
 
     def test_to_cpu(self):
-        mf = rks.RKS(mol_sph).density_fit().to_cpu()
+        mf = gpu_rks.RKS(mol_sph).density_fit()
+        e_gpu = mf.kernel()
+        mf = mf.to_cpu()
         assert isinstance(mf, cpu_df_jk._DFHF)
-        # grids are still not df._key
-        #assert 'gpu' not in mf.grids.__module__
+        e_cpu = mf.kernel()
+        np.allclose(e_cpu, e_gpu)
 
-        # TODO: coming soon
-        #mf = mf.to_gpu()
-        #assert isinstance(mf, df_jk._DFHF)
-        #assert 'gpu' in mf.grids.__module__
+    def test_to_gpu(self):
+        mf = cpu_rks.RKS(mol_sph).density_fit()
+        e_gpu = mf.kernel()
+        mf = mf.to_gpu()
+        assert isinstance(mf, gpu_df_jk._DFHF)
+        e_cpu = mf.kernel()
+        np.allclose(e_cpu, e_gpu)
 
     def test_rks_cart(self):
         print('-------- B3LYP (CART) -------------')

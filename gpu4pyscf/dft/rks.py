@@ -24,8 +24,9 @@ from pyscf.dft import rks
 
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
-from gpu4pyscf.scf.hf import RHF
+from gpu4pyscf.scf import hf
 from gpu4pyscf.lib.cupy_helper import load_library, tag_array
+from pyscf import __config__
 
 __all__ = [
     'get_veff', 'RKS'
@@ -230,11 +231,59 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     logger.debug(ks, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
     return e1+e2, e2
 
-class RKS(rks.RKS, RHF):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+class KohnShamDFT:
 
+    _keys = rks.KohnShamDFT._keys
+
+    def __init__(self, xc='LDA,VWN'):
+        self.xc = xc
+        self.disp = None
+        self.disp_with_3body = None
+        self.nlc = ''
+        self.grids = gen_grid.Grids(self.mol)
+        self.grids.level = getattr(
+            __config__, 'dft_rks_RKS_grids_level', self.grids.level)
+        self.nlcgrids = gen_grid.Grids(self.mol)
+        self.nlcgrids.level = getattr(
+            __config__, 'dft_rks_RKS_nlcgrids_level', self.nlcgrids.level)
+        # Use rho to filter grids
+        self.small_rho_cutoff = getattr(
+            __config__, 'dft_rks_RKS_small_rho_cutoff', 1e-7)
+##################################################
+# don't modify the following attributes, they are not input options
+        self._numint = numint.NumInt()
+    @property
+    def omega(self):
+        return self._numint.omega
+    @omega.setter
+    def omega(self, v):
+        self._numint.omega = float(v)
+
+    def dump_flags(self, verbose=None):
+        # TODO: add this later
+        return
+
+    reset = rks.KohnShamDFT.reset
+
+hf.KohnShamDFT = KohnShamDFT
+from gpu4pyscf.lib import utils
+
+class RKS(KohnShamDFT, hf.RHF):
+
+    to_gpu = utils.to_gpu
+    device = utils.device
     _keys = {'disp'}
 
+    def __init__(self, mol, xc='LDA,VWN', disp=None):
+        hf.RHF.__init__(self, mol)
+        KohnShamDFT.__init__(self, xc)
+        self.disp = disp
+
+    def dump_flags(self, verbose=None):
+        hf.RHF.dump_flags(self, verbose)
+        return KohnShamDFT.dump_flags(self, verbose)
+
+    '''
     def __init__(self, mol, xc='LDA,VWN', disp=None):
         super().__init__(mol, xc)
         self._numint = numint.NumInt(xc=xc)
@@ -248,7 +297,7 @@ class RKS(rks.RKS, RHF):
         nlcgrids_level = self.nlcgrids.level
         self.nlcgrids = gen_grid.Grids(mol)
         self.nlcgrids.level = nlcgrids_level
-
+    '''
     def reset(self, mol=None):
         super().reset(mol)
         self.grids.reset(mol)
@@ -260,7 +309,14 @@ class RKS(rks.RKS, RHF):
         from gpu4pyscf.grad import rks as rks_grad
         return rks_grad.Gradients(self)
 
+    def to_cpu(self):
+        mf = rks.RKS(self.mol)
+        utils.to_cpu(self, out=mf)
+        return mf
+
     energy_elec = energy_elec
-    energy_tot = RHF.energy_tot
+    energy_tot = hf.RHF.energy_tot
     get_veff = get_veff
+
     to_hf = NotImplemented
+    init_guess_by_vsap = rks.init_guess_by_vsap

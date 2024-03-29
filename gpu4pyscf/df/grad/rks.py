@@ -18,8 +18,9 @@ import numpy
 import cupy
 import pyscf
 from pyscf import lib
+from pyscf.df.grad import rks as df_rks_grad
 from gpu4pyscf.grad import rks as rks_grad
-from gpu4pyscf.df.grad.rhf import get_jk, grad_elec
+from gpu4pyscf.df.grad import rhf as df_rhf_grad
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
 
@@ -115,12 +116,15 @@ def get_veff(ks_grad, mol=None, dm=None):
     vxc = tag_array(vxc, aux=e1_aux)
     return vxc
 
-class Gradients(rks_grad.Gradients, pyscf.df.grad.rks.Gradients):
+class Gradients(rks_grad.Gradients):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
-    get_jk = get_jk
+    _keys = df_rks_grad.Gradients._keys
+    __init__ = df_rks_grad.Gradients.__init__
+
+    get_jk = df_rhf_grad.Gradients.get_jk
+    grad_elec = df_rhf_grad.Gradients.grad_elec
     get_veff = get_veff
-    grad_elec = grad_elec
 
     def get_j(self, mol=None, dm=None, hermi=0, omega=None):
         vj, _, vjaux, _ = self.get_jk(mol, dm, with_k=False, omega=omega)
@@ -135,3 +139,5 @@ class Gradients(rks_grad.Gradients, pyscf.df.grad.rks.Gradients):
             return envs['dvhf'].aux[atom_id]
         else:
             return 0
+
+Grad = Gradients

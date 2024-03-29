@@ -215,10 +215,16 @@ def get_D_S(surface, with_S=True, with_D=False):
 
     return D, S
 
-class PCM(ddcosmo.DDCOSMO):
+class PCM(lib.StreamObject):
     _keys = {
-        'method', 'vdw_scale', 'surface', 'r_probe', 'intopt'
+        'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
+        'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
+        'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
+        'equilibrium_solvation', 'e', 'v',
     }
+
+    kernel = ddcosmo.DDCOSMO.kernel
+
     def __init__(self, mol):
         ddcosmo.DDCOSMO.__init__(self, mol)
         self.method = 'C-PCM'
@@ -377,9 +383,12 @@ class PCM(ddcosmo.DDCOSMO):
             raise RuntimeError('Only SCF gradient is supported')
 
     def reset(self, mol=None):
+        if mol is not None:
+            self.mol = mol
+            self.grids.reset(mol)
+        self._intermediates = None
         self.surface = None
         self.intopt = None
-        super().reset(mol)
         return self
 
     def _B_dot_x(self, dms):

@@ -23,6 +23,7 @@ import cupy
 import pyscf
 from pyscf import lib, gto
 from pyscf.dft import radi
+from pyscf.grad import rks as rks_grad
 from gpu4pyscf.lib.utils import patch_cpu_kernel
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.dft import numint, xc_deriv, rks
@@ -502,7 +503,31 @@ def grids_response_cc(grids):
         w0 = vol * pbecke[ia] * z
         yield coords, w0, w1
 
-class Gradients(rhf_grad.Gradients, pyscf.grad.rks.Gradients):
+class Gradients(rhf_grad.Gradients):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    # attributes
+    grid_response = rks_grad.Gradients.grid_response
+    _keys = rks_grad.Gradients._keys
+
+    # method
+    def __init__ (self, mf):
+        rhf_grad.Gradients.__init__(self, mf)
+        self.grids = None
+        self.nlcgrids = None
+        self.grid_response = False
 
     get_veff = _get_veff
+    # TODO: add grid response into this function
+    def extra_force(self, atom_id, envs):
+        return 0
+
+    def to_cpu(self):
+        from gpu4pyscf.lib import utils
+        mf = self.base.to_cpu()
+        gobj = rks.Gradients(mf)
+        utils.to_cpu(self, out=gobj)
+        return gobj
+
+Grad = Gradients
+from gpu4pyscf import dft
+dft.rks.RKS.Gradients = lib.class_as_method(Gradients)

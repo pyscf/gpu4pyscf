@@ -24,6 +24,7 @@ Non-relativistic RKS analytical Hessian
 import numpy
 import cupy
 from pyscf import lib
+from pyscf.hessian import rks as rks_hess
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
@@ -408,7 +409,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             aow = [numint._scale_ao(ao[i], wv) for i in range(1, 4)]
             _d1d2_dot_(ipip, mol, aow, ao[1:4], mask, ao_loc, False)
             dm0_mask = dm0_sorted[numpy.ix_(mask, mask)]
-            
+
             ao_dm_mask = contract('nig,ij->njg', ao_mask[:4], dm0_mask)
             ao_dm0 = numint._dot_ao_dm(mol, ao[0], dm0, mask, shls_slice, ao_loc)
             wf = weight * fxc[0,0]
@@ -676,24 +677,27 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     return vmat
 
 
-class Hessian(rhf_hess.Hessian):
+class Hessian(rhf_hess.HessianBase):
     '''Non-relativistic RKS hessian'''
+
     from gpu4pyscf.lib.utils import to_gpu, device
+
+    _keys = {'grids', 'grid_response'}
 
     def __init__(self, mf):
         rhf_hess.Hessian.__init__(self, mf)
         self.grids = None
         self.grid_response = False
-        self._keys = self._keys.union(['grids'])
 
     def to_cpu(self):
-        from gpu4pyscf.lib.utils import to_cpu
-        from pyscf.hessian.rks import Hessian
-        # to_cpu returns an rhf.Hessian object
-        obj = to_cpu(self)
-        return obj.view(Hessian)
+        from gpu4pyscf.lib import utils
+        mf = self.base.to_cpu()
+        gobj = rks_hess.Hessian(mf)
+        utils.to_cpu(self, out=gobj)
+        return gobj
 
     partial_hess_elec = partial_hess_elec
+    hess_elec = rhf_hess.hess_elec
     make_h1 = make_h1
 
 from pyscf import dft

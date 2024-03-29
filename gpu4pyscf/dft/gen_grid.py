@@ -458,67 +458,10 @@ def _load_conf(mod, name, default):
         return var
 
 from pyscf.dft import gen_grid
-class Grids(gen_grid.Grids):
-    '''DFT mesh grids
+from gpu4pyscf.lib import utils
+class Grids(lib.StreamObject):
 
-    Attributes for Grids:
-        level : int
-            To control the number of radial and angular grids. Large number
-            leads to large mesh grids. The default level 3 corresponds to
-            (50,302) for H, He;
-            (75,302) for second row;
-            (80~105,434) for rest.
-
-            Grids settings at other levels can be found in
-            pyscf.dft.gen_grid.RAD_GRIDS and pyscf.dft.gen_grid.ANG_ORDER
-
-        atomic_radii : 1D array
-            | radi.BRAGG_RADII  (default)
-            | radi.COVALENT_RADII
-            | None : to switch off atomic radii adjustment
-
-        radii_adjust : function(mol, atomic_radii) => (function(atom_id, atom_id, g) => array_like_g)
-            Function to adjust atomic radii, can be one of
-            | radi.treutler_atomic_radii_adjust
-            | radi.becke_atomic_radii_adjust
-            | None : to switch off atomic radii adjustment
-
-        radi_method : function(n) => (rad_grids, rad_weights)
-            scheme for radial grids, can be one of
-            | radi.treutler  (default)
-            | radi.delley
-            | radi.mura_knowles
-            | radi.gauss_chebyshev
-
-        becke_scheme : function(v) => array_like_v
-            weight partition function, can be one of
-            | gen_grid.original_becke  (default)
-            | gen_grid.stratmann
-
-        prune : function(nuc, rad_grids, n_ang) => list_n_ang_for_each_rad_grid
-            scheme to reduce number of grids, can be one of
-            | gen_grid.nwchem_prune  (default)
-            | gen_grid.sg1_prune
-            | gen_grid.treutler_prune
-            | None : to switch off grid pruning
-
-        symmetry : bool
-            whether to symmetrize mesh grids (TODO)
-
-        atom_grid : dict
-            Set (radial, angular) grids for particular atoms.
-            Eg, grids.atom_grid = {'H': (20,110)} will generate 20 radial
-            grids and 110 angular grids for H atom.
-
-    Examples:
-
-    >>> mol = gto.M(atom='H 0 0 0; H 0 0 1.1')
-    >>> grids = dft.gen_grid.Grids(mol)
-    >>> grids.level = 4
-    >>> grids.build()
-    '''
-
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     atomic_radii = _load_conf(radi, 'dft_gen_grid_Grids_atomic_radii',
                                    radi.BRAGG_RADII)
@@ -530,15 +473,21 @@ class Grids(gen_grid.Grids):
                               original_becke)
     prune = _load_conf(None, 'dft_gen_grid_Grids_prune', nwchem_prune)
     level = getattr(__config__, 'dft_gen_grid_Grids_level', 3)
+    alignment    = ALIGNMENT_UNIT
+    cutoff       = CUTOFF
+    _keys        = gen_grid.Grids._keys
 
-    alignment = ALIGNMENT_UNIT
-    cutoff = CUTOFF
+    __init__    = gen_grid.Grids.__init__
 
     def __setattr__(self, key, val):
         if key in ('atom_grid', 'atomic_radii', 'radii_adjust', 'radi_method',
                    'becke_scheme', 'prune', 'level'):
             self.reset()
-        super(Grids, self).__setattr__(key, val)
+        super().__setattr__(key, val)
+
+    @property
+    def size(self):
+        return getattr(self.weights, 'size', 0)
 
     def build(self, mol=None, with_non0tab=False, sort_grids=True, **kwargs):
         if mol is None: mol = self.mol
@@ -626,6 +575,11 @@ class Grids(gen_grid.Grids):
             self.non0tab = self.make_mask(mol, self.coords)
             self.screen_index = self.non0tab
         return self
+
+    def to_cpu(self):
+        grids = gen_grid.Grids(self.mol)
+        utils.to_cpu(self, out=grids)
+        return grids
 
 _default_rad = gen_grid._default_rad
 RAD_GRIDS = gen_grid.RAD_GRIDS

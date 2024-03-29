@@ -16,21 +16,16 @@
 import numpy as np
 import cupy
 import copy
-import time
-import ctypes
 from cupyx.scipy.linalg import solve_triangular
-from gpu4pyscf.df.grad import rhf
-from pyscf import lib, scf, gto
+from pyscf import scf
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import print_mem_info, tag_array, unpack_tril, contract, load_library, take_last2d
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.grad.rhf import grad_elec
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
-from gpu4pyscf.scf.hf import _VHFOpt
 
 libgvhf = load_library('libgvhf')
-LMAX_ON_GPU = 3
 FREE_CUPY_CACHE = True
 BINSIZE = 128
 

@@ -21,7 +21,7 @@ import numpy
 from pyscf import lib, gto
 from pyscf.grad import rhf
 from gpu4pyscf.lib.cupy_helper import load_library
-from gpu4pyscf.scf.hf import _VHFOpt
+from gpu4pyscf.scf.hf import _VHFOpt, KohnShamDFT
 from gpu4pyscf.lib.cupy_helper import tag_array, contract, take_last2d
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
@@ -601,9 +601,72 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
         dh1e[:,atm_id] += contract('xio,ip->xpo', h1mo, mo_coeff)
     return dh1e
 
-class Gradients(rhf.Gradients):
+def as_scanner(mf_grad):
+    if isinstance(mf_grad, lib.GradScanner):
+        return mf_grad
+
+    logger.info(mf_grad, 'Create scanner for %s', mf_grad.__class__)
+    name = mf_grad.__class__.__name__ + SCF_GradScanner.__name_mixin__
+    return lib.set_class(SCF_GradScanner(mf_grad),
+                         (SCF_GradScanner, mf_grad.__class__), name)
+
+class SCF_GradScanner(lib.GradScanner):
+    def __init__(self, g):
+        lib.GradScanner.__init__(self, g)
+
+    def __call__(self, mol_or_geom, **kwargs):
+        if isinstance(mol_or_geom, gto.MoleBase):
+            assert mol_or_geom.__class__ == gto.Mole
+            mol = mol_or_geom
+        else:
+            mol = self.mol.set_geom_(mol_or_geom, inplace=False)
+
+        self.reset(mol)
+        mf_scanner = self.base
+        e_tot = mf_scanner(mol)
+
+        if isinstance(mf_scanner, KohnShamDFT):
+            if getattr(self, 'grids', None):
+                self.grids.reset(mol)
+            if getattr(self, 'nlcgrids', None):
+                self.nlcgrids.reset(mol)
+
+        de = self.kernel(**kwargs)
+        return e_tot, de
+
+class GradientsBase(lib.StreamObject):
+    '''
+    Basic nuclear gradient functions for non-relativistic methods
+    '''
+
+    _keys = {'mol', 'base', 'unit', 'atmlst', 'de'}
+    __init__ = rhf.GradientsBase.__init__
+
+    def dump_flags(self, verbose=None):
+        return
+
+    reset       = rhf.GradientsBase.reset
+    get_hcore   = rhf.GradientsBase.get_hcore
+    get_ovlp    = rhf.GradientsBase.get_ovlp
+    get_jk      = rhf.GradientsBase.get_jk
+    get_j       = rhf.GradientsBase.get_j
+    get_k       = rhf.GradientsBase.get_k
+    get_veff    = NotImplemented
+    make_rdm1e  = rhf.GradientsBase.make_rdm1e
+    grad_nuc    = rhf.GradientsBase.grad_nuc
+    optimizer   = rhf.GradientsBase.optimizer
+    extra_force = rhf.GradientsBase.extra_force
+    kernel      = rhf.GradientsBase.kernel
+    grad        = rhf.GradientsBase.grad
+    _finalize   = rhf.GradientsBase._finalize
+    _write      = rhf.GradientsBase._write
+    as_scanner  = as_scanner
+    _tag_rdm1   = rhf.GradientsBase._tag_rdm1
+
+class Gradients(GradientsBase):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
+    make_rdm1e = rhf.Gradients.make_rdm1e
     grad_elec = grad_elec
     grad_nuc = grad_nuc
     get_veff = get_veff
@@ -624,3 +687,12 @@ class Gradients(rhf.Gradients):
         grid response is implemented get_veff
         '''
         return 0
+
+    def to_cpu(self):
+        from gpu4pyscf.lib import utils
+        mf = self.base.to_cpu()
+        gobj = rhf.Gradients(mf)
+        utils.to_cpu(self, out=gobj)
+        return gobj
+
+Grad = Gradients
