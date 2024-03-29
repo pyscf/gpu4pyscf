@@ -36,13 +36,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
     '''
 def setUpModule():
     global mol, auxmol
-    mol = pyscf.M(
-                  atom='''
-Ti 0.0 0.0 0.0
-Cl 0.0 0.0 2.0
-Cl 0.0 2.0 -1.0
-Cl 1.73 -1.0 -1.0
-Cl -1.73 -1.0 -1.0''',
+    mol = pyscf.M(atom=atom,
                   basis= 'def2-tzvpp',
                   verbose=1,
                   output='/dev/null')
