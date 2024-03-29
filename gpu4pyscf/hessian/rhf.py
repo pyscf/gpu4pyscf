@@ -617,7 +617,7 @@ class HessianBase(lib.StreamObject):
         return get_hcore(mol)
 
     def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
-        fx=None, atmlst=None, max_memory=4000, verbose=None):
+                  fx=None, atmlst=None, max_memory=4000, verbose=None):
         return solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
                          fx, atmlst, max_memory, verbose)
 

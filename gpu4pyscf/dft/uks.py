@@ -113,28 +113,14 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
 
 
 class UKS(rks.KohnShamDFT, uhf.UHF):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    from gpu4pyscf.lib.utils import to_gpu, device
     _keys = {'disp', 'screen_tol'}
 
     def __init__(self, mol, xc='LDA,VWN', disp=None):
         uhf.UHF.__init__(self, mol)
         rks.KohnShamDFT.__init__(self, xc)
         self.disp = disp
-    '''
-    def __init__(self, mol, xc='LDA,VWN', disp=None):
-        super().__init__(mol, xc)
-        self.disp = disp
-        self._numint = numint.NumInt()
-        self.screen_tol = 1e-14
 
-        grids_level = self.grids.level
-        self.grids = gen_grid.Grids(mol)
-        self.grids.level = grids_level
-
-        nlcgrids_level = self.nlcgrids.level
-        self.nlcgrids = gen_grid.Grids(mol)
-        self.nlcgrids.level = nlcgrids_level
-    '''
     get_veff = get_veff
     get_vasp = uks.get_vsap
     energy_elec = energy_elec

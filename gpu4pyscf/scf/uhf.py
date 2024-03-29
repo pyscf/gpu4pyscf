@@ -150,7 +150,7 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
     return e_elec, e_coul
 
 class UHF(hf.SCF):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     _keys = {'e_disp', 'screen_tol', 'conv_tol_cpscf', 'h1e', 's1e'}
     def __init__(self, mol):
@@ -191,7 +191,6 @@ class UHF(hf.SCF):
             fock = self.get_hcore(self.mol) + self.get_veff(self.mol, dm1)
         return get_grad(mo_coeff, mo_occ, fock)
 
-    make_rdm1                = make_rdm1
     make_rdm2                = NotImplemented
     energy_elec              = energy_elec
     get_init_guess           = hf.return_cupy_array(uhf.UHF.get_init_guess)
@@ -202,7 +201,6 @@ class UHF(hf.SCF):
     init_guess_by_1e         = uhf.UHF.init_guess_by_1e
     init_guess_by_chkfile    = NotImplemented
 
-    spin_square        = NotImplemented
     analyze            = NotImplemented
     mulliken_pop       = NotImplemented
     mulliken_spin_pop  = NotImplemented

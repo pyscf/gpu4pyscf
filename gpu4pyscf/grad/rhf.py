@@ -664,7 +664,7 @@ class GradientsBase(lib.StreamObject):
     _tag_rdm1   = rhf.GradientsBase._tag_rdm1
 
 class Gradients(GradientsBase):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     make_rdm1e = rhf.Gradients.make_rdm1e
     grad_elec = grad_elec

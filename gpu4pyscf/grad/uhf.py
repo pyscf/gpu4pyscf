@@ -327,7 +327,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
 
 class Gradients(rhf_grad.GradientsBase):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     grad_elec = grad_elec
     grad_nuc = rhf_grad.grad_nuc

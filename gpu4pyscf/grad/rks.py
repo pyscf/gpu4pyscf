@@ -504,7 +504,7 @@ def grids_response_cc(grids):
         yield coords, w0, w1
 
 class Gradients(rhf_grad.Gradients):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    from gpu4pyscf.lib.utils import to_gpu, device
     # attributes
     grid_response = rks_grad.Gradients.grid_response
     _keys = rks_grad.Gradients._keys

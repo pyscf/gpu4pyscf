@@ -345,7 +345,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
 
 
 class Gradients(uhf_grad.Gradients):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    from gpu4pyscf.lib.utils import to_gpu, device
     grid_response = uks_grad.Gradients.grid_response
     _keys = uks_grad.Gradients._keys
 
