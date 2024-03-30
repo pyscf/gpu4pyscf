@@ -109,6 +109,34 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              level_shift(s1e, dm[1], f[1], shiftb))
     return f
 
+def energy_elec(mf, dm=None, h1e=None, vhf=None):
+    '''Electronic energy of Unrestricted Hartree-Fock
+
+    Note this function has side effects which cause mf.scf_summary updated.
+
+    Returns:
+        Hartree-Fock electronic energy and the 2-electron part contribution
+    '''
+    if dm is None: dm = mf.make_rdm1()
+    if h1e is None:
+        h1e = mf.get_hcore()
+    if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
+        dm = cupy.array((dm*.5, dm*.5))
+    if vhf is None:
+        vhf = mf.get_veff(mf.mol, dm)
+    if h1e[0].ndim < dm[0].ndim:  # get [0] because h1e and dm may not be ndarrays
+        h1e = (h1e, h1e)
+    e1 = cupy.einsum('ij,ji->', h1e[0], dm[0])
+    e1+= cupy.einsum('ij,ji->', h1e[1], dm[1])
+    e_coul =(cupy.einsum('ij,ji->', vhf[0], dm[0]) +
+             cupy.einsum('ij,ji->', vhf[1], dm[1])) * .5
+    e1 = e1.get()[()]
+    e_coul = e_coul.get()[()]
+    e_elec = (e1 + e_coul).real
+    mf.scf_summary['e1'] = e1.real
+    mf.scf_summary['e2'] = e_coul.real
+    logger.debug(mf, 'E1 = %s  Ecoul = %s', e1, e_coul.real)
+    return e_elec, e_coul
 
 class UHF(uhf.UHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
@@ -126,7 +154,8 @@ class UHF(uhf.UHF):
     get_init_guess = hf.return_cupy_array(uhf.UHF.get_init_guess)
     density_fit = hf.RHF.density_fit
     energy_tot = hf.RHF.energy_tot
-
+    energy_elec = energy_elec
+    
     make_rdm2 = NotImplemented
     dump_chk = NotImplemented
     newton = NotImplemented

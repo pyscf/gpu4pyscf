@@ -538,11 +538,11 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
     de = 2.0 * dvhf + dh1e + delec + extra_force
 
+    # for backforward compatiability
     if(hasattr(mf, 'disp') and mf.disp is not None):
         g_disp = mf_grad.get_dispersion()
         mf_grad.grad_disp = g_disp
         mf_grad.grad_mf = de
-        de += cupy.asarray(g_disp)
 
     if log.verbose >= logger.DEBUG:
         log.timer_debug1('gradients of electronic part', *t0)
