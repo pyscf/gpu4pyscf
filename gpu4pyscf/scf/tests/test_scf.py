@@ -75,14 +75,14 @@ class KnownValues(unittest.TestCase):
         e_gpu = mf.kernel()
         mf = mf.to_gpu()
         e_cpu = mf.kernel()
-        assert isinstance(mf, cpu_scf.hf.RHF)
+        assert isinstance(mf, gpu_scf.hf.RHF)
         assert np.allclose(e_cpu, e_gpu)
 
         mf = cpu_dft.rks.RKS(mol)
         e_gpu = mf.kernel()
         mf = mf.to_gpu()
         e_cpu = mf.kernel()
-        assert isinstance(mf, cpu_dft.rks.RKS)
+        assert isinstance(mf, gpu_dft.rks.RKS)
         assert 'gpu' in mf.grids.__module__
         assert np.allclose(e_cpu, e_gpu)
 
