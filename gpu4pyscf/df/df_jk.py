@@ -242,16 +242,7 @@ class _DFHF:
         obj = self.undo_df().to_cpu().density_fit()
         print(type(obj))
         return utils.to_cpu(self, obj)
-    """
-    def energy_tot(self, dm=None, h1e=None, vhf=None):
-        '''
-        compute tot energy
-        '''
-        nuc = self.energy_nuc()
-        e_tot = self.energy_elec(dm, h1e, vhf)[0] + nuc
-        self.scf_summary['nuc'] = nuc.real
-        return e_tot
-    """
+
 
 def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-14, omega=None):
     '''

@@ -220,7 +220,8 @@ class UHF(hf.SCF):
     get_init_guess = hf.return_cupy_array(uhf.UHF.get_init_guess)
     density_fit = hf.RHF.density_fit
     energy_tot = hf.RHF.energy_tot
-
+    energy_elec = energy_elec
+    
     make_rdm2 = NotImplemented
     dump_chk = NotImplemented
     newton = NotImplemented
