@@ -283,21 +283,6 @@ class RKS(KohnShamDFT, hf.RHF):
         hf.RHF.dump_flags(self, verbose)
         return KohnShamDFT.dump_flags(self, verbose)
 
-    '''
-    def __init__(self, mol, xc='LDA,VWN', disp=None):
-        super().__init__(mol, xc)
-        self._numint = numint.NumInt(xc=xc)
-        self.disp = disp
-        self.screen_tol = 1e-14
-
-        grids_level = self.grids.level
-        self.grids = gen_grid.Grids(mol)
-        self.grids.level = grids_level
-
-        nlcgrids_level = self.nlcgrids.level
-        self.nlcgrids = gen_grid.Grids(mol)
-        self.nlcgrids.level = nlcgrids_level
-    '''
     def reset(self, mol=None):
         super().reset(mol)
         self.grids.reset(mol)

@@ -29,6 +29,7 @@ LMAX_ON_GPU = 8
 FREE_CUPY_CACHE = True
 STACK_SIZE_PER_THREAD = 8192 * 4
 BLKSIZE = 128
+NROOT_ON_GPU = 7
 
 libgvhf = load_library('libgvhf')
 libgint = load_library('libgint')
@@ -200,8 +201,9 @@ class VHFOpt(_vhf.VHFOpt):
         if group_size_aux is not None:
             aux_uniq_l_ctr, aux_l_ctr_counts = _split_l_ctr_groups(aux_uniq_l_ctr, aux_l_ctr_counts, group_size_aux)
 
-        tmp_mol = gto.mole.conc_mol(fake_mol, sorted_auxmol)
-        tot_mol = gto.mole.conc_mol(sorted_mol, tmp_mol)
+        tot_mol = sorted_mol + fake_mol + sorted_auxmol
+        tot_mol.cart = True
+        self.tot_mol = tot_mol
 
         # Initialize vhfopt after reordering mol._bas
         _vhf.VHFOpt.__init__(self, sorted_mol, self._intor, self._prescreen,
@@ -295,13 +297,16 @@ class VHFOpt(_vhf.VHFOpt):
         aux_pair2ket = []
         aux_log_qs = []
         for p0, p1 in zip(aux_l_ctr_offsets[:-1], aux_l_ctr_offsets[1:]):
-            aux_pair2bra.append(np.arange(p0,p1))
-            aux_pair2ket.append(fake_l_ctr_offsets[0] * np.ones(p1-p0))
-            aux_log_qs.append(np.ones(p1-p0))
+            aux_pair2bra.append(np.arange(p0,p1,dtype=np.int32))
+            aux_pair2ket.append(fake_l_ctr_offsets[0] * np.ones(p1-p0, dtype=np.int32))
+            aux_log_qs.append(np.ones(p1-p0, dtype=np.int32))
 
         self.aux_log_qs = aux_log_qs.copy()
         pair2bra += aux_pair2bra
         pair2ket += aux_pair2ket
+
+        self.aux_pair2bra = aux_pair2bra
+        self.aux_pair2ket = aux_pair2ket
 
         uniq_l_ctr = np.concatenate([uniq_l_ctr, fake_uniq_l_ctr, aux_uniq_l_ctr])
         l_ctr_offsets = np.concatenate([
@@ -309,6 +314,8 @@ class VHFOpt(_vhf.VHFOpt):
             fake_l_ctr_offsets[1:],
             aux_l_ctr_offsets[1:]])
 
+        self.pair2bra = pair2bra
+        self.pair2ket = pair2ket
         bas_pair2shls = np.hstack(pair2bra + pair2ket).astype(np.int32).reshape(2,-1)
         bas_pairs_locs = np.append(0, np.cumsum([x.size for x in pair2bra])).astype(np.int32)
         log_qs = log_qs + aux_log_qs
@@ -493,6 +500,16 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
     aux_ao_loc = intopt.aux_ao_loc
     comp = 3**order
 
+    lmax = intopt.mol._bas[:gto.ANG_OF].max()
+    aux_lmax = intopt.auxmol._bas[:gto.ANG_OF].max()
+    nroots = (lmax + aux_lmax + order)//2 + 1
+    if nroots > NROOT_ON_GPU:
+        from pyscf.gto.moleintor import getints, make_cintopt
+        mol = intopt.mol
+        pmol = intopt.tot_mol
+        intor = pmol._add_suffix('int3c2e_' + ip_type)
+        opt = make_cintopt(pmol._atm, pmol._bas, pmol._env, intor)
+
     nbins = 1
     for aux_id, log_q_kl in enumerate(intopt.aux_log_qs):
         cp_kl_id = aux_id + len(intopt.log_qs)
@@ -517,22 +534,32 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
             ao_offsets = np.array([i0,j0,nao+1+k0,nao], dtype=np.int32)
             strides = np.array([1, ni, ni*nj, ni*nj*nk], dtype=np.int32)
 
-            int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
-            err = fn(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
-                intopt.bpcache,
-                ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(norb),
-                strides.ctypes.data_as(ctypes.c_void_p),
-                ao_offsets.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
-                ctypes.c_int(nbins),
-                ctypes.c_int(cp_ij_id),
-                ctypes.c_int(cp_kl_id),
-                ctypes.c_double(omega))
-            if err != 0:
-                raise RuntimeError(f'GINT_fill_int3c2e general failed, err={err}')
+            # Use GPU kernels for low-angular momentum
+            if (li + lj + lk + order)//2 + 1 < NROOT_ON_GPU:
+                int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
+                err = fn(
+                    ctypes.cast(stream.ptr, ctypes.c_void_p),
+                    intopt.bpcache,
+                    ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(norb),
+                    strides.ctypes.data_as(ctypes.c_void_p),
+                    ao_offsets.ctypes.data_as(ctypes.c_void_p),
+                    bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
+                    bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
+                    ctypes.c_int(nbins),
+                    ctypes.c_int(cp_ij_id),
+                    ctypes.c_int(cp_kl_id),
+                    ctypes.c_double(omega))
+                if err != 0:
+                    raise RuntimeError(f'GINT_fill_int3c2e general failed, err={err}')
+            else:
+                # TODO: sph2cart in CPU?
+                ishl0, ishl1 = intopt.pair2bra[cp_ij_id][0], intopt.pair2bra[cp_ij_id][-1]+1
+                jshl0, jshl1 = intopt.pair2ket[cp_ij_id][0], intopt.pair2ket[cp_ij_id][-1]+1
+                kshl0, kshl1 = intopt.aux_pair2bra[aux_id][0], intopt.aux_pair2bra[aux_id][-1]+1
+                shls_slice = np.array([ishl0, ishl1, jshl0, jshl1, kshl0, kshl1], dtype=np.int64)
+                int3c_cpu = getints(intor, pmol._atm, pmol._bas, pmol._env, shls_slice, cintopt=opt).transpose([0,3,2,1])
+                int3c_blk = cupy.asarray(int3c_cpu)
 
             if not intopt._auxmol.cart:
                 int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
@@ -1211,6 +1238,16 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
 
+    lmax = mol._bas[:gto.ANG_OF].max()
+    aux_lmax = auxmol._bas[:gto.ANG_OF].max()
+    nroots = (lmax + aux_lmax + order)//2 + 1
+    if nroots > NROOT_ON_GPU:
+        from pyscf.gto.moleintor import getints, make_cintopt
+        mol = intopt.mol
+        pmol = intopt.tot_mol
+        intor = pmol._add_suffix('int3c2e_' + ip_type)
+        opt = make_cintopt(pmol._atm, pmol._bas, pmol._env, intor)
+
     nao_cart = intopt.mol.nao
     naux_cart = intopt.auxmol.nao
     norb_cart = nao_cart + naux_cart + 1
@@ -1241,22 +1278,31 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
             ao_offsets = np.array([i0,j0,nao_cart+1+k0,nao_cart], dtype=np.int32)
             strides = np.array([1, ni, ni*nj, ni*nj*nk], dtype=np.int32)
 
-            int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
-            err = fn(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
-                intopt.bpcache,
-                ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(norb_cart),
-                strides.ctypes.data_as(ctypes.c_void_p),
-                ao_offsets.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
-                ctypes.c_int(nbins),
-                ctypes.c_int(cp_ij_id),
-                ctypes.c_int(cp_kl_id),
-                ctypes.c_double(omega))
-            if err != 0:
-                raise RuntimeError("int3c2e failed\n")
+            # Use GPU kernels for low-angular momentum
+            if (li + lj + lk + order)//2 + 1 < NROOT_ON_GPU:
+                int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
+                err = fn(
+                    ctypes.cast(stream.ptr, ctypes.c_void_p),
+                    intopt.bpcache,
+                    ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(norb_cart),
+                    strides.ctypes.data_as(ctypes.c_void_p),
+                    ao_offsets.ctypes.data_as(ctypes.c_void_p),
+                    bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
+                    bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
+                    ctypes.c_int(nbins),
+                    ctypes.c_int(cp_ij_id),
+                    ctypes.c_int(cp_kl_id),
+                    ctypes.c_double(omega))
+                if err != 0:
+                    raise RuntimeError("int3c2e failed\n")
+            else:
+                ishl0, ishl1 = intopt.pair2bra[cp_ij_id][0], intopt.pair2bra[cp_ij_id][-1]+1
+                jshl0, jshl1 = intopt.pair2ket[cp_ij_id][0], intopt.pair2ket[cp_ij_id][-1]+1
+                kshl0, kshl1 = intopt.aux_pair2bra[aux_id][0], intopt.aux_pair2bra[aux_id][-1]+1
+                shls_slice = np.array([ishl0, ishl1, jshl0, jshl1, kshl0, kshl1], dtype=np.int64)
+                int3c_cpu = getints(intor, pmol._atm, pmol._bas, pmol._env, shls_slice, cintopt=opt).transpose([0,3,2,1])
+                int3c_blk = cupy.asarray(int3c_cpu)
 
             if not intopt._auxmol.cart:
                 int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)

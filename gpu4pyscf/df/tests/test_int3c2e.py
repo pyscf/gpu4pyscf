@@ -31,11 +31,13 @@ check int3c2e consistency between pyscf and gpu4pyscf
 
 def setUpModule():
     global mol, auxmol
-    mol = pyscf.M(atom='''
-O       0.0000000000    -0.0000000000     0.1174000000
-H      -0.7570000000    -0.0000000000    -0.4696000000
-H       0.7570000000     0.0000000000    -0.4696000000
-    ''',
+    atom='''
+Ti 0.0 0.0 0.0
+Cl 0.0 0.0 2.0
+Cl 0.0 2.0 -1.0
+Cl 1.73 -1.0 -1.0
+Cl -1.73 -1.0 -1.0'''
+    mol = pyscf.M(atom=atom,
                   basis= 'def2-tzvpp',
                   verbose=1,
                   output='/dev/null')
@@ -122,6 +124,7 @@ class KnownValues(unittest.TestCase):
         charges = mol.atom_charges()
 
         fakemol = gto.fakemol_for_charges(coords)
+        fakemol.output = '/dev/null'
         int3c = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipip1').get()
 
         for i,q in enumerate(charges):
@@ -135,6 +138,7 @@ class KnownValues(unittest.TestCase):
         charges = mol.atom_charges()
 
         fakemol = gto.fakemol_for_charges(coords)
+        fakemol.output = '/dev/null'
         int3c = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipvip1').get()
 
         for i,q in enumerate(charges):
