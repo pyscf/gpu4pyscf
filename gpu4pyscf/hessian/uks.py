@@ -867,7 +867,8 @@ class Hessian(rhf_hess.HessianBase):
     solve_mo1 = uhf_hess.Hessian.solve_mo1
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
-    kernel = rhf_hess_gpu.kernel
+    kernel = NotImplemented
+    hess = NotImplemented
 
 from gpu4pyscf import dft
 dft.uks.UKS.Hessian = lib.class_as_method(Hessian)

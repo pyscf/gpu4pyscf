@@ -142,3 +142,4 @@ class Hessian(uks_hess.Hessian):
     make_h1 = make_h1
     hess_elec = uhf_hess.hess_elec
     kernel = rhf_hess.kernel
+    hess = kernel

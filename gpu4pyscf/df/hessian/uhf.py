@@ -692,3 +692,5 @@ class Hessian(uhf_hess.Hessian):
 
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
+    kernel = rhf_hess.kernel
+    hess = kernel

@@ -36,6 +36,7 @@ def setUpModule():
     mol.basis = {'H': 'cc-pvdz',
                  'O': 'cc-pvdz',}
     mol.build()
+    mol.incore_anyway = True
     mf = scf.RHF(mol)
     mf.conv_tol = 1e-12
     mf.scf()

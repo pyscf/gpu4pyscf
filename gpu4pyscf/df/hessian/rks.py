@@ -30,6 +30,7 @@ Non-relativistic RKS analytical Hessian
 import numpy
 import cupy
 from pyscf import lib
+from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.hessian import rks as rks_hess
 from gpu4pyscf.df.hessian import rhf as df_rhf_hess
 from gpu4pyscf.lib import logger
@@ -122,3 +123,5 @@ class Hessian(rks_hess.Hessian):
 
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
+    kernel = rhf_hess.kernel
+    hess = kernel
