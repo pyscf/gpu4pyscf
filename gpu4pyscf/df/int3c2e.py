@@ -505,7 +505,6 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
     nroots = (lmax + aux_lmax + order)//2 + 1
     if nroots > NROOT_ON_GPU:
         from pyscf.gto.moleintor import getints, make_cintopt
-        mol = intopt.mol
         pmol = intopt.tot_mol
         intor = pmol._add_suffix('int3c2e_' + ip_type)
         opt = make_cintopt(pmol._atm, pmol._bas, pmol._env, intor)
