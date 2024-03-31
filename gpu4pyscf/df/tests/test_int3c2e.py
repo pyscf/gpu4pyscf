@@ -29,13 +29,14 @@ libgint = load_library('libgint')
 check int3c2e consistency between pyscf and gpu4pyscf
 '''
 
-def setUpModule():
-    global mol, auxmol
-    mol = pyscf.M(atom='''
+atom='''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
-    ''',
+    '''
+def setUpModule():
+    global mol, auxmol
+    mol = pyscf.M(atom=atom,
                   basis= 'def2-tzvpp',
                   verbose=1,
                   output='/dev/null')

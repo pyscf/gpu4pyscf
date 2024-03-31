@@ -317,6 +317,5 @@ class RKS(KohnShamDFT, hf.RHF):
     energy_elec = energy_elec
     energy_tot = hf.RHF.energy_tot
     get_veff = get_veff
-
     to_hf = NotImplemented
     init_guess_by_vsap = rks.init_guess_by_vsap
