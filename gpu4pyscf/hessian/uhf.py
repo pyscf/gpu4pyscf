@@ -520,13 +520,6 @@ class Hessian(HessianBase):
 
     gen_hop = gen_hop
 
-    def to_cpu(self):
-        from gpu4pyscf.lib import utils
-        mf = self.base.to_cpu()
-        gobj = uhf_hess.Hessian(mf)
-        utils.to_cpu(self, out=gobj)
-        return gobj
-
 # Inject to UHF class
 from gpu4pyscf import scf
 scf.uhf.UHF.Hessian = lib.class_as_method(Hessian)

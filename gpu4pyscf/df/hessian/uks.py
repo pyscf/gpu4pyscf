@@ -126,13 +126,6 @@ class Hessian(uks_hess.Hessian):
         self.auxbasis_response = 1
         uks_hess.Hessian.__init__(self, mf)
 
-    def to_cpu(self):
-        from gpu4pyscf.lib.utils import to_cpu
-        from pyscf.df.hessian.uks import Hessian
-        # to_cpu returns an rhf.Hessian object
-        obj = to_cpu(self)
-        return obj.view(Hessian)
-
     def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
                   fx=None, atmlst=None, max_memory=4000, verbose=None):
         return uhf_hess.solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,

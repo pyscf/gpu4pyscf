@@ -663,6 +663,15 @@ class GradientsBase(lib.StreamObject):
     as_scanner  = as_scanner
     _tag_rdm1   = rhf.GradientsBase._tag_rdm1
 
+    # to_cpu can be reused only when __init__ still takes mf
+    def to_cpu(self):
+        mf = self.base.to_cpu()
+        from importlib import import_module
+        mod = import_module(self.__module__.replace('gpu4pyscf', 'pyscf'))
+        cls = getattr(mod, self.__class__.__name__)
+        obj = cls(mf)
+        return obj
+
 class Gradients(GradientsBase):
     from gpu4pyscf.lib.utils import to_gpu, device
 
@@ -687,12 +696,5 @@ class Gradients(GradientsBase):
         grid response is implemented get_veff
         '''
         return 0
-
-    def to_cpu(self):
-        from gpu4pyscf.lib import utils
-        mf = self.base.to_cpu()
-        gobj = rhf.Gradients(mf)
-        utils.to_cpu(self, out=gobj)
-        return gobj
 
 Grad = Gradients

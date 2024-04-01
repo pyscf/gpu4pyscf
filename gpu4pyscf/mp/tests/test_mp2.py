@@ -123,6 +123,32 @@ class KnownValues(unittest.TestCase):
         e = pt.kernel()[0]
         self.assertAlmostEqual(e, -0.14708846352674113, 8)
 
+    def test_to_cpu(self):
+        pt = mp_gpu.mp2.MP2(mf.to_gpu())
+        e_gpu = pt.kernel()[0]
+        pt = pt.to_cpu()
+        e_cpu = pt.kernel()[0]
+        assert abs(e_cpu - e_gpu) < 1e-6
+
+        pt = mp_gpu.dfmp2.DFMP2(mf.to_gpu())
+        e_gpu = pt.kernel()[0]
+        pt = pt.to_cpu()
+        e_cpu = pt.kernel()[0]
+        assert abs(e_cpu - e_gpu) < 1e-6
+
+    def test_to_gpu(self):
+        pt = mp_cpu.mp2.MP2(mf)
+        e_cpu = pt.kernel()[0]
+        pt = pt.to_gpu()
+        e_gpu = pt.kernel()[0]
+        assert abs(e_cpu - e_gpu) < 1e-6
+
+        pt = mp_cpu.dfmp2.DFMP2(mf)
+        e_cpu = pt.kernel()[0]
+        pt = pt.to_gpu()
+        e_gpu = pt.kernel()[0]
+        assert abs(e_cpu - e_gpu) < 1e-6
+
 if __name__ == "__main__":
     print("Full Tests for mp2")
     unittest.main()

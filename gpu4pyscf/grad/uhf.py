@@ -353,10 +353,3 @@ class Gradients(rhf_grad.GradientsBase):
         grid response is implemented get_veff
         '''
         return 0
-
-    def to_cpu(self):
-        from gpu4pyscf.lib import utils
-        mf = self.base.to_cpu()
-        gobj = uhf.Gradients(mf)
-        utils.to_cpu(self, out=gobj)
-        return gobj

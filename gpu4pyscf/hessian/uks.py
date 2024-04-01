@@ -187,7 +187,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
     else:
         grids = mf.grids
     if grids.coords is None:
-        grids.build(with_non0tab=True)
+        grids.build(with_non0tab=False)
 
     # move data to GPU
     mo_occ = cupy.asarray(mo_occ)
@@ -855,13 +855,6 @@ class Hessian(rhf_hess.HessianBase):
         rhf_hess.Hessian.__init__(self, mf)
         self.grids = None
         self.grid_response = False
-
-    def to_cpu(self):
-        from gpu4pyscf.lib import utils
-        mf = self.base.to_cpu()
-        gobj = uks_hess.Hessian(mf)
-        utils.to_cpu(self, out=gobj)
-        return gobj
 
     hess_elec = uhf_hess.hess_elec
     solve_mo1 = uhf_hess.Hessian.solve_mo1

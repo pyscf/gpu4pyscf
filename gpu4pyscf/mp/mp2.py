@@ -209,7 +209,6 @@ class MP2(lib.StreamObject):
     }
 
     def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None):
-        mf = mf.to_gpu()
         if mo_coeff is None: mo_coeff = mf.mo_coeff
         if mo_occ is None: mo_occ = mf.mo_occ
 
@@ -347,6 +346,15 @@ class MP2(lib.StreamObject):
 
     def init_amps(self, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2):
         return kernel(self, mo_energy, mo_coeff, eris, with_t2)
+
+    # to_cpu can be reused only when __init__ still takes mf
+    def to_cpu(self):
+        mf = self._scf.to_cpu()
+        from importlib import import_module
+        mod = import_module(self.__module__.replace('gpu4pyscf', 'pyscf'))
+        cls = getattr(mod, self.__class__.__name__)
+        obj = cls(mf)
+        return obj
 
 RMP2 = MP2
 from gpu4pyscf import scf

@@ -117,7 +117,7 @@ def get_veff(ks_grad, mol=None, dm=None):
     return vxc
 
 class Gradients(rks_grad.Gradients):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     _keys = df_rks_grad.Gradients._keys
     __init__ = df_rks_grad.Gradients.__init__

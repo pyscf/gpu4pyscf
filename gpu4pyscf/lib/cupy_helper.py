@@ -238,7 +238,7 @@ def block_c2s_diag(ncart, nsph, angular, counts):
         r, c = c2s_l[l].shape
         rows.append(rows[-1][-1] + np.arange(1,count+1, dtype='int32') * r)
         cols.append(cols[-1][-1] + np.arange(1,count+1, dtype='int32') * c)
-        offsets += [c2s_offset[l]] * count    
+        offsets += [c2s_offset[l]] * count
     rows = cupy.hstack(rows)
     cols = cupy.hstack(cols)
     offsets = cupy.asarray(offsets, dtype='int32')
@@ -603,3 +603,6 @@ def pinv(a, lindep=1e-10):
     v1 = v[:,mask]
     j2c = cupy.dot(v1/w[mask], v1.conj().T)
     return j2c
+
+def cond(a):
+    return cupy.linalg.norm(a,2)*cupy.linalg.norm(cupy.linalg.inv(a),2)

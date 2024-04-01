@@ -31,12 +31,11 @@ check int3c2e consistency between pyscf and gpu4pyscf
 
 def setUpModule():
     global mol, auxmol
-    atom='''
-Ti 0.0 0.0 0.0
-Cl 0.0 0.0 2.0
-Cl 0.0 2.0 -1.0
-Cl 1.73 -1.0 -1.0
-Cl -1.73 -1.0 -1.0'''
+    atom = '''
+O       0.0000000000    -0.0000000000     0.1174000000
+H      -0.7570000000    -0.0000000000    -0.4696000000
+H       0.7570000000     0.0000000000    -0.4696000000
+'''
     mol = pyscf.M(atom=atom,
                   basis= 'def2-tzvpp',
                   verbose=1,
