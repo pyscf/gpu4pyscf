@@ -16,6 +16,7 @@
 import unittest
 from functools import reduce
 import numpy
+import pytest
 from pyscf import lib
 from pyscf import gto
 from pyscf import scf
@@ -46,7 +47,9 @@ def tearDownModule():
     mol.stdout.close()
     del mol, mf
 
-
+import pyscf
+from packaging import version
+pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 class KnownValues(unittest.TestCase):
     def test_mp2(self):
         nocc = mol.nelectron//2
@@ -136,6 +139,7 @@ class KnownValues(unittest.TestCase):
         e_cpu = pt.kernel()[0]
         assert abs(e_cpu - e_gpu) < 1e-6
 
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_gpu(self):
         pt = mp_cpu.mp2.MP2(mf)
         e_cpu = pt.kernel()[0]
