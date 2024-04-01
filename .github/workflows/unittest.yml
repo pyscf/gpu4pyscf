@@ -33,4 +33,4 @@ jobs:
       run: |
         echo $GITHUB_WORKSPACE
         export PYTHONPATH="${PYTHONPATH}:$GITHUB_WORKSPACE"
-        coverage run -m pytest
+        pytest --cov=gpu4pyscf

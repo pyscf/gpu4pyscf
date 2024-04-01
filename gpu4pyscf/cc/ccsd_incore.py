@@ -529,8 +529,83 @@ def _make_eris_incore(mycc, mo_coeff=None):
         cupy.get_default_memory_pool().free_all_blocks()
     return eris
 
-class CCSD(ccsd.CCSD):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+class CCSDBase(lib.StreamObject):
+    # attributes
+    _keys                  = ccsd.CCSDBase._keys
+    max_cycle              = ccsd.CCSDBase.max_cycle
+    conv_tol               = ccsd.CCSDBase.conv_tol
+    iterative_damping      = ccsd.CCSDBase.iterative_damping
+    conv_tol_normt         = ccsd.CCSDBase.conv_tol_normt
+
+    diis                   = ccsd.CCSDBase.diis
+    diis_space             = ccsd.CCSDBase.diis_space
+    diis_file              = None
+    diis_start_cycle       = ccsd.CCSDBase.diis_start_cycle
+    diis_start_energy_diff = ccsd.CCSDBase.diis_start_energy_diff
+
+    direct                 = ccsd.CCSDBase.direct
+    async_io               = None
+    incore_complete        = ccsd.CCSDBase.incore_complete
+    cc2                    = ccsd.CCSDBase.cc2
+    callback               = None
+
+    # functions
+    __init__           = ccsd.CCSDBase.__init__
+    ecc                = ccsd.CCSDBase.ecc
+    e_tot              = ccsd.CCSDBase.e_tot
+    nocc               = ccsd.CCSDBase.nocc
+    nmo                = ccsd.CCSDBase.nmo
+    reset              = ccsd.CCSDBase.reset
+    get_nocc           = ccsd.CCSDBase.get_nocc
+    get_nmo            = ccsd.CCSDBase.get_nmo
+    get_frozen_mask    = ccsd.CCSDBase.get_frozen_mask
+    get_e_hf           = ccsd.CCSDBase.get_e_hf
+    set_frozen         = ccsd.CCSDBase.set_frozen
+    dump_flags         = ccsd.CCSDBase.dump_flags
+    get_init_guess     = ccsd.CCSDBase.get_init_guess
+    init_amps          = ccsd.CCSDBase.init_amps
+    energy             = ccsd.CCSDBase.energy
+    _add_vvvv          = ccsd.CCSDBase._add_vvvv
+    update_amps        = update_amps
+    kernel             = ccsd.CCSDBase.kernel
+    _finalize          = ccsd.CCSDBase._finalize
+    as_scanner         = ccsd.CCSDBase.as_scanner
+    restore_from_diis_ = ccsd.CCSDBase.restore_from_diis_
+
+    solve_lambda         = NotImplemented
+    ccsd_t               = NotImplemented
+    ipccsd               = NotImplemented
+    eaccsd               = NotImplemented
+    eeccsd               = NotImplemented
+    eomee_ccsd_singlet   = NotImplemented
+    eomee_ccsd_triplet   = NotImplemented
+    eomsf_ccsd           = NotImplemented
+    eomip_method         = NotImplemented
+    eomea_method         = NotImplemented
+    eomee_method         = NotImplemented
+    make_rdm1            = NotImplemented
+    make_rdm2            = NotImplemented
+    ao2mo                = _make_eris_incore
+    run_diis             = ccsd.CCSDBase.run_diis
+    amplitudes_to_vector = ccsd.CCSDBase.amplitudes_to_vector
+    vector_to_amplitudes = ccsd.CCSDBase.vector_to_amplitudes
+    dump_chk             = None
+    density_fit          = NotImplemented
+    nuc_grad_method      = NotImplemented
+
+    # to_cpu can be reused only when __init__ still takes mf
+    def to_cpu(self):
+        mf = self._scf.to_cpu()
+        from importlib import import_module
+        mod = import_module(self.__module__.replace('gpu4pyscf', 'pyscf'))
+        cls = getattr(mod, self.__class__.__name__)
+        obj = cls(mf)
+        return obj
+
+CCSDBase.ccsd = ccsd.CCSDBase.ccsd
+
+class CCSD(CCSDBase):
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     def __init__(self, mf, *args, **kwargs):
         if hasattr(mf, 'to_cpu'):
@@ -539,5 +614,3 @@ class CCSD(ccsd.CCSD):
             lib.logger.warn(mf.mol, 'DF-CCSD not available. Run the standard CCSD.')
         ccsd.CCSD.__init__(self, mf, *args, **kwargs)
 
-    update_amps = update_amps
-    ao2mo = _make_eris_incore
