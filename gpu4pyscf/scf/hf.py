@@ -598,7 +598,7 @@ class SCF(pyscf_lib.StreamObject):
         logger.debug(self, 'cond(S) = %s', c)
         if cupy.max(c)*1e-17 > self.conv_tol:
             logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
-                        'SCF may be inaccurate and hard to converge.', numpy.max(cond))
+                        'SCF may be inaccurate and hard to converge.', cupy.max(cond))
         return super().check_sanity()
 
     build                    = hf.SCF.build
