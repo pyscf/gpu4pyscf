@@ -33,4 +33,4 @@ jobs:
       run: |
         echo $GITHUB_WORKSPACE
         export PYTHONPATH="${PYTHONPATH}:$GITHUB_WORKSPACE"
-        pytest --cov=gpu4pyscf
+        pytest --cov=$GITHUB_WORKSPACE
