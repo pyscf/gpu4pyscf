@@ -53,6 +53,15 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(mcc.t1 - ref.t1).max(), 0, 6)
         self.assertAlmostEqual(abs(mcc.t2 - ref.t2).max(), 0, 6)
 
+    def test_to_gpu(self):
+        mcc = ccsd_incore.CCSD(mf.to_gpu()).run()
+        mcc = mcc.run()
+        e_gpu = mcc.e_tot
+        mcc = mcc.to_gpu()
+        mcc = mcc.run()
+        e_cpu = mcc.e_tot
+        assert (e_cpu - e_gpu) < 1e-6
+
 
 if __name__ == '__main__':
     print("Full Tests for CCSD")

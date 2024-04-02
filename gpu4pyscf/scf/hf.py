@@ -28,7 +28,7 @@ from pyscf import lib as pyscf_lib
 from pyscf.scf import hf, jk, _vhf
 from gpu4pyscf import lib
 from gpu4pyscf.lib.cupy_helper import (eigh, load_library, tag_array,
-                                       return_cupy_array, to_cupy)
+                                       return_cupy_array, cond)
 from gpu4pyscf.scf import diis
 from gpu4pyscf.lib import logger
 
@@ -570,7 +570,7 @@ class SCF(pyscf_lib.StreamObject):
     max_cycle           = hf.SCF.max_cycle
     init_guess          = hf.SCF.init_guess
 
-    #disp                = hf.SCF.disp. # to be added later
+    disp                = None
     DIIS                = hf.SCF.DIIS
     diis                = hf.SCF.diis
     diis_space          = hf.SCF.diis_space
@@ -588,7 +588,19 @@ class SCF(pyscf_lib.StreamObject):
 
     # methods
     __init__                 = hf.SCF.__init__
-    check_sanity             = hf.SCF.check_sanity
+
+    def check_sanity(self):
+        s1e = self.get_ovlp()
+        if isinstance(s1e, cupy.ndarray) and s1e.ndim == 2:
+            c = cond(s1e)
+        else:
+            c = cupy.asarray([cond(xi) for xi in s1e])
+        logger.debug(self, 'cond(S) = %s', c)
+        if cupy.max(c)*1e-17 > self.conv_tol:
+            logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
+                        'SCF may be inaccurate and hard to converge.', cupy.max(cond))
+        return super().check_sanity()
+
     build                    = hf.SCF.build
     opt                      = NotImplemented
     dump_flags               = hf.SCF.dump_flags

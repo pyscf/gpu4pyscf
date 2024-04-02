@@ -360,13 +360,6 @@ class Gradients(uhf_grad.Gradients):
     def extra_force(self, atom_id, envs):
         return 0
 
-    def to_cpu(self):
-        from gpu4pyscf.lib import utils
-        mf = self.base.to_cpu()
-        gobj = uks_grad.Gradients(mf)
-        utils.to_cpu(self, out=gobj)
-        return gobj
-
 Grad = Gradients
 from gpu4pyscf import dft
 dft.uks.UKS.Gradients = lib.class_as_method(Gradients)

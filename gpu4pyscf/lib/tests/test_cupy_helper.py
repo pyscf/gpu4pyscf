@@ -18,7 +18,7 @@ import numpy
 import cupy
 from gpu4pyscf.lib.cupy_helper import (
     take_last2d, transpose_sum, krylov, unpack_sparse,
-    add_sparse, takebak, empty_mapped, dist_matrix)
+    add_sparse, takebak, empty_mapped, dist_matrix, cond)
 
 class KnownValues(unittest.TestCase):
     def test_take_last2d(self):
@@ -83,6 +83,12 @@ class KnownValues(unittest.TestCase):
         takebak(out, a, idx)
         out[:,idx] -= 1.
         assert abs(out).sum() == 0.
+
+    def test_cond(self):
+        a = cupy.random.rand(5,5)
+        cond_cpu = numpy.linalg.cond(a.get())
+        cond_gpu = cond(a)
+        assert abs(cond_cpu - cond_gpu) < 1e-5
 
 if __name__ == "__main__":
     print("Full tests for cupy helper module")

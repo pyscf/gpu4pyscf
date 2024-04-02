@@ -238,7 +238,15 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
 
 
 class Gradients(rhf_grad.Gradients):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+
+    from gpu4pyscf.lib.utils import to_gpu, device
+
+    _keys = {'with_df', 'auxbasis_response'}
+    def __init__(self, mf):
+        # Whether to include the response of DF auxiliary basis when computing
+        # nuclear gradients of J/K matrices
+        self.auxbasis_response = True
+        rhf_grad.Gradients.__init__(self, mf)
 
     _keys = {'with_df', 'auxbasis_response'}
     def __init__(self, mf):

@@ -644,6 +644,8 @@ class Hessian(HessianBase):
     partial_hess_elec = partial_hess_elec
     hess_elec = hess_elec
     make_h1 = make_h1
+    hess = NotImplemented
+    kernel = NotImplemented
 
     gen_hop = gen_hop
 
