@@ -625,6 +625,14 @@ class HessianBase(lib.StreamObject):
         if mol is None: mol = self.mol
         return hess_nuc(mol, atmlst)
 
+    def to_cpu(self):
+        mf = self.base.to_cpu()
+        from importlib import import_module
+        mod = import_module(self.__module__.replace('gpu4pyscf', 'pyscf'))
+        cls = getattr(mod, self.__class__.__name__)
+        obj = cls(mf)
+        return obj
+
 class Hessian(HessianBase):
     '''Non-relativistic restricted Hartree-Fock hessian'''
 
@@ -646,15 +654,8 @@ class Hessian(HessianBase):
     make_h1 = make_h1
     hess = NotImplemented
     kernel = NotImplemented
-
     gen_hop = gen_hop
 
-    def to_cpu(self):
-        from gpu4pyscf.lib import utils
-        mf = self.base.to_cpu()
-        gobj = rhf_hess.Hessian(mf)
-        utils.to_cpu(self, out=gobj)
-        return gobj
 # Inject to RHF class
 from gpu4pyscf import scf
 scf.hf.RHF.Hessian = lib.class_as_method(Hessian)

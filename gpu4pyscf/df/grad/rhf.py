@@ -248,13 +248,6 @@ class Gradients(rhf_grad.Gradients):
         self.auxbasis_response = True
         rhf_grad.Gradients.__init__(self, mf)
 
-    _keys = {'with_df', 'auxbasis_response'}
-    def __init__(self, mf):
-        # Whether to include the response of DF auxiliary basis when computing
-        # nuclear gradients of J/K matrices
-        self.auxbasis_response = True
-        rhf_grad.Gradients.__init__(self, mf)
-
     get_jk = get_jk
     grad_elec = rhf_grad.grad_elec
     check_sanity = NotImplemented
