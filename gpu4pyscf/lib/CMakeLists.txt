@@ -98,18 +98,19 @@ set(CXX_LINK_TEMPLATE "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LA
 
 option(BUILD_CUTLASS "Using cutlass" ON)
 if(BUILD_CUTLASS)
-  include(FetchContent)
-  FetchContent_Declare(
-    cutlass
-    GIT_REPOSITORY https://gitlab.com/libxc/libxc.git
+  include(ExternalProject)
+  ExternalProject_Add(cutlass
+    GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
     GIT_TAG        v3.4.0
+    CONFIGURE_COMMAND ""  # No configure step
+    BUILD_COMMAND ""      # No build step
+    INSTALL_COMMAND ""    # No install step
+    TEST_COMMAND ""       # No test step
   )
-  # FetchContent_MakeAvailable(cutlass) # this command leads to building cutlass which we don't want
-  FetchContent_GetProperties(cutlass)
-  if(NOT cutlass_POPULATED)
-    FetchContent_Populate(cutlass)
-    # now we can use cmake variable cutlass_SOURCE_DIR
-  endif()
+
+  # ExternalProject_Add automatically populates this variable
+  ExternalProject_Get_Property(cutlass SOURCE_DIR)
+  set(cutlass_SOURCE_DIR ${SOURCE_DIR})
 endif()
 
 add_subdirectory(gint)
