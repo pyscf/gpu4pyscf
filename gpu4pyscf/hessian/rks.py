@@ -695,5 +695,5 @@ class Hessian(rhf_hess.HessianBase):
     hess = NotImplemented
     kernel = NotImplemented
 
-from pyscf import dft
+from gpu4pyscf import dft
 dft.rks.RKS.Hessian = lib.class_as_method(Hessian)
