@@ -28,6 +28,8 @@ add_library(cupy_helper SHARED
   grouped_gemm.cu
   grouped_dot.cu
 )
+
+add_dependencies(cupy_helper cutlass)
 target_include_directories(cupy_helper PRIVATE ${cutlass_SOURCE_DIR}/tools/util/include ${cutlass_SOURCE_DIR}/include)
 
 set_target_properties(cupy_helper PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
