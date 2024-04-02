@@ -54,10 +54,9 @@ def _check_grad(grid_response=False, xc='B3LYP', disp='d3bj', tol=1e-6):
     cpu_gradient.grid_response = grid_response
     g_cpu = cpu_gradient.kernel()
 
-
     # TODO: use to_gpu functionality
     mf.__class__ = gpu4pyscf.dft.rks.RKS
-    mf._numint = numint.NumInt(xc=xc)
+    mf._numint = numint.NumInt()
     mf.grids = gpu4pyscf.dft.gen_grid.Grids(mol)
     mf.grids.level = grids_level
     mf.grids.prune = None

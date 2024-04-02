@@ -16,6 +16,7 @@
 import unittest
 from functools import reduce
 import numpy
+import pytest
 from pyscf import lib
 from pyscf import gto
 from pyscf import scf
@@ -36,6 +37,7 @@ def setUpModule():
     mol.basis = {'H': 'cc-pvdz',
                  'O': 'cc-pvdz',}
     mol.build()
+    mol.incore_anyway = True
     mf = scf.RHF(mol)
     mf.conv_tol = 1e-12
     mf.scf()
@@ -45,7 +47,9 @@ def tearDownModule():
     mol.stdout.close()
     del mol, mf
 
-
+import pyscf
+from packaging import version
+pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 class KnownValues(unittest.TestCase):
     def test_mp2(self):
         nocc = mol.nelectron//2
@@ -121,6 +125,33 @@ class KnownValues(unittest.TestCase):
         pt.with_df = mf.to_gpu().density_fit('weigend').with_df
         e = pt.kernel()[0]
         self.assertAlmostEqual(e, -0.14708846352674113, 8)
+
+    def test_to_cpu(self):
+        pt = mp_gpu.mp2.MP2(mf.to_gpu())
+        e_gpu = pt.kernel()[0]
+        pt = pt.to_cpu()
+        e_cpu = pt.kernel()[0]
+        assert abs(e_cpu - e_gpu) < 1e-6
+
+        pt = mp_gpu.dfmp2.DFMP2(mf.to_gpu())
+        e_gpu = pt.kernel()[0]
+        pt = pt.to_cpu()
+        e_cpu = pt.kernel()[0]
+        assert abs(e_cpu - e_gpu) < 1e-6
+
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    def test_to_gpu(self):
+        pt = mp_cpu.mp2.MP2(mf)
+        e_cpu = pt.kernel()[0]
+        pt = pt.to_gpu()
+        e_gpu = pt.kernel()[0]
+        assert abs(e_cpu - e_gpu) < 1e-6
+
+        pt = mp_cpu.dfmp2.DFMP2(mf)
+        e_cpu = pt.kernel()[0]
+        pt = pt.to_gpu()
+        e_gpu = pt.kernel()[0]
+        assert abs(e_cpu - e_gpu) < 1e-6
 
 if __name__ == "__main__":
     print("Full Tests for mp2")

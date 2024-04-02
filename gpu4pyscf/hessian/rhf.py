@@ -32,7 +32,7 @@ from pyscf import gto
 from pyscf.scf import _vhf
 
 # import _response_functions to load gen_response methods in SCF class
-from pyscf.scf import _response_functions  # noqa
+from gpu4pyscf.scf import _response_functions  # noqa
 # import pyscf.grad.rhf to activate nuc_grad_method method
 from pyscf.grad import rhf  # noqa
 from gpu4pyscf.scf import cphf
@@ -598,10 +598,45 @@ def hcore_generator(hessobj, mol=None):
         return hcore + hcore.conj().transpose(0,1,3,2)
     return get_hcore
 
-class Hessian(rhf_hess.Hessian):
+class HessianBase(lib.StreamObject):
+    # attributes
+    max_cycle   = rhf_hess.HessianBase.max_cycle
+    level_shift = rhf_hess.HessianBase.level_shift
+    _keys       = rhf_hess.HessianBase._keys
+
+    # methods
+    __init__        = rhf_hess.HessianBase.__init__
+    hess_elec       = rhf_hess.HessianBase.hess_elec
+    make_h1         = rhf_hess.HessianBase.make_h1
+    hcore_generator = hcore_generator  # the functionality is different from cpu version
+    kernel          = kernel
+    hess            = kernel
+
+    def get_hcore(self, mol=None):
+        if mol is None: mol = self.mol
+        return get_hcore(mol)
+
+    def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
+                  fx=None, atmlst=None, max_memory=4000, verbose=None):
+        return solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
+                         fx, atmlst, max_memory, verbose)
+
+    def hess_nuc(self, mol=None, atmlst=None):
+        if mol is None: mol = self.mol
+        return hess_nuc(mol, atmlst)
+
+    def to_cpu(self):
+        mf = self.base.to_cpu()
+        from importlib import import_module
+        mod = import_module(self.__module__.replace('gpu4pyscf', 'pyscf'))
+        cls = getattr(mod, self.__class__.__name__)
+        obj = cls(mf)
+        return obj
+
+class Hessian(HessianBase):
     '''Non-relativistic restricted Hartree-Fock hessian'''
 
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     def __init__(self, scf_method):
         self.verbose = scf_method.verbose
@@ -617,24 +652,8 @@ class Hessian(rhf_hess.Hessian):
     partial_hess_elec = partial_hess_elec
     hess_elec = hess_elec
     make_h1 = make_h1
-
-    def get_hcore(self, mol=None):
-        if mol is None: mol = self.mol
-        return get_hcore(mol)
-
-
-    def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
-                  fx=None, atmlst=None, max_memory=4000, verbose=None):
-        return solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
-                         fx, atmlst, max_memory, verbose)
-
-    def hess_nuc(self, mol=None, atmlst=None):
-        if mol is None: mol = self.mol
-        return hess_nuc(mol, atmlst)
-
-    kernel = kernel
-    hess = kernel
-
+    hess = NotImplemented
+    kernel = NotImplemented
     gen_hop = gen_hop
 
 # Inject to RHF class

@@ -20,8 +20,8 @@ import pyscf
 from pyscf import lib
 from pyscf import scf as cpu_scf
 from pyscf import dft as cpu_dft
-from gpu4pyscf import scf
-from gpu4pyscf.dft import rks
+from gpu4pyscf import scf as gpu_scf
+from gpu4pyscf import dft as gpu_dft
 
 lib.num_threads(8)
 
@@ -48,26 +48,43 @@ class KnownValues(unittest.TestCase):
     known values are obtained by Q-Chem
     '''
     def test_rhf(self):
-        mf = scf.RHF(mol)
+        mf = gpu_scf.RHF(mol)
         mf.max_cycle = 10
         mf.conv_tol = 1e-9
         e_tot = mf.kernel()
         assert np.allclose(e_tot, -76.0667232412)
 
     def test_to_cpu(self):
-        mf = scf.RHF(mol).to_cpu()
+        mf = gpu_scf.RHF(mol)
+        e_gpu = mf.kernel()
+        mf = mf.to_cpu()
+        e_cpu = mf.kernel()
         assert isinstance(mf, cpu_scf.hf.RHF)
-        # coming soon
-        #mf = mf.to_gpu()
-        #assert isinstance(mf, scf.RHF)
+        assert np.allclose(e_cpu, e_gpu)
 
-        mf = rks.RKS(mol).to_cpu()
+        mf = gpu_dft.rks.RKS(mol)
+        e_gpu = mf.kernel()
+        mf = mf.to_cpu()
+        e_cpu = mf.kernel()
         assert isinstance(mf, cpu_dft.rks.RKS)
         assert 'gpu' not in mf.grids.__module__
-        # coming soon
-        # mf = mf.to_gpu()
-        # assert isinstance(mf, rks.RKS)
-        #assert 'gpu' in mf.grids.__module__
+        assert np.allclose(e_cpu, e_gpu)
+
+    def test_to_gpu(self):
+        mf = cpu_scf.RHF(mol)
+        e_gpu = mf.kernel()
+        mf = mf.to_gpu()
+        e_cpu = mf.kernel()
+        assert isinstance(mf, gpu_scf.hf.RHF)
+        assert np.allclose(e_cpu, e_gpu)
+
+        mf = cpu_dft.rks.RKS(mol)
+        e_gpu = mf.kernel()
+        mf = mf.to_gpu()
+        e_cpu = mf.kernel()
+        assert isinstance(mf, gpu_dft.rks.RKS)
+        assert 'gpu' in mf.grids.__module__
+        assert np.allclose(e_cpu, e_gpu)
 
 if __name__ == "__main__":
     print("Full Tests for SCF")

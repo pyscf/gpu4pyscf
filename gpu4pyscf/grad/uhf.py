@@ -1,3 +1,18 @@
+# Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 import time
 import ctypes
 import numpy as np
@@ -17,8 +32,6 @@ LMAX_ON_GPU = 3
 FREE_CUPY_CACHE = True
 BINSIZE = 128
 libgvhf = load_library('libgvhf')
-
-
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
            verbose=None, atmlst=None):
@@ -211,7 +224,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             vj = vj.reshape(2,3,nao0,nao0)
         if with_k:
             vk = vk.reshape(2,3,nao0,nao0)
-    
+
     if out_cupy:
         return vj, vk
     else:
@@ -258,15 +271,15 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
     dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
     dm0_sf = dm0[0] + dm0[1]
-    dme0_sf = dme0[0] + dme0[1] 
-    
+    dme0_sf = dme0[0] + dme0[1]
+
     s1 = mf_grad.get_ovlp(mol)
-    
+
     if atmlst is None:
         atmlst = range(mol.natm)
     aoslices = mol.aoslice_by_atom()
     de = cupy.zeros((len(atmlst),3))
-        
+
     def calculate_h1e(h1_gpu, s1_gpu):
         # (\nabla i | hcore | j) - (\nabla i | j)
         h1_cpu = mf_grad.get_hcore(mol)
@@ -300,9 +313,9 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     ds = contract('xij,ij->xi', s1, dme0_sf)
     delec = 2.0*(dh - ds)
     delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
-    
+
     de = 2.0 * dvhf + dh1e + delec + extra_force
-    
+
     # for backward compatiability
     if(hasattr(mf, 'disp') and mf.disp is not None):
         g_disp = mf_grad.get_dispersion()
@@ -313,14 +326,14 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     return de.get()
 
 
-class Gradients(uhf.Gradients):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
-    
+class Gradients(rhf_grad.GradientsBase):
+    from gpu4pyscf.lib.utils import to_gpu, device
+
     grad_elec = grad_elec
-    grad_nuc = rhf_grad.grad_nuc 
+    grad_nuc = rhf_grad.grad_nuc
     get_veff =  get_veff
-    get_jk = rhf_grad._get_jk 
-    
+    get_jk = rhf_grad._get_jk
+
     def get_j(self, mol=None, dm=None, hermi=0, omega=None):
         vj, _ = self.get_jk(mol, dm, with_k=False, omega=omega)
         return vj
@@ -328,13 +341,13 @@ class Gradients(uhf.Gradients):
     def get_k(self, mol=None, dm=None, hermi=0, omega=None):
         _, vk = self.get_jk(mol, dm, with_j=False, omega=omega)
         return vk
-    
+
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         if mo_energy is None: mo_energy = self.base.mo_energy
         if mo_coeff is None: mo_coeff = self.base.mo_coeff
         if mo_occ is None: mo_occ = self.base.mo_occ
         return make_rdm1e(mo_energy, mo_coeff, mo_occ)
-    
+
     def extra_force(self, atom_id, envs):
         '''
         grid response is implemented get_veff

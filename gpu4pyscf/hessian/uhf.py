@@ -33,14 +33,14 @@ from pyscf import gto
 from pyscf.scf import _vhf
 
 # import _response_functions to load gen_response methods in SCF class
-from pyscf.scf import _response_functions  # noqa
+from gpu4pyscf.scf import _response_functions  # noqa
 # import pyscf.grad.rhf to activate nuc_grad_method method
 from pyscf.grad import rhf  # noqa
 from gpu4pyscf.scf import ucphf
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, print_mem_info
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.hessian import rhf as rhf_hess_gpu
+from gpu4pyscf.hessian.rhf import HessianBase
 
 def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
               mo1=None, mo_e1=None, h1ao=None,
@@ -504,26 +504,14 @@ def gen_hop(hobj, mo_energy=None, mo_coeff=None, mo_occ=None, verbose=None):
     return h_op, hdiag
 
 
-class Hessian(rhf_hess.HessianBase):
-    '''Non-relativistic restricted Hartree-Fock hessian'''
-
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
-
-    def __init__(self, scf_method):
-        self.verbose = scf_method.verbose
-        self.stdout = scf_method.stdout
-        self.mol = scf_method.mol
-        self.base = scf_method
-        self.chkfile = None #scf_method.chkfile
-        self.max_memory = self.mol.max_memory
-        self.atmlst = range(self.mol.natm)
-        self.de = numpy.zeros((0,0,3,3))  # (A,B,dR_A,dR_B)
-        self._keys = set(self.__dict__.keys())
+class Hessian(HessianBase):
+    '''Non-relativistic unrestricted Hartree-Fock hessian'''
 
     partial_hess_elec = partial_hess_elec
     hess_elec = hess_elec
     make_h1 = make_h1
-    kernel = rhf_hess_gpu.kernel
+    kernel = NotImplemented
+    hess = NotImplemented
 
     def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
                   fx=None, atmlst=None, max_memory=4000, verbose=None):

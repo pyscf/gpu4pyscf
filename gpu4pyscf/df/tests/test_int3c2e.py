@@ -29,13 +29,13 @@ libgint = load_library('libgint')
 check int3c2e consistency between pyscf and gpu4pyscf
 '''
 
-atom='''
+def setUpModule():
+    global mol, auxmol
+    atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
-    '''
-def setUpModule():
-    global mol, auxmol
+'''
     mol = pyscf.M(atom=atom,
                   basis= 'def2-tzvpp',
                   verbose=1,
@@ -123,6 +123,7 @@ class KnownValues(unittest.TestCase):
         charges = mol.atom_charges()
 
         fakemol = gto.fakemol_for_charges(coords)
+        fakemol.output = '/dev/null'
         int3c = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipip1').get()
 
         for i,q in enumerate(charges):
@@ -136,6 +137,7 @@ class KnownValues(unittest.TestCase):
         charges = mol.atom_charges()
 
         fakemol = gto.fakemol_for_charges(coords)
+        fakemol.output = '/dev/null'
         int3c = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipvip1').get()
 
         for i,q in enumerate(charges):

@@ -17,8 +17,10 @@ import unittest
 import numpy as np
 import pyscf
 from pyscf import lib
+from pyscf import scf as cpu_scf
 from pyscf.df import df_jk as cpu_df_jk
-from gpu4pyscf import scf
+from gpu4pyscf.df import df_jk as gpu_df_jk
+from gpu4pyscf import scf as gpu_scf
 
 lib.num_threads(8)
 
@@ -48,23 +50,27 @@ class KnownValues(unittest.TestCase):
     '''
     def test_rhf(self):
         print('------- HF -----------------')
-        mf = scf.RHF(mol).density_fit(auxbasis='def2-tzvpp-jkfit')
+        mf = gpu_scf.RHF(mol).density_fit(auxbasis='def2-tzvpp-jkfit')
         e_tot = mf.kernel()
         e_qchem = -76.0624582299
         print(f'diff from qchem {e_tot - e_qchem}')
         assert np.allclose(e_tot, e_qchem)
 
     def test_to_cpu(self):
-        mf = scf.RHF(mol).density_fit().to_cpu()
+        mf = gpu_scf.RHF(mol).density_fit()
+        e_gpu = mf.kernel()
+        mf = mf.to_cpu()
         assert isinstance(mf, cpu_df_jk._DFHF)
-        # TODO: coming soon
-        #mf = mf.to_gpu()
-        #assert isinstance(mf, df_jk._DFHF)
+        e_cpu = mf.kernel()
+        assert np.allclose(e_cpu, e_gpu)
 
-        # TODO: coming soon
-        #mf = mf.to_gpu()
-        #assert isinstance(mf, df_jk._DFHF)
-        #assert 'gpu' in mf.grids.__module__
+    def test_to_gpu(self):
+        mf = cpu_scf.RHF(mol).density_fit()
+        e_cpu = mf.kernel()
+        mf = mf.to_gpu()
+        assert isinstance(mf, gpu_df_jk._DFHF)
+        e_gpu = mf.kernel()
+        assert np.allclose(e_cpu, e_gpu)
 
 if __name__ == "__main__":
     print("Full Tests for restricted Hartree-Fock")

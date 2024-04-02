@@ -25,6 +25,12 @@ from gpu4pyscf.dft.libxc_structs import xc_func_type
 
 import site
 path_list = [os.path.abspath(os.path.join(__file__, '..', '..', '..'))] + site.getsitepackages()
+__version__ = '6.1' # hard coded
+
+# CPU routines
+is_nlc           = dft.libxc.is_nlc
+is_hybrid_xc     = dft.libxc.is_hybrid_xc
+test_deriv_order = dft.libxc.test_deriv_order
 
 for path in path_list:
     try:
@@ -99,6 +105,8 @@ class XCfun:
 
     def needs_laplacian(self):
         return dft.libxc.needs_laplacian(self.func_id)
+
+    rsh_coeff = dft.libxc.rsh_coeff
 
     def compute(self, inp, output=None, do_exc=True, do_vxc=True, do_fxc=False, do_kxc=False, do_lxc=False):
         if isinstance(inp, cupy.ndarray):

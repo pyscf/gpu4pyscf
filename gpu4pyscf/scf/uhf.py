@@ -109,6 +109,17 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              level_shift(s1e, dm[1], f[1], shiftb))
     return f
 
+def get_grad(mo_coeff, mo_occ, fock_ao):
+    '''UHF Gradients'''
+    occidxa = mo_occ[0] > 0
+    occidxb = mo_occ[1] > 0
+    viridxa = ~occidxa
+    viridxb = ~occidxb
+
+    ga = mo_coeff[0][:,viridxa].conj().T.dot(fock_ao[0].dot(mo_coeff[0][:,occidxa]))
+    gb = mo_coeff[1][:,viridxb].conj().T.dot(fock_ao[1].dot(mo_coeff[1][:,occidxb]))
+    return cupy.hstack((ga.ravel(), gb.ravel()))
+
 def energy_elec(mf, dm=None, h1e=None, vhf=None):
     '''Electronic energy of Unrestricted Hartree-Fock
 
@@ -138,17 +149,72 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
     logger.debug(mf, 'E1 = %s  Ecoul = %s', e1, e_coul.real)
     return e_elec, e_coul
 
-class UHF(uhf.UHF):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+class UHF(hf.SCF):
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     _keys = {'e_disp', 'screen_tol', 'conv_tol_cpscf', 'h1e', 's1e'}
+    def __init__(self, mol):
+        hf.SCF.__init__(self, mol)
+        self.nelec = None
 
-    screen_tol = 1e-14
-    conv_tol_cpscf = 1e-3
-    DIIS = diis.SCF_DIIS
-    get_jk = _get_jk
+    @property
+    def nelec(self):
+        if self._nelec is not None:
+            return self._nelec
+        else:
+            return self.mol.nelec
+    @nelec.setter
+    def nelec(self, x):
+        self._nelec = x
+
+    @property
+    def nelectron_alpha(self):
+        return self.nelec[0]
+    @nelectron_alpha.setter
+    def nelectron_alpha(self, x):
+        logger.warn(self, 'WARN: Attribute .nelectron_alpha is deprecated. '
+                    'Set .nelec instead')
+        #raise RuntimeError('API updates')
+        self.nelec = (x, self.mol.nelectron-x)
+
+    def dump_flags(self, verbose=None):
+        return
+
+    get_jk = hf._get_jk
     _eigh = staticmethod(eigh)
     get_fock = get_fock
+    get_occ = uhf.get_occ
+
+    def get_grad(self, mo_coeff, mo_occ, fock=None):
+        if fock is None:
+            dm1 = self.make_rdm1(mo_coeff, mo_occ)
+            fock = self.get_hcore(self.mol) + self.get_veff(self.mol, dm1)
+        return get_grad(mo_coeff, mo_occ, fock)
+
+    make_rdm2                = NotImplemented
+    energy_elec              = energy_elec
+    get_init_guess           = hf.return_cupy_array(uhf.UHF.get_init_guess)
+    init_guess_by_minao      = uhf.UHF.init_guess_by_minao
+    init_guess_by_atom       = uhf.UHF.init_guess_by_atom
+    init_guess_by_huckel     = uhf.UHF.init_guess_by_huckel
+    init_guess_by_mod_huckel = uhf.UHF.init_guess_by_mod_huckel
+    init_guess_by_1e         = uhf.UHF.init_guess_by_1e
+    init_guess_by_chkfile    = NotImplemented
+
+    analyze            = NotImplemented
+    mulliken_pop       = NotImplemented
+    mulliken_spin_pop  = NotImplemented
+    mulliken_meta      = NotImplemented
+    mulliken_meta_spin = NotImplemented
+    canonicalize       = NotImplemented
+    det_ovlp           = NotImplemented
+    make_asym_dm       = NotImplemented
+    _finalize          = uhf.UHF._finalize
+    #screen_tol = 1e-14
+    #conv_tol_cpscf = 1e-3
+    DIIS = diis.SCF_DIIS
+    #get_jk = _get_jk
+
     get_hcore = hf.RHF.get_hcore
     get_ovlp = hf.RHF.get_ovlp
     get_init_guess = hf.return_cupy_array(uhf.UHF.get_init_guess)
@@ -221,3 +287,8 @@ class UHF(uhf.UHF):
         from gpu4pyscf.grad import uhf
         return uhf.Gradients(self)
 
+    def to_cpu(self):
+        from gpu4pyscf.lib import utils
+        mf = uhf.UHF(self.mol)
+        utils.to_cpu(self, mf)
+        return mf

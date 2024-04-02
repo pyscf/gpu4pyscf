@@ -15,11 +15,13 @@
 
 import unittest
 import numpy as np
+import cupy
 import pyscf
 from pyscf import lib
+from pyscf import scf as cpu_scf
 from pyscf.df import df_jk as cpu_df_jk
-from gpu4pyscf import scf
-from gpu4pyscf.df import df_jk
+from gpu4pyscf import scf as gpu_scf
+from gpu4pyscf.df import df_jk as gpu_df_jk
 
 lib.num_threads(8)
 
@@ -43,31 +45,76 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
+def _check_grad(tol=1e-5):
+    mf = gpu_scf.uhf.UHF(mol)#.density_fit()
+    mf.conv_tol = 1e-10
+    mf.verbose = 1
+    mf.kernel()
+
+    g = mf.nuc_grad_method()
+    g.auxbasis_response = True
+
+    g_scanner = g.as_scanner()
+    g_analy = g_scanner(mol)[1]
+    print('analytical gradient:')
+    print(g_analy)
+
+    f_scanner = mf.as_scanner()
+    coords = mol.atom_coords()
+    grad_fd = np.zeros_like(coords)
+    eps = 1.0/1024
+    for i in range(len(coords)):
+        for j in range(3):
+            coords = mol.atom_coords()
+            coords[i,j] += eps
+            mol.set_geom_(coords, unit='Bohr')
+            mol.build()
+            e0 = f_scanner(mol)
+
+            coords[i,j] -= 2.0 * eps
+            mol.set_geom_(coords, unit='Bohr')
+            mol.build()
+            e1 = f_scanner(mol)
+
+            coords[i,j] += eps
+            mol.set_geom_(coords, unit='Bohr')
+            grad_fd[i,j] = (e0-e1)/2.0/eps
+    grad_fd = np.array(grad_fd).reshape(-1,3)
+    print('finite difference gradient:')
+    print(grad_fd)
+    print('difference between analytical and finite difference gradient:', cupy.linalg.norm(g_analy - grad_fd))
+    assert(cupy.linalg.norm(g_analy - grad_fd) < tol)
+
 class KnownValues(unittest.TestCase):
     '''
     known values are obtained by PySCF
     '''
     def test_uhf(self):
-        print('------- HF -----------------')
-        mf = scf.UHF(mol).density_fit(auxbasis='def2-tzvpp-jkfit')
+        print('------- UHF -----------------')
+        mf = gpu_scf.UHF(mol).density_fit(auxbasis='def2-tzvpp-jkfit')
         e_tot = mf.kernel()
         e_pyscf = -75.6599919479438
         print(f'diff from pyscf {e_tot - e_pyscf}')
         assert np.allclose(e_tot, e_pyscf)
 
+    def test_grad_uhf(self):
+        _check_grad(tol=1e-5)
+
     def test_to_cpu(self):
-        mf = scf.UHF(mol).density_fit().to_cpu()
+        mf = gpu_scf.UHF(mol).density_fit()
+        e_gpu = mf.kernel()
+        mf = mf.to_cpu()
+        e_cpu = mf.kernel()
         assert isinstance(mf, cpu_df_jk._DFHF)
-        # TODO: coming soon
-        #mf = mf.to_gpu()
-        #assert isinstance(mf, df_jk._DFHF)
-        # grids are still not df._key
-        #assert 'gpu' not in mf.grids.__module__
-        
-        # TODO: coming soon
-        #mf = mf.to_gpu()
-        #assert isinstance(mf, df_jk._DFHF)
-        #assert 'gpu' in mf.grids.__module__
+        assert np.allclose(e_gpu, e_cpu)
+
+    def test_to_gpu(self):
+        mf = cpu_scf.UHF(mol).density_fit()
+        e_cpu = mf.kernel()
+        mf = mf.to_gpu()
+        e_gpu = mf.kernel()
+        assert isinstance(mf, gpu_df_jk._DFHF)
+        assert np.allclose(e_gpu, e_cpu)
 
 if __name__ == "__main__":
     print("Full Tests for unrestricted Hartree-Fock")

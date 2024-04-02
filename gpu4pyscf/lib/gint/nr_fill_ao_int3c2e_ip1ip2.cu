@@ -71,7 +71,7 @@ int GINTfill_int3c2e_ip1ip2(cudaStream_t stream, BasisProdCache *bpcache, double
     ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
     ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
     GINTEnvVars envs;
-    
+
     int ng[4] = {1,0,1,0};
 
     GINTinit_EnvVars(&envs, cp_ij, cp_kl, ng);
@@ -79,7 +79,7 @@ int GINTfill_int3c2e_ip1ip2(cudaStream_t stream, BasisProdCache *bpcache, double
     if (envs.nrys_roots > 9) {
         return 2;
     }
-    
+
     // TODO: improve the efficiency by unrolling
     if (envs.nrys_roots > 1) {
         int16_t *idx4c = (int16_t *)malloc(sizeof(int16_t) * envs.nf * 3);
@@ -87,13 +87,13 @@ int GINTfill_int3c2e_ip1ip2(cudaStream_t stream, BasisProdCache *bpcache, double
         checkCudaErrors(cudaMemcpyToSymbol(c_idx4c, idx4c, sizeof(int16_t)*envs.nf*3));
         free(idx4c);
     }
-    
+
     int kl_bin, ij_bin1;
-    
+
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
-    
+
     ERITensor eritensor;
     eritensor.stride_j = strides[1];
     eritensor.stride_k = strides[2];
@@ -105,7 +105,7 @@ int GINTfill_int3c2e_ip1ip2(cudaStream_t stream, BasisProdCache *bpcache, double
     eritensor.nao = nao;
     eritensor.data = eri;
     BasisProdOffsets offsets;
-    
+
     int *bas_pairs_locs = bpcache->bas_pairs_locs;
     int *primitive_pairs_locs = bpcache->primitive_pairs_locs;
     for (kl_bin = 0; kl_bin < nbins; kl_bin++) {
@@ -136,7 +136,6 @@ int GINTfill_int3c2e_ip1ip2(cudaStream_t stream, BasisProdCache *bpcache, double
             return err;
         }
     }
-    
     return 0;
 }
 

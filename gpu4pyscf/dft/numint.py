@@ -1325,18 +1325,37 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             block_id += 1
             yield ao_mask, idx, weight, coords
 
-class NumInt(numint.NumInt):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+class LibXCMixin:
+    libxc = libxc
+    omega = None
+    to_cpu = NotImplemented
+
+    def hybrid_coeff(self, xc_code, spin=0):
+        return dft.libxc.hybrid_coeff(xc_code, spin)
+
+    def nlc_coeff(self, xc_code):
+        return dft.libxc.nlc_coeff(xc_code)
+
+    def rsh_coeff(sef, xc_code):
+        return dft.libxc.rsh_coeff(xc_code)
+    eval_xc      = NotImplemented
+    eval_xc_eff  = NotImplemented
+
+    def _xc_type(self, xc_code):
+        return dft.libxc.xc_type(xc_code)
+
+    rsh_and_hybrid_coeff = numint.LibXCMixin.rsh_and_hybrid_coeff
+
+_NumIntMixin = LibXCMixin
+from gpu4pyscf.lib import utils
+class NumInt(lib.StreamObject, LibXCMixin):
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     _keys = {'screen_idx', 'xcfuns', 'gdftopt'}
-
-    def __init__(self, xc='LDA'):
-        super().__init__()
-        self.gdftopt = None
-        self.pair_mask = None
-        self.screen_index = None
-        self.xcfuns = None        # can be multiple xc functionals
-        self.xc = xc
+    gdftopt      = None
+    pair_mask    = None
+    screen_index = None
+    xcfuns       = None        # can be multiple xc functionals
 
     def build(self, mol, coords):
         self.gdftopt = _GDFTOpt.from_mol(mol)
@@ -1375,6 +1394,10 @@ class NumInt(numint.NumInt):
     eval_rho2 = eval_rho2
     eval_ao = eval_ao
     #eval_rho2 = staticmethod(eval_rho2)
+
+    def to_cpu(self):
+        ni = numint.NumInt()
+        return ni
 
 def _make_pairs2shls_idx(pair_mask, l_bas_loc, hermi=0):
     if hermi:

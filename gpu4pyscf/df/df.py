@@ -32,24 +32,38 @@ MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
 LINEAR_DEP_TOL = 1e-7
 
-class DF(df.DF):
+class DF(lib.StreamObject):
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    _keys = {'intopt'}
+    _keys = {'intopt', 'mol', 'auxmol'}
 
     def __init__(self, mol, auxbasis=None):
-        super().__init__(mol, auxbasis)
+        self.mol = mol
+        self.stdout = mol.stdout
+        self.verbose = mol.verbose
+        self.max_memory = mol.max_memory
+        self._auxbasis = auxbasis
+
         self.auxmol = None
         self.intopt = None
         self.nao = None
         self.naux = None
         self.cd_low = None
         self._cderi = None
+        self._rsh_df = {}
+
+    @property
+    def auxbasis(self):
+        return self._auxbasis
+    @auxbasis.setter
+    def auxbasis(self, x):
+        if self._auxbasis != x:
+            self.reset()
+            self._auxbasis = x
 
     def to_cpu(self):
         from gpu4pyscf.lib.utils import to_cpu
         obj = to_cpu(self)
-        del obj.intopt, obj.cd_low, obj.nao, obj.naux
         return obj.reset()
 
     def build(self, direct_scf_tol=1e-14, omega=None):
@@ -167,15 +181,17 @@ class DF(df.DF):
                 buf = buf_prefetch
 
     def reset(self, mol=None):
-        '''
-        reset object for scanner
-        '''
-        super().reset(mol)
+        '''Reset mol and clean up relevant attributes for scanner mode'''
+        if mol is not None:
+            self.mol = mol
+            self.auxmol = None
+        self._cderi = None
+        self._vjopt = None
+        self._rsh_df = {}
         self.intopt = None
         self.nao = None
         self.naux = None
         self.cd_low = None
-        self._cderi = None
         return self
 
     get_ao_eri = get_eri = NotImplemented

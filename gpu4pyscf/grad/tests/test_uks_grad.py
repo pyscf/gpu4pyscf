@@ -57,7 +57,7 @@ def _check_grad(grid_response=False, xc='B3LYP', disp='d3bj', tol=1e-6):
 
     # TODO: use to_gpu functionality
     mf.__class__ = gpu4pyscf.dft.uks.UKS
-    mf._numint = numint.NumInt(xc=xc)
+    mf._numint = numint.NumInt()
     mf.grids = gpu4pyscf.dft.gen_grid.Grids(mol)
     mf.grids.level = grids_level
     mf.grids.prune = None

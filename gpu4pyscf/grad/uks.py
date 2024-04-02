@@ -23,6 +23,7 @@ import numpy as np
 import cupy
 import pyscf
 from pyscf import lib
+from pyscf.grad import uks as uks_grad
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint, xc_deriv
@@ -343,7 +344,22 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
     return exc, -vmat
 
 
-class Gradients(uhf_grad.Gradients, pyscf.grad.uks.Gradients):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+class Gradients(uhf_grad.Gradients):
+    from gpu4pyscf.lib.utils import to_gpu, device
+    grid_response = uks_grad.Gradients.grid_response
+    _keys = uks_grad.Gradients._keys
+
+    def __init__(self, mf):
+        uhf_grad.Gradients.__init__(self, mf)
+        self.grids = None
+        self.nlcgrids = None
+        self.grid_response = False
 
     get_veff = get_veff
+    # TODO: add grid response into this function
+    def extra_force(self, atom_id, envs):
+        return 0
+
+Grad = Gradients
+from gpu4pyscf import dft
+dft.uks.UKS.Gradients = lib.class_as_method(Gradients)

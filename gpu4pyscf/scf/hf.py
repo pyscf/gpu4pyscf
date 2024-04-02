@@ -28,7 +28,7 @@ from pyscf import lib as pyscf_lib
 from pyscf.scf import hf, jk, _vhf
 from gpu4pyscf import lib
 from gpu4pyscf.lib.cupy_helper import (eigh, load_library, tag_array,
-                                       return_cupy_array, to_cupy)
+                                       return_cupy_array, cond)
 from gpu4pyscf.scf import diis
 from gpu4pyscf.lib import logger
 
@@ -458,81 +458,6 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
-# tempory implemention, will be replaced after pyscf 2.2.0
-def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
-                      singlet=None, hermi=0, max_memory=None):
-    '''Generate a function to compute the product of RHF response function and
-    RHF density matrices.
-
-    Kwargs:
-        singlet (None or boolean) : If singlet is None, response function for
-            orbital hessian or CPHF will be generated. If singlet is boolean,
-            it is used in TDDFT response kernel.
-    '''
-    if mo_coeff is None: mo_coeff = mf.mo_coeff
-    if mo_occ is None: mo_occ = mf.mo_occ
-    mol = mf.mol
-    if isinstance(mf, hf.KohnShamDFT):
-        from pyscf.dft import numint
-        ni = mf._numint
-        ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
-        if getattr(mf, 'nlc', '') != '':
-            logger.warn(mf, 'NLC functional found in DFT object.  Its second '
-                        'deriviative is not available. Its contribution is '
-                        'not included in the response function.')
-        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
-        hybrid = abs(hyb) > 1e-10
-
-        # mf can be pbc.dft.RKS object with multigrid
-        if (not hybrid and
-            'MultiGridFFTDF' == getattr(mf, 'with_df', None).__class__.__name__):
-            from pyscf.pbc.dft import multigrid
-            dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-            return multigrid._gen_rhf_response(mf, dm0, singlet, hermi)
-
-        if singlet is None:
-            # for ground state orbital hessian
-            rho0, vxc, fxc = ni.cache_xc_kernel(mol, mf.grids, mf.xc,
-                                                mo_coeff, mo_occ, 0)
-        else:
-            rho0, vxc, fxc = ni.cache_xc_kernel(mol, mf.grids, mf.xc,
-                                                [mo_coeff]*2, [mo_occ*.5]*2, spin=1)
-        dm0 = None  #mf.make_rdm1(mo_coeff, mo_occ)
-
-        if singlet is None:
-            # Without specify singlet, used in ground state orbital hessian
-            def vind(dm1):
-                # The singlet hessian
-                if hermi == 2:
-                    v1 = cupy.zeros_like(dm1)
-                else:
-                    v1 = ni.nr_rks_fxc(mol, mf.grids, mf.xc, dm0, dm1, 0, hermi,
-                                       rho0, vxc, fxc, max_memory=max_memory)
-                if hybrid or abs(alpha) > 1e-10:
-                    if hermi != 2:
-                        vj, vk = mf.get_jk(mol, dm1, hermi=hermi)
-                        vk *= hyb
-                        if omega > 1e-10:  # For range separated Coulomb
-                            vk += mf.get_k(mol, dm1, hermi, omega) * (alpha-hyb)
-                        v1 += vj - .5 * vk
-                    else:
-                        v1 -= .5 * hyb * mf.get_k(mol, dm1, hermi=hermi)
-                elif hermi != 2:
-                    v1 += mf.get_j(mol, dm1, hermi=hermi)
-                return v1
-        else:
-            raise NotImplementedError('only singlet response is supported!')
-
-    else:  # HF
-        if (singlet is None or singlet) and hermi != 2:
-            def vind(dm1):
-                vj, vk = mf.get_jk(mol, dm1, hermi=hermi)
-                return vj - .5 * vk
-        else:
-            def vind(dm1):
-                return -.5 * mf.get_k(mol, dm1, hermi=hermi)
-
-    return vind
 
 def _quad_moment(mf, mol=None, dm=None, unit='Debye-Ang'):
     from pyscf.data import nist
@@ -600,8 +525,147 @@ def scf(mf, dm0=None, **kwargs):
     mf._finalize()
     return mf.e_tot
 
-class RHF(hf.RHF):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+def as_scanner(mf):
+    if isinstance(mf, pyscf_lib.SinglePointScanner):
+        return mf
+
+    logger.info(mf, 'Create scanner for %s', mf.__class__)
+    name = mf.__class__.__name__ + SCF_Scanner.__name_mixin__
+    return pyscf_lib.set_class(SCF_Scanner(mf), (SCF_Scanner, mf.__class__), name)
+
+class SCF_Scanner(pyscf_lib.SinglePointScanner):
+    def __init__(self, mf_obj):
+        self.__dict__.update(mf_obj.__dict__)
+        self._last_mol_fp = mf_obj.mol.ao_loc
+
+    def __call__(self, mol_or_geom, **kwargs):
+        if isinstance(mol_or_geom, gto.MoleBase):
+            mol = mol_or_geom
+        else:
+            mol = self.mol.set_geom_(mol_or_geom, inplace=False)
+
+        # Cleanup intermediates associated to the previous mol object
+        self.reset(mol)
+
+        if 'dm0' in kwargs:
+            dm0 = kwargs.pop('dm0')
+        elif self.mo_coeff is None:
+            dm0 = None
+        else:
+            dm0 = None
+            if cupy.array_equal(self._last_mol_fp, mol.ao_loc):
+                dm0 = self.make_rdm1()
+            else:
+                raise NotImplementedError
+        self.mo_coeff = None  # To avoid last mo_coeff being used by SOSCF
+        e_tot = self.kernel(dm0=dm0, **kwargs)
+        self._last_mol_fp = mol.ao_loc
+        return e_tot
+
+class SCF(pyscf_lib.StreamObject):
+
+    # attributes
+    conv_tol            = hf.SCF.conv_tol
+    conv_tol_grad       = hf.SCF.conv_tol_grad
+    max_cycle           = hf.SCF.max_cycle
+    init_guess          = hf.SCF.init_guess
+
+    disp                = None
+    DIIS                = hf.SCF.DIIS
+    diis                = hf.SCF.diis
+    diis_space          = hf.SCF.diis_space
+    diis_damp           = hf.SCF.diis_damp
+    diis_start_cycle    = hf.SCF.diis_start_cycle
+    diis_file           = hf.SCF.diis_file
+    diis_space_rollback = hf.SCF.diis_space_rollback
+    damp                = hf.SCF.damp
+    level_shift         = hf.SCF.level_shift
+    direct_scf          = hf.SCF.direct_scf
+    direct_scf_tol      = hf.SCF.direct_scf_tol
+    conv_check          = hf.SCF.conv_check
+    callback            = hf.SCF.callback
+    _keys               = hf.SCF._keys
+
+    # methods
+    __init__                 = hf.SCF.__init__
+
+    def check_sanity(self):
+        s1e = self.get_ovlp()
+        if isinstance(s1e, cupy.ndarray) and s1e.ndim == 2:
+            c = cond(s1e)
+        else:
+            c = cupy.asarray([cond(xi) for xi in s1e])
+        logger.debug(self, 'cond(S) = %s', c)
+        if cupy.max(c)*1e-17 > self.conv_tol:
+            logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
+                        'SCF may be inaccurate and hard to converge.', cupy.max(cond))
+        return super().check_sanity()
+
+    build                    = hf.SCF.build
+    opt                      = NotImplemented
+    dump_flags               = hf.SCF.dump_flags
+    get_fock                 = hf.SCF.get_fock
+    get_occ                  = hf.SCF.get_occ
+    get_grad                 = hf.SCF.get_grad
+    dump_chk                 = NotImplemented
+    init_guess_by_minao      = hf.SCF.init_guess_by_minao
+    init_guess_by_atom       = hf.SCF.init_guess_by_atom
+    init_guess_by_huckel     = hf.SCF.init_guess_by_huckel
+    init_guess_by_mod_huckel = hf.SCF.init_guess_by_mod_huckel
+    init_guess_by_1e         = hf.SCF.init_guess_by_1e
+    init_guess_by_chkfile    = NotImplemented
+    from_chk                 = NotImplemented
+    get_init_guess           = hf.SCF.get_init_guess
+    make_rdm1                = hf.SCF.make_rdm1
+    make_rdm2                = hf.SCF.make_rdm2
+    energy_elec              = hf.SCF.energy_elec
+    energy_tot               = hf.SCF.energy_tot
+    energy_nuc               = hf.SCF.energy_nuc
+    check_convergence        = None
+    _eigh                    = staticmethod(eigh)
+    eig                      = hf.SCF.eig
+
+    scf                      = hf.SCF.scf
+    as_scanner               = hf.SCF.as_scanner
+    _finalize                = hf.SCF._finalize
+    init_direct_scf          = hf.SCF.init_direct_scf
+    get_jk                   = hf.SCF.get_jk
+    get_j                    = hf.SCF.get_j
+    get_k                    = hf.SCF.get_k
+    get_veff                 = hf.SCF.get_veff
+    analyze                  = hf.SCF.analyze
+    mulliken_meta            = hf.SCF.mulliken_meta
+    pop                      = hf.SCF.pop
+    dip_moment               = hf.SCF.dip_moment
+    _is_mem_enough           = NotImplemented
+    density_fit              = NotImplemented
+    sfx2c1e                  = NotImplemented
+    x2c1e                    = NotImplemented
+    x2c                      = NotImplemented
+    newton                   = NotImplemented
+    remove_soscf             = NotImplemented
+    stability                = NotImplemented
+    nuc_grad_method          = NotImplemented
+    update_                  = NotImplemented
+    istype                   = hf.SCF.istype
+
+    def reset(self, mol=None):
+        if mol is not None:
+            self.mol = mol
+        self._opt_gpu = None
+        self._opt_gpu_omega = None
+        return self
+
+class KohnShamDFT:
+    '''
+    A mock DFT base class, to be compatible with PySCF
+    '''
+
+from gpu4pyscf.lib import utils
+class RHF(SCF):
+
+    to_gpu = utils.to_gpu
+    device = utils.device
 
     _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'screen_tol', 'conv_tol_cpscf'}
 
@@ -616,7 +680,6 @@ class RHF(hf.RHF):
     get_occ = get_occ
     get_veff = get_veff
     get_grad = staticmethod(get_grad)
-    gen_response = _gen_rhf_response
     quad_moment = _quad_moment
     energy_tot = energy_tot
 
@@ -645,12 +708,6 @@ class RHF(hf.RHF):
     scf = scf
     kernel = scf
 
-    def reset(self, mol=None):
-        super().reset(mol)
-        self._opt_gpu = None
-        self._opt_gpu_omega = None
-        return self
-
     def nuc_grad_method(self):
         from gpu4pyscf.grad import rhf
         return rhf.Gradients(self)
@@ -659,7 +716,12 @@ class RHF(hf.RHF):
         import gpu4pyscf.df.df_jk
         return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
 
-class _VHFOpt(_vhf.VHFOpt):
+    def to_cpu(self):
+        mf = hf.RHF(self.mol)
+        utils.to_cpu(self, out=mf)
+        return mf
+
+class _VHFOpt:
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     def __init__(self, mol, intor, prescreen='CVHFnoscreen',
@@ -816,6 +878,10 @@ class _VHFOpt(_vhf.VHFOpt):
             mol._env.ctypes.data_as(ctypes.c_void_p))
         logger.timer(mol, 'Initialize GPU cache', *cput1)
         return self
+
+    init_cvhf_direct = _vhf.VHFOpt.init_cvhf_direct
+    get_q_cond       = _vhf.VHFOpt.get_q_cond
+    set_dm           = _vhf.VHFOpt.set_dm
 
     def clear(self):
         _vhf.VHFOpt.__del__(self)

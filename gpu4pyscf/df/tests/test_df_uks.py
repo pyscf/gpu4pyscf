@@ -17,8 +17,10 @@ import unittest
 import numpy as np
 import pyscf
 from pyscf import lib
+from pyscf.dft import uks as cpu_uks
 from pyscf.df import df_jk as cpu_df_jk
-from gpu4pyscf.dft import uks
+from gpu4pyscf.dft import uks as gpu_uks
+from gpu4pyscf.df import df_jk as gpu_df_jk
 
 lib.num_threads(8)
 
@@ -44,7 +46,7 @@ def tearDownModule():
     del mol
 
 def run_dft(xc):
-    mf = uks.UKS(mol, xc=xc).density_fit(auxbasis='def2-tzvpp-jkfit')
+    mf = gpu_uks.UKS(mol, xc=xc).density_fit(auxbasis='def2-tzvpp-jkfit')
     mf.grids.atom_grid = (99,590)
     mf.nlcgrids.atom_grid = (50,194)
     mf.conv_tol = 1e-10
@@ -98,15 +100,20 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(e_tot, e_pyscf)
 
     def test_to_cpu(self):
-        mf = uks.UKS(mol).density_fit().to_cpu()
+        mf = gpu_uks.UKS(mol).density_fit()
+        e_gpu = mf.kernel()
+        mf = mf.to_cpu()
         assert isinstance(mf, cpu_df_jk._DFHF)
-        # grids are still not df._key
-        #assert 'gpu' not in mf.grids.__module__
+        e_cpu = mf.kernel()
+        np.allclose(e_cpu, e_gpu)
 
-        # TODO: coming soon
-        #mf = mf.to_gpu()
-        #assert isinstance(mf, df_jk._DFHF)
-        #assert 'gpu' in mf.grids.__module__
+    def test_to_gpu(self):
+        mf = cpu_uks.UKS(mol).density_fit()
+        e_gpu = mf.kernel()
+        mf = mf.to_gpu()
+        assert isinstance(mf, gpu_df_jk._DFHF)
+        e_cpu = mf.kernel()
+        np.allclose(e_cpu, e_gpu)
 
 if __name__ == "__main__":
     print("Full Tests for unrestricted Kohn-Sham")

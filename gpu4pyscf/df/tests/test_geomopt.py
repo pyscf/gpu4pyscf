@@ -94,7 +94,6 @@ class KnownValues(unittest.TestCase):
             [ 0.0000000000,     0.0000000000,     0.1164022656],
             [-0.7617088263,    -0.0000000000,    -0.4691011328],
             [0.7617088263,    -0.0000000000,    -0.4691011328]])
-
         assert np.linalg.norm(coords - coords_qchem) < 1e-4
 
     def test_uhf_geomopt(self):
@@ -109,6 +108,7 @@ class KnownValues(unittest.TestCase):
             [0.7519034531,    -0.0000000000,    -0.4619624892]])
 
         assert np.linalg.norm(coords - coords_qchem) < 1e-4
+
 if __name__ == "__main__":
     print("Full Tests for geometry optimization")
     unittest.main()

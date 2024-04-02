@@ -69,7 +69,7 @@ MGGA_M06 = 'MGGA_C_M06'
 class KnownValues(unittest.TestCase):
 
     def _check_vxc(self, method, xc):
-        ni = NumInt(xc=xc)
+        ni = NumInt()
         fn = getattr(ni, method)
         n, e, v = fn(mol, grids_gpu, xc, dm1, hermi=1)
         v = [x.get() for x in v]
@@ -133,7 +133,7 @@ class KnownValues(unittest.TestCase):
             mol, grids_gpu, xc, cupy.asarray(mo_coeff), cupy.asarray(mo_occ), spin)
         v = ni.nr_uks_fxc(mol, grids_gpu, xc, dms=t1, fxc=fxc, hermi=hermi)
 
-        ni = ni.to_cpu()
+        ni = pyscf_numint()
         dm0 = mo_coeff.dot(mo_coeff.T)
         rho_ref, vxc_ref, fxc_ref = ni.cache_xc_kernel(
             mol, grids_cpu, xc, mo_coeff, mo_occ, spin)
@@ -156,7 +156,6 @@ class KnownValues(unittest.TestCase):
     def test_rks_mgga(self):
         self._check_vxc('nr_rks', MGGA_M06)
 
-    # Not implemented yet
     def test_uks_lda(self):
         self._check_vxc('nr_uks', LDA)#'lda', -6.362059440515177)
 
