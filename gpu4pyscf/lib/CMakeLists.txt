@@ -101,7 +101,7 @@ if(BUILD_CUTLASS)
   include(FetchContent)
   FetchContent_Declare(
     cutlass
-    GIT_REPOSITORY "https://github.com/NVIDIA/cutlass"
+    GIT_REPOSITORY https://gitlab.com/libxc/libxc.git
     GIT_TAG        v3.4.0
   )
   # FetchContent_MakeAvailable(cutlass) # this command leads to building cutlass which we don't want
