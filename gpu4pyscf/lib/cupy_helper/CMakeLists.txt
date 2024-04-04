@@ -25,9 +25,12 @@ add_library(cupy_helper SHARED
   async_d2h_2d.cu
   add_sparse.cu
   dist_matrix.cu
+  grouped_gemm.cu
+  grouped_dot.cu
 )
 
-set_target_properties(cupy_helper PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+add_dependencies(cupy_helper cutlass)
+target_include_directories(cupy_helper PRIVATE ${cutlass_SOURCE_DIR}/tools/util/include ${cutlass_SOURCE_DIR}/include)
 
-target_link_libraries(cupy_helper)
+set_target_properties(cupy_helper PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+set_target_properties(cupy_helper PROPERTIES CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")

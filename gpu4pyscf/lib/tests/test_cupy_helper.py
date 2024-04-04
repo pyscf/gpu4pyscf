@@ -18,7 +18,8 @@ import numpy
 import cupy
 from gpu4pyscf.lib.cupy_helper import (
     take_last2d, transpose_sum, krylov, unpack_sparse,
-    add_sparse, takebak, empty_mapped, dist_matrix, cond)
+    add_sparse, takebak, empty_mapped, dist_matrix,
+    grouped_dot, grouped_gemm, cond)
 
 class KnownValues(unittest.TestCase):
     def test_take_last2d(self):
@@ -89,6 +90,75 @@ class KnownValues(unittest.TestCase):
         cond_cpu = numpy.linalg.cond(a.get())
         cond_gpu = cond(a)
         assert abs(cond_cpu - cond_gpu) < 1e-5
+    def test_grouped_dot(self):
+        dtype = cupy.float64
+        def initialize(dtype, M, N, K):
+            sizes = [(M, K), (N, K), (M, N)]
+            return [cupy.random.random(size).astype(dtype) for size in sizes]
+
+        def generate_problems(problems):
+            valid_sizes = [31]
+            As, Bs, Cs = [], [], []
+            for _ in range(problems):
+                M = numpy.random.choice(valid_sizes)
+                N = M
+                K = 63
+                A, B, C = initialize(dtype, M, N, K)
+                As.append(A)
+                Bs.append(B)
+                Cs.append(C)
+            return As, Bs, Cs
+
+        groups = 20
+        As, Bs, Cs = generate_problems(groups)
+        res_Cs = Cs
+
+        for i in range(groups):
+            Cs[i] = cupy.dot(As[i].T, Bs[i])
+
+        grouped_dot(As, Bs, res_Cs)
+        res_Cs_2 = grouped_dot(As, Bs)
+
+        res_Cs = cupy.concatenate(res_Cs, axis=None)
+        res_Cs_2 = cupy.concatenate(res_Cs, axis=None)
+        ans_Cs = cupy.concatenate(Cs, axis=None)
+        assert(cupy.linalg.norm(res_Cs - ans_Cs) < 1e-8)
+        assert(cupy.linalg.norm(res_Cs_2 - ans_Cs) < 1e-8)
+
+    def test_grouped_gemm(self):
+        dtype = cupy.float64
+        def initialize(dtype, M, N, K):
+            sizes = [(M, K), (M, N), (K, N)]
+            return [cupy.random.random(size).astype(dtype) for size in sizes]
+
+        def generate_problems(problems):
+            valid_sizes = [31]
+            As, Bs, Cs = [], [], []
+            for _ in range(problems):
+                M = numpy.random.choice(valid_sizes)
+                N = M
+                K = 63
+                A, B, C = initialize(dtype, M, N, K)
+                As.append(A)
+                Bs.append(B)
+                Cs.append(C)
+            return As, Bs, Cs
+
+        groups = 20
+        As, Bs, Cs = generate_problems(groups)
+        res_Cs = Cs
+
+        for i in range(groups):
+            Cs[i] = cupy.dot(As[i].T, Bs[i])
+
+        grouped_gemm(As, Bs, res_Cs)
+        res_Cs_2 = grouped_gemm(As, Bs)
+
+        res_Cs = cupy.concatenate(res_Cs, axis=None)
+        res_Cs_2 = cupy.concatenate(res_Cs, axis=None)
+        ans_Cs = cupy.concatenate(Cs, axis=None)
+        assert(cupy.linalg.norm(res_Cs - ans_Cs) < 1e-8)
+        assert(cupy.linalg.norm(res_Cs_2 - ans_Cs) < 1e-8)
 
 if __name__ == "__main__":
     print("Full tests for cupy helper module")
