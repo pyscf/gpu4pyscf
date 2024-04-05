@@ -24,6 +24,7 @@ jobs:
         python3 -m pip install --upgrade pip
         pip3 install flake8 pytest coverage gpu4pyscf-libxc-cuda11x pytest-cov
         pip3 install pyscf --upgrade
+        git config --global core.compression 9
     - name: Build GPU4PySCF
       run: |
         export CUDA_HOME=/usr/local/cuda
