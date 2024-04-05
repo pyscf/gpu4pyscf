@@ -314,6 +314,17 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     delec = 2.0*(dh - ds)
     delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
 
+
+    '''
+    print('dvhf')
+    print(dvhf)
+    print('dh1e')
+    print(dh1e)
+    print('delec')
+    print(delec)
+    print('extra')
+    print(extra_force)
+    '''
     de = 2.0 * dvhf + dh1e + delec + extra_force
 
     # for backward compatiability

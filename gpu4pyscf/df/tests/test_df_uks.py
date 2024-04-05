@@ -22,7 +22,7 @@ from pyscf.df import df_jk as cpu_df_jk
 from gpu4pyscf.dft import uks as gpu_uks
 from gpu4pyscf.df import df_jk as gpu_df_jk
 
-lib.num_threads(8)
+lib.num_threads(1)
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -34,22 +34,29 @@ bas='def2tzvpp'
 grids_level = 5
 
 def setUpModule():
-    global mol
-    mol = pyscf.M(atom=atom, basis=bas, charge=1, spin=1, max_memory=32000)
-    mol.output = '/dev/null'
-    mol.build()
-    mol.verbose = 1
+    global mol_sph, mol_cart
+    mol_sph = pyscf.M(atom=atom, basis=bas, charge=1, spin=1, max_memory=32000)
+    mol_sph.output = '/dev/null'
+    mol_sph.build()
+    mol_sph.verbose = 1
+
+    mol_cart = pyscf.M(atom=atom, basis=bas, charge=1, spin=1, cart=1, max_memory=32000)
+    mol_cart.output = '/dev/null'
+    mol_cart.build()
+    mol_cart.verbose = 1
 
 def tearDownModule():
-    global mol
-    mol.stdout.close()
-    del mol
+    global mol_sph, mol_cart
+    mol_sph.stdout.close()
+    mol_cart.stdout.close()
+    del mol_sph, mol_cart
 
-def run_dft(xc):
+def run_dft(mol, xc, disp=None):
     mf = gpu_uks.UKS(mol, xc=xc).density_fit(auxbasis='def2-tzvpp-jkfit')
     mf.grids.atom_grid = (99,590)
     mf.nlcgrids.atom_grid = (50,194)
     mf.conv_tol = 1e-10
+    mf.disp = disp
     e_dft = mf.kernel()
     return e_dft
 
@@ -59,61 +66,83 @@ class KnownValues(unittest.TestCase):
     '''
     def test_uks_lda(self):
         print('------- LDA ----------------')
-        e_tot = run_dft("LDA,VWN5")
+        e_tot = run_dft(mol_sph, "LDA,VWN5")
         e_pyscf = -75.42319302444447
         print(f'diff from pyscf {e_tot - e_pyscf}')
-        assert np.allclose(e_tot, e_pyscf)
+        assert np.abs(e_tot - e_pyscf) < 1e-5
 
     def test_uks_pbe(self):
         print('------- PBE ----------------')
-        e_tot = run_dft('PBE')
+        e_tot = run_dft(mol_sph, 'PBE')
         e_pyscf = -75.91291185761159
         print(f'diff from pyscf {e_tot - e_pyscf}')
-        assert np.allclose(e_tot, e_pyscf)
+        assert np.abs(e_tot - e_pyscf) < 1e-5
 
     def test_uks_b3lyp(self):
         print('-------- B3LYP -------------')
-        e_tot = run_dft('B3LYP')
+        e_tot = run_dft(mol_sph, 'B3LYP')
         e_pyscf = -75.9987750880688
         print(f'diff from pyscf {e_tot - e_pyscf}')
-        assert np.allclose(e_tot, e_pyscf)
+        assert np.abs(e_tot - e_pyscf) < 1e-5
 
     def test_uks_m06(self):
         print('--------- M06 --------------')
-        e_tot = run_dft("M06")
+        e_tot = run_dft(mol_sph, "M06")
         e_pyscf = -75.96097588711966
         print(f'diff from pyscf {e_tot - e_pyscf}')
-        assert np.allclose(e_tot, e_pyscf)
+        assert np.abs(e_tot - e_pyscf) < 1e-5
 
     def test_uks_wb97(self):
         print('-------- wB97 --------------')
-        e_tot = run_dft("HYB_GGA_XC_WB97")
+        e_tot = run_dft(mol_sph, "HYB_GGA_XC_WB97")
         e_pyscf = -75.98337641724999
         print(f'diff from pyscf {e_tot - e_pyscf}')
-        assert np.allclose(e_tot, e_pyscf)
+        assert np.abs(e_tot - e_pyscf) < 1e-5
 
     def test_uks_wb97m_v(self):
         print('-------- wB97m-v --------------')
-        e_tot = run_dft("HYB_MGGA_XC_WB97M_V")
+        e_tot = run_dft(mol_sph, "HYB_MGGA_XC_WB97M_V")
         e_pyscf = -75.96980058343685
         print(f'diff from pyscf {e_tot - e_pyscf}')
-        assert np.allclose(e_tot, e_pyscf)
+        assert np.abs(e_tot - e_pyscf) < 1e-5
+
+    def test_uks_b3lyp_d3(self):
+        print('-------- B3LYP D3(BJ) -------------')
+        e_tot = run_dft(mol_sph, 'B3LYP', disp='d3bj')
+        e_pyscf = -75.9993489428 #-75.9987750880688
+        print(f'diff from pyscf {e_tot - e_pyscf}')
+        assert np.abs(e_tot - e_pyscf) < 1e-5
+
+    def test_uks_b3lyp_d4(self):
+        print('-------- B3LYP D4 -------------')
+        e_tot = run_dft(mol_sph, 'B3LYP', disp='d4')
+        e_pyscf =  -75.9989312099 #-75.9987750880688
+        print(f'diff from pyscf {e_tot - e_pyscf}')
+        assert np.abs(e_tot - e_pyscf) < 1e-5
 
     def test_to_cpu(self):
-        mf = gpu_uks.UKS(mol).density_fit()
+        mf = gpu_uks.UKS(mol_sph).density_fit()
         e_gpu = mf.kernel()
         mf = mf.to_cpu()
         assert isinstance(mf, cpu_df_jk._DFHF)
         e_cpu = mf.kernel()
-        np.allclose(e_cpu, e_gpu)
+        assert np.abs(e_cpu - e_gpu) < 1e-5
 
     def test_to_gpu(self):
-        mf = cpu_uks.UKS(mol).density_fit()
+        mf = cpu_uks.UKS(mol_sph).density_fit()
         e_gpu = mf.kernel()
         mf = mf.to_gpu()
         assert isinstance(mf, gpu_df_jk._DFHF)
         e_cpu = mf.kernel()
-        np.allclose(e_cpu, e_gpu)
+        assert np.abs(e_cpu - e_gpu) < 1e-5
+
+    def test_uks_cart(self):
+        print('-------- B3LYP cart-------------')
+        mf = gpu_uks.UKS(mol_cart, xc='B3LYP').density_fit()
+        e_tot = mf.kernel()
+        e_pyscf = mf.to_cpu().kernel()
+        print(f'diff from pyscf {e_tot - e_pyscf}')
+        assert np.abs(e_tot - e_pyscf) < 1e-5
 
 if __name__ == "__main__":
     print("Full Tests for unrestricted Kohn-Sham")

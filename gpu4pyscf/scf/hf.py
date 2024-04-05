@@ -87,7 +87,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     dm_ctr_cond = np.max(
         [pyscf_lib.condense('absmax', x, l_ctr_ao_locs) for x in dms.get()], axis=0)
 
-    dm_shl = cupy.zeros([l_ctr_shell_locs[-1], l_ctr_shell_locs[-1]])
+    dm_shl = cupy.zeros([n_dm, l_ctr_shell_locs[-1], l_ctr_shell_locs[-1]])
     assert dms.flags.c_contiguous
     size_l = np.array([1,3,6,10,15,21,28])
     l_ctr = vhfopt.uniq_l_ctr[:,0]
@@ -101,13 +101,14 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             j0 = l_ctr_ao_locs[j]
             j1 = l_ctr_ao_locs[j+1]
             nj_shls = (j1-j0)//size_l[lj]
-            sub_dm = dms[0][i0:i1,j0:j1].reshape([ni_shls, size_l[li], nj_shls, size_l[lj]])
-            dm_shl[r:r+ni_shls, c:c+nj_shls] = cupy.max(sub_dm, axis=[1,3])
+            for idm in range(n_dm):
+                sub_dm = dms[idm][i0:i1,j0:j1].reshape([ni_shls, size_l[li], nj_shls, size_l[lj]])
+                dm_shl[idm, r:r+ni_shls, c:c+nj_shls] = cupy.max(cupy.abs(sub_dm), axis=[1,3])
             c += nj_shls
         r += ni_shls
-
+    dm_shl = cupy.max(dm_shl, axis=0)
     dm_shl = cupy.log(dm_shl)
-    nshls = dm_shl.shape[0]
+    nshls = dm_shl.shape[1]
     if hermi != 1:
         dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
     fn = libgvhf.GINTbuild_jk
@@ -177,6 +178,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             #           time.perf_counter() - t0)
             #print(li, lj, lk, ll, time.perf_counter() - t0)
             #exit()
+
     if with_j:
         vj_ao = []
         #vj = [cupy.einsum('pi,pq,qj->ij', coeff, x, coeff) for x in vj]
@@ -280,7 +282,6 @@ def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
                                 getattr(mf.opt, '_dmcondname', 'CVHFsetnr_direct_scf_dm'))
                 vhfopt.build(mf.direct_scf_tol)
                 mf._opt_gpu_omega = vhfopt
-
     vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega, verbose=log)
     log.timer('vj and vk on gpu', *cput0)
     return vj, vk
@@ -598,7 +599,7 @@ class SCF(pyscf_lib.StreamObject):
         logger.debug(self, 'cond(S) = %s', c)
         if cupy.max(c)*1e-17 > self.conv_tol:
             logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
-                        'SCF may be inaccurate and hard to converge.', cupy.max(cond))
+                        'SCF may be inaccurate and hard to converge.', cupy.max(c))
         return super().check_sanity()
 
     build                    = hf.SCF.build
@@ -654,6 +655,7 @@ class SCF(pyscf_lib.StreamObject):
             self.mol = mol
         self._opt_gpu = None
         self._opt_gpu_omega = None
+        self.scf_summary = {}
         return self
 
 class KohnShamDFT:

@@ -20,7 +20,7 @@ import copy
 import cupy
 import numpy
 from cupy import cublas
-from pyscf import lib, scf, __config__
+from pyscf import lib, __config__
 from pyscf.scf import dhf
 from pyscf.df import df_jk, addons
 from gpu4pyscf.lib import logger
@@ -97,7 +97,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
         with_df.verbose = mf.verbose
         with_df.auxbasis = auxbasis
 
-    if isinstance(mf, df_jk._DFHF):
+    if isinstance(mf, _DFHF):
         if mf.with_df is None:
             mf.with_df = with_df
         elif getattr(mf.with_df, 'auxbasis', None) != auxbasis:
@@ -240,7 +240,6 @@ class _DFHF:
 
     def to_cpu(self):
         obj = self.undo_df().to_cpu().density_fit()
-        print(type(obj))
         return utils.to_cpu(self, obj)
 
 

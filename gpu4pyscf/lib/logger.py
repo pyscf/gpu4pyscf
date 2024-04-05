@@ -92,6 +92,7 @@ def _timer_debug2(rec, msg, cpu0=None, wall0=None, gpu0=None, sync=True):
 
 info = lib.logger.info
 note = lib.logger.note
+warn = lib.logger.warn
 debug = lib.logger.debug
 debug1 = lib.logger.debug1
 debug2 = lib.logger.debug2

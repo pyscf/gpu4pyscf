@@ -34,7 +34,7 @@ scf_tol = 1e-10
 max_scf_cycles = 50
 screen_tol = 1e-14
 
-mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
+mol = pyscf.M(atom=atom, basis=bas, cart=1, max_memory=32000)
 
 mol.verbose = 4
 mf_GPU = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
@@ -47,6 +47,7 @@ mf_GPU.conv_tol_cpscf = 1e-3
 # Compute Energy
 e_dft = mf_GPU.kernel()
 print(f"total energy = {e_dft}") # -76.26736519501688
+exit()
 
 # Compute Gradient
 g = mf_GPU.nuc_grad_method()

@@ -19,9 +19,8 @@ import copy
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import scf
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.cupy_helper import print_mem_info, tag_array, unpack_tril, contract, load_library, take_last2d
+from gpu4pyscf.lib.cupy_helper import tag_array, contract, load_library, take_last2d
 from gpu4pyscf.grad import uhf as uhf_grad
-from gpu4pyscf.grad.rhf import grad_elec
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
 
@@ -62,13 +61,13 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         mo_coeff = cupy.asarray(mf_grad.base.mo_coeff)
     if mo_occ is None:
         mo_occ = cupy.asarray(mf_grad.base.mo_occ)
-    sph_ao_idx = intopt.sph_ao_idx
-    dm = take_last2d(dm0, sph_ao_idx)
+    ao_idx = intopt.ao_idx
+    dm = take_last2d(dm0, ao_idx)
     if dm2 is not None:
-        dm2_tmp = take_last2d(dm2, sph_ao_idx)
+        dm2_tmp = take_last2d(dm2, ao_idx)
     # (L|ij) -> rhoj: (L), rhok: (L|oo)
     orbo = mo_coeff[:,mo_occ>0] * mo_occ[mo_occ>0] ** 0.5
-    orbo = orbo[sph_ao_idx, :]
+    orbo = orbo[ao_idx, :]
     nocc = orbo.shape[-1]
 
     # (L|ij) -> rhoj: (L), rhok: (L|oo)
@@ -109,8 +108,8 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     else:
         int2c_e1 = auxmol.intor('int2c2e_ip1')
     int2c_e1 = cupy.asarray(int2c_e1)
-    sph_aux_idx = intopt.sph_aux_idx
-    rev_aux_idx = np.argsort(sph_aux_idx)
+    aux_ao_idx = intopt.aux_ao_idx
+    rev_aux_idx = np.argsort(aux_ao_idx)
     auxslices = auxmol.aoslice_by_atom()
     aux_cart2sph = intopt.aux_cart2sph
     low_t = low.T.copy()
@@ -123,8 +122,13 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
             rhoj = solve_triangular(low_t, rhoj, lower=False, overwrite_b=True)
             if dm2 is not None:
                 rhoj2 = solve_triangular(low_t, rhoj2, lower=False, overwrite_b=True)
-        rhoj_cart = contract('pq,q->p', aux_cart2sph, rhoj)
+        if not auxmol.cart:
+            rhoj_cart = contract('pq,q->p', aux_cart2sph, rhoj)
+        else:
+            rhoj_cart = rhoj
+
         rhoj = rhoj[rev_aux_idx]
+
         if dm2 is not None:
             rhoj2 = rhoj2[rev_aux_idx]
         tmp = contract('xpq,q->xp', int2c_e1, rhoj)
@@ -144,7 +148,10 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         vkaux = -contract('xpq,pq->xp', int2c_e1, tmp)
         vkaux_2c = cupy.array([-vkaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
         vkaux = tmp = None
-        rhok_cart = contract('pq,qkl->pkl', aux_cart2sph, rhok)
+        if not auxmol.cart:
+            rhok_cart = contract('pq,qkl->pkl', aux_cart2sph, rhok)
+        else:
+            rhok_cart = rhok
         rhok = None
     low_t = None
     t0 = log.timer_debug1('rhoj and rhok', *t0)
@@ -156,15 +163,21 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     # rebuild with aosym
     intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False,
                  group_size_aux=block_size)#, group_size=block_size)
-
-    # sph2cart for ao
-    cart2sph = intopt.cart2sph
-    orbo_cart = cart2sph @ orbo
-    if dm2 is None:
-        dm_cart = cart2sph @ dm @ cart2sph.T
+    if not intopt._mol.cart:
+        # sph2cart for ao
+        cart2sph = intopt.cart2sph
+        orbo_cart = cart2sph @ orbo
+        if dm2 is None:
+            dm_cart = cart2sph @ dm @ cart2sph.T
+        else:
+            dm2_tmp = take_last2d(dm2, ao_idx)
+            dm_cart = cart2sph @ dm2_tmp @ cart2sph.T
     else:
-        dm2_tmp = take_last2d(dm2, sph_ao_idx)
-        dm_cart = cart2sph @ dm2_tmp @ cart2sph.T
+        if dm2 is None:
+            dm_cart = dm
+        else:
+            dm_cart = take_last2d(dm2, ao_idx)
+        orbo_cart = orbo
     dm = orbo = None
 
     vj = vk = rhoj_tmp = rhok_tmp = None
@@ -272,10 +285,12 @@ class Gradients(uhf_grad.Gradients):
 
 
     def get_veff(self, mol=None, dm=None):
-        vj0, vk0, vjaux0, vkaux0 = self.get_jk(mol, dm[0], mo_coeff=self.base.mo_coeff[0], mo_occ=self.base.mo_occ[0])
-        vj1, vk1, vjaux1, vkaux1 = self.get_jk(mol, dm[1], mo_coeff=self.base.mo_coeff[1], mo_occ=self.base.mo_occ[1])
-        vj0_m1, vjaux0_m1 = self.get_j(mol, dm[0], mo_coeff=self.base.mo_coeff[0], mo_occ=self.base.mo_occ[0], dm2=dm[1])
-        vj1_m0, vjaux1_m0 = self.get_j(mol, dm[1], mo_coeff=self.base.mo_coeff[1], mo_occ=self.base.mo_occ[1], dm2=dm[0])
+        mo_a, mo_b = self.base.mo_coeff
+        mo_occa, mo_occb = self.base.mo_occ
+        vj0, vk0, vjaux0, vkaux0 = self.get_jk(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa)
+        vj1, vk1, vjaux1, vkaux1 = self.get_jk(mol, dm[1], mo_coeff=mo_b, mo_occ=mo_occb)
+        vj0_m1, vjaux0_m1 = self.get_j(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa, dm2=dm[1])
+        vj1_m0, vjaux1_m0 = self.get_j(mol, dm[1], mo_coeff=mo_b, mo_occ=mo_occb, dm2=dm[0])
         vhf = vj0 + vj1 + vj0_m1 + vj1_m0 - vk0 - vk1
         if self.auxbasis_response:
             e1_aux = vjaux0 + vjaux1 + vjaux0_m1 + vjaux1_m0 - vkaux0 - vkaux1

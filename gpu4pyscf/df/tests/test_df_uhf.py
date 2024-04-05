@@ -34,21 +34,28 @@ H       0.7570000000     0.0000000000    -0.4696000000
 bas='def2tzvpp'
 
 def setUpModule():
-    global mol
-    mol = pyscf.M(atom=atom, basis=bas, charge=1, spin=1, max_memory=32000)
-    mol.output = '/dev/null'
-    mol.build()
-    mol.verbose = 1
+    global mol_sph, mol_cart
+    mol_sph = pyscf.M(atom=atom, basis=bas, charge=1, spin=1, max_memory=32000)
+    mol_sph.output = '/dev/null'
+    mol_sph.build()
+    mol_sph.verbose = 1
+
+    mol_cart = pyscf.M(atom=atom, basis=bas, charge=1, spin=1, cart=1, max_memory=32000)
+    mol_cart.output = '/dev/null'
+    mol_cart.build()
+    mol_cart.verbose = 1
 
 def tearDownModule():
-    global mol
-    mol.stdout.close()
-    del mol
+    global mol_sph, mol_cart
+    mol_sph.stdout.close()
+    mol_cart.stdout.close()
+    del mol_sph, mol_cart
 
-def _check_grad(tol=1e-5):
-    mf = gpu_scf.uhf.UHF(mol)#.density_fit()
+def _check_grad(mol, tol=1e-5, disp=None):
+    mf = gpu_scf.uhf.UHF(mol).density_fit()
     mf.conv_tol = 1e-10
     mf.verbose = 1
+    mf.disp = disp
     mf.kernel()
 
     g = mf.nuc_grad_method()
@@ -91,30 +98,67 @@ class KnownValues(unittest.TestCase):
     '''
     def test_uhf(self):
         print('------- UHF -----------------')
-        mf = gpu_scf.UHF(mol).density_fit(auxbasis='def2-tzvpp-jkfit')
+        mf = gpu_scf.UHF(mol_sph).density_fit(auxbasis='def2-tzvpp-jkfit')
         e_tot = mf.kernel()
         e_pyscf = -75.6599919479438
         print(f'diff from pyscf {e_tot - e_pyscf}')
-        assert np.allclose(e_tot, e_pyscf)
+        assert np.abs(e_tot - e_pyscf) < 1e-5
 
+    def test_cart(self):
+        print('------- cart UHF -------------')
+        mf = gpu_scf.UHF(mol_cart).density_fit(auxbasis='def2-tzvpp-jkfit')
+        e_gpu = mf.kernel()
+        e_cpu = mf.to_cpu().kernel()
+        print(f'diff from pyscf {e_gpu - e_cpu}')
+        assert np.abs(e_gpu - e_cpu) < 1e-5
+
+    def test_uhf_d3(self):
+        print('------- UHF with D3(BJ) -----')
+        mf = gpu_scf.UHF(mol_sph).density_fit(auxbasis='def2-tzvpp-jkfit')
+        mf.disp = 'd3bj'
+        e_tot = mf.kernel()
+        e_pyscf = -75.6645005436
+        print(f'diff from pyscf {e_tot - e_pyscf}')
+        assert np.abs(e_tot - e_pyscf) < 1e-5
+    '''
+    def test_uhf_d4(self):
+        print('------- UHF with D4 -------')
+        mf = gpu_scf.UHF(mol).density_fit(auxbasis='def2-tzvpp-jkfit')
+        mf.disp = 'd4'
+        e_tot = mf.kernel()
+        e_pyscf = -75.66097302959608
+        print(f'diff from pyscf {e_tot - e_pyscf}')
+        assert np.abs(e_tot - e_pyscf) < 1e-5
+    '''
     def test_grad_uhf(self):
-        _check_grad(tol=1e-5)
+        _check_grad(mol_sph, tol=1e-5)
+
+    def test_grad_cart(self):
+        print('-------- UHF Cart Gradient ------')
+        _check_grad(mol_cart, tol=1e-5)
+
+    def test_grad_uhf_d3(self):
+        _check_grad(mol_sph, tol=1e-5, disp='d3bj')
+
+    def test_grad_uhf_d4(self):
+        _check_grad(mol_sph, tol=1e-5, disp='d4')
+
 
     def test_to_cpu(self):
-        mf = gpu_scf.UHF(mol).density_fit()
+        mf = gpu_scf.UHF(mol_sph).density_fit()
         e_gpu = mf.kernel()
         mf = mf.to_cpu()
         e_cpu = mf.kernel()
         assert isinstance(mf, cpu_df_jk._DFHF)
-        assert np.allclose(e_gpu, e_cpu)
+        assert np.abs(e_gpu - e_cpu) < 1e-5
 
     def test_to_gpu(self):
-        mf = cpu_scf.UHF(mol).density_fit()
+        mf = cpu_scf.UHF(mol_sph).density_fit()
         e_cpu = mf.kernel()
         mf = mf.to_gpu()
         e_gpu = mf.kernel()
         assert isinstance(mf, gpu_df_jk._DFHF)
-        assert np.allclose(e_gpu, e_cpu)
+        assert np.abs(e_gpu - e_cpu) < 1e-5
 
 if __name__ == "__main__":
     print("Full Tests for unrestricted Hartree-Fock")

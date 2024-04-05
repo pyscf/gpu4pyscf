@@ -91,20 +91,23 @@ def get_veff(ks_grad, mol=None, dm=None):
     vxc = cupy.asarray(vxc)
 
     if not ni.libxc.is_hybrid_xc(mf.xc):
-        vj0, vjaux0 = ks_grad.get_j(mol, dm[0], mo_coeff=ks_grad.base.mo_coeff[0], mo_occ=ks_grad.base.mo_occ[0])
-        vj1, vjaux1 = ks_grad.get_j(mol, dm[1], mo_coeff=ks_grad.base.mo_coeff[1], mo_occ=ks_grad.base.mo_occ[1])
-        vj0_m1, vjaux0_m1 = ks_grad.get_j(mol, dm[0], mo_coeff=ks_grad.base.mo_coeff[0], mo_occ=ks_grad.base.mo_occ[0], dm2=dm[1])
-        vj1_m0, vjaux1_m0 = ks_grad.get_j(mol, dm[1], mo_coeff=ks_grad.base.mo_coeff[1], mo_occ=ks_grad.base.mo_occ[1], dm2=dm[0])
+        mo_a, mo_b = ks_grad.base.mo_coeff
+        mo_occa, mo_occb = ks_grad.base.mo_occ
+        vj0, vjaux0 = ks_grad.get_j(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa)
+        vj1, vjaux1 = ks_grad.get_j(mol, dm[1], mo_coeff=mo_b, mo_occ=mo_occb)
+        vj0_m1, vjaux0_m1 = ks_grad.get_j(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa, dm2=dm[1])
+        vj1_m0, vjaux1_m0 = ks_grad.get_j(mol, dm[1], mo_coeff=mo_b, mo_occ=mo_occb, dm2=dm[0])
         if ks_grad.auxbasis_response:
             e1_aux = vjaux0 + vjaux1 + vjaux0_m1 + vjaux1_m0
         vxc += vj0 + vj1 + vj0_m1 + vj1_m0
     else:
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
-
-        vj0, vk0, vjaux0, vkaux0 = ks_grad.get_jk(mol, dm[0], mo_coeff=ks_grad.base.mo_coeff[0], mo_occ=ks_grad.base.mo_occ[0])
-        vj1, vk1, vjaux1, vkaux1 = ks_grad.get_jk(mol, dm[1], mo_coeff=ks_grad.base.mo_coeff[1], mo_occ=ks_grad.base.mo_occ[1])
-        vj0_m1, vjaux0_m1 = ks_grad.get_j(mol, dm[0], mo_coeff=ks_grad.base.mo_coeff[0], mo_occ=ks_grad.base.mo_occ[0], dm2=dm[1])
-        vj1_m0, vjaux1_m0 = ks_grad.get_j(mol, dm[1], mo_coeff=ks_grad.base.mo_coeff[1], mo_occ=ks_grad.base.mo_occ[1], dm2=dm[0])
+        mo_a, mo_b = ks_grad.base.mo_coeff
+        mo_occa, mo_occb = ks_grad.base.mo_occ
+        vj0, vk0, vjaux0, vkaux0 = ks_grad.get_jk(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa)
+        vj1, vk1, vjaux1, vkaux1 = ks_grad.get_jk(mol, dm[1], mo_coeff=mo_b, mo_occ=mo_occb)
+        vj0_m1, vjaux0_m1 = ks_grad.get_j(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa, dm2=dm[1])
+        vj1_m0, vjaux1_m0 = ks_grad.get_j(mol, dm[1], mo_coeff=mo_b, mo_occ=mo_occb, dm2=dm[0])
         vj = vj0 + vj1 + vj0_m1 + vj1_m0
         vk = (vk0 + vk1) * hyb
         if ks_grad.auxbasis_response:

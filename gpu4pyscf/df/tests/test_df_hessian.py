@@ -47,9 +47,17 @@ def tearDownModule():
     mol_cart.stdout.close()
     del mol_sph, mol_cart
 
-def _make_rhf(mol):
-    mf = scf.RHF(mol).density_fit(auxbasis='ccpvtz-jkfit')
+def _make_rhf(mol, disp=None):
+    mf = scf.RHF(mol).density_fit()
     mf.conv_tol = 1e-12
+    mf.disp = disp
+    mf.kernel()
+    return mf
+
+def _make_uhf(mol, disp=None):
+    mf = scf.UHF(mol).density_fit()
+    mf.conv_tol = 1e-12
+    mf.disp = disp
     mf.kernel()
     return mf
 
@@ -120,9 +128,10 @@ def _check_dft_hessian(mf, h, ix=0, iy=0, tol=1e-3):
     assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
 
 class KnownValues(unittest.TestCase):
-    def test_hessian_rhf(self):
+    def test_hessian_rhf(self, disp=None):
         print('-----testing DF RHF Hessian----')
         mf = _make_rhf(mol_sph)
+        mf.disp = disp
         mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
@@ -130,7 +139,7 @@ class KnownValues(unittest.TestCase):
         _check_rhf_hessian(mf, h, ix=0, iy=0)
         _check_rhf_hessian(mf, h, ix=0, iy=1)
 
-    def test_hessian_lda(self):
+    def test_hessian_lda(self, disp=None):
         print('-----testing DF LDA Hessian----')
         mf = _make_rks(mol_sph, 'LDA')
         mf.conv_tol_cpscf = 1e-7
@@ -190,41 +199,91 @@ class KnownValues(unittest.TestCase):
         _check_dft_hessian(mf, h, ix=0,iy=0)
         _check_dft_hessian(mf, h, ix=0,iy=1)
 
-    def test_hessian_D3(self):
-        pmol = mol_sph.copy()
-        pmol.build()
-
-        mf = dft.rks.RKS(pmol, xc='B3LYP', disp='d3bj').density_fit(auxbasis=auxbasis0)
-        mf.conv_tol = 1e-12
+    def test_hessian_rhf_D3(self):
+        print('----- testing DFRHF with D3BJ ------')
+        mf = _make_rhf(mol_sph, disp='d3bj')
         mf.conv_tol_cpscf = 1e-7
-        mf.grids.level = grids_level
-        mf.verbose = 1
-        mf.kernel()
-
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
-        hobj.verbose=0
-        hobj.kernel()
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
 
-    def test_hessian_D4(self):
-        pmol = mol_sph.copy()
-        pmol.build()
-
-        mf = dft.rks.RKS(pmol, xc='B3LYP', disp='d4').density_fit(auxbasis=auxbasis0)
-        mf.conv_tol = 1e-12
+    def test_hessian_rhf_D4(self):
+        print('------ testing DFRKS with D4 --------')
+        mf = _make_rhf(mol_sph, disp='d4')
         mf.conv_tol_cpscf = 1e-7
-        mf.grids.level = grids_level
-        mf.verbose = 1
-        mf.kernel()
-
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
-        hobj.verbose=0
-        hobj.kernel()
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+
+    def test_hessian_uhf_D3(self):
+        print('-------- testing DFUHF with D3BJ ------')
+        mf = _make_uhf(mol_sph, disp='d3bj')
+        mf.conv_tol_cpscf = 1e-7
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+
+    def test_hessian_uhf_D4(self):
+        print('--------- testing DFUHF with D4 -------')
+        mf = _make_uhf(mol_sph, disp='d4')
+        mf.conv_tol_cpscf = 1e-7
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+
+    def test_hessian_rks_D3(self):
+        print('--------- testing DFRKS with D3BJ -------')
+        mf = _make_rks(mol_sph, 'b3lyp', disp='d3bj')
+        mf.conv_tol_cpscf = 1e-7
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+
+    def test_hessian_rks_D4(self):
+        print('----------- testing DFRKS with D4 --------')
+        mf = _make_rks(mol_sph, 'b3lyp', disp='d4')
+        mf.conv_tol_cpscf = 1e-7
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+
+    def test_hessian_uks_D3(self):
+        print('------------ testing DFUKS with D3BJ -------')
+        mf = _make_uks(mol_sph, 'b3lyp', disp='d3bj')
+        mf.conv_tol_cpscf = 1e-7
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+
+    def test_hessian_uks_D4(self):
+        print('------------- testing DFUKS with D4 ---------')
+        mf = _make_uks(mol_sph, 'b3lyp', disp='d4')
+        mf.conv_tol_cpscf = 1e-7
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
 
     def test_hessian_cart(self):
         print('-----testing DF Hessian (cartesian)----')
         mf = _make_rks(mol_cart, 'b3lyp')
+        mf.conv_tol_cpscf = 1e-7
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+        _check_dft_hessian(mf, h, ix=0,iy=1)
+
+    def test_hessian_uks_cart(self):
+        print('-----testing DF Hessian (cartesian)----')
+        mf = _make_uks(mol_cart, 'b3lyp')
         mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)

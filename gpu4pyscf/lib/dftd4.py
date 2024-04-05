@@ -33,7 +33,7 @@ libdftd4.dftd4_load_rational_damping.restype = _d4_p
 class DFTD4Dispersion(lib.StreamObject):
     def __init__(self, mol, xc, atm=False):
         coords = np.asarray(mol.atom_coords(), dtype=np.double, order='C')
-        charges = np.asarray(mol.atom_charges(), dtype=np.int32)
+        charge = np.array([mol.charge], dtype=np.double)
         nuc_types = [gto.charge(mol.atom_symbol(ia))
                      for ia in range(mol.natm)]
         nuc_types = np.asarray(nuc_types, dtype=np.int32)
@@ -47,7 +47,7 @@ class DFTD4Dispersion(lib.StreamObject):
             ctypes.c_int(mol.natm),
             nuc_types.ctypes.data_as(ctypes.c_void_p),
             coords.ctypes.data_as(ctypes.c_void_p),
-            charges.ctypes.data_as(ctypes.c_void_p),
+            charge.ctypes.data_as(ctypes.c_void_p),
             self._lattice,
             self._periodic,
         )

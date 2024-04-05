@@ -21,7 +21,7 @@ dispersion correction for HF and DFT
 
 
 import numpy
-from gpu4pyscf.scf.hf import KohnShamDFT
+from gpu4pyscf.scf import hf
 
 def get_dispersion(mf, disp_version=None):
     if disp_version is None:
@@ -29,7 +29,7 @@ def get_dispersion(mf, disp_version=None):
     mol = mf.mol
     if disp_version is None:
         return 0.0
-    if isinstance(mf, KohnShamDFT):
+    if isinstance(mf, hf.KohnShamDFT):
         method = mf.xc
     else:
         method = 'hf'
