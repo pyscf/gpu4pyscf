@@ -34,5 +34,5 @@ jobs:
     - name: Test with pytest
       run: |
         echo $GITHUB_WORKSPACE
-        export PYTHONPATH="${PYTHONPATH}:$GITHUB_WORKSPACE"
+        export PYTHONPATH="${PYTHONPATH}:$(pwd)"
         pytest --cov=$GITHUB_WORKSPACE
