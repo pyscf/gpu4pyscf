@@ -19,7 +19,7 @@ gradient of dispersion correction for HF and DFT
 '''
 
 import numpy
-from gpu4pyscf.scf import hf
+from gpu4pyscf import dft
 
 def get_dispersion(mf_grad, disp_version=None):
     '''gradient of dispersion correction for RHF/RKS'''
@@ -30,7 +30,7 @@ def get_dispersion(mf_grad, disp_version=None):
     if disp_version is None:
         return numpy.zeros([mol.natm,3])
 
-    if isinstance(mf_grad.base, hf.KohnShamDFT):
+    if isinstance(mf_grad.base, dft.rks.KohnShamDFT):
         method = mf_grad.base.xc
     else:
         method = 'hf'

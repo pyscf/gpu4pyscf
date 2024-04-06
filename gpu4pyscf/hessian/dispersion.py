@@ -19,7 +19,7 @@ Hessian of dispersion correction for HF and DFT
 '''
 
 import numpy
-from gpu4pyscf.scf import hf
+from gpu4pyscf import dft
 
 def get_dispersion(hessobj, disp_version=None):
     if disp_version is None:
@@ -30,7 +30,7 @@ def get_dispersion(hessobj, disp_version=None):
     h_disp = numpy.zeros([natm,natm,3,3])
     if disp_version is None:
         return h_disp
-    if isinstance(hessobj.base, hf.KohnShamDFT):
+    if isinstance(hessobj.base, dft.rks.KohnShamDFT):
         method = hessobj.base.xc
     else:
         method = 'hf'
