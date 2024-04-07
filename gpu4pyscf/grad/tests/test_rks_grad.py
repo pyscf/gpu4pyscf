@@ -16,13 +16,18 @@
 import pyscf
 import cupy
 import unittest
+import pytest
 from pyscf.dft import rks as cpu_rks
 from gpu4pyscf.dft import rks as gpu_rks
+from packaging import version
+
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
+
+pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
 bas0='def2-tzvpp'
 grids_level = 5
@@ -98,10 +103,12 @@ class KnownValues(unittest.TestCase):
         print('--------nlc testing-------------')
         _check_grad(mol_sph, xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-5)
 
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_grad_d3bj(self):
         print('--------- testing RKS with D3BJ ------')
         _check_grad(mol_sph, xc='b3lyp', disp='d3bj', tol=1e-5)
 
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_grad_d4(self):
         print('--------- testing RKS with D4 ------')
         _check_grad(mol_sph, xc='b3lyp', disp='d4', tol=1e-5)
@@ -110,6 +117,7 @@ class KnownValues(unittest.TestCase):
         print('------hybrid GGA Cart testing--------')
         _check_grad(mol_cart, xc='B3LYP', disp=None, tol=1e-5)
 
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_cpu(self):
         mf = gpu_rks.RKS(mol_sph, xc='b3lyp')
         mf.direct_scf_tol = 1e-10

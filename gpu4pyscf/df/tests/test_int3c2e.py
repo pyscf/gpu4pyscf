@@ -14,15 +14,14 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import pyscf
-from pyscf import lib, df
+from pyscf import df
 from pyscf.gto.moleintor import getints, make_cintopt
 from pyscf.df.grad.rhf import _int3c_wrapper
 import numpy as np
-import cupy
 import unittest
-
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import load_library
+
 libgint = load_library('libgint')
 
 '''
