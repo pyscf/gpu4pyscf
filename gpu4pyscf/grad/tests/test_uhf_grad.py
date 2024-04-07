@@ -16,6 +16,7 @@
 import pyscf
 import numpy as np
 import unittest
+import pytest
 from gpu4pyscf import scf
 from packaging import version
 
