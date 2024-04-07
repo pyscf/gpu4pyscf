@@ -296,7 +296,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         t3 = log.init_timer()
         dh1e = int3c2e.get_dh1e(mol, dm0_sf)
 
-        t4 = log.timer_debug1("get_dh1e", *t3)
+        log.timer_debug1("get_dh1e", *t3)
         if mol.has_ecp():
             dh1e += rhf_grad.get_dh1e_ecp(mol, dm0_sf)
         t1 = log.timer_debug1('gradients of h1e', *t0)
@@ -306,14 +306,24 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         extra_force = cupy.zeros((len(atmlst),3))
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals())
-
-        t2 = log.timer_debug1('gradients of 2e part', *t1)
+        log.timer_debug1('gradients of 2e part', *t1)
 
     dh = contract('xij,ij->xi', h1, dm0_sf)
     ds = contract('xij,ij->xi', s1, dme0_sf)
     delec = 2.0*(dh - ds)
     delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
 
+
+    '''
+    print('dvhf')
+    print(dvhf)
+    print('dh1e')
+    print(dh1e)
+    print('delec')
+    print(delec)
+    print('extra')
+    print(extra_force)
+    '''
     de = 2.0 * dvhf + dh1e + delec + extra_force
 
     # for backward compatiability

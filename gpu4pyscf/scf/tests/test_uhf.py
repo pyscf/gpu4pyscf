@@ -248,8 +248,30 @@ class KnownValues(unittest.TestCase):
     # end to end test
     def test_uhf_scf(self):
         e_tot = scf.UHF(mol).kernel()
-        self.assertAlmostEqual(e_tot, -150.76441654065087)
+        e_ref = -150.76441654065087
+        print('--------- testing UHF -----------')
+        print('pyscf - qchem ', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5
 
+    def test_uhf_d3bj(self):
+        mf = scf.UHF(mol)
+        mf.disp = 'd3bj'
+        e_tot = mf.kernel()
+        e_ref = -150.7949833081
+        print('--------- testing UHF with D3BJ ---')
+        print('pyscf - qchem ', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5
+
+    '''
+    def test_uhf_d4(self):
+        mf = scf.UHF(mol)
+        mf.disp = 'd4'
+        e_tot = mf.kernel()
+        e_ref = -150.7604264160
+        print('--------- testing UHF with D4 ----')
+        print('pyscf - qchem ', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5
+    '''
     # TODO:
     #test analyze
     #test mulliken_pop

@@ -17,10 +17,7 @@ import pyscf
 import cupy
 import numpy as np
 import unittest
-from pyscf import lib
 from gpu4pyscf.dft import rks
-
-lib.num_threads(8)
 
 '''
 test density fitting for dft
@@ -139,6 +136,24 @@ class KnownValues(unittest.TestCase):
     def test_grad_cart(self):
         print('------ Cart testing--------')
         _check_grad(mol_cart, xc='B3LYP', disp=None, tol=1e-6)
+
+    def test_grad_d3(self):
+        print('------ B3LYP with d3bj --------')
+        _check_grad(mol_cart, xc='B3LYP', disp='d3bj', tol=1e-6)
+
+    def test_grad_d4(self):
+        print('------ B3LYP with d4 --------')
+        _check_grad(mol_cart, xc='B3LYP', disp='d4', tol=1e-6)
+
+    def test_to_cpu(self):
+        mf = rks.RKS(mol_sph, xc='b3lyp').density_fit()
+        mf.kernel()
+
+        gobj = mf.nuc_grad_method()
+        g_gpu = gobj.kernel()
+
+        g_cpu = gobj.to_cpu().kernel()
+        assert np.linalg.norm(g_cpu - g_gpu) < 1e-5
 if __name__ == "__main__":
     print("Full Tests for DF Gradient")
     unittest.main()

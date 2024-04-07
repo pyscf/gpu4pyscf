@@ -14,19 +14,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import unittest
-import numpy as np
 import cupy
 import pyscf
-from pyscf import lib, df
-from pyscf import scf as cpu_scf
-from pyscf import df as cpu_df
-from pyscf.geomopt.geometric_solver import optimize
+from pyscf import df
 from gpu4pyscf import scf as gpu_scf
-from gpu4pyscf import df as gpu_df
-from gpu4pyscf.dft import rks
 from gpu4pyscf.df import int3c2e, df_jk
-
-lib.num_threads(8)
 
 atom='''
 Ti 0.0 0.0 0.0
@@ -71,7 +63,7 @@ class KnownValues(unittest.TestCase):
         vj_outcore = cupy.einsum('ijL,L->ij', int3c_gpu, rhoj_outcore)
         vj_incore = int3c2e.get_j_int3c2e_pass2(intopt, rhoj_incore)
         assert cupy.linalg.norm(vj_outcore - vj_incore) < 1e-5
-    
+
     def test_j_outcore(self):
         cupy.random.seed(1)
         nao = mol.nao

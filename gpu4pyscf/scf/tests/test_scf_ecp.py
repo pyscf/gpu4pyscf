@@ -41,7 +41,7 @@ class KnownValues(unittest.TestCase):
         mf.max_cycle = 10
         mf.conv_tol = 1e-9
         e_tot = mf.kernel()
-        assert np.allclose(e_tot, -578.9674228876)
+        assert np.abs(e_tot - -578.9674228876) < 1e-5
 
 if __name__ == "__main__":
     print("Full Tests for SCF")

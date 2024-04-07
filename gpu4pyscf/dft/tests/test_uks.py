@@ -46,8 +46,9 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-def run_dft(xc):
+def run_dft(xc, disp=None):
     mf = uks.UKS(mol, xc=xc)
+    mf.disp = disp
     mf.grids.level = grids_level
     mf.nlcgrids.level = nlcgrids_level
     e_dft = mf.kernel()
@@ -60,35 +61,58 @@ class KnownValues(unittest.TestCase):
     def test_uks_lda(self):
         print('------- LDA ----------------')
         e_tot = run_dft("LDA, vwn5")
-        assert np.allclose(e_tot, -75.4231504131) #-75.42821982483972)
+        e_ref = -75.4231504131
+        print('diff:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5 #-75.42821982483972)
 
     def test_uks_pbe(self):
         print('------- PBE ----------------')
         e_tot = run_dft('PBE')
-        assert np.allclose(e_tot, -75.9128621398)# -75.91732813416843)
+        e_ref = -75.9128621398
+        print('diff:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5# -75.91732813416843)
 
     def test_uks_b3lyp(self):
         print('-------- B3LYP -------------')
         e_tot = run_dft('B3LYP')
-        assert np.allclose(e_tot, -75.9987351592) #-76.00306439862237)
+        e_ref = -75.9987351592
+        print('diff:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5 #-76.00306439862237)
 
     def test_uks_m06(self):
         print('--------- M06 --------------')
         e_tot = run_dft("M06")
-        assert np.allclose(e_tot, -75.9609384616) #-75.96551006522827)
+        e_ref = -75.9609384616
+        print('diff:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5 #-75.96551006522827)
 
     def test_uks_wb97(self):
         print('-------- wB97 --------------')
         e_tot = run_dft("HYB_GGA_XC_WB97")
-        assert np.allclose(e_tot, -75.9833214499) #-75.987601337562)
+        e_ref = -75.9833214499
+        print('diff:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5 #-75.987601337562)
 
     def test_uks_vv10(self):
         print("------- wB97m-v -------------")
         e_tot = run_dft('HYB_MGGA_XC_WB97M_V')
-        assert np.allclose(e_tot, -75.9697577968)# -75.97363094678428)
+        e_ref = -75.9697577968
+        print('diff:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5# -75.97363094678428)
 
-    #TODO: add test cases for D3/D4 and gradient
+    def test_uks_d3bj(self):
+        print('-------- B3LYP with D3BJ-------------')
+        e_tot = run_dft('B3LYP', disp='d3bj')
+        e_ref = -75.9993089249
+        print('diff:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5#-76.00306439862237)
 
+    def test_uks_d4(self):
+        print('-------- B3LYP with D4 ------')
+        e_tot = run_dft('B3LYP', disp='d4')
+        e_ref = -75.9988910961
+        print('diff:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5#-76.00306439862237)
 if __name__ == "__main__":
     print("Full Tests for dft")
     unittest.main()

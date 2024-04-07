@@ -243,13 +243,28 @@ class KnownValues(unittest.TestCase):
         mf1 = mf.to_cpu()
         refk = mf1.get_k(mol1, dm, hermi=0)
         self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
-    '''
+
     # end to end test
     def test_rhf_scf(self):
         e_tot = scf.RHF(mol).kernel()
-        self.assertAlmostEqual(e_tot, -151.08447712520285)
-    '''
+        e_ref = -151.08447712520285
+        assert np.abs(e_tot - e_ref) < 1e-5
 
+    def test_rhf_d3(self):
+        mf = scf.RHF(mol)
+        mf.disp = 'd3bj'
+        e_tot = mf.kernel()
+        e_ref = -151.1150439066
+        assert np.abs(e_tot - e_ref) < 1e-5
+
+    '''
+    def test_rhf_d4(self):
+        mf = scf.RHF(mol)
+        mf.disp = 'd4'
+        e_tot = mf.kernel()
+        e_ref = -151.08447712520285
+        assert np.abs(e_tot - e_ref) < 1e-5
+    '''
     # TODO:
     #test analyze
     #test mulliken_pop

@@ -13,8 +13,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from pyscf import gto, scf, grad
+from pyscf import gto
+from gpu4pyscf import scf
 import numpy as np
+import cupy
 
 mol = gto.M(atom=
 '''
@@ -22,32 +24,27 @@ O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 ''',
-basis='cc-pvtz',
+basis='def2-tzvpp',
+cart=1,
 verbose=4)
 
-mf = scf.hf.RHF(mol)
-mf.direct_scf_tol = 1e-14
-mf.conv_tol = 1e-12
-e_cpu = mf.kernel()
-
-cpu_gradient = grad.rhf.Gradients(mf)
-cpu_gradient.kernel()
-
-from gpu4pyscf import scf
-import gpu4pyscf
-
+# Calculation on GPU
 mf = scf.hf.RHF(mol)
 mf.direct_scf_tol = 1e-14
 mf.conv_tol = 1e-12
 e_gpu = mf.kernel()
-gpu_gradient = gpu4pyscf.grad.rhf.Gradients(mf)
+
+gpu_gradient = mf.nuc_grad_method()
 gpu_gradient.kernel()
 
+# Move the object to CPU
+mf = mf.to_cpu()
+e_cpu = mf.kernel()
+cpu_gradient = mf.nuc_grad_method()
+cpu_gradient.kernel()
 cpu_de = cpu_gradient.de
-print(cpu_de)
-print(gpu_gradient.de)
-
 cpu_de -= np.sum(cpu_de, axis=0)/mol.natm
+
 print('e diff = ', e_cpu - e_gpu)
 print('g diff = \n', cpu_de - gpu_gradient.de)
 

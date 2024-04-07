@@ -210,8 +210,9 @@ class UHF(hf.SCF):
     det_ovlp           = NotImplemented
     make_asym_dm       = NotImplemented
     _finalize          = uhf.UHF._finalize
-    #screen_tol = 1e-14
-    #conv_tol_cpscf = 1e-3
+
+    screen_tol = 1e-14
+    conv_tol_cpscf = 1e-3
     DIIS = diis.SCF_DIIS
     #get_jk = _get_jk
 
@@ -221,7 +222,7 @@ class UHF(hf.SCF):
     density_fit = hf.RHF.density_fit
     energy_tot = hf.RHF.energy_tot
     energy_elec = energy_elec
-    
+
     make_rdm2 = NotImplemented
     dump_chk = NotImplemented
     newton = NotImplemented

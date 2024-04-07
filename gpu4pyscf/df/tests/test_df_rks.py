@@ -16,13 +16,10 @@
 import unittest
 import numpy as np
 import pyscf
-from pyscf import lib
 from pyscf.df import df_jk as cpu_df_jk
 from pyscf.dft import rks as cpu_rks
 from gpu4pyscf.dft import rks as gpu_rks
 from gpu4pyscf.df import df_jk as gpu_df_jk
-
-lib.num_threads(8)
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -50,11 +47,12 @@ def tearDownModule():
     mol_cart.stdout.close()
     del mol_sph, mol_cart
 
-def run_dft(xc, mol):
+def run_dft(xc, mol, disp=None):
     mf = gpu_rks.RKS(mol, xc=xc).density_fit(auxbasis='def2-tzvpp-jkfit')
     mf.grids.atom_grid = (99,590)
     mf.nlcgrids.atom_grid = (50,194)
     mf.conv_tol = 1e-10
+    mf.disp = disp
     e_dft = mf.kernel()
     return e_dft
 
@@ -68,42 +66,56 @@ class KnownValues(unittest.TestCase):
         e_tot = run_dft("LDA,VWN5", mol_sph)
         e_qchem = -75.9046768207
         print(f'diff from qchem {e_tot - e_qchem}')
-        assert np.allclose(e_tot, e_qchem)
+        assert np.abs(e_tot - e_qchem) < 1e-5
 
     def test_rks_pbe(self):
         print('------- PBE ----------------')
         e_tot = run_dft('PBE', mol_sph)
         e_qchem = -76.3800605005
         print(f'diff from qchem {e_tot - e_qchem}')
-        assert np.allclose(e_tot, e_qchem)
+        assert np.abs(e_tot - e_qchem) < 1e-5
 
     def test_rks_b3lyp(self):
         print('-------- B3LYP -------------')
         e_tot = run_dft('B3LYP', mol_sph)
         e_qchem = -76.4666819950
         print(f'diff from qchem {e_tot - e_qchem}')
-        assert np.allclose(e_tot, e_qchem)
+        assert np.abs(e_tot - e_qchem) < 1e-5
 
     def test_rks_m06(self):
         print('--------- M06 --------------')
         e_tot = run_dft("M06", mol_sph)
         e_qchem = -76.4266137244
         print(f'diff from qchem {e_tot - e_qchem}')
-        assert np.allclose(e_tot, e_qchem)
+        assert np.abs(e_tot - e_qchem) < 1e-5
 
     def test_rks_wb97(self):
         print('-------- wB97 --------------')
         e_tot = run_dft("HYB_GGA_XC_WB97", mol_sph)
         e_qchem = -76.4486707747
         print(f'diff from qchem {e_tot - e_qchem}')
-        assert np.allclose(e_tot, e_qchem)
+        assert np.abs(e_tot - e_qchem) < 1e-5
 
     def test_rks_wb97m_v(self):
         print('-------- wB97m-v --------------')
         e_tot = run_dft("HYB_MGGA_XC_WB97M_V", mol_sph)
         e_qchem = -76.4334564629
         print(f'diff from qchem {e_tot - e_qchem}')
-        assert np.allclose(e_tot, e_qchem)
+        assert np.abs(e_tot - e_qchem) < 1e-5
+
+    def test_rks_b3lyp_d3(self):
+        print('-------- B3LYP with D3(BJ) -------------')
+        e_tot = run_dft('B3LYP', mol_sph, disp='d3bj')
+        e_qchem = -76.4672558312 # w/o D3(BJ) -76.4666819950
+        print(f'diff from qchem {e_tot - e_qchem}')
+        assert np.abs(e_tot - e_qchem) < 1e-5
+
+    def test_rks_b3lyp_d4(self):
+        print('-------- B3LYP with D4 ---------------')
+        e_tot = run_dft('B3LYP', mol_sph, disp='D4')
+        e_qchem = -76.4669915146 # w/o D3(BJ) -76.4666819950
+        print(f'diff from qchem {e_tot - e_qchem}')
+        assert np.abs(e_tot - e_qchem) < 1e-5
 
     def test_to_cpu(self):
         mf = gpu_rks.RKS(mol_sph).density_fit()
@@ -111,7 +123,7 @@ class KnownValues(unittest.TestCase):
         mf = mf.to_cpu()
         assert isinstance(mf, cpu_df_jk._DFHF)
         e_cpu = mf.kernel()
-        np.allclose(e_cpu, e_gpu)
+        assert np.abs(e_cpu - e_gpu) < 1e-5
 
     def test_to_gpu(self):
         mf = cpu_rks.RKS(mol_sph).density_fit()
@@ -119,14 +131,14 @@ class KnownValues(unittest.TestCase):
         mf = mf.to_gpu()
         assert isinstance(mf, gpu_df_jk._DFHF)
         e_cpu = mf.kernel()
-        np.allclose(e_cpu, e_gpu)
+        assert np.abs(e_cpu - e_gpu) < 1e-5
 
     def test_rks_cart(self):
         print('-------- B3LYP (CART) -------------')
         e_tot = run_dft('B3LYP', mol_cart)
         e_qchem = -76.46723795965626 # data from PySCF
-        print(f'diff from qchem {e_tot - e_qchem}')
-        assert np.allclose(e_tot, e_qchem)
+        print(f'diff from pyscf {e_tot - e_qchem}')
+        assert np.abs(e_tot - e_qchem) < 1e-5
 
 if __name__ == "__main__":
     print("Full Tests for restricted Kohn-Sham")

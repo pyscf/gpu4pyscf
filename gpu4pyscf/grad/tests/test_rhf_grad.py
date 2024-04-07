@@ -16,8 +16,8 @@
 import pyscf
 import numpy as np
 import unittest
-import gpu4pyscf
-from pyscf import scf
+from pyscf import scf as cpu_scf
+from gpu4pyscf import scf as gpu_scf
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -28,33 +28,62 @@ H       0.7570000000     0.0000000000    -0.4696000000
 bas0='cc-pvtz'
 
 def setUpModule():
-    global mol
-    mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000)
-    mol.output = '/dev/null'
-    mol.build()
-    mol.verbose = 1
+    global mol_sph, mol_cart
+    mol_sph = pyscf.M(atom=atom, basis=bas0, max_memory=32000)
+    mol_sph.output = '/dev/null'
+    mol_sph.build()
+    mol_sph.verbose = 1
+
+    mol_cart = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=1)
+    mol_cart.output = '/dev/null'
+    mol_cart.build()
+    mol_cart.verbose = 1
 
 def tearDownModule():
-    global mol
-    mol.stdout.close()
-    del mol
+    global mol_sph, mol_cart
+    mol_sph.stdout.close()
+    mol_cart.stdout.close()
+    del mol_sph, mol_cart
 
-def _check_grad(tol=1e-6):
-    mf = scf.hf.RHF(mol)
+def _check_grad(mol, tol=1e-6, disp=None):
+    mf = cpu_scf.hf.RHF(mol)
     mf.direct_scf_tol = 1e-10
+    mf.disp = disp
     mf.kernel()
 
-    cpu_gradient = pyscf.grad.RHF(mf)
+    cpu_gradient = mf.nuc_grad_method()
     g_cpu = cpu_gradient.kernel()
 
     gpu_gradient = cpu_gradient.to_gpu()
     g_gpu = gpu_gradient.kernel()
+    print('|| CPU - GPU ||:', np.linalg.norm(g_cpu - g_gpu))
     assert(np.linalg.norm(g_cpu - g_gpu) < tol)
 
 class KnownValues(unittest.TestCase):
     def test_grad_rhf(self):
-        _check_grad(tol=1e-6)
+        _check_grad(mol_sph, tol=1e-6)
+
+    def test_grad_cart(self):
+        _check_grad(mol_cart, tol=1e-6)
+
+    def test_grad_d3bj(self):
+        _check_grad(mol_sph, tol=1e-6, disp='d3bj')
+
+    def test_grad_d4(self):
+        _check_grad(mol_sph, tol=1e-6, disp='d4')
+
+    def test_to_cpu(self):
+        mf = gpu_scf.hf.RHF(mol_sph)
+        mf.direct_scf_tol = 1e-10
+        mf.disp = 'd3bj'
+        mf.kernel()
+
+        gpu_gradient = mf.nuc_grad_method()
+        g_gpu = gpu_gradient.kernel()
+        cpu_gradient = gpu_gradient.to_cpu()
+        g_cpu = cpu_gradient.kernel()
+        assert np.linalg.norm(g_gpu - g_cpu) < 1e-5
 
 if __name__ == "__main__":
-    print("Full Tests for Gradient")
+    print("Full Tests for RHF Gradient")
     unittest.main()

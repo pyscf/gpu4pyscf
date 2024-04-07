@@ -128,7 +128,7 @@ class KnownValues(unittest.TestCase):
         h = hobj.kernel()
         assert numpy.abs(lib.fp(h) - 2.187025544697092) < 1e-4
 
-    # TODO: solvent
+
 
 
 if __name__ == "__main__":

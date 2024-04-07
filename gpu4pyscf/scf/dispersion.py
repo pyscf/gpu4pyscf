@@ -20,8 +20,8 @@ dispersion correction for HF and DFT
 '''
 
 
-import numpy
-from gpu4pyscf.scf.hf import KohnShamDFT
+from gpu4pyscf.scf import hf, uhf
+from gpu4pyscf.dft import rks, uks
 
 def get_dispersion(mf, disp_version=None):
     if disp_version is None:
@@ -29,7 +29,7 @@ def get_dispersion(mf, disp_version=None):
     mol = mf.mol
     if disp_version is None:
         return 0.0
-    if isinstance(mf, KohnShamDFT):
+    if isinstance(mf, rks.KohnShamDFT):
         method = mf.xc
     else:
         method = 'hf'
@@ -51,8 +51,6 @@ def get_dispersion(mf, disp_version=None):
         raise RuntimeError(f'dipersion correction: {disp_version} is not supported.')
 
 # Inject to SCF class
-from gpu4pyscf.scf import hf, uhf
-from gpu4pyscf.dft import rks, uks
 hf.RHF.get_dispersion = get_dispersion
 uhf.UHF.get_dispersion = get_dispersion
 rks.RKS.get_dispersion = get_dispersion

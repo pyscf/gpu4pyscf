@@ -42,6 +42,7 @@ mf_GPU = rks.RKS(mol, xc=xc, disp='d3bj').density_fit(auxbasis=auxbasis)
 mf_GPU.grids.level = grids_level
 mf_GPU.conv_tol = scf_tol
 mf_GPU.max_cycle = max_scf_cycles
+mf_GPU.conv_tol_cpscf = 1e-6
 mf_GPU.screen_tol = screen_tol
 
 # Compute Energy
@@ -50,7 +51,9 @@ e_dft = mf_GPU.kernel()
 print('DFT energy by GPU4PySCF')
 print(e_dft)
 print('DFT energy by Q-Chem')
-print(-76.4672557846) # reference from q-chem: -76.4672557846
+e_qchem = -76.4672557846
+print(e_qchem) # reference from q-chem: -76.4672557846
+print('Energy diff between Q-Chem and PySCF', e_dft - e_qchem)
 
 # Compute Gradient
 print('------------------ Gradient ----------------------------')
@@ -61,9 +64,11 @@ print('Gradient by GPU4PySCF')
 print(g_dft)
 print('Gradient by Q-Chem')
 # reference from q-chem
-print(np.array([[0.0000000,   0.0030278,  -0.0030278],
+g_qchem = np.array([[0.0000000,   0.0030278,  -0.0030278],
         [-0.0000000,  -0.0000000,   0.0000000],
-        [-0.0023449,   0.0011724,   0.0011724]]).T)
+        [-0.0023449,   0.0011724,   0.0011724]]).T
+print(g_qchem)
+print('Gradient diff between Q-Chem and PySCF', np.linalg.norm(g_dft - g_qchem))
 
 # Compute Hessian
 print('------------------- Hessian -----------------------------')
@@ -81,3 +86,4 @@ print(np.diag(h_dft))
 print('Diagonals entries of Mass-weighted Hessian by Q-Chem')
 hess_qchem = np.loadtxt('hess_qchem.txt')
 print(np.diag(hess_qchem))
+print('Hessian diff between Q-Chem and PySCF', np.linalg.norm(hess_qchem - h_dft))

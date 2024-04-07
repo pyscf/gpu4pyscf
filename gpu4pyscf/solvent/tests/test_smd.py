@@ -15,8 +15,8 @@
 
 import unittest
 import numpy
-from pyscf import gto, df
-from gpu4pyscf import scf
+from pyscf import gto
+from gpu4pyscf import scf, dft
 from gpu4pyscf.solvent import smd
 
 def setUpModule():
@@ -75,7 +75,38 @@ class KnownValues(unittest.TestCase):
         mf.with_solvent.sasa_ng = 590
         e_tot = mf.kernel()
         assert numpy.abs(e_tot - -76.07550951172617) < 2e-4
-    # TODO: add more test for other molecules
+
+    def test_rks(self):
+        mf = dft.RKS(mol, xc='b3lyp')
+        mf = mf.SMD()
+        mf.with_solvent.solvent = 'water'
+        mf.with_solvent.sasa_ng = 590
+        e_tot = mf.kernel()
+        assert numpy.abs(e_tot - -76.478626548) < 2e-4
+
+    def test_uks(self):
+        mf = dft.UKS(mol, xc='b3lyp')
+        mf = mf.SMD()
+        mf.with_solvent.solvent = 'water'
+        mf.with_solvent.sasa_ng = 590
+        e_tot = mf.kernel()
+        assert numpy.abs(e_tot - -76.478626548) < 2e-4
+
+    def test_dfrks(self):
+        mf = dft.RKS(mol, xc='b3lyp').density_fit()
+        mf = mf.SMD()
+        mf.with_solvent.solvent = 'water'
+        mf.with_solvent.sasa_ng = 590
+        e_tot = mf.kernel()
+        assert numpy.abs(e_tot - -76.47848839552529) < 1e-4
+
+    def test_dfuks(self):
+        mf = dft.UKS(mol, xc='b3lyp').density_fit()
+        mf = mf.SMD()
+        mf.with_solvent.solvent = 'water'
+        mf.with_solvent.sasa_ng = 590
+        e_tot = mf.kernel()
+        assert numpy.abs(e_tot - -76.47848839552529) < 1e-4
 
 if __name__ == "__main__":
     print("Full Tests for SMDs")
