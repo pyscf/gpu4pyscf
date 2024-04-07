@@ -48,10 +48,17 @@ def tearDownModule():
     mol_sph.stdout.close()
     mol_cart.stdout.close()
     del mol_sph, mol_cart
+    global mol_sph, mol_cart
+    mol_sph.stdout.close()
+    mol_cart.stdout.close()
+    del mol_sph, mol_cart
 
 def _check_grad(mol, tol=1e-6, disp=None):
     mf = cpu_scf.hf.RHF(mol)
+def _check_grad(mol, tol=1e-6, disp=None):
+    mf = cpu_scf.hf.RHF(mol)
     mf.direct_scf_tol = 1e-10
+    mf.disp = disp
     mf.disp = disp
     mf.kernel()
 
@@ -60,6 +67,7 @@ def _check_grad(mol, tol=1e-6, disp=None):
 
     gpu_gradient = cpu_gradient.to_gpu()
     g_gpu = gpu_gradient.kernel()
+    print('|| CPU - GPU ||:', np.linalg.norm(g_cpu - g_gpu))
     print('|| CPU - GPU ||:', np.linalg.norm(g_cpu - g_gpu))
     assert(np.linalg.norm(g_cpu - g_gpu) < tol)
 
