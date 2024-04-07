@@ -16,14 +16,18 @@
 import pyscf
 import numpy as np
 import unittest
+import pytest
 from pyscf import scf as cpu_scf
 from gpu4pyscf import scf as gpu_scf
+from packaging import version
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
+
+pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
 bas0='cc-pvtz'
 
@@ -66,9 +70,11 @@ class KnownValues(unittest.TestCase):
     def test_grad_cart(self):
         _check_grad(mol_cart, tol=1e-6)
 
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_grad_d3bj(self):
         _check_grad(mol_sph, tol=1e-6, disp='d3bj')
 
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_grad_d4(self):
         _check_grad(mol_sph, tol=1e-6, disp='d4')
 
