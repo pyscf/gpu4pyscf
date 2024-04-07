@@ -16,12 +16,9 @@
 import pyscf
 import numpy as np
 import unittest
-from pyscf import lib
 from gpu4pyscf import scf
 from gpu4pyscf.dft import rks, uks
 from pyscf.geomopt.geometric_solver import optimize
-
-lib.num_threads(8)
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000

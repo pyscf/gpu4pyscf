@@ -16,10 +16,7 @@
 import unittest
 import numpy as np
 import pyscf
-from pyscf import lib
 from gpu4pyscf.dft import rks
-
-lib.num_threads(8)
 
 xc='pbe0'
 bas='def2-tzvpp'

@@ -17,10 +17,7 @@ import pyscf
 import cupy
 import numpy as np
 import unittest
-from pyscf import lib
 from gpu4pyscf.dft import uks
-
-lib.num_threads(8)
 
 '''
 test density fitting for dft

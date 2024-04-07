@@ -17,13 +17,10 @@ import unittest
 import numpy as np
 import cupy
 import pyscf
-from pyscf import lib
 from pyscf import scf as cpu_scf
 from pyscf.df import df_jk as cpu_df_jk
 from gpu4pyscf import scf as gpu_scf
 from gpu4pyscf.df import df_jk as gpu_df_jk
-
-lib.num_threads(8)
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000

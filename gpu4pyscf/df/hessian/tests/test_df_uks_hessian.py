@@ -15,11 +15,7 @@
 
 import unittest
 import numpy
-import cupy
-from pyscf import gto, scf, lib, dft
-from pyscf import grad, hessian
-from pyscf.df.hessian import uhf as df_uks_cpu
-from gpu4pyscf.df.hessian import uks as df_uks_gpu
+from pyscf import gto, dft
 
 def setUpModule():
     global mol
