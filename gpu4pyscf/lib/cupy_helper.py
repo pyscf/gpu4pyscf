@@ -439,7 +439,7 @@ def cart2sph(t, axis=0, ang=1, out=None, stream=None):
     count = i0*nli*i3
     if stream is None:
         stream = cupy.cuda.get_current_stream()
-    libcupy_helper.cart2sph(
+    err = libcupy_helper.cart2sph(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(t_cart.data.ptr, ctypes.c_void_p),
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
@@ -447,6 +447,8 @@ def cart2sph(t, axis=0, ang=1, out=None, stream=None):
         ctypes.c_int(count),
         ctypes.c_int(ang)
     )
+    if err != 0:
+        raise RuntimeError('failed in cart2sph kernel')
     return out.reshape(out_shape)
 
 # a copy with modification from

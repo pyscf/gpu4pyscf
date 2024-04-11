@@ -123,6 +123,9 @@ int cart2sph(cudaStream_t stream, double *cart_gto, double *sph_gto, int stride,
         case 2: _cart2sph_ang2 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
         case 3: _cart2sph_ang3 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
         case 4: _cart2sph_ang4 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
+        default:
+            fprintf(stderr, "Ang > 4 is not supported!");
+            return 1;
     }
 
     cudaError_t err = cudaGetLastError();
