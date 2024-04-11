@@ -19,7 +19,7 @@ import cupy
 from gpu4pyscf.lib.cupy_helper import (
     take_last2d, transpose_sum, krylov, unpack_sparse,
     add_sparse, takebak, empty_mapped, dist_matrix,
-    grouped_dot, grouped_gemm, cond)
+    grouped_dot, grouped_gemm, cond, cart2sph_cutensor, cart2sph)
 
 class KnownValues(unittest.TestCase):
     def test_take_last2d(self):
@@ -159,6 +159,22 @@ class KnownValues(unittest.TestCase):
         ans_Cs = cupy.concatenate(Cs, axis=None)
         assert(cupy.linalg.norm(res_Cs - ans_Cs) < 1e-8)
         assert(cupy.linalg.norm(res_Cs_2 - ans_Cs) < 1e-8)
+
+    def test_cart2sph(self):
+        a_cart = cupy.random.rand(10,6,11)
+        a_sph0 = cart2sph_cutensor(a_cart, axis=1, ang=2)
+        a_sph1 = cart2sph(a_cart, axis=1, ang=2)
+        assert cupy.linalg.norm(a_sph0 - a_sph1) < 1e-8
+
+        a_cart = cupy.random.rand(10,10,11)
+        a_sph0 = cart2sph_cutensor(a_cart, axis=1, ang=3)
+        a_sph1 = cart2sph(a_cart, axis=1, ang=3)
+        assert cupy.linalg.norm(a_sph0 - a_sph1) < 1e-8
+
+        a_cart = cupy.random.rand(10,15,11)
+        a_sph0 = cart2sph_cutensor(a_cart, axis=1, ang=4)
+        a_sph1 = cart2sph(a_cart, axis=1, ang=4)
+        assert cupy.linalg.norm(a_sph0 - a_sph1) < 1e-8
 
 if __name__ == "__main__":
     print("Full tests for cupy helper module")

@@ -36,13 +36,13 @@ mol = pyscf.M(
     basis=bas,
     max_memory=32000)
 # set verbose >= 6 for debugging timer
-mol.verbose = 7
+mol.verbose = 4
 
 if args.unrestricted:
     mf_df = uks.UKS(mol, xc=args.xc).density_fit(auxbasis=args.auxbasis)
 else:
     mf_df = rks.RKS(mol, xc=args.xc).density_fit(auxbasis=args.auxbasis)
-mf_df.verbose = 7
+mf_df.verbose = 4
 
 if args.solvent:
     mf_df = mf_df.PCM()
