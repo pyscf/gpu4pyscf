@@ -393,7 +393,7 @@ def hermi_triu(mat, hermi=1, inplace=True):
 
     return mat
 
-def cart2sph(t, axis=0, ang=1, out=None):
+def cart2sph_cutensor(t, axis=0, ang=1, out=None):
     '''
     transform 'axis' of a tensor from cartesian basis into spherical basis
     '''
@@ -414,6 +414,42 @@ def cart2sph(t, axis=0, ang=1, out=None):
         out = out.reshape([i0*nli, li_size[1], i3])
     t_sph = contract('min,ip->mpn', t_cart, c2s, out=out)
     return t_sph.reshape(out_shape)
+
+def cart2sph(t, axis=0, ang=1, out=None, stream=None):
+    '''
+    transform 'axis' of a tensor from cartesian basis into spherical basis
+    '''
+    if(ang <= 1):
+        if(out is not None): out[:] = t
+        return t
+    size = list(t.shape)
+    c2s = c2s_l[ang]
+    if(not t.flags['C_CONTIGUOUS']): t = cupy.asarray(t, order='C')
+    li_size = c2s.shape
+    nli = size[axis] // li_size[0]
+    i0 = max(1, np.prod(size[:axis]))
+    i3 = max(1, np.prod(size[axis+1:]))
+    out_shape = size[:axis] + [nli*li_size[1]] + size[axis+1:]
+
+    t_cart = t.reshape([i0*nli, li_size[0], i3])
+    if(out is not None):
+        out = out.reshape([i0*nli, li_size[1], i3])
+    else:
+        out = cupy.empty(out_shape)
+    count = i0*nli*i3
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.cart2sph(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(t_cart.data.ptr, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(i3),
+        ctypes.c_int(count),
+        ctypes.c_int(ang)
+    )
+    if err != 0:
+        raise RuntimeError('failed in cart2sph kernel')
+    return out.reshape(out_shape)
 
 # a copy with modification from
 # https://github.com/pyscf/pyscf/blob/9219058ac0a1bcdd8058166cad0fb9127b82e9bf/pyscf/lib/linalg_helper.py#L1536

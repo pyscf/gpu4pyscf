@@ -27,6 +27,7 @@ add_library(cupy_helper SHARED
   dist_matrix.cu
   grouped_gemm.cu
   grouped_dot.cu
+  cart2sph.cu
 )
 
 add_dependencies(cupy_helper cutlass)
