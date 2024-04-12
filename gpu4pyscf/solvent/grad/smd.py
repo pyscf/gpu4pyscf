@@ -22,17 +22,14 @@ import numpy as np
 import cupy
 #from cupyx import scipy, jit
 from pyscf import lib
-from pyscf import gto, df
 from pyscf.grad import rhf as rhf_grad
 from pyscf.data import radii
-from pyscf.solvent import ddcosmo_grad
 
 from gpu4pyscf.solvent import pcm, smd
 from gpu4pyscf.solvent.grad import pcm as pcm_grad
 from gpu4pyscf.solvent.smd import (
     sigma_water, sigma_n, sigma_alpha, sigma_beta, r_zz, swtich_function,
     hartree2kcal)
-from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 

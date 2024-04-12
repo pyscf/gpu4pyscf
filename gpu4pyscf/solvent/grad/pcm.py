@@ -22,9 +22,8 @@ import numpy
 import cupy
 from cupyx import scipy
 from pyscf import lib
-from pyscf import gto, df
+from pyscf import gto
 from pyscf.grad import rhf as rhf_grad
-from pyscf.solvent import ddcosmo_grad
 
 from gpu4pyscf.solvent.pcm import PI, switch_h
 from gpu4pyscf.df import int3c2e
