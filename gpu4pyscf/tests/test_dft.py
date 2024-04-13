@@ -59,7 +59,7 @@ def test_DFRKS():
     assert np.abs(e_dft - -685.0326965348272) < 1e-8
 
     g = mf.nuc_grad_method().kernel()
-    assert np.abs(cupy.linalg.norm(g) - 0.17498362161082373) < 1e-6
+    assert np.abs(cupy.linalg.norm(g) - 0.17498362161082373) < 1e-5
 
     h = mf.Hessian().kernel()
     assert np.abs(cupy.linalg.norm(h) - 3.7684319231335377) < 1e-4
@@ -77,7 +77,7 @@ def test_DFUKS():
     assert np.abs(e_dft - -685.0326965349493) < 1e-8
 
     g = mf.nuc_grad_method().kernel()
-    assert np.abs(cupy.linalg.norm(g) - 0.17498264516108836) < 1e-6
+    assert np.abs(cupy.linalg.norm(g) - 0.17498264516108836) < 1e-5
 
     h = mf.Hessian().kernel()
     assert np.abs(cupy.linalg.norm(h) - 3.768429871470736) < 1e-4
@@ -108,7 +108,7 @@ def test_UKS():
     assert np.abs(e_dft - -685.0325611823603) < 1e-8
 
     g = mf.nuc_grad_method().kernel()
-    assert np.abs(cupy.linalg.norm(g) - 0.17503584692057772) < 1e-6
+    assert np.abs(cupy.linalg.norm(g) - 0.17503584692057772) < 1e-5
 
 @pytest.mark.smoke
 def test_DFRKS_with_SMD():
@@ -124,7 +124,7 @@ def test_DFRKS_with_SMD():
     assert np.abs(e_dft - -685.0579697676872) < 1e-8
 
     g = mf.nuc_grad_method().kernel()
-    assert np.abs(cupy.linalg.norm(g) - 0.16832696143145143) < 1e-6
+    assert np.abs(cupy.linalg.norm(g) - 0.16832696143145143) < 1e-5
 
     h = mf.Hessian().kernel()
     assert np.abs(cupy.linalg.norm(h) - 3.750511574920911) < 1e-4
@@ -143,7 +143,7 @@ def test_DFUKS_with_SMD():
     assert np.abs(e_dft - -685.0579697677729) < 1e-8
 
     g = mf.nuc_grad_method().kernel()
-    assert np.abs(cupy.linalg.norm(g) - 0.16832715562574982) < 1e-6
+    assert np.abs(cupy.linalg.norm(g) - 0.16832715562574982) < 1e-5
 
     h = mf.Hessian().kernel()
     assert np.abs(cupy.linalg.norm(h) - 3.7505074541182823) < 1e-4

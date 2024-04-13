@@ -33,4 +33,4 @@ jobs:
       run: |
         echo $GITHUB_WORKSPACE
         export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-        pytest -m smoke --durations=0
+        pytest --durations=0
