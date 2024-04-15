@@ -285,7 +285,6 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
 
     # SCF K matrix with occ
     if getattr(dms_tag, 'mo_coeff', None) is not None:
-        #occ_coeff = cupy.asarray(dms_tag.occ_coeff[ao_idx, :], order='C')
         mo_occ = dms_tag.mo_occ
         mo_coeff = dms_tag.mo_coeff
         nmo = mo_occ.shape[-1]
@@ -307,7 +306,6 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
             for i in range(nset):
                 if with_k:
                     rhok = contract('Lij,jk->Lki', cderi, occ_coeff[i])
-                    #vk[0] += 2.0 * contract('Lki,Lkj->ij', rhok, rhok)
                     cublas.syrk('T', rhok.reshape([-1,nao]), out=vk[i], alpha=1.0, beta=1.0, lower=True)
         if with_j:
             vj[:,rows,cols] = vj_packed
@@ -319,30 +317,40 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
             transpose_sum(vk)
     # CP-HF K matrix
     elif hasattr(dms_tag, 'mo1'):
+        occ_coeffs = dms_tag.occ_coeff
+        mo1s = dms_tag.mo1
+        mo_occ = dms_tag.mo_occ
+        if not isinstance(occ_coeffs, list):
+            occ_coeffs = [occ_coeffs * 2.0] # For restricted
+        if not isinstance(mo1s, list):
+            mo1s = [mo1s]
+
+        occ_coeffs = [occ_coeff[ao_idx] for occ_coeff in occ_coeffs]
+        mo1s = [mo1[:,ao_idx] for mo1 in mo1s]
+
         if with_j:
             vj_sparse = cupy.zeros_like(dm_sparse)
-        mo1 = dms_tag.mo1[:,ao_idx,:]
-        nocc = mo1.shape[2]
-        # 2.0 due to rhok and rhok1, put it here for symmetry
-        occ_coeff = dms_tag.occ_coeff[ao_idx,:] * 2.0
+
+        nocc = max([mo1.shape[2] for mo1 in mo1s])
+
         blksize = dfobj.get_blksize(extra=2*nao*nocc)
         for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
             if with_j:
-                #vj += get_j(cderi_sparse)
                 rhoj = 2.0*dm_sparse.dot(cderi_sparse)
                 vj_sparse += cupy.dot(rhoj, cderi_sparse.T)
             if with_k:
-                rhok = contract('Lij,jk->Lki', cderi, occ_coeff)
-                for i in range(mo1.shape[0]):
-                    rhok1 = contract('Lij,jk->Lki', cderi, mo1[i])
-                    #vk[i] += contract('Lki,Lkj->ij', rhok, rhok1)
-                    contract('Lki,Lkj->ij', rhok, rhok1, alpha=1.0, beta=1.0, out=vk[i])
+                iset = 0
+                for occ_coeff, mo1 in zip(occ_coeffs, mo1s):
+                    rhok = contract('Lij,jk->Lki', cderi, occ_coeff)
+                    for i in range(mo1.shape[0]):
+                        rhok1 = contract('Lij,jk->Lki', cderi, mo1[i])
+                        contract('Lki,Lkj->ij', rhok, rhok1, alpha=1.0, beta=1.0, out=vk[iset])
+                        iset += 1
         occ_coeff = rhok1 = rhok = mo1 = None
         if with_j:
             vj[:,rows,cols] = vj_sparse
             vj[:,cols,rows] = vj_sparse
         if with_k:
-            #vk = vk + vk.transpose(0,2,1)
             transpose_sum(vk)
     # general K matrix with density matrix
     else:
