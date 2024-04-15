@@ -20,7 +20,7 @@ Gradient of PCM family solvent model
 
 import numpy as np
 import cupy
-from pyscf import gto, df, scf, lib
+from pyscf import lib
 
 from gpu4pyscf.solvent import smd
 from gpu4pyscf.solvent.grad import smd as smd_grad
@@ -31,6 +31,7 @@ from gpu4pyscf.solvent.smd import (
     hartree2kcal)
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
+from gpu4pyscf import scf
 
 def hess_swtich_function(R, r, dr):
     if R < r + dr:
