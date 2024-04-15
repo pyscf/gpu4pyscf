@@ -22,7 +22,6 @@ import numpy as np
 import cupy
 #from cupyx import scipy, jit
 from pyscf import lib
-from pyscf import gto, df
 from pyscf.grad import rhf as rhf_grad
 from pyscf.data import radii
 

@@ -417,21 +417,26 @@ def gen_vind(mf, mo_coeff, mo_occ):
         nset = len(mo1)
 
         x = mo1[:,:nmoa*nocca].reshape(nset,nmoa,nocca)
-        mo1_mo = contract('npo,ip->nio', x, mo_coeff[0])
-        dma = contract('nio,jo->nij', mo1_mo, mocca)
+        mo1_moa = contract('npo,ip->nio', x, mo_coeff[0])
+        dma = contract('nio,jo->nij', mo1_moa, mocca)
 
         x = mo1[:,nmoa*nocca:].reshape(nset,nmob,noccb)
-        mo1_mo = contract('npo,ip->nio', x, mo_coeff[1])
-        dmb = contract('nio,jo->nij', mo1_mo, moccb)
+        mo1_mob = contract('npo,ip->nio', x, mo_coeff[1])
+        dmb = contract('nio,jo->nij', mo1_mob, moccb)
 
         dm1 = cupy.empty([2,nset,nao,nao])
         dm1[0] = dma + dma.transpose(0,2,1)
         dm1[1] = dmb + dmb.transpose(0,2,1)
 
+        #v1_old = vresp(dm1)
         # TODO: improve the efficiency with occ_coeff
-        #dm1 = tag_array(dm1, mo1=mo1_mo, occ_coeff=mocc, mo_occ=mo_occ)
+        dm1 = tag_array(dm1, mo1=[mo1_moa,mo1_mob], occ_coeff=[mocca,moccb], mo_occ=mo_occ)
+        #print(dm1.shape)
         v1 = vresp(dm1)
-
+        #print(cupy.linalg.norm(v1 - v1_old))
+        #print(cupy.linalg.norm(v1))
+        #print(v1.shape)
+        #exit()
         v1vo = cupy.empty_like(mo1)
         tmp = contract('nij,jo->nio', v1[0], mocca)
         v1vo[:,:nmoa*nocca] = contract('nio,ip->npo', tmp, mo_coeff[0]).reshape(nset,-1)

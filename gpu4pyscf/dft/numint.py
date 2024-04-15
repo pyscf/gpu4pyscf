@@ -1093,10 +1093,12 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     # AO basis -> gdftopt AO basis
     with_mocc = hasattr(dms, 'mo1')
     if with_mocc:
-        mo1a = contract('nio,pi->npo', dma.mo1, coeff) * 2.0**0.5
-        mo1b = contract('nio,pi->npo', dmb.mo1, coeff) * 2.0**0.5
-        occ_coeff_a = contract('io,pi->po', dma.occ_coeff, coeff) * 2.0**0.5
-        occ_coeff_b = contract('io,pi->po', dmb.occ_coeff, coeff) * 2.0**0.5
+        mo1a, mo1b = dms.mo1
+        occ_coeffa, occ_coeffb = dms.occ_coeff
+        mo1a = contract('nio,pi->npo', mo1a, coeff)
+        mo1b = contract('nio,pi->npo', mo1b, coeff)
+        occ_coeff_a = contract('io,pi->po', occ_coeffa, coeff)
+        occ_coeff_b = contract('io,pi->po', occ_coeffb, coeff)
 
     dma = cupy.asarray(dma).reshape(-1,nao0,nao0)
     dmb = cupy.asarray(dmb).reshape(-1,nao0,nao0)
