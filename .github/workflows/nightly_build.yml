@@ -6,6 +6,7 @@ name: nightly build on self-hosted machine
 on:
   schedule:
     - cron: "0 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
