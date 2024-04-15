@@ -16,7 +16,6 @@
 import cupy
 from pyscf import lib
 from pyscf.lib import logger
-from pyscf.solvent._attach_solvent import _Solvation
 from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf import scf
 
@@ -32,8 +31,6 @@ def _for_scf(mf, solvent_obj, dm=None):
     if isinstance(mf, _Solvation):
         mf.with_solvent = solvent_obj
         return mf
-
-    oldMF = mf.__class__
 
     if dm is not None:
         solvent_obj.e, solvent_obj.v = solvent_obj.kernel(dm)
@@ -82,9 +79,9 @@ class SCFWithSolvent(_Solvation):
     def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1,
                  diis=None, diis_start_cycle=None,
                  level_shift_factor=None, damp_factor=None):
-            # DIIS was called inside oldMF.get_fock. v_solvent, as a function of
-            # dm, should be extrapolated as well. To enable it, v_solvent has to be
-            # added to the fock matrix before DIIS was called.
+        # DIIS was called inside oldMF.get_fock. v_solvent, as a function of
+        # dm, should be extrapolated as well. To enable it, v_solvent has to be
+        # added to the fock matrix before DIIS was called.
         if getattr(vhf, 'v_solvent', None) is None:
             vhf = self.get_veff(self.mol, dm)
         return super().get_fock(self, h1e, s1e, vhf+vhf.v_solvent, dm, cycle, diis,
