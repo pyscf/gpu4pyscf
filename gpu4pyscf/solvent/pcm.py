@@ -226,12 +226,12 @@ class PCM(lib.StreamObject):
     kernel = ddcosmo.DDCOSMO.kernel
 
     def __init__(self, mol):
-        ddcosmo.DDCOSMO.__init__(self, mol)
         self.method = 'C-PCM'
         self.vdw_scale = 1.2 # default value in qchem
+        self.surface = {}
         self.r_probe = 0.0
         self.radii_table = None
-        self.surface = {}
+        self.lebedev_order = 29
         self._intermediates = {}
 
     def dump_flags(self, verbose=None):

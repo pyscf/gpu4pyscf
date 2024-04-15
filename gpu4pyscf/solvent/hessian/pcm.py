@@ -20,17 +20,13 @@ Gradient of PCM family solvent model
 
 import numpy
 import cupy
-from cupyx import scipy
-from pyscf import lib, gto, df
-from pyscf.grad import rhf as rhf_grad
+from pyscf import lib, gto
 from gpu4pyscf import scf
 from gpu4pyscf.solvent.pcm import PI, switch_h
 from gpu4pyscf.solvent.grad.pcm import grad_switch_h, get_dF_dA, get_dD_dS, grad_qv, grad_solver, grad_nuc
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
-
-libdft = lib.load_library('libdft')
 
 def hess_nuc(pcmobj):
     if not pcmobj._intermediates:

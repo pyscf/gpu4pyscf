@@ -22,16 +22,13 @@ import numpy
 import cupy
 from cupyx import scipy
 from pyscf import lib
-from pyscf import gto, df
+from pyscf import gto
 from pyscf.grad import rhf as rhf_grad
-from pyscf.solvent import ddcosmo_grad
 
 from gpu4pyscf.solvent.pcm import PI, switch_h
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
-
-libdft = lib.load_library('libdft')
 
 def grad_switch_h(x):
     ''' first derivative of h(x)'''
@@ -146,7 +143,10 @@ def grad_nuc(pcmobj, dm):
     mol = pcmobj.mol
     log = logger.new_logger(mol, mol.verbose)
     t1 = log.init_timer()
-    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+    dm_cache = pcmobj._intermediates.get('dm', None)
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
+        pass
+    else:
         pcmobj._get_vind(dm)
 
     mol = pcmobj.mol
@@ -180,7 +180,10 @@ def grad_qv(pcmobj, dm):
     '''
     contributions due to integrals
     '''
-    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+    dm_cache = pcmobj._intermediates.get('dm', None)
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
+        pass
+    else:
         pcmobj._get_vind(dm)
     mol = pcmobj.mol
     log = logger.new_logger(mol, mol.verbose)
@@ -217,7 +220,10 @@ def grad_solver(pcmobj, dm):
     mol = pcmobj.mol
     log = logger.new_logger(mol, mol.verbose)
     t1 = log.init_timer()
-    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+    dm_cache = pcmobj._intermediates.get('dm', None)
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
+        pass
+    else:
         pcmobj._get_vind(dm)
 
     gridslice    = pcmobj.surface['gslice_by_atom']
