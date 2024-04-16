@@ -27,13 +27,12 @@ from gpu4pyscf.solvent.grad import smd as smd_grad
 from gpu4pyscf.solvent.hessian import pcm as pcm_hess
 
 from gpu4pyscf.solvent.smd import (
-    sigma_water, sigma_n, sigma_alpha, sigma_beta, r_zz, swtich_function,
+    sigma_water, sigma_n, sigma_alpha, sigma_beta, r_zz, switch_function,
     hartree2kcal)
-from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from gpu4pyscf import scf
 
-def hess_swtich_function(R, r, dr):
+def hess_switch_function(R, r, dr):
     if R < r + dr:
         dist = (R[0]**2 + R[1]**2 + R[2]**2)**.5
         hess = [
@@ -76,14 +75,14 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
                     r, dr = r_zz.get(('H','C'), (0.0, 0.0))
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
+                    dt_drij = hess_switch_function(coords[i]-coords[j], r, dr)
                     dt_HC[i,i] += dt_drij
                     dt_HC[i,j] -= dt_drij
                     dt_HC[j,i] -= dt_drij
                     dt_HC[j,j] += dt_drij
                 if sym_j == 'O':
                     r, dr = r_zz.get(('H','O'), (0.0, 0.0))
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
+                    dt_drij = hess_switch_function(coords[i]-coords[j], r, dr)
                     dt_HO[i,i] += dt_drij
                     dt_HO[i,j] -= dt_drij
                     dt_HO[j,i] -= dt_drij
@@ -101,18 +100,18 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C' and i != j:
                     r, dr = r_zz.get(('C', 'C'), (0.0, 0.0))
-                    d2t_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
+                    d2t_drij = hess_switch_function(coords[i]-coords[j], r, dr)
                     d2t_CC[i,i] += d2t_drij
                     d2t_CC[i,j] -= d2t_drij
                     d2t_CC[j,i] -= d2t_drij
                     d2t_CC[j,j] += d2t_drij
                 if sym_j == 'N':
                     r, dr = r_zz.get(('C', 'N'), (0.0, 0.0))
-                    t_CN += swtich_function(rij[i,j], r, dr)
+                    t_CN += switch_function(rij[i,j], r, dr)
                     dt_drij = smd_grad.grad_switch_function(coords[i]-coords[j], r, dr)
                     dt_CN[i] += dt_drij
                     dt_CN[j] -= dt_drij
-                    d2t_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
+                    d2t_drij = hess_switch_function(coords[i]-coords[j], r, dr)
                     d2t_CN[i,i] += d2t_drij
                     d2t_CN[i,j] -= d2t_drij
                     d2t_CN[j,i] -= d2t_drij
@@ -134,23 +133,23 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
                     for k, sym_k in enumerate(symbols):
                         if k != i and k != j:
                             rjk, drjk = r_zz.get(('C', sym_k), (0.0, 0.0))
-                            tk += swtich_function(rij[j,k], rjk, drjk)
-                            dtk_rjk = hess_swtich_function(coords[j]-coords[k], rjk, drjk)
+                            tk += switch_function(rij[j,k], rjk, drjk)
+                            dtk_rjk = hess_switch_function(coords[j]-coords[k], rjk, drjk)
                             dtk[j,j] += dtk_rjk
                             dtk[j,k] -= dtk_rjk
                             dtk[k,j] -= dtk_rjk
                             dtk[k,k] += dtk_rjk
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr) * tk**2
+                    dt_drij = hess_switch_function(coords[i]-coords[j], r, dr) * tk**2
                     dt_NC[i,i] += dt_drij
                     dt_NC[i,j] -= dt_drij
                     dt_NC[j,i] -= dt_drij
                     dt_NC[j,j] += dt_drij
-                    t = swtich_function(coords[i]-coords[j], r, dr)
+                    t = switch_function(coords[i]-coords[j], r, dr)
                     dt_NC += t * (2 * tk * dtk)
                     t_NC += t * tk**2
 
                     r, dr = r_zz.get(('N','C3'), (0.0, 0.0))
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
+                    dt_drij = hess_switch_function(coords[i]-coords[j], r, dr)
                     dt_NC3[i,i] += dt_drij
                     dt_NC3[i,j] -= dt_drij
                     dt_NC3[j,i] -= dt_drij
@@ -168,28 +167,28 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
                     r, dr = r_zz.get(('O','C'), (0.0, 0.0))
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
+                    dt_drij = hess_switch_function(coords[i]-coords[j], r, dr)
                     dt_OC[i,i] += dt_drij
                     dt_OC[i,j] -= dt_drij
                     dt_OC[j,i] -= dt_drij
                     dt_OC[j,j] += dt_drij
                 if sym_j == 'N':
                     r, dr = r_zz.get(('O','N'), (0.0, 0.0))
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
+                    dt_drij = hess_switch_function(coords[i]-coords[j], r, dr)
                     dt_ON[i,i] += dt_drij
                     dt_ON[i,j] -= dt_drij
                     dt_ON[j,i] -= dt_drij
                     dt_ON[j,j] += dt_drij
                 if sym_j == 'O' and j != i:
                     r, dr = r_zz.get(('O','O'), (0.0, 0.0))
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
+                    dt_drij = hess_switch_function(coords[i]-coords[j], r, dr)
                     dt_OO[i,i] += dt_drij
                     dt_OO[i,j] -= dt_drij
                     dt_OO[j,i] -= dt_drij
                     dt_OO[j,j] += dt_drij
                 if sym_j == 'P':
                     r, dr = r_zz.get(('O','P'), (0.0, 0.0))
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
+                    dt_drij = hess_switch_function(coords[i]-coords[j], r, dr)
                     dt_OP[i,i] += dt_drij
                     dt_OP[i,j] -= dt_drij
                     dt_OP[j,i] -= dt_drij

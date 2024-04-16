@@ -28,12 +28,11 @@ from pyscf.data import radii
 from gpu4pyscf.solvent import pcm, smd
 from gpu4pyscf.solvent.grad import pcm as pcm_grad
 from gpu4pyscf.solvent.smd import (
-    sigma_water, sigma_n, sigma_alpha, sigma_beta, r_zz, swtich_function,
+    sigma_water, sigma_n, sigma_alpha, sigma_beta, r_zz, switch_function,
     hartree2kcal)
-from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 
-def grad_swtich_function(R, r, dr):
+def grad_switch_function(R, r, dr):
     if R < r + dr:
         return -np.exp(dr/(R-dr-r)) * dr / (R-dr-r)**2
     else:
@@ -85,12 +84,12 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
                     r, dr = r_zz.get(('H','C'), (0.0, 0.0))
-                    dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
+                    dt_drij = grad_switch_function(rij[i,j], r, dr) * drij[i,j]
                     dt_HC[i] += dt_drij
                     dt_HC[j] -= dt_drij
                 if sym_j == 'O':
                     r, dr = r_zz.get(('H','O'), (0.0, 0.0))
-                    dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
+                    dt_drij = grad_switch_function(rij[i,j], r, dr) * drij[i,j]
                     dt_HO[i] += dt_drij
                     dt_HO[j] -= dt_drij
             sig_HC = get_bond_tension(('H','C'))
@@ -106,13 +105,13 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C' and i != j:
                     r, dr = r_zz.get(('C', 'C'), (0.0, 0.0))
-                    dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
+                    dt_drij = grad_switch_function(rij[i,j], r, dr) * drij[i,j]
                     dt_CC[i] += dt_drij
                     dt_CC[j] -= dt_drij
                 if sym_j == 'N':
                     r, dr = r_zz.get(('C', 'N'), (0.0, 0.0))
-                    t_CN += swtich_function(rij[i,j], r, dr)
-                    dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
+                    t_CN += switch_function(rij[i,j], r, dr)
+                    dt_drij = grad_switch_function(rij[i,j], r, dr) * drij[i,j]
                     dt_CN[i] += dt_drij
                     dt_CN[j] -= dt_drij
             sig_CC = get_bond_tension(('C','C'))
@@ -134,20 +133,20 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
                         if k != i and k != j:
                             rjk, drjk = r_zz.get(('C', sym_k), (0.0, 0.0))
                             tk += swtich_function(rij[j,k], rjk, drjk)
-                            dtk_rjk = grad_swtich_function(rij[j,k], rjk, drjk) * drij[j,k]
+                            dtk_rjk = grad_switch_function(rij[j,k], rjk, drjk) * drij[j,k]
                             dtk[j] += dtk_rjk
                             dtk[k] -= dtk_rjk
 
-                    dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j] * tk**2
+                    dt_drij = grad_switch_function(rij[i,j], r, dr) * drij[i,j] * tk**2
                     dt_NC[i] += dt_drij
                     dt_NC[j] -= dt_drij
 
-                    t = swtich_function(rij[i,j], r, dr)
+                    t = switch_function(rij[i,j], r, dr)
                     dt_NC += t * (2 * tk * dtk)
                     t_NC += t * tk**2
 
                     r, dr = r_zz.get(('N','C3'), (0.0, 0.0))
-                    dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
+                    dt_drij = grad_switch_function(rij[i,j], r, dr) * drij[i,j]
                     dt_NC3[i] += dt_drij
                     dt_NC3[j] -= dt_drij
             sig_NC = get_bond_tension(('N','C'))
@@ -164,22 +163,22 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
                     r, dr = r_zz.get(('O','C'), (0.0, 0.0))
-                    dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
+                    dt_drij = grad_switch_function(rij[i,j], r, dr) * drij[i,j]
                     dt_OC[i] += dt_drij
                     dt_OC[j] -= dt_drij
                 if sym_j == 'N':
                     r, dr = r_zz.get(('O','N'), (0.0, 0.0))
-                    dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
+                    dt_drij = grad_switch_function(rij[i,j], r, dr) * drij[i,j]
                     dt_ON[i] += dt_drij
                     dt_ON[j] -= dt_drij
                 if sym_j == 'O' and j != i:
                     r, dr = r_zz.get(('O','O'), (0.0, 0.0))
-                    dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
+                    dt_drij = grad_switch_function(rij[i,j], r, dr) * drij[i,j]
                     dt_OO[i] += dt_drij
                     dt_OO[j] -= dt_drij
                 if sym_j == 'P':
                     r, dr = r_zz.get(('O','P'), (0.0, 0.0))
-                    dt_drij = grad_swtich_function(rij[i,j], r, dr) * drij[i,j]
+                    dt_drij = grad_switch_function(rij[i,j], r, dr) * drij[i,j]
                     dt_OP[i] += dt_drij
                     dt_OP[j] -= dt_drij
             sig_OC = get_bond_tension(('O','C'))

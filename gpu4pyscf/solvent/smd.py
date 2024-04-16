@@ -327,7 +327,7 @@ def smd_radii(alpha):
     radii_table[53] = 2.74
     return radii_table/radii.BOHR
 
-def swtich_function(R, r, dr):
+def switch_function(R, r, dr):
     return np.exp(dr/(R-dr-r)) if R<r+dr else 0
 
 def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
@@ -373,10 +373,10 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
                     r, dr = r_zz.get(('H','C'), (0.0, 0.0))
-                    t_HC += swtich_function(rij[i,j], r, dr)
+                    t_HC += switch_function(rij[i,j], r, dr)
                 if sym_j == 'O':
                     r, dr = r_zz.get(('H','O'), (0.0, 0.0))
-                    t_HO += swtich_function(rij[i,j], r, dr)
+                    t_HO += switch_function(rij[i,j], r, dr)
             sig_HC = get_bond_tension(('H','C'))
             sig_HO = get_bond_tension(('H','O'))
             tension += sig_HC * t_HC + sig_HO * t_HO
@@ -389,10 +389,10 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C' and i != j:
                     r, dr = r_zz.get(('C', 'C'), (0.0, 0.0))
-                    t_CC += swtich_function(rij[i,j], r, dr)
+                    t_CC += switch_function(rij[i,j], r, dr)
                 if sym_j == 'N':
                     r, dr = r_zz.get(('C', 'N'), (0.0, 0.0))
-                    t_CN += swtich_function(rij[i,j], r, dr)
+                    t_CN += switch_function(rij[i,j], r, dr)
             sig_CC = get_bond_tension(('C','C'))
             sig_CN = get_bond_tension(('C','N'))
             tension += sig_CC * t_CC + sig_CN * t_CN**2
@@ -409,11 +409,11 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
                     for k, sym_k in enumerate(symbols):
                         if k != i and k != j:
                             rjk, drjk = r_zz.get(('C', sym_k), (0.0,0.0))
-                            tk += swtich_function(rij[j,k], rjk, drjk)
-                    t_NC += swtich_function(rij[i,j], r, dr) * tk**2
+                            tk += switch_function(rij[j,k], rjk, drjk)
+                    t_NC += switch_function(rij[i,j], r, dr) * tk**2
 
                     r, dr = r_zz.get(('N','C3'), (0.0, 0.0))
-                    t_NC3 += swtich_function(rij[i,j], r, dr)
+                    t_NC3 += switch_function(rij[i,j], r, dr)
             sig_NC = get_bond_tension(('N','C'))
             sig_NC3= get_bond_tension(('N','C3'))
             tension += sig_NC * t_NC**1.3 + sig_NC3 * t_NC3
@@ -428,16 +428,16 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             for j, sym_j in enumerate(symbols):
                 if sym_j == 'C':
                     r, dr = r_zz.get(('O','C'), (0.0, 0.0))
-                    t_OC += swtich_function(rij[i,j], r, dr)
+                    t_OC += switch_function(rij[i,j], r, dr)
                 if sym_j == 'N':
                     r, dr = r_zz.get(('O','N'), (0.0, 0.0))
-                    t_ON += swtich_function(rij[i,j], r, dr)
+                    t_ON += switch_function(rij[i,j], r, dr)
                 if sym_j == 'O' and j != i:
                     r, dr = r_zz.get(('O','O'), (0.0, 0.0))
-                    t_OO += swtich_function(rij[i,j], r, dr)
+                    t_OO += switch_function(rij[i,j], r, dr)
                 if sym_j == 'P':
                     r, dr = r_zz.get(('O','P'), (0.0, 0.0))
-                    t_OP += swtich_function(rij[i,j], r, dr)
+                    t_OP += switch_function(rij[i,j], r, dr)
             sig_OC = get_bond_tension(('O','C'))
             sig_ON = get_bond_tension(('O','N'))
             sig_OO = get_bond_tension(('O','O'))
