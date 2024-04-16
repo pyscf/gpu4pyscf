@@ -132,7 +132,7 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
                     for k, sym_k in enumerate(symbols):
                         if k != i and k != j:
                             rjk, drjk = r_zz.get(('C', sym_k), (0.0, 0.0))
-                            tk += swtich_function(rij[j,k], rjk, drjk)
+                            tk += switch_function(rij[j,k], rjk, drjk)
                             dtk_rjk = grad_switch_function(rij[j,k], rjk, drjk) * drij[j,k]
                             dtk[j] += dtk_rjk
                             dtk[k] -= dtk_rjk
