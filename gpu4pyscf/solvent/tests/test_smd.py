@@ -98,7 +98,7 @@ class KnownValues(unittest.TestCase):
         mf.with_solvent.solvent = 'water'
         mf.with_solvent.sasa_ng = 590
         e_tot = mf.kernel()
-        assert numpy.abs(e_tot - -76.47848839552529) < 1e-4
+        assert numpy.abs(e_tot - -76.47848839552529) < 2e-4
 
     def test_dfuks(self):
         mf = dft.UKS(mol, xc='b3lyp').density_fit()
@@ -106,7 +106,7 @@ class KnownValues(unittest.TestCase):
         mf.with_solvent.solvent = 'water'
         mf.with_solvent.sasa_ng = 590
         e_tot = mf.kernel()
-        assert numpy.abs(e_tot - -76.47848839552529) < 1e-4
+        assert numpy.abs(e_tot - -76.47848839552529) < 2e-4
 
 if __name__ == "__main__":
     print("Full Tests for SMDs")

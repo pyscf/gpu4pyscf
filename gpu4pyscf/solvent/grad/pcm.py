@@ -188,12 +188,13 @@ def grad_qv(pcmobj, dm):
     mol = pcmobj.mol
     log = logger.new_logger(mol, mol.verbose)
     t1 = log.init_timer()
-    gridslice    = pcmobj.surface['gslice_by_atom']
-    q_sym        = pcmobj._intermediates['q_sym']
+    gridslice   = pcmobj.surface['gslice_by_atom']
+    charge_exp  = pcmobj.surface['charge_exp']
+    grid_coords = pcmobj.surface['grid_coords']
+    q_sym       = pcmobj._intermediates['q_sym']
 
-    intopt = pcmobj.intopt
-    intopt.clear()
-    # rebuild with aosym
+    auxmol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
+    intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
     coeff = intopt.coeff
     dm_cart = coeff @ dm @ coeff.T

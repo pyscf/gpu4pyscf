@@ -19,8 +19,6 @@ from pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf import scf
 
-# NOTE: copied from pyscf, different from the latest version
-
 def _for_scf(mf, solvent_obj, dm=None):
     '''Add solvent model to SCF (HF and DFT) method.
 
@@ -59,17 +57,17 @@ class SCFWithSolvent(_Solvation):
         return obj
 
     def dump_flags(self, verbose=None):
-        super().dump_flags(self, verbose)
+        super().dump_flags(verbose)
         self.with_solvent.check_sanity()
         self.with_solvent.dump_flags(verbose)
         return self
 
     def reset(self, mol=None):
         self.with_solvent.reset(mol)
-        return super().reset(self, mol)
+        return super().reset(mol)
 
     def get_veff(self, mol=None, dm=None, *args, **kwargs):
-        vhf = super().get_veff(self, mol, dm, *args, **kwargs)
+        vhf = super().get_veff(mol, dm, *args, **kwargs)
         with_solvent = self.with_solvent
         if not with_solvent.frozen:
             with_solvent.e, with_solvent.v = with_solvent.kernel(dm)
@@ -84,7 +82,7 @@ class SCFWithSolvent(_Solvation):
         # added to the fock matrix before DIIS was called.
         if getattr(vhf, 'v_solvent', None) is None:
             vhf = self.get_veff(self.mol, dm)
-        return super().get_fock(self, h1e, s1e, vhf+vhf.v_solvent, dm, cycle, diis,
+        return super().get_fock(h1e, s1e, vhf+vhf.v_solvent, dm, cycle, diis,
                                 diis_start_cycle, level_shift_factor, damp_factor)
 
     def energy_elec(self, dm=None, h1e=None, vhf=None):
@@ -93,14 +91,14 @@ class SCFWithSolvent(_Solvation):
         if getattr(vhf, 'e_solvent', None) is None:
             vhf = self.get_veff(self.mol, dm)
 
-        e_tot, e_coul = super().energy_elec(self, dm, h1e, vhf)
+        e_tot, e_coul = super().energy_elec(dm, h1e, vhf)
         e_solvent = vhf.e_solvent
         if isinstance(e_solvent, cupy.ndarray):
             e_solvent = e_solvent.get()[()]
         e_tot += e_solvent
         self.scf_summary['e_solvent'] = vhf.e_solvent.real
 
-        if self.with_solvent.method.upper() == 'SMD':
+        if (hasattr(self.with_solvent, 'method') and self.with_solvent.method.upper() == 'SMD'):
             if self.with_solvent.e_cds is None:
                 e_cds = self.with_solvent.get_cds()
                 self.with_solvent.e_cds = e_cds
@@ -116,17 +114,17 @@ class SCFWithSolvent(_Solvation):
         return e_tot, e_coul
 
     def nuc_grad_method(self):
-        grad_method = super().nuc_grad_method(self)
+        grad_method = super().nuc_grad_method()
         return self.with_solvent.nuc_grad_method(grad_method)
 
     Gradients = nuc_grad_method
 
     def Hessian(self):
-        hess_method = super().Hessian(self)
+        hess_method = super().Hessian()
         return self.with_solvent.Hessian(hess_method)
 
     def gen_response(self, *args, **kwargs):
-        vind = super().gen_response(self, *args, **kwargs)
+        vind = super().gen_response(*args, **kwargs)
         is_uhf = isinstance(self, scf.uhf.UHF)
         # singlet=None is orbital hessian or CPHF type response function
         singlet = kwargs.get('singlet', True)
@@ -151,4 +149,4 @@ class SCFWithSolvent(_Solvation):
         # be considered in stability analysis.
         with lib.temporary_env(self.with_solvent,
                                 equilibrium_solvation=not self.with_solvent.frozen):
-            return super().stability(self, *args, **kwargs)
+            return super().stability(*args, **kwargs)

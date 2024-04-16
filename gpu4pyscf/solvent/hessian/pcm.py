@@ -22,8 +22,8 @@ import numpy
 import cupy
 from pyscf import lib, gto
 from gpu4pyscf import scf
-from gpu4pyscf.solvent.pcm import PI, switch_h
-from gpu4pyscf.solvent.grad.pcm import grad_switch_h, get_dF_dA, get_dD_dS, grad_qv, grad_solver, grad_nuc
+from gpu4pyscf.solvent.pcm import PI
+from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_solver, grad_nuc
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger

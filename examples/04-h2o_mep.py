@@ -18,7 +18,7 @@ import numpy as np
 from pyscf import lib, gto
 from gpu4pyscf.dft import rks
 
-atom =''' 
+atom ='''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000

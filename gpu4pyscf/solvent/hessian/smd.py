@@ -45,13 +45,6 @@ def hess_swtich_function(R, r, dr):
         return np.zeros([3,3])
 
 def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
-    '''
-    TODO: debug later
-    - list of atomic symbols
-    - atomic coordinates in Anstrong
-    - solvent descriptors: n, alpha, beta
-    '''
-
     def get_bond_tension(bond):
         if water:
             return sigma_water.get(bond, 0.0)
@@ -61,14 +54,6 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
         t += sigma_beta.get(bond, 0.0) * beta
         return t
 
-    def get_atom_tension(sym_i):
-        if water:
-            return sigma_water.get(sym_i, 0.0)
-        t = 0.0
-        t += sigma_n.get(sym_i, 0.0) * n
-        t += sigma_alpha.get(sym_i, 0.0) * alpha
-        t += sigma_beta.get(sym_i, 0.0) * beta
-        return t
     natm = coords.shape[0]
     ri_rj = coords[:,None,:] - coords[None,:,:]
     rij = np.sum(ri_rj**2, axis=2)**0.5

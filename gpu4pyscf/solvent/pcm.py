@@ -22,10 +22,10 @@ import numpy
 import cupy
 import cupyx.scipy as scipy
 from pyscf import lib
-from pyscf import gto, df
+from pyscf import gto
 from pyscf.dft import gen_grid
 from pyscf.data import radii
-from pyscf.solvent import ddcosmo#, _attach_solvent
+from pyscf.solvent import ddcosmo
 from gpu4pyscf.solvent import _attach_solvent
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
@@ -226,6 +226,7 @@ class PCM(lib.StreamObject):
     kernel = ddcosmo.DDCOSMO.kernel
 
     def __init__(self, mol):
+        ddcosmo.DDCOSMO.__init__(self, mol)
         self.method = 'C-PCM'
         self.vdw_scale = 1.2 # default value in qchem
         self.surface = {}

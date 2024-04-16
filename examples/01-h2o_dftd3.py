@@ -38,7 +38,8 @@ grids_level = 8
 mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
 # set verbose >= 6 for debugging timer
 mol.verbose = 1
-mf_GPU = rks.RKS(mol, xc=xc, disp='d3bj').density_fit(auxbasis=auxbasis)
+mf_GPU = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
+mf_GPU.disp = 'd3bj'
 mf_GPU.grids.level = grids_level
 mf_GPU.conv_tol = scf_tol
 mf_GPU.max_cycle = max_scf_cycles

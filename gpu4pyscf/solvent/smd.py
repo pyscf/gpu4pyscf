@@ -545,8 +545,6 @@ class SMD(pcm.PCM):
         logger.info(self, '******** %s ********', self.__class__)
         logger.info(self, 'lebedev_order = %s (%d grids per sphere)',
                     self.lebedev_order, gen_grid.LEBEDEV_ORDER[self.lebedev_order])
-        logger.info(self, 'lmax = %s'         , self.lmax)
-        logger.info(self, 'eta = %s'          , self.eta)
         logger.info(self, 'eps = %s'          , self.eps)
         logger.info(self, 'frozen = %s'       , self.frozen)
         logger.info(self, '---------- SMD solvent descriptors -------')
