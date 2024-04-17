@@ -222,7 +222,7 @@ class PCM(lib.StreamObject):
         'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
         'equilibrium_solvation', 'e', 'v',
     }
-
+    from gpu4pyscf.lib.utils import to_gpu, device
     kernel = ddcosmo.DDCOSMO.kernel
 
     def __init__(self, mol):
@@ -249,6 +249,11 @@ class PCM(lib.StreamObject):
             logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
         self.grids.dump_flags(verbose)
         return self
+
+    def to_cpu(self):
+        from gpu4pyscf.lib.utils import to_cpu
+        obj = to_cpu(self)
+        return obj.reset()
 
     def build(self, ng=None):
         if self.radii_table is None:

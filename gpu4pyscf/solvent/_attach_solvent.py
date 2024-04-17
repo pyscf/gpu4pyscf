@@ -43,6 +43,8 @@ class _Solvation:
     pass
 
 class SCFWithSolvent(_Solvation):
+    from gpu4pyscf.lib.utils import to_gpu, device
+
     _keys = {'with_solvent'}
 
     def __init__(self, mf, solvent):
@@ -54,6 +56,11 @@ class SCFWithSolvent(_Solvation):
         name_mixin = self.with_solvent.__class__.__name__
         obj = lib.view(self, lib.drop_class(cls, SCFWithSolvent, name_mixin))
         del obj.with_solvent
+        return obj
+
+    def to_cpu(self):
+        solvent_obj = self.with_solvent.to_cpu()
+        obj = _for_scf(self.undo_solvent().to_cpu(), solvent_obj)
         return obj
 
     def dump_flags(self, verbose=None):

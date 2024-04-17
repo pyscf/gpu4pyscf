@@ -234,12 +234,27 @@ def make_hess_object(hess_method):
                          (WithSolventHess, hess_method.__class__), name)
 
 class WithSolventHess:
+    from gpu4pyscf.lib.utils import to_gpu, device
+
     _keys = {'de_solvent', 'de_solute'}
 
     def __init__(self, hess_method):
         self.__dict__.update(hess_method.__dict__)
         self.de_solvent = None
         self.de_solute = None
+
+    def undo_solvent(self):
+        cls = self.__class__
+        name_mixin = self.base.with_solvent.__class__.__name__
+        obj = lib.view(self, lib.drop_class(cls, WithSolventHess, name_mixin))
+        del obj.de_solvent
+        del obj.de_solute
+        return obj
+
+    def to_cpu(self):
+        from pyscf.solvent.hessian import pcm
+        hess_method = self.undo_solvent().to_cpu()
+        return pcm.make_hess_object(hess_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         dm = kwargs.pop('dm', None)

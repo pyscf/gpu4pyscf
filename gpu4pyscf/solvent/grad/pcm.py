@@ -332,6 +332,8 @@ def make_grad_object(grad_method):
                          (WithSolventGrad, grad_method.__class__), name)
 
 class WithSolventGrad:
+    from gpu4pyscf.lib.utils import to_gpu, device
+
     _keys = {'de_solvent', 'de_solute'}
 
     def __init__(self, grad_method):
@@ -346,6 +348,11 @@ class WithSolventGrad:
         del obj.de_solvent
         del obj.de_solute
         return obj
+
+    def to_cpu(self):
+        from pyscf.solvent.grad import pcm
+        grad_method = self.undo_solvent().to_cpu()
+        return pcm.make_grad_object(grad_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         dm = kwargs.pop('dm', None)
