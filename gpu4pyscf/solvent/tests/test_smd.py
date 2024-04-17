@@ -277,7 +277,9 @@ H -0.595 -0.476 -0.824
     '''
         _check_smd(atom, -500.1341946429, solvent='water')
         _check_smd(atom, -500.1369954008, solvent='toluene')
-    """
+
+# TODO: SMD18 updated radii for Br
+"""
     def test_Br(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -286,9 +288,9 @@ H -0.646 0.929 0.000
 H -0.646 -0.464 0.804
 H -0.646 -0.464 -0.804
     '''
-        _check_smd(atom, -2614.0791753205, solvent='water')
-        _check_smd(atom, -2614.0822064510, solvent='toluene')
-    """
+        _check_smd(atom, -2614.0791753204, solvent='water')
+        _check_smd(atom, -2614.0823543837, solvent='toluene')
+"""
 if __name__ == "__main__":
     print("Full Tests for SMDs")
     unittest.main()
