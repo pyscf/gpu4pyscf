@@ -15,10 +15,15 @@
 
 import unittest
 import numpy
+import pyscf
+import pytest
 from pyscf import gto
 from gpu4pyscf import scf
 from gpu4pyscf.solvent import pcm
 from gpu4pyscf.solvent.grad import pcm as pcm_grad
+from packaging import version
+
+pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
 def setUpModule():
     global mol, epsilon, lebedev_order
@@ -58,6 +63,7 @@ def _grad_with_solvent(method, unrestricted=False):
     return grad
 
 class KnownValues(unittest.TestCase):
+
     def test_dA_dF(self):
         cm = pcm.PCM(mol)
         cm.lebedev_order = 3
@@ -164,6 +170,56 @@ class KnownValues(unittest.TestCase):
             [-0.22822709179066E-01,  -0.31051364515588E-16,   0.29494044211806E-01]])
         print(f"Gradient error in UHF with IEFPCM: {numpy.linalg.norm(g0 - grad)}")
         assert numpy.linalg.norm(g0 - grad) < 1e-6
+
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    def test_to_cpu(self):
+        mf = scf.RHF(mol).PCM()
+        mf.verbose = 0
+        mf.conv_tol = 1e-12
+        mf.kernel()
+
+        gradobj = mf.nuc_grad_method()
+        grad_gpu = gradobj.kernel()
+        gradobj = gradobj.to_cpu()
+        grad_cpu = gradobj.kernel()
+        assert numpy.linalg.norm(grad_gpu - grad_cpu) < 1e-8
+
+        mf = scf.RHF(mol).density_fit().PCM()
+        mf.verbose = 0
+        mf.conv_tol = 1e-12
+        mf.kernel()
+
+        gradobj = mf.nuc_grad_method()
+        grad_gpu = gradobj.kernel()
+        gradobj = gradobj.to_cpu()
+        grad_cpu = gradobj.kernel()
+        assert numpy.linalg.norm(grad_gpu - grad_cpu) < 1e-8
+
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    def test_to_gpu(self):
+        mf = pyscf.scf.RHF(mol).PCM()
+        mf.verbose = 0
+        mf.conv_tol = 1e-12
+        mf.kernel()
+
+        g = mf.nuc_grad_method()
+        grad_cpu = g.kernel()
+
+        g = g.to_gpu()
+        grad_gpu = g.kernel()
+        assert numpy.linalg.norm(grad_gpu - grad_cpu) < 1e-8
+
+        mf = pyscf.scf.RHF(mol).density_fit().PCM()
+        mf.verbose = 0
+        mf.conv_tol = 1e-12
+        mf.kernel()
+
+        g = mf.nuc_grad_method()
+        grad_cpu = g.kernel()
+
+        g = g.to_gpu()
+        grad_gpu = g.kernel()
+        assert numpy.linalg.norm(grad_gpu - grad_cpu) < 1e-8
 
 if __name__ == "__main__":
     print("Full Tests for Gradient of PCMs")

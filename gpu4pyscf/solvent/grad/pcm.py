@@ -143,6 +143,8 @@ def grad_nuc(pcmobj, dm):
     mol = pcmobj.mol
     log = logger.new_logger(mol, mol.verbose)
     t1 = log.init_timer()
+    if not pcmobj._intermediates:
+        pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
     if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
         pass
@@ -180,6 +182,8 @@ def grad_qv(pcmobj, dm):
     '''
     contributions due to integrals
     '''
+    if not pcmobj._intermediates:
+        pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
     if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
         pass
@@ -221,6 +225,8 @@ def grad_solver(pcmobj, dm):
     mol = pcmobj.mol
     log = logger.new_logger(mol, mol.verbose)
     t1 = log.init_timer()
+    if not pcmobj._intermediates:
+        pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
     if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
         pass

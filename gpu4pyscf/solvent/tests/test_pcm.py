@@ -15,9 +15,14 @@
 
 import unittest
 import numpy
+import pyscf
+import pytest
 from pyscf import gto
 from gpu4pyscf import scf, dft
 from gpu4pyscf.solvent import pcm
+from packaging import version
+
+pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
 def setUpModule():
     global mol, epsilon, lebedev_order
@@ -86,16 +91,55 @@ class KnownValues(unittest.TestCase):
 
     def test_dfrks(self):
         e_tot = _energy_with_solvent(dft.RKS(mol, xc='b3lyp').density_fit(), 'IEF-PCM')
-        print(e_tot)
         print(f"Energy error in DFRKS with IEF-PCM: {numpy.abs(e_tot - -75.31863727142068)}")
         assert numpy.abs(e_tot -  -75.31863727142068) < 1e-9
 
     def test_dfuks(self):
         e_tot = _energy_with_solvent(dft.UKS(mol, xc='b3lyp').density_fit(), 'IEF-PCM')
-        print(e_tot)
         print(f"Energy error in DFUKS with IEF-PCM: {numpy.abs(e_tot - -75.31863727142068)}")
         assert numpy.abs(e_tot - -75.31863727142068) < 1e-9
 
+    def test_to_cpu(self):
+        mf = dft.RKS(mol, xc='b3lyp')
+        e_gpu = mf.kernel()
+        mf = mf.to_cpu()
+        e_cpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
+
+        mf = dft.RKS(mol, xc='b3lyp').density_fit()
+        e_gpu = mf.kernel()
+        mf = mf.to_cpu()
+        e_cpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
+
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    def test_to_gpu(self):
+        import pyscf
+        mf = pyscf.dft.RKS(mol, xc='b3lyp').PCM()
+        e_cpu = mf.kernel()
+        mf = mf.to_gpu()
+        e_gpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
+
+        mf = pyscf.dft.RKS(mol, xc='b3lyp').density_fit().PCM()
+        e_cpu = mf.kernel()
+        mf = mf.to_gpu()
+        e_gpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
+
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    def test_to_cpu(self):
+        mf = dft.RKS(mol, xc='b3lyp').PCM()
+        e_gpu = mf.kernel()
+        mf = mf.to_cpu()
+        e_cpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
+
+        mf = dft.RKS(mol, xc='b3lyp').density_fit().PCM()
+        e_gpu = mf.kernel()
+        mf = mf.to_cpu()
+        e_cpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
 if __name__ == "__main__":
     print("Full Tests for PCMs")
     unittest.main()

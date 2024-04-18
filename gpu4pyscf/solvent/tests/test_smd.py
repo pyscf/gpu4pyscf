@@ -15,9 +15,14 @@
 
 import unittest
 import numpy
+import pytest
+import pyscf
 from pyscf import gto
 from gpu4pyscf import scf, dft
 from gpu4pyscf.solvent import smd
+from packaging import version
+
+pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
 # for reproducing the reference
 """
@@ -102,6 +107,7 @@ def _check_smd(atom, e_ref, solvent='water'):
     mf.with_solvent.sasa_ng = 590
     mf.with_solvent.lebedev_order = 29
     e_tot = mf.kernel()
+    mol.stdout.close()
     assert numpy.abs(e_tot - e_ref) < 2e-4
 
 class KnownValues(unittest.TestCase):
@@ -278,8 +284,8 @@ H -0.595 -0.476 -0.824
         _check_smd(atom, -500.1341946429, solvent='water')
         _check_smd(atom, -500.1369954008, solvent='toluene')
 
-# TODO: SMD18 updated radii for Br
-"""
+    # TODO: SMD18 updated radii for Br
+    """
     def test_Br(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -290,7 +296,35 @@ H -0.646 -0.464 -0.804
     '''
         _check_smd(atom, -2614.0791753204, solvent='water')
         _check_smd(atom, -2614.0823543837, solvent='toluene')
-"""
+    """
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    def test_to_gpu(self):
+        import pyscf
+        mf = pyscf.dft.RKS(mol, xc='b3lyp').SMD()
+        e_cpu = mf.kernel()
+        mf = mf.to_gpu()
+        e_gpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
+
+        mf = pyscf.dft.RKS(mol, xc='b3lyp').density_fit().SMD()
+        e_cpu = mf.kernel()
+        mf = mf.to_gpu()
+        e_gpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
+
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    def test_to_cpu(self):
+        mf = dft.RKS(mol, xc='b3lyp').SMD()
+        e_gpu = mf.kernel()
+        mf = mf.to_cpu()
+        e_cpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
+
+        mf = dft.RKS(mol, xc='b3lyp').density_fit().SMD()
+        e_gpu = mf.kernel()
+        mf = mf.to_cpu()
+        e_cpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
 if __name__ == "__main__":
     print("Full Tests for SMDs")
     unittest.main()

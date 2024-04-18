@@ -15,24 +15,25 @@
 
 import unittest
 import numpy
+import pyscf
+import pytest
 from pyscf import gto
 from gpu4pyscf import scf, dft, lib
 from gpu4pyscf.solvent.hessian import smd as smd_hess
 from gpu4pyscf.solvent.grad import smd as smd_grad
 from gpu4pyscf.solvent import smd
+from packaging import version
+
+pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
 def setUpModule():
     global mol
     mol = gto.Mole()
-    mol.atom = '''P 0.000 0.000 0.000
-O 1.500 0.000 0.000
-O -1.500 0.000 0.000
-O 0.000 1.500 0.000
-O 0.000 -1.500 0.000
-H 1.000 1.000 0.000
-H -1.000 -1.000 0.000
-H 0.000 -2.000 0.000
-'''
+    mol.atom = '''
+O       0.0000000000    -0.0000000000     0.1174000000
+H      -0.7570000000    -0.0000000000    -0.4696000000
+H       0.7570000000     0.0000000000    -0.4696000000
+    '''
     mol.basis = 'sto3g'
     mol.output = '/dev/null'
     mol.build(verbose=0)
@@ -212,6 +213,49 @@ H -0.646 -0.464 -0.804
     '''
         _check_hess(atom, solvent='water')
         _check_hess(atom, solvent='toluene')
+
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    def test_to_gpu(self):
+        import pyscf
+        # Not implemented yet
+        '''
+        mf = pyscf.dft.RKS(mol, xc='b3lyp').SMD()
+        mf.kernel()
+        hessobj = mf.Hessian()
+        hess_cpu = hessobj.kernel()
+        hessobj = hessobj.to_gpu()
+        hess_gpu = hessobj.kernel()
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-8
+        '''
+        mf = pyscf.dft.RKS(mol, xc='b3lyp').density_fit().SMD()
+        mf.conv_tol = 1e-12
+        mf.conv_tol_cpscf = 1e-7
+        mf.kernel()
+        hessobj = mf.Hessian()
+        hess_cpu = hessobj.kernel()
+        hessobj = hessobj.to_gpu()
+        hess_gpu = hessobj.kernel()
+        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    def test_to_cpu(self):
+        # Not implemented yet
+        '''
+        mf = dft.RKS(mol, xc='b3lyp').SMD()
+        e_gpu = mf.kernel()
+        mf = mf.to_cpu()
+        e_cpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
+        '''
+        mf = dft.RKS(mol, xc='b3lyp').density_fit().SMD()
+        mf.conv_tol = 1e-12
+        mf.conv_tol_cpscf = 1e-7
+        mf.kernel()
+        hessobj = mf.Hessian()
+        hess_gpu = hessobj.kernel()
+        hessobj = hessobj.to_cpu()
+        hess_cpu = hessobj.kernel()
+        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
 
 if __name__ == "__main__":
     print("Full Tests for Hessian of SMD")

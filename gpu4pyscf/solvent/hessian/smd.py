@@ -14,7 +14,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 '''
-Gradient of PCM family solvent model
+Hessian SMD solvent model
 '''
 # pylint: disable=C0103
 

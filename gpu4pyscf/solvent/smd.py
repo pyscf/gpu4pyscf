@@ -559,7 +559,6 @@ class SMD(pcm.PCM):
         logger.info(self, 'radii_table %s', self.radii_table*radii.BOHR)
         if self.atom_radii:
             logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
-        self.grids.dump_flags(verbose)
         return self
 
     def get_cds(self):

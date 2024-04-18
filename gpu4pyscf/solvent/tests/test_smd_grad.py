@@ -15,12 +15,15 @@
 
 import unittest
 import numpy
+import pyscf
+import pytest
 from pyscf import gto
 from gpu4pyscf import scf, dft
-from gpu4pyscf.solvent import pcm
-from gpu4pyscf.solvent.grad import pcm as pcm_grad
 from gpu4pyscf.solvent.grad import smd as smd_grad
 from gpu4pyscf.solvent import smd
+from packaging import version
+
+pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
 def setUpModule():
     global mol
@@ -74,6 +77,7 @@ def _check_grad(atom, solvent='water'):
     smdobj = smd.SMD(mol)
     smdobj.solvent = solvent
     grad_cds = smd_grad.get_cds(smdobj)
+    mol.stdout.close()
     assert numpy.linalg.norm(fd_cds - grad_cds) < 1e-8
 
 class KnownValues(unittest.TestCase):
@@ -234,6 +238,47 @@ H -0.646 -0.464 -0.804
     '''
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
+
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    def test_to_gpu(self):
+        import pyscf
+        mf = pyscf.dft.RKS(mol, xc='b3lyp').SMD()
+        mf.conv_tol = 1e-12
+        mf.kernel()
+        gradobj = mf.nuc_grad_method()
+        g_cpu = gradobj.kernel()
+        gradobj = gradobj.to_gpu()
+        g_gpu = gradobj.kernel()
+        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-5
+
+        mf = pyscf.dft.RKS(mol, xc='b3lyp').density_fit().SMD()
+        mf.conv_tol = 1e-12
+        mf.kernel()
+        gradobj = mf.nuc_grad_method()
+        g_cpu = gradobj.kernel()
+        gradobj = gradobj.to_gpu()
+        g_gpu = gradobj.kernel()
+        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-5
+
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    def test_to_cpu(self):
+        mf = dft.RKS(mol, xc='b3lyp').SMD()
+        mf.conv_tol = 1e-12
+        mf.kernel()
+        gradobj = mf.nuc_grad_method()
+        g_gpu = gradobj.kernel()
+        gradobj = gradobj.to_cpu()
+        g_cpu = gradobj.kernel()
+        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-5
+
+        mf = dft.RKS(mol, xc='b3lyp').density_fit().SMD()
+        mf.conv_tol = 1e-12
+        mf.kernel()
+        gradobj = mf.nuc_grad_method()
+        g_gpu = gradobj.kernel()
+        gradobj = gradobj.to_cpu()
+        g_cpu = gradobj.kernel()
+        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-5
 
 if __name__ == "__main__":
     print("Full Tests for Gradient of SMD")

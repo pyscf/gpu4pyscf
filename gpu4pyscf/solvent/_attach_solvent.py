@@ -59,8 +59,9 @@ class SCFWithSolvent(_Solvation):
         return obj
 
     def to_cpu(self):
+        from pyscf.solvent import _attach_solvent
         solvent_obj = self.with_solvent.to_cpu()
-        obj = _for_scf(self.undo_solvent().to_cpu(), solvent_obj)
+        obj = _attach_solvent._for_scf(self.undo_solvent().to_cpu(), solvent_obj)
         return obj
 
     def dump_flags(self, verbose=None):
@@ -83,7 +84,7 @@ class SCFWithSolvent(_Solvation):
 
     def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1,
                  diis=None, diis_start_cycle=None,
-                 level_shift_factor=None, damp_factor=None):
+                 level_shift_factor=None, damp_factor=None, fock_last=None):
         # DIIS was called inside oldMF.get_fock. v_solvent, as a function of
         # dm, should be extrapolated as well. To enable it, v_solvent has to be
         # added to the fock matrix before DIIS was called.
