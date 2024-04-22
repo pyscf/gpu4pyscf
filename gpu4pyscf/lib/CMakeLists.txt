@@ -16,10 +16,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 cmake_minimum_required (VERSION 3.19 FATAL_ERROR) # 3.19 is required by cutlass
-project (gpu4pyscf C CXX CUDA)
+project (gpu4pyscf C CXX CUDA Fortran)
 
 set(CMAKE_C_STANDARD "99")
-
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -117,6 +116,7 @@ add_subdirectory(gint)
 add_subdirectory(gvhf)
 add_subdirectory(gdft)
 add_subdirectory(cupy_helper)
+add_subdirectory(solvent)
 
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
