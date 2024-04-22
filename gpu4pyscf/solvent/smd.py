@@ -539,7 +539,7 @@ def get_cds_legacy(smdobj):
                     sola, solb, solc, solg, solh, soln,
                     icds,
                     ctypes.byref(gcds), ctypes.byref(areacds), dcds)
-    return gcds.value / 627.509451
+    return gcds.value / 627.509451, dcds
 
 class SMD(pcm.PCM):
     _keys = {
@@ -606,7 +606,7 @@ class SMD(pcm.PCM):
         return self
 
     def get_cds(self):
-        return get_cds_legacy(self)
+        return get_cds_legacy(self)[0]
 
     def nuc_grad_method(self, grad_method):
         from gpu4pyscf.solvent.grad import smd as smd_grad

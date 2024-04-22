@@ -114,7 +114,6 @@ class KnownValues(unittest.TestCase):
         smdobj.sasa_ng = 590
         smdobj.solvent = 'toluene'
         e_cds = smdobj.get_cds()
-        print(e_cds)
         assert numpy.abs(e_cds - -0.0013479524949097355) < 1e-8
 
     def test_cds_water(self):
@@ -122,7 +121,6 @@ class KnownValues(unittest.TestCase):
         smdobj.sasa_ng = 590
         smdobj.solvent = 'water'
         e_cds = smdobj.get_cds()
-        print(e_cds)
         assert numpy.abs(e_cds - 0.002298448590009083) < 1e-8
 
     def test_smd_solvent(self):
