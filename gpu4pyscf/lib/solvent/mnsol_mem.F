@@ -1,4 +1,6 @@
+c     copied from https://github.com/nwchemgit/nwchem/blob/master/src/solvation/mnsol_mem.F
 c
+c     
 c     memory for the x array used in mnsol code
 c
       subroutine mnsol_xmem(nat,ineed)

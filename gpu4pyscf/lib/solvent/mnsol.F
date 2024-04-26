@@ -1,4 +1,5 @@
-c MN solvation models -->
+c     copied from https://github.com/nwchemgit/nwchem/blob/master/src/solvation/mnsol.F
+c     MN solvation models -->
 C
 C THIS IS A PROGRAM TO CALCULATE THE CDS TERM FOR MINNESOTA SOLVATION MODEL SMD (MARENICH, CRAMER, TRUHLAR) 
 C JUN-14-2010

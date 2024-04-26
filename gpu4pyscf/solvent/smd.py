@@ -497,7 +497,6 @@ def get_cds(smdobj):
     atm_cds = cupy.sum(SASA * atm_tension) / 1000 # in kcal/mol
     return (mol_cds + atm_cds)/hartree2kcal # hartree
 
-from ctypes import c_void_p, c_int, c_double
 import ctypes
 from gpu4pyscf.lib.cupy_helper import load_library
 libsolvent = load_library('libsolvent')
