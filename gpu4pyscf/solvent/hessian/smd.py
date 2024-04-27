@@ -23,6 +23,8 @@ from pyscf import lib
 from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.solvent import smd
+from gpu4pyscf.solvent.grad import smd as smd_grad
+from gpu4pyscf.solvent.grad import pcm as pcm_grad
 from gpu4pyscf.solvent.hessian import pcm as pcm_hess
 
 def get_cds(smdobj):
@@ -57,6 +59,45 @@ def get_cds(smdobj):
             hess_cds[ia,:,j] = (grad0_cds - grad1_cds) / (2.0 * eps)
     t1 = log.timer_debug1('solvent energy', *t1)
     return hess_cds # hartree
+
+
+def hess_elec(smdobj, dm, verbose=None):
+    '''
+    slow version with finite difference
+    TODO: use analytical hess_nuc
+    '''
+    log = logger.new_logger(smdobj, verbose)
+    t1 = log.init_timer()
+    pmol = smdobj.mol.copy()
+    mol = pmol.copy()
+    coords = mol.atom_coords(unit='Bohr')
+
+    def pcm_grad_scanner(mol):
+        # TODO: use more analytical forms
+        smdobj.reset(mol)
+        e, v = smdobj._get_vind(dm)
+        #return grad_elec(smdobj, dm)
+        grad = pcm_grad.grad_nuc(smdobj, dm)
+        grad+= smd_grad.grad_solver(smdobj, dm)
+        grad+= pcm_grad.grad_qv(smdobj, dm)
+        return grad
+
+    mol.verbose = 0
+    de = np.zeros([mol.natm, mol.natm, 3, 3])
+    eps = 1e-3
+    for ia in range(mol.natm):
+        for ix in range(3):
+            dv = np.zeros_like(coords)
+            dv[ia,ix] = eps
+            mol.set_geom_(coords + dv, unit='Bohr')
+            g0 = pcm_grad_scanner(mol)
+
+            mol.set_geom_(coords - dv, unit='Bohr')
+            g1 = pcm_grad_scanner(mol)
+            de[ia,:,ix] = (g0 - g1)/2.0/eps
+    t1 = log.timer_debug1('solvent energy', *t1)
+    smdobj.reset(pmol)
+    return de
 
 def make_hess_object(hess_method):
     '''For hess_method in vacuum, add nuclear Hessian of solvent smdobj'''

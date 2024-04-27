@@ -18,14 +18,13 @@ SMD solvent model
 '''
 
 import numpy as np
-import scipy
 import cupy
-from pyscf import lib
+from pyscf import lib, gto
 from pyscf.data import radii
 from pyscf.dft import gen_grid
 from gpu4pyscf.solvent import pcm, _attach_solvent
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import dist_matrix
+from gpu4pyscf.df import int3c2e
 
 @lib.with_doc(_attach_solvent._for_scf.__doc__)
 def smd_for_scf(mf, solvent_obj=None, dm=None):
@@ -37,7 +36,7 @@ def smd_for_scf(mf, solvent_obj=None, dm=None):
 from gpu4pyscf import scf
 scf.hf.RHF.SMD = smd_for_scf
 scf.uhf.UHF.SMD = smd_for_scf
-hartree2kcal = 627.509
+hartree2kcal = 627.509451
 
 # database from https://comp.chem.umn.edu/solvation/mnsddb.pdf
 # solvent name: [n, n25, alpha, beta, gamma, epsilon, phi, psi)
@@ -293,7 +292,7 @@ def get_cds_legacy(smdobj):
                     sola, solb, solc, solg, solh, soln,
                     icds,
                     ctypes.byref(gcds), ctypes.byref(areacds), dcds)
-    return gcds.value / 627.509451, dcds
+    return gcds.value / hartree2kcal, dcds
 
 class SMD(pcm.PCM):
     _keys = {
@@ -358,6 +357,53 @@ class SMD(pcm.PCM):
         if self.atom_radii:
             logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
         return self
+
+    def build(self, ng=None):
+        if self.radii_table is None:
+            vdw_scale = self.vdw_scale
+            self.radii_table = vdw_scale * pcm.modified_Bondi + self.r_probe
+        mol = self.mol
+        if ng is None:
+            ng = gen_grid.LEBEDEV_ORDER[self.lebedev_order]
+
+        self.surface = pcm.gen_surface(mol, rad=self.radii_table, ng=ng)
+        self._intermediates = {}
+        F, A = pcm.get_F_A(self.surface)
+        D, S = pcm.get_D_S(self.surface, with_S=True, with_D=True)
+
+        epsilon = self.eps
+        f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
+        DA = D*A
+        DAS = cupy.dot(DA, S)
+        K = S - f_epsilon/(2.0*np.pi) * DAS
+        R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*np.pi)*DA)
+
+        intermediates = {
+            'S': cupy.asarray(S),
+            'D': cupy.asarray(D),
+            'A': cupy.asarray(A),
+            'K': cupy.asarray(K),
+            'R': cupy.asarray(R),
+            'f_epsilon': f_epsilon
+        }
+        self._intermediates.update(intermediates)
+
+        charge_exp  = self.surface['charge_exp']
+        grid_coords = self.surface['grid_coords']
+        atom_coords = mol.atom_coords(unit='B')
+        atom_charges = mol.atom_charges()
+
+        # Move this to GPU
+        auxmol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
+        intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
+        intopt.build(1e-14, diag_block_with_triu=False, aosym=True, group_size=256)
+        self.intopt = intopt
+
+        int2c2e = mol._add_suffix('int2c2e')
+        fakemol_nuc = gto.fakemol_for_charges(atom_coords)
+        v_ng = gto.mole.intor_cross(int2c2e, fakemol_nuc, auxmol)
+        v_grids_n = np.dot(atom_charges, v_ng)
+        self.v_grids_n = cupy.asarray(v_grids_n)
 
     def get_cds(self):
         return get_cds_legacy(self)[0]
