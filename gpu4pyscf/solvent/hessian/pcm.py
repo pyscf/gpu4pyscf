@@ -248,7 +248,7 @@ class WithSolventHess:
         return obj
 
     def to_cpu(self):
-        from pyscf.solvent.hessian import pcm
+        from pyscf.solvent.hessian import pcm           # type: ignore
         hess_method = self.undo_solvent().to_cpu()
         return pcm.make_hess_object(hess_method)
 

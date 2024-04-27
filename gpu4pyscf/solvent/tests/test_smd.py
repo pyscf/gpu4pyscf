@@ -104,7 +104,7 @@ def _check_smd(atom, e_ref, solvent='water'):
     smdobj.solvent = solvent
     smdobj.sasa_ng = 590
     smdobj.lebedev_order = 29
-    e_cds = smdobj.get_cds() * 627.509 # in kcal/mol
+    e_cds = smdobj.get_cds() * smd.hartree2kcal # in kcal/mol
     mol.stdout.close()
     assert numpy.abs(e_cds - e_ref) < 1e-3
 

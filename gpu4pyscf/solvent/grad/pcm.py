@@ -356,7 +356,7 @@ class WithSolventGrad:
         return obj
 
     def to_cpu(self):
-        from pyscf.solvent.grad import pcm
+        from pyscf.solvent.grad import pcm  # type: ignore
         grad_method = self.undo_solvent().to_cpu()
         return pcm.make_grad_object(grad_method)
 
