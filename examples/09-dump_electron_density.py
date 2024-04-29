@@ -13,11 +13,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+###############################################################
+#  Example of evaluating and saving electron density on grids
+###############################################################
+
 import numpy as np
 import pyscf
-from pyscf import lib
 from gpu4pyscf.dft import rks
-lib.num_threads(8)
 
 atom ='''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -25,39 +27,30 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-xc = 'B3LYP'
-bas = 'def2-tzvpp'
-auxbasis = 'def2-tzvpp-jkfit'
-scf_tol = 1e-10
-max_scf_cycles = 50
-screen_tol = 1e-14
-grids_level = 3
-
-mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
-
-mol.verbose = 1
-mf_GPU = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
-mf_GPU.grids.level = grids_level
-mf_GPU.conv_tol = scf_tol
-mf_GPU.max_cycle = max_scf_cycles
-mf_GPU.screen_tol = screen_tol
+mol = pyscf.M(atom=atom, basis='def2-tzvpp')
+mf_GPU = rks.RKS(mol, xc='b3lyp').density_fit()
+mf_GPU.grids.level = 3
+mf_GPU.conv_tol = 1e-10
+mf_GPU.max_cycle = 50
 
 # Compute Energy
 e_dft = mf_GPU.kernel()
 dm = mf_GPU.make_rdm1()
 grids = mf_GPU.grids
-
-from pyscf.data.elements import charge
-atom_list = []
-for ia in range(mol.natm):
-    symb = mol.atom_symbol(ia)
-    atom_list.append(charge(symb))
+charges = mol.atom_charges()
 
 # Prepare results for denspart
-points = grids.coords.get()
+coords = grids.coords.get()
 weights = grids.weights.get()
 density = mf_GPU._numint.get_rho(mol, dm, grids)
-atnums = np.array(atom_list)
+atnums = np.array(charges)
 atcoords = mol.atom_coords(unit='B')
 
-np.savez('density.npz', points=points, weights=weights, density=density, atnums=atnums, atcoords=atcoords)
+# this file can be used to calculate the partial charge with denspart
+np.savez(
+    'density.npz',
+    points=coords,
+    weights=weights,
+    density=density,
+    atnums=atnums,
+    atcoords=atcoords)

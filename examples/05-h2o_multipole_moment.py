@@ -13,19 +13,29 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+##########################################################
+#  Example of compute dipole moment and quadrupole moment
+##########################################################
+
 import pyscf
 from gpu4pyscf.dft import rks
 
-atom = '''
-I 0 0 0
-I 1 0 0
+atom ='''
+O       0.0000000000    -0.0000000000     0.1174000000
+H      -0.7570000000    -0.0000000000    -0.4696000000
+H       0.7570000000     0.0000000000    -0.4696000000
 '''
-bas = 'def2-qzvpp'
-grids_level = 6
 
-mol = pyscf.M(atom=atom, basis=bas, ecp=bas)
+mol = pyscf.M(atom=atom, basis='def2-tzvpp')
 mol.verbose = 1
+mf = rks.RKS(mol, xc='B3LYP').density_fit()
+mf.kernel()
+dm = mf.make_rdm1()
 
-mf = rks.RKS(mol, xc='b3lyp')
-mf.grids.level = grids_level
-e_dft = mf.kernel()
+dip = mf.dip_moment(unit='DEBYE', dm=dm.get())
+print('dipole moment:')
+print(dip)
+
+quad = mf.quad_moment(unit='DEBYE-ANG', dm=dm.get())
+print('quadrupole moment:')
+print(quad)

@@ -13,6 +13,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+###################################
+#  Example of CHELG charge
+###################################
+
 from pyscf import gto
 from gpu4pyscf.dft import rks
 from gpu4pyscf.qmmm import chelpg
