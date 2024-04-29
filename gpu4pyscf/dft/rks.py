@@ -231,7 +231,8 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     logger.debug(ks, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
     return e1+e2, e2
 
-class KohnShamDFT:
+# Inherit pyscf KohnShamDFT class since this is tested in the pyscf dispersion code
+class KohnShamDFT(rks.KohnShamDFT):
 
     _keys = rks.KohnShamDFT._keys
 
