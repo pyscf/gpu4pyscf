@@ -293,9 +293,9 @@ static void _cart_kernel_deriv0(BasOffsets offsets)
         gto[14*ngrids+grid_id] = ce * rz * rz * rz * rz;
     } else {
         int lx, ly, lz;
-        double xpows[LMAX];
-        double ypows[LMAX];
-        double zpows[LMAX];
+        double xpows[ANG+1];
+        double ypows[ANG+1];
+        double zpows[ANG+1];
 
         xpows[0] = 1.0;
         ypows[0] = 1.0;
@@ -533,7 +533,7 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
         gtoz[14*ngrids+grid_id] = az * rz * rz * rz * rz + 4 * bzzz;
     }
     else{
-        double fx0[16], fy0[16], fz0[16];
+        double fx0[ANG+3], fy0[ANG+3], fz0[ANG+3];
 
         fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
         for (int lx = 1; lx <= ANG+2; lx++){
@@ -542,7 +542,7 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
             fz0[lx] = fz0[lx-1] * rz;
         }
 
-        double fx1[16], fy1[16], fz1[16];
+        double fx1[ANG+1], fy1[ANG+1], fz1[ANG+1];
         for (int ip = 0; ip < offsets.nprim; ++ip) {
             double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
 
@@ -601,9 +601,9 @@ static void _cart_kernel_deriv2(BasOffsets offsets)
     double *exps = c_envs.env + c_bas_exp[glob_ish];
     double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
 
-    double fx0[16], fy0[16], fz0[16];
-    double fx1[16], fy1[16], fz1[16];
-    double fx2[16], fy2[16], fz2[16];
+    double fx0[ANG+3], fy0[ANG+3], fz0[ANG+3];
+    double fx1[ANG+2], fy1[ANG+2], fz1[ANG+2];
+    double fx2[ANG+1], fy2[ANG+1], fz2[ANG+1];
 
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
     for (int lx = 1; lx <= ANG+2; lx++){
@@ -686,10 +686,10 @@ static void _cart_kernel_deriv3(BasOffsets offsets)
     double *exps = c_envs.env + c_bas_exp[glob_ish];
     double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
 
-    double fx0[16], fy0[16], fz0[16];
-    double fx1[16], fy1[16], fz1[16];
-    double fx2[16], fy2[16], fz2[16];
-    double fx3[16], fy3[16], fz3[16];
+    double fx0[ANG+4], fy0[ANG+4], fz0[ANG+4];
+    double fx1[ANG+3], fy1[ANG+3], fz1[ANG+3];
+    double fx2[ANG+2], fy2[ANG+2], fz2[ANG+2];
+    double fx3[ANG+1], fy3[ANG+1], fz3[ANG+1];
 
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
     for (int lx = 1; lx <= ANG+3; lx++){
@@ -799,11 +799,11 @@ static void _cart_kernel_deriv4(BasOffsets offsets)
     double *exps = c_envs.env + c_bas_exp[glob_ish];
     double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
 
-    double fx0[16], fy0[16], fz0[16];
-    double fx1[16], fy1[16], fz1[16];
-    double fx2[16], fy2[16], fz2[16];
-    double fx3[16], fy3[16], fz3[16];
-    double fx4[16], fy4[16], fz4[16];
+    double fx0[ANG+5], fy0[ANG+5], fz0[ANG+5];
+    double fx1[ANG+4], fy1[ANG+4], fz1[ANG+4];
+    double fx2[ANG+3], fy2[ANG+3], fz2[ANG+3];
+    double fx3[ANG+2], fy3[ANG+2], fz3[ANG+2];
+    double fx4[ANG+1], fy4[ANG+1], fz4[ANG+1];
 
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
     for (int lx = 1; lx <= ANG+4; lx++){
@@ -1328,7 +1328,7 @@ static void _sph_kernel_deriv2(BasOffsets offsets)
     double *exps = c_envs.env + c_bas_exp[glob_ish];
     double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
 
-    double fx0[16], fy0[16], fz0[16];
+    double fx0[ANG+3], fy0[ANG+3], fz0[ANG+3];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
 #pragma unroll
     for (int lx = 1; lx <= ANG+2; lx++){
@@ -1336,8 +1336,8 @@ static void _sph_kernel_deriv2(BasOffsets offsets)
         fy0[lx] = fy0[lx-1] * ry;
         fz0[lx] = fz0[lx-1] * rz;
     }
-    double fx1[16], fy1[16], fz1[16];
-    double fx2[16], fy2[16], fz2[16];
+    double fx1[ANG+2], fy1[ANG+2], fz1[ANG+2];
+    double fx2[ANG+1],   fy2[ANG+1],   fz2[ANG+1];
 
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
@@ -1410,7 +1410,7 @@ static void _sph_kernel_deriv3(BasOffsets offsets)
     double *exps = c_envs.env + c_bas_exp[glob_ish];
     double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
 
-    double fx0[16], fy0[16], fz0[16];
+    double fx0[ANG+4], fy0[ANG+4], fz0[ANG+4];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
 #pragma unroll
     for (int lx = 1; lx <= ANG+3; lx++){
@@ -1418,9 +1418,9 @@ static void _sph_kernel_deriv3(BasOffsets offsets)
         fy0[lx] = fy0[lx-1] * ry;
         fz0[lx] = fz0[lx-1] * rz;
     }
-    double fx1[16], fy1[16], fz1[16];
-    double fx2[16], fy2[16], fz2[16];
-    double fx3[16], fy3[16], fz3[16];
+    double fx1[ANG+3], fy1[ANG+3], fz1[ANG+3];
+    double fx2[ANG+2], fy2[ANG+2], fz2[ANG+2];
+    double fx3[ANG+1], fy3[ANG+1], fz3[ANG+1];
 
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
@@ -1518,7 +1518,7 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
     double *exps = c_envs.env + c_bas_exp[glob_ish];
     double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
 
-    double fx0[16], fy0[16], fz0[16];
+    double fx0[ANG+5], fy0[ANG+5], fz0[ANG+5];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
 #pragma unroll
     for (int lx = 1; lx <= ANG+4; lx++){
@@ -1526,10 +1526,10 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
         fy0[lx] = fy0[lx-1] * ry;
         fz0[lx] = fz0[lx-1] * rz;
     }
-    double fx1[16], fy1[16], fz1[16];
-    double fx2[16], fy2[16], fz2[16];
-    double fx3[16], fy3[16], fz3[16];
-    double fx4[16], fy4[16], fz4[16];
+    double fx1[ANG+4], fy1[ANG+4], fz1[ANG+4];
+    double fx2[ANG+3], fy2[ANG+3], fz2[ANG+3];
+    double fx3[ANG+2], fy3[ANG+2], fz3[ANG+2];
+    double fx4[ANG+1], fy4[ANG+1], fz4[ANG+1];
 
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
@@ -1605,6 +1605,7 @@ void GDFTinit_envs(GTOValEnvVars **envs_cache, int *ao_loc,
     }
     DEVICE_INIT(double, d_atom_coords, atom_coords, natm * 3);
     envs->atom_coordx = d_atom_coords;
+    free(atom_coords);
 
     uint16_t bas_atom[NBAS_MAX];
     uint16_t bas_exp[NBAS_MAX];
