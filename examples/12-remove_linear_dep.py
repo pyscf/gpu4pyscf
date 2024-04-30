@@ -13,16 +13,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import pyscf
-import time
-from pyscf import lib, gto
+################################################################
+#  Example of removing the linear dependence of atomic orbitals
+################################################################
 
+import time
+from pyscf import gto
 from gpu4pyscf.dft import rks
-lib.num_threads(8)
 
 mol = gto.M(atom=['H 0 0 %f'%i for i in range(10)], unit='Bohr',
             basis='ccpvtz', symmetry=1)
-mol.verbose = 4
 
 mf = rks.RKS(mol, xc='B3LYP').density_fit()
 mf.grids.level = 5

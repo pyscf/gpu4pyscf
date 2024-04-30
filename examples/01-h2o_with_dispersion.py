@@ -13,13 +13,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+###########################################################
+#  Example of DFT with Dispersion correction (dftd3/dftd4)
+###########################################################
 
 import numpy as np
 import pyscf
-from pyscf import lib
 from gpu4pyscf.dft import rks
-
-lib.num_threads(8)
 
 atom ='''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -27,33 +27,18 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-xc = 'B3LYP'
-bas = 'def2-tzvpp'
-auxbasis = 'def2-tzvpp-jkfit'
-scf_tol = 1e-10
-max_scf_cycles = 50
-screen_tol = 1e-14
-grids_level = 8
-
-mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
-# set verbose >= 6 for debugging timer
-mol.verbose = 1
-mf_GPU = rks.RKS(mol, xc=xc, disp='d3bj').density_fit(auxbasis=auxbasis)
-mf_GPU.grids.level = grids_level
-mf_GPU.conv_tol = scf_tol
-mf_GPU.max_cycle = max_scf_cycles
+mol = pyscf.M(atom=atom, basis='def2-tzvpp')
+mf_GPU = rks.RKS(mol, xc='b3lyp').density_fit()
+mf_GPU.disp = 'd3bj' # d3zero,  d3bjm,  d4
+mf_GPU.grids.level = 5
+mf_GPU.conv_tol = 1e-10
+mf_GPU.max_cycle = 50
 mf_GPU.conv_tol_cpscf = 1e-6
-mf_GPU.screen_tol = screen_tol
 
 # Compute Energy
 print('------------------- Energy -----------------------------')
 e_dft = mf_GPU.kernel()
 print('DFT energy by GPU4PySCF')
-print(e_dft)
-print('DFT energy by Q-Chem')
-e_qchem = -76.4672557846
-print(e_qchem) # reference from q-chem: -76.4672557846
-print('Energy diff between Q-Chem and PySCF', e_dft - e_qchem)
 
 # Compute Gradient
 print('------------------ Gradient ----------------------------')
@@ -62,28 +47,17 @@ g.auxbasis_response = True
 g_dft = g.kernel()
 print('Gradient by GPU4PySCF')
 print(g_dft)
-print('Gradient by Q-Chem')
-# reference from q-chem
-g_qchem = np.array([[0.0000000,   0.0030278,  -0.0030278],
-        [-0.0000000,  -0.0000000,   0.0000000],
-        [-0.0023449,   0.0011724,   0.0011724]]).T
-print(g_qchem)
-print('Gradient diff between Q-Chem and PySCF', np.linalg.norm(g_dft - g_qchem))
 
 # Compute Hessian
 print('------------------- Hessian -----------------------------')
 h = mf_GPU.Hessian()
 h.auxbasis_response = 2
 h_dft = h.kernel()
-print('Diagonal entries of Mass-weighted Hessian by GPU4PySCF')
 mass = [15.99491, 1.00783, 1.00783]
 for i in range(3):
     for j in range(3):
         h_dft[i,j] = h_dft[i,j]/np.sqrt(mass[i]*mass[j])
 n = h_dft.shape[0]
 h_dft = h_dft.transpose([0,2,1,3]).reshape(3*n,3*n)
-print(np.diag(h_dft))
-print('Diagonals entries of Mass-weighted Hessian by Q-Chem')
-hess_qchem = np.loadtxt('hess_qchem.txt')
-print(np.diag(hess_qchem))
-print('Hessian diff between Q-Chem and PySCF', np.linalg.norm(hess_qchem - h_dft))
+print('Hessian by GPU4PySCF')
+print(h_dft)

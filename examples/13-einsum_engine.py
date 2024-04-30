@@ -15,6 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+################################################################
+#  Example of switching tensor contraction engine
+################################################################
+
 import os
 os.environ['CONTRACT_ENGINE'] = 'opt_einsum' # 'cupy', 'cuquantum'
 

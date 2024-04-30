@@ -13,6 +13,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#############################################################
+#  Example of transition state with geomeTRIC
+#############################################################
+
 import numpy as np
 import pyscf
 
@@ -47,22 +51,15 @@ atom='''
    H          1.06461        2.50818       -0.45885'''
 
 
-xc = 'B3LYP'
-bas = 'def2-tzvpp'
-auxbasis = 'def2-tzvpp-jkfit'
-scf_tol = 1e-10
-max_scf_cycles = 50
-screen_tol = 1e-14
-grids_level = 3
-mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
+mol = pyscf.M(atom=atom, basis='def2-tzvpp')
+mf_GPU = rks.RKS(mol, xc='b3lyp').density_fit()
+mf_GPU.disp = 'd3bj'
+mf_GPU.grids.level = 3
+mf_GPU.conv_tol = 1e-10
+mf_GPU.max_cycle = 50
 
-mol.verbose = 1
-mf_GPU = rks.RKS(mol, xc=xc, disp='d3bj').density_fit(auxbasis=auxbasis)
-mf_GPU.grids.level = grids_level
-mf_GPU.conv_tol = scf_tol
-mf_GPU.max_cycle = max_scf_cycles
-mf_GPU.screen_tol = screen_tol
 
+# Transition state search in geomeTRIC will need Hessian matrix
 import time
 start_time = time.time()
 mf_GPU.kernel()

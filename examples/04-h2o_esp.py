@@ -13,7 +13,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#########################################################
+#  Example of calculating Electrostatic potential (ESP)
+#########################################################
+
 import pyscf
+import numpy as np
+from pyscf import gto
 from gpu4pyscf.dft import rks
 
 atom ='''
@@ -22,16 +28,15 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-mol = pyscf.M(atom=atom, basis='def2-tzvpp', max_memory=32000)
-mol.verbose = 1
-mf = rks.RKS(mol, xc='B3LYP').density_fit(auxbasis='def2-tzvpp-jkfit')
+mol = pyscf.M(atom=atom, basis='def2-tzvpp')
+mf = rks.RKS(mol, xc='B3LYP').density_fit()
 mf.kernel()
-dm = mf.make_rdm1()
+dm = mf.make_rdm1()  # compute one-electron density matrix
 
-dip = mf.dip_moment(unit='DEBYE', dm=dm.get())
-print('dipole moment:')
-print(dip)
+# Use default mesh grids
+coords = mf.grids.coords.get()
 
-quad = mf.quad_moment(unit='DEBYE-ANG', dm=dm.get())
-print('quadrupole moment:')
-print(quad)
+# The efficiency can be improved if needed
+from pyscf import df
+fakemol = gto.fakemol_for_charges(coords)
+v = np.einsum('ijp,ij->p', df.incore.aux_e2(mol, fakemol), dm)

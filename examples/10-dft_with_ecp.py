@@ -13,27 +13,27 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+####################################################
+#   Example of DFT with ECP
+####################################################
 import pyscf
-import numpy as np
-from pyscf import lib, gto
 from gpu4pyscf.dft import rks
 
-atom =''' 
-O       0.0000000000    -0.0000000000     0.1174000000
-H      -0.7570000000    -0.0000000000    -0.4696000000
-H       0.7570000000     0.0000000000    -0.4696000000
+atom = '''
+I 0 0 0
+I 1 0 0
 '''
 
-mol = pyscf.M(atom=atom, basis='def2-tzvpp', max_memory=32000)
-mol.verbose = 1
-mf = rks.RKS(mol, xc='B3LYP').density_fit(auxbasis='def2-tzvpp-jkfit')
-mf.kernel()
-dm = mf.make_rdm1()
+# def2-qzvpp contains ecp for heavy atoms
+mol = pyscf.M(atom=atom, basis='def2-qzvpp', ecp='def2-qzvpp')
+mf = rks.RKS(mol, xc='b3lyp').density_fit()
+mf.grids.level = 6   # more grids are needed for heavy atoms
+e_dft = mf.kernel()
 
-# Use default mesh grids
-coords = mf.grids.coords.get()
+# gradient and Hessian of ECP are also supported
+# but ECP contributions are still calculated on CPU
+g = mf.nuc_grad_method()
+grad = g.kernel()
 
-# The efficiency can be improved if needed
-from pyscf import df
-fakemol = gto.fakemol_for_charges(coords)
-v = np.einsum('ijp,ij->p', df.incore.aux_e2(mol, fakemol), dm)
+h = mf.Hessian()
+hess = h.kernel()

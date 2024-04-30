@@ -13,33 +13,42 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import numpy
-import pyscf
-from pyscf import gto, df
-from gpu4pyscf import scf, dft
-from gpu4pyscf.solvent import smd
+#######################################################
+#  Example of DFT with direct SCF scheme
+#######################################################
 
-atom = '''
+from pyscf import gto
+from gpu4pyscf import scf
+import numpy as np
+
+mol = gto.M(atom=
+'''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
-'''
+''',
+basis='def2-tzvpp',
+cart=1,
+verbose=4)
 
-mol = pyscf.M(atom=atom, basis='def2-tzvpp', verbose=6)
+# Calculation on GPU
+mf = scf.hf.RHF(mol)
+mf.direct_scf_tol = 1e-14
+mf.conv_tol = 1e-12
+e_gpu = mf.kernel()
 
-mf = dft.rks.RKS(mol, xc='HYB_GGA_XC_B3LYP').density_fit()
-mf = mf.SMD()
-mf.verbose = 6
-mf.grids.atom_grid = (99,590)
-mf.small_rho_cutoff = 1e-10
-mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
-mf.with_solvent.method = 'SMD'
-mf.with_solvent.solvent = 'water'
-e_tot = mf.kernel()
-print('total energy with SMD:', e_tot)
+gpu_gradient = mf.nuc_grad_method()
+gpu_gradient.kernel()
 
-gradobj = mf.nuc_grad_method()
-f = gradobj.kernel()
+# Move the object to CPU
+mf = mf.to_cpu()
+e_cpu = mf.kernel()
+cpu_gradient = mf.nuc_grad_method()
+cpu_gradient.kernel()
+cpu_de = cpu_gradient.de
+cpu_de -= np.sum(cpu_de, axis=0)/mol.natm
 
-hessobj = mf.Hessian()
-h = hessobj.kernel()
+print('e diff = ', e_cpu - e_gpu)
+print('g diff = \n', cpu_de - gpu_gradient.de)
+
+assert np.max(np.abs(cpu_de - gpu_gradient.de)) < 1e-6
