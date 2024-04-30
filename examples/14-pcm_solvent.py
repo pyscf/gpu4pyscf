@@ -13,11 +13,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+############################################################
+#  Example of DFT with PCM solvent model
+############################################################
+
 import numpy as np
 import pyscf
-from pyscf import lib, df
 from gpu4pyscf.dft import rks
-lib.num_threads(8)
 
 atom ='''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -25,20 +27,16 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-mol = pyscf.M(atom=atom, basis='def2-tzvpp', verbose=0)
-
+mol = pyscf.M(atom=atom, basis='def2-tzvpp')
 mf = rks.RKS(mol, xc='HYB_GGA_XC_B3LYP').density_fit()
 mf = mf.PCM()
-mf.verbose = 6
 mf.grids.atom_grid = (99,590)
-mf.small_rho_cutoff = 1e-10
 mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
 mf.with_solvent.method = 'IEF-PCM'
 mf.with_solvent.eps = 78.3553
 mf.kernel()
 
 gradobj = mf.nuc_grad_method()
-gradobj.auxbasis_response = True
 f = gradobj.kernel()
 
 hessobj = mf.Hessian()

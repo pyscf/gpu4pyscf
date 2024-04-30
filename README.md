@@ -1,5 +1,9 @@
 GPU plugin for PySCF
 ====================
+[![arXiv](https://img.shields.io/badge/arXiv-2404.09452-b31b1b.svg)](https://arxiv.org/abs/2404.09452)
+![nightly](https://github.com/pyscf/gpu4pyscf/actions/workflows/nightly_build.yml/badge.svg)
+[![PyPI version](https://badge.fury.io/py/gpu4pyscf-cuda11x.svg)](https://badge.fury.io/py/gpu4pyscf-cuda11x)
+
 Installation
 --------
 
@@ -56,8 +60,8 @@ Limitations
 --------
 - Rys roots up to 9 for density fitting scheme and direct scf scheme;
 - Atomic basis up to g orbitals;
-- Auxiliary basis up to h orbitals;
-- Density fitting scheme up to ~168 atoms with def2-tzvpd basis, bounded CPU memory;
+- Auxiliary basis up to i orbitals;
+- Density fitting scheme up to ~168 atoms with def2-tzvpd basis, bounded by CPU memory;
 - Hessian is unavailable for Direct SCF yet;
 - meta-GGA without density laplacian;
 

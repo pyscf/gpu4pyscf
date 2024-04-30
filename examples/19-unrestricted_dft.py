@@ -13,7 +13,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import numpy as np
+###########################################
+#  Example of unrestricted DFT
+###########################################
+
 import pyscf
 from gpu4pyscf.dft import uks
 
@@ -22,15 +25,12 @@ O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
-bas = 'def2-tzvpp'
-xc = 'b3lyp'
-auxbasis = 'def2-tzvpp-jkfit'
 
 # SCF, gradient, and Hessian for DF-UKS
-mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
+mol = pyscf.M(atom=atom, basis='def2-tzvpp')
 mol.charge = 1
 mol.spin = 1
-mf = uks.UKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
+mf = uks.UKS(mol, xc='b3lyp').density_fit()
 mf.kernel()
 
 gobj = mf.nuc_grad_method()

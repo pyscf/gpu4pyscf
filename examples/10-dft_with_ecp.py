@@ -13,6 +13,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+####################################################
+#   Example of DFT with ECP
+####################################################
 import pyscf
 from gpu4pyscf.dft import rks
 
@@ -20,12 +23,17 @@ atom = '''
 I 0 0 0
 I 1 0 0
 '''
-bas = 'def2-qzvpp'
-grids_level = 6
 
-mol = pyscf.M(atom=atom, basis=bas, ecp=bas)
-mol.verbose = 1
-
-mf = rks.RKS(mol, xc='b3lyp')
-mf.grids.level = grids_level
+# def2-qzvpp contains ecp for heavy atoms
+mol = pyscf.M(atom=atom, basis='def2-qzvpp', ecp='def2-qzvpp')
+mf = rks.RKS(mol, xc='b3lyp').density_fit()
+mf.grids.level = 6   # more grids are needed for heavy atoms
 e_dft = mf.kernel()
+
+# gradient and Hessian of ECP are also supported
+# but ECP contributions are still calculated on CPU
+g = mf.nuc_grad_method()
+grad = g.kernel()
+
+h = mf.Hessian()
+hess = h.kernel()

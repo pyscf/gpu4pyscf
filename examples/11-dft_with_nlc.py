@@ -13,9 +13,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#################################################
+#  Example of DFT with nonlocal corrections
+#################################################
+
 import pyscf
-import numpy as np
-from pyscf import lib, gto
+import time
 from gpu4pyscf.dft import rks
 
 atom ='''
@@ -24,16 +27,23 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-mol = pyscf.M(atom=atom, basis='def2-tzvpp', max_memory=32000)
-mol.verbose = 1
-mf = rks.RKS(mol, xc='B3LYP').density_fit(auxbasis='def2-tzvpp-jkfit')
-mf.kernel()
-dm = mf.make_rdm1()
+start_time = time.time()
+mol = pyscf.M(
+    atom='Vitamin_C.xyz',
+    verbose=4)
 
-# Use default mesh grids
-coords = mf.grids.coords.get()
+print(f'{mol.nao} atomic orbitals')
+mf = rks.RKS(mol, xc='HYB_MGGA_XC_WB97M_V').density_fit()
+mf.grids.atom_grid = (99,590)
+mf.nlcgrids.atom_grid = (50,194)
+mf.conv_tol = 1e-8
+mf.direct_scf_tol = 1e-14
+e_tot = mf.kernel()
+end_time = time.time()
+print(f'Wallclock time: {end_time-start_time}')
 
-# The efficiency can be improved if needed
-from pyscf import df
-fakemol = gto.fakemol_for_charges(coords)
-v = np.einsum('ijp,ij->p', df.incore.aux_e2(mol, fakemol), dm)
+print('calculating gradient')
+gobj = mf.nuc_grad_method()
+gobj.kernel()
+
+# Hessian for nlc is not supported
