@@ -1664,6 +1664,7 @@ def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size):
         nf = (l + 1) * (l + 2) // 2
         aligned_size = (group_size // nf // 1) * 1
         max_shells = max(aligned_size, 2)
+        assert max_shells * nf <= group_size
         if l > LMAX_ON_GPU or counts <= max_shells:
             _l_ctrs.append(l_ctr)
             _l_ctr_counts.append(counts)

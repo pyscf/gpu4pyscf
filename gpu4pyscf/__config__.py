@@ -28,9 +28,9 @@ elif props['totalGlobalMem'] >= 16 * GB:
     number_of_threads = 1024 * 80
 # other gaming cards
 else:
-    min_ao_blksize = 32
-    min_grid_blksize = 32*32
-    ao_aligned = 8
+    min_ao_blksize = 64
+    min_grid_blksize = 64*64
+    ao_aligned = 32
     grid_aligned = 128
     mem_fraction = 0.9
     number_of_threads = 1024 * 80

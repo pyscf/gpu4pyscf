@@ -23,7 +23,7 @@ from gpu4pyscf.cc import ccsd_incore
 mol = pyscf.M(
     atom = 'Vitamin_C.xyz',
     basis = 'cc-pvdz',
-    verbose=5)
+    verbose=1)
 
 mf = mol.RHF().run()
 mf.with_df = None

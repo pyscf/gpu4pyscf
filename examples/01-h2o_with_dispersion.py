@@ -53,10 +53,11 @@ print('------------------- Hessian -----------------------------')
 h = mf_GPU.Hessian()
 h.auxbasis_response = 2
 h_dft = h.kernel()
-print('Diagonal entries of Mass-weighted Hessian by GPU4PySCF')
 mass = [15.99491, 1.00783, 1.00783]
 for i in range(3):
     for j in range(3):
         h_dft[i,j] = h_dft[i,j]/np.sqrt(mass[i]*mass[j])
 n = h_dft.shape[0]
 h_dft = h_dft.transpose([0,2,1,3]).reshape(3*n,3*n)
+print('Hessian by GPU4PySCF')
+print(h_dft)
