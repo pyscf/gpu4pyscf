@@ -46,8 +46,6 @@ def get_dispersion(mf_grad, disp_version=None):
         from gpu4pyscf.lib import dftd4
         dftd4_model = dftd4.DFTD4Dispersion(mol, xc=method)
         res = dftd4_model.get_dispersion(grad=True)
-        print(method, disp_version)
-        print(res.get("gradient"))
         return res.get("gradient")
     else:
         raise RuntimeError(f'dispersion correction: {disp_version} is not supported.')

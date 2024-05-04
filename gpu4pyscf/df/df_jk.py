@@ -124,7 +124,7 @@ class _DFHF:
     '''
     to_gpu = utils.to_gpu
     device = utils.device
-
+    __name_mixin__ = 'DF'
     _keys = {'rhoj', 'rhok', 'disp', 'screen_tol'}
 
     def __init__(self, mf, dfobj, only_dfj):
