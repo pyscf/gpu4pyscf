@@ -547,8 +547,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     if log.verbose >= logger.DEBUG:
         log.timer_debug1('gradients of electronic part', *t0)
 
-    # net force should be zero
-    de -= cupy.sum(de, axis=0)/len(atmlst)
+    ## net force should be zero
+    #de -= cupy.sum(de, axis=0)/len(atmlst)
     return de.get()
 
 def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):

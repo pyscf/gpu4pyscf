@@ -20,7 +20,7 @@ import ctypes
 import numpy as np
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
-from pyscf.df import df, addons
+from pyscf.df import df, addons, incore
 from gpu4pyscf.lib.cupy_helper import (
     cholesky, tag_array, get_avail_mem, cart2sph, take_last2d, transpose_sum)
 from gpu4pyscf.df import int3c2e, df_jk
@@ -30,7 +30,7 @@ from cupyx import scipy
 
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
-LINEAR_DEP_TOL = 1e-7
+LINEAR_DEP_TOL = incore.LINEAR_DEP_THR
 
 class DF(lib.StreamObject):
     from gpu4pyscf.lib.utils import to_gpu, device

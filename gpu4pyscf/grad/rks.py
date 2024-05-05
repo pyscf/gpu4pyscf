@@ -514,7 +514,6 @@ class Gradients(rhf_grad.Gradients):
         rhf_grad.Gradients.__init__(self, mf)
         self.grids = None
         self.nlcgrids = None
-        self.grid_response = False
 
     get_veff = _get_veff
     # TODO: add grid response into this function

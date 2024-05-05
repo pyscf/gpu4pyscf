@@ -580,9 +580,9 @@ class Hessian(rhf_hess.Hessian):
 
     from gpu4pyscf.lib.utils import to_gpu, device
     def __init__(self, mf):
-        self.auxbasis_response = 1
         rhf_hess.Hessian.__init__(self, mf)
 
+    auxbasis_response = 1
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
     kernel = rhf_hess.kernel
