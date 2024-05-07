@@ -16,6 +16,7 @@
 import numpy as np
 from gpu4pyscf.scf import cphf
 import cupy
+from gpu4pyscf.lib.cupy_helper import contract
 
 
 def gen_vind(mf, mo_coeff, mo_occ):
@@ -38,13 +39,13 @@ def gen_vind(mf, mo_coeff, mo_occ):
 
     def fx(mo1):
         mo1 = mo1.reshape(-1, nvir, nocc)  # * the saving pattern
-        mo1_mo_real = cupy.einsum('nai,ua->nui', mo1, mvir)
-        dm1 = 2*cupy.einsum('nui,vi->nuv', mo1_mo_real, mocc.conj()) 
+        mo1_mo_real = contract('nai,ua->nui', mo1, mvir)
+        dm1 = 2*contract('nui,vi->nuv', mo1_mo_real, mocc.conj()) 
         dm1+= dm1.transpose(0,2,1)
 
         v1 = vresp(dm1)  # (nset, nao, nao)
-        tmp = cupy.einsum('nuv,vi->nui', v1, mocc)
-        v1vo = cupy.einsum('nui,ua->nai', tmp, mvir.conj())
+        tmp = contract('nuv,vi->nui', v1, mocc)
+        v1vo = contract('nui,ua->nai', tmp, mvir.conj())
 
         return v1vo
     return fx

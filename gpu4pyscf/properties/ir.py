@@ -1,3 +1,18 @@
+# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 from functools import reduce
 from pyscf.hessian import thermo
 import numpy as np
@@ -5,6 +20,7 @@ import cupy
 from pyscf.data import elements, nist
 from scipy.constants import physical_constants
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import contract
 
 LINDEP_THRESHOLD = 1e-7
 
@@ -31,7 +47,7 @@ def eval_ir_freq_intensity(mf, hessian_obj):
     atom_charges = mf.mol.atom_charges()
     mass = cupy.array([elements.MASSES[atom_charges[i]] for i in range(natm)])
     intensity = cupy.zeros((3*natm))
-    hessian_mass = cupy.einsum('ijkl,i,j->ijkl', hessian,
+    hessian_mass = contract('ijkl,i,j->ijkl', hessian,
                              1/cupy.sqrt(mass), 1/cupy.sqrt(mass))
     
     TR = thermo._get_TR(mass.get(), mf.mol.atom_coords())
@@ -57,7 +73,7 @@ def eval_ir_freq_intensity(mf, hessian_obj):
         e, mode = cupy.linalg.eigh(h)
         mode = bvec.dot(mode)
     
-    c = cupy.einsum('ixn,i->ixn', mode.reshape(natm, 3, -1),
+    c = contract('ixn,i->ixn', mode.reshape(natm, 3, -1),
                   1/np.sqrt(mass)).reshape(3*natm, -1)
     freq = cupy.sign(e)*cupy.sqrt(cupy.abs(e))*unit2cm
 
@@ -92,10 +108,10 @@ def eval_ir_freq_intensity(mf, hessian_obj):
         h11ao[:, :, :, p0:p1] += hmuao11[:, :, :, p0:p1]
         h11ao[:, :, p0:p1] += hmuao11[:, :, :, p0:p1].transpose(0, 1, 3, 2)
 
-        tmp0 = cupy.einsum('ypi,vi->ypv', mo1[ia], mocc)  # nabla
-        dm1 = cupy.einsum('ypv,up->yuv', tmp0, mo_coeff)
-        tmp[:, :, ia] = -cupy.einsum('xuv,yuv->xy', hmuao, dm1) * 4 #the minus means the density should be negative, but calculate it is positive.
-        tmp[:, :, ia] -= cupy.einsum('xyuv,vu->xy', h11ao, dm0)
+        tmp0 = contract('ypi,vi->ypv', mo1[ia], mocc)  # nabla
+        dm1 = contract('ypv,up->yuv', tmp0, mo_coeff)
+        tmp[:, :, ia] = -contract('xuv,yuv->xy', hmuao, dm1) * 4 #the minus means the density should be negative, but calculate it is positive.
+        tmp[:, :, ia] -= contract('xyuv,vu->xy', h11ao, dm0)
         tmp[:, :, ia] += mf.mol.atom_charge(ia)*cupy.eye(3)
 
     alpha = physical_constants["fine-structure constant"][0]
@@ -105,8 +121,8 @@ def eval_ir_freq_intensity(mf, hessian_obj):
     a_0 = physical_constants["Bohr radius"][0]
     unit_kmmol = alpha**2 * (1e-3 / amu) * m_e * N_A * np.pi * a_0 / 3
 
-    intensity = cupy.einsum('xym,myn->xn', tmp, c.reshape(natm, 3, -1))
-    intensity = cupy.einsum('xn,xn->n', intensity, intensity)
+    intensity = contract('xym,myn->xn', tmp, c.reshape(natm, 3, -1))
+    intensity = contract('xn,xn->n', intensity, intensity)
     intensity *= unit_kmmol
 
     return freq, intensity

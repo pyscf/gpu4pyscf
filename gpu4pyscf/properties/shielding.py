@@ -44,8 +44,8 @@ def gen_vind(mf, mo_coeff, mo_occ):
 
     def fx(mo1):
         mo1 = mo1.reshape(-1, nvir, nocc)  # * the saving pattern
-        mo1_mo_real = cupy.einsum('nai,ua->nui', mo1, mvir)
-        dm1 = 2*cupy.einsum('nui,vi->nuv', mo1_mo_real, mocc.conj())
+        mo1_mo_real = contract('nai,ua->nui', mo1, mvir)
+        dm1 = 2*contract('nui,vi->nuv', mo1_mo_real, mocc.conj())
         dm1 -= dm1.transpose(0, 2, 1)
         if hasattr(mf,'with_df'):
             v1 = cupy.zeros((3, nao, nao))
@@ -56,8 +56,8 @@ def gen_vind(mf, mo_coeff, mo_occ):
             for i in range(3):
                 v1[i] = -jk.get_jk(mf.mol, dm1[i].get(), 'ijkl,jk->il')*0.5*hyb
             v1 = cupy.array(v1)
-        tmp = cupy.einsum('nuv,vi->nui', v1, mocc)
-        v1vo = cupy.einsum('nui,ua->nai', tmp, mvir.conj())
+        tmp = contract('nuv,vi->nui', v1, mocc)
+        v1vo = contract('nui,ua->nai', tmp, mvir.conj())
 
         return v1vo
 
@@ -113,13 +113,13 @@ def nr_rks(ni, mol, grids, xc_code, dms):
             giao_nabla_aux = giao_nabla[:,:,:,index]
             for idirect in range(3):
                 # * write like the gpu4pyscf numint part, but explicitly use the einsum
-                aow = cupy.einsum('pn,p->pn', giao_aux[idirect], wv[0])
-                aow += cupy.einsum('xpn,xp->pn', giao_nabla_aux[:, idirect, :, :], wv[1:4])
-                vtmp = cupy.einsum('pn,mp->nm', aow, ao[0])
+                aow = contract('pn,p->pn', giao_aux[idirect], wv[0])
+                aow += contract('xpn,xp->pn', giao_nabla_aux[:, idirect, :, :], wv[1:4])
+                vtmp = contract('pn,mp->nm', aow, ao[0])
                 vtmp = cupy.ascontiguousarray(vtmp)
                 add_sparse(vmat[idirect], vtmp, index)
-                aow = cupy.einsum('pn,xp->xpn', giao_aux[idirect], wv[1:4])
-                vtmp = cupy.einsum('xpn,xmp->nm', aow, ao[1:4])
+                aow = contract('pn,xp->xpn', giao_aux[idirect], wv[1:4])
+                vtmp = contract('xpn,xmp->nm', aow, ao[1:4])
                 vtmp = cupy.ascontiguousarray(vtmp)
                 add_sparse(vmat[idirect], vtmp, index)
 
@@ -218,14 +218,14 @@ def eval_shielding(mf):
     h1ao = get_h1ao(mf)
     t3 = time.time()
     print("h1ao ", t3-t2)
-    tmp = cupy.einsum('xuv,ua->xav', s1ao, mvir)
-    s1ai = cupy.einsum('xav,vi->xai', tmp, mocc)
-    tmp = cupy.einsum('ned,ue->nud', s1ao, dm0)
-    s1dm = cupy.einsum('nud,dv->nuv', tmp, dm0)*0.5
-    tmp = cupy.einsum('xpq,pi->xiq', s1ao, mocc)
-    s1jk = -cupy.einsum('xiq,qj->xij', tmp, mocc)*0.5
-    tmp = cupy.einsum('nai,ua->nui', s1jk, mocc)
-    s1jkdm1 = cupy.einsum('nui,vi->nuv', tmp, mocc.conj())*2
+    tmp = contract('xuv,ua->xav', s1ao, mvir)
+    s1ai = contract('xav,vi->xai', tmp, mocc)
+    tmp = contract('ned,ue->nud', s1ao, dm0)
+    s1dm = contract('nud,dv->nuv', tmp, dm0)*0.5
+    tmp = contract('xpq,pi->xiq', s1ao, mocc)
+    s1jk = -contract('xiq,qj->xij', tmp, mocc)*0.5
+    tmp = contract('nai,ua->nui', s1jk, mocc)
+    s1jkdm1 = contract('nui,vi->nuv', tmp, mocc.conj())*2
     t4 = time.time()
     print('sintegral cal ', t4 - t3)
     s1jkdm1 -= s1jkdm1.transpose(0, 2, 1)
@@ -244,9 +244,9 @@ def eval_shielding(mf):
     t5 = time.time()
     print('vk2 cal ', t5 - t4)
     h1ao += vk2
-    tmp = cupy.einsum('xuv,ua->xav', h1ao, mvir)
-    Veff_ai = cupy.einsum('xav,vi->xai', tmp, mocc)
-    Veff_ai -= cupy.einsum('xai,i->xai', s1ai, mo_energy[idx_occ])
+    tmp = contract('xuv,ua->xav', h1ao, mvir)
+    Veff_ai = contract('xav,vi->xai', tmp, mocc)
+    Veff_ai -= contract('xai,i->xai', s1ai, mo_energy[idx_occ])
     t6 = time.time()
     print('veff cal ', t6 - t5)
     Veff_ai = cupy.array(Veff_ai)
@@ -268,13 +268,13 @@ def eval_shielding(mf):
         int_h11[1, 1] -= int_h11_diag
         int_h11[2, 2] -= int_h11_diag
 
-        tmp = cupy.einsum('ua,xai->xui', mvir, mo1)
-        dm1 = cupy.einsum('xui,vi->xvu', tmp, mocc)
+        tmp = contract('ua,xai->xui', mvir, mo1)
+        dm1 = contract('xui,vi->xvu', tmp, mocc)
         dm1 *= 2
-        shielding_p[atm_id] = cupy.einsum('yuv,xvu->xy', int_h01, dm1)*2.0
-        shielding_p[atm_id] += cupy.einsum('yuv,xvu->xy', int_h01, s1dm)
-        shielding_d[atm_id] = cupy.einsum('xyuv,vu->xy', int_h11, dm0)
-        shielding_d[atm_id] += cupy.einsum('xyuv,vu->xy', int_h01_giao, dm0)
+        shielding_p[atm_id] = contract('yuv,xvu->xy', int_h01, dm1)*2.0
+        shielding_p[atm_id] += contract('yuv,xvu->xy', int_h01, s1dm)
+        shielding_d[atm_id] = contract('xyuv,vu->xy', int_h11, dm0)
+        shielding_d[atm_id] += contract('xyuv,vu->xy', int_h01_giao, dm0)
     t8 = time.time()
     print("contraction time ", t8-t7)
     ppm = nist.ALPHA**2 * 1e6
