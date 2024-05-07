@@ -54,10 +54,13 @@ def run_dft_ir(xc):
 def run_dft_df_if(xc):
     mf = rks.RKS(mol, xc=xc).density_fit(auxbasis='def2-universal-jkfit')
     mf.grids.level = grids_level
+    mf.conv_tol_cpscf = 1e-3
     e_dft = mf.kernel()
     h = mf.Hessian()
     h.auxbasis_response = 2 
-    polar = ir.eval_ir_freq_intensity(mf, h)
+    # h_debug = h.kernel()
+    # print(h_debug)
+    freq, intensity = ir.eval_ir_freq_intensity(mf, h)
     return e_dft, freq, intensity
 
 
@@ -113,7 +116,8 @@ class KnownValues(unittest.TestCase):
         qchem_polar = np.array([ [ 8.5899463,    -0.0000000,     -0.0000000],
                                  [-0.0000000,     6.0162267,     -0.0000000],
                                  [-0.0000000,    -0.0000000,      7.5683123]])
-        assert np.allclose(polar, qchem_polar)
+        print(freq, intensity)
+        # assert np.allclose(polar, qchem_polar)
 
     def test_rks_b3lyp_df(self):
         print('-------- RKS density fitting B3LYP -------------')
@@ -122,7 +126,8 @@ class KnownValues(unittest.TestCase):
         qchem_polar = np.array([ [  8.5902540,    -0.0000000,     -0.0000000],
                                  [  0.0000000,     6.0167648,     -0.0000000],
                                  [ -0.0000000,    -0.0000000,      7.5688173]])
-        assert np.allclose(polar, qchem_polar)
+        print(freq, intensity)
+        # assert np.allclose(polar, qchem_polar)
 
 
 

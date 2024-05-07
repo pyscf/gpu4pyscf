@@ -47,9 +47,11 @@ def eval_ir_freq_intensity(mf, hessian_obj):
     atom_charges = mf.mol.atom_charges()
     mass = cupy.array([elements.MASSES[atom_charges[i]] for i in range(natm)])
     intensity = cupy.zeros((3*natm))
-    hessian_mass = contract('ijkl,i,j->ijkl', hessian,
-                             1/cupy.sqrt(mass), 1/cupy.sqrt(mass))
-    
+    # hessian_mass = contract('ijkl,i,j->ijkl', hessian,
+    #                          1/cupy.sqrt(mass), 1/cupy.sqrt(mass))
+    hessian_mass = contract('ijkl,i->ijkl', cupy.array(hessian), 1/cupy.sqrt(mass))
+    hessian_mass = contract('ijkl,j->ijkl', hessian_mass, 1/cupy.sqrt(mass))
+
     TR = thermo._get_TR(mass.get(), mf.mol.atom_coords())
     TRspace = []
     TRspace.append(TR[:3])
