@@ -50,7 +50,7 @@ def tearDownModule():
 
 def _check_grad(mol, tol=1e-6, disp=None):
     mf = scf.uhf.UHF(mol)
-    mf.direct_scf_tol = 1e-10
+    mf.direct_scf_tol = 1e-14
     mf.disp = disp
     mf.kernel()
 
@@ -83,7 +83,7 @@ class KnownValues(unittest.TestCase):
 
     def test_to_cpu(self):
         mf = scf.uhf.UHF(mol_sph)
-        mf.direct_scf_tol = 1e-10
+        mf.direct_scf_tol = 1e-14
         mf.disp = 'd3bj'
         mf.kernel()
 
