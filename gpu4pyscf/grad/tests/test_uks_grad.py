@@ -119,7 +119,7 @@ class KnownValues(unittest.TestCase):
     @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_cpu(self):
         mf = uks.UKS(mol_sph, xc='b3lyp')
-        mf.direct_scf_tol = 1e-10
+        mf.direct_scf_tol = 1e-14
         mf.disp = 'd3bj'
         mf.kernel()
 
