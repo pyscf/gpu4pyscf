@@ -140,11 +140,11 @@ class Gradients(uks_grad.Gradients):
     _keys = {'with_df', 'auxbasis_response'}
 
     def __init__(self, mf):
-        # Whether to include the response of DF auxiliary basis when computing
-        # nuclear gradients of J/K matrices
-        self.auxbasis_response = True
         uks_grad.Gradients.__init__(self, mf)
 
+    # Whether to include the response of DF auxiliary basis when computing
+    # nuclear gradients of J/K matrices
+    auxbasis_response = True
     get_jk = get_jk
 
     def get_j(self, mol=None, dm=None, hermi=0, mo_coeff=None, mo_occ=None, dm2 = None, omega=None):
