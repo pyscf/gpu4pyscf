@@ -19,8 +19,7 @@ from pyscf.data import nist
 import cupy
 from pyscf.scf import _vhf, jk
 from gpu4pyscf.dft import numint
-import time
-from gpu4pyscf.lib.cupy_helper import contract, release_gpu_stack, take_last2d, add_sparse
+from gpu4pyscf.lib.cupy_helper import contract, take_last2d, add_sparse
 
 
 def gen_vind(mf, mo_coeff, mo_occ):
@@ -71,7 +70,6 @@ def nr_rks(ni, mol, grids, xc_code, dms):
     mo_occ = getattr(dms, 'mo_occ', None)
     nao = mo_coeff.shape[1]
     
-    ####
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
         ni.build(mol, grids.coords)
@@ -81,7 +79,6 @@ def nr_rks(ni, mol, grids, xc_code, dms):
     dms = cupy.asarray(dms).reshape(-1,nao0,nao0)
     dms = take_last2d(dms, opt.ao_idx)
     mo_coeff = mo_coeff[opt.ao_idx]
-    #####
 
     vmat = cupy.zeros((3, nao, nao))
     if xctype == 'LDA':
@@ -117,7 +114,7 @@ def nr_rks(ni, mol, grids, xc_code, dms):
                 aow += contract('xpn,xp->pn', giao_nabla_aux[:, idirect, :, :], wv[1:4])
                 vtmp = contract('pn,mp->nm', aow, ao[0])
                 vtmp = cupy.ascontiguousarray(vtmp)
-                add_sparse(vmat[idirect], vtmp, index)
+                
                 aow = contract('pn,xp->xpn', giao_aux[idirect], wv[1:4])
                 vtmp = contract('xpn,xmp->nm', aow, ao[1:4])
                 vtmp = cupy.ascontiguousarray(vtmp)
@@ -177,15 +174,11 @@ def get_vxc(mf, dm0):
 def get_h1ao(mf):
     dm0 = mf.make_rdm1()
     # ! imaginary part
-    t1 = time.time()
     h1ao = -0.5*mf.mol.intor('int1e_giao_irjxp')
     h1ao += -mf.mol.intor('int1e_igkin')
     h1ao += -mf.mol.intor('int1e_ignuc')
     h1ao = cupy.array(h1ao)
-    t2 = time.time()
     h1ao += get_vxc(mf, dm0)
-    t3 = time.time()
-    print("h1ao 1e: ", t2-t1, "v2e ", t3-t2)
 
     return h1ao
 
@@ -203,21 +196,15 @@ def eval_shielding(mf):
     idx_occ = mo_occ > 0
     idx_vir = mo_occ == 0
     fx = gen_vind(mf, mo_coeff, mo_occ)
-    start_time = time.time()
     mocc = mo_coeff[:, idx_occ]
     mvir = mo_coeff[:, idx_vir]
     s1ao = -mf.mol.intor('int1e_igovlp')
-    t1 = time.time()
-    print("s1ao ", t1-start_time)
     dm0 = mf.make_rdm1()
     natom = mf.mol.natm
 
     shielding_d = cupy.zeros((natom, 3, 3))
     shielding_p = cupy.zeros((natom, 3, 3))
-    t2 = time.time()
     h1ao = get_h1ao(mf)
-    t3 = time.time()
-    print("h1ao ", t3-t2)
     tmp = contract('xuv,ua->xav', s1ao, mvir)
     s1ai = contract('xav,vi->xai', tmp, mocc)
     tmp = contract('ned,ue->nud', s1ao, dm0)
@@ -226,8 +213,6 @@ def eval_shielding(mf):
     s1jk = -contract('xiq,qj->xij', tmp, mocc)*0.5
     tmp = contract('nai,ua->nui', s1jk, mocc)
     s1jkdm1 = contract('nui,vi->nuv', tmp, mocc.conj())*2
-    t4 = time.time()
-    print('sintegral cal ', t4 - t3)
     s1jkdm1 -= s1jkdm1.transpose(0, 2, 1)
     omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(
             mf.xc, spin=mf.mol.spin)
@@ -241,18 +226,12 @@ def eval_shielding(mf):
         for i in range(3):
             vk2[i] = -jk.get_jk(mf.mol, s1jkdm1[i].get(), 'ijkl,jk->il')*0.5*hyb
         vk2 = cupy.array(vk2)
-    t5 = time.time()
-    print('vk2 cal ', t5 - t4)
     h1ao += vk2
     tmp = contract('xuv,ua->xav', h1ao, mvir)
     Veff_ai = contract('xav,vi->xai', tmp, mocc)
     Veff_ai -= contract('xai,i->xai', s1ai, mo_energy[idx_occ])
-    t6 = time.time()
-    print('veff cal ', t6 - t5)
     Veff_ai = cupy.array(Veff_ai)
     mo1 = cphf.solve(fx, mo_energy, mo_occ, Veff_ai, max_cycle=20, tol=1e-10)[0]
-    t7 = time.time()
-    print("cphf-time", t7-t6)
 
     for atm_id in range(natom):
         mf.mol.set_rinv_origin(mf.mol.atom_coord(atm_id))
@@ -275,7 +254,5 @@ def eval_shielding(mf):
         shielding_p[atm_id] += contract('yuv,xvu->xy', int_h01, s1dm)
         shielding_d[atm_id] = contract('xyuv,vu->xy', int_h11, dm0)
         shielding_d[atm_id] += contract('xyuv,vu->xy', int_h01_giao, dm0)
-    t8 = time.time()
-    print("contraction time ", t8-t7)
     ppm = nist.ALPHA**2 * 1e6
     return shielding_d*ppm, shielding_p*ppm

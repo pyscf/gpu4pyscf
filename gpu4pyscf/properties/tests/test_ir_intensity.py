@@ -43,14 +43,6 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-def run_dft_ir(xc):
-    mf = rks.RKS(mol, xc=xc)
-    mf.grids.level = grids_level
-    e_dft = mf.kernel()
-    h = mf.Hessian()
-    freq, intensity = ir.eval_ir_freq_intensity(mf, h)
-    return e_dft, freq, intensity
-
 def run_dft_df_if(xc):
     mf = rks.RKS(mol, xc=xc).density_fit(auxbasis='def2-universal-jkfit')
     mf.grids.level = grids_level
@@ -58,8 +50,6 @@ def run_dft_df_if(xc):
     e_dft = mf.kernel()
     h = mf.Hessian()
     h.auxbasis_response = 2 
-    # h_debug = h.kernel()
-    # print(h_debug)
     freq, intensity = ir.eval_ir_freq_intensity(mf, h)
     return e_dft, freq, intensity
 
@@ -70,27 +60,8 @@ class KnownValues(unittest.TestCase):
 
     $rem
     MEM_STATIC    2000
-    JOBTYPE       POLARIZABILITY
+    JOBTYPE       freq
     METHOD        b3lyp
-    RESPONSE_POLAR 0
-    BASIS         def2-tzvpp
-    SCF_CONVERGENCE     12
-    XC_GRID 000099000590
-    SYMMETRY FALSE
-    SYM_IGNORE = TRUE
-    $end
-
-     -----------------------------------------------------------------------------
-    Polarizability tensor      [a.u.]
-      8.5899463     -0.0000000     -0.0000000
-     -0.0000000      6.0162267     -0.0000000
-     -0.0000000     -0.0000000      7.5683123
-
-    $rem
-    MEM_STATIC    2000
-    JOBTYPE       POLARIZABILITY
-    METHOD        b3lyp
-    RESPONSE_POLAR -1
     BASIS         def2-tzvpp
     SCF_CONVERGENCE     12
     XC_GRID 000099000590
@@ -103,34 +74,28 @@ class KnownValues(unittest.TestCase):
     $end
 
      <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    Polarizability tensor      [a.u.]
-        8.5902540     -0.0000000     -0.0000000
-        0.0000000      6.0167648      0.0000000
-       -0.0000000     -0.0000000      7.5688173
+   Mode:                 1                      2                      3
+ Frequency:      1630.86                3850.08                3949.35
+ Force Cnst:      1.6970                 9.1261                 9.9412
+ Red. Mass:       1.0829                 1.0450                 1.0818
+ IR Active:          YES                    YES                    YES
+ IR Intens:       69.334                  4.675                 47.943
+ Raman Active:       YES                    YES                    YES
     
     '''
-    def test_rks_b3lyp(self):
-        print('-------- RKS B3LYP -------------')
-        e_tot, freq, intensity = run_dft_ir('B3LYP')
-        assert np.allclose(e_tot, -76.4666494276)
-        qchem_polar = np.array([ [ 8.5899463,    -0.0000000,     -0.0000000],
-                                 [-0.0000000,     6.0162267,     -0.0000000],
-                                 [-0.0000000,    -0.0000000,      7.5683123]])
-        print(freq, intensity)
-        # assert np.allclose(polar, qchem_polar)
 
     def test_rks_b3lyp_df(self):
         print('-------- RKS density fitting B3LYP -------------')
         e_tot, freq, intensity = run_dft_df_if('B3LYP')
-        assert np.allclose(e_tot, -76.4666819553)
-        qchem_polar = np.array([ [  8.5902540,    -0.0000000,     -0.0000000],
-                                 [  0.0000000,     6.0167648,     -0.0000000],
-                                 [ -0.0000000,    -0.0000000,      7.5688173]])
+        assert np.allclose(e_tot, -76.4666819537)
+        qchem_freq = np.array([1630.86, 3850.08, 3949.35])
+        qchem_intensity = np.array([69.334, 4.675, 47.943])
         print(freq, intensity)
-        # assert np.allclose(polar, qchem_polar)
+        assert np.allclose(freq, qchem_freq, rtol=1e-03)
+        assert np.allclose(intensity, qchem_intensity, rtol=1e-02)
 
 
 
 if __name__ == "__main__":
-    print("Full Tests for polarizabillity")
+    print("Full Tests for ir intensity")
     unittest.main()
