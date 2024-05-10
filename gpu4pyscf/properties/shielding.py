@@ -114,7 +114,7 @@ def nr_rks(ni, mol, grids, xc_code, dms):
                 aow += contract('xpn,xp->pn', giao_nabla_aux[:, idirect, :, :], wv[1:4])
                 vtmp = contract('pn,mp->nm', aow, ao[0])
                 vtmp = cupy.ascontiguousarray(vtmp)
-                
+                add_sparse(vmat[idirect], vtmp, index)
                 aow = contract('pn,xp->xpn', giao_aux[idirect], wv[1:4])
                 vtmp = contract('xpn,xmp->nm', aow, ao[1:4])
                 vtmp = cupy.ascontiguousarray(vtmp)
@@ -199,6 +199,7 @@ def eval_shielding(mf):
     mocc = mo_coeff[:, idx_occ]
     mvir = mo_coeff[:, idx_vir]
     s1ao = -mf.mol.intor('int1e_igovlp')
+    s1ao = cupy.array(s1ao)
     dm0 = mf.make_rdm1()
     natom = mf.mol.natm
 
@@ -242,6 +243,9 @@ def eval_shielding(mf):
             3, 3, nao, nao)
         int_h11 = mf.mol.intor('int1e_giao_a11part').reshape(
             3, 3, nao, nao)  # ! (-.5 | nabla-rinv | r)
+        int_h11 = cupy.array(int_h11)
+        int_h01 = cupy.array(int_h01)
+        int_h01_giao = cupy.array(int_h01_giao)
         int_h11_diag = int_h11[0, 0] + int_h11[1, 1] + int_h11[2, 2]
         int_h11[0, 0] -= int_h11_diag
         int_h11[1, 1] -= int_h11_diag
