@@ -171,7 +171,7 @@ def get_dD_dS(surface, dF, with_S=True, with_D=False, stream=None):
         ctypes.c_int(n)
     )
     if err != 0:
-        raise RuntimeError(f'Failed in generating PCM dD and dS matrices.')
+        raise RuntimeError('Failed in generating PCM dD and dS matrices.')
 
     dSii_dF = -charge_exp * (2.0/PI)**0.5 / switch_fun**2
     dSii = cupy.expand_dims(dSii_dF, axis=(1,2)) * dF

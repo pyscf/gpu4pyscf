@@ -240,7 +240,7 @@ def get_D_S(surface, with_S=True, with_D=False, stream=None):
         ctypes.c_int(n)
     )
     if err != 0:
-        raise RuntimeError(f'Failed in generating PCM D and S matrices.')
+        raise RuntimeError('Failed in generating PCM D and S matrices.')
     return D, S
 
 class PCM(lib.StreamObject):
