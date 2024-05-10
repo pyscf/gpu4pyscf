@@ -29,9 +29,10 @@ from pyscf.solvent import ddcosmo#, _attach_solvent
 from gpu4pyscf.solvent import _attach_solvent
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import dist_matrix
+from gpu4pyscf.lib.cupy_helper import dist_matrix, load_library
 
 libdft = lib.load_library('libdft')
+libsolvent = load_library('libsolvent')
 
 @lib.with_doc(_attach_solvent._for_scf.__doc__)
 def pcm_for_scf(mf, solvent_obj=None, dm=None):
@@ -179,7 +180,7 @@ def get_F_A(surface):
     A = weights*R_vdw**2*switch_fun
     return switch_fun, A
 
-def get_D_S(surface, with_S=True, with_D=False):
+def get_D_S_slow(surface, with_S=True, with_D=False):
     '''
     generate D and S matrix in  J. Chem. Phys. 133, 244111 (2010)
     The diagonal entries of S is not filled
@@ -207,12 +208,39 @@ def get_D_S(surface, with_S=True, with_D=False):
         #nrij = cupy.expand_dims(nri, axis=1) - nri
         #cupy.expand_dims(grid_coords, axis=1) * norm_vec
         nrij = grid_coords.dot(norm_vec.T) - cupy.sum(grid_coords * norm_vec, axis=-1)
-
         #nrij = cupy.sum(drij * norm_vec, axis=-1)
-
         D = S*nrij/rij**2 -2.0*xi_r_ij/PI**0.5*cupy.exp(-xi_r_ij**2)*nrij/rij**3
         cupy.fill_diagonal(D, -charge_exp * (2.0 / PI)**0.5 / (2.0 * R_vdw))
+    return D, S
 
+def get_D_S(surface, with_S=True, with_D=False, stream=None):
+    charge_exp  = surface['charge_exp']
+    grid_coords = surface['grid_coords']
+    switch_fun  = surface['switch_fun']
+    norm_vec    = surface['norm_vec']
+    R_vdw       = surface['R_vdw']
+    n = charge_exp.shape[0]
+    S = cupy.empty([n,n])
+    D = None
+    S_ptr = ctypes.cast(S.data.ptr, ctypes.c_void_p)
+    D_ptr = lib.c_null_ptr()
+    if with_D:
+        D = cupy.empty([n,n])
+        D_ptr = ctypes.cast(D.data.ptr, ctypes.c_void_p)
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    err = libsolvent.pcm_d_s(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        D_ptr, S_ptr,
+        ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(norm_vec.data.ptr, ctypes.c_void_p),
+        ctypes.cast(R_vdw.data.ptr, ctypes.c_void_p),
+        ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
+        ctypes.cast(switch_fun.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n)
+    )
+    if err != 0:
+        raise RuntimeError(f'Failed in generating PCM D and S matrices.')
     return D, S
 
 class PCM(lib.StreamObject):

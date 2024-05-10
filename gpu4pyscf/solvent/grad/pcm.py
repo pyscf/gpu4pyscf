@@ -20,6 +20,7 @@ Gradient of PCM family solvent model
 
 import numpy
 import cupy
+import ctypes
 from cupyx import scipy
 from pyscf import lib
 from pyscf import gto
@@ -27,10 +28,12 @@ from pyscf.grad import rhf as rhf_grad
 
 from gpu4pyscf.solvent.pcm import PI, switch_h
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, load_library
 from gpu4pyscf.lib import logger
+from pyscf import lib as pyscf_lib
 
 libdft = lib.load_library('libdft')
+libsolvent = load_library('libsolvent')
 
 def grad_switch_h(x):
     ''' first derivative of h(x)'''
@@ -98,7 +101,7 @@ def get_dF_dA(surface):
 
     return dF, dA
 
-def get_dD_dS(surface, dF, with_S=True, with_D=False):
+def get_dD_dS_slow(surface, dF, with_S=True, with_D=False):
     '''
     derivative of D and S w.r.t grids, partial_i D_ij = -partial_j D_ij
     S is symmetric, D is not
@@ -139,6 +142,39 @@ def get_dD_dS(surface, dF, with_S=True, with_D=False):
     dSii_dF = -exponents * (2.0/PI)**0.5 / switch_fun**2
     dSii = cupy.expand_dims(dSii_dF, axis=(1,2)) * dF
 
+    return dD, dS, dSii
+
+def get_dD_dS(surface, dF, with_S=True, with_D=False, stream=None):
+    charge_exp  = surface['charge_exp']
+    grid_coords = surface['grid_coords']
+    switch_fun  = surface['switch_fun']
+    norm_vec    = surface['norm_vec']
+    R_vdw       = surface['R_vdw']
+    n = charge_exp.shape[0]
+    dS = cupy.empty([n,n,3])
+    dD = None
+    dS_ptr = ctypes.cast(dS.data.ptr, ctypes.c_void_p)
+    dD_ptr = pyscf_lib.c_null_ptr()
+    if with_D:
+        dD = cupy.empty([n,n,3])
+        dD_ptr = ctypes.cast(dD.data.ptr, ctypes.c_void_p)
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    err = libsolvent.pcm_dd_ds(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        dD_ptr, dS_ptr,
+        ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(norm_vec.data.ptr, ctypes.c_void_p),
+        ctypes.cast(R_vdw.data.ptr, ctypes.c_void_p),
+        ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
+        ctypes.cast(switch_fun.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n)
+    )
+    if err != 0:
+        raise RuntimeError(f'Failed in generating PCM dD and dS matrices.')
+
+    dSii_dF = -charge_exp * (2.0/PI)**0.5 / switch_fun**2
+    dSii = cupy.expand_dims(dSii_dF, axis=(1,2)) * dF
     return dD, dS, dSii
 
 def grad_nuc(pcmobj, dm):
