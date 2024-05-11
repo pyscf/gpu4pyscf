@@ -39,9 +39,15 @@ static void _pcm_d_s(double *matrix_d, double *matrix_s,
     double xi_ij = ei * ej / sqrt(ei*ei + ej*ej);
 
     // calculate r
-    double dx = coords[3*i]   - coords[3*j];
-    double dy = coords[3*i+1] - coords[3*j+1];
-    double dz = coords[3*i+2] - coords[3*j+2];
+    double xi = coords[3*i];
+    double yi = coords[3*i+1];
+    double zi = coords[3*i+2];
+    double xj = coords[3*j];
+    double yj = coords[3*j+1];
+    double zj = coords[3*j+2];
+    double dx = xi - xj;
+    double dy = yi - yj;
+    double dz = zi - zj;
     double rij = norm3d(dx, dy, dz);
 
     double xi_r_ij = xi_ij * rij;
@@ -51,14 +57,18 @@ static void _pcm_d_s(double *matrix_d, double *matrix_s,
     matrix_s[i*n+j] = s;
 
     if (matrix_d != NULL){
-        double nrij = 0.0;
-        nrij += coords[3*i]   * norm_vec[3*j];
-        nrij += coords[3*i+1] * norm_vec[3*j+1];
-        nrij += coords[3*i+2] * norm_vec[3*j+2];
+        double nxj = norm_vec[3*j];
+        double nyj = norm_vec[3*j+1];
+        double nzj = norm_vec[3*j+2];
 
-        nrij -= coords[3*j]   * norm_vec[3*j];
-        nrij -= coords[3*j+1] * norm_vec[3*j+1];
-        nrij -= coords[3*j+2] * norm_vec[3*j+2];
+        double nrij = 0.0;
+        nrij += xj * nxj;
+        nrij += yj * nyj;
+        nrij += zj * nzj;
+
+        nrij -= xj * nxj;
+        nrij -= yj * nyj;
+        nrij -= zj * nzj;
 
         double rij2 = rij*rij;
         double rij3 = rij2*rij;
@@ -108,18 +118,17 @@ static void _pcm_dD_dS(double *matrix_dd, double *matrix_ds,
     matrix_ds[3*(i*n+j)+2] = dS_dr * dz_rij;
 
     if (matrix_dd != NULL){
+        double nxj = norm_vec[3*j];
+        double nyj = norm_vec[3*j+1];
+        double nzj = norm_vec[3*j+2];
+        double nj_rij = dx*nxj + dy*nyj + dz*nzj;
         double rij3 = rij2*rij;
-        double nj_rij = dx*norm_vec[3*j] + dy*norm_vec[3*j+1] + dz*norm_vec[3*j+2];
         double dD_dri = 4.0*xi_r2_ij*xi_ij / SQRT_PI*exp(-xi_r2_ij)*nj_rij/rij3;
         if (i == j) dD_dri = 0.0;
 
-        double nj_x = norm_vec[3*j];
-        double nj_y = norm_vec[3*j+1];
-        double nj_z = norm_vec[3*j+2];
-
-        matrix_dd[3*(i*n+j)]   = dD_dri*dx_rij + dS_dr*(-nj_x/rij + 3.0*nj_rij/rij2*dx_rij);
-        matrix_dd[3*(i*n+j)+1] = dD_dri*dy_rij + dS_dr*(-nj_y/rij + 3.0*nj_rij/rij2*dy_rij);
-        matrix_dd[3*(i*n+j)+2] = dD_dri*dz_rij + dS_dr*(-nj_z/rij + 3.0*nj_rij/rij2*dz_rij);
+        matrix_dd[3*(i*n+j)]   = dD_dri*dx_rij + dS_dr*(-nxj/rij + 3.0*nj_rij/rij2*dx_rij);
+        matrix_dd[3*(i*n+j)+1] = dD_dri*dy_rij + dS_dr*(-nyj/rij + 3.0*nj_rij/rij2*dy_rij);
+        matrix_dd[3*(i*n+j)+2] = dD_dri*dz_rij + dS_dr*(-nzj/rij + 3.0*nj_rij/rij2*dz_rij);
     }
 }
 
