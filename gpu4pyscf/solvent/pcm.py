@@ -193,8 +193,6 @@ def get_D_S_slow(surface, with_S=True, with_D=False):
 
     xi_i, xi_j = cupy.meshgrid(charge_exp, charge_exp, indexing='ij')
     xi_ij = xi_i * xi_j / (xi_i**2 + xi_j**2)**0.5
-    #rij = scipy.spatial.distance.cdist(grid_coords, grid_coords)
-    #rij = cupy.sum((grid_coords[:,None,:] - grid_coords[None,:,:])**2, axis=2)**0.5
     rij = dist_matrix(grid_coords, grid_coords)
     xi_r_ij = xi_ij * rij
     cupy.fill_diagonal(rij, 1)
@@ -203,17 +201,13 @@ def get_D_S_slow(surface, with_S=True, with_D=False):
 
     D = None
     if with_D:
-        #drij = cupy.expand_dims(grid_coords, axis=1) - grid_coords
-        #nri = cupy.sum(grid_coords * norm_vec, axis=-1)
-        #nrij = cupy.expand_dims(nri, axis=1) - nri
-        #cupy.expand_dims(grid_coords, axis=1) * norm_vec
         nrij = grid_coords.dot(norm_vec.T) - cupy.sum(grid_coords * norm_vec, axis=-1)
-        #nrij = cupy.sum(drij * norm_vec, axis=-1)
         D = S*nrij/rij**2 -2.0*xi_r_ij/PI**0.5*cupy.exp(-xi_r_ij**2)*nrij/rij**3
         cupy.fill_diagonal(D, -charge_exp * (2.0 / PI)**0.5 / (2.0 * R_vdw))
     return D, S
 
 def get_D_S(surface, with_S=True, with_D=False, stream=None):
+    ''' Efficiently generating D matrix and S matrix in PCM models '''
     charge_exp  = surface['charge_exp']
     grid_coords = surface['grid_coords']
     switch_fun  = surface['switch_fun']
