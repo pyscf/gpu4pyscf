@@ -323,7 +323,6 @@ class PCM(lib.StreamObject):
         atom_coords = mol.atom_coords(unit='B')
         atom_charges = mol.atom_charges()
 
-        # Move this to GPU
         auxmol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
         intopt.build(1e-14, diag_block_with_triu=False, aosym=True, group_size=256)
