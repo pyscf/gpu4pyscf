@@ -18,7 +18,7 @@
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80")
 
 add_library(solvent SHARED
-  pcm_d_s.cu
+  pcm.cu
 )
 
 set_target_properties(solvent PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
