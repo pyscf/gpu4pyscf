@@ -117,6 +117,7 @@ add_subdirectory(gint)
 add_subdirectory(gvhf)
 add_subdirectory(gdft)
 add_subdirectory(cupy_helper)
+add_subdirectory(solvent)
 
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
