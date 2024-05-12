@@ -21,6 +21,7 @@
 #define SQRT2_PI       0.7978845608028654
 #define SQRT_PI        1.7724538509055159
 
+// D and S matrix in J. Chem. Phys. 133, 244111 (2010)
 __global__
 static void _pcm_d_s(double *matrix_d, double *matrix_s,
                     const double *coords, const double *norm_vec, const double *r_vdw,
@@ -62,13 +63,9 @@ static void _pcm_d_s(double *matrix_d, double *matrix_s,
         double nzj = norm_vec[3*j+2];
 
         double nrij = 0.0;
-        nrij += xj * nxj;
-        nrij += yj * nyj;
-        nrij += zj * nzj;
-
-        nrij -= xj * nxj;
-        nrij -= yj * nyj;
-        nrij -= zj * nzj;
+        nrij += (xi - xj) * nxj;
+        nrij += (yi - yj) * nyj;
+        nrij += (zi - zj) * nzj;
 
         double rij2 = rij*rij;
         double rij3 = rij2*rij;
