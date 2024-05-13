@@ -181,7 +181,12 @@ def grad_nuc(pcmobj, dm):
     mol = pcmobj.mol
     log = logger.new_logger(mol, mol.verbose)
     t1 = log.init_timer()
-    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+    if not pcmobj._intermediates:
+        pcmobj.build()
+    dm_cache = pcmobj._intermediates.get('dm', None)
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
+        pass
+    else:
         pcmobj._get_vind(dm)
 
     mol = pcmobj.mol
@@ -215,17 +220,23 @@ def grad_qv(pcmobj, dm):
     '''
     contributions due to integrals
     '''
-    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+    if not pcmobj._intermediates:
+        pcmobj.build()
+    dm_cache = pcmobj._intermediates.get('dm', None)
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
+        pass
+    else:
         pcmobj._get_vind(dm)
     mol = pcmobj.mol
     log = logger.new_logger(mol, mol.verbose)
     t1 = log.init_timer()
-    gridslice    = pcmobj.surface['gslice_by_atom']
-    q_sym        = pcmobj._intermediates['q_sym']
+    gridslice   = pcmobj.surface['gslice_by_atom']
+    charge_exp  = pcmobj.surface['charge_exp']
+    grid_coords = pcmobj.surface['grid_coords']
+    q_sym       = pcmobj._intermediates['q_sym']
 
-    intopt = pcmobj.intopt
-    intopt.clear()
-    # rebuild with aosym
+    auxmol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
+    intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
     coeff = intopt.coeff
     dm_cart = coeff @ dm @ coeff.T
@@ -252,7 +263,12 @@ def grad_solver(pcmobj, dm):
     mol = pcmobj.mol
     log = logger.new_logger(mol, mol.verbose)
     t1 = log.init_timer()
-    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+    if not pcmobj._intermediates:
+        pcmobj.build()
+    dm_cache = pcmobj._intermediates.get('dm', None)
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
+        pass
+    else:
         pcmobj._get_vind(dm)
 
     gridslice    = pcmobj.surface['gslice_by_atom']
@@ -360,6 +376,8 @@ def make_grad_object(grad_method):
                          (WithSolventGrad, grad_method.__class__), name)
 
 class WithSolventGrad:
+    from gpu4pyscf.lib.utils import to_gpu, device
+
     _keys = {'de_solvent', 'de_solute'}
 
     def __init__(self, grad_method):
@@ -374,6 +392,11 @@ class WithSolventGrad:
         del obj.de_solvent
         del obj.de_solute
         return obj
+
+    def to_cpu(self):
+        from pyscf.solvent.grad import pcm  # type: ignore
+        grad_method = self.undo_solvent().to_cpu()
+        return pcm.make_grad_object(grad_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         dm = kwargs.pop('dm', None)

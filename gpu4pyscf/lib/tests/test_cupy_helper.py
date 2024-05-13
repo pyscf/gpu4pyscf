@@ -176,6 +176,22 @@ class KnownValues(unittest.TestCase):
         a_sph1 = cart2sph(a_cart, axis=1, ang=4)
         assert cupy.linalg.norm(a_sph0 - a_sph1) < 1e-8
 
+        a_cart = cupy.random.rand(10,21,11)
+        a_sph0 = cart2sph_cutensor(a_cart, axis=1, ang=5)
+        a_sph1 = cart2sph(a_cart, axis=1, ang=5)
+        assert cupy.linalg.norm(a_sph0 - a_sph1) < 1e-8
+
+        a_cart = cupy.random.rand(10,28,11)
+        a_sph0 = cart2sph_cutensor(a_cart, axis=1, ang=6)
+        a_sph1 = cart2sph(a_cart, axis=1, ang=6)
+        assert cupy.linalg.norm(a_sph0 - a_sph1) < 1e-8
+
+        '''
+        a_cart = cupy.random.rand(10,36,11)
+        a_sph0 = cart2sph_cutensor(a_cart, axis=1, ang=7)
+        a_sph1 = cart2sph(a_cart, axis=1, ang=7)
+        assert cupy.linalg.norm(a_sph0 - a_sph1) < 1e-8
+        '''
 if __name__ == "__main__":
     print("Full tests for cupy helper module")
     unittest.main()

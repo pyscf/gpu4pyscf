@@ -14,208 +14,18 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 '''
-Gradient of PCM family solvent model
+Hessian SMD solvent model
 '''
 # pylint: disable=C0103
 
 import numpy as np
-import cupy
 from pyscf import lib
-
+from gpu4pyscf import scf
+from gpu4pyscf.lib import logger
 from gpu4pyscf.solvent import smd
 from gpu4pyscf.solvent.grad import smd as smd_grad
+from gpu4pyscf.solvent.grad import pcm as pcm_grad
 from gpu4pyscf.solvent.hessian import pcm as pcm_hess
-
-from gpu4pyscf.solvent.smd import (
-    sigma_water, sigma_n, sigma_alpha, sigma_beta, r_zz, swtich_function,
-    hartree2kcal)
-from gpu4pyscf import scf
-from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.lib import logger
-
-def hess_swtich_function(R, r, dr):
-    if R < r + dr:
-        dist = (R[0]**2 + R[1]**2 + R[2]**2)**.5
-        hess = [
-            [R[1]**2+R[2]**2, -R[0]*R[1], -R[0]*R[2]],
-            [-R[0]*R[1], R[0]**2+R[2]**2, -R[1]*R[2]],
-            [-R[0]*R[2], -R[1]*R[2], R[0]**2+R[1]**2]]
-        return np.asarray(hess)/dist
-    else:
-        return np.zeros([3,3])
-
-def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
-    '''
-    TODO: debug later
-    - list of atomic symbols
-    - atomic coordinates in Anstrong
-    - solvent descriptors: n, alpha, beta
-    '''
-
-    def get_bond_tension(bond):
-        if water:
-            return sigma_water.get(bond, 0.0)
-        t = 0.0
-        t += sigma_n.get(bond, 0.0) * n
-        t += sigma_alpha.get(bond, 0.0) * alpha
-        t += sigma_beta.get(bond, 0.0) * beta
-        return t
-
-    def get_atom_tension(sym_i):
-        if water:
-            return sigma_water.get(sym_i, 0.0)
-        t = 0.0
-        t += sigma_n.get(sym_i, 0.0) * n
-        t += sigma_alpha.get(sym_i, 0.0) * alpha
-        t += sigma_beta.get(sym_i, 0.0) * beta
-        return t
-    natm = coords.shape[0]
-    ri_rj = coords[:,None,:] - coords[None,:,:]
-    rij = np.sum(ri_rj**2, axis=2)**0.5
-    np.fill_diagonal(rij, 1)
-    #drij = ri_rj / np.expand_dims(rij, axis=-1)
-    tensions = []
-    for i, sym_i in enumerate(symbols):
-        if sym_i not in ['H', 'C', 'N', 'O', 'F', 'Si', 'S', 'Cl', 'Br']:
-            tensions.append(np.zeros([natm,3]))
-            continue
-
-        tension = np.zeros([natm,3])
-        if sym_i in ['F', 'Si', 'S', 'Cl', 'Br']:
-            tensions.append(tension)
-            continue
-
-        if sym_i == 'H':
-            dt_HC = np.zeros([natm,natm,3,3])
-            dt_HO = np.zeros([natm,natm,3,3])
-            for j, sym_j in enumerate(symbols):
-                if sym_j == 'C':
-                    r, dr = r_zz.get(('H','C'), (0.0, 0.0))
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
-                    dt_HC[i,i] += dt_drij
-                    dt_HC[i,j] -= dt_drij
-                    dt_HC[j,i] -= dt_drij
-                    dt_HC[j,j] += dt_drij
-                if sym_j == 'O':
-                    r, dr = r_zz.get(('H','O'), (0.0, 0.0))
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
-                    dt_HO[i,i] += dt_drij
-                    dt_HO[i,j] -= dt_drij
-                    dt_HO[j,i] -= dt_drij
-                    dt_HO[j,j] += dt_drij
-            sig_HC = get_bond_tension(('H','C'))
-            sig_HO = get_bond_tension(('H','O'))
-            tension += sig_HC * dt_HC + sig_HO * dt_HO
-            tensions.append(tension)
-
-        if sym_i == 'C':
-            dt_CN = np.zeros([natm,3])
-            d2t_CC = np.zeros([natm,natm,3,3])
-            d2t_CN = np.zeros([natm,natm,3,3])
-            t_CN = 0.0
-            for j, sym_j in enumerate(symbols):
-                if sym_j == 'C' and i != j:
-                    r, dr = r_zz.get(('C', 'C'), (0.0, 0.0))
-                    d2t_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
-                    d2t_CC[i,i] += d2t_drij
-                    d2t_CC[i,j] -= d2t_drij
-                    d2t_CC[j,i] -= d2t_drij
-                    d2t_CC[j,j] += d2t_drij
-                if sym_j == 'N':
-                    r, dr = r_zz.get(('C', 'N'), (0.0, 0.0))
-                    t_CN += swtich_function(rij[i,j], r, dr)
-                    dt_drij = smd_grad.grad_switch_function(coords[i]-coords[j], r, dr)
-                    dt_CN[i] += dt_drij
-                    dt_CN[j] -= dt_drij
-                    d2t_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
-                    d2t_CN[i,i] += d2t_drij
-                    d2t_CN[i,j] -= d2t_drij
-                    d2t_CN[j,i] -= d2t_drij
-                    d2t_CN[j,j] += d2t_drij
-            sig_CC = get_bond_tension(('C','C'))
-            sig_CN = get_bond_tension(('C','N'))
-            tension += sig_CC * d2t_CC + sig_CN * (2 * t_CN * d2t_CN + 2 * np.einsum('i,j->ij', dt_drij[i], dt_drij[j]))
-            tensions.append(tension)
-
-        if sym_i == 'N':
-            t_NC = 0.0
-            dt_NC = np.zeros([natm,natm,3,3])
-            dt_NC3 = np.zeros([natm,natm,3,3])
-            for j, sym_j in enumerate(symbols):
-                if sym_j == 'C':
-                    r, dr = r_zz.get(('N','C'), (0.0, 0.0))
-                    tk = 0.0
-                    dtk = np.zeros([natm,natm,3,3])
-                    for k, sym_k in enumerate(symbols):
-                        if k != i and k != j:
-                            rjk, drjk = r_zz.get(('C', sym_k), (0.0, 0.0))
-                            tk += swtich_function(rij[j,k], rjk, drjk)
-                            dtk_rjk = hess_swtich_function(coords[j]-coords[k], rjk, drjk)
-                            dtk[j,j] += dtk_rjk
-                            dtk[j,k] -= dtk_rjk
-                            dtk[k,j] -= dtk_rjk
-                            dtk[k,k] += dtk_rjk
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr) * tk**2
-                    dt_NC[i,i] += dt_drij
-                    dt_NC[i,j] -= dt_drij
-                    dt_NC[j,i] -= dt_drij
-                    dt_NC[j,j] += dt_drij
-                    t = swtich_function(coords[i]-coords[j], r, dr)
-                    dt_NC += t * (2 * tk * dtk)
-                    t_NC += t * tk**2
-
-                    r, dr = r_zz.get(('N','C3'), (0.0, 0.0))
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
-                    dt_NC3[i,i] += dt_drij
-                    dt_NC3[i,j] -= dt_drij
-                    dt_NC3[j,i] -= dt_drij
-                    dt_NC3[j,j] += dt_drij
-            sig_NC = get_bond_tension(('N','C'))
-            sig_NC3= get_bond_tension(('N','C3'))
-            tension += sig_NC * (1.3 * t_NC**0.3 * dt_NC) + sig_NC3 * dt_NC3
-            tensions.append(tension)
-
-        if sym_i == 'O':
-            dt_OC = np.zeros([natm,natm,3,3])
-            dt_ON = np.zeros([natm,natm,3,3])
-            dt_OO = np.zeros([natm,natm,3,3])
-            dt_OP = np.zeros([natm,natm,3,3])
-            for j, sym_j in enumerate(symbols):
-                if sym_j == 'C':
-                    r, dr = r_zz.get(('O','C'), (0.0, 0.0))
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
-                    dt_OC[i,i] += dt_drij
-                    dt_OC[i,j] -= dt_drij
-                    dt_OC[j,i] -= dt_drij
-                    dt_OC[j,j] += dt_drij
-                if sym_j == 'N':
-                    r, dr = r_zz.get(('O','N'), (0.0, 0.0))
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
-                    dt_ON[i,i] += dt_drij
-                    dt_ON[i,j] -= dt_drij
-                    dt_ON[j,i] -= dt_drij
-                    dt_ON[j,j] += dt_drij
-                if sym_j == 'O' and j != i:
-                    r, dr = r_zz.get(('O','O'), (0.0, 0.0))
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
-                    dt_OO[i,i] += dt_drij
-                    dt_OO[i,j] -= dt_drij
-                    dt_OO[j,i] -= dt_drij
-                    dt_OO[j,j] += dt_drij
-                if sym_j == 'P':
-                    r, dr = r_zz.get(('O','P'), (0.0, 0.0))
-                    dt_drij = hess_swtich_function(coords[i]-coords[j], r, dr)
-                    dt_OP[i,i] += dt_drij
-                    dt_OP[i,j] -= dt_drij
-                    dt_OP[j,i] -= dt_drij
-                    dt_OP[j,j] += dt_drij
-            sig_OC = get_bond_tension(('O','C'))
-            sig_ON = get_bond_tension(('O','N'))
-            sig_OO = get_bond_tension(('O','O'))
-            sig_OP = get_bond_tension(('O','P'))
-            tension += sig_OC * dt_OC + sig_ON * dt_ON + sig_OO * dt_OO + sig_OP * dt_OP
-            tensions.append(tension)
-    return cupy.asarray(tensions)
 
 def get_cds(smdobj):
     mol = smdobj.mol
@@ -223,7 +33,7 @@ def get_cds(smdobj):
     def smd_grad_scanner(mol):
         smdobj_tmp = smd.SMD(mol)
         smdobj_tmp.solvent = solvent
-        return smd_grad.get_cds(smdobj_tmp)
+        return smd.get_cds_legacy(smdobj_tmp)[1]
 
     log = logger.new_logger(mol, mol.verbose)
     t1 = log.init_timer()
@@ -250,6 +60,45 @@ def get_cds(smdobj):
     t1 = log.timer_debug1('solvent energy', *t1)
     return hess_cds # hartree
 
+
+def hess_elec(smdobj, dm, verbose=None):
+    '''
+    slow version with finite difference
+    TODO: use analytical hess_nuc
+    '''
+    log = logger.new_logger(smdobj, verbose)
+    t1 = log.init_timer()
+    pmol = smdobj.mol.copy()
+    mol = pmol.copy()
+    coords = mol.atom_coords(unit='Bohr')
+
+    def pcm_grad_scanner(mol):
+        # TODO: use more analytical forms
+        smdobj.reset(mol)
+        e, v = smdobj._get_vind(dm)
+        #return grad_elec(smdobj, dm)
+        grad = pcm_grad.grad_nuc(smdobj, dm)
+        grad+= smd_grad.grad_solver(smdobj, dm)
+        grad+= pcm_grad.grad_qv(smdobj, dm)
+        return grad
+
+    mol.verbose = 0
+    de = np.zeros([mol.natm, mol.natm, 3, 3])
+    eps = 1e-3
+    for ia in range(mol.natm):
+        for ix in range(3):
+            dv = np.zeros_like(coords)
+            dv[ia,ix] = eps
+            mol.set_geom_(coords + dv, unit='Bohr')
+            g0 = pcm_grad_scanner(mol)
+
+            mol.set_geom_(coords - dv, unit='Bohr')
+            g1 = pcm_grad_scanner(mol)
+            de[ia,:,ix] = (g0 - g1)/2.0/eps
+    t1 = log.timer_debug1('solvent energy', *t1)
+    smdobj.reset(pmol)
+    return de
+
 def make_hess_object(hess_method):
     '''For hess_method in vacuum, add nuclear Hessian of solvent smdobj'''
     if hess_method.base.with_solvent.frozen:
@@ -261,12 +110,27 @@ def make_hess_object(hess_method):
                          (WithSolventHess, hess_method.__class__), name)
 
 class WithSolventHess:
+    from gpu4pyscf.lib.utils import to_gpu, device
+
     _keys = {'de_solvent', 'de_solute'}
 
     def __init__(self, hess_method):
         self.__dict__.update(hess_method.__dict__)
         self.de_solvent = None
         self.de_solute = None
+
+    def undo_solvent(self):
+        cls = self.__class__
+        name_mixin = self.base.with_solvent.__class__.__name__
+        obj = lib.view(self, lib.drop_class(cls, WithSolventHess, name_mixin))
+        del obj.de_solvent
+        del obj.de_solute
+        return obj
+
+    def to_cpu(self):
+        from pyscf.solvent.hessian import smd  # type: ignore
+        hess_method = self.undo_solvent().to_cpu()
+        return smd.make_hess_object(hess_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         dm = kwargs.pop('dm', None)

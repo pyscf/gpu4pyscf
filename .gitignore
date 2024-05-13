@@ -16,6 +16,7 @@ output/
 *.swp
 *~
 *.log
+*.mod
 *.h5
 **/qchem_input.in
 .coverage

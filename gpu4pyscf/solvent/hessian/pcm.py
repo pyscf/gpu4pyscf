@@ -14,7 +14,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 '''
-Gradient of PCM family solvent model
+Hessian of PCM family solvent model
 '''
 # pylint: disable=C0103
 
@@ -22,13 +22,11 @@ import numpy
 import cupy
 from pyscf import lib, gto
 from gpu4pyscf import scf
-from gpu4pyscf.solvent.pcm import PI, switch_h
-from gpu4pyscf.solvent.grad.pcm import grad_switch_h, get_dF_dA, get_dD_dS, grad_qv, grad_solver, grad_nuc
+from gpu4pyscf.solvent.pcm import PI
+from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_solver, grad_nuc
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
-
-libdft = lib.load_library('libdft')
 
 def hess_nuc(pcmobj):
     if not pcmobj._intermediates:
@@ -142,11 +140,9 @@ def hess_elec(pcmobj, dm, verbose=None):
             dv = numpy.zeros_like(coords)
             dv[ia,ix] = eps
             mol.set_geom_(coords + dv, unit='Bohr')
-            mol.build()
             g0 = pcm_grad_scanner(mol)
 
             mol.set_geom_(coords - dv, unit='Bohr')
-            mol.build()
             g1 = pcm_grad_scanner(mol)
             de[ia,:,ix] = (g0 - g1)/2.0/eps
     t1 = log.timer_debug1('solvent energy', *t1)
@@ -181,11 +177,9 @@ def fd_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
             dv = numpy.zeros_like(coords)
             dv[ia,ix] = eps
             mol.set_geom_(coords + dv, unit='Bohr')
-            mol.build()
             vmat0 = pcm_vmat_scanner(mol)
 
             mol.set_geom_(coords - dv, unit='Bohr')
-            mol.build()
             vmat1 = pcm_vmat_scanner(mol)
 
             grad_vmat = (vmat0 - vmat1)/2.0/eps
@@ -236,12 +230,27 @@ def make_hess_object(hess_method):
                          (WithSolventHess, hess_method.__class__), name)
 
 class WithSolventHess:
+    from gpu4pyscf.lib.utils import to_gpu, device
+
     _keys = {'de_solvent', 'de_solute'}
 
     def __init__(self, hess_method):
         self.__dict__.update(hess_method.__dict__)
         self.de_solvent = None
         self.de_solute = None
+
+    def undo_solvent(self):
+        cls = self.__class__
+        name_mixin = self.base.with_solvent.__class__.__name__
+        obj = lib.view(self, lib.drop_class(cls, WithSolventHess, name_mixin))
+        del obj.de_solvent
+        del obj.de_solute
+        return obj
+
+    def to_cpu(self):
+        from pyscf.solvent.hessian import pcm           # type: ignore
+        hess_method = self.undo_solvent().to_cpu()
+        return pcm.make_hess_object(hess_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         dm = kwargs.pop('dm', None)

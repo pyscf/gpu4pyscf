@@ -22,10 +22,10 @@ import numpy
 import cupy
 import cupyx.scipy as scipy
 from pyscf import lib
-from pyscf import gto, df
+from pyscf import gto
 from pyscf.dft import gen_grid
 from pyscf.data import radii
-from pyscf.solvent import ddcosmo#, _attach_solvent
+from pyscf.solvent import ddcosmo
 from gpu4pyscf.solvent import _attach_solvent
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
@@ -244,32 +244,52 @@ class PCM(lib.StreamObject):
         'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
         'equilibrium_solvation', 'e', 'v',
     }
-
+    from gpu4pyscf.lib.utils import to_gpu, device
     kernel = ddcosmo.DDCOSMO.kernel
 
     def __init__(self, mol):
-        ddcosmo.DDCOSMO.__init__(self, mol)
+        self.mol = mol
+        self.stdout = mol.stdout
+        self.verbose = mol.verbose
+        self.max_memory = mol.max_memory
         self.method = 'C-PCM'
+
         self.vdw_scale = 1.2 # default value in qchem
+        self.surface = {}
         self.r_probe = 0.0
         self.radii_table = None
-        self.surface = {}
+        self.atom_radii = None
+        self.lebedev_order = 29
         self._intermediates = {}
+        self.eps = 78.3553
+
+        self.max_cycle = 20
+        self.conv_tol = 1e-7
+        self.state_id = 0
+
+        self.frozen = False
+        self.equilibrium_solvation = False
+
+        self.e = None
+        self.v = None
+        self._dm = None
 
     def dump_flags(self, verbose=None):
         logger.info(self, '******** %s ********', self.__class__)
         logger.info(self, 'lebedev_order = %s (%d grids per sphere)',
                     self.lebedev_order, gen_grid.LEBEDEV_ORDER[self.lebedev_order])
-        logger.info(self, 'lmax = %s'         , self.lmax)
-        logger.info(self, 'eta = %s'          , self.eta)
         logger.info(self, 'eps = %s'          , self.eps)
         logger.info(self, 'frozen = %s'       , self.frozen)
         logger.info(self, 'equilibrium_solvation = %s', self.equilibrium_solvation)
         logger.debug2(self, 'radii_table %s', self.radii_table)
         if self.atom_radii:
             logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
-        self.grids.dump_flags(verbose)
         return self
+
+    def to_cpu(self):
+        from gpu4pyscf.lib.utils import to_cpu
+        obj = to_cpu(self)
+        return obj.reset()
 
     def build(self, ng=None):
         if self.radii_table is None:
@@ -293,7 +313,7 @@ class PCM(lib.StreamObject):
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0/2.0)
             K = S
             R = -f_epsilon * cupy.eye(K.shape[0])
-        elif self.method.upper() in ['IEF-PCM', 'IEFPCM', 'SMD']:
+        elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
             DA = D*A
             DAS = cupy.dot(DA, S)
@@ -406,7 +426,6 @@ class PCM(lib.StreamObject):
     def reset(self, mol=None):
         if mol is not None:
             self.mol = mol
-            self.grids.reset(mol)
         self._intermediates = None
         self.surface = None
         self.intopt = None

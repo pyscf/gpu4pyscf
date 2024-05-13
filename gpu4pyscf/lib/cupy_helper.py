@@ -395,7 +395,7 @@ def hermi_triu(mat, hermi=1, inplace=True):
 
 def cart2sph_cutensor(t, axis=0, ang=1, out=None):
     '''
-    transform 'axis' of a tensor from cartesian basis into spherical basis
+    transform 'axis' of a tensor from cartesian basis into spherical basis with cutensor
     '''
     if(ang <= 1):
         if(out is not None): out[:] = t

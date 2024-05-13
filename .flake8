@@ -15,7 +15,7 @@ ignore =
         E701, E731, E741, E275,
         F401, C901, W391, W503, W504, W291, W292, W293
 
-exclude = test, tests, .git, __pycache__, build, dist, __init__.py .eggs, *.egg, .coveragerc
+exclude = test, tests, .git, __pycache__, build, dist, __init__.py .eggs, *.egg, .coveragerc, mnsol.F
 max-line-length = 160
 
 per-file-ignores =
