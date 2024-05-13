@@ -62,7 +62,7 @@ def eval_polarizability(mf, unit='au'):
         polarizability (numpy.array): polarizability
     """
 
-    polarizability = np.zeros((3, 3))
+    polarizability = np.empty((3, 3))
 
     mo_coeff = mf.mo_coeff
     mo_occ = mf.mo_occ

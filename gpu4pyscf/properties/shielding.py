@@ -47,11 +47,11 @@ def gen_vind(mf, mo_coeff, mo_occ):
         dm1 = 2*contract('nui,vi->nuv', mo1_mo_real, mocc.conj())
         dm1 -= dm1.transpose(0, 2, 1)
         if hasattr(mf,'with_df'):
-            v1 = cupy.zeros((3, nao, nao))
+            v1 = cupy.empty((3, nao, nao))
             for i in range(3):
                 v1[i] =+mf.get_jk(mf.mol, dm1[i], hermi=2, with_j=False)[1]*0.5*hyb
         else:
-            v1 = np.zeros((3, nao, nao))
+            v1 = np.empty((3, nao, nao))
             for i in range(3):
                 v1[i] = -jk.get_jk(mf.mol, dm1[i].get(), 'ijkl,jk->il')*0.5*hyb
             v1 = cupy.array(v1)
@@ -96,7 +96,7 @@ def nr_rks(ni, mol, grids, xc_code, dms):
             giao = cupy.array(giao)
             giao_aux = giao[:,:,index]
             for idirect in range(3):
-                vtmp = np.einsum('pu,p,vp->uv', giao_aux[idirect], wv, ao)
+                vtmp = contract('pu,p,vp->uv', giao_aux[idirect], wv, ao)
                 vtmp = cupy.ascontiguousarray(vtmp)
                 add_sparse(vmat[idirect], vtmp, index)
             
@@ -203,8 +203,6 @@ def eval_shielding(mf):
     dm0 = mf.make_rdm1()
     natom = mf.mol.natm
 
-    shielding_d = cupy.zeros((natom, 3, 3))
-    shielding_p = cupy.zeros((natom, 3, 3))
     h1ao = get_h1ao(mf)
     tmp = contract('xuv,ua->xav', s1ao, mvir)
     s1ai = contract('xav,vi->xai', tmp, mocc)
@@ -218,12 +216,12 @@ def eval_shielding(mf):
     omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(
             mf.xc, spin=mf.mol.spin)
     if hasattr(mf,'with_df'):
-        vk2 = cupy.zeros((3, nao, nao))
+        vk2 = cupy.empty((3, nao, nao))
         for i in range(3):
             vk2[i] = +mf.get_jk(mf.mol, s1jkdm1[i], hermi=2, with_j=False)[1]*0.5*hyb
     
     else:
-        vk2 = np.zeros((3, nao, nao))
+        vk2 = np.empty((3, nao, nao))
         for i in range(3):
             vk2[i] = -jk.get_jk(mf.mol, s1jkdm1[i].get(), 'ijkl,jk->il')*0.5*hyb
         vk2 = cupy.array(vk2)
@@ -233,6 +231,9 @@ def eval_shielding(mf):
     Veff_ai -= contract('xai,i->xai', s1ai, mo_energy[idx_occ])
     Veff_ai = cupy.array(Veff_ai)
     mo1 = cphf.solve(fx, mo_energy, mo_occ, Veff_ai, max_cycle=20, tol=1e-10)[0]
+
+    shielding_d = cupy.empty((natom, 3, 3))
+    shielding_p = cupy.empty((natom, 3, 3))
 
     for atm_id in range(natom):
         mf.mol.set_rinv_origin(mf.mol.atom_coord(atm_id))

@@ -46,7 +46,6 @@ def eval_ir_freq_intensity(mf, hessian_obj):
 
     atom_charges = mf.mol.atom_charges()
     mass = cupy.array([elements.MASSES[atom_charges[i]] for i in range(natm)])
-    intensity = cupy.zeros((3*natm))
     # hessian_mass = contract('ijkl,i,j->ijkl', hessian,
     #                          1/cupy.sqrt(mass), 1/cupy.sqrt(mass))
     hessian_mass = contract('ijkl,i->ijkl', cupy.array(hessian), 1/cupy.sqrt(mass))
@@ -96,7 +95,7 @@ def eval_ir_freq_intensity(mf, hessian_obj):
                                        None, atmlst, hessian_obj.max_memory, log)  
 
     
-    tmp = cupy.zeros((3, 3, natm))  # dipole moment, x,y,z
+    tmp = cupy.empty((3, 3, natm))  # dipole moment, x,y,z
     aoslices = mf.mol.aoslice_by_atom()
     with mf.mol.with_common_orig((0, 0, 0)):
         hmuao = mf.mol.intor('int1e_r')  # mu
