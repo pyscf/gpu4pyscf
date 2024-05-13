@@ -293,9 +293,9 @@ static void _cart_kernel_deriv0(BasOffsets offsets)
         gto[14*ngrids+grid_id] = ce * rz * rz * rz * rz;
     } else {
         int lx, ly, lz;
-        double xpows[LMAX];
-        double ypows[LMAX];
-        double zpows[LMAX];
+        double xpows[ANG+1];
+        double ypows[ANG+1];
+        double zpows[ANG+1];
 
         xpows[0] = 1.0;
         ypows[0] = 1.0;
@@ -533,7 +533,7 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
         gtoz[14*ngrids+grid_id] = az * rz * rz * rz * rz + 4 * bzzz;
     }
     else{
-        double fx0[16], fy0[16], fz0[16];
+        double fx0[ANG+3], fy0[ANG+3], fz0[ANG+3];
 
         fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
         for (int lx = 1; lx <= ANG+2; lx++){
@@ -542,7 +542,7 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
             fz0[lx] = fz0[lx-1] * rz;
         }
 
-        double fx1[16], fy1[16], fz1[16];
+        double fx1[ANG+1], fy1[ANG+1], fz1[ANG+1];
         for (int ip = 0; ip < offsets.nprim; ++ip) {
             double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
 
@@ -601,9 +601,9 @@ static void _cart_kernel_deriv2(BasOffsets offsets)
     double *exps = c_envs.env + c_bas_exp[glob_ish];
     double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
 
-    double fx0[16], fy0[16], fz0[16];
-    double fx1[16], fy1[16], fz1[16];
-    double fx2[16], fy2[16], fz2[16];
+    double fx0[ANG+3], fy0[ANG+3], fz0[ANG+3];
+    double fx1[ANG+2], fy1[ANG+2], fz1[ANG+2];
+    double fx2[ANG+1], fy2[ANG+1], fz2[ANG+1];
 
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
     for (int lx = 1; lx <= ANG+2; lx++){
@@ -686,10 +686,10 @@ static void _cart_kernel_deriv3(BasOffsets offsets)
     double *exps = c_envs.env + c_bas_exp[glob_ish];
     double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
 
-    double fx0[16], fy0[16], fz0[16];
-    double fx1[16], fy1[16], fz1[16];
-    double fx2[16], fy2[16], fz2[16];
-    double fx3[16], fy3[16], fz3[16];
+    double fx0[ANG+4], fy0[ANG+4], fz0[ANG+4];
+    double fx1[ANG+3], fy1[ANG+3], fz1[ANG+3];
+    double fx2[ANG+2], fy2[ANG+2], fz2[ANG+2];
+    double fx3[ANG+1], fy3[ANG+1], fz3[ANG+1];
 
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
     for (int lx = 1; lx <= ANG+3; lx++){
@@ -799,11 +799,11 @@ static void _cart_kernel_deriv4(BasOffsets offsets)
     double *exps = c_envs.env + c_bas_exp[glob_ish];
     double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
 
-    double fx0[16], fy0[16], fz0[16];
-    double fx1[16], fy1[16], fz1[16];
-    double fx2[16], fy2[16], fz2[16];
-    double fx3[16], fy3[16], fz3[16];
-    double fx4[16], fy4[16], fz4[16];
+    double fx0[ANG+5], fy0[ANG+5], fz0[ANG+5];
+    double fx1[ANG+4], fy1[ANG+4], fz1[ANG+4];
+    double fx2[ANG+3], fy2[ANG+3], fz2[ANG+3];
+    double fx3[ANG+2], fy3[ANG+2], fz3[ANG+2];
+    double fx4[ANG+1], fy4[ANG+1], fz4[ANG+1];
 
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
     for (int lx = 1; lx <= ANG+4; lx++){
@@ -983,6 +983,20 @@ static void _sph_kernel_deriv0(BasOffsets offsets)
         gto[6*ngrids+grid_id] = 2.838524087272680054 * (g5 - g12) + 0.473087347878780009 * (g10 - g0);
         gto[7*ngrids+grid_id] = 1.770130769779930531 * g2 - 5.310392309339791590 * g7 ;
         gto[8*ngrids+grid_id] = 0.625835735449176134 * (g0  + g10) - 3.755014412695056800 * g3;
+    } else {
+        double fx0[ANG+1], fy0[ANG+1], fz0[ANG+1];
+        fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
+        for (int lx = 1; lx <= ANG; lx++){
+            fx0[lx] = fx0[lx-1] * rx;
+            fy0[lx] = fy0[lx-1] * ry;
+            fz0[lx] = fz0[lx-1] * rz;
+        }
+
+        for (int ip = 0; ip < offsets.nprim; ++ip) {
+            double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
+            double g[GTO_MAX_CART];
+            _cart_gto<ANG>(g, ce, fx0, fy0, fz0); _cart2sph<ANG>(g, gto,   ngrids, grid_id);
+        }
     }
 }
 
@@ -1285,6 +1299,25 @@ static void _sph_kernel_deriv1(BasOffsets offsets)
         gtoz[6 *ngrids+grid_id] = 2.838524087272680054 * (g5 - g12) + 0.473087347878780009 * (g10 - g0);
         gtoz[7 *ngrids+grid_id] = 1.770130769779930531 * g2 - 5.310392309339791590 * g7 ;
         gtoz[8 *ngrids+grid_id] = 0.625835735449176134 * (g0 + g10) - 3.755014412695056800 * g3;
+    } else {
+        double fx0[ANG+2], fy0[ANG+2], fz0[ANG+2];
+        fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
+        for (int lx = 1; lx <= ANG+1; lx++){
+            fx0[lx] = fx0[lx-1] * rx;
+            fy0[lx] = fy0[lx-1] * ry;
+            fz0[lx] = fz0[lx-1] * rz;
+        }
+        double fx1[ANG+1], fy1[ANG+1], fz1[ANG+1];
+
+        for (int ip = 0; ip < offsets.nprim; ++ip) {
+            double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
+            _nabla1<ANG>(fx1, fy1, fz1, fx0, fy0, fz0, exps[ip]);
+            double g[GTO_MAX_CART];
+            _cart_gto<ANG>(g, ce, fx0, fy0, fz0); _cart2sph<ANG>(g, gto,   ngrids, grid_id);
+            _cart_gto<ANG>(g, ce, fx1, fy0, fz0); _cart2sph<ANG>(g, gtox,  ngrids, grid_id);
+            _cart_gto<ANG>(g, ce, fx0, fy1, fz0); _cart2sph<ANG>(g, gtoy,  ngrids, grid_id);
+            _cart_gto<ANG>(g, ce, fx0, fy0, fz1); _cart2sph<ANG>(g, gtoz,  ngrids, grid_id);
+        }
     }
 }
 
@@ -1328,7 +1361,7 @@ static void _sph_kernel_deriv2(BasOffsets offsets)
     double *exps = c_envs.env + c_bas_exp[glob_ish];
     double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
 
-    double fx0[16], fy0[16], fz0[16];
+    double fx0[ANG+3], fy0[ANG+3], fz0[ANG+3];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
 #pragma unroll
     for (int lx = 1; lx <= ANG+2; lx++){
@@ -1336,8 +1369,8 @@ static void _sph_kernel_deriv2(BasOffsets offsets)
         fy0[lx] = fy0[lx-1] * ry;
         fz0[lx] = fz0[lx-1] * rz;
     }
-    double fx1[16], fy1[16], fz1[16];
-    double fx2[16], fy2[16], fz2[16];
+    double fx1[ANG+2], fy1[ANG+2], fz1[ANG+2];
+    double fx2[ANG+1], fy2[ANG+1], fz2[ANG+1];
 
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
@@ -1410,7 +1443,7 @@ static void _sph_kernel_deriv3(BasOffsets offsets)
     double *exps = c_envs.env + c_bas_exp[glob_ish];
     double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
 
-    double fx0[16], fy0[16], fz0[16];
+    double fx0[ANG+4], fy0[ANG+4], fz0[ANG+4];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
 #pragma unroll
     for (int lx = 1; lx <= ANG+3; lx++){
@@ -1418,9 +1451,9 @@ static void _sph_kernel_deriv3(BasOffsets offsets)
         fy0[lx] = fy0[lx-1] * ry;
         fz0[lx] = fz0[lx-1] * rz;
     }
-    double fx1[16], fy1[16], fz1[16];
-    double fx2[16], fy2[16], fz2[16];
-    double fx3[16], fy3[16], fz3[16];
+    double fx1[ANG+3], fy1[ANG+3], fz1[ANG+3];
+    double fx2[ANG+2], fy2[ANG+2], fz2[ANG+2];
+    double fx3[ANG+1], fy3[ANG+1], fz3[ANG+1];
 
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
@@ -1518,7 +1551,7 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
     double *exps = c_envs.env + c_bas_exp[glob_ish];
     double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
 
-    double fx0[16], fy0[16], fz0[16];
+    double fx0[ANG+5], fy0[ANG+5], fz0[ANG+5];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
 #pragma unroll
     for (int lx = 1; lx <= ANG+4; lx++){
@@ -1526,10 +1559,10 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
         fy0[lx] = fy0[lx-1] * ry;
         fz0[lx] = fz0[lx-1] * rz;
     }
-    double fx1[16], fy1[16], fz1[16];
-    double fx2[16], fy2[16], fz2[16];
-    double fx3[16], fy3[16], fz3[16];
-    double fx4[16], fy4[16], fz4[16];
+    double fx1[ANG+4], fy1[ANG+4], fz1[ANG+4];
+    double fx2[ANG+3], fy2[ANG+3], fz2[ANG+3];
+    double fx3[ANG+2], fy3[ANG+2], fz3[ANG+2];
+    double fx4[ANG+1], fy4[ANG+1], fz4[ANG+1];
 
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
@@ -1605,6 +1638,7 @@ void GDFTinit_envs(GTOValEnvVars **envs_cache, int *ao_loc,
     }
     DEVICE_INIT(double, d_atom_coords, atom_coords, natm * 3);
     envs->atom_coordx = d_atom_coords;
+    free(atom_coords);
 
     uint16_t bas_atom[NBAS_MAX];
     uint16_t bas_exp[NBAS_MAX];
@@ -1686,9 +1720,9 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 case 3: _cart_kernel_deriv0<3> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 4: _cart_kernel_deriv0<4> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 5: _cart_kernel_deriv0<5> <<<blocks, threads, 0, stream>>>(offsets); break;
-                case 6: _cart_kernel_deriv0<4> <<<blocks, threads, 0, stream>>>(offsets); break;
-                case 7: _cart_kernel_deriv0<5> <<<blocks, threads, 0, stream>>>(offsets); break;
-                case 8: _cart_kernel_deriv0<4> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 6: _cart_kernel_deriv0<6> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 7: _cart_kernel_deriv0<7> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 8: _cart_kernel_deriv0<8> <<<blocks, threads, 0, stream>>>(offsets); break;
                 default:fprintf(stderr, "l = %d not supported\n", l); }
             } else {
                 switch (l) {
@@ -1697,6 +1731,10 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 case 2: _sph_kernel_deriv0 <2> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 3: _sph_kernel_deriv0 <3> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 4: _sph_kernel_deriv0 <4> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 5: _sph_kernel_deriv0 <5> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 6: _sph_kernel_deriv0 <6> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 7: _sph_kernel_deriv0 <7> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 8: _sph_kernel_deriv0 <8> <<<blocks, threads, 0, stream>>>(offsets); break;
                 default: fprintf(stderr, "l = %d not supported\n", l); }
             }
             break;
@@ -1720,6 +1758,10 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 case 2: _sph_kernel_deriv1 <2> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 3: _sph_kernel_deriv1 <3> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 4: _sph_kernel_deriv1 <4> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 5: _sph_kernel_deriv1 <5> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 6: _sph_kernel_deriv1 <6> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 7: _sph_kernel_deriv1 <7> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 8: _sph_kernel_deriv1 <8> <<<blocks, threads, 0, stream>>>(offsets); break;
                 default: fprintf(stderr, "l = %d not supported\n", l); }
             }
             break;
@@ -1743,6 +1785,10 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 case 2: _sph_kernel_deriv2<2> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 3: _sph_kernel_deriv2<3> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 4: _sph_kernel_deriv2<4> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 5: _sph_kernel_deriv2<5> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 6: _sph_kernel_deriv2<6> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 7: _sph_kernel_deriv2<7> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 8: _sph_kernel_deriv2<8> <<<blocks, threads, 0, stream>>>(offsets); break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break; }
                 }
             break;
@@ -1766,6 +1812,10 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 case 2: _sph_kernel_deriv3<2> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 3: _sph_kernel_deriv3<3> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 4: _sph_kernel_deriv3<4> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 5: _sph_kernel_deriv3<5> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 6: _sph_kernel_deriv3<6> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 7: _sph_kernel_deriv3<7> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 8: _sph_kernel_deriv3<8> <<<blocks, threads, 0, stream>>>(offsets); break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break; }
                 }
             break;
@@ -1789,6 +1839,10 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 case 2: _sph_kernel_deriv4<2> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 3: _sph_kernel_deriv4<3> <<<blocks, threads, 0, stream>>>(offsets); break;
                 case 4: _sph_kernel_deriv4<4> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 5: _sph_kernel_deriv4<5> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 6: _sph_kernel_deriv4<6> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 7: _sph_kernel_deriv4<7> <<<blocks, threads, 0, stream>>>(offsets); break;
+                case 8: _sph_kernel_deriv4<8> <<<blocks, threads, 0, stream>>>(offsets); break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break; }
             }
             break;

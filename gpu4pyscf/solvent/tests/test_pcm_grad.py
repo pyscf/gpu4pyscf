@@ -17,6 +17,7 @@ import unittest
 import numpy
 import pyscf
 import pytest
+import cupy
 from pyscf import gto
 from gpu4pyscf import scf
 from gpu4pyscf.solvent import pcm
@@ -124,6 +125,20 @@ class KnownValues(unittest.TestCase):
                 dD_ia[p0:p1] = dD[p0:p1,:,j]
                 dD_ia[:,p0:p1] -= dD[:,p0:p1,j]
                 assert numpy.linalg.norm(dD0 - dD_ia) < 1e-8
+
+    def test_dD_dS(self):
+        cm = pcm.PCM(mol)
+        cm.lebedev_order = 3
+        cm.method = 'IEF-PCM'
+        cm.build()
+
+        dF, dA = pcm_grad.get_dF_dA(cm.surface)
+        dD0, dS0, dSii0 = pcm_grad.get_dD_dS(cm.surface, dF, with_S=True, with_D=True)
+        dD1, dS1, dSii1 = pcm_grad.get_dD_dS_slow(cm.surface, dF, with_S=True, with_D=True)
+
+        assert cupy.linalg.norm(dD0 - dD1) < 1e-8
+        assert cupy.linalg.norm(dS0 - dS1) < 1e-8
+        assert cupy.linalg.norm(dSii0 - dSii1) < 1e-8
 
     def test_grad_CPCM(self):
         grad = _grad_with_solvent('C-PCM')

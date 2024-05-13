@@ -669,7 +669,7 @@ class RHF(SCF):
     to_gpu = utils.to_gpu
     device = utils.device
 
-    _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'screen_tol', 'conv_tol_cpscf'}
+    _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'screen_tol', 'conv_tol_cpscf', 'disp_with_3body'}
 
     screen_tol = 1e-14
     conv_tol_cpscf = 1e-3

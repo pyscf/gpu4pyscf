@@ -17,6 +17,7 @@ import unittest
 import numpy
 import pyscf
 import pytest
+import cupy
 from pyscf import gto
 from gpu4pyscf import scf, dft
 from gpu4pyscf.solvent import pcm
@@ -55,6 +56,18 @@ def _energy_with_solvent(mf, method):
     return e_tot
 
 class KnownValues(unittest.TestCase):
+    def test_D_S(self):
+        cm = pcm.PCM(mol)
+        cm.lebedev_order = 3
+        cm.method = 'IEF-PCM'
+        cm.build()
+
+        D0, S0 = pcm.get_D_S_slow(cm.surface, with_S=True, with_D=True)
+        D1, S1 = pcm.get_D_S(cm.surface, with_S=True, with_D=True)
+
+        assert cupy.linalg.norm(D0 - D1) < 1e-8
+        assert cupy.linalg.norm(S0 - S1) < 1e-8
+
     def test_CPCM(self):
         e_tot = _energy_with_solvent(scf.RHF(mol), 'C-PCM')
         print(f"Energy error in RHF with C-PCM: {numpy.abs(e_tot - -71.19244927767662)}")
@@ -99,7 +112,7 @@ class KnownValues(unittest.TestCase):
         e_tot = _energy_with_solvent(dft.UKS(mol, xc='b3lyp').density_fit(), 'IEF-PCM')
         print(f"Energy error in DFUKS with IEF-PCM: {numpy.abs(e_tot - -71.67135250643567)}")
         assert numpy.abs(e_tot - -71.67135250643567) < 1e-5
-
+        
     def test_to_cpu(self):
         mf = dft.RKS(mol, xc='b3lyp')
         e_gpu = mf.kernel()

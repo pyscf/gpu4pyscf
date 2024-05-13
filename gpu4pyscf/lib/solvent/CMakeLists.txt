@@ -1,3 +1,4 @@
+
 # Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
 #
 # This program is free software: you can redistribute it and/or modify
@@ -24,6 +25,7 @@ add_library(solvent SHARED
 mnsol_interface.f90
 mnsol_mem.F
 mnsol.F
+pcm.cu
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
@@ -34,3 +36,6 @@ mnsol.F
 
 set_target_properties(solvent PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+set_target_properties(solvent PROPERTIES 
+  CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
+

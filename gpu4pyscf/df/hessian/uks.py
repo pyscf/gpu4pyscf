@@ -123,7 +123,6 @@ class Hessian(uks_hess.Hessian):
     from gpu4pyscf.lib.utils import to_gpu, device
 
     def __init__(self, mf):
-        self.auxbasis_response = 1
         uks_hess.Hessian.__init__(self, mf)
 
     def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
@@ -131,6 +130,7 @@ class Hessian(uks_hess.Hessian):
         return uhf_hess.solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
                          fx, atmlst, max_memory, verbose)
 
+    auxbasis_response = 1
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
     hess_elec = uhf_hess.hess_elec

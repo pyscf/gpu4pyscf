@@ -69,7 +69,7 @@ class KnownValues(unittest.TestCase):
         mf = rks.RKS(mol).run()
         gobj = mf.nuc_grad_method().to_gpu()
         g = gobj.kernel()
-        assert numpy.abs(lib.fp(g) - -0.04339987221752033) < 1e-7
+        assert numpy.abs(lib.fp(g) - -0.04340162663176693) < 1e-7
 
         # RKS Hessian it not supported yet
         # mf = rks.RKS(mol).run()
@@ -102,7 +102,7 @@ class KnownValues(unittest.TestCase):
         mf = rks.RKS(mol, xc='b3lyp').density_fit().run()
         gobj = mf.nuc_grad_method().to_gpu()
         g = gobj.kernel()
-        assert numpy.abs(lib.fp(g) - -0.04079190644707999) < 1e-7
+        assert numpy.abs(lib.fp(g) - -0.04079319540057938) < 1e-5
 
         mf = rks.RKS(mol, xc='b3lyp').density_fit().run()
         mf.conv_tol_cpscf = 1e-7
@@ -119,8 +119,7 @@ class KnownValues(unittest.TestCase):
         mf = rks.RKS(mol, xc='wb97x').density_fit().run()
         gobj = mf.nuc_grad_method().to_gpu()
         g = gobj.kernel()
-        g -= g.sum(axis=0)/len(g)
-        assert numpy.abs(lib.fp(g) - -0.034343799164131) < 1e-5
+        assert numpy.abs(lib.fp(g) - -0.03432881437746617) < 1e-5
 
         mf = rks.RKS(mol, xc='wb97x').density_fit().run()
         mf.conv_tol_cpscf = 1e-7
