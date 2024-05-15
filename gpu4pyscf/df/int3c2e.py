@@ -355,7 +355,15 @@ class VHFOpt(_vhf.VHFOpt):
         else:
             self.aux_ao_loc = self.sph_aux_loc
             self.aux_ao_idx = self.sph_aux_idx
+
         self.rev_ao_idx = np.argsort(self.ao_idx, kind='stable').astype(np.int32)
+        self.ao_idx = cupy.array(self.ao_idx)
+        self.cart_ao_idx = cupy.array(self.cart_ao_idx)
+        self.sph_ao_idx = cupy.array(self.sph_ao_idx)
+        self.aux_ao_idx = cupy.array(self.aux_ao_idx)
+        self.cart_aux_idx = cupy.array(self.cart_aux_idx)
+        self.sph_aux_idx = cupy.array(self.sph_aux_idx)
+        self.rev_ao_idx = cupy.array(self.rev_ao_idx)
 
 def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
     intopt = VHFOpt(mol, auxmol, 'int2e')

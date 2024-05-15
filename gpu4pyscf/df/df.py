@@ -136,11 +136,8 @@ class DF(lib.StreamObject):
             raise RuntimeError("Not enough GPU memory")
         return blksize
 
-
     def loop(self, blksize=None, unpack=True):
-        '''
-        loop over all cderi and unpack
-        '''
+        ''' loop over all cderi and unpack the CDERI in (Lij) format '''
         cderi_sparse = self._cderi
         if blksize is None:
             blksize = self.get_blksize()
@@ -152,7 +149,6 @@ class DF(lib.StreamObject):
         buf_cderi = cupy.zeros([blksize,nao,nao])
         data_stream = cupy.cuda.stream.Stream(non_blocking=True)
         compute_stream = cupy.cuda.get_current_stream()
-        #compute_stream = cupy.cuda.stream.Stream()
         for p0, p1 in lib.prange(0, naux, blksize):
             p2 = min(naux, p1+blksize)
             if isinstance(cderi_sparse, cupy.ndarray):
@@ -229,6 +225,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
         data_stream = cupy.cuda.stream.Stream(non_blocking=False)
     count = 0
     nq = len(intopt.log_qs)
+    cd_low_f = cupy.array(cd_low, order='F', copy=False)
     for cp_ij_id, _ in enumerate(intopt.log_qs):
         if len(intopt.ao_pairs_row[cp_ij_id]) == 0: continue
         t1 = log.init_timer()
@@ -276,9 +273,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
             cderi_block = cupy.dot(cd_low.T, ints_slices)
             ints_slices = None
         elif cd_low.tag == 'cd':
-            #cderi_block = solve_triangular(cd_low, ints_slices)
-            # TODO: create array in f-contiguous to avoid memory copy
-            cderi_block = solve_triangular(cd_low, ints_slices, lower=True, overwrite_b=False)
+            cderi_block = solve_triangular(cd_low_f, ints_slices, lower=True, overwrite_b=True)
         ij0, ij1 = count, count+cderi_block.shape[1]
         count = ij1
         if isinstance(cderi, cupy.ndarray):
