@@ -24,7 +24,7 @@ Restricted coupled pertubed Hartree-Fock solver
 import numpy
 import cupy
 from pyscf import lib
-from gpu4pyscf.lib.cupy_helper import krylov
+from gpu4pyscf.lib.cupy_helper import krylov, krylov_batch
 from gpu4pyscf.lib import logger
 
 def solve(fvind, mo_energy, mo_occ, h1, s1=None,
@@ -89,6 +89,7 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
     viridx = mo_occ == 0
     e_a = mo_energy[viridx]
     e_i = mo_energy[occidx]
+
     I, A = cupy.meshgrid(e_i, e_a)
     e_ai = 1 / (A - I)
     nvir, nocc = e_ai.shape
@@ -102,11 +103,11 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
     mo1base[:,occidx] = -s1[:,occidx] * .5
 
     def vind_vo(mo1):
-        v = fvind(mo1.reshape(h1.shape)).reshape(-1,nmo,nocc)
+        v = fvind(mo1.reshape(-1,nmo,nocc)).reshape(-1,nmo,nocc)
         v[:,viridx,:] *= e_ai
         v[:,occidx,:] = 0
-        return v.ravel()
-    mo1 = krylov(vind_vo, mo1base.ravel(),
+        return v.reshape(-1,nmo*nocc)
+    mo1 = krylov_batch(vind_vo, mo1base.copy().reshape(-1,nmo*nocc),
                      tol=tol, max_cycle=max_cycle, hermi=hermi, verbose=log)
     mo1 = mo1.reshape(mo1base.shape)
     log.timer('krylov solver in CPHF', *t0)
