@@ -245,7 +245,7 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                 angs = [n_ang] * n_rad
             logger.debug(mol, 'atom %s rad-grids = %d, ang-grids = %s',
                          symb, n_rad, angs)
-
+            if isinstance(angs, cupy.ndarray): angs = angs.get()
             angs = numpy.array(angs)
             coords = []
             vol = []
