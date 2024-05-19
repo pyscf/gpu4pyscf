@@ -331,7 +331,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         return contract('xik,ip->xpk', tmp, mo_coeff)
     cupy.get_default_memory_pool().free_all_blocks()
     # TODO: calculate blksize dynamically
-    blksize = 8
+    blksize = 16
     mo1s = [None] * mol.natm
     e1s = [None] * mol.natm
     aoslices = mol.aoslice_by_atom()
