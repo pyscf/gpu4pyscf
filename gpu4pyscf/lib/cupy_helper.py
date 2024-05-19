@@ -692,7 +692,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
             if innerprod1 > lindep and innerprod1 > tol**2:
                 idx.append(i)
                 innerprod.append(innerprod1)
-        log.debug(f'krylov cycle {cycle}  r = {max_innerprod**.5:.3e} {x1.shape[0]} equations')
+        log.info(f'krylov cycle {cycle}  r = {max_innerprod**.5:.3e} {x1.shape[0]} equations')
         if max_innerprod < lindep or max_innerprod < tol**2:
             break
         x1 = x1[idx]
