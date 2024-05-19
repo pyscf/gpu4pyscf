@@ -19,7 +19,8 @@ import cupy
 from gpu4pyscf.lib.cupy_helper import (
     take_last2d, transpose_sum, krylov, unpack_sparse,
     add_sparse, takebak, empty_mapped, dist_matrix,
-    grouped_dot, grouped_gemm, cond, cart2sph_cutensor, cart2sph)
+    grouped_dot, grouped_gemm, cond, cart2sph_cutensor,
+    block_krylov, cart2sph)
 
 class KnownValues(unittest.TestCase):
     def test_take_last2d(self):
@@ -40,13 +41,21 @@ class KnownValues(unittest.TestCase):
         assert(cupy.linalg.norm(a - b) < 1e-10)
 
     def test_krylov(self):
-        a = cupy.random.random((10,10)) * 1e-2
-        b = cupy.random.random(10)
+        a = cupy.random.random((100,100)) * 1e-2
+        b = cupy.random.random((3,100))
 
         def aop(x):
             return cupy.dot(a, x.T).T
         x = krylov(aop, b)
-        cupy.allclose(cupy.dot(a,x)+x, b)
+        assert cupy.allclose(cupy.dot(a,x.T)+x.T, b.T)
+
+        a = cupy.random.random((10,10)) * 1e-2
+        b = cupy.random.random((10))
+
+        def aop(x):
+            return cupy.dot(a, x.T).T
+        x = krylov(aop, b)
+        assert cupy.allclose(cupy.dot(a,x)+x, b)
 
     def test_cderi_sparse(self):
         naux = 4
@@ -90,6 +99,7 @@ class KnownValues(unittest.TestCase):
         cond_cpu = numpy.linalg.cond(a.get())
         cond_gpu = cond(a)
         assert abs(cond_cpu - cond_gpu) < 1e-5
+
     def test_grouped_dot(self):
         dtype = cupy.float64
         def initialize(dtype, M, N, K):
