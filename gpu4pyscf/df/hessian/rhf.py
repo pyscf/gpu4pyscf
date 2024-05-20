@@ -37,7 +37,7 @@ import numpy
 import cupy
 import numpy as np
 from pyscf import lib, df
-from pyscf.df.grad.rhf import LINEAR_DEP_THRESHOLD
+from pyscf.df.incore import LINEAR_DEP_THR
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.lib.cupy_helper import (
@@ -45,6 +45,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
 
+LINEAR_DEP_THRESHOLD = LINEAR_DEP_THR
 BLKSIZE = 256
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
