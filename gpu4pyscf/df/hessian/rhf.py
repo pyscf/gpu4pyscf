@@ -36,7 +36,7 @@ Ref:
 import numpy
 import cupy
 import numpy as np
-from pyscf import lib, df
+from pyscf import lib
 from pyscf.df.incore import LINEAR_DEP_THR
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
