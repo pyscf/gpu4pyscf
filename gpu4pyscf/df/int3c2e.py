@@ -902,12 +902,12 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     nocc = orbo.shape[1]
 
-    wj = cupy.zeros([nao,naux,3])
+    wj = cupy.zeros([naux,nao,3])
     avail_mem = get_avail_mem()
     use_gpu_memory = True
     if nao*naux*nocc*3*8 < 0.4*avail_mem:
         try:
-            wk = cupy.empty([nao,naux,nocc,3])
+            wk = cupy.empty([naux,nao,nocc,3])
         except Exception:
             use_gpu_memory = False
     else:
@@ -915,21 +915,21 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
 
     if not use_gpu_memory:
         mem = cupy.cuda.alloc_pinned_memory(nao*naux*nocc*3*8)
-        wk = np.ndarray([nao,naux,nocc,3], dtype=np.float64, order='C', buffer=mem)
+        wk = np.ndarray([naux,nao,nocc,3], dtype=np.float64, order='C', buffer=mem)
 
     # TODO: async data transfer
     ncp_ij = len(intopt.log_qs)
     count = 0
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip1', omega=omega):
         if count % ncp_ij == 0:
-            wk_tmp = cupy.zeros([nao, k1-k0, nocc, 3])
-        wj[i0:i1,k0:k1] += contract('xpji,ij->ipx', int3c_blk, dm0_tag[i0:i1,j0:j1])
-        wk_tmp[i0:i1,:] += contract('xpji,jo->ipox', int3c_blk, orbo[j0:j1])
+            wk_tmp = cupy.zeros([k1-k0,nao,nocc,3])
+        wj[k0:k1,i0:i1] += contract('xpji,ij->pix', int3c_blk, dm0_tag[i0:i1,j0:j1])
+        wk_tmp[:,i0:i1] += contract('xpji,jo->piox', int3c_blk, orbo[j0:j1])
         if (count+1) % ncp_ij == 0:
             if use_gpu_memory:
-                wk[:,k0:k1] = wk_tmp
+                wk[k0:k1] = wk_tmp
             else:
-                wk[:,k0:k1] = wk_tmp.get()
+                wk[k0:k1] = wk_tmp.get()
         count += 1
     return wj, wk
 

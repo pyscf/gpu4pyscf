@@ -136,15 +136,15 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     wj1a_P, wk1a_Pko = int3c2e.get_int3c2e_ip1_wjk(intopt, dm0a_tag, omega=omega)
     wj1b_P, wk1b_Pko = int3c2e.get_int3c2e_ip1_wjk(intopt, dm0b_tag, omega=omega)
     wj1_P = wj1a_P + wj1b_P
-    rhoj1_P = contract('pq,ipx->iqx', int2c_inv, wj1_P)
+    rhoj1_P = contract('pq,pix->qix', int2c_inv, wj1_P)
 
-    hj_ao_ao += 4.0*contract('ipx,jpy->ijxy', rhoj1_P, wj1_P)   # (10|0)(0|0)(0|01)
+    hj_ao_ao += 4.0*contract('pix,pjy->ijxy', rhoj1_P, wj1_P)   # (10|0)(0|0)(0|01)
     wj1_P = None
     if hessobj.auxbasis_response:
         wj0_01 = contract('ypq,q->yp', int2c_ip1, rhoj0_P)
-        wj1_01 = contract('yqp,ipx->iqxy', int2c_ip1, rhoj1_P)
-        hj_ao_aux += contract('ipx,py->ipxy', rhoj1_P, wj_ip2)   # (10|0)(1|00)
-        hj_ao_aux -= contract('ipx,yp->ipxy', rhoj1_P, wj0_01)   # (10|0)(1|0)(0|00)
+        wj1_01 = contract('yqp,pix->iqxy', int2c_ip1, rhoj1_P)
+        hj_ao_aux += contract('pix,py->ipxy', rhoj1_P, wj_ip2)   # (10|0)(1|00)
+        hj_ao_aux -= contract('pix,yp->ipxy', rhoj1_P, wj0_01)   # (10|0)(1|0)(0|00)
         hj_ao_aux -= contract('q,iqxy->iqxy', rhoj0_P, wj1_01)   # (10|0)(0|1)(0|00)
         wj1_01 = None
     rhoj1_P = None
@@ -152,53 +152,53 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     int2c_ip1_inv = contract('yqp,pr->yqr', int2c_ip1, int2c_inv)
     if with_k:
         for i0, i1 in lib.prange(0,nao,64):
-            wk1a_Pko_islice = cupy.asarray(wk1a_Pko[i0:i1])
-            wk1b_Pko_islice = cupy.asarray(wk1b_Pko[i0:i1])
-            rhok1a_Pko = contract('pq,iqox->ipox', int2c_inv, wk1a_Pko_islice)
-            rhok1b_Pko = contract('pq,iqox->ipox', int2c_inv, wk1b_Pko_islice)
+            wk1a_Pko_islice = cupy.asarray(wk1a_Pko[:,i0:i1])
+            wk1b_Pko_islice = cupy.asarray(wk1b_Pko[:,i0:i1])
+            rhok1a_Pko = contract('pq,qiox->piox', int2c_inv, wk1a_Pko_islice)
+            rhok1b_Pko = contract('pq,qiox->piox', int2c_inv, wk1b_Pko_islice)
             for k0, k1 in lib.prange(0,nao,64):
-                wk1a_Pko_kslice = cupy.asarray(wk1a_Pko[k0:k1])
-                wk1b_Pko_kslice = cupy.asarray(wk1b_Pko[k0:k1])
+                wk1a_Pko_kslice = cupy.asarray(wk1a_Pko[:,k0:k1])
+                wk1b_Pko_kslice = cupy.asarray(wk1b_Pko[:,k0:k1])
 
                 # (10|0)(0|10) without response of RI basis
-                vk2_ip1_ip1 = contract('ipox,kpoy->ikxy', rhok1a_Pko, wk1a_Pko_kslice)
+                vk2_ip1_ip1 = contract('piox,pkoy->ikxy', rhok1a_Pko, wk1a_Pko_kslice)
                 hk_ao_ao[i0:i1,k0:k1] += contract('ikxy,ik->ikxy', vk2_ip1_ip1, dm0a[i0:i1,k0:k1])
-                vk2_ip1_ip1 = contract('ipox,kpoy->ikxy', rhok1b_Pko, wk1b_Pko_kslice)
+                vk2_ip1_ip1 = contract('piox,pkoy->ikxy', rhok1b_Pko, wk1b_Pko_kslice)
                 hk_ao_ao[i0:i1,k0:k1] += contract('ikxy,ik->ikxy', vk2_ip1_ip1, dm0b[i0:i1,k0:k1])
                 vk2_ip1_ip1 = None
 
                 # (10|0)(0|01) without response of RI basis
-                bra = contract('ipox,ko->ipkx', rhok1a_Pko, mocca[k0:k1])
-                ket = contract('kpoy,io->kpiy', wk1a_Pko_kslice, mocca[i0:i1])
-                hk_ao_ao[i0:i1,k0:k1] += contract('ipkx,kpiy->ikxy', bra, ket)
-                bra = contract('ipox,ko->ipkx', rhok1b_Pko, moccb[k0:k1])
-                ket = contract('kpoy,io->kpiy', wk1b_Pko_kslice, moccb[i0:i1])
-                hk_ao_ao[i0:i1,k0:k1] += contract('ipkx,kpiy->ikxy', bra, ket)
+                bra = contract('piox,ko->pikx', rhok1a_Pko, mocca[k0:k1])
+                ket = contract('pkoy,io->pkiy', wk1a_Pko_kslice, mocca[i0:i1])
+                hk_ao_ao[i0:i1,k0:k1] += contract('pikx,pkiy->ikxy', bra, ket)
+                bra = contract('piox,ko->pikx', rhok1b_Pko, moccb[k0:k1])
+                ket = contract('pkoy,io->pkiy', wk1b_Pko_kslice, moccb[i0:i1])
+                hk_ao_ao[i0:i1,k0:k1] += contract('pikx,pkiy->ikxy', bra, ket)
                 bra = ket = None
             wk1a_Pko_kslice = wk1a_Pko_kslice = None
             if hessobj.auxbasis_response:
                 # (10|0)(1|00)
-                wk_ip2_Ipo = contract('porx,io->iprx', wka_ip2_P__, mocca[i0:i1])
-                hk_ao_aux[i0:i1] += contract('ipox,ipoy->ipxy', rhok1a_Pko, wk_ip2_Ipo)
-                wk_ip2_Ipo = contract('porx,io->iprx', wkb_ip2_P__, moccb[i0:i1])
-                hk_ao_aux[i0:i1] += contract('ipox,ipoy->ipxy', rhok1b_Pko, wk_ip2_Ipo)
+                wk_ip2_Ipo = contract('porx,io->pirx', wka_ip2_P__, mocca[i0:i1])
+                hk_ao_aux[i0:i1] += contract('piox,pioy->ipxy', rhok1a_Pko, wk_ip2_Ipo)
+                wk_ip2_Ipo = contract('porx,io->pirx', wkb_ip2_P__, moccb[i0:i1])
+                hk_ao_aux[i0:i1] += contract('piox,pioy->ipxy', rhok1b_Pko, wk_ip2_Ipo)
                 wk_ip2_Ipo = None
 
                 # (10|0)(1|0)(0|00)
                 rhok0a_P_I = contract('qor,ir->qoi', rhok0a_P__, mocca[i0:i1])
-                wk1_P_I = contract('ypq,qoi->ipoy', int2c_ip1, rhok0a_P_I)
-                hk_ao_aux[i0:i1] -= contract("ipox,ipoy->ipxy", rhok1a_Pko, wk1_P_I)
+                wk1_P_I = contract('ypq,qoi->pioy', int2c_ip1, rhok0a_P_I)
+                hk_ao_aux[i0:i1] -= contract("piox,pioy->ipxy", rhok1a_Pko, wk1_P_I)
                 rhok0b_P_I = contract('qor,ir->qoi', rhok0b_P__, moccb[i0:i1])
-                wk1_P_I = contract('ypq,qoi->ipoy', int2c_ip1, rhok0b_P_I)
-                hk_ao_aux[i0:i1] -= contract("ipox,ipoy->ipxy", rhok1b_Pko, wk1_P_I)
+                wk1_P_I = contract('ypq,qoi->pioy', int2c_ip1, rhok0b_P_I)
+                hk_ao_aux[i0:i1] -= contract("piox,pioy->ipxy", rhok1b_Pko, wk1_P_I)
                 wk1_P_I = rhok1a_Pko = rhok1b_Pko = None
 
                 # (10|0)(0|1)(0|00)
                 for q0,q1 in lib.prange(0,naux,64):
-                    wk1_I = contract('yqp,ipox->iqoxy', int2c_ip1_inv[:,q0:q1], wk1a_Pko_islice)
-                    hk_ao_aux[i0:i1,q0:q1] -= contract('qoi,iqoxy->iqxy', rhok0a_P_I[q0:q1], wk1_I)
-                    wk1_I = contract('yqp,ipox->iqoxy', int2c_ip1_inv[:,q0:q1], wk1b_Pko_islice)
-                    hk_ao_aux[i0:i1,q0:q1] -= contract('qoi,iqoxy->iqxy', rhok0b_P_I[q0:q1], wk1_I)
+                    wk1_I = contract('yqp,piox->qioxy', int2c_ip1_inv[:,q0:q1], wk1a_Pko_islice)
+                    hk_ao_aux[i0:i1,q0:q1] -= contract('qoi,qioxy->iqxy', rhok0a_P_I[q0:q1], wk1_I)
+                    wk1_I = contract('yqp,piox->qioxy', int2c_ip1_inv[:,q0:q1], wk1b_Pko_islice)
+                    hk_ao_aux[i0:i1,q0:q1] -= contract('qoi,qioxy->iqxy', rhok0b_P_I[q0:q1], wk1_I)
                 wk1_I = rhok0a_P_I = rhok0b_P_I = None
             wk1a_Pko_islice = wk1b_Pko_islice = None
     wk1a_Pko = wk1b_Pko = None
