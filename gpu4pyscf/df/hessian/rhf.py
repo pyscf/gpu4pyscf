@@ -145,6 +145,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     if with_k:
         mem_avail = get_avail_mem()
+        nocc = mocc.shape[1]
         slice_size = naux*nocc*9   # largest slice of intermediate variables
         blksize = int(mem_avail*0.2/8/slice_size/ALIGNED) * ALIGNED
         for i0, i1 in lib.prange(0,nao,blksize):
@@ -152,7 +153,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             #rhok1_Pko = contract('pq,qiox->piox', int2c_inv, wk1_Pko_islice)
             rhok1_Pko = solve_j2c(wk1_Pko_islice)
             wk1_Pko_islice = None
-            for k0, k1 in lib.prange(0,nao,64):
+            for k0, k1 in lib.prange(0,nao,blksize):
                 wk1_Pko_kslice = cupy.asarray(wk1_Pko[:,k0:k1])
 
                 # (10|0)(0|10) without response of RI basis
