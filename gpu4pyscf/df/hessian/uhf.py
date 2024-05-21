@@ -195,7 +195,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                 rhok0b_P_I = contract('qor,ir->qoi', rhok0b_P__, moccb[i0:i1])
                 wk1_P_I = contract('ypq,qoi->pioy', int2c_ip1, rhok0b_P_I)
                 hk_ao_aux[i0:i1] -= contract("piox,pioy->ipxy", rhok1b_Pko, wk1_P_I)
-                wk1_P_I = rhok1a_Pko = rhok1b_Pko = None
+                wk1_P_I = None
 
                 # (10|0)(0|1)(0|00)
                 for q0,q1 in lib.prange(0,naux,64):
@@ -204,7 +204,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                     wk1_I = contract('yqp,piox->qioxy', int2c_ip1[:,q0:q1], rhok1b_Pko)
                     hk_ao_aux[i0:i1,q0:q1] -= contract('qoi,qioxy->iqxy', rhok0b_P_I[q0:q1], wk1_I)
                 wk1_I = rhok0a_P_I = rhok0b_P_I = None
-
+        rhok1a_Pko = rhok1b_Pko = None
     wk1a_Pko = wk1b_Pko = None
     t1 = log.timer_debug1('intermediate variables with int3c2e_ip1', *t1)
 
