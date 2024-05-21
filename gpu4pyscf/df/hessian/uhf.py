@@ -36,14 +36,17 @@ Ref:
 import numpy
 import cupy
 import numpy as np
-from pyscf import lib, df
+from pyscf import lib
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import uhf as uhf_hess
 from gpu4pyscf.hessian import rhf as rhf_hess
-from gpu4pyscf.lib.cupy_helper import contract, tag_array, release_gpu_stack, print_mem_info, take_last2d
-from gpu4pyscf.df import int3c2e
+from gpu4pyscf.lib.cupy_helper import (
+    contract, tag_array, release_gpu_stack, print_mem_info, take_last2d, pinv)
+from gpu4pyscf.df import int3c2e, df
 from gpu4pyscf.lib import logger
+from gpu4pyscf.df.grad.rhf import _gen_metric_solver
 
+LINEAR_DEP_THRESHOLD = df.LINEAR_DEP_THR
 BLKSIZE = 256
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
@@ -105,7 +108,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     dm0b_tag = tag_array(dm0b, occ_coeff=moccb)
     int2c = cupy.asarray(int2c, order='C')
     int2c = take_last2d(int2c, aux_ao_idx)
-    int2c_inv = cupy.linalg.pinv(int2c, rcond=1e-12)
+    int2c_inv = pinv(int2c, lindep=LINEAR_DEP_THRESHOLD)
+    solve_j2c = _gen_metric_solver(int2c)
     int2c = None
 
     int2c_ip1 = cupy.asarray(int2c_ip1, order='C')
@@ -120,9 +124,9 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     #  int3c contributions
     wja, wka_P__ = int3c2e.get_int3c2e_jk(mol, auxmol, dm0a_tag, omega=omega)
     wjb, wkb_P__ = int3c2e.get_int3c2e_jk(mol, auxmol, dm0b_tag, omega=omega)
-    rhoj0_P = contract('pq,q->p', int2c_inv, wja + wjb)
-    rhok0a_P__ = contract('pq,qij->pij', int2c_inv, wka_P__)
-    rhok0b_P__ = contract('pq,qij->pij', int2c_inv, wkb_P__)
+    rhoj0_P = solve_j2c(wja + wjb)
+    rhok0a_P__ = solve_j2c(wka_P__)
+    rhok0b_P__ = solve_j2c(wkb_P__)
     wja = wjb = wka_P__ = wkb_P__ = None
     t1 = log.timer_debug1('intermediate variables with int3c2e', *t1)
 
@@ -136,7 +140,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     wj1a_P, wk1a_Pko = int3c2e.get_int3c2e_ip1_wjk(intopt, dm0a_tag, omega=omega)
     wj1b_P, wk1b_Pko = int3c2e.get_int3c2e_ip1_wjk(intopt, dm0b_tag, omega=omega)
     wj1_P = wj1a_P + wj1b_P
-    rhoj1_P = contract('pq,pix->qix', int2c_inv, wj1_P)
+    rhoj1_P = solve_j2c(wj1_P)
 
     hj_ao_ao += 4.0*contract('pix,pjy->ijxy', rhoj1_P, wj1_P)   # (10|0)(0|0)(0|01)
     wj1_P = None
@@ -149,13 +153,12 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         wj1_01 = None
     rhoj1_P = None
 
-    int2c_ip1_inv = contract('yqp,pr->yqr', int2c_ip1, int2c_inv)
     if with_k:
         for i0, i1 in lib.prange(0,nao,64):
             wk1a_Pko_islice = cupy.asarray(wk1a_Pko[:,i0:i1])
             wk1b_Pko_islice = cupy.asarray(wk1b_Pko[:,i0:i1])
-            rhok1a_Pko = contract('pq,qiox->piox', int2c_inv, wk1a_Pko_islice)
-            rhok1b_Pko = contract('pq,qiox->piox', int2c_inv, wk1b_Pko_islice)
+            rhok1a_Pko = solve_j2c(wk1a_Pko_islice)
+            rhok1b_Pko = solve_j2c(wk1b_Pko_islice)
             for k0, k1 in lib.prange(0,nao,64):
                 wk1a_Pko_kslice = cupy.asarray(wk1a_Pko[:,k0:k1])
                 wk1b_Pko_kslice = cupy.asarray(wk1b_Pko[:,k0:k1])
@@ -286,6 +289,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     # aux-aux pair
     if hessobj.auxbasis_response > 1:
         wj0_10 = contract('ypq,p->ypq', int2c_ip1, rhoj0_P)
+        int2c_ip1_inv = contract('yqp,pr->yqr', int2c_ip1, int2c_inv)
 
         rhoj0_10 = contract('p,xpq->xpq', rhoj0_P, int2c_ip1_inv)     # (1|0)(0|00)
         hj_aux_aux += .5 * contract('xpr,yqr->pqxy', rhoj0_10, wj0_10)  # (00|0)(1|0), (0|1)(0|00)
@@ -507,7 +511,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     dm0 = dm0a + dm0b
 
     int2c = take_last2d(int2c, aux_ao_idx)
-    int2c_inv = cupy.linalg.pinv(int2c, rcond=1e-12)
+    solve_j2c = _gen_metric_solver(int2c)
     int2c = None
 
     fn = int3c2e.get_int3c2e_wjk
@@ -515,27 +519,27 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     wj, wka_Pl_ = fn(mol, auxmol, dm0_tag, omega=omega)
     dm0_tag = tag_array(dm0, occ_coeff=moccb)
     wj, wkb_Pl_ = fn(mol, auxmol, dm0_tag, omega=omega)
-    rhoj0 = contract('pq,q->p', int2c_inv, wj)
+    rhoj0 = solve_j2c(wj)
     wj = None
 
     if isinstance(wka_Pl_, cupy.ndarray):
-        rhok0a_Pl_ = contract('pq,qio->pio', int2c_inv, wka_Pl_)
+        rhok0a_Pl_ = solve_j2c(wka_Pl_)
     else:
         rhok0a_Pl_ = np.empty_like(wka_Pl_)
         for p0, p1 in lib.prange(0,nao,64):
             wk_tmp = cupy.asarray(wka_Pl_[:,p0:p1])
-            rhok0a_Pl_[:,p0:p1] = contract('pq,qio->pio', int2c_inv, wk_tmp).get()
+            rhok0a_Pl_[:,p0:p1] = solve_j2c(wk_tmp).get()
         wk_tmp = None
 
     if isinstance(wkb_Pl_, cupy.ndarray):
-        rhok0b_Pl_ = contract('pq,qio->pio', int2c_inv, wkb_Pl_)
+        rhok0b_Pl_ = solve_j2c(wkb_Pl_)
     else:
         rhok0b_Pl_ = np.empty_like(wkb_Pl_)
         for p0, p1 in lib.prange(0,nao,64):
             wk_tmp = cupy.asarray(wkb_Pl_[:,p0:p1])
-            rhok0b_Pl_[:,p0:p1] = contract('pq,qio->pio', int2c_inv, wk_tmp).get()
+            rhok0b_Pl_[:,p0:p1] = solve_j2c(wk_tmp).get()
         wk_tmp = None
-    wka_Pl_ = wkb_Pl_ = int2c_inv = None
+    wka_Pl_ = wkb_Pl_ = None
 
     # -----------------------------
     # int3c_ip1 contributions
