@@ -159,6 +159,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             wk1b_Pko_islice = cupy.asarray(wk1b_Pko[:,i0:i1])
             rhok1a_Pko = solve_j2c(wk1a_Pko_islice)
             rhok1b_Pko = solve_j2c(wk1b_Pko_islice)
+            wk1a_Pko_islice = wk1b_Pko_islice = None
             for k0, k1 in lib.prange(0,nao,64):
                 wk1a_Pko_kslice = cupy.asarray(wk1a_Pko[:,k0:k1])
                 wk1b_Pko_kslice = cupy.asarray(wk1b_Pko[:,k0:k1])
@@ -198,12 +199,12 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
                 # (10|0)(0|1)(0|00)
                 for q0,q1 in lib.prange(0,naux,64):
-                    wk1_I = contract('yqp,piox->qioxy', int2c_ip1_inv[:,q0:q1], wk1a_Pko_islice)
+                    wk1_I = contract('yqp,piox->qioxy', int2c_ip1[:,q0:q1], rhok1a_Pko)
                     hk_ao_aux[i0:i1,q0:q1] -= contract('qoi,qioxy->iqxy', rhok0a_P_I[q0:q1], wk1_I)
-                    wk1_I = contract('yqp,piox->qioxy', int2c_ip1_inv[:,q0:q1], wk1b_Pko_islice)
+                    wk1_I = contract('yqp,piox->qioxy', int2c_ip1[:,q0:q1], rhok1b_Pko)
                     hk_ao_aux[i0:i1,q0:q1] -= contract('qoi,qioxy->iqxy', rhok0b_P_I[q0:q1], wk1_I)
                 wk1_I = rhok0a_P_I = rhok0b_P_I = None
-            wk1a_Pko_islice = wk1b_Pko_islice = None
+
     wk1a_Pko = wk1b_Pko = None
     t1 = log.timer_debug1('intermediate variables with int3c2e_ip1', *t1)
 
