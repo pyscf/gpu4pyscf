@@ -41,13 +41,15 @@ from pyscf.df.incore import LINEAR_DEP_THR
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.lib.cupy_helper import (
-    contract, tag_array, release_gpu_stack, print_mem_info, take_last2d, pinv)
+    contract, tag_array, get_avail_mem, release_gpu_stack, print_mem_info, take_last2d, pinv)
 from gpu4pyscf.df import int3c2e, df
 from gpu4pyscf.lib import logger
+from gpu4pyscf import __config__
 from gpu4pyscf.df.grad.rhf import _gen_metric_solver
 
 LINEAR_DEP_THRESHOLD = df.LINEAR_DEP_THR
 BLKSIZE = 256
+ALIGNED = getattr(__config__, 'ao_aligned', 32)
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -143,7 +145,10 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     rhoj1_P = None
 
     if with_k:
-        for i0, i1 in lib.prange(0,nao,64):
+        mem_avail = get_avail_mem()
+        slice_size = naux*naux*3   # largest slice of intermediate variables
+        blksize = int(mem_avail*0.2/8/slice_size/ALIGNED) * ALIGNED
+        for i0, i1 in lib.prange(0,nao,blksize):
             wk1_Pko_islice = cupy.asarray(wk1_Pko[:,i0:i1])
             #rhok1_Pko = contract('pq,qiox->piox', int2c_inv, wk1_Pko_islice)
             rhok1_Pko = solve_j2c(wk1_Pko_islice)
@@ -175,9 +180,11 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                 wk1_P_I = None
 
                 # (10|0)(0|1)(0|00)
-                for q0,q1 in lib.prange(0,naux,64):
-                    wk1_I = contract('yqp,piox->qioxy', int2c_ip1[:,q0:q1], rhok1_Pko)
-                    hk_ao_aux[i0:i1,q0:q1] -= contract('qoi,qioxy->iqxy', rhok0_P_I[q0:q1], wk1_I)
+                #for q0,q1 in lib.prange(0,naux,64):
+                #    wk1_I = contract('yqp,piox->qioxy', int2c_ip1[:,q0:q1], rhok1_Pko)
+                #    hk_ao_aux[i0:i1,q0:q1] -= contract('qoi,qioxy->iqxy', rhok0_P_I[q0:q1], wk1_I)
+                wk1_I = contract('piox,qoi->ipqx', rhok1_Pko, rhok0_P_I)
+                hk_ao_aux[i0:i1] -= contract('ipqx,yqp->iqxy', wk1_I, int2c_ip1)
                 wk1_I = rhok0_P_I = None
 
     wk1_Pko = None
