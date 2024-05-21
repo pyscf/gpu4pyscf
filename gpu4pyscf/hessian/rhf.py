@@ -36,7 +36,7 @@ from gpu4pyscf.scf import _response_functions  # noqa
 # import pyscf.grad.rhf to activate nuc_grad_method method
 from pyscf.grad import rhf  # noqa
 from gpu4pyscf.scf import cphf
-from gpu4pyscf.lib.cupy_helper import contract, tag_array, print_mem_info
+from gpu4pyscf.lib.cupy_helper import contract, tag_array, print_mem_info, transpose_sum
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
 
@@ -331,7 +331,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         return contract('xik,ip->xpk', tmp, mo_coeff)
     cupy.get_default_memory_pool().free_all_blocks()
     # TODO: calculate blksize dynamically
-    blksize = 16
+    blksize = 48
     mo1s = [None] * mol.natm
     e1s = [None] * mol.natm
     aoslices = mol.aoslice_by_atom()
