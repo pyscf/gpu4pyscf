@@ -32,7 +32,6 @@ Ref:
 '''
 
 
-
 import numpy
 import cupy
 import numpy as np
@@ -146,7 +145,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     if with_k:
         mem_avail = get_avail_mem()
-        slice_size = naux*naux*3   # largest slice of intermediate variables
+        slice_size = naux*nocc*9   # largest slice of intermediate variables
         blksize = int(mem_avail*0.2/8/slice_size/ALIGNED) * ALIGNED
         for i0, i1 in lib.prange(0,nao,blksize):
             wk1_Pko_islice = cupy.asarray(wk1_Pko[:,i0:i1])
@@ -181,10 +180,10 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
                 # (10|0)(0|1)(0|00)
                 #for q0,q1 in lib.prange(0,naux,64):
-                #    wk1_I = contract('yqp,piox->qioxy', int2c_ip1[:,q0:q1], rhok1_Pko)
-                #    hk_ao_aux[i0:i1,q0:q1] -= contract('qoi,qioxy->iqxy', rhok0_P_I[q0:q1], wk1_I)
-                wk1_I = contract('piox,qoi->ipqx', rhok1_Pko, rhok0_P_I)
-                hk_ao_aux[i0:i1] -= contract('ipqx,yqp->iqxy', wk1_I, int2c_ip1)
+                wk1_I = contract('yqp,piox->qioxy', int2c_ip1, rhok1_Pko)
+                hk_ao_aux[i0:i1] -= contract('qoi,qioxy->iqxy', rhok0_P_I, wk1_I)
+                #wk1_I = contract('piox,qoi->ipqx', rhok1_Pko, rhok0_P_I)
+                #hk_ao_aux[i0:i1] -= contract('ipqx,yqp->iqxy', wk1_I, int2c_ip1)
                 wk1_I = rhok0_P_I = None
 
     wk1_Pko = None
