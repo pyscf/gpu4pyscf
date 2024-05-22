@@ -24,7 +24,7 @@ Restricted coupled pertubed Hartree-Fock solver
 import numpy
 import cupy
 from pyscf import lib
-from gpu4pyscf.lib.cupy_helper import krylov, krylov_batch
+from gpu4pyscf.lib.cupy_helper import krylov
 from gpu4pyscf.lib import logger
 
 def solve(fvind, mo_energy, mo_occ, h1, s1=None,
