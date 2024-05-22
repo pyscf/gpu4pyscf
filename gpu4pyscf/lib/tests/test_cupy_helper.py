@@ -46,6 +46,7 @@ class KnownValues(unittest.TestCase):
         def aop(x):
             return cupy.dot(a, x.T).T
         x = krylov(aop, b)
+
         assert cupy.allclose(cupy.dot(a,x.T)+x.T, b.T)
 
         a = cupy.random.random((10,10)) * 1e-2
