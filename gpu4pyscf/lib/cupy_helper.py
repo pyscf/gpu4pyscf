@@ -557,7 +557,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
             break
         x1 = x1[idx]
 
-    if len(x1) > 0:
+    if len(idx) > 0:
         raise RuntimeError("CPSCF failed to converge.")
 
     xs = cupy.asarray(xs)
@@ -576,8 +576,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         # Restore the first nroots vectors, which are array b or b-(1+a)x0
         for i in range(min(nd, nroots)):
             xsi = cupy.asarray(xs[i])
-            for j in range(nroots):
-                g[i,j] = cupy.dot(xsi.conj(), b[j])
+            g[i] = cupy.dot(xsi.conj(), b.T)
 
     c = cupy.linalg.solve(h, g)
     x = _gen_x0(c, cupy.asarray(xs))
@@ -587,46 +586,6 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     if x0 is not None:
         x += x0
     return x
-
-def block_krylov(aop, B, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
-           lindep=DSOLVE_LINDEP, callback=None, hermi=False,
-           verbose=logger.WARN):
-    '''solve (I+A)x = b with preconditioned block krylov solver'''
-    m, n = B.shape
-    V = cupy.zeros((m, n * max_cycle))  # Allocate space for all Krylov vectors
-    AV = cupy.zeros_like(V)  # Store A * V incrementally
-
-    # Initial orthogonalization of B
-    Q, _ = cupy.linalg.qr(B)
-    V[:, :n] = Q
-    AV[:, :n] = aop(Q)
-
-    for j in range(max_cycle):
-        W = AV[:, j*n:(j+1)*n]  # Use stored A * V
-        for i in range(j+1):
-            H_ij = V[:, i*n:(i+1)*n].T @ W
-            W -= V[:, i*n:(i+1)*n] @ H_ij
-
-        Q, R = cupy.linalg.qr(W)
-        print(j, cupy.linalg.norm(R))
-        if cupy.linalg.norm(R) < tol:
-            if verbose:
-                print(f"Convergence achieved after {j+1} iterations.")
-            break
-
-        V[:, (j+1)*n:(j+2)*n] = Q
-        AV[:, (j+1)*n:(j+2)*n] = aop(Q)  # Compute and store A * V for the new vectors
-
-    # Solve the reduced system using the projection method
-    T = V[:, :n*(j+1)].T @ AV[:, :n*(j+1)]  # This is the effective projection T = V^T * A * V
-    Y = cupy.linalg.solve(T, V[:, :n*(j+1)].T @ B)
-
-    # Compute the approximate solution
-    X = V[:, :n*(j+1)] @ Y
-
-    if x0 is not None:
-        X += x0
-    return X
 
 def _qr(xs, dot, lindep=1e-14):
     '''QR decomposition for a list of vectors (for linearly independent vectors only).
@@ -642,10 +601,11 @@ def _qr(xs, dot, lindep=1e-14):
         xi = cupy.array(xs[i], copy=True)
         rmat[:,nv] = 0
         rmat[nv,nv] = 1
-        for j in range(nv):
-            prod = dot(qs[j].conj(), xi)
-            xi -= qs[j] * prod
-            rmat[:,nv] -= rmat[:,j] * prod
+
+        prod = dot(qs[:nv].conj(), xi)
+        xi -= cupy.dot(qs[:nv].T, prod)
+        rmat[:,nv] -= cupy.dot(rmat[:,:nv], prod)
+
         innerprod = dot(xi.conj(), xi).real
         norm = cupy.sqrt(innerprod)
         if innerprod > lindep:
@@ -662,8 +622,7 @@ def _gen_x0(v, xs):
     x0 = cupy.einsum('c,x->cx', v[space-1], cupy.asarray(xs[space-1]))
     for i in reversed(range(space-1)):
         xsi = cupy.asarray(xs[i])
-        for k in range(nroots):
-            x0[k] += v[i,k] * xsi
+        x0 += cupy.expand_dims(v[i],-1) * xsi
     if ndim == 1:
         x0 = x0[0]
     return x0
