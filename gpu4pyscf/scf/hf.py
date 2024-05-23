@@ -672,7 +672,7 @@ class RHF(SCF):
     _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'screen_tol', 'conv_tol_cpscf', 'disp_with_3body'}
 
     screen_tol = 1e-14
-    conv_tol_cpscf = 1e-3
+    conv_tol_cpscf = 1e-6
     DIIS = diis.SCF_DIIS
     get_jk = _get_jk
     _eigh = staticmethod(eigh)
