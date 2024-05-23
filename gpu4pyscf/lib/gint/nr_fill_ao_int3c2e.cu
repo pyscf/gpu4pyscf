@@ -25,9 +25,9 @@
 #include "cuda_alloc.cuh"
 #include "cint2e.cuh"
 #include "g2e.h"
-#include "g2e.cu"
 
 #include "rys_roots.cu"
+#include "g2e.cu"
 #include "gout3c2e.cu"
 #include "g3c2e_root1.cu"
 #include "g2e_root2.cu"

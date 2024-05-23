@@ -27,9 +27,10 @@
 #include "config.h"
 #include "cuda_alloc.cuh"
 #include "g2e.h"
+
+#include "rys_roots.cu"
 #include "g2e.cu"
 #include "cint2e.cuh"
-#include "rys_roots.cu"
 #include "gout2e.cuh"
 
 #include "fill_ints.cu"

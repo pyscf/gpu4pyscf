@@ -119,7 +119,7 @@ static int GINTrun_tasks_jk(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars
 extern "C" { __host__
 int GINTbuild_jk(BasisProdCache *bpcache,
                  double *vj, double *vk, double *dm, int nao, int n_dm,
-                 int *bins_locs_ij, int *bins_locs_kl, 
+                 int *bins_locs_ij, int *bins_locs_kl,
                  double *bins_floor_ij, double *bins_floor_kl,
                  int nbins_ij, int nbins_kl,
                  int cp_ij_id, int cp_kl_id, double omega, double log_cutoff, double sub_dm_cond,
@@ -191,10 +191,10 @@ int GINTbuild_jk(BasisProdCache *bpcache,
         if (ntasks_kl <= 0) {
             continue;
         }
-        
+
         // ij_bin1 is the index of first bin out of cutoff
         ij_bin1 = 0;
-        double log_q_kl_bin, log_q_ij_bin; 
+        double log_q_kl_bin, log_q_ij_bin;
         log_q_kl_bin = bins_floor_kl[kl_bin];
         for(int ij_bin = 0; ij_bin < nbins_ij; ij_bin++){
             log_q_ij_bin = bins_floor_ij[ij_bin];
@@ -203,14 +203,14 @@ int GINTbuild_jk(BasisProdCache *bpcache,
             }
             ij_bin1++;
         }
-        
+
         int bas_ij0 = bins_locs_ij[0];
         int bas_ij1 = bins_locs_ij[ij_bin1];
         int ntasks_ij = bas_ij1 - bas_ij0;
         if (ntasks_ij <= 0) {
             continue;
         }
-        
+
         offsets.ntasks_ij = ntasks_ij;
         offsets.ntasks_kl = ntasks_kl;
         offsets.bas_ij = bas_pairs_locs[cp_ij_id] + bas_ij0;

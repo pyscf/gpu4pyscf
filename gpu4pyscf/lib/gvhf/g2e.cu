@@ -49,7 +49,7 @@ void GINTint2e_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets
     if (bas_ij == bas_kl) {
         norm *= .5;
     }
-    double omega = envs.omega;
+
     int nprim_ij = envs.nprim_ij;
     int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
@@ -66,13 +66,8 @@ void GINTint2e_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets
         active = false;
     }
 
-    double uw[NROOTS*2];
     double g[GSIZE];
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
     int ij, kl;
     int as_ish, as_jsh, as_ksh, as_lsh;
     if (envs.ibase) {
@@ -92,26 +87,7 @@ void GINTint2e_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets
     if(!active) norm = 0.0;
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        double aij = a12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
-        double akl = a12[kl];
-        double xkl = x12[kl];
-        double ykl = y12[kl];
-        double zkl = z12[kl];
-        double xijxkl = xij - xkl;
-        double yijykl = yij - ykl;
-        double zijzkl = zij - zkl;
-        double aijkl = aij + akl;
-        double a1 = aij * akl;
-        double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-        a0 *= theta;
-        double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        GINTrys_root<NROOTS>(x, uw);
-        GINTscale_u<NROOTS>(uw, theta);
-        if(active) GINTg0_2e_2d4d<NROOTS>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+        if(active) GINTg0_2e_2d4d<NROOTS>(envs, g, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
         if(active) GINTkernel_direct_getjk<NROOTS, GSIZE>(envs, jk, g, ish, jsh, ksh, lsh);
     } }
 }
@@ -179,7 +155,7 @@ static void GINTint2e_jk_kernel0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -200,7 +176,7 @@ static void GINTint2e_jk_kernel0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double *vk = jk.vk;
     int tx = threadIdx.x;
     int ty = threadIdx.y;
-    
+
     for (i_dm = 0; i_dm < n_dm; ++i_dm) {
         if (vj != NULL) {
             block_reduce_x<THREADSX, THREADSY>(gout0*dm[i0+nao*j0], vj+k0+nao*l0, tx, ty);
@@ -294,7 +270,7 @@ static void GINTint2e_jk_kernel1000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         //double fac = eij * ekl / (sqrt(aijkl) * a1);
