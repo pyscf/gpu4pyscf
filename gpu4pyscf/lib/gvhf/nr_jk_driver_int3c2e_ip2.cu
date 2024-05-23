@@ -25,11 +25,10 @@
 #include "gint/cuda_alloc.cuh"
 #include "gint/g2e.h"
 #include "gint/cint2e.cuh"
-#include "gint/g2e.cu"
 
 #include "contract_jk.cu"
 #include "gint/rys_roots.cu"
-
+#include "gint/g2e.cu"
 #include "g3c2e.cuh"
 #include "g3c2e_ip2.cu"
 
