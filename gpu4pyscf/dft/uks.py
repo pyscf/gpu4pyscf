@@ -128,6 +128,14 @@ class UKS(rks.KohnShamDFT, uhf.UHF):
     init_guess_by_vsap = uks.UKS.init_guess_by_vsap
 
     to_hf = NotImplemented
+
+    def reset(self, mol=None):
+        super().reset(mol)
+        self.grids.reset(mol)
+        self.nlcgrids.reset(mol)
+        self._numint.gdftopt = None
+        return self
+
     def nuc_grad_method(self):
         from gpu4pyscf.grad import uks as uks_grad
         return uks_grad.Gradients(self)

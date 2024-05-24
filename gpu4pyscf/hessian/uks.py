@@ -200,9 +200,10 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
     ao_loc = mol.ao_loc_nr()
 
     opt = getattr(ni, 'gdftopt', None)
-    if opt is None:
+    if opt is None or mol not in [opt.mol, opt._mol]:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
+    _mol = opt._mol
 
     coeff = cupy.asarray(opt.coeff)
     mo_coeff = contract('nij,pi->npj', mo_coeff, coeff)
@@ -213,10 +214,10 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
     if xctype == 'LDA':
         ao_deriv = 2
         for ao, mask, weight, coords \
-                in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
+                in ni.block_loop(_mol, grids, nao, ao_deriv, max_memory):
             mo_coeff_mask = mo_coeff[:,mask,:]
-            rhoa = numint.eval_rho2(opt.mol, ao[0], mo_coeff_mask[0], mo_occ[0], mask, xctype)
-            rhob = numint.eval_rho2(opt.mol, ao[0], mo_coeff_mask[1], mo_occ[1], mask, xctype)
+            rhoa = numint.eval_rho2(_mol, ao[0], mo_coeff_mask[0], mo_occ[0], mask, xctype)
+            rhob = numint.eval_rho2(_mol, ao[0], mo_coeff_mask[1], mo_occ[1], mask, xctype)
             vxc = ni.eval_xc_eff(mf.xc, cupy.asarray((rhoa,rhob)), 1, xctype=xctype)[1]
             wv = weight * vxc[:,0]
             aowa = numint._scale_ao(ao[0], wv[0])
@@ -237,10 +238,10 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
 
         ao_deriv = 3
         for ao, mask, weight, coords \
-                in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
+                in ni.block_loop(_mol, grids, nao, ao_deriv, max_memory):
             mo_coeff_mask = mo_coeff[:,mask,:]
-            rhoa = numint.eval_rho2(opt.mol, ao[:4], mo_coeff_mask[0], mo_occ[0], mask, xctype)
-            rhob = numint.eval_rho2(opt.mol, ao[:4], mo_coeff_mask[1], mo_occ[1], mask, xctype)
+            rhoa = numint.eval_rho2(_mol, ao[:4], mo_coeff_mask[0], mo_occ[0], mask, xctype)
+            rhob = numint.eval_rho2(_mol, ao[:4], mo_coeff_mask[1], mo_occ[1], mask, xctype)
             vxc = ni.eval_xc_eff(mf.xc, cupy.asarray((rhoa,rhob)), 1, xctype=xctype)[1]
             wv = weight * vxc
             #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
@@ -276,10 +277,10 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
 
         ao_deriv = 3
         for ao, mask, weight, coords \
-                in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
+                in ni.block_loop(_mol, grids, nao, ao_deriv, max_memory):
             mo_coeff_mask = mo_coeff[:,mask,:]
-            rhoa = numint.eval_rho2(opt.mol, ao[:10], mo_coeff_mask[0], mo_occ[0], mask, xctype)
-            rhob = numint.eval_rho2(opt.mol, ao[:10], mo_coeff_mask[1], mo_occ[1], mask, xctype)
+            rhoa = numint.eval_rho2(_mol, ao[:10], mo_coeff_mask[0], mo_occ[0], mask, xctype)
+            rhob = numint.eval_rho2(_mol, ao[:10], mo_coeff_mask[1], mo_occ[1], mask, xctype)
             vxc = ni.eval_xc_eff(mf.xc, cupy.asarray((rhoa,rhob)), 1, xctype=xctype)[1]
             wv = weight * vxc
             wv[:,4] *= .5  # for the factor 1/2 in tau
@@ -413,9 +414,11 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     ao_loc = mol.ao_loc_nr()
 
     opt = getattr(ni, 'gdftopt', None)
-    if opt is None:
+    if opt is None or mol not in [opt.mol, opt._mol]:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
+    _mol = opt._mol
+
     coeff = cupy.asarray(opt.coeff)
     dm0a, dm0b = mf.make_rdm1(mo_coeff, mo_occ)
     dm0a_sorted = take_last2d(dm0a, opt.ao_idx)
@@ -428,11 +431,11 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
         ao_deriv = 1
         t1 = log.init_timer()
         for ao_mask, mask, weight, coords \
-                in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
+                in ni.block_loop(_mol, grids, nao, ao_deriv, max_memory):
             nao_non0 = len(mask)
             ao = contract('nip,ij->njp', ao_mask, coeff[mask])
-            rhoa = numint.eval_rho2(opt.mol, ao[0], mo_coeff[0], mo_occ[0], mask, xctype)
-            rhob = numint.eval_rho2(opt.mol, ao[0], mo_coeff[1], mo_occ[1], mask, xctype)
+            rhoa = numint.eval_rho2(_mol, ao[0], mo_coeff[0], mo_occ[0], mask, xctype)
+            rhob = numint.eval_rho2(_mol, ao[0], mo_coeff[1], mo_occ[1], mask, xctype)
             t1 = log.timer_debug2('eval rho', *t1)
             vxc, fxc = ni.eval_xc_eff(mf.xc, cupy.asarray((rhoa,rhob)), 2, xctype=xctype)[1:3]
             t1 = log.timer_debug2('eval vxc', *t1)
@@ -450,7 +453,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0a = numint._dot_ao_dm(mol, ao[0], dm0a, mask, shls_slice, ao_loc)
             ao_dm0b = numint._dot_ao_dm(mol, ao[0], dm0b, mask, shls_slice, ao_loc)
             wf = weight * fxc[:,0,:,0]
-            for ia in range(mol.natm):
+            for ia in range(_mol.natm):
                 p0, p1 = aoslices[ia][2:]
                 # *2 for \nabla|ket> in rho1
                 rho1a = contract('xig,ig->xg', ao[1:,p0:p1,:], ao_dm0a[p0:p1,:]) * 2
@@ -467,7 +470,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 vmatb_dm[ia][:,:,mask] += contract('yjg,xjg->xyj', ao_mask[1:4], aow)
             ao_dm0a = ao_dm0b = aow = None
             t1 = log.timer_debug2('integration', *t1)
-        for ia in range(mol.natm):
+        for ia in range(_mol.natm):
             p0, p1 = aoslices[ia][2:]
             vmata_dm[ia] = vmata_dm[ia][:,:,opt.rev_ao_idx]
             vmatb_dm[ia] = vmatb_dm[ia][:,:,opt.rev_ao_idx]
@@ -477,11 +480,11 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
         ao_deriv = 2
         t1 = log.init_timer()
         for ao_mask, mask, weight, coords \
-                in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
+                in ni.block_loop(_mol, grids, nao, ao_deriv, max_memory):
             nao_non0 = len(mask)
             ao = contract('nip,ij->njp', ao_mask, coeff[mask])
-            rhoa = numint.eval_rho2(opt.mol, ao[:4], mo_coeff[0], mo_occ[0], mask, xctype)
-            rhob = numint.eval_rho2(opt.mol, ao[:4], mo_coeff[1], mo_occ[1], mask, xctype)
+            rhoa = numint.eval_rho2(_mol, ao[:4], mo_coeff[0], mo_occ[0], mask, xctype)
+            rhob = numint.eval_rho2(_mol, ao[:4], mo_coeff[1], mo_occ[1], mask, xctype)
             t1 = log.timer_debug2('eval rho', *t1)
             vxc, fxc = ni.eval_xc_eff(mf.xc, cupy.asarray((rhoa,rhob)), 2, xctype=xctype)[1:3]
             t1 = log.timer_debug2('eval vxc', *t1)
@@ -500,7 +503,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dmb_mask = contract('nig,ij->njg', ao_mask[:4], dm0b_mask)
             vmata_dm_tmp = cupy.empty([3,3,nao_non0])
             vmatb_dm_tmp = cupy.empty([3,3,nao_non0])
-            for ia in range(mol.natm):
+            for ia in range(_mol.natm):
                 dR_rho1a = _make_dR_rho1(ao, ao_dm0a, ia, aoslices, xctype)
                 dR_rho1b = _make_dR_rho1(ao, ao_dm0b, ia, aoslices, xctype)
                 wv = contract('xbyg,sxg->bsyg', wf[0], dR_rho1a)
@@ -524,7 +527,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 vmatb_dm[ia][:,:,mask] += vmatb_dm_tmp
             ao_dm0a = ao_dm0b = aow = None
             t1 = log.timer_debug2('integration', *t1)
-        for ia in range(mol.natm):
+        for ia in range(_mol.natm):
             vmata_dm[ia] = vmata_dm[ia][:,:,opt.rev_ao_idx]
             vmatb_dm[ia] = vmatb_dm[ia][:,:,opt.rev_ao_idx]
             p0, p1 = aoslices[ia][2:]
@@ -539,11 +542,11 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
         ao_deriv = 2
         t1 = log.init_timer()
         for ao_mask, mask, weight, coords \
-                in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
+                in ni.block_loop(_mol, grids, nao, ao_deriv, max_memory):
             nao_non0 = len(mask)
             ao = contract('nip,ij->njp', ao_mask, coeff[mask])
-            rhoa = numint.eval_rho2(opt.mol, ao[:10], mo_coeff[0], mo_occ[0], mask, xctype)
-            rhob = numint.eval_rho2(opt.mol, ao[:10], mo_coeff[1], mo_occ[1], mask, xctype)
+            rhoa = numint.eval_rho2(_mol, ao[:10], mo_coeff[0], mo_occ[0], mask, xctype)
+            rhob = numint.eval_rho2(_mol, ao[:10], mo_coeff[1], mo_occ[1], mask, xctype)
             t1 = log.timer_debug2('eval rho', *t1)
             vxc, fxc = ni.eval_xc_eff(mf.xc, cupy.asarray((rhoa, rhob)), 2, xctype=xctype)[1:3]
             t1 = log.timer_debug2('eval vxc', *t1)
@@ -571,7 +574,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dma_mask = contract('nig,ij->njg', ao_mask[:4], dm0a_mask)
             ao_dmb_mask = contract('nig,ij->njg', ao_mask[:4], dm0b_mask)
             wf = weight * fxc
-            for ia in range(mol.natm):
+            for ia in range(_mol.natm):
                 dR_rho1a = _make_dR_rho1(ao, ao_dm0a, ia, aoslices, xctype)
                 dR_rho1b = _make_dR_rho1(ao, ao_dm0b, ia, aoslices, xctype)
                 wv = contract('xbyg,sxg->bsyg', wf[0], dR_rho1a)
@@ -639,7 +642,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 vmata_dm[ia][:,:,mask] += vmata_dm_tmp
                 vmatb_dm[ia][:,:,mask] += vmatb_dm_tmp
             t1 = log.timer_debug2('integration', *t1)
-        for ia in range(mol.natm):
+        for ia in range(_mol.natm):
             vmata_dm[ia] = vmata_dm[ia][:,:,opt.rev_ao_idx]
             vmatb_dm[ia] = vmatb_dm[ia][:,:,opt.rev_ao_idx]
             p0, p1 = aoslices[ia][2:]
@@ -677,26 +680,26 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     ao_loc = mol.ao_loc_nr()
 
     opt = getattr(ni, 'gdftopt', None)
-    if opt is None:
+    if opt is None or mol not in [opt.mol, opt._mol]:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
-
+    _mol = opt._mol
     coeff = cupy.asarray(opt.coeff)
     dm0a, dm0b = mf.make_rdm1(mo_coeff, mo_occ)
 
     vipa = cupy.zeros((3,nao,nao))
     vipb = cupy.zeros((3,nao,nao))
-    vmata = cupy.zeros((mol.natm,3,nao,nocca))
-    vmatb = cupy.zeros((mol.natm,3,nao,noccb))
+    vmata = cupy.zeros((_mol.natm,3,nao,nocca))
+    vmatb = cupy.zeros((_mol.natm,3,nao,noccb))
     max_memory = None
     if xctype == 'LDA':
         ao_deriv = 1
         t1 = t0 = log.init_timer()
         for ao, mask, weight, coords \
-                in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
+                in ni.block_loop(_mol, grids, nao, ao_deriv, max_memory):
             ao = contract('nip,ij->njp', ao, coeff[mask])
-            rhoa = numint.eval_rho2(opt.mol, ao[0], mo_coeff[0], mo_occ[0], mask, xctype)
-            rhob = numint.eval_rho2(opt.mol, ao[0], mo_coeff[1], mo_occ[1], mask, xctype)
+            rhoa = numint.eval_rho2(_mol, ao[0], mo_coeff[0], mo_occ[0], mask, xctype)
+            rhob = numint.eval_rho2(_mol, ao[0], mo_coeff[1], mo_occ[1], mask, xctype)
             t1 = log.timer_debug2('eval rho', *t1)
             vxc, fxc = ni.eval_xc_eff(mf.xc, cupy.asarray((rhoa,rhob)), 2, xctype=xctype)[1:3]
             t1 = log.timer_debug2('eval vxc', *t1)
@@ -710,7 +713,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0a = numint._dot_ao_dm(mol, ao[0], dm0a, mask, shls_slice, ao_loc)
             ao_dm0b = numint._dot_ao_dm(mol, ao[0], dm0b, mask, shls_slice, ao_loc)
             wf = weight * fxc[:,0,:,0]
-            for ia in range(mol.natm):
+            for ia in range(_mol.natm):
                 p0, p1 = aoslices[ia][2:]
 # First order density = rho1 * 2.  *2 is not applied because + c.c. in the end
                 rho1a = contract('xig,ig->xg', ao[1:,p0:p1,:], ao_dm0a[p0:p1,:])
@@ -732,10 +735,10 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         ao_deriv = 2
         t1 = t0 = log.init_timer()
         for ao, mask, weight, coords \
-                in ni.block_loop(mol, grids, nao, ao_deriv, max_memory):
+                in ni.block_loop(_mol, grids, nao, ao_deriv, max_memory):
             ao = contract('nip,ij->njp', ao, coeff[mask])
-            rhoa = numint.eval_rho2(mol, ao[:4], mo_coeff[0], mo_occ[0], mask, xctype)
-            rhob = numint.eval_rho2(mol, ao[:4], mo_coeff[1], mo_occ[1], mask, xctype)
+            rhoa = numint.eval_rho2(_mol, ao[:4], mo_coeff[0], mo_occ[0], mask, xctype)
+            rhob = numint.eval_rho2(_mol, ao[:4], mo_coeff[1], mo_occ[1], mask, xctype)
             t1 = log.timer_debug2('eval rho', *t1)
             vxc, fxc = ni.eval_xc_eff(mf.xc, cupy.asarray((rhoa,rhob)), 2, xctype=xctype)[1:3]
             t1 = log.timer_debug2('eval vxc', *t1)
@@ -750,7 +753,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0b = [numint._dot_ao_dm(mol, ao[i], dm0b, mask, shls_slice, ao_loc)
                       for i in range(4)]
             wf = weight * fxc
-            for ia in range(mol.natm):
+            for ia in range(_mol.natm):
                 dR_rho1a = _make_dR_rho1(ao, ao_dm0a, ia, aoslices, xctype)
                 dR_rho1b = _make_dR_rho1(ao, ao_dm0b, ia, aoslices, xctype)
                 wv = contract('xbyg,sxg->bsyg', wf[0], dR_rho1a)
@@ -774,10 +777,10 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         ao_deriv = 2
         t1 = t0 = log.init_timer()
         for ao, mask, weight, coords \
-                in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
+                in ni.block_loop(_mol, grids, nao, ao_deriv, max_memory):
             ao = contract('nip,ij->njp', ao, coeff[mask])
-            rhoa = numint.eval_rho2(opt.mol, ao[:10], mo_coeff[0], mo_occ[0], mask, xctype)
-            rhob = numint.eval_rho2(opt.mol, ao[:10], mo_coeff[1], mo_occ[1], mask, xctype)
+            rhoa = numint.eval_rho2(_mol, ao[:10], mo_coeff[0], mo_occ[0], mask, xctype)
+            rhob = numint.eval_rho2(_mol, ao[:10], mo_coeff[1], mo_occ[1], mask, xctype)
             t1 = log.timer_debug2('eval rho', *t1)
             vxc, fxc = ni.eval_xc_eff(mf.xc, cupy.asarray((rhoa,rhob)), 2, xctype=xctype)[1:3]
             t1 = log.timer_debug2('eval vxc', *t0)
@@ -794,7 +797,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0a = [numint._dot_ao_dm(mol, ao[i], dm0a, mask, shls_slice, ao_loc) for i in range(4)]
             ao_dm0b = [numint._dot_ao_dm(mol, ao[i], dm0b, mask, shls_slice, ao_loc) for i in range(4)]
             wf = weight * fxc
-            for ia in range(mol.natm):
+            for ia in range(_mol.natm):
                 dR_rho1a = _make_dR_rho1(ao, ao_dm0a, ia, aoslices, xctype)
                 dR_rho1b = _make_dR_rho1(ao, ao_dm0b, ia, aoslices, xctype)
                 wv = contract('xbyg,sxg->bsyg', wf[0], dR_rho1a)
@@ -827,7 +830,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     vmata = -contract("kxiq,ip->kxpq", vmata, mo_coeff[0])
     vmatb = -contract("kxiq,ip->kxpq", vmatb, mo_coeff[1])
 
-    for ia in range(mol.natm):
+    for ia in range(_mol.natm):
         p0, p1 = aoslices[ia][2:]
         vmat_tmp = cupy.zeros([3,nao,nao])
         vmat_tmp[:,p0:p1] += vipa[:,p0:p1]

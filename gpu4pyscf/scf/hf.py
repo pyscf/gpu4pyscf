@@ -402,7 +402,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     h1e = cupy.asarray(mf.get_hcore(mol))
     s1e = cupy.asarray(mf.get_ovlp(mol))
-
+    
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     logger.info(mf, 'init E= %.15g', e_tot)
