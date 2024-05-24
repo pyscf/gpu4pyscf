@@ -14,7 +14,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ###########################################################
-#  Example of DFT with Dispersion correction (dftd3/dftd4)
+#  Example of specifying device in multi-GPU environment
 ###########################################################
 
 import numpy as np
@@ -28,7 +28,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
 def run_dft():
-    mol = pyscf.M(atom=atom, basis='def2-tzvpp', verbose=6, output='device1.log')
+    mol = pyscf.M(atom=atom, basis='def2-tzvpp', verbose=1)
     mf_GPU = rks.RKS(mol, xc='b3lyp').density_fit()
 
     # Compute Energy
@@ -43,5 +43,9 @@ def run_dft():
     h_dft = h.kernel()
 
 import cupy
+# Select Device #1 to run
 with cupy.cuda.Device(1):
+    run_dft()
+
+with cupy.cuda.Device(0):
     run_dft()
