@@ -39,12 +39,12 @@ ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
 libgdft = load_library('libgdft')
 libgdft.GDFT_make_dR_dao_w.restype = ctypes.c_int
 
-def _get_veff(ks_grad, mol=None, dm=None):
+def get_veff(ks_grad, mol=None, dm=None):
     '''
     First order derivative of DFT effective potential matrix (wrt electron coordinates)
 
     Args:
-        ks_grad : grad.uhf.Gradients or grad.uks.Gradients object
+        ks_grad : grad.rhf.Gradients or grad.rks.Gradients object
     '''
     if mol is None: mol = ks_grad.mol
     if dm is None: dm = ks_grad.base.make_rdm1()
@@ -125,17 +125,10 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms).reshape(-1,nao0,nao0)
     dms = take_last2d(dms, opt.ao_idx)
-    #dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
-    #       for dm in dms.reshape(-1,nao0,nao0)]
-    #mo_coeff = coeff @ mo_coeff
     mo_coeff = mo_coeff[opt.ao_idx]
 
     nset = len(dms)
     assert nset == 1
-    if xctype == 'LDA':
-        ao_deriv = 1
-    else:
-        ao_deriv = 2
     vmat = cupy.zeros((nset,3,nao,nao))
     if xctype == 'LDA':
         ao_deriv = 1
@@ -515,7 +508,7 @@ class Gradients(rhf_grad.Gradients):
         self.grids = None
         self.nlcgrids = None
 
-    get_veff = _get_veff
+    get_veff = get_veff
     # TODO: add grid response into this function
     def extra_force(self, atom_id, envs):
         return 0

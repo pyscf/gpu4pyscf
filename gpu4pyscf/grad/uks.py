@@ -49,7 +49,6 @@ def get_veff(ks_grad, mol=None, dm=None):
     if mol is None: mol = ks_grad.mol
     if dm is None: dm = ks_grad.base.make_rdm1()
     t0 = (logger.process_clock(), logger.perf_counter())
-
     mf = ks_grad.base
     ni = mf._numint
     if ks_grad.grids is not None:
@@ -69,7 +68,6 @@ def get_veff(ks_grad, mol=None, dm=None):
         if nlcgrids.coords is None:
             nlcgrids.build(sort_grids=True)
 
-    ni = mf._numint
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, ks_grad.max_memory*.9-mem_now)
     if ks_grad.grid_response:
@@ -178,8 +176,8 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         ao_deriv = 2
         for ao_mask, idx, weight, _ in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
             mo_coeff_mask = mo_coeff[:,idx,:]
-            rho_a = numint.eval_rho2(opt.mol, ao_mask[:10], mo_coeff_mask[0], mo_occ[0], None, xctype, with_lapl=False)
-            rho_b = numint.eval_rho2(opt.mol, ao_mask[:10], mo_coeff_mask[1], mo_occ[1], None, xctype, with_lapl=False)
+            rho_a = numint.eval_rho2(opt.mol, ao_mask[:4], mo_coeff_mask[0], mo_occ[0], None, xctype, with_lapl=False)
+            rho_b = numint.eval_rho2(opt.mol, ao_mask[:4], mo_coeff_mask[1], mo_occ[1], None, xctype, with_lapl=False)
             vxc = ni.eval_xc_eff(xc_code, cupy.array([rho_a,rho_b]), 1, xctype=xctype)[1]
             wv = weight * vxc
             wv[:,0] *= .5
@@ -195,7 +193,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     exc = None
     if nset == 1:
         vmat = vmat[0]
-
+        
     # - sign because nabla_X = -nabla_x
     return exc, -cupy.array(vmat)
 

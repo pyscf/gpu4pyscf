@@ -604,7 +604,6 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
 def as_scanner(mf_grad):
     if isinstance(mf_grad, lib.GradScanner):
         return mf_grad
-
     logger.info(mf_grad, 'Create scanner for %s', mf_grad.__class__)
     name = mf_grad.__class__.__name__ + SCF_GradScanner.__name_mixin__
     return lib.set_class(SCF_GradScanner(mf_grad),

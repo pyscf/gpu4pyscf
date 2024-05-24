@@ -406,7 +406,7 @@ def cart2sph_cutensor(t, axis=0, ang=1, out=None):
         if(out is not None): out[:] = t
         return t
     size = list(t.shape)
-    c2s = c2s_l[ang]
+    c2s = cupy.asarray(c2s_l[ang])
     if(not t.flags['C_CONTIGUOUS']): t = cupy.asarray(t, order='C')
     li_size = c2s.shape
     nli = size[axis] // li_size[0]
