@@ -119,7 +119,7 @@ def nwchem_prune(nuc, rads, n_ang, radii=radi.BRAGG_RADII):
     else:
         idx = numpy.where(leb_ngrid==n_ang)[0][0]
         leb_l = numpy.array([1, 3, idx-1, idx, idx-1])
-    r_atom = radii[nuc].get() + 1e-200
+    r_atom = radii[nuc] + 1e-200
     if nuc <= 2:  # H, He
         place = ((rads/r_atom).reshape(-1,1) > alphas[0]).sum(axis=1)
     elif nuc <= 10:  # Li - Ne

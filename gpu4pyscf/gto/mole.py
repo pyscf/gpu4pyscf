@@ -25,6 +25,6 @@ def get_cart2sph(lmax=12):
     cart2sph = []
     for l in range(lmax):
         c2s = gto.mole.cart2sph(l, normalized='sp')
-        cart2sph.append(cupy.asarray(c2s, order='C'))
+        cart2sph.append(np.asarray(c2s, order='C'))
     return cart2sph
 

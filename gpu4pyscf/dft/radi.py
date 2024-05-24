@@ -24,9 +24,9 @@ import pyscf
 from pyscf.data import radii
 from pyscf.data.elements import charge as elements_proton
 
-BRAGG_RADII = cupy.asarray(radii.BRAGG)
+BRAGG_RADII = radii.BRAGG
 COVALENT_RADII = radii.COVALENT
-SG1RADII = cupy.asarray(pyscf.dft.radi.SG1RADII)
+SG1RADII = pyscf.dft.radi.SG1RADII
 
 gauss_chebyshev = pyscf.dft.radi.gauss_chebyshev
 treutler = pyscf.dft.radi.treutler
@@ -58,7 +58,8 @@ def get_treutler_fac(mol, atomic_radii):
     # fac(j,i) = -fac(i,j)
     '''
     charges = [elements_proton(x) for x in mol.elements]
-    rad = cupy.sqrt(atomic_radii[charges]) + 1e-200
+    atomic_radii = cupy.asarray(atomic_radii[charges])
+    rad = cupy.sqrt(atomic_radii) + 1e-200
     rr = rad.reshape(-1,1) * (1./rad)
     a = .25 * (rr.T - rr)
     a[a<-.5] = -.5

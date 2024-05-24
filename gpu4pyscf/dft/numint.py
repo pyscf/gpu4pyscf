@@ -509,7 +509,6 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         p0 = p1
         t1 = log.timer_debug2('eval rho slice', *t1)
     t0 = log.timer_debug1('eval rho', *t0)
-
     wv = []
     for i in range(nset):
         if xctype == 'LDA':
@@ -934,7 +933,7 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
     mol = opt.mol
-    log = logger.new_logger(mol, verbose)
+    log = logger.new_logger(ni, verbose)
     coeff = cupy.asarray(opt.coeff)
     nao = coeff.shape[0]
     mo_coeff = getattr(dm, 'mo_coeff', None)
@@ -1526,8 +1525,8 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         nao = mol.nao
     ngrids = grids.coords.shape[0]
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
-    log = logger.new_logger(mol, mol.verbose)
-
+    log = logger.new_logger(ni, ni.verbose)
+    
     if blksize is None:
         #cupy.get_default_memory_pool().free_all_blocks()
         mem_avail = get_avail_mem()

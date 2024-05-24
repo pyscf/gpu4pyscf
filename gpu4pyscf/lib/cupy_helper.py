@@ -31,8 +31,8 @@ LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-15
 
 c2s_l = mole.get_cart2sph(lmax=LMAX_ON_GPU)
-c2s_data = cupy.concatenate([x.ravel() for x in c2s_l])
 c2s_offset = np.cumsum([0] + [x.shape[0]*x.shape[1] for x in c2s_l])
+_data = {'c2s': None}
 
 def load_library(libname):
     try:
@@ -45,6 +45,7 @@ libcupy_helper = load_library('libcupy_helper')
 
 pinned_memory_pool = cupy.cuda.PinnedMemoryPool()
 cupy.cuda.set_pinned_memory_allocator(pinned_memory_pool.malloc)
+
 def pin_memory(array):
     mem = cupy.cuda.alloc_pinned_memory(array.nbytes)
     ret = np.frombuffer(mem, array.dtype, array.size).reshape(array.shape)
@@ -227,10 +228,12 @@ def block_c2s_diag(ncart, nsph, angular, counts):
     '''
     constract a cartesian to spherical transformation of n shells
     '''
+    if _data['c2s'] is None: 
+        c2s_data = cupy.concatenate([cupy.asarray(x.ravel()) for x in c2s_l])
+        _data['c2s'] = c2s_data
+    c2s_data = _data['c2s']
 
     nshells = np.sum(counts)
-    cart2sph = cupy.zeros([ncart, nsph])
-
     rows = [np.array([0], dtype='int32')]
     cols = [np.array([0], dtype='int32')]
     offsets = []
@@ -241,6 +244,8 @@ def block_c2s_diag(ncart, nsph, angular, counts):
         offsets += [c2s_offset[l]] * count
     rows = cupy.hstack(rows)
     cols = cupy.hstack(cols)
+
+    cart2sph = cupy.zeros([ncart, nsph])
     offsets = cupy.asarray(offsets, dtype='int32')
 
     stream = cupy.cuda.get_current_stream()
