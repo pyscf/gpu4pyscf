@@ -36,7 +36,7 @@ mol = pyscf.M(
     atom=atom,                         # water molecule
     basis='def2-tzvpp',                # basis set
     output='./pyscf.log',              # save log file
-    verbose=6                          # control the level of print info
+    verbose=1                          # control the level of print info
     )
 
 mf_GPU = rks.RKS(                      # restricted Kohn-Sham DFT
