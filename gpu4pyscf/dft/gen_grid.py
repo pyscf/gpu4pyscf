@@ -72,12 +72,13 @@ def sg1_prune(nuc, rads, n_ang, radii=radi.SG1RADII):
     '''
 # In SG1 the ang grids for the five regions
 #            6  38 86  194 86
-    leb_ngrid = numpy.array([6, 38, 86, 194, 86])
-    alphas = numpy.array((
+    leb_ngrid = cupy.array([6, 38, 86, 194, 86])
+    alphas = cupy.array((
         (0.25  , 0.5, 1.0, 4.5),
         (0.1667, 0.5, 0.9, 3.5),
         (0.1   , 0.4, 0.8, 2.5)))
     r_atom = radii[nuc] + 1e-200
+    rads = cupy.asarray(rads)
     if nuc <= 2:  # H, He
         place = ((rads/r_atom).reshape(-1,1) > alphas[0]).sum(axis=1)
     elif nuc <= 10:  # Li - Ne
@@ -244,7 +245,7 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                 angs = [n_ang] * n_rad
             logger.debug(mol, 'atom %s rad-grids = %d, ang-grids = %s',
                          symb, n_rad, angs)
-
+            if isinstance(angs, cupy.ndarray): angs = angs.get()
             angs = numpy.array(angs)
             coords = []
             vol = []

@@ -30,7 +30,9 @@ from cupyx import scipy
 
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
-LINEAR_DEP_TOL = incore.LINEAR_DEP_THR
+
+# TODO: reuse the setting in pyscf 2.6
+LINEAR_DEP_THR = 1e-6#incore.LINEAR_DEP_THR
 GROUP_SIZE = 256
 
 class DF(lib.StreamObject):
@@ -94,7 +96,7 @@ class DF(lib.StreamObject):
             self.cd_low = tag_array(self.cd_low, tag='cd')
         except Exception:
             w, v = cupy.linalg.eigh(j2c)
-            idx = w > LINEAR_DEP_TOL
+            idx = w > LINEAR_DEP_THR
             self.cd_low = (v[:,idx] / cupy.sqrt(w[idx]))
             self.cd_low = tag_array(self.cd_low, tag='eig')
 

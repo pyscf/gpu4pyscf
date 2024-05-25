@@ -18,16 +18,38 @@ import numpy
 import cupy
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import scf
-from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.cupy_helper import print_mem_info, tag_array, unpack_tril, contract, load_library, take_last2d
+from gpu4pyscf.df import int3c2e, df
+from gpu4pyscf.lib.cupy_helper import (print_mem_info, tag_array,
+unpack_tril, contract, load_library, take_last2d, cholesky)
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
 
 libcupy_helper = load_library('libcupy_helper')
 
+LINEAR_DEP_THRESHOLD = df.LINEAR_DEP_THR
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 64)
+
+def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=LINEAR_DEP_THRESHOLD):
+    ''' generate a solver to solve Ax = b, RHS must be in (n,....) '''
+    if decompose_j2c.upper() == 'CD':
+        try:
+            j2c = cholesky(int2c, lower=True)
+            def j2c_solver(v):
+                return solve_triangular(j2c, v, overwrite_b=False)
+            return j2c_solver
+
+        except Exception:
+            pass
+
+    w, v = cupy.linalg.eigh(int2c)
+    mask = w > lindep
+    v1 = v[:,mask]
+    j2c = cupy.dot(v1/w[mask], v1.conj().T)
+    def j2c_solver(b): # noqa: F811
+        return j2c.dot(b.reshape(j2c.shape[0],-1)).reshape(b.shape)
+    return j2c_solver
 
 def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega=None):
     if mol is None: mol = mf_grad.mol
