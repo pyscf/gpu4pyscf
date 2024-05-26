@@ -90,6 +90,8 @@ def basis_seg_contraction(mol, allow_replica=False):
     
     pmol = copy.copy(mol)
     pmol.output = mol.output
+    pmol.verbose = mol.verbose
+    pmol.stdout = mol.stdout
     pmol.cart = True
     pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
     pmol._env = _env
@@ -1054,6 +1056,9 @@ def get_hess_nuc_elec(mol, dm):
     charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
 
     fakemol = gto.fakemol_for_charges(coords)
+    fakemol.output = mol.output
+    fakemol.verbose = mol.verbose
+    fakemol.stdout = mol.stdout
     intopt = VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
     ao_idx = intopt.ao_idx
@@ -1348,6 +1353,8 @@ def get_dh1e(mol, dm0):
     charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
     fakemol = gto.fakemol_for_charges(coords)
     fakemol.output = mol.output
+    fakemol.verbose = mol.verbose
+    fakemol.stdout = mol.stdout
     intopt = VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
     dm0_sorted = take_last2d(dm0, intopt.ao_idx)
@@ -1361,7 +1368,9 @@ def get_d2h1e(mol, dm0):
     coords = mol.atom_coords()
     charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
     fakemol = gto.fakemol_for_charges(coords)
-
+    fakemol.output = mol.output
+    fakemol.stdout = mol.stdout
+    fakemol.verbose = mol.verbose
     nao = mol.nao
     d2h1e_diag = cupy.zeros([natm,9])
     d2h1e_offdiag = cupy.zeros([natm, nao, 9])
