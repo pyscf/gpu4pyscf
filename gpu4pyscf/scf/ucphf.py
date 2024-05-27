@@ -130,20 +130,20 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
     mo1base_a[:,occidxa] = -s1_a[:,occidxa] * .5
     mo1base_b[:,occidxb] = -s1_b[:,occidxb] * .5
     mo1base = cupy.hstack((mo1base_a.reshape(nset,-1), mo1base_b.reshape(nset,-1)))
-
+    
     def vind_vo(mo1):
-        mo1 = mo1.reshape(mo1base.shape)
-        v = fvind(mo1).reshape(mo1base.shape)
+        mo1 = mo1.reshape(-1,nmoa*nocca+nmob*noccb)
+        v = fvind(mo1).reshape(-1,nmoa*nocca+nmob*noccb)
         if level_shift != 0:
             v -= mo1 * level_shift
-        v1a = v[:,:nmoa*nocca].reshape(nset,nmoa,nocca)
-        v1b = v[:,nmoa*nocca:].reshape(nset,nmob,noccb)
+        v1a = v[:,:nmoa*nocca].reshape(-1,nmoa,nocca)
+        v1b = v[:,nmoa*nocca:].reshape(-1,nmob,noccb)
         v1a[:,viridxa] *= eai_a
         v1b[:,viridxb] *= eai_b
         v1a[:,occidxa] = 0
         v1b[:,occidxb] = 0
-        return v.ravel()
-    mo1 = krylov(vind_vo, mo1base.ravel(),
+        return v.reshape(-1,nmoa*nocca+nmob*noccb)
+    mo1 = krylov(vind_vo, mo1base.reshape(-1,nmoa*nocca+nmob*noccb),
                      tol=tol, max_cycle=max_cycle, hermi=hermi, verbose=log)
 
     mo1 = mo1.reshape(mo1base.shape)

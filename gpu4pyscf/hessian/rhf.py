@@ -36,7 +36,7 @@ from gpu4pyscf.scf import _response_functions  # noqa
 # import pyscf.grad.rhf to activate nuc_grad_method method
 from pyscf.grad import rhf  # noqa
 from gpu4pyscf.scf import cphf
-from gpu4pyscf.lib.cupy_helper import contract, tag_array, print_mem_info
+from gpu4pyscf.lib.cupy_helper import contract, tag_array, print_mem_info, transpose_sum
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
 
@@ -307,7 +307,8 @@ def _get_jk(mol, intor, comp, aosym, script_dms,
     return vs
 
 def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
-              fx=None, atmlst=None, max_memory=4000, verbose=None):
+              fx=None, atmlst=None, max_memory=4000, verbose=None,
+              max_cycle=50, level_shift=0):
     '''Solve the first order equation
     Kwargs:
         fx : function(dm_mo) => v1_mo
@@ -331,7 +332,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         return contract('xik,ip->xpk', tmp, mo_coeff)
     cupy.get_default_memory_pool().free_all_blocks()
     # TODO: calculate blksize dynamically
-    blksize = 8
+    blksize = 48
     mo1s = [None] * mol.natm
     e1s = [None] * mol.natm
     aoslices = mol.aoslice_by_atom()
@@ -349,7 +350,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
 
         h1vo = cupy.vstack(h1vo)
         s1vo = cupy.vstack(s1vo)
-        tol = mf.conv_tol_cpscf * (ia1 - ia0)
+        tol = mf.conv_tol_cpscf
         mo1, e1 = cphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo, tol=tol, verbose=verbose)
         # Different from PySCF, mo1 is in AO
         mo1 = mo1.reshape(-1,3,nao,nocc)
@@ -619,7 +620,8 @@ class HessianBase(lib.StreamObject):
     def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
                   fx=None, atmlst=None, max_memory=4000, verbose=None):
         return solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
-                         fx, atmlst, max_memory, verbose)
+                         fx, atmlst, max_memory, verbose,
+                         max_cycle=self.max_cycle, level_shift=self.level_shift)
 
     def hess_nuc(self, mol=None, atmlst=None):
         if mol is None: mol = self.mol

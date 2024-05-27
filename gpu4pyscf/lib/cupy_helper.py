@@ -28,7 +28,7 @@ from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 
 LMAX_ON_GPU = 7
-DSOLVE_LINDEP = 1e-15
+DSOLVE_LINDEP = 1e-12
 
 c2s_l = mole.get_cart2sph(lmax=LMAX_ON_GPU)
 c2s_data = cupy.concatenate([x.ravel() for x in c2s_l])
@@ -395,7 +395,7 @@ def hermi_triu(mat, hermi=1, inplace=True):
 
 def cart2sph_cutensor(t, axis=0, ang=1, out=None):
     '''
-    transform 'axis' of a tensor from cartesian basis into spherical basis
+    transform 'axis' of a tensor from cartesian basis into spherical basis with cutensor
     '''
     if(ang <= 1):
         if(out is not None): out[:] = t
@@ -532,13 +532,17 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         ax.extend(axt)
         if callable(callback):
             callback(cycle, xs, ax)
-
         x1 = axt.copy()
+
         for i in range(len(xs)):
             xsi = cupy.asarray(xs[i])
-            for j, axj in enumerate(axt):
-                x1[j] -= xsi * (cupy.dot(xsi.conj(), axj) / innerprod[i])
+            w = cupy.dot(axt, xsi.conj()) / innerprod[i]
+            x1 -= xsi * cupy.expand_dims(w,-1)
         axt = xsi = None
+
+        x1, rmat = _qr(x1, cupy.dot, lindep)
+        for i in range(len(x1)):
+            x1[i] *= rmat[i,i]
 
         max_innerprod = 0
         idx = []
@@ -548,16 +552,17 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
             if innerprod1 > lindep and innerprod1 > tol**2:
                 idx.append(i)
                 innerprod.append(innerprod1)
-        log.debug('krylov cycle %d  r = %g', cycle, max_innerprod**.5)
-
+        log.info(f'krylov cycle {cycle}  r = {max_innerprod**.5:.3e} {x1.shape[0]} equations')
         if max_innerprod < lindep or max_innerprod < tol**2:
             break
-
         x1 = x1[idx]
+
+    if len(idx) > 0:
+        raise RuntimeError("CPSCF failed to converge.")
 
     xs = cupy.asarray(xs)
     ax = cupy.asarray(ax)
-    nd = cycle + 1
+    nd = xs.shape[0]
 
     h = cupy.dot(xs, ax.T)
 
@@ -568,15 +573,10 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     if b.ndim == 1:
         g[0] = innerprod[0]
     else:
-        ng = min(nd, nroots)
-        g[:ng, :nroots] += cupy.dot(xs[:ng], b[:nroots].T)
-        '''
         # Restore the first nroots vectors, which are array b or b-(1+a)x0
         for i in range(min(nd, nroots)):
             xsi = cupy.asarray(xs[i])
-            for j in range(nroots):
-                g[i,j] = cupy.dot(xsi.conj(), b[j])
-        '''
+            g[i] = cupy.dot(xsi.conj(), b.T)
 
     c = cupy.linalg.solve(h, g)
     x = _gen_x0(c, cupy.asarray(xs))
@@ -601,10 +601,11 @@ def _qr(xs, dot, lindep=1e-14):
         xi = cupy.array(xs[i], copy=True)
         rmat[:,nv] = 0
         rmat[nv,nv] = 1
-        for j in range(nv):
-            prod = dot(qs[j].conj(), xi)
-            xi -= qs[j] * prod
-            rmat[:,nv] -= rmat[:,j] * prod
+
+        prod = dot(qs[:nv].conj(), xi)
+        xi -= cupy.dot(qs[:nv].T, prod)
+        rmat[:,nv] -= cupy.dot(rmat[:,:nv], prod)
+
         innerprod = dot(xi.conj(), xi).real
         norm = cupy.sqrt(innerprod)
         if innerprod > lindep:
@@ -614,7 +615,17 @@ def _qr(xs, dot, lindep=1e-14):
     return qs[:nv], cupy.linalg.inv(rmat[:nv,:nv])
 
 def _gen_x0(v, xs):
-    return cupy.dot(v.T, xs)
+    ndim = v.ndim
+    if ndim == 1:
+        v = v[:,None]
+    space, nroots = v.shape
+    x0 = cupy.einsum('c,x->cx', v[space-1], cupy.asarray(xs[space-1]))
+    for i in reversed(range(space-1)):
+        xsi = cupy.asarray(xs[i])
+        x0 += cupy.expand_dims(v[i],-1) * xsi
+    if ndim == 1:
+        x0 = x0[0]
+    return x0
 
 def empty_mapped(shape, dtype=float, order='C'):
     '''(experimental)

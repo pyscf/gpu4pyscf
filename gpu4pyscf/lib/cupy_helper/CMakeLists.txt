@@ -20,7 +20,7 @@
 add_library(cupy_helper SHARED
   transpose.cu
   block_diag.cu
-  contract_cderi_k.cu
+  unpack.cu
   take_last2d.cu
   async_d2h_2d.cu
   add_sparse.cu

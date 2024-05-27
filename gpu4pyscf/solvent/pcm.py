@@ -22,16 +22,17 @@ import numpy
 import cupy
 import cupyx.scipy as scipy
 from pyscf import lib
-from pyscf import gto, df
+from pyscf import gto
 from pyscf.dft import gen_grid
 from pyscf.data import radii
-from pyscf.solvent import ddcosmo#, _attach_solvent
+from pyscf.solvent import ddcosmo
 from gpu4pyscf.solvent import _attach_solvent
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import dist_matrix
+from gpu4pyscf.lib.cupy_helper import dist_matrix, load_library
 
 libdft = lib.load_library('libdft')
+libsolvent = load_library('libsolvent')
 
 @lib.with_doc(_attach_solvent._for_scf.__doc__)
 def pcm_for_scf(mf, solvent_obj=None, dm=None):
@@ -179,7 +180,7 @@ def get_F_A(surface):
     A = weights*R_vdw**2*switch_fun
     return switch_fun, A
 
-def get_D_S(surface, with_S=True, with_D=False):
+def get_D_S_slow(surface, with_S=True, with_D=False):
     '''
     generate D and S matrix in  J. Chem. Phys. 133, 244111 (2010)
     The diagonal entries of S is not filled
@@ -192,8 +193,6 @@ def get_D_S(surface, with_S=True, with_D=False):
 
     xi_i, xi_j = cupy.meshgrid(charge_exp, charge_exp, indexing='ij')
     xi_ij = xi_i * xi_j / (xi_i**2 + xi_j**2)**0.5
-    #rij = scipy.spatial.distance.cdist(grid_coords, grid_coords)
-    #rij = cupy.sum((grid_coords[:,None,:] - grid_coords[None,:,:])**2, axis=2)**0.5
     rij = dist_matrix(grid_coords, grid_coords)
     xi_r_ij = xi_ij * rij
     cupy.fill_diagonal(rij, 1)
@@ -202,17 +201,40 @@ def get_D_S(surface, with_S=True, with_D=False):
 
     D = None
     if with_D:
-        #drij = cupy.expand_dims(grid_coords, axis=1) - grid_coords
-        #nri = cupy.sum(grid_coords * norm_vec, axis=-1)
-        #nrij = cupy.expand_dims(nri, axis=1) - nri
-        #cupy.expand_dims(grid_coords, axis=1) * norm_vec
         nrij = grid_coords.dot(norm_vec.T) - cupy.sum(grid_coords * norm_vec, axis=-1)
-
-        #nrij = cupy.sum(drij * norm_vec, axis=-1)
-
         D = S*nrij/rij**2 -2.0*xi_r_ij/PI**0.5*cupy.exp(-xi_r_ij**2)*nrij/rij**3
         cupy.fill_diagonal(D, -charge_exp * (2.0 / PI)**0.5 / (2.0 * R_vdw))
+    return D, S
 
+def get_D_S(surface, with_S=True, with_D=False, stream=None):
+    ''' Efficiently generating D matrix and S matrix in PCM models '''
+    charge_exp  = surface['charge_exp']
+    grid_coords = surface['grid_coords']
+    switch_fun  = surface['switch_fun']
+    norm_vec    = surface['norm_vec']
+    R_vdw       = surface['R_vdw']
+    n = charge_exp.shape[0]
+    S = cupy.empty([n,n])
+    D = None
+    S_ptr = ctypes.cast(S.data.ptr, ctypes.c_void_p)
+    D_ptr = lib.c_null_ptr()
+    if with_D:
+        D = cupy.empty([n,n])
+        D_ptr = ctypes.cast(D.data.ptr, ctypes.c_void_p)
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    err = libsolvent.pcm_d_s(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        D_ptr, S_ptr,
+        ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(norm_vec.data.ptr, ctypes.c_void_p),
+        ctypes.cast(R_vdw.data.ptr, ctypes.c_void_p),
+        ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
+        ctypes.cast(switch_fun.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n)
+    )
+    if err != 0:
+        raise RuntimeError('Failed in generating PCM D and S matrices.')
     return D, S
 
 class PCM(lib.StreamObject):
@@ -222,32 +244,52 @@ class PCM(lib.StreamObject):
         'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
         'equilibrium_solvation', 'e', 'v',
     }
-
+    from gpu4pyscf.lib.utils import to_gpu, device
     kernel = ddcosmo.DDCOSMO.kernel
 
     def __init__(self, mol):
-        ddcosmo.DDCOSMO.__init__(self, mol)
+        self.mol = mol
+        self.stdout = mol.stdout
+        self.verbose = mol.verbose
+        self.max_memory = mol.max_memory
         self.method = 'C-PCM'
+
         self.vdw_scale = 1.2 # default value in qchem
+        self.surface = {}
         self.r_probe = 0.0
         self.radii_table = None
-        self.surface = {}
+        self.atom_radii = None
+        self.lebedev_order = 29
         self._intermediates = {}
+        self.eps = 78.3553
+
+        self.max_cycle = 20
+        self.conv_tol = 1e-7
+        self.state_id = 0
+
+        self.frozen = False
+        self.equilibrium_solvation = False
+
+        self.e = None
+        self.v = None
+        self._dm = None
 
     def dump_flags(self, verbose=None):
         logger.info(self, '******** %s ********', self.__class__)
         logger.info(self, 'lebedev_order = %s (%d grids per sphere)',
                     self.lebedev_order, gen_grid.LEBEDEV_ORDER[self.lebedev_order])
-        logger.info(self, 'lmax = %s'         , self.lmax)
-        logger.info(self, 'eta = %s'          , self.eta)
         logger.info(self, 'eps = %s'          , self.eps)
         logger.info(self, 'frozen = %s'       , self.frozen)
         logger.info(self, 'equilibrium_solvation = %s', self.equilibrium_solvation)
         logger.debug2(self, 'radii_table %s', self.radii_table)
         if self.atom_radii:
             logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
-        self.grids.dump_flags(verbose)
         return self
+
+    def to_cpu(self):
+        from gpu4pyscf.lib.utils import to_cpu
+        obj = to_cpu(self)
+        return obj.reset()
 
     def build(self, ng=None):
         if self.radii_table is None:
@@ -271,7 +313,7 @@ class PCM(lib.StreamObject):
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0/2.0)
             K = S
             R = -f_epsilon * cupy.eye(K.shape[0])
-        elif self.method.upper() in ['IEF-PCM', 'IEFPCM', 'SMD']:
+        elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
             DA = D*A
             DAS = cupy.dot(DA, S)
@@ -301,7 +343,6 @@ class PCM(lib.StreamObject):
         atom_coords = mol.atom_coords(unit='B')
         atom_charges = mol.atom_charges()
 
-        # Move this to GPU
         auxmol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
         intopt.build(1e-14, diag_block_with_triu=False, aosym=True, group_size=256)
@@ -385,7 +426,6 @@ class PCM(lib.StreamObject):
     def reset(self, mol=None):
         if mol is not None:
             self.mol = mol
-            self.grids.reset(mol)
         self._intermediates = None
         self.surface = None
         self.intopt = None

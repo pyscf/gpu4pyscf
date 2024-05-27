@@ -127,9 +127,6 @@ class KnownValues(unittest.TestCase):
         h = hobj.kernel()
         assert numpy.abs(lib.fp(h) - 2.187025544697092) < 1e-4
 
-
-
-
 if __name__ == "__main__":
     print("Full tests for to_gpu module")
     unittest.main()
