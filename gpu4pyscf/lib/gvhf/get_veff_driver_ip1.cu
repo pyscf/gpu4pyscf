@@ -194,7 +194,6 @@ int GINTget_veff_ip1(BasisProdCache *bpcache,
     offsets.bas_kl = bas_pairs_locs[cp_kl_id] + bas_kl0;
     offsets.primitive_ij = primitive_pairs_locs[cp_ij_id] + bas_ij0 * envs.nprim_ij;
     offsets.primitive_kl = primitive_pairs_locs[cp_kl_id] + bas_kl0 * envs.nprim_kl;
-    offsets.log_cutoff = log_cutoff;
 
     int err = GINTrun_tasks_get_veff_ip1(&jk, &offsets, &envs);
     if (err != 0) {
