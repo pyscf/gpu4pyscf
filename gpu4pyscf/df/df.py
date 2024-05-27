@@ -30,13 +30,9 @@ from cupyx import scipy
 
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
-<<<<<<< HEAD
-LINEAR_DEP_TOL = incore.LINEAR_DEP_THR
-=======
 
 # TODO: reuse the setting in pyscf 2.6
 LINEAR_DEP_THR = 1e-6#incore.LINEAR_DEP_THR
->>>>>>> master
 
 class DF(lib.StreamObject):
     from gpu4pyscf.lib.utils import to_gpu, device
