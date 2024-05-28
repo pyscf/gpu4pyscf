@@ -46,7 +46,7 @@ def setUpModule():
     mol_copy = mol_sph.copy()
     coords = mol_sph.atom_coords(unit='Bohr')
     coords[:,1] += 100
-    mol_copy.set_geom_(coords)
+    mol_copy.set_geom_(coords, unit='Bohr')
     mol2 = mol_sph + mol_copy
 
 def tearDownModule():
@@ -70,7 +70,6 @@ class KnownValues(unittest.TestCase):
     def test_rhf_cart(self):
         mf = gpu_scf.RHF(mol_cart)
         mf.max_cycle = 50
-        mf.verbose = 5
         mf.conv_tol = 1e-9
         e_tot = mf.kernel()
         assert np.abs(e_tot - -76.0668120924) < 1e-5
@@ -78,7 +77,6 @@ class KnownValues(unittest.TestCase):
     def test_uhf(self):
         mf = gpu_scf.UHF(mol_cart)
         mf.max_cycle = 50
-        mf.verbose = 5
         mf.conv_tol = 1e-9
         e_gpu = mf.kernel()
 
@@ -89,7 +87,6 @@ class KnownValues(unittest.TestCase):
     def test_uhf_cart(self):
         mf = gpu_scf.UHF(mol_cart)
         mf.max_cycle = 50
-        mf.verbose = 5
         mf.conv_tol = 1e-9
         e_gpu = mf.kernel()
 
@@ -100,7 +97,6 @@ class KnownValues(unittest.TestCase):
     def test_screening(self):
         mf = gpu_scf.RHF(mol2)
         mf.max_cycle = 50
-        mf.verbose = 5
         mf.conv_tol = 1e-9
         e_tot = mf.kernel()
         assert np.abs(e_tot - -76.0667232412 * 2.0) < 1e-5
