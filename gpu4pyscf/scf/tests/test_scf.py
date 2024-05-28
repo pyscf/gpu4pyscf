@@ -23,16 +23,15 @@ from pyscf import dft as cpu_dft
 from gpu4pyscf import scf as gpu_scf
 from gpu4pyscf import dft as gpu_dft
 
-lib.num_threads(8)
-
-atom = '''
+def setUpModule():
+    global mol_sph, mol_cart, mol2
+    atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
-bas='def2-qzvpp'
-def setUpModule():
-    global mol_sph, mol_cart, mol2
+    bas='def2-qzvpp'
+
     mol_sph = pyscf.M(atom=atom, basis=bas, max_memory=32000)
     mol_sph.output = '/dev/null'
     mol_sph.verbose = 0
@@ -43,11 +42,18 @@ def setUpModule():
     mol_cart.verbose = 0
     mol_cart.build()
 
-    mol_copy = mol_sph.copy()
-    coords = mol_sph.atom_coords(unit='Bohr')
-    coords[:,1] += 100
-    mol_copy.set_geom_(coords, unit='Bohr')
-    mol2 = mol_sph + mol_copy
+    atom = '''
+O       0.0000000000    -0.0000000000     0.1174000000
+H      -0.7570000000    -0.0000000000    -0.4696000000
+H       0.7570000000     0.0000000000    -0.4696000000
+O       0.0000000000    100.0000000000     0.1174000000
+H      -0.7570000000    100.0000000000    -0.4696000000
+H       0.7570000000    100.0000000000    -0.4696000000
+'''
+    mol2 = pyscf.M(atom=atom, basis=bas, max_memory=32000)
+    mol2.output = '/dev/null'
+    mol2.verbose = 0
+    mol2.build()
 
 def tearDownModule():
     global mol_sph, mol_cart, mol2
@@ -75,7 +81,7 @@ class KnownValues(unittest.TestCase):
         assert np.abs(e_tot - -76.0668120924) < 1e-5
 
     def test_uhf(self):
-        mf = gpu_scf.UHF(mol_cart)
+        mf = gpu_scf.UHF(mol_sph)
         mf.max_cycle = 50
         mf.conv_tol = 1e-9
         e_gpu = mf.kernel()
