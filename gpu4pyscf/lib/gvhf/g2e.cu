@@ -60,11 +60,6 @@ void GINTint2e_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    double log_q_ij = offsets.log_q_ij[task_ij];
-    double log_q_kl = offsets.log_q_kl[task_kl];
-    if (is_skip(jk, log_q_ij, log_q_kl, ish, jsh, ksh, lsh, offsets.log_cutoff)){
-        active = false;
-    }
 
     double g[GSIZE];
 

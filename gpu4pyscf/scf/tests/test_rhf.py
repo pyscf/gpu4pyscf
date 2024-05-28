@@ -257,14 +257,13 @@ class KnownValues(unittest.TestCase):
         e_ref = -151.1150439066
         assert np.abs(e_tot - e_ref) < 1e-5
 
-    '''
     def test_rhf_d4(self):
         mf = scf.RHF(mol)
         mf.disp = 'd4'
         e_tot = mf.kernel()
-        e_ref = -151.08447712520285
+        e_ref = -151.09634038447925
         assert np.abs(e_tot - e_ref) < 1e-5
-    '''
+
     # TODO:
     #test analyze
     #test mulliken_pop

@@ -180,8 +180,7 @@ int GINTbuild_jk(BasisProdCache *bpcache,
     jk.dm_sh = dm_sh;
     jk.nshls = nshls;
     BasisProdOffsets offsets;
-    offsets.log_q_ij = log_q_ij;
-    offsets.log_q_kl = log_q_kl;
+
     int *bas_pairs_locs = bpcache->bas_pairs_locs;
     int *primitive_pairs_locs = bpcache->primitive_pairs_locs;
     for (kl_bin = 0; kl_bin < nbins_kl; kl_bin++) {
@@ -217,7 +216,6 @@ int GINTbuild_jk(BasisProdCache *bpcache,
         offsets.bas_kl = bas_pairs_locs[cp_kl_id] + bas_kl0;
         offsets.primitive_ij = primitive_pairs_locs[cp_ij_id] + bas_ij0 * envs.nprim_ij;
         offsets.primitive_kl = primitive_pairs_locs[cp_kl_id] + bas_kl0 * envs.nprim_kl;
-        offsets.log_cutoff = log_cutoff;
 
         int err = GINTrun_tasks_jk(&jk, &offsets, &envs);
         if (err != 0) {
