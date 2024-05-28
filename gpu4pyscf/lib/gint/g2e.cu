@@ -27,8 +27,7 @@
 // TODO: prime basis into different thread
 
 template <int NROOTS> __device__
-static void GINTg0_2e_2d4d(GINTEnvVars envs, double* __restrict__ g, double*__restrict__ uw, double norm,
-                    int ish, int jsh, int ksh, int lsh, int prim_ij, int prim_kl)
+static void GINTg0_2e_2d4d(GINTEnvVars envs, double* __restrict__ g, double norm, int ish, int jsh, int ksh, int lsh, int prim_ij, int prim_kl)
 {
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
@@ -36,33 +35,38 @@ static void GINTg0_2e_2d4d(GINTEnvVars envs, double* __restrict__ g, double*__re
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
     double aij = a12[prim_ij];
+    double xij = x12[prim_ij];
+    double yij = y12[prim_ij];
+    double zij = z12[prim_ij];
     double akl = a12[prim_kl];
-    double eij = e12[prim_ij];
-    double ekl = e12[prim_kl];
+    double xkl = x12[prim_kl];
+    double ykl = y12[prim_kl];
+    double zkl = z12[prim_kl];
+
+    double xijxkl = xij - xkl;
+    double yijykl = yij - ykl;
+    double zijzkl = zij - zkl;
     double aijkl = aij + akl;
     double a1 = aij * akl;
     double a0 = a1 / aijkl;
     double omega = envs.omega;
-    double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+    double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
     a0 *= theta;
-    //double fac = eij * ekl / (sqrt(aijkl) * a1);
+
+    double eij = e12[prim_ij];
+    double ekl = e12[prim_kl];
     double fac = eij * ekl * sqrt(a0 / (a1 * a1 * a1));
-    
+    double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
+    double uw[NROOTS*2];
+    GINTrys_root<NROOTS>(x, uw);
+    GINTscale_u<NROOTS>(uw, theta);
+
     double* __restrict__ u = uw;
     double* __restrict__ w = u + NROOTS;
     double* __restrict__ gx = g;
     double* __restrict__ gy = g + envs.g_size;
     double* __restrict__ gz = g + envs.g_size * 2;
 
-    double xij = x12[prim_ij];
-    double yij = y12[prim_ij];
-    double zij = z12[prim_ij];
-    double xkl = x12[prim_kl];
-    double ykl = y12[prim_kl];
-    double zkl = z12[prim_kl];
-    double xijxkl = xij - xkl;
-    double yijykl = yij - ykl;
-    double zijzkl = zij - zkl;
     int nbas = c_bpcache.nbas;
     double* __restrict__ bas_x = c_bpcache.bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
@@ -100,7 +104,7 @@ static void GINTg0_2e_2d4d(GINTEnvVars envs, double* __restrict__ g, double*__re
     double s0z, s1z, s2z, t0z, t1z;
     double u2, tmp1, tmp2, tmp3, tmp4;
     double b00, b10, b01, c00x, c00y, c00z, c0px, c0py, c0pz;
-    
+
     for (i = 0; i < NROOTS; ++i) {
         gx[i] = norm;
         gy[i] = fac;
@@ -115,7 +119,7 @@ static void GINTg0_2e_2d4d(GINTEnvVars envs, double* __restrict__ g, double*__re
         c00x = xijxi - tmp2 * xijxkl;
         c00y = yijyi - tmp2 * yijykl;
         c00z = zijzi - tmp2 * zijzkl;
-        
+
         if (nmax > 0) {
             // gx(irys,0,1) = c00(irys) * gx(irys,0,0)
             // gx(irys,0,n+1) = c00(irys)*gx(irys,0,n) + n*b10(irys)*gx(irys,0,n-1)
@@ -429,7 +433,7 @@ template <int NROOTS> __device__
 static void GINTnabla1i_2e(GINTEnvVars envs, double *f, double *g, double ai2, int li, int lj, int lk){
     // reference code
     // https://github.com/sunqm/libcint/blob/be610546b935049d0cf65c1099244d45b2ff4e5e/src/g2e.c#L1829
-    
+
     int n, ptr;
     int di = envs.stride_i;
     int dj = envs.stride_j;
@@ -474,7 +478,7 @@ template <int NROOTS> __device__
 static void GINTnabla1j_2e(GINTEnvVars envs, double *f, double *g, double aj2, int li, int lj, int lk){
     // reference code
     // https://github.com/sunqm/libcint/blob/be610546b935049d0cf65c1099244d45b2ff4e5e/src/g2e.c#L1829
-    
+
     int n, ptr;
     int di = envs.stride_i;
     int dj = envs.stride_j;
@@ -491,7 +495,7 @@ static void GINTnabla1j_2e(GINTEnvVars envs, double *f, double *g, double aj2, i
     double *p2x = gx + dj;
     double *p2y = gy + dj;
     double *p2z = gz + dj;
-    
+
     for (int k = 0; k <= lk; k++){
         ptr = dk * k;
         for (int i = 0; i <= li; i++) {
@@ -524,7 +528,7 @@ template <int NROOTS> __device__
 static void GINTnabla1k_2e(GINTEnvVars envs, double *f, double *g, double ak2, int li, int lj, int lk){
     // reference code
     // https://github.com/sunqm/libcint/blob/be610546b935049d0cf65c1099244d45b2ff4e5e/src/g2e.c#L1829
-    
+
     int n, ptr;
     int di = envs.stride_i;
     int dj = envs.stride_j;
@@ -541,7 +545,7 @@ static void GINTnabla1k_2e(GINTEnvVars envs, double *f, double *g, double ak2, i
     double *p2x = gx + dk;
     double *p2y = gy + dk;
     double *p2z = gz + dk;
-    
+
     for (int j = 0; j <= lj; j++) {
         ptr = dj * j;
         for (int i = 0; i <= li; i++){
@@ -554,7 +558,7 @@ static void GINTnabla1k_2e(GINTEnvVars envs, double *f, double *g, double ak2, i
             ptr += di;
         }
     }
-    
+
     for (int k = 1; k <= lk; k++){
         for (int j = 0; j <= lj; j++){
             ptr = dj * j + dk * k;

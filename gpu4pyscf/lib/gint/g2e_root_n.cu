@@ -47,7 +47,7 @@ static void GINTfill_int2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffs
     double gout[GOUTSIZE];
     double *g = gout + envs.nf;
     int i;
-    
+
     for (i = 0; i < envs.nf; ++i) {
         gout[i] = 0;
     }
@@ -68,7 +68,7 @@ static void GINTfill_int2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffs
         as_ksh = lsh;
         as_lsh = ksh;
     }
-    
+
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
         GINTg0_2e_2d4d<NROOTS>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
@@ -91,9 +91,9 @@ void GINTfill_int2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets off
         return;
     }
 
+    double norm = envs.fac;
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = envs.fac;
     int nprim_ij = envs.nprim_ij;
     int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
@@ -104,7 +104,6 @@ void GINTfill_int2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets off
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    double uw[NROOTS*2];
     double gout[GOUTSIZE];
     double *g = gout + envs.nf;
     int i;
@@ -112,10 +111,6 @@ void GINTfill_int2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets off
         gout[i] = 0;
     }
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
     int ij, kl;
     int as_ish, as_jsh, as_ksh, as_lsh;
     if (envs.ibase) {
@@ -134,23 +129,7 @@ void GINTfill_int2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets off
     }
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        double aij = a12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
-        double akl = a12[kl];
-        double xkl = x12[kl];
-        double ykl = y12[kl];
-        double zkl = z12[kl];
-        double xijxkl = xij - xkl;
-        double yijykl = yij - ykl;
-        double zijzkl = zij - zkl;
-        double aijkl = aij + akl;
-        double a1 = aij * akl;
-        double a0 = a1 / aijkl;
-        double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        GINTrys_root<NROOTS>(x, uw);
-        GINTg0_2e_2d4d<NROOTS>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+        GINTg0_2e_2d4d<NROOTS>(envs, g, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
         GINTgout2e<NROOTS>(envs, gout, g);
     } }
 

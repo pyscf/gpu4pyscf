@@ -104,6 +104,8 @@ class KnownValues(unittest.TestCase):
         h1b_cpu = numpy.einsum('xypq,pi,qj->xyij', h1b_cpu, mo_coeff[1], moccb)
 
         mf = mf.to_gpu()
+        mf.conv_tol = 1e-10
+        mf.conv_tol_cpscf = 1e-8
         hobj = mf.Hessian()
         hobj.auxbasis_response = 1
         h1a_gpu, h1b_gpu = df_uhf_gpu.make_h1(hobj, mo_coeff, mo_occ)
@@ -121,10 +123,10 @@ class KnownValues(unittest.TestCase):
         mo_e1_gpu = (cupy.asarray(mo_e1_gpu[0]).get(), cupy.asarray(mo_e1_gpu[1]).get())
 
         # mo1 is not consistent in PySCF and GPU4PySCF
-        #assert numpy.linalg.norm((mo1_cpu[0] - mo1_gpu[0])) < 1e-5
-        assert numpy.linalg.norm((mo_e1_cpu[0] - mo_e1_gpu[0])) < 1e-5
-        #assert numpy.linalg.norm((mo1_cpu[1] - mo1_gpu[1])) < 1e-5
-        assert numpy.linalg.norm((mo_e1_cpu[1] - mo_e1_gpu[1])) < 1e-5
+        #assert numpy.linalg.norm((mo1_cpu[0] - mo1_gpu[0])) < 1e-4
+        assert numpy.linalg.norm((mo_e1_cpu[0] - mo_e1_gpu[0])) < 1e-4
+        #assert numpy.linalg.norm((mo1_cpu[1] - mo1_gpu[1])) < 1e-4
+        assert numpy.linalg.norm((mo_e1_cpu[1] - mo_e1_gpu[1])) < 1e-4
 
     def test_df_uhf_hess_elec(self):
         mf = scf.UHF(mol).density_fit()

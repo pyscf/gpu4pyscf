@@ -28,7 +28,7 @@ from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 
 LMAX_ON_GPU = 7
-DSOLVE_LINDEP = 1e-12
+DSOLVE_LINDEP = 1e-13
 
 c2s_l = mole.get_cart2sph(lmax=LMAX_ON_GPU)
 c2s_data = cupy.concatenate([x.ravel() for x in c2s_l])
