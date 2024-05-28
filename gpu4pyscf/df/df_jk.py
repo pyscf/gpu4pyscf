@@ -274,6 +274,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
 
     rows = dfobj.intopt.cderi_row
     cols = dfobj.intopt.cderi_col
+    
     if with_j:
         dm_sparse = dms[:,rows,cols]
         dm_sparse[:, dfobj.intopt.cderi_diag] *= .5

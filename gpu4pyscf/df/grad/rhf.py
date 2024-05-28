@@ -72,7 +72,6 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     if not hasattr(with_df, 'intopt') or with_df._cderi is None:
         with_df.build(omega=omega)
     intopt = with_df.intopt
-
     naux = with_df.naux
 
     log = logger.new_logger(mol, mol.verbose)
@@ -166,7 +165,6 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     # rebuild with aosym
     intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False,
                  group_size_aux=block_size)#, group_size=block_size)
-
     if not intopt._mol.cart:
         # sph2cart for ao
         cart2sph = intopt.cart2sph

@@ -56,14 +56,15 @@ def solve_nos1(fvind, mo_energy, mo_occ, h1,
     e_a = mo_energy[mo_occ==0]
     e_i = mo_energy[mo_occ>0]
     I, A = cupy.meshgrid(e_i, e_a)
-    e_ai = 1 / (A - I)#cupy.einsum('a,i->ai', e_a, e_i)
+    e_ai = 1 / (A - I)
     mo1base = h1 * -e_ai
+    nvir, nocc = e_ai.shape
 
     def vind_vo(mo1):
-        v = fvind(mo1.reshape(h1.shape)).reshape(h1.shape)
+        v = fvind(mo1.reshape(-1,nvir,nocc)).reshape(-1,nvir,nocc)
         v *= e_ai
-        return v.ravel()
-    mo1 = krylov(vind_vo, mo1base.ravel(),
+        return v.reshape(-1,nvir*nocc)
+    mo1 = krylov(vind_vo, mo1base.reshape(-1,nvir*nocc),
                      tol=tol, max_cycle=max_cycle, hermi=hermi, verbose=log)
     log.timer('krylov solver in CPHF', *t0)
     return mo1.reshape(h1.shape), None

@@ -400,21 +400,14 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
             occ_coeff = cupy.asarray(mo_coeff[:,mo_occ>0])
             dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
 
-    # use optimized workflow if possible
-    if hasattr(mf, 'init_workflow'):
-        mf.init_workflow(dm0=dm)
-        h1e = mf.h1e
-        s1e = mf.s1e
-    else:
-        h1e = cupy.asarray(mf.get_hcore(mol))
-        s1e = cupy.asarray(mf.get_ovlp(mol))
-
+    h1e = cupy.asarray(mf.get_hcore(mol))
+    s1e = cupy.asarray(mf.get_ovlp(mol))
+    
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     logger.info(mf, 'init E= %.15g', e_tot)
     t1 = log.timer_debug1('total prep', *t0)
     scf_conv = False
-
     if isinstance(mf.diis, lib.diis.DIIS):
         mf_diis = mf.diis
     elif mf.diis:
@@ -426,7 +419,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         _, mf_diis.Corth = mf.eig(fock, s1e)
     else:
         mf_diis = None
-
+    
     for cycle in range(mf.max_cycle):
         t0 = log.init_timer()
         dm_last = dm

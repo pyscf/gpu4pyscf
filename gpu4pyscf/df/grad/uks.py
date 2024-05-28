@@ -33,7 +33,7 @@ def get_veff(ks_grad, mol=None, dm=None):
     if mol is None: mol = ks_grad.mol
     if dm is None: dm = ks_grad.base.make_rdm1()
     t0 = (logger.process_clock(), logger.perf_counter())
-
+    
     mf = ks_grad.base
     ni = mf._numint
     if ks_grad.grids is not None:
@@ -131,7 +131,7 @@ def get_veff(ks_grad, mol=None, dm=None):
         e1_aux = None
 
     vxc = tag_array(vxc, aux=e1_aux)
-
+    
     return vxc
 
 

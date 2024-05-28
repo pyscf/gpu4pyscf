@@ -87,8 +87,11 @@ def basis_seg_contraction(mol, allow_replica=False):
             bas_of_ia = np.vstack(bas_of_ia)
             bas_templates[key] = bas_of_ia
         _bas.append(bas_of_ia)
-
+    
     pmol = copy.copy(mol)
+    pmol.output = mol.output
+    pmol.verbose = mol.verbose
+    pmol.stdout = mol.stdout
     pmol.cart = True
     pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
     pmol._env = _env
@@ -126,6 +129,7 @@ class VHFOpt(_vhf.VHFOpt):
     def __init__(self, mol, auxmol, intor, prescreen='CVHFnoscreen',
                  qcondname='CVHFsetnr_direct_scf', dmcondname=None):
         # use local basis_seg_contraction for efficiency
+        # TODO: switch _mol and mol
         self.mol = basis_seg_contraction(mol,allow_replica=True)
         self.auxmol = basis_seg_contraction(auxmol, allow_replica=True)
         self._mol = mol
@@ -171,7 +175,8 @@ class VHFOpt(_vhf.VHFOpt):
 
     def clear(self):
         _vhf.VHFOpt.__del__(self)
-        libgvhf.GINTdel_basis_prod(ctypes.byref(self.bpcache))
+        if self.bpcache is not None:
+            libgvhf.GINTdel_basis_prod(ctypes.byref(self.bpcache))
         return self
 
     def __del__(self):
@@ -187,17 +192,23 @@ class VHFOpt(_vhf.VHFOpt):
         a tot_mol is created with concatenating [mol, fake_mol, aux_mol]
         we will pair (ao,ao) and (aux,1) separately.
         '''
-        cput0 = logger.init_timer(self.mol)
-        sorted_mol, sorted_idx, uniq_l_ctr, l_ctr_counts = sort_mol(self.mol)
+        _mol = self._mol
+        _auxmol = self._auxmol
+        mol = self.mol
+        auxmol = self.auxmol
+
+        log = logger.new_logger(_mol, _mol.verbose)
+        cput0 = log.init_timer()
+        sorted_mol, sorted_idx, uniq_l_ctr, l_ctr_counts = sort_mol(mol, log=log)
         if group_size is not None :
             uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size)
 
         # sort fake mol
         fake_mol = make_fake_mol()
-        _, _, fake_uniq_l_ctr, fake_l_ctr_counts = sort_mol(fake_mol)
+        _, _, fake_uniq_l_ctr, fake_l_ctr_counts = sort_mol(fake_mol, log=log)
 
         # sort auxiliary mol
-        sorted_auxmol, sorted_aux_idx, aux_uniq_l_ctr, aux_l_ctr_counts = sort_mol(self.auxmol)
+        sorted_auxmol, sorted_aux_idx, aux_uniq_l_ctr, aux_l_ctr_counts = sort_mol(auxmol, log=log)
         if group_size_aux is not None:
             aux_uniq_l_ctr, aux_l_ctr_counts = _split_l_ctr_groups(aux_uniq_l_ctr, aux_l_ctr_counts, group_size_aux)
 
@@ -212,13 +223,13 @@ class VHFOpt(_vhf.VHFOpt):
 
         # TODO: is it more accurate to filter with overlap_cond (or exp_cond)?
         q_cond = self.get_q_cond()
-        cput1 = logger.timer_debug1(sorted_mol, 'Initialize q_cond', *cput0)
+        cput1 = log.timer_debug1('Initialize q_cond', *cput0)
         l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
         log_qs, pair2bra, pair2ket = get_pairing(
             l_ctr_offsets, l_ctr_offsets, q_cond,
             diag_block_with_triu=diag_block_with_triu, aosym=aosym)
         self.log_qs = log_qs.copy()
-        cput1 = logger.timer_debug1(sorted_mol, 'Get pairing', *cput1)
+        cput1 = log.timer_debug1('Get pairing', *cput1)
 
         # contraction coefficient for ao basis
         cart_ao_loc = sorted_mol.ao_loc_nr(cart=True)
@@ -227,12 +238,12 @@ class VHFOpt(_vhf.VHFOpt):
         self.sph_ao_loc = [sph_ao_loc[cp] for cp in l_ctr_offsets]
         self.angular = [l[0] for l in uniq_l_ctr]
 
-        cart_ao_loc = self.mol.ao_loc_nr(cart=True)
-        sph_ao_loc = self.mol.ao_loc_nr(cart=False)
+        cart_ao_loc = mol.ao_loc_nr(cart=True)
+        sph_ao_loc = mol.ao_loc_nr(cart=False)
         nao = sph_ao_loc[-1]
         ao_idx = np.array_split(np.arange(nao), sph_ao_loc[1:-1])
         self.sph_ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
-
+        
         # cartesian ao index
         nao = cart_ao_loc[-1]
         ao_idx = np.array_split(np.arange(nao), cart_ao_loc[1:-1])
@@ -240,15 +251,15 @@ class VHFOpt(_vhf.VHFOpt):
         ncart = cart_ao_loc[-1]
         nsph = sph_ao_loc[-1]
         self.cart2sph = block_c2s_diag(ncart, nsph, self.angular, l_ctr_counts)
-
-        if self._mol.cart:
+        
+        if _mol.cart:
             inv_idx = np.argsort(self.cart_ao_idx, kind='stable').astype(np.int32)
             self.coeff = cupy.eye(ncart)[:,inv_idx]
         else:
             inv_idx = np.argsort(self.sph_ao_idx, kind='stable').astype(np.int32)
             self.coeff = self.cart2sph[:, inv_idx]
-        cput1 = logger.timer_debug1(sorted_mol, 'AO cart2sph coeff', *cput1)
-
+        cput1 = log.timer_debug1('AO cart2sph coeff', *cput1)
+        
         # pairing auxiliary basis with fake basis set
         fake_l_ctr_offsets = np.append(0, np.cumsum(fake_l_ctr_counts))
         fake_l_ctr_offsets += l_ctr_offsets[-1]
@@ -275,23 +286,23 @@ class VHFOpt(_vhf.VHFOpt):
         nsph = sph_aux_loc[-1]
         self.aux_cart2sph = block_c2s_diag(ncart, nsph, self.aux_angular, aux_l_ctr_counts)
 
-        if self._auxmol.cart:
+        if _auxmol.cart:
             inv_idx = np.argsort(self.cart_aux_idx, kind='stable').astype(np.int32)
             self.aux_coeff = cupy.eye(ncart)[:,inv_idx]
         else:
             inv_idx = np.argsort(self.sph_aux_idx, kind='stable').astype(np.int32)
             self.aux_coeff = self.aux_cart2sph[:, inv_idx]
         aux_l_ctr_offsets += fake_l_ctr_offsets[-1]
-        cput1 = logger.timer_debug1(tot_mol, 'aux cart2sph coeff', *cput1)
+        cput1 = log.timer_debug1('aux cart2sph coeff', *cput1)
 
-        ao_loc = sorted_mol.ao_loc_nr(cart=self._mol.cart)
+        ao_loc = sorted_mol.ao_loc_nr(cart=_mol.cart)
         self.ao_pairs_row, self.ao_pairs_col = get_ao_pairs(pair2bra, pair2ket, ao_loc)
         cderi_row = cupy.hstack(self.ao_pairs_row)
         cderi_col = cupy.hstack(self.ao_pairs_col)
         self.cderi_row = cderi_row
         self.cderi_col = cderi_col
         self.cderi_diag = cupy.argwhere(cderi_row == cderi_col)[:,0]
-        cput1 = logger.timer_debug1(tot_mol, 'Get AO pairs', *cput1)
+        cput1 = log.timer_debug1('Get AO pairs', *cput1)
 
         aux_pair2bra = []
         aux_pair2ket = []
@@ -333,7 +344,7 @@ class VHFOpt(_vhf.VHFOpt):
             tot_mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(tot_mol.nbas),
             tot_mol._env.ctypes.data_as(ctypes.c_void_p))
 
-        cput1 = logger.timer_debug1(tot_mol, 'Initialize GPU cache', *cput1)
+        cput1 = log.timer_debug1('Initialize GPU cache', *cput1)
         self.bas_pairs_locs = bas_pairs_locs
         ncptype = len(self.log_qs)
         self.aosym = aosym
@@ -343,13 +354,13 @@ class VHFOpt(_vhf.VHFOpt):
             nl = int(round(np.sqrt(ncptype)))
             self.cp_idx, self.cp_jdx = np.unravel_index(np.arange(ncptype), (nl, nl))
 
-        if self._mol.cart:
+        if _mol.cart:
             self.ao_loc = self.cart_ao_loc
             self.ao_idx = self.cart_ao_idx
         else:
             self.ao_loc = self.sph_ao_loc
             self.ao_idx = self.sph_ao_idx
-        if self._auxmol.cart:
+        if _auxmol.cart:
             self.aux_ao_loc = self.cart_aux_loc
             self.aux_ao_idx = self.cart_aux_idx
         else:
@@ -1045,6 +1056,9 @@ def get_hess_nuc_elec(mol, dm):
     charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
 
     fakemol = gto.fakemol_for_charges(coords)
+    fakemol.output = mol.output
+    fakemol.verbose = mol.verbose
+    fakemol.stdout = mol.stdout
     intopt = VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
     ao_idx = intopt.ao_idx
@@ -1338,6 +1352,9 @@ def get_dh1e(mol, dm0):
     coords = mol.atom_coords()
     charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
     fakemol = gto.fakemol_for_charges(coords)
+    fakemol.output = mol.output
+    fakemol.verbose = mol.verbose
+    fakemol.stdout = mol.stdout
     intopt = VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
     dm0_sorted = take_last2d(dm0, intopt.ao_idx)
@@ -1351,7 +1368,9 @@ def get_d2h1e(mol, dm0):
     coords = mol.atom_coords()
     charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
     fakemol = gto.fakemol_for_charges(coords)
-
+    fakemol.output = mol.output
+    fakemol.stdout = mol.stdout
+    fakemol.verbose = mol.verbose
     nao = mol.nao
     d2h1e_diag = cupy.zeros([natm,9])
     d2h1e_offdiag = cupy.zeros([natm, nao, 9])
@@ -1588,21 +1607,23 @@ def get_int2c2e(mol, auxmol, direct_scf_tol=1e-13):
     int2c = int2c[np.ix_(aux_idx, aux_idx)]
     return int2c
 
-def sort_mol(mol0, cart=True):
+def sort_mol(mol0, cart=True, log=None):
     '''
     # Sort basis according to angular momentum and contraction patterns so
     # as to group the basis functions to blocks in GPU kernel.
     '''
+    if log is None:
+        log = logger.new_logger(mol0, mol0.verbose)
     mol = mol0.copy(deep=True)
     l_ctrs = mol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
-
+    
     uniq_l_ctr, _, inv_idx, l_ctr_counts = np.unique(
         l_ctrs, return_index=True, return_inverse=True, return_counts=True, axis=0)
-
+    
     if mol.verbose >= logger.DEBUG:
-        logger.debug1(mol, 'Number of shells for each [l, nctr] group')
+        log.debug1('Number of shells for each [l, nctr] group')
         for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
-            logger.debug(mol, '    %s : %s', l_ctr, n)
+            log.debug('    %s : %s', l_ctr, n)
 
     sorted_idx = np.argsort(inv_idx, kind='stable').astype(np.int32)
 

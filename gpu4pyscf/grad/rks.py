@@ -39,12 +39,12 @@ ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
 libgdft = load_library('libgdft')
 libgdft.GDFT_make_dR_dao_w.restype = ctypes.c_int
 
-def _get_veff(ks_grad, mol=None, dm=None):
+def get_veff(ks_grad, mol=None, dm=None):
     '''
     First order derivative of DFT effective potential matrix (wrt electron coordinates)
 
     Args:
-        ks_grad : grad.uhf.Gradients or grad.uks.Gradients object
+        ks_grad : grad.rhf.Gradients or grad.rks.Gradients object
     '''
     if mol is None: mol = ks_grad.mol
     if dm is None: dm = ks_grad.base.make_rdm1()
@@ -119,30 +119,24 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
+    _sorted_mol = opt._sorted_mol
     mo_occ = cupy.asarray(dms.mo_occ)
     mo_coeff = cupy.asarray(dms.mo_coeff)
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms).reshape(-1,nao0,nao0)
     dms = take_last2d(dms, opt.ao_idx)
-    #dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
-    #       for dm in dms.reshape(-1,nao0,nao0)]
-    #mo_coeff = coeff @ mo_coeff
     mo_coeff = mo_coeff[opt.ao_idx]
 
     nset = len(dms)
     assert nset == 1
-    if xctype == 'LDA':
-        ao_deriv = 1
-    else:
-        ao_deriv = 2
     vmat = cupy.zeros((nset,3,nao,nao))
     if xctype == 'LDA':
         ao_deriv = 1
-        for ao_mask, idx, weight, _ in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
+        for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
             for idm in range(nset):
                 mo_coeff_mask = mo_coeff[idx,:]
-                rho = numint.eval_rho2(opt.mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype)
+                rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype)
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                 wv = weight * vxc[0]
                 aow = numint._scale_ao(ao_mask[0], wv)
@@ -150,10 +144,10 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 add_sparse(vmat[idm], vtmp, idx)
     elif xctype == 'GGA':
         ao_deriv = 2
-        for ao_mask, idx, weight, _ in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
+        for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
             for idm in range(nset):
                 mo_coeff_mask = mo_coeff[idx,:]
-                rho = numint.eval_rho2(opt.mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype)
+                rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype)
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                 wv = weight * vxc
                 wv[0] *= .5
@@ -164,10 +158,10 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     elif xctype == 'MGGA':
         ao_deriv = 2
-        for ao_mask, idx, weight, _ in ni.block_loop(opt.mol, grids, nao, ao_deriv, max_memory):
+        for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
             for idm in range(nset):
                 mo_coeff_mask = mo_coeff[idx,:]
-                rho = numint.eval_rho2(opt.mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
+                rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                 wv = weight * vxc
                 wv[0] *= .5
@@ -194,8 +188,9 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     mo_occ = cupy.asarray(dms.mo_occ)
     mo_coeff = cupy.asarray(dms.mo_coeff)
-
-    mol = opt.mol
+    
+    mol = None
+    _sorted_mol = opt._sorted_mol
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
@@ -213,9 +208,9 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     ao_deriv = 2
     vvrho = []
     for ao_mask, mask, weight, coords \
-            in ni.block_loop(mol, grids, nao, ao_deriv, max_memory=max_memory):
+            in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         mo_coeff_mask = mo_coeff[mask]
-        rho = numint.eval_rho2(mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
+        rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
         vvrho.append(rho)
     rho = cupy.hstack(vvrho)
 
@@ -226,7 +221,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     vmat = cupy.zeros((3,nao,nao))
     p1 = 0
     for ao_mask, mask, weight, coords \
-            in ni.block_loop(mol, grids, nao, ao_deriv, max_memory):
+            in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
         p0, p1 = p1, p1 + weight.size
         wv = vv_vxc[:,p0:p1] * weight
         wv[0] *= .5  # *.5 because vmat + vmat.T at the end
@@ -323,14 +318,13 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
+    mol = None
+    _sorted_mol = opt._sorted_mol
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
     dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
            for dm in dms.reshape(-1,nao0,nao0)]
-    #nset = len(dms)
-    #make_rho, nset, nao = ni._gen_rho_evaluator(mol, dms.get(), hermi, False, grids)
-    #ao_loc = mol.ao_loc_nr()
 
     excsum = 0
     vmat = cupy.zeros((3,nao,nao))
@@ -352,8 +346,8 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         for atm_id, (coords, weight, weight1) in enumerate(grids_response_cc(grids)):
             ngrids = weight.size
             for p0, p1 in lib.prange(0,ngrids,block_size):
-                ao = numint.eval_ao(ni, opt.mol, coords[p0:p1, :], ao_deriv)
-                rho = numint.eval_rho(opt.mol, ao, dms[0],
+                ao = numint.eval_ao(ni, _sorted_mol, coords[p0:p1, :], ao_deriv)
+                rho = numint.eval_rho(_sorted_mol, ao, dms[0],
                                       xctype=xctype, hermi=1, with_lapl=False)
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
 
@@ -515,7 +509,7 @@ class Gradients(rhf_grad.Gradients):
         self.grids = None
         self.nlcgrids = None
 
-    get_veff = _get_veff
+    get_veff = get_veff
     # TODO: add grid response into this function
     def extra_force(self, atom_id, envs):
         return 0

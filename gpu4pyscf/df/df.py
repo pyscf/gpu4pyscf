@@ -33,6 +33,7 @@ ALIGNED = getattr(__config__, 'ao_aligned', 32)
 
 # TODO: reuse the setting in pyscf 2.6
 LINEAR_DEP_THR = 1e-6#incore.LINEAR_DEP_THR
+GROUP_SIZE = 256
 
 class DF(lib.StreamObject):
     from gpu4pyscf.lib.utils import to_gpu, device
@@ -85,7 +86,7 @@ class DF(lib.StreamObject):
         j2c = cupy.asarray(j2c_cpu, order='C')
         t0 = log.timer_debug1('2c2e', *t0)
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-        intopt.build(direct_scf_tol, diag_block_with_triu=False, aosym=True, group_size=256)
+        intopt.build(direct_scf_tol, diag_block_with_triu=False, aosym=True, group_size=GROUP_SIZE)
         log.timer_debug1('prepare intopt', *t0)
         self.j2c = j2c.copy()
 

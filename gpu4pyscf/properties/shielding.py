@@ -13,14 +13,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from gpu4pyscf.scf import cphf
 import numpy as np
-from pyscf.data import nist
 import cupy
+from pyscf.data import nist
 from pyscf.scf import _vhf, jk
 from gpu4pyscf.dft import numint
 from gpu4pyscf.lib.cupy_helper import contract, take_last2d, add_sparse
-
+from gpu4pyscf.scf import cphf
 
 def gen_vind(mf, mo_coeff, mo_occ):
     """get the induced potential. This is the same as contract the mo1 with the kernel.
@@ -74,6 +73,8 @@ def nr_rks(ni, mol, grids, xc_code, dms):
     if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
+    _sorted_mol = opt._sorted_mol
+
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms).reshape(-1,nao0,nao0)
@@ -86,13 +87,13 @@ def nr_rks(ni, mol, grids, xc_code, dms):
     else:
         ao_deriv = 1
 
-    for ao, index, weight, coords in ni.block_loop(opt.mol, grids, nao, ao_deriv):
+    for ao, index, weight, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
         mo_coeff_mask = mo_coeff[index,:]
-        rho = numint.eval_rho2(opt.mol, ao, mo_coeff_mask, mo_occ, None, xctype)
+        rho = numint.eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, xctype)
         vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
         if xctype == 'LDA':
             wv = weight * vxc[0]
-            giao = opt.mol.eval_gto('GTOval_ig', coords.get(), comp=3)  # (#C(0 1) g) |AO>
+            giao = _sorted_mol.eval_gto('GTOval_ig', coords.get(), comp=3)  # (#C(0 1) g) |AO>
             giao = cupy.array(giao)
             giao_aux = giao[:,:,index]
             for idirect in range(3):
@@ -102,8 +103,8 @@ def nr_rks(ni, mol, grids, xc_code, dms):
             
         elif xctype == 'GGA':
             wv = vxc * weight
-            giao = opt.mol.eval_gto('GTOval_ig', coords.get(), comp=3)
-            giao_nabla = opt.mol.eval_gto('GTOval_ipig', coords.get()).reshape(3, 3, -1, nao)
+            giao = _sorted_mol.eval_gto('GTOval_ig', coords.get(), comp=3)
+            giao_nabla = _sorted_mol.eval_gto('GTOval_ipig', coords.get()).reshape(3, 3, -1, nao)
             giao = cupy.array(giao)
             giao_nabla = cupy.array(giao_nabla)
             giao_aux = giao[:,:,index]
@@ -132,8 +133,6 @@ def nr_rks(ni, mol, grids, xc_code, dms):
 
         ao = None
 
-    # vmat = contract('pi,npq->niq', coeff, vmat)
-    # vmat = contract('qj,niq->nij', coeff, vmat)
     vmat = take_last2d(vmat, opt.rev_ao_idx)
 
     if numint.FREE_CUPY_CACHE:
@@ -227,10 +226,10 @@ def eval_shielding(mf):
         vk2 = cupy.array(vk2)
     h1ao += vk2
     tmp = contract('xuv,ua->xav', h1ao, mvir)
-    Veff_ai = contract('xav,vi->xai', tmp, mocc)
-    Veff_ai -= contract('xai,i->xai', s1ai, mo_energy[idx_occ])
-    Veff_ai = cupy.array(Veff_ai)
-    mo1 = cphf.solve(fx, mo_energy, mo_occ, Veff_ai, max_cycle=20, tol=1e-10)[0]
+    veff_ai = contract('xav,vi->xai', tmp, mocc)
+    veff_ai -= contract('xai,i->xai', s1ai, mo_energy[idx_occ])
+
+    mo1 = cphf.solve(fx, mo_energy, mo_occ, veff_ai, max_cycle=20, tol=1e-10)[0]
 
     shielding_d = cupy.empty((natom, 3, 3))
     shielding_p = cupy.empty((natom, 3, 3))
