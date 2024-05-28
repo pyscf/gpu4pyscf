@@ -42,7 +42,6 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
   int i, j, k, l, f;
 
   double norm = envs.fac;
-  double omega = envs.omega;
   int nprim_ij = envs.nprim_ij;
   int nprim_kl = envs.nprim_kl;
   int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
@@ -69,15 +68,10 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
   double * dm;
   double s_ix, s_iy, s_iz, s_jx, s_jy, s_jz;
 
-  double uw[NROOTS * 2];
   double local_cache[NROOTS * GPU_AO_LMAX + GOUTSIZE];
   memset(local_cache, 0, sizeof(double) * (NROOTS * GPU_AO_LMAX + GOUTSIZE));
   double * __restrict__ g = local_cache + NROOTS * GPU_AO_LMAX;
 
-  double* __restrict__ a12 = c_bpcache.a12;
-  double* __restrict__ x12 = c_bpcache.x12;
-  double* __restrict__ y12 = c_bpcache.y12;
-  double* __restrict__ z12 = c_bpcache.z12;
   double * __restrict__ i_exponent = c_bpcache.a1;
   double * __restrict__ j_exponent = c_bpcache.a2;
 
@@ -113,28 +107,8 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
       for (ij = prim_ij; ij < prim_ij + nprim_ij; ++ij) {
         double ai = i_exponent[ij];
         double aj = j_exponent[ij];
-        double aij = a12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
         for (kl = prim_kl; kl < prim_kl + nprim_kl; ++kl) {
-          double akl = a12[kl];
-          double xkl = x12[kl];
-          double ykl = y12[kl];
-          double zkl = z12[kl];
-          double xijxkl = xij - xkl;
-          double yijykl = yij - ykl;
-          double zijzkl = zij - zkl;
-          double aijkl = aij + akl;
-          double a1 = aij * akl;
-          double a0 = a1 / aijkl;
-          double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-          a0 *= theta;
-          double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-
-          GINTrys_root<NROOTS>(x, uw);
-          GINTscale_u<NROOTS>(uw, theta);
-          GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, uw, norm,
+          GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, norm,
                                  as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
 
           dm = jk.dm;
@@ -188,28 +162,8 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
       for (ij = prim_ij; ij < prim_ij + nprim_ij; ++ij) {
         double ai = i_exponent[ij];
         double aj = j_exponent[ij];
-        double aij = a12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
         for (kl = prim_kl; kl < prim_kl + nprim_kl; ++kl) {
-          double akl = a12[kl];
-          double xkl = x12[kl];
-          double ykl = y12[kl];
-          double zkl = z12[kl];
-          double xijxkl = xij - xkl;
-          double yijykl = yij - ykl;
-          double zijzkl = zij - zkl;
-          double aijkl = aij + akl;
-          double a1 = aij * akl;
-          double a0 = a1 / aijkl;
-          double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-          a0 *= theta;
-          double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-
-          GINTrys_root<NROOTS>(x, uw);
-          GINTscale_u<NROOTS>(uw, theta);
-          GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, uw, norm,
+          GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, norm,
                                  as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
 
           dm = jk.dm;
@@ -271,28 +225,8 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
       for (ij = prim_ij; ij < prim_ij + nprim_ij; ++ij) {
         double ai = i_exponent[ij];
         double aj = j_exponent[ij];
-        double aij = a12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
         for (kl = prim_kl; kl < prim_kl + nprim_kl; ++kl) {
-          double akl = a12[kl];
-          double xkl = x12[kl];
-          double ykl = y12[kl];
-          double zkl = z12[kl];
-          double xijxkl = xij - xkl;
-          double yijykl = yij - ykl;
-          double zijzkl = zij - zkl;
-          double aijkl = aij + akl;
-          double a1 = aij * akl;
-          double a0 = a1 / aijkl;
-          double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-          a0 *= theta;
-          double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-
-          GINTrys_root<NROOTS>(x, uw);
-          GINTscale_u<NROOTS>(uw, theta);
-          GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, uw, norm,
+          GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, norm,
                                  as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
 
           dm = jk.dm;
@@ -434,13 +368,13 @@ GINTint2e_get_veff_ip1_kernel_0000(GINTEnvVars envs,
       double aijkl = aij + akl;
       double a1 = aij * akl;
       double a0 = a1 / aijkl;
-      double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+      double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
       a0 *= theta;
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
       double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
       double root0, weight0;
-      
+
       if (x < 3.e-7) {
         root0 = 0.5;
         weight0 = 1.;

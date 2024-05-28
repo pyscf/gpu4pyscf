@@ -27,21 +27,21 @@
 // TODO: prime basis into different thread
 
 template <int NROOTS> __device__
-static void GINTg0_2e_2d4d(GINTEnvVars envs, double* __restrict__ g, double norm, int ish, int jsh, int ksh, int lsh, int ij, int kl)
+static void GINTg0_2e_2d4d(GINTEnvVars envs, double* __restrict__ g, double norm, int ish, int jsh, int ksh, int lsh, int prim_ij, int prim_kl)
 {
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
-    double aij = a12[ij];
-    double xij = x12[ij];
-    double yij = y12[ij];
-    double zij = z12[ij];
-    double akl = a12[kl];
-    double xkl = x12[kl];
-    double ykl = y12[kl];
-    double zkl = z12[kl];
+    double aij = a12[prim_ij];
+    double xij = x12[prim_ij];
+    double yij = y12[prim_ij];
+    double zij = z12[prim_ij];
+    double akl = a12[prim_kl];
+    double xkl = x12[prim_kl];
+    double ykl = y12[prim_kl];
+    double zkl = z12[prim_kl];
 
     double xijxkl = xij - xkl;
     double yijykl = yij - ykl;
@@ -53,8 +53,8 @@ static void GINTg0_2e_2d4d(GINTEnvVars envs, double* __restrict__ g, double norm
     double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
     a0 *= theta;
 
-    double eij = e12[ij];
-    double ekl = e12[kl];
+    double eij = e12[prim_ij];
+    double ekl = e12[prim_kl];
     double fac = eij * ekl * sqrt(a0 / (a1 * a1 * a1));
     double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
     double uw[NROOTS*2];
