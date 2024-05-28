@@ -248,9 +248,6 @@ typedef struct {
         int bas_kl;
         int primitive_ij;
         int primitive_kl;
-        double *log_q_ij;
-        double *log_q_kl;
-        double log_cutoff;
 } BasisProdOffsets;
 
 typedef struct {
