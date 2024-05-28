@@ -32,7 +32,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
 '''
 bas='def2-qzvpp'
 def setUpModule():
-    global mol_sph, mol_cart
+    global mol_sph, mol_cart, mol2
     mol_sph = pyscf.M(atom=atom, basis=bas, max_memory=32000)
     mol_sph.output = '/dev/null'
     mol_sph.verbose = 0
@@ -43,11 +43,18 @@ def setUpModule():
     mol_cart.verbose = 0
     mol_cart.build()
 
+    mol_copy = mol_sph.copy()
+    coords = mol_sph.atom_coords(unit='Bohr')
+    coords[:,1] += 100
+    mol_copy.set_geom_(coords)
+    mol2 = mol_sph + mol_copy
+
 def tearDownModule():
-    global mol_sph, mol_cart
+    global mol_sph, mol_cart, mol2
     mol_sph.stdout.close()
     mol_cart.stdout.close()
-    del mol_sph, mol_cart
+    mol2.stdout.close()
+    del mol_sph, mol_cart, mol2
 
 class KnownValues(unittest.TestCase):
     '''
@@ -89,6 +96,14 @@ class KnownValues(unittest.TestCase):
         mf = mf.to_cpu()
         e_cpu = mf.kernel()
         assert np.abs(e_cpu - e_gpu) < 1e-5
+
+    def test_screening(self):
+        mf = gpu_scf.RHF(mol2)
+        mf.max_cycle = 50
+        mf.verbose = 5
+        mf.conv_tol = 1e-9
+        e_tot = mf.kernel()
+        assert np.abs(e_tot - -76.0667232412 * 2.0) < 1e-5
 
     def test_to_cpu(self):
         mf = gpu_scf.RHF(mol_sph)
