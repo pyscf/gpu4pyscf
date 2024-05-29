@@ -14,16 +14,10 @@ Run ```nvidia-smi``` in your terminal to check the installed CUDA version.
 
 Choose the proper package based on your CUDA environment.
 
-| Platform      | Command                               |
-----------------| --------------------------------------|
-| **CUDA 11.x** |  ```pip3 install gpu4pyscf-cuda11x``` |
-| **CUDA 12.x** |  ```pip3 install gpu4pyscf-cuda12x``` |
-
-```cuTensor``` is **highly recommended** for accelerating tensor contractions.
-
-For **CUDA 11.x**, ```pip3 install cutensor-cu11``` (requires CuPy V13.0 and later)
-
-For **CUDA 12.x**, ```pip3 install cutensor-cu12``` (requires CuPy V13.0 and later)
+| Platform      | Command                               | cutensor (**highly recommended**)|
+----------------| --------------------------------------|----------------------------------|
+| **CUDA 11.x** |  ```pip3 install gpu4pyscf-cuda11x``` | ```pip3 install cutensor-cu11``` |
+| **CUDA 12.x** |  ```pip3 install gpu4pyscf-cuda12x``` | ```pip3 install cutensor-cu12``` |
 
 Compilation
 --------
@@ -41,7 +35,7 @@ Then install cutensor for acceleration
 pip3 install cutensor-cu11
 ```
 
-The package also provides multiple dockerfiles in ```dockerfiles```. One can use them as references to create the compilation envrionment. 
+The package also provides multiple dockerfiles in ```dockerfiles```. One can use them as references to create the compilation envrionment.
 
 Features
 --------
@@ -53,8 +47,9 @@ Features
 - Nonlocal functional correction (vv10) for SCF and gradient;
 - ECP is supported and calculated on CPU;
 - PCM models, SMD model, their analytical gradients, and semi-analytical Hessian matrix;
-- Unrestricted Hartree-Fock and Unrestricted DFT, gradient, and Hessian
-- MP2/DF-MP2 and CCSD (experimental)
+- Unrestricted Hartree-Fock and Unrestricted DFT, gradient, and Hessian;
+- MP2/DF-MP2 and CCSD (experimental);
+- Polarizability, IR, and NMR shielding
 
 Limitations
 --------
