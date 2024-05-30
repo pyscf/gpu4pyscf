@@ -124,7 +124,7 @@ setup(
     ],
     cmdclass={'build_py': CMakeBuildPy},
     install_requires=[
-        'pyscf~=2.6.0',
+        'pyscf~=2.5.0',
         f'cupy-cuda{CUDA_VERSION}',
         'geometric',
         f'gpu4pyscf-libxc-cuda{CUDA_VERSION}',
