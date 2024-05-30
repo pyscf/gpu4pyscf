@@ -1,6 +1,6 @@
 from . import lib, grad, hessian, solvent, scf, dft
 
-__version__ = '0.7.8'
+__version__ = '0.7.9'
 
 # monkey patch libxc reference due to a bug in nvcc
 from pyscf.dft import libxc
