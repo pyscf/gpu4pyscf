@@ -112,7 +112,7 @@ class KnownValues(unittest.TestCase):
 
     def test_rks_b3lyp_d4(self):
         print('-------- B3LYP with D4 ---------------')
-        e_tot = run_dft('B3LYP', mol_sph, disp='D4')
+        e_tot = run_dft('B3LYP', mol_sph, disp='d4')
         e_qchem = -76.4669915146 # w/o D3(BJ) -76.4666819950
         print(f'diff from qchem {e_tot - e_qchem}')
         assert np.abs(e_tot - e_qchem) < 1e-5

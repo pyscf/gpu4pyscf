@@ -128,6 +128,33 @@ class KnownValues(unittest.TestCase):
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
 
+    def test_rks_b3lyp_d3bj(self):
+        print('-------- B3LYP-d3bj -------------')
+        e_tot = run_dft('B3LYP-d3bj', mol_sph)
+        e_ref = -76.4672233969
+        print('| CPU - GPU |:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
+
+    def test_rks_wb97x_d3bj(self):
+        print('-------- wb97x-d3bj -------------')
+        e_tot = run_dft('wb97x-d3bj', mol_sph)
+        e_ref = -76.47761276450566
+        print('| CPU - GPU |:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
+
+    def test_rks_wb97m_d3bj(self):
+        print('-------- wb97m-d3bj -------------')
+        e_tot = run_dft('wb97m-d3bj', mol_sph)
+        e_ref = -76.47675948061112
+        print('| CPU - GPU |:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
+
+    def test_rks_b3lyp_d4(self):
+        print('-------- B3LYP with d4 -------------')
+        e_tot = run_dft('B3LYP-d4', mol_sph)
+        e_ref = -76.4669590803
+        print('| CPU - GPU |:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
 if __name__ == "__main__":
     print("Full Tests for dft")
     unittest.main()
