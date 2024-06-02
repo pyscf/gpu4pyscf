@@ -525,7 +525,7 @@ def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     de = hessobj.hess_elec(mo_energy, mo_coeff, mo_occ, atmlst=atmlst)
     hessobj.de = de.get() + hessobj.hess_nuc(hessobj.mol, atmlst=atmlst)
     mf = hessobj.base
-    if(hasattr(mf, 'disp') and mf.disp is not None):
+    if mf.do_disp():
         h_disp = hessobj.get_dispersion()
         hessobj.hess_disp = h_disp
         hessobj.hess_mf = hessobj.de

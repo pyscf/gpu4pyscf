@@ -83,8 +83,8 @@ def initialize_grids(ks, mol=None, dm=None):
             # Filter grids the first time setup grids
             ks.grids = prune_small_rho_grids_(ks, ks.mol, dm, ks.grids)
         t0 = logger.timer_debug1(ks, 'setting up grids', *t0)
-        is_nlc = ks.nlc or ks._numint.libxc.is_nlc(ks.xc)
-        if is_nlc and ks.nlcgrids.coords is None:
+
+        if ks.do_nlc() and ks.nlcgrids.coords is None:
             if ks.nlcgrids.coords is None:
                 t0 = logger.init_timer(ks)
                 #ks.nlcgrids.build(with_non0tab=True)
@@ -138,7 +138,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     else:
         max_memory = ks.max_memory - lib.current_memory()[0]
         n, exc, vxc = ni.nr_rks(mol, ks.grids, ks.xc, dm, max_memory=max_memory)
-        if ks.nlc or ni.libxc.is_nlc(ks.xc):
+        if ks.do_nlc():
             if ni.libxc.is_nlc(ks.xc):
                 xc = ks.xc
             else:
@@ -265,6 +265,7 @@ class KohnShamDFT(rks.KohnShamDFT):
         return
 
     reset = rks.KohnShamDFT.reset
+    do_nlc = rks.KohnShamDFT.do_nlc
 
 hf.KohnShamDFT = KohnShamDFT
 from gpu4pyscf.lib import utils
