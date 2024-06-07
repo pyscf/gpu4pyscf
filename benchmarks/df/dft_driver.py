@@ -14,119 +14,51 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import csv
-import pyscf
-import time
+import json
 import argparse
-import numpy as np
+
 from pyscf import lib
-from pyscf.dft import rks
+from gpu4pyscf.drivers.benchmark_driver import run_dft, warmup
 
-lib.num_threads(8)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Run DFT with GPU4PySCF for molecules')
+    parser.add_argument("--config",    type=str,  default='benchmark.json')
+    args = parser.parse_args()
 
-parser = argparse.ArgumentParser(description='Run SCF, grad, and Hessian in GPU4PySCF for molecules')
-parser.add_argument('--basis',        type=str, default='def2-tzvpp')
-parser.add_argument('--verbose',      type=int, default=1)
-parser.add_argument('--xc',           type=str, default='B3LYP')
-parser.add_argument('--device',       type=str, default='GPU')
-parser.add_argument('--input_path',   type=str, default='./')
-parser.add_argument('--output_path',  type=str, default='./')
-parser.add_argument('--with_hessian', type=bool, default=False)
-parser.add_argument('--solvent',      type=str, default='')
+    with open(args.config) as f:
+        config = json.load(f)[0]
 
-args = parser.parse_args()
-bas = args.basis
-verbose = args.verbose
-xc = args.xc
+    isExist = os.path.exists(config['output_dir'])
+    if not isExist:
+        os.makedirs(config['output_dir'])
 
-if xc == 'LDA':
-    xc = 'LDA,VWN5'
+    config['input_dir'] = '../molecules/organic/'
 
-if not os.path.exists(args.output_path):
-    os.mkdir(args.output_path)
+    # Warmup
+    warmup()
 
-if args.device == 'GPU':
-    import cupy
-    import gpu4pyscf
-    from gpu4pyscf.dft import rks
-    props = cupy.cuda.runtime.getDeviceProperties(0)
-    device = props['name'].decode('ascii')
-    output_file = device+'.csv'
-else:
-    from pyscf.dft import rks
-    output_file = 'PySCF-16-cores-CPU.csv'
-output_file = args.output_path + output_file
+    # Generate benchmark data for different xc
+    config['basis'] = 'def2-tzvpp'
+    for xc in ['LDA', 'PBE', 'B3LYP', 'M06', 'wB97m-v']:
+        config['xc'] = xc
+        config['output_dir'] = './organic/xc/' + xc 
+        for mol_name in config['molecules']:
+            run_dft(mol_name, config)
 
-def run_dft(path, filename):
-    mol = pyscf.M(atom=path+filename, basis=bas, max_memory=64000)
-    start_time = time.time()
-    # set verbose >= 6 for debugging timer
-    mol.verbose = 1 #verbose
-    mol.max_memory = 40000
-    mf = rks.RKS(mol, xc=xc).density_fit(auxbasis='def2-universal-jkfit')
-    if args.solvent:
-        mf = mf.PCM()
-        mf.with_solvent.lebedev_order = 29
-        mf.with_solvent.method = 'IEF-PCM'
-        mf.with_solvent.eps = 78.3553
-    mf.verbose = 6
-    mf.grids.atom_grid = (99,590)
-    mf.chkfile = None
-    prep_time = time.time() - start_time
-    mf.conv_tol = 1e-9
-    mf.nlcgrids.atom_grid = (50,194)
-    mf.max_cycle = 100
-    try:
-        e_dft = mf.kernel()
-        scf_time = time.time() - start_time
-    except Exception:
-        scf_time = -1
-        e_dft = 0
+    # Generate benchmark data for different basis
+    config['xc'] = 'b3lyp'
+    for bas in ['sto-3g', '6-31g', 'def2-svp', 'def2-tzvpp', 'def2-tzvpd']:
+        config['basis'] = bas
+        config['output_dir'] = './organic/basis/' + bas
+        for mol_name in config['molecules']:
+            run_dft(mol_name, config)
 
-    # calculate gradient
-    if args.device == 'GPU':
-        cupy.get_default_memory_pool().free_all_blocks()
-    try:
-        start_time = time.time()
-        g = mf.nuc_grad_method()
-        g.max_memory = 40000
-        g.auxbasis_response = True
-        f = g.kernel()
-        grad_time = time.time() - start_time
-    except Exception:
-        grad_time = -1
-        f = -1
-
-    # calculate hessian
-    if args.device == 'GPU':
-        cupy.get_default_memory_pool().free_all_blocks()
-
-    hess_time = -1
-    if args.with_hessian:
-        try:
-            start_time = time.time()
-            h = mf.Hessian()
-            h.auxbasis_response = 1
-            h.max_memory = 40000
-            hess = h.kernel().reshape([3*mol.natm, 3*mol.natm])
-            hess_time = time.time() - start_time
-        except Exception:
-            hess_time = -1
-            hess = -1
-
-    np.savez(args.output_path+filename+'.npz', e_dft=e_dft, grad=f, hess=hess)
-    return mol.natm, mol.nao, scf_time, grad_time, hess_time, e_dft
-
-fields = ['mol','natm', 'nao', 't_scf', 't_gradient', 't_hessian', 'e_tot']
-csvfile = open(output_file, 'w')
-csvwriter = csv.writer(csvfile)
-csvwriter.writerow(fields)
-
-for filename in sorted(os.listdir(args.input_path)):
-    if filename.endswith(".xyz"):
-        print(f'running DFT {filename}')
-        info = run_dft(args.input_path, filename)
-        row = [filename[:-4]]+list(info)
-        csvwriter.writerow(row)
-        csvfile.flush()
-csvfile.close()
+    # Generate benchmark data for different solvent
+    config['xc'] = 'b3lyp'
+    config['basis'] = 'def2-tzvpp'
+    for solvent_method in ["CPCM", "IEFPCM"]:
+        config['with_solvent'] = True
+        config['solvent']['method'] = solvent_method
+        config['output_dir'] = './organic/solvent/' + solvent_method
+        for mol_name in config['molecules']:
+            run_dft(mol_name, config)

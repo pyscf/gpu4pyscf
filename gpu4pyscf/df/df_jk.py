@@ -267,8 +267,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
         t1 = log.timer_debug1('init jk', *t0)
 
     assert nao == dfobj.nao
-    vj = None
-    vk = None
+    vj = vk = None
     ao_idx = dfobj.intopt.ao_idx
     dms = take_last2d(dms, ao_idx)
 
@@ -278,7 +277,6 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     if with_j:
         dm_sparse = dms[:,rows,cols]
         dm_sparse[:, dfobj.intopt.cderi_diag] *= .5
-        vj = cupy.zeros_like(dms)
 
     if with_k:
         vk = cupy.zeros_like(dms)
@@ -312,6 +310,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
                     rhok = rhok.reshape([-1,nao])
                     vk[i] += cupy.dot(rhok.T, rhok)
         if with_j:
+            vj = cupy.zeros_like(dms)
             vj[:,rows,cols] = vj_packed
             vj[:,cols,rows] = vj_packed
 
@@ -332,7 +331,6 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
             vj_sparse = cupy.zeros_like(dm_sparse)
 
         nocc = max([mo1.shape[2] for mo1 in mo1s])
-
         blksize = dfobj.get_blksize(extra=2*nao*nocc)
         for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
             if with_j:
@@ -347,12 +345,15 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
                         #contract('Lki,Lkj->ij', rhok, rhok1, alpha=1.0, beta=1.0, out=vk[iset])
                         vk[iset] += cupy.dot(rhok.T, rhok1)
                         iset += 1
-        occ_coeff = rhok1 = rhok = mo1 = None
+        occ_coeff = rhoj = rhok1 = rhok = None
+        mo1s = mo1 = None
         if with_j:
+            vj = cupy.zeros_like(dms)
             vj[:,rows,cols] = vj_sparse
             vj[:,cols,rows] = vj_sparse
         if with_k:
             transpose_sum(vk)
+        vj_sparse = cderi = cderi_sparse = None
     # general K matrix with density matrix
     else:
         if with_j:
@@ -368,6 +369,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
                     #vk[k] += contract('Lki,Lkj->ij', cderi, rhok)
                     vk[k] += cupy.dot(cderi.reshape([-1,nao]).T, rhok)
         if with_j:
+            vj = cupy.zeros_like(dms)
             vj[:,rows,cols] = vj_sparse
             vj[:,cols,rows] = vj_sparse
         rhok = None

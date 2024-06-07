@@ -87,7 +87,7 @@ def basis_seg_contraction(mol, allow_replica=False):
             bas_of_ia = np.vstack(bas_of_ia)
             bas_templates[key] = bas_of_ia
         _bas.append(bas_of_ia)
-    
+
     pmol = copy.copy(mol)
     pmol.output = mol.output
     pmol.verbose = mol.verbose
@@ -202,6 +202,7 @@ class VHFOpt(_vhf.VHFOpt):
         sorted_mol, sorted_idx, uniq_l_ctr, l_ctr_counts = sort_mol(mol, log=log)
         if group_size is not None :
             uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size)
+        self.nctr = len(uniq_l_ctr)
 
         # sort fake mol
         fake_mol = make_fake_mol()
@@ -243,7 +244,7 @@ class VHFOpt(_vhf.VHFOpt):
         nao = sph_ao_loc[-1]
         ao_idx = np.array_split(np.arange(nao), sph_ao_loc[1:-1])
         self.sph_ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
-        
+
         # cartesian ao index
         nao = cart_ao_loc[-1]
         ao_idx = np.array_split(np.arange(nao), cart_ao_loc[1:-1])
@@ -251,7 +252,7 @@ class VHFOpt(_vhf.VHFOpt):
         ncart = cart_ao_loc[-1]
         nsph = sph_ao_loc[-1]
         self.cart2sph = block_c2s_diag(ncart, nsph, self.angular, l_ctr_counts)
-        
+
         if _mol.cart:
             inv_idx = np.argsort(self.cart_ao_idx, kind='stable').astype(np.int32)
             self.coeff = cupy.eye(ncart)[:,inv_idx]
@@ -259,7 +260,7 @@ class VHFOpt(_vhf.VHFOpt):
             inv_idx = np.argsort(self.sph_ao_idx, kind='stable').astype(np.int32)
             self.coeff = self.cart2sph[:, inv_idx]
         cput1 = log.timer_debug1('AO cart2sph coeff', *cput1)
-        
+
         # pairing auxiliary basis with fake basis set
         fake_l_ctr_offsets = np.append(0, np.cumsum(fake_l_ctr_counts))
         fake_l_ctr_offsets += l_ctr_offsets[-1]
@@ -327,6 +328,7 @@ class VHFOpt(_vhf.VHFOpt):
 
         self.pair2bra = pair2bra
         self.pair2ket = pair2ket
+        self.l_ctr_offsets = l_ctr_offsets
         bas_pair2shls = np.hstack(pair2bra + pair2ket).astype(np.int32).reshape(2,-1)
         bas_pairs_locs = np.append(0, np.cumsum([x.size for x in pair2bra])).astype(np.int32)
         log_qs = log_qs + aux_log_qs
@@ -529,6 +531,7 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
         opt = make_cintopt(pmol._atm, pmol._bas, pmol._env, intor)
 
     nbins = 1
+
     for aux_id, log_q_kl in enumerate(intopt.aux_log_qs):
         cp_kl_id = aux_id + len(intopt.log_qs)
         lk = intopt.aux_angular[aux_id]
@@ -572,9 +575,9 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
                     raise RuntimeError(f'GINT_fill_int3c2e general failed, err={err}')
             else:
                 # TODO: sph2cart in CPU?
-                ishl0, ishl1 = intopt.pair2bra[cp_ij_id][0], intopt.pair2bra[cp_ij_id][-1]+1
-                jshl0, jshl1 = intopt.pair2ket[cp_ij_id][0], intopt.pair2ket[cp_ij_id][-1]+1
-                kshl0, kshl1 = intopt.aux_pair2bra[aux_id][0], intopt.aux_pair2bra[aux_id][-1]+1
+                ishl0, ishl1 = intopt.l_ctr_offsets[cpi], intopt.l_ctr_offsets[cpi+1]
+                jshl0, jshl1 = intopt.l_ctr_offsets[cpj], intopt.l_ctr_offsets[cpj+1]
+                kshl0, kshl1 = intopt.l_ctr_offsets[aux_id+1+intopt.nctr], intopt.l_ctr_offsets[aux_id+1+intopt.nctr+1]
                 shls_slice = np.array([ishl0, ishl1, jshl0, jshl1, kshl0, kshl1], dtype=np.int64)
                 int3c_cpu = getints(intor, pmol._atm, pmol._bas, pmol._env, shls_slice, cintopt=opt).transpose([0,3,2,1])
                 int3c_blk = cupy.asarray(int3c_cpu)
@@ -1318,9 +1321,10 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
                 if err != 0:
                     raise RuntimeError("int3c2e failed\n")
             else:
-                ishl0, ishl1 = intopt.pair2bra[cp_ij_id][0], intopt.pair2bra[cp_ij_id][-1]+1
-                jshl0, jshl1 = intopt.pair2ket[cp_ij_id][0], intopt.pair2ket[cp_ij_id][-1]+1
-                kshl0, kshl1 = intopt.aux_pair2bra[aux_id][0], intopt.aux_pair2bra[aux_id][-1]+1
+                # TODO: sph2cart in CPU?
+                ishl0, ishl1 = intopt.l_ctr_offsets[cpi], intopt.l_ctr_offsets[cpi+1]
+                jshl0, jshl1 = intopt.l_ctr_offsets[cpj], intopt.l_ctr_offsets[cpj+1]
+                kshl0, kshl1 = intopt.l_ctr_offsets[aux_id+1+intopt.nctr], intopt.l_ctr_offsets[aux_id+1+intopt.nctr+1]
                 shls_slice = np.array([ishl0, ishl1, jshl0, jshl1, kshl0, kshl1], dtype=np.int64)
                 int3c_cpu = getints(intor, pmol._atm, pmol._bas, pmol._env, shls_slice, cintopt=opt).transpose([0,3,2,1])
                 int3c_blk = cupy.asarray(int3c_cpu)
@@ -1616,10 +1620,10 @@ def sort_mol(mol0, cart=True, log=None):
         log = logger.new_logger(mol0, mol0.verbose)
     mol = mol0.copy(deep=True)
     l_ctrs = mol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
-    
+
     uniq_l_ctr, _, inv_idx, l_ctr_counts = np.unique(
         l_ctrs, return_index=True, return_inverse=True, return_counts=True, axis=0)
-    
+
     if mol.verbose >= logger.DEBUG:
         log.debug1('Number of shells for each [l, nctr] group')
         for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):

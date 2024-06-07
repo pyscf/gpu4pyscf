@@ -40,7 +40,7 @@ from pyscf.df.incore import LINEAR_DEP_THR
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.lib.cupy_helper import (
-    contract, tag_array, get_avail_mem, release_gpu_stack, print_mem_info, take_last2d, pinv)
+    contract, tag_array, get_avail_mem, release_gpu_stack, take_last2d, pinv)
 from gpu4pyscf.df import int3c2e, df
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
@@ -148,6 +148,10 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         nocc = mocc.shape[1]
         slice_size = naux*nocc*9   # largest slice of intermediate variables
         blksize = int(mem_avail*0.2/8/slice_size/ALIGNED) * ALIGNED
+        blksize = min(blksize, int((mem_avail*0.2/8//9/naux)**.5/ALIGNED)*ALIGNED)
+        if blksize < ALIGNED:
+            raise RuntimeError('Not enough memory for intermediate variables')
+        
         for i0, i1 in lib.prange(0,nao,blksize):
             wk1_Pko_islice = cupy.asarray(wk1_Pko[:,i0:i1])
             #rhok1_Pko = contract('pq,qiox->piox', int2c_inv, wk1_Pko_islice)
@@ -180,11 +184,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                 wk1_P_I = None
 
                 # (10|0)(0|1)(0|00)
-                #for q0,q1 in lib.prange(0,naux,64):
                 wk1_I = contract('yqp,piox->qioxy', int2c_ip1, rhok1_Pko)
                 hk_ao_aux[i0:i1] -= contract('qoi,qioxy->iqxy', rhok0_P_I, wk1_I)
-                #wk1_I = contract('piox,qoi->ipqx', rhok1_Pko, rhok0_P_I)
-                #hk_ao_aux[i0:i1] -= contract('ipqx,yqp->iqxy', wk1_I, int2c_ip1)
                 wk1_I = rhok0_P_I = None
 
     wk1_Pko = None
@@ -451,11 +452,16 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     int2c = cupy.asarray(int2c, order='C')
     # ======================= sorted AO begin ======================================
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size_aux=BLKSIZE, group_size=BLKSIZE)
+    intopt.build(mf.direct_scf_tol, 
+                 diag_block_with_triu=True, 
+                 aosym=False, 
+                 group_size_aux=BLKSIZE, 
+                 group_size=BLKSIZE)
     ao_idx = intopt.ao_idx
     aux_ao_idx = intopt.aux_ao_idx
-
+    naux = len(aux_ao_idx)
     mocc = mocc[ao_idx, :]
+    nocc = mocc.shape[1]
     mo_coeff = mo_coeff[ao_idx,:]
     dm0 = take_last2d(dm0, ao_idx)
     dm0_tag = tag_array(dm0, occ_coeff=mocc)
@@ -478,23 +484,6 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         wk_tmp = None
     wk_Pl_ = None
 
-    # -----------------------------
-    # int3c_ip1 contributions
-    # ------------------------------
-    cupy.get_default_memory_pool().free_all_blocks()
-    fn = int3c2e.get_int3c2e_ip1_vjk
-    vj1_buf, vk1_buf, vj1_ao, vk1_ao = fn(intopt, rhoj0, rhok0_Pl_, dm0_tag, aoslices, omega=omega)
-    vk1_ao *= 2.0
-    vk1_buf *= 2.0
-    rev_ao_idx = np.argsort(ao_idx)
-    vj1_buf = take_last2d(vj1_buf, rev_ao_idx)
-    vk1_buf = take_last2d(vk1_buf, rev_ao_idx)
-
-    vj1_int3c_ip1 = -contract('nxiq,ip->nxpq', vj1_ao, mo_coeff)
-    vk1_int3c_ip1 = -contract('nxiq,ip->nxpq', vk1_ao, mo_coeff)
-    vj1_ao = vk1_ao = None
-    t0 = log.timer_debug1('Fock matrix due to int3c2e_ip1', *t0)
-
     # --------------------------
     #  int3c_ip2 contribution
     # --------------------------
@@ -512,12 +501,10 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         int2c_ip1 = cupy.asarray(int2c_ip1, order='C')
         int2c_ip1 = take_last2d(int2c_ip1, aux_ao_idx)
 
-        # generate rhok0_P__
+        # Generate rhok0_P__
         if isinstance(rhok0_Pl_, cupy.ndarray):
             rhok0_P__ = contract('pio,ir->pro', rhok0_Pl_, mocc)
         else:
-            naux = len(aux_ao_idx)
-            nocc = mocc.shape[1]
             rhok0_P__ = cupy.empty([naux,nocc,nocc])
             for p0, p1 in lib.prange(0,naux,64):
                 rhok0_Pl_tmp = cupy.asarray(rhok0_Pl_[p0:p1])
@@ -528,7 +515,12 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         wk0_10_P__ = contract('xqp,pro->xqro', int2c_ip1, rhok0_P__)
 
         aux2atom = int3c2e.get_aux2atom(intopt, auxslices)
-        for p0, p1 in lib.prange(0,nao,64):
+        mem_avail = get_avail_mem()
+        blksize = int(0.2*mem_avail/(3*naux*nocc*8)/ALIGNED) * ALIGNED
+        if blksize < ALIGNED:
+            raise RuntimeError('Not enough memory to compute int3c2e_ip2')
+        
+        for p0, p1 in lib.prange(0,nao,blksize):
             rhok_tmp = cupy.asarray(rhok0_Pl_[:,p0:p1])
             vj1_tmp = contract('pio,xp->xpio', rhok_tmp, wj0_10)
 
@@ -544,12 +536,29 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
                 vk1_tmp = None
             wk0_10_Pl_ = rhok_tmp = None
         wj0_10 = wk0_10_P__ = rhok0_P__ = int2c_ip1 = None
-        rhoj0 = rhok0_Pl_ = None
         aux2atom = None
 
         vj1_int3c_ip2 = contract('nxiq,ip->nxpq', vj1_int3c_ip2, mo_coeff)
         vk1_int3c_ip2 = contract('nxiq,ip->nxpq', vk1_int3c_ip2, mo_coeff)
         t0 = log.timer_debug1('Fock matrix due to int3c2e_ip2', *t0)
+
+    # -----------------------------
+    # int3c_ip1 contributions
+    # ------------------------------
+    cupy.get_default_memory_pool().free_all_blocks()
+    fn = int3c2e.get_int3c2e_ip1_vjk
+    vj1_buf, vk1_buf, vj1_ao, vk1_ao = fn(intopt, rhoj0, rhok0_Pl_, dm0_tag, aoslices, omega=omega)
+    rhoj0 = rhok0_Pl_ = None
+    vk1_ao *= 2.0
+    vk1_buf *= 2.0
+    rev_ao_idx = np.argsort(ao_idx)
+    vj1_buf = take_last2d(vj1_buf, rev_ao_idx)
+    vk1_buf = take_last2d(vk1_buf, rev_ao_idx)
+
+    vj1_int3c_ip1 = -contract('nxiq,ip->nxpq', vj1_ao, mo_coeff)
+    vk1_int3c_ip1 = -contract('nxiq,ip->nxpq', vk1_ao, mo_coeff)
+    vj1_ao = vk1_ao = None
+    t0 = log.timer_debug1('Fock matrix due to int3c2e_ip1', *t0)
 
     mocc = mocc[rev_ao_idx]
     mo_coeff = mo_coeff[rev_ao_idx]
@@ -568,7 +577,6 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
 
     grad_hcore = rhf_grad.get_grad_hcore(hessobj.base.nuc_grad_method())
     cupy.get_default_memory_pool().free_all_blocks()
-    #hcore_deriv = hessobj.base.nuc_grad_method().hcore_generator(mol)
     vk1 = None
     for i0, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = aoslices[ia]
@@ -582,8 +590,6 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             vk1_ao[:,:,p0:p1] -= vk1_buf[:,p0:p1,:].transpose(0,2,1)
 
         h1 =  grad_hcore[:,i0]
-        #h1 = hcore_deriv(ia)
-        #h1 = _ao2mo(cupy.asarray(h1, order='C'))
         vj1 = vj1_int3c[ia] + _ao2mo(vj1_ao)
         if with_k:
             vk1 = vk1_int3c[ia] + _ao2mo(vk1_ao)

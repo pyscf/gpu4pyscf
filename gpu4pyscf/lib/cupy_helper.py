@@ -28,7 +28,7 @@ from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 
 LMAX_ON_GPU = 7
-DSOLVE_LINDEP = 1e-13
+DSOLVE_LINDEP = 1e-12
 
 c2s_l = mole.get_cart2sph(lmax=LMAX_ON_GPU)
 c2s_offset = np.cumsum([0] + [x.shape[0]*x.shape[1] for x in c2s_l])
@@ -96,7 +96,7 @@ def device2host_2d(a_cpu, a_gpu, stream=None):
 class CPArrayWithTag(cupy.ndarray):
     pass
 
-@functools.wraps(lib.tag_array)
+#@functools.wraps(lib.tag_array)
 def tag_array(a, **kwargs):
     '''
     a should be cupy/numpy array or tuple of cupy/numpy array
@@ -228,7 +228,7 @@ def block_c2s_diag(ncart, nsph, angular, counts):
     '''
     constract a cartesian to spherical transformation of n shells
     '''
-    if _data['c2s'] is None: 
+    if _data['c2s'] is None:
         c2s_data = cupy.concatenate([cupy.asarray(x.ravel()) for x in c2s_l])
         _data['c2s'] = c2s_data
     c2s_data = _data['c2s']
@@ -562,8 +562,8 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
             break
         x1 = x1[idx]
 
-    if len(idx) > 0:
-        raise RuntimeError("CPSCF failed to converge.")
+    if cycle == max_cycle:
+        log.warn('CPSCF failed to converge')
 
     xs = cupy.asarray(xs)
     ax = cupy.asarray(ax)
