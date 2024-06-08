@@ -21,6 +21,7 @@ output/
 **/qchem_input.in
 .coverage
 #*
+*.csv
 dockerfiles/manylinux/wheelhouse
 gpu4pyscf/lib/bin
 gpu4pyscf/lib/build

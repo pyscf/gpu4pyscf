@@ -19,39 +19,14 @@
 dispersion correction for HF and DFT
 '''
 
-
+from pyscf.scf import dispersion
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.dft import rks, uks
 
-def get_dispersion(mf, disp_version=None):
-    if disp_version is None:
-        disp_version = mf.disp
-    mol = mf.mol
-    if disp_version is None:
-        return 0.0
-    if isinstance(mf, rks.KohnShamDFT):
-        method = mf.xc
-    else:
-        method = 'hf'
-
-    # for dftd3
-    if disp_version[:2].upper() == 'D3':
-        from gpu4pyscf.lib import dftd3
-        dftd3_model = dftd3.DFTD3Dispersion(mol, xc=method, version=disp_version)
-        res = dftd3_model.get_dispersion()
-        return res['energy']
-
-    # for dftd4
-    elif disp_version[:2].upper() == 'D4':
-        from gpu4pyscf.lib import dftd4
-        dftd4_model = dftd4.DFTD4Dispersion(mol, xc=method)
-        res = dftd4_model.get_dispersion()
-        return res.get("energy")
-    else:
-        raise RuntimeError(f'dipersion correction: {disp_version} is not supported.')
-
 # Inject to SCF class
-hf.RHF.get_dispersion = get_dispersion
-uhf.UHF.get_dispersion = get_dispersion
-rks.RKS.get_dispersion = get_dispersion
-uks.UKS.get_dispersion = get_dispersion
+hf.SCF.do_disp = dispersion.check_disp
+
+hf.RHF.get_dispersion = dispersion.get_dispersion
+uhf.UHF.get_dispersion = dispersion.get_dispersion
+rks.RKS.get_dispersion = dispersion.get_dispersion
+uks.UKS.get_dispersion = dispersion.get_dispersion

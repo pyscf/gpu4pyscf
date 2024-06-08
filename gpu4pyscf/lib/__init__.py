@@ -18,13 +18,3 @@ import numpy
 from gpu4pyscf.lib import diis
 from gpu4pyscf.lib import cupy_helper
 from gpu4pyscf.lib import cutensor
-
-try:
-    from gpu4pyscf.lib import dftd3
-except Exception:
-    print('failed to load DFTD3')
-
-try:
-    from gpu4pyscf.lib import dftd4
-except Exception:
-    print('failed to load DFTD4')
