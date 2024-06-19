@@ -10,9 +10,7 @@ Installation
 > [!NOTE]
 > The compiled binary packages support compute capability 6.0 and later (Pascal and later, such as Tesla P100, RTX 10 series and later).
 
-Run ```nvidia-smi``` in your terminal to check the installed CUDA version.
-
-Choose the proper package based on your CUDA environment.
+Run ```nvcc --version``` in your terminal to check the installed CUDA toolkit version. Then, choose the proper package based on your CUDA toolkit version.
 
 | Platform      | Command                               | cutensor (**highly recommended**)|
 ----------------| --------------------------------------|----------------------------------|
@@ -59,6 +57,7 @@ Limitations
 - Density fitting scheme up to ~168 atoms with def2-tzvpd basis, bounded by CPU memory;
 - Hessian is unavailable for Direct SCF yet;
 - meta-GGA without density laplacian;
+- Double hybrid functionals are not supported;
 
 Examples
 --------
