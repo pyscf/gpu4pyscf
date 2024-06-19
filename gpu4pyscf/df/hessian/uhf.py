@@ -47,9 +47,10 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
 from gpu4pyscf.df.grad.rhf import _gen_metric_solver
 
-LINEAR_DEP_THRESHOLD = df.LINEAR_DEP_THR
+LINEAR_DEP_THR = df.LINEAR_DEP_THR
 BLKSIZE = 256
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
+GB = 1024*1024*1024
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -110,7 +111,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     dm0b_tag = tag_array(dm0b, occ_coeff=moccb)
     int2c = cupy.asarray(int2c, order='C')
     int2c = take_last2d(int2c, aux_ao_idx)
-    int2c_inv = pinv(int2c, lindep=LINEAR_DEP_THRESHOLD)
+    int2c_inv = pinv(int2c, lindep=LINEAR_DEP_THR)
     solve_j2c = _gen_metric_solver(int2c)
     int2c = None
 
@@ -161,6 +162,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         slice_size = naux*nocc*9   # largest slice of intermediate variables
         blksize = int(mem_avail*0.2/8/slice_size/ALIGNED) * ALIGNED
         blksize = min(blksize, int((mem_avail*0.2/8//9/naux)**.5/ALIGNED)*ALIGNED)
+        log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
         if blksize < ALIGNED:
             raise RuntimeError('Not enough memory for intermediate variables')
     
@@ -629,6 +631,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         mem_avail = get_avail_mem()
         nocc = mocca.shape[1] + moccb.shape[1]
         blksize = int(0.2*mem_avail/(3*naux*nocc*8)/ALIGNED) * ALIGNED
+        log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
         if blksize < ALIGNED:
             raise RuntimeError('Not enough memory to compute int3c2e_ip2')
         

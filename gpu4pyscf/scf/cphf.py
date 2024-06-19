@@ -110,7 +110,7 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
         v[:,viridx,:] *= e_ai
         v[:,occidx,:] = 0
         return v.reshape(-1,nmo*nocc)
-
+    
     mo1 = krylov(vind_vo, mo1base.reshape(-1,nmo*nocc),
                      tol=tol, max_cycle=max_cycle, hermi=hermi, verbose=log)
     mo1 = mo1.reshape(mo1base.shape)

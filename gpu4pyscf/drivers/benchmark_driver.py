@@ -24,7 +24,8 @@ import cupy
 import traceback
 
 from pyscf import lib, gto
-from pyscf import dft
+from pyscf import dft, scf
+from pyscf.lib import logger
 
 def warmup():
     """
@@ -40,23 +41,31 @@ def warmup():
         ["O" , (0. , 0.     , 0.)],
         [1   , (0. , -0.757 , 0.587)],
         [1   , (0. , 0.757  , 0.587)] ])
-    mol.basis = 'sto3g'
+    mol.basis = 'def2-tzvpp'
     mol.spin = 1
     mol.charge = 1
     mol.build()
-    mf = dft.rks.RKS(mol).to_gpu()
+    mf = dft.rks.RKS(mol, xc='b3lyp').density_fit().to_gpu()
     mf.kernel()
-    
-def run_dft(mol_name, config):
-    xc = config['xc']
-    bas = config['basis']
-    verbose = config['verbose']
-    with_df = 'with_df' in config and config['with_df']
-    with_gpu = 'with_gpu' in config and config['with_gpu']
-    with_solvent = 'with_solvent' in config and config['with_solvent']
-    with_grad = 'with_grad' in config and config['with_grad']
-    with_hess = 'with_hess' in config and config['with_hess']
 
+    g = mf.nuc_grad_method()
+    g = g.kernel()
+
+    h = mf.Hessian()
+    hess = h.kernel()
+    return
+
+def run_dft(mol_name, config):
+    xc           = config.get('xc',           'b3lyp')
+    bas          = config.get('basis',        'def2-tzvpp')
+    verbose      = config.get('verbose',      4)
+    with_df      = config.get('with_df',      True)
+    with_gpu     = config.get('with_gpu',     True)
+    with_solvent = config.get('with_solvent', False)
+    with_grad    = config.get('with_grad',    True)
+    with_hess    = config.get('with_hess',    True)
+    
+    # I/O
     fp = tempfile.TemporaryDirectory()
     local_dir = f'{fp.name}/'
     logfile = f'{mol_name[:-4]}_pyscf.log'
@@ -68,14 +77,23 @@ def run_dft(mol_name, config):
         atom=local_dir+mol_name,
         basis=bas, max_memory=32000,
         verbose=verbose,
-        output=f'{local_dir}/{logfile}')
+        output=f'{local_dir}/{logfile}'
+        )
 
     # To match default LDA in Q-Chem
     if xc == 'LDA':
         pyscf_xc = 'LDA,VWN5'
     else:
         pyscf_xc = xc
-    mf = dft.rks.RKS(mol, xc=pyscf_xc)
+
+    if xc.lower() == 'hf':
+        mf = scf.HF(mol)
+    else:
+        mf = dft.KS(mol, xc=pyscf_xc)
+        mf.grids.atom_grid = (99,590)
+        if mf._numint.libxc.is_nlc(mf.xc):
+            mf.nlcgrids.atom_grid = (50,194)
+
     if with_df:
         if 'auxbasis' in config and config['auxbasis'] == "RIJK-def2-tzvp":
             auxbasis = 'def2-tzvp-jkfit'
@@ -86,7 +104,6 @@ def run_dft(mol_name, config):
     if with_gpu:
         mf = mf.to_gpu()
 
-    mf.verbose = verbose
     mf.chkfile = None
     if with_solvent:
         mf = mf.PCM()
@@ -94,12 +111,14 @@ def run_dft(mol_name, config):
         mf.with_solvent.method = config['solvent']['method'].replace('PCM','-PCM')
         mf.with_solvent.eps = config['solvent']['eps']
 
-    mf.grids.atom_grid = (99,590)
-    if mf._numint.libxc.is_nlc(mf.xc):
-        mf.nlcgrids.atom_grid = (50,194)
     mf.direct_scf_tol = 1e-14
+    mf.chkfile = None
     mf.conv_tol = 1e-10
     e_tot = mf.kernel()
+    
+    if not mf.converged:
+        logger.warn(mf, 'SCF failed to converge')
+    
     scf_time = time.time() - start_time
     print(f'compute time for energy: {scf_time:.3f} s')
 
@@ -117,6 +136,7 @@ def run_dft(mol_name, config):
             if with_df:
                 g.auxbasis_response = True
             f = g.kernel()
+            g = None
             grad_time = time.time() - start_time
             print(f'compute time for gradient: {grad_time:.3f} s')
         except Exception as exc:
@@ -151,52 +171,15 @@ def run_dft(mol_name, config):
 
     # copy the files to destination folder
     output_dir = config['output_dir']
+    isExist = os.path.exists(output_dir)
+    if not isExist:
+        os.makedirs(output_dir)
+
     shutil.copyfile(f'{local_dir}/{data_file}', f'{output_dir}/{data_file}')
     shutil.copyfile(f'{local_dir}/{logfile}', f'{output_dir}/{logfile}')
 
-    return mf,g,h
+    return mf
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run DFT with GPU4PySCF for molecules')
-    parser.add_argument("--config",    type=str,  default='benchmark.json')
-    args = parser.parse_args()
-
-    with open(args.config) as f:
-        config = json.load(f)[0]
-
-    verbose = config['verbose'] if 'verbose' in config else 4
-
-    isExist = os.path.exists(config['output_dir'])
-    if not isExist:
-        os.makedirs(config['output_dir'])
-
-    config['input_dir'] = '../molecules/organic/'
-
-    # Warmup
-    run_dft(config['molecules'][0])
-
-    # Generate benchmark data for different xc
-    config['basis'] = 'def2-tzvpp'
-    for xc in ['LDA', 'PBE', 'B3LYP', 'M06', 'wB97m-v']:
-        config['xc'] = xc
-        for mol_name in config['molecules']:
-            config['output_dir'] = './organic/xc/' + xc 
-            run_dft(mol_name, config)
-
-    # Generate benchmark data for different basis
-    config['xc'] = 'b3lyp'
-    for bas in ['sto-3g', '6-31g', 'def2-svp', 'def2-tzvpp', 'def2-tzvpd']:
-        config['basis'] = bas
-        for mol_name in config['molecules']:
-            config['output_dir'] = './organic/basis/' + bas
-            run_dft(mol_name, config)
-
-    # Generate benchmark data for different solvent
-    config['xc'] = 'b3lyp'
-    config['basis'] = 'def2-tzvpp'
-    for solvent_method in ["CPCM", "IEFPCM"]:
-        config['with_solvent'] = True
-        config['solvent']['method'] = solvent_method
-        for mol_name in config['molecules']:
-            config['output_dir'] = './organic/solvent/' + solvent_method
-            run_dft(mol_name, config)
+    run_dft()

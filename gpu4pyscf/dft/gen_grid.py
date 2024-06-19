@@ -333,6 +333,7 @@ def get_partition(mol, atom_grids_tab,
     # support atomic_radii_adjust = None
     assert radii_adjust == radi.treutler_atomic_radii_adjust
     a = -radi.get_treutler_fac(mol, atomic_radii)
+    #a = -radi.get_becke_fac(mol, atomic_radii)
     for ia in range(mol.natm):
         coords, vol = atom_grids_tab[mol.atom_symbol(ia)]
         coords = coords + atm_coords[ia]
@@ -373,6 +374,14 @@ def make_mask(mol, coords, relativity=0, shls_slice=None, cutoff=CUTOFF,
         is the number of shells.
     '''
     return make_screen_index(mol, coords, shls_slice, cutoff)
+
+def argsort_group(group_ids, ngroup):
+    '''Sort the grids based on the group_ids.
+    '''
+    groups = []
+    for i in range(ngroup):
+        groups.append(numpy.where(group_ids==i)[0])
+    return cupy.hstack(groups)
 
 def atomic_group_grids(mol, coords):
     '''
@@ -415,7 +424,6 @@ def atomic_group_grids(mol, coords):
         raise RuntimeError('CUDA Error')
 
     return group_ids.argsort()
-
 
 def arg_group_grids(mol, coords, box_size=GROUP_BOX_SIZE):
     '''
@@ -489,7 +497,7 @@ class Grids(lib.StreamObject):
     @property
     def size(self):
         return getattr(self.weights, 'size', 0)
-
+    
     def build(self, mol=None, with_non0tab=False, sort_grids=True, **kwargs):
         if mol is None: mol = self.mol
         if self.verbose >= logger.WARN:

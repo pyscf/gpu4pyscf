@@ -28,7 +28,7 @@ from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 
 LMAX_ON_GPU = 7
-DSOLVE_LINDEP = 1e-12
+DSOLVE_LINDEP = 1e-10
 
 c2s_l = mole.get_cart2sph(lmax=LMAX_ON_GPU)
 c2s_offset = np.cumsum([0] + [x.shape[0]*x.shape[1] for x in c2s_l])
@@ -510,10 +510,10 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     nroots, ndim = x1.shape
 
     # Not exactly QR, vectors are orthogonal but not normalized
-    x1, rmat = _qr(x1, cupy.dot, lindep)
+    x1, rmat = _qr(x1, cupy.dot, lindep, log=log)
     for i in range(len(x1)):
         x1[i] *= rmat[i,i]
-
+    
     innerprod = [cupy.dot(xi.conj(), xi).real for xi in x1]
     if innerprod:
         max_innerprod = max(innerprod)
@@ -545,7 +545,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
             x1 -= xsi * cupy.expand_dims(w,-1)
         axt = xsi = None
 
-        x1, rmat = _qr(x1, cupy.dot, lindep)
+        x1, rmat = _qr(x1, cupy.dot, lindep, log=log)
         for i in range(len(x1)):
             x1[i] *= rmat[i,i]
 
@@ -563,7 +563,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         x1 = x1[idx]
 
     if cycle == max_cycle:
-        log.warn('CPSCF failed to converge')
+        log.error('CPSCF failed to converge')
 
     xs = cupy.asarray(xs)
     ax = cupy.asarray(ax)
@@ -592,7 +592,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         x += x0
     return x
 
-def _qr(xs, dot, lindep=1e-14):
+def _qr(xs, dot, lindep=1e-14, log=None):
     '''QR decomposition for a list of vectors (for linearly independent vectors only).
     xs = (r.T).dot(qs)
     '''
@@ -617,7 +617,12 @@ def _qr(xs, dot, lindep=1e-14):
             qs[nv] = xi/norm
             rmat[:nv+1,nv] /= norm
             nv += 1
-    return qs[:nv], cupy.linalg.inv(rmat[:nv,:nv])
+    if nv > 0:
+        _, s, _ = cupy.linalg.svd(rmat[:nv,:nv])
+        cond_number = s[0] / s[-1]
+        if log:
+            log.info(f'{nv} vectors, condition number of R matrix {cond_number}')
+    return qs[:nv], cupy.linalg.pinv(rmat[:nv,:nv])
 
 def _gen_x0(v, xs):
     ndim = v.ndim
@@ -657,7 +662,18 @@ def pinv(a, lindep=1e-10):
     return j2c
 
 def cond(a):
-    return cupy.linalg.norm(a,2)*cupy.linalg.norm(cupy.linalg.inv(a),2)
+    """
+    Calculate the condition number of a matrix.
+
+    Parameters:
+    a (cupy.ndarray): The input matrix.
+
+    Returns:
+    float: The condition number of the matrix.
+    """
+    _, s, _ = cupy.linalg.svd(a)
+    cond_number = s[0] / s[-1]
+    return cond_number
 
 def grouped_dot(As, Bs, Cs=None):
     '''

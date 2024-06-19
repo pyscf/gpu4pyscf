@@ -34,10 +34,8 @@ __all__ = [
 
 libcupy_helper = load_library('libcupy_helper')
 
-LINEAR_DEP_THR = 1e-12
-
 def prune_small_rho_grids_(ks, mol, dm, grids):
-    rho = ks._numint.get_rho(mol, dm, grids, ks.max_memory)
+    rho = ks._numint.get_rho(mol, dm, grids, ks.max_memory, verbose=ks.verbose)
 
     threshold = ks.small_rho_cutoff
     '''Prune grids if the electron density on the grid is small'''
@@ -49,10 +47,10 @@ def prune_small_rho_grids_(ks, mol, dm, grids):
     if abs(n-mol.nelectron) < gen_grid.NELEC_ERROR_TOL*n:
         rho *= grids.weights
         idx = cupy.abs(rho) > threshold / grids.weights.size
-
-        logger.debug(grids, 'Drop grids %d', grids.weights.size - cupy.count_nonzero(idx))
+        
         grids.coords  = cupy.asarray(grids.coords [idx], order='C')
         grids.weights = cupy.asarray(grids.weights[idx], order='C')
+        logger.debug(grids, 'Drop grids %d', rho.size - grids.weights.size)
         if grids.alignment:
             padding = gen_grid._padding_size(grids.size, grids.alignment)
             logger.debug(ks, 'prune_by_density_: %d padding grids', padding)
@@ -263,7 +261,7 @@ class KohnShamDFT(rks.KohnShamDFT):
     def dump_flags(self, verbose=None):
         # TODO: add this later
         return
-
+    
     reset = rks.KohnShamDFT.reset
     do_nlc = rks.KohnShamDFT.do_nlc
 

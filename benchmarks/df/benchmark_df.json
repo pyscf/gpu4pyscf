@@ -13,11 +13,12 @@
         "066_Raffinose.xyz",
         "084_Sphingomyelin.xyz",
         "095_Azadirachtin.xyz",
-        "113_Taxol.xyz"
+        "113_Taxol.xyz",
+        "168_Valinomycin.xyz"
     ],
     "basis": "sto-3g",
     "xc": "m06",
-    "verbose": 4,
+    "verbose": 6,
     "with_solvent": false,
     "solvent": {
         "eps": 78.3553,

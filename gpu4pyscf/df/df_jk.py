@@ -262,7 +262,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     nset = dms.shape[0]
     t1 = t0 = log.init_timer()
     if dfobj._cderi is None:
-        log.debug('CDERI not found, build...')
+        log.debug('Build CDERI ...')
         dfobj.build(direct_scf_tol=direct_scf_tol, omega=omega)
         t1 = log.timer_debug1('init jk', *t0)
 
@@ -270,7 +270,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     vj = vk = None
     ao_idx = dfobj.intopt.ao_idx
     dms = take_last2d(dms, ao_idx)
-
+    dms_shape = dms.shape
     rows = dfobj.intopt.cderi_row
     cols = dfobj.intopt.cderi_col
     
@@ -302,6 +302,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
             if with_j:
                 rhoj = 2.0*dm_sparse.dot(cderi_sparse)
                 vj_packed += cupy.dot(rhoj, cderi_sparse.T)
+            cderi_sparse = rhoj = None
             for i in range(nset):
                 if with_k:
                     rhok = contract('Lji,jk->Lki', cderi, occ_coeff[i])
@@ -309,13 +310,15 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
                     #cublas.syrk('T', rhok.reshape([-1,nao]), out=vk[i], alpha=1.0, beta=1.0, lower=True)
                     rhok = rhok.reshape([-1,nao])
                     vk[i] += cupy.dot(rhok.T, rhok)
+                rhok = None
         if with_j:
-            vj = cupy.zeros_like(dms)
+            vj = cupy.zeros(dms_shape)
             vj[:,rows,cols] = vj_packed
             vj[:,cols,rows] = vj_packed
 
     # CP-HF K matrix
     elif hasattr(dms_tag, 'mo1'):
+        dms = None
         occ_coeffs = dms_tag.occ_coeff
         mo1s = dms_tag.mo1
         mo_occ = dms_tag.mo_occ
@@ -336,6 +339,8 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
             if with_j:
                 rhoj = 2.0*dm_sparse.dot(cderi_sparse)
                 vj_sparse += cupy.dot(rhoj, cderi_sparse.T)
+                rhoj = None
+            cderi_sparse = None
             if with_k:
                 iset = 0
                 for occ_coeff, mo1 in zip(occ_coeffs, mo1s):
@@ -345,15 +350,16 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
                         #contract('Lki,Lkj->ij', rhok, rhok1, alpha=1.0, beta=1.0, out=vk[iset])
                         vk[iset] += cupy.dot(rhok.T, rhok1)
                         iset += 1
-        occ_coeff = rhoj = rhok1 = rhok = None
-        mo1s = mo1 = None
+                mo1 = rhok1 = rhok = None
+            cderi = None
+        mo1s = None
         if with_j:
-            vj = cupy.zeros_like(dms)
+            vj = cupy.zeros(dms_shape)
             vj[:,rows,cols] = vj_sparse
             vj[:,cols,rows] = vj_sparse
         if with_k:
             transpose_sum(vk)
-        vj_sparse = cderi = cderi_sparse = None
+        vj_sparse = None
     # general K matrix with density matrix
     else:
         if with_j:
@@ -369,7 +375,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
                     #vk[k] += contract('Lki,Lkj->ij', cderi, rhok)
                     vk[k] += cupy.dot(cderi.reshape([-1,nao]).T, rhok)
         if with_j:
-            vj = cupy.zeros_like(dms)
+            vj = cupy.zeros(dms_shape)
             vj[:,rows,cols] = vj_sparse
             vj[:,cols,rows] = vj_sparse
         rhok = None

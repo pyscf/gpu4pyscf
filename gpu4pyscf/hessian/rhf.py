@@ -36,9 +36,13 @@ from gpu4pyscf.scf import _response_functions  # noqa
 # import pyscf.grad.rhf to activate nuc_grad_method method
 from pyscf.grad import rhf  # noqa
 from gpu4pyscf.scf import cphf
-from gpu4pyscf.lib.cupy_helper import contract, tag_array, print_mem_info, transpose_sum
+from gpu4pyscf.lib.cupy_helper import (
+    contract, tag_array, print_mem_info, transpose_sum, get_avail_mem)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
+
+GB = 1024*1024*1024
+ALIGNED = 4
 
 def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
               mo1=None, mo_e1=None, h1ao=None,
@@ -316,6 +320,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
             See also the function gen_vind.
     '''
     mol = mf.mol
+    log = logger.new_logger(mf, verbose)
     if atmlst is None: atmlst = range(mol.natm)
 
     nao, nmo = mo_coeff.shape
@@ -331,8 +336,13 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         tmp = contract('xij,jo->xio', mat, mocc)
         return contract('xik,ip->xpk', tmp, mo_coeff)
     cupy.get_default_memory_pool().free_all_blocks()
-    # TODO: calculate blksize dynamically
-    blksize = 48
+    
+    avail_mem = get_avail_mem()
+    blksize = int(avail_mem*0.4) // (8*3*nao*nao*4) // ALIGNED * ALIGNED
+    blksize = min(32, blksize)
+    log.debug(f'GPU memory {avail_mem/GB:.1f} GB available')
+    log.debug(f'{blksize} atoms in each block CPHF equation')
+    
     mo1s = [None] * mol.natm
     e1s = [None] * mol.natm
     aoslices = mol.aoslice_by_atom()
@@ -376,8 +386,10 @@ def gen_vind(mf, mo_coeff, mo_occ):
         mo1 = cupy.asarray(mo1)
         mo1 = mo1.reshape(-1,nmo,nocc)
         mo1_mo = contract('npo,ip->nio', mo1, mo_coeff)
-        dm1 = contract('nio,jo->nij', 2.0*mo1_mo, mocc)
-        dm1 = dm1 + dm1.transpose(0,2,1)
+        #dm1 = contract('nio,jo->nij', 2.0*mo1_mo, mocc)
+        #dm1 = dm1 + dm1.transpose(0,2,1)
+        dm1 = mo1_mo.dot(2.0*mocc.T)
+        transpose_sum(dm1)
         dm1 = tag_array(dm1, mo1=mo1_mo, occ_coeff=mocc, mo_occ=mo_occ)
         v1 = vresp(dm1)
         tmp = contract('nij,jo->nio', v1, mocc)
@@ -514,6 +526,7 @@ def gen_hop(hobj, mo_energy=None, mo_coeff=None, mo_occ=None, verbose=None):
 
 
 def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
+    cput0 = (logger.process_clock(), logger.perf_counter())
     if mo_energy is None: mo_energy = hessobj.base.mo_energy
     if mo_coeff is None: mo_coeff = hessobj.base.mo_coeff
     if mo_occ is None: mo_occ = hessobj.base.mo_occ
@@ -521,6 +534,9 @@ def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         atmlst = hessobj.atmlst
     else:
         hessobj.atmlst = atmlst
+    
+    if hessobj.verbose >= logger.INFO:
+        hessobj.dump_flags()
 
     de = hessobj.hess_elec(mo_energy, mo_coeff, mo_occ, atmlst=atmlst)
     hessobj.de = de.get() + hessobj.hess_nuc(hessobj.mol, atmlst=atmlst)
@@ -532,6 +548,7 @@ def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         for k, katm in enumerate(atmlst):
             for l, latm in enumerate(atmlst):
                 hessobj.de[k,l] += h_disp[k,l]
+    logger.timer(hessobj, 'SCF hessian', *cput0)
 
     return hessobj.de
 
@@ -626,6 +643,18 @@ class HessianBase(lib.StreamObject):
     def hess_nuc(self, mol=None, atmlst=None):
         if mol is None: mol = self.mol
         return hess_nuc(mol, atmlst)
+
+    def dump_flags(self, verbose=None):
+        log = logger.new_logger(self, verbose)
+        log.info('\n')
+        if hasattr(self.base, 'converged') and not self.base.converged:
+            log.warn('Ground state %s not converged',
+                     self.base.__class__.__name__)
+        log.info('******** %s for %s ********',
+                 self.__class__, self.base.__class__)
+        log.info('Max_memory %d MB (current use %d MB)',
+                 self.max_memory, lib.current_memory()[0])
+        return self
 
     def to_cpu(self):
         mf = self.base.to_cpu()

@@ -22,7 +22,7 @@ from gpu4pyscf.drivers.benchmark_driver import run_dft, warmup
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run DFT with GPU4PySCF for molecules')
-    parser.add_argument("--config",    type=str,  default='benchmark.json')
+    parser.add_argument("--config",    type=str,  default='benchmark_df.json')
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -36,15 +36,23 @@ if __name__ == '__main__':
 
     # Warmup
     warmup()
-
     # Generate benchmark data for different xc
     config['basis'] = 'def2-tzvpp'
-    for xc in ['LDA', 'PBE', 'B3LYP', 'M06', 'wB97m-v']:
+    for xc in ['B3LYP']:#['LDA', 'PBE', 'B3LYP', 'M06', 'wB97m-v']:
         config['xc'] = xc
         config['output_dir'] = './organic/xc/' + xc 
         for mol_name in config['molecules']:
-            run_dft(mol_name, config)
+            if mol_name[:2] == '16':
+                run_dft(mol_name, config)
+    config['basis'] = 'def2-tzvpp'
+    for xc in ['B3LYP']:#['LDA', 'PBE', 'B3LYP', 'M06', 'wB97m-v']:
+        config['xc'] = xc
+        config['output_dir'] = './organic/xc/' + xc 
+        for mol_name in config['molecules']:
+            if mol_name[:2] == '09':
+                run_dft(mol_name, config)
 
+    exit()
     # Generate benchmark data for different basis
     config['xc'] = 'b3lyp'
     for bas in ['sto-3g', '6-31g', 'def2-svp', 'def2-tzvpp', 'def2-tzvpd']:

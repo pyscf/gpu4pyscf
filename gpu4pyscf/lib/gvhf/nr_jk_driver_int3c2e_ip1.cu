@@ -138,6 +138,8 @@ int GINTbuild_int3c2e_ip1_jk(BasisProdCache *bpcache,
     }
     for (int n = 0; n < MAX_STREAMS; n++){
         checkCudaErrors(cudaStreamSynchronize(streams[n]));
+    }
+    for (int n = 0; n < MAX_STREAMS; n++){    
         checkCudaErrors(cudaStreamDestroy(streams[n]));
     }
 
