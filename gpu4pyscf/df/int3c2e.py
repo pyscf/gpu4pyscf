@@ -763,7 +763,6 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
     '''
     ao2atom = get_ao2atom(intopt, aoslices)
     natom = len(aoslices)
-    naux = len(intopt.aux_ao_idx)
     nao = len(intopt.ao_idx)
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     nocc = orbo.shape[1]
@@ -783,7 +782,7 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
                 rhok0 = contract('pro,Jo->prJ', rhok0, orbo)
             rhoj0 = cupy.zeros([3,k1-k0,nao])
             int3c_ip1_occ = cupy.zeros([3,k1-k0,nao,nocc])
-            
+
         vj1_buf[:,i0:i1,j0:j1] += contract('xpji,p->xij', int3c_blk, rhoj[k0:k1])
         rhoj0[:,:,i0:i1] += contract('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
         int3c_ip1_occ[:,:,i0:i1] += contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])

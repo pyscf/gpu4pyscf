@@ -52,7 +52,7 @@ def warmup():
     g = g.kernel()
 
     h = mf.Hessian()
-    hess = h.kernel()
+    h.kernel()
     return
 
 def run_dft(mol_name, config):
@@ -64,7 +64,7 @@ def run_dft(mol_name, config):
     with_solvent = config.get('with_solvent', False)
     with_grad    = config.get('with_grad',    True)
     with_hess    = config.get('with_hess',    True)
-    
+
     # I/O
     fp = tempfile.TemporaryDirectory()
     local_dir = f'{fp.name}/'
@@ -77,8 +77,7 @@ def run_dft(mol_name, config):
         atom=local_dir+mol_name,
         basis=bas, max_memory=32000,
         verbose=verbose,
-        output=f'{local_dir}/{logfile}'
-        )
+        output=f'{local_dir}/{logfile}')
 
     # To match default LDA in Q-Chem
     if xc == 'LDA':
@@ -100,7 +99,7 @@ def run_dft(mol_name, config):
         else:
             auxbasis = None
         mf = mf.density_fit(auxbasis=auxbasis)
-    
+
     if with_gpu:
         mf = mf.to_gpu()
 
@@ -115,10 +114,10 @@ def run_dft(mol_name, config):
     mf.chkfile = None
     mf.conv_tol = 1e-10
     e_tot = mf.kernel()
-    
+
     if not mf.converged:
         logger.warn(mf, 'SCF failed to converge')
-    
+
     scf_time = time.time() - start_time
     print(f'compute time for energy: {scf_time:.3f} s')
 
