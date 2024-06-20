@@ -24,7 +24,4 @@ map = {
     'PBE0'          : 'HYB_GGA_XC_PBEH',
     'WB97'          : 'HYB_GGA_XC_WB97',
     'WB97X'         : 'HYB_GGA_XC_WB97X',
-    'CAMB3LYP'      : 'HYB_GGA_XC_CAM_B3LYP',
-    'CAMYBLYP'      : 'HYB_GGA_XC_CAMY_BLYP',
-    'CAMYB3LYP'     : 'HYB_GGA_XC_CAMY_B3LYP',
 }
