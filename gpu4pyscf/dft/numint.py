@@ -1986,7 +1986,7 @@ class _GDFTOpt:
 
         ao_loc = pmol.ao_loc_nr()
         nao = ao_loc[-1]
-        sorted_idx = np.argsort(inv_idx)
+        sorted_idx = np.argsort(inv_idx.ravel())
         pmol._bas = np.asarray(pmol._bas[sorted_idx], dtype=np.int32)
         ao_idx = np.array_split(np.arange(nao), ao_loc[1:-1])
         ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
