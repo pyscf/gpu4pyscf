@@ -198,8 +198,8 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     T = cupy.cuda.cublas.CUBLAS_OP_T
     one = np.ones(1)
     one_ptr = one.ctypes.data
-    x2_ptr = x2.data.ptr
-    Ht2ao_ptr = Ht2ao.data.ptr
+    x2_ptr = np.int64(x2.data.ptr)
+    Ht2ao_ptr = np.int64(Ht2ao.data.ptr)
     def contract_vvvv_(eri, i0, i1, j0, j1):
         ic = i1 - i0
         jc = j1 - j0

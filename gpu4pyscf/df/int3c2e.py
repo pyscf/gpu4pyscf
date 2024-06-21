@@ -61,7 +61,6 @@ def make_fake_mol():
     fakemol._env[ptr_coeff] = 1.0/0.282094791773878143
     fakemol._env[ptr_exp] = 0.0
     fakemol._built = True
-
     return fakemol
 
 class VHFOpt(_vhf.VHFOpt):
@@ -1573,7 +1572,6 @@ def sort_mol(mol0, cart=True, log=None):
         log = logger.new_logger(mol0, mol0.verbose)
     mol = mol0.copy(deep=True)
     l_ctrs = mol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
-
     uniq_l_ctr, _, inv_idx, l_ctr_counts = np.unique(
         l_ctrs, return_index=True, return_inverse=True, return_counts=True, axis=0)
 
@@ -1582,7 +1580,7 @@ def sort_mol(mol0, cart=True, log=None):
         for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
             log.debug('    %s : %s', l_ctr, n)
 
-    sorted_idx = np.argsort(inv_idx, kind='stable').astype(np.int32)
+    sorted_idx = np.argsort(inv_idx.ravel(), kind='stable').astype(np.int32)
 
     # Sort basis inplace
     mol._bas = mol._bas[sorted_idx]

@@ -142,7 +142,7 @@ class KnownValues(unittest.TestCase):
         assert abs(e_cpu - e_gpu) < 1e-8
 
     @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
-    def test_to_cpu(self):
+    def test_to_cpu_1(self):
         mf = dft.RKS(mol, xc='b3lyp').PCM()
         e_gpu = mf.kernel()
         mf = mf.to_cpu()
@@ -154,6 +154,7 @@ class KnownValues(unittest.TestCase):
         mf = mf.to_cpu()
         e_cpu = mf.kernel()
         assert abs(e_cpu - e_gpu) < 1e-8
+
 if __name__ == "__main__":
     print("Full Tests for PCMs")
     unittest.main()
