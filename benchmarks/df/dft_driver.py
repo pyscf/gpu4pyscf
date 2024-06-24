@@ -16,9 +16,9 @@
 import os
 import json
 import argparse
-
+import cupy
 from pyscf import lib
-from gpu4pyscf.drivers.benchmark_driver import run_dft, warmup
+from gpu4pyscf.drivers.dft_driver import run_dft, warmup
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run DFT with GPU4PySCF for molecules')
@@ -26,45 +26,60 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     with open(args.config) as f:
-        config = json.load(f)[0]
+        config_template = json.load(f)[0]
 
-    isExist = os.path.exists(config['output_dir'])
+    isExist = os.path.exists(config_template['output_dir'])
     if not isExist:
-        os.makedirs(config['output_dir'])
+        os.makedirs(config_template['output_dir'])
 
-    config['input_dir'] = '../molecules/organic/'
+    config_template['input_dir'] = '../molecules/organic/'
 
     # Warmup
-    warmup()
+    warmup(atom='../molecules/organic/020_Vitamin_C.xyz')
     # Generate benchmark data for different xc
-    config['basis'] = 'def2-tzvpp'
-    for xc in ['B3LYP']:#['LDA', 'PBE', 'B3LYP', 'M06', 'wB97m-v']:
+    config = config_template.copy()
+    #for xc in ['LDA', 'PBE', 'B3LYP', 'M06']:
+    for xc in ['B3LYP']:
         config['xc'] = xc
         config['output_dir'] = './organic/xc/' + xc 
+        config['basis'] = 'def2-tzvpp'
+        config['verbose'] = 4
         for mol_name in config['molecules']:
-            if mol_name[:2] == '16':
+            # CPHF for these molecules does not converge
+            if mol_name in ["095_Azadirachtin.xyz","113_Taxol.xyz","168_Valinomycin.xyz"]:
+                #config["with_hess"] = False
+                cupy.get_default_memory_pool().free_all_blocks()
+                cupy.get_default_pinned_memory_pool().free_all_blocks()
                 run_dft(mol_name, config)
+            ##run_dft(mol_name, config)
+    exit()
+    # vv10 Hessian is not supported yet
+    xc = 'wB97m-v'
+    config = config_template.copy()
+    config['xc'] = xc
+    config['output_dir'] = './organic/xc/' + xc
+    config['with_hess'] = False
     config['basis'] = 'def2-tzvpp'
-    for xc in ['B3LYP']:#['LDA', 'PBE', 'B3LYP', 'M06', 'wB97m-v']:
-        config['xc'] = xc
-        config['output_dir'] = './organic/xc/' + xc 
-        for mol_name in config['molecules']:
-            if mol_name[:2] == '09':
-                run_dft(mol_name, config)
-
+    for mol_name in config['molecules']:
+        run_dft(mol_name, config)
     exit()
     # Generate benchmark data for different basis
-    config['xc'] = 'b3lyp'
+    config = config_template.copy()
     for bas in ['sto-3g', '6-31g', 'def2-svp', 'def2-tzvpp', 'def2-tzvpd']:
+        config['xc'] = 'b3lyp'
         config['basis'] = bas
         config['output_dir'] = './organic/basis/' + bas
         for mol_name in config['molecules']:
+            # CPHF for these molecules does not converge
+            if mol_name in ["095_Azadirachtin.xyz", "113_Taxol.xyz","168_Valinomycin.xyz"]:
+                config["with_hess"] = False
             run_dft(mol_name, config)
 
     # Generate benchmark data for different solvent
-    config['xc'] = 'b3lyp'
-    config['basis'] = 'def2-tzvpp'
+    config = config_template.copy()
     for solvent_method in ["CPCM", "IEFPCM"]:
+        config['xc'] = 'b3lyp'
+        config['basis'] = 'def2-tzvpp'
         config['with_solvent'] = True
         config['solvent']['method'] = solvent_method
         config['output_dir'] = './organic/solvent/' + solvent_method
