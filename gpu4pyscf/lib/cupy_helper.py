@@ -28,7 +28,7 @@ from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 
 LMAX_ON_GPU = 7
-DSOLVE_LINDEP = 1e-10
+DSOLVE_LINDEP = 1e-13
 
 c2s_l = mole.get_cart2sph(lmax=LMAX_ON_GPU)
 c2s_offset = np.cumsum([0] + [x.shape[0]*x.shape[1] for x in c2s_l])
@@ -510,15 +510,12 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     nroots, ndim = x1.shape
 
     # Not exactly QR, vectors are orthogonal but not normalized
-    x1, rmat = _qr(x1, cupy.dot, lindep, log=log)
-    for i in range(len(x1)):
-        x1[i] *= rmat[i,i]
+    x1, rmat = _qr(x1, cupy.dot, lindep)
+    x1 *= rmat.diagonal()[:,None]
     
-    innerprod = [cupy.dot(xi.conj(), xi).real for xi in x1]
-    if innerprod:
-        max_innerprod = max(innerprod)
-    else:
-        max_innerprod = 0
+    innerprod = [rmat[i,i].real ** 2 for i in range(x1.shape[0])]
+    max_innerprod = max(innerprod)
+
     if max_innerprod < lindep or max_innerprod < tol**2:
         if x0 is None:
             return cupy.zeros_like(b)
@@ -544,26 +541,23 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
             w = cupy.dot(axt, xsi.conj()) / innerprod[i]
             x1 -= xsi * cupy.expand_dims(w,-1)
         axt = xsi = None
+        
+        x1, rmat = _qr(x1, cupy.dot, lindep)
+        x1 *= rmat.diagonal()[:,None]
+        innerprod1 = rmat.diagonal().real ** 2
+        max_innerprod = max(innerprod1, default=0.)
 
-        x1, rmat = _qr(x1, cupy.dot, lindep, log=log)
-        for i in range(len(x1)):
-            x1[i] *= rmat[i,i]
-
-        max_innerprod = 0
-        idx = []
-        for i, xi in enumerate(x1):
-            innerprod1 = cupy.dot(xi.conj(), xi).real
-            max_innerprod = max(max_innerprod, innerprod1)
-            if innerprod1 > lindep and innerprod1 > tol**2:
-                idx.append(i)
-                innerprod.append(innerprod1)
-        log.info(f'krylov cycle {cycle}  r = {max_innerprod**.5:.3e} {x1.shape[0]} equations')
+        log.info(f'krylov cycle {cycle}, r = {max_innerprod**.5:.3e}, {x1.shape[0]} equations')
         if max_innerprod < lindep or max_innerprod < tol**2:
             break
-        x1 = x1[idx]
+        mask = (innerprod1 > lindep) & (innerprod1 > tol**2)
+        x1 = x1[mask]
+        innerprod.extend(innerprod1[mask])
+        if max_innerprod > 1e10:
+            raise RuntimeError('Krylov subspace iterations diverge') 
 
-    if cycle == max_cycle:
-        log.error('CPSCF failed to converge')
+    else:
+        raise RuntimeError('Krylov solver failed to converge')
 
     xs = cupy.asarray(xs)
     ax = cupy.asarray(ax)
@@ -592,37 +586,29 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         x += x0
     return x
 
-def _qr(xs, dot, lindep=1e-14, log=None):
+def _qr(xs, dot, lindep=1e-14):
     '''QR decomposition for a list of vectors (for linearly independent vectors only).
     xs = (r.T).dot(qs)
     '''
     nvec = len(xs)
     dtype = xs[0].dtype
     qs = cupy.empty((nvec,xs[0].size), dtype=dtype)
-    rmat = cupy.empty((nvec,nvec), order='F', dtype=dtype)
+    rmat = cupy.eye(nvec, order='F', dtype=dtype)
 
     nv = 0
     for i in range(nvec):
         xi = cupy.array(xs[i], copy=True)
-        rmat[:,nv] = 0
-        rmat[nv,nv] = 1
-
         prod = dot(qs[:nv].conj(), xi)
         xi -= cupy.dot(qs[:nv].T, prod)
         rmat[:,nv] -= cupy.dot(rmat[:,:nv], prod)
 
         innerprod = dot(xi.conj(), xi).real
-        norm = cupy.sqrt(innerprod)
+        norm = innerprod**0.5
         if innerprod > lindep:
             qs[nv] = xi/norm
             rmat[:nv+1,nv] /= norm
             nv += 1
-    if nv > 0:
-        _, s, _ = cupy.linalg.svd(rmat[:nv,:nv])
-        cond_number = s[0] / s[-1]
-        if log:
-            log.info(f'{nv} vectors, condition number of R matrix {cond_number}')
-    return qs[:nv], cupy.linalg.pinv(rmat[:nv,:nv])
+    return qs[:nv], cupy.linalg.inv(rmat[:nv,:nv])
 
 def _gen_x0(v, xs):
     ndim = v.ndim

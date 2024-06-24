@@ -126,8 +126,8 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     t0 = logger.init_timer(ks)
     initialize_grids(ks, mol, dm)
 
-    if hasattr(ks, 'screen_tol') and ks.screen_tol is not None:
-        ks.direct_scf_tol = ks.screen_tol
+    #if hasattr(ks, 'screen_tol') and ks.screen_tol is not None:
+    #    ks.direct_scf_tol = ks.screen_tol
     ground_state = getattr(dm, 'ndim', 0) == 2
 
     ni = ks._numint

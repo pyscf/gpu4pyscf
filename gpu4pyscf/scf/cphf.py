@@ -28,7 +28,8 @@ from gpu4pyscf.lib.cupy_helper import krylov
 from gpu4pyscf.lib import logger
 
 def solve(fvind, mo_energy, mo_occ, h1, s1=None,
-          max_cycle=50, tol=1e-7, hermi=False, verbose=logger.WARN):
+          max_cycle=50, tol=1e-7, hermi=False, verbose=logger.WARN,
+          level_shift=0):
     '''
     Args:
         fvind : function
@@ -48,20 +49,22 @@ kernel = solve
 
 # h1 shape is (:,nvir,nocc)
 def solve_nos1(fvind, mo_energy, mo_occ, h1,
-               max_cycle=20, tol=1e-9, hermi=False, verbose=logger.WARN):
+               max_cycle=20, tol=1e-9, hermi=False, verbose=logger.WARN,
+               level_shift=0):
     '''For field independent basis. First order overlap matrix is zero'''
     log = logger.new_logger(verbose=verbose)
     t0 = (logger.process_clock(), logger.perf_counter())
 
     e_a = mo_energy[mo_occ==0]
     e_i = mo_energy[mo_occ>0]
-    I, A = cupy.meshgrid(e_i, e_a)
-    e_ai = 1 / (A - I)
+    e_ai = 1 / (e_a[:,None] + level_shift - e_i)
     mo1base = h1 * -e_ai
     nvir, nocc = e_ai.shape
 
     def vind_vo(mo1):
         v = fvind(mo1.reshape(-1,nvir,nocc)).reshape(-1,nvir,nocc)
+        if level_shift != 0:
+            v -= mo1 * level_shift
         v *= e_ai
         return v.reshape(-1,nvir*nocc)
     mo1 = krylov(vind_vo, mo1base.reshape(-1,nvir*nocc),

@@ -27,7 +27,7 @@ from pyscf import lib, gto
 from pyscf import dft, scf
 from pyscf.lib import logger
 
-def warmup():
+def warmup(atom=None):
     """
     Perform a warm-up calculation to initialize the GPU.
 
@@ -37,10 +37,30 @@ def warmup():
     mol = gto.Mole()
     mol.verbose = 1
     mol.output = '/dev/null'
-    mol.atom.extend([
-        ["O" , (0. , 0.     , 0.)],
-        [1   , (0. , -0.757 , 0.587)],
-        [1   , (0. , 0.757  , 0.587)] ])
+    if atom is None:
+        atom = '''
+C                 -0.07551087    1.68127663   -0.10745193
+O                  1.33621755    1.87147409   -0.39326987
+C                  1.67074668    2.95729545    0.49387976
+C                  0.41740763    3.77281969    0.78495878
+C                 -0.60481480    3.07572636    0.28906224
+H                 -0.19316298    1.01922455    0.72486113
+O                  0.35092043    5.03413298    1.45545728
+H                  0.42961487    5.74279041    0.81264173
+O                 -1.95331750    3.53349874    0.15912025
+H                 -2.55333895    2.78846397    0.23972698
+O                  2.81976302    3.20110148    0.94542226
+C                 -0.81772499    1.09230218   -1.32146482
+H                 -0.70955636    1.74951833   -2.15888136
+C                 -2.31163857    0.93420736   -0.98260166
+H                 -2.72575463    1.89080093   -0.74107186
+H                 -2.41980721    0.27699120   -0.14518512
+O                 -0.26428017   -0.18613595   -1.64425697
+H                 -0.72695910   -0.55328886   -2.40104423
+O                 -3.00083741    0.38730252   -2.10989934
+H                 -3.93210821    0.28874990   -1.89865997
+'''
+    mol.atom = atom
     mol.basis = 'def2-tzvpp'
     mol.spin = 1
     mol.charge = 1
@@ -48,17 +68,16 @@ def warmup():
     mf = dft.rks.RKS(mol, xc='b3lyp').density_fit().to_gpu()
     mf.kernel()
 
-    g = mf.nuc_grad_method()
-    g = g.kernel()
-
-    h = mf.Hessian()
-    h.kernel()
     return
 
 def run_dft(mol_name, config):
+    ''' Perform DFT calculations based on the configuration file. 
+    Saving the results, timing, and log to a HDF5 file.
+    '''
     xc           = config.get('xc',           'b3lyp')
     bas          = config.get('basis',        'def2-tzvpp')
     verbose      = config.get('verbose',      4)
+    scf_conv_tol = config.get('scf_conv_tol', 1e-10)
     with_df      = config.get('with_df',      True)
     with_gpu     = config.get('with_gpu',     True)
     with_solvent = config.get('with_solvent', False)
@@ -78,6 +97,7 @@ def run_dft(mol_name, config):
         basis=bas, max_memory=32000,
         verbose=verbose,
         output=f'{local_dir}/{logfile}')
+    mol.build()
 
     # To match default LDA in Q-Chem
     if xc == 'LDA':
@@ -112,7 +132,7 @@ def run_dft(mol_name, config):
 
     mf.direct_scf_tol = 1e-14
     mf.chkfile = None
-    mf.conv_tol = 1e-10
+    mf.conv_tol = scf_conv_tol
     e_tot = mf.kernel()
 
     if not mf.converged:

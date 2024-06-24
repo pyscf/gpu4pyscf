@@ -17,7 +17,7 @@ import os
 import json
 import argparse
 
-from gpu4pyscf.drivers.benchmark_driver import run_dft, warmup
+from gpu4pyscf.drivers.dft_driver import run_dft, warmup
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run DFT with GPU4PySCF for molecules')
@@ -38,7 +38,7 @@ if __name__ == '__main__':
     
     # Generate benchmark data for different xc
     config['basis'] = 'def2-tzvpp'
-    for xc in ['M06', 'wB97m-v']:#['LDA', 'PBE', 'B3LYP', 'M06', 'wB97m-v']:
+    for xc in ['LDA', 'PBE', 'B3LYP']:#, 'M06', 'wB97m-v']:
         config['xc'] = xc
         config['output_dir'] = './water_clusters/xc/' + xc 
         for mol_name in config['molecules']:
@@ -46,7 +46,7 @@ if __name__ == '__main__':
 
     # Generate benchmark data for different basis
     config['xc'] = 'b3lyp'
-    for bas in ['def2-tzvpd']:#['sto-3g', '6-31g', 'def2-svp', 'def2-tzvpp', 'def2-tzvpd']:
+    for bas in ['sto-3g', '6-31g', 'def2-svp', 'def2-tzvpp', 'def2-tzvpd']:
         config['basis'] = bas
         config['output_dir'] = './water_clusters/basis/' + bas
         for mol_name in config['molecules']:

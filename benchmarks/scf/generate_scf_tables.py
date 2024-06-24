@@ -19,6 +19,9 @@ import pandas as pd
 import os
 import argparse
 import glob
+
+import sys
+sys.path.append('../lib')
 import utils
 
 if __name__ == '__main__':
@@ -52,14 +55,15 @@ if __name__ == '__main__':
     print("")
     print("## Direct SCF Energy with B3LYP/*")
     print("")
-    source_path = os.path.join(source_dir, 'scf', 'water_clusters', 'basis')
-    target_path = os.path.join(target_dir, 'scf', 'water_clusters', 'basis')
+    source_path = os.path.join(source_dir, 'water_clusters', 'basis')
+    target_path = os.path.join(target_dir, 'water_clusters', 'basis')
     df_basis_diff = pd.DataFrame({'mol': molecules})
     df_basis_speedup = pd.DataFrame({'mol': molecules})
     for basis in ['sto-3g', '6-31g', 'def2-svp', 'def2-tzvpp', 'def2-tzvpd']:
-        df_diff, df_speedup = utils.generate_scf_tables(f'{source_path}/{basis}/', f'{target_path}/{basis}', molecules)
-        #df_diff = df_diff.drop(columns=['hess diff'])
-        #df_speedup = df_speedup.drop(columns=['hess speedup'])
+        df_diff, df_speedup = utils.generate_scf_tables(
+            f'{source_path}/{basis}/', 
+            f'{target_path}/{basis}', 
+            molecules)
         df_diff = df_diff.rename(columns={'scf diff': f'{basis}'})
         df_speedup = df_speedup.rename(columns={'scf speedup': f'{basis}'})
         df_basis_diff = df_basis_diff.merge(df_diff, how='outer', on='mol')
@@ -69,14 +73,13 @@ if __name__ == '__main__':
     print("")
     print("## Direct SCF Gradient with B3LYP/*")
     print("")
-    source_path = os.path.join(source_dir, 'scf', 'water_clusters', 'basis')
-    target_path = os.path.join(target_dir, 'scf', 'water_clusters', 'basis')
     df_basis_diff = pd.DataFrame({'mol': molecules})
     df_basis_speedup = pd.DataFrame({'mol': molecules})
     for basis in ['sto-3g', '6-31g', 'def2-svp', 'def2-tzvpp', 'def2-tzvpd']:
-        df_diff, df_speedup = utils.generate_grad_tables(f'{source_path}/{basis}/', f'{target_path}/{basis}', molecules)
-        #df_diff = df_diff.drop(columns=['hess diff'])
-        #df_speedup = df_speedup.drop(columns=['hess speedup'])
+        df_diff, df_speedup = utils.generate_grad_tables(
+            f'{source_path}/{basis}/', 
+            f'{target_path}/{basis}', 
+            molecules)
         df_diff = df_diff.rename(columns={'grad diff': f'{basis}'})
         df_speedup = df_speedup.rename(columns={'grad speedup': f'{basis}'})
         df_basis_diff = df_basis_diff.merge(df_diff, how='outer', on='mol')
@@ -87,14 +90,15 @@ if __name__ == '__main__':
     print("")
     print('## Direct SCF Energy with */def2-tzvpp')
     print("")
-    source_path = os.path.join(source_dir, 'scf', 'water_clusters', 'xc')
-    target_path = os.path.join(target_dir, 'scf', 'water_clusters', 'xc')
+    source_path = os.path.join(source_dir, 'water_clusters', 'xc')
+    target_path = os.path.join(target_dir, 'water_clusters', 'xc')
     df_xc_diff = pd.DataFrame({'mol': molecules})
     df_xc_speedup = pd.DataFrame({'mol': molecules})
     for xc in ['HF', 'LDA', 'PBE', 'M06', 'B3LYP', 'wB97m-v']:
-        df_diff, df_speedup = utils.generate_scf_tables(f'{source_path}/{xc}/', f'{target_path}/{xc}', molecules)
-        #df_diff = df_diff.drop(columns={'hess diff'})
-        #df_speedup = df_speedup.drop(columns={'hess speedup'})
+        df_diff, df_speedup = utils.generate_scf_tables(
+            f'{source_path}/{xc}/', 
+            f'{target_path}/{xc}', 
+            molecules)
         df_diff = df_diff.rename(columns={'scf diff': f'{xc}'})
         df_speedup = df_speedup.rename(columns={'scf speedup': f'{xc}'})
         df_xc_diff = df_xc_diff.merge(df_diff, how='outer', on='mol')
@@ -107,9 +111,10 @@ if __name__ == '__main__':
     df_xc_diff = pd.DataFrame({'mol': molecules})
     df_xc_speedup = pd.DataFrame({'mol': molecules})
     for xc in ['HF', 'LDA', 'PBE', 'M06', 'B3LYP', 'wB97m-v']:
-        df_diff, df_speedup = utils.generate_grad_tables(f'{source_path}/{xc}/', f'{target_path}/{xc}', molecules)
-        #df_diff = df_diff.drop(columns={'hess diff'})
-        #df_speedup = df_speedup.drop(columns={'hess speedup'})
+        df_diff, df_speedup = utils.generate_grad_tables(
+            f'{source_path}/{xc}/', 
+            f'{target_path}/{xc}', 
+            molecules)
         df_diff = df_diff.rename(columns={'grad diff': f'{xc}'})
         df_speedup = df_speedup.rename(columns={'grad speedup': f'{xc}'})
         df_xc_diff = df_xc_diff.merge(df_diff, how='outer', on='mol')

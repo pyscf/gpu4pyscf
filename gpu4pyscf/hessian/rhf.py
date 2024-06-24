@@ -35,6 +35,7 @@ from pyscf.scf import _vhf
 from gpu4pyscf.scf import _response_functions  # noqa
 # import pyscf.grad.rhf to activate nuc_grad_method method
 from pyscf.grad import rhf  # noqa
+from gpu4pyscf.gto.mole import partition_mol
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib.cupy_helper import (
     contract, tag_array, print_mem_info, transpose_sum, get_avail_mem)
@@ -339,35 +340,39 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     
     avail_mem = get_avail_mem()
     blksize = int(avail_mem*0.4) // (8*3*nao*nao*4) // ALIGNED * ALIGNED
-    blksize = min(32, blksize)
+    blksize = min(8, blksize)
     log.debug(f'GPU memory {avail_mem/GB:.1f} GB available')
     log.debug(f'{blksize} atoms in each block CPHF equation')
     
+    # sort atoms to improve the convergence
+    atom_groups = partition_mol(mol, group_size=blksize, max_dist=5.0)
+
     mo1s = [None] * mol.natm
     e1s = [None] * mol.natm
     aoslices = mol.aoslice_by_atom()
-    for ia0, ia1 in lib.prange(0, len(atmlst), blksize):
+
+    for group in atom_groups:
         s1vo = []
         h1vo = []
-        for i0 in range(ia0, ia1):
-            ia = atmlst[i0]
+        for ia in group:
             shl0, shl1, p0, p1 = aoslices[ia]
             s1ao = cupy.zeros((3,nao,nao))
             s1ao[:,p0:p1] += s1a[:,p0:p1]
             s1ao[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
             s1vo.append(_ao2mo(s1ao))
             h1vo.append(h1mo[ia])
-
+    
+        log.info(f'Solving CPHF equation for atoms {len(group)}/{mol.natm}')
         h1vo = cupy.vstack(h1vo)
         s1vo = cupy.vstack(s1vo)
         tol = mf.conv_tol_cpscf
-        mo1, e1 = cphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo, tol=tol, verbose=verbose)
+        mo1, e1 = cphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo, 
+                             level_shift=level_shift, tol=tol, verbose=verbose)
         # Different from PySCF, mo1 is in AO
         mo1 = mo1.reshape(-1,3,nao,nocc)
         e1 = e1.reshape(-1,3,nocc,nocc)
 
-        for k in range(ia1-ia0):
-            ia = atmlst[k+ia0]
+        for k, ia in enumerate(group):
             mo1s[ia] = mo1[k]
             e1s[ia] = e1[k].reshape(3,nocc,nocc)
         mo1 = e1 = None

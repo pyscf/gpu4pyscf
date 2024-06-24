@@ -21,7 +21,7 @@ import argparse
 import glob
 
 def read_solvent_gradient(path, mol):
-    ''' special treatment, solvent gradient is stored in .out '''
+    ''' special treatment qchem, solvent gradient is stored in .out '''
     keywords = ' -- total gradient after adding PCM contribution --'
     l = len(keywords)
     qchem_out = f'{path}/{mol}_qchem.out'
@@ -58,6 +58,7 @@ def generate_scf_tables(source_path, target_path, molecules):
             fp_target_h5['e_tot'][()] != -1 and
             fp_source_h5['e_tot'][()] != -1):
                 scf_diff_tmp = np.linalg.norm(fp_target_h5['e_tot'][()] - fp_source_h5['e_tot'][()])
+                
         except Exception:
             pass
         
@@ -89,7 +90,7 @@ def generate_grad_tables(source_path, target_path, molecules, solvent=False):
                 qchem_grad = fp_target_h5['grad'][()]
             else:
                 qchem_grad = read_solvent_gradient(target_path, mol)
-
+            
             if ('grad' in fp_target_h5 and 'grad' in fp_source_h5 and
             isinstance(fp_target_h5['grad'][()], np.ndarray) and
             isinstance(fp_source_h5['grad'][()], np.ndarray)):

@@ -90,3 +90,80 @@ def basis_seg_contraction(mol, allow_replica=False):
     pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
     pmol._env = _env
     return pmol
+
+def sort_atoms(mol):
+    """
+    Sort atoms in a molecule based on their distance to the first atom.
+
+    Parameters:
+    mol (Mole): A molecule object
+
+    Returns:
+    list: A list of atom indices sorted in ascending order based on their distance.
+
+    """
+    from scipy.spatial import distance_matrix
+    natm = mol.natm
+    atom_coords = mol.atom_coords()
+    charges = mol.atom_charges()
+    heavy_atoms = np.argwhere(charges != 1).ravel()
+    
+    visited = np.zeros(len(heavy_atoms), dtype=bool)
+    heavy_coords = atom_coords[heavy_atoms,:]
+    current_node = np.argmin(heavy_coords[:,0])
+    dist = distance_matrix(atom_coords[heavy_atoms], atom_coords[heavy_atoms])
+
+    # greedy traverse heavy atoms
+    path = [current_node]
+    while len(path) < len(heavy_atoms):
+        visited[current_node] = True
+        # Set distances to visited nodes as infinity so they won't be chosen
+        distances_to_unvisited = np.where(visited, np.inf, dist[current_node]).ravel()
+        next_node = np.argmin(distances_to_unvisited)
+        path.append(next_node)
+        current_node = next_node
+    
+    # Assign Hydrogen atoms to heavy atoms
+    full_path = [[heavy_atoms[idx]] for idx in path]
+    hydrogen_atoms = np.argwhere(charges == 1).ravel()
+    dist = distance_matrix(atom_coords[hydrogen_atoms], atom_coords[heavy_atoms])
+    for i, d in enumerate(dist):
+        heavy_idx = np.argmin(d)
+        full_path[heavy_idx].append(hydrogen_atoms[i])
+    
+    return [x for heavy_list in full_path for x in heavy_list]
+
+def partition_mol(mol, group_size=10, max_dist=10.0):
+    """
+    Partition a molecule into groups of atoms based on the distance between them.
+
+    Parameters:
+    mol (Molecule): The molecule to partition.
+    group_size (int): The maximum size of each group.
+    max_dist (float): The maximum distance between atoms in the same group.
+
+    Returns:
+    list: A list of groups, where each group is a list of atom indices.
+    """
+        
+    from scipy.spatial import distance_matrix
+    atom_coords = mol.atom_coords()
+    dist = distance_matrix(atom_coords, atom_coords)
+    
+    used_atoms = set()
+    groups = []
+    while(len(used_atoms) < mol.natm):
+        group = []
+        remaining_atoms = [i for i in range(mol.natm) if i not in used_atoms]
+
+        start_atom = remaining_atoms[0]
+        group.append(start_atom)
+        used_atoms.add(start_atom)
+
+        mask = dist[start_atom] < max_dist
+        mask[list(used_atoms)] = False
+        idx = np.argwhere(mask).ravel()[:group_size-1]
+        group += idx.tolist()
+        used_atoms.update(idx)
+        groups.append(group.copy())
+    return groups

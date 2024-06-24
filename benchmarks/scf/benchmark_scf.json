@@ -15,6 +15,7 @@
     "basis": "sto-3g",
     "xc": "m06",
     "verbose": 4,
+    "scf_conv_tol": 1e-10,
     "with_solvent": false,
     "solvent": {
         "eps": 78.3553,
