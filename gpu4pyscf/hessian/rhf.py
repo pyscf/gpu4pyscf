@@ -46,8 +46,10 @@ GB = 1024*1024*1024
 ALIGNED = 4
 
 def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
-              mo1=None, mo_e1=None, h1ao=None,
+              mo1=None, mo_e1=None, h1mo=None,
               atmlst=None, max_memory=4000, verbose=None):
+    ''' Different from PySF, using h1mo instead of h1ao for saving memory
+    '''
     log = logger.new_logger(hessobj, verbose)
     time0 = t1 = (logger.process_clock(), logger.perf_counter())
 
@@ -64,21 +66,14 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     de2 = hessobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ, atmlst,
                                     max_memory, log)
     t1 = log.timer_debug1('hess elec', *t1)
-    if h1ao is None:
-        h1ao = hessobj.make_h1(mo_coeff, mo_occ, hessobj.chkfile, atmlst, log)
+    if h1mo is None:
+        h1mo = hessobj.make_h1(mo_coeff, mo_occ, hessobj.chkfile, atmlst, log)
         t1 = log.timer_debug1('making H1', *t1)
     if mo1 is None or mo_e1 is None:
-        mo1, mo_e1 = hessobj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1ao,
+        mo1, mo_e1 = hessobj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1mo,
                                        None, atmlst, max_memory, log)
         t1 = log.timer_debug1('solving MO1', *t1)
-    '''
-    if isinstance(h1ao, str):
-        h1ao = lib.chkfile.load(h1ao, 'scf_f1ao')
-        h1ao = dict([(int(k), h1ao[k]) for k in h1ao])
-    if isinstance(mo1, str):
-        mo1 = lib.chkfile.load(mo1, 'scf_mo1')
-        mo1 = dict([(int(k), mo1[k]) for k in mo1])
-    '''
+
     nao, nmo = mo_coeff.shape
     mocc = cupy.array(mo_coeff[:,mo_occ>0])
     mo_energy = cupy.array(mo_energy)
@@ -94,7 +89,6 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         tmp = contract('xpq,pi->xiq', s1ao, mocc)
         s1oo = contract('xiq,qj->xij', tmp, mocc)
 
-        #s1oo = cupy.einsum('xpq,pi,qj->xij', s1ao, mocc, mocc)
         s1mo = contract('xij,ip->xpj', s1ao, mo_coeff)
 
         for j0 in range(i0+1):
@@ -103,7 +97,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 # *2 for double occupancy, *2 for +c.c.
             #dm1 = cupy.einsum('ypi,qi->ypq', mo1[ja], mocc)
             #de2_gpu[i0,j0] += cupy.einsum('xpq,ypq->xy', h1ao[ia], dm1) * 4
-            de2[i0,j0] += contract('xpi,ypi->xy', h1ao[ia], mo1[ja]) * 4
+            de2[i0,j0] += contract('xpi,ypi->xy', h1mo[ia], mo1[ja]) * 4
             dm1 = contract('ypi,qi->ypq', mo1[ja], mocc*mo_energy[mo_occ>0])
             de2[i0,j0] -= contract('xpq,ypq->xy', s1mo, dm1) * 4
             de2[i0,j0] -= contract('xpq,ypq->xy', s1oo, mo_e1[ja]) * 2
@@ -368,7 +362,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         tol = mf.conv_tol_cpscf
         mo1, e1 = cphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo, 
                              level_shift=level_shift, tol=tol, verbose=verbose)
-        # Different from PySCF, mo1 is in AO
+        
         mo1 = mo1.reshape(-1,3,nao,nocc)
         e1 = e1.reshape(-1,3,nocc,nocc)
 
@@ -639,9 +633,9 @@ class HessianBase(lib.StreamObject):
         if mol is None: mol = self.mol
         return get_hcore(mol)
 
-    def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
+    def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1mo,
                   fx=None, atmlst=None, max_memory=4000, verbose=None):
-        return solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
+        return solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1mo,
                          fx, atmlst, max_memory, verbose,
                          max_cycle=self.max_cycle, level_shift=self.level_shift)
 

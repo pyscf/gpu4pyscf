@@ -47,9 +47,10 @@ GB = 1024*1024*1024
 ALIGNED = 4
 
 def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
-              mo1=None, mo_e1=None, h1ao=None,
+              mo1=None, mo_e1=None, h1mo=None,
               atmlst=None, max_memory=4000, verbose=None):
-
+    ''' Different from PySF, using h1mo instead of h1ao for saving memory
+    '''
     log = logger.new_logger(hessobj, verbose)
     time0 = t1 = (logger.process_clock(), logger.perf_counter())
 
@@ -66,16 +67,16 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     de2 = hessobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ, atmlst,
                                     max_memory, log)
     t1 = log.timer_debug1('hess elec', *t1)
-    if h1ao is None:
-        h1ao = hessobj.make_h1(mo_coeff, mo_occ, hessobj.chkfile, atmlst, log)
+    if h1mo is None:
+        h1mo = hessobj.make_h1(mo_coeff, mo_occ, hessobj.chkfile, atmlst, log)
         t1 = log.timer_debug1('making H1', *t1)
     if mo1 is None or mo_e1 is None:
-        mo1, mo_e1 = hessobj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1ao,
+        mo1, mo_e1 = hessobj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1mo,
                                        None, atmlst, max_memory, log)
         t1 = log.timer_debug1('solving MO1', *t1)
     mo1a, mo1b = mo1
     mo_e1a, mo_e1b = mo_e1
-    h1aoa, h1aob = h1ao
+    h1aoa, h1aob = h1mo
 
     nao, _ = mo_coeff[0].shape
     mocca = cupy.array(mo_coeff[0][:,mo_occ[0]>0])
@@ -399,7 +400,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         tol = mf.conv_tol_cpscf
         mo1, e1 = ucphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo,
                               max_cycle=max_cycle, level_shift=level_shift, tol=tol, verbose=verbose)
-        # Different from PySCF, mo1 is in AO
+        
         mo1a = mo1[0].reshape(-1,3,nao,nocca)
         mo1b = mo1[1].reshape(-1,3,nao,noccb)
         e1a = e1[0].reshape(-1,3,nocca,nocca)
@@ -524,9 +525,9 @@ class Hessian(HessianBase):
     kernel = NotImplemented
     hess = NotImplemented
 
-    def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
+    def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1mo,
                   fx=None, atmlst=None, max_memory=4000, verbose=None):
-        return solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
+        return solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1mo,
                          fx, atmlst, max_memory, verbose,
                          max_cycle=self.max_cycle, level_shift=self.level_shift)
 
