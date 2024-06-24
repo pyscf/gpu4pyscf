@@ -748,7 +748,7 @@ class _VHFOpt:
             for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
                 logger.debug(mol, '    %s : %s', l_ctr, n)
 
-        sorted_idx = np.argsort(inv_idx, kind='stable').astype(np.int32)
+        sorted_idx = np.argsort(inv_idx.ravel(), kind='stable').astype(np.int32)
         # Sort contraction coefficients before updating self.mol
         ao_loc = mol.ao_loc_nr(cart=True)
         nao = ao_loc[-1]
