@@ -103,7 +103,6 @@ def sort_atoms(mol):
 
     """
     from scipy.spatial import distance_matrix
-    natm = mol.natm
     atom_coords = mol.atom_coords()
     charges = mol.atom_charges()
     heavy_atoms = np.argwhere(charges != 1).ravel()
