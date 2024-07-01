@@ -1,0 +1,31 @@
+[{
+    "input_dir": "./",
+    "output_dir": "./",
+    "molecules": [
+        "020_Vitamin_C.xyz",
+        "031_Inosine.xyz",
+        "033_Bisphenol_A.xyz",
+        "037_Mg_Porphin.xyz",
+        "042_Penicillin_V.xyz",
+        "045_Ochratoxin_A.xyz",
+        "052_Cetirizine.xyz",
+        "057_Tamoxifen.xyz",
+        "066_Raffinose.xyz",
+        "084_Sphingomyelin.xyz",
+        "095_Azadirachtin.xyz",
+        "113_Taxol.xyz",
+        "168_Valinomycin.xyz"
+    ],
+    "basis": "sto-3g",
+    "xc": "m06",
+    "verbose": 4,
+    "with_solvent": false,
+    "solvent": {
+        "eps": 78.3553,
+        "method": "CPCM"
+    },
+    "with_gpu": true,
+    "with_df": true,
+    "with_grad": true,
+    "with_hess": true
+}]

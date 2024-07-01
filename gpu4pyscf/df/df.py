@@ -30,9 +30,10 @@ from cupyx import scipy
 
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
+GB = 1024*1024*1024
 
 # TODO: reuse the setting in pyscf 2.6
-LINEAR_DEP_THR = 1e-6#incore.LINEAR_DEP_THR
+LINEAR_DEP_THR = 1e-7#incore.LINEAR_DEP_THR
 GROUP_SIZE = 256
 
 class DF(lib.StreamObject):
@@ -212,12 +213,13 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
     if naux * npair * 8 < 0.4 * avail_mem:
         try:
             cderi = cupy.empty([naux, npair], order='C')
+            log.debug(f"Saving CDERI on GPU. CDERI size {cderi.nbytes/GB}")
         except Exception:
             use_gpu_memory = False
     else:
         use_gpu_memory = False
     if(not use_gpu_memory):
-        log.debug("Not enough GPU memory")
+        log.debug("Saving cderi on CPU memory.")
         # TODO: async allocate memory
         try:
             mem = cupy.cuda.alloc_pinned_memory(naux * npair * 8)

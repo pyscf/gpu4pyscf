@@ -22,8 +22,9 @@ from pyscf import gto, df, lib
 from pyscf.scf import _vhf
 from gpu4pyscf.scf.hf import BasisProdCache, _make_s_index_offsets
 from gpu4pyscf.lib.cupy_helper import (
-    block_c2s_diag, cart2sph, block_diag, contract, load_library, c2s_l, get_avail_mem, print_mem_info, take_last2d)
+    block_c2s_diag, cart2sph, block_diag, contract, load_library, get_avail_mem, print_mem_info, take_last2d)
 from gpu4pyscf.lib import logger
+from gpu4pyscf.gto.mole import basis_seg_contraction
 
 LMAX_ON_GPU = 8
 FREE_CUPY_CACHE = True
@@ -34,68 +35,6 @@ NROOT_ON_GPU = 7
 libgvhf = load_library('libgvhf')
 libgint = load_library('libgint')
 libcupy_helper = load_library('libcupy_helper')
-
-def basis_seg_contraction(mol, allow_replica=False):
-    '''transform generally contracted basis to segment contracted basis
-    Kwargs:
-        allow_replica:
-            transform the generally contracted basis to replicated
-            segment-contracted basis
-    '''
-    bas_templates = {}
-    _bas = []
-    _env = mol._env.copy()
-
-    aoslices = mol.aoslice_by_atom()
-    for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
-        key = tuple(mol._bas[ib0:ib1,gto.PTR_EXP])
-        if key in bas_templates:
-            bas_of_ia = bas_templates[key]
-            bas_of_ia = bas_of_ia.copy()
-            bas_of_ia[:,gto.ATOM_OF] = ia
-        else:
-            # Generate the template for decontracted basis
-            bas_of_ia = []
-            for shell in mol._bas[ib0:ib1]:
-                l = shell[gto.ANG_OF]
-                nctr = shell[gto.NCTR_OF]
-                if nctr == 1:
-                    bas_of_ia.append(shell)
-                    continue
-
-                # Only basis with nctr > 1 needs to be decontracted
-                nprim = shell[gto.NPRIM_OF]
-                pcoeff = shell[gto.PTR_COEFF]
-                if allow_replica:
-                    bs = np.repeat(shell[np.newaxis], nctr, axis=0)
-                    bs[:,gto.NCTR_OF] = 1
-                    bs[:,gto.PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr, nprim)
-                    bas_of_ia.append(bs)
-                else:
-                    pexp = shell[gto.PTR_EXP]
-                    exps = _env[pexp:pexp+nprim]
-                    norm = gto.gto_norm(l, exps)
-                    # remove normalization from contraction coefficients
-                    _env[pcoeff:pcoeff+nprim] = norm
-                    bs = np.repeat(shell[np.newaxis], nprim, axis=0)
-                    bs[:,gto.NPRIM_OF] = 1
-                    bs[:,gto.NCTR_OF] = 1
-                    bs[:,gto.PTR_EXP] = np.arange(pexp, pexp+nprim)
-                    bs[:,gto.PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim)
-                    bas_of_ia.append(bs)
-
-            bas_of_ia = np.vstack(bas_of_ia)
-            bas_templates[key] = bas_of_ia
-        _bas.append(bas_of_ia)
-    
-    pmol = copy.copy(mol)
-    pmol.output = mol.output
-    pmol.verbose = mol.verbose
-    pmol.stdout = mol.stdout
-    pmol.cart = True
-    pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
-    pmol._env = _env
-    return pmol
 
 def make_fake_mol():
     '''
@@ -201,6 +140,7 @@ class VHFOpt(_vhf.VHFOpt):
         sorted_mol, sorted_idx, uniq_l_ctr, l_ctr_counts = sort_mol(mol, log=log)
         if group_size is not None :
             uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size)
+        self.nctr = len(uniq_l_ctr)
 
         # sort fake mol
         fake_mol = make_fake_mol()
@@ -242,7 +182,7 @@ class VHFOpt(_vhf.VHFOpt):
         nao = sph_ao_loc[-1]
         ao_idx = np.array_split(np.arange(nao), sph_ao_loc[1:-1])
         self.sph_ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
-        
+
         # cartesian ao index
         nao = cart_ao_loc[-1]
         ao_idx = np.array_split(np.arange(nao), cart_ao_loc[1:-1])
@@ -250,7 +190,7 @@ class VHFOpt(_vhf.VHFOpt):
         ncart = cart_ao_loc[-1]
         nsph = sph_ao_loc[-1]
         self.cart2sph = block_c2s_diag(ncart, nsph, self.angular, l_ctr_counts)
-        
+
         if _mol.cart:
             inv_idx = np.argsort(self.cart_ao_idx, kind='stable').astype(np.int32)
             self.coeff = cupy.eye(ncart)[:,inv_idx]
@@ -258,7 +198,7 @@ class VHFOpt(_vhf.VHFOpt):
             inv_idx = np.argsort(self.sph_ao_idx, kind='stable').astype(np.int32)
             self.coeff = self.cart2sph[:, inv_idx]
         cput1 = log.timer_debug1('AO cart2sph coeff', *cput1)
-        
+
         # pairing auxiliary basis with fake basis set
         fake_l_ctr_offsets = np.append(0, np.cumsum(fake_l_ctr_counts))
         fake_l_ctr_offsets += l_ctr_offsets[-1]
@@ -326,6 +266,7 @@ class VHFOpt(_vhf.VHFOpt):
 
         self.pair2bra = pair2bra
         self.pair2ket = pair2ket
+        self.l_ctr_offsets = l_ctr_offsets
         bas_pair2shls = np.hstack(pair2bra + pair2ket).astype(np.int32).reshape(2,-1)
         bas_pairs_locs = np.append(0, np.cumsum([x.size for x in pair2bra])).astype(np.int32)
         log_qs = log_qs + aux_log_qs
@@ -376,13 +317,13 @@ class VHFOpt(_vhf.VHFOpt):
         self.rev_ao_idx = cupy.array(self.rev_ao_idx)
 
 def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
+    log = logger.new_logger(mol, mol.verbose)
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(thred, diag_block_with_triu=True, aosym=True, group_size=BLKSIZE, group_size_aux=BLKSIZE)
     orbo = dm0_tag.occ_coeff
     nao = mol.nao
     naux = auxmol.nao
     nocc = orbo.shape[1]
-    row, col = np.tril_indices(nao)
     wj = cupy.empty([naux])
     avail_mem = get_avail_mem()
     use_gpu_memory = True
@@ -393,8 +334,9 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
             use_gpu_memory = False
     else:
         use_gpu_memory = False
-
+    
     if not use_gpu_memory:
+        log.debug('Saving int3c2e_wjk on CPU memory')
         mem = cupy.cuda.alloc_pinned_memory(naux*nao*nocc*8)
         wk = np.ndarray([naux,nao,nocc], dtype=np.float64, order='C', buffer=mem)
 
@@ -429,7 +371,7 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
             if isinstance(wk, cupy.ndarray):
                 wk[k0:k1] = rhok_tmp
             else:
-                wk[k0:k1] = rhok_tmp.get()
+                rhok_tmp.get(out=wk[k0:k1])
     return wj, wk
 
 def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None):
@@ -528,6 +470,7 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
         opt = make_cintopt(pmol._atm, pmol._bas, pmol._env, intor)
 
     nbins = 1
+
     for aux_id, log_q_kl in enumerate(intopt.aux_log_qs):
         cp_kl_id = aux_id + len(intopt.log_qs)
         lk = intopt.aux_angular[aux_id]
@@ -571,9 +514,9 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
                     raise RuntimeError(f'GINT_fill_int3c2e general failed, err={err}')
             else:
                 # TODO: sph2cart in CPU?
-                ishl0, ishl1 = intopt.pair2bra[cp_ij_id][0], intopt.pair2bra[cp_ij_id][-1]+1
-                jshl0, jshl1 = intopt.pair2ket[cp_ij_id][0], intopt.pair2ket[cp_ij_id][-1]+1
-                kshl0, kshl1 = intopt.aux_pair2bra[aux_id][0], intopt.aux_pair2bra[aux_id][-1]+1
+                ishl0, ishl1 = intopt.l_ctr_offsets[cpi], intopt.l_ctr_offsets[cpi+1]
+                jshl0, jshl1 = intopt.l_ctr_offsets[cpj], intopt.l_ctr_offsets[cpj+1]
+                kshl0, kshl1 = intopt.l_ctr_offsets[aux_id+1+intopt.nctr], intopt.l_ctr_offsets[aux_id+1+intopt.nctr+1]
                 shls_slice = np.array([ishl0, ishl1, jshl0, jshl1, kshl0, kshl1], dtype=np.int64)
                 int3c_cpu = getints(intor, pmol._atm, pmol._bas, pmol._env, shls_slice, cintopt=opt).transpose([0,3,2,1])
                 int3c_blk = cupy.asarray(int3c_cpu)
@@ -829,32 +772,44 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
     ncp_ij = len(intopt.log_qs)
     count = 0
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip1', omega=omega):
-        vj1_buf[:,i0:i1,j0:j1] += contract('xpji,p->xij', int3c_blk, rhoj[k0:k1])
         # initialize intermediate variables
         if count % ncp_ij == 0:
             rhok_tmp = cupy.asarray(rhok[k0:k1])
             if with_k:
                 rhok0 = contract('pio,ir->pro', rhok_tmp, orbo)
                 rhok0 = contract('pro,Jo->prJ', rhok0, orbo)
+            rhoj0 = cupy.zeros([3,k1-k0,nao])
+            int3c_ip1_occ = cupy.zeros([3,k1-k0,nao,nocc])
 
-        rhoj0 = contract('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
-        vj1_ao = contract('pJo,xpi->xiJo', rhok_tmp, rhoj0)
-        vj1 += 2.0*contract('xiJo,ia->axJo', vj1_ao, ao2atom[i0:i1])
-        vj1_ao = rhoj0 = None
+        vj1_buf[:,i0:i1,j0:j1] += contract('xpji,p->xij', int3c_blk, rhoj[k0:k1])
+        rhoj0[:,:,i0:i1] += contract('xpji,ij->xpi', int3c_blk, dm0_tag[i0:i1,j0:j1])
+        int3c_ip1_occ[:,:,i0:i1] += contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])
+
+        if (count+1) % ncp_ij == 0:
+            rhoj0_atom = contract('xpi,ia->xpa', rhoj0, 2.0*ao2atom)
+            vj1 += contract('pJo,xpa->axJo', rhok_tmp, rhoj0_atom)
+            rhoj0_atom = None
+            vk1_buf += contract('xpio,plo->xil', int3c_ip1_occ, rhok_tmp)
+
+            #vj1_ao = contract('pJo,xpi->xiJo', rhok_tmp, rhoj0)
+            #vj1 += contract('xiJo,ia->axJo', vj1_ao, 2.0*ao2atom)
+            #vj1_ao = None
 
         if with_k:
-            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, orbo[j0:j1])
-            vk1_buf[:,i0:i1] += contract('xpji,plj->xil', int3c_blk, rhok0_slice)
+            #rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, orbo[j0:j1])
+            #vk1_buf[:,i0:i1] += contract('xpji,plj->xil', int3c_blk, rhok0_slice)
+            #int3c_occ = contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])
+            #vk1_buf[:,i0:i1] += contract('xpio,plo->xil', int3c_occ, rhok_tmp)
 
             vk1_ao = contract('xpji,poi->xijo', int3c_blk, rhok0[:,:,i0:i1])
             vk1[:,:,j0:j1] += contract('xijo,ia->axjo', vk1_ao, ao2atom[i0:i1])
 
-            int3c_ip1_occ = contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])
-            rhok0_slice = contract('pio,Jo->piJ', rhok_tmp, orbo[i0:i1])
+            int3c_occ = contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])
+            rhok0_slice = contract('pJr,ir->pJi', rhok_tmp, orbo[i0:i1])
 
-            vk1_ao = contract('xpio,pJi->xiJo', int3c_ip1_occ, rhok0_slice)
+            vk1_ao = contract('xpio,pJi->xiJo', int3c_occ, rhok0_slice)
             vk1 += contract('xiJo,ia->axJo', vk1_ao, ao2atom[i0:i1])
-            vk1_ao = int3c_ip1_occ = None
+            vk1_ao = int3c_occ = None
         count += 1
 
     return vj1_buf, vk1_buf, vj1, vk1
@@ -922,7 +877,7 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
             use_gpu_memory = False
     else:
         use_gpu_memory = False
-
+    
     if not use_gpu_memory:
         mem = cupy.cuda.alloc_pinned_memory(nao*naux*nocc*3*8)
         wk = np.ndarray([naux,nao,nocc,3], dtype=np.float64, order='C', buffer=mem)
@@ -939,7 +894,7 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
             if use_gpu_memory:
                 wk[k0:k1] = wk_tmp
             else:
-                wk[k0:k1] = wk_tmp.get()
+                wk_tmp.get(out=wk[k0:k1])
         count += 1
     return wj, wk
 
@@ -1317,9 +1272,10 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
                 if err != 0:
                     raise RuntimeError("int3c2e failed\n")
             else:
-                ishl0, ishl1 = intopt.pair2bra[cp_ij_id][0], intopt.pair2bra[cp_ij_id][-1]+1
-                jshl0, jshl1 = intopt.pair2ket[cp_ij_id][0], intopt.pair2ket[cp_ij_id][-1]+1
-                kshl0, kshl1 = intopt.aux_pair2bra[aux_id][0], intopt.aux_pair2bra[aux_id][-1]+1
+                # TODO: sph2cart in CPU?
+                ishl0, ishl1 = intopt.l_ctr_offsets[cpi], intopt.l_ctr_offsets[cpi+1]
+                jshl0, jshl1 = intopt.l_ctr_offsets[cpj], intopt.l_ctr_offsets[cpj+1]
+                kshl0, kshl1 = intopt.l_ctr_offsets[aux_id+1+intopt.nctr], intopt.l_ctr_offsets[aux_id+1+intopt.nctr+1]
                 shls_slice = np.array([ishl0, ishl1, jshl0, jshl1, kshl0, kshl1], dtype=np.int64)
                 int3c_cpu = getints(intor, pmol._atm, pmol._bas, pmol._env, shls_slice, cintopt=opt).transpose([0,3,2,1])
                 int3c_blk = cupy.asarray(int3c_cpu)
@@ -1617,7 +1573,7 @@ def sort_mol(mol0, cart=True, log=None):
     l_ctrs = mol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
     uniq_l_ctr, _, inv_idx, l_ctr_counts = np.unique(
         l_ctrs, return_index=True, return_inverse=True, return_counts=True, axis=0)
-    
+
     if mol.verbose >= logger.DEBUG:
         log.debug1('Number of shells for each [l, nctr] group')
         for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):

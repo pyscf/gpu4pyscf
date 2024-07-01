@@ -41,13 +41,16 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import uhf as uhf_hess
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.lib.cupy_helper import (
-    contract, tag_array, release_gpu_stack, print_mem_info, take_last2d, pinv)
+    contract, tag_array, get_avail_mem, release_gpu_stack, take_last2d, pinv)
 from gpu4pyscf.df import int3c2e, df
 from gpu4pyscf.lib import logger
+from gpu4pyscf import __config__
 from gpu4pyscf.df.grad.rhf import _gen_metric_solver
 
-LINEAR_DEP_THRESHOLD = df.LINEAR_DEP_THR
+LINEAR_DEP_THR = df.LINEAR_DEP_THR
 BLKSIZE = 256
+ALIGNED = getattr(__config__, 'ao_aligned', 32)
+GB = 1024*1024*1024
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -108,7 +111,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     dm0b_tag = tag_array(dm0b, occ_coeff=moccb)
     int2c = cupy.asarray(int2c, order='C')
     int2c = take_last2d(int2c, aux_ao_idx)
-    int2c_inv = pinv(int2c, lindep=LINEAR_DEP_THRESHOLD)
+    int2c_inv = pinv(int2c, lindep=LINEAR_DEP_THR)
     solve_j2c = _gen_metric_solver(int2c)
     int2c = None
 
@@ -154,13 +157,22 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     rhoj1_P = None
 
     if with_k:
-        for i0, i1 in lib.prange(0,nao,64):
+        mem_avail = get_avail_mem()
+        nocc = mocca.shape[1] + moccb.shape[1]
+        slice_size = naux*nocc*9   # largest slice of intermediate variables
+        blksize = int(mem_avail*0.2/8/slice_size/ALIGNED) * ALIGNED
+        blksize = min(blksize, int((mem_avail*0.2/8//9/naux)**.5/ALIGNED)*ALIGNED)
+        log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
+        if blksize < ALIGNED:
+            raise RuntimeError('Not enough memory for intermediate variables')
+    
+        for i0, i1 in lib.prange(0,nao,blksize):
             wk1a_Pko_islice = cupy.asarray(wk1a_Pko[:,i0:i1])
             wk1b_Pko_islice = cupy.asarray(wk1b_Pko[:,i0:i1])
             rhok1a_Pko = solve_j2c(wk1a_Pko_islice)
             rhok1b_Pko = solve_j2c(wk1b_Pko_islice)
             wk1a_Pko_islice = wk1b_Pko_islice = None
-            for k0, k1 in lib.prange(0,nao,64):
+            for k0, k1 in lib.prange(0,nao,blksize):
                 wk1a_Pko_kslice = cupy.asarray(wk1a_Pko[:,k0:k1])
                 wk1b_Pko_kslice = cupy.asarray(wk1b_Pko[:,k0:k1])
 
@@ -198,11 +210,10 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                 wk1_P_I = None
 
                 # (10|0)(0|1)(0|00)
-                for q0,q1 in lib.prange(0,naux,64):
-                    wk1_I = contract('yqp,piox->qioxy', int2c_ip1[:,q0:q1], rhok1a_Pko)
-                    hk_ao_aux[i0:i1,q0:q1] -= contract('qoi,qioxy->iqxy', rhok0a_P_I[q0:q1], wk1_I)
-                    wk1_I = contract('yqp,piox->qioxy', int2c_ip1[:,q0:q1], rhok1b_Pko)
-                    hk_ao_aux[i0:i1,q0:q1] -= contract('qoi,qioxy->iqxy', rhok0b_P_I[q0:q1], wk1_I)
+                wk1_I = contract('yqp,piox->qioxy', int2c_ip1, rhok1a_Pko)
+                hk_ao_aux[i0:i1] -= contract('qoi,qioxy->iqxy', rhok0a_P_I, wk1_I)
+                wk1_I = contract('yqp,piox->qioxy', int2c_ip1, rhok1b_Pko)
+                hk_ao_aux[i0:i1] -= contract('qoi,qioxy->iqxy', rhok0b_P_I, wk1_I)
                 wk1_I = rhok0a_P_I = rhok0b_P_I = None
         rhok1a_Pko = rhok1b_Pko = None
     wk1a_Pko = wk1b_Pko = None
@@ -483,6 +494,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     mf = hessobj.base
     #auxmol = hessobj.base.with_df.auxmol
     auxmol = df.addons.make_auxmol(mol, auxbasis=mf.with_df.auxbasis)
+    naux = auxmol.nao
     aoslices = mol.aoslice_by_atom()
     auxslices = auxmol.aoslice_by_atom()
 
@@ -500,7 +512,11 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     int2c = cupy.asarray(int2c, order='C')
     # ======================= sorted AO begin ======================================
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size_aux=BLKSIZE, group_size=BLKSIZE)
+    intopt.build(mf.direct_scf_tol, 
+                 diag_block_with_triu=True, 
+                 aosym=False, 
+                 group_size_aux=BLKSIZE, 
+                 group_size=BLKSIZE)
     ao_idx = intopt.ao_idx
     aux_ao_idx = intopt.aux_ao_idx
 
@@ -612,6 +628,13 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         wk0b_10_P__ = contract('xqp,pro->xqro', int2c_ip1, rhok0b_P__)
 
         aux2atom = int3c2e.get_aux2atom(intopt, auxslices)
+        mem_avail = get_avail_mem()
+        nocc = mocca.shape[1] + moccb.shape[1]
+        blksize = int(0.2*mem_avail/(3*naux*nocc*8)/ALIGNED) * ALIGNED
+        log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
+        if blksize < ALIGNED:
+            raise RuntimeError('Not enough memory to compute int3c2e_ip2')
+        
         for p0, p1 in lib.prange(0,nao,64):
             rhoka_tmp = cupy.asarray(rhok0a_Pl_[:,p0:p1])
             rhokb_tmp = cupy.asarray(rhok0b_Pl_[:,p0:p1])

@@ -51,3 +51,26 @@ perf = profiler.benchmark(_contract, (a0,), n_repeat=20, n_warmup=0)
 print(perf.gpu_times)
 flops = a0.nbytes/1e9
 print(flops/perf.gpu_times.mean(), 'GFLOPS')
+
+a0 = cupy.random.random([20,320,320])
+b0 = cupy.random.random([320,54])
+perf = profiler.benchmark(contract, ('ijk,jo->iok', a0, b0), n_repeat=20, n_warmup=3)
+flops = 20*320*320*54/1e9
+print(flops/perf.gpu_times.mean(), 'GFLOPS')
+
+perf = profiler.benchmark(cupy.dot, (b0.T, a0), n_repeat=20, n_warmup=3)
+print(flops/perf.gpu_times.mean(), 'GFLOPS')
+
+import cupy as cp
+from cupy.cuda import cublas
+import ctypes
+from cupy.cuda import device
+from cupy_backends.cuda.libs import cublas #NOQA
+
+libcublas = ctypes.CDLL('libcublas.so')
+_handle = device.get_cublas_handle()
+
+print(cupy.matmul(b0.T,a0).shape)
+#handle = cublas.create()
+perf = profiler.benchmark(cupy.matmul, (b0.T,a0), n_repeat=20, n_warmup=3)
+print(flops/perf.gpu_times.mean(), 'GFLOPS')

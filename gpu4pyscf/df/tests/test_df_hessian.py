@@ -291,6 +291,21 @@ class KnownValues(unittest.TestCase):
         _check_dft_hessian(mf, h, ix=0,iy=0)
         _check_dft_hessian(mf, h, ix=0,iy=1)
 
+    def test_hessian_qz(self):
+        mol = pyscf.M(atom=atom, basis='def2-qzvpp', max_memory=32000, cart=0)
+        mol.build(output='/dev/null')
+        mol.verbose = 1
+
+        mf = scf.RHF(mol).density_fit()
+        mf.conv_tol = 1e-12
+        mf.kernel()
+
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+        _check_dft_hessian(mf, h, ix=0,iy=1)
+
 if __name__ == "__main__":
     print("Full Tests for DF Hessian")
     unittest.main()

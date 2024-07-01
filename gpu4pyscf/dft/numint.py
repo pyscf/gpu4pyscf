@@ -23,7 +23,7 @@ import cupy
 from pyscf import gto, lib, dft
 from pyscf.dft import numint
 from pyscf.gto.eval_gto import NBINS, CUTOFF, make_screen_index
-from gpu4pyscf.scf.hf import basis_seg_contraction
+from gpu4pyscf.gto.mole import basis_seg_contraction
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, take_last2d, transpose_sum,
     grouped_dot, grouped_gemm)
@@ -204,7 +204,7 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
         rho = _contract_rho(c0, c0)
     elif xctype in ('GGA', 'NLC'):
         rho = cupy.empty((4,ngrids))
-        #c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc)
+        #c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc) 
         c0 = contract('nig,io->nog', ao, cpos)
         #:rho[0] = numpy.einsum('pi,pi->p', c0, c0)
         _contract_rho(c0[0], c0[0], rho=rho[0])
@@ -467,8 +467,8 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     if mo_coeff is not None:
         mo_coeff = mo_coeff[opt.ao_idx]
 
-    nelec = cupy.zeros(nset)
-    excsum = cupy.zeros(nset)
+    nelec = cupy.empty(nset)
+    excsum = cupy.empty(nset)
     vmat = cupy.zeros((nset, nao, nao))
 
     release_gpu_stack()
@@ -517,34 +517,28 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         if xctype == 'MGGA':
             wv[i][[0,4]] *= .5
     t0 = log.timer_debug1('eval vxc', *t0)
-
+    
+    if USE_SPARSITY != 2:
+        raise NotImplementedError(f'USE_SPARSITY = {USE_SPARSITY} is not implemented')
+    
     t1 = t0
     p0 = p1 = 0
     for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
         p1 = p0 + weight.size
         for i in range(nset):
             if xctype == 'LDA':
-                if USE_SPARSITY == 2:
-                    aow = _scale_ao(ao_mask, wv[i][0,p0:p1])
-                    add_sparse(vmat[i], ao_mask.dot(aow.T), idx)
-                else:
-                    raise NotImplementedError(f'USE_SPARSITY = {USE_SPARSITY} is not implemented')
+                aow = _scale_ao(ao_mask, wv[i][0,p0:p1])
+                add_sparse(vmat[i], ao_mask.dot(aow.T), idx)
             elif xctype == 'GGA':
-                if USE_SPARSITY == 2:
-                    aow = _scale_ao(ao_mask, wv[i][:,p0:p1])
-                    add_sparse(vmat[i], ao_mask[0].dot(aow.T), idx)
-                else:
-                    raise NotImplementedError(f'USE_SPARSITY = {USE_SPARSITY} is not implemented')
+                aow = _scale_ao(ao_mask, wv[i][:,p0:p1])
+                add_sparse(vmat[i], ao_mask[0].dot(aow.T), idx)
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             elif xctype == 'MGGA':
-                if USE_SPARSITY == 2:
-                    aow = _scale_ao(ao_mask, wv[i][:4,p0:p1])
-                    vtmp = ao_mask[0].dot(aow.T)
-                    vtmp+= _tau_dot(ao_mask, ao_mask, wv[i][4,p0:p1])
-                    add_sparse(vmat[i], vtmp, idx)
-                else:
-                    raise NotImplementedError(f'USE_SPARSITY = {USE_SPARSITY} is not implemented')
+                aow = _scale_ao(ao_mask, wv[i][:4,p0:p1])
+                vtmp = ao_mask[0].dot(aow.T)
+                vtmp+= _tau_dot(ao_mask, ao_mask, wv[i][4,p0:p1])
+                add_sparse(vmat[i], vtmp, idx)
             elif xctype == 'HF':
                 pass
             else:
@@ -921,12 +915,12 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
 def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
     opt = getattr(ni, 'gdftopt', None)
-    if opt is None or mol not in [opt.mol, opt._sorted_mol]:
+    if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
     mol = None
     _sorted_mol = opt._sorted_mol
-    log = logger.new_logger(ni, verbose)
+    log = logger.new_logger(opt.mol, verbose)
     coeff = cupy.asarray(opt.coeff)
     nao = coeff.shape[0]
     mo_coeff = getattr(dm, 'mo_coeff', None)
@@ -937,19 +931,24 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
         mo_coeff = coeff @ mo_coeff
     with_lapl = MGGA_DENSITY_LAPL
 
+    mem_avail = get_avail_mem()
+    blksize = mem_avail*.2/8/nao//ALIGNED * ALIGNED
+    blksize = min(blksize, MIN_BLK_SIZE)
+    GB = 1024*1024*1024
+    log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
+    
     ngrids = grids.weights.size
     rho = cupy.empty(ngrids)
-    p0 = p1 = 0
-    t1 = t0 = log.init_timer()
-    for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, 0):
-        p1 = p0 + weight.size
-        if mo_coeff is None:
-            rho[p0:p1] = eval_rho(_sorted_mol, ao_mask, dm[np.ix_(idx,idx)], xctype='LDA', hermi=1, with_lapl=with_lapl)
-        else:
-            mo_coeff_mask = mo_coeff[idx,:]
-            rho[p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, None, 'LDA', with_lapl)
-        p0 = p1
-        t1 = log.timer_debug2('eval rho slice', *t1)
+    with opt.gdft_envs_cache():
+        t1 = t0 = log.init_timer()
+        for p0, p1 in lib.prange(0,ngrids,blksize):
+            coords = grids.coords[p0:p1]
+            ao = eval_ao(ni, _sorted_mol, coords, 0)
+            if mo_coeff is None:
+                rho[p0:p1] = eval_rho(_sorted_mol, ao, dm, xctype='LDA', hermi=1, with_lapl=with_lapl)
+            else:
+                rho[p0:p1] = eval_rho2(_sorted_mol, ao, mo_coeff, mo_occ, None, 'LDA', with_lapl)
+            t1 = log.timer_debug2('eval rho slice', *t1)
     t0 = log.timer_debug1('eval rho', *t0)
 
     if FREE_CUPY_CACHE:
@@ -1497,15 +1496,14 @@ def _sparse_index(mol, coords, l_ctr_offsets):
             non0ao_idx += range(p0,p1)
         else:
             zero_idx += range(p0,p1)
-
-    idx = cupy.asarray(non0ao_idx, dtype=np.int32)
-    zero_idx = cupy.asarray(zero_idx, dtype=np.int32)
+    idx = np.asarray(non0ao_idx, dtype=np.int32)
+    zero_idx = np.asarray(zero_idx, dtype=np.int32)
     pad = (len(idx) + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT - len(idx)
-    idx = cupy.hstack([idx, zero_idx[:pad]])
+    idx = np.hstack([idx, zero_idx[:pad]])
     pad = min(pad, len(zero_idx))
     non0shl_idx = cupy.asarray(np.where(non0shl_idx)[0], dtype=np.int32)
     t1 = log.timer_debug2('init ao sparsity', *t1)
-    return pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice
+    return pad, cupy.asarray(idx), non0shl_idx, ctr_offsets_slice, ao_loc_slice
 
 def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 non0tab=None, blksize=None, buf=None, extra=0):
@@ -1556,7 +1554,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 shls_slice=non0shl_idx,
                 ao_loc_slice=ao_loc_slice,
                 ctr_offsets_slice=ctr_offsets_slice)
-
+            
             t1 = log.timer_debug2('evaluate ao slice', *t1)
             if pad > 0:
                 if deriv == 0:
@@ -1677,7 +1675,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
     pair_mask    = None
     screen_index = None
     xcfuns       = None        # can be multiple xc functionals
-
+    
     def build(self, mol, coords):
         self.gdftopt = _GDFTOpt.from_mol(mol)
         if USE_SPARSITY == 1:
@@ -1934,7 +1932,7 @@ class _GDFTOpt:
         self.envs_cache = ctypes.POINTER(_GDFTEnvsCache)()
         self._sorted_mol = None       # sorted mol object based on contraction pattern
         self.mol = mol
-
+    
     def build(self, mol=None):
         if mol is None:
             mol = self.mol
@@ -1943,7 +1941,7 @@ class _GDFTOpt:
         if hasattr(mol, '_decontracted') and mol._decontracted:
             raise RuntimeError('mol object is already decontracted')
 
-        pmol, coeff = basis_seg_contraction(mol, allow_replica=True)
+        pmol = basis_seg_contraction(mol, allow_replica=True)
         pmol.cart = mol.cart
         coeff = cupy.eye(mol.nao)      # without cart2sph transformation
         # Sort basis according to angular momentum and contraction patterns so

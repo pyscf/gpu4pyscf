@@ -1,0 +1,28 @@
+[{
+    "input_dir": "./",
+    "output_dir": "./",
+    "molecules": [
+        "002.xyz",
+        "003.xyz",
+        "004.xyz",
+        "005.xyz",
+        "006.xyz",
+        "007.xyz",
+        "008.xyz",
+        "009.xyz",
+        "010.xyz"
+    ],
+    "basis": "sto-3g",
+    "xc": "m06",
+    "verbose": 4,
+    "scf_conv_tol": 1e-10,
+    "with_solvent": false,
+    "solvent": {
+        "eps": 78.3553,
+        "method": "CPCM"
+    },
+    "with_gpu": true,
+    "with_df": false,
+    "with_grad": true,
+    "with_hess": false
+}]

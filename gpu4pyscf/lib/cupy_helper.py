@@ -96,7 +96,7 @@ def device2host_2d(a_cpu, a_gpu, stream=None):
 class CPArrayWithTag(cupy.ndarray):
     pass
 
-@functools.wraps(lib.tag_array)
+#@functools.wraps(lib.tag_array)
 def tag_array(a, **kwargs):
     '''
     a should be cupy/numpy array or tuple of cupy/numpy array
@@ -228,7 +228,7 @@ def block_c2s_diag(ncart, nsph, angular, counts):
     '''
     constract a cartesian to spherical transformation of n shells
     '''
-    if _data['c2s'] is None: 
+    if _data['c2s'] is None:
         c2s_data = cupy.concatenate([cupy.asarray(x.ravel()) for x in c2s_l])
         _data['c2s'] = c2s_data
     c2s_data = _data['c2s']
@@ -508,17 +508,12 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     if x1.ndim == 1:
         x1 = x1.reshape(1, x1.size)
     nroots, ndim = x1.shape
+    x1, rmat = _stable_qr(x1, cupy.dot, lindep=lindep)
+    x1 *= rmat.diagonal()[:,None]
+    
+    innerprod = [rmat[i,i].real ** 2 for i in range(x1.shape[0])]
+    max_innerprod = max(innerprod)
 
-    # Not exactly QR, vectors are orthogonal but not normalized
-    x1, rmat = _qr(x1, cupy.dot, lindep)
-    for i in range(len(x1)):
-        x1[i] *= rmat[i,i]
-
-    innerprod = [cupy.dot(xi.conj(), xi).real for xi in x1]
-    if innerprod:
-        max_innerprod = max(innerprod)
-    else:
-        max_innerprod = 0
     if max_innerprod < lindep or max_innerprod < tol**2:
         if x0 is None:
             return cupy.zeros_like(b)
@@ -538,32 +533,27 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         if callable(callback):
             callback(cycle, xs, ax)
         x1 = axt.copy()
-
         for i in range(len(xs)):
             xsi = cupy.asarray(xs[i])
-            w = cupy.dot(axt, xsi.conj()) / innerprod[i]
+            w = cupy.dot(x1, xsi.conj()) / innerprod[i]
             x1 -= xsi * cupy.expand_dims(w,-1)
         axt = xsi = None
+        x1, rmat = _stable_qr(x1, cupy.dot, lindep=lindep)
+        x1 *= rmat.diagonal()[:,None]
+        innerprod1 = rmat.diagonal().real ** 2
+        max_innerprod = max(innerprod1, default=0.)
 
-        x1, rmat = _qr(x1, cupy.dot, lindep)
-        for i in range(len(x1)):
-            x1[i] *= rmat[i,i]
-
-        max_innerprod = 0
-        idx = []
-        for i, xi in enumerate(x1):
-            innerprod1 = cupy.dot(xi.conj(), xi).real
-            max_innerprod = max(max_innerprod, innerprod1)
-            if innerprod1 > lindep and innerprod1 > tol**2:
-                idx.append(i)
-                innerprod.append(innerprod1)
-        log.info(f'krylov cycle {cycle}  r = {max_innerprod**.5:.3e} {x1.shape[0]} equations')
+        log.info(f'krylov cycle {cycle}, r = {max_innerprod**.5:.3e}, {x1.shape[0]} equations')
         if max_innerprod < lindep or max_innerprod < tol**2:
             break
-        x1 = x1[idx]
+        mask = (innerprod1 > lindep) & (innerprod1 > tol**2)
+        x1 = x1[mask]
+        innerprod.extend(innerprod1[mask])
+        if max_innerprod > 1e10:
+            raise RuntimeError('Krylov subspace iterations diverge') 
 
-    if len(idx) > 0:
-        raise RuntimeError("CPSCF failed to converge.")
+    else:
+        raise RuntimeError('Krylov solver failed to converge')
 
     xs = cupy.asarray(xs)
     ax = cupy.asarray(ax)
@@ -599,25 +589,42 @@ def _qr(xs, dot, lindep=1e-14):
     nvec = len(xs)
     dtype = xs[0].dtype
     qs = cupy.empty((nvec,xs[0].size), dtype=dtype)
-    rmat = cupy.empty((nvec,nvec), order='F', dtype=dtype)
+    rmat = cupy.eye(nvec, order='F', dtype=dtype)
 
     nv = 0
     for i in range(nvec):
         xi = cupy.array(xs[i], copy=True)
-        rmat[:,nv] = 0
-        rmat[nv,nv] = 1
-
         prod = dot(qs[:nv].conj(), xi)
         xi -= cupy.dot(qs[:nv].T, prod)
-        rmat[:,nv] -= cupy.dot(rmat[:,:nv], prod)
 
         innerprod = dot(xi.conj(), xi).real
-        norm = cupy.sqrt(innerprod)
+        norm = innerprod**0.5
         if innerprod > lindep:
+            rmat[:,nv] -= cupy.dot(rmat[:,:nv], prod)
             qs[nv] = xi/norm
             rmat[:nv+1,nv] /= norm
             nv += 1
     return qs[:nv], cupy.linalg.inv(rmat[:nv,:nv])
+
+def _stable_qr(xs, dot, lindep=1e-14):
+    '''QR decomposition for a list of vectors (for linearly independent vectors only).
+    using the modified Gram-Schmidt process
+    '''
+    nvec = len(xs)
+    dtype = xs[0].dtype
+    Q = cupy.empty((nvec,xs[0].size), dtype=dtype)
+    R = cupy.zeros((nvec,nvec), dtype=dtype)
+    V = xs.copy()
+    nv = 0
+    for i in range(nvec):
+        norm = cupy.linalg.norm(V[i])
+        if norm**2 > lindep:
+            R[nv,nv] = norm
+            Q[nv] = V[i] / norm
+            R[nv, i+1:] = dot(Q[nv], V[i+1:].T)
+            V[i+1:] -= cupy.outer(R[nv, i+1:], Q[nv])
+            nv += 1
+    return Q[:nv], R[:nv,:nv]
 
 def _gen_x0(v, xs):
     ndim = v.ndim
@@ -657,7 +664,18 @@ def pinv(a, lindep=1e-10):
     return j2c
 
 def cond(a):
-    return cupy.linalg.norm(a,2)*cupy.linalg.norm(cupy.linalg.inv(a),2)
+    """
+    Calculate the condition number of a matrix.
+
+    Parameters:
+    a (cupy.ndarray): The input matrix.
+
+    Returns:
+    float: The condition number of the matrix.
+    """
+    _, s, _ = cupy.linalg.svd(a)
+    cond_number = s[0] / s[-1]
+    return cond_number
 
 def grouped_dot(As, Bs, Cs=None):
     '''

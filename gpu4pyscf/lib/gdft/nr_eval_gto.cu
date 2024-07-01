@@ -54,24 +54,30 @@ static void _nabla1(double *fx1, double *fy1, double *fz1,
 __global__
 void _screen_index(int *non0shl_idx, double cutoff, int l, int ish, int nprim, double *coords, int ngrids){
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    if (grid_id >= ngrids){
-        return;
-    }
+    const bool active = grid_id < ngrids;
+
     int natm = c_envs.natm;
     int atm_id = c_bas_atom[ish];
     double* atm_coords = c_envs.atom_coordx;
-
-    double gridx = coords[3*grid_id + 0];
-    double gridy = coords[3*grid_id + 1];
-    double gridz = coords[3*grid_id + 2];
-
+    double gridx, gridy, gridz;
+    if (active) {
+        gridx = coords[3*grid_id + 0];
+        gridy = coords[3*grid_id + 1];
+        gridz = coords[3*grid_id + 2];        
+    } else {
+        gridx = 0.0;
+        gridy = 0.0;
+        gridz = 0.0;
+    }
     double rx = gridx - atm_coords[atm_id + 0*natm];
     double ry = gridy - atm_coords[atm_id + 1*natm];
     double rz = gridz - atm_coords[atm_id + 2*natm];
     double rr = rx * rx + ry * ry + rz * rz;
+    double r = sqrt(rr);
 
     double *exps = c_envs.env + c_bas_exp[ish];
     double *coeffs = c_envs.env + c_bas_coeff[ish];
+    /*
     double maxc = 0.0;
     double min_exp = 1e9;
     for (int ip = 0; ip < nprim; ++ip) {
@@ -80,7 +86,28 @@ void _screen_index(int *non0shl_idx, double cutoff, int l, int ish, int nprim, d
     }
     double gto_sup = -min_exp * rr + .5 * log(rr) * l + log(maxc);
     int is_large = gto_sup > log(cutoff);
-    atomicOr(non0shl_idx + ish, is_large);
+    */
+    double gto_sup = 0.0;
+    for (int ip = 0; ip < nprim; ++ip) {
+        gto_sup += coeffs[ip] * exp(-exps[ip] * rr);
+    }
+    gto_sup *= pow(r,l);
+    int is_large = fabs(gto_sup) > cutoff;
+    
+    // Reduce and write to global memory
+    unsigned int tid = threadIdx.x;
+    __shared__ int sdata[NG_PER_BLOCK];
+    sdata[tid] = active ? is_large : 0;
+    __syncthreads();
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            sdata[tid] = sdata[tid] || sdata[tid + s];
+        }
+        __syncthreads();
+    }
+    if (tid == 0 && active){
+        atomicOr(non0shl_idx + ish, sdata[0]);
+    }
 }
 
 template <int ANG> __device__
