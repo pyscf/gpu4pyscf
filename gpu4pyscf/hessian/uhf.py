@@ -37,7 +37,7 @@ from gpu4pyscf.scf import _response_functions  # noqa
 # import pyscf.grad.rhf to activate nuc_grad_method method
 from pyscf.grad import rhf  # noqa
 from gpu4pyscf.scf import ucphf
-from gpu4pyscf.gto.mole import partition_mol
+from gpu4pyscf.gto.mole import sort_atoms
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, print_mem_info, get_avail_mem
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
@@ -372,8 +372,12 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     log.debug(f'{blksize} atoms in each block CPHF equation')
 
     # sort atoms to improve the convergence
-    atom_groups = partition_mol(mol, group_size=blksize, max_dist=5.0)
-
+    sorted_idx = sort_atoms(mol)
+    atom_groups = []
+    for p0,p1 in lib.prange(0,mol.natm,blksize):
+        blk = sorted_idx[p0:p1]
+        atom_groups.append(blk)
+        
     mo1sa = [None] * mol.natm
     mo1sb = [None] * mol.natm
     e1sa = [None] * mol.natm

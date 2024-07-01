@@ -51,9 +51,9 @@ void _transpose_sum(double *a, int n)
 	unsigned int y1 = blockx_off + threadIdx.y;
     unsigned int z = blockIdx.z;
 
-    unsigned int off = n * n * z;
-    unsigned int xy0 = y0 * n + x0 + off;
-    unsigned int xy1 = y1 * n + x1 + off;
+    size_t off = n * n * z;
+    size_t xy0 = y0 * n + x0 + off;
+    size_t xy1 = y1 * n + x1 + off;
 
     if (x0 < n && y0 < n){
         block[threadIdx.y][threadIdx.x] = a[xy0];

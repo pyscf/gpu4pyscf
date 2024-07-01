@@ -35,7 +35,7 @@ from pyscf.scf import _vhf
 from gpu4pyscf.scf import _response_functions  # noqa
 # import pyscf.grad.rhf to activate nuc_grad_method method
 from pyscf.grad import rhf  # noqa
-from gpu4pyscf.gto.mole import partition_mol
+from gpu4pyscf.gto.mole import sort_atoms
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib.cupy_helper import (
     contract, tag_array, print_mem_info, transpose_sum, get_avail_mem)
@@ -334,12 +334,16 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     
     avail_mem = get_avail_mem()
     blksize = int(avail_mem*0.4) // (8*3*nao*nao*4) // ALIGNED * ALIGNED
-    blksize = min(8, blksize)
+    blksize = min(32, blksize)
     log.debug(f'GPU memory {avail_mem/GB:.1f} GB available')
     log.debug(f'{blksize} atoms in each block CPHF equation')
     
     # sort atoms to improve the convergence
-    atom_groups = partition_mol(mol, group_size=blksize, max_dist=5.0)
+    sorted_idx = sort_atoms(mol)
+    atom_groups = []
+    for p0,p1 in lib.prange(0,mol.natm,blksize):
+        blk = sorted_idx[p0:p1]
+        atom_groups.append(blk)
 
     mo1s = [None] * mol.natm
     e1s = [None] * mol.natm
@@ -355,7 +359,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
             s1ao[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
             s1vo.append(_ao2mo(s1ao))
             h1vo.append(h1mo[ia])
-    
+            
         log.info(f'Solving CPHF equation for atoms {len(group)}/{mol.natm}')
         h1vo = cupy.vstack(h1vo)
         s1vo = cupy.vstack(s1vo)

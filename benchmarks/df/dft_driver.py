@@ -35,24 +35,21 @@ if __name__ == '__main__':
     config_template['input_dir'] = '../molecules/organic/'
 
     # Warmup
-    warmup(atom='../molecules/organic/020_Vitamin_C.xyz')
+    for i in range(3):
+        warmup(atom='../molecules/organic/020_Vitamin_C.xyz')
+    '''
     # Generate benchmark data for different xc
     config = config_template.copy()
-    #for xc in ['LDA', 'PBE', 'B3LYP', 'M06']:
-    for xc in ['B3LYP']:
+    for xc in ['LDA', 'PBE', 'B3LYP', 'M06']:
         config['xc'] = xc
         config['output_dir'] = './organic/xc/' + xc 
         config['basis'] = 'def2-tzvpp'
         config['verbose'] = 4
         for mol_name in config['molecules']:
-            # CPHF for these molecules does not converge
             if mol_name in ["095_Azadirachtin.xyz","113_Taxol.xyz","168_Valinomycin.xyz"]:
-                #config["with_hess"] = False
-                cupy.get_default_memory_pool().free_all_blocks()
-                cupy.get_default_pinned_memory_pool().free_all_blocks()
-                run_dft(mol_name, config)
-            ##run_dft(mol_name, config)
-    exit()
+                continue
+            run_dft(mol_name, config)
+
     # vv10 Hessian is not supported yet
     xc = 'wB97m-v'
     config = config_template.copy()
@@ -61,8 +58,10 @@ if __name__ == '__main__':
     config['with_hess'] = False
     config['basis'] = 'def2-tzvpp'
     for mol_name in config['molecules']:
+        if mol_name in ["095_Azadirachtin.xyz","113_Taxol.xyz","168_Valinomycin.xyz"]:
+            continue
         run_dft(mol_name, config)
-    exit()
+    
     # Generate benchmark data for different basis
     config = config_template.copy()
     for bas in ['sto-3g', '6-31g', 'def2-svp', 'def2-tzvpp', 'def2-tzvpd']:
@@ -70,18 +69,25 @@ if __name__ == '__main__':
         config['basis'] = bas
         config['output_dir'] = './organic/basis/' + bas
         for mol_name in config['molecules']:
-            # CPHF for these molecules does not converge
             if mol_name in ["095_Azadirachtin.xyz", "113_Taxol.xyz","168_Valinomycin.xyz"]:
-                config["with_hess"] = False
+                continue
             run_dft(mol_name, config)
-
+    '''
     # Generate benchmark data for different solvent
     config = config_template.copy()
-    for solvent_method in ["CPCM", "IEFPCM"]:
+    for mol_name in config['molecules']:
+        if mol_name in ["095_Azadirachtin.xyz", "113_Taxol.xyz","168_Valinomycin.xyz"]:
+            continue
         config['xc'] = 'b3lyp'
         config['basis'] = 'def2-tzvpp'
         config['with_solvent'] = True
+        
+        solvent_method = "CPCM"
         config['solvent']['method'] = solvent_method
         config['output_dir'] = './organic/solvent/' + solvent_method
-        for mol_name in config['molecules']:
-            run_dft(mol_name, config)
+        run_dft(mol_name, config)
+
+        solvent_method = "IEFPCM"
+        config['solvent']['method'] = solvent_method
+        config['output_dir'] = './organic/solvent/' + solvent_method
+        run_dft(mol_name, config)            

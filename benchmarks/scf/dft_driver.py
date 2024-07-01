@@ -38,7 +38,7 @@ if __name__ == '__main__':
     
     # Generate benchmark data for different xc
     config['basis'] = 'def2-tzvpp'
-    for xc in ['LDA', 'PBE', 'B3LYP']:#, 'M06', 'wB97m-v']:
+    for xc in ['LDA', 'PBE', 'B3LYP', 'M06', 'wB97m-v']:
         config['xc'] = xc
         config['output_dir'] = './water_clusters/xc/' + xc 
         for mol_name in config['molecules']:

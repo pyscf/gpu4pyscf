@@ -324,7 +324,6 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
     nao = mol.nao
     naux = auxmol.nao
     nocc = orbo.shape[1]
-    row, col = np.tril_indices(nao)
     wj = cupy.empty([naux])
     avail_mem = get_avail_mem()
     use_gpu_memory = True
@@ -335,7 +334,7 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
             use_gpu_memory = False
     else:
         use_gpu_memory = False
-    use_gpu_memory = False
+    
     if not use_gpu_memory:
         log.debug('Saving int3c2e_wjk on CPU memory')
         mem = cupy.cuda.alloc_pinned_memory(naux*nao*nocc*8)
@@ -878,7 +877,7 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
             use_gpu_memory = False
     else:
         use_gpu_memory = False
-
+    
     if not use_gpu_memory:
         mem = cupy.cuda.alloc_pinned_memory(nao*naux*nocc*3*8)
         wk = np.ndarray([naux,nao,nocc,3], dtype=np.float64, order='C', buffer=mem)

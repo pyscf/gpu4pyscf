@@ -131,38 +131,3 @@ def sort_atoms(mol):
         full_path[heavy_idx].append(hydrogen_atoms[i])
     
     return [x for heavy_list in full_path for x in heavy_list]
-
-def partition_mol(mol, group_size=10, max_dist=10.0):
-    """
-    Partition a molecule into groups of atoms based on the distance between them.
-
-    Parameters:
-    mol (Molecule): The molecule to partition.
-    group_size (int): The maximum size of each group.
-    max_dist (float): The maximum distance between atoms in the same group.
-
-    Returns:
-    list: A list of groups, where each group is a list of atom indices.
-    """
-        
-    from scipy.spatial import distance_matrix
-    atom_coords = mol.atom_coords()
-    dist = distance_matrix(atom_coords, atom_coords)
-    
-    used_atoms = set()
-    groups = []
-    while(len(used_atoms) < mol.natm):
-        group = []
-        remaining_atoms = [i for i in range(mol.natm) if i not in used_atoms]
-
-        start_atom = remaining_atoms[0]
-        group.append(start_atom)
-        used_atoms.add(start_atom)
-
-        mask = dist[start_atom] < max_dist
-        mask[list(used_atoms)] = False
-        idx = np.argwhere(mask).ravel()[:group_size-1]
-        group += idx.tolist()
-        used_atoms.update(idx)
-        groups.append(group.copy())
-    return groups

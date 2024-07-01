@@ -280,7 +280,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
 
     if with_k:
         vk = cupy.zeros_like(dms)
-
+    
     # SCF K matrix with occ
     if getattr(dms_tag, 'mo_coeff', None) is not None:
         mo_occ = dms_tag.mo_occ
@@ -318,7 +318,6 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
 
     # CP-HF K matrix
     elif hasattr(dms_tag, 'mo1'):
-        dms = None
         occ_coeffs = dms_tag.occ_coeff
         mo1s = dms_tag.mo1
         mo_occ = dms_tag.mo_occ

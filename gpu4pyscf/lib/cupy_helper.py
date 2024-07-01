@@ -508,9 +508,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     if x1.ndim == 1:
         x1 = x1.reshape(1, x1.size)
     nroots, ndim = x1.shape
-
-    # Not exactly QR, vectors are orthogonal but not normalized
-    x1, rmat = _qr(x1, cupy.dot, lindep)
+    x1, rmat = _stable_qr(x1, cupy.dot, lindep=lindep)
     x1 *= rmat.diagonal()[:,None]
     
     innerprod = [rmat[i,i].real ** 2 for i in range(x1.shape[0])]
@@ -535,14 +533,12 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         if callable(callback):
             callback(cycle, xs, ax)
         x1 = axt.copy()
-
         for i in range(len(xs)):
             xsi = cupy.asarray(xs[i])
-            w = cupy.dot(axt, xsi.conj()) / innerprod[i]
+            w = cupy.dot(x1, xsi.conj()) / innerprod[i]
             x1 -= xsi * cupy.expand_dims(w,-1)
         axt = xsi = None
-        
-        x1, rmat = _qr(x1, cupy.dot, lindep)
+        x1, rmat = _stable_qr(x1, cupy.dot, lindep=lindep)
         x1 *= rmat.diagonal()[:,None]
         innerprod1 = rmat.diagonal().real ** 2
         max_innerprod = max(innerprod1, default=0.)
@@ -600,15 +596,35 @@ def _qr(xs, dot, lindep=1e-14):
         xi = cupy.array(xs[i], copy=True)
         prod = dot(qs[:nv].conj(), xi)
         xi -= cupy.dot(qs[:nv].T, prod)
-        rmat[:,nv] -= cupy.dot(rmat[:,:nv], prod)
 
         innerprod = dot(xi.conj(), xi).real
         norm = innerprod**0.5
         if innerprod > lindep:
+            rmat[:,nv] -= cupy.dot(rmat[:,:nv], prod)
             qs[nv] = xi/norm
             rmat[:nv+1,nv] /= norm
             nv += 1
     return qs[:nv], cupy.linalg.inv(rmat[:nv,:nv])
+
+def _stable_qr(xs, dot, lindep=1e-14):
+    '''QR decomposition for a list of vectors (for linearly independent vectors only).
+    using the modified Gram-Schmidt process
+    '''
+    nvec = len(xs)
+    dtype = xs[0].dtype
+    Q = cupy.empty((nvec,xs[0].size), dtype=dtype)
+    R = cupy.zeros((nvec,nvec), dtype=dtype)
+    V = xs.copy()
+    nv = 0
+    for i in range(nvec):
+        norm = cupy.linalg.norm(V[i])
+        if norm**2 > lindep:
+            R[nv,nv] = norm
+            Q[nv] = V[i] / norm
+            R[nv, i+1:] = dot(Q[nv], V[i+1:].T)
+            V[i+1:] -= cupy.outer(R[nv, i+1:], Q[nv])
+            nv += 1
+    return Q[:nv], R[:nv,:nv]
 
 def _gen_x0(v, xs):
     ndim = v.ndim
