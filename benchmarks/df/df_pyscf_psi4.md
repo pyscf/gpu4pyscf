@@ -66,18 +66,6 @@ Speedup over Psi4 v1.8:
 | 066_Raffinose     |   26.123 |  35.054 |     37.704 |       42.252 |       44.321 |
 | 084_Sphingomyelin |   27.184 |  39.310 |     44.598 |       56.146 |       54.315 |
 
-## DF Hessian with B3LYP/*
-
-
-Difference from Psi4 v1.8:
-
-| mol   |
-|-------|
-
-Speedup over Psi4 v1.8:
-
-| mol   |
-|-------|
 
 ## DF SCF Energy with */def2-tzvpp
 
@@ -146,15 +134,3 @@ Speedup over Psi4 v1.8:
 | 066_Raffinose     | 38.008 | 49.386 |  41.478 |
 | 084_Sphingomyelin | 46.598 | 65.944 |  55.063 |
 
-## DF Hessian with */def2-tzvpp
-
-
-Difference from Psi4 v1.8:
-
-| mol   |
-|-------|
-
-Speedup over Psi4 v1.8:
-
-| mol   |
-|-------|
