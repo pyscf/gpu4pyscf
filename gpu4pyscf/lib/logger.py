@@ -21,6 +21,7 @@ from pyscf import lib
 from pyscf.lib import parameters as param
 import pyscf.__config__
 
+INFO = lib.logger.INFO
 NOTE = lib.logger.NOTE
 WARN = lib.logger.WARN
 DEBUG = lib.logger.DEBUG

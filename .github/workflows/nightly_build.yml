@@ -23,6 +23,9 @@ jobs:
         python3 -m pip install --upgrade pip
         pip3 install flake8 pytest coverage gpu4pyscf-libxc-cuda11x pytest-cov pyscf-dispersion
         pip3 install pyscf --upgrade
+        pip3 install numpy --upgrade
+        pip3 install scipy --upgrade
+        pip3 install cupy-cuda11x --upgrade
         git config --global core.compression 9
     - name: Build GPU4PySCF
       run: |

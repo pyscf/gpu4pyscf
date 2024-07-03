@@ -63,7 +63,7 @@ def _check_arrays(current_arrays, fields, sizes, factor, required):
     for label in fields:
         if required:
             size = sizes[label]
-            current_arrays[label] = cupy.zeros((factor, size), dtype=np.float64)
+            current_arrays[label] = cupy.empty((factor, size), dtype=np.float64)
         else:
             current_arrays[label] = None # cupy.empty((1))
 
@@ -78,6 +78,7 @@ if _libxc is not None:
     _libxc.xc_func_init.argtypes = (_xc_func_p, ctypes.c_int, ctypes.c_int)
     _libxc.xc_func_end.argtypes = (_xc_func_p, )
     _libxc.xc_func_free.argtypes = (_xc_func_p, )
+    _libxc.xc_func_alloc()
 
 class XCfun:
     def __init__(self, xc, spin):

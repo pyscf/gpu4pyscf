@@ -17,7 +17,6 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #define THREADS        8
-// THREADS must be greater than (LMAX+1)*(LMAX+2)/2
 
 __global__
 static void _block_diag(double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols)

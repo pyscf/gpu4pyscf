@@ -31,8 +31,7 @@ static void _take_last2d(double *a, const double *b, int *indices, int n)
 
     int j_b = indices[j];
     int k_b = indices[k];
-    int off = i * n * n;
-
+    size_t off = i * n * n;
     a[off + j * n + k] = b[off + j_b * n + k_b];
 }
 

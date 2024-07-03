@@ -37,15 +37,20 @@ from gpu4pyscf.scf import _response_functions  # noqa
 # import pyscf.grad.rhf to activate nuc_grad_method method
 from pyscf.grad import rhf  # noqa
 from gpu4pyscf.scf import ucphf
-from gpu4pyscf.lib.cupy_helper import contract, tag_array, print_mem_info
+from gpu4pyscf.gto.mole import sort_atoms
+from gpu4pyscf.lib.cupy_helper import contract, tag_array, print_mem_info, get_avail_mem
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.hessian.rhf import HessianBase
 
-def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
-              mo1=None, mo_e1=None, h1ao=None,
-              atmlst=None, max_memory=4000, verbose=None):
+GB = 1024*1024*1024
+ALIGNED = 4
 
+def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
+              mo1=None, mo_e1=None, h1mo=None,
+              atmlst=None, max_memory=4000, verbose=None):
+    ''' Different from PySF, using h1mo instead of h1ao for saving memory
+    '''
     log = logger.new_logger(hessobj, verbose)
     time0 = t1 = (logger.process_clock(), logger.perf_counter())
 
@@ -62,16 +67,16 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     de2 = hessobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ, atmlst,
                                     max_memory, log)
     t1 = log.timer_debug1('hess elec', *t1)
-    if h1ao is None:
-        h1ao = hessobj.make_h1(mo_coeff, mo_occ, hessobj.chkfile, atmlst, log)
+    if h1mo is None:
+        h1mo = hessobj.make_h1(mo_coeff, mo_occ, hessobj.chkfile, atmlst, log)
         t1 = log.timer_debug1('making H1', *t1)
     if mo1 is None or mo_e1 is None:
-        mo1, mo_e1 = hessobj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1ao,
+        mo1, mo_e1 = hessobj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1mo,
                                        None, atmlst, max_memory, log)
         t1 = log.timer_debug1('solving MO1', *t1)
     mo1a, mo1b = mo1
     mo_e1a, mo_e1b = mo_e1
-    h1aoa, h1aob = h1ao
+    h1aoa, h1aob = h1mo
 
     nao, _ = mo_coeff[0].shape
     mocca = cupy.array(mo_coeff[0][:,mo_occ[0]>0])
@@ -342,6 +347,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
             See also the function gen_vind.
     '''
     mol = mf.mol
+    log = logger.new_logger(mf, verbose)
     if atmlst is None: atmlst = range(mol.natm)
 
     nao, nmo = mo_coeff[0].shape
@@ -358,20 +364,31 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         tmp = contract('xij,jo->xio', mat, mocc)
         return contract('xik,ip->xpk', tmp, mo)
     cupy.get_default_memory_pool().free_all_blocks()
-    # TODO: calculate blksize dynamically
-    blksize = 8
+    
+    avail_mem = get_avail_mem()
+    blksize = int(avail_mem*0.4) // (8*3*nao*nao*4) // ALIGNED * ALIGNED
+    blksize = min(8, blksize)
+    log.debug(f'GPU memory {avail_mem/GB:.1f} GB available')
+    log.debug(f'{blksize} atoms in each block CPHF equation')
+
+    # sort atoms to improve the convergence
+    sorted_idx = sort_atoms(mol)
+    atom_groups = []
+    for p0,p1 in lib.prange(0,mol.natm,blksize):
+        blk = sorted_idx[p0:p1]
+        atom_groups.append(blk)
+        
     mo1sa = [None] * mol.natm
     mo1sb = [None] * mol.natm
     e1sa = [None] * mol.natm
     e1sb = [None] * mol.natm
     aoslices = mol.aoslice_by_atom()
-    for ia0, ia1 in lib.prange(0, len(atmlst), blksize):
+    for group in atom_groups:
         s1voa = []
         s1vob = []
         h1voa = []
         h1vob = []
-        for i0 in range(ia0, ia1):
-            ia = atmlst[i0]
+        for ia in group:
             shl0, shl1, p0, p1 = aoslices[ia]
             s1ao = cupy.zeros((3,nao,nao))
             s1ao[:,p0:p1] += s1a[:,p0:p1]
@@ -381,18 +398,18 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
             h1voa.append(h1mo[0][ia])
             h1vob.append(h1mo[1][ia])
 
+        log.info(f'Solving CPHF equation for atoms {len(group)}/{mol.natm}')
         h1vo = (cupy.vstack(h1voa), cupy.vstack(h1vob))
         s1vo = (cupy.vstack(s1voa), cupy.vstack(s1vob))
-        tol = mf.conv_tol_cpscf * (ia1 - ia0)
+        tol = mf.conv_tol_cpscf
         mo1, e1 = ucphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo,
-        tol=tol, verbose=verbose)
-        # Different from PySCF, mo1 is in AO
+                              max_cycle=max_cycle, level_shift=level_shift, tol=tol, verbose=verbose)
+        
         mo1a = mo1[0].reshape(-1,3,nao,nocca)
         mo1b = mo1[1].reshape(-1,3,nao,noccb)
         e1a = e1[0].reshape(-1,3,nocca,nocca)
         e1b = e1[1].reshape(-1,3,noccb,noccb)
-        for k in range(ia1-ia0):
-            ia = atmlst[k+ia0]
+        for k, ia in enumerate(group):
             mo1sa[ia] = mo1a[k]
             mo1sb[ia] = mo1b[k]
             e1sa[ia] = e1a[k].reshape(3,nocca,nocca)
@@ -429,15 +446,8 @@ def gen_vind(mf, mo_coeff, mo_occ):
         dm1[0] = dma + dma.transpose(0,2,1)
         dm1[1] = dmb + dmb.transpose(0,2,1)
 
-        #v1_old = vresp(dm1)
-        # TODO: improve the efficiency with occ_coeff
         dm1 = tag_array(dm1, mo1=[mo1_moa,mo1_mob], occ_coeff=[mocca,moccb], mo_occ=mo_occ)
-        #print(dm1.shape)
         v1 = vresp(dm1)
-        #print(cupy.linalg.norm(v1 - v1_old))
-        #print(cupy.linalg.norm(v1))
-        #print(v1.shape)
-        #exit()
         v1vo = cupy.empty_like(mo1)
         tmp = contract('nij,jo->nio', v1[0], mocca)
         v1vo[:,:nmoa*nocca] = contract('nio,ip->npo', tmp, mo_coeff[0]).reshape(nset,-1)
@@ -519,9 +529,9 @@ class Hessian(HessianBase):
     kernel = NotImplemented
     hess = NotImplemented
 
-    def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
+    def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1mo,
                   fx=None, atmlst=None, max_memory=4000, verbose=None):
-        return solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
+        return solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1mo,
                          fx, atmlst, max_memory, verbose,
                          max_cycle=self.max_cycle, level_shift=self.level_shift)
 
