@@ -204,7 +204,7 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
         rho = _contract_rho(c0, c0)
     elif xctype in ('GGA', 'NLC'):
         rho = cupy.empty((4,ngrids))
-        #c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc) 
+        #c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc)
         c0 = contract('nig,io->nog', ao, cpos)
         #:rho[0] = numpy.einsum('pi,pi->p', c0, c0)
         _contract_rho(c0[0], c0[0], rho=rho[0])
@@ -517,10 +517,10 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         if xctype == 'MGGA':
             wv[i][[0,4]] *= .5
     t0 = log.timer_debug1('eval vxc', *t0)
-    
+
     if USE_SPARSITY != 2:
         raise NotImplementedError(f'USE_SPARSITY = {USE_SPARSITY} is not implemented')
-    
+
     t1 = t0
     p0 = p1 = 0
     for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
@@ -936,7 +936,7 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
     blksize = min(blksize, MIN_BLK_SIZE)
     GB = 1024*1024*1024
     log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
-    
+
     ngrids = grids.weights.size
     rho = cupy.empty(ngrids)
     with opt.gdft_envs_cache():
@@ -1519,7 +1519,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     ngrids = grids.coords.shape[0]
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     log = logger.new_logger(ni, ni.verbose)
-    
+
     if blksize is None:
         #cupy.get_default_memory_pool().free_all_blocks()
         mem_avail = get_avail_mem()
@@ -1554,7 +1554,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 shls_slice=non0shl_idx,
                 ao_loc_slice=ao_loc_slice,
                 ctr_offsets_slice=ctr_offsets_slice)
-            
+
             t1 = log.timer_debug2('evaluate ao slice', *t1)
             if pad > 0:
                 if deriv == 0:
@@ -1675,7 +1675,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
     pair_mask    = None
     screen_index = None
     xcfuns       = None        # can be multiple xc functionals
-    
+
     def build(self, mol, coords):
         self.gdftopt = _GDFTOpt.from_mol(mol)
         if USE_SPARSITY == 1:
@@ -1932,7 +1932,7 @@ class _GDFTOpt:
         self.envs_cache = ctypes.POINTER(_GDFTEnvsCache)()
         self._sorted_mol = None       # sorted mol object based on contraction pattern
         self.mol = mol
-    
+
     def build(self, mol=None):
         if mol is None:
             mol = self.mol

@@ -33,7 +33,7 @@ def get_veff(ks_grad, mol=None, dm=None):
     if mol is None: mol = ks_grad.mol
     if dm is None: dm = ks_grad.base.make_rdm1()
     t0 = (logger.process_clock(), logger.perf_counter())
-    
+
     mf = ks_grad.base
     ni = mf._numint
     if ks_grad.grids is not None:
@@ -45,7 +45,7 @@ def get_veff(ks_grad, mol=None, dm=None):
         grids.build(sort_grids=True)
 
     nlcgrids = None
-    if mf.nlc or ni.libxc.is_nlc(mf.xc):
+    if mf.do_nlc():
         if ks_grad.nlcgrids is not None:
             nlcgrids = ks_grad.nlcgrids
         else:
@@ -60,12 +60,12 @@ def get_veff(ks_grad, mol=None, dm=None):
         exc, vxc_tmp = uks_grad.get_vxc_full_response(ni, mol, grids, mf.xc, dm,
                                          max_memory=max_memory,
                                          verbose=ks_grad.verbose)
-        if mf.nlc or ni.libxc.is_nlc(mf.xc):
+        if mf.do_nlc():
             raise NotImplementedError
     else:
         exc, vxc_tmp = uks_grad.get_vxc(ni, mol, grids, mf.xc, dm,
                            max_memory=max_memory, verbose=ks_grad.verbose)
-        if mf.nlc or ni.libxc.is_nlc(mf.xc):
+        if mf.do_nlc():
             if ni.libxc.is_nlc(mf.xc):
                 xc = mf.xc
             else:
@@ -131,7 +131,7 @@ def get_veff(ks_grad, mol=None, dm=None):
         e1_aux = None
 
     vxc = tag_array(vxc, aux=e1_aux)
-    
+
     return vxc
 
 

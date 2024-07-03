@@ -271,6 +271,24 @@ class KnownValues(unittest.TestCase):
         h = hobj.kernel()
         _check_dft_hessian(mf, h, ix=0,iy=0)
 
+    def test_hessian_rks_wb97m_d3bj(self):
+        print('----------- testing DFRKS, wb97m-d3bj --------')
+        mf = _make_rks(mol_sph, 'wb97m-d3bj')
+        mf.conv_tol_cpscf = 1e-7
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+
+    def test_hessian_uks_D4(self):
+        print('------------- testing DFUKS, wb97m-d3bj ---------')
+        mf = _make_uks(mol_sph, 'wb97m-d3bj')
+        mf.conv_tol_cpscf = 1e-7
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0,iy=0)
+
     def test_hessian_cart(self):
         print('-----testing DF Hessian (cartesian)----')
         mf = _make_rks(mol_cart, 'b3lyp')

@@ -136,9 +136,16 @@ class KnownValues(unittest.TestCase):
     def test_rks_cart(self):
         print('-------- B3LYP (CART) -------------')
         e_tot = run_dft('B3LYP', mol_cart)
-        e_qchem = -76.46723795965626 # data from PySCF
-        print(f'diff from pyscf {e_tot - e_qchem}')
-        assert np.abs(e_tot - e_qchem) < 1e-5
+        e_ref = -76.46723795965626 # data from PySCF
+        print(f'diff from PySCF {e_tot - e_ref}')
+        assert np.abs(e_tot - e_ref) < 1e-5
+
+    def test_rks_wb97m_d3bj(self):
+        print('-------- wB97m-d3bj -------------')
+        e_tot = run_dft('wb97m-d3bj', mol_sph)
+        e_ref = -76.47679432135077
+        print(f'diff from PySCF {e_tot - e_ref}')
+        assert np.abs(e_tot - e_ref) < 1e-5
 
 if __name__ == "__main__":
     print("Full Tests for restricted Kohn-Sham")
