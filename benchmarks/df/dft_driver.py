@@ -37,12 +37,12 @@ if __name__ == '__main__':
     # Warmup
     for i in range(3):
         warmup(atom='../molecules/organic/020_Vitamin_C.xyz')
-    '''
+
     # Generate benchmark data for different xc
     config = config_template.copy()
     for xc in ['LDA', 'PBE', 'B3LYP', 'M06']:
         config['xc'] = xc
-        config['output_dir'] = './organic/xc/' + xc 
+        config['output_dir'] = './organic/xc/' + xc
         config['basis'] = 'def2-tzvpp'
         config['verbose'] = 4
         for mol_name in config['molecules']:
@@ -61,7 +61,7 @@ if __name__ == '__main__':
         if mol_name in ["095_Azadirachtin.xyz","113_Taxol.xyz","168_Valinomycin.xyz"]:
             continue
         run_dft(mol_name, config)
-    
+
     # Generate benchmark data for different basis
     config = config_template.copy()
     for bas in ['sto-3g', '6-31g', 'def2-svp', 'def2-tzvpp', 'def2-tzvpd']:
@@ -72,7 +72,7 @@ if __name__ == '__main__':
             if mol_name in ["095_Azadirachtin.xyz", "113_Taxol.xyz","168_Valinomycin.xyz"]:
                 continue
             run_dft(mol_name, config)
-    '''
+
     # Generate benchmark data for different solvent
     config = config_template.copy()
     for mol_name in config['molecules']:
@@ -81,7 +81,7 @@ if __name__ == '__main__':
         config['xc'] = 'b3lyp'
         config['basis'] = 'def2-tzvpp'
         config['with_solvent'] = True
-        
+
         solvent_method = "CPCM"
         config['solvent']['method'] = solvent_method
         config['output_dir'] = './organic/solvent/' + solvent_method
@@ -90,4 +90,4 @@ if __name__ == '__main__':
         solvent_method = "IEFPCM"
         config['solvent']['method'] = solvent_method
         config['output_dir'] = './organic/solvent/' + solvent_method
-        run_dft(mol_name, config)            
+        run_dft(mol_name, config)

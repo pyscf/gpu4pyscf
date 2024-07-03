@@ -33,7 +33,7 @@ ALIGNED = getattr(__config__, 'ao_aligned', 32)
 GB = 1024*1024*1024
 
 # TODO: reuse the setting in pyscf 2.6
-LINEAR_DEP_THR = 1e-10#incore.LINEAR_DEP_THR
+LINEAR_DEP_THR = 1e-7#incore.LINEAR_DEP_THR
 GROUP_SIZE = 256
 
 class DF(lib.StreamObject):
@@ -184,7 +184,7 @@ class DF(lib.StreamObject):
         '''Reset mol and clean up relevant attributes for scanner mode'''
         if mol is not None:
             self.mol = mol
-            self.auxmol = None
+        self.auxmol = None    # reset auxmol to be compatible with PySCF
         self._cderi = None
         self._vjopt = None
         self._rsh_df = {}

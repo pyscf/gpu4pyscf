@@ -51,7 +51,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = cupy.dot(mocc, mocc.T) * 2
 
-    if mf.nlc != '':
+    if mf.do_nlc():
         raise NotImplementedError
     #enabling range-separated hybrids
     omega, alpha, beta = mf._numint.rsh_coeff(mf.xc)
@@ -209,7 +209,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
     coeff = cupy.asarray(opt.coeff)
     mo_coeff = coeff @ mo_coeff
     nao = mo_coeff.shape[0]
-    
+
     vmat = cupy.zeros((6,nao,nao))
     if xctype == 'LDA':
         ao_deriv = 2

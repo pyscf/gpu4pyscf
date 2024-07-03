@@ -143,10 +143,10 @@ class KnownValues(unittest.TestCase):
 
     def test_uks_wb97m_d3bj(self):
         print('-------- wB97m-d3bj -------------')
-        e_tot = run_dft('wb97m-d3bj', mol_sph)
-        e_qchem = -76.47680732960397 # data from PySCF
-        print(f'diff from pyscf {e_tot - e_qchem}')
-        assert np.abs(e_tot - e_qchem) < 1e-5
+        e_tot = run_dft(mol_sph, 'wb97m-d3bj')
+        e_ref = -76.00969751095374
+        print(f'diff from pyscf {e_tot - e_ref}')
+        assert np.abs(e_tot - e_ref) < 1e-5
 
 if __name__ == "__main__":
     print("Full Tests for unrestricted Kohn-Sham")

@@ -54,7 +54,8 @@ eps = 1e-3
 
 class KnownValues(unittest.TestCase):
     def test_rks_geomopt(self):
-        mf = rks.RKS(mol, xc=xc, disp=disp).density_fit()
+        mf = rks.RKS(mol, xc=xc).density_fit()
+        mf.disp = disp
         mf.grids.level = grids_level
         mf.kernel()
         mol_eq = optimize(mf, maxsteps=20)

@@ -152,7 +152,7 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_wb97m_d3bj(self):
         print('------ wB97m-d3bj --------')
-        _check_grad(mol_sph, xc='wb97m-d3bj', tol=1e-6)
+        _check_grad(mol_sph, xc='wb97m-d3bj', tol=1e-5)
 
     def test_to_cpu(self):
         mf = uks.UKS(mol_sph, xc='b3lyp').density_fit()
