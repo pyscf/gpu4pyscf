@@ -280,7 +280,7 @@ class KnownValues(unittest.TestCase):
         h = hobj.kernel()
         _check_dft_hessian(mf, h, ix=0,iy=0)
 
-    def test_hessian_uks_D4(self):
+    def test_hessian_uks_wb97m_d3bj(self):
         print('------------- testing DFUKS, wb97m-d3bj ---------')
         mf = _make_uks(mol_sph, 'wb97m-d3bj')
         mf.conv_tol_cpscf = 1e-7
