@@ -204,7 +204,7 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
         rho = _contract_rho(c0, c0)
     elif xctype in ('GGA', 'NLC'):
         rho = cupy.empty((4,ngrids))
-        #c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc)
+        #c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc) 
         c0 = contract('nig,io->nog', ao, cpos)
         #:rho[0] = numpy.einsum('pi,pi->p', c0, c0)
         _contract_rho(c0[0], c0[0], rho=rho[0])
@@ -1554,7 +1554,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 shls_slice=non0shl_idx,
                 ao_loc_slice=ao_loc_slice,
                 ctr_offsets_slice=ctr_offsets_slice)
-
+            
             t1 = log.timer_debug2('evaluate ao slice', *t1)
             if pad > 0:
                 if deriv == 0:
@@ -1675,7 +1675,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
     pair_mask    = None
     screen_index = None
     xcfuns       = None        # can be multiple xc functionals
-
+    
     def build(self, mol, coords):
         self.gdftopt = _GDFTOpt.from_mol(mol)
         if USE_SPARSITY == 1:
@@ -1932,7 +1932,7 @@ class _GDFTOpt:
         self.envs_cache = ctypes.POINTER(_GDFTEnvsCache)()
         self._sorted_mol = None       # sorted mol object based on contraction pattern
         self.mol = mol
-
+    
     def build(self, mol=None):
         if mol is None:
             mol = self.mol

@@ -91,3 +91,4 @@ if __name__ == '__main__':
         config['solvent']['method'] = solvent_method
         config['output_dir'] = './organic/solvent/' + solvent_method
         run_dft(mol_name, config)
+

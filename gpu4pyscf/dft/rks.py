@@ -261,7 +261,7 @@ class KohnShamDFT(rks.KohnShamDFT):
     def dump_flags(self, verbose=None):
         # TODO: add this later
         return
-
+    
     reset = rks.KohnShamDFT.reset
     do_nlc = rks.KohnShamDFT.do_nlc
 

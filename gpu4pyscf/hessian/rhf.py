@@ -537,6 +537,9 @@ def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         atmlst = hessobj.atmlst
     else:
         hessobj.atmlst = atmlst
+    
+    if hessobj.verbose >= logger.INFO:
+        hessobj.dump_flags()
 
     if hessobj.verbose >= logger.INFO:
         hessobj.dump_flags()
