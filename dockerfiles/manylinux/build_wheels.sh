@@ -14,6 +14,10 @@ export CUTENSOR_DIR=/usr/local/cuda
 export PATH=$CUDA_HOME/bin:$PATH
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 
+sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo \
+sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo \
+sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo \
+
 # blas is required by DFTD3 and DFTD4
 yum install -y openblas-devel
 
