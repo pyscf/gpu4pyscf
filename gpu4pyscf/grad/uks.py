@@ -195,7 +195,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     exc = None
     if nset == 1:
         vmat = vmat[0]
-        
+
     # - sign because nabla_X = -nabla_x
     return exc, -cupy.array(vmat)
 

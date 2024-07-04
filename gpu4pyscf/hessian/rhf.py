@@ -331,13 +331,13 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         tmp = contract('xij,jo->xio', mat, mocc)
         return contract('xik,ip->xpk', tmp, mo_coeff)
     cupy.get_default_memory_pool().free_all_blocks()
-    
+
     avail_mem = get_avail_mem()
     blksize = int(avail_mem*0.4) // (8*3*nao*nao*4) // ALIGNED * ALIGNED
     blksize = min(32, blksize)
     log.debug(f'GPU memory {avail_mem/GB:.1f} GB available')
     log.debug(f'{blksize} atoms in each block CPHF equation')
-    
+
     # sort atoms to improve the convergence
     sorted_idx = sort_atoms(mol)
     atom_groups = []
@@ -359,14 +359,14 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
             s1ao[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
             s1vo.append(_ao2mo(s1ao))
             h1vo.append(h1mo[ia])
-            
+
         log.info(f'Solving CPHF equation for atoms {len(group)}/{mol.natm}')
         h1vo = cupy.vstack(h1vo)
         s1vo = cupy.vstack(s1vo)
         tol = mf.conv_tol_cpscf
-        mo1, e1 = cphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo, 
+        mo1, e1 = cphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo,
                              level_shift=level_shift, tol=tol, verbose=verbose)
-        
+
         mo1 = mo1.reshape(-1,3,nao,nocc)
         e1 = e1.reshape(-1,3,nocc,nocc)
 
@@ -537,7 +537,7 @@ def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         atmlst = hessobj.atmlst
     else:
         hessobj.atmlst = atmlst
-    
+
     if hessobj.verbose >= logger.INFO:
         hessobj.dump_flags()
 

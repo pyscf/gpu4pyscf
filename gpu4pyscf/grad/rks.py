@@ -188,7 +188,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     mo_occ = cupy.asarray(dms.mo_occ)
     mo_coeff = cupy.asarray(dms.mo_coeff)
-    
+
     mol = None
     _sorted_mol = opt._sorted_mol
     coeff = cupy.asarray(opt.coeff)

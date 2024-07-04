@@ -113,6 +113,14 @@ class KnownValues(unittest.TestCase):
         e_ref = -75.9988910961
         print('diff:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5#-76.00306439862237)
+
+    def test_uks_wb97m_d3bj(self):
+        print('-------- wB97m-d3bj ----------------')
+        e_tot = run_dft('wb97m-d3bj')
+        e_ref = -76.009645802806       # From Psi4
+        print('| CPU - GPU |:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
+
 if __name__ == "__main__":
     print("Full Tests for dft")
     unittest.main()

@@ -59,12 +59,12 @@ def tearDownModule():
     del mol_sph, mol_cart
 
 def _check_grad(mol, grid_response=True, xc=xc0, disp=disp0, tol=1e-5):
-    mf = uks.UKS(mol, xc=xc, disp=disp).density_fit(auxbasis=auxbasis0)
+    mf = uks.UKS(mol, xc=xc).density_fit(auxbasis=auxbasis0)
+    mf.disp = disp
     mf.grids.level = grids_level
     mf.nlcgrids.level = nlcgrids_level
     mf.conv_tol = 1e-10
     mf.verbose = 1
-    mf.disp = disp
     mf.kernel()
 
     g = mf.nuc_grad_method()
@@ -149,6 +149,10 @@ class KnownValues(unittest.TestCase):
     def test_grad_cart(self):
         print('------ Cart testing--------')
         _check_grad(mol_cart, xc='B3LYP', disp=None, tol=1e-5)
+
+    def test_grad_wb97m_d3bj(self):
+        print('------ wB97m-d3bj --------')
+        _check_grad(mol_sph, xc='wb97m-d3bj', tol=1e-5)
 
     def test_to_cpu(self):
         mf = uks.UKS(mol_sph, xc='b3lyp').density_fit()

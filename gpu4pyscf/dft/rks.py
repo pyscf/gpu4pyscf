@@ -47,7 +47,7 @@ def prune_small_rho_grids_(ks, mol, dm, grids):
     if abs(n-mol.nelectron) < gen_grid.NELEC_ERROR_TOL*n:
         rho *= grids.weights
         idx = cupy.abs(rho) > threshold / grids.weights.size
-        
+
         grids.coords  = cupy.asarray(grids.coords [idx], order='C')
         grids.weights = cupy.asarray(grids.weights[idx], order='C')
         logger.debug(grids, 'Drop grids %d', rho.size - grids.weights.size)
@@ -272,12 +272,10 @@ class RKS(KohnShamDFT, hf.RHF):
 
     to_gpu = utils.to_gpu
     device = utils.device
-    _keys = {'disp'}
 
-    def __init__(self, mol, xc='LDA,VWN', disp=None):
+    def __init__(self, mol, xc='LDA,VWN'):
         hf.RHF.__init__(self, mol)
         KohnShamDFT.__init__(self, xc)
-        self.disp = disp
 
     def dump_flags(self, verbose=None):
         hf.RHF.dump_flags(self, verbose)

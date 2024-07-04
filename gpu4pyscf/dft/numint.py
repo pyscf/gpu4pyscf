@@ -517,10 +517,10 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         if xctype == 'MGGA':
             wv[i][[0,4]] *= .5
     t0 = log.timer_debug1('eval vxc', *t0)
-    
+
     if USE_SPARSITY != 2:
         raise NotImplementedError(f'USE_SPARSITY = {USE_SPARSITY} is not implemented')
-    
+
     t1 = t0
     p0 = p1 = 0
     for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
@@ -936,7 +936,7 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
     blksize = min(blksize, MIN_BLK_SIZE)
     GB = 1024*1024*1024
     log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
-    
+
     ngrids = grids.weights.size
     rho = cupy.empty(ngrids)
     with opt.gdft_envs_cache():
@@ -1519,7 +1519,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     ngrids = grids.coords.shape[0]
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     log = logger.new_logger(ni, ni.verbose)
-    
+
     if blksize is None:
         #cupy.get_default_memory_pool().free_all_blocks()
         mem_avail = get_avail_mem()
