@@ -22,6 +22,8 @@ jobs:
         docker run --rm -v ${{ github.workspace }}:/gpu4pyscf:rw --workdir=/gpu4pyscf \
         -e CMAKE_CONFIGURE_ARGS="-DBUILD_LIBXC=OFF" \
         ${{ env.img }} \
+        sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* \
+        sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* \
         bash -exc 'sh /gpu4pyscf/builder/build_wheels.sh'
     - name: List available wheels
       run: |
@@ -32,7 +34,7 @@ jobs:
           export TWINE_USERNAME=__token__
           export TWINE_PASSWORD="${{ secrets.PYPI_API_TOKEN }}"
           twine upload --verbose "${{ github.workspace }}/wheelhouse/*"
-          
+
   release-pypi-linux-cuda12:
     runs-on: ubuntu-latest
     env:
@@ -45,6 +47,8 @@ jobs:
         docker run --rm -v ${{ github.workspace }}:/gpu4pyscf:rw --workdir=/gpu4pyscf \
         -e CMAKE_CONFIGURE_ARGS="-DBUILD_LIBXC=OFF" \
         ${{ env.img }} \
+        sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* \
+        sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* \
         bash -exc 'sh /gpu4pyscf/builder/build_wheels.sh'
     - name: List available wheels
       run: |
@@ -55,7 +59,7 @@ jobs:
           export TWINE_USERNAME=__token__
           export TWINE_PASSWORD="${{ secrets.PYPI_API_TOKEN }}"
           twine upload --verbose "${{ github.workspace }}/wheelhouse/*"
-          
+
   release-pypi-sdist:
     runs-on: ubuntu-latest
     steps:
