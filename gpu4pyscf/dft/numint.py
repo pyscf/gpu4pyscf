@@ -192,26 +192,17 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
     else:
         _, ngrids = ao[0].shape
 
-    shls_slice = (0, mol.nbas)
-    ao_loc = mol.ao_loc_nr()
-
-    #cpos = cupy.einsum('ij,j->ij', mo_coeff[:,mo_occ>0], cupy.sqrt(mo_occ[mo_occ>0]))
-    #cpos = mo_coeff[:,mo_occ>0] * cupy.sqrt(mo_occ[mo_occ>0])
     cpos = (mo_coeff * mo_occ**0.5)[:,mo_occ>0]
     if xctype == 'LDA' or xctype == 'HF':
-        c0 = _dot_ao_dm(mol, ao, cpos, non0tab, shls_slice, ao_loc)
-        #:rho = numpy.einsum('pi,pi->p', c0, c0)
+        c0 = cupy.dot(cpos.T, ao)
         rho = _contract_rho(c0, c0)
     elif xctype in ('GGA', 'NLC'):
         rho = cupy.empty((4,ngrids))
-        #c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc) 
-        c0 = contract('nig,io->nog', ao, cpos)
-        #:rho[0] = numpy.einsum('pi,pi->p', c0, c0)
-        _contract_rho(c0[0], c0[0], rho=rho[0])
+        c0 = cupy.dot(cpos.T, ao[0])
+        _contract_rho(c0, c0, rho=rho[0])
         for i in range(1, 4):
-            #c1 = _dot_ao_dm(mol, ao[i], cpos, non0tab, shls_slice, ao_loc)
-            #:rho[i] = numpy.einsum('pi,pi->p', c0, c1) * 2 # *2 for +c.c.
-            _contract_rho(c0[0], c0[i], rho=rho[i])
+            c1 = cupy.dot(cpos.T, ao[i])
+            _contract_rho(c0, c1, rho=rho[i])
         rho[1:] *= 2
     else: # meta-GGA
         if with_lapl:
@@ -221,26 +212,23 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
         else:
             rho = cupy.empty((5,ngrids))
             tau_idx = 4
-        #c0 = _dot_ao_dm(mol, ao[0], cpos, non0tab, shls_slice, ao_loc)
-        c0 = contract('nig,io->nog', ao, cpos)
-        #:rho[0] = numpy.einsum('pi,pi->p', c0, c0)
-        _contract_rho(c0[0], c0[0], rho=rho[0])
+
+        c0 = cupy.dot(cpos.T, ao[0])
+        _contract_rho(c0, c0, rho=rho[0])
 
         rho[tau_idx] = 0
         for i in range(1, 4):
-            #c1 = _dot_ao_dm(mol, ao[i], cpos, non0tab, shls_slice, ao_loc)
-            #:rho[i] = numpy.einsum('pi,pi->p', c0, c1) * 2 # *2 for +c.c.
-            #:rho[5] += numpy.einsum('pi,pi->p', c1, c1)
-            rho[i] = _contract_rho(c0[0], c0[i])
-            rho[tau_idx] += _contract_rho(c0[i], c0[i])
+            c1 = cupy.dot(cpos.T, ao[i])
+            rho[i] = _contract_rho(c0, c1)
+            rho[tau_idx] += _contract_rho(c1, c1)
 
         if with_lapl:
             if ao.shape[0] > 4:
                 XX, YY, ZZ = 4, 7, 9
                 ao2 = ao[XX] + ao[YY] + ao[ZZ]
-                c1 = _dot_ao_dm(mol, ao2, cpos, non0tab, shls_slice, ao_loc)
+                c1 = cupy.dot(cpos.T, ao2)
                 #:rho[4] = numpy.einsum('pi,pi->p', c0, c1)
-                rho[4] = _contract_rho(c0[0], c1)
+                rho[4] = _contract_rho(c0, c1)
                 rho[4] += rho[5]
                 rho[4] *= 2
             else:
@@ -510,7 +498,8 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         exc = cupy.asarray(exc, order='C')
         den = rho_tot[i][0] * grids.weights
         nelec[i] = den.sum()
-        excsum[i] = cupy.sum(den * exc[:,0])
+        excsum[i] = cupy.dot(den, exc[:,0])
+
         wv.append(vxc * grids.weights)
         if xctype == 'GGA':
             wv[i][0] *= .5
@@ -1554,7 +1543,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 shls_slice=non0shl_idx,
                 ao_loc_slice=ao_loc_slice,
                 ctr_offsets_slice=ctr_offsets_slice)
-            
+
             t1 = log.timer_debug2('evaluate ao slice', *t1)
             if pad > 0:
                 if deriv == 0:
@@ -1675,7 +1664,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
     pair_mask    = None
     screen_index = None
     xcfuns       = None        # can be multiple xc functionals
-    
+
     def build(self, mol, coords):
         self.gdftopt = _GDFTOpt.from_mol(mol)
         if USE_SPARSITY == 1:
@@ -1932,7 +1921,7 @@ class _GDFTOpt:
         self.envs_cache = ctypes.POINTER(_GDFTEnvsCache)()
         self._sorted_mol = None       # sorted mol object based on contraction pattern
         self.mol = mol
-    
+
     def build(self, mol=None):
         if mol is None:
             mol = self.mol
