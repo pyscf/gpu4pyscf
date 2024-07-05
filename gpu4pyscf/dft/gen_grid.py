@@ -380,7 +380,7 @@ def argsort_group(group_ids, ngroup):
     '''
     groups = []
     for i in range(ngroup):
-        groups.append(numpy.where(group_ids==i)[0])
+        groups.append(cupy.argwhere(group_ids==i)[0])
     return cupy.hstack(groups)
 
 def atomic_group_grids(mol, coords):
@@ -405,8 +405,6 @@ def atomic_group_grids(mol, coords):
         current_node = next_node
 
     atom_coords = cupy.asarray(atom_coords[path])
-    #dij = cupy.sum((atom_coords[:,None,:] - coords[None,:,:])**2, axis=2)
-    #group_ids = cupy.argmin(dij, axis=0)
 
     coords = cupy.asarray(coords, order='F')
     atom_coords = cupy.asarray(atom_coords, order='F')
@@ -423,7 +421,8 @@ def atomic_group_grids(mol, coords):
     if err != 0:
         raise RuntimeError('CUDA Error')
 
-    return group_ids.argsort()
+    idx = group_ids.argsort()
+    return idx
 
 def arg_group_grids(mol, coords, box_size=GROUP_BOX_SIZE):
     '''
@@ -497,7 +496,7 @@ class Grids(lib.StreamObject):
     @property
     def size(self):
         return getattr(self.weights, 'size', 0)
-    
+
     def build(self, mol=None, with_non0tab=False, sort_grids=True, **kwargs):
         if mol is None: mol = self.mol
         if self.verbose >= logger.WARN:

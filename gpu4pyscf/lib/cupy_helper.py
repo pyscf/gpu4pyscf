@@ -510,7 +510,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     nroots, ndim = x1.shape
     x1, rmat = _stable_qr(x1, cupy.dot, lindep=lindep)
     x1 *= rmat.diagonal()[:,None]
-    
+
     innerprod = [rmat[i,i].real ** 2 for i in range(x1.shape[0])]
     max_innerprod = max(innerprod)
 
@@ -550,7 +550,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         x1 = x1[mask]
         innerprod.extend(innerprod1[mask])
         if max_innerprod > 1e10:
-            raise RuntimeError('Krylov subspace iterations diverge') 
+            raise RuntimeError('Krylov subspace iterations diverge')
 
     else:
         raise RuntimeError('Krylov solver failed to converge')
@@ -796,3 +796,4 @@ def grouped_gemm(As, Bs, Cs=None):
     if err != 0:
         raise RuntimeError('failed in grouped_gemm kernel')
     return Cs
+

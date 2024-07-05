@@ -5,8 +5,7 @@ DF with solvent methods
 
 Difference from Q-Chem v6.1:
 
-| mol              |     CPCM |      CPCM |     CPCM |    IEFPCM |    IEFPCM |    IEFPCM |
-|                  |      scf |      grad |     hess |       scf |      grad |      hess |
+| mol              | CPCM scf | CPCM grad | CPCM hess|IEFPCM scf |IEFPCM grad|IEFPCM hess|
 |:-----------------|---------:|----------:|---------:|----------:|----------:|----------:|
 | 020_Vitamin_C    | 1.38e-04 |  1.20e-04 | 1.14e-03 |  1.38e-04 |  1.20e-04 |  1.14e-03 |
 | 031_Inosine      | 2.08e-04 |  1.40e-04 | 1.18e-03 |  2.08e-04 |  1.40e-04 |  1.18e-03 |
@@ -16,8 +15,7 @@ Difference from Q-Chem v6.1:
 
 Speedup over Q-Chem v6.1:
 
-| mol              |   CPCM |    CPCM |    CPCM |   IEFPCM |   IEFPCM |   IEFPCM |
-|                  |    scf |    grad |    hess |      scf |     grad |     hess |
+| mol              |CPCM scf|CPCM grad|CPCM hess|IEFPCM scf|IEFPCM grad|IEFPCM hess|
 |:-----------------|-------:|--------:|--------:|---------:|---------:|---------:|
 | 020_Vitamin_C    | 39.830 |  21.569 | 107.197 |   31.005 |   18.264 |  100.091 |
 | 031_Inosine      | 64.261 |  30.356 | 162.287 |   54.346 |   30.641 |  158.179 |
