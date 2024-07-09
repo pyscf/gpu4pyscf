@@ -53,8 +53,7 @@ libgdft.xc_lda.argtypes = (
     ctypes.c_int,
     ctypes.c_void_p,
     POINTER(xc_lda_out_params),
-    POINTER(xc_lda_out_params),
-    )
+    POINTER(xc_lda_out_params))
 
 libgdft.xc_gga.argtypes = (
     ctypes.c_void_p,
@@ -63,8 +62,7 @@ libgdft.xc_gga.argtypes = (
     ctypes.c_void_p,
     ctypes.c_void_p,
     POINTER(xc_gga_out_params),
-    POINTER(xc_gga_out_params),
-    )
+    POINTER(xc_gga_out_params))
 
 libgdft.xc_mgga.argtypes = (
     ctypes.c_void_p,
@@ -75,8 +73,7 @@ libgdft.xc_mgga.argtypes = (
     ctypes.c_void_p,
     ctypes.c_void_p,
     POINTER(xc_mgga_out_params),
-    POINTER(xc_mgga_out_params),
-    )
+    POINTER(xc_mgga_out_params))
 
 if _libxc is None:
     import warnings
@@ -256,7 +253,7 @@ class XCfun:
                 if(isinstance(arg, cupy.ndarray)):
                     arg = ctypes.cast(arg.data.ptr, ctypes.c_void_p)
                 cuda_args.append(arg)
-            
+
             out_params = xc_gga_out_params()
             buf_params = xc_gga_out_params()
             buf = copy.deepcopy(output)
@@ -282,7 +279,7 @@ class XCfun:
 
             if err != 0:
                 raise RuntimeError(f"Error in xc_gga: {err}")
-            
+
             output['zk'][:] = 0.0
             output['vrho'][:] = 0.0
             output['vsigma'][:] = 0.0
