@@ -70,32 +70,38 @@ H                 -3.93210821    0.28874990   -1.89865997
 
     return
 
-def run_dft(mol_name, config):
-    ''' Perform DFT calculations based on the configuration file. 
+def run_dft(mol_name, config, charge=None, spin=0):
+    ''' Perform DFT calculations based on the configuration file.
     Saving the results, timing, and log to a HDF5 file.
     '''
     xc           = config.get('xc',           'b3lyp')
+    disp         = config.get('disp',          None)
     bas          = config.get('basis',        'def2-tzvpp')
     verbose      = config.get('verbose',      4)
     scf_conv_tol = config.get('scf_conv_tol', 1e-10)
     with_df      = config.get('with_df',      True)
+    auxbasis     = config.get('auxbasis',     None)
     with_gpu     = config.get('with_gpu',     True)
     with_solvent = config.get('with_solvent', False)
     with_grad    = config.get('with_grad',    True)
     with_hess    = config.get('with_hess',    True)
+    input_dir    = config.get('input_dir',    './')
 
     # I/O
     fp = tempfile.TemporaryDirectory()
     local_dir = f'{fp.name}/'
     logfile = f'{mol_name[:-4]}_pyscf.log'
-    shutil.copyfile(config['input_dir']+mol_name, local_dir+mol_name)
+    shutil.copyfile(f'{input_dir}/{mol_name}', local_dir+mol_name)
     cupy.get_default_memory_pool().free_all_blocks()
     lib.num_threads(8)
     start_time = time.time()
     mol = pyscf.M(
         atom=local_dir+mol_name,
-        basis=bas, max_memory=32000,
+        basis=bas,
+        max_memory=32000,
         verbose=verbose,
+        charge=charge,
+        spin=spin,
         output=f'{local_dir}/{logfile}')
     mol.build()
 
@@ -112,12 +118,10 @@ def run_dft(mol_name, config):
         mf.grids.atom_grid = (99,590)
         if mf._numint.libxc.is_nlc(mf.xc):
             mf.nlcgrids.atom_grid = (50,194)
-
+    mf.disp = disp
     if with_df:
         if 'auxbasis' in config and config['auxbasis'] == "RIJK-def2-tzvp":
             auxbasis = 'def2-tzvp-jkfit'
-        else:
-            auxbasis = None
         mf = mf.density_fit(auxbasis=auxbasis)
 
     if with_gpu:
@@ -201,4 +205,14 @@ def run_dft(mol_name, config):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run DFT with GPU4PySCF for molecules')
-    run_dft()
+    parser.add_argument("--config", type=str, default='example.json')
+    parser.add_argument("--charge", type=int, default=None)
+    parser.add_argument("--spin",   type=int, default=0)
+    args = parser.parse_args()
+
+    with open(args.config) as f:
+        config = json.load(f)
+        if isinstance(config, list):
+            config = config[0]
+    for mol_name in config['molecule']:
+        run_dft(mol_name, config, charge=args.charge, spin=args.spin)
