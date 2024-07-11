@@ -20,12 +20,12 @@ import argparse
 import tempfile
 import shutil
 import cupy
-import traceback
+import h5py
+import logging
 
 from pyscf import lib, gto
 from pyscf import dft, scf
-from pyscf.lib import logger
-from pyscf.geomopt.geometric_solver import optimize
+from pyscf.geomopt.geometric_solver import kernel
 
 def opt_mol(mol_name, config, constraints, charge=None, spin=0):
     xc           = config.get('xc',           'b3lyp')
@@ -36,14 +36,19 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
     with_df      = config.get('with_df',      True)
     with_gpu     = config.get('with_gpu',     True)
     with_solvent = config.get('with_solvent', False)
+    maxsteps     = config.get('maxsteps',     50)
 
     # I/O
     fp = tempfile.TemporaryDirectory()
     local_dir = f'{fp.name}/'
     logfile = f'{mol_name[:-4]}_pyscf.log'
+
     shutil.copyfile(config['input_dir']+mol_name, local_dir+mol_name)
     if constraints is not None:
         shutil.copyfile(config['input_dir']+constraints, local_dir+constraints)
+    geometric_log = f'{mol_name[:-4]}_geometric.log'
+    logging.basicConfig(filename=f'{local_dir}/{geometric_log}', filemode='w', level=logging.INFO)
+
     cupy.get_default_memory_pool().free_all_blocks()
     lib.num_threads(8)
     start_time = time.time()
@@ -100,15 +105,25 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
         "convergence_dmax": config.get("dmax", 1.8e-3),  # Angstrom
         "prefix": config.get("prefix", "test"),
     }
-    maxsteps = config.get('maxsteps', 20)
-    gradients = []
+
+    history = []
     def callback(envs):
-        gradients.append(envs['gradients'])
-    mol_eq = optimize(mf,
+        result = {
+            'energy':    envs['energy'],
+            'gradients': envs['gradients'],
+            'coords':    envs['coords'].tolist(),
+            'e1':        mf.scf_summary.get('e1',         0.0),
+            'e_coul':    mf.scf_summary.get('coul',       0.0),
+            'e_xc':      mf.scf_summary.get('exc',        0.0),
+            'e_disp':    mf.scf_summary.get('dispersion', 0.0)
+            }
+        history.append(result)
+
+    conv, mol_eq = kernel(mf,
         maxsteps=maxsteps,
         callback=callback,
+        convergence_set='GAU',
         constraints=constraints,
-        **opt_params
         )
 
     # copy the files to destination folder
@@ -116,10 +131,24 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
     isExist = os.path.exists(output_dir)
     if not isExist:
         os.makedirs(output_dir)
-    optimized_xyz = mol_name[:-4] + '_opt.xyz'
+    optimized_xyz = f'{mol_name[:-4]}_opt.xyz'
+    hist_file = f'{mol_name[:-4]}_hist.h5'
     mol_eq.tofile(f'{local_dir}/{optimized_xyz}', format='xyz')
+
+    with h5py.File(f'{local_dir}/{hist_file}', 'w') as h5f:
+        #json.dump(history, f)
+        for step, info in enumerate(history):
+            group = h5f.create_group(f'step_{step}')
+            for key, array in info.items():
+                group.create_dataset(key, data=array)
+
     shutil.copyfile(f'{local_dir}/{optimized_xyz}', f'{output_dir}/{optimized_xyz}')
+    shutil.copyfile(f'{local_dir}/{hist_file}', f'{output_dir}/{hist_file}')
     shutil.copyfile(f'{local_dir}/{logfile}', f'{output_dir}/{logfile}')
+    shutil.copyfile(f'{local_dir}/{geometric_log}', f'{output_dir}/{geometric_log}')
+    if conv:
+        with open(f'{output_dir}/{mol_name[:-4]}_success.txt', 'w') as file:
+            file.write("Geometry optimization converged\n")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run DFT with GPU4PySCF for molecules')
@@ -129,10 +158,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     with open(args.config) as f:
-        config = json.load(f)[0]
+        config = json.load(f)
+        if isinstance(config, list):
+            config = config[0]
     for i, mol_name in enumerate(config['molecule']):
         constraints = None
-        if 'constraints' in config:
+        if 'constraints' in config and config['constraints']:
             assert len(config['constraints']) == len(config['molecule'])
             constraints = config['constraints'][i]
         opt_mol(mol_name, config, constraints, charge=args.charge, spin=args.spin)

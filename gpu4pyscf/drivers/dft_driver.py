@@ -74,18 +74,21 @@ def run_dft(mol_name, config, charge=None, spin=0):
     ''' Perform DFT calculations based on the configuration file.
     Saving the results, timing, and log to a HDF5 file.
     '''
-    xc           = config.get('xc',           'b3lyp')
-    disp         = config.get('disp',          None)
-    bas          = config.get('basis',        'def2-tzvpp')
-    verbose      = config.get('verbose',      4)
-    scf_conv_tol = config.get('scf_conv_tol', 1e-10)
-    with_df      = config.get('with_df',      True)
-    auxbasis     = config.get('auxbasis',     None)
-    with_gpu     = config.get('with_gpu',     True)
-    with_solvent = config.get('with_solvent', False)
-    with_grad    = config.get('with_grad',    True)
-    with_hess    = config.get('with_hess',    True)
-    input_dir    = config.get('input_dir',    './')
+    xc             = config.get('xc',             'b3lyp')
+    disp           = config.get('disp',            None)
+    grids          = config.get('grids',          {'atom_grid': (99,590)})
+    nlcgrids       = config.get('nlcgrids',       {'atom_grid': (50,194)})
+    bas            = config.get('basis',          'def2-tzvpp')
+    verbose        = config.get('verbose',        4)
+    scf_conv_tol   = config.get('scf_conv_tol',   1e-10)
+    direct_scf_tol = config.get('direct_scf_tol', 1e-14)
+    with_df        = config.get('with_df',        True)
+    auxbasis       = config.get('auxbasis',       None)
+    with_gpu       = config.get('with_gpu',       True)
+    with_solvent   = config.get('with_solvent',   False)
+    with_grad      = config.get('with_grad',      True)
+    with_hess      = config.get('with_hess',      True)
+    input_dir      = config.get('input_dir',      './')
 
     # I/O
     fp = tempfile.TemporaryDirectory()
@@ -115,15 +118,16 @@ def run_dft(mol_name, config, charge=None, spin=0):
         mf = scf.HF(mol)
     else:
         mf = dft.KS(mol, xc=pyscf_xc)
-        mf.grids.atom_grid = (99,590)
+        if 'atom_grid' in grids: mf.grids.atom_grid = grids['atom_grid']
+        if 'level' in grids:     mf.grids.level     = grids['level']
         if mf._numint.libxc.is_nlc(mf.xc):
-            mf.nlcgrids.atom_grid = (50,194)
+            if 'atom_grid' in nlcgrids: mf.nlcgrids.atom_grid = nlcgrids['atom_grid']
+            if 'level' in nlcgrids:     mf.nlcgrids.level     = nlcgrids['level']
     mf.disp = disp
     if with_df:
         if 'auxbasis' in config and config['auxbasis'] == "RIJK-def2-tzvp":
             auxbasis = 'def2-tzvp-jkfit'
         mf = mf.density_fit(auxbasis=auxbasis)
-
     if with_gpu:
         mf = mf.to_gpu()
 
@@ -134,7 +138,7 @@ def run_dft(mol_name, config, charge=None, spin=0):
         mf.with_solvent.method = config['solvent']['method'].replace('PCM','-PCM')
         mf.with_solvent.eps = config['solvent']['eps']
 
-    mf.direct_scf_tol = 1e-14
+    mf.direct_scf_tol = direct_scf_tol
     mf.chkfile = None
     mf.conv_tol = scf_conv_tol
     e_tot = mf.kernel()
@@ -145,10 +149,19 @@ def run_dft(mol_name, config, charge=None, spin=0):
     scf_time = time.time() - start_time
     print(f'compute time for energy: {scf_time:.3f} s')
 
+    e1     = mf.scf_summary.get('e1',         0.0)
+    e_coul = mf.scf_summary.get('coul',       0.0)
+    e_xc   = mf.scf_summary.get('exc',        0.0)
+    e_disp = mf.scf_summary.get('dispersion', 0.0)
+
     data_file = mol_name[:-4] + '_pyscf.h5'
     import h5py
     h5f = h5py.File(f'{local_dir}/{data_file}', 'w')
-    h5f.create_dataset('e_tot', data=e_tot)
+    h5f.create_dataset('e_tot',    data=e_tot)
+    h5f.create_dataset('e1',       data=e1)
+    h5f.create_dataset('e_coul',   data=e_coul)
+    h5f.create_dataset('e_xc',     data=e_xc)
+    h5f.create_dataset('e_disp',   data=e_disp)
     h5f.create_dataset('scf_time', data=scf_time)
 
     g = None
