@@ -28,15 +28,16 @@ from pyscf import dft, scf
 from pyscf.geomopt.geometric_solver import kernel
 
 def opt_mol(mol_name, config, constraints, charge=None, spin=0):
-    xc           = config.get('xc',           'b3lyp')
-    disp         = config.get('disp',          None)
-    bas          = config.get('basis',        'def2-tzvpp')
-    verbose      = config.get('verbose',      4)
-    scf_conv_tol = config.get('scf_conv_tol', 1e-10)
-    with_df      = config.get('with_df',      True)
-    with_gpu     = config.get('with_gpu',     True)
-    with_solvent = config.get('with_solvent', False)
-    maxsteps     = config.get('maxsteps',     50)
+    xc              = config.get('xc',              'b3lyp')
+    disp            = config.get('disp',            None)
+    bas             = config.get('basis',           'def2-tzvpp')
+    verbose         = config.get('verbose',         4)
+    scf_conv_tol    = config.get('scf_conv_tol',    1e-10)
+    with_df         = config.get('with_df',         True)
+    with_gpu        = config.get('with_gpu',        True)
+    with_solvent    = config.get('with_solvent',    False)
+    maxsteps        = config.get('maxsteps',        50)
+    convergence_set = config.get('convergence_set', 'GAU')
 
     # I/O
     fp = tempfile.TemporaryDirectory()
@@ -97,15 +98,6 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
     mf.chkfile = None
     mf.conv_tol = scf_conv_tol
 
-    opt_params = {
-        "convergence_energy": config.get("conv_e", 1e-6),  # Eh
-        "convergence_grms": config.get("grms", 3.0e-4),  # Eh/Bohr
-        "convergence_gmax": config.get("gmax", 4.5e-4),  # Eh/Bohr
-        "convergence_drms": config.get("drms", 1.2e-3),  # Angstrom
-        "convergence_dmax": config.get("dmax", 1.8e-3),  # Angstrom
-        "prefix": config.get("prefix", "test"),
-    }
-
     history = []
     def callback(envs):
         result = {
@@ -122,7 +114,7 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
     conv, mol_eq = kernel(mf,
         maxsteps=maxsteps,
         callback=callback,
-        convergence_set='GAU',
+        convergence_set=convergence_set,
         constraints=constraints,
         )
 
