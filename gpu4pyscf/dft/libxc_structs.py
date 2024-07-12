@@ -182,8 +182,12 @@ class xc_func_type(ctypes.Structure):
         ("dim", xc_dimensions),
 
         # parameters
+        ("ext_params", ctypes.POINTER(ctypes.c_double)),
         ("params", ctypes.c_void_p),  # void *params;
         ("dens_threshold", ctypes.c_double),
+        ("zeta_threshold", ctypes.c_double),
+        ("sigma_threshold", ctypes.c_double),
+        ("tau_threshold", ctypes.c_double)
     ]
 
 class xc_lda_out_params(ctypes.Structure):

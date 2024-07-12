@@ -26,38 +26,42 @@
 #define THREADS 128
 
 // Up to order = 2, do_exc = True, do_vxc = True, do_fxc = True, do_kxc = False, do_lxc = False
-#define ADD_LDA if(out->zk     != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->zk, out_lda->zk, coef, np*dim->zk); \
-                if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vrho, out_lda->vrho, coef, np*dim->vrho); \
-                if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rho2, out_lda->v2rho2, coef, np*dim->v2rho2); 
+#define ADD_LDA if(out->zk     != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->zk, out_lda->zk, coef, np, dim->zk); \
+                if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vrho, out_lda->vrho, coef, np, dim->vrho); \
+                if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rho2, out_lda->v2rho2, coef, np, dim->v2rho2);
 
-#define ADD_GGA if(out->zk     != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->zk, out_gga->zk, coef, np*dim->zk); \
-                if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vrho, out_gga->vrho, coef, np*dim->vrho); \
-                if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vsigma, out_gga->vsigma, coef, np*dim->vsigma); \
-                if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rho2, out_gga->v2rho2, coef, np*dim->v2rho2); \
-                if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rhosigma, out_gga->v2rhosigma, coef, np*dim->v2rhosigma); \
-                if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2sigma2, out_gga->v2sigma2, coef, np*dim->v2sigma2);
+#define ADD_GGA if(out->zk     != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->zk, out_gga->zk, coef, np, dim->zk); \
+                if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vrho, out_gga->vrho, coef, np, dim->vrho); \
+                if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vsigma, out_gga->vsigma, coef, np, dim->vsigma); \
+                if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rho2, out_gga->v2rho2, coef, np, dim->v2rho2); \
+                if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rhosigma, out_gga->v2rhosigma, coef, np, dim->v2rhosigma); \
+                if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2sigma2, out_gga->v2sigma2, coef, np, dim->v2sigma2);
 
-#define ADD_MGGA if(out->zk     != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->zk, out_mgga->zk, coef, np*dim->zk); \
-                 if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vrho, out_mgga->vrho, coef, np*dim->vrho); \
-                 if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vsigma, out_mgga->vsigma, coef, np*dim->vsigma); \
-                 if(out->vrho   != NULL && out->vlapl != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vlapl, out_mgga->vlapl, coef, np*dim->vlapl); \
-                 if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vtau, out_mgga->vtau, coef, np*dim->vtau); \
-                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rho2, out_mgga->v2rho2, coef, np*dim->v2rho2); \
-                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rhosigma, out_mgga->v2rhosigma, coef, np*dim->v2rhosigma); \
-                 if(out->v2rho2 != NULL && out->v2rholapl != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rholapl, out_mgga->v2rholapl, coef, np*dim->v2rholapl); \
-                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rhotau, out_mgga->v2rhotau, coef, np*dim->v2rhotau); \
-                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2sigma2, out_mgga->v2sigma2, coef, np*dim->v2sigma2);\
-                 if(out->v2rho2 != NULL && out->v2sigmalapl != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2sigmalapl, out_mgga->v2sigmalapl, coef, np*dim->v2sigmalapl);\
-                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2sigmatau, out_mgga->v2sigmatau, coef, np*dim->v2sigmatau);\
-                 if(out->v2rho2 != NULL && out->v2lapl2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2lapl2, out_mgga->v2lapl2, coef, np*dim->v2lapl2);\
-                 if(out->v2rho2 != NULL && out->v2lapltau != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2lapltau, out_mgga->v2lapltau, coef, np*dim->v2lapltau);\
-                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2tau2, out_mgga->v2tau2, coef, np*dim->v2tau2);
+#define ADD_MGGA if(out->zk     != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->zk, out_mgga->zk, coef, np, dim->zk); \
+                 if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vrho, out_mgga->vrho, coef, np, dim->vrho); \
+                 if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vsigma, out_mgga->vsigma, coef, np, dim->vsigma); \
+                 if(out->vrho   != NULL && out->vlapl != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vlapl, out_mgga->vlapl, coef, np, dim->vlapl); \
+                 if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vtau, out_mgga->vtau, coef, np, dim->vtau); \
+                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rho2, out_mgga->v2rho2, coef, np, dim->v2rho2); \
+                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rhosigma, out_mgga->v2rhosigma, coef, np, dim->v2rhosigma); \
+                 if(out->v2rho2 != NULL && out->v2rholapl != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rholapl, out_mgga->v2rholapl, coef, np, dim->v2rholapl); \
+                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rhotau, out_mgga->v2rhotau, coef, np, dim->v2rhotau); \
+                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2sigma2, out_mgga->v2sigma2, coef, np, dim->v2sigma2);\
+                 if(out->v2rho2 != NULL && out->v2sigmalapl != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2sigmalapl, out_mgga->v2sigmalapl, coef, np, dim->v2sigmalapl);\
+                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2sigmatau, out_mgga->v2sigmatau, coef, np, dim->v2sigmatau);\
+                 if(out->v2rho2 != NULL && out->v2lapl2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2lapl2, out_mgga->v2lapl2, coef, np, dim->v2lapl2);\
+                 if(out->v2rho2 != NULL && out->v2lapltau != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2lapltau, out_mgga->v2lapltau, coef, np, dim->v2lapltau);\
+                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2tau2, out_mgga->v2tau2, coef, np, dim->v2tau2);
 
 __global__
-void _add_out(double *out, const double *buf, double coef, int np){
+static void _add_out(double *out, const double *buf, double coef, int np, int dim){
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < np) {
-        out[i] += coef * buf[i];
+        #pragma unroll
+        for (int j = 0; j < dim; j++){
+            int idx = i + j * np;
+            out[idx] += coef * buf[idx];
+        }
     }
 }
 
@@ -88,7 +92,7 @@ void _memset_mgga(xc_mgga_out_params *out, int order, int np, const xc_dimension
     if(order >= 1) cudaMemset(out->vsigma, 0, sizeof(double)*np*dim->vsigma);
     if(order >= 1 && out->vlapl != NULL) cudaMemset(out->vlapl, 0, sizeof(double)*np*dim->vlapl); // (sigma, lapl, tau)
     if(order >= 1) cudaMemset(out->vtau, 0, sizeof(double)*np*dim->vtau);
-    
+
     if(order >= 2) cudaMemset(out->v2rho2, 0, sizeof(double)*np*dim->v2rho2);
     if(order >= 2) cudaMemset(out->v2rhosigma, 0, sizeof(double)*np*dim->v2rhosigma);
     if(order >= 2 && out->v2rholapl != NULL) cudaMemset(out->v2rholapl, 0, sizeof(double)*np*dim->v2rholapl);
@@ -104,13 +108,13 @@ void _memset_mgga(xc_mgga_out_params *out, int order, int np, const xc_dimension
 __host__
 int _xc_lda(const xc_func_type *func, int np, int order, const double *rho,
             xc_lda_out_params *out){
-    
+
     if(func->info->lda == NULL){
         fprintf(stderr, "Nested xc functional is not supported\n");
         return 1;
     }
     const xc_dimensions *dim = &(func->dim);
-    
+
     if(order < 0) return 0;
     _memset_lda(out, order, np, dim);
 
@@ -129,7 +133,7 @@ int _xc_lda(const xc_func_type *func, int np, int order, const double *rho,
 __host__
 int _xc_gga(const xc_func_type *func, int np, int order, const double *rho, const double *sigma,
             xc_gga_out_params *out){
-    
+
     if(func->info->gga == NULL){
         fprintf(stderr, "Nested xc functional is not supported\n");
         return 1;
@@ -153,10 +157,10 @@ int _xc_gga(const xc_func_type *func, int np, int order, const double *rho, cons
 }
 
 __host__
-int _xc_mgga(const xc_func_type *func, int np, int order, const double *rho, const double *sigma, 
+int _xc_mgga(const xc_func_type *func, int np, int order, const double *rho, const double *sigma,
             const double *lapl, const double *tau,
             xc_mgga_out_params *out){
-    
+
     if(func->info->mgga == NULL){
         fprintf(stderr, "Nested xc functional is not supported\n");
         return 1;
@@ -213,10 +217,9 @@ int xc_lda(cudaStream_t stream,
         double coef = func->mix_coef[ii];
         /* Evaluate the functional */
         switch(aux->info->family){
-            case XC_FAMILY_LDA:
-            case XC_FAMILY_HYB_LDA:{
+            case XC_FAMILY_LDA:{
                 xc_lda_out_params *out_lda = (xc_lda_out_params *)(buf);
-                ierr = _xc_lda(aux, np, order, rho, out_lda); 
+                ierr = _xc_lda(aux, np, order, rho, out_lda);
                 ADD_LDA;
                 break;
             }
@@ -254,33 +257,34 @@ int xc_gga(cudaStream_t stream,
     if(func->mix_coef == NULL){
         return ierr;
     }
-    const xc_dimensions *dim = &(func->dim);
+    //const xc_dimensions *dim = &(func->dim);
+    _memset_gga(out, order, np, &(func->dim));
+    //printf("%d %d %d\n", func->dim->rho, func->dim->vrho, func->dim->vsigma);
 
-    _memset_gga(out, order, np, dim);
     dim3 threads(THREADS);
     dim3 blocks((np+THREADS-1)/THREADS);
     for (int ii=0; ii< func->n_func_aux; ii++){
         xc_func_type *aux = func->func_aux[ii];
         double coef = func->mix_coef[ii];
+        const xc_dimensions *dim = &(aux->dim);
+
         /* Evaluate the functional */
         switch(aux->info->family){
-            case XC_FAMILY_LDA:
-            case XC_FAMILY_HYB_LDA:{
+            case XC_FAMILY_LDA:{
                 xc_lda_out_params *out_lda = (xc_lda_out_params *)(buf);
                 ierr = _xc_lda(aux, np, order, rho, out_lda);
                 ADD_LDA;
                 break;
             }
-            case XC_FAMILY_GGA:
-            case XC_FAMILY_HYB_GGA:{
+            case XC_FAMILY_GGA:{
                 xc_gga_out_params *out_gga = (xc_gga_out_params *)(buf);
-                ierr = _xc_gga(aux, np, order, rho, sigma, out_gga); 
+                ierr = _xc_gga(aux, np, order, rho, sigma, out_gga);
                 ADD_GGA;
                 break;
             }
         }
     }
-    
+
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of xc_gga: %s\n", cudaGetErrorString(err));
@@ -324,24 +328,21 @@ int xc_mgga(cudaStream_t stream,
         double coef = func->mix_coef[ii];
         /* Evaluate the functional */
         switch(aux->info->family){
-            case XC_FAMILY_LDA:
-            case XC_FAMILY_HYB_LDA:{
+            case XC_FAMILY_LDA:{
                 xc_lda_out_params *out_lda = (xc_lda_out_params *)(buf);
-                ierr = _xc_lda(aux, np, order, rho, out_lda); 
+                ierr = _xc_lda(aux, np, order, rho, out_lda);
                 ADD_LDA;
                 break;
             }
-            case XC_FAMILY_GGA:
-            case XC_FAMILY_HYB_GGA:{
+            case XC_FAMILY_GGA:{
                 xc_gga_out_params *out_gga = (xc_gga_out_params *)(buf);
-                ierr = _xc_gga(aux, np, order, rho, sigma, out_gga); 
+                ierr = _xc_gga(aux, np, order, rho, sigma, out_gga);
                 ADD_GGA;
                 break;
             }
-            case XC_FAMILY_MGGA:
-            case XC_FAMILY_HYB_MGGA:{
+            case XC_FAMILY_MGGA:{
                 xc_mgga_out_params *out_mgga = (xc_mgga_out_params *)(buf);
-                ierr = _xc_mgga(aux, np, order, rho, sigma, lapl, tau, out_mgga); 
+                ierr = _xc_mgga(aux, np, order, rho, sigma, lapl, tau, out_mgga);
                 ADD_MGGA;
                 break;
             }

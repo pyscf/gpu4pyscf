@@ -216,6 +216,7 @@ class XCfun:
                     arg = ctypes.cast(arg.data.ptr, ctypes.c_void_p)
                 cuda_args.append(arg)
             #_libxc.xc_lda(*cuda_args)
+
             out_params = xc_lda_out_params()
             buf_params = xc_lda_out_params()
             buf = copy.deepcopy(output)
@@ -253,6 +254,7 @@ class XCfun:
                 if(isinstance(arg, cupy.ndarray)):
                     arg = ctypes.cast(arg.data.ptr, ctypes.c_void_p)
                 cuda_args.append(arg)
+            #_libxc.xc_gga(*cuda_args)
 
             out_params = xc_gga_out_params()
             buf_params = xc_gga_out_params()
@@ -274,28 +276,7 @@ class XCfun:
             )
             if err != 0:
                 raise RuntimeError('Failed in xc_gga')
-            '''
-            output0 = copy.deepcopy(output)
 
-            if err != 0:
-                raise RuntimeError(f"Error in xc_gga: {err}")
-
-            output['zk'][:] = 0.0
-            output['vrho'][:] = 0.0
-            output['vsigma'][:] = 0.0
-            _libxc.xc_gga(*cuda_args)
-            for label in output:
-                if output[label] is not None:
-                    print(label, cupy.linalg.norm(output[label] - output0[label]))
-            print('zk')
-            print(output['zk'][:10], output0['zk'][:10])
-            print('vrho')
-            print(output['vrho'][:10], output0['vrho'][:10])
-            print('vsigma')
-            print(output['vsigma'][:10], output0['vsigma'][:10])
-
-            exit()
-            '''
         elif self._family == 'MGGA':
             # Build input args
             if self.needs_laplacian():
@@ -323,6 +304,7 @@ class XCfun:
                     arg = ctypes.cast(arg.data.ptr, ctypes.c_void_p)
                 cuda_args.append(arg)
             #_libxc.xc_mgga(*cuda_args)
+
             out_params = xc_mgga_out_params()
             buf_params = xc_mgga_out_params()
             buf = copy.deepcopy(output)
