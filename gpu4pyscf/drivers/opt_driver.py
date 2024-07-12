@@ -52,7 +52,6 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
 
     cupy.get_default_memory_pool().free_all_blocks()
     lib.num_threads(8)
-    start_time = time.time()
     mol = pyscf.M(
         atom=local_dir+mol_name,
         basis=bas,
@@ -108,15 +107,14 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
             'e_coul':    mf.scf_summary.get('coul',       0.0),
             'e_xc':      mf.scf_summary.get('exc',        0.0),
             'e_disp':    mf.scf_summary.get('dispersion', 0.0)
-            }
+        }
         history.append(result)
 
     conv, mol_eq = kernel(mf,
         maxsteps=maxsteps,
         callback=callback,
         convergence_set=convergence_set,
-        constraints=constraints,
-        )
+        constraints=constraints)
 
     # copy the files to destination folder
     output_dir = config['output_dir']
