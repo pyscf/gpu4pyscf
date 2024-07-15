@@ -21,6 +21,7 @@ jobs:
     - uses: actions/checkout@v3
     - name: Install dependencies
       run: |
+        pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
         python3 -m pip install --upgrade pip
         pip3 install flake8 pytest coverage gpu4pyscf-libxc-cuda11x pytest-cov pyscf-dispersion
         pip3 install pyscf --upgrade
