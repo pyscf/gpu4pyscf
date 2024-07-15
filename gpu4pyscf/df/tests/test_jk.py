@@ -14,6 +14,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import unittest
+import numpy as np
 import cupy
 import pyscf
 from pyscf import df
@@ -49,7 +50,7 @@ class KnownValues(unittest.TestCase):
         int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym=True, direct_scf_tol=1e-14)
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
         intopt.build(1e-14, diag_block_with_triu=False, aosym=True)
-        cupy.random.seed(1)
+        cupy.random.seed(np.asarray(1, dtype=np.uint64))
         nao = len(intopt.ao_idx)
         dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T
@@ -65,7 +66,7 @@ class KnownValues(unittest.TestCase):
         assert cupy.linalg.norm(vj_outcore - vj_incore) < 1e-5
 
     def test_j_outcore(self):
-        cupy.random.seed(1)
+        cupy.random.seed(np.asarray(1, dtype=np.uint64))
         nao = mol.nao
         dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T
@@ -73,8 +74,6 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
         vj0, _ = mf.get_jk(dm=dm, with_j=True, with_k=False)
         vj = df_jk.get_j(mf.with_df, dm)
-        print(cupy.linalg.norm(vj - vj0))
-        print(cupy.linalg.norm(vj))
         assert cupy.linalg.norm(vj - vj0) < 1e-4
 
 if __name__ == "__main__":
