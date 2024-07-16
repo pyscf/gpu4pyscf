@@ -47,10 +47,7 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
     shutil.copyfile(config['input_dir']+mol_name, local_dir+mol_name)
     if constraints is not None:
         shutil.copyfile(config['input_dir']+constraints, local_dir+constraints)
-    geometric_log = f'{mol_name[:-4]}_geometric.log'
-    logging.basicConfig(filename=f'{local_dir}/{geometric_log}', filemode='w', level=logging.INFO)
 
-    cupy.get_default_memory_pool().free_all_blocks()
     lib.num_threads(8)
     mol = pyscf.M(
         atom=local_dir+mol_name,
@@ -110,11 +107,19 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
         }
         history.append(result)
 
-    conv, mol_eq = kernel(mf,
-        maxsteps=maxsteps,
-        callback=callback,
-        convergence_set=convergence_set,
-        constraints=constraints)
+    geometric_log = f'{mol_name[:-4]}_geometric.log'
+    import sys
+    # PySCF forwards geometric log to sys.stderr
+    with open(f'{local_dir}/{geometric_log}', 'w') as log_file:
+        import sys
+        sys.stderr = log_file
+        conv, mol_eq = kernel(
+            mf,
+            maxsteps=maxsteps,
+            callback=callback,
+            convergence_set=convergence_set,
+            constraints=constraints)
+    sys.stderr = sys.__stderr__
 
     # copy the files to destination folder
     output_dir = config['output_dir']
@@ -151,7 +156,7 @@ if __name__ == '__main__':
         config = json.load(f)
         if isinstance(config, list):
             config = config[0]
-    for i, mol_name in enumerate(config['molecule']):
+    for i, mol_name in enumerate(config['molecules']):
         constraints = None
         if 'constraints' in config and config['constraints']:
             assert len(config['constraints']) == len(config['molecule'])
