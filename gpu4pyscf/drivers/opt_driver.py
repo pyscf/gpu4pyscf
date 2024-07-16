@@ -111,7 +111,6 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
     import sys
     # PySCF forwards geometric log to sys.stderr
     with open(f'{local_dir}/{geometric_log}', 'w') as log_file:
-        import sys
         sys.stderr = log_file
         conv, mol_eq = kernel(
             mf,
