@@ -273,7 +273,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
         row = intopt.ao_pairs_row[cp_ij_id] - i0
         col = intopt.ao_pairs_col[cp_ij_id] - j0
 
-        ints_slices_f= cupy.empty([naux,len(row)], order='F')
+        ints_slices_f= cupy.empty([naoaux,len(row)], order='F')
         ints_slices_f[:] = ints_slices[:,col,row]
         ints_slices = None
 
