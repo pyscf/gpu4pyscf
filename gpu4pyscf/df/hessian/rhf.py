@@ -65,7 +65,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     mem_avail = get_avail_mem()
     log.debug('Partial Hessian with density fitting approximation')
     log.debug(f'Memory available {mem_avail/GB} GB')
-    
+
     mol = hessobj.mol
     mf = hessobj.base
     mf.with_df._cderi = None
@@ -109,7 +109,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     int2c_ip1 = cupy.asarray(int2c_ip1, order='C')
     int2c_ip1 = take_last2d(int2c_ip1, aux_ao_idx)
-    
+
     hj_ao_ao = cupy.zeros([nao,nao,3,3])
     hk_ao_ao = cupy.zeros([nao,nao,3,3])
     if hessobj.auxbasis_response:
@@ -175,7 +175,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                 hk_ao_aux[i0:i1] -= contract('qoi,qioxy->iqxy', rhok0_P_I, wk1_I)
                 wk1_I = rhok0_P_I = None
         rhok1_Pko = None
-        
+
         w, v = cupy.linalg.eigh(int2c)
         idx = w > LINEAR_DEP_THR
         cd_low = (v[:,idx] / cupy.sqrt(w[idx]))
@@ -208,7 +208,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             hk_ao_ao += contract('pikx,pkiy->ikxy', rhok1_Pkl_kslice, rhok1_Pkl_kslice)
             rhok1_Pkl_kslice = None
         rhok1_Pko_kslice = None
-        
+
     wk1_Pko = rhok1_Pko = None
     t1 = log.timer_debug1('intermediate variables with int3c2e_ip1', *t1)
 
@@ -480,11 +480,11 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     mem_avail = get_avail_mem()
     blksize = int(mem_avail*0.2/(nao*nao*8*3)/ALIGNED) * ALIGNED
     log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
-    
-    intopt.build(mf.direct_scf_tol, 
-                 diag_block_with_triu=True, 
-                 aosym=False, 
-                 group_size_aux=BLKSIZE, 
+
+    intopt.build(mf.direct_scf_tol,
+                 diag_block_with_triu=True,
+                 aosym=False,
+                 group_size_aux=BLKSIZE,
                  group_size=BLKSIZE)
     ao_idx = intopt.ao_idx
     aux_ao_idx = intopt.aux_ao_idx
@@ -551,7 +551,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
         if blksize < ALIGNED:
             raise RuntimeError('Not enough memory to compute int3c2e_ip2')
-        
+
         for p0, p1 in lib.prange(0,nao,blksize):
             rhok_tmp = cupy.asarray(rhok0_Pl_[:,p0:p1])
             vj1_tmp = contract('pio,xp->xpio', rhok_tmp, wj0_10)

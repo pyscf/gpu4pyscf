@@ -70,32 +70,41 @@ H                 -3.93210821    0.28874990   -1.89865997
 
     return
 
-def run_dft(mol_name, config):
-    ''' Perform DFT calculations based on the configuration file. 
+def run_dft(mol_name, config, charge=None, spin=0):
+    ''' Perform DFT calculations based on the configuration file.
     Saving the results, timing, and log to a HDF5 file.
     '''
-    xc           = config.get('xc',           'b3lyp')
-    bas          = config.get('basis',        'def2-tzvpp')
-    verbose      = config.get('verbose',      4)
-    scf_conv_tol = config.get('scf_conv_tol', 1e-10)
-    with_df      = config.get('with_df',      True)
-    with_gpu     = config.get('with_gpu',     True)
-    with_solvent = config.get('with_solvent', False)
-    with_grad    = config.get('with_grad',    True)
-    with_hess    = config.get('with_hess',    True)
+    xc             = config.get('xc',             'b3lyp')
+    disp           = config.get('disp',            None)
+    grids          = config.get('grids',          {'atom_grid': (99,590)})
+    nlcgrids       = config.get('nlcgrids',       {'atom_grid': (50,194)})
+    bas            = config.get('basis',          'def2-tzvpp')
+    verbose        = config.get('verbose',        4)
+    scf_conv_tol   = config.get('scf_conv_tol',   1e-10)
+    direct_scf_tol = config.get('direct_scf_tol', 1e-14)
+    with_df        = config.get('with_df',        True)
+    auxbasis       = config.get('auxbasis',       None)
+    with_gpu       = config.get('with_gpu',       True)
+    with_solvent   = config.get('with_solvent',   False)
+    with_grad      = config.get('with_grad',      True)
+    with_hess      = config.get('with_hess',      True)
+    input_dir      = config.get('input_dir',      './')
 
     # I/O
     fp = tempfile.TemporaryDirectory()
     local_dir = f'{fp.name}/'
     logfile = f'{mol_name[:-4]}_pyscf.log'
-    shutil.copyfile(config['input_dir']+mol_name, local_dir+mol_name)
+    shutil.copyfile(f'{input_dir}/{mol_name}', local_dir+mol_name)
     cupy.get_default_memory_pool().free_all_blocks()
     lib.num_threads(8)
     start_time = time.time()
     mol = pyscf.M(
         atom=local_dir+mol_name,
-        basis=bas, max_memory=32000,
+        basis=bas,
+        max_memory=32000,
         verbose=verbose,
+        charge=charge,
+        spin=spin,
         output=f'{local_dir}/{logfile}')
     mol.build()
 
@@ -109,17 +118,16 @@ def run_dft(mol_name, config):
         mf = scf.HF(mol)
     else:
         mf = dft.KS(mol, xc=pyscf_xc)
-        mf.grids.atom_grid = (99,590)
+        if 'atom_grid' in grids: mf.grids.atom_grid = grids['atom_grid']
+        if 'level' in grids:     mf.grids.level     = grids['level']
         if mf._numint.libxc.is_nlc(mf.xc):
-            mf.nlcgrids.atom_grid = (50,194)
-
+            if 'atom_grid' in nlcgrids: mf.nlcgrids.atom_grid = nlcgrids['atom_grid']
+            if 'level' in nlcgrids:     mf.nlcgrids.level     = nlcgrids['level']
+    mf.disp = disp
     if with_df:
         if 'auxbasis' in config and config['auxbasis'] == "RIJK-def2-tzvp":
             auxbasis = 'def2-tzvp-jkfit'
-        else:
-            auxbasis = None
         mf = mf.density_fit(auxbasis=auxbasis)
-
     if with_gpu:
         mf = mf.to_gpu()
 
@@ -130,7 +138,7 @@ def run_dft(mol_name, config):
         mf.with_solvent.method = config['solvent']['method'].replace('PCM','-PCM')
         mf.with_solvent.eps = config['solvent']['eps']
 
-    mf.direct_scf_tol = 1e-14
+    mf.direct_scf_tol = direct_scf_tol
     mf.chkfile = None
     mf.conv_tol = scf_conv_tol
     e_tot = mf.kernel()
@@ -141,12 +149,44 @@ def run_dft(mol_name, config):
     scf_time = time.time() - start_time
     print(f'compute time for energy: {scf_time:.3f} s')
 
+    e1     = mf.scf_summary.get('e1',         0.0)
+    e_coul = mf.scf_summary.get('coul',       0.0)
+    e_xc   = mf.scf_summary.get('exc',        0.0)
+    e_disp = mf.scf_summary.get('dispersion', 0.0)
+
     data_file = mol_name[:-4] + '_pyscf.h5'
     import h5py
     h5f = h5py.File(f'{local_dir}/{data_file}', 'w')
-    h5f.create_dataset('e_tot', data=e_tot)
+    h5f.create_dataset('e_tot',    data=e_tot)
+    h5f.create_dataset('e1',       data=e1)
+    h5f.create_dataset('e_coul',   data=e_coul)
+    h5f.create_dataset('e_xc',     data=e_xc)
+    h5f.create_dataset('e_disp',   data=e_disp)
     h5f.create_dataset('scf_time', data=scf_time)
-
+    
+    dm = mf.make_rdm1()
+    if isinstance(dm, cupy.ndarray): dm = dm.get()
+    h5f.create_dataset('dm',       data=dm)
+    
+    if dm.ndim == 3:
+        # open-shell case
+        mo_energy = mf.mo_energy
+        if isinstance(mo_energy, cupy.ndarray): mo_energy = mo_energy.get()
+        mo_energy[0].sort()
+        mo_energy[1].sort()
+        na, nb = mf.nelec
+        h5f.create_dataset('e_lomo_alpha',   data=mo_energy[0][na])
+        h5f.create_dataset('e_lomo_beta',    data=mo_energy[1][nb])
+        h5f.create_dataset('e_homo_alpha',   data=mo_energy[0][na-1])
+        h5f.create_dataset('e_homo_beta',    data=mo_energy[1][nb-1])
+    else:
+        # closed-shell case
+        mo_energy = mf.mo_energy
+        if isinstance(mo_energy, cupy.ndarray): mo_energy = mo_energy.get()
+        mo_energy.sort()
+        nocc = mf.mol.nelectron // 2
+        h5f.create_dataset('e_lomo',     data=mo_energy[nocc])
+        h5f.create_dataset('e_homo',     data=mo_energy[nocc-1])
     g = None
     if with_grad:
         try:
@@ -201,4 +241,14 @@ def run_dft(mol_name, config):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run DFT with GPU4PySCF for molecules')
-    run_dft()
+    parser.add_argument("--config", type=str, default='example.json')
+    parser.add_argument("--charge", type=int, default=None)
+    parser.add_argument("--spin",   type=int, default=0)
+    args = parser.parse_args()
+
+    with open(args.config) as f:
+        config = json.load(f)
+        if isinstance(config, list):
+            config = config[0]
+    for mol_name in config['molecules']:
+        run_dft(mol_name, config, charge=args.charge, spin=args.spin)
