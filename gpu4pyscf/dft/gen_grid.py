@@ -36,8 +36,9 @@ from pyscf import __config__
 from cupyx.scipy.spatial.distance import cdist
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import radi
-from gpu4pyscf.lib.cupy_helper import load_library, counting_argsort
+from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf import __config__ as __gpu4pyscf_config__
+
 libdft = lib.load_library('libdft')
 libgdft = load_library('libgdft')
 
