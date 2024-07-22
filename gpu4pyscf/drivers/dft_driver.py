@@ -88,6 +88,7 @@ def run_dft(mol_name, config, charge=None, spin=0):
     with_solvent   = config.get('with_solvent',   False)
     with_grad      = config.get('with_grad',      True)
     with_hess      = config.get('with_hess',      True)
+    save_density   = config.get('save_density',   False)
     input_dir      = config.get('input_dir',      './')
 
     # I/O
@@ -168,6 +169,19 @@ def run_dft(mol_name, config, charge=None, spin=0):
     if isinstance(dm, cupy.ndarray): dm = dm.get()
     h5f.create_dataset('dm',       data=dm)
     
+    if save_density and xc.lower() != 'hf':
+        weights = mf.grids.weights
+        coords = mf.grids.coords
+        rho = mf._numint.get_rho(mf.mol, dm, mf.grids)
+
+        if isinstance(weights, cupy.ndarray): weights = weights.get()
+        if isinstance(coords, cupy.ndarray):  coords  = coords.get()
+        if isinstance(rho, cupy.ndarray):     rho     = rho.get()
+
+        h5f.create_dataset('grids_weights',      data=weights)
+        h5f.create_dataset('grids_coords',       data=coords)
+        h5f.create_dataset('grids_rho',          data=rho)
+
     if dm.ndim == 3:
         # open-shell case
         mo_energy = mf.mo_energy
