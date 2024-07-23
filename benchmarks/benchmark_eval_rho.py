@@ -1,7 +1,7 @@
 import pyscf
 from gpu4pyscf.scf import hf
 
-mol = pyscf.M(atom = '/mlx_devbox/users/xiaojie.wu/playground/gpu4pyscf/benchmarks/molecules/water_clusters/008.xyz')
+mol = pyscf.M(atom = 'molecules/water_clusters/008.xyz')
 mol.basis = {
     'H': [[0, (1,  0.0070011547)]],
     'O': [[0, (1,  0.0070011547)]]}
