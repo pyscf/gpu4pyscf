@@ -158,6 +158,6 @@ if __name__ == '__main__':
     for i, mol_name in enumerate(config['molecules']):
         constraints = None
         if 'constraints' in config and config['constraints']:
-            assert len(config['constraints']) == len(config['molecule'])
+            assert len(config['constraints']) == len(config['molecules'])
             constraints = config['constraints'][i]
         opt_mol(mol_name, config, constraints, charge=args.charge, spin=args.spin)
