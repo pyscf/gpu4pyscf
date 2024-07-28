@@ -99,7 +99,6 @@ class XCfun:
     def __del__(self):
         if self.xc_func is None:
             return
-        # TODO: deallocate xc func
         _libxc.xc_func_end(self.xc_func)
         _libxc.xc_func_free(self.xc_func)
 
