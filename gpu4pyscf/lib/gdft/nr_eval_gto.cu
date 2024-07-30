@@ -1909,7 +1909,7 @@ int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
 }
 
 __host__
-int eval_rho(BasisProdCache *bpcache, double *grids, int ngrids,
+int eval_rho_fp64(BasisProdCache *bpcache, double *grids, int ngrids,
             double *rho, double *exp_sparse, double *coef_sparse, double *coord_pairs,
             int nao, double *dm_sparse)
 {
@@ -1928,7 +1928,32 @@ int eval_rho(BasisProdCache *bpcache, double *grids, int ngrids,
     dim3 threads(NG_PER_BLOCK);
     dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
 
-    _eval_rho<<<blocks, threads>>> (offsets, dm_sparse, npairs, exp_sparse, coef_sparse, coord_pairs);
+    _eval_rho<double, double><<<blocks, threads>>> (offsets, dm_sparse, npairs, exp_sparse, coef_sparse, coord_pairs);
+
+    return 1;
+}
+
+__host__
+int eval_rho_fp32(BasisProdCache *bpcache, double *grids, int ngrids,
+            double *rho, float *exp_sparse, float *coef_sparse, float *coord_pairs,
+            int nao, float *dm_sparse)
+{
+    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
+    int *bas_pairs_locs = bpcache->bas_pairs_locs;
+    int npairs = bas_pairs_locs[1];
+    //printf("%d \n", npairs);
+
+    BasOffsets offsets;
+    offsets.gridx = grids;//d_grids;
+    offsets.ngrids = ngrids;
+    offsets.data = rho;
+    offsets.nao = nao;
+    offsets.nprim = 1;
+    offsets.fac = CINTcommon_fac_sp(0);
+    dim3 threads(NG_PER_BLOCK);
+    dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
+
+    _eval_rho<double, float><<<blocks, threads>>> (offsets, dm_sparse, npairs, exp_sparse, coef_sparse, coord_pairs);
 
     return 1;
 }

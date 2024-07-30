@@ -3,8 +3,8 @@ from gpu4pyscf.scf import hf
 
 mol = pyscf.M(atom = 'molecules/water_clusters/008.xyz')
 mol.basis = {
-    'H': [[0, (1,  0.0070011547)]],
-    'O': [[0, (1,  0.0070011547)]]}
+    'H': [[0, (0.01,  0.0070011547)]],
+    'O': [[0, (0.01,  0.0070011547)]]}
 mol.build()
 
 vhfopt = hf._VHFOpt(mol, 'int2e').build()
@@ -58,10 +58,32 @@ coord_pairs[:,3:] = atm_coords[jsh,:]
 dm_sparse = dm[ish, jsh] * coef_sparse[:,0] * coef_sparse[:,1]
 dm_sparse[diag_idx] *= 0.5
 
+coords_fp32 = coords.astype(np.float32)
+exp_sparse_fp32 = exp_sparse.astype(np.float32)
+coef_sparse_fp32 = coef_sparse.astype(np.float32)
+coord_pairs_fp32 = coord_pairs.astype(np.float32)
+dm_sparse_fp32 = dm_sparse.astype(np.float32)
+
 def eval_rho0(dm):
+    with ni.gdftopt.gdft_envs_cache():
+        rho = cupy.empty([4,ngrids])
+        libgdft.eval_rho_fp32(
+            vhfopt.bpcache,
+            ctypes.cast(coords.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ngrids),
+            ctypes.cast(rho.data.ptr, ctypes.c_void_p),
+            ctypes.cast(exp_sparse_fp32.data.ptr, ctypes.c_void_p),
+            ctypes.cast(coef_sparse_fp32.data.ptr, ctypes.c_void_p),
+            ctypes.cast(coord_pairs_fp32.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nao),
+            ctypes.cast(dm_sparse_fp32.data.ptr, ctypes.c_void_p))
+        return rho
+    return eval_rho0
+
+def eval_rho1(dm):
     rho = cupy.empty([4,ngrids])
     with ni.gdftopt.gdft_envs_cache():
-        libgdft.eval_rho(
+        libgdft.eval_rho_fp64(
             vhfopt.bpcache,
             ctypes.cast(coords.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
@@ -73,7 +95,7 @@ def eval_rho0(dm):
             ctypes.cast(dm_sparse.data.ptr, ctypes.c_void_p))
     return rho
 
-def eval_rho1(dm):
+def eval_rho2(dm):
     ao = numint.eval_ao(ni, ni.gdftopt._sorted_mol, coords, deriv=1)
     rho0 = numint.eval_rho(ni.gdftopt._sorted_mol, ao, dm, xctype='GGA')
     return rho0
@@ -81,13 +103,22 @@ def eval_rho1(dm):
 from cupyx import profiler
 perf = profiler.benchmark(eval_rho0, (dm_sparse,), n_repeat=20, n_warmup=3)
 print('with eval_rho0', perf.gpu_times.mean())
+# 0.130s on V100
+# 0.115s on A10
 
-perf = profiler.benchmark(eval_rho1, (dm,), n_repeat=20, n_warmup=3)
+perf = profiler.benchmark(eval_rho1, (dm_sparse,), n_repeat=20, n_warmup=3)
 print('with eval_rho1', perf.gpu_times.mean())
+# 0.324s on V100
+# 5.401s on A10
+
+perf = profiler.benchmark(eval_rho2, (dm,), n_repeat=20, n_warmup=3)
+print('with eval_rho2', perf.gpu_times.mean())
+# 0.0858s on v100
+# 0.723s on A10
 
 rho0 = eval_rho0(dm)
 rho1 = eval_rho1(dm)
 print(rho0[:4,:3])
 print(rho1[:4,:3])
 
-print(cupy.linalg.norm(rho0 - rho1))
+print(cupy.max(rho0 - rho1), cupy.max(rho0))
