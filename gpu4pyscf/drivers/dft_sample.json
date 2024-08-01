@@ -12,6 +12,7 @@
     "xc": "b3lyp",
     "verbose": 4,
     "with_solvent": false,
+    "with_thermo": false,
     "solvent": {
         "eps": 78.3553,
         "method": "CPCM"
