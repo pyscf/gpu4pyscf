@@ -99,8 +99,9 @@ class XCfun:
     def __del__(self):
         if self.xc_func is None:
             return
-        _libxc.xc_func_end(self.xc_func)
-        _libxc.xc_func_free(self.xc_func)
+        if _libxc is not None:
+            _libxc.xc_func_end(self.xc_func)
+            _libxc.xc_func_free(self.xc_func)
 
     def needs_laplacian(self):
         return dft.libxc.needs_laplacian(self.func_id)
