@@ -231,18 +231,14 @@ def run_dft(mol_name, config, charge=None, spin=0):
             start_time = time.time()
             h = mf.Hessian()
             h.auxbasis_response = 2
-            _h_dft = h.kernel()
-            h_dft = _h_dft.transpose([0,2,1,3]).reshape([3*natm, 3*natm])
-            h_diag = h_dft.sum(axis=0)
-            h_dft -= np.diag(h_diag)
-            _h_dft = h_dft.reshape([natm, 3, natm, 3]).transpose([0, 2, 1, 3])
+            h_dft = h.kernel().transpose([0,2,1,3]).reshape([3*natm, 3*natm])
             hess_time = time.time() - start_time
             print(f'compute time for hessian: {hess_time:.3f} s')
 
             if with_thermo:
                 # harmonic analysis
                 start_time = time.time()
-                normal_mode = thermo.harmonic_analysis(mol, _h_dft)
+                normal_mode = thermo.harmonic_analysis(mol, h_dft)
 
                 thermo_dat = thermo.thermo(
                     mf,                            # GPU4PySCF object
@@ -262,24 +258,24 @@ def run_dft(mol_name, config, charge=None, spin=0):
         h5f.create_dataset('hess_time', data=hess_time)
 
         if with_thermo: 
-            h5f.create_dataset('freq_au',     data=normal_mode['freq_au'])
-            h5f.create_dataset('freq_wavenumber',     data=normal_mode['freq_wavenumber'])
-            h5f.create_dataset('E_tot',     data=thermo_dat['E_tot'][0])
-            h5f.create_dataset('H_tot',     data=thermo_dat['H_tot'][0])
-            h5f.create_dataset('G_tot',     data=thermo_dat['G_tot'][0])
-            h5f.create_dataset('E_elec',     data=thermo_dat['E_elec'][0])
-            h5f.create_dataset('E_trans',     data=thermo_dat['E_trans'][0])
-            h5f.create_dataset('E_rot',     data=thermo_dat['E_rot'][0])
-            h5f.create_dataset('E_vib',     data=thermo_dat['E_vib'][0])
-            h5f.create_dataset('E_0K',     data=thermo_dat['E_0K'][0])
-            h5f.create_dataset('H_elec',     data=thermo_dat['H_elec'][0])
-            h5f.create_dataset('H_trans',     data=thermo_dat['H_trans'][0])
-            h5f.create_dataset('H_rot',     data=thermo_dat['H_rot'][0])
-            h5f.create_dataset('H_vib',     data=thermo_dat['H_vib'][0])
-            h5f.create_dataset('G_elec',     data=thermo_dat['G_elec'][0])
-            h5f.create_dataset('G_trans',     data=thermo_dat['G_trans'][0])
-            h5f.create_dataset('G_rot',     data=thermo_dat['G_rot'][0])
-            h5f.create_dataset('G_vib',     data=thermo_dat['G_vib'][0])
+            h5f.create_dataset('freq_au',         data=normal_mode['freq_au'])
+            h5f.create_dataset('freq_wavenumber', data=normal_mode['freq_wavenumber'])
+            h5f.create_dataset('E_tot',           data=thermo_dat['E_tot'][0])
+            h5f.create_dataset('H_tot',           data=thermo_dat['H_tot'][0])
+            h5f.create_dataset('G_tot',           data=thermo_dat['G_tot'][0])
+            h5f.create_dataset('E_elec',          data=thermo_dat['E_elec'][0])
+            h5f.create_dataset('E_trans',         data=thermo_dat['E_trans'][0])
+            h5f.create_dataset('E_rot',           data=thermo_dat['E_rot'][0])
+            h5f.create_dataset('E_vib',           data=thermo_dat['E_vib'][0])
+            h5f.create_dataset('E_0K',            data=thermo_dat['E_0K'][0])
+            h5f.create_dataset('H_elec',          data=thermo_dat['H_elec'][0])
+            h5f.create_dataset('H_trans',         data=thermo_dat['H_trans'][0])
+            h5f.create_dataset('H_rot',           data=thermo_dat['H_rot'][0])
+            h5f.create_dataset('H_vib',           data=thermo_dat['H_vib'][0])
+            h5f.create_dataset('G_elec',          data=thermo_dat['G_elec'][0])
+            h5f.create_dataset('G_trans',         data=thermo_dat['G_trans'][0])
+            h5f.create_dataset('G_rot',           data=thermo_dat['G_rot'][0])
+            h5f.create_dataset('G_vib',           data=thermo_dat['G_vib'][0])
 
     h5f.close()
 
