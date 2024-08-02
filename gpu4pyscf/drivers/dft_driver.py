@@ -238,7 +238,7 @@ def run_dft(mol_name, config, charge=None, spin=0):
             if with_thermo:
                 # harmonic analysis
                 start_time = time.time()
-                normal_mode = thermo.harmonic_analysis(mol, h_dft)
+                normal_mode = thermo.harmonic_analysis(mol, h.kernel())
 
                 thermo_dat = thermo.thermo(
                     mf,                            # GPU4PySCF object
