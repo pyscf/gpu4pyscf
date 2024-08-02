@@ -22,7 +22,6 @@ import tempfile
 import shutil
 import cupy
 import traceback
-import numpy as np
 
 from pyscf import lib, gto
 from pyscf import dft, scf
