@@ -231,4 +231,3 @@ class XCfun:
 
         return {k: v for k, v in zip(output_labels, args[2+input_num_args:]) if v is not None}
 
-
