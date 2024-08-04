@@ -175,5 +175,9 @@ class xc_func_type(ctypes.Structure):
 
         # parameters
         ("params", ctypes.c_void_p),  # void *params;
+        
         ("dens_threshold", ctypes.c_double),
+        ("zeta_threshold", ctypes.c_double),
+        ("sigma_threshold", ctypes.c_double),
+        ("tau_threshood", ctypes.c_double),
     ]

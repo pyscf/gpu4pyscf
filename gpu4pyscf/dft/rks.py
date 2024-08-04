@@ -282,7 +282,7 @@ class RKS(KohnShamDFT, hf.RHF):
         return KohnShamDFT.dump_flags(self, verbose)
 
     def reset(self, mol=None):
-        super().reset(mol)
+        hf.SCF.reset(self, mol)
         self.grids.reset(mol)
         self.nlcgrids.reset(mol)
         self._numint.gdftopt = None
