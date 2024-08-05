@@ -230,14 +230,15 @@ def run_dft(mol_name, config, charge=None, spin=0):
             start_time = time.time()
             h = mf.Hessian()
             h.auxbasis_response = 2
-            h_dft = h.kernel().transpose([0,2,1,3]).reshape([3*natm, 3*natm])
+            _h_dft = h.kernel()
+            h_dft = _h_dft.transpose([0,2,1,3]).reshape([3*natm, 3*natm])
             hess_time = time.time() - start_time
             print(f'compute time for hessian: {hess_time:.3f} s')
 
             if with_thermo:
                 # harmonic analysis
                 start_time = time.time()
-                normal_mode = thermo.harmonic_analysis(mol, h.kernel())
+                normal_mode = thermo.harmonic_analysis(mol, _h_dft)
 
                 thermo_dat = thermo.thermo(
                     mf,                            # GPU4PySCF object
