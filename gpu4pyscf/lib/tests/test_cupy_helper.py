@@ -72,9 +72,9 @@ class KnownValues(unittest.TestCase):
     def test_sparse(self):
         a = cupy.random.rand(20, 20)
         b = cupy.random.rand(5,5)
-        indices = cupy.array([3,4,8,10,12]).astype(numpy.int32)
+        indices = cupy.array([3,4,8,10]).astype(numpy.int32)
         a0 = a.copy()
-        a0[cupy.ix_(indices, indices)] += b
+        a0[cupy.ix_(indices, indices)] += b[:4,:4]
         add_sparse(a, b, indices)
         assert cupy.linalg.norm(a - a0) < 1e-10
 

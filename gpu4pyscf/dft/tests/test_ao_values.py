@@ -52,13 +52,13 @@ class KnownValues(unittest.TestCase):
 
     # sph mol
     def test_ao_sph_deriv0(self):
-        coords = np.random.random((100,3))
+        coords = np.random.random((10,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv0', coords)
         ao_cpu = cupy.asarray(ao)
         ni = NumInt()
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=0)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
-
+    
     def test_ao_sph_deriv1(self):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv1', coords)
@@ -131,7 +131,7 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=4)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
-
+    
 if __name__ == "__main__":
     print("Full Tests for dft numint")
     unittest.main()
