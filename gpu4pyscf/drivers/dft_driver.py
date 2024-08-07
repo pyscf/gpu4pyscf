@@ -135,11 +135,17 @@ def run_dft(mol_name, config, charge=None, spin=0):
         mf = mf.to_gpu()
 
     mf.chkfile = None
-    if with_solvent:
+    if with_solvent and config['solvent']['method'].endswith(('PCM', 'pcm')):
         mf = mf.PCM()
         mf.with_solvent.lebedev_order = 29
         mf.with_solvent.method = config['solvent']['method'].replace('PCM','-PCM')
         mf.with_solvent.eps = config['solvent']['eps']
+    
+    if with_solvent and config['solvent']['method'].endswith(('smd', 'SMD')):
+        mf = mf.SMD()
+        mf.with_solvent.lebedev_order = 29
+        mf.with_solvent.method = 'SMD'
+        mf.with_solvent.solvent = config['solvent']['solvent']
 
     mf.direct_scf_tol = direct_scf_tol
     mf.chkfile = None
@@ -152,25 +158,27 @@ def run_dft(mol_name, config, charge=None, spin=0):
     scf_time = time.time() - start_time
     print(f'compute time for energy: {scf_time:.3f} s')
 
-    e1     = mf.scf_summary.get('e1',         0.0)
-    e_coul = mf.scf_summary.get('coul',       0.0)
-    e_xc   = mf.scf_summary.get('exc',        0.0)
-    e_disp = mf.scf_summary.get('dispersion', 0.0)
+    e1        = mf.scf_summary.get('e1',         0.0)
+    e_coul    = mf.scf_summary.get('coul',       0.0)
+    e_xc      = mf.scf_summary.get('exc',        0.0)
+    e_disp    = mf.scf_summary.get('dispersion', 0.0)
+    e_solvent = mf.scf_summary.get('e_solvent',  0.0)
 
     data_file = mol_name[:-4] + '_pyscf.h5'
     import h5py
     h5f = h5py.File(f'{local_dir}/{data_file}', 'w')
-    h5f.create_dataset('e_tot',    data=e_tot)
-    h5f.create_dataset('e1',       data=e1)
-    h5f.create_dataset('e_coul',   data=e_coul)
-    h5f.create_dataset('e_xc',     data=e_xc)
-    h5f.create_dataset('e_disp',   data=e_disp)
-    h5f.create_dataset('scf_time', data=scf_time)
+    h5f.create_dataset('e_tot',     data=e_tot)
+    h5f.create_dataset('e1',        data=e1)
+    h5f.create_dataset('e_coul',    data=e_coul)
+    h5f.create_dataset('e_xc',      data=e_xc)
+    h5f.create_dataset('e_disp',    data=e_disp)
+    h5f.create_dataset('e_solvent', data=e_solvent)
+    h5f.create_dataset('scf_time',  data=scf_time)
     
     dm = mf.make_rdm1()
     if isinstance(dm, cupy.ndarray): dm = dm.get()
     h5f.create_dataset('dm',       data=dm)
-    
+
     if save_density and xc.lower() != 'hf':
         weights = mf.grids.weights
         coords = mf.grids.coords
