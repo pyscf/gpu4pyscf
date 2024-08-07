@@ -182,6 +182,8 @@ def add_sparse(a, b, indices):
     if len(indices) == 0: return a
     n = a.shape[-1]
     m = b.shape[-1]
+    k = len(indices)
+    
     if a.ndim > 2:
         count = np.prod(a.shape[:-2])
     elif a.ndim == 2:
@@ -196,6 +198,7 @@ def add_sparse(a, b, indices):
         ctypes.cast(indices.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n),
         ctypes.c_int(m),
+        ctypes.c_int(k),
         ctypes.c_int(count)
     )
     if err != 0:
