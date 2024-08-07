@@ -826,7 +826,7 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         ao_deriv = 1
     with_lapl = MGGA_DENSITY_LAPL
 
-    for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+    for ao_mask, idx, weight, nao_non0 in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
         for i in range(nset):
             t0 = log.init_timer()
             if mo_coeff is None:
@@ -846,8 +846,8 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 wv = vxc[:,0] * weight
                 va = ao_mask.dot(_scale_ao(ao_mask, wv[0]).T)
                 vb = ao_mask.dot(_scale_ao(ao_mask, wv[1]).T)
-                add_sparse(vmata[i], va, idx)
-                add_sparse(vmatb[i], vb, idx)
+                add_sparse(vmata[i], va, idx[:nao_non0])
+                add_sparse(vmatb[i], vb, idx[:nao_non0])
 
             elif xctype == 'GGA':
                 den_a = rho_a[0] * weight
@@ -856,8 +856,8 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 wv[:,0] *= .5
                 va = ao_mask[0].dot(_scale_ao(ao_mask, wv[0]).T)
                 vb = ao_mask[0].dot(_scale_ao(ao_mask, wv[1]).T)
-                add_sparse(vmata[i], va, idx)
-                add_sparse(vmatb[i], vb, idx)
+                add_sparse(vmata[i], va, idx[:nao_non0])
+                add_sparse(vmatb[i], vb, idx[:nao_non0])
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             elif xctype == 'MGGA':
@@ -869,8 +869,8 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 vb = ao_mask[0].dot(_scale_ao(ao_mask[:4], wv[1,:4]).T)
                 va += _tau_dot(ao_mask, ao_mask, wv[0,4])
                 vb += _tau_dot(ao_mask, ao_mask, wv[1,4])
-                add_sparse(vmata[i], va, idx)
-                add_sparse(vmatb[i], vb, idx)
+                add_sparse(vmata[i], va, idx[:nao_non0])
+                add_sparse(vmatb[i], vb, idx[:nao_non0])
             elif xctype == 'HF':
                 pass
             else:
@@ -977,7 +977,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     p0 = 0
     p1 = 0
     t1 = t0 = log.init_timer()
-    for ao, mask, weights, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+    for ao, mask, weights, nao_non0 in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
         p0, p1 = p1, p1+len(weights)
         # precompute molecular orbitals
         if with_mocc:
@@ -1011,12 +1011,12 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         for i in range(nset):
             if xctype == 'LDA':
                 vmat_tmp = ao.dot(_scale_ao(ao, wv[i]).T)
-                add_sparse(vmat[i], vmat_tmp, mask)
+                add_sparse(vmat[i], vmat_tmp, mask[:nao_non0])
             elif xctype == 'GGA':
                 wv[i,0] *= .5
                 aow = _scale_ao(ao, wv[i])
                 vmat_tmp = aow.dot(ao[0].T)
-                add_sparse(vmat[i], vmat_tmp, mask)
+                add_sparse(vmat[i], vmat_tmp, mask[:nao_non0])
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             else:
@@ -1024,7 +1024,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 wv[i,4] *= .5
                 vmat_tmp = ao[0].dot(_scale_ao(ao[:4], wv[i,:4]).T)
                 vmat_tmp+= _tau_dot(ao, ao, wv[i,4])
-                add_sparse(vmat[i], vmat_tmp, mask)
+                add_sparse(vmat[i], vmat_tmp, mask[:nao_non0])
 
         t1 = log.timer_debug2('integration', *t1)
         ao = c0 = rho1 = None
@@ -1100,7 +1100,7 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     with_lapl = MGGA_DENSITY_LAPL
     p0 = 0
     p1 = 0
-    for ao, mask, weights, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+    for ao, mask, weights, nao_non0 in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
         t0 = log.init_timer()
         p0, p1 = p1, p1+len(weights)
         # precompute molecular orbitals
@@ -1145,15 +1145,15 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 wv = contract('ag,abg->bg', rho1[:,i], fxc_w)
                 va = ao.dot(_scale_ao(ao, wv[0]).T)
                 vb = ao.dot(_scale_ao(ao, wv[1]).T)
-                add_sparse(vmata[i], va, mask)
-                add_sparse(vmatb[i], vb, mask)
+                add_sparse(vmata[i], va, mask[:nao_non0])
+                add_sparse(vmatb[i], vb, mask[:nao_non0])
             elif xctype == 'GGA':
                 wv = contract('axg,axbyg->byg', rho1[:,i], fxc_w)
                 wv[:,0] *= .5
                 va = ao[0].dot(_scale_ao(ao, wv[0]).T)
                 vb = ao[0].dot(_scale_ao(ao, wv[1]).T)
-                add_sparse(vmata[i], va, mask)
-                add_sparse(vmatb[i], vb, mask)
+                add_sparse(vmata[i], va, mask[:nao_non0])
+                add_sparse(vmatb[i], vb, mask[:nao_non0])
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             else:
@@ -1163,8 +1163,8 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 vb = ao[0].dot(_scale_ao(ao[:4], wv[1,:4]).T)
                 va += _tau_dot(ao, ao, wv[0,4])
                 vb += _tau_dot(ao, ao, wv[1,4])
-                add_sparse(vmata[i], va, mask)
-                add_sparse(vmatb[i], vb, mask)
+                add_sparse(vmata[i], va, mask[:nao_non0])
+                add_sparse(vmatb[i], vb, mask[:nao_non0])
     vmata = [coeff.T @ v @ coeff for v in vmata]
     vmatb = [coeff.T @ v @ coeff for v in vmatb]
     if xctype != 'LDA':
@@ -1266,13 +1266,13 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     vmat = cupy.zeros((nao,nao))
     p1 = 0
-    for ao, mask, weight, coords \
+    for ao, mask, weight, nao_non0 \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         p0, p1 = p1, p1 + weight.size
         wv = vv_vxc[:,p0:p1] * weight
         wv[0] *= .5
         aow = _scale_ao(ao, wv)
-        add_sparse(vmat, ao[0].dot(aow.T), mask)
+        add_sparse(vmat, ao[0].dot(aow.T), mask[:nao_non0])
     t1 = log.timer_debug1('integration', *t1)
 
     transpose_sum(vmat)

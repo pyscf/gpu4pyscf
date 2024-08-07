@@ -86,9 +86,11 @@ def nr_rks(ni, mol, grids, xc_code, dms):
         ao_deriv = 0
     else:
         ao_deriv = 1
-
-    for ao, index, weight, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+    p0 = p1 = 0
+    for ao, index, weight, nao_non0 in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
         mo_coeff_mask = mo_coeff[index,:]
+        p0, p1 = p1, p1+weight.size
+        coords = grids.coords[p0:p1]
         rho = numint.eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, xctype)
         vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
         if xctype == 'LDA':
@@ -97,9 +99,9 @@ def nr_rks(ni, mol, grids, xc_code, dms):
             giao = cupy.array(giao)
             giao_aux = giao[:,:,index]
             for idirect in range(3):
-                vtmp = contract('pu,p,vp->uv', giao_aux[idirect], wv, ao)
+                vtmp = contract('pu,vp->uv', giao_aux[idirect], wv*ao)
                 vtmp = cupy.ascontiguousarray(vtmp)
-                add_sparse(vmat[idirect], vtmp, index)
+                add_sparse(vmat[idirect], vtmp, index[:nao_non0])
             
         elif xctype == 'GGA':
             wv = vxc * weight
@@ -115,11 +117,11 @@ def nr_rks(ni, mol, grids, xc_code, dms):
                 aow += contract('xpn,xp->pn', giao_nabla_aux[:, idirect, :, :], wv[1:4])
                 vtmp = contract('pn,mp->nm', aow, ao[0])
                 vtmp = cupy.ascontiguousarray(vtmp)
-                add_sparse(vmat[idirect], vtmp, index)
+                add_sparse(vmat[idirect], vtmp, index[:nao_non0])
                 aow = contract('pn,xp->xpn', giao_aux[idirect], wv[1:4])
                 vtmp = contract('xpn,xmp->nm', aow, ao[1:4])
                 vtmp = cupy.ascontiguousarray(vtmp)
-                add_sparse(vmat[idirect], vtmp, index)
+                add_sparse(vmat[idirect], vtmp, index[:nao_non0])
 
         elif xctype == 'NLC':
             raise NotImplementedError('NLC')

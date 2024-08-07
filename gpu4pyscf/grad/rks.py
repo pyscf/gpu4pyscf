@@ -133,7 +133,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     vmat = cupy.zeros((nset,3,nao,nao))
     if xctype == 'LDA':
         ao_deriv = 1
-        for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
+        for ao_mask, idx, weight, nao_non0 in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
             for idm in range(nset):
                 mo_coeff_mask = mo_coeff[idx,:]
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype)
@@ -141,10 +141,10 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 wv = weight * vxc[0]
                 aow = numint._scale_ao(ao_mask[0], wv)
                 vtmp = _d1_dot_(ao_mask[1:4], aow.T)
-                add_sparse(vmat[idm], vtmp, idx)
+                add_sparse(vmat[idm], vtmp, idx[:nao_non0])
     elif xctype == 'GGA':
         ao_deriv = 2
-        for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
+        for ao_mask, idx, weight, nao_non0 in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
             for idm in range(nset):
                 mo_coeff_mask = mo_coeff[idx,:]
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype)
@@ -152,13 +152,13 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 wv = weight * vxc
                 wv[0] *= .5
                 vtmp = _gga_grad_sum_(ao_mask, wv)
-                add_sparse(vmat[idm], vtmp, idx)
+                add_sparse(vmat[idm], vtmp, idx[:nao_non0])
     elif xctype == 'NLC':
         raise NotImplementedError('NLC')
 
     elif xctype == 'MGGA':
         ao_deriv = 2
-        for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
+        for ao_mask, idx, weight, nao_non0 in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
             for idm in range(nset):
                 mo_coeff_mask = mo_coeff[idx,:]
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
@@ -168,7 +168,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 wv[4] *= .5  # for the factor 1/2 in tau
                 vtmp = _gga_grad_sum_(ao_mask, wv)
                 vtmp += _tau_grad_dot_(ao_mask, wv[4])
-                add_sparse(vmat[idm], vtmp, idx)
+                add_sparse(vmat[idm], vtmp, idx[:nao_non0])
     #vmat = [cupy.einsum('pi,npq,qj->nij', coeff, v, coeff) for v in vmat]
     vmat = take_last2d(vmat, opt.rev_ao_idx)
     exc = None
@@ -207,7 +207,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     ao_deriv = 2
     vvrho = []
-    for ao_mask, mask, weight, coords \
+    for ao_mask, mask, weight, nao_non0 \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         mo_coeff_mask = mo_coeff[mask]
         rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
@@ -220,13 +220,13 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     vmat = cupy.zeros((3,nao,nao))
     p1 = 0
-    for ao_mask, mask, weight, coords \
+    for ao_mask, idx, weight, nao_non0 \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
         p0, p1 = p1, p1 + weight.size
         wv = vv_vxc[:,p0:p1] * weight
         wv[0] *= .5  # *.5 because vmat + vmat.T at the end
         vmat_tmp = _gga_grad_sum_(ao_mask, wv)
-        add_sparse(vmat, vmat_tmp, mask)
+        add_sparse(vmat, vmat_tmp, idx[:nao_non0])
 
     #vmat = contract('npq,qj->npj', vmat, coeff)
     #vmat = contract('pi,npj->nij', coeff, vmat)
