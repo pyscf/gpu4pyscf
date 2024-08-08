@@ -89,7 +89,7 @@ def run_dft(mol_name, config, charge=None, spin=0):
     with_solvent   = config.get('with_solvent',   False)
     with_grad      = config.get('with_grad',      True)
     with_hess      = config.get('with_hess',      True)
-    with_thermo    = config.get('with_thermo',    True) 
+    with_thermo    = config.get('with_thermo',    False) 
     save_density   = config.get('save_density',   False)
     input_dir      = config.get('input_dir',      './')
 
