@@ -207,6 +207,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     ao_deriv = 2
     vvrho = []
+    # TODO: use sparsity?
     for ao_mask, mask, weight, nao_non0 \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         mo_coeff_mask = mo_coeff[mask]

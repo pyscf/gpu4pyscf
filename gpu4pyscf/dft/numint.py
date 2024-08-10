@@ -22,7 +22,8 @@ import cupy
 
 from pyscf import gto, lib, dft
 from pyscf.dft import numint
-from pyscf.gto.eval_gto import NBINS, CUTOFF, make_screen_index
+from pyscf.gto.eval_gto import NBINS, CUTOFF
+from gpu4pyscf.gto.eval_gto import make_screen_index
 from gpu4pyscf.gto.mole import basis_seg_contraction
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, take_last2d, transpose_sum,
@@ -125,7 +126,7 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_non0=None, ao_loc_non
             _sorted_mol._bas.ctypes.data_as(ctypes.c_void_p))
     if err != 0:
         raise RuntimeError('CUDA Error in evaluating AO')
-
+    
     if deriv == 0:
         out = out[0]
     
@@ -925,18 +926,37 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
     GB = 1024*1024*1024
     log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
 
+    t1 = t0 = log.init_timer()
+    _sorted_mol = opt._sorted_mol
+    if not hasattr(grids, 'sparse_cache') or len(grids.sparse_cache) == 0:
+        grids.build_sparsity(_sorted_mol)
+        t0 = log.timer_debug1('generate sparsity', *t0)
+
     ngrids = grids.weights.size
     rho = cupy.empty(ngrids)
     with opt.gdft_envs_cache():
+        block_id = 0
         t1 = t0 = log.init_timer()
         for p0, p1 in lib.prange(0,ngrids,blksize):
             coords = grids.coords[p0:p1]
-            ao = eval_ao(ni, _sorted_mol, coords, 0)
+            pad, idx, non0tab, ao_loc_non0 = grids.sparse_cache[block_id, blksize, ngrids]
+            ao_mask = eval_ao(
+                ni, _sorted_mol, coords, 0,
+                nao_non0=len(idx),
+                ao_loc_non0=ao_loc_non0,
+                non0tab=non0tab)
+            if pad > 0: 
+                ao_mask[-pad:,:] = 0.0
+
             if mo_coeff is None:
-                rho[p0:p1] = eval_rho(_sorted_mol, ao, dm, xctype='LDA', hermi=1, with_lapl=with_lapl)
+                rho[p0:p1] = eval_rho(_sorted_mol, ao_mask, dm[np.ix_(idx,idx)], 
+                                      xctype='LDA', hermi=1, with_lapl=with_lapl)
             else:
-                rho[p0:p1] = eval_rho2(_sorted_mol, ao, mo_coeff, mo_occ, None, 'LDA', with_lapl)
+                mo_coeff_mask = mo_coeff[idx,:]
+                rho[p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, 
+                                       mo_occ, None, 'LDA', with_lapl)
             t1 = log.timer_debug2('eval rho slice', *t1)
+            block_id += 1
     t0 = log.timer_debug1('eval rho', *t0)
 
     if FREE_CUPY_CACHE:
@@ -1442,46 +1462,6 @@ def _init_xcfuns(xc_code, spin):
             raise NotImplementedError()
     return xcfuns
 
-def _sparse_index(mol, coords, l_ctr_offsets):
-    '''
-    determine sparse AO indices
-    '''
-    log = logger.new_logger(mol, mol.verbose)
-    t1 = log.init_timer()
-    stream = cupy.cuda.get_current_stream()
-    cutoff = AO_THRESHOLD
-    ng = coords.shape[0]
-    ao_loc = mol.ao_loc_nr()
-    nbas = mol.nbas
-    non0tab = cupy.zeros(len(ao_loc)-1, dtype=np.int32)
-    libgdft.GDFTscreen_index(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(non0tab.data.ptr, ctypes.c_void_p),
-        ctypes.c_double(cutoff),
-        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ng),
-        ao_loc.ctypes.data_as(ctypes.c_void_p),
-        ctypes.c_int(nbas),
-        mol._bas.ctypes.data_as(ctypes.c_void_p))
-    non0shl_idx = non0tab.get()
-
-    non0shl_idx = non0shl_idx == 1
-    ao_loc_non0 = [0]
-    non0ao_idx = []
-    for sh_idx in range(len(ao_loc)-1):
-        p0, p1 = ao_loc[sh_idx], ao_loc[sh_idx+1]
-        if non0shl_idx[sh_idx]:
-            ao_loc_non0.append(p1-p0+ao_loc_non0[-1])
-            non0ao_idx += range(p0,p1)
-        else:
-            ao_loc_non0.append(ao_loc_non0[-1])
-    ao_loc_non0 = cupy.asarray(ao_loc_non0, dtype=np.int32)
-    nzz = len(non0ao_idx)
-    pad = (nzz + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT - nzz
-    idx = np.asarray(non0ao_idx + [0]*pad, dtype=np.int32)
-    t1 = log.timer_debug2('init ao sparsity', *t1)
-    return pad, cupy.asarray(idx), non0tab, ao_loc_non0
-
 def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 non0tab=None, blksize=None, buf=None, extra=0):
     '''
@@ -1510,9 +1490,12 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     if opt is None or mol not in [opt.mol, opt._sorted_mol]:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
-
+    
     mol = None
     _sorted_mol = opt._sorted_mol
+    if not hasattr(grids, 'sparse_cache') or len(grids.sparse_cache) == 0:
+        grids.build_sparsity(_sorted_mol)
+
     with opt.gdft_envs_cache():
         block_id = 0
         t1 = log.init_timer()
@@ -1520,18 +1503,12 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             coords = grids.coords[ip0:ip1]
             weight = grids.weights[ip0:ip1]
             t1 = log.init_timer()
-            # cache ao indices
-            if (block_id, blksize, ngrids) not in ni.non0ao_idx:
-                ni.non0ao_idx[block_id, blksize, ngrids] = _sparse_index(_sorted_mol, coords, opt.l_ctr_offsets)
-
-            pad, idx, non0tab, ao_loc_non0 = ni.non0ao_idx[block_id, blksize, ngrids]
-            
+            pad, idx, non0tab, ao_loc_non0 = grids.sparse_cache[block_id, blksize, ngrids]
             ao_mask = eval_ao(
                 ni, _sorted_mol, coords, deriv,
                 nao_non0=len(idx),
                 ao_loc_non0=ao_loc_non0,
                 non0tab=non0tab)
-
             t1 = log.timer_debug2('evaluate ao slice', *t1)
             if pad > 0:
                 if deriv == 0:
@@ -1585,19 +1562,12 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         for ip0, ip1 in lib.prange(0, ngrids, blksize):
             coords = grids.coords[ip0:ip1]
             weight = grids.weights[ip0:ip1]
-            # cache ao indices
-            if (block_id, blksize, ngrids) not in ni.non0ao_idx:
-                ni.non0ao_idx[block_id, blksize, ngrids] = _sparse_index(_sorted_mol, coords, opt.l_ctr_offsets)
-
-            pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[block_id, blksize, ngrids]
-
+            pad, idx, non0tab, ao_loc_non0 = grids.sparse_cache[block_id, blksize, ngrids]
             ao_mask = eval_ao(
                 ni, _sorted_mol, coords, deriv,
-                nao_slice=len(idx),
-                shls_slice=non0shl_idx,
-                ao_loc_slice=ao_loc_slice,
-                ctr_offsets_slice=ctr_offsets_slice)
-
+                nao_non0=len(idx),
+                ao_loc_non0=ao_loc_non0,
+                non0tab=non0tab)
             if pad > 0:
                 if deriv == 0:
                     ao_mask[-pad:,:] = 0.0
@@ -1643,7 +1613,7 @@ class LibXCMixin:
     rsh_and_hybrid_coeff = numint.LibXCMixin.rsh_and_hybrid_coeff
 
 _NumIntMixin = LibXCMixin
-from gpu4pyscf.lib import utils
+
 class NumInt(lib.StreamObject, LibXCMixin):
     from gpu4pyscf.lib.utils import to_gpu, device
 
@@ -1652,7 +1622,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
     pair_mask    = None
     screen_index = None
     xcfuns       = None        # can be multiple xc functionals
-
+    
     def build(self, mol, coords):
         self.gdftopt = _GDFTOpt.from_mol(mol)
         if USE_SPARSITY == 1:
@@ -1673,6 +1643,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
             # nonzero ao index will be saved
             self.grid_blksize = None
             self.non0ao_idx = {}
+
         return self
 
     get_rho = get_rho
@@ -1978,6 +1949,7 @@ class _GDFTOpt:
         self.coeff = coeff[ao_idx]
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts)).astype(np.int32)
         self.l_bas_offsets = np.append(0, np.cumsum(l_counts)).astype(np.int32)
+        self._sorted_mol.l_ctr_offsets = self.l_ctr_offsets
         logger.debug2(mol, 'l_ctr_offsets = %s', self.l_ctr_offsets)
         logger.debug2(mol, 'l_bas_offsets = %s', self.l_bas_offsets)
         return self

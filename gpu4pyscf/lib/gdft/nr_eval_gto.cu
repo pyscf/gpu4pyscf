@@ -52,18 +52,19 @@ static void _nabla1(double *fx1, double *fy1, double *fz1,
 }
 
 __global__
-void _screen_index(int *non0shl_idx, double cutoff, int l, int ish, int nprim, double *coords, int ngrids){
+void _screen_index(int *non0shl_idx, double cutoff, int l, int bas_offset, int nprim, 
+                    double *coords, int ngrids, int grid_blksize, double *atm_coords){
     const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     const bool active = grid_id < ngrids;
-
-    const int natm = c_envs.natm;
-    const int atm_id = c_bas_atom[ish];
-    double* atm_coords = c_envs.atom_coordx;
+    const int ish = bas_offset + blockIdx.y;
+    int natm = c_envs.natm;
+    int nbas = c_envs.nbas;
+    int atm_id = c_bas_atom[ish];
     double gridx, gridy, gridz;
     if (active) {
         gridx = coords[3*grid_id + 0];
         gridy = coords[3*grid_id + 1];
-        gridz = coords[3*grid_id + 2];        
+        gridz = coords[3*grid_id + 2];   
     } else {
         gridx = 0.0;
         gridy = 0.0;
@@ -77,23 +78,14 @@ void _screen_index(int *non0shl_idx, double cutoff, int l, int ish, int nprim, d
 
     double *exps = c_envs.env + c_bas_exp[ish];
     double *coeffs = c_envs.env + c_bas_coeff[ish];
-    /*
-    double maxc = 0.0;
-    double min_exp = 1e9;
-    for (int ip = 0; ip < nprim; ++ip) {
-        min_exp = MIN(min_exp, exps[ip]);
-        maxc = MAX(maxc, fabs(coeffs[ip]));
-    }
-    double gto_sup = -min_exp * rr + .5 * log(rr) * l + log(maxc);
-    int is_large = gto_sup > log(cutoff);
-    */
+
     double gto_sup = 0.0;
     for (int ip = 0; ip < nprim; ++ip) {
         gto_sup += coeffs[ip] * exp(-exps[ip] * rr);
     }
     gto_sup *= pow(r,l);
     int is_large = fabs(gto_sup) > cutoff;
-    
+
     // Reduce and write to global memory
     unsigned int tid = threadIdx.x;
     __shared__ int sdata[NG_PER_BLOCK];
@@ -106,7 +98,8 @@ void _screen_index(int *non0shl_idx, double cutoff, int l, int ish, int nprim, d
         __syncthreads();
     }
     if (tid == 0 && active){
-        atomicOr(non0shl_idx + ish, sdata[0]);
+        int block_id = grid_id / grid_blksize;
+        atomicOr(non0shl_idx + block_id * nbas + ish, sdata[0]);
     }
 }
 
@@ -1924,15 +1917,40 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
 }
 
 int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
-                 double *grids, int ngrids, int *bas_loc, int nbas, int *bas)
+                    double *grids, int ngrids, int grid_blksize, int *bas, int nbas,  
+                    double *atm_coords, int natm, double *env,
+                    int *ctr_offsets, int nctr)
 {
     dim3 threads(NG_PER_BLOCK);
     dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
+    
+    GTOValEnvVars *envs = (GTOValEnvVars *)malloc(sizeof(GTOValEnvVars));
+    envs->natm = natm;
+    envs->nbas = nbas;
+    envs->env = env;
 
-    for (int shl_id = 0; shl_id < nbas; ++shl_id) {
-        int l = bas[ANG_OF+shl_id*BAS_SLOTS];
-        int nprim = bas[NPRIM_OF+shl_id*BAS_SLOTS];
-        _screen_index<<<blocks, threads, 0, stream>>>(non0shl_idx, cutoff, l, shl_id, nprim, grids, ngrids);
+    uint16_t bas_atom[NBAS_MAX];
+    uint16_t bas_exp[NBAS_MAX];
+    uint16_t bas_coeff[NBAS_MAX];
+    int ish;
+    for (ish = 0; ish < nbas; ++ish) {
+        bas_atom[ish] = bas[ATOM_OF + ish * BAS_SLOTS];
+        bas_exp[ish] = bas[PTR_EXP + ish * BAS_SLOTS];
+        bas_coeff[ish] = bas[PTR_COEFF + ish * BAS_SLOTS];
+    }
+    checkCudaErrors(cudaMemcpyToSymbol(c_envs, envs, sizeof(GTOValEnvVars)));
+    checkCudaErrors(cudaMemcpyToSymbol(c_bas_atom, bas_atom, sizeof(uint16_t)*NBAS_MAX));
+    checkCudaErrors(cudaMemcpyToSymbol(c_bas_exp, bas_exp, sizeof(uint16_t)*NBAS_MAX));
+    checkCudaErrors(cudaMemcpyToSymbol(c_bas_coeff, bas_coeff, sizeof(uint16_t)*NBAS_MAX));
+
+    for (int ictr = 0; ictr < nctr; ++ictr) {
+        int bas_offset = ctr_offsets[ictr];
+        int l = bas[ANG_OF+bas_offset*BAS_SLOTS];
+        int nprim = bas[NPRIM_OF+bas_offset*BAS_SLOTS];
+        blocks.y = ctr_offsets[ictr+1] - ctr_offsets[ictr];
+        _screen_index<<<blocks, threads, 0, stream>>>(
+            non0shl_idx, cutoff, l, bas_offset, nprim,
+            grids, ngrids, grid_blksize, atm_coords);
 
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {

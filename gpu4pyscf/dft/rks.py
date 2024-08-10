@@ -21,12 +21,13 @@ import cupy
 
 from pyscf import lib
 from pyscf.dft import rks
+from pyscf import __config__
 
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
 from gpu4pyscf.scf import hf
 from gpu4pyscf.lib.cupy_helper import load_library, tag_array
-from pyscf import __config__
+from gpu4pyscf.dft.numint import GRID_BLKSIZE
 
 __all__ = [
     'get_veff', 'RKS'
@@ -35,6 +36,7 @@ __all__ = [
 libcupy_helper = load_library('libcupy_helper')
 
 def prune_small_rho_grids_(ks, mol, dm, grids):
+    ni = ks._numint
     rho = ks._numint.get_rho(mol, dm, grids, ks.max_memory, verbose=ks.verbose)
 
     threshold = ks.small_rho_cutoff
@@ -65,6 +67,7 @@ def prune_small_rho_grids_(ks, mol, dm, grids):
         #grids.screen_index = grids.non0tab
         #if ks._numint.use_sparsity:
         #    ks._numint.build(mol, grids.coords)
+        grids.sparse_cache = {}
     return grids
 
 def initialize_grids(ks, mol=None, dm=None):
@@ -81,7 +84,7 @@ def initialize_grids(ks, mol=None, dm=None):
             # Filter grids the first time setup grids
             ks.grids = prune_small_rho_grids_(ks, ks.mol, dm, ks.grids)
         t0 = logger.timer_debug1(ks, 'setting up grids', *t0)
-
+        
         if ks.do_nlc() and ks.nlcgrids.coords is None:
             if ks.nlcgrids.coords is None:
                 t0 = logger.init_timer(ks)

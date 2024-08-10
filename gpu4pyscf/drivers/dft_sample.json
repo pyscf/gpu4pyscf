@@ -1,16 +1,18 @@
 [{
-    "input_dir": "./",
+    "input_dir": "../../examples/",
     "output_dir": "./",
     "molecules": [
-        "h2o.xyz",
-        "h2o.xyz",
-        "h2o.xyz",
-        "h2o.xyz",
-        "h2o.xyz"
+        "Tamoxifen.xyz",
+        "Tamoxifen.xyz",
+        "Tamoxifen.xyz",
+        "Tamoxifen.xyz",
+        "Tamoxifen.xyz",
+        "Tamoxifen.xyz",
+        "Tamoxifen.xyz"
     ],
     "basis": "def2-tzvpp",
     "xc": "b3lyp",
-    "verbose": 4,
+    "verbose": 6,
     "with_solvent": false,
     "solvent": {
         "eps": 78.3553,
@@ -18,7 +20,7 @@
     },
     "with_gpu": true,
     "with_df": true,
-    "with_grad": true,
-    "with_hess": true,
-    "save_density": true
+    "with_grad": false,
+    "with_hess": false,
+    "save_density": false
 }]
