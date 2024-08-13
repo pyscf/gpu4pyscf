@@ -46,7 +46,7 @@ libgdft = load_library('libgdft')
 from pyscf.dft.gen_grid import GROUP_BOUNDARY_PENALTY, NELEC_ERROR_TOL, LEBEDEV_ORDER, LEBEDEV_NGRID
 
 AO_ALIGNMENT = getattr(__config__, 'ao_aligned', 16)
-GROUP_BOX_SIZE = 3.0
+GROUP_BOX_SIZE = 1.2
 ALIGNMENT_UNIT = getattr(__gpu4pyscf_config__, 'grid_aligned', 128)
 MIN_BLK_SIZE = getattr(__gpu4pyscf_config__, 'min_grid_blksize', 64*64)
 GRID_BLKSIZE = MIN_BLK_SIZE
@@ -425,7 +425,7 @@ def atomic_group_grids(mol, coords):
         ctypes.c_int(ngrids)
     )
     if err != 0:
-        raise RuntimeError('CUDA Error')
+        raise RuntimeError('CUDA Error in GDFTgroup_grids kernel')
 
     idx = group_ids.argsort()
     return idx
@@ -478,32 +478,27 @@ def gen_sparse_cache(mol, coords, blksize):
     log = logger.new_logger(mol, 6)
     ao_loc = mol.ao_loc_nr()
     ngrids = coords.shape[0]
-    t1 = t0 = log.init_timer()
+    t0 = log.init_timer()
     s_index = make_screen_index(mol, coords, blksize=blksize)
     t0 = log.timer_debug1('s_index', *t0)
-    sparse_data = {}
-    block_id = 0
     s_index_cpu = s_index.get()
-    for ip0, ip1 in lib.prange(0, ngrids, blksize):
-        ao_loc_non0 = [0]
-        non0ao_idx = []
-        for sh_idx in range(len(ao_loc)-1):
-            p0, p1 = ao_loc[sh_idx], ao_loc[sh_idx+1]
-            if s_index_cpu[block_id, sh_idx]:
-                ao_loc_non0.append(p1-p0+ao_loc_non0[-1])
-                non0ao_idx += range(p0,p1)
-            else:
-                ao_loc_non0.append(ao_loc_non0[-1])
-        ao_loc_non0 = cupy.asarray(ao_loc_non0, dtype=numpy.int32)
-        nzz = len(non0ao_idx)
-        pad = (nzz + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT - nzz
-        idx = cupy.asarray(non0ao_idx + [0]*pad, dtype=numpy.int32)
-        sparse_tuple = (pad, idx, s_index[block_id], ao_loc_non0)
-        sparse_data[block_id, blksize, ngrids] = sparse_tuple
-        block_id += 1
-    t0 = log.timer_debug1('sparse ao', *t0)
-    
-    return sparse_data
+    nblocks = (ngrids + blksize - 1)//blksize
+    nbas = mol.nbas
+    nao = mol.nao
+    ao_indices = numpy.zeros([nblocks, nao], dtype=numpy.int32)
+    ao_loc_non0 = numpy.zeros([nblocks, nbas+1], dtype=numpy.int32)
+
+    # Running on CPU
+    libgdft.GDFTmake_sparse_cache(
+        s_index_cpu.ctypes.data_as(ctypes.c_void_p),
+        ao_loc.ctypes.data_as(ctypes.c_void_p),
+        ctypes.c_int(nblocks),
+        ao_loc_non0.ctypes.data_as(ctypes.c_void_p),
+        ctypes.c_int(nbas),
+        ao_indices.ctypes.data_as(ctypes.c_void_p),
+        ctypes.c_int(nao))
+    t0 = log.timer_debug1('sparse ao kernel', *t0)
+    return ao_indices, s_index, ao_loc_non0
 
 from pyscf.dft import gen_grid
 from gpu4pyscf.lib import utils
@@ -603,8 +598,37 @@ class Grids(lib.StreamObject):
     make_mask = lib.module_method(make_mask, absences=['cutoff'])
 
     def build_sparsity(self, sorted_mol):
-        self.sparse_cache = gen_sparse_cache(sorted_mol, self.coords, GRID_BLKSIZE)
-
+        ''' Build sparsity data for sparse AO evaluation
+        Sort grids for batching grids
+        '''
+        #self.sparse_cache = gen_sparse_cache(sorted_mol, self.coords, GRID_BLKSIZE)
+        blksize = GRID_BLKSIZE
+        ngrids = self.coords.shape[0]
+        ao_indices, s_index, ao_loc_non0 = gen_sparse_cache(sorted_mol, self.coords, blksize)
+        
+        nao_non0 = ao_loc_non0[:,-1]
+        ao_loc_non0 = cupy.asarray(ao_loc_non0)
+        ao_indices = cupy.asarray(ao_indices)
+        '''
+        # Sort grids based on the number of nonzero AOs
+        idx = numpy.argsort(nao_non0)
+        nao_non0 = nao_non0[idx]
+        ao_indices = ao_indices[idx]
+        s_index = s_index[idx]
+        ao_loc_non0 = cupy.asarray(ao_loc_non0[idx])
+        idx = cupy.asarray(idx)
+        idx_grids = cupy.tile(idx*blksize, (blksize,1)).T
+        idx_grids += cupy.arange(blksize)
+        idx_grids = idx_grids.ravel(order='C')
+        
+        self.coords = self.coords[idx_grids]
+        self.weights = self.weights[idx_grids]
+        '''
+        sparse_data = (ao_indices, s_index, ao_loc_non0, nao_non0)
+        self.sparse_cache[blksize, ngrids] = sparse_data
+        
+        return
+    
     def prune_by_density_(self, rho, threshold=0):
         '''Prune grids if the electron density on the grid is small'''
         if threshold == 0:

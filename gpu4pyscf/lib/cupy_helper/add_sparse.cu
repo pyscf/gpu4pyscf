@@ -33,7 +33,8 @@ void _add_sparse(double *a, const double *b, const int *indices, int n, int m, i
     int idx_a = indices[row] * n + indices[col];
     int idx_b = row * m + col;
     for (int i = 0; i < count; i++){
-        a[idx_a + i*n*n] += b[idx_b + i*m*m];
+        //a[idx_a + i*n*n] += b[idx_b + i*m*m];
+        atomicAdd(a+idx_a+i*n*n, b[idx_b+i*m*m]);
     }
 }
 

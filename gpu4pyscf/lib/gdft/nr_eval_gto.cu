@@ -29,6 +29,7 @@
 #include "contract_rho.cuh"
 
 #define NG_PER_BLOCK       256
+#define NB_PER_BLOCK       256
 #define LMAX            8
 #define GTO_MAX_CART     15
 
@@ -1669,6 +1670,37 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
     }
 }
 
+/*
+template <int ANG> __global__
+static void _make_sparse_cache(int *s_index, int *ao_loc, int nblocks, int bas_offset,
+                                int *ao_loc_non0, int nbas, int *ao_indices, int nao)
+{
+    const int grid_block_id = blockIdx.x * blockDim.x + threadIdx.x;
+    if (grid_block_id >= nblocks) {
+        return;
+    }
+    const int bas_id = blockIdx.y;
+    const int ish = bas_offset + bas_id;
+    
+    if (s_index[grid_block_id*nbas+ish] <= 0){
+        return;
+    }
+    
+    ao_loc_non0[grid_block_id*nbas] = 0;
+
+    for (int bas_id = 0; bas_id < nbas; bas_id++){
+        int j = grid_block_id*nbas+ish;
+        int s = s_index[j];
+
+        ao_loc_non0[grid_block_id*nbas+bas_id] = ;
+        for (int ao_id = ao_loc[bas_id]; ao_id < ao_loc[bas_id+1]; ao_id++){
+            ao_indices[ao_id] = ao_id;
+        }
+    }
+
+}
+*/
+
 extern "C" {
 __host__
 void GDFTinit_envs(GTOValEnvVars **envs_cache, int *ao_loc,
@@ -1956,6 +1988,55 @@ int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
         if (err != cudaSuccess) {
             fprintf(stderr, "CUDA Error of GDFTscreen_index: %s\n", cudaGetErrorString(err));
             return 1;
+        }
+    }
+    return 0;
+}
+/*
+int GDFTmake_sparse_cache(cudaStream_t stream, int *s_index, int *ao_loc, int nblocks,
+                        int *ctr_offsets, int nctr, int *ao_loc_non0, int nbas, 
+                        int *ao_indices, int nao){
+    dim3 threads(NB_PER_BLOCK);
+    dim3 blocks((nblocks+NB_PER_BLOCK-1)/NB_PER_BLOCK);
+
+    for (int ictr = 0; ictr < nctr; ++ictr) {
+        int bas_offset = ctr_offsets[ictr];
+        blocks.y = ctr_offsets[ictr+1] - ctr_offsets[ictr];
+        _make_sparse_cache<<<blocks, threads, 0, stream>>>(
+            s_index, ao_loc, nblocks, ao_loc_non0, nbas, ao_indices, nao);
+        
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA Error of GDFTmake_sparse_cache: %s\n", cudaGetErrorString(err));
+            return 1;
+        }
+    }
+    return 0;
+
+}
+*/
+
+int GDFTmake_sparse_cache(int *s_index, int *ao_loc, int nblocks,
+                        int *ao_loc_non0, int nbas, 
+                        int *ao_indices, int nao)
+{
+    for (int grid_block_id = 0; grid_block_id < nblocks; grid_block_id++){
+        int nao_non0 = 0;
+        int *ao_idx = ao_indices + grid_block_id * nao;
+        int *ao_loc_blk = ao_loc_non0 + grid_block_id * (nbas+1);
+        
+        ao_loc_blk[0] = 0;
+        for (int sh_idx = 0; sh_idx < nbas; sh_idx++){
+            int idx = grid_block_id * nbas + sh_idx;
+            int nao_shell = 0;
+            if(s_index[idx] == 1){
+                nao_shell = ao_loc[sh_idx+1] - ao_loc[sh_idx];
+                for (int i = ao_loc[sh_idx]; i < ao_loc[sh_idx+1]; i++){
+                    ao_idx[nao_non0] = i;
+                    nao_non0++;
+                }
+            }
+            ao_loc_blk[sh_idx+1] = ao_loc_blk[sh_idx] + nao_shell;
         }
     }
     return 0;

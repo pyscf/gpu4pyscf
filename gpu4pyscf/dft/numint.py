@@ -932,21 +932,27 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
         grids.build_sparsity(_sorted_mol)
         t0 = log.timer_debug1('generate sparsity', *t0)
 
-    ngrids = grids.weights.size
+    ngrids = grids.coords.shape[0]    
+    ao_indices, s_index, ao_loc_non0, nao_non0 = grids.sparse_cache[blksize, ngrids]
     rho = cupy.empty(ngrids)
     with opt.gdft_envs_cache():
-        block_id = 0
         t1 = t0 = log.init_timer()
-        for p0, p1 in lib.prange(0,ngrids,blksize):
+        for block_id, (p0, p1) in enumerate(lib.prange(0,ngrids,blksize)):
             coords = grids.coords[p0:p1]
-            pad, idx, non0tab, ao_loc_non0 = grids.sparse_cache[block_id, blksize, ngrids]
+            #pad, idx, non0tab, ao_loc_non0 = grids.sparse_cache[block_id, blksize, ngrids]
+            nao_pad = (nao_non0[block_id] + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT
+            nao_pad = min(nao, nao_pad)
+            pad = nao_pad - nao_non0[block_id]
             ao_mask = eval_ao(
                 ni, _sorted_mol, coords, 0,
-                nao_non0=len(idx),
-                ao_loc_non0=ao_loc_non0,
-                non0tab=non0tab)
+                nao_non0=nao_pad,
+                ao_loc_non0=ao_loc_non0[block_id],
+                non0tab=s_index[block_id])
+            
             if pad > 0: 
                 ao_mask[-pad:,:] = 0.0
+
+            idx = ao_indices[block_id][:nao_pad]
 
             if mo_coeff is None:
                 rho[p0:p1] = eval_rho(_sorted_mol, ao_mask, dm[np.ix_(idx,idx)], 
@@ -956,7 +962,6 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
                 rho[p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, 
                                        mo_occ, None, 'LDA', with_lapl)
             t1 = log.timer_debug2('eval rho slice', *t1)
-            block_id += 1
     t0 = log.timer_debug1('eval rho', *t0)
 
     if FREE_CUPY_CACHE:
@@ -1473,7 +1478,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         grids.build(with_non0tab=False, sort_grids=True)
     if nao is None:
         nao = mol.nao
-    ngrids = grids.coords.shape[0]
+    
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     log = logger.new_logger(ni, ni.verbose)
 
@@ -1495,28 +1500,36 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     _sorted_mol = opt._sorted_mol
     if not hasattr(grids, 'sparse_cache') or len(grids.sparse_cache) == 0:
         grids.build_sparsity(_sorted_mol)
-
+    
+    ngrids = grids.coords.shape[0]
+    ao_indices, s_index, ao_loc_non0, nao_non0 = grids.sparse_cache[blksize, ngrids]
     with opt.gdft_envs_cache():
-        block_id = 0
         t1 = log.init_timer()
-        for ip0, ip1 in lib.prange(0, ngrids, blksize):
+        for block_id, (ip0, ip1) in enumerate(lib.prange(0, ngrids, blksize)):
             coords = grids.coords[ip0:ip1]
             weight = grids.weights[ip0:ip1]
             t1 = log.init_timer()
-            pad, idx, non0tab, ao_loc_non0 = grids.sparse_cache[block_id, blksize, ngrids]
+            #pad, idx, non0tab, ao_loc_non0 = grids.sparse_cache[block_id, blksize, ngrids]
+            #ao_loc_non0 = grids.ao_loc_non0[block_id]
+            #idx = grids.ao_indices[block_id]
+            #non0tab = grids.screen_index[block_id]
+            nao_pad = (nao_non0[block_id] + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT
+            nao_pad = min(nao_pad, nao)
+            pad = nao_pad - nao_non0[block_id]
+
             ao_mask = eval_ao(
                 ni, _sorted_mol, coords, deriv,
-                nao_non0=len(idx),
-                ao_loc_non0=ao_loc_non0,
-                non0tab=non0tab)
+                nao_non0=nao_pad,
+                ao_loc_non0=ao_loc_non0[block_id],
+                non0tab=s_index[block_id])
             t1 = log.timer_debug2('evaluate ao slice', *t1)
             if pad > 0:
                 if deriv == 0:
                     ao_mask[-pad:,:] = 0.0
                 else:
                     ao_mask[:,-pad:,:] = 0.0
-            block_id += 1
-            yield ao_mask, idx, weight, len(idx)-pad
+            idx = ao_indices[block_id][:nao_pad]
+            yield ao_mask, idx, weight, nao_pad
 
 def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 non0tab=None, blksize=None, buf=None, extra=0):
