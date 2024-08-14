@@ -12,11 +12,13 @@
     ],
     "basis": "def2-tzvpp",
     "xc": "b3lyp",
-    "verbose": 6,
-    "with_solvent": false,
+    "verbose": 4,
+    "with_solvent": true,
+    "with_thermo": true,
     "solvent": {
         "eps": 78.3553,
-        "method": "CPCM"
+        "solvent": "water",
+        "method": "SMD"
     },
     "with_gpu": true,
     "with_df": true,
