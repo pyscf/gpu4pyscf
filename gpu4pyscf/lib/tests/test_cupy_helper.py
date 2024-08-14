@@ -18,7 +18,7 @@ import numpy
 import cupy
 from gpu4pyscf.lib.cupy_helper import (
     take_last2d, transpose_sum, krylov, unpack_sparse,
-    add_sparse, takebak, empty_mapped, dist_matrix,
+    add_sparse, reduce_sparse, takebak, empty_mapped, dist_matrix,
     grouped_dot, grouped_gemm, cond, cart2sph_cutensor, cart2sph)
 
 class KnownValues(unittest.TestCase):
@@ -69,13 +69,23 @@ class KnownValues(unittest.TestCase):
         out = unpack_sparse(cderi_sparse, row, col, p0, p1, nao)
         assert cupy.linalg.norm(out - cderi[:,:,p0:p1]) < 1e-10
 
-    def test_sparse(self):
+    def test_add_sparse(self):
         a = cupy.random.rand(20, 20)
         b = cupy.random.rand(5,5)
         indices = cupy.array([3,4,8,10]).astype(numpy.int32)
         a0 = a.copy()
         a0[cupy.ix_(indices, indices)] += b[:4,:4]
         add_sparse(a, b, indices)
+        assert cupy.linalg.norm(a - a0) < 1e-10
+
+    def test_reduce_sparse(self):
+        a = cupy.random.rand(20, 20)
+        b = cupy.random.rand(2, 5, 5)
+        indices = cupy.array([[3,4,8,10],[2,4,5,8]]).astype(numpy.int32)
+        a0 = a.copy()
+        a0[cupy.ix_(indices[0], indices[0])] += b[0,:4,:4]
+        a0[cupy.ix_(indices[1], indices[1])] += b[1,:4,:4]
+        reduce_sparse(a, b, indices)
         assert cupy.linalg.norm(a - a0) < 1e-10
 
     def test_dist_matrix(self):

@@ -205,6 +205,42 @@ def add_sparse(a, b, indices):
         raise RuntimeError('failed in sparse_add2d')
     return a
 
+
+def reduce_sparse(a, b, indices):
+    '''
+    a[:,...,:np.ix_(indices[0], indices[0])] += b[0]
+    a[:,...,:np.ix_(indices[1], indices[1])] += b[1]
+    a[:,...,:np.ix_(indices[2], indices[2])] += b[2]
+    '''
+    assert a.flags.c_contiguous
+    assert b.flags.c_contiguous
+    if len(indices) == 0: return a
+    n = a.shape[-1]
+    m = b.shape[-1]
+    k = indices.shape[-1]
+
+    if b.ndim > 2:
+        count = np.prod(b.shape[:-2])
+    elif b.ndim == 2:
+        count = 1
+    else:
+        raise RuntimeError('add_sparse only supports 2d or 3d tensor')
+    
+    stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.reduce_sparse(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.cast(b.data.ptr, ctypes.c_void_p),
+        ctypes.cast(indices.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n),
+        ctypes.c_int(m),
+        ctypes.c_int(k),
+        ctypes.c_int(count)
+    )
+    if err != 0:
+        raise RuntimeError('failed in sparse_add2d')
+    return a
+
 def dist_matrix(x, y, out=None):
     assert x.flags.c_contiguous
     assert y.flags.c_contiguous

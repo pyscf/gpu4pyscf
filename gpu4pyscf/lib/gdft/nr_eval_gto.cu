@@ -179,6 +179,7 @@ static void _memset_cart(double *g_cart, int stride, int grid_id){
         g_cart[grid_id +10*stride] = 0.0;
         g_cart[grid_id +11*stride] = 0.0;
         g_cart[grid_id +12*stride] = 0.0;
+        g_cart[grid_id +13*stride] = 0.0;
         g_cart[grid_id +14*stride] = 0.0;
     } else {
         int i = 0;
@@ -247,14 +248,14 @@ static void _cart_kernel_deriv0(BasOffsets offsets)
 
     const int bas_id = blockIdx.y;
     const int natm = c_envs.natm;
+    const int nbas = c_envs.nbas;
     const int ish = offsets.bas_off + bas_id;
 
-    if (offsets.non0table[ish] <= 0){
+    if (offsets.non0table[ish + blockIdx.x * nbas] <= 0){
         return;
     }
     const int atm_id = c_bas_atom[ish];
-    const size_t i0 = offsets.ao_loc[ish];
-    
+    const size_t i0 = offsets.ao_loc[ish + blockIdx.x * (nbas+1)];
     double* __restrict__ gto = offsets.data + i0 * ngrids;
 
     double *atom_coordx = c_envs.atom_coordx;
@@ -352,14 +353,15 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
 
     const int bas_id = blockIdx.y;
     const int natm = c_envs.natm;
+    const int nbas = c_envs.nbas;
     const int nao = offsets.nao;
     const int ish = offsets.bas_off + bas_id;
 
-    if (offsets.non0table[ish] <= 0){
+    if (offsets.non0table[ish + blockIdx.x * nbas] <= 0){
         return;
     }
     const int atm_id = c_bas_atom[ish];
-    const size_t i0 = offsets.ao_loc[ish];
+    const size_t i0 = offsets.ao_loc[ish + blockIdx.x * (nbas+1)];
 
     double* __restrict__ gto = offsets.data + i0 * ngrids;
     double* __restrict__ gtox = offsets.data + (nao * 1 + i0) * ngrids;
@@ -601,14 +603,15 @@ static void _cart_kernel_deriv2(BasOffsets offsets)
 
     const int bas_id = blockIdx.y;
     const int natm = c_envs.natm;
+    const int nbas = c_envs.nbas;
     const int nao = offsets.nao;
     const int ish = offsets.bas_off + bas_id;
 
-    if (offsets.non0table[ish] <= 0){
+    if (offsets.non0table[ish + blockIdx.x * nbas] <= 0){
         return;
     }
     const int atm_id = c_bas_atom[ish];
-    const size_t i0 = offsets.ao_loc[ish];
+    const size_t i0 = offsets.ao_loc[ish + blockIdx.x * (nbas+1)];
 
     double* __restrict__ gto = offsets.data + i0 * ngrids;
     double* __restrict__ gtox = offsets.data + (nao * 1 + i0) * ngrids;
@@ -620,6 +623,17 @@ static void _cart_kernel_deriv2(BasOffsets offsets)
     double* __restrict__ gtoyy = offsets.data + (nao * 7 + i0) * ngrids;
     double* __restrict__ gtoyz = offsets.data + (nao * 8 + i0) * ngrids;
     double* __restrict__ gtozz = offsets.data + (nao * 9 + i0) * ngrids;
+
+    _memset_cart<ANG>(gto,   ngrids, grid_id);
+    _memset_cart<ANG>(gtox,  ngrids, grid_id);
+    _memset_cart<ANG>(gtoy,  ngrids, grid_id);
+    _memset_cart<ANG>(gtoz,  ngrids, grid_id);
+    _memset_cart<ANG>(gtoxx, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxy, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoyy, ngrids, grid_id);
+    _memset_cart<ANG>(gtoyz, ngrids, grid_id);
+    _memset_cart<ANG>(gtozz, ngrids, grid_id);
 
     double *atom_coordx = c_envs.atom_coordx;
     double *atom_coordy = c_envs.atom_coordx + natm;
@@ -644,6 +658,7 @@ static void _cart_kernel_deriv2(BasOffsets offsets)
         fy0[lx] = fy0[lx-1] * ry;
         fz0[lx] = fz0[lx-1] * rz;
     }
+    
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
         _nabla1<ANG+1>(fx1, fy1, fz1, fx0, fy0, fz0, exps[ip]);
@@ -680,14 +695,15 @@ static void _cart_kernel_deriv3(BasOffsets offsets)
 
     const int bas_id = blockIdx.y;
     const int natm = c_envs.natm;
+    const int nbas = c_envs.nbas;
     const int nao = offsets.nao;
     const int ish = offsets.bas_off + bas_id;
 
-    if (offsets.non0table[ish] <= 0){
+    if (offsets.non0table[ish + blockIdx.x * nbas] <= 0){
         return;
     }
     const int atm_id = c_bas_atom[ish];
-    const size_t i0 = offsets.ao_loc[ish];
+    const size_t i0 = offsets.ao_loc[ish + blockIdx.x * (nbas+1)];
 
     double* __restrict__ gto    = offsets.data + i0 * ngrids;
     double* __restrict__ gtox   = offsets.data + (nao * 1 + i0) * ngrids;
@@ -709,6 +725,27 @@ static void _cart_kernel_deriv3(BasOffsets offsets)
     double* __restrict__ gtoyyz = offsets.data + (nao * 17 + i0) * ngrids;
     double* __restrict__ gtoyzz = offsets.data + (nao * 18 + i0) * ngrids;
     double* __restrict__ gtozzz = offsets.data + (nao * 19 + i0) * ngrids;
+
+    _memset_cart<ANG>(gto,    ngrids, grid_id);
+    _memset_cart<ANG>(gtox,   ngrids, grid_id);
+    _memset_cart<ANG>(gtoy,   ngrids, grid_id);
+    _memset_cart<ANG>(gtoz,   ngrids, grid_id);
+    _memset_cart<ANG>(gtoxx,  ngrids, grid_id);
+    _memset_cart<ANG>(gtoxy,  ngrids, grid_id);
+    _memset_cart<ANG>(gtoxz,  ngrids, grid_id);
+    _memset_cart<ANG>(gtoyy,  ngrids, grid_id);
+    _memset_cart<ANG>(gtoyz,  ngrids, grid_id);
+    _memset_cart<ANG>(gtozz,  ngrids, grid_id);
+    _memset_cart<ANG>(gtoxxx, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxxy, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxxz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxyy, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxyz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxzz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoyyy, ngrids, grid_id);
+    _memset_cart<ANG>(gtoyyz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoyzz, ngrids, grid_id);
+    _memset_cart<ANG>(gtozzz, ngrids, grid_id);
 
     double *atom_coordx = c_envs.atom_coordx;
     double *atom_coordy = c_envs.atom_coordx + natm;
@@ -782,14 +819,15 @@ static void _cart_kernel_deriv4(BasOffsets offsets)
 
     const int bas_id = blockIdx.y;
     const int natm = c_envs.natm;
+    const int nbas = c_envs.nbas;
     const int nao = offsets.nao;
     const int ish = offsets.bas_off + bas_id;
 
-    if (offsets.non0table[ish] <= 0){
+    if (offsets.non0table[ish + blockIdx.x * nbas] <= 0){
         return;
     }
     const int atm_id = c_bas_atom[ish];
-    const size_t i0 = offsets.ao_loc[ish];
+    const size_t i0 = offsets.ao_loc[ish + blockIdx.x * (nbas+1)];
 
     double* __restrict__ gto     = offsets.data + i0 * ngrids;
     double* __restrict__ gtox    = offsets.data + (nao * 1 + i0) * ngrids;
@@ -826,6 +864,42 @@ static void _cart_kernel_deriv4(BasOffsets offsets)
     double* __restrict__ gtoyyzz = offsets.data + (nao * 32 + i0) * ngrids;
     double* __restrict__ gtoyzzz = offsets.data + (nao * 33 + i0) * ngrids;
     double* __restrict__ gtozzzz = offsets.data + (nao * 34 + i0) * ngrids;
+
+    _memset_cart<ANG>(gto,   ngrids, grid_id);
+    _memset_cart<ANG>(gtox,  ngrids, grid_id);
+    _memset_cart<ANG>(gtoy,  ngrids, grid_id);
+    _memset_cart<ANG>(gtoz,  ngrids, grid_id);
+    _memset_cart<ANG>(gtoxx, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxy, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoyy, ngrids, grid_id);
+    _memset_cart<ANG>(gtoyz, ngrids, grid_id);
+    _memset_cart<ANG>(gtozz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxxx, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxxy, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxxz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxyy, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxyz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxzz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoyyy, ngrids, grid_id);
+    _memset_cart<ANG>(gtoyyz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoyzz, ngrids, grid_id);
+    _memset_cart<ANG>(gtozzz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxxxx, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxxxy, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxxxz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxxyy, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxxyz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxxzz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxyyy, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxyyz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxyzz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoxzzz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoyyyy, ngrids, grid_id);
+    _memset_cart<ANG>(gtoyyyz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoyyzz, ngrids, grid_id);
+    _memset_cart<ANG>(gtoyzzz, ngrids, grid_id);
+    _memset_cart<ANG>(gtozzzz, ngrids, grid_id);
 
     double *atom_coordx = c_envs.atom_coordx;
     double *atom_coordy = c_envs.atom_coordx + natm;
@@ -916,14 +990,15 @@ static void _sph_kernel_deriv0(BasOffsets offsets)
     }
 
     const int bas_id = blockIdx.y;
+    const int nbas = c_envs.nbas;
     const int natm = c_envs.natm;
     const int ish = offsets.bas_off + bas_id;
 
-    if (offsets.non0table[ish] <= 0){
+    if (offsets.non0table[ish + blockIdx.x * nbas] <= 0){
         return;
     }
     const int atm_id = c_bas_atom[ish];
-    const size_t i0 = offsets.ao_loc[ish];
+    const size_t i0 = offsets.ao_loc[ish + blockIdx.x * (nbas+1)];
 
     double* __restrict__ gto = offsets.data + i0 * ngrids;
 
@@ -1057,14 +1132,15 @@ static void _sph_kernel_deriv1(BasOffsets offsets)
 
     const int bas_id = blockIdx.y;
     const int natm = c_envs.natm;
+    const int nbas = c_envs.nbas;
     const int nao = offsets.nao;
     const int ish = offsets.bas_off + bas_id;
 
-    if (offsets.non0table[ish] <= 0){
+    if (offsets.non0table[ish + blockIdx.x * nbas] <= 0){
         return;
     }
     const int atm_id = c_bas_atom[ish];
-    const size_t i0 = offsets.ao_loc[ish];
+    const size_t i0 = offsets.ao_loc[ish + blockIdx.x * (nbas+1)];
 
     double* __restrict__ gto = offsets.data + i0 * ngrids;
     double* __restrict__ gtox = offsets.data + (nao * 1 + i0) * ngrids;
@@ -1380,14 +1456,15 @@ static void _sph_kernel_deriv2(BasOffsets offsets)
 
     const int bas_id = blockIdx.y;
     const int natm = c_envs.natm;
+    const int nbas = c_envs.nbas;
     const int nao = offsets.nao;
     const int ish = offsets.bas_off + bas_id;
 
-    if (offsets.non0table[ish] <= 0){
+    if (offsets.non0table[ish + blockIdx.x * nbas] <= 0){
         return;
     }
     const int atm_id = c_bas_atom[ish];
-    const size_t i0 = offsets.ao_loc[ish];
+    const size_t i0 = offsets.ao_loc[ish + blockIdx.x * (nbas+1)];
 
     double* __restrict__ gto = offsets.data + i0 * ngrids;
     double* __restrict__ gtox = offsets.data + (nao * 1 + i0) * ngrids;
@@ -1399,6 +1476,17 @@ static void _sph_kernel_deriv2(BasOffsets offsets)
     double* __restrict__ gtoyy = offsets.data + (nao * 7 + i0) * ngrids;
     double* __restrict__ gtoyz = offsets.data + (nao * 8 + i0) * ngrids;
     double* __restrict__ gtozz = offsets.data + (nao * 9 + i0) * ngrids;
+
+    _memset_sph<ANG>(gto,   ngrids, grid_id);
+    _memset_sph<ANG>(gtox,  ngrids, grid_id);
+    _memset_sph<ANG>(gtoy,  ngrids, grid_id);
+    _memset_sph<ANG>(gtoz,  ngrids, grid_id);
+    _memset_sph<ANG>(gtoxx, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyz, ngrids, grid_id);
+    _memset_sph<ANG>(gtozz, ngrids, grid_id);
 
     double *atom_coordx = c_envs.atom_coordx;
     double *atom_coordy = c_envs.atom_coordx + natm;
@@ -1429,7 +1517,6 @@ static void _sph_kernel_deriv2(BasOffsets offsets)
         _nabla1<ANG+1>(fx1, fy1, fz1, fx0, fy0, fz0, exps[ip]);
         _nabla1<ANG  >(fx2, fy2, fz2, fx1, fy1, fz1, exps[ip]);
 
-
         double g[GTO_MAX_CART];
         _cart_gto<ANG>(g, ce, fx0, fy0, fz0); _cart2sph<ANG>(g, gto,   ngrids, grid_id);
         _cart_gto<ANG>(g, ce, fx1, fy0, fz0); _cart2sph<ANG>(g, gtox,  ngrids, grid_id);
@@ -1456,14 +1543,15 @@ static void _sph_kernel_deriv3(BasOffsets offsets)
 
     const int bas_id = blockIdx.y;
     const int natm = c_envs.natm;
+    const int nbas = c_envs.nbas;
     const int nao = offsets.nao;
     const int ish = offsets.bas_off + bas_id;
 
-    if (offsets.non0table[ish] <= 0){
+    if (offsets.non0table[ish + blockIdx.x * nbas] <= 0){
         return;
     }
     const int atm_id = c_bas_atom[ish];
-    const size_t i0 = offsets.ao_loc[ish];
+    const size_t i0 = offsets.ao_loc[ish + blockIdx.x * (nbas+1)];
 
     double* __restrict__ gto    = offsets.data + i0 * ngrids;
     double* __restrict__ gtox   = offsets.data + (nao * 1 + i0) * ngrids;
@@ -1485,6 +1573,27 @@ static void _sph_kernel_deriv3(BasOffsets offsets)
     double* __restrict__ gtoyyz = offsets.data + (nao * 17 + i0) * ngrids;
     double* __restrict__ gtoyzz = offsets.data + (nao * 18 + i0) * ngrids;
     double* __restrict__ gtozzz = offsets.data + (nao * 19 + i0) * ngrids;
+
+    _memset_sph<ANG>(gto,   ngrids, grid_id);
+    _memset_sph<ANG>(gtox,  ngrids, grid_id);
+    _memset_sph<ANG>(gtoy,  ngrids, grid_id);
+    _memset_sph<ANG>(gtoz,  ngrids, grid_id);
+    _memset_sph<ANG>(gtoxx, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyz, ngrids, grid_id);
+    _memset_sph<ANG>(gtozz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxxx, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxxy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxxz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxyy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxyz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxzz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyyy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyyz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyzz, ngrids, grid_id);
+    _memset_sph<ANG>(gtozzz, ngrids, grid_id);
 
     double *atom_coordx = c_envs.atom_coordx;
     double *atom_coordy = c_envs.atom_coordx + natm;
@@ -1553,14 +1662,15 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
 
     const int bas_id = blockIdx.y;
     const int natm = c_envs.natm;
+    const int nbas = c_envs.nbas;
     const int nao = offsets.nao;
     const int ish = offsets.bas_off + bas_id;
 
-    if (offsets.non0table[ish] <= 0){
+    if (offsets.non0table[ish + blockIdx.x * nbas] <= 0){
         return;
     }
     const int atm_id = c_bas_atom[ish];
-    const size_t i0 = offsets.ao_loc[ish];
+    const size_t i0 = offsets.ao_loc[ish + blockIdx.x * (nbas+1)];
 
     double* __restrict__ gto     = offsets.data + i0 * ngrids;
     double* __restrict__ gtox    = offsets.data + (nao * 1 + i0) * ngrids;
@@ -1597,6 +1707,42 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
     double* __restrict__ gtoyyzz = offsets.data + (nao * 32 + i0) * ngrids;
     double* __restrict__ gtoyzzz = offsets.data + (nao * 33 + i0) * ngrids;
     double* __restrict__ gtozzzz = offsets.data + (nao * 34 + i0) * ngrids;
+
+    _memset_sph<ANG>(gto,   ngrids, grid_id);
+    _memset_sph<ANG>(gtox,  ngrids, grid_id);
+    _memset_sph<ANG>(gtoy,  ngrids, grid_id);
+    _memset_sph<ANG>(gtoz,  ngrids, grid_id);
+    _memset_sph<ANG>(gtoxx, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyz, ngrids, grid_id);
+    _memset_sph<ANG>(gtozz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxxx, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxxy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxxz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxyy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxyz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxzz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyyy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyyz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyzz, ngrids, grid_id);
+    _memset_sph<ANG>(gtozzz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxxxx, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxxxy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxxxz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxxyy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxxyz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxxzz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxyyy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxyyz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxyzz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoxzzz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyyyy, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyyyz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyyzz, ngrids, grid_id);
+    _memset_sph<ANG>(gtoyzzz, ngrids, grid_id);
+    _memset_sph<ANG>(gtozzzz, ngrids, grid_id);
 
     double *atom_coordx = c_envs.atom_coordx;
     double *atom_coordy = c_envs.atom_coordx + natm;

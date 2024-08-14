@@ -609,7 +609,7 @@ class Grids(lib.StreamObject):
         nao_non0 = ao_loc_non0[:,-1]
         ao_loc_non0 = cupy.asarray(ao_loc_non0)
         ao_indices = cupy.asarray(ao_indices)
-        '''
+        
         # Sort grids based on the number of nonzero AOs
         idx = numpy.argsort(nao_non0)
         nao_non0 = nao_non0[idx]
@@ -623,7 +623,7 @@ class Grids(lib.StreamObject):
         
         self.coords = self.coords[idx_grids]
         self.weights = self.weights[idx_grids]
-        '''
+        
         sparse_data = (ao_indices, s_index, ao_loc_non0, nao_non0)
         self.sparse_cache[blksize, ngrids] = sparse_data
         
