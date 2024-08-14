@@ -91,15 +91,8 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_non0=None, ao_loc_non
     nctr = ctr_offsets.size - 1
     stream = cupy.cuda.get_current_stream()
 
-    # ao must be set to zero due to implementation
-    if deriv > 1:
-        if out is None:
-            out = cupy.empty((comp, nao_non0, ngrids), order='C')
-        else:
-            out[:] = 0
-    else:
-        if out is None:
-            out = cupy.empty((comp, nao_non0, ngrids), order='C')
+    if out is None:
+        out = cupy.empty((comp, nao_non0, ngrids), order='C')
 
     if not with_opt:
         # mol may be different to _GDFTOpt._sorted_mol.
