@@ -130,7 +130,7 @@ class UKS(rks.KohnShamDFT, uhf.UHF):
     to_hf = NotImplemented
 
     def reset(self, mol=None):
-        super().reset(mol)
+        hf.SCF.reset(self, mol)
         self.grids.reset(mol)
         self.nlcgrids.reset(mol)
         self._numint.gdftopt = None

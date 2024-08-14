@@ -149,7 +149,6 @@ if _libxc is not None:
     _libxc.xc_func_init.argtypes = (_xc_func_p, ctypes.c_int, ctypes.c_int)
     _libxc.xc_func_end.argtypes = (_xc_func_p, )
     _libxc.xc_func_free.argtypes = (_xc_func_p, )
-    _libxc.xc_func_alloc()
 
 class XCfun:
     def __init__(self, xc, spin):
@@ -171,9 +170,9 @@ class XCfun:
     def __del__(self):
         if self.xc_func is None:
             return
-        # TODO: deallocate xc func
-        #_libxc.xc_func_end(self.xc_func)
-        #_libxc.xc_func_free(self.xc_func)
+        if _libxc is not None:
+            _libxc.xc_func_end(self.xc_func)
+            _libxc.xc_func_free(self.xc_func)
 
     def needs_laplacian(self):
         return dft.libxc.needs_laplacian(self.func_id)
@@ -330,5 +329,4 @@ class XCfun:
             raise KeyError("Functional kind not recognized!")
 
         return {k: v for k, v in zip(output_labels, args[2+input_num_args:]) if v is not None}
-
 
