@@ -84,11 +84,18 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
         mf = mf.to_gpu()
 
     mf.chkfile = None
-    if with_solvent:
+
+    if with_solvent and config['solvent']['method'].endswith(('PCM', 'pcm')):
         mf = mf.PCM()
         mf.with_solvent.lebedev_order = 29
         mf.with_solvent.method = config['solvent']['method'].replace('PCM','-PCM')
         mf.with_solvent.eps = config['solvent']['eps']
+    
+    if with_solvent and config['solvent']['method'].endswith(('smd', 'SMD')):
+        mf = mf.SMD()
+        mf.with_solvent.lebedev_order = 29
+        mf.with_solvent.method = 'SMD'
+        mf.with_solvent.solvent = config['solvent']['solvent']
 
     mf.direct_scf_tol = 1e-14
     mf.chkfile = None
