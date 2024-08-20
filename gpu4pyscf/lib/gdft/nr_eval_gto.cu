@@ -1903,18 +1903,11 @@ int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
         if (blocks.y == 0){
             continue;
         }
-        switch(l) {
-            case 0: _screen_index<0> <<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, nprim, grids, ngrids, bas_offset); break;
-            case 1: _screen_index<1> <<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, nprim, grids, ngrids, bas_offset); break;
-            case 2: _screen_index<2> <<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, nprim, grids, ngrids, bas_offset); break;
-            case 3: _screen_index<3> <<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, nprim, grids, ngrids, bas_offset); break;
-            case 4: _screen_index<4> <<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, nprim, grids, ngrids, bas_offset); break;
-            case 5: _screen_index<5> <<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, nprim, grids, ngrids, bas_offset); break;
-            case 6: _screen_index<6> <<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, nprim, grids, ngrids, bas_offset); break;
-            case 7: _screen_index<7> <<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, nprim, grids, ngrids, bas_offset); break;
-            case 8: _screen_index<8> <<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, nprim, grids, ngrids, bas_offset); break;
-            default:fprintf(stderr, "l = %d not supported\n", l);
+        if (l > 8){
+            fprintf(stderr, "l = %d not supported\n", l);
+            return 1;
         }
+        _screen_index<l> <<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, nprim, grids, ngrids, bas_offset);
     }
 
     cudaError_t err = cudaGetLastError();
