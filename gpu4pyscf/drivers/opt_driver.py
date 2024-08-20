@@ -34,6 +34,7 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
     verbose         = config.get('verbose',         4)
     scf_conv_tol    = config.get('scf_conv_tol',    1e-10)
     with_df         = config.get('with_df',         True)
+    auxbasis        = config.get('auxbasis',       None)
     with_gpu        = config.get('with_gpu',        True)
     with_solvent    = config.get('with_solvent',    False)
     maxsteps        = config.get('maxsteps',        50)
