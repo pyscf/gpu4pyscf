@@ -78,12 +78,10 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
             mf.nlcgrids.atom_grid = (50,194)
     mf.disp = disp
     if with_df:
+        pyscf_auxbasis = auxbasis
         if auxbasis == "RIJK-def2-tzvp":
             pyscf_auxbasis = 'def2-tzvp-jkfit'
-        else:
-            pyscf_auxbasis = None
         mf = mf.density_fit(auxbasis=pyscf_auxbasis)
-
     if with_gpu:
         mf = mf.to_gpu()
 
