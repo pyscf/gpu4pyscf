@@ -51,8 +51,8 @@ static void _nabla1(double *fx1, double *fy1, double *fz1,
     }
 }
 
-template <int ANG> __global__
-static void _screen_index(int *non0shl_idx, double cutoff, int nprim, double *coords, int ngrids, int bas_offset){
+__global__
+static void _screen_index(int *non0shl_idx, double cutoff, int ang, int nprim, double *coords, int ngrids, int bas_offset){
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     int ish = blockIdx.y + bas_offset;
     const bool active = grid_id < ngrids;
@@ -92,7 +92,7 @@ static void _screen_index(int *non0shl_idx, double cutoff, int nprim, double *co
     for (int ip = 0; ip < nprim; ++ip) {
         gto_sup += coeffs[ip] * exp(-exps[ip] * rr);
     }
-    gto_sup *= pow(r,ANG);
+    gto_sup *= pow(r,ang);
     int is_large = fabs(gto_sup) > cutoff;
 
     // Reduce and write to global memory
@@ -1896,7 +1896,7 @@ int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
 
     for (int ictr = 0; ictr < nctr; ictr++){
         int ish = ctr_offsets[ictr];
-        int l =  bas[ANG_OF+ish*BAS_SLOTS];
+        const int l =  bas[ANG_OF+ish*BAS_SLOTS];
         int nprim = bas[NPRIM_OF+ish*BAS_SLOTS];
         int bas_offset = ctr_offsets[ictr];
         blocks.y = ctr_offsets[ictr+1] - bas_offset;
@@ -1907,7 +1907,7 @@ int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
             fprintf(stderr, "l = %d not supported\n", l);
             return 1;
         }
-        _screen_index<l> <<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, nprim, grids, ngrids, bas_offset);
+        _screen_index<<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, l, nprim, grids, ngrids, bas_offset);
     }
 
     cudaError_t err = cudaGetLastError();
