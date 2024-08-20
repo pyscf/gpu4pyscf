@@ -173,6 +173,7 @@ class XCfun:
         if self.xc_func is None:
             return
         if _libxc is not None:
+            cupy.cuda.runtime.deviceSynchronize()
             _libxc.xc_func_end(self.xc_func)
             _libxc.xc_func_free(self.xc_func)
 
