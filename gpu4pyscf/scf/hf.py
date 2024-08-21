@@ -702,6 +702,13 @@ class RHF(SCF):
     scf = scf
     kernel = scf
 
+    def check_sanity(self):
+        mol = self.mol
+        if mol.nelectron != 1 and mol.spin != 0:
+            logger.warn(self, 'Invalid number of electrons %d for RHF method.',
+                        mol.nelectron)
+        return SCF.check_sanity(self)
+
     def nuc_grad_method(self):
         from gpu4pyscf.grad import rhf
         return rhf.Gradients(self)
