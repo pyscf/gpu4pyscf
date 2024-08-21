@@ -1,6 +1,5 @@
 GPU plugin for PySCF
 ====================
-[![arXiv](https://img.shields.io/badge/arXiv-2404.09452-b31b1b.svg)](https://arxiv.org/abs/2404.09452)
 ![nightly](https://github.com/pyscf/gpu4pyscf/actions/workflows/nightly_build.yml/badge.svg)
 [![PyPI version](https://badge.fury.io/py/gpu4pyscf-cuda11x.svg)](https://badge.fury.io/py/gpu4pyscf-cuda11x)
 
@@ -125,3 +124,26 @@ Speedup with GPU4PySCF v0.6.0 on A100-80G over Q-Chem 6.1 on 32-cores CPU (Desit
 
 Find more benchmarks in [gpu4pyscf/benchmarks](https://github.com/pyscf/gpu4pyscf/tree/master/benchmarks)
 
+References
+---------
+```
+@misc{li2024introducting,
+      title={Introducing GPU-acceleration into the Python-based Simulations of Chemistry Framework}, 
+      author={Rui Li and Qiming Sun and Xing Zhang and Garnet Kin-Lic Chan},
+      year={2024},
+      eprint={2407.09700},
+      archivePrefix={arXiv},
+      primaryClass={physics.comp-ph},
+      url={https://arxiv.org/abs/2407.09700}, 
+}
+
+@misc{wu2024enhancing,
+      title={Enhancing GPU-acceleration in the Python-based Simulations of Chemistry Framework}, 
+      author={Xiaojie Wu and Qiming Sun and Zhichen Pu and Tianze Zheng and Wenzhi Ma and Wen Yan and Xia Yu and Zhengxiao Wu and Mian Huo and Xiang Li and Weiluo Ren and Sheng Gong and Yumin Zhang and Weihao Gao},
+      year={2024},
+      eprint={2404.09452},
+      archivePrefix={arXiv},
+      primaryClass={physics.comp-ph},
+      url={https://arxiv.org/abs/2404.09452}, 
+}
+```
