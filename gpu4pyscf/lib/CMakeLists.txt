@@ -122,8 +122,8 @@ option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
   include(ExternalProject)
   ExternalProject_Add(libxc
-    GIT_REPOSITORY https://gitlab.com/libxc/libxc.git
-    GIT_TAG 6af8da52125a05e5997fb65751eee7fe4bc2f171
+    GIT_REPOSITORY https://github.com/wxj6000/libxc.git
+    GIT_TAG e04322c8cf5d7b38c7a1b29f35e51ccd8a59c1d4
     PREFIX ${PROJECT_BINARY_DIR}/deps
     INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
     CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON
