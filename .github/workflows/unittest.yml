@@ -27,6 +27,8 @@ jobs:
         pip3 install pyscf --upgrade
         pip3 install numpy --upgrade
         pip3 install h5py --upgrade
+        pip3 install gpu4pyscf-libxc-cuda12x --upgrade
+        pip3 install cupy-cuda12x --upgrade
         git config --global core.compression 9
     - name: Build GPU4PySCF
       run: |
