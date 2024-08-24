@@ -154,8 +154,7 @@ class xc_dimensions(ctypes.Structure):
          ("v4lapl3tau", ctypes.c_int),
          ("v4lapl2tau2", ctypes.c_int),
          ("v4lapltau3", ctypes.c_int),
-         ("v4tau4", ctypes.c_int),
-         ]
+         ("v4tau4", ctypes.c_int)]
 
 
 class xc_func_type(ctypes.Structure):
