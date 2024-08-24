@@ -47,7 +47,7 @@ for path in path_list:
         break
 
 libgdft = load_library('libgdft')
-libgdft.xc_lda.argtypes = (
+libgdft.GDFT_xc_lda.argtypes = (
     ctypes.c_void_p,
     ctypes.c_void_p,
     ctypes.c_int,
@@ -55,7 +55,7 @@ libgdft.xc_lda.argtypes = (
     POINTER(xc_lda_out_params),
     POINTER(xc_lda_out_params))
 
-libgdft.xc_gga.argtypes = (
+libgdft.GDFT_xc_gga.argtypes = (
     ctypes.c_void_p,
     ctypes.c_void_p,
     ctypes.c_int,
@@ -64,7 +64,7 @@ libgdft.xc_gga.argtypes = (
     POINTER(xc_gga_out_params),
     POINTER(xc_gga_out_params))
 
-libgdft.xc_mgga.argtypes = (
+libgdft.GDFT_xc_mgga.argtypes = (
     ctypes.c_void_p,
     ctypes.c_void_p,
     ctypes.c_int,
@@ -227,7 +227,7 @@ class XCfun:
                     setattr(buf_params, label, buf[label].data.ptr)
                     setattr(out_params, label, output[label].data.ptr)
             stream = cupy.cuda.get_current_stream()
-            err = libgdft.xc_lda(
+            err = libgdft.GDFT_xc_lda(
                 stream.ptr,
                 self.xc_func,
                 npoints,
@@ -267,7 +267,7 @@ class XCfun:
                     setattr(out_params, label, output[label].data.ptr)
 
             stream = cupy.cuda.get_current_stream()
-            err = libgdft.xc_gga(
+            err = libgdft.GDFT_xc_gga(
                 stream.ptr,
                 self.xc_func,
                 npoints,
@@ -315,7 +315,7 @@ class XCfun:
                     setattr(buf_params, label, buf[label].data.ptr)
                     setattr(out_params, label, output[label].data.ptr)
             stream = cupy.cuda.get_current_stream()
-            err = libgdft.xc_mgga(
+            err = libgdft.GDFT_xc_mgga(
                 stream.ptr,
                 self.xc_func,
                 npoints,

@@ -22,6 +22,7 @@
 #include <dlfcn.h>
 #include <cuda_runtime.h>
 #include "libxc.h"
+#include "gint/cuda_alloc.cuh"
 
 #define THREADS 256
 
@@ -68,14 +69,14 @@ static void _add_out(double *out, const double *buf, double coef, int np, int di
 extern "C" {
 
 __host__
-void _memset_lda(xc_lda_out_params *out, int order, int np, xc_dimensions *dim){
+void _memset_lda(xc_lda_out_params *out, int order, int np, const xc_dimensions *dim){
     if(order >= 0) cudaMemset(out->zk, 0, sizeof(double)*np*dim->zk);
     if(order >= 1) cudaMemset(out->vrho, 0, sizeof(double)*np*dim->vrho);
     if(order >= 2) cudaMemset(out->v2rho2, 0, sizeof(double)*np*dim->v2rho2);
 }
 
 __host__
-void _memset_gga(xc_gga_out_params *out, int order, int np, xc_dimensions *dim){
+void _memset_gga(xc_gga_out_params *out, int order, int np, const xc_dimensions *dim){
     if(order >= 0) cudaMemset(out->zk, 0, sizeof(double)*np*dim->zk);
     if(order >= 1) cudaMemset(out->vrho, 0, sizeof(double)*np*dim->vrho);
     if(order >= 1) cudaMemset(out->vsigma, 0, sizeof(double)*np*dim->vsigma); // (sigma, lapl, tau)
@@ -85,7 +86,7 @@ void _memset_gga(xc_gga_out_params *out, int order, int np, xc_dimensions *dim){
 }
 
 __host__
-void _memset_mgga(xc_mgga_out_params *out, int order, int np, xc_dimensions *dim){
+void _memset_mgga(xc_mgga_out_params *out, int order, int np, const xc_dimensions *dim){
     if(order >= 0) cudaMemset(out->zk, 0, sizeof(double)*np*dim->zk);
 
     if(order >= 1) cudaMemset(out->vrho, 0, sizeof(double)*np*dim->vrho);
@@ -108,17 +109,18 @@ void _memset_mgga(xc_mgga_out_params *out, int order, int np, xc_dimensions *dim
 __host__
 int _xc_lda(const xc_func_type *func, int np, int order, const double *rho,
             xc_lda_out_params *out){
-    cudaDeviceSynchronize();
     if(func->info->lda == NULL){
         fprintf(stderr, "Nested xc functional is not supported\n");
         return 1;
     }
-    xc_dimensions* dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
-    memcpy(dim, &(func->dim), sizeof(xc_dimensions));
-   
+    //xc_dimensions* dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
+    //memcpy(dim, &(func->dim), sizeof(xc_dimensions));
+    //DEVICE_INIT(xc_dimensions, dim, &(func->dim), 1);
     if(order < 0) return 0;
+    const xc_dimensions *dim = &(func->dim);
     _memset_lda(out, order, np, dim);
-    cudaDeviceSynchronize();
+    //FREE(dim);
+
     if(func->info->lda != NULL){
         if(func->nspin == XC_UNPOLARIZED){
             if(func->info->lda->unpol[order] != NULL)
@@ -128,6 +130,11 @@ int _xc_lda(const xc_func_type *func, int np, int order, const double *rho,
                 func->info->lda->pol[order](func, np, rho, out);
         }
     }
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error of xc lda: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
     return 0;
 }
 
@@ -135,19 +142,25 @@ __host__
 int _xc_gga(const xc_func_type *func, int np, int order, const double *rho, const double *sigma,
             xc_gga_out_params *out){
     
-    cudaDeviceSynchronize();
     if(func->info->gga == NULL){
         fprintf(stderr, "Nested xc functional is not supported\n");
         return 1;
     }
         
-    xc_dimensions* dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
-    memcpy(dim, &(func->dim), sizeof(xc_dimensions));
-    
+    //xc_dimensions* dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
+    //memcpy(dim, &(func->dim), sizeof(xc_dimensions));
+    //DEVICE_INIT(xc_dimensions, dim, &(func->dim), 1);
     if(order < 0) return 0;
+    const xc_dimensions *dim = &(func->dim);
     _memset_gga(out, order, np, dim);
-    cudaDeviceSynchronize();
+    //FREE(dim);
     
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error of memset_gga: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+
     /* call the GGA routines */
     if(func->info->gga != NULL){
         if(func->nspin == XC_UNPOLARIZED){
@@ -158,6 +171,11 @@ int _xc_gga(const xc_func_type *func, int np, int order, const double *rho, cons
                 func->info->gga->pol[order](func, np, rho, sigma, out);
         }
     }
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error of xc_gga: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
     return 0;
 }
 
@@ -165,18 +183,25 @@ __host__
 int _xc_mgga(const xc_func_type *func, int np, int order, const double *rho, const double *sigma,
             const double *lapl, const double *tau,
             xc_mgga_out_params *out){
-    cudaDeviceSynchronize();
     if(func->info->mgga == NULL){
         fprintf(stderr, "Nested xc functional is not supported\n");
         return 1;
     }
     
-    xc_dimensions* dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
-    memcpy(dim, &(func->dim), sizeof(xc_dimensions));
-    
+    //xc_dimensions* dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
+    //memcpy(dim, &(func->dim), sizeof(xc_dimensions));
+    //DEVICE_INIT(xc_dimensions, dim, &(func->dim), 1);
     if(order < 0) return 0;
+    const xc_dimensions *dim = &(func->dim);
     _memset_mgga(out, order, np, dim);
-    cudaDeviceSynchronize();
+    //FREE(dim);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error of memset mgga: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+
     /* call the mGGA routines */
     if(func->info->mgga != NULL){
         if(func->nspin == XC_UNPOLARIZED){
@@ -187,11 +212,16 @@ int _xc_mgga(const xc_func_type *func, int np, int order, const double *rho, con
                 func->info->mgga->pol[order](func, np, rho, sigma, lapl, tau, out);
         }
     }
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error of xc mgga: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
     return 0;
 }
 
 __host__
-int xc_lda(cudaStream_t stream,
+int GDFT_xc_lda(cudaStream_t stream,
     const xc_func_type *func, int np, const double *rho,
     xc_lda_out_params *out, xc_lda_out_params *buf)
 {
@@ -204,8 +234,6 @@ int xc_lda(cudaStream_t stream,
     if(out->v3rho3 != NULL) order = 3;
     if(out->v4rho4 != NULL) order = 4;
 
-    cudaDeviceSynchronize();
-
     // If the functional is not a mix
     if(func->info->lda != NULL){
         ierr = _xc_lda(func, np, order, rho, out);
@@ -217,19 +245,19 @@ int xc_lda(cudaStream_t stream,
         return ierr;
     }
     int n_func_aux = func->n_func_aux;
-    xc_dimensions* dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
-    memcpy(dim, &(func->dim), sizeof(xc_dimensions));
+    //xc_dimensions* dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
+    //memcpy(dim, &(func->dim), sizeof(xc_dimensions));
+    //DEVICE_INIT(xc_dimensions, dim, &(func->dim), 1);
+    const xc_dimensions *dim = &(func->dim);
     _memset_lda(out, order, np, dim);
-    
+    //FREE(dim);
+
     dim3 threads(THREADS);
     dim3 blocks((np+THREADS-1)/THREADS);
     
     for (int ii=0; ii< n_func_aux; ii++){
-    	cudaDeviceSynchronize();
         xc_func_type *aux = func->func_aux[ii];
     	double coef = func->mix_coef[ii];
-
-	    memcpy(dim, &(func->dim), sizeof(xc_dimensions));
 	
 	    /* Evaluate the functional */
         switch(aux->info->family){
@@ -241,17 +269,11 @@ int xc_lda(cudaStream_t stream,
             }
         }
     }
-    free(dim);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error of xc lda: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
     return ierr;
 }
 
 __host__
-int xc_gga(cudaStream_t stream,
+int GDFT_xc_gga(cudaStream_t stream,
     const xc_func_type *func, int np, const double *rho, const double *sigma,
     xc_gga_out_params *out, xc_gga_out_params *buf)
 {
@@ -262,7 +284,6 @@ int xc_gga(cudaStream_t stream,
     if(out->v3rho3 != NULL) order = 3;
     if(out->v4rho4 != NULL) order = 4;
 
-    cudaDeviceSynchronize();
     // If the functional is not a mix
     int ierr = 0;
     if(func->info->gga != NULL){
@@ -275,18 +296,18 @@ int xc_gga(cudaStream_t stream,
         return ierr;
     }
     int n_func_aux = func->n_func_aux;
-    xc_dimensions *dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
-    memcpy(dim, &(func->dim), sizeof(xc_dimensions));
+    //xc_dimensions *dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
+    //memcpy(dim, &(func->dim), sizeof(xc_dimensions));
+    //DEVICE_INIT(xc_dimensions, dim, &(func->dim), 1);
+    const xc_dimensions *dim = &(func->dim);
     _memset_gga(out, order, np, dim);
-    
+    //FREE(dim);
+
     dim3 threads(THREADS);
     dim3 blocks((np+THREADS-1)/THREADS);
     for (int ii=0; ii< n_func_aux; ii++){
-    	cudaDeviceSynchronize();
 	    xc_func_type *aux = func->func_aux[ii];
         double coef = func->mix_coef[ii];
-
-	    memcpy(dim, &(func->dim), sizeof(xc_dimensions));
 
 	    /* Evaluate the functional */
         switch(aux->info->family){
@@ -304,17 +325,11 @@ int xc_gga(cudaStream_t stream,
             }
         }
     }
-    free(dim);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error of xc_gga: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
     return ierr;
 }
 
 __host__
-int xc_mgga(cudaStream_t stream,
+int GDFT_xc_mgga(cudaStream_t stream,
         const xc_func_type *func, int np,
         const double *rho, const double *sigma, const double *lapl, const double *tau,
         xc_mgga_out_params *out, xc_mgga_out_params *buf)
@@ -326,8 +341,6 @@ int xc_mgga(cudaStream_t stream,
     if(out->v2rho2 != NULL) order = 2;
     if(out->v3rho3 != NULL) order = 3;
     if(out->v4rho4 != NULL) order = 4;
-
-    cudaDeviceSynchronize();
 
     int ierr = 0;
     // If the functional is not a mix
@@ -341,19 +354,19 @@ int xc_mgga(cudaStream_t stream,
         return ierr;
     }
     int n_func_aux = func->n_func_aux;
-    xc_dimensions *dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
-    memcpy(dim, &(func->dim), sizeof(xc_dimensions));
+    //xc_dimensions *dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
+    //memcpy(dim, &(func->dim), sizeof(xc_dimensions));
+    //DEVICE_INIT(xc_dimensions, dim, &(func->dim), 1);
+    const xc_dimensions *dim = &(func->dim);
     _memset_mgga(out, order, np, dim);
-    
+    //FREE(dim);
+
     dim3 threads(THREADS);
     dim3 blocks((np+THREADS-1)/THREADS);
     
     for (int ii=0; ii< n_func_aux; ii++){
-    	cudaDeviceSynchronize();
     	xc_func_type *aux = func->func_aux[ii];
         double coef = func->mix_coef[ii];
-
-	    memcpy(dim, &(func->dim), sizeof(xc_dimensions));
 	
         /* Evaluate the functional */
         switch(aux->info->family){
@@ -377,13 +390,7 @@ int xc_mgga(cudaStream_t stream,
             }
         }
     }
-    free(dim);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error of xc mgga: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
+    return ierr;
 }
 
 }

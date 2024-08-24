@@ -14,18 +14,18 @@ extern "C" {
 #endif
 
 /* Get the literature reference for libxc */
-const char *xc_reference();
+const char *xc_reference(void);
 /* Get the doi for the literature reference for libxc */
-const char *xc_reference_doi();
+const char *xc_reference_doi(void);
 /* Get the key for the literature reference for libxc */
-const char *xc_reference_key();
+const char *xc_reference_key(void);
 
 /* Get the major, minor, and micro version of libxc */
 void xc_version(int *major, int *minor, int *micro);
 /* Get the version of libxc as a string */
-const char *xc_version_string();
+const char *xc_version_string(void);
 
-//#include <xc_version.h>
+#include <xc_version.h>
 #include <stddef.h>
 
 #define XC_UNPOLARIZED          1
@@ -45,6 +45,9 @@ const char *xc_version_string();
 #define XC_FAMILY_MGGA          4
 #define XC_FAMILY_LCA           8
 #define XC_FAMILY_OEP          16
+#define XC_FAMILY_HYB_GGA      32
+#define XC_FAMILY_HYB_MGGA     64
+#define XC_FAMILY_HYB_LDA     128
 
 /* flags that can be used in info.flags. Don't reorder these since it
    will break the ABI of the library. */
@@ -56,7 +59,15 @@ const char *xc_version_string();
 #define XC_FLAGS_1D               (1 <<  5) /*    32 */
 #define XC_FLAGS_2D               (1 <<  6) /*    64 */
 #define XC_FLAGS_3D               (1 <<  7) /*   128 */
+/* range separation via error function (usual case) */
+#define XC_FLAGS_HYB_CAM          (1 <<  8) /*   256 */
+/* range separation via Yukawa function (rare) */
+#define XC_FLAGS_HYB_CAMY         (1 <<  9) /*   512 */
 #define XC_FLAGS_VV10             (1 << 10) /*  1024 */
+/* range separation via error function i.e. same as XC_FLAGS_HYB_CAM; deprecated */
+#define XC_FLAGS_HYB_LC           (1 << 11) /*  2048 */
+/* range separation via Yukawa function i.e. same as XC_FLAGS_HYB_CAMY; deprecated */
+#define XC_FLAGS_HYB_LCY          (1 << 12) /*  4096 */
 #define XC_FLAGS_STABLE           (1 << 13) /*  8192 */
 /* functionals marked with the development flag may have significant problems in the implementation */
 #define XC_FLAGS_DEVELOPMENT      (1 << 14) /* 16384 */
@@ -70,34 +81,6 @@ const char *xc_version_string();
 
 /* This magic value means use default parameter */
 #define XC_EXT_PARAMS_DEFAULT   -999998888
-
-/* Different flavors of many-body terms used in hybrids
-   The Fock term to be added to the Hamiltonian reads
-
-     F = -1/2 <i j| f(r_12)/r_12 |j i>
-
-   where the function f(r) is
-
-   *) XC_HYB_FOCK           f(r) = coeff
-   *) XC_HYB_ERF_SR         f(r) = coeff * (1 - erf(omega r))
-   *) XC_HYB_YUKAWA_SR      f(r) = coeff * exp(-omega r)
-   *) XC_HYB_GAUSSIAN_SR    f(r) = coeff * 2*omega/sqrt(pi) * exp(-omega^2 r^2)
-*/
-#define XC_HYB_NONE             0
-#define XC_HYB_FOCK             1  /* Normal hybrid */
-#define XC_HYB_PT2              2  /* Used for double hybrids */
-#define XC_HYB_ERF_SR           4  /* Short range of range separated - erf version */
-#define XC_HYB_YUKAWA_SR        8  /* Short range of range separated - Yakawa version */
-#define XC_HYB_GAUSSIAN_SR     16  /* Short range of range separated - Gaussian version */
-
-/* Different types of hybrid functionals. */
-#define XC_HYB_SEMILOCAL        0  /* Standard semi-local functional (not a hybrid) */
-#define XC_HYB_HYBRID           1  /* Standard hybrid functional */
-#define XC_HYB_CAM              2  /* Coulomb attenuated hybrid */
-#define XC_HYB_CAMY             3  /* Coulomb attenuated hybrid with a Yukawa screening */
-#define XC_HYB_CAMG             4  /* Coulomb attenuated hybrid with a Gaussian screening */
-#define XC_HYB_DOUBLE_HYBRID    5  /* Double hybrid */
-#define XC_HYB_MIXTURE      32768  /* More complicated mixture (have to check individual terms) */
 
 #define XC_MAX_REFERENCES       5
 
@@ -334,18 +317,18 @@ struct xc_func_type{
 
   /**
      Parameters for range-separated hybrids
-     hyb_type[i]:  XC_HYB_NONE, XC_HYB_FOCK, XC_HYB_ERF_SR, etc.
-     hyb_omega[i]: the range separation constant
-     hyb_coeff[i]: fraction of exchange, used both for
+     cam_omega: the range separation constant
+     cam_alpha: fraction of full Hartree-Fock exchange, used both for
                 usual hybrids as well as range-separated ones
+     cam_beta:  fraction of short-range only(!) exchange in
+                range-separated hybrids
 
      N.B. Different conventions for alpha and beta can be found in
      literature. In the convention used in libxc, at short range the
      fraction of exact exchange is cam_alpha+cam_beta, while at long
      range it is cam_alpha.
   */
-  int hyb_number_terms, *hyb_type;
-  double *hyb_coeff, *hyb_omega;
+  double cam_omega, cam_alpha, cam_beta;
 
   double nlc_b;                /* Non-local correlation, b parameter */
   double nlc_C;                /* Non-local correlation, C parameter */
@@ -356,6 +339,8 @@ struct xc_func_type{
   double *ext_params;
   /* This is a placeholder for structs of parameters that are used in the Maple generated sources */
   void *params;
+  /* This is sizeof structs of parameters*/
+  int params_size;
 
   double dens_threshold;       /* functional is put to zero for spin-densities smaller than this */
   double zeta_threshold;       /* idem for the absolute value of zeta */
@@ -374,9 +359,9 @@ char *xc_functional_get_name(int number);
 int   xc_family_from_id(int id, int *family, int *number);
 
 /** The number of functionals implemented in this version of libxc */
-int   xc_number_of_functionals();
+int   xc_number_of_functionals(void);
 /** The maximum name length of any functional */
-int   xc_maximum_name_length();
+int   xc_maximum_name_length(void);
 /** Returns the available functional number sorted by id */
 void  xc_available_functional_numbers(int *list);
 /** Returns the available functional number sorted by the functionals'
@@ -387,7 +372,7 @@ void  xc_available_functional_numbers_by_name(int *list);
 void  xc_available_functional_names(char **list);
 
 /** Dynamically allocates a libxc functional; which will also need to be initialized. */
-xc_func_type *xc_func_alloc();
+xc_func_type *xc_func_alloc(void);
 /** Initializes a functional by id with nspin spin channels */
 int   xc_func_init(xc_func_type *p, int functional, int nspin);
 /** Destructor for an initialized functional */
@@ -416,6 +401,187 @@ void  xc_func_set_ext_params_name(xc_func_type *p, const char *name, double par)
 double xc_func_get_ext_params_name(const xc_func_type *p, const char *name);
 /** Gets an external parameter by index */
 double xc_func_get_ext_params_value(const xc_func_type *p, int number);
+
+/** New API */
+void xc_lda_new (const xc_func_type *p, int order, size_t np,
+             const double *rho, xc_lda_out_params *out);
+void xc_gga_new (const xc_func_type *p, int order, size_t np,
+             const double *rho, const double *sigma, xc_gga_out_params *out);
+void xc_mgga_new(const xc_func_type *func, int order, size_t np,
+             const double *rho, const double *sigma, const double *lapl,
+             const double *tau, xc_mgga_out_params *out);
+
+/** Evaluate an     LDA functional */
+void xc_lda (const xc_func_type *p, size_t np, const double *rho,
+             double *zk LDA_OUT_PARAMS_NO_EXC(XC_COMMA double *, ));
+/** Evaluate a      GGA functional */
+void xc_gga (const xc_func_type *p, size_t np, const double *rho, const double *sigma,
+             double *zk GGA_OUT_PARAMS_NO_EXC(XC_COMMA double *, ));
+/** Evaluate a meta-GGA functional */
+void xc_mgga(const xc_func_type *p, size_t np,
+             const double *rho, const double *sigma, const double *lapl_rho, const double *tau,
+             double *zk MGGA_OUT_PARAMS_NO_EXC(XC_COMMA double *, ));
+
+/** Evaluates the energy density for an     LDA functional */
+void xc_lda_exc (const xc_func_type *p, size_t np, const double *rho, double *zk);
+/** Evaluates the energy density for a      GGA functional */
+void xc_gga_exc (const xc_func_type *p, size_t np, const double *rho, const double *sigma,
+		 double *zk);
+/** Evaluates the energy density for a meta-GGA functional */
+void xc_mgga_exc(const xc_func_type *p, size_t np,
+     const double *rho, const double *sigma, const double *lapl, const double *tau,
+     double *zk);
+
+/** Evaluates the energy density and its first derivative for an     LDA functional */
+void xc_lda_exc_vxc (const xc_func_type *p, size_t np, const double *rho, double *zk, double *vrho);
+/** Evaluates the energy density and its first derivative for a      GGA functional */
+void xc_gga_exc_vxc (const xc_func_type *p, size_t np, const double *rho, const double *sigma,
+		 double *zk, double *vrho, double *vsigma);
+/** Evaluates the energy density and its first derivative for a meta-GGA functional */
+void xc_mgga_exc_vxc(const xc_func_type *p, size_t np,
+     const double *rho, const double *sigma, const double *lapl, const double *tau,
+     double *zk, double *vrho, double *vsigma, double *vlapl, double *vtau);
+
+/** Evaluates the first derivative of the energy density for an     LDA functional */
+void xc_lda_vxc (const xc_func_type *p, size_t np, const double *rho, double *vrho);
+/** Evaluates the first derivative of the energy density for a      GGA functional */
+void xc_gga_vxc (const xc_func_type *p, size_t np, const double *rho, const double *sigma,
+		 double *vrho, double *vsigma);
+/** Evaluates the first derivative of the energy density for a meta-GGA functional */
+void xc_mgga_vxc(const xc_func_type *p, size_t np,
+     const double *rho, const double *sigma, const double *lapl, const double *tau,
+     double *vrho, double *vsigma, double *vlapl, double *vtau);
+
+/** Evaluates the energy density and its first and second derivatives for an     LDA functional */
+void xc_lda_exc_vxc_fxc (const xc_func_type *p, size_t np, const double *rho, double *zk, double *vrho, double *v2rho2);
+/** Evaluates the energy density and its first and second derivatives for a      GGA functional */
+void xc_gga_exc_vxc_fxc (const xc_func_type *p, size_t np, const double *rho, const double *sigma,
+                         double *zk, double *vrho, double *vsigma, double *v2rho2, double *v2rhosigma, double *v2sigma2);
+/** Evaluates the energy density and its first and second derivatives for a meta-GGA functional */
+void xc_mgga_exc_vxc_fxc(const xc_func_type *p, size_t np,
+                         const double *rho, const double *sigma, const double *lapl, const double *tau,
+                         double *zk, double *vrho, double *vsigma, double *vlapl, double *vtau,
+                         double *v2rho2, double *v2rhosigma, double *v2rholapl, double *v2rhotau,
+                         double *v2sigma2, double *v2sigmalapl, double *v2sigmatau, double *v2lapl2,
+                         double *v2lapltau, double *v2tau2);
+
+/** Evaluates the first and second derivatives for an     LDA functional */
+void xc_lda_vxc_fxc (const xc_func_type *p, size_t np, const double *rho, double *vrho, double *v2rho2);
+/** Evaluates the first and second derivatives for a      GGA functional */
+void xc_gga_vxc_fxc (const xc_func_type *p, size_t np, const double *rho, const double *sigma,
+                         double *vrho, double *vsigma, double *v2rho2, double *v2rhosigma, double *v2sigma2);
+/** Evaluates the first and second derivatives for a meta-GGA functional */
+void xc_mgga_vxc_fxc(const xc_func_type *p, size_t np,
+                         const double *rho, const double *sigma, const double *lapl, const double *tau,
+                         double *vrho, double *vsigma, double *vlapl, double *vtau,
+                         double *v2rho2, double *v2rhosigma, double *v2rholapl, double *v2rhotau,
+                         double *v2sigma2, double *v2sigmalapl, double *v2sigmatau, double *v2lapl2,
+                         double *v2lapltau, double *v2tau2);
+
+/** Evaluates the second derivative for an     LDA functional */
+void xc_lda_fxc (const xc_func_type *p, size_t np, const double *rho, double *v2rho2);
+/** Evaluates the second derivative for a      GGA functional */
+void xc_gga_fxc (const xc_func_type *p, size_t np, const double *rho, const double *sigma,
+		 double *v2rho2, double *v2rhosigma, double *v2sigma2);
+/** Evaluates the second derivative for a meta-GGA functional */
+void xc_mgga_fxc(const xc_func_type *p, size_t np,
+     const double *rho, const double *sigma, const double *lapl, const double *tau,
+     double *v2rho2, double *v2rhosigma, double *v2rholapl, double *v2rhotau,
+     double *v2sigma2, double *v2sigmalapl, double *v2sigmatau, double *v2lapl2,
+     double *v2lapltau, double *v2tau2);
+
+/** Evaluates the energy density and its first, second, and third derivatives for an     LDA functional */
+void xc_lda_exc_vxc_fxc_kxc (const xc_func_type *p, size_t np, const double *rho, double *zk, double *vrho, double *v2rho2, double *v3rho3);
+/** Evaluates the energy density and its first, second, and third derivatives for a      GGA functional */
+void xc_gga_exc_vxc_fxc_kxc (const xc_func_type *p, size_t np, const double *rho, const double *sigma,
+                             double *zk, double *vrho, double *vsigma, double *v2rho2, double *v2rhosigma, double *v2sigma2,
+                             double *v3rho3, double *v3rho2sigma, double *v3rhosigma2, double *v3sigma3);
+/** Evaluates the energy density and its first, second, and third derivatives for a meta-GGA functional */
+void xc_mgga_exc_vxc_fxc_kxc(const xc_func_type *p, size_t np,
+                             const double *rho, const double *sigma, const double *lapl, const double *tau,
+                             double *zk, double *vrho, double *vsigma, double *vlapl, double *vtau,
+                             double *v2rho2, double *v2rhosigma, double *v2rholapl, double *v2rhotau,
+                             double *v2sigma2, double *v2sigmalapl, double *v2sigmatau, double *v2lapl2,
+                             double *v2lapltau, double *v2tau2,
+                             double *v3rho3, double *v3rho2sigma, double *v3rho2lapl, double *v3rho2tau,
+                             double *v3rhosigma2, double *v3rhosigmalapl, double *v3rhosigmatau,
+                             double *v3rholapl2, double *v3rholapltau, double *v3rhotau2, double *v3sigma3,
+                             double *v3sigma2lapl, double *v3sigma2tau, double *v3sigmalapl2, double *v3sigmalapltau,
+                             double *v3sigmatau2, double *v3lapl3, double *v3lapl2tau, double *v3lapltau2,
+                             double *v3tau3);
+
+/** Evaluates the first, second, and third derivatives for an     LDA functional */
+void xc_lda_vxc_fxc_kxc (const xc_func_type *p, size_t np, const double *rho, double *vrho, double *v2rho2, double *v3rho3);
+/** Evaluates the first, second, and third derivatives for a      GGA functional */
+void xc_gga_vxc_fxc_kxc (const xc_func_type *p, size_t np, const double *rho, const double *sigma,
+                             double *vrho, double *vsigma, double *v2rho2, double *v2rhosigma, double *v2sigma2,
+                             double *v3rho3, double *v3rho2sigma, double *v3rhosigma2, double *v3sigma3);
+/** Evaluates the first, second, and third derivatives for a meta-GGA functional */
+void xc_mgga_vxc_fxc_kxc(const xc_func_type *p, size_t np,
+                             const double *rho, const double *sigma, const double *lapl, const double *tau,
+                             double *vrho, double *vsigma, double *vlapl, double *vtau,
+                             double *v2rho2, double *v2rhosigma, double *v2rholapl, double *v2rhotau,
+                             double *v2sigma2, double *v2sigmalapl, double *v2sigmatau, double *v2lapl2,
+                             double *v2lapltau, double *v2tau2,
+                             double *v3rho3, double *v3rho2sigma, double *v3rho2lapl, double *v3rho2tau,
+                             double *v3rhosigma2, double *v3rhosigmalapl, double *v3rhosigmatau,
+                             double *v3rholapl2, double *v3rholapltau, double *v3rhotau2, double *v3sigma3,
+                             double *v3sigma2lapl, double *v3sigma2tau, double *v3sigmalapl2, double *v3sigmalapltau,
+                             double *v3sigmatau2, double *v3lapl3, double *v3lapl2tau, double *v3lapltau2,
+                             double *v3tau3);
+
+/** Evaluates the third derivative for an     LDA functional */
+void xc_lda_kxc (const xc_func_type *p, size_t np, const double *rho, double *v3rho3);
+/** Evaluates the third derivative for a      GGA functional */
+void xc_gga_kxc (const xc_func_type *p, size_t np, const double *rho, const double *sigma,
+		 double *v3rho3, double *v3rho2sigma, double *v3rhosigma2, double *v3sigma3);
+/** Evaluates the third derivative for a meta-GGA functional */
+void xc_mgga_kxc(const xc_func_type *p, size_t np,
+     const double *rho, const double *sigma, const double *lapl, const double *tau,
+     double *v3rho3, double *v3rho2sigma, double *v3rho2lapl, double *v3rho2tau,
+     double *v3rhosigma2, double *v3rhosigmalapl, double *v3rhosigmatau,
+     double *v3rholapl2, double *v3rholapltau, double *v3rhotau2, double *v3sigma3,
+     double *v3sigma2lapl, double *v3sigma2tau, double *v3sigmalapl2, double *v3sigmalapltau,
+     double *v3sigmatau2, double *v3lapl3, double *v3lapl2tau, double *v3lapltau2,
+     double *v3tau3);
+
+/** Evaluates the fourth derivative for an     LDA functional */
+void xc_lda_lxc (const xc_func_type *p, size_t np, const double *rho, double *v4rho4);
+/** Evaluates the fourth derivative for a      GGA functional */
+void xc_gga_lxc (const xc_func_type *p, size_t np, const double *rho, const double *sigma,
+     double *v4rho4,  double *v4rho3sigma,  double *v4rho2sigma2,  double *v4rhosigma3,
+     double *v4sigma4);
+/** Evaluates the fourth derivative for a meta-GGA functional */
+void xc_mgga_lxc(const xc_func_type *p, size_t np,
+     const double *rho, const double *sigma, const double *lapl, const double *tau,
+     double *v4rho4, double *v4rho3sigma, double *v4rho3lapl, double *v4rho3tau, double *v4rho2sigma2,
+     double *v4rho2sigmalapl, double *v4rho2sigmatau, double *v4rho2lapl2, double *v4rho2lapltau,
+     double *v4rho2tau2, double *v4rhosigma3, double *v4rhosigma2lapl, double *v4rhosigma2tau,
+     double *v4rhosigmalapl2, double *v4rhosigmalapltau, double *v4rhosigmatau2,
+     double *v4rholapl3, double *v4rholapl2tau, double *v4rholapltau2, double *v4rhotau3,
+     double *v4sigma4, double *v4sigma3lapl, double *v4sigma3tau, double *v4sigma2lapl2,
+     double *v4sigma2lapltau, double *v4sigma2tau2, double *v4sigmalapl3, double *v4sigmalapl2tau,
+     double *v4sigmalapltau2, double *v4sigmatau3, double *v4lapl4, double *v4lapl3tau,
+     double *v4lapl2tau2, double *v4lapltau3, double *v4tau4);
+
+/* Calculate asymptotic value of the AK13 potential */
+double xc_gga_ak13_get_asymptotic (double homo);
+/* Calculate asymptotic value of the AK13 potential with customized parameter values */
+double xc_gga_ak13_pars_get_asymptotic (double homo, const double *ext_params);
+
+/* Returns fraction of Hartree-Fock exchange in a global hybrid functional */
+double xc_hyb_exx_coef(const xc_func_type *p);
+/* Returns fraction of Hartee-Fock exchange and short-range exchange in a range-separated hybrid functional  */
+void xc_hyb_cam_coef(const xc_func_type *p, double *omega, double *alpha, double *beta);
+/* Returns the b and C coefficients for a non-local VV10 correlation kernel */
+void xc_nlc_coef(const xc_func_type *p, double *nlc_b, double *nlc_C);
+
+/* If this is a mixed functional, returns the number of auxiliary functions. Otherwise returns zero. */
+int xc_num_aux_funcs(const xc_func_type *p);
+/* Gets the IDs of the auxiliary functions */
+void xc_aux_func_ids(const xc_func_type *p, int *ids);
+/* Gets the weights of the auxiliary functions */
+void xc_aux_func_weights(const xc_func_type *p, double *weights);
 
 #ifdef __cplusplus
 }

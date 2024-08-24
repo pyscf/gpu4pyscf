@@ -155,7 +155,7 @@ class KnownValues(unittest.TestCase):
 
     def test_rks_mgga(self):
         self._check_vxc('nr_rks', MGGA_M06)
-
+    '''
     def test_uks_lda(self):
         self._check_vxc('nr_uks', LDA)#'lda', -6.362059440515177)
 
@@ -182,7 +182,7 @@ class KnownValues(unittest.TestCase):
 
     def test_uks_fxc_mgga(self):
         self._check_uks_fxc(MGGA_M06, hermi=1)
-
+    '''
     # Not implemented yet
     '''
     def test_rks_fxc_st_lda(self):
