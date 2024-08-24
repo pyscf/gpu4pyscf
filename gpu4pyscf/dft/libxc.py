@@ -158,14 +158,12 @@ class XCfun:
             self.func_id = _libxc.xc_functional_get_number(ctypes.c_char_p(xc.encode()))
         else:
             self.func_id = xc
-        cupy.cuda.runtime.deviceSynchronize()
         ret = _libxc.xc_func_init(self.xc_func, self.func_id, self._spin)
         if ret != 0:
             raise RuntimeError('failed to initialize xc fun')
         self._family = dft.libxc.xc_type(xc)
 
         self.xc_func_sizes = {}
-        cupy.cuda.runtime.deviceSynchronize()
         for attr in dir(self.xc_func.contents.dim):
             if "_" not in attr:
                 self.xc_func_sizes[attr] = getattr(self.xc_func.contents.dim, attr)
@@ -173,7 +171,6 @@ class XCfun:
         if self.xc_func is None:
             return
         if _libxc is not None:
-            cupy.cuda.runtime.deviceSynchronize()
             _libxc.xc_func_end(self.xc_func)
             _libxc.xc_func_free(self.xc_func)
 

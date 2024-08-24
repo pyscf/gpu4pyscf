@@ -155,7 +155,7 @@ class KnownValues(unittest.TestCase):
 
     def test_rks_mgga(self):
         self._check_vxc('nr_rks', MGGA_M06)
-    '''
+    
     def test_uks_lda(self):
         self._check_vxc('nr_uks', LDA)#'lda', -6.362059440515177)
 
@@ -193,7 +193,6 @@ class KnownValues(unittest.TestCase):
 
     def test_rks_fxc_st_mgga(self):
         self._check_rks_fxc_st('m06', 1.2456987899337242)
-    '''
 
     def test_vv10(self):
         np.random.seed(10)

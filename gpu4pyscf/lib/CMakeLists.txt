@@ -123,7 +123,7 @@ if(BUILD_LIBXC)
   include(ExternalProject)
   ExternalProject_Add(libxc
     GIT_REPOSITORY https://github.com/wxj6000/libxc.git
-    GIT_TAG e04322c8cf5d7b38c7a1b29f35e51ccd8a59c1d4
+    GIT_TAG b225c254c063e1de835a4425115c9a6377478b32
     PREFIX ${PROJECT_BINARY_DIR}/deps
     INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
     CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON
