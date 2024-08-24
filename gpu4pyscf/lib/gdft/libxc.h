@@ -25,7 +25,7 @@ void xc_version(int *major, int *minor, int *micro);
 /* Get the version of libxc as a string */
 const char *xc_version_string(void);
 
-#include <xc_version.h>
+//#include <xc_version.h>
 #include <stddef.h>
 
 #define XC_UNPOLARIZED          1
