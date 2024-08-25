@@ -28,7 +28,7 @@
 #include "nr_eval_gto.cuh"
 #include "contract_rho.cuh"
 
-#define NG_PER_BLOCK       256
+#define NG_PER_BLOCK      256
 #define LMAX            8
 #define GTO_MAX_CART     15
 
@@ -52,8 +52,9 @@ static void _nabla1(double *fx1, double *fy1, double *fz1,
 }
 
 __global__
-void _screen_index(int *non0shl_idx, double cutoff, int l, int ish, int nprim, double *coords, int ngrids){
+static void _screen_index(int *non0shl_idx, double cutoff, int ang, int nprim, double *coords, int ngrids, int bas_offset){
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    int ish = blockIdx.y + bas_offset;
     const bool active = grid_id < ngrids;
 
     int natm = c_envs.natm;
@@ -63,7 +64,7 @@ void _screen_index(int *non0shl_idx, double cutoff, int l, int ish, int nprim, d
     if (active) {
         gridx = coords[3*grid_id + 0];
         gridy = coords[3*grid_id + 1];
-        gridz = coords[3*grid_id + 2];        
+        gridz = coords[3*grid_id + 2];
     } else {
         gridx = 0.0;
         gridy = 0.0;
@@ -91,21 +92,21 @@ void _screen_index(int *non0shl_idx, double cutoff, int l, int ish, int nprim, d
     for (int ip = 0; ip < nprim; ++ip) {
         gto_sup += coeffs[ip] * exp(-exps[ip] * rr);
     }
-    gto_sup *= pow(r,l);
+    gto_sup *= pow(r,ang);
     int is_large = fabs(gto_sup) > cutoff;
-    
+
     // Reduce and write to global memory
-    unsigned int tid = threadIdx.x;
+    unsigned int tx = threadIdx.x;
     __shared__ int sdata[NG_PER_BLOCK];
-    sdata[tid] = active ? is_large : 0;
+    sdata[tx] = active ? is_large : 0;
     __syncthreads();
     for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (tid < s) {
-            sdata[tid] = sdata[tid] || sdata[tid + s];
+        if (tx < s) {
+            sdata[tx] = sdata[tx] || sdata[tx + s];
         }
         __syncthreads();
     }
-    if (tid == 0 && active){
+    if (tx == 0 && active){
         atomicOr(non0shl_idx + ish, sdata[0]);
     }
 }
@@ -1888,21 +1889,31 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
 }
 
 int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
-                 double *grids, int ngrids, int *bas_loc, int nbas, int *bas)
+                 double *grids, int ngrids, int *ctr_offsets, int nctr, int *bas)
 {
     dim3 threads(NG_PER_BLOCK);
     dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
 
-    for (int shl_id = 0; shl_id < nbas; ++shl_id) {
-        int l = bas[ANG_OF+shl_id*BAS_SLOTS];
-        int nprim = bas[NPRIM_OF+shl_id*BAS_SLOTS];
-        _screen_index<<<blocks, threads, 0, stream>>>(non0shl_idx, cutoff, l, shl_id, nprim, grids, ngrids);
-
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA Error of GDFTscreen_index: %s\n", cudaGetErrorString(err));
+    for (int ictr = 0; ictr < nctr; ictr++){
+        int ish = ctr_offsets[ictr];
+        const int l =  bas[ANG_OF+ish*BAS_SLOTS];
+        int nprim = bas[NPRIM_OF+ish*BAS_SLOTS];
+        int bas_offset = ctr_offsets[ictr];
+        blocks.y = ctr_offsets[ictr+1] - bas_offset;
+        if (blocks.y == 0){
+            continue;
+        }
+        if (l > 8){
+            fprintf(stderr, "l = %d not supported\n", l);
             return 1;
         }
+        _screen_index<<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, l, nprim, grids, ngrids, bas_offset);
+    }
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error of GDFTscreen_index: %s\n", cudaGetErrorString(err));
+        return 1;
     }
     return 0;
 }

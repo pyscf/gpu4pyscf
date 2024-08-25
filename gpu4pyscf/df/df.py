@@ -273,12 +273,15 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
         row = intopt.ao_pairs_row[cp_ij_id] - i0
         col = intopt.ao_pairs_col[cp_ij_id] - j0
 
-        ints_slices = ints_slices[:,col,row]
+        ints_slices_f= cupy.empty([naoaux,len(row)], order='F')
+        ints_slices_f[:] = ints_slices[:,col,row]
+        ints_slices = None
+
         if cd_low.tag == 'eig':
-            cderi_block = cupy.dot(cd_low.T, ints_slices)
+            cderi_block = cupy.dot(cd_low.T, ints_slices_f)
             ints_slices = None
         elif cd_low.tag == 'cd':
-            cderi_block = solve_triangular(cd_low_f, ints_slices, lower=True, overwrite_b=True)
+            cderi_block = solve_triangular(cd_low_f, ints_slices_f, lower=True, overwrite_b=True)
         ij0, ij1 = count, count+cderi_block.shape[1]
         count = ij1
         if isinstance(cderi, cupy.ndarray):
@@ -288,6 +291,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
                 for i in range(naux):
                     cderi_block[i].get(out=cderi[i,ij0:ij1])
         t1 = log.timer_debug1(f'solve {cp_ij_id} / {nq}', *t1)
+
     if not use_gpu_memory:
         cupy.cuda.Device().synchronize()
     return cderi

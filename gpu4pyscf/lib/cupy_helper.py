@@ -796,4 +796,3 @@ def grouped_gemm(As, Bs, Cs=None):
     if err != 0:
         raise RuntimeError('failed in grouped_gemm kernel')
     return Cs
-

@@ -1452,8 +1452,8 @@ def _sparse_index(mol, coords, l_ctr_offsets):
     stream = cupy.cuda.get_current_stream()
     cutoff = AO_THRESHOLD
     ng = coords.shape[0]
+    nctr = len(l_ctr_offsets) - 1
     ao_loc = mol.ao_loc_nr()
-    nbas = mol.nbas
     non0shl_idx = cupy.zeros(len(ao_loc)-1, dtype=np.int32)
     libgdft.GDFTscreen_index(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -1461,8 +1461,8 @@ def _sparse_index(mol, coords, l_ctr_offsets):
         ctypes.c_double(cutoff),
         ctypes.cast(coords.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ng),
-        ao_loc.ctypes.data_as(ctypes.c_void_p),
-        ctypes.c_int(nbas),
+        l_ctr_offsets.ctypes.data_as(ctypes.c_void_p),
+        ctypes.c_int(nctr),
         mol._bas.ctypes.data_as(ctypes.c_void_p))
     non0shl_idx = non0shl_idx.get()
 
@@ -1485,6 +1485,7 @@ def _sparse_index(mol, coords, l_ctr_offsets):
             non0ao_idx += range(p0,p1)
         else:
             zero_idx += range(p0,p1)
+
     idx = np.asarray(non0ao_idx, dtype=np.int32)
     zero_idx = np.asarray(zero_idx, dtype=np.int32)
     pad = (len(idx) + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT - len(idx)

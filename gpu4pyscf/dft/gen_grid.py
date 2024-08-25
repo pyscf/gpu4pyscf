@@ -30,14 +30,15 @@ import ctypes
 import numpy
 import cupy
 from pyscf import lib
-from pyscf.lib import logger
 from pyscf import gto
 from pyscf.gto.eval_gto import BLKSIZE, NBINS, CUTOFF, make_screen_index
 from pyscf import __config__
 from cupyx.scipy.spatial.distance import cdist
+from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf import __config__ as __gpu4pyscf_config__
+
 libdft = lib.load_library('libdft')
 libgdft = load_library('libgdft')
 
@@ -189,7 +190,7 @@ def gen_grids_partition(atm_coords, coords, a):
     assert ngrids < 65535 * 16
 
     pbecke = cupy.empty([natm, ngrids], order='C')
-    atm_coords = cupy.asarray(atm_coords, order='F')
+    #atm_coords = cupy.asarray(atm_coords, order='F')
     err = libgdft.GDFTgen_grid_partition(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(pbecke.data.ptr, ctypes.c_void_p),
@@ -200,7 +201,7 @@ def gen_grids_partition(atm_coords, coords, a):
         ctypes.c_int(natm)
     )
     if err != 0:
-        raise RuntimeError('CUDA Error')
+        raise RuntimeError('CUDA Error in grids_partition kernel')
     return pbecke
 
 def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
@@ -334,6 +335,7 @@ def get_partition(mol, atom_grids_tab,
     assert radii_adjust == radi.treutler_atomic_radii_adjust
     a = -radi.get_treutler_fac(mol, atomic_radii)
     #a = -radi.get_becke_fac(mol, atomic_radii)
+    atm_coords = cupy.asarray(atm_coords, order='F')
     for ia in range(mol.natm):
         coords, vol = atom_grids_tab[mol.atom_symbol(ia)]
         coords = coords + atm_coords[ia]
@@ -341,7 +343,6 @@ def get_partition(mol, atom_grids_tab,
         weights = vol * pbecke[ia] * (1./pbecke.sum(axis=0))
         coords_all.append(coords)
         weights_all.append(weights)
-
     if concat:
         coords_all = cupy.vstack(coords_all)
         weights_all = cupy.hstack(weights_all)
@@ -403,7 +404,6 @@ def atomic_group_grids(mol, coords):
         next_node = numpy.argmin(distances_to_unvisited)
         path.append(next_node)
         current_node = next_node
-
     atom_coords = cupy.asarray(atom_coords[path])
 
     coords = cupy.asarray(coords, order='F')
@@ -420,7 +420,6 @@ def atomic_group_grids(mol, coords):
     )
     if err != 0:
         raise RuntimeError('CUDA Error')
-
     idx = group_ids.argsort()
     return idx
 
@@ -505,7 +504,6 @@ class Grids(lib.StreamObject):
             mol, self.atom_grid, self.radi_method, self.level, self.prune, **kwargs)
         self.coords, self.weights = self.get_partition(
             mol, atom_grids_tab, self.radii_adjust, self.atomic_radii, self.becke_scheme)
-
         if self.alignment > 1:
             padding = _padding_size(self.size, self.alignment)
             logger.debug(self, 'Padding %d grids', padding)
@@ -514,7 +512,6 @@ class Grids(lib.StreamObject):
                 self.coords = cupy.vstack(
                     [self.coords, numpy.repeat([[1e4]*3], padding, axis=0)])
                 self.weights = cupy.hstack([self.weights, numpy.zeros(padding)])
-
         if sort_grids:
             #idx = arg_group_grids(mol, self.coords)
             idx = atomic_group_grids(mol, self.coords)

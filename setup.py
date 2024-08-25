@@ -142,6 +142,6 @@ setup(
         'pyscf-dispersion',
         f'cupy-cuda{CUDA_VERSION}',
         'geometric',
-        f'gpu4pyscf-libxc-cuda{CUDA_VERSION}',
+        f'gpu4pyscf-libxc-cuda{CUDA_VERSION}>=0.5',
     ]
 )
