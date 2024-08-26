@@ -53,7 +53,7 @@ def tearDownModule():
 eps = 1e-3
 
 class KnownValues(unittest.TestCase):
-    def test_rks_geomopt(self):
+    def test_df_rks_geomopt(self):
         mf = rks.RKS(mol, xc=xc).density_fit()
         mf.disp = disp
         mf.grids.level = grids_level
@@ -68,7 +68,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(coords - coords_qchem) < 1e-4
 
-    def test_rhf_geomopt(self):
+    def test_df_rhf_geomopt(self):
         mf = scf.RHF(mol).density_fit()
         mf.kernel()
         mol_eq = optimize(mf, maxsteps=20)
@@ -81,7 +81,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(coords - coords_qchem) < 1e-4
 
-    def test_uks_geomopt(self):
+    def test_df_uks_geomopt(self):
         mf = uks.UKS(mol, xc=xc, disp=disp).density_fit()
         mf.grids.level = grids_level
         mf.kernel()
@@ -94,7 +94,7 @@ class KnownValues(unittest.TestCase):
             [0.7617088263,    -0.0000000000,    -0.4691011328]])
         assert np.linalg.norm(coords - coords_qchem) < 1e-4
 
-    def test_uhf_geomopt(self):
+    def test_df_uhf_geomopt(self):
         mf = scf.UHF(mol).density_fit()
         mf.kernel()
         mol_eq = optimize(mf, maxsteps=20)
@@ -108,5 +108,5 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(coords - coords_qchem) < 1e-4
 
 if __name__ == "__main__":
-    print("Full Tests for geometry optimization")
+    print("Full Tests for geometry optimization with DF")
     unittest.main()

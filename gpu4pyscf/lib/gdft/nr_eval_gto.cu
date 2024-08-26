@@ -84,17 +84,17 @@ void _screen_index(int *non0shl_idx, double cutoff, int l, int bas_offset, int n
     for (int ip = 0; ip < nprim; ++ip) {
         gto_sup += coeffs[ip] * exp(-exps[ip] * rr);
     }
-    gto_sup *= pow(r,l);
+    gto_sup *= pow(r,ang);
     int is_large = fabs(gto_sup) > cutoff;
 
     // Reduce and write to global memory
-    unsigned int tid = threadIdx.x;
+    unsigned int tx = threadIdx.x;
     __shared__ int sdata[NG_PER_BLOCK];
-    sdata[tid] = active ? is_large : 0;
+    sdata[tx] = active ? is_large : 0;
     __syncthreads();
     for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (tid < s) {
-            sdata[tid] = sdata[tid] || sdata[tid + s];
+        if (tx < s) {
+            sdata[tx] = sdata[tx] || sdata[tx + s];
         }
         __syncthreads();
     }
@@ -2135,6 +2135,13 @@ int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
             fprintf(stderr, "CUDA Error of GDFTscreen_index: %s\n", cudaGetErrorString(err));
             return 1;
         }
+        _screen_index<<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, l, nprim, grids, ngrids, bas_offset);
+    }
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error of GDFTscreen_index: %s\n", cudaGetErrorString(err));
+        return 1;
     }
     return 0;
 }

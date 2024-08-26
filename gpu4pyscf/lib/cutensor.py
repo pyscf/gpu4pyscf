@@ -109,7 +109,7 @@ def contraction(
                              alpha.ctypes.data, a.data.ptr, b.data.ptr,
                              beta.ctypes.data, c.data.ptr, out.data.ptr,
                              ws.data.ptr, ws_size)
-
+    
     return out
 
 import os

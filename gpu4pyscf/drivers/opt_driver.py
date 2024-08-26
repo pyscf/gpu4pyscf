@@ -34,11 +34,16 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
     verbose         = config.get('verbose',         4)
     scf_conv_tol    = config.get('scf_conv_tol',    1e-10)
     with_df         = config.get('with_df',         True)
+    auxbasis        = config.get('auxbasis',       None)
     with_gpu        = config.get('with_gpu',        True)
     with_solvent    = config.get('with_solvent',    False)
     maxsteps        = config.get('maxsteps',        50)
     convergence_set = config.get('convergence_set', 'GAU')
 
+    default_solvent = {'method': 'iefpcm', 'eps': 78.3553, 'solvent': 'water'}
+    with_solvent   = config.get('with_solvent',   False)
+    solvent        = config.get('solvent',        default_solvent)
+    
     # I/O
     fp = tempfile.TemporaryDirectory()
     local_dir = f'{fp.name}/'
@@ -74,21 +79,28 @@ def opt_mol(mol_name, config, constraints, charge=None, spin=0):
             mf.nlcgrids.atom_grid = (50,194)
     mf.disp = disp
     if with_df:
-        if 'auxbasis' in config and config['auxbasis'] == "RIJK-def2-tzvp":
-            auxbasis = 'def2-tzvp-jkfit'
-        else:
-            auxbasis = None
-        mf = mf.density_fit(auxbasis=auxbasis)
-
+        pyscf_auxbasis = auxbasis
+        if auxbasis == "RIJK-def2-tzvp":
+            pyscf_auxbasis = 'def2-tzvp-jkfit'
+        mf = mf.density_fit(auxbasis=pyscf_auxbasis)
     if with_gpu:
         mf = mf.to_gpu()
 
     mf.chkfile = None
+
     if with_solvent:
-        mf = mf.PCM()
-        mf.with_solvent.lebedev_order = 29
-        mf.with_solvent.method = config['solvent']['method'].replace('PCM','-PCM')
-        mf.with_solvent.eps = config['solvent']['eps']
+        if solvent['method'].endswith(('PCM', 'pcm')):
+            mf = mf.PCM()
+            mf.with_solvent.lebedev_order = 29
+            mf.with_solvent.method = solvent['method'].replace('PCM','-PCM')
+            mf.with_solvent.eps = solvent['eps']
+        elif with_solvent and solvent['method'].endswith(('smd', 'SMD')):
+            mf = mf.SMD()
+            mf.with_solvent.lebedev_order = 29
+            mf.with_solvent.method = 'SMD'
+            mf.with_solvent.solvent = solvent['solvent']
+        else:
+            raise NotImplementedError
 
     mf.direct_scf_tol = 1e-14
     mf.chkfile = None
