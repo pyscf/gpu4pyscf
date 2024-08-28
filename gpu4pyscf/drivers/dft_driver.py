@@ -238,7 +238,7 @@ def run_dft(mol_name, config, charge=None, spin=0):
             f = -1
             grad_time = -1
         
-        with h5py.File(f'{local_dir}/{data_file}', 'w') as h5f:
+        with h5py.File(f'{local_dir}/{data_file}', 'a') as h5f:
             h5f.create_dataset('grad', data=f)
             h5f.create_dataset('grad_time', data=grad_time)
 
@@ -274,7 +274,7 @@ def run_dft(mol_name, config, charge=None, spin=0):
             h_dft = -1
             hess_time = -1
 
-        with h5py.File(f'{local_dir}/{data_file}', 'w') as h5f:
+        with h5py.File(f'{local_dir}/{data_file}', 'a') as h5f:
             h5f.create_dataset('hess', data=h_dft)
             h5f.create_dataset('hess_time', data=hess_time)
 
