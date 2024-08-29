@@ -697,3 +697,6 @@ class Gradients(GradientsBase):
         return 0
 
 Grad = Gradients
+
+from gpu4pyscf import scf
+scf.hf.RHF.Gradients = lib.class_as_method(Gradients)

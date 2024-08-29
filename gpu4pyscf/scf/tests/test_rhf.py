@@ -16,6 +16,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import unittest
+import tempfile
 import numpy as np
 import cupy
 import pyscf
@@ -264,11 +265,23 @@ class KnownValues(unittest.TestCase):
         e_ref = -151.09634038447925
         assert np.abs(e_tot - e_ref) < 1e-5
 
+    def test_chkfile(self):
+        ftmp = tempfile.NamedTemporaryFile(dir = pyscf.lib.param.TMPDIR)
+        mf = scf.RHF(mol)
+        mf.chkfile = ftmp.name
+        mf.kernel()
+        dm_stored = mf.make_rdm1(mf.mo_coeff, mf.mo_occ)
+        dm_stored = cupy.asnumpy(dm_stored)
+
+        mf_copy = scf.RHF(mol)
+        mf_copy.chkfile = ftmp.name
+        dm_loaded = mf_copy.init_guess_by_chkfile()
+        assert np.allclose(dm_stored, dm_loaded, atol = 1e-14)
+
     # TODO:
     #test analyze
     #test mulliken_pop
     #test mulliken_meta
-    #test chkfile
     #test stability
     #test newton
     #test x2c

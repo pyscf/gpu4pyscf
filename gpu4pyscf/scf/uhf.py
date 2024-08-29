@@ -20,11 +20,10 @@ import numpy as np
 import cupy
 from pyscf.scf import uhf
 from pyscf import lib as pyscf_lib
-from gpu4pyscf.scf.hf import _get_jk, eigh, damping, level_shift, _kernel
+from gpu4pyscf.scf.hf import eigh, damping, level_shift
 from gpu4pyscf.scf import hf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import tag_array
-from gpu4pyscf import lib
 from gpu4pyscf.scf import diis
 
 def make_rdm1(mo_coeff, mo_occ, **kwargs):
@@ -199,7 +198,7 @@ class UHF(hf.SCF):
     init_guess_by_huckel     = uhf.UHF.init_guess_by_huckel
     init_guess_by_mod_huckel = uhf.UHF.init_guess_by_mod_huckel
     init_guess_by_1e         = uhf.UHF.init_guess_by_1e
-    init_guess_by_chkfile    = NotImplemented
+    init_guess_by_chkfile    = uhf.UHF.init_guess_by_chkfile
 
     analyze            = NotImplemented
     mulliken_pop       = NotImplemented
@@ -224,7 +223,6 @@ class UHF(hf.SCF):
     energy_elec = energy_elec
 
     make_rdm2 = NotImplemented
-    dump_chk = NotImplemented
     newton = NotImplemented
     x2c = x2c1e = sfx2c1e = NotImplemented
     to_rhf = NotImplemented
