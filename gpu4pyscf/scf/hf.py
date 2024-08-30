@@ -423,6 +423,8 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         # Explicit overwrite the mol object in chkfile
         # Note in pbc.scf, mf.mol == mf.cell, cell is saved under key "mol"
         chkfile.save_mol(mol, mf.chkfile)
+    print(mf.chkfile)
+    exit()
     
     for cycle in range(mf.max_cycle):
         t0 = log.init_timer()
@@ -594,7 +596,30 @@ class SCF(pyscf_lib.StreamObject):
     _keys               = hf.SCF._keys
 
     # methods
-    __init__                 = hf.SCF.__init__
+    def __init__(self, mol):
+        if not mol._built:
+            sys.stderr.write('Warning: %s must be initialized before calling SCF.\n'
+                             'Initialize %s in %s\n' % (mol, mol, self))
+            mol.build()
+        self.mol = mol
+        self.verbose = mol.verbose
+        self.max_memory = mol.max_memory
+        self.stdout = mol.stdout
+
+        # The chkfile part is different from pyscf, we turn off chkfile by default.
+        self.chkfile = None
+
+##################################################
+# don't modify the following attributes, they are not input options
+        self.mo_energy = None
+        self.mo_coeff = None
+        self.mo_occ = None
+        self.e_tot = 0
+        self.converged = False
+        self.scf_summary = {}
+
+        self._opt = {None: None}
+        self._eri = None # Note: self._eri requires large amount of memory
 
     def check_sanity(self):
         s1e = self.get_ovlp()
