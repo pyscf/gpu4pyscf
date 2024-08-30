@@ -401,7 +401,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     h1e = cupy.asarray(mf.get_hcore(mol))
     s1e = cupy.asarray(mf.get_ovlp(mol))
-    
+
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     logger.info(mf, 'init E= %.15g', e_tot)
@@ -423,9 +423,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         # Explicit overwrite the mol object in chkfile
         # Note in pbc.scf, mf.mol == mf.cell, cell is saved under key "mol"
         chkfile.save_mol(mol, mf.chkfile)
-    print(mf.chkfile)
-    exit()
-    
+
     for cycle in range(mf.max_cycle):
         t0 = log.init_timer()
         dm_last = dm
