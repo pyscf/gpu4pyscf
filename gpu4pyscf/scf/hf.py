@@ -17,6 +17,8 @@
 
 import copy
 import ctypes
+import sys
+import h5py
 import numpy as np
 import cupy
 import scipy.linalg
@@ -450,7 +452,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
             local_variables = locals()
             for key in local_variables:
                 value = local_variables[key]
-                if (type(value) == cupy.ndarray):
+                if (type(value) is cupy.ndarray):
                     local_variables[key] = cupy.asnumpy(value)
             mf.dump_chk(local_variables)
 
