@@ -27,9 +27,13 @@ cmake --build build/temp.gpu4pyscf -j 4
 CURRENT_PATH=`pwd`
 export PYTHONPATH="${PYTHONPATH}:${CURRENT_PATH}"
 ```
-Then install cutensor for acceleration
+Then install cutensor and cupy for acceleration (please switch the versions according to your nvcc version!)
 ```sh
-pip3 install cutensor-cu11
+pip3 install cutensor-cu12 cupy-cuda12x
+```
+There shouldn't be cupy or cutensor compilation during pip install process. If you see the following warning at the beginning of a gpu4pyscf job, it implies problems with cupy and cutensor installation (likely a version mismatch, or multiple versions of same package installed).
+```
+<repo_path>/gpu4pyscf/lib/cutensor.py:<line_number>: UserWarning: using cupy as the tensor contraction engine.
 ```
 
 The package also provides multiple dockerfiles in ```dockerfiles```. One can use them as references to create the compilation envrionment.
