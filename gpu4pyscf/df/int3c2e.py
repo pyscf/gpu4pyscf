@@ -632,15 +632,17 @@ def get_aux2atom(intopt, auxslices):
         aux2atom[p0:p1,ia] = 1.0
     return aux2atom[aux_ao_idx,:]
 
-def get_j_int3c2e_pass1(intopt, dm0):
+def get_j_int3c2e_pass1(intopt, dm0, sort_j=True):
     '''
     get rhoj pass1 for int3c2e
     '''
     n_dm = 1
 
-    naux = len(intopt.cart_aux_idx)
+    naux = intopt.cart_aux_loc[-1]#len(intopt.cart_aux_idx)
     rhoj = cupy.zeros([naux])
     coeff = intopt.coeff
+    if dm0.ndim == 3:
+        dm0 = dm0[0] + dm0[1]
     dm_cart = coeff @ dm0 @ coeff.T
 
     num_cp_ij = [len(log_qs) for log_qs in intopt.log_qs]
@@ -666,8 +668,9 @@ def get_j_int3c2e_pass1(intopt, dm0):
     if err != 0:
         raise RuntimeError('CUDA error in get_j_pass1')
 
-    aux_coeff = intopt.aux_coeff
-    rhoj = cupy.dot(rhoj, aux_coeff)
+    if sort_j:
+        aux_coeff = intopt.aux_coeff
+        rhoj = cupy.dot(rhoj, aux_coeff)
     return rhoj
 
 def get_j_int3c2e_pass2(intopt, rhoj):
