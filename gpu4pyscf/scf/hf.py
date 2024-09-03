@@ -15,17 +15,18 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import time
 import copy
 import ctypes
-import contextlib
+import sys
+import h5py
 import numpy as np
 import cupy
 import scipy.linalg
 from functools import reduce
 from pyscf import gto
 from pyscf import lib as pyscf_lib
-from pyscf.scf import hf, jk, _vhf
+from pyscf.scf import hf, _vhf
+from pyscf.scf import chkfile
 from gpu4pyscf import lib
 from gpu4pyscf.lib.cupy_helper import (eigh, load_library, tag_array,
                                        return_cupy_array, cond)
@@ -402,7 +403,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     h1e = cupy.asarray(mf.get_hcore(mol))
     s1e = cupy.asarray(mf.get_ovlp(mol))
-    
+
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     logger.info(mf, 'init E= %.15g', e_tot)
@@ -419,7 +420,12 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         _, mf_diis.Corth = mf.eig(fock, s1e)
     else:
         mf_diis = None
-    
+
+    if dump_chk and mf.chkfile:
+        # Explicit overwrite the mol object in chkfile
+        # Note in pbc.scf, mf.mol == mf.cell, cell is saved under key "mol"
+        chkfile.save_mol(mol, mf.chkfile)
+
     for cycle in range(mf.max_cycle):
         t0 = log.init_timer()
         dm_last = dm
@@ -441,6 +447,15 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         t1 = log.timer_debug1('total', *t0)
         logger.info(mf, 'cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
                     cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
+
+        if dump_chk:
+            local_variables = locals()
+            for key in local_variables:
+                value = local_variables[key]
+                if (type(value) is cupy.ndarray):
+                    local_variables[key] = cupy.asnumpy(value)
+            mf.dump_chk(local_variables)
+
         e_diff = abs(e_tot-last_hf_e)
         norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, f))
         if(e_diff < conv_tol and norm_gorb < conv_tol_grad):
@@ -549,8 +564,8 @@ class SCF_Scanner(pyscf_lib.SinglePointScanner):
             dm0 = None
             if cupy.array_equal(self._last_mol_fp, mol.ao_loc):
                 dm0 = self.make_rdm1()
-            else:
-                raise NotImplementedError
+            elif self.chkfile and h5py.is_hdf5(self.chkfile):
+                dm0 = self.from_chk(self.chkfile)
         self.mo_coeff = None  # To avoid last mo_coeff being used by SOSCF
         e_tot = self.kernel(dm0=dm0, **kwargs)
         self._last_mol_fp = mol.ao_loc
@@ -581,7 +596,30 @@ class SCF(pyscf_lib.StreamObject):
     _keys               = hf.SCF._keys
 
     # methods
-    __init__                 = hf.SCF.__init__
+    def __init__(self, mol):
+        if not mol._built:
+            sys.stderr.write('Warning: %s must be initialized before calling SCF.\n'
+                             'Initialize %s in %s\n' % (mol, mol, self))
+            mol.build()
+        self.mol = mol
+        self.verbose = mol.verbose
+        self.max_memory = mol.max_memory
+        self.stdout = mol.stdout
+
+        # The chkfile part is different from pyscf, we turn off chkfile by default.
+        self.chkfile = None
+
+##################################################
+# don't modify the following attributes, they are not input options
+        self.mo_energy = None
+        self.mo_coeff = None
+        self.mo_occ = None
+        self.e_tot = 0
+        self.converged = False
+        self.scf_summary = {}
+
+        self._opt = {None: None}
+        self._eri = None # Note: self._eri requires large amount of memory
 
     def check_sanity(self):
         s1e = self.get_ovlp()
@@ -601,14 +639,14 @@ class SCF(pyscf_lib.StreamObject):
     get_fock                 = hf.SCF.get_fock
     get_occ                  = hf.SCF.get_occ
     get_grad                 = hf.SCF.get_grad
-    dump_chk                 = NotImplemented
+    dump_chk                 = hf.SCF.dump_chk
     init_guess_by_minao      = hf.SCF.init_guess_by_minao
     init_guess_by_atom       = hf.SCF.init_guess_by_atom
     init_guess_by_huckel     = hf.SCF.init_guess_by_huckel
     init_guess_by_mod_huckel = hf.SCF.init_guess_by_mod_huckel
     init_guess_by_1e         = hf.SCF.init_guess_by_1e
-    init_guess_by_chkfile    = NotImplemented
-    from_chk                 = NotImplemented
+    init_guess_by_chkfile    = hf.SCF.init_guess_by_chkfile
+    from_chk                 = hf.SCF.from_chk
     get_init_guess           = hf.SCF.get_init_guess
     make_rdm1                = hf.SCF.make_rdm1
     make_rdm2                = hf.SCF.make_rdm2
@@ -682,7 +720,6 @@ class RHF(SCF):
     get_init_guess = return_cupy_array(hf.RHF.get_init_guess)
     init_direct_scf = NotImplemented
     make_rdm2 = NotImplemented
-    dump_chk = NotImplemented
     newton = NotImplemented
     x2c = x2c1e = sfx2c1e = NotImplemented
     to_rhf = NotImplemented
