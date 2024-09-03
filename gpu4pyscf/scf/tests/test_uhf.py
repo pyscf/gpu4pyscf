@@ -285,7 +285,7 @@ class KnownValues(unittest.TestCase):
         mf_copy = scf.UHF(mol)
         mf_copy.chkfile = ftmp.name
         dma_loaded, dmb_loaded = mf_copy.init_guess_by_chkfile()
-        assert np.allclose(dma_stored, dma_loaded, atol = 1e-14)
+        assert np.allclose(dma_stored, dma_loaded, atol = 1e-14) # Since we reload the MO coefficients, the density matrix should be identical up to numerical noise.
         assert np.allclose(dmb_stored, dmb_loaded, atol = 1e-14)
         assert not np.allclose(dma_stored, dmb_loaded, atol = 1e-1) # Just to make sure alpha and beta electron are different in the test system
 

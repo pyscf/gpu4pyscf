@@ -276,7 +276,7 @@ class KnownValues(unittest.TestCase):
         mf_copy = scf.RHF(mol)
         mf_copy.chkfile = ftmp.name
         dm_loaded = mf_copy.init_guess_by_chkfile()
-        assert np.allclose(dm_stored, dm_loaded, atol = 1e-14)
+        assert np.allclose(dm_stored, dm_loaded, atol = 1e-14) # Since we reload the MO coefficients, the density matrix should be identical up to numerical noise.
 
     # TODO:
     #test analyze
