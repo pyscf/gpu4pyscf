@@ -27,7 +27,7 @@ for PYBIN in /opt/python/cp311-cp311/bin; do
     rm -rf /gpu4pyscf/build
     rm -rf /gpu4pyscf/gpu4pyscf/lib/deps
     rm -rf /gpu4pyscf/tmp/*
-    rm -rf /gpu4pyscf/put4pyscf/lib/*.so
+    rm -rf /gpu4pyscf/gpu4pyscf/lib/*.so
     "${PYBIN}/python3" -m pip install --upgrade pip
     "${PYBIN}/pip" wheel /gpu4pyscf/ --no-deps -w /gpu4pyscf/tmp/
     repair_wheel /gpu4pyscf/tmp/*.whl
