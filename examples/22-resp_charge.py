@@ -21,14 +21,15 @@ import pyscf
 from pyscf import scf
 from gpu4pyscf.pop import esp
 
-mol = pyscf.M(atom = """ C   1.45051389  -0.06628932   0.00000000
+atom = """ C   1.45051389  -0.06628932   0.00000000
     H   1.75521613  -0.62865986  -0.87500146
     H   1.75521613  -0.62865986   0.87500146
     H   1.92173244   0.90485897   0.00000000
     C  -0.04233122   0.09849378   0.00000000
     O  -0.67064817  -1.07620915   0.00000000
     H  -1.60837259  -0.91016601   0.00000000
-    O  -0.62675864   1.13160510   0.00000000""", basis = '6-31gs')
+    O  -0.62675864   1.13160510   0.00000000"""
+mol = pyscf.M(atom=atom, basis='6-31gs')
 mol.cart = True    # PySCF uses spherical basis by default
 
 mf = scf.RHF(mol)
