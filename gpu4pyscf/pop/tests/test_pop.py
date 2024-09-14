@@ -69,28 +69,8 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
 
         dm = mf.make_rdm1()
-        r_vdw = 1.0/radii.BOHR * np.asarray([
-            -1,
-            1.20, # H
-            1.20, # He
-            1.37, # Li
-            1.45, # Be
-            1.45, # B
-            1.50, # C
-            1.50, # N,
-            1.40, # O
-            1.35, # F,
-            1.30, # Ne,
-            1.57, # Na,
-            1.36, # Mg
-            1.24, # Al,
-            1.17, # Si,
-            1.80, # P,
-            1.75, # S,
-            1.70 # Cl
-        ])
 
-        q = esp.resp_solve(mol1, dm, grid_density=1.0*radii.BOHR**2, rad=r_vdw, hfree=True)
+        q = esp.resp_solve(mol1, dm, grid_density=1.0*radii.BOHR**2, hfree=True)
         q_ref = np.array([-0.294974,  0.107114,  0.107114,  0.084795,
                         0.803999, -0.661279,  0.453270, -0.600039])
         assert np.linalg.norm(q - q_ref) < 1e-5
@@ -101,7 +81,7 @@ class KnownValues(unittest.TestCase):
         equal_constraints = [[1,2,3]]
 
         q = esp.resp_solve(mol1, dm, resp_a = 1e-3,
-                    grid_density=1.0*radii.BOHR**2, rad=r_vdw, hfree=True,
+                    grid_density=1.0*radii.BOHR**2, hfree=True,
                     sum_constraints=sum_constraints,
                     equal_constraints=equal_constraints)
         q_ref = np.array([-0.290893,  0.098314,  0.098314,  0.098314,

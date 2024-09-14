@@ -26,8 +26,30 @@ from pyscf.data import radii
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import dist_matrix
 
-modified_Bondi = radii.VDW.copy()
-modified_Bondi[1] = 1.1/radii.BOHR      # modified version
+#modified_Bondi = radii.VDW.copy()
+#modified_Bondi[1] = 1.1/radii.BOHR      # modified version
+
+# Van der Waals radii (in angstrom) are taken from GAMESS.
+R_VDW = 1.0/radii.BOHR * np.asarray([
+    -1,
+    1.20, # H
+    1.20, # He
+    1.37, # Li
+    1.45, # Be
+    1.45, # B
+    1.50, # C
+    1.50, # N,
+    1.40, # O
+    1.35, # F,
+    1.30, # Ne,
+    1.57, # Na,
+    1.36, # Mg
+    1.24, # Al,
+    1.17, # Si,
+    1.80, # P,
+    1.75, # S,
+    1.70 # Cl
+    ])
 
 def unit_surface(n):
     '''
@@ -62,9 +84,7 @@ def unit_surface(n):
 
     return np.array([ux[:n], uy[:n], uz[:n]]).T
 
-def vdw_surface(mol, scales=[1.0], 
-                density=1.0*radii.BOHR**2, 
-                rad=modified_Bondi):
+def vdw_surface(mol, scales=[1.0], density=1.0*radii.BOHR**2, rad=R_VDW):
     '''
     Generate vdw surface of molecules, in Bohr
     '''
@@ -85,7 +105,7 @@ def vdw_surface(mol, scales=[1.0],
     return np.concatenate(surface_points)
 
 def build_ab(mol, dm, 
-             grid_density=1.0*radii.BOHR**2, rad=modified_Bondi, 
+             grid_density=1.0*radii.BOHR**2, rad=R_VDW, 
              sum_constraints=[], equal_constraints=[]):
     dm = cupy.asarray(dm)
     natm = mol.natm
@@ -154,15 +174,14 @@ def build_ab(mol, dm,
             dim_offset += len(group) - 1
     return A, B
 
-def esp_solve(mol, dm, grid_density=1.0*radii.BOHR**2, rad=modified_Bondi):
+def esp_solve(mol, dm, grid_density=1.0*radii.BOHR**2, rad=R_VDW):
     natm = mol.natm
     A, B = build_ab(mol, dm, grid_density=grid_density, rad=rad)
     q = cupy.linalg.solve(A, B)[:natm]
     return q.get()
 
 def resp_solve(mol, dm, grid_density=1.0*radii.BOHR**2, 
-               rad=modified_Bondi, maxit=25,
-               resp_a=5e-4, resp_b=0.1, hfree=True, tol=1e-5, 
+               rad=R_VDW, maxit=25, resp_a=5e-4, resp_b=0.1, hfree=True, tol=1e-5, 
                sum_constraints=[], equal_constraints=[]):
     ''' 
     sum_constraints = [
