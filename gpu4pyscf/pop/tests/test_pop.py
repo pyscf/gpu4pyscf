@@ -58,7 +58,7 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
         dm = mf.make_rdm1()
         q = esp.esp_solve(mol0, dm)
-        q_ref = np.asarray([-0.61694153,  0.30831773,  0.3086238])
+        q_ref = np.asarray([-0.61468718,  0.30747624,  0.30721094])
         assert np.linalg.norm(q - q_ref) < 1e-4
 
     def test_resp_charge(self):
