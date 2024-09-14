@@ -48,8 +48,7 @@ R_VDW = 1.0/radii.BOHR * np.asarray([
     1.17, # Si,
     1.80, # P,
     1.75, # S,
-    1.70 # Cl
-    ])
+    1.70]) # Cl
 
 def unit_surface(n):
     '''
