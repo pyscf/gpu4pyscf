@@ -190,7 +190,8 @@ def run_dft(mol_name, config, charge=None, spin=0):
         if save_density and xc.lower() != 'hf':
             weights = mf.grids.weights
             coords = mf.grids.coords
-            rho = mf._numint.get_rho(mf.mol, dm, mf.grids)
+            dm0 = dm[0] + dm[1] if dm.ndim == 3 else dm
+            rho = mf._numint.get_rho(mf.mol, dm0, mf.grids)
 
             if isinstance(weights, cupy.ndarray): weights = weights.get()
             if isinstance(coords, cupy.ndarray):  coords  = coords.get()
@@ -238,7 +239,7 @@ def run_dft(mol_name, config, charge=None, spin=0):
             f = -1
             grad_time = -1
         
-        with h5py.File(f'{local_dir}/{data_file}', 'w') as h5f:
+        with h5py.File(f'{local_dir}/{data_file}', 'a') as h5f:
             h5f.create_dataset('grad', data=f)
             h5f.create_dataset('grad_time', data=grad_time)
 
@@ -274,7 +275,7 @@ def run_dft(mol_name, config, charge=None, spin=0):
             h_dft = -1
             hess_time = -1
 
-        with h5py.File(f'{local_dir}/{data_file}', 'w') as h5f:
+        with h5py.File(f'{local_dir}/{data_file}', 'a') as h5f:
             h5f.create_dataset('hess', data=h_dft)
             h5f.create_dataset('hess_time', data=hess_time)
 
