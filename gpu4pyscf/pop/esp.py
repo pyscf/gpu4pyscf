@@ -53,6 +53,7 @@ R_VDW = 1.0/radii.BOHR * np.asarray([
 def unit_surface(n):
     '''
     Generate spherical harmonics grid points on unit sphere
+    The number of generated points is less than n in general.
     '''
     ux = []
     uy = []
@@ -96,8 +97,9 @@ def vdw_surface(mol, scales=[1.0], density=1.0*radii.BOHR**2, rad=R_VDW):
         scaled_radii = atom_radii * scale
         for i, coord in enumerate(coords):
             r = scaled_radii[i]
-            npoints = int(density * 4.0 * np.pi * r**2)
-            points = coord + r * unit_surface(npoints)
+            # nd is an indicator of density, not exactly the same as number of points
+            nd = int(density * 4.0 * np.pi * r**2)
+            points = coord + r * unit_surface(nd)
             dist = distance_matrix(points, coords) + 1e-10
             included = np.all(dist >= scaled_radii, axis=1)
             surface_points.append(points[included])
