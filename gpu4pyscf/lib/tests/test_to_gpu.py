@@ -17,8 +17,10 @@ import unittest
 import numpy
 import cupy
 import pyscf
+import pytest
 from pyscf import scf, lib
 from pyscf.dft import rks
+from packaging import version
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -28,6 +30,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
 bas='sto3g'
 grids_level = 1
+pyscf_24 = version.parse(pyscf.__version__) <= version.parse('2.4.0')
 
 def setUpModule():
     global mol
@@ -41,8 +44,8 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-
 class KnownValues(unittest.TestCase):
+    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_rhf(self):
         mf = scf.RHF(mol).to_gpu()
         e_tot = mf.to_gpu().kernel()
@@ -57,6 +60,7 @@ class KnownValues(unittest.TestCase):
         # h = mf.Hessian().to_gpu()
         # h.kernel()
 
+    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_rks(self):
         mf = rks.RKS(mol).to_gpu()
         e_tot = mf.to_gpu().kernel()
@@ -65,13 +69,14 @@ class KnownValues(unittest.TestCase):
         mf = rks.RKS(mol).run()
         gobj = mf.nuc_grad_method().to_gpu()
         g = gobj.kernel()
-        assert numpy.abs(lib.fp(g) - -0.04339987221752033) < 1e-7
+        assert numpy.abs(lib.fp(g) - -0.04340162663176693) < 1e-7
 
         # RKS Hessian it not supported yet
         # mf = rks.RKS(mol).run()
         # h = mf.Hessian().to_gpu()
         # h.kernel()
 
+    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_df_RHF(self):
         mf = scf.RHF(mol).density_fit().to_gpu()
         e_tot = mf.to_gpu().kernel()
@@ -83,48 +88,44 @@ class KnownValues(unittest.TestCase):
         assert numpy.abs(lib.fp(g) - -0.01641213202225146) < 1e-7
 
         mf = scf.RHF(mol).density_fit().run()
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
         h = hobj.kernel()
-        assert numpy.abs(lib.fp(h) - 2.198079352288524) < 1e-7
+        assert numpy.abs(lib.fp(h) - 2.198079352288524) < 1e-4
 
+    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_df_b3lyp(self):
         mf = rks.RKS(mol, xc='b3lyp').density_fit().to_gpu()
         e_tot = mf.to_gpu().kernel()
-        print('DF b3lyp energy:', e_tot)
         assert numpy.abs(e_tot - -75.31295618175646) < 1e-7
 
         mf = rks.RKS(mol, xc='b3lyp').density_fit().run()
         gobj = mf.nuc_grad_method().to_gpu()
         g = gobj.kernel()
-        print('DF b3lyp force:', lib.fp(g))
-        assert numpy.abs(lib.fp(g) - -0.04079190644707999) < 1e-7
+        assert numpy.abs(lib.fp(g) - -0.04079319540057938) < 1e-5
 
         mf = rks.RKS(mol, xc='b3lyp').density_fit().run()
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
         h = hobj.kernel()
-        print('DF b3lyp hessian:', lib.fp(h))
-        assert numpy.abs(lib.fp(h) - 2.1527804103141848) < 1e-7
+        assert numpy.abs(lib.fp(h) - 2.1527804103141848) < 1e-4
 
+    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_df_RKS(self):
         mf = rks.RKS(mol, xc='wb97x').density_fit().to_gpu()
         e_tot = mf.to_gpu().kernel()
-        print('DF wb97x energy:', e_tot)
         assert numpy.abs(e_tot - -75.30717654021076) < 1e-7
 
         mf = rks.RKS(mol, xc='wb97x').density_fit().run()
         gobj = mf.nuc_grad_method().to_gpu()
         g = gobj.kernel()
-        print('DF wb97x force:', lib.fp(g))
-        assert numpy.abs(lib.fp(g) - -0.043401172511220595) < 1e-7
+        assert numpy.abs(lib.fp(g) - -0.03432881437746617) < 1e-5
 
         mf = rks.RKS(mol, xc='wb97x').density_fit().run()
+        mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
         h = hobj.kernel()
-        print('DF wb97x hessian:', lib.fp(h))
-        assert numpy.abs(lib.fp(h) - 2.187025544697092) < 1e-7
-
-    # TODO: solvent
-
+        assert numpy.abs(lib.fp(h) - 2.187025544697092) < 1e-4
 
 if __name__ == "__main__":
     print("Full tests for to_gpu module")

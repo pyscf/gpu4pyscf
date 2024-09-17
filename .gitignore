@@ -16,9 +16,12 @@ output/
 *.swp
 *~
 *.log
+*.mod
 *.h5
 **/qchem_input.in
+.coverage
 #*
+*.csv
 dockerfiles/manylinux/wheelhouse
 gpu4pyscf/lib/bin
 gpu4pyscf/lib/build

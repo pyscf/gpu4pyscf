@@ -21,6 +21,7 @@ add_library(gdft SHARED
   gen_grids.cu
   nr_numint_sparse.cu
   vv10.cu
+  libxc.cu
 )
 
 set_target_properties(gdft PROPERTIES

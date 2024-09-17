@@ -16,7 +16,8 @@
 # Author: Qiming Sun <osirpt.sun@gmail.com>
 #  modified by Xiaojie Wu <wxj6000@gmail.com>
 
-from gpu4pyscf.hessian import rhf
+from gpu4pyscf.hessian import rhf, uhf
+from gpu4pyscf.hessian import dispersion
 from gpu4pyscf.hessian.rhf import Hessian as RHF
 from gpu4pyscf.hessian.rhf import hess_nuc
 

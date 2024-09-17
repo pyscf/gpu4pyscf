@@ -30,7 +30,7 @@ C   0.73685281,  0.61123287, -0.00800148
 '''
     mol_sph = pyscf.M(
         atom=atom,
-        basis='ccpvdz',
+        basis='ccpvqz',
         spin=None,
         cart = 0,
         output = '/dev/null')
@@ -55,7 +55,7 @@ class KnownValues(unittest.TestCase):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv0', coords)
         ao_cpu = cupy.asarray(ao)
-        ni = NumInt(xc='LDA')
+        ni = NumInt()
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=0)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
@@ -63,7 +63,7 @@ class KnownValues(unittest.TestCase):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv1', coords)
         ao_cpu = cupy.asarray(ao)
-        ni = NumInt(xc='LDA')
+        ni = NumInt()
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=1)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
@@ -71,16 +71,15 @@ class KnownValues(unittest.TestCase):
         coords = np.random.random((4,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv2', coords)
         ao_cpu = cupy.asarray(ao)
-        ni = NumInt(xc='LDA')
+        ni = NumInt()
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=2)
-        #idx = cupy.argwhere(cupy.abs(ao_gpu - ao_cpu) > 1e-10)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_sph_deriv3(self):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv3', coords)
         ao_cpu = cupy.asarray(ao)
-        ni = NumInt(xc='LDA')
+        ni = NumInt()
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=3)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
@@ -88,7 +87,7 @@ class KnownValues(unittest.TestCase):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv4', coords)
         ao_cpu = cupy.asarray(ao)
-        ni = NumInt(xc='LDA')
+        ni = NumInt()
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=4)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
@@ -97,7 +96,7 @@ class KnownValues(unittest.TestCase):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv0', coords)
         ao_cpu = cupy.asarray(ao)
-        ni = NumInt(xc='LDA')
+        ni = NumInt()
         ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=0)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
@@ -105,7 +104,7 @@ class KnownValues(unittest.TestCase):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv1', coords)
         ao_cpu = cupy.asarray(ao)
-        ni = NumInt(xc='LDA')
+        ni = NumInt()
         ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=1)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
@@ -113,7 +112,7 @@ class KnownValues(unittest.TestCase):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv2', coords)
         ao_cpu = cupy.asarray(ao)
-        ni = NumInt(xc='LDA')
+        ni = NumInt()
         ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=2)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
@@ -121,7 +120,7 @@ class KnownValues(unittest.TestCase):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv3', coords)
         ao_cpu = cupy.asarray(ao)
-        ni = NumInt(xc='LDA')
+        ni = NumInt()
         ao_gpu = ni.eval_ao(mol_cart, coords, deriv=3)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
@@ -129,7 +128,7 @@ class KnownValues(unittest.TestCase):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv4', coords)
         ao_cpu = cupy.asarray(ao)
-        ni = NumInt(xc='LDA')
+        ni = NumInt()
         ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=4)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 

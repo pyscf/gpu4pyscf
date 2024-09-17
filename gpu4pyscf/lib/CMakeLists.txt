@@ -15,19 +15,21 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-# 3.18 for CUDAToolkit and CMAKE_CUDA_ARCHITECTURES
-cmake_minimum_required (VERSION 3.18)
-project (gpu4pyscf C CUDA)
+cmake_minimum_required (VERSION 3.19 FATAL_ERROR) # 3.19 is required by cutlass
+project (gpu4pyscf C CXX CUDA Fortran)
 
 set(CMAKE_C_STANDARD "99")
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # For better performance on A100, the option
 # -DCUDA_ARCHITECTURES="70-real;80-real" can be added to cmake command
 if(DEFINED CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCHITECTURES}")
 else()
-  set(CMAKE_CUDA_ARCHITECTURES "70-real;80-real")
+  set(CMAKE_CUDA_ARCHITECTURES "60-real;70-real;80-real;90-real")
 endif()
+message("CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 
 if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RELWITHDEBINFO)
@@ -93,17 +95,54 @@ link_directories(${PROJECT_SOURCE_DIR}/deps/lib)
 set(C_LINK_TEMPLATE "<CMAKE_C_COMPILER> <CMAKE_SHARED_LIBRARY_C_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
 set(CXX_LINK_TEMPLATE "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
 
-add_subdirectory(gint)
-add_subdirectory(gvhf)
-add_subdirectory(gdft)
-add_subdirectory(cupy_helper)
+option(BUILD_CUTLASS "Using cutlass" ON)
+if(BUILD_CUTLASS)
+  include(ExternalProject)
+  ExternalProject_Add(cutlass
+    GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
+    GIT_TAG        v3.4.0
+    CONFIGURE_COMMAND ""  # No configure step
+    BUILD_COMMAND ""      # No build step
+    INSTALL_COMMAND ""    # No install step
+    TEST_COMMAND ""       # No test step
+  )
+
+  # ExternalProject_Add automatically populates this variable
+  ExternalProject_Get_Property(cutlass SOURCE_DIR)
+  set(cutlass_SOURCE_DIR ${SOURCE_DIR})
+endif()
+
+option(BUILD_GINT "Using gint" ON)
+if(BUILD_GINT)
+  add_subdirectory(gint)
+endif()
+
+option(BUILD_GVHF "Using gvhf" ON)
+if(BUILD_GVHF)
+  add_subdirectory(gvhf)
+endif()
+
+option(BUILD_GDFT "Using gdft" ON)
+if(BUILD_GDFT)
+  add_subdirectory(gdft)
+endif()
+
+option(BUILD_CUPY_HELPER "Using cupy_helper" ON)
+if(BUILD_CUPY_HELPER)
+  add_subdirectory(cupy_helper)
+endif()
+
+option(BUILD_SOLVENT "Using SMD solvent" ON)
+if(BUILD_SOLVENT)
+  add_subdirectory(solvent)
+endif()
 
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
   include(ExternalProject)
   ExternalProject_Add(libxc
-    GIT_REPOSITORY https://gitlab.com/libxc/libxc.git
-    GIT_TAG 6af8da52125a05e5997fb65751eee7fe4bc2f171
+    GIT_REPOSITORY https://github.com/wxj6000/libxc.git
+    GIT_TAG b225c254c063e1de835a4425115c9a6377478b32
     PREFIX ${PROJECT_BINARY_DIR}/deps
     INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
     CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON

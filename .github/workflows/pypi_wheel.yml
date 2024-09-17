@@ -32,7 +32,7 @@ jobs:
           export TWINE_USERNAME=__token__
           export TWINE_PASSWORD="${{ secrets.PYPI_API_TOKEN }}"
           twine upload --verbose "${{ github.workspace }}/wheelhouse/*"
-          
+
   release-pypi-linux-cuda12:
     runs-on: ubuntu-latest
     env:
@@ -55,7 +55,7 @@ jobs:
           export TWINE_USERNAME=__token__
           export TWINE_PASSWORD="${{ secrets.PYPI_API_TOKEN }}"
           twine upload --verbose "${{ github.workspace }}/wheelhouse/*"
-          
+
   release-pypi-sdist:
     runs-on: ubuntu-latest
     steps:

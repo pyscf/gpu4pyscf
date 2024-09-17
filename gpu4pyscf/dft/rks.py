@@ -22,18 +22,20 @@ import cupy
 from pyscf import lib
 from pyscf.dft import rks
 
-from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
-from gpu4pyscf.scf.hf import RHF
+from gpu4pyscf.scf import hf
 from gpu4pyscf.lib.cupy_helper import load_library, tag_array
+from pyscf import __config__
+
+__all__ = [
+    'get_veff', 'RKS'
+]
 
 libcupy_helper = load_library('libcupy_helper')
 
-LINEAR_DEP_THR = 1e-12
-
 def prune_small_rho_grids_(ks, mol, dm, grids):
-    rho = ks._numint.get_rho(mol, dm, grids, ks.max_memory)
+    rho = ks._numint.get_rho(mol, dm, grids, ks.max_memory, verbose=ks.verbose)
 
     threshold = ks.small_rho_cutoff
     '''Prune grids if the electron density on the grid is small'''
@@ -46,9 +48,9 @@ def prune_small_rho_grids_(ks, mol, dm, grids):
         rho *= grids.weights
         idx = cupy.abs(rho) > threshold / grids.weights.size
 
-        logger.debug(grids, 'Drop grids %d', grids.weights.size - cupy.count_nonzero(idx))
         grids.coords  = cupy.asarray(grids.coords [idx], order='C')
         grids.weights = cupy.asarray(grids.weights[idx], order='C')
+        logger.debug(grids, 'Drop grids %d', rho.size - grids.weights.size)
         if grids.alignment:
             padding = gen_grid._padding_size(grids.size, grids.alignment)
             logger.debug(ks, 'prune_by_density_: %d padding grids', padding)
@@ -57,6 +59,7 @@ def prune_small_rho_grids_(ks, mol, dm, grids):
                 grids.coords = cupy.vstack(
                         [grids.coords, pad])
                 grids.weights = cupy.hstack([grids.weights, cupy.zeros(padding)])
+
         # make_mask has to be executed on cpu for now.
         #grids.non0tab = grids.make_mask(mol, grids.coords)
         #grids.screen_index = grids.non0tab
@@ -73,23 +76,20 @@ def initialize_grids(ks, mol=None, dm=None):
         #ks.grids.build(with_non0tab=True)
         ks.grids.weights = cupy.asarray(ks.grids.weights)
         ks.grids.coords = cupy.asarray(ks.grids.coords)
-        if (ks.small_rho_cutoff > 1e-20 and
-            # dm.ndim == 2 indicates ground state
-            isinstance(dm, cupy.ndarray) and dm.ndim == 2):
+        ground_state = getattr(dm, 'ndim', 0) == 2
+        if ks.small_rho_cutoff > 1e-20 and ground_state:
             # Filter grids the first time setup grids
             ks.grids = prune_small_rho_grids_(ks, ks.mol, dm, ks.grids)
         t0 = logger.timer_debug1(ks, 'setting up grids', *t0)
-        is_nlc = ks.nlc or ks._numint.libxc.is_nlc(ks.xc)
-        if is_nlc and ks.nlcgrids.coords is None:
+
+        if ks.do_nlc() and ks.nlcgrids.coords is None:
             if ks.nlcgrids.coords is None:
                 t0 = logger.init_timer(ks)
                 #ks.nlcgrids.build(with_non0tab=True)
                 ks.nlcgrids.build()
                 ks.nlcgrids.weights = cupy.asarray(ks.nlcgrids.weights)
                 ks.nlcgrids.coords = cupy.asarray(ks.nlcgrids.coords)
-                if (ks.small_rho_cutoff > 1e-20 and
-                    # dm.ndim == 2 indicates ground state
-                    isinstance(dm, cupy.ndarray) and dm.ndim == 2):
+                if ks.small_rho_cutoff > 1e-20 and ground_state:
                     # Filter grids the first time setup grids
                     ks.nlcgrids = prune_small_rho_grids_(ks, ks.mol, dm, ks.nlcgrids)
                 t0 = logger.timer_debug1(ks, 'setting up nlc grids', *t0)
@@ -126,9 +126,9 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     t0 = logger.init_timer(ks)
     initialize_grids(ks, mol, dm)
 
-    if hasattr(ks, 'screen_tol') and ks.screen_tol is not None:
-        ks.direct_scf_tol = ks.screen_tol
-    ground_state = (isinstance(dm, cupy.ndarray) and dm.ndim == 2)
+    #if hasattr(ks, 'screen_tol') and ks.screen_tol is not None:
+    #    ks.direct_scf_tol = ks.screen_tol
+    ground_state = getattr(dm, 'ndim', 0) == 2
 
     ni = ks._numint
     if hermi == 2:  # because rho = 0
@@ -136,7 +136,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     else:
         max_memory = ks.max_memory - lib.current_memory()[0]
         n, exc, vxc = ni.nr_rks(mol, ks.grids, ks.xc, dm, max_memory=max_memory)
-        if ks.nlc or ni.libxc.is_nlc(ks.xc):
+        if ks.do_nlc():
             if ni.libxc.is_nlc(ks.xc):
                 xc = ks.xc
             else:
@@ -216,6 +216,12 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     e1 = cupy.einsum('ij,ji->', h1e, dm).real
     ecoul = vhf.ecoul.real
     exc = vhf.exc.real
+    if isinstance(ecoul, cupy.ndarray):
+        ecoul = ecoul.get()[()]
+    if isinstance(exc, cupy.ndarray):
+        exc = exc.get()[()]
+    if isinstance(e1, cupy.ndarray):
+        e1 = e1.get()[()]
     e2 = ecoul + exc
     ks.scf_summary['e1'] = e1
     ks.scf_summary['coul'] = ecoul
@@ -223,51 +229,60 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     logger.debug(ks, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
     return e1+e2, e2
 
-class RKS(scf.hf.RHF, rks.RKS):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+# Inherit pyscf KohnShamDFT class since this is tested in the pyscf dispersion code
+class KohnShamDFT(rks.KohnShamDFT):
 
-    _keys = {'disp'}
+    _keys = rks.KohnShamDFT._keys
 
-    def __init__(self, mol, xc='LDA,VWN', disp=None):
-        super().__init__(mol, xc)
-        self._numint = numint.NumInt(xc=xc)
-        self.disp = disp
-        self.screen_tol = 1e-14
+    def __init__(self, xc='LDA,VWN'):
+        self.xc = xc
+        self.disp = None
+        self.disp_with_3body = None
+        self.nlc = ''
+        self.grids = gen_grid.Grids(self.mol)
+        self.grids.level = getattr(
+            __config__, 'dft_rks_RKS_grids_level', self.grids.level)
+        self.nlcgrids = gen_grid.Grids(self.mol)
+        self.nlcgrids.level = getattr(
+            __config__, 'dft_rks_RKS_nlcgrids_level', self.nlcgrids.level)
+        # Use rho to filter grids
+        self.small_rho_cutoff = getattr(
+            __config__, 'dft_rks_RKS_small_rho_cutoff', 1e-7)
+##################################################
+# don't modify the following attributes, they are not input options
+        self._numint = numint.NumInt()
+    @property
+    def omega(self):
+        return self._numint.omega
+    @omega.setter
+    def omega(self, v):
+        self._numint.omega = float(v)
 
-        grids_level = self.grids.level
-        self.grids = gen_grid.Grids(mol)
-        self.grids.level = grids_level
+    def dump_flags(self, verbose=None):
+        # TODO: add this later
+        return
+    
+    reset = rks.KohnShamDFT.reset
+    do_nlc = rks.KohnShamDFT.do_nlc
 
-        nlcgrids_level = self.nlcgrids.level
-        self.nlcgrids = gen_grid.Grids(mol)
-        self.nlcgrids.level = nlcgrids_level
+hf.KohnShamDFT = KohnShamDFT
+from gpu4pyscf.lib import utils
 
-    def get_dispersion(self):
-        if self.disp is None:
-            return 0.0
+class RKS(KohnShamDFT, hf.RHF):
 
-        if self.disp[:2].upper() == 'D3':
-            # multi-threads in DFTD3 conflicts with PyTorch, set it to be 1 for safty
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                import dftd3.pyscf as disp
-                d3 = disp.DFTD3Dispersion(self.mol, xc=self.xc, version=self.disp)
-                e_d3, _ = d3.kernel()
-            return e_d3
+    to_gpu = utils.to_gpu
+    device = utils.device
 
-        if self.disp[:2].upper() == 'D4':
-            from pyscf.data.elements import charge
-            atoms = numpy.array([ charge(a[0]) for a in self.mol._atom])
-            coords = self.mol.atom_coords()
-            from pyscf import lib
-            with lib.with_omp_threads(1):
-                from dftd4.interface import DampingParam, DispersionModel
-                model = DispersionModel(atoms, coords)
-                res = model.get_dispersion(DampingParam(method=self.xc), grad=False)
-            return res.get("energy")
+    def __init__(self, mol, xc='LDA,VWN'):
+        hf.RHF.__init__(self, mol)
+        KohnShamDFT.__init__(self, xc)
+
+    def dump_flags(self, verbose=None):
+        hf.RHF.dump_flags(self, verbose)
+        return KohnShamDFT.dump_flags(self, verbose)
 
     def reset(self, mol=None):
-        super().reset(mol)
+        hf.SCF.reset(self, mol)
         self.grids.reset(mol)
         self.nlcgrids.reset(mol)
         self._numint.gdftopt = None
@@ -277,7 +292,13 @@ class RKS(scf.hf.RHF, rks.RKS):
         from gpu4pyscf.grad import rks as rks_grad
         return rks_grad.Gradients(self)
 
+    def to_cpu(self):
+        mf = rks.RKS(self.mol)
+        utils.to_cpu(self, out=mf)
+        return mf
+
     energy_elec = energy_elec
-    get_jk = RHF.get_jk
+    energy_tot = hf.RHF.energy_tot
     get_veff = get_veff
-    _eigh = RHF._eigh
+    to_hf = NotImplemented
+    init_guess_by_vsap = rks.init_guess_by_vsap

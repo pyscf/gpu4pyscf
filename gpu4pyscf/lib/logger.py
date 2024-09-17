@@ -21,10 +21,12 @@ from pyscf import lib
 from pyscf.lib import parameters as param
 import pyscf.__config__
 
+INFO = lib.logger.INFO
 NOTE = lib.logger.NOTE
 WARN = lib.logger.WARN
 DEBUG = lib.logger.DEBUG
 DEBUG1= lib.logger.DEBUG1
+DEBUG2= lib.logger.DEBUG2
 TIMER_LEVEL = lib.logger.TIMER_LEVEL
 flush = lib.logger.flush
 
@@ -84,17 +86,25 @@ def _timer_debug1(rec, msg, cpu0=None, wall0=None, gpu0=None, sync=True):
         rec._t0 = process_clock()
         return rec._t0,
 
+def _timer_debug2(rec, msg, cpu0=None, wall0=None, gpu0=None, sync=True):
+    if rec.verbose >= DEBUG2:
+        return timer(rec, msg, cpu0, wall0, gpu0)
+    return cpu0, wall0, gpu0
+
 info = lib.logger.info
 note = lib.logger.note
+warn = lib.logger.warn
 debug = lib.logger.debug
 debug1 = lib.logger.debug1
 debug2 = lib.logger.debug2
 timer_debug1 = _timer_debug1
+timer_debug2 = _timer_debug2
 
 class Logger(lib.logger.Logger):
     def __init__(self, stdout=sys.stdout, verbose=NOTE):
         super().__init__(stdout=stdout, verbose=verbose)
     timer_debug1 = _timer_debug1
+    timer_debug2 = _timer_debug2
     timer = timer
     init_timer = init_timer
 

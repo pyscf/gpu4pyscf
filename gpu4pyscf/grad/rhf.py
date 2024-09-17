@@ -21,8 +21,8 @@ import numpy
 from pyscf import lib, gto
 from pyscf.grad import rhf
 from gpu4pyscf.lib.cupy_helper import load_library
-from gpu4pyscf.scf.hf import _VHFOpt
-from gpu4pyscf.lib.cupy_helper import tag_array, contract
+from gpu4pyscf.scf.hf import _VHFOpt, KohnShamDFT
+from gpu4pyscf.lib.cupy_helper import tag_array, contract, take_last2d
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
 
@@ -516,21 +516,20 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         t3 = log.init_timer()
         dh1e = int3c2e.get_dh1e(mol, dm0)
 
-        t4 = log.timer_debug1("get_dh1e", *t3)
         if mol.has_ecp():
             dh1e += get_dh1e_ecp(mol, dm0)
+        t3 = log.timer_debug1('gradients of h1e', *t3)
 
         dvhf = mf_grad.get_veff(mol, dm0)
-        t1 = log.timer_debug1('gradients of h1e', *t0)
+        log.timer_debug1('gradients of veff', *t3)
         log.debug('Computing Gradients of NR-HF Coulomb repulsion')
 
         dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
-
         extra_force = cupy.zeros((len(atmlst),3))
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals())
 
-        t2 = log.timer_debug1('gradients of 2e part', *t1)
+        log.timer_debug1('gradients of 2e part', *t3)
 
     dh = contract('xij,ij->xi', h1, dm0)
     ds = contract('xij,ij->xi', s1, dme0)
@@ -539,28 +538,149 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
     de = 2.0 * dvhf + dh1e + delec + extra_force
 
+    # for backforward compatiability
     if(hasattr(mf, 'disp') and mf.disp is not None):
         g_disp = mf_grad.get_dispersion()
         mf_grad.grad_disp = g_disp
         mf_grad.grad_mf = de
-        de += cupy.asarray(g_disp)
 
     if log.verbose >= logger.DEBUG:
         log.timer_debug1('gradients of electronic part', *t0)
 
-    # net force should be zero
-    de -= cupy.sum(de, axis=0)/len(atmlst)
+    ## net force should be zero
+    #de -= cupy.sum(de, axis=0)/len(atmlst)
     return de.get()
 
-class Gradients(rhf.Gradients):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
+    '''
+    derivative of hcore in MO
+    '''
+    mf = mf_grad.base
+    mol = mf.mol
+    natm = mol.natm
+    nao = mol.nao
+    if mo_coeff is None: mo_coeff = cupy.asarray(mf.mo_coeff)
+    if mo_occ is None: mo_occ = mf.mo_occ
 
+    orbo = mo_coeff[:,mo_occ>0]
+    nocc = orbo.shape[1]
+
+    # derivative w.r.t nuclie position
+    dh1e = cupy.zeros([3,natm,nao,nocc])
+    coords = mol.atom_coords()
+    charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
+    fakemol = gto.fakemol_for_charges(coords)
+    intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
+    intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
+    orbo_sorted = orbo[intopt.ao_idx]
+    mo_coeff_sorted = mo_coeff[intopt.ao_idx]
+    for i0,i1,j0,j1,k0,k1,int3c_blk in int3c2e.loop_int3c2e_general(intopt, ip_type='ip1'):
+        dh1e[:,k0:k1,j0:j1,:] += contract('xkji,io->xkjo', int3c_blk, orbo_sorted[i0:i1])
+        dh1e[:,k0:k1,i0:i1,:] += contract('xkji,jo->xkio', int3c_blk, orbo_sorted[j0:j1])
+    dh1e = contract('xkjo,k->xkjo', dh1e, -charges)
+    dh1e = contract('xkjo,jp->xkpo', dh1e, mo_coeff_sorted)
+
+    # derivative w.r.t. atomic orbitals
+    h1 = mf_grad.get_hcore(mol)
+    aoslices = mol.aoslice_by_atom()
+    with_ecp = mol.has_ecp()
+    if with_ecp:
+        ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
+    else:
+        ecp_atoms = ()
+    for atm_id in range(natm):
+        shl0, shl1, p0, p1 = aoslices[atm_id]
+        h1ao = numpy.zeros([3,nao,nao])
+        with mol.with_rinv_at_nucleus(atm_id):
+            if with_ecp and atm_id in ecp_atoms:
+                h1ao += mol.intor('ECPscalar_iprinv', comp=3)
+        h1ao[:,p0:p1] += h1[:,p0:p1]
+        h1ao += h1ao.transpose([0,2,1])
+        h1ao = cupy.asarray(h1ao)
+        h1mo = contract('xij,jo->xio', h1ao, orbo)
+        dh1e[:,atm_id] += contract('xio,ip->xpo', h1mo, mo_coeff)
+    return dh1e
+
+def as_scanner(mf_grad):
+    if isinstance(mf_grad, lib.GradScanner):
+        return mf_grad
+    logger.info(mf_grad, 'Create scanner for %s', mf_grad.__class__)
+    name = mf_grad.__class__.__name__ + SCF_GradScanner.__name_mixin__
+    return lib.set_class(SCF_GradScanner(mf_grad),
+                         (SCF_GradScanner, mf_grad.__class__), name)
+
+class SCF_GradScanner(lib.GradScanner):
+    def __init__(self, g):
+        lib.GradScanner.__init__(self, g)
+
+    def __call__(self, mol_or_geom, **kwargs):
+        if isinstance(mol_or_geom, gto.MoleBase):
+            assert mol_or_geom.__class__ == gto.Mole
+            mol = mol_or_geom
+        else:
+            mol = self.mol.set_geom_(mol_or_geom, inplace=False)
+
+        self.reset(mol)
+        mf_scanner = self.base
+        e_tot = mf_scanner(mol)
+
+        if isinstance(mf_scanner, KohnShamDFT):
+            if getattr(self, 'grids', None):
+                self.grids.reset(mol)
+            if getattr(self, 'nlcgrids', None):
+                self.nlcgrids.reset(mol)
+
+        de = self.kernel(**kwargs)
+        return e_tot, de
+
+class GradientsBase(lib.StreamObject):
+    '''
+    Basic nuclear gradient functions for non-relativistic methods
+    '''
+
+    _keys = {'mol', 'base', 'unit', 'atmlst', 'de'}
+    __init__ = rhf.GradientsBase.__init__
+
+    def dump_flags(self, verbose=None):
+        return
+
+    reset       = rhf.GradientsBase.reset
+    get_hcore   = rhf.GradientsBase.get_hcore
+    get_ovlp    = rhf.GradientsBase.get_ovlp
+    get_jk      = rhf.GradientsBase.get_jk
+    get_j       = rhf.GradientsBase.get_j
+    get_k       = rhf.GradientsBase.get_k
+    get_veff    = NotImplemented
+    make_rdm1e  = rhf.GradientsBase.make_rdm1e
+    grad_nuc    = rhf.GradientsBase.grad_nuc
+    optimizer   = rhf.GradientsBase.optimizer
+    extra_force = rhf.GradientsBase.extra_force
+    kernel      = rhf.GradientsBase.kernel
+    grad        = rhf.GradientsBase.grad
+    _finalize   = rhf.GradientsBase._finalize
+    _write      = rhf.GradientsBase._write
+    as_scanner  = as_scanner
+    _tag_rdm1   = rhf.GradientsBase._tag_rdm1
+
+    # to_cpu can be reused only when __init__ still takes mf
+    def to_cpu(self):
+        mf = self.base.to_cpu()
+        from importlib import import_module
+        mod = import_module(self.__module__.replace('gpu4pyscf', 'pyscf'))
+        cls = getattr(mod, self.__class__.__name__)
+        obj = cls(mf)
+        return obj
+
+class Gradients(GradientsBase):
+    from gpu4pyscf.lib.utils import to_gpu, device
+
+    make_rdm1e = rhf.Gradients.make_rdm1e
     grad_elec = grad_elec
     grad_nuc = grad_nuc
     get_veff = get_veff
     get_jk = _get_jk
 
-    _keys = {'auxbasis_response'}
+    _keys = {'auxbasis_response', 'grad_disp', 'grad_mf'}
 
     def get_j(self, mol=None, dm=None, hermi=0, omega=None):
         vj, _ = self.get_jk(mol, dm, with_k=False, omega=omega)
@@ -575,3 +695,8 @@ class Gradients(rhf.Gradients):
         grid response is implemented get_veff
         '''
         return 0
+
+Grad = Gradients
+
+from gpu4pyscf import scf
+scf.hf.RHF.Gradients = lib.class_as_method(Gradients)

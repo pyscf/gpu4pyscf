@@ -17,18 +17,39 @@ import copy
 import numpy
 import cupy
 from cupyx.scipy.linalg import solve_triangular
-from pyscf.df.grad import rhf
-from pyscf import lib, scf, gto
-from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.cupy_helper import print_mem_info, tag_array, unpack_tril, contract, load_library, take_last2d
-from gpu4pyscf.grad.rhf import grad_elec
+from pyscf import scf
+from gpu4pyscf.df import int3c2e, df
+from gpu4pyscf.lib.cupy_helper import (print_mem_info, tag_array,
+unpack_tril, contract, load_library, take_last2d, cholesky)
+from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
 
 libcupy_helper = load_library('libcupy_helper')
 
+LINEAR_DEP_THRESHOLD = df.LINEAR_DEP_THR
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 64)
+
+def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=LINEAR_DEP_THRESHOLD):
+    ''' generate a solver to solve Ax = b, RHS must be in (n,....) '''
+    if decompose_j2c.upper() == 'CD':
+        try:
+            j2c = cholesky(int2c, lower=True)
+            def j2c_solver(v):
+                return solve_triangular(j2c, v, overwrite_b=False)
+            return j2c_solver
+
+        except Exception:
+            pass
+
+    w, v = cupy.linalg.eigh(int2c)
+    mask = w > lindep
+    v1 = v[:,mask]
+    j2c = cupy.dot(v1/w[mask], v1.conj().T)
+    def j2c_solver(b): # noqa: F811
+        return j2c.dot(b.reshape(j2c.shape[0],-1)).reshape(b.shape)
+    return j2c_solver
 
 def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega=None):
     if mol is None: mol = mf_grad.mol
@@ -46,13 +67,11 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         else:
             dfobj = mf_grad.base.with_df
             with_df = dfobj._rsh_df[key] = copy.copy(dfobj).reset()
-            #raise RuntimeError(f'omega={omega} is not calculated in SCF')
 
     auxmol = with_df.auxmol
     if not hasattr(with_df, 'intopt') or with_df._cderi is None:
         with_df.build(omega=omega)
     intopt = with_df.intopt
-
     naux = with_df.naux
 
     log = logger.new_logger(mol, mol.verbose)
@@ -62,10 +81,11 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         raise NotImplementedError()
     mo_coeff = cupy.asarray(mf_grad.base.mo_coeff)
     mo_occ = cupy.asarray(mf_grad.base.mo_occ)
-    sph_ao_idx = intopt.sph_ao_idx
-    dm = take_last2d(dm0, sph_ao_idx)
-    orbo = contract('pi,i->pi', mo_coeff[:,mo_occ>0], numpy.sqrt(mo_occ[mo_occ>0]))
-    orbo = orbo[sph_ao_idx, :]
+    ao_idx = intopt.ao_idx
+
+    dm = take_last2d(dm0, ao_idx)
+    orbo = mo_coeff[:,mo_occ>0] * mo_occ[mo_occ>0] ** 0.5
+    orbo = orbo[ao_idx, :]
     nocc = orbo.shape[-1]
 
     # (L|ij) -> rhoj: (L), rhok: (L|oo)
@@ -99,8 +119,8 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     else:
         int2c_e1 = auxmol.intor('int2c2e_ip1')
     int2c_e1 = cupy.asarray(int2c_e1)
-    sph_aux_idx = intopt.sph_aux_idx
-    rev_aux_idx = numpy.argsort(sph_aux_idx)
+    aux_ao_idx = intopt.aux_ao_idx
+    rev_aux_idx = numpy.argsort(aux_ao_idx)
     auxslices = auxmol.aoslice_by_atom()
     aux_cart2sph = intopt.aux_cart2sph
     low_t = low.T.copy()
@@ -110,7 +130,10 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         elif low.tag == 'cd':
             #rhoj = solve_triangular(low_t, rhoj, lower=False)
             rhoj = solve_triangular(low_t, rhoj, lower=False, overwrite_b=True)
-        rhoj_cart = contract('pq,q->p', aux_cart2sph, rhoj)
+        if not auxmol.cart:
+            rhoj_cart = contract('pq,q->p', aux_cart2sph, rhoj)
+        else:
+            rhoj_cart = rhoj
         rhoj = rhoj[rev_aux_idx]
         tmp = contract('xpq,q->xp', int2c_e1, rhoj)
         vjaux = -contract('xp,p->xp', tmp, rhoj)
@@ -127,7 +150,10 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         vkaux = -contract('xpq,pq->xp', int2c_e1, tmp)
         vkaux_2c = cupy.array([-vkaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
         vkaux = tmp = None
-        rhok_cart = contract('pq,qkl->pkl', aux_cart2sph, rhok)
+        if not auxmol.cart:
+            rhok_cart = contract('pq,qkl->pkl', aux_cart2sph, rhok)
+        else:
+            rhok_cart = rhok
         rhok = None
     low_t = None
     t0 = log.timer_debug1('rhoj and rhok', *t0)
@@ -139,11 +165,14 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     # rebuild with aosym
     intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False,
                  group_size_aux=block_size)#, group_size=block_size)
-
-    # sph2cart for ao
-    cart2sph = intopt.cart2sph
-    orbo_cart = cart2sph @ orbo
-    dm_cart = cart2sph @ dm @ cart2sph.T
+    if not intopt._mol.cart:
+        # sph2cart for ao
+        cart2sph = intopt.cart2sph
+        orbo_cart = cart2sph @ orbo
+        dm_cart = cart2sph @ dm @ cart2sph.T
+    else:
+        dm_cart = dm
+        orbo_cart = orbo
     dm = orbo = None
 
     vj = vk = rhoj_tmp = rhok_tmp = None
@@ -175,22 +204,22 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         '''
         '''
         # outcore implementation
-        int3c2e.get_int3c2e_ip_slice(intopt, cp_kl_id, 1, out=buf)
+        buf = int3c2e.get_int3c2e_ip_slice(intopt, cp_kl_id, 1)
         size = 3*(k1-k0)*nao_cart*nao_cart
         int3c_ip = buf[:size].reshape([3,k1-k0,nao_cart,nao_cart], order='C')
-        rhoj_tmp = contract('xpji,ij->xip', int3c_ip, dm_cart)
-        vj += contract('xip,p->xi', rhoj_tmp, rhoj_cart[k0:k1])
-        vk += contract('pji,xpji->xi', rhok_tmp, int3c_ip)
+        rhoj_tmp0 = contract('xpji,ij->xip', int3c_ip, dm_cart)
+        vj_outcore = contract('xip,p->xi', rhoj_tmp0, rhoj_cart[k0:k1])
+        vk_outcore = contract('pji,xpji->xi', rhok_tmp, int3c_ip)
 
-        int3c2e.get_int3c2e_ip_slice(intopt, cp_kl_id, 2, out=buf)
-        rhoj_tmp = contract('xpji,ji->xp', int3c_ip, dm_cart)
-        vjaux[:, k0:k1] = contract('xp,p->xp', rhoj_tmp, rhoj_cart[k0:k1])
-        vkaux[:, k0:k1] = contract('xpji,pji->xp', int3c_ip, rhok_tmp)
+        buf = int3c2e.get_int3c2e_ip_slice(intopt, cp_kl_id, 2)
+        int3c_ip = buf[:size].reshape([3,k1-k0,nao_cart,nao_cart], order='C')
+        rhoj_tmp0 = contract('xpji,ji->xp', int3c_ip, dm_cart)
+        vjaux_outcore = contract('xp,p->xp', rhoj_tmp0, rhoj_cart[k0:k1])
+        vkaux_outcore = contract('xpji,pji->xp', int3c_ip, rhok_tmp)
         '''
         vj_tmp, vk_tmp = int3c2e.get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip1', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
         if with_j: vj += vj_tmp
         if with_k: vk += vk_tmp
-
         vj_tmp, vk_tmp = int3c2e.get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip2', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
         if with_j: vjaux[:, k0:k1] = vj_tmp
         if with_k: vkaux[:, k0:k1] = vk_tmp
@@ -198,6 +227,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         rhoj_tmp = rhok_tmp = vj_tmp = vk_tmp = None
         t1 = log.timer_debug1(f'calculate {cp_kl_id:3d} / {len(intopt.aux_log_qs):3d}, {k1-k0:3d} slices', *t1)
 
+    # vj and vk are still in cartesian
     cart_ao_idx = intopt.cart_ao_idx
     rev_cart_ao_idx = numpy.argsort(cart_ao_idx)
     aoslices = intopt.mol.aoslice_by_atom()
@@ -210,7 +240,6 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         vk = [-vk[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
         vk = cupy.asarray(vk)
     t0 = log.timer_debug1('(di,j|P) and (i,j|dP)', *t0)
-
     cart_aux_idx = intopt.cart_aux_idx
     rev_cart_aux_idx = numpy.argsort(cart_aux_idx)
     auxslices = intopt.auxmol.aoslice_by_atom()
@@ -227,12 +256,22 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     return vj, vk, vjaux, vkaux
 
 
-class Gradients(rhf.Gradients):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+class Gradients(rhf_grad.Gradients):
+    from gpu4pyscf.lib.utils import to_gpu, device
 
+    _keys = {'with_df', 'auxbasis_response'}
+    def __init__(self, mf):
+        # Whether to include the response of DF auxiliary basis when computing
+        # nuclear gradients of J/K matrices
+        rhf_grad.Gradients.__init__(self, mf)
+
+    auxbasis_response = True
     get_jk = get_jk
-    grad_elec = grad_elec
-
+    grad_elec = rhf_grad.grad_elec
+    
+    def check_sanity(self):
+        assert isinstance(self.base, df.df_jk._DFHF)
+    
     def get_j(self, mol=None, dm=None, hermi=0):
         vj, _, vjaux, _ = self.get_jk(mol, dm, with_k=False)
         return vj, vjaux
@@ -257,3 +296,5 @@ class Gradients(rhf.Gradients):
             return envs['dvhf'].aux[atom_id]
         else:
             return 0
+
+Grad = Gradients

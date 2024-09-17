@@ -4,7 +4,7 @@ cutensor==1.6.0.3
 cutensor-cu11==1.6.1
 cutensornet-cu11==2.0.0
 Cython==0.29.32
-dftd3==0.7.0
+# dftd3==0.7.0
 geometric==1.0
 h5py==3.7.0
 numpy==1.23.5

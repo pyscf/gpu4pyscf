@@ -19,7 +19,7 @@
 
 
 template <int NROOTS> __device__
-static void GINTg0_2e_2d4d_ip1(GINTEnvVars envs, double* __restrict__ g, double*__restrict__ uw, double norm,
+static void GINTg0_2e_2d4d_ip1(GINTEnvVars envs, double* __restrict__ g, double norm,
                                int ish, int jsh, int ksh, int lsh, int prim_ij, int prim_kl)
 {
   double* __restrict__ a12 = c_bpcache.a12;
@@ -28,17 +28,31 @@ static void GINTg0_2e_2d4d_ip1(GINTEnvVars envs, double* __restrict__ g, double*
   double* __restrict__ y12 = c_bpcache.y12;
   double* __restrict__ z12 = c_bpcache.z12;
   double aij = a12[prim_ij];
+  double xij = x12[prim_ij];
+  double yij = y12[prim_ij];
+  double zij = z12[prim_ij];
   double akl = a12[prim_kl];
-  double eij = e12[prim_ij];
-  double ekl = e12[prim_kl];
+  double xkl = x12[prim_kl];
+  double ykl = y12[prim_kl];
+  double zkl = z12[prim_kl];
+
+  double xijxkl = xij - xkl;
+  double yijykl = yij - ykl;
+  double zijzkl = zij - zkl;
   double aijkl = aij + akl;
   double a1 = aij * akl;
   double a0 = a1 / aijkl;
   double omega = envs.omega;
   double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
   a0 *= theta;
-  //double fac = eij * ekl / (sqrt(aijkl) * a1);
+
+  double eij = e12[prim_ij];
+  double ekl = e12[prim_kl];
   double fac = eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+  double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
+  double uw[NROOTS*2];
+  GINTrys_root<NROOTS>(x, uw);
+  GINTscale_u<NROOTS>(uw, theta);
 
   double* __restrict__ u = uw;
   double* __restrict__ w = u + NROOTS;
@@ -46,15 +60,6 @@ static void GINTg0_2e_2d4d_ip1(GINTEnvVars envs, double* __restrict__ g, double*
   double* __restrict__ gy = g + envs.g_size;
   double* __restrict__ gz = g + envs.g_size * 2;
 
-  double xij = x12[prim_ij];
-  double yij = y12[prim_ij];
-  double zij = z12[prim_ij];
-  double xkl = x12[prim_kl];
-  double ykl = y12[prim_kl];
-  double zkl = z12[prim_kl];
-  double xijxkl = xij - xkl;
-  double yijykl = yij - ykl;
-  double zijzkl = zij - zkl;
   int nbas = c_bpcache.nbas;
   double* __restrict__ bas_x = c_bpcache.bas_coords;
   double* __restrict__ bas_y = bas_x + nbas;
@@ -807,7 +812,6 @@ static void GINTint2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
   double v_jk_x, v_jk_y, v_jk_z, v_jl_x, v_jl_y, v_jl_z;
 
   double norm = envs.fac;
-  double omega = envs.omega;
   int nprim_ij = envs.nprim_ij;
   int nprim_kl = envs.nprim_kl;
   int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
@@ -838,23 +842,17 @@ static void GINTint2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
   int nfjk = nfj * nfk;
   int nfjl = nfj * nfl;
 
-
   int n_dm = jk.n_dm;
   double * vj = jk.vj;
   double * vk = jk.vk;
   double * dm = jk.dm;
   double s_ix, s_iy, s_iz, s_jx, s_jy, s_jz;
 
-  double uw[NROOTS * 2];
   double gout[GOUTSIZE];
   double * __restrict__ g =
       gout + (3 * nfik + 3 * nfjk + 3 * nfil + 3 * nfjl + 6 * nfij) * n_dm;
 
   memset(gout, 0, sizeof(double) * GOUTSIZE);
-  double* __restrict__ a12 = c_bpcache.a12;
-  double* __restrict__ x12 = c_bpcache.x12;
-  double* __restrict__ y12 = c_bpcache.y12;
-  double* __restrict__ z12 = c_bpcache.z12;
   double * __restrict__ i_exponent = c_bpcache.a1;
   double * __restrict__ j_exponent = c_bpcache.a2;
 
@@ -889,26 +887,7 @@ static void GINTint2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
       double aj = j_exponent[ij];
 
       for (kl = prim_kl; kl < prim_kl + nprim_kl; ++kl) {
-        double aij = a12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
-        double akl = a12[kl];
-        double xkl = x12[kl];
-        double ykl = y12[kl];
-        double zkl = z12[kl];
-        double xijxkl = xij - xkl;
-        double yijykl = yij - ykl;
-        double zijzkl = zij - zkl;
-        double aijkl = aij + akl;
-        double a1 = aij * akl;
-        double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-        a0 *= theta;
-        double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        GINTrys_root<NROOTS>(x, uw);
-        GINTscale_u<NROOTS>(uw, theta);
-        GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, uw, norm,
+        GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, norm,
                                as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
         buf_ij = gout;
         dm = jk.dm;
@@ -974,26 +953,7 @@ static void GINTint2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double ai = i_exponent[ij];
         double aj = j_exponent[ij];
         for (kl = prim_kl; kl < prim_kl + nprim_kl; ++kl) {
-          double aij = a12[ij];
-          double xij = x12[ij];
-          double yij = y12[ij];
-          double zij = z12[ij];
-          double akl = a12[kl];
-          double xkl = x12[kl];
-          double ykl = y12[kl];
-          double zkl = z12[kl];
-          double xijxkl = xij - xkl;
-          double yijykl = yij - ykl;
-          double zijzkl = zij - zkl;
-          double aijkl = aij + akl;
-          double a1 = aij * akl;
-          double a0 = a1 / aijkl;
-          double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-          a0 *= theta;
-          double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-          GINTrys_root<NROOTS>(x, uw);
-          GINTscale_u<NROOTS>(uw, theta);
-          GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, uw, norm,
+          GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, norm,
                                  as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
           dm = jk.dm;
           p_buf_ij = buf_ij;
@@ -1140,26 +1100,7 @@ static void GINTint2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double ai = i_exponent[ij];
         double aj = j_exponent[ij];
         for (kl = prim_kl; kl < prim_kl + nprim_kl; ++kl) {
-          double aij = a12[ij];
-          double xij = x12[ij];
-          double yij = y12[ij];
-          double zij = z12[ij];
-          double akl = a12[kl];
-          double xkl = x12[kl];
-          double ykl = y12[kl];
-          double zkl = z12[kl];
-          double xijxkl = xij - xkl;
-          double yijykl = yij - ykl;
-          double zijzkl = zij - zkl;
-          double aijkl = aij + akl;
-          double a1 = aij * akl;
-          double a0 = a1 / aijkl;
-          double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-          a0 *= theta;
-          double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-          GINTrys_root<NROOTS>(x, uw);
-          GINTscale_u<NROOTS>(uw, theta);
-          GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, uw, norm,
+          GINTg0_2e_2d4d_ip1<NROOTS>(envs, g, norm,
                                  as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
           dm = jk.dm;
           for (i_dm = 0; i_dm < n_dm; ++i_dm) {
@@ -1353,7 +1294,7 @@ GINTint2e_ip1_jk_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets off
       double a1 = aij * akl;
       double a0 = a1 / aijkl;
 
-      double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+      double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
       a0 *= theta;
       double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
       double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -1452,186 +1393,3 @@ GINTint2e_ip1_jk_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets off
     dm += nao2;
   }
 }
-
-#if POLYFIT_ORDER >= 4
-
-template<>
-__global__
-void GINTint2e_ip1_jk_kernel<4, NABLAGOUTSIZE4>(GINTEnvVars envs, JKMatrix jk,
-                                                    BasisProdOffsets offsets) {
-  int ntasks_ij = offsets.ntasks_ij;
-  int ntasks_kl = offsets.ntasks_kl;
-  int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-  int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-  if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-    return;
-  }
-
-  int bas_ij = offsets.bas_ij + task_ij;
-  int bas_kl = offsets.bas_kl + task_kl;
-
-  double norm = envs.fac;
-  double omega = envs.omega;
-  int nprim_ij = envs.nprim_ij;
-  int nprim_kl = envs.nprim_kl;
-  int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-  int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-  int * bas_pair2bra = c_bpcache.bas_pair2bra;
-  int * bas_pair2ket = c_bpcache.bas_pair2ket;
-  int ish = bas_pair2bra[bas_ij];
-  int jsh = bas_pair2ket[bas_ij];
-  int ksh = bas_pair2bra[bas_kl];
-  int lsh = bas_pair2ket[bas_kl];
-
-  double uw[8];
-  double gout[NABLAGOUTSIZE4];
-  double * g = gout + 6 * envs.nf;
-  memset(gout, 0, 6 * envs.nf * sizeof(double));
-
-  double * __restrict__ a12 = c_bpcache.a12;
-  double * __restrict__ x12 = c_bpcache.x12;
-  double * __restrict__ y12 = c_bpcache.y12;
-  double * __restrict__ z12 = c_bpcache.z12;
-  double * __restrict__ i_exponent = c_bpcache.a1;
-  double * __restrict__ j_exponent = c_bpcache.a2;
-
-  int ij, kl;
-  int as_ish, as_jsh, as_ksh, as_lsh;
-  if (envs.ibase) {
-    as_ish = ish;
-    as_jsh = jsh;
-  } else {
-    as_ish = jsh;
-    as_jsh = ish;
-  }
-  if (envs.kbase) {
-    as_ksh = ksh;
-    as_lsh = lsh;
-  } else {
-    as_ksh = lsh;
-    as_lsh = ksh;
-  }
-  for (ij = prim_ij; ij < prim_ij + nprim_ij; ++ij) {
-    double ai = i_exponent[ij];
-    double aj = j_exponent[ij];
-    double aij = a12[ij];
-    double xij = x12[ij];
-    double yij = y12[ij];
-    double zij = z12[ij];
-    for (kl = prim_kl; kl < prim_kl + nprim_kl; ++kl) {
-      double akl = a12[kl];
-      double xkl = x12[kl];
-      double ykl = y12[kl];
-      double zkl = z12[kl];
-      double xijxkl = xij - xkl;
-      double yijykl = yij - ykl;
-      double zijzkl = zij - zkl;
-      double aijkl = aij + akl;
-      double a1 = aij * akl;
-      double a0 = a1 / aijkl;
-      double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-      a0 *= theta;
-      double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-      
-      GINTrys_root<4>(x, uw);
-      GINTscale_u<4>(uw, theta);
-      GINTg0_2e_2d4d_ip1<4>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-      GINTgout2e_ip1<4>(envs, gout, g, ai, aj);
-    }
-  }
-
-  GINTkernel_ip1_getjk(envs, jk, gout, ish, jsh, ksh, lsh);
-}
-
-#endif
-
-#if POLYFIT_ORDER >= 5
-
-template<>
-__global__
-void GINTint2e_ip1_jk_kernel<5, NABLAGOUTSIZE5>(GINTEnvVars envs, JKMatrix jk,
-                                                    BasisProdOffsets offsets) {
-  int ntasks_ij = offsets.ntasks_ij;
-  int ntasks_kl = offsets.ntasks_kl;
-  int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-  int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-  if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-    return;
-  }
-
-  int bas_ij = offsets.bas_ij + task_ij;
-  int bas_kl = offsets.bas_kl + task_kl;
-
-  double norm = envs.fac;
-  double omega = envs.omega;
-  int nprim_ij = envs.nprim_ij;
-  int nprim_kl = envs.nprim_kl;
-  int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-  int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-  int * bas_pair2bra = c_bpcache.bas_pair2bra;
-  int * bas_pair2ket = c_bpcache.bas_pair2ket;
-  int ish = bas_pair2bra[bas_ij];
-  int jsh = bas_pair2ket[bas_ij];
-  int ksh = bas_pair2bra[bas_kl];
-  int lsh = bas_pair2ket[bas_kl];
-
-  double uw[10];
-  double gout[NABLAGOUTSIZE5];
-  double * g = gout + 6 * envs.nf;
-  memset(gout, 0, 6 * envs.nf * sizeof(double));
-
-  double * __restrict__ a12 = c_bpcache.a12;
-  double * __restrict__ x12 = c_bpcache.x12;
-  double * __restrict__ y12 = c_bpcache.y12;
-  double * __restrict__ z12 = c_bpcache.z12;
-  double * __restrict__ i_exponent = c_bpcache.a1;
-  double * __restrict__ j_exponent = c_bpcache.a2;
-
-  int ij, kl;
-  int as_ish, as_jsh, as_ksh, as_lsh;
-  if (envs.ibase) {
-    as_ish = ish;
-    as_jsh = jsh;
-  } else {
-    as_ish = jsh;
-    as_jsh = ish;
-  }
-  if (envs.kbase) {
-    as_ksh = ksh;
-    as_lsh = lsh;
-  } else {
-    as_ksh = lsh;
-    as_lsh = ksh;
-  }
-  for (ij = prim_ij; ij < prim_ij + nprim_ij; ++ij) {
-    double ai = i_exponent[ij];
-    double aj = j_exponent[ij];
-    double aij = a12[ij];
-    double xij = x12[ij];
-    double yij = y12[ij];
-    double zij = z12[ij];
-    for (kl = prim_kl; kl < prim_kl + nprim_kl; ++kl) {
-      double akl = a12[kl];
-      double xkl = x12[kl];
-      double ykl = y12[kl];
-      double zkl = z12[kl];
-      double xijxkl = xij - xkl;
-      double yijykl = yij - ykl;
-      double zijzkl = zij - zkl;
-      double aijkl = aij + akl;
-      double a1 = aij * akl;
-      double a0 = a1 / aijkl;
-      double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
-      a0 *= theta;
-      double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-      GINTrys_root<5>(x, uw);
-      GINTscale_u<5>(uw, theta);
-      GINTg0_2e_2d4d_ip1<5>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-      GINTgout2e_ip1<5>(envs, gout, g, ai, aj);
-    }
-  }
-
-  GINTkernel_ip1_getjk(envs, jk, gout, ish, jsh, ksh, lsh);
-}
-
-#endif

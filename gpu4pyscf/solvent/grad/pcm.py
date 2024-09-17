@@ -20,17 +20,20 @@ Gradient of PCM family solvent model
 
 import numpy
 import cupy
+import ctypes
 from cupyx import scipy
 from pyscf import lib
-from pyscf import gto, df
+from pyscf import gto
 from pyscf.grad import rhf as rhf_grad
+
 from gpu4pyscf.solvent.pcm import PI, switch_h
 from gpu4pyscf.df import int3c2e
-
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, load_library
 from gpu4pyscf.lib import logger
+from pyscf import lib as pyscf_lib
 
 libdft = lib.load_library('libdft')
+libsolvent = load_library('libsolvent')
 
 def grad_switch_h(x):
     ''' first derivative of h(x)'''
@@ -98,7 +101,7 @@ def get_dF_dA(surface):
 
     return dF, dA
 
-def get_dD_dS(surface, dF, with_S=True, with_D=False):
+def get_dD_dS_slow(surface, dF, with_S=True, with_D=False):
     '''
     derivative of D and S w.r.t grids, partial_i D_ij = -partial_j D_ij
     S is symmetric, D is not
@@ -114,6 +117,7 @@ def get_dD_dS(surface, dF, with_S=True, with_D=False):
     rij = cupy.linalg.norm(ri_rj, axis=-1)
     xi_r_ij = xi_ij * rij
     cupy.fill_diagonal(rij, 1)
+    xi_i = xi_j = None
 
     dS_dr = -(scipy.special.erf(xi_r_ij) - 2.0*xi_r_ij/PI**0.5*cupy.exp(-xi_r_ij**2))/rij**2
     cupy.fill_diagonal(dS_dr, 0)
@@ -134,14 +138,55 @@ def get_dD_dS(surface, dF, with_S=True, with_D=False):
         dD_dri = cupy.expand_dims(dD_dri, axis=-1)
 
         dD = dD_dri * drij + dS_dr * (-nj/rij + 3.0*nj_rij/rij**2 * drij)
-
+        dD_dri = None
     dSii_dF = -exponents * (2.0/PI)**0.5 / switch_fun**2
     dSii = cupy.expand_dims(dSii_dF, axis=(1,2)) * dF
 
     return dD, dS, dSii
 
+def get_dD_dS(surface, dF, with_S=True, with_D=False, stream=None):
+    charge_exp  = surface['charge_exp']
+    grid_coords = surface['grid_coords']
+    switch_fun  = surface['switch_fun']
+    norm_vec    = surface['norm_vec']
+    R_vdw       = surface['R_vdw']
+    n = charge_exp.shape[0]
+    dS = cupy.empty([n,n,3])
+    dD = None
+    dS_ptr = ctypes.cast(dS.data.ptr, ctypes.c_void_p)
+    dD_ptr = pyscf_lib.c_null_ptr()
+    if with_D:
+        dD = cupy.empty([n,n,3])
+        dD_ptr = ctypes.cast(dD.data.ptr, ctypes.c_void_p)
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    err = libsolvent.pcm_dd_ds(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        dD_ptr, dS_ptr,
+        ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(norm_vec.data.ptr, ctypes.c_void_p),
+        ctypes.cast(R_vdw.data.ptr, ctypes.c_void_p),
+        ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
+        ctypes.cast(switch_fun.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n)
+    )
+    if err != 0:
+        raise RuntimeError('Failed in generating PCM dD and dS matrices.')
+
+    dSii_dF = -charge_exp * (2.0/PI)**0.5 / switch_fun**2
+    dSii = cupy.expand_dims(dSii_dF, axis=(1,2)) * dF
+    return dD, dS, dSii
+
 def grad_nuc(pcmobj, dm):
-    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+    mol = pcmobj.mol
+    log = logger.new_logger(mol, mol.verbose)
+    t1 = log.init_timer()
+    if not pcmobj._intermediates:
+        pcmobj.build()
+    dm_cache = pcmobj._intermediates.get('dm', None)
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
+        pass
+    else:
         pcmobj._get_vind(dm)
 
     mol = pcmobj.mol
@@ -168,25 +213,33 @@ def grad_nuc(pcmobj, dm):
     dv_g = numpy.einsum('gx,g->gx', dv_g, q_sym)
 
     de -= numpy.asarray([numpy.sum(dv_g[p0:p1], axis=0) for p0,p1 in gridslice])
+    t1 = log.timer_debug1('grad nuc', *t1)
     return de
 
 def grad_qv(pcmobj, dm):
     '''
     contributions due to integrals
     '''
-    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+    if not pcmobj._intermediates:
+        pcmobj.build()
+    dm_cache = pcmobj._intermediates.get('dm', None)
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
+        pass
+    else:
         pcmobj._get_vind(dm)
+    mol = pcmobj.mol
+    log = logger.new_logger(mol, mol.verbose)
+    t1 = log.init_timer()
+    gridslice   = pcmobj.surface['gslice_by_atom']
+    charge_exp  = pcmobj.surface['charge_exp']
+    grid_coords = pcmobj.surface['grid_coords']
+    q_sym       = pcmobj._intermediates['q_sym']
 
-    gridslice    = pcmobj.surface['gslice_by_atom']
-    q_sym        = pcmobj._intermediates['q_sym']
-
-    intopt = pcmobj.intopt
-    intopt.clear()
-    # rebuild with aosym
+    auxmol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
+    intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
     coeff = intopt.coeff
     dm_cart = coeff @ dm @ coeff.T
-    #dm_cart = cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
 
     dvj, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip1', q_sym, None, dm_cart)
     dq, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip2', q_sym, None, dm_cart)
@@ -199,6 +252,7 @@ def grad_qv(pcmobj, dm):
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
     dvj= 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     de = dq + dvj
+    t1 = log.timer_debug1('grad qv', *t1)
     return de.get()
 
 def grad_solver(pcmobj, dm):
@@ -206,7 +260,15 @@ def grad_solver(pcmobj, dm):
     dE = 0.5*v* d(K^-1 R) *v + q*dv
     v^T* d(K^-1 R)v = v^T*K^-1(dR - dK K^-1R)v = v^T K^-1(dR - dK q)
     '''
-    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+    mol = pcmobj.mol
+    log = logger.new_logger(mol, mol.verbose)
+    t1 = log.init_timer()
+    if not pcmobj._intermediates:
+        pcmobj.build()
+    dm_cache = pcmobj._intermediates.get('dm', None)
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
+        pass
+    else:
         pcmobj._get_vind(dm)
 
     gridslice    = pcmobj.surface['gslice_by_atom']
@@ -221,10 +283,10 @@ def grad_solver(pcmobj, dm):
 
     dF, dA = get_dF_dA(pcmobj.surface)
 
-    with_D = pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE']
+    with_D = pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE', 'SMD']
     dD, dS, dSii = get_dD_dS(pcmobj.surface, dF, with_D=with_D, with_S=True)
 
-    if pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE']:
+    if pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE', 'SMD']:
         DA = D*A
 
     epsilon = pcmobj.eps
@@ -242,7 +304,7 @@ def grad_solver(pcmobj, dm):
         de -= cupy.asarray([cupy.sum(de_dS[p0:p1], axis=0) for p0,p1, in gridslice])
         de -= 0.5*contract('i,xij->jx', vK_1*q, dSii) # 0.5*cupy.einsum('i,xij,i->jx', vK_1, dSii, q)
 
-    elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE']:
+    elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE', 'SMD']:
         dD = dD.transpose([2,0,1])
         dS = dS.transpose([2,0,1])
         dSii = dSii.transpose([2,0,1])
@@ -300,45 +362,63 @@ def grad_solver(pcmobj, dm):
         de += de_dR - de_dK
     else:
         raise RuntimeError(f"Unknown implicit solvent model: {pcmobj.method}")
-
+    t1 = log.timer_debug1('grad solver', *t1)
     return de.get()
 
 def make_grad_object(grad_method):
-    '''
-    return solvent gradient object
-    '''
-    grad_method_class = grad_method.__class__
-    class WithSolventGrad(grad_method_class):
-        def __init__(self, grad_method):
-            self.__dict__.update(grad_method.__dict__)
-            self.de_solvent = None
-            self.de_solute = None
-            self._keys = self._keys.union(['de_solvent', 'de_solute'])
+    '''For grad_method in vacuum, add nuclear gradients of solvent pcmobj'''
+    if grad_method.base.with_solvent.frozen:
+        raise RuntimeError('Frozen solvent model is not avialbe for energy gradients')
 
-        def kernel(self, *args, dm=None, atmlst=None, **kwargs):
-            dm = kwargs.pop('dm', None)
-            if dm is None:
-                dm = self.base.make_rdm1(ao_repr=True)
+    name = (grad_method.base.with_solvent.__class__.__name__
+            + grad_method.__class__.__name__)
+    return lib.set_class(WithSolventGrad(grad_method),
+                         (WithSolventGrad, grad_method.__class__), name)
 
-            self.de_solvent = grad_qv(self.base.with_solvent, dm)
-            self.de_solvent+= grad_solver(self.base.with_solvent, dm)
-            self.de_solvent+= grad_nuc(self.base.with_solvent, dm)
+class WithSolventGrad:
+    from gpu4pyscf.lib.utils import to_gpu, device
 
-            self.de_solute = grad_method_class.kernel(self, *args, **kwargs)
-            self.de = self.de_solute + self.de_solvent
+    _keys = {'de_solvent', 'de_solute'}
 
-            if self.verbose >= logger.NOTE:
-                logger.note(self, '--------------- %s (+%s) gradients ---------------',
-                            self.base.__class__.__name__,
-                            self.base.with_solvent.__class__.__name__)
-                rhf_grad._write(self, self.mol, self.de, self.atmlst)
-                logger.note(self, '----------------------------------------------')
-            return self.de
+    def __init__(self, grad_method):
+        self.__dict__.update(grad_method.__dict__)
+        self.de_solvent = None
+        self.de_solute = None
 
-        def _finalize(self):
-            # disable _finalize. It is called in grad_method.kernel method
-            # where self.de was not yet initialized.
-            pass
+    def undo_solvent(self):
+        cls = self.__class__
+        name_mixin = self.base.with_solvent.__class__.__name__
+        obj = lib.view(self, lib.drop_class(cls, WithSolventGrad, name_mixin))
+        del obj.de_solvent
+        del obj.de_solute
+        return obj
 
-    return WithSolventGrad(grad_method)
+    def to_cpu(self):
+        from pyscf.solvent.grad import pcm  # type: ignore
+        grad_method = self.undo_solvent().to_cpu()
+        return pcm.make_grad_object(grad_method)
 
+    def kernel(self, *args, dm=None, atmlst=None, **kwargs):
+        dm = kwargs.pop('dm', None)
+        if dm is None:
+            dm = self.base.make_rdm1(ao_repr=True)
+        if dm.ndim == 3:
+            dm = dm[0] + dm[1]
+        self.de_solute = super().kernel(*args, **kwargs)
+        self.de_solvent = grad_qv(self.base.with_solvent, dm)
+        self.de_solvent+= grad_solver(self.base.with_solvent, dm)
+        self.de_solvent+= grad_nuc(self.base.with_solvent, dm)
+        self.de = self.de_solute + self.de_solvent
+
+        if self.verbose >= logger.NOTE:
+            logger.note(self, '--------------- %s (+%s) gradients ---------------',
+                        self.base.__class__.__name__,
+                        self.base.with_solvent.__class__.__name__)
+            rhf_grad._write(self, self.mol, self.de, self.atmlst)
+            logger.note(self, '----------------------------------------------')
+        return self.de
+
+    def _finalize(self):
+        # disable _finalize. It is called in grad_method.kernel method
+        # where self.de was not yet initialized.
+        pass

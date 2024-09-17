@@ -13,7 +13,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
- 
+
 
 template <int NROOTS, int GSIZE> __global__
 void GINTint3c2e_pass2_j_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
@@ -22,14 +22,13 @@ void GINTint3c2e_pass2_j_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets 
     int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    
+
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
 
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
-    double norm = envs.fac;
     int nprim_ij = envs.nprim_ij;
     int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
@@ -40,13 +39,12 @@ void GINTint3c2e_pass2_j_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets 
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    double uw[NROOTS*2];
+
     double g[GSIZE];
-    
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
+    double norm = envs.fac;
+    if (ish == jsh){
+        norm *= .5;
+    }
 
     int ij, kl;
     int as_ish, as_jsh, as_ksh, as_lsh;
@@ -66,24 +64,8 @@ void GINTint3c2e_pass2_j_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets 
     }
 
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        double aij = a12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
-        for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {  
-            double akl = a12[kl];
-            double xkl = x12[kl];
-            double ykl = y12[kl];
-            double zkl = z12[kl];
-            double xijxkl = xij - xkl;
-            double yijykl = yij - ykl;
-            double zijzkl = zij - zkl;
-            double aijkl = aij + akl;
-            double a1 = aij * akl;
-            double a0 = a1 / aijkl;
-            double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-            GINTrys_root<NROOTS>(x, uw);
-            GINTg0_2e_2d4d<NROOTS>(envs, g, uw, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+        for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+            GINTg0_2e_2d4d<NROOTS>(envs, g, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
             GINTkernel_int3c2e_getj_pass2<NROOTS>(envs, jk, g, ish, jsh, ksh);
     } }
 }

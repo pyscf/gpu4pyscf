@@ -1,45 +1,42 @@
 GPU plugin for PySCF
 ====================
+![nightly](https://github.com/pyscf/gpu4pyscf/actions/workflows/nightly_build.yml/badge.svg)
+[![PyPI version](https://badge.fury.io/py/gpu4pyscf-cuda11x.svg)](https://badge.fury.io/py/gpu4pyscf-cuda11x)
+
 Installation
 --------
 
 > [!NOTE]
-> The compiled binary packages support compute capability 7.0 and later (Volta and later, such as Tesla V100, RTX 20 series and later). For older GPUs (GTX 10**, Tesla P100), please compile the package with the source code as follows.
+> The compiled binary packages support compute capability 6.0 and later (Pascal and later, such as Tesla P100, RTX 10 series and later).
 
-Run ```nvidia-smi``` in your terminal to check the installed CUDA version.
+Run ```nvcc --version``` in your terminal to check the installed CUDA toolkit version. Then, choose the proper package based on your CUDA toolkit version.
 
-Choose the proper package based on your CUDA environment.
-
-| Platform      | Command                               |
-----------------| --------------------------------------|
-| **CUDA 11.x** |  ```pip3 install gpu4pyscf-cuda11x``` |
-| **CUDA 12.x** |  ```pip3 install gpu4pyscf-cuda12x``` |
-
-```cuTensor``` is **highly recommended** for accelerating tensor contractions.
-
-For **CUDA 11.x**, ```python -m cupyx.tools.install_library --cuda 11.x --library cutensor```
-
-For **CUDA 12.x**, ```python -m cupyx.tools.install_library --cuda 12.x --library cutensor```
+| Platform      | Command                               | cutensor (**highly recommended**)|
+----------------| --------------------------------------|----------------------------------|
+| **CUDA 11.x** |  ```pip3 install gpu4pyscf-cuda11x``` | ```pip3 install cutensor-cu11``` |
+| **CUDA 12.x** |  ```pip3 install gpu4pyscf-cuda12x``` | ```pip3 install cutensor-cu12``` |
 
 Compilation
 --------
-The package provides ```dockerfiles/compile/Dockerfile``` for creating the CUDA environment. One can compile the package with
+One can compile the package with
 ```sh
-sh build.sh
+git clone https://github.com/pyscf/gpu4pyscf.git
+cd gpu4pyscf
+cmake -S gpu4pyscf/lib -B build/temp.gpu4pyscf
+cmake --build build/temp.gpu4pyscf -j 4
+CURRENT_PATH=`pwd`
+export PYTHONPATH="${PYTHONPATH}:${CURRENT_PATH}"
 ```
-This script will automatically download LibXC, and compile it with CUDA. The script will also build the wheel for installation. The compilation can take more than 5 mins. Then, one can either install the wheel with
+Then install cutensor and cupy for acceleration (please switch the versions according to your nvcc version!)
 ```sh
-cd output
-pip3 install gpu4pyscf-*
+pip3 install cutensor-cu12 cupy-cuda12x
 ```
-or simply add it to ```PYTHONPATH```
-```sh
-export PYTHONPATH="${PYTHONPATH}:/your-local-path/gpu4pyscf"
+There shouldn't be cupy or cutensor compilation during pip install process. If you see the following warning at the beginning of a gpu4pyscf job, it implies problems with cupy and cutensor installation (likely a version mismatch, or multiple versions of same package installed).
 ```
-Then install cutensor for acceleration
-```sh
-python -m cupyx.tools.install_library --cuda 11.x --library cutensor
+<repo_path>/gpu4pyscf/lib/cutensor.py:<line_number>: UserWarning: using cupy as the tensor contraction engine.
 ```
+
+The package also provides multiple dockerfiles in ```dockerfiles```. One can use them as references to create the compilation envrionment.
 
 Features
 --------
@@ -50,18 +47,20 @@ Features
 - Dispersion corrections via [DFTD3](https://github.com/dftd3/simple-dftd3) and [DFTD4](https://github.com/dftd4/dftd4);
 - Nonlocal functional correction (vv10) for SCF and gradient;
 - ECP is supported and calculated on CPU;
-- PCM solvent models, analytical gradients, and semi-analytical Hessian matrix;
-- SMD solvent models and solvation free energy
+- PCM models, SMD model, their analytical gradients, and semi-analytical Hessian matrix;
+- Unrestricted Hartree-Fock and Unrestricted DFT, gradient, and Hessian;
+- MP2/DF-MP2 and CCSD (experimental);
+- Polarizability, IR, and NMR shielding
 
 Limitations
 --------
-- Rys roots up to 8 for density fitting scheme;
-- Rys roots up to 9 for direct scf scheme;
+- Rys roots up to 9 for density fitting scheme and direct scf scheme;
 - Atomic basis up to g orbitals;
-- Auxiliary basis up to h orbitals;
-- Density fitting scheme up to ~168 atoms with def2-tzvpd basis, bounded CPU memory;
+- Auxiliary basis up to i orbitals;
+- Density fitting scheme up to ~168 atoms with def2-tzvpd basis, bounded by CPU memory;
 - Hessian is unavailable for Direct SCF yet;
 - meta-GGA without density laplacian;
+- Double hybrid functionals are not supported;
 
 Examples
 --------
@@ -88,7 +87,25 @@ h = mf.Hessian()
 h_dft = h.kernel()   # compute analytical Hessian
 
 ```
-Find more examples in gpu4pyscf/examples
+
+`to_gpu` is supported since PySCF 2.5.0
+```python
+import pyscf
+from pyscf.dft import rks
+
+atom ='''
+O       0.0000000000    -0.0000000000     0.1174000000
+H      -0.7570000000    -0.0000000000    -0.4696000000
+H       0.7570000000     0.0000000000    -0.4696000000
+'''
+
+mol = pyscf.M(atom=atom, basis='def2-tzvpp')
+mf = rks.RKS(mol, xc='LDA').density_fit().to_gpu()  # move PySCF object to GPU4PySCF object
+e_dft = mf.kernel()  # compute total energy
+
+```
+
+Find more examples in [gpu4pyscf/examples](https://github.com/pyscf/gpu4pyscf/tree/master/examples)
 
 Benchmarks
 --------
@@ -109,5 +126,28 @@ Speedup with GPU4PySCF v0.6.0 on A100-80G over Q-Chem 6.1 on 32-cores CPU (Desit
 | 095_Azadirachtin  |     95 |   5.58 |   7.72 |   24.18 |  26.84 |     25.21 |
 | 113_Taxol         |    113 |   5.44 |   6.81 |   24.58 |  29.14 |    nan    |
 
-Find more benchmarks in gpu4pyscf/benchmarks
+Find more benchmarks in [gpu4pyscf/benchmarks](https://github.com/pyscf/gpu4pyscf/tree/master/benchmarks)
 
+References
+---------
+```
+@misc{li2024introducting,
+      title={Introducing GPU-acceleration into the Python-based Simulations of Chemistry Framework}, 
+      author={Rui Li and Qiming Sun and Xing Zhang and Garnet Kin-Lic Chan},
+      year={2024},
+      eprint={2407.09700},
+      archivePrefix={arXiv},
+      primaryClass={physics.comp-ph},
+      url={https://arxiv.org/abs/2407.09700}, 
+}
+
+@misc{wu2024enhancing,
+      title={Enhancing GPU-acceleration in the Python-based Simulations of Chemistry Framework}, 
+      author={Xiaojie Wu and Qiming Sun and Zhichen Pu and Tianze Zheng and Wenzhi Ma and Wen Yan and Xia Yu and Zhengxiao Wu and Mian Huo and Xiang Li and Weiluo Ren and Sheng Gong and Yumin Zhang and Weihao Gao},
+      year={2024},
+      eprint={2404.09452},
+      archivePrefix={arXiv},
+      primaryClass={physics.comp-ph},
+      url={https://arxiv.org/abs/2404.09452}, 
+}
+```

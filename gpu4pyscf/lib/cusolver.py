@@ -17,12 +17,12 @@
 import numpy as np
 import cupy
 import ctypes
-from cupy.cuda import device
 from cupy_backends.cuda.libs import cusolver
 from cupy_backends.cuda.libs import cublas
+from cupy.cuda import device
 
-libcusolver = ctypes.CDLL('libcusolver.so')
 _handle = device.get_cusolver_handle()
+libcusolver = ctypes.CDLL('libcusolver.so')
 
 CUSOLVER_EIG_TYPE_1 = 1
 CUSOLVER_EIG_TYPE_2 = 2
@@ -34,7 +34,6 @@ CUSOLVER_EIG_MODE_VECTOR = 1
 libcusolver.cusolverDnDsygvd_bufferSize.restype = int
 libcusolver.cusolverDnDsygvd.restype = int
 
-devInfo = cupy.empty(1, dtype=np.int32)
 _buffersize = {}
 
 # https://docs.nvidia.com/cuda/cusolver/index.html#cusolverdn-t-sygvd
@@ -76,7 +75,7 @@ def eigh(h, s):
     w = cupy.zeros(n)
     A = h.copy()
     B = s.copy()
-
+    
     # TODO: reuse workspace
     if n in _buffersize:
         lwork = _buffersize[n]
@@ -86,7 +85,7 @@ def eigh(h, s):
             _handle,
             CUSOLVER_EIG_TYPE_1,
             CUSOLVER_EIG_MODE_VECTOR,
-            cublas.CUBLAS_FILL_MODE_LOWER, 
+            cublas.CUBLAS_FILL_MODE_LOWER,
             n,
             A.data.ptr,
             n,
@@ -98,7 +97,7 @@ def eigh(h, s):
         lwork = lwork.value
     
     work = cupy.empty(lwork)
-    
+    devInfo = cupy.empty(1, dtype=np.int32)
     status = libcusolver.cusolverDnDsygvd(
         _handle,
         CUSOLVER_EIG_TYPE_1,
@@ -131,8 +130,8 @@ def cholesky(A):
     dev_info = cupy.empty(1, dtype=np.int32)
     potrf(handle, cublas.CUBLAS_FILL_MODE_UPPER, n, x.data.ptr, n,
         workspace.data.ptr, buffersize, dev_info.data.ptr)
-    
-    if dev_info[0] > 0:
+
+    if dev_info[0] != 0:
         raise RuntimeError('failed to perform Cholesky Decomposition')
     cupy.linalg._util._tril(x,k=0)
     return x

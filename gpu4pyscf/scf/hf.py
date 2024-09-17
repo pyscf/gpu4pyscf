@@ -15,21 +15,28 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import time
 import copy
 import ctypes
-import contextlib
+import sys
+import h5py
 import numpy as np
 import cupy
 import scipy.linalg
 from functools import reduce
 from pyscf import gto
 from pyscf import lib as pyscf_lib
-from pyscf.scf import hf, jk, _vhf
+from pyscf.scf import hf, _vhf
+from pyscf.scf import chkfile
 from gpu4pyscf import lib
-from gpu4pyscf.lib.cupy_helper import eigh, load_library, tag_array
+from gpu4pyscf.lib.cupy_helper import (eigh, load_library, tag_array,
+                                       return_cupy_array, cond)
 from gpu4pyscf.scf import diis
 from gpu4pyscf.lib import logger
+
+__all__ = [
+    'get_jk', 'get_occ', 'get_grad', 'damping', 'level_shift', 'get_fock',
+    'energy_elec', 'RHF'
+]
 
 LMAX_ON_GPU = 4
 FREE_CUPY_CACHE = True
@@ -49,17 +56,13 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     if vhfopt is None:
         vhfopt = _VHFOpt(mol, 'int2e').build()
     out_cupy = isinstance(dm, cupy.ndarray)
-    if not isinstance(dm, cupy.ndarray):
-        dm = cupy.asarray(dm)
+    if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
     coeff = cupy.asarray(vhfopt.coeff)
     nao, nao0 = coeff.shape
     dm0 = dm
-    dms = cupy.asarray(dm0.reshape(-1,nao0,nao0))
-    dms = [coeff @ x @ coeff.T for x in dms]
-    if dm0.ndim == 2:
-        dms = cupy.asarray(dms[0], order='C').reshape(1,nao,nao)
-    else:
-        dms = cupy.asarray(dms, order='C')
+    dms = dm0.reshape(-1,nao0,nao0)
+    dms = cupy.einsum('pi,xij,qj->xpq', coeff, dms, coeff.conj())
+    dms = cupy.asarray(dms, order='C')
     n_dm = dms.shape[0]
     scripts = []
     vj = vk = None
@@ -79,14 +82,13 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     l_symb = pyscf_lib.param.ANGULAR
     log_qs = vhfopt.log_qs
     direct_scf_tol = vhfopt.direct_scf_tol
-    ncptype = len(log_qs)
-    cp_idx, cp_jdx = np.tril_indices(ncptype)
+    cp_idx, cp_jdx = np.tril_indices(len(vhfopt.uniq_l_ctr))
     l_ctr_shell_locs = vhfopt.l_ctr_offsets
     l_ctr_ao_locs = vhfopt.mol.ao_loc[l_ctr_shell_locs]
     dm_ctr_cond = np.max(
         [pyscf_lib.condense('absmax', x, l_ctr_ao_locs) for x in dms.get()], axis=0)
 
-    dm_shl = cupy.zeros([l_ctr_shell_locs[-1], l_ctr_shell_locs[-1]])
+    dm_shl = cupy.zeros([n_dm, l_ctr_shell_locs[-1], l_ctr_shell_locs[-1]])
     assert dms.flags.c_contiguous
     size_l = np.array([1,3,6,10,15,21,28])
     l_ctr = vhfopt.uniq_l_ctr[:,0]
@@ -100,13 +102,14 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             j0 = l_ctr_ao_locs[j]
             j1 = l_ctr_ao_locs[j+1]
             nj_shls = (j1-j0)//size_l[lj]
-            sub_dm = dms[0][i0:i1,j0:j1].reshape([ni_shls, size_l[li], nj_shls, size_l[lj]])
-            dm_shl[r:r+ni_shls, c:c+nj_shls] = cupy.max(sub_dm, axis=[1,3])
+            for idm in range(n_dm):
+                sub_dm = dms[idm][i0:i1,j0:j1].reshape([ni_shls, size_l[li], nj_shls, size_l[lj]])
+                dm_shl[idm, r:r+ni_shls, c:c+nj_shls] = cupy.max(cupy.abs(sub_dm), axis=[1,3])
             c += nj_shls
         r += ni_shls
-
-    dm_shl = cupy.asarray(np.log(dm_shl))
-    nshls = dm_shl.shape[0]
+    dm_shl = cupy.max(dm_shl, axis=0)
+    dm_shl = cupy.log(dm_shl)
+    nshls = dm_shl.shape[1]
     if hermi != 1:
         dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
     fn = libgvhf.GINTbuild_jk
@@ -176,6 +179,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             #           time.perf_counter() - t0)
             #print(li, lj, lk, ll, time.perf_counter() - t0)
             #exit()
+
     if with_j:
         vj_ao = []
         #vj = [cupy.einsum('pi,pq,qj->ij', coeff, x, coeff) for x in vj]
@@ -279,7 +283,6 @@ def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
                                 getattr(mf.opt, '_dmcondname', 'CVHFsetnr_direct_scf_dm'))
                 vhfopt.build(mf.direct_scf_tol)
                 mf._opt_gpu_omega = vhfopt
-
     vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega, verbose=log)
     log.timer('vj and vk on gpu', *cput0)
     return vj, vk
@@ -287,6 +290,8 @@ def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
 def make_rdm1(mf, mo_coeff=None, mo_occ=None, **kwargs):
     if mo_occ is None: mo_occ = mf.mo_occ
     if mo_coeff is None: mo_coeff = mf.mo_coeff
+    mo_coeff = cupy.asarray(mo_coeff)
+    mo_occ = cupy.asarray(mo_occ)
     is_occ = mo_occ > 0
     mocc = mo_coeff[:, is_occ]
     dm = cupy.dot(mocc*mo_occ[is_occ], mocc.conj().T)
@@ -302,14 +307,15 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     mo_occ[e_idx[:nocc]] = 2
     return mo_occ
 
-def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1, vhfopt=None):
+def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1, vhfopt=None):
+    if dm is None: dm = mf.make_rdm1()
     if dm_last is None or not mf.direct_scf:
-        vj, vk = mf.get_jk(mol, cupy.asarray(dm), hermi)
+        vj, vk = mf.get_jk(mol, dm, hermi)
         return vj - vk * .5
     else:
         ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
         vj, vk = mf.get_jk(mol, ddm, hermi)
-        return vj - vk * .5 + cupy.asarray(vhf_last)
+        return vj - vk * .5 + vhf_last
 
 def get_grad(mo_coeff, mo_occ, fock_ao):
     occidx = mo_occ > 0
@@ -330,8 +336,14 @@ def level_shift(s, d, f, factor):
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
+    if s1e is None: s1e = mf.get_ovlp()
+    if dm is None: dm = mf.make_rdm1()
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
+    if not isinstance(s1e, cupy.ndarray): s1e = cupy.asarray(s1e)
+    if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
+    if not isinstance(h1e, cupy.ndarray): h1e = cupy.asarray(h1e)
+    if not isinstance(vhf, cupy.ndarray): vhf = cupy.asarray(vhf)
     f = h1e + vhf
     if cycle < 0 and diis is None:  # Not inside the SCF iteration
         return f
@@ -342,8 +354,6 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         level_shift_factor = mf.level_shift
     if damp_factor is None:
         damp_factor = mf.damp
-    if s1e is None: s1e = mf.get_ovlp()
-    if dm is None: dm = mf.make_rdm1()
 
     if 0 <= cycle < diis_start_cycle-1 and abs(damp_factor) > 1e-4:
         f = damping(s1e, dm*.5, f, damp_factor)
@@ -362,6 +372,8 @@ def energy_elec(self, dm=None, h1e=None, vhf=None):
     if vhf is None: vhf = self.get_veff(self.mol, dm)
     e1 = cupy.einsum('ij,ji->', h1e, dm).real
     e_coul = cupy.einsum('ij,ji->', vhf, dm).real * .5
+    e1 = e1.get()[()]
+    e_coul = e_coul.get()[()]
     self.scf_summary['e1'] = e1
     self.scf_summary['e2'] = e_coul
     logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
@@ -379,30 +391,24 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         logger.info(mf, 'Set gradient conv threshold to %g', conv_tol_grad)
 
     if(dm0 is None):
-        dm0 = mf.get_init_guess(mol)
+        dm0 = mf.get_init_guess(mol, mf.init_guess)
 
     dm = cupy.asarray(dm0, order='C')
     if hasattr(dm0, 'mo_coeff') and hasattr(dm0, 'mo_occ'):
-        mo_coeff = cupy.asarray(dm0.mo_coeff)
-        mo_occ = cupy.asarray(dm0.mo_occ)
-        occ_coeff = cupy.asarray(mo_coeff[:,mo_occ>0])
-        dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
+        if dm0.ndim == 2:
+            mo_coeff = cupy.asarray(dm0.mo_coeff)
+            mo_occ = cupy.asarray(dm0.mo_occ)
+            occ_coeff = cupy.asarray(mo_coeff[:,mo_occ>0])
+            dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
 
-    # use optimized workflow if possible
-    if hasattr(mf, 'init_workflow'):
-        mf.init_workflow(dm0=dm)
-        h1e = mf.h1e
-        s1e = mf.s1e
-    else:
-        h1e = cupy.asarray(mf.get_hcore(mol))
-        s1e = cupy.asarray(mf.get_ovlp(mol))
+    h1e = cupy.asarray(mf.get_hcore(mol))
+    s1e = cupy.asarray(mf.get_ovlp(mol))
 
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     logger.info(mf, 'init E= %.15g', e_tot)
     t1 = log.timer_debug1('total prep', *t0)
     scf_conv = False
-
     if isinstance(mf.diis, lib.diis.DIIS):
         mf_diis = mf.diis
     elif mf.diis:
@@ -414,6 +420,11 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         _, mf_diis.Corth = mf.eig(fock, s1e)
     else:
         mf_diis = None
+
+    if dump_chk and mf.chkfile:
+        # Explicit overwrite the mol object in chkfile
+        # Note in pbc.scf, mf.mol == mf.cell, cell is saved under key "mol"
+        chkfile.save_mol(mol, mf.chkfile)
 
     for cycle in range(mf.max_cycle):
         t0 = log.init_timer()
@@ -436,6 +447,15 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         t1 = log.timer_debug1('total', *t0)
         logger.info(mf, 'cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
                     cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
+
+        if dump_chk:
+            local_variables = locals()
+            for key in local_variables:
+                value = local_variables[key]
+                if (type(value) is cupy.ndarray):
+                    local_variables[key] = cupy.asnumpy(value)
+            mf.dump_chk(local_variables)
+
         e_diff = abs(e_tot-last_hf_e)
         norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, f))
         if(e_diff < conv_tol and norm_gorb < conv_tol_grad):
@@ -445,91 +465,8 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     if(cycle == mf.max_cycle):
         logger.warn("SCF failed to converge")
 
-    # for dispersion correction
-    e_tot = e_tot.get()
-    if(hasattr(mf, 'get_dispersion')):
-        e_disp = mf.get_dispersion()
-        mf.e_disp = e_disp
-        mf.e_mf = e_tot
-        e_tot += e_disp
-
     return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
-# tempory implemention, will be replaced after pyscf 2.2.0
-def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
-                      singlet=None, hermi=0, max_memory=None):
-    '''Generate a function to compute the product of RHF response function and
-    RHF density matrices.
-
-    Kwargs:
-        singlet (None or boolean) : If singlet is None, response function for
-            orbital hessian or CPHF will be generated. If singlet is boolean,
-            it is used in TDDFT response kernel.
-    '''
-    if mo_coeff is None: mo_coeff = mf.mo_coeff
-    if mo_occ is None: mo_occ = mf.mo_occ
-    mol = mf.mol
-    if isinstance(mf, hf.KohnShamDFT):
-        from pyscf.dft import numint
-        ni = mf._numint
-        ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
-        if getattr(mf, 'nlc', '') != '':
-            logger.warn(mf, 'NLC functional found in DFT object.  Its second '
-                        'deriviative is not available. Its contribution is '
-                        'not included in the response function.')
-        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
-        hybrid = abs(hyb) > 1e-10
-
-        # mf can be pbc.dft.RKS object with multigrid
-        if (not hybrid and
-            'MultiGridFFTDF' == getattr(mf, 'with_df', None).__class__.__name__):
-            from pyscf.pbc.dft import multigrid
-            dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-            return multigrid._gen_rhf_response(mf, dm0, singlet, hermi)
-
-        if singlet is None:
-            # for ground state orbital hessian
-            rho0, vxc, fxc = ni.cache_xc_kernel(mol, mf.grids, mf.xc,
-                                                mo_coeff, mo_occ, 0)
-        else:
-            rho0, vxc, fxc = ni.cache_xc_kernel(mol, mf.grids, mf.xc,
-                                                [mo_coeff]*2, [mo_occ*.5]*2, spin=1)
-        dm0 = None  #mf.make_rdm1(mo_coeff, mo_occ)
-
-        if singlet is None:
-            # Without specify singlet, used in ground state orbital hessian
-            def vind(dm1):
-                # The singlet hessian
-                if hermi == 2:
-                    v1 = cupy.zeros_like(dm1)
-                else:
-                    v1 = ni.nr_rks_fxc(mol, mf.grids, mf.xc, dm0, dm1, 0, hermi,
-                                       rho0, vxc, fxc, max_memory=max_memory)
-                if hybrid or abs(alpha) > 1e-10:
-                    if hermi != 2:
-                        vj, vk = mf.get_jk(mol, dm1, hermi=hermi)
-                        vk *= hyb
-                        if omega > 1e-10:  # For range separated Coulomb
-                            vk += mf.get_k(mol, dm1, hermi, omega) * (alpha-hyb)
-                        v1 += vj - .5 * vk
-                    else:
-                        v1 -= .5 * hyb * mf.get_k(mol, dm1, hermi=hermi)
-                elif hermi != 2:
-                    v1 += mf.get_j(mol, dm1, hermi=hermi)
-                return v1
-        else:
-            raise NotImplementedError('only singlet response is supported!')
-
-    else:  # HF
-        if (singlet is None or singlet) and hermi != 2:
-            def vind(dm1):
-                vj, vk = mf.get_jk(mol, dm1, hermi=hermi)
-                return vj - .5 * vk
-        else:
-            def vind(dm1):
-                return -.5 * mf.get_k(mol, dm1, hermi=hermi)
-
-    return vind
 
 def _quad_moment(mf, mol=None, dm=None, unit='Debye-Ang'):
     from pyscf.data import nist
@@ -552,60 +489,262 @@ def _quad_moment(mf, mol=None, dm=None, unit='Debye-Ang'):
         mol_quad *= nist.AU2DEBYE * nist.BOHR
     return mol_quad
 
-def _eigh(mf, h, s):
-    return eigh(h, s)
+def energy_tot(mf, dm=None, h1e=None, vhf=None):
+    r'''Total Hartree-Fock energy, electronic part plus nuclear repulstion
+    See :func:`scf.hf.energy_elec` for the electron part
 
-class RHF(hf.RHF):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    Note this function has side effects which cause mf.scf_summary updated.
 
-    _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'e_disp', 'screen_tol'}
-
-    screen_tol = 1e-14
-    DIIS = diis.SCF_DIIS
-    get_jk = _get_jk
-    #_eigh = staticmethod(_eigh)
-    _eigh = _eigh
-    make_rdm1 = make_rdm1
-    energy_elec = energy_elec
-    get_fock = get_fock
-    get_occ = get_occ
-    get_veff = get_veff
-    get_grad = staticmethod(get_grad)
-    gen_response = _gen_rhf_response
-    quad_moment = _quad_moment
-
-    def scf(self, dm0=None, **kwargs):
-        cput0 = logger.init_timer(self)
-
-        self.dump_flags()
-        self.build(self.mol)
-
-        if self.max_cycle > 0 or self.mo_coeff is None:
-            self.converged, self.e_tot, \
-                    self.mo_energy, self.mo_coeff, self.mo_occ = \
-                    _kernel(self, self.conv_tol, self.conv_tol_grad,
-                           dm0=dm0, callback=self.callback,
-                           conv_check=self.conv_check, **kwargs)
+    '''
+    nuc = mf.energy_nuc()
+    e_tot = mf.energy_elec(dm, h1e, vhf)[0] + nuc
+    if mf.do_disp():
+        if 'dispersion' in mf.scf_summary:
+            e_tot += mf.scf_summary['dispersion']
         else:
-            # Avoid to update SCF orbitals in the non-SCF initialization
-            # (issue #495).  But run regular SCF for initial guess if SCF was
-            # not initialized.
-            self.e_tot = _kernel(self, self.conv_tol, self.conv_tol_grad,
-                                dm0=dm0, callback=self.callback,
-                                conv_check=self.conv_check, **kwargs)[1]
+            e_disp = mf.get_dispersion()
+            mf.scf_summary['dispersion'] = e_disp
+            e_tot += e_disp
+    mf.scf_summary['nuc'] = nuc.real
+    if isinstance(e_tot, cupy.ndarray):
+        e_tot = e_tot.get()
+    return e_tot
 
-        logger.timer(self, 'SCF', *cput0)
-        self._finalize()
-        return self.e_tot
-    kernel = pyscf_lib.alias(scf, alias_name='kernel')
+def scf(mf, dm0=None, **kwargs):
+    cput0 = logger.init_timer(mf)
+
+    mf.dump_flags()
+    mf.build(mf.mol)
+
+    if mf.max_cycle > 0 or mf.mo_coeff is None:
+        mf.converged, mf.e_tot, \
+                mf.mo_energy, mf.mo_coeff, mf.mo_occ = \
+                _kernel(mf, mf.conv_tol, mf.conv_tol_grad,
+                        dm0=dm0, callback=mf.callback,
+                        conv_check=mf.conv_check, **kwargs)
+    else:
+        # Avoid to update SCF orbitals in the non-SCF initialization
+        # (issue #495).  But run regular SCF for initial guess if SCF was
+        # not initialized.
+        mf.e_tot = _kernel(mf, mf.conv_tol, mf.conv_tol_grad,
+                            dm0=dm0, callback=mf.callback,
+                            conv_check=mf.conv_check, **kwargs)[1]
+
+    logger.timer(mf, 'SCF', *cput0)
+    mf._finalize()
+    return mf.e_tot
+
+def as_scanner(mf):
+    if isinstance(mf, pyscf_lib.SinglePointScanner):
+        return mf
+
+    logger.info(mf, 'Create scanner for %s', mf.__class__)
+    name = mf.__class__.__name__ + SCF_Scanner.__name_mixin__
+    return pyscf_lib.set_class(SCF_Scanner(mf), (SCF_Scanner, mf.__class__), name)
+
+class SCF_Scanner(pyscf_lib.SinglePointScanner):
+    def __init__(self, mf_obj):
+        self.__dict__.update(mf_obj.__dict__)
+        self._last_mol_fp = mf_obj.mol.ao_loc
+
+    def __call__(self, mol_or_geom, **kwargs):
+        if isinstance(mol_or_geom, gto.MoleBase):
+            mol = mol_or_geom
+        else:
+            mol = self.mol.set_geom_(mol_or_geom, inplace=False)
+
+        # Cleanup intermediates associated to the previous mol object
+        self.reset(mol)
+
+        if 'dm0' in kwargs:
+            dm0 = kwargs.pop('dm0')
+        elif self.mo_coeff is None:
+            dm0 = None
+        else:
+            dm0 = None
+            if cupy.array_equal(self._last_mol_fp, mol.ao_loc):
+                dm0 = self.make_rdm1()
+            elif self.chkfile and h5py.is_hdf5(self.chkfile):
+                dm0 = self.from_chk(self.chkfile)
+        self.mo_coeff = None  # To avoid last mo_coeff being used by SOSCF
+        e_tot = self.kernel(dm0=dm0, **kwargs)
+        self._last_mol_fp = mol.ao_loc
+        return e_tot
+
+class SCF(pyscf_lib.StreamObject):
+
+    # attributes
+    conv_tol            = hf.SCF.conv_tol
+    conv_tol_grad       = hf.SCF.conv_tol_grad
+    max_cycle           = hf.SCF.max_cycle
+    init_guess          = hf.SCF.init_guess
+
+    disp                = None
+    DIIS                = hf.SCF.DIIS
+    diis                = hf.SCF.diis
+    diis_space          = hf.SCF.diis_space
+    diis_damp           = hf.SCF.diis_damp
+    diis_start_cycle    = hf.SCF.diis_start_cycle
+    diis_file           = hf.SCF.diis_file
+    diis_space_rollback = hf.SCF.diis_space_rollback
+    damp                = hf.SCF.damp
+    level_shift         = hf.SCF.level_shift
+    direct_scf          = hf.SCF.direct_scf
+    direct_scf_tol      = hf.SCF.direct_scf_tol
+    conv_check          = hf.SCF.conv_check
+    callback            = hf.SCF.callback
+    _keys               = hf.SCF._keys
+
+    # methods
+    def __init__(self, mol):
+        if not mol._built:
+            sys.stderr.write('Warning: %s must be initialized before calling SCF.\n'
+                             'Initialize %s in %s\n' % (mol, mol, self))
+            mol.build()
+        self.mol = mol
+        self.verbose = mol.verbose
+        self.max_memory = mol.max_memory
+        self.stdout = mol.stdout
+
+        # The chkfile part is different from pyscf, we turn off chkfile by default.
+        self.chkfile = None
+
+##################################################
+# don't modify the following attributes, they are not input options
+        self.mo_energy = None
+        self.mo_coeff = None
+        self.mo_occ = None
+        self.e_tot = 0
+        self.converged = False
+        self.scf_summary = {}
+
+        self._opt = {None: None}
+        self._eri = None # Note: self._eri requires large amount of memory
+
+    def check_sanity(self):
+        s1e = self.get_ovlp()
+        if isinstance(s1e, cupy.ndarray) and s1e.ndim == 2:
+            c = cond(s1e)
+        else:
+            c = cupy.asarray([cond(xi) for xi in s1e])
+        logger.debug(self, 'cond(S) = %s', c)
+        if cupy.max(c)*1e-17 > self.conv_tol:
+            logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
+                        'SCF may be inaccurate and hard to converge.', cupy.max(c))
+        return super().check_sanity()
+
+    build                    = hf.SCF.build
+    opt                      = NotImplemented
+    dump_flags               = hf.SCF.dump_flags
+    get_fock                 = hf.SCF.get_fock
+    get_occ                  = hf.SCF.get_occ
+    get_grad                 = hf.SCF.get_grad
+    dump_chk                 = hf.SCF.dump_chk
+    init_guess_by_minao      = hf.SCF.init_guess_by_minao
+    init_guess_by_atom       = hf.SCF.init_guess_by_atom
+    init_guess_by_huckel     = hf.SCF.init_guess_by_huckel
+    init_guess_by_mod_huckel = hf.SCF.init_guess_by_mod_huckel
+    init_guess_by_1e         = hf.SCF.init_guess_by_1e
+    init_guess_by_chkfile    = hf.SCF.init_guess_by_chkfile
+    from_chk                 = hf.SCF.from_chk
+    get_init_guess           = hf.SCF.get_init_guess
+    make_rdm1                = hf.SCF.make_rdm1
+    make_rdm2                = hf.SCF.make_rdm2
+    energy_elec              = hf.SCF.energy_elec
+    energy_tot               = hf.SCF.energy_tot
+    energy_nuc               = hf.SCF.energy_nuc
+    check_convergence        = None
+    _eigh                    = staticmethod(eigh)
+    eig                      = hf.SCF.eig
+
+    scf                      = hf.SCF.scf
+    as_scanner               = hf.SCF.as_scanner
+    _finalize                = hf.SCF._finalize
+    init_direct_scf          = hf.SCF.init_direct_scf
+    get_jk                   = hf.SCF.get_jk
+    get_j                    = hf.SCF.get_j
+    get_k                    = hf.SCF.get_k
+    get_veff                 = hf.SCF.get_veff
+    analyze                  = hf.SCF.analyze
+    mulliken_meta            = hf.SCF.mulliken_meta
+    pop                      = hf.SCF.pop
+    dip_moment               = hf.SCF.dip_moment
+    _is_mem_enough           = NotImplemented
+    density_fit              = NotImplemented
+    sfx2c1e                  = NotImplemented
+    x2c1e                    = NotImplemented
+    x2c                      = NotImplemented
+    newton                   = NotImplemented
+    remove_soscf             = NotImplemented
+    stability                = NotImplemented
+    nuc_grad_method          = NotImplemented
+    update_                  = NotImplemented
+    istype                   = hf.SCF.istype
 
     def reset(self, mol=None):
         if mol is not None:
             self.mol = mol
         self._opt_gpu = None
         self._opt_gpu_omega = None
-        self._eri = None
+        self.scf_summary = {}
         return self
+
+class KohnShamDFT:
+    '''
+    A mock DFT base class, to be compatible with PySCF
+    '''
+
+from gpu4pyscf.lib import utils
+class RHF(SCF):
+
+    to_gpu = utils.to_gpu
+    device = utils.device
+
+    _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'conv_tol_cpscf', 'disp_with_3body'}
+
+    conv_tol_cpscf = 1e-6
+    DIIS = diis.SCF_DIIS
+    get_jk = _get_jk
+    _eigh = staticmethod(eigh)
+    make_rdm1 = make_rdm1
+    energy_elec = energy_elec
+    get_fock = get_fock
+    get_occ = get_occ
+    get_veff = get_veff
+    get_grad = staticmethod(get_grad)
+    quad_moment = _quad_moment
+    energy_tot = energy_tot
+
+    get_hcore = return_cupy_array(hf.RHF.get_hcore)
+    get_ovlp = return_cupy_array(hf.RHF.get_ovlp)
+    get_init_guess = return_cupy_array(hf.RHF.get_init_guess)
+    init_direct_scf = NotImplemented
+    make_rdm2 = NotImplemented
+    newton = NotImplemented
+    x2c = x2c1e = sfx2c1e = NotImplemented
+    to_rhf = NotImplemented
+    to_uhf = NotImplemented
+    to_ghf = NotImplemented
+    to_rks = NotImplemented
+    to_uks = NotImplemented
+    to_gks = NotImplemented
+    to_ks = NotImplemented
+    canonicalize = NotImplemented
+    # TODO: Enable followings after testing
+    analyze = NotImplemented
+    stability = NotImplemented
+    mulliken_pop = NotImplemented
+    mulliken_meta = NotImplemented
+
+    scf = scf
+    kernel = scf
+
+    def check_sanity(self):
+        mol = self.mol
+        if mol.nelectron != 1 and mol.spin != 0:
+            logger.warn(self, 'Invalid number of electrons %d for RHF method.',
+                        mol.nelectron)
+        return SCF.check_sanity(self)
 
     def nuc_grad_method(self):
         from gpu4pyscf.grad import rhf
@@ -615,7 +754,12 @@ class RHF(hf.RHF):
         import gpu4pyscf.df.df_jk
         return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
 
-class _VHFOpt(_vhf.VHFOpt):
+    def to_cpu(self):
+        mf = hf.RHF(self.mol)
+        utils.to_cpu(self, out=mf)
+        return mf
+
+class _VHFOpt:
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     def __init__(self, mol, intor, prescreen='CVHFnoscreen',
@@ -648,7 +792,7 @@ class _VHFOpt(_vhf.VHFOpt):
             for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
                 logger.debug(mol, '    %s : %s', l_ctr, n)
 
-        sorted_idx = np.argsort(inv_idx, kind='stable').astype(np.int32)
+        sorted_idx = np.argsort(inv_idx.ravel(), kind='stable').astype(np.int32)
         # Sort contraction coefficients before updating self.mol
         ao_loc = mol.ao_loc_nr(cart=True)
         nao = ao_loc[-1]
@@ -772,6 +916,10 @@ class _VHFOpt(_vhf.VHFOpt):
             mol._env.ctypes.data_as(ctypes.c_void_p))
         logger.timer(mol, 'Initialize GPU cache', *cput1)
         return self
+
+    init_cvhf_direct = _vhf.VHFOpt.init_cvhf_direct
+    get_q_cond       = _vhf.VHFOpt.get_q_cond
+    set_dm           = _vhf.VHFOpt.set_dm
 
     def clear(self):
         _vhf.VHFOpt.__del__(self)

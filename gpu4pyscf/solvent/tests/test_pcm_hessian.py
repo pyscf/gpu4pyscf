@@ -15,10 +15,13 @@
 
 import unittest
 import numpy as np
+import pyscf
+import pytest
 from pyscf import gto
 from gpu4pyscf import scf, dft
-from gpu4pyscf.solvent import pcm
-from gpu4pyscf.solvent.grad import pcm as pcm_grad
+from packaging import version
+
+pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
 def setUpModule():
     global mol, epsilon, lebedev_order, eps, xc, tol
@@ -42,12 +45,16 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-def _make_mf(method='C-PCM'):
-    mf = dft.rks.RKS(mol, xc=xc).density_fit().PCM()
+def _make_mf(method='C-PCM', restricted=True):
+    if restricted:
+        mf = dft.rks.RKS(mol, xc=xc).density_fit().PCM()
+    else:
+        mf = dft.uks.UKS(mol, xc=xc).density_fit().PCM()
     mf.with_solvent.method = method
     mf.with_solvent.eps = epsilon
     mf.with_solvent.lebedev_order = lebedev_order
     mf.conv_tol = 1e-12
+    mf.conv_tol_cpscf = 1e-7
     mf.grids.atom_grid = (99,590)
     mf.verbose = 0
     mf.kernel()
@@ -80,7 +87,7 @@ def _check_hessian(mf, h, ix=0, iy=0):
 
 class KnownValues(unittest.TestCase):
     def test_hess_cpcm(self):
-        print('testing C-PCM Hessian')
+        print('testing C-PCM Hessian with DF-RKS')
         mf = _make_mf(method='C-PCM')
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
@@ -89,7 +96,7 @@ class KnownValues(unittest.TestCase):
         _check_hessian(mf, h, ix=0, iy=1)
 
     def test_hess_iefpcm(self):
-        print("testing IEF-PCM hessian")
+        print("testing IEF-PCM hessian with DF-RKS")
         mf = _make_mf(method='IEF-PCM')
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
@@ -97,6 +104,57 @@ class KnownValues(unittest.TestCase):
         _check_hessian(mf, h, ix=0, iy=0)
         _check_hessian(mf, h, ix=0, iy=1)
 
+    def test_uhf_hess_iefpcm(self):
+        print("testing IEF-PCM hessian with DF-UKS")
+        mf = _make_mf(method='IEF-PCM', restricted=False)
+        hobj = mf.Hessian()
+        hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_hessian(mf, h, ix=0, iy=0)
+        _check_hessian(mf, h, ix=0, iy=1)
+
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    def test_to_gpu(self):
+        import pyscf
+        # Not implemented yet
+        '''
+        mf = pyscf.dft.RKS(mol, xc='b3lyp').SMD()
+        mf.kernel()
+        hessobj = mf.Hessian()
+        hess_cpu = hessobj.kernel()
+        hessobj = hessobj.to_gpu()
+        hess_gpu = hessobj.kernel()
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-8
+        '''
+        mf = pyscf.dft.RKS(mol, xc='b3lyp').density_fit().PCM()
+        mf.conv_tol = 1e-12
+        mf.conv_tol_cpscf = 1e-7
+        mf.kernel()
+        hessobj = mf.Hessian()
+        hess_cpu = hessobj.kernel()
+        hessobj = hessobj.to_gpu()
+        hess_gpu = hessobj.kernel()
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+
+    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    def test_to_cpu(self):
+        # Not implemented yet
+        '''
+        mf = dft.RKS(mol, xc='b3lyp').SMD()
+        e_gpu = mf.kernel()
+        mf = mf.to_cpu()
+        e_cpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
+        '''
+        mf = dft.RKS(mol, xc='b3lyp').density_fit().PCM()
+        mf.conv_tol = 1e-12
+        mf.conv_tol_cpscf = 1e-7
+        mf.kernel()
+        hessobj = mf.Hessian()
+        hess_gpu = hessobj.kernel()
+        hessobj = hessobj.to_cpu()
+        hess_cpu = hessobj.kernel()
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
 if __name__ == "__main__":
     print("Full Tests for Hessian of PCMs")
     unittest.main()

@@ -30,14 +30,15 @@ import ctypes
 import numpy
 import cupy
 from pyscf import lib
-from pyscf.lib import logger
 from pyscf import gto
 from pyscf.gto.eval_gto import BLKSIZE, NBINS, CUTOFF, make_screen_index
 from pyscf import __config__
 from cupyx.scipy.spatial.distance import cdist
+from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf import __config__ as __gpu4pyscf_config__
+
 libdft = lib.load_library('libdft')
 libgdft = load_library('libgdft')
 
@@ -72,12 +73,13 @@ def sg1_prune(nuc, rads, n_ang, radii=radi.SG1RADII):
     '''
 # In SG1 the ang grids for the five regions
 #            6  38 86  194 86
-    leb_ngrid = numpy.array([6, 38, 86, 194, 86])
-    alphas = numpy.array((
+    leb_ngrid = cupy.array([6, 38, 86, 194, 86])
+    alphas = cupy.array((
         (0.25  , 0.5, 1.0, 4.5),
         (0.1667, 0.5, 0.9, 3.5),
         (0.1   , 0.4, 0.8, 2.5)))
     r_atom = radii[nuc] + 1e-200
+    rads = cupy.asarray(rads)
     if nuc <= 2:  # H, He
         place = ((rads/r_atom).reshape(-1,1) > alphas[0]).sum(axis=1)
     elif nuc <= 10:  # Li - Ne
@@ -119,7 +121,7 @@ def nwchem_prune(nuc, rads, n_ang, radii=radi.BRAGG_RADII):
     else:
         idx = numpy.where(leb_ngrid==n_ang)[0][0]
         leb_l = numpy.array([1, 3, idx-1, idx, idx-1])
-    r_atom = radii[nuc].get() + 1e-200
+    r_atom = radii[nuc] + 1e-200
     if nuc <= 2:  # H, He
         place = ((rads/r_atom).reshape(-1,1) > alphas[0]).sum(axis=1)
     elif nuc <= 10:  # Li - Ne
@@ -186,27 +188,20 @@ def gen_grids_partition(atm_coords, coords, a):
     natm = atm_coords.shape[0]
     ngrids = coords.shape[0]
     assert ngrids < 65535 * 16
-    x_i = cupy.expand_dims(atm_coords, axis=1)
-    x_g = cupy.expand_dims(coords, axis=0)
-    squared_diff = (x_i - x_g)**2
-    dist_ig = cupy.sum(squared_diff, axis=2)**0.5
 
-    x_j = cupy.expand_dims(atm_coords, axis=0)
-    squared_diff = (x_i - x_j)**2
-    dist_ij = cupy.sum(squared_diff, axis=2)**0.5
-
-    pbecke = cupy.ones([natm, ngrids], order='C')
+    pbecke = cupy.empty([natm, ngrids], order='C')
+    #atm_coords = cupy.asarray(atm_coords, order='F')
     err = libgdft.GDFTgen_grid_partition(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(pbecke.data.ptr, ctypes.c_void_p),
-        ctypes.cast(dist_ig.data.ptr, ctypes.c_void_p),
-        ctypes.cast(dist_ij.data.ptr, ctypes.c_void_p),
+        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(natm)
     )
     if err != 0:
-        raise RuntimeError('CUDA Error')
+        raise RuntimeError('CUDA Error in grids_partition kernel')
     return pbecke
 
 def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
@@ -251,7 +246,7 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                 angs = [n_ang] * n_rad
             logger.debug(mol, 'atom %s rad-grids = %d, ang-grids = %s',
                          symb, n_rad, angs)
-
+            if isinstance(angs, cupy.ndarray): angs = angs.get()
             angs = numpy.array(angs)
             coords = []
             vol = []
@@ -286,14 +281,16 @@ def get_partition(mol, atom_grids_tab,
         grid_coord and grid_weight arrays.  grid_coord array has shape (N,3);
         weight 1D array has N elements.
     '''
+    atm_coords = numpy.asarray(mol.atom_coords() , order='C')
+    atm_coords = cupy.asarray(atm_coords)
+    '''
     if callable(radii_adjust) and atomic_radii is not None:
         f_radii_adjust = radii_adjust(mol, atomic_radii)
     else:
         f_radii_adjust = None
-    atm_coords = numpy.asarray(mol.atom_coords() , order='C')
     atm_dist = gto.inter_distance(mol)
-    atm_coords = cupy.asarray(atm_coords)
     atm_dist = cupy.asarray(atm_dist)
+
     if (becke_scheme is original_becke and
         (radii_adjust is radi.treutler_atomic_radii_adjust or
          radii_adjust is radi.becke_atomic_radii_adjust or
@@ -331,12 +328,14 @@ def get_partition(mol, atom_grids_tab,
                     pbecke[i] *= .5 * (1-g)
                     pbecke[j] *= .5 * (1+g)
             return pbecke
-
+    '''
     coords_all = []
     weights_all = []
     # support atomic_radii_adjust = None
     assert radii_adjust == radi.treutler_atomic_radii_adjust
     a = -radi.get_treutler_fac(mol, atomic_radii)
+    #a = -radi.get_becke_fac(mol, atomic_radii)
+    atm_coords = cupy.asarray(atm_coords, order='F')
     for ia in range(mol.natm):
         coords, vol = atom_grids_tab[mol.atom_symbol(ia)]
         coords = coords + atm_coords[ia]
@@ -344,7 +343,6 @@ def get_partition(mol, atom_grids_tab,
         weights = vol * pbecke[ia] * (1./pbecke.sum(axis=0))
         coords_all.append(coords)
         weights_all.append(weights)
-
     if concat:
         coords_all = cupy.vstack(coords_all)
         weights_all = cupy.hstack(weights_all)
@@ -378,6 +376,14 @@ def make_mask(mol, coords, relativity=0, shls_slice=None, cutoff=CUTOFF,
     '''
     return make_screen_index(mol, coords, shls_slice, cutoff)
 
+def argsort_group(group_ids, ngroup):
+    '''Sort the grids based on the group_ids.
+    '''
+    groups = []
+    for i in range(ngroup):
+        groups.append(cupy.argwhere(group_ids==i)[0])
+    return cupy.hstack(groups)
+
 def atomic_group_grids(mol, coords):
     '''
     partition the entire space based on atomic position
@@ -398,10 +404,7 @@ def atomic_group_grids(mol, coords):
         next_node = numpy.argmin(distances_to_unvisited)
         path.append(next_node)
         current_node = next_node
-
     atom_coords = cupy.asarray(atom_coords[path])
-    #dij = cupy.sum((atom_coords[:,None,:] - coords[None,:,:])**2, axis=2)
-    #group_ids = cupy.argmin(dij, axis=0)
 
     coords = cupy.asarray(coords, order='F')
     atom_coords = cupy.asarray(atom_coords, order='F')
@@ -417,9 +420,8 @@ def atomic_group_grids(mol, coords):
     )
     if err != 0:
         raise RuntimeError('CUDA Error')
-
-    return group_ids.argsort()
-
+    idx = group_ids.argsort()
+    return idx
 
 def arg_group_grids(mol, coords, box_size=GROUP_BOX_SIZE):
     '''
@@ -463,67 +465,10 @@ def _load_conf(mod, name, default):
         return var
 
 from pyscf.dft import gen_grid
-class Grids(gen_grid.Grids):
-    '''DFT mesh grids
+from gpu4pyscf.lib import utils
+class Grids(lib.StreamObject):
 
-    Attributes for Grids:
-        level : int
-            To control the number of radial and angular grids. Large number
-            leads to large mesh grids. The default level 3 corresponds to
-            (50,302) for H, He;
-            (75,302) for second row;
-            (80~105,434) for rest.
-
-            Grids settings at other levels can be found in
-            pyscf.dft.gen_grid.RAD_GRIDS and pyscf.dft.gen_grid.ANG_ORDER
-
-        atomic_radii : 1D array
-            | radi.BRAGG_RADII  (default)
-            | radi.COVALENT_RADII
-            | None : to switch off atomic radii adjustment
-
-        radii_adjust : function(mol, atomic_radii) => (function(atom_id, atom_id, g) => array_like_g)
-            Function to adjust atomic radii, can be one of
-            | radi.treutler_atomic_radii_adjust
-            | radi.becke_atomic_radii_adjust
-            | None : to switch off atomic radii adjustment
-
-        radi_method : function(n) => (rad_grids, rad_weights)
-            scheme for radial grids, can be one of
-            | radi.treutler  (default)
-            | radi.delley
-            | radi.mura_knowles
-            | radi.gauss_chebyshev
-
-        becke_scheme : function(v) => array_like_v
-            weight partition function, can be one of
-            | gen_grid.original_becke  (default)
-            | gen_grid.stratmann
-
-        prune : function(nuc, rad_grids, n_ang) => list_n_ang_for_each_rad_grid
-            scheme to reduce number of grids, can be one of
-            | gen_grid.nwchem_prune  (default)
-            | gen_grid.sg1_prune
-            | gen_grid.treutler_prune
-            | None : to switch off grid pruning
-
-        symmetry : bool
-            whether to symmetrize mesh grids (TODO)
-
-        atom_grid : dict
-            Set (radial, angular) grids for particular atoms.
-            Eg, grids.atom_grid = {'H': (20,110)} will generate 20 radial
-            grids and 110 angular grids for H atom.
-
-    Examples:
-
-    >>> mol = gto.M(atom='H 0 0 0; H 0 0 1.1')
-    >>> grids = dft.gen_grid.Grids(mol)
-    >>> grids.level = 4
-    >>> grids.build()
-    '''
-
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     atomic_radii = _load_conf(radi, 'dft_gen_grid_Grids_atomic_radii',
                                    radi.BRAGG_RADII)
@@ -535,15 +480,21 @@ class Grids(gen_grid.Grids):
                               original_becke)
     prune = _load_conf(None, 'dft_gen_grid_Grids_prune', nwchem_prune)
     level = getattr(__config__, 'dft_gen_grid_Grids_level', 3)
+    alignment    = ALIGNMENT_UNIT
+    cutoff       = CUTOFF
+    _keys        = gen_grid.Grids._keys
 
-    alignment = ALIGNMENT_UNIT
-    cutoff = CUTOFF
+    __init__    = gen_grid.Grids.__init__
 
     def __setattr__(self, key, val):
         if key in ('atom_grid', 'atomic_radii', 'radii_adjust', 'radi_method',
                    'becke_scheme', 'prune', 'level'):
             self.reset()
-        super(Grids, self).__setattr__(key, val)
+        super().__setattr__(key, val)
+
+    @property
+    def size(self):
+        return getattr(self.weights, 'size', 0)
 
     def build(self, mol=None, with_non0tab=False, sort_grids=True, **kwargs):
         if mol is None: mol = self.mol
@@ -553,7 +504,6 @@ class Grids(gen_grid.Grids):
             mol, self.atom_grid, self.radi_method, self.level, self.prune, **kwargs)
         self.coords, self.weights = self.get_partition(
             mol, atom_grids_tab, self.radii_adjust, self.atomic_radii, self.becke_scheme)
-
         if self.alignment > 1:
             padding = _padding_size(self.size, self.alignment)
             logger.debug(self, 'Padding %d grids', padding)
@@ -562,7 +512,6 @@ class Grids(gen_grid.Grids):
                 self.coords = cupy.vstack(
                     [self.coords, numpy.repeat([[1e4]*3], padding, axis=0)])
                 self.weights = cupy.hstack([self.weights, numpy.zeros(padding)])
-
         if sort_grids:
             #idx = arg_group_grids(mol, self.coords)
             idx = atomic_group_grids(mol, self.coords)
@@ -631,6 +580,11 @@ class Grids(gen_grid.Grids):
             self.non0tab = self.make_mask(mol, self.coords)
             self.screen_index = self.non0tab
         return self
+
+    def to_cpu(self):
+        grids = gen_grid.Grids(self.mol)
+        utils.to_cpu(self, out=grids)
+        return grids
 
 _default_rad = gen_grid._default_rad
 RAD_GRIDS = gen_grid.RAD_GRIDS

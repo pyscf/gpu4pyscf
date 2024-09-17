@@ -25,11 +25,10 @@
 #include "gint/cuda_alloc.cuh"
 #include "gint/g2e.h"
 #include "gint/cint2e.cuh"
-#include "gint/g2e.cu"
 
 #include "contract_jk.cu"
 #include "gint/rys_roots.cu"
-
+#include "gint/g2e.cu"
 #include "g3c2e.cuh"
 #include "g3c2e_ip2.cu"
 
@@ -51,6 +50,7 @@ static int GINTrun_tasks_int3c2e_ip2_jk(JKMatrix *jk, BasisProdOffsets *offsets,
         case 6: GINTint3c2e_ip2_jk_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
         case 7: GINTint3c2e_ip2_jk_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
         case 8: GINTint3c2e_ip2_jk_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 9: GINTint3c2e_ip2_jk_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
         default:
             fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
@@ -67,17 +67,17 @@ static int GINTrun_tasks_int3c2e_ip2_jk(JKMatrix *jk, BasisProdOffsets *offsets,
 
 extern "C" { __host__
 int GINTbuild_int3c2e_ip2_jk(BasisProdCache *bpcache,
-                 double *vj, double *vk, double *dm, double *rhoj, double *rhok, 
+                 double *vj, double *vk, double *dm, double *rhoj, double *rhok,
                  int *ao_offsets, int nao, int naux, int n_dm,
                  int *bins_locs_ij, int ntasks_kl, int ncp_ij, int cp_kl_id, double omega)
 {
     ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
-    
+
     int ng[4] = {0,0,1,0};
-    
+
     // move bpcache to constant memory
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
-    
+
     JKMatrix jk;
     jk.n_dm = n_dm;
     jk.nao = nao;
@@ -91,18 +91,17 @@ int GINTbuild_int3c2e_ip2_jk(BasisProdCache *bpcache,
     jk.ao_offsets_j = ao_offsets[1];
     jk.ao_offsets_k = ao_offsets[2];
     jk.ao_offsets_l = ao_offsets[3];
-    BasisProdOffsets offsets;
-    
+
     int *bas_pairs_locs = bpcache->bas_pairs_locs;
     int *primitive_pairs_locs = bpcache->primitive_pairs_locs;
-    
+
     cudaStream_t streams[MAX_STREAMS];
     for (int n = 0; n < MAX_STREAMS; n++){
         checkCudaErrors(cudaStreamCreate(&streams[n]));
     }
-    
+
     int *idx = (int *)malloc(sizeof(int) * TOT_NF * 3);
-    int *l_locs = (int *)malloc(sizeof(int) * (GPU_LMAX + 2)); 
+    int *l_locs = (int *)malloc(sizeof(int) * (GPU_LMAX + 2));
     GINTinit_index1d_xyz(idx, l_locs);
     checkCudaErrors(cudaMemcpyToSymbol(c_idx, idx, sizeof(int) * TOT_NF*3));
     checkCudaErrors(cudaMemcpyToSymbol(c_l_locs, l_locs, sizeof(int) * (GPU_LMAX + 2)));
@@ -111,18 +110,19 @@ int GINTbuild_int3c2e_ip2_jk(BasisProdCache *bpcache,
 
     for (int cp_ij_id = 0; cp_ij_id < ncp_ij; cp_ij_id++){
         int n_stream = cp_ij_id % MAX_STREAMS;
-        
+
         GINTEnvVars envs;
         ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
         GINTinit_EnvVars(&envs, cp_ij, cp_kl, ng);
         envs.omega = omega;
-        if (envs.nrys_roots > 8) {
+        if (envs.nrys_roots > 9) {
             return 2;
         }
 
         int ntasks_ij = bins_locs_ij[cp_ij_id+1] - bins_locs_ij[cp_ij_id];
         if (ntasks_ij <= 0) continue;
 
+        BasisProdOffsets offsets;
         offsets.ntasks_ij = ntasks_ij;
         offsets.ntasks_kl = ntasks_kl;
         offsets.bas_ij = bas_pairs_locs[cp_ij_id];
@@ -131,13 +131,15 @@ int GINTbuild_int3c2e_ip2_jk(BasisProdCache *bpcache,
         offsets.primitive_kl = primitive_pairs_locs[cp_kl_id];
 
         int err = GINTrun_tasks_int3c2e_ip2_jk(&jk, &offsets, &envs, streams[n_stream]);
-        
+
         if (err != 0) {
             return err;
         }
     }
     for (int n = 0; n < MAX_STREAMS; n++){
         checkCudaErrors(cudaStreamSynchronize(streams[n]));
+    }
+    for (int n = 0; n < MAX_STREAMS; n++){
         checkCudaErrors(cudaStreamDestroy(streams[n]));
     }
 

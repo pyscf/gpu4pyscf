@@ -30,6 +30,7 @@ Non-relativistic RKS analytical Hessian
 import numpy
 import cupy
 from pyscf import lib
+from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.hessian import rks as rks_hess
 from gpu4pyscf.df.hessian import rhf as df_rhf_hess
 from gpu4pyscf.lib import logger
@@ -70,15 +71,15 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     veff_diag = rks_hess._get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory)
     t1 = log.timer_debug1('computing veff_diag', *t1)
     aoslices = mol.aoslice_by_atom()
-    vxc = rks_hess._get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
+    vxc_dm = rks_hess._get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
     t1 = log.timer_debug1('computing veff_deriv2', *t1)
     for i0, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = aoslices[ia]
-        veff = vxc[ia]
+        veff_dm = vxc_dm[ia]
         de2[i0,i0] += contract('xypq,pq->xy', veff_diag[:,:,p0:p1], dm0[p0:p1])*2
         for j0, ja in enumerate(atmlst[:i0+1]):
             q0, q1 = aoslices[ja][2:]
-            de2[i0,j0] += contract('xypq,pq->xy', veff[:,:,q0:q1], dm0[q0:q1])*2
+            de2[i0,j0] += 2.0*cupy.sum(veff_dm[:,:,q0:q1], axis=2)#contract('xypq,pq->xy', veff[:,:,q0:q1], dm0[q0:q1])*2
         for j0 in range(i0):
             de2[j0,i0] = de2[i0,j0].T
     log.timer('RKS partial hessian', *time0)
@@ -105,31 +106,15 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
             h1ao[ia] -= .5 * (alpha - hyb) * vk1_lr
     return h1ao
 
-    # support chkfile?
-    '''
-    if chkfile is None:
-        return h1ao
-    else:
-        for ia in atmlst:
-            lib.chkfile.save(chkfile, 'scf_f1ao/%d'%ia, h1ao[ia])
-        return chkfile
-    '''
-
 class Hessian(rks_hess.Hessian):
     '''Non-relativistic RKS hessian'''
     from gpu4pyscf.lib.utils import to_gpu, device
 
     def __init__(self, mf):
-        self.auxbasis_response = 1
         rks_hess.Hessian.__init__(self, mf)
 
-    def to_cpu(self):
-        from gpu4pyscf.lib.utils import to_cpu
-        from pyscf.df.hessian.rks import Hessian
-        # to_cpu returns an rhf.Hessian object
-        obj = to_cpu(self)
-        return obj.view(Hessian)
-
+    auxbasis_response = 1
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
-
+    kernel = rhf_hess.kernel
+    hess = kernel

@@ -21,6 +21,7 @@ import os
 import sys
 import subprocess
 import re
+import glob
 
 from setuptools import setup, find_packages, Extension
 from setuptools.command.build_py import build_py
@@ -69,7 +70,7 @@ class CMakeBuildPy(build_py):
         self.announce('Configuring extensions', level=3)
         src_dir = os.path.abspath(os.path.join(__file__, '..', 'gpu4pyscf', 'lib'))
         dest_dir = os.path.join(self.build_temp, 'gpu4pyscf')
-        cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}']
+        cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}', '-DBUILD_LIBXC=OFF']
         configure_args = os.getenv('CMAKE_CONFIGURE_ARGS')
         if configure_args:
             cmd.extend(configure_args.split(' '))
@@ -84,16 +85,31 @@ class CMakeBuildPy(build_py):
             self.announce(' '.join(cmd))
         else:
             self.spawn(cmd)
+
         super().run()
 
 # build_py will produce plat_name = 'any'. Patch the bdist_wheel to change the
 # platform tag because the C extensions are platform dependent.
+# For setuptools<70
 from wheel.bdist_wheel import bdist_wheel
-initialize_options = bdist_wheel.initialize_options
+initialize_options_1 = bdist_wheel.initialize_options
 def initialize_with_default_plat_name(self):
-    initialize_options(self)
+    initialize_options_1(self)
     self.plat_name = get_platform()
+    self.plat_name_supplied = True
 bdist_wheel.initialize_options = initialize_with_default_plat_name
+
+# For setuptools>=70
+try:
+    from setuptools.command.bdist_wheel import bdist_wheel
+    initialize_options_2 = bdist_wheel.initialize_options
+    def initialize_with_default_plat_name(self):
+        initialize_options_2(self)
+        self.plat_name = get_platform()
+        self.plat_name_supplied = True
+    bdist_wheel.initialize_options = initialize_with_default_plat_name
+except ImportError:
+    pass
 
 if 'sdist' in sys.argv:
     # The sdist release
@@ -122,11 +138,10 @@ setup(
     ],
     cmdclass={'build_py': CMakeBuildPy},
     install_requires=[
-        'pyscf>=2.4.0',
-        f'cupy-cuda{CUDA_VERSION}>=12.0',
-        'dftd3==0.7.0',
-        'dftd4==3.5.0',
+        'pyscf~=2.6.0',
+        'pyscf-dispersion',
+        f'cupy-cuda{CUDA_VERSION}',
         'geometric',
-        f'gpu4pyscf-libxc-cuda{CUDA_VERSION}',
-    ],
+        f'gpu4pyscf-libxc-cuda{CUDA_VERSION}>=0.5',
+    ]
 )

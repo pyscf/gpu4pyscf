@@ -13,13 +13,18 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+
+##############################################################################
+#   This example shows the basic usage of PySCF/GPU4PySCF                    #
+#   For the complete guide, please refer to                                  #
+#     - PySCF user guide (https://pyscf.org/user.html)                       #
+#     - PySCF examples (https://github.com/pyscf/pyscf/tree/master/examples) #
+##############################################################################
+
 import numpy as np
-import cupy
 import pyscf
-from pyscf import lib
 from pyscf.hessian import thermo
 from gpu4pyscf.dft import rks
-lib.num_threads(8)
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -27,23 +32,22 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-xc = 'B3LYP'
-bas = 'def2-tzvpp'
-auxbasis = 'def2-tzvpp-jkfit'
-scf_tol = 1e-10
-max_scf_cycles = 50
-screen_tol = 1e-14
-grids_level = 5
+mol = pyscf.M(
+    atom=atom,                         # water molecule
+    basis='def2-tzvpp',                # basis set
+    output='./pyscf.log',              # save log file
+    verbose=6                          # control the level of print info
+    )
 
-mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
+mf_GPU = rks.RKS(                      # restricted Kohn-Sham DFT
+    mol,                               # pyscf.gto.object
+    xc='b3lyp'                         # xc funtionals, such as pbe0, wb97m-v, tpss,
+    ).density_fit()                    # density fitting
 
-mol.verbose = 4
-mf_GPU = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
-mf_GPU.grids.level = grids_level
-mf_GPU.grids.atom_grid = (99,590)
-mf_GPU.conv_tol = scf_tol
-mf_GPU.max_cycle = max_scf_cycles
-mf_GPU.screen_tol = screen_tol
+mf_GPU.grids.atom_grid = (99,590)      # (99,590) lebedev grids, (75,302) is often enough
+mf_GPU.conv_tol = 1e-10                # controls SCF convergence tolerance
+mf_GPU.max_cycle = 50                  # controls max iterations of SCF
+mf_GPU.conv_tol_cpscf = 1e-3           # controls max iterations of CPSCF (for hessian)
 
 # Compute Energy
 e_dft = mf_GPU.kernel()
@@ -51,20 +55,23 @@ print(f"total energy = {e_dft}") # -76.26736519501688
 
 # Compute Gradient
 g = mf_GPU.nuc_grad_method()
-g.max_memory = 20000
-g.auxbasis_response = True
 g_dft = g.kernel()
 
 # Compute Hessian
 h = mf_GPU.Hessian()
-h.auxbasis_response = 2
+h.auxbasis_response = 2                # 0: no aux contribution, 1: some contributions, 2: all
 h_dft = h.kernel()
 
 # harmonic analysis
 results = thermo.harmonic_analysis(mol, h_dft)
 thermo.dump_normal_mode(mol, results)
 
-results = thermo.thermo(mf_GPU, results['freq_au'], 298.15, 101325)
+results = thermo.thermo(
+    mf_GPU,                            # GPU4PySCF object
+    results['freq_au'],
+    298.15,                            # room temperature
+    101325)                            # standard atmosphere
+
 thermo.dump_thermo(mol, results)
 
 # force translational symmetry
@@ -72,4 +79,3 @@ natm = mol.natm
 h_dft = h_dft.transpose([0,2,1,3]).reshape(3*natm,3*natm)
 h_diag = h_dft.sum(axis=0)
 h_dft -= np.diag(h_diag)
-print(h_dft[:3,:3])

@@ -16,24 +16,24 @@
 
 #include <cuda_runtime.h>
 #include <stdio.h>
-#define THREADS        16
+#define THREADS        8
 
 __global__
 static void _block_diag(double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols)
 {
-    int i = threadIdx.x;
-    int j = threadIdx.y;
     int r = blockIdx.x;
-    
+
     if (r >= ndiags){
         return;
     }
     int m0 = rows[r+1] - rows[r];
     int n0 = cols[r+1] - cols[r];
-    if (i >= m0 || j >= n0) {
-        return;
+    
+    for (int i = threadIdx.x; i < m0; i += THREADS){
+        for (int j = threadIdx.y; j < n0; j += THREADS){
+            out[(i+rows[r])*n + (j+cols[r])] = diags[offsets[r] + i*n0 + j];
+        }
     }
-    out[(i+rows[r])*n + (j+cols[r])] = diags[offsets[r] + i*n0 + j];
 }
 
 extern "C" {

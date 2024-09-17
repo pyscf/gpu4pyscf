@@ -13,6 +13,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+###################################
+#  Example of CHELG charge
+###################################
+
 from pyscf import gto
 from gpu4pyscf.dft import rks
 from gpu4pyscf.qmmm import chelpg
@@ -35,5 +39,11 @@ mf = rks.RKS(mol, xc=xc)
 mf.grids.level = 5
 mf.kernel()
 q = chelpg.eval_chelpg_layer_gpu(mf)
-print('partial charge with CHELPG')
+print('partial charge with CHELPG, using modified Bondi radii')
 print(q) # [ 0.04402311  0.11333945 -0.25767919  0.10031663]
+
+# Customize the radii used for calculating CHELPG charges
+from pyscf.data import radii
+q = chelpg.eval_chelpg_layer_gpu(mf, Rvdw=radii.UFF)
+print('partial charge with CHELPG, using UFF radii')
+print(q)

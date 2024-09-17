@@ -36,7 +36,7 @@ def setUpModule():
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
     ''',
-    basis= 'sto3g',
+    basis= 'ccpvdz',
     verbose=1,
     output = '/dev/null')
     mol.build()
@@ -69,6 +69,20 @@ class KnownValues(unittest.TestCase):
         vj, vk = int4c2e.get_int4c2e_jk(mol, dm)
         assert np.linalg.norm(vj.get() - vj0) < 1e-8
         assert np.linalg.norm(vk.get() - vk0) < 1e-8
+
+    def test_int4c2e_ovov(self):
+        nao = mol.nao
+        eri = mol.intor('int2e_cart').reshape((nao,)*4)
+        np.random.seed(10)
+        orbo = np.random.rand(nao, 2)
+        orbv = np.random.rand(nao, 3)
+
+        ovov_cpu = np.einsum('ijkl,io,jp,kr,lq->oprq', eri, orbo, orbv, orbo, orbv)
+
+        orbo = cupy.asarray(orbo)
+        orbv = cupy.asarray(orbv)
+        ovov_gpu = int4c2e.get_int4c2e_ovov(mol, orbo, orbv)
+        assert np.linalg.norm(ovov_cpu - ovov_gpu.get()) < 1e-8
 
 if __name__ == "__main__":
     print("Full Tests for int4c")

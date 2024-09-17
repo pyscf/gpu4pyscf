@@ -24,10 +24,10 @@
 #include "config.h"
 #include "cuda_alloc.cuh"
 #include "g2e.h"
-#include "g2e.cu"
 #include "cint2e.cuh"
 
 #include "rys_roots.cu"
+#include "g2e.cu"
 #include "gout3c2e.cu"
 #include "g3c2e_ip1_root1.cu"
 #include "g3c2e_ip1.cu"
@@ -41,7 +41,7 @@ static int GINTfill_int3c2e_ip1_tasks(ERITensor *eri, BasisProdOffsets *offsets,
     assert(ntasks_kl < 65536*THREADSY);
     dim3 threads(THREADSX, THREADSY);
     dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
-    
+
     switch (envs->nrys_roots) {
         case 1: GINTfill_int3c2e_ip1_kernel1000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 2: GINTfill_int3c2e_ip1_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
@@ -51,10 +51,11 @@ static int GINTfill_int3c2e_ip1_tasks(ERITensor *eri, BasisProdOffsets *offsets,
         case 6: GINTfill_int3c2e_ip1_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 7: GINTfill_int3c2e_ip1_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 8: GINTfill_int3c2e_ip1_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 9: GINTfill_int3c2e_ip1_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         default: fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
     }
-    
+
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of GINTfill_int3c2e_ip1_kernel: %s\n", cudaGetErrorString(err));
@@ -73,13 +74,13 @@ int GINTfill_int3c2e_ip1(cudaStream_t stream, BasisProdCache *bpcache, double *e
     ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
     GINTEnvVars envs;
     int ng[4] = {1,0,0,0};
-    
+
     GINTinit_EnvVars(&envs, cp_ij, cp_kl, ng);
     envs.omega = omega;
-    if (envs.nrys_roots > 8) {
+    if (envs.nrys_roots > 9) {
         return 2;
     }
-    
+
     // TODO: improve the efficiency by unrolling
     if (envs.nrys_roots > 1) {
         int16_t *idx4c = (int16_t *)malloc(sizeof(int16_t) * envs.nf * 3);
@@ -87,13 +88,13 @@ int GINTfill_int3c2e_ip1(cudaStream_t stream, BasisProdCache *bpcache, double *e
         checkCudaErrors(cudaMemcpyToSymbol(c_idx4c, idx4c, sizeof(int16_t)*envs.nf*3));
         free(idx4c);
     }
-    
+
     int kl_bin, ij_bin1;
-    
+
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
-    
+
     ERITensor eritensor;
     eritensor.stride_j = strides[1];
     eritensor.stride_k = strides[2];
@@ -136,7 +137,7 @@ int GINTfill_int3c2e_ip1(cudaStream_t stream, BasisProdCache *bpcache, double *e
             return err;
         }
     }
-    
+
     return 0;
 }
 

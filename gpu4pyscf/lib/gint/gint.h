@@ -65,13 +65,13 @@
 #define BAS_SLOTS       8
 
 // boundaries for gint
-#define GPU_AO_LMAX     4           //l = 0..5 
-#define GPU_AUX_LMAX    6   
+#define GPU_AO_LMAX     4           //l = 0..4
+#define GPU_AUX_LMAX    6
 #define GPU_LMAX        6
 
 #define GPU_AO_NF       15          // up to g orbitals
-#define GPU_AUX_NF      28          // > (ANG_MAX*(ANG_MAX+1)/2)
-#define GPU_CART_MAX    28  
+#define GPU_AUX_NF      28          // > ((ANG_MAX+1)*(ANG_MAX+2)/2)
+#define GPU_CART_MAX    28
 #define NF_MAX_INT3C    (GPU_AO_NF * GPU_AO_NF * GPU_AUX_NF)
 
 // threads for GPU
@@ -84,7 +84,7 @@
 // sum of total l indices
 #define TOT_NF         (1+3+6+10+15+21+28)
 
-#define POLYFIT_ORDER  9 
+#define POLYFIT_ORDER  9
 #define POLYFIT_ORDER_IP 9
 
 #define SQRTPIE4        .8862269254527580136
@@ -248,9 +248,6 @@ typedef struct {
         int bas_kl;
         int primitive_ij;
         int primitive_kl;
-        double *log_q_ij;
-        double *log_q_kl;
-        double log_cutoff;
 } BasisProdOffsets;
 
 typedef struct {
