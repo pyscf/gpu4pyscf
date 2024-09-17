@@ -232,6 +232,60 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
         rho[tau_idx] *= .5
     return rho
 
+def eval_rho_batch(mol, ao, mocc_2, non0tab=None, xctype='LDA',
+              with_lapl=True, verbose=None, out=None):
+    xctype = xctype.upper()
+    if xctype == 'LDA' or xctype == 'HF':
+        _, ngrids = ao.shape
+    else:
+        _, ngrids = ao[0].shape
+
+    if xctype == 'LDA' or xctype == 'HF':
+        c0 = cupy.dot(mocc_2.T, ao)
+        rho = _contract_rho(c0, c0)
+    elif xctype in ('GGA', 'NLC'):
+        rho = cupy.empty((4,ngrids))
+        print(mocc_2.shape, ao.shape)
+        exit()
+        c0 = cupy.dot(mocc_2.T, ao[0])
+        _contract_rho(c0, c0, rho=rho[0])
+        for i in range(1, 4):
+            c1 = cupy.dot(mocc_2.T, ao[i])
+            _contract_rho(c0, c1, rho=rho[i])
+        rho[1:] *= 2
+    else: # meta-GGA
+        if with_lapl:
+            # rho[4] = \nabla^2 rho, rho[5] = 1/2 |nabla f|^2
+            rho = cupy.empty((6,ngrids))
+            tau_idx = 5
+        else:
+            rho = cupy.empty((5,ngrids))
+            tau_idx = 4
+
+        c0 = cupy.dot(mocc_2.T, ao[0])
+        _contract_rho(c0, c0, rho=rho[0])
+
+        rho[tau_idx] = 0
+        for i in range(1, 4):
+            c1 = cupy.dot(mocc_2.T, ao[i])
+            rho[i] = _contract_rho(c0, c1)
+            rho[tau_idx] += _contract_rho(c1, c1)
+
+        if with_lapl:
+            if ao.shape[0] > 4:
+                XX, YY, ZZ = 4, 7, 9
+                ao2 = ao[XX] + ao[YY] + ao[ZZ]
+                c1 = cupy.dot(mocc_2.T, ao2)
+                #:rho[4] = numpy.einsum('pi,pi->p', c0, c1)
+                rho[4] = _contract_rho(c0, c1)
+                rho[4] += rho[5]
+                rho[4] *= 2
+            else:
+                rho[4] = 0
+        rho[1:4] *= 2
+        rho[tau_idx] *= .5
+    return rho
+
 def eval_rho3(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
               with_lapl=True, verbose=None):
     xctype = xctype.upper()
@@ -657,7 +711,7 @@ def nr_rks_batch(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     dms = dms.reshape(-1,nao0,nao0)
     dms = take_last2d(dms, opt.ao_idx)
     nset = len(dms)
-
+    
     if mo_coeff is not None:
         mo_coeff = mo_coeff[opt.ao_idx]
 
@@ -679,14 +733,15 @@ def nr_rks_batch(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             rho_tot = cupy.empty([nset,5,ngrids])
     p0 = p1 = 0
     t1 = t0 = log.init_timer()
+    mocc_2 = (mo_coeff * mo_occ**0.5)[:,mo_occ>0]
     for ao_mask, idx, weight, _ in ni.batch_loop(_sorted_mol, grids, nao, ao_deriv):
         p1 = p0 + weight.size
         for i in range(nset):
             if mo_coeff is None:
                 rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms[i][np.ix_(idx,idx)], xctype=xctype, hermi=1, with_lapl=with_lapl)
             else:
-                mo_coeff_mask = mo_coeff[idx,:]
-                rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype, with_lapl)
+                mocc_2_mask = mocc_2[idx,:]
+                rho_tot[i,:,p0:p1] = eval_rho_batch(_sorted_mol, ao_mask, mocc_2_mask, None, xctype, with_lapl)
         p0 = p1
         t1 = log.timer_debug2('eval rho slice', *t1)
     t0 = log.timer_debug1('eval rho', *t0)
@@ -1633,10 +1688,9 @@ def _batch_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             #non0tab = grids.screen_index[block_id]
             nao_pad = (nao_non0[ip1] + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT
             nao_pad = min(nao_pad, nao)
-            pad = nao_pad - nao_non0[block_id]
+            pad = nao_pad - nao_non0[batch_id]
 
             comp = (deriv+1)*(deriv+2)*(deriv+3)//6
-            #ao_mask = 
             ao_mask = eval_ao(
                 ni, _sorted_mol, coords, deriv,
                 nao_non0=nao_pad,
@@ -1648,7 +1702,7 @@ def _batch_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                     ao_mask[-pad:,:] = 0.0
                 else:
                     ao_mask[:,-pad:,:] = 0.0
-            idx = ao_indices[ip0:ip1][:nao_pad]
+            idx = ao_indices[ip0:ip1]
             yield ao_mask, idx, weight, nao_pad
 
 def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
