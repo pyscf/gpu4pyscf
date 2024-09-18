@@ -5,13 +5,12 @@ import pyscf
 from pyscf import lib
 from pyscf import gto
 from pyscf import df
-from pyscf import scf
 from pyscf import grad
 from pyscf.lib import logger
 from pyscf.qmmm.itrf import _QMMM, _QMMMGrad
-from pyscf import qmmm as qmmm_gas
 
 import cupy as cp
+from gpu4pyscf import scf
 from gpu4pyscf.qmmm.pbc import mm_mole
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df.df import ALIGNED, MIN_BLK_SIZE
@@ -74,6 +73,27 @@ def add_mm_charges(scf_method, atoms_or_coords, a, charges, radii=None,
     mm_mol = mm_mole.create_mm_mol(atoms_or_coords, a, charges, radii=radii, 
             rcut_ewald=rcut_ewald, rcut_hcore=rcut_hcore, unit=unit)
     return qmmm_for_scf(scf_method, mm_mol)
+
+def qmmm_gas_for_scf(method, mm_mol):
+    '''Add the potential of MM particles to SCF (HF and DFT) method or CASCI
+    method then generate the corresponding QM/MM method for the QM system.
+
+    Args:
+        mm_mol : MM Mole object
+    '''
+    from pyscf.qmmm.itrf import QMMM, QMMMSCF
+    if isinstance(method, scf.hf.SCF):
+        # Avoid to initialize QMMM twice
+        if isinstance(method, QMMM):
+            method.mm_mol = mm_mol
+            return method
+
+        cls = QMMMSCF
+    else:
+        # post-HF methods
+        raise NotImplementedError()
+
+    return lib.set_class(cls(method, mm_mol), (cls, method.__class__))
 
 def qmmm_for_scf(scf_method, mm_mol):
     assert isinstance(scf_method, scf.hf.SCF)
@@ -433,10 +453,10 @@ def qmmm_for_scf(scf_method, mm_mol):
             return qmmm_grad_for_scf(scf_grad)
 
     if isinstance(scf_method, scf.hf.SCF):
-        qmmm = qmmm_gas.itrf.qmmm_for_scf(scf_method, mm_mol)
+        qmmm = qmmm_gas_for_scf(scf_method, mm_mol)
         obj2return = qmmm
     else:
-        obj2return = qmmm_gas.itrf.qmmm_for_scf(scf_method._scf, mm_mol)
+        obj2return = qmmm_gas_for_scf(scf_method._scf, mm_mol)
         qmmm = obj2return._scf
 
     qmmm.mm_mol = mm_mol
@@ -508,6 +528,23 @@ def add_mm_charges_grad(scf_grad, atoms_or_coords, a, charges, radii=None,
 
 # Define method mm_charge_grad for backward compatibility
 mm_charge_grad = add_mm_charges_grad
+
+def qmmm_gas_grad_for_scf(scf_grad):
+    '''Add the potential of MM particles to SCF (HF and DFT) object and then
+    generate the corresponding QM/MM gradients method for the QM system.
+    '''
+    from pyscf.qmmm.itrf import QMMMGrad, QMMM
+    if getattr(scf_grad.base, 'with_x2c', None):
+        raise NotImplementedError('X2C with QM/MM charges')
+
+    # Avoid to initialize QMMMGrad twice
+    if isinstance(scf_grad, QMMMGrad):
+        return scf_grad
+
+    assert (isinstance(scf_grad.base, scf.hf.SCF) and
+           isinstance(scf_grad.base, QMMM))
+
+    return scf_grad.view(lib.make_class((QMMMGrad, scf_grad.__class__)))
 
 def qmmm_grad_for_scf(scf_grad):
     '''Add the potential of MM particles to SCF (HF and DFT) object and then
@@ -1077,7 +1114,7 @@ def qmmm_grad_for_scf(scf_grad):
             self.de += g_ewald_qm
             grad_class._finalize(self)
 
-    qmmm = qmmm_gas.itrf.qmmm_grad_for_scf(scf_grad)
+    qmmm = qmmm_gas_grad_for_scf(scf_grad)
     qmmm.de_ewald_mm = None
     qmmm.h1_on_cpu = False
     qmmm.de_nuc_mm = None
