@@ -67,6 +67,16 @@ if (BUILD_MARCH_NATIVE)
   endif()
 endif()
 
+option(ENABLE_OPENMP "Compiling C extensions with openmp" ON)
+set(OPENMP_C_PROPERTIES "")
+if(ENABLE_OPENMP)
+  find_package(OpenMP)
+  if(OPENMP_FOUND)
+    set(HAVE_OPENMP 1)
+    set(OPENMP_C_PROPERTIES OpenMP::OpenMP_C)
+  endif()
+endif()
+
 # See also https://gitlab.kitware.com/cmake/community/wikis/doc/cmake/RPATH-handling
 if (WIN32)
   #?
@@ -132,12 +142,14 @@ if(BUILD_CUPY_HELPER)
   add_subdirectory(cupy_helper)
 endif()
 
-option(BUILD_SOLVENT "Using SMD solvent" ON)
+option(BUILD_SOLVENT "Using SMD solvent" OFF)
 if(BUILD_SOLVENT)
   add_subdirectory(solvent)
 endif()
 
-option(BUILD_LIBXC "Using libxc for DFT" ON)
+add_subdirectory(gvhf-rys)
+
+option(BUILD_LIBXC "Using libxc for DFT" OFF)
 if(BUILD_LIBXC)
   include(ExternalProject)
   ExternalProject_Add(libxc
