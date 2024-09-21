@@ -142,7 +142,6 @@ int GINTfill_int2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, in
     ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
     ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
     GINTEnvVars envs;
-
     int ng[4] = {0,0,0,0};
     GINTinit_EnvVars(&envs, cp_ij, cp_kl, ng);
     envs.omega = omega;
