@@ -439,3 +439,4 @@ def loop_int4c2e_general(intopt, ip_type='', direct_scf_tol=1e-13, omega=None, s
             if cp_ij_id == cp_kl_id:
                 int4c *= 0.5
             yield i0,i1,j0,j1,k0,k1,l0,l1,int4c
+            
