@@ -36,7 +36,7 @@ void GINTinit_contraction_types(BasisProdCache *bpcache,
         bpcache->ncptype = ncptype;
         bpcache->bas_pair2shls = bas_pair2shls;
         bpcache->bas_pairs_locs = bas_pairs_locs;
-        
+
         ContractionProdType *cptype = (ContractionProdType *)malloc(sizeof(ContractionProdType) * ncptype);
         bpcache->cptype = cptype;
         int *primitive_pairs_locs = (int *)malloc(sizeof(int) * (ncptype + 1));
@@ -84,23 +84,23 @@ void GINTsort_bas_coordinates(double *bas_coords, int *atm, int natm,
 }
 
 void GINTinit_exponent(double *exp, int *bas, int nbas, double *env)
-{        
+{
         int ib, ptr;
         for (ib = 0; ib < nbas; ib++) {
                 ptr = bas[PTR_EXP + ib * BAS_SLOTS];
                 exp[ib] = env[ptr];
         }
 }
-// TODO: improve the memory efficiency
-void GINTinit_aexyz(double *aexyz, BasisProdCache *bpcache, double diag_fac,
-                    int *atm, int natm, int *bas, int nbas, double *env)
+
+void GINTinit_aexyz(double *aexyz, const BasisProdCache *bpcache, const double diag_fac,
+                    const int *atm, const int natm, const int *bas, const int nbas, const double *env)
 {
-        int ncptype = bpcache->ncptype;
-        int n_bas_pairs = bpcache->bas_pairs_locs[ncptype];
-        int n_primitive_pairs = bpcache->primitive_pairs_locs[ncptype];
-        int *bas_pair2bra = bpcache->bas_pair2shls;
-        int *bas_pair2ket = bpcache->bas_pair2shls + n_bas_pairs;
-        
+        const int ncptype = bpcache->ncptype;
+        const int n_bas_pairs = bpcache->bas_pairs_locs[ncptype];
+        const int n_primitive_pairs = bpcache->primitive_pairs_locs[ncptype];
+        const int *bas_pair2bra = bpcache->bas_pair2shls;
+        const int *bas_pair2ket = bpcache->bas_pair2shls + n_bas_pairs;
+
         double *a12 = aexyz;
         double *e12 = a12 + n_primitive_pairs;
         double *x12 = e12 + n_primitive_pairs;
@@ -108,38 +108,33 @@ void GINTinit_aexyz(double *aexyz, BasisProdCache *bpcache, double diag_fac,
         double *z12 = y12 + n_primitive_pairs;
         double *a1  = z12 + n_primitive_pairs;
         double *a2  = a1 + n_primitive_pairs;
-        
-        int pair_id, count;
-        int ish, jsh, ia, ja;
-        int ip, jp, npi, npj, li, lj;
-        double *ai, *aj, *ci, *cj, *ri, *rj;
-        double rx, ry, rz, dist_ij, aij, norm;
+
         int off = 0;
-        for (pair_id = 0; pair_id < n_bas_pairs; pair_id++) {
-                ish = bas_pair2bra[pair_id];
-                jsh = bas_pair2ket[pair_id];
-                npi = bas[NPRIM_OF + ish * BAS_SLOTS];
-                npj = bas[NPRIM_OF + jsh * BAS_SLOTS];
-                ia = bas[ATOM_OF + ish * BAS_SLOTS];
-                ja = bas[ATOM_OF + jsh * BAS_SLOTS];
-                li = bas[ANG_OF + ish * BAS_SLOTS];
-                lj = bas[ANG_OF + jsh * BAS_SLOTS];
-                ai = env + bas[PTR_EXP + ish * BAS_SLOTS];
-                aj = env + bas[PTR_EXP + jsh * BAS_SLOTS];
-                ci = env + bas[PTR_COEFF + ish * BAS_SLOTS];
-                cj = env + bas[PTR_COEFF + jsh * BAS_SLOTS];
-                ri = env + atm[PTR_COORD + ia * ATM_SLOTS];
-                rj = env + atm[PTR_COORD + ja * ATM_SLOTS];
-                norm = CINTcommon_fac_sp(li) * CINTcommon_fac_sp(lj);
+        for (int pair_id = 0; pair_id < n_bas_pairs; pair_id++) {
+                const int ish = bas_pair2bra[pair_id];
+                const int jsh = bas_pair2ket[pair_id];
+                const int npi = bas[NPRIM_OF + ish * BAS_SLOTS];
+                const int npj = bas[NPRIM_OF + jsh * BAS_SLOTS];
+                const int ia = bas[ATOM_OF + ish * BAS_SLOTS];
+                const int ja = bas[ATOM_OF + jsh * BAS_SLOTS];
+                const int li = bas[ANG_OF + ish * BAS_SLOTS];
+                const int lj = bas[ANG_OF + jsh * BAS_SLOTS];
+                const double* ai = env + bas[PTR_EXP + ish * BAS_SLOTS];
+                const double* aj = env + bas[PTR_EXP + jsh * BAS_SLOTS];
+                const double* ci = env + bas[PTR_COEFF + ish * BAS_SLOTS];
+                const double* cj = env + bas[PTR_COEFF + jsh * BAS_SLOTS];
+                const double* ri = env + atm[PTR_COORD + ia * ATM_SLOTS];
+                const double* rj = env + atm[PTR_COORD + ja * ATM_SLOTS];
+                const double norm = CINTcommon_fac_sp(li) * CINTcommon_fac_sp(lj);
 
-                rx = ri[0] - rj[0];
-                ry = ri[1] - rj[1];
-                rz = ri[2] - rj[2];
-                dist_ij = rx * rx + ry * ry + rz * rz;
+                const double rx = ri[0] - rj[0];
+                const double ry = ri[1] - rj[1];
+                const double rz = ri[2] - rj[2];
+                const double dist_ij = rx * rx + ry * ry + rz * rz;
 
-                for (count = off, ip = 0; ip < npi; ip++) {
-                for (jp = 0; jp < npj; jp++, count++) {
-                        aij = ai[ip] + aj[jp];
+                for (int count = off, ip = 0; ip < npi; ip++) {
+                for (int jp = 0; jp < npj; jp++, count++) {
+                        const double aij = ai[ip] + aj[jp];
                         a12[count] = aij;
                         e12[count] = norm * ci[ip] * cj[jp] *
                                 exp(-dist_ij * ai[ip] * aj[jp] / aij);
@@ -151,7 +146,82 @@ void GINTinit_aexyz(double *aexyz, BasisProdCache *bpcache, double diag_fac,
                 } }
 
                 if (ish == jsh) {
-                        for (count = 0; count < npi * npj; count++) {
+                        for (int count = 0; count < npi * npj; count++) {
+                                e12[off + count] *= diag_fac;
+                        }
+                }
+                off += npi * npj;
+        }
+}
+
+void GINTinit_populate_pair_data(double *aexyz, int *i0i1j0j1, const BasisProdCache *bpcache, const double diag_fac,
+                                 const int *atm, const int natm, const int *bas, const int nbas, const int *ao_loc,
+                                 const double *env)
+{
+        const int ncptype = bpcache->ncptype;
+        const int n_bas_pairs = bpcache->bas_pairs_locs[ncptype];
+        const int n_primitive_pairs = bpcache->primitive_pairs_locs[ncptype];
+        const int *bas_pair2bra = bpcache->bas_pair2shls;
+        const int *bas_pair2ket = bpcache->bas_pair2shls + n_bas_pairs;
+
+        double *a12 = aexyz;
+        double *e12 = a12 + n_primitive_pairs;
+        double *x12 = e12 + n_primitive_pairs;
+        double *y12 = x12 + n_primitive_pairs;
+        double *z12 = y12 + n_primitive_pairs;
+        double *a1  = z12 + n_primitive_pairs;
+        double *x1  = a1  + n_primitive_pairs;
+        double *y1  = x1  + n_bas_pairs;
+        double *z1  = y1  + n_bas_pairs;
+        int *i0 = i0i1j0j1;
+        int *i1 = i0 + n_bas_pairs;
+        int *j0 = i1 + n_bas_pairs;
+        int *j1 = j0 + n_bas_pairs;
+
+        int off = 0;
+        for (int pair_id = 0; pair_id < n_bas_pairs; pair_id++) {
+                const int ish = bas_pair2bra[pair_id];
+                const int jsh = bas_pair2ket[pair_id];
+                const int npi = bas[NPRIM_OF + ish * BAS_SLOTS];
+                const int npj = bas[NPRIM_OF + jsh * BAS_SLOTS];
+                const int ia = bas[ATOM_OF + ish * BAS_SLOTS];
+                const int ja = bas[ATOM_OF + jsh * BAS_SLOTS];
+                const int li = bas[ANG_OF + ish * BAS_SLOTS];
+                const int lj = bas[ANG_OF + jsh * BAS_SLOTS];
+                const double* ai = env + bas[PTR_EXP + ish * BAS_SLOTS];
+                const double* aj = env + bas[PTR_EXP + jsh * BAS_SLOTS];
+                const double* ci = env + bas[PTR_COEFF + ish * BAS_SLOTS];
+                const double* cj = env + bas[PTR_COEFF + jsh * BAS_SLOTS];
+                const double* ri = env + atm[PTR_COORD + ia * ATM_SLOTS];
+                const double* rj = env + atm[PTR_COORD + ja * ATM_SLOTS];
+                const double norm = CINTcommon_fac_sp(li) * CINTcommon_fac_sp(lj);
+
+                x1[pair_id] = ri[0];
+                y1[pair_id] = ri[1];
+                z1[pair_id] = ri[2];
+                i0[pair_id] = ao_loc[ish];
+                i1[pair_id] = ao_loc[ish + 1];
+                j0[pair_id] = ao_loc[jsh];
+                j1[pair_id] = ao_loc[jsh + 1];
+
+                const double rx = ri[0] - rj[0];
+                const double ry = ri[1] - rj[1];
+                const double rz = ri[2] - rj[2];
+                const double dist_ij = rx * rx + ry * ry + rz * rz;
+
+                for (int count = off, ip = 0; ip < npi; ip++) {
+                for (int jp = 0; jp < npj; jp++, count++) {
+                        const double aij = ai[ip] + aj[jp];
+                        a12[count] = aij;
+                        e12[count] = norm * ci[ip] * cj[jp] * exp(-dist_ij * ai[ip] * aj[jp] / aij);
+                        x12[count] = (ai[ip]*ri[0] + aj[jp]*rj[0]) / aij;
+                        y12[count] = (ai[ip]*ri[1] + aj[jp]*rj[1]) / aij;
+                        z12[count] = (ai[ip]*ri[2] + aj[jp]*rj[2]) / aij;
+                        a1[count] = ai[ip];
+                } }
+
+                if (ish == jsh) {
+                        for (int count = 0; count < npi * npj; count++) {
                                 e12[off + count] *= diag_fac;
                         }
                 }

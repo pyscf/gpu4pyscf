@@ -43,6 +43,17 @@ FREE_CUPY_CACHE = True
 BINSIZE = 128   # TODO bug for 256
 libgvhf = load_library('libgvhf')
 
+def check_mixed_precision_threshold_validity(log_single_double_precision_threshold, log_pair_cutoff):
+    if (log_single_double_precision_threshold < log_pair_cutoff):
+        print(f"single_double_precision_threshold ({np.exp(log_single_double_precision_threshold)}) is smaller than pair_cutoff (direct_scf_tol = {np.exp(log_pair_cutoff)}), so full double precision is used.")
+        log_single_double_precision_threshold = log_pair_cutoff
+    if (log_single_double_precision_threshold >= 0):
+        print(f"single_double_precision_threshold ({np.exp(log_single_double_precision_threshold)}) is >= 1, so full single precision is used.")
+        log_single_double_precision_threshold = 0
+    if (log_single_double_precision_threshold > log_pair_cutoff - np.log((2**(-52) / 2**(-23)))):
+        print(f"The difference between single_double_precision_threshold and pair_threshold (direct_scf_tol) is greater than 9 digit, so the result precision is worse than double precision.")
+    return log_single_double_precision_threshold
+
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
            verbose=None):
     '''Compute J, K matrices with CPU-GPU hybrid algorithm
@@ -63,17 +74,23 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     dms = dm0.reshape(-1,nao0,nao0)
     dms = cupy.einsum('pi,xij,qj->xpq', coeff, dms, coeff.conj())
     dms = cupy.asarray(dms, order='C')
+    dms_single_precision = cupy.asarray(dms, dtype=cupy.float32, order='C')
     n_dm = dms.shape[0]
     scripts = []
     vj = vk = None
     vj_ptr = vk_ptr = pyscf_lib.c_null_ptr()
+    vj_single_precision_ptr = vk_single_precision_ptr = pyscf_lib.c_null_ptr()
     if with_j:
         vj = cupy.zeros(dms.shape).transpose(0, 2, 1)
         vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
+        vj_single_precision = cupy.zeros(dms.shape, dtype=cupy.float32).transpose(0, 2, 1)
+        vj_single_precision_ptr = ctypes.cast(vj_single_precision.data.ptr, ctypes.c_void_p)
         scripts.append('ji->s2kl')
     if with_k:
         vk = cupy.zeros(dms.shape).transpose(0, 2, 1)
         vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
+        vk_single_precision = cupy.zeros(dms.shape, dtype=cupy.float32).transpose(0, 2, 1)
+        vk_single_precision_ptr = ctypes.cast(vk_single_precision.data.ptr, ctypes.c_void_p)
         if hermi == 1:
             scripts.append('jk->s2il')
         else:
@@ -82,6 +99,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     l_symb = pyscf_lib.param.ANGULAR
     log_qs = vhfopt.log_qs
     direct_scf_tol = vhfopt.direct_scf_tol
+    single_double_precision_threshold = vhfopt.single_double_precision_threshold
     cp_idx, cp_jdx = np.tril_indices(len(vhfopt.uniq_l_ctr))
     l_ctr_shell_locs = vhfopt.l_ctr_offsets
     l_ctr_ao_locs = vhfopt.mol.ao_loc[l_ctr_shell_locs]
@@ -138,6 +156,8 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
 
             #log_cutoff = np.log(direct_scf_tol / sub_dm_cond)
             log_cutoff = np.log(direct_scf_tol)
+            log_single_double_precision_threshold = np.log(single_double_precision_threshold)
+            log_single_double_precision_threshold = check_mixed_precision_threshold_validity(log_single_double_precision_threshold, log_cutoff)
             sub_dm_cond = np.log(sub_dm_cond)
 
             bins_locs_ij = vhfopt.bins[cp_ij_id]
@@ -152,8 +172,12 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             #    continue
             nbins_ij = len(bins_locs_ij) - 1
             nbins_kl = len(bins_locs_kl) - 1
-            err = fn(vhfopt.bpcache, vj_ptr, vk_ptr,
+
+            err = fn(vhfopt.bpcache, vhfopt.bpcache_single, vhfopt.bpcache_double,
+                     vj_ptr, vk_ptr,
                      ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                     vj_single_precision_ptr, vk_single_precision_ptr,
+                     ctypes.cast(dms_single_precision.data.ptr, ctypes.c_void_p),
                      ctypes.c_int(nao), ctypes.c_int(n_dm),
                      bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
                      bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
@@ -165,6 +189,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
                      ctypes.c_int(cp_kl_id),
                      ctypes.c_double(omega),
                      ctypes.c_double(log_cutoff),
+                     ctypes.c_double(log_single_double_precision_threshold),
                      ctypes.c_double(sub_dm_cond),
                      ctypes.cast(dm_shl.data.ptr, ctypes.c_void_p),
                      ctypes.c_int(nshls),
@@ -179,6 +204,11 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             #           time.perf_counter() - t0)
             #print(li, lj, lk, ll, time.perf_counter() - t0)
             #exit()
+
+    if with_j:
+        vj += vj_single_precision
+    if with_k:
+        vk += vk_single_precision
 
     if with_j:
         vj_ao = []
@@ -270,7 +300,9 @@ def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
                             getattr(mf.opt, 'prescreen', 'CVHFnrs8_prescreen'),
                             getattr(mf.opt, '_qcondname', 'CVHFsetnr_direct_scf'),
                             getattr(mf.opt, '_dmcondname', 'CVHFsetnr_direct_scf_dm'))
-            vhfopt.build(mf.direct_scf_tol)
+            
+            single_double_precision_threshold = mf.single_double_precision_threshold if hasattr(mf, 'single_double_precision_threshold') else mf.direct_scf_tol
+            vhfopt.build(mf.direct_scf_tol, single_double_precision_threshold)
             mf._opt_gpu = vhfopt
     else:
         if hasattr(mf, '_opt_gpu_omega'):
@@ -773,7 +805,7 @@ class _VHFOpt:
         self._qcondname = qcondname
         self._dmcondname = dmcondname
 
-    def build(self, cutoff=1e-13, group_size=None, diag_block_with_triu=False):
+    def build(self, cutoff=1e-13, single_double_precision_threshold=1e-13, group_size=None, diag_block_with_triu=False):
         mol = self.mol
         cput0 = logger.init_timer(mol)
         # Sort basis according to angular momentum and contraction patterns so
@@ -808,6 +840,7 @@ class _VHFOpt:
         _vhf.VHFOpt.__init__(self, mol, self._intor, self._prescreen,
                              self._qcondname, self._dmcondname)
         self.direct_scf_tol = cutoff
+        self.single_double_precision_threshold = single_double_precision_threshold
 
         lmax = uniq_l_ctr[:,0].max()
         nbas_by_l = [l_ctr_counts[uniq_l_ctr[:,0]==l].sum() for l in range(lmax+1)]
@@ -902,12 +935,16 @@ class _VHFOpt:
         ao_loc = mol.ao_loc_nr(cart=True)
         ncptype = len(log_qs)
         self.bpcache = ctypes.POINTER(BasisProdCache)()
+        self.bpcache_single = ctypes.POINTER(BasisProductCacheSinglePrecision)()
+        self.bpcache_double = ctypes.POINTER(BasisProductCacheDoublePrecision)()
         if diag_block_with_triu:
             scale_shellpair_diag = 1.
         else:
             scale_shellpair_diag = 0.5
-        libgvhf.GINTinit_basis_prod(
-            ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),
+        libgvhf.GINTinit_basis_product_mixed_precision(
+            ctypes.byref(self.bpcache),
+            ctypes.byref(self.bpcache_single), ctypes.byref(self.bpcache_double),
+            ctypes.c_double(scale_shellpair_diag),
             ao_loc.ctypes.data_as(ctypes.c_void_p),
             self.bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
             self.bas_pairs_locs.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ncptype),
@@ -923,7 +960,7 @@ class _VHFOpt:
 
     def clear(self):
         _vhf.VHFOpt.__del__(self)
-        libgvhf.GINTdel_basis_prod(ctypes.byref(self.bpcache))
+        libgvhf.GINTdel_basis_product_mixed_precision(ctypes.byref(self.bpcache), ctypes.byref(self.bpcache_single), ctypes.byref(self.bpcache_double))
         return self
 
     def __del__(self):
@@ -933,6 +970,12 @@ class _VHFOpt:
             pass
 
 class BasisProdCache(ctypes.Structure):
+    pass
+
+class BasisProductCacheSinglePrecision(ctypes.Structure):
+    pass
+
+class BasisProductCacheDoublePrecision(ctypes.Structure):
     pass
 
 def basis_seg_contraction(mol, allow_replica=False):

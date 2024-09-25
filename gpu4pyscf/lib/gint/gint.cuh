@@ -1,4 +1,7 @@
-/* Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+/*
+ * gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+ *
+ * Copyright (C) 2022 Qiming Sun
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,15 +17,16 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "constant.cuh"
+#ifndef HAVE_DEFINED_GINTENVVAS_MIXED_PRECISION_H
+#define HAVE_DEFINED_GINTENVVAS_MIXED_PRECISION_H
 
-__constant__ BasisProdCache c_bpcache;
-__constant__ BasisProductCacheSinglePrecision c_bpcache_single;
-__constant__ BasisProductCacheDoublePrecision c_bpcache_double;
-__constant__ int16_t c_idx4c[NFffff*3];
-__constant__ int c_idx[TOT_NF*3]; 
-__constant__ int c_l_locs[GPU_LMAX+2];
+template<typename FloatType>
+struct JKMatrixMixedPrecision {
+    int nao;
+    int n_dm;
+    FloatType* __restrict__ vj;
+    FloatType* __restrict__ vk;
+    const FloatType* __restrict__ dm;
+};
 
-__constant__ BasisProdOffsets c_offsets[MAX_STREAMS];
-__constant__ GINTEnvVars c_envs[MAX_STREAMS];
-__constant__ JKMatrix c_jk[MAX_STREAMS];
+#endif

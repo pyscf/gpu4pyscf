@@ -275,6 +275,38 @@ typedef struct {
 
 
 typedef struct {
+    float *d_a12; // dimension n_primitive_pairs
+    float *d_e12; // dimension n_primitive_pairs
+    float *d_x12; // dimension n_primitive_pairs
+    float *d_y12; // dimension n_primitive_pairs
+    float *d_z12; // dimension n_primitive_pairs
+    float *d_a1;  // dimension n_primitive_pairs
+    float *d_x1;  // dimension n_bas_pairs
+    float *d_y1;  // dimension n_bas_pairs
+    float *d_z1;  // dimension n_bas_pairs
+    int *d_i0;     // dimension n_bas_pairs
+    int *d_i1;     // dimension n_bas_pairs
+    int *d_j0;     // dimension n_bas_pairs
+    int *d_j1;     // dimension n_bas_pairs
+} BasisProductCacheSinglePrecision;
+
+typedef struct {
+    double *d_a12; // dimension n_primitive_pairs
+    double *d_e12; // dimension n_primitive_pairs
+    double *d_x12; // dimension n_primitive_pairs
+    double *d_y12; // dimension n_primitive_pairs
+    double *d_z12; // dimension n_primitive_pairs
+    double *d_a1;  // dimension n_primitive_pairs
+    double *d_x1;  // dimension n_bas_pairs
+    double *d_y1;  // dimension n_bas_pairs
+    double *d_z1;  // dimension n_bas_pairs
+    int *d_i0;     // dimension n_bas_pairs
+    int *d_i1;     // dimension n_bas_pairs
+    int *d_j0;     // dimension n_bas_pairs
+    int *d_j1;     // dimension n_bas_pairs
+} BasisProductCacheDoublePrecision;
+
+typedef struct {
         int stride_j;
         int stride_k;
         int stride_l;
