@@ -43,16 +43,16 @@ FREE_CUPY_CACHE = True
 BINSIZE = 128   # TODO bug for 256
 libgvhf = load_library('libgvhf')
 
-def check_mixed_precision_threshold_validity(log_single_double_precision_threshold, log_pair_cutoff):
-    if (log_single_double_precision_threshold < log_pair_cutoff):
-        print(f"single_double_precision_threshold ({np.exp(log_single_double_precision_threshold)}) is smaller than pair_cutoff (direct_scf_tol = {np.exp(log_pair_cutoff)}), so full double precision is used.")
-        log_single_double_precision_threshold = log_pair_cutoff
-    if (log_single_double_precision_threshold >= 0):
-        print(f"single_double_precision_threshold ({np.exp(log_single_double_precision_threshold)}) is >= 1, so full single precision is used.")
-        log_single_double_precision_threshold = 0
-    if (log_single_double_precision_threshold > log_pair_cutoff - np.log((2**(-52) / 2**(-23)))):
+def check_mixed_precision_threshold_validity(single_double_precision_threshold, pair_cutoff):
+    if (single_double_precision_threshold < pair_cutoff):
+        print(f"single_double_precision_threshold ({single_double_precision_threshold}) is smaller than pair_cutoff (direct_scf_tol = {pair_cutoff}), so full double precision is used.")
+        single_double_precision_threshold = pair_cutoff
+    if (single_double_precision_threshold >= 1.0):
+        print(f"single_double_precision_threshold ({single_double_precision_threshold}) is >= 1, so full single precision is used.")
+        single_double_precision_threshold = 1.0
+    if (single_double_precision_threshold * 2**(-52) / 2**(-23) > pair_cutoff):
         print(f"The difference between single_double_precision_threshold and pair_threshold (direct_scf_tol) is greater than 9 digit, so the result precision is worse than double precision.")
-    return log_single_double_precision_threshold
+    return single_double_precision_threshold
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
            verbose=None):
@@ -157,7 +157,6 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             #log_cutoff = np.log(direct_scf_tol / sub_dm_cond)
             log_cutoff = np.log(direct_scf_tol)
             log_single_double_precision_threshold = np.log(single_double_precision_threshold)
-            log_single_double_precision_threshold = check_mixed_precision_threshold_validity(log_single_double_precision_threshold, log_cutoff)
             sub_dm_cond = np.log(sub_dm_cond)
 
             bins_locs_ij = vhfopt.bins[cp_ij_id]
@@ -302,6 +301,7 @@ def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
                             getattr(mf.opt, '_dmcondname', 'CVHFsetnr_direct_scf_dm'))
             
             single_double_precision_threshold = mf.single_double_precision_threshold if hasattr(mf, 'single_double_precision_threshold') else mf.direct_scf_tol
+            single_double_precision_threshold = check_mixed_precision_threshold_validity(single_double_precision_threshold, mf.direct_scf_tol)
             vhfopt.build(mf.direct_scf_tol, single_double_precision_threshold)
             mf._opt_gpu = vhfopt
     else:

@@ -154,7 +154,7 @@ void GINTinit_aexyz(double *aexyz, const BasisProdCache *bpcache, const double d
         }
 }
 
-void GINTinit_populate_pair_data(double *aexyz, int *i0i1j0j1, const BasisProdCache *bpcache, const double diag_fac,
+void GINTinit_populate_pair_data(double *aexyz, int *i0j0, const BasisProdCache *bpcache, const double diag_fac,
                                  const int *atm, const int natm, const int *bas, const int nbas, const int *ao_loc,
                                  const double *env)
 {
@@ -173,10 +173,8 @@ void GINTinit_populate_pair_data(double *aexyz, int *i0i1j0j1, const BasisProdCa
         double *x1  = a1  + n_primitive_pairs;
         double *y1  = x1  + n_bas_pairs;
         double *z1  = y1  + n_bas_pairs;
-        int *i0 = i0i1j0j1;
-        int *i1 = i0 + n_bas_pairs;
-        int *j0 = i1 + n_bas_pairs;
-        int *j1 = j0 + n_bas_pairs;
+        int *i0 = i0j0;
+        int *j0 = i0 + n_bas_pairs;
 
         int off = 0;
         for (int pair_id = 0; pair_id < n_bas_pairs; pair_id++) {
@@ -200,9 +198,7 @@ void GINTinit_populate_pair_data(double *aexyz, int *i0i1j0j1, const BasisProdCa
                 y1[pair_id] = ri[1];
                 z1[pair_id] = ri[2];
                 i0[pair_id] = ao_loc[ish];
-                i1[pair_id] = ao_loc[ish + 1];
                 j0[pair_id] = ao_loc[jsh];
-                j1[pair_id] = ao_loc[jsh + 1];
 
                 const double rx = ri[0] - rj[0];
                 const double ry = ri[1] - rj[1];

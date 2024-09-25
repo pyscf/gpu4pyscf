@@ -47,7 +47,7 @@ void GINTsort_bas_coordinates(double *bas_coords, int *atm, int natm,
                               int *bas, int nbas, double *env);
 void GINTinit_aexyz(double *aexyz, const BasisProdCache *bpcache, const double diag_fac,
                     const int *atm, const int natm, const int *bas, const int nbas, const double *env);
-void GINTinit_populate_pair_data(double *aexyz, int *i0i1j0j1, const BasisProdCache *bpcache, const double diag_fac,
+void GINTinit_populate_pair_data(double *aexyz, int *i0j0, const BasisProdCache *bpcache, const double diag_fac,
                                  const int *atm, const int natm, const int *bas, const int nbas, const int *ao_loc,
                                  const double *env);
 #ifdef __cplusplus

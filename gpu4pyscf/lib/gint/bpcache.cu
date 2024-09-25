@@ -146,10 +146,10 @@ void GINTinit_basis_product_mixed_precision(BasisProdCache **pbp,
     *pbp_double = bpcache_double;
 
     double *h_aexyz_double = (double *)malloc((n_primitive_pairs * 6 + n_bas_pairs * 3) * sizeof(double));
-    int *h_i0i1j0j1 = (int *)malloc(n_bas_pairs * 4 * sizeof(int));
-    GINTinit_populate_pair_data(h_aexyz_double, h_i0i1j0j1, bpcache, diag_fac, atm, natm, bas, nbas, ao_loc, env);
+    int *h_i0j0 = (int *)malloc(n_bas_pairs * 2 * sizeof(int));
+    GINTinit_populate_pair_data(h_aexyz_double, h_i0j0, bpcache, diag_fac, atm, natm, bas, nbas, ao_loc, env);
     DEVICE_INIT(double, d_aexyz_double, h_aexyz_double, n_primitive_pairs * 6 + n_bas_pairs * 3);
-    DEVICE_INIT(int, d_i0i1j0j1, h_i0i1j0j1, n_bas_pairs * 4);
+    DEVICE_INIT(int, d_i0j0, h_i0j0, n_bas_pairs * 2);
     bpcache_double->d_a12 = d_aexyz_double;
     bpcache_double->d_e12 = d_aexyz_double + n_primitive_pairs * 1;
     bpcache_double->d_x12 = d_aexyz_double + n_primitive_pairs * 2;
@@ -159,10 +159,8 @@ void GINTinit_basis_product_mixed_precision(BasisProdCache **pbp,
     bpcache_double->d_x1  = d_aexyz_double + n_primitive_pairs * 6;
     bpcache_double->d_y1  = d_aexyz_double + n_primitive_pairs * 6 + n_bas_pairs;
     bpcache_double->d_z1  = d_aexyz_double + n_primitive_pairs * 6 + n_bas_pairs * 2;
-    bpcache_double->d_i0  = d_i0i1j0j1;
-    bpcache_double->d_i1  = d_i0i1j0j1 + n_bas_pairs * 1;
-    bpcache_double->d_j0  = d_i0i1j0j1 + n_bas_pairs * 2;
-    bpcache_double->d_j1  = d_i0i1j0j1 + n_bas_pairs * 3;
+    bpcache_double->d_i0  = d_i0j0;
+    bpcache_double->d_j0  = d_i0j0 + n_bas_pairs;
 
     float *h_aexyz_single = (float *)malloc((n_primitive_pairs * 6 + n_bas_pairs * 3) * sizeof(float));
     for (int i = 0; i < n_primitive_pairs * 6 + n_bas_pairs * 3; i++)
@@ -177,14 +175,12 @@ void GINTinit_basis_product_mixed_precision(BasisProdCache **pbp,
     bpcache_single->d_x1  = d_aexyz_single + n_primitive_pairs * 6;
     bpcache_single->d_y1  = d_aexyz_single + n_primitive_pairs * 6 + n_bas_pairs;
     bpcache_single->d_z1  = d_aexyz_single + n_primitive_pairs * 6 + n_bas_pairs * 2;
-    bpcache_single->d_i0  = d_i0i1j0j1;
-    bpcache_single->d_i1  = d_i0i1j0j1 + n_bas_pairs * 1;
-    bpcache_single->d_j0  = d_i0i1j0j1 + n_bas_pairs * 2;
-    bpcache_single->d_j1  = d_i0i1j0j1 + n_bas_pairs * 3;
+    bpcache_single->d_i0  = d_i0j0;
+    bpcache_single->d_j0  = d_i0j0 + n_bas_pairs;
 
     free(h_aexyz_double);
     free(h_aexyz_single);
-    free(h_i0i1j0j1);
+    free(h_i0j0);
 }
 }
 

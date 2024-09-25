@@ -285,9 +285,7 @@ typedef struct {
     float *d_y1;  // dimension n_bas_pairs
     float *d_z1;  // dimension n_bas_pairs
     int *d_i0;     // dimension n_bas_pairs
-    int *d_i1;     // dimension n_bas_pairs
     int *d_j0;     // dimension n_bas_pairs
-    int *d_j1;     // dimension n_bas_pairs
 } BasisProductCacheSinglePrecision;
 
 typedef struct {
@@ -301,9 +299,7 @@ typedef struct {
     double *d_y1;  // dimension n_bas_pairs
     double *d_z1;  // dimension n_bas_pairs
     int *d_i0;     // dimension n_bas_pairs
-    int *d_i1;     // dimension n_bas_pairs
     int *d_j0;     // dimension n_bas_pairs
-    int *d_j1;     // dimension n_bas_pairs
 } BasisProductCacheDoublePrecision;
 
 typedef struct {

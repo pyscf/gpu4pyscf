@@ -278,6 +278,15 @@ class KnownValues(unittest.TestCase):
         dm_loaded = mf_copy.init_guess_by_chkfile()
         assert np.allclose(dm_stored, dm_loaded, atol = 1e-14) # Since we reload the MO coefficients, the density matrix should be identical up to numerical noise.
 
+    def test_mixed_precision(self):
+        mf = scf.RHF(mol)
+        mf.direct_scf_tol = 1e-14
+        mf.single_double_precision_threshold = 1e-14 / (2**(-52) / 2**(-23))
+        mf.conv_tol = 1e-14
+        e_tot = mf.kernel()
+        e_ref = -151.08447712520262
+        assert np.abs(e_tot - e_ref) < 1e-12
+
     # TODO:
     #test analyze
     #test mulliken_pop
