@@ -20,6 +20,8 @@ import numpy as np
 import cupy
 from pyscf.scf import uhf
 from pyscf import lib as pyscf_lib
+from pyscf import __config__
+
 from gpu4pyscf.scf.hf import eigh, damping, level_shift
 from gpu4pyscf.scf import hf
 from gpu4pyscf.lib import logger
@@ -151,7 +153,9 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
 class UHF(hf.SCF):
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    _keys = {'e_disp', 'screen_tol', 'conv_tol_cpscf', 'h1e', 's1e'}
+    init_guess_breaksym = getattr(__config__, 'scf_uhf_init_guess_breaksym', 1)
+
+    _keys = {'e_disp', 'screen_tol', 'conv_tol_cpscf', 'h1e', 's1e', "init_guess_breaksym"}
     def __init__(self, mol):
         hf.SCF.__init__(self, mol)
         self.nelec = None

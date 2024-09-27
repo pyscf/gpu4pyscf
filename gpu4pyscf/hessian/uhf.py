@@ -68,7 +68,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                                     max_memory, log)
     t1 = log.timer_debug1('hess elec', *t1)
     if h1mo is None:
-        h1mo = hessobj.make_h1(mo_coeff, mo_occ, hessobj.chkfile, atmlst, log)
+        h1mo = hessobj.make_h1(mo_coeff, mo_occ, None, atmlst, log)
         t1 = log.timer_debug1('making H1', *t1)
     if mo1 is None or mo_e1 is None:
         mo1, mo_e1 = hessobj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1mo,
@@ -364,7 +364,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         tmp = contract('xij,jo->xio', mat, mocc)
         return contract('xik,ip->xpk', tmp, mo)
     cupy.get_default_memory_pool().free_all_blocks()
-    
+
     avail_mem = get_avail_mem()
     blksize = int(avail_mem*0.4) // (8*3*nao*nao*4) // ALIGNED * ALIGNED
     blksize = min(8, blksize)
@@ -377,7 +377,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     for p0,p1 in lib.prange(0,mol.natm,blksize):
         blk = sorted_idx[p0:p1]
         atom_groups.append(blk)
-        
+
     mo1sa = [None] * mol.natm
     mo1sb = [None] * mol.natm
     e1sa = [None] * mol.natm
@@ -404,7 +404,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         tol = mf.conv_tol_cpscf
         mo1, e1 = ucphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo,
                               max_cycle=max_cycle, level_shift=level_shift, tol=tol, verbose=verbose)
-        
+
         mo1a = mo1[0].reshape(-1,3,nao,nocca)
         mo1b = mo1[1].reshape(-1,3,nao,noccb)
         e1a = e1[0].reshape(-1,3,nocca,nocca)
@@ -478,8 +478,7 @@ def gen_hop(hobj, mo_energy=None, mo_coeff=None, mo_occ=None, verbose=None):
                                  max_memory, log)
     de2 += hobj.hess_nuc()
 
-    # Compute H1 integrals and store in hobj.chkfile
-    hobj.make_h1(mo_coeff, mo_occ, hobj.chkfile, atmlst, log)
+    h1ao_cache = hobj.make_h1(mo_coeff, mo_occ, None, atmlst, log)
 
     aoslices = mol.aoslice_by_atom()
     s1a = -mol.intor('int1e_ipovlp', comp=3)
@@ -492,8 +491,7 @@ def gen_hop(hobj, mo_energy=None, mo_coeff=None, mo_occ=None, verbose=None):
         s1ao = 0
         for ia in range(natm):
             shl0, shl1, p0, p1 = aoslices[ia]
-            h1ao_i = lib.chkfile.load(hobj.chkfile, 'scf_f1ao/%d' % ia)
-            h1ao += numpy.einsum('x,xij->ij', x[ia], h1ao_i)
+            h1ao += numpy.einsum('x,xij->ij', x[ia], h1ao_cache[ia])
             s1ao_i = numpy.zeros((3,nao,nao))
             s1ao_i[:,p0:p1] += s1a[:,p0:p1]
             s1ao_i[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
@@ -510,8 +508,7 @@ def gen_hop(hobj, mo_energy=None, mo_coeff=None, mo_occ=None, verbose=None):
 
         for ja in range(natm):
             q0, q1 = aoslices[ja][2:]
-            h1ao = lib.chkfile.load(hobj.chkfile, 'scf_f1ao/%s'%ja)
-            hx[ja] += numpy.einsum('xpq,pq->x', h1ao, dm1) * 4
+            hx[ja] += numpy.einsum('xpq,pq->x', h1ao_cache[ja], dm1) * 4
             hx[ja] -= numpy.einsum('xpq,pq->x', s1a[:,q0:q1], dme1[q0:q1]) * 2
             hx[ja] -= numpy.einsum('xpq,qp->x', s1a[:,q0:q1], dme1[:,q0:q1]) * 2
         return hx.ravel()
