@@ -323,21 +323,21 @@ def qmmm_for_scf(scf_method, mm_mol):
                      + d D_Ix / d dm_uv ewald_pot[1]_Ix 
                      + d O_Ixy / d dm_uv ewald_pot[2]_Ixy
             '''
-            vdiff = np.zeros((mol.nao, mol.nao))
+            vdiff = cp.zeros((mol.nao, mol.nao))
             ovlp = self.get_ovlp()
-            s1r = self.get_s1r()
+            s1r  = self.get_s1r()
             s1rr = self.get_s1rr()
             aoslices = mol.aoslice_by_atom()
             for iatm in range(mol.natm):
-                v0 = ewald_pot[0][iatm].get()
-                v1 = ewald_pot[1][iatm].get()
-                v2 = ewald_pot[2][iatm].get()
+                v0 = ewald_pot[0][iatm]
+                v1 = ewald_pot[1][iatm]
+                v2 = ewald_pot[2][iatm]
                 p0, p1 = aoslices[iatm, 2:]
                 vdiff[:,p0:p1] -= v0 * ovlp[:,p0:p1]
-                vdiff[:,p0:p1] -= lib.einsum('x,xuv->uv', v1, s1r[iatm])
-                vdiff[:,p0:p1] -= lib.einsum('xy,xyuv->uv', v2, s1rr[iatm])
+                vdiff[:,p0:p1] -= cp.einsum('x,xuv->uv', v1, cp.asarray(s1r[iatm]))
+                vdiff[:,p0:p1] -= cp.einsum('xy,xyuv->uv', v2, cp.asarray(s1rr[iatm]))
             vdiff = (vdiff + vdiff.T) / 2
-            return cp.asarray(vdiff)
+            return vdiff
 
         def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
                      mm_ewald_pot=None, qm_ewald_pot=None):
