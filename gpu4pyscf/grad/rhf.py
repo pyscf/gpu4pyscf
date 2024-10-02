@@ -685,7 +685,7 @@ class Gradients(GradientsBase):
     get_veff = get_veff
     get_jk = _get_jk
 
-    _keys = {'auxbasis_response', 'grad_disp', 'grad_mf'}
+    _keys = {'auxbasis_response', 'grad_disp', 'grad_mf', 'h1_on_cpu'}
     h1_on_cpu = True
 
     def get_j(self, mol=None, dm=None, hermi=0, omega=None):
