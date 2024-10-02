@@ -67,7 +67,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                                     max_memory, log)
     t1 = log.timer_debug1('hess elec', *t1)
     if h1mo is None:
-        h1mo = hessobj.make_h1(mo_coeff, mo_occ, hessobj.chkfile, atmlst, log)
+        h1mo = hessobj.make_h1(mo_coeff, mo_occ, None, atmlst, log)
         t1 = log.timer_debug1('making H1', *t1)
     if mo1 is None or mo_e1 is None:
         mo1, mo_e1 = hessobj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1mo,
@@ -486,8 +486,7 @@ def gen_hop(hobj, mo_energy=None, mo_coeff=None, mo_occ=None, verbose=None):
                                  max_memory, log)
     de2 += hobj.hess_nuc()
 
-    # Compute H1 integrals and store in hobj.chkfile
-    hobj.make_h1(mo_coeff, mo_occ, hobj.chkfile, atmlst, log)
+    h1ao_cache = hobj.make_h1(mo_coeff, mo_occ, None, atmlst, log)
 
     aoslices = mol.aoslice_by_atom()
     s1a = -mol.intor('int1e_ipovlp', comp=3)
@@ -500,8 +499,7 @@ def gen_hop(hobj, mo_energy=None, mo_coeff=None, mo_occ=None, verbose=None):
         s1ao = 0
         for ia in range(natm):
             shl0, shl1, p0, p1 = aoslices[ia]
-            h1ao_i = lib.chkfile.load(hobj.chkfile, 'scf_f1ao/%d' % ia)
-            h1ao += numpy.einsum('x,xij->ij', x[ia], h1ao_i)
+            h1ao += numpy.einsum('x,xij->ij', x[ia], h1ao_cache[ia])
             s1ao_i = numpy.zeros((3,nao,nao))
             s1ao_i[:,p0:p1] += s1a[:,p0:p1]
             s1ao_i[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
@@ -518,8 +516,7 @@ def gen_hop(hobj, mo_energy=None, mo_coeff=None, mo_occ=None, verbose=None):
 
         for ja in range(natm):
             q0, q1 = aoslices[ja][2:]
-            h1ao = lib.chkfile.load(hobj.chkfile, 'scf_f1ao/%s'%ja)
-            hx[ja] += numpy.einsum('xpq,pq->x', h1ao, dm1) * 4
+            hx[ja] += numpy.einsum('xpq,pq->x', h1ao_cache[ja], dm1) * 4
             hx[ja] -= numpy.einsum('xpq,pq->x', s1a[:,q0:q1], dme1[q0:q1]) * 2
             hx[ja] -= numpy.einsum('xpq,qp->x', s1a[:,q0:q1], dme1[:,q0:q1]) * 2
         return hx.ravel()
@@ -677,7 +674,6 @@ class Hessian(HessianBase):
         self.stdout = scf_method.stdout
         self.mol = scf_method.mol
         self.base = scf_method
-        self.chkfile = None #scf_method.chkfile
         self.max_memory = self.mol.max_memory
         self.atmlst = range(self.mol.natm)
         self.de = numpy.zeros((0,0,3,3))  # (A,B,dR_A,dR_B)
