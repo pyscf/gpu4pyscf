@@ -30,6 +30,8 @@ import cupy as cp
 from gpu4pyscf.df.df import ALIGNED, MIN_BLK_SIZE
 from gpu4pyscf.lib import cupy_helper
 
+contract = cupy_helper.contract
+
 class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
     '''Cell class for MM particles.
 
@@ -133,6 +135,8 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
 
         if charges2 is not None:
             assert len(charges2) == len(coords2)
+            charges2 = cp.asarray(charges2)
+            coords2 = cp.asarray(coords2)
         else:
             coords2 = coords1
 
@@ -151,7 +155,7 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
         else:
             all_charges2 = None
         dist2 = all_coords2 - cp.mean(coords1, axis=0)[None]
-        dist2 = cp.einsum('jx,jx->j', dist2, dist2)
+        dist2 = contract('jx,jx->j', dist2, dist2)
 
         if all_charges2 is not None:
             ewovrl0 = cp.zeros(len(coords1))
@@ -181,21 +185,21 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
             mask = dist2 <= self.rcut_hcore**2
             Tij = 1 / r[:,mask]
             Rij = R[:,mask]
-            Tija = -cp.einsum('ijx,ij->ijx', Rij, Tij**3)
-            Tijab  = 3 * cp.einsum('ija,ijb->ijab', Rij, Rij) 
-            Tijab  = cp.einsum('ijab,ij->ijab', Tijab, Tij**5)
-            Tijab -= cp.einsum('ij,ab->ijab', Tij**3, cp.eye(3))
+            Tija = -contract('ijx,ij->ijx', Rij, Tij**3)
+            Tijab  = 3 * contract('ija,ijb->ijab', Rij, Rij) 
+            Tijab  = contract('ijab,ij->ijab', Tijab, Tij**5)
+            Tijab -= contract('ij,ab->ijab', Tij**3, cp.eye(3))
             if all_charges2 is not None:
                 charges = all_charges2[mask]
                 # ew0 = -d^2 E / dQi dqj qj
                 # ew1 = -d^2 E / dDia dqj qj
                 # ew2 = -d^2 E / dOiab dqj qj
                 # qm pc - mm pc
-                ewovrl0[i0:i1] += -cp.einsum('ij,j->i', Tij, charges)
+                ewovrl0[i0:i1] += -contract('ij,j->i', Tij, charges)
                 # qm dip - mm pc
-                ewovrl1[i0:i1] += -cp.einsum('j,ija->ia', charges, Tija)
+                ewovrl1[i0:i1] += -contract('j,ija->ia', charges, Tija)
                 # qm quad - mm pc
-                ewovrl2[i0:i1] += -cp.einsum('j,ijab->iab', charges, Tijab) / 3
+                ewovrl2[i0:i1] += -contract('j,ijab->iab', charges, Tijab) / 3
             else:
                 # NOTE a too small rcut_hcore truncates QM atoms, while this correction
                 # should be applied to all QM pairs regardless of rcut_hcore
@@ -221,18 +225,22 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                 expnts = cp.hstack([cp.sqrt(zetas)] * len(Lall))[mask]
                 r_ = r[:,mask]
                 R_ = R[:,mask]
-                ekR = cp.exp(-cp.einsum('j,ij->ij', expnts**2, r_**2))
-                Tij = erfc(cp.einsum('j,ij->ij', expnts, r_)) / r_
-                invr3 = (Tij + cp.einsum('j,ij->ij', expnts, 2/cp.sqrt(cp.pi)*ekR)) / r_**2
-                Tija = -cp.einsum('ijx,ij->ijx', R_, invr3)
-                Tijab  = 3 * cp.einsum('ija,ijb,ij->ijab', R_, R_, 1/r_**2)
-                Tijab -= cp.einsum('ij,ab->ijab', cp.ones_like(r_), cp.eye(3))
-                invr5 = invr3 + cp.einsum('j,ij->ij', expnts**3, 4/3/cp.sqrt(cp.pi) * ekR)
-                Tijab = cp.einsum('ijab,ij->ijab', Tijab, invr5)
-                Tijab += cp.einsum('j,ij,ab->ijab', expnts**3, 4/3/cp.sqrt(cp.pi)*ekR, cp.eye(3))
-                ewovrl0[i0:i1] -= cp.einsum('ij,j->i', Tij, all_charges2[mask])
-                ewovrl1[i0:i1] -= cp.einsum('j,ija->ia', all_charges2[mask], Tija)
-                ewovrl2[i0:i1] -= cp.einsum('j,ijab->iab', all_charges2[mask], Tijab) / 3
+                if expnts.size != 0:
+                    ekR = cp.exp(-contract('j,ij->ij', expnts**2, r_**2))
+                    Tij = erfc(contract('j,ij->ij', expnts, r_)) / r_
+                    invr3 = (Tij + contract('j,ij->ij', expnts, 2/cp.sqrt(cp.pi)*ekR)) / r_**2
+                    Tija = -contract('ijx,ij->ijx', R_, invr3)
+                    temp = contract('ijb,ij->ijb', R_, 1/r_**2)
+                    Tijab  = 3 * contract('ija,ijb->ijab', R_, temp)
+                    Tijab -= contract('ij,ab->ijab', cp.ones_like(r_), cp.eye(3))
+                    invr5 = invr3 + contract('j,ij->ij', expnts**3, 4/3/cp.sqrt(cp.pi) * ekR)
+                    Tijab = contract('ijab,ij->ijab', Tijab, invr5)
+                    temp = contract('j,ij->ij', expnts**3, 4/3/cp.sqrt(cp.pi)*ekR)
+                    Tijab += contract('ij,ab->ijab', temp, cp.eye(3))
+                    ewovrl0[i0:i1] -= contract('ij,j->i', Tij, all_charges2[mask])
+                    ewovrl1[i0:i1] -= contract('j,ija->ia', all_charges2[mask], Tija)
+                    ewovrl2[i0:i1] -= contract('j,ijab->iab', all_charges2[mask], Tijab) / 3
+                    temp = None
     
             # ewald real-space sum
             if all_charges2 is not None:
@@ -251,19 +259,21 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
             Tij = erfc(ew_eta * r_) / r_
             # Tija = -Rija \hat{1/r^3} = -Rija / r^2 ( \hat{1/r} + 2 eta/sqrt(pi) exp(-eta^2 r^2) )
             invr3 = (Tij + 2*ew_eta/cp.sqrt(cp.pi) * ekR) / r_**2
-            Tija = -cp.einsum('ijx,ij->ijx', R_, invr3)
+            Tija = -contract('ijx,ij->ijx', R_, invr3)
             # Tijab = (3 RijaRijb - Rij^2 delta_ab) \hat{1/r^5}
-            Tijab  = 3 * cp.einsum('ija,ijb,ij->ijab', R_, R_, 1/r_**2)
-            Tijab -= cp.einsum('ij,ab->ijab', cp.ones_like(r_), cp.eye(3))
+            #Tijab  = 3 * contract('ija,ijb,ij->ijab', R_, R_, 1/r_**2)
+            Tijab  = 3 * contract('ijb,ij->ijb', R_, 1/r_**2)
+            Tijab  = contract('ija,ijb->ijab', R_, Tijab)
+            Tijab -= contract('ij,ab->ijab', cp.ones_like(r_), cp.eye(3))
             invr5 = invr3 + 4/3*ew_eta**3/cp.sqrt(cp.pi) * ekR # NOTE this is invr5 * r**2
-            Tijab = cp.einsum('ijab,ij->ijab', Tijab, invr5)
+            Tijab = contract('ijab,ij->ijab', Tijab, invr5)
             # NOTE the below is present in Eq 8 but missing in Eq 12
-            Tijab += 4/3*ew_eta**3/cp.sqrt(cp.pi)*cp.einsum('ij,ab->ijab', ekR, cp.eye(3))
+            Tijab += 4/3*ew_eta**3/cp.sqrt(cp.pi)*contract('ij,ab->ijab', ekR, cp.eye(3))
     
             if all_charges2 is not None:
-                ewovrl0[i0:i1] += cp.einsum('ij,j->i', Tij, all_charges2_)
-                ewovrl1[i0:i1] += cp.einsum('j,ija->ia', all_charges2_, Tija)
-                ewovrl2[i0:i1] += cp.einsum('j,ijab->iab', all_charges2_, Tijab) / 3
+                ewovrl0[i0:i1] += contract('ij,j->i', Tij, all_charges2_)
+                ewovrl1[i0:i1] += contract('j,ija->ia', all_charges2_, Tija)
+                ewovrl2[i0:i1] += contract('j,ijab->iab', all_charges2_, Tijab) / 3
             else:
                 Tij = cp.sum(Tij.reshape(i1-i0, len(Lall), len(coords1)), axis=1)
                 Tija = cp.sum(Tija.reshape(i1-i0, len(Lall), len(coords1), 3), axis=1)
@@ -282,7 +292,7 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                 # -d^2 Eself / dQi dQj
                 ewself00[i0:i1] += -cp.eye(len(coords1))[i0:i1] * 2 * ew_eta / cp.sqrt(cp.pi)
                 # -d^2 Eself / dDia dDjb
-                ewself11[i0:i1] += -cp.einsum('ij,ab->ijab', cp.eye(len(coords1))[i0:i1], cp.eye(3)) \
+                ewself11[i0:i1] += -contract('ij,ab->ijab', cp.eye(len(coords1))[i0:i1], cp.eye(3)) \
                         * 4 * ew_eta**3 / 3 / cp.sqrt(cp.pi)
 
             r_ = R_ = all_charges2_ = None
@@ -293,7 +303,8 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
         logger.debug(self, f"Ewald mesh {mesh}")
 
         Gv, Gvbase, weights = self.get_Gv_weights(mesh)
-        absG2 = cp.einsum('gx,gx->g', Gv, Gv)
+        Gv = cp.asarray(Gv)
+        absG2 = contract('gx,gx->g', Gv, Gv)
         absG2[absG2==0] = 1e200
 
         coulG = 4*cp.pi / absG2
@@ -301,42 +312,66 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
         # NOTE Gpref is actually Gpref*2
         Gpref = cp.exp(-absG2/(4*ew_eta**2)) * coulG
 
-        GvR2 = cp.einsum('gx,ix->ig', Gv, coords2)
+        GvR2 = contract('gx,ix->ig', Gv, coords2)
         cosGvR2 = cp.cos(GvR2)
         sinGvR2 = cp.sin(GvR2)
 
         if charges2 is not None:
-            GvR1 = cp.einsum('gx,ix->ig', Gv, coords1)
+            GvR1 = contract('gx,ix->ig', Gv, coords1)
             cosGvR1 = cp.cos(GvR1)
             sinGvR1 = cp.sin(GvR1)
-            zcosGvR2 = cp.einsum("i,ig->g", charges2, cosGvR2)
-            zsinGvR2 = cp.einsum("i,ig->g", charges2, sinGvR2)
+            zcosGvR2 = contract("i,ig->g", charges2, cosGvR2)
+            zsinGvR2 = contract("i,ig->g", charges2, sinGvR2)
             # qm pc - mm pc
-            ewg0  = cp.einsum('ig,g,g->i', cosGvR1, zcosGvR2, Gpref)
-            ewg0 += cp.einsum('ig,g,g->i', sinGvR1, zsinGvR2, Gpref)
+            ewg0  = contract('ig,g->i', cosGvR1, zcosGvR2 * Gpref)
+            ewg0 += contract('ig,g->i', sinGvR1, zsinGvR2 * Gpref)
             # qm dip - mm pc
-            p = ['einsum_path', (2, 3), (0, 2), (0, 1)]
-            ewg1  = cp.einsum('gx,ig,g,g->ix', Gv, cosGvR1, zsinGvR2, Gpref, optimize=p)
-            ewg1 -= cp.einsum('gx,ig,g,g->ix', Gv, sinGvR1, zcosGvR2, Gpref, optimize=p)
+            #p = ['einsum_path', (2, 3), (0, 2), (0, 1)]
+            #ewg1  = contract('gx,ig,g,g->ix', Gv, cosGvR1, zsinGvR2, Gpref, optimize=p)
+            #ewg1 -= contract('gx,ig,g,g->ix', Gv, sinGvR1, zcosGvR2, Gpref, optimize=p)
+            tempGsR2  = contract('gx,g->gx', Gv, zsinGvR2 * Gpref)
+            ewg1  = contract('gx,ig->ix', tempGsR2, cosGvR1)
+            tempGcR2  = contract('gx,g->gx', Gv, zcosGvR2 * Gpref)
+            ewg1 -= contract('gx,ig->ix', tempGcR2, sinGvR1)
             # qm quad - mm pc
-            p = ['einsum_path', (3, 4), (0, 3), (0, 2), (0, 1)]
-            ewg2  = -cp.einsum('gx,gy,ig,g,g->ixy', Gv, Gv, cosGvR1, zcosGvR2, Gpref, optimize=p)
-            ewg2 += -cp.einsum('gx,gy,ig,g,g->ixy', Gv, Gv, sinGvR1, zsinGvR2, Gpref, optimize=p)
+            #p = ['einsum_path', (3, 4), (0, 3), (0, 2), (0, 1)]
+            #ewg2  = -contract('gx,gy,ig,g,g->ixy', Gv, Gv, cosGvR1, zcosGvR2, Gpref, optimize=p)
+            #ewg2 += -contract('gx,gy,ig,g,g->ixy', Gv, Gv, sinGvR1, zsinGvR2, Gpref, optimize=p)
+            temp  =  contract('gx,gy->gxy', tempGcR2, Gv)
+            ewg2  = -contract('gxy,ig->ixy', temp, cosGvR1)
+            temp  =  contract('gx,gy->gxy', tempGsR2, Gv)
+            ewg2 += -contract('gxy,ig->ixy', temp, sinGvR1)
             ewg2 /= 3
         else:
             # qm pc - qm pc
-            ewg00  = cp.einsum('ig,jg,g->ij', cosGvR2, cosGvR2, Gpref)
-            ewg00 += cp.einsum('ig,jg,g->ij', sinGvR2, sinGvR2, Gpref)
+            #ewg00  = contract('ig,jg,g->ij', cosGvR2, cosGvR2, Gpref)
+            #ewg00 += contract('ig,jg,g->ij', sinGvR2, sinGvR2, Gpref)
+            temp   = contract('ig,g->ig', cosGvR2, Gpref)
+            ewg00  = contract('ig,jg->ij', temp, cosGvR2)
+            temp   = contract('ig,g->ig', sinGvR2, Gpref)
+            ewg00 += contract('ig,jg->ij', temp, sinGvR2)
             # qm pc - qm dip
-            ewg01  = cp.einsum('gx,ig,jg,g->ijx', Gv, sinGvR2, cosGvR2, Gpref)
-            ewg01 -= cp.einsum('gx,ig,jg,g->ijx', Gv, cosGvR2, sinGvR2, Gpref)
+            #ewg01  = contract('gx,ig,jg,g->ijx', Gv, sinGvR2, cosGvR2, Gpref)
+            #ewg01 -= contract('gx,ig,jg,g->ijx', Gv, cosGvR2, sinGvR2, Gpref)
+            temp1   = contract('gx,g->gx', Gv, Gpref)
+            temp   = contract('gx,ig->igx', temp1, sinGvR2)
+            ewg01  = contract('igx,jg->ijx', temp, cosGvR2)
+            temp   = contract('gx,ig->igx', temp1, cosGvR2)
+            ewg01 -= contract('igx,jg->ijx', temp, sinGvR2)
             # qm dip - qm dip
-            ewg11  = cp.einsum('gx,gy,ig,jg,g->ijxy', Gv, Gv, cosGvR2, cosGvR2, Gpref)
-            ewg11 += cp.einsum('gx,gy,ig,jg,g->ijxy', Gv, Gv, sinGvR2, sinGvR2, Gpref)
+            #ewg11  = contract('gx,gy,ig,jg,g->ijxy', Gv, Gv, cosGvR2, cosGvR2, Gpref)
+            #ewg11 += contract('gx,gy,ig,jg,g->ijxy', Gv, Gv, sinGvR2, sinGvR2, Gpref)
+            temp2   = contract('gx,gy->gxy', temp1, Gv)
+            temp   = contract('gxy,ig->igxy', temp2, cosGvR2)
+            ewg11  = contract('igxy,jg->ijxy', temp, cosGvR2)
+            temp   = contract('gxy,ig->igxy', temp2, sinGvR2)
+            ewg11 += contract('igxy,jg->ijxy', temp, sinGvR2)
             # qm pc - qm quad
-            ewg02  = -cp.einsum('gx,gy,ig,jg,g->ijxy', Gv, Gv, cosGvR2, cosGvR2, Gpref)
-            ewg02 += -cp.einsum('gx,gy,ig,jg,g->ijxy', Gv, Gv, sinGvR2, sinGvR2, Gpref)
-            ewg02 /= 3
+            #ewg02  = -contract('gx,gy,ig,jg,g->ijxy', Gv, Gv, cosGvR2, cosGvR2, Gpref)
+            #ewg02 += -contract('gx,gy,ig,jg,g->ijxy', Gv, Gv, sinGvR2, sinGvR2, Gpref)
+            ewg02 = -ewg11 / 3
+
+        temp = tempGcR2 = tempGsR2 = temp1 = temp2 = None
 
         if charges2 is not None:
             return ewovrl0 + ewg0, ewovrl1 + ewg1, ewovrl2 + ewg2
