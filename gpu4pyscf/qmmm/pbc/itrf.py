@@ -811,6 +811,12 @@ class QMMMGrad:
 
         # subtract the real-space Coulomb within rcut_hcore
         Tija, Tijab, Tijabc = grad_Tij(R, r)
+        #qm_ewovrl_grad -= cp.einsum('i,ijx,j->ix', qm_charges, Tija, qm_charges)
+        #qm_ewovrl_grad += cp.einsum('i,ijxa,ja->ix', qm_charges, Tijab, qm_dipoles)
+        #qm_ewovrl_grad -= cp.einsum('i,ijxa,ja->jx', qm_charges, Tijab, qm_dipoles) #
+        #qm_ewovrl_grad += cp.einsum('ia,ijxab,jb->ix', qm_dipoles, Tijabc, qm_dipoles)
+        #qm_ewovrl_grad -= cp.einsum('i,ijxab,jab->ix', qm_charges, Tijabc, qm_quads) / 3
+        #qm_ewovrl_grad += cp.einsum('i,ijxab,jab->jx', qm_charges, Tijabc, qm_quads) / 3 #
         temp = contract('ijx,j->ix', Tija, qm_charges)
         qm_ewovrl_grad -= contract('i,ix->ix', qm_charges, temp)
         temp = contract('ijxa,ja->ix', Tijab, qm_dipoles)
@@ -835,6 +841,12 @@ class QMMMGrad:
         Tija = Tija.reshape(len(qm_coords), len(qm_coords), len(Lall), 3)
         Tijab = Tijab.reshape(len(qm_coords), len(qm_coords), len(Lall), 3, 3)
         Tijabc = Tijabc.reshape(len(qm_coords), len(qm_coords), len(Lall), 3, 3, 3)
+        #qm_ewovrl_grad += cp.einsum('i,ijLx,j->ix', qm_charges, Tija, qm_charges)
+        #qm_ewovrl_grad -= cp.einsum('i,ijLxa,ja->ix', qm_charges, Tijab, qm_dipoles)
+        #qm_ewovrl_grad += cp.einsum('i,ijLxa,ja->jx', qm_charges, Tijab, qm_dipoles) #
+        #qm_ewovrl_grad -= cp.einsum('ia,ijLxab,jb->ix', qm_dipoles, Tijabc, qm_dipoles)
+        #qm_ewovrl_grad += cp.einsum('i,ijLxab,jab->ix', qm_charges, Tijabc, qm_quads) / 3
+        #qm_ewovrl_grad -= cp.einsum('i,ijLxab,jab->jx', qm_charges, Tijabc, qm_quads) / 3 #
         temp = contract('ijLx,j->ix', Tija, qm_charges)
         qm_ewovrl_grad += contract('i,ix->ix', qm_charges, temp)
         temp = contract('ijLxa,ja->ix', Tijab, qm_dipoles)
@@ -874,6 +886,10 @@ class QMMMGrad:
         sinGvRqm = cp.sin(GvRqm)
         zcosGvRqm = contract("i,ig->g", qm_charges, cosGvRqm)
         zsinGvRqm = contract("i,ig->g", qm_charges, sinGvRqm)
+        #DGcosGvRqm = cp.einsum("ia,ga,ig->g", qm_dipoles, Gv, cosGvRqm)
+        #DGsinGvRqm = cp.einsum("ia,ga,ig->g", qm_dipoles, Gv, sinGvRqm)
+        #TGGcosGvRqm = cp.einsum("iab,ga,gb,ig->g", qm_quads, Gv, Gv, cosGvRqm)
+        #TGGsinGvRqm = cp.einsum("iab,ga,gb,ig->g", qm_quads, Gv, Gv, sinGvRqm)
         temp = contract('ia,ig->ag', qm_dipoles, cosGvRqm)
         DGcosGvRqm = contract('ga,ag->g', Gv, temp)
         temp = contract('ia,ig->ag', qm_dipoles, sinGvRqm)
@@ -890,6 +906,9 @@ class QMMMGrad:
             mm_ewg_grad = cp.zeros_like(mm_coords)
 
         # qm pc - mm pc
+        #p = ['einsum_path', (3, 4), (1, 3), (1, 2), (0, 1)]
+        #qm_ewg_grad -= cp.einsum('i,gx,ig,g,g->ix', qm_charges, Gv, sinGvRqm, zcosGvRmm, Gpref, optimize=p)
+        #qm_ewg_grad += cp.einsum('i,gx,ig,g,g->ix', qm_charges, Gv, cosGvRqm, zsinGvRmm, Gpref, optimize=p)
         temp = contract('g,g->g', zcosGvRmm, Gpref)
         temp = contract('gx,g->gx', Gv, temp)
         temp = contract('ig,gx->ix', sinGvRqm, temp)
@@ -899,6 +918,9 @@ class QMMMGrad:
         temp = contract('ig,gx->ix', cosGvRqm, temp)
         qm_ewg_grad += contract('i,ix->ix', qm_charges, temp)
         if with_mm:
+            #p = ['einsum_path', (0, 2), (1, 2), (0, 2), (0, 1)]
+            #mm_ewg_grad -= cp.einsum('i,gx,ig,g,g->ix', mm_charges, Gv, sinGvRmm, zcosGvRqm, Gpref, optimize=p)
+            #mm_ewg_grad += cp.einsum('i,gx,ig,g,g->ix', mm_charges, Gv, cosGvRmm, zsinGvRqm, Gpref, optimize=p)
             temp = contract('i,ig->gi', mm_charges, sinGvRmm)
             temp2 = contract('g,g->g', zcosGvRqm, Gpref)
             temp2 = contract('gx,g->gx', Gv, temp2)
