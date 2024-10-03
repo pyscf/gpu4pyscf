@@ -16,7 +16,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 cmake_minimum_required (VERSION 3.19 FATAL_ERROR) # 3.19 is required by cutlass
-project (gpu4pyscf C CXX CUDA Fortran)
+#project (gpu4pyscf C CXX CUDA Fortran)
+project(gpu4pyscf C CXX HIP Fortran)
 
 set(CMAKE_C_STANDARD "99")
 set(CMAKE_CXX_STANDARD 17)
@@ -30,6 +31,13 @@ else()
   set(CMAKE_CUDA_ARCHITECTURES "60-real;70-real;80-real;90-real")
 endif()
 message("CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
+# HIP architecture flags (replace with appropriate values)
+if(DEFINED HIP_ARCHITECTURES)
+    set(CMAKE_HIP_ARCHITECTURES "${HIP_ARCHITECTURES}")
+else()
+    set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx906") # Example architectures
+endif()
+message("HIP_ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
 
 if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RELWITHDEBINFO)
@@ -90,67 +98,71 @@ include_directories(${PROJECT_SOURCE_DIR})
 include_directories(${PROJECT_SOURCE_DIR}/deps/include)
 link_directories(${PROJECT_SOURCE_DIR}/deps/lib)
 
+# Include HIP directories
+include_directories(/opt/rocm/include)
+link_directories(/opt/rocm/lib)
+
 #list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 set(C_LINK_TEMPLATE "<CMAKE_C_COMPILER> <CMAKE_SHARED_LIBRARY_C_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
 set(CXX_LINK_TEMPLATE "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
 
-option(BUILD_CUTLASS "Using cutlass" ON)
-if(BUILD_CUTLASS)
-  include(ExternalProject)
-  ExternalProject_Add(cutlass
-    GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
-    GIT_TAG        v3.4.0
-    CONFIGURE_COMMAND ""  # No configure step
-    BUILD_COMMAND ""      # No build step
-    INSTALL_COMMAND ""    # No install step
-    TEST_COMMAND ""       # No test step
-  )
-
-  # ExternalProject_Add automatically populates this variable
-  ExternalProject_Get_Property(cutlass SOURCE_DIR)
-  set(cutlass_SOURCE_DIR ${SOURCE_DIR})
-endif()
-
-option(BUILD_GINT "Using gint" ON)
-if(BUILD_GINT)
-  add_subdirectory(gint)
-endif()
-
-option(BUILD_GVHF "Using gvhf" ON)
-if(BUILD_GVHF)
-  add_subdirectory(gvhf)
-endif()
+#option(BUILD_CUTLASS "Using cutlass" OFF)
+#if(BUILD_CUTLASS)
+#  include(ExternalProject)
+#  ExternalProject_Add(cutlass
+#    GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
+#    GIT_TAG        v3.4.0
+#    CONFIGURE_COMMAND ""  # No configure step
+#    BUILD_COMMAND ""      # No build step
+#    INSTALL_COMMAND ""    # No install step
+#    TEST_COMMAND ""       # No test step
+#  )
+#
+#  # ExternalProject_Add automatically populates this variable
+#  ExternalProject_Get_Property(cutlass SOURCE_DIR)
+#  set(cutlass_SOURCE_DIR ${SOURCE_DIR})
+#endif()
+#
+#option(BUILD_GINT "Using gint" OFF)
+#if(BUILD_GINT)
+#  add_subdirectory(gint)
+#endif()
+#
+#option(BUILD_GVHF "Using gvhf" OFF)
+#if(BUILD_GVHF)
+#  add_subdirectory(gvhf)
+#endif()
 
 option(BUILD_GDFT "Using gdft" ON)
 if(BUILD_GDFT)
   add_subdirectory(gdft)
 endif()
 
-option(BUILD_CUPY_HELPER "Using cupy_helper" ON)
+option(BUILD_CUPY_HELPER "Using cupy_helper" OFF)
 if(BUILD_CUPY_HELPER)
   add_subdirectory(cupy_helper)
 endif()
 
-option(BUILD_SOLVENT "Using SMD solvent" ON)
-if(BUILD_SOLVENT)
-  add_subdirectory(solvent)
-endif()
-
-option(BUILD_LIBXC "Using libxc for DFT" ON)
-if(BUILD_LIBXC)
-  include(ExternalProject)
-  ExternalProject_Add(libxc
-    GIT_REPOSITORY https://github.com/wxj6000/libxc.git
-    GIT_TAG b225c254c063e1de835a4425115c9a6377478b32
-    PREFIX ${PROJECT_BINARY_DIR}/deps
-    INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
-    CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON
-            -DENABLE_FORTRAN=OFF -DDISABLE_KXC=ON -DDISABLE_LXC=ON -DDISABLE_FHC=ON
-            -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
-            -DCMAKE_INSTALL_LIBDIR:PATH=lib
-            -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
-            -DENABLE_XHOST:STRING=${BUILD_MARCH_NATIVE}
-    CMAKE_CACHE_ARGS -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}
-  )
-endif()
+#option(BUILD_SOLVENT "Using SMD solvent" OFF)
+#if(BUILD_SOLVENT)
+#  add_subdirectory(solvent)
+#endif()
+#
+#option(BUILD_LIBXC "Using libxc for DFT" OFF)
+#if(BUILD_LIBXC)
+#  include(ExternalProject)
+#  ExternalProject_Add(libxc
+#    GIT_REPOSITORY https://github.com/wxj6000/libxc.git
+#    GIT_TAG b225c254c063e1de835a4425115c9a6377478b32
+#    PREFIX ${PROJECT_BINARY_DIR}/deps
+#    INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
+#    CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON
+#            -DENABLE_FORTRAN=OFF -DDISABLE_KXC=ON -DDISABLE_LXC=ON -DDISABLE_FHC=ON
+#            -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
+#            -DCMAKE_INSTALL_LIBDIR:PATH=lib
+#            -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
+#            -DENABLE_XHOST:STRING=${BUILD_MARCH_NATIVE}
+#    CMAKE_CACHE_ARGS -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}
+#  )
+#endif()
