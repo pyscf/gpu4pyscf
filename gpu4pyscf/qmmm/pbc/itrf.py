@@ -123,6 +123,8 @@ _QMMM = QMMM
 class QMMMSCF(QMMM):
     _keys = {'mm_mol', 's1r', 's1rr', 'mm_ewald_pot', 'qm_ewald_hess', 'e_nuc'}
 
+    to_cpu = NotImplemented
+
     def __init__(self, method, mm_mol):
         self.__dict__.update(method.__dict__)
         self.mm_mol = mm_mol
@@ -158,6 +160,7 @@ class QMMMSCF(QMMM):
         if qm_ewald_hess is None:
             qm_ewald_hess = self.mm_mol.get_ewald_pot(mol.atom_coords())
             self.qm_ewald_hess = qm_ewald_hess
+        dm = cp.asarray(dm)
         charges = self.get_qm_charges(dm)
         dips = self.get_qm_dipoles(dm)
         quads = self.get_qm_quadrupoles(dm)
@@ -343,9 +346,9 @@ class QMMMSCF(QMMM):
         s1rr = self.get_s1rr()
         aoslices = mol.aoslice_by_atom()
         for iatm in range(mol.natm):
-            v0 = ewald_pot[0][iatm]
-            v1 = ewald_pot[1][iatm]
-            v2 = ewald_pot[2][iatm]
+            v0 = cp.asarray(ewald_pot[0][iatm])
+            v1 = cp.asarray(ewald_pot[1][iatm])
+            v2 = cp.asarray(ewald_pot[2][iatm])
             p0, p1 = aoslices[iatm, 2:]
             vdiff[:,p0:p1] -= v0 * ovlp[:,p0:p1]
             vdiff[:,p0:p1] -= contract('x,xuv->uv', v1, s1r[iatm])
@@ -405,6 +408,8 @@ class QMMMSCF(QMMM):
         # QM-QM and QM-MM pbc correction
         if dm is None:
             dm = self.make_rdm1()
+        else:
+            dm = cp.asarray(dm)
         if mm_ewald_pot is None:
             if self.mm_ewald_pot is not None:
                 mm_ewald_pot = self.mm_ewald_pot
@@ -413,11 +418,11 @@ class QMMMSCF(QMMM):
         if qm_ewald_pot is None:
             qm_ewald_pot = self.get_qm_ewald_pot(self.mol, dm, self.qm_ewald_hess)
         ewald_pot = mm_ewald_pot[0] + qm_ewald_pot[0] / 2
-        e  = contract('i,i->', ewald_pot, self.get_qm_charges(dm))
+        e  = contract('i,i->', cp.asarray(ewald_pot), self.get_qm_charges(dm))
         ewald_pot = mm_ewald_pot[1] + qm_ewald_pot[1] / 2
-        e += contract('ix,ix->', ewald_pot, self.get_qm_dipoles(dm))
+        e += contract('ix,ix->', cp.asarray(ewald_pot), self.get_qm_dipoles(dm))
         ewald_pot = mm_ewald_pot[2] + qm_ewald_pot[2] / 2
-        e += contract('ixy,ixy->', ewald_pot, self.get_qm_quadrupoles(dm))
+        e += contract('ixy,ixy->', cp.asarray(ewald_pot), self.get_qm_quadrupoles(dm))
         # TODO add energy correction if sum(charges) !=0 ?
         return e
 
@@ -528,6 +533,8 @@ class QMMMGrad:
     __name_mixin__ = 'QMMM'
     _keys = {'de_ewald_mm', 'de_nuc_mm'}
 
+    to_cpu = NotImplemented
+
     def __init__(self, scf_grad):
         self.__dict__.update(scf_grad.__dict__)
 
@@ -587,9 +594,9 @@ class QMMMGrad:
         s1rr = list()
         bas_atom = mol._bas[:,gto.ATOM_OF]
         for iatm in range(mol.natm):
-            v0 = ewald_pot[0][iatm]
-            v1 = ewald_pot[1][iatm]
-            v2 = ewald_pot[2][iatm]
+            v0 = cp.asarray(ewald_pot[0][iatm])
+            v1 = cp.asarray(ewald_pot[1][iatm])
+            v2 = cp.asarray(ewald_pot[2][iatm])
             p0, p1 = aoslices[iatm, 2:]
 
             dEds[p0:p1] -= v0 * dm[p0:p1]
