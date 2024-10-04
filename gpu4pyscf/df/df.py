@@ -137,8 +137,7 @@ class DF(lib.StreamObject):
         log = logger.new_logger(self.mol, self.mol.verbose)
         log.debug(f"GPU Memory {mem_avail/1e9:.3f} GB available, block size = {blksize}")
         if blksize < ALIGNED:
-            raise RuntimeError("Not enough GPU memory\n" +
-                              f"GPU Memory {mem_avail/1e9:.3f} GB available, block size = {blksize}" )
+            raise RuntimeError("Not enough GPU memory")
         return blksize
 
     def loop(self, blksize=None, unpack=True):
