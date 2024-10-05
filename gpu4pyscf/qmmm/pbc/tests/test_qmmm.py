@@ -18,11 +18,8 @@
 import unittest
 import numpy as np
 import pyscf
-from pyscf import lib
 from gpu4pyscf.dft import rks
 from gpu4pyscf.qmmm.pbc import itrf
-
-lib.num_threads(2)
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -55,7 +52,7 @@ def run_dft(xc):
         mf, [[1,2,-1],[3,4,5]], np.eye(3)*15, [-5,5], [0.8,1.2], rcut_ewald=8, rcut_hcore=6)
     mf.conv_tol = scf_tol
     mf.max_cycle = max_scf_cycles
-    mf.screen_tol = screen_tol
+    mf.direct_scf_tol = screen_tol
     mf.grids.level = grids_level
     e_dft = mf.kernel()
 

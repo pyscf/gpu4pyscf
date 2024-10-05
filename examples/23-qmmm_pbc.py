@@ -14,13 +14,10 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import pyscf
-from pyscf import lib
 from gpu4pyscf.scf import hf
 from gpu4pyscf.qmmm.pbc import itrf, mm_mole
 
 import numpy as np
-
-lib.num_threads(2)
 
 atom ='''
 O       0.0000000000    -0.0000000000     0.1174000000

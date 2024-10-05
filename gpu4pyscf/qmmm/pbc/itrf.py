@@ -218,30 +218,9 @@ class QMMMSCF(QMMM):
             fakemol = gto.fakemol_for_charges(coords.get(), expnts.get())
 
             intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
-            intopt.build(self.direct_scf_tol, diag_block_with_triu=True, aosym=True, 
+            intopt.build(self.direct_scf_tol, diag_block_with_triu=False, aosym=True, 
                          group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
-
-            nao_sph = len(intopt.sph_ao_idx)
-            v = 0
-            for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-                k0 = intopt.sph_aux_loc[cp_kl_id]
-                k1 = intopt.sph_aux_loc[cp_kl_id+1]
-                j3c = cp.zeros([k1-k0, nao_sph, nao_sph], order='C')
-                for cp_ij_id, _ in enumerate(intopt.log_qs):
-                    cpi = intopt.cp_idx[cp_ij_id]
-                    cpj = intopt.cp_jdx[cp_ij_id]
-                    li = intopt.angular[cpi]
-                    lj = intopt.angular[cpj]
-                    int3c_blk = int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, omega=0.0)
-                    int3c_blk = int3c2e.cart2sph(int3c_blk, axis=1, ang=lj)
-                    int3c_blk = int3c2e.cart2sph(int3c_blk, axis=2, ang=li)
-                    i0, i1 = intopt.sph_ao_loc[cpi], intopt.sph_ao_loc[cpi+1]
-                    j0, j1 = intopt.sph_ao_loc[cpj], intopt.sph_ao_loc[cpj+1]
-                    j3c[:,j0:j1,i0:i1] = int3c_blk
-                    if cpi != cpj and intopt.aosym:
-                        j3c[:,i0:i1,j0:j1] = int3c_blk.transpose([0,2,1])
-                v += contract('kji,k->ji', j3c, -charges[k0:k1])
-            h1e += cupy_helper.take_last2d(v, intopt.rev_ao_idx)
+            h1e += int3c2e.get_j_int3c2e_pass2(intopt, -charges)
             intopt = int3c_blk = None
         elif mm_mol.charge_model != 'point' and len(coords) != 0:
             # TODO test this block
