@@ -189,19 +189,19 @@ class QMMMSCF(QMMM):
         r_qm = (mol.atom_coords() - qm_center)[None,:,:] - Ls[:,None,:]
         r_qm = np.einsum('Lix,Lix->Li', r_qm, r_qm)
         assert rcut_hcore**2 < np.min(r_qm), \
-            f"QM image is within rcut_hcore of QM center. " + \
+             "QM image is within rcut_hcore of QM center. " + \
             f"rcut_hcore = {rcut_hcore} >= min(r_qm) = {np.sqrt(np.min(r_qm))}"
         Ls[Ls == np.inf] = 0.0
 
         r_qm = mol.atom_coords() - qm_center
         r_qm = np.einsum('ix,ix->i', r_qm, r_qm)
         assert rcut_hcore**2 > np.max(r_qm), \
-            f"Not all QM atoms are within rcut_hcore of QM center. " + \
+             "Not all QM atoms are within rcut_hcore of QM center. " + \
             f"rcut_hcore = {rcut_hcore} <= max(r_qm) = {np.sqrt(np.max(r_qm))}"
         r_qm = None
 
         qm_center = cp.asarray(qm_center)
-        all_coords = cp.asarray((mm_mol.atom_coords()[None,:,:] \
+        all_coords = cp.asarray((mm_mol.atom_coords()[None,:,:]
                 + Ls[:,None,:]).reshape(-1,3))
         all_charges = cp.hstack([mm_mol.atom_charges()] * len(Ls))
         dist2 = all_coords - qm_center
@@ -221,7 +221,7 @@ class QMMMSCF(QMMM):
             intopt.build(self.direct_scf_tol, diag_block_with_triu=False, aosym=True, 
                          group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
             h1e += int3c2e.get_j_int3c2e_pass2(intopt, -charges)
-            intopt = int3c_blk = None
+            intopt = None
         elif mm_mol.charge_model != 'point' and len(coords) != 0:
             # TODO test this block
             raise RuntimeError("Not tested yet")
@@ -261,7 +261,7 @@ class QMMMSCF(QMMM):
                 shls_slice = (0, mol.nbas, b0, b1+1)
                 with mol.with_common_orig(mol.atom_coord(i)):
                     self.s1r.append(
-                    cp.asarray(mol.intor('int1e_r', shls_slice=shls_slice)))
+                        cp.asarray(mol.intor('int1e_r', shls_slice=shls_slice)))
             logger.timer(self, 'get_s1r', *cput0)
         return self.s1r
 
@@ -278,8 +278,8 @@ class QMMMSCF(QMMM):
         return cp.asarray(qm_dipoles)
 
     def get_s1rr(self):
-        '''
-        \int phi_u phi_v [3(r-Rc)\otimes(r-Rc) - |r-Rc|^2] /2 dr
+        r'''
+        .. math:: \int phi_u phi_v [3(r-Rc)\otimes(r-Rc) - |r-Rc|^2] /2 dr
         '''
         if self.s1rr is None:
             cput0 = (logger.process_clock(), logger.perf_counter())
@@ -1187,7 +1187,7 @@ class QMMMGrad:
             r1 = cp.asarray(mol.atom_coord(i))
             r = cp.linalg.norm(r1-coords, axis=1)
             g_mm_  =  q1 * contract('ix,i->ix', r1-coords, charges * erf(expnts*r)/r**3)
-            g_mm_ -=  q1 * contract('ix,i->ix', r1-coords, charges * expnts * 2 / np.sqrt(np.pi) \
+            g_mm_ -=  q1 * contract('ix,i->ix', r1-coords, charges * expnts * 2 / np.sqrt(np.pi)
                               * cp.exp(-expnts**2 * r**2)/r**2)
             g_mm[mask] += g_mm_
             g_qm[i]    -= cp.sum(g_mm_, axis=0)
