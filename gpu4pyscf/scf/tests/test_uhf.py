@@ -289,6 +289,15 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(dmb_stored, dmb_loaded, atol = 1e-14)
         assert not np.allclose(dma_stored, dmb_loaded, atol = 1e-1) # Just to make sure alpha and beta electron are different in the test system
 
+    def test_mixed_precision(self):
+        mf = scf.RHF(mol)
+        mf.direct_scf_tol = 1e-14
+        mf.single_double_precision_threshold = 1e-14 / (2**(-52) / 2**(-23))
+        mf.conv_tol = 1e-14
+        e_tot = mf.kernel()
+        e_ref = -150.11866691903435
+        assert np.abs(e_tot - e_ref) < 1e-12
+
     # TODO:
     #test analyze
     #test mulliken_pop
