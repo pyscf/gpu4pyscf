@@ -27,6 +27,7 @@ from gpu4pyscf.lib import cupy_helper
 contract = cupy_helper.contract
 
 def get_qm_octupoles(mol, dm):
+    dm = cp.asarray(dm)
     nao = mol.nao
     bas_atom = mol._bas[:,gto.ATOM_OF]
     aoslices = mol.aoslice_by_atom()
@@ -39,7 +40,7 @@ def get_qm_octupoles(mol, dm):
             s1rrr = s1rrr.reshape((3,3,3,nao,-1))
         p0, p1 = aoslices[i, 2:]
         qm_octupoles.append(
-            -lib.einsum('uv,xyzvu->xyz', dm[p0:p1], s1rrr))
+            -contract('uv,xyzvu->xyz', dm[p0:p1], cp.asarray(s1rrr)))
     qm_octupoles = cp.asarray(qm_octupoles)
     return qm_octupoles
 
@@ -114,7 +115,7 @@ def estimate_error(mol, mm_coords, a, mm_charges, rcut_hcore, dm, precision=1e-8
             if coords2.size != 0:
                 err_icell += energy_octupole(qm_coords, coords2, qm_octupoles, mm_charges[mask])
         err_tot += err_icell
-        if abs(err_icell) < precision:
+        if abs(err_icell) < precision and icell > 0:
             break
         icell += 1
     return err_tot

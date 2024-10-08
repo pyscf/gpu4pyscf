@@ -20,6 +20,7 @@ import numpy as np
 import pyscf
 from gpu4pyscf.dft import rks
 from gpu4pyscf.qmmm.pbc import itrf
+from gpu4pyscf.qmmm.pbc.tools import estimate_error
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -46,6 +47,19 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
+def compute_octupole_error(xc):
+    mf = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
+    mf = itrf.add_mm_charges(
+        mf, [[1,2,-1],[3,4,5]], np.eye(3)*15, [-5,5], [0.8,1.2], rcut_ewald=8, rcut_hcore=6)
+    mf.conv_tol = scf_tol
+    mf.max_cycle = max_scf_cycles
+    mf.direct_scf_tol = screen_tol
+    mf.grids.level = grids_level
+    e_dft = mf.kernel()
+    e_oct = estimate_error(mf.mol, mf.mm_mol.atom_coords(), mf.mm_mol.a, mf.mm_mol.atom_charges(),
+                    20, mf.make_rdm1(), unit='Bohr', precision=1e-6)
+    return e_dft, e_oct
+
 def run_dft(xc):
     mf = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
     mf = itrf.add_mm_charges(
@@ -65,6 +79,11 @@ def run_dft(xc):
     return e_dft, g_qm, g_mm
 
 class KnownValues(unittest.TestCase):
+    def test_estimate_error(self):
+        print('-------- Octupole Error -------')
+        e_tot, e_octupole = compute_octupole_error('PBE')
+        assert np.allclose(e_octupole, 2.4943047809143978e-05)
+
     def test_rks_pbe0(self):
         print('-------- RKS PBE0 -------------')
         e_tot, g_qm, g_mm = run_dft('PBE0')
