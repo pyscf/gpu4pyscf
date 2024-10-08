@@ -142,14 +142,14 @@ if(BUILD_CUPY_HELPER)
   add_subdirectory(cupy_helper)
 endif()
 
-option(BUILD_SOLVENT "Using SMD solvent" OFF)
+option(BUILD_SOLVENT "Using SMD solvent" ON)
 if(BUILD_SOLVENT)
   add_subdirectory(solvent)
 endif()
 
 add_subdirectory(gvhf-rys)
 
-option(BUILD_LIBXC "Using libxc for DFT" OFF)
+option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
   include(ExternalProject)
   ExternalProject_Add(libxc
