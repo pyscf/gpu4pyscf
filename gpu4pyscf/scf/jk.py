@@ -9,7 +9,7 @@ from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
 from pyscf import lib
 from pyscf.scf import _vhf
 from pyscf import __config__
-from gpu4pyscf.lib.cupy_helper import load_library, condense
+from gpu4pyscf.lib.cupy_helper import load_library, condense, sandwich_dot, transpose_sum
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 
@@ -57,7 +57,8 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
     n_dm = dms.shape[0]
-    dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
+    #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
+    dms = sandwich_dot(dms, vhfopt.coeff.T)
     dms = cp.asarray(dms, order='C')
 
     vj = vk = None
@@ -156,12 +157,14 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             log.debug1('%s wall time %.2f', llll, t)
 
     if with_k:
-        vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
-        vk = vk + vk.transpose(0,2,1)
+        #:vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
+        vk = sandwich_dot(vk, vhfopt.coeff)
+        vk = transpose_sum(vk)
         vk = vk.reshape(dm.shape)
     if with_j:
-        vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vj, vhfopt.coeff)
-        vj = vj + vj.transpose(0,2,1)
+        #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vj, vhfopt.coeff)
+        vj = sandwich_dot(vj, vhfopt.coeff)
+        vj = transpose_sum(vj)
         vj *= 2.
         vj = vj.reshape(dm.shape)
     log.timer('vj and vk', *cput0)
@@ -188,7 +191,8 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
     dms = dm.reshape(-1,nao_orig,nao_orig)
     n_dm = dms.shape[0]
     assert n_dm == 1
-    dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
+    #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
+    dms = sandwich_dot(dms, vhfopt.coeff.T)
     dms = cp.asarray(dms, order='C')
 
     ao_loc = mol.ao_loc
@@ -300,8 +304,9 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
     libvhf_rys.transform_xyz_to_cart(
         vj.ctypes, vj_xyz.ctypes, ao_loc.ctypes, pair_loc.ctypes,
         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-    vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
-    vj = vj + vj.transpose(0,2,1)
+    #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
+    vj = sandwich_dot(vj, vhfopt.coeff)
+    vj = transpose_sum(vj)
     vj *= 2.
     vj = vj.reshape(dm.shape)
     log.timer('vj', *cput0)

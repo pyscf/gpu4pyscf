@@ -902,3 +902,20 @@ void {fn_name}(double *out, double *a, int *loc_x, int *loc_y,
     if do_transpose:
         out = out.T
     return out
+
+def sandwich_dot(a, c, out=None):
+    '''Performs c.T.dot(a).dot(c)'''
+    a = cupy.asarray(a)
+    a_ndim = a.ndim
+    if a_ndim == 2:
+        a = a[None]
+    counts = a.shape[0]
+    m = c.shape[1]
+    out = cupy.empty((counts, m, m))
+    tmp = None
+    for i in range(counts):
+        tmp = cupy.dot(c.T, a[i], out=tmp)
+        cupy.dot(tmp, c, out=out[i])
+    if a_ndim == 2:
+        out = out[0]
+    return out
