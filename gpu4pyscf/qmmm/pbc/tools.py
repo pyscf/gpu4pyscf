@@ -61,9 +61,9 @@ def energy_octupole(coords1, coords2, octupoles, charges):
         #Tijabc += 3 * cp.einsum('ijb,ac,ij->ijabc', Rij, np.eye(3), Tij**5)
         #Tijabc += 3 * cp.einsum('ijc,ab,ij->ijabc', Rij, np.eye(3), Tij**5)
         Rij = contract('ija,ij->ija', Rij, Tij**5)
-        Tijabc += 3 * contract('ija,bc->ijabc', Rij, np.eye(3))
-        Tijabc += 3 * contract('ijb,ac->ijabc', Rij, np.eye(3))
-        Tijabc += 3 * contract('ijc,ab->ijabc', Rij, np.eye(3))
+        Tijabc += 3 * contract('ija,bc->ijabc', Rij, cp.eye(3))
+        Tijabc += 3 * contract('ijb,ac->ijabc', Rij, cp.eye(3))
+        Tijabc += 3 * contract('ijc,ab->ijabc', Rij, cp.eye(3))
         vj = contract('ijabc,iabc->j', Tijabc, octupoles[i0:i1])
         ene += cp.dot(vj, charges) / 6
     return ene.get()
@@ -111,7 +111,8 @@ def estimate_error(mol, mm_coords, a, mm_charges, rcut_hcore, dm, precision=1e-8
             dist2 = contract('ix,ix->i', dist2, dist2)
             mask = dist2 > rcut_hcore**2
             coords2 = coords2[mask]
-            err_icell += energy_octupole(qm_coords, coords2, qm_octupoles, mm_charges[mask])
+            if coords2.size != 0:
+                err_icell += energy_octupole(qm_coords, coords2, qm_octupoles, mm_charges[mask])
         err_tot += err_icell
         if abs(err_icell) < precision:
             break
@@ -146,7 +147,8 @@ def determine_hcore_cutoff(mol, mm_coords, a, mm_charges, rcut_min, dm, rcut_ste
             dist2 = contract('ix,ix->i', dist2, dist2)
             mask = dist2 > rcut_min**2
             coords2 = coords2[mask]
-            err_icell += energy_octupole(qm_coords, coords2, qm_octupoles, mm_charges[mask])
+            if coords2.size != 0:
+                err_icell += energy_octupole(qm_coords, coords2, qm_octupoles, mm_charges[mask])
         err_tot += err_icell
         if abs(err_icell) < rs_precision:
             break
@@ -164,7 +166,8 @@ def determine_hcore_cutoff(mol, mm_coords, a, mm_charges, rcut_min, dm, rcut_ste
                 dist2 = contract('ix,ix->i', dist2, dist2)
                 mask = (dist2 > rcut_min**2) & (dist2 <= rcut**2)
                 coords2 = coords2[mask]
-                err_rcut -= energy_octupole(qm_coords, coords2, qm_octupoles, mm_charges[mask])
+                if coords2.size != 0:
+                    err_rcut -= energy_octupole(qm_coords, coords2, qm_octupoles, mm_charges[mask])
         if abs(err_rcut) < precision:
             trust_level += 1
         else:
