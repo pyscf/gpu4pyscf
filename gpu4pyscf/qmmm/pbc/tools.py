@@ -24,6 +24,8 @@ from pyscf.lib import param, logger
 
 from gpu4pyscf.lib import cupy_helper
 
+contract = cupy_helper.contract
+
 def get_qm_octupoles(mol, dm):
     nao = mol.nao
     bas_atom = mol._bas[:,gto.ATOM_OF]
@@ -51,13 +53,19 @@ def energy_octupole(coords1, coords2, octupoles, charges):
         Rij = coords1[i0:i1,None,:] - coords2[None,:,:]
         rij = cp.linalg.norm(Rij, axis=-1)
         Tij = 1 / rij
-        Tijabc  = -15 * cp.einsum('ija,ijb,ijc->ijabc', Rij, Rij, Rij)
-        Tijabc  = cp.einsum('ijabc,ij->ijabc', Tijabc, Tij**7)
-        Tijabc += 3 * cp.einsum('ija,bc,ij->ijabc', Rij, np.eye(3), Tij**5)
-        Tijabc += 3 * cp.einsum('ijb,ac,ij->ijabc', Rij, np.eye(3), Tij**5)
-        Tijabc += 3 * cp.einsum('ijc,ab,ij->ijabc', Rij, np.eye(3), Tij**5)
-        vj = cp.einsum('ijabc,iabc->j', Tijabc, octupoles[i0:i1])
-        ene += vj @ charges / 6
+        #Tijabc  = -15 * cp.einsum('ija,ijb,ijc->ijabc', Rij, Rij, Rij)
+        Tijabc = contract('ija,ijb->ijab', Rij, Rij)
+        Tijabc = -15 * contract('ijab,ijc->ijabc', Tijabc, Rij)
+        Tijabc  = contract('ijabc,ij->ijabc', Tijabc, Tij**7)
+        #Tijabc += 3 * cp.einsum('ija,bc,ij->ijabc', Rij, np.eye(3), Tij**5)
+        #Tijabc += 3 * cp.einsum('ijb,ac,ij->ijabc', Rij, np.eye(3), Tij**5)
+        #Tijabc += 3 * cp.einsum('ijc,ab,ij->ijabc', Rij, np.eye(3), Tij**5)
+        Rij = contract('ija,ij->ija', Rij, Tij**5)
+        Tijabc += 3 * contract('ija,bc->ijabc', Rij, np.eye(3))
+        Tijabc += 3 * contract('ijb,ac->ijabc', Rij, np.eye(3))
+        Tijabc += 3 * contract('ijc,ab->ijabc', Rij, np.eye(3))
+        vj = contract('ijabc,iabc->j', Tijabc, octupoles[i0:i1])
+        ene += cp.dot(vj, charges) / 6
     return ene.get()
 
 def loop_icell(i, a):
@@ -69,15 +77,15 @@ def loop_icell(i, a):
         for nx in [-i,i]:
             for ny in range(-i,i+1):
                 for nz in range(-i,i+1):
-                    yield cp.asarray([nx, ny, nz]) @ a
+                    yield cp.dot(cp.asarray([nx, ny, nz]), a)
         for nx in range(-i+1,i):
             for ny in [-i,i]:
                 for nz in range(-i,i+1):
-                    yield cp.asarray([nx, ny, nz]) @ a
+                    yield cp.dot(cp.asarray([nx, ny, nz]), a)
         for nx in range(-i+1,i):
             for ny in range(-i+1,i):
                 for nz in [-i, i]:
-                    yield cp.asarray([nx, ny, nz]) @ a
+                    yield cp.dot(cp.asarray([nx, ny, nz]), a)
 
 def estimate_error(mol, mm_coords, a, mm_charges, rcut_hcore, dm, precision=1e-8, unit='angstrom'):
     qm_octupoles = get_qm_octupoles(mol, dm)
@@ -100,7 +108,7 @@ def estimate_error(mol, mm_coords, a, mm_charges, rcut_hcore, dm, precision=1e-8
         for shift in loop_icell(icell, a):
             coords2 = mm_coords + shift
             dist2 = coords2 - qm_cen
-            dist2 = cp.einsum('ix,ix->i', dist2, dist2)
+            dist2 = contract('ix,ix->i', dist2, dist2)
             mask = dist2 > rcut_hcore**2
             coords2 = coords2[mask]
             err_icell += energy_octupole(qm_coords, coords2, qm_octupoles, mm_charges[mask])
@@ -135,7 +143,7 @@ def determine_hcore_cutoff(mol, mm_coords, a, mm_charges, rcut_min, dm, rcut_ste
         for shift in loop_icell(icell, a):
             coords2 = mm_coords + shift
             dist2 = coords2 - qm_cen
-            dist2 = cp.einsum('ix,ix->i', dist2, dist2)
+            dist2 = contract('ix,ix->i', dist2, dist2)
             mask = dist2 > rcut_min**2
             coords2 = coords2[mask]
             err_icell += energy_octupole(qm_coords, coords2, qm_octupoles, mm_charges[mask])
@@ -153,7 +161,7 @@ def determine_hcore_cutoff(mol, mm_coords, a, mm_charges, rcut_min, dm, rcut_ste
             for shift in loop_icell(icell, a):
                 coords2 = mm_coords + shift
                 dist2 = coords2 - qm_cen
-                dist2 = cp.einsum('ix,ix->i', dist2, dist2)
+                dist2 = contract('ix,ix->i', dist2, dist2)
                 mask = (dist2 > rcut_min**2) & (dist2 <= rcut**2)
                 coords2 = coords2[mask]
                 err_rcut -= energy_octupole(qm_coords, coords2, qm_octupoles, mm_charges[mask])
