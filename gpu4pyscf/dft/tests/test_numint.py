@@ -79,7 +79,7 @@ class KnownValues(unittest.TestCase):
         v = [x.get() for x in v]
 
         ni_pyscf = pyscf_numint()
-        fn = getattr(ni_pyscf, method)
+        fn = getattr(ni_pyscf, method[:6])
         nref, eref, vref = fn(mol, grids_cpu, xc, dm1, hermi=1)
 
         v = cupy.asarray(v)
@@ -154,12 +154,21 @@ class KnownValues(unittest.TestCase):
     def test_rks_lda(self):
         self._check_vxc('nr_rks', LDA)
 
+    def test_rks_lda_batch(self):
+        self._check_vxc('nr_rks_batch', LDA)
+
     def test_rks_gga(self):
         self._check_vxc('nr_rks', GGA_PBE)
 
+    def test_rks_gga_batch(self):
+        self._check_vxc('nr_rks_batch', GGA_PBE)
+
     def test_rks_mgga(self):
         self._check_vxc('nr_rks', MGGA_M06)
-    
+
+    def test_rks_mgga_batch(self):
+        self._check_vxc('nr_rks_batch', MGGA_M06)
+
     def test_uks_lda(self):
         self._check_vxc('nr_uks', LDA)#'lda', -6.362059440515177)
 

@@ -66,7 +66,7 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=1)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
-    '''
+    
     def test_ao_sph_deriv2(self):
         coords = np.random.random((512,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv2', coords)
@@ -74,7 +74,7 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=2)
         assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
-    '''
+    
     def test_ao_sph_deriv3(self):
         coords = np.random.random((512,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv3', coords)

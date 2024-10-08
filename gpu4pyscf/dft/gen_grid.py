@@ -479,6 +479,7 @@ def gen_sparse_cache(mol, coords, blksize):
     ngrids = coords.shape[0]
     t0 = log.init_timer()
     s_index = make_screen_index(mol, coords, blksize=blksize)
+    s_index[:] = 1
     t0 = log.timer_debug1('s_index', *t0)
     s_index_cpu = s_index.get()
     nblocks = (ngrids + blksize - 1)//blksize
@@ -599,7 +600,8 @@ class Grids(lib.StreamObject):
         Sort grids for batching grids
         '''
         #self.sparse_cache = gen_sparse_cache(sorted_mol, self.coords, GRID_BLKSIZE)
-        blksize = GRID_BLKSIZE
+        #blksize = GRID_BLKSIZE
+        blksize = ALIGNMENT_UNIT
         ngrids = self.coords.shape[0]
         ao_indices, s_index, ao_loc_non0 = gen_sparse_cache(sorted_mol, self.coords, blksize)
         

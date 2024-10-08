@@ -225,7 +225,7 @@ def reduce_sparse(a, b, indices):
         count = 1
     else:
         raise RuntimeError('add_sparse only supports 2d or 3d tensor')
-    
+    indices = cupy.asarray(indices, dtype=np.int32)
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.reduce_sparse(
         ctypes.cast(stream.ptr, ctypes.c_void_p),

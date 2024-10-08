@@ -49,7 +49,9 @@ void _reduce_sparse(double *a, const double *b, const int *indices, int n, int m
     }
 
     for (int i = 0; i < count; i++){
-        int idx_a = indices[row + i * k] * n + indices[col + i * k];
+        int ix = indices[row + i * k];
+        int iy = indices[col + i * k];
+        int idx_a = ix * n + iy;
         int idx_b = row * m + col;
         //a[idx_a + i*n*n] += b[idx_b + i*m*m];
         atomicAdd(a+idx_a, b[idx_b+i*m*m]);

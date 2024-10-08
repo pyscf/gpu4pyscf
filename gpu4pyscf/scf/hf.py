@@ -442,7 +442,6 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         t1 = log.timer_debug1('veff', *t1)
         e_tot = mf.energy_tot(dm, h1e, vhf)
         t1 = log.timer_debug1('energy', *t1)
-
         norm_ddm = cupy.linalg.norm(dm-dm_last)
         t1 = log.timer_debug1('total', *t0)
         logger.info(mf, 'cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
