@@ -26,7 +26,7 @@ from pyscf.scf import hf
 from pyscf.scf import chkfile
 from gpu4pyscf import lib
 from gpu4pyscf.lib.cupy_helper import eigh, tag_array, return_cupy_array, cond
-from gpu4pyscf.scf import diis
+from gpu4pyscf.scf import diis, jk
 from gpu4pyscf.lib import logger
 
 __all__ = [
@@ -38,7 +38,6 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
            verbose=None):
     '''Compute J, K matrices with CPU-GPU hybrid algorithm
     '''
-    log = logger.new_logger(mol, verbose)
     vj, vk = jk.get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega, verbose)
     if not isinstance(dm, cupy.ndarray):
         if with_j: vj = vj.get()
@@ -50,7 +49,7 @@ def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
     vhfopt = mf._opt.get(omega)
     if vhfopt is None:
         with mol.with_range_coulomb(omega):
-            vhfopt = mf._opt[omega] = _VHFOpt(mol, mf.direct_scf_tol).build()
+            vhfopt = mf._opt[omega] = jk._VHFOpt(mol, mf.direct_scf_tol).build()
 
     vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega)
     return vj, vk

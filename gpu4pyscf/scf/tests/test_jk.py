@@ -22,16 +22,16 @@ from pyscf.scf.hf import get_jk
 
 def test_jk():
     mol = pyscf.M(
-    atom = '''
-    O   0.000   -0.    0.1174
-    H  -0.757    4.   -0.4696
-    H   0.757    4.   -0.4696
-    C   1.      1.    0.
-    H   4.      0.    3.
-    H   0.      1.    .6
-    ''',
-    basis='def2-tzvp',
-    unit='B',)
+        atom = '''
+        O   0.000   -0.    0.1174
+        H  -0.757    4.   -0.4696
+        H   0.757    4.   -0.4696
+        C   1.      1.    0.
+        H   4.      0.    3.
+        H   0.      1.    .6
+        ''',
+        basis='def2-tzvp',
+        unit='B',)
 
     np.random.seed(9)
     nao = mol.nao
