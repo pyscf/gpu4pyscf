@@ -42,10 +42,17 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
             |  [atom2, (x, y, z)],
             |  ...
             |  [atomN, (x, y, z)]]
+        a : (3,3) ndarray
+            Lattice primitive vectors. Each row represents a lattice vector
+            Reciprocal lattice vectors are given by  b1,b2,b3 = 2 pi inv(a).T
 
     Kwargs:
         charges : 1D array
             fractional charges of MM particles
+        rcut_ewald : float
+            The real-space Ewald cutoff.
+        rcut_hcore : float
+            The cutoff for exact MM potential when computing hcore.
         zeta : 1D array
             Gaussian charge distribution parameter.
             rho(r) = charge * Norm * exp(-zeta * r^2)
@@ -399,6 +406,10 @@ def create_mm_mol(atoms_or_coords, a, charges=None, radii=None,
             The charges of MM atoms.
         radii : 1D array
             The Gaussian charge distribuction radii of MM atoms.
+        rcut_ewald : float
+            The real-space Ewald cutoff.
+        rcut_hcore : float
+            The cutoff for exact MM potential whne computing hcore.
         unit : string
             The unit of the input. Default is 'Angstrom'.
     '''

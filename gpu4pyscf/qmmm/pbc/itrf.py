@@ -60,22 +60,15 @@ def add_mm_charges(scf_method, atoms_or_coords, a, charges, radii=None,
     Kwargs:
         radii : 1D array
             The Gaussian charge distribution radii of MM atoms.
-        rcut_ewald: Float
-            Ewald real-space cutoff
-        rcut_hcore: Float
-            Real-space cutoff for MM charges to be seen by QM density
+        rcut_ewald : float
+            The real-space Ewald cutoff.
+        rcut_hcore : float
+            The cutoff for exact MM potential when computing hcore.
         unit : str
             Bohr, AU, Ang (case insensitive). Default is the same to mol.unit
 
     Returns:
-        Same method object as the input scf_method with modified 1e Hamiltonian
-
-    Note:
-        1. if MM charge and X2C correction are used together, function mm_charge
-        needs to be applied after X2C decoration (.x2c method), eg
-        mf = mm_charge(scf.RHF(mol).x2c()), [(0.5,0.6,0.8)], [-0.5]).
-        2. Once mm_charge function is applied on the SCF object, it
-        affects all the post-HF calculations eg MP2, CCSD, MCSCF etc
+        Same method object as the input scf_method with modified 1e Hamiltonia
 
     Examples:
 
@@ -471,6 +464,10 @@ def add_mm_charges_grad(scf_grad, atoms_or_coords, a, charges, radii=None,
     Kwargs:
         radii : 1D array
             The Gaussian charge distribution radii of MM atoms.
+        rcut_ewald : float
+            The real-space Ewald cutoff.
+        rcut_hcore : float
+            The cutoff for exact MM potential when computing hcore.
         unit : str
             Bohr, AU, Ang (case insensitive). Default is the same to mol.unit
 
@@ -533,8 +530,7 @@ class QMMMGrad:
         return self
 
     def grad_ewald(self, dm=None, with_mm=False, mm_ewald_pot=None, qm_ewald_pot=None):
-        '''
-        pbc correction energy grad w.r.t. qm and mm atom positions
+        '''PBC correction energy grad w.r.t. qm and mm atom positions
         '''
         cput0 = (logger.process_clock(), logger.perf_counter())
         if dm is None: dm = self.base.make_rdm1()
@@ -1110,7 +1106,7 @@ class QMMMGrad:
         return g_qm_orig + g_qm
 
     def grad_hcore_mm(self, dm, mol=None):
-        r'''Nuclear gradients of the electronic energy
+        '''Nuclear gradients of the electronic energy
         '''
         cput0 = (logger.process_clock(), logger.perf_counter())
         dm = cp.asarray(dm)

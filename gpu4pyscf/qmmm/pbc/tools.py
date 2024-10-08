@@ -69,7 +69,7 @@ def energy_octupole(coords1, coords2, octupoles, charges):
     return ene.get()
 
 def loop_icell(i, a):
-    ''' loop over cell images in i-th layer around the center cell
+    '''loop over cell images in i-th layer around the center cell
     '''
     if i == 0:
         yield cp.zeros(3)
