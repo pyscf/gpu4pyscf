@@ -1,3 +1,4 @@
+#include <cuda.h>
 #include "vhf.cuh"
 #include "rys_roots_unrolled.cu"
 #include "create_tasks.cu"
@@ -183,7 +184,11 @@ void _rys_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -199,11 +204,11 @@ void rys_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -397,7 +402,11 @@ void _rys_sr_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_sr_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -413,11 +422,11 @@ void rys_sr_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -652,7 +661,11 @@ void _rys_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -668,11 +681,11 @@ void rys_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -905,7 +918,11 @@ void _rys_sr_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_sr_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -921,11 +938,11 @@ void rys_sr_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -1245,7 +1262,11 @@ void _rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -1261,11 +1282,11 @@ void rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -1583,7 +1604,11 @@ void _rys_sr_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_sr_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -1599,11 +1624,11 @@ void rys_sr_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -2148,11 +2173,11 @@ void rys_jk_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -2695,11 +2720,11 @@ void rys_sr_jk_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -3022,7 +3047,11 @@ void _rys_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -3038,11 +3067,11 @@ void rys_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -3363,7 +3392,11 @@ void _rys_sr_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_sr_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -3379,11 +3412,11 @@ void rys_sr_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -3932,11 +3965,11 @@ void rys_jk_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -4483,11 +4516,11 @@ void rys_sr_jk_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -5598,11 +5631,11 @@ void rys_jk_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -6711,11 +6744,11 @@ void rys_sr_jk_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -6999,7 +7032,11 @@ void _rys_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -7015,11 +7052,11 @@ void rys_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -7301,7 +7338,11 @@ void _rys_sr_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_sr_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -7317,11 +7358,11 @@ void rys_sr_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -7759,7 +7800,11 @@ void _rys_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -7775,11 +7820,11 @@ void rys_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -8215,7 +8260,11 @@ void _rys_sr_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_sr_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -8231,11 +8280,11 @@ void rys_sr_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -9081,11 +9130,11 @@ void rys_jk_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -9929,11 +9978,11 @@ void rys_sr_jk_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -10607,11 +10656,11 @@ void rys_jk_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -11283,11 +11332,11 @@ void rys_sr_jk_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -11727,7 +11776,11 @@ void _rys_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -11743,11 +11796,11 @@ void rys_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -12185,7 +12238,11 @@ void _rys_sr_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_sr_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -12201,11 +12258,11 @@ void rys_sr_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -13051,11 +13108,11 @@ void rys_jk_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -13899,11 +13956,11 @@ void rys_sr_jk_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -14584,11 +14641,11 @@ void rys_jk_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -15267,11 +15324,11 @@ void rys_sr_jk_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -15618,7 +15675,11 @@ void _rys_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -15634,11 +15695,11 @@ void rys_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -15983,7 +16044,11 @@ void _rys_sr_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_sr_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -15999,11 +16064,11 @@ void rys_sr_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -16611,11 +16676,11 @@ void rys_jk_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -17221,11 +17286,11 @@ void rys_sr_jk_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -18188,11 +18253,11 @@ void rys_jk_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -19153,11 +19218,11 @@ void rys_sr_jk_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -19767,11 +19832,11 @@ void rys_jk_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -20379,11 +20444,11 @@ void rys_sr_jk_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -21353,11 +21418,11 @@ void rys_jk_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                     batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -22325,11 +22390,11 @@ void rys_sr_jk_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < bounds.nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
             int nbas_tiles = nbas / TILE;
             int tile_i = tile_ij / nbas_tiles;
             int tile_j = tile_ij % nbas_tiles;
@@ -22362,25 +22427,25 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     if (omega < 0) {
         buflen += nroots*2 * threads;
     }
-    int ijkl = li*125 + lj*25 + lk*5 + ll;
+    int ijkl = li*64 + lj*16 + lk*4 + ll;
     switch (ijkl) {
     case 0: rys_jk_0000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 125: rys_jk_1000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 130: rys_jk_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 131: rys_jk_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 150: rys_jk_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 155: rys_jk_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 156: rys_jk_1111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 250: rys_jk_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 255: rys_jk_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 256: rys_jk_2011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 260: rys_jk_2020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 275: rys_jk_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 280: rys_jk_2110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 300: rys_jk_2200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 375: rys_jk_3000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 380: rys_jk_3010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 400: rys_jk_3100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 64: rys_jk_1000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 68: rys_jk_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 69: rys_jk_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 80: rys_jk_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 84: rys_jk_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 85: rys_jk_1111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 128: rys_jk_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 132: rys_jk_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 133: rys_jk_2011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 136: rys_jk_2020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 144: rys_jk_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 148: rys_jk_2110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 160: rys_jk_2200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 192: rys_jk_3000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 196: rys_jk_3010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 208: rys_jk_3100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     default: return 0;
     }
     return 1;
@@ -22403,25 +22468,25 @@ int rys_sr_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     if (omega < 0) {
         buflen += nroots*2 * threads;
     }
-    int ijkl = li*125 + lj*25 + lk*5 + ll;
+    int ijkl = li*64 + lj*16 + lk*4 + ll;
     switch (ijkl) {
     case 0: rys_sr_jk_0000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 125: rys_sr_jk_1000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 130: rys_sr_jk_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 131: rys_sr_jk_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 150: rys_sr_jk_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 155: rys_sr_jk_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 156: rys_sr_jk_1111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 250: rys_sr_jk_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 255: rys_sr_jk_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 256: rys_sr_jk_2011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 260: rys_sr_jk_2020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 275: rys_sr_jk_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 280: rys_sr_jk_2110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 300: rys_sr_jk_2200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 375: rys_sr_jk_3000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 380: rys_sr_jk_3010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 400: rys_sr_jk_3100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 64: rys_sr_jk_1000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 68: rys_sr_jk_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 69: rys_sr_jk_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 80: rys_sr_jk_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 84: rys_sr_jk_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 85: rys_sr_jk_1111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 128: rys_sr_jk_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 132: rys_sr_jk_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 133: rys_sr_jk_2011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 136: rys_sr_jk_2020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 144: rys_sr_jk_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 148: rys_sr_jk_2110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 160: rys_sr_jk_2200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 192: rys_sr_jk_3000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 196: rys_sr_jk_3010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 208: rys_sr_jk_3100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     default: return 0;
     }
     return 1;

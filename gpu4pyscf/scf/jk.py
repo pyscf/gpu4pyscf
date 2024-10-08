@@ -35,6 +35,8 @@ SHL_IN_GROUP = 500
 
 libvhf_rys = load_library('libgvhf_rys')
 libvhf_rys.RYS_build_jk.restype = ctypes.c_int
+libvhf_rys.cuda_version.restype = ctypes.c_int
+CUDA_VERSION = libvhf_rys.cuda_version()
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
            verbose=None):
@@ -598,7 +600,8 @@ def quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nfl = (ll + 1) * (ll + 2) // 2
     gout_size = nfi * nfj * nfk * nfl
     if (gout_size <= UNROLL_NFMAX or order <= UNROLL_ORDER) and all(ls <= UNROLL_LMAX):
-        if order <= 3 and (li,lj,lk,ll) != (1,1,1,0) and (li,lj,lk,ll) != (1,0,1,1):
+        if (CUDA_VERSION >= 12040 and
+            order <= 3 and (li,lj,lk,ll) != (1,1,1,0) and (li,lj,lk,ll) != (1,0,1,1)):
             return 512, 1
         return 256, 1
 
@@ -637,7 +640,7 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     lmax = 4
     max_order = 6
     if order <= max_order and lij <= lmax and lkl <= lmax:
-        if order <= 2:
+        if CUDA_VERSION >= 12040 and order <= 2:
             return 512, 1, False
         return 256, 1, False
 
@@ -658,5 +661,7 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     n = 128
     while n >= counts:
         n >>= 1
-    gout_stride = THREADS*2 // n
+    gout_stride = THREADS // n
+    if CUDA_VERSION >= 12040:
+        gout_stride *= 2
     return n, gout_stride, with_gout

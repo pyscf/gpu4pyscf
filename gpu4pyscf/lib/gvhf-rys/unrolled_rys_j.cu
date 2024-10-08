@@ -1,3 +1,4 @@
+#include <cuda.h>
 #include "vhf.cuh"
 #include "rys_roots_unrolled.cu"
 #include "create_tasks.cu"
@@ -152,7 +153,11 @@ void _rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -352,7 +357,11 @@ void _rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -577,7 +586,11 @@ void _rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -1073,7 +1086,11 @@ void _rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {

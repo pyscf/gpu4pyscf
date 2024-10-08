@@ -1,3 +1,4 @@
+#include <cuda.h>
 #include "vhf.cuh"
 #include "gamma_inc_unrolled.cu"
 #include "create_tasks.cu"
@@ -50,7 +51,7 @@ void _os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
         Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
     }
-    double eri0;
+    double gout0;
     double val;
     double *dm, *vj, *vk;
 
@@ -89,7 +90,7 @@ void _os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
 
-        eri0 = 0;
+        gout0 = 0;
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
@@ -155,7 +156,7 @@ void _os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 __syncthreads();
                 if (task_id < ntasks) {
                     double vrr_0_000 = fac * gamma_inc[sq_id+0*nsq_per_block];
-                    eri0 += vrr_0_000;
+                    gout0 += vrr_0_000;
                 }
             }
         }
@@ -168,25 +169,25 @@ void _os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
                 if (do_j) {
                     val = 0;
-                    val += eri0 * dm[(l0+0)*nao+(k0+0)];
+                    val += gout0 * dm[(l0+0)*nao+(k0+0)];
                     atomicAdd(vj+(i0+0)*nao+(j0+0), val);
                     val = 0;
-                    val += eri0 * dm[(j0+0)*nao+(i0+0)];
+                    val += gout0 * dm[(j0+0)*nao+(i0+0)];
                     atomicAdd(vj+(k0+0)*nao+(l0+0), val);
                     vj += nao * nao;
                 }
                 if (do_k) {
                     val = 0;
-                    val += eri0 * dm[(j0+0)*nao+(k0+0)];
+                    val += gout0 * dm[(j0+0)*nao+(k0+0)];
                     atomicAdd(vk+(i0+0)*nao+(l0+0), val);
                     val = 0;
-                    val += eri0 * dm[(i0+0)*nao+(k0+0)];
+                    val += gout0 * dm[(i0+0)*nao+(k0+0)];
                     atomicAdd(vk+(j0+0)*nao+(l0+0), val);
                     val = 0;
-                    val += eri0 * dm[(j0+0)*nao+(l0+0)];
+                    val += gout0 * dm[(j0+0)*nao+(l0+0)];
                     atomicAdd(vk+(i0+0)*nao+(k0+0), val);
                     val = 0;
-                    val += eri0 * dm[(i0+0)*nao+(l0+0)];
+                    val += gout0 * dm[(i0+0)*nao+(l0+0)];
                     atomicAdd(vk+(j0+0)*nao+(k0+0), val);
                     vk += nao * nao;
                 }
@@ -195,7 +196,11 @@ void _os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 }
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
