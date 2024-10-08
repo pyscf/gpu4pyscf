@@ -70,7 +70,7 @@ def _check_grad(mol, grid_response=False, xc='B3LYP', disp=None, tol=1e-6):
     assert(cupy.linalg.norm(g_cpu - g_gpu) < tol)
 
 class KnownValues(unittest.TestCase):
-
+    
     def test_grad_with_grids_response(self):
         print("-----testing DFT gradient with grids response----")
         _check_grad(mol_sph, grid_response=True, tol=1e-5)
@@ -98,11 +98,11 @@ class KnownValues(unittest.TestCase):
     def test_grad_rsh(self):
         print('--------RSH testing-------------')
         _check_grad(mol_sph, xc='wb97', disp=None, tol=1e-4)
-
+    
     def test_grad_nlc(self):
         print('--------nlc testing-------------')
         _check_grad(mol_sph, xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-5)
-
+    
     @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_grad_d3bj(self):
         print('--------- testing RKS with D3BJ ------')
@@ -129,7 +129,7 @@ class KnownValues(unittest.TestCase):
         cpu_gradient = gpu_gradient.to_cpu()
         g_cpu = cpu_gradient.kernel()
         assert cupy.linalg.norm(g_gpu - g_cpu) < 1e-5
-
+    
 if __name__ == "__main__":
     print("Full Tests for RKS Gradient")
     unittest.main()
