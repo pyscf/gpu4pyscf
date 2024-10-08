@@ -36,7 +36,6 @@ __all__ = [
 libcupy_helper = load_library('libcupy_helper')
 
 def prune_small_rho_grids_(ks, mol, dm, grids):
-    ni = ks._numint
     rho = ks._numint.get_rho_batch(mol, dm, grids, ks.max_memory, verbose=ks.verbose)
 
     threshold = ks.small_rho_cutoff
