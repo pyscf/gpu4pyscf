@@ -17,9 +17,12 @@
 import ctypes
 import copy
 import numpy as np
+import scipy.linalg
 import cupy
+from pyscf import gto
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import block_c2s_diag, cart2sph, block_diag, contract, load_library, c2s_l
+from gpu4pyscf.lib import logger
 
 LMAX_ON_GPU = 4
 FREE_CUPY_CACHE = True
@@ -722,12 +725,10 @@ def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size):
     number of AOs in each group
     '''
     l = uniq_l_ctr[:,0]
-    nf = l * (l + 1) // 2
     _l_ctrs = []
     _l_ctr_counts = []
     for l_ctr, counts in zip(uniq_l_ctr, l_ctr_counts):
         l = l_ctr[0]
-        nf = (l + 1) * (l + 2) // 2
         max_shells = group_size
         if l > LMAX_ON_GPU or counts <= max_shells:
             _l_ctrs.append(l_ctr)
