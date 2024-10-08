@@ -843,7 +843,6 @@ def nr_rks_batch(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 aow = _scale_ao(ao_flatten, wv[i][:,p0:p1]).reshape(-1,nbatch,alignment)
                 vmat_batch = contract('ikg,jkg->kij', ao_mask[0], aow)
                 reduce_sparse(vmat[i], vmat_batch, idx)
-                print(cupy.linalg.norm(vmat[i]))
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             elif xctype == 'MGGA':
@@ -866,9 +865,8 @@ def nr_rks_batch(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         t1 = log.timer_debug2('integration', *t1)
     t0 = log.timer_debug1('vxc integration', *t0)
     rev_ao_idx = opt.rev_ao_idx
-    print(cupy.linalg.norm(vmat), cupy.linalg.norm(rho_tot[0]), cupy.linalg.norm(wv[0]))
     vmat = take_last2d(vmat, rev_ao_idx)
-    exit()
+
     if xctype != 'LDA':
         transpose_sum(vmat)
 
