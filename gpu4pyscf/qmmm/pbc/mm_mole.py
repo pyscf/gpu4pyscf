@@ -193,7 +193,8 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
             Tij = 1 / r[:,mask]
             Rij = R[:,mask]
             Tija = -contract('ijx,ij->ijx', Rij, Tij**3)
-            Tijab  = 3 * contract('ija,ijb->ijab', Rij, Rij) 
+            #Tijab  = 3 * contract('ija,ijb->ijab', Rij, Rij)
+            Tijab  = 3 * Rij[:,:,:,None] * Rij[:,:,None,:]
             Tijab  = contract('ijab,ij->ijab', Tijab, Tij**5)
             Tijab -= contract('ij,ab->ijab', Tij**3, cp.eye(3))
             if all_charges2 is not None:

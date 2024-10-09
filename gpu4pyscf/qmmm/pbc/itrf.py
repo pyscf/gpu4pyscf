@@ -643,11 +643,13 @@ class QMMMGrad:
             # Tijab  = \nabla_a Tijb
             # Tijabc = \nabla_a Tijbc
             Tija = -contract('ijx,ij->ijx', Rij, Tij**3)
-            Tijab   = 3 * contract('ija,ijb->ijab', Rij, Rij) 
+            #Tijab   = 3 * contract('ija,ijb->ijab', Rij, Rij)
+            Tijab   = 3 * Rij[:,:,:,None] * Rij[:,:,None,:]
             Tijab   = contract('ijab,ij->ijab', Tijab, Tij**5)
             Tijab  -= contract('ij,ab->ijab', Tij**3, cp.eye(3))
-            Tijabc  = contract('ija,ijb->ijab', Rij, Rij)
-            Tijabc  = -15 * contract('ijab,ijc->ijabc', Tijabc, Rij)
+            #Tijabc  = contract('ija,ijb->ijab', Rij, Rij)
+            #Tijabc  = -15 * contract('ijab,ijc->ijabc', Tijabc, Rij)
+            Tijabc = -15 * Rij[:,:,:,None,None] * Rij[:,:,None,:,None] * Rij[:,:,None,None,:]
             Tijabc  = contract('ijabc,ij->ijabc', Tijabc, Tij**7)
             RTij = contract('ija,ij->ija', Rij, Tij**5)
             Tijabc += 3 * contract('ija,bc->ijabc', RTij, cp.eye(3))

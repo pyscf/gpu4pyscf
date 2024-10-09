@@ -55,8 +55,7 @@ def energy_octupole(coords1, coords2, octupoles, charges):
         rij = cp.linalg.norm(Rij, axis=-1)
         Tij = 1 / rij
         #Tijabc  = -15 * cp.einsum('ija,ijb,ijc->ijabc', Rij, Rij, Rij)
-        Tijabc = contract('ija,ijb->ijab', Rij, Rij)
-        Tijabc = -15 * contract('ijab,ijc->ijabc', Tijabc, Rij)
+        Tijabc = -15 * Rij[:,:,:,None,None] * Rij[:,:,None,:,None] * Rij[:,:,None,None,:]
         Tijabc  = contract('ijabc,ij->ijabc', Tijabc, Tij**7)
         #Tijabc += 3 * cp.einsum('ija,bc,ij->ijabc', Rij, np.eye(3), Tij**5)
         #Tijabc += 3 * cp.einsum('ijb,ac,ij->ijabc', Rij, np.eye(3), Tij**5)
