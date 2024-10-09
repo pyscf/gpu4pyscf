@@ -191,19 +191,7 @@ def energy_octupole(coords1, coords2, octupoles, charges):
     ene = 0
     for i0, i1 in lib.prange(0, len(coords1), blksize):
         Rij = coords1[i0:i1,None,:] - coords2[None,:,:]
-        rij = cp.linalg.norm(Rij, axis=-1)
-        Tij = 1 / rij
-        #Tijabc  = -15 * cp.einsum('ija,ijb,ijc->ijabc', Rij, Rij, Rij)
-        Tijabc = -15 * Rij[:,:,:,None,None] * Rij[:,:,None,:,None] * Rij[:,:,None,None,:]
-        #Tijabc  = contract('ijabc,ij->ijabc', Tijabc, Tij**7)
-        Tijabc = Tijabc * Tij[:,:,None,None,None]**7
-        #Tijabc += 3 * cp.einsum('ija,bc,ij->ijabc', Rij, np.eye(3), Tij**5)
-        #Tijabc += 3 * cp.einsum('ijb,ac,ij->ijabc', Rij, np.eye(3), Tij**5)
-        #Tijabc += 3 * cp.einsum('ijc,ab,ij->ijabc', Rij, np.eye(3), Tij**5)
-        Rij = Rij * Tij[:,:,None]**5
-        Tijabc += 3 * Rij[:,:,:,None,None] * cp.eye(3)[None,None,None,:,:]
-        Tijabc += 3 * Rij[:,:,None,:,None] * cp.eye(3)[None,None,:,None,:]
-        Tijabc += 3 * Rij[:,:,None,None,:] * cp.eye(3)[None,None,:,:,None]
+        Tijabc = get_multipole_tensors_pp(Rij, [3])[0]
         vj = contract('ijabc,iabc->j', Tijabc, octupoles[i0:i1])
         ene += cp.dot(vj, charges) / 6
     return ene.get()
