@@ -502,9 +502,10 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     # CPU tasks are executed on background
     def calculate_h1e(h1_gpu, s1_gpu):
         # (\nabla i | hcore | j) - (\nabla i | j)
-        h1_cpu = mf_grad.get_hcore(mol)
+        if mf_grad.h1_on_cpu:
+            h1_cpu = mf_grad.get_hcore(mol)
+            h1_gpu[:] = cupy.asarray(h1_cpu)
         s1_cpu = mf_grad.get_ovlp(mol)
-        h1_gpu[:] = cupy.asarray(h1_cpu)
         s1_gpu[:] = cupy.asarray(s1_cpu)
         return
 
@@ -512,6 +513,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     s1 = cupy.empty([3, dm0.shape[0], dm0.shape[1]])
     with lib.call_in_background(calculate_h1e) as calculate_hs:
         calculate_hs(h1, s1)
+        if not mf_grad.h1_on_cpu:
+            h1[:] = mf_grad.get_hcore(mol)
         # (i | \nabla hcore | j)
         t3 = log.init_timer()
         dh1e = int3c2e.get_dh1e(mol, dm0)
@@ -680,7 +683,8 @@ class Gradients(GradientsBase):
     get_veff = get_veff
     get_jk = _get_jk
 
-    _keys = {'auxbasis_response', 'grad_disp', 'grad_mf'}
+    _keys = {'auxbasis_response', 'grad_disp', 'grad_mf', 'h1_on_cpu'}
+    h1_on_cpu = True
 
     def get_j(self, mol=None, dm=None, hermi=0, omega=None):
         vj, _ = self.get_jk(mol, dm, with_k=False, omega=omega)
