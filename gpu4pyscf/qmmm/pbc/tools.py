@@ -56,14 +56,15 @@ def energy_octupole(coords1, coords2, octupoles, charges):
         Tij = 1 / rij
         #Tijabc  = -15 * cp.einsum('ija,ijb,ijc->ijabc', Rij, Rij, Rij)
         Tijabc = -15 * Rij[:,:,:,None,None] * Rij[:,:,None,:,None] * Rij[:,:,None,None,:]
-        Tijabc  = contract('ijabc,ij->ijabc', Tijabc, Tij**7)
+        #Tijabc  = contract('ijabc,ij->ijabc', Tijabc, Tij**7)
+        Tijabc = Tijabc * Tij[:,:,None,None,None]**7
         #Tijabc += 3 * cp.einsum('ija,bc,ij->ijabc', Rij, np.eye(3), Tij**5)
         #Tijabc += 3 * cp.einsum('ijb,ac,ij->ijabc', Rij, np.eye(3), Tij**5)
         #Tijabc += 3 * cp.einsum('ijc,ab,ij->ijabc', Rij, np.eye(3), Tij**5)
-        Rij = contract('ija,ij->ija', Rij, Tij**5)
-        Tijabc += 3 * contract('ija,bc->ijabc', Rij, cp.eye(3))
-        Tijabc += 3 * contract('ijb,ac->ijabc', Rij, cp.eye(3))
-        Tijabc += 3 * contract('ijc,ab->ijabc', Rij, cp.eye(3))
+        Rij = Rij * Tij[:,:,None]**5
+        Tijabc += 3 * Rij[:,:,:,None,None] * cp.eye(3)[None,None,None,:,:]
+        Tijabc += 3 * Rij[:,:,None,:,None] * cp.eye(3)[None,None,:,None,:]
+        Tijabc += 3 * Rij[:,:,None,None,:] * cp.eye(3)[None,None,:,:,None]
         vj = contract('ijabc,iabc->j', Tijabc, octupoles[i0:i1])
         ene += cp.dot(vj, charges) / 6
     return ene.get()
