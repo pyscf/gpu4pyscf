@@ -78,7 +78,7 @@ int RYS_count_jk_tasks(double *vj, double *vk, double *dm, int n_dm, int nao,
         nroots, stride_j, stride_k, stride_l, iprim, jprim, kprim, lprim,
         nbatches, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
         q_cond, dm_cond, cutoff};
-    JKMatrix jk = {n_dm, vj, vk, dm};
+    JKMatrix jk = {vj, vk, dm, (uint16_t)n_dm};
 
     cudaMemset(batch_head, 0, 2*sizeof(uint32_t));
 

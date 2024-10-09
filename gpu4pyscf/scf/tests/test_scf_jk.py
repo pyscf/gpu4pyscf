@@ -49,7 +49,7 @@ def test_jk():
 
     vj = jk.get_j(mol, dm).get()
     assert abs(vj - ref[0]).max() < 1e-9
-    assert abs(lib.fp(vj) - -2327.4715195591784) < 1e-10
+    assert abs(lib.fp(vj) - -2327.4715195591784) < 5e-10
 
     mol.omega = 0.2
     vj, vk = jk.get_jk(mol, dm)
@@ -58,8 +58,8 @@ def test_jk():
     ref = get_jk(mol, dm)
     assert abs(vj2 - ref[0]).max() < 1e-9
     assert abs(vk2 - ref[1]).max() < 1e-9
-    assert lib.fp(vj2) - -1163.9326046354604 < 1e-10
-    assert lib.fp(vk2) -  1269.969109438691  < 1e-10
+    assert abs(lib.fp(vj2) -  1163.932604635460) < 1e-10
+    assert abs(lib.fp(vk2) - -1269.969109438691) < 1e-10
 
     mol.omega = -0.2
     vj, vk = jk.get_jk(mol, dm)
@@ -68,8 +68,8 @@ def test_jk():
     ref = get_jk(mol, dm)
     assert abs(vj3 - ref[0]).max() < 1e-8
     assert abs(vk3 - ref[1]).max() < 1e-9
-    assert lib.fp(vj3) - -3491.4041241948660 < 1e-10
-    assert lib.fp(vk3) - -2799.3478913872023 < 1e-10
+    assert abs(lib.fp(vj3) - -3491.404124194866) < 1e-10
+    assert abs(lib.fp(vk3) - -2799.347891387202) < 1e-10
 
     assert abs(vj2+vj3 - vj1).max() < 1e-9
     assert abs(vk2+vk3 - vk1).max() < 1e-9

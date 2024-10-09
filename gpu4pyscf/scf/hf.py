@@ -421,6 +421,8 @@ class SCF(pyscf_lib.StreamObject):
     check_convergence        = None
     _eigh                    = staticmethod(eigh)
     eig                      = hf.SCF.eig
+    do_disp                  = hf.SCF.do_disp
+    get_dispersion           = hf.SCF.get_dispersion
 
     scf                      = hf.SCF.scf
     as_scanner               = hf.SCF.as_scanner

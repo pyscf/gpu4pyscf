@@ -57,10 +57,11 @@ typedef struct {
 } RysIntEnvVars;
 
 typedef struct {
-    int n_dm;
     double *vj;
     double *vk;
     double *dm;
+    uint16_t n_dm;
+    uint16_t atom_offset;
 } JKMatrix;
 
 typedef struct {

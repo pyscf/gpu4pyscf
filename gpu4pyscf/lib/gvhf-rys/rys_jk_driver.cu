@@ -83,7 +83,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
         nbatches, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
         q_cond, dm_cond, cutoff};
 
-    JKMatrix jk = {n_dm, vj, NULL, dm};
+    JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(uint32_t));
 
     if (!rys_j_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
@@ -154,7 +154,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         nbatches, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
         q_cond, dm_cond, cutoff};
 
-    JKMatrix jk = {n_dm, vj, vk, dm};
+    JKMatrix jk = {vj, vk, dm, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(uint32_t));
 
     if (omega >= 0) {

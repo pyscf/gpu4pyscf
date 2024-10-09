@@ -31,7 +31,6 @@ THREADS = 256
 
 # TODO: test different size for L2 cache efficiency
 NAO_IN_GROUP = 1500
-SHL_IN_GROUP = 500
 
 libvhf_rys = load_library('libgvhf_rys')
 libvhf_rys.RYS_build_jk.restype = ctypes.c_int
@@ -324,7 +323,7 @@ class _VHFOpt:
         self.tile_q_cond = None
         self.tile = TILE
 
-    def build(self, omega=None, verbose=None):
+    def build(self, group_size=None, verbose=None):
         mol = self.mol
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
@@ -379,7 +378,9 @@ class _VHFOpt:
         assert mol._bas.dtype == np.int32
 
         ## Limit the number of AOs in each group
-        #uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, tile)
+        if group_size is not None:
+            uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(
+                uniq_l_ctr, l_ctr_counts, group_size, tile)
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
 
@@ -509,7 +510,8 @@ def basis_seg_contraction(mol, allow_replica=1):
         contr_coeff = contr_coeff.dot(mol.cart2sph_coeff())
     return pmol, contr_coeff
 
-def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, align):
+def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size=NAO_IN_GROUP,
+                        align=TILE):
     '''Splits l_ctr patterns into small groups with group_size the maximum
     number of AOs in each group
     '''
@@ -520,7 +522,7 @@ def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, align):
     for l_ctr, counts in zip(uniq_l_ctr, l_ctr_counts):
         l = l_ctr[0]
         nf = (l + 1) * (l + 2) // 2
-        max_shells = min(SHL_IN_GROUP, max(NAO_IN_GROUP // nf, 2))
+        max_shells = max(group_size//nf-align+1, align, 2)
         max_shells = (max_shells + align - 1) & (0x100000-align)
         if counts <= max_shells:
             _l_ctrs.append(l_ctr)

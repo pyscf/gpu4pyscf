@@ -458,7 +458,7 @@ class _VHFOpt:
         self._qcondname = qcondname
         self._dmcondname = dmcondname
 
-    def build(self, cutoff=1e-13, group_size=600, diag_block_with_triu=False):
+    def build(self, cutoff=1e-13, group_size=None, diag_block_with_triu=False):
         mol = self.mol
         cput0 = logger.init_timer(mol)
         # Sort basis according to angular momentum and contraction patterns so
@@ -472,10 +472,10 @@ class _VHFOpt:
             uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(
                 uniq_l_ctr, l_ctr_counts, group_size)
 
-        if mol.verbose >= logger.DEBUG:
-            logger.debug1(mol, 'Number of shells for each [l, nctr] group')
+        if mol.verbose >= logger.DEBUG1:
+            logger.debug1(mol, 'Number of shells for each [l, nprim] group')
             for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
-                logger.debug(mol, '    %s : %s', l_ctr, n)
+                logger.debug1(mol, '    %s : %s', l_ctr, n)
 
         sorted_idx = np.argsort(inv_idx.ravel(), kind='stable').astype(np.int32)
         # Sort contraction coefficients before updating self.mol
@@ -729,7 +729,8 @@ def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size):
     _l_ctr_counts = []
     for l_ctr, counts in zip(uniq_l_ctr, l_ctr_counts):
         l = l_ctr[0]
-        max_shells = group_size
+        nf = (l + 1) * (l + 2) // 2
+        max_shells = max(group_size // nf, 2)
         if l > LMAX_ON_GPU or counts <= max_shells:
             _l_ctrs.append(l_ctr)
             _l_ctr_counts.append(counts)
