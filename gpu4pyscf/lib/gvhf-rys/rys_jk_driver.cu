@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <cuda.h>
 #include <cuda_runtime.h>
 
 #include "vhf.cuh"
@@ -218,5 +219,10 @@ void RYS_init_rysj_constant(int shm_size)
     cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
     cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_j_with_gout_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+}
+
+int cuda_version()
+{
+    return CUDA_VERSION;
 }
 }
