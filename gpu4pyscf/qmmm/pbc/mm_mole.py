@@ -29,6 +29,7 @@ from pyscf import lib
 import cupy as cp
 from gpu4pyscf.df.df import ALIGNED, MIN_BLK_SIZE
 from gpu4pyscf.lib import cupy_helper
+from gpu4pyscf.qmmm.pbc.tools import get_multipole_tensors_pp, get_multipole_tensors_pg
 
 contract = cupy_helper.contract
 
@@ -190,13 +191,7 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
     
             # substract the real-space Coulomb within rcut_hcore
             mask = dist2 <= self.rcut_hcore**2
-            Tij = 1 / r[:,mask]
-            Rij = R[:,mask]
-            Tija = -contract('ijx,ij->ijx', Rij, Tij**3)
-            #Tijab  = 3 * contract('ija,ijb->ijab', Rij, Rij)
-            Tijab  = 3 * Rij[:,:,:,None] * Rij[:,:,None,:]
-            Tijab  = contract('ijab,ij->ijab', Tijab, Tij**5)
-            Tijab -= contract('ij,ab->ijab', Tij**3, cp.eye(3))
+            Tij, Tija, Tijab = get_multipole_tensors_pp(R[:,mask], [0,1,2], r[:,mask])
             if all_charges2 is not None:
                 charges = all_charges2[mask]
                 # ew0 = -d^2 E / dQi dqj qj
@@ -234,21 +229,10 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                 r_ = r[:,mask]
                 R_ = R[:,mask]
                 if expnts.size != 0:
-                    ekR = cp.exp(-contract('j,ij->ij', expnts**2, r_**2))
-                    Tij = erfc(contract('j,ij->ij', expnts, r_)) / r_
-                    invr3 = (Tij + contract('j,ij->ij', expnts, 2/cp.sqrt(cp.pi)*ekR)) / r_**2
-                    Tija = -contract('ijx,ij->ijx', R_, invr3)
-                    temp = contract('ijb,ij->ijb', R_, 1/r_**2)
-                    Tijab  = 3 * contract('ija,ijb->ijab', R_, temp)
-                    Tijab -= contract('ij,ab->ijab', cp.ones_like(r_), cp.eye(3))
-                    invr5 = invr3 + contract('j,ij->ij', expnts**3, 4/3/cp.sqrt(cp.pi) * ekR)
-                    Tijab = contract('ijab,ij->ijab', Tijab, invr5)
-                    temp = contract('j,ij->ij', expnts**3, 4/3/cp.sqrt(cp.pi)*ekR)
-                    Tijab += contract('ij,ab->ijab', temp, cp.eye(3))
+                    Tij, Tija, Tijab = get_multipole_tensors_pg(R_, expnts, [0,1,2], r_)
                     ewovrl0[i0:i1] -= contract('ij,j->i', Tij, all_charges2[mask])
                     ewovrl1[i0:i1] -= contract('j,ija->ia', all_charges2[mask], Tija)
                     ewovrl2[i0:i1] -= contract('j,ijab->iab', all_charges2[mask], Tijab) / 3
-                    temp = None
     
             # ewald real-space sum
             if all_charges2 is not None:
@@ -262,21 +246,7 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                 # this is to ensure r and R will always have the shape of (i1-i0, L*num_qm)
                 r_ = r
                 R_ = R
-            ekR = cp.exp(-ew_eta**2 * r_**2)
-            # Tij = \hat{1/r} = f0 / r = erfc(r) / r
-            Tij = erfc(ew_eta * r_) / r_
-            # Tija = -Rija \hat{1/r^3} = -Rija / r^2 ( \hat{1/r} + 2 eta/sqrt(pi) exp(-eta^2 r^2) )
-            invr3 = (Tij + 2*ew_eta/cp.sqrt(cp.pi) * ekR) / r_**2
-            Tija = -contract('ijx,ij->ijx', R_, invr3)
-            # Tijab = (3 RijaRijb - Rij^2 delta_ab) \hat{1/r^5}
-            #Tijab  = 3 * contract('ija,ijb,ij->ijab', R_, R_, 1/r_**2)
-            Tijab  = 3 * contract('ijb,ij->ijb', R_, 1/r_**2)
-            Tijab  = contract('ija,ijb->ijab', R_, Tijab)
-            Tijab -= contract('ij,ab->ijab', cp.ones_like(r_), cp.eye(3))
-            invr5 = invr3 + 4/3*ew_eta**3/cp.sqrt(cp.pi) * ekR # NOTE this is invr5 * r**2
-            Tijab = contract('ijab,ij->ijab', Tijab, invr5)
-            # NOTE the below is present in Eq 8 but missing in Eq 12
-            Tijab += 4/3*ew_eta**3/cp.sqrt(cp.pi)*contract('ij,ab->ijab', ekR, cp.eye(3))
+            Tij, Tija, Tijab = get_multipole_tensors_pg(R_, ew_eta, [0,1,2], r_)
     
             if all_charges2 is not None:
                 ewovrl0[i0:i1] += contract('ij,j->i', Tij, all_charges2_)

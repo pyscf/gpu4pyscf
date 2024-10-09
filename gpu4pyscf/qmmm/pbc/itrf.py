@@ -29,6 +29,7 @@ from gpu4pyscf.qmmm.pbc import mm_mole
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df.df import ALIGNED, MIN_BLK_SIZE
 from gpu4pyscf.lib import cupy_helper
+from gpu4pyscf.qmmm.pbc.tools import get_multipole_tensors_pp, get_multipole_tensors_pg
 
 contract = cupy_helper.contract
 
@@ -639,79 +640,8 @@ class QMMMGrad:
         rmax_qm = max(cp.linalg.norm(qm_coords - cp.mean(qm_coords, axis=0), axis=-1))
         qm_ewovrl_grad = cp.zeros_like(qm_coords)
 
-        def grad_Tij(R, r):
-            Rij = R
-            Tij = 1 / r
-            # Tija   = \nabla_a Tij
-            # Tijab  = \nabla_a Tijb
-            # Tijabc = \nabla_a Tijbc
-            Tija = -contract('ijx,ij->ijx', Rij, Tij**3)
-            #Tijab   = 3 * contract('ija,ijb->ijab', Rij, Rij)
-            Tijab   = 3 * Rij[:,:,:,None] * Rij[:,:,None,:]
-            Tijab   = contract('ijab,ij->ijab', Tijab, Tij**5)
-            Tijab  -= contract('ij,ab->ijab', Tij**3, cp.eye(3))
-            #Tijabc  = contract('ija,ijb->ijab', Rij, Rij)
-            #Tijabc  = -15 * contract('ijab,ijc->ijabc', Tijabc, Rij)
-            Tijabc = -15 * Rij[:,:,:,None,None] * Rij[:,:,None,:,None] * Rij[:,:,None,None,:]
-            Tijabc  = contract('ijabc,ij->ijabc', Tijabc, Tij**7)
-            RTij = contract('ija,ij->ija', Rij, Tij**5)
-            Tijabc += 3 * contract('ija,bc->ijabc', RTij, cp.eye(3))
-            Tijabc += 3 * contract('ijb,ac->ijabc', RTij, cp.eye(3))
-            Tijabc += 3 * contract('ijc,ab->ijabc', RTij, cp.eye(3))
-            return Tija, Tijab, Tijabc
-
-        def grad_kTij(R, r, eta):
-            if isinstance(eta, float):
-                Tij = erfc(eta * r) / r
-                ekR = cp.exp(-eta**2 * r**2)
-                Tij = erfc(eta * r) / r
-                invr3 = (Tij + 2*eta/np.sqrt(np.pi) * ekR) / r**2
-                Tija = -contract('ijx,ij->ijx', R, invr3)
-                Tijab  = contract('ijb,ij->ijb', R, 1/r**2)
-                Tijab  = 3 * contract('ija,ijb->ijab', R, Tijab)
-                Tijab -= contract('ij,ab->ijab', np.ones_like(r), cp.eye(3))
-                invr5 = invr3 + 4/3*eta**3/np.sqrt(np.pi) * ekR # NOTE this is invr5 * r**2
-                Tijab = contract('ijab,ij->ijab', Tijab, invr5)
-                Tijab += 4/3*eta**3/np.sqrt(np.pi)*contract('ij,ab->ijab', ekR, cp.eye(3))
-                invr7 = invr5 / r**2 + 8/15 / np.sqrt(np.pi) * eta**5 * ekR  # NOTE this is invr7 * r**2
-                Tijabc  = contract('ija,ijb->ijab', R, R)
-                Tijabc  = -15 * contract('ijab,ijc->ijabc', Tijabc, R)
-                Tijabc  = contract('ijabc,ij->ijabc', Tijabc, 1/r**2)
-                Tijabc += 3 * contract('ija,bc->ijabc', R, cp.eye(3))
-                Tijabc += 3 * contract('ijb,ac->ijabc', R, cp.eye(3))
-                Tijabc += 3 * contract('ijc,ab->ijabc', R, cp.eye(3))
-                Tijabc = contract('ijabc,ij->ijabc', Tijabc, invr7)
-                ekRR = contract('ij,ija->ija', ekR, R)
-                Tijabc -= 8/5 / np.sqrt(np.pi) * eta**5 * contract('ija,bc->ijabc', ekRR, cp.eye(3))
-                Tijabc -= 8/5 / np.sqrt(np.pi) * eta**5 * contract('ijb,ac->ijabc', ekRR, cp.eye(3))
-                Tijabc -= 8/5 / np.sqrt(np.pi) * eta**5 * contract('ijc,ab->ijabc', ekRR, cp.eye(3))
-                return Tija, Tijab, Tijabc
-            else:
-                Tij = erfc(eta * r) / r
-                ekR = np.exp(-eta**2 * r**2)
-                Tij = erfc(eta * r) / r
-                invr3 = (Tij + 2*eta/np.sqrt(np.pi) * ekR) / r**2
-                Tija = -contract('ijx,ij->ijx', R, invr3)
-                Tijab  = contract('ijb,ij->ijb', R, 1/r**2)
-                Tijab  = 3 * contract('ija,ijb->ijab', R, Tijab)
-                Tijab -= contract('ij,ab->ijab', np.ones_like(r), cp.eye(3))
-                invr5 = invr3 + 4/3*eta**3/np.sqrt(np.pi) * ekR # NOTE this is invr5 * r**2
-                Tijab = contract('ijab,ij->ijab', Tijab, invr5)
-                eekR = contract('j,ij->ij', eta**3, ekR)
-                Tijab += 4/3/np.sqrt(np.pi)*contract('ij,ab->ijab', eekR, cp.eye(3))
-                invr7 = invr5 / r**2 + 8/15 / np.sqrt(np.pi) * eta**5 * ekR  # NOTE this is invr7 * r**2
-                Tijabc  = contract('ija,ijb->ijab', R, R)
-                Tijabc  = -15 * contract('ijab,ijc->ijabc', Tijabc, R)
-                Tijabc  = contract('ijabc,ij->ijabc', Tijabc, 1/r**2)
-                Tijabc += 3 * contract('ija,bc->ijabc', R, cp.eye(3))
-                Tijabc += 3 * contract('ijb,ac->ijabc', R, cp.eye(3))
-                Tijabc += 3 * contract('ijc,ab->ijabc', R, cp.eye(3))
-                Tijabc = contract('ijabc,ij->ijabc', Tijabc, invr7)
-                eekRR = contract('ij,ija->ija', contract('j,ij->ij', eta**5, ekR), R)
-                Tijabc -= 8/5 / np.sqrt(np.pi) * contract('ija,bc->ijabc', eekRR, cp.eye(3))
-                Tijabc -= 8/5 / np.sqrt(np.pi) * contract('ijb,ac->ijabc', eekRR, cp.eye(3))
-                Tijabc -= 8/5 / np.sqrt(np.pi) * contract('ijc,ab->ijabc', eekRR, cp.eye(3))
-                return Tija, Tijab, Tijabc
+        grad_Tij = lambda R, r: get_multipole_tensors_pp(R, [1,2,3], r)
+        grad_kTij = lambda R, r, eta: get_multipole_tensors_pg(R, eta, [1,2,3], r)
 
         def grad_qm_multipole(Tija, Tijab, Tijabc, 
                               qm_charges, qm_dipoles, qm_quads, 

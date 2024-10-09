@@ -24,7 +24,146 @@ from pyscf.lib import param, logger
 
 from gpu4pyscf.lib import cupy_helper
 
+from cupyx.scipy.special import erfc, erf
+
 contract = cupy_helper.contract
+
+def get_multipole_tensors_pp(Rij, multipole_orders, rij=None):
+    ''' Compute the interaction tensors between point multipoles.
+
+    Args:
+        Rij : 3D array, shape (Ni,Nj,3)
+            Distance vectors pointing from particle j to i
+        multipole_orders : list of int
+            orders of multipole interactions to compute
+            0: Tij, 1: Tija, 2: Tijab, ...
+
+    Kwargs:
+        rij : 2D array, shape (Ni,Nj)
+            Distance between particles i and j
+
+    Returns:
+        A list of multipole tensors requested in ascending order
+    '''
+    if max(multipole_orders) > 3:
+        raise NotImplementedError('Tijabcd or higher not implemented')
+    if rij is None:
+        rij = cp.linalg.norm(Rij, axis=-1)
+
+    res = list()
+
+    Tij = 1 / rij
+    if 0 in multipole_orders:
+        res.append(Tij)
+    if 1 in multipole_orders:
+        Tija = -Rij * Tij[:,:,None]**3
+        res.append(Tija)
+    if 2 in multipole_orders:
+        Tijab  = 3 * Rij[:,:,:,None] * Rij[:,:,None,:] * Tij[:,:,None,None]**5
+        Tijab -= Tij[:,:,None,None]**3 * cp.eye(3)[None,None,:,:]
+        res.append(Tijab)
+    if 3 in multipole_orders:
+        Tijabc = -15 * Rij[:,:,:,None,None] * Rij[:,:,None,:,None] * Rij[:,:,None,None,:]\
+            * Tij[:,:,None,None,None]**7
+        Rij = Rij * Tij[:,:,None]**5
+        Tijabc += 3 * Rij[:,:,:,None,None] * cp.eye(3)[None,None,None,:,:]
+        Tijabc += 3 * Rij[:,:,None,:,None] * cp.eye(3)[None,None,:,None,:]
+        Tijabc += 3 * Rij[:,:,None,None,:] * cp.eye(3)[None,None,:,:,None]
+        res.append(Tijabc)
+    return res
+
+def get_multipole_tensors_pg(Rij, eta, multipole_orders, rij=None):
+    ''' Compute the interaction tensors between point and gaussian multipoles.
+
+    Args:
+        Rij : 3D array, shape (Ni,Nj,3)
+            Distance vectors pointing from particle j to i
+        eta : float or 1D array, shape (Nj,)
+            Exponents of gaussians
+        multipole_orders : list of int
+            orders of multipole interactions to compute
+            0: Tij, 1: Tija, 2: Tijab, ...
+
+    Kwargs:
+        rij : 2D array, shape (Ni,Nj)
+            Distance between particles i and j
+
+    Returns:
+        A list of multipole tensors requested in ascending order
+    '''
+    if max(multipole_orders) > 3:
+        raise NotImplementedError('Tijabcd or higher not implemented')
+    if rij is None:
+        rij = cp.linalg.norm(Rij, axis=-1)
+
+    res_dict = dict()
+
+    if isinstance(eta, float):
+        Tij = erfc(eta * rij) / rij
+        res_dict[0] = Tij
+        if max(multipole_orders) > 0:
+            ekR = cp.exp(-eta**2 * rij**2)
+            invr3 = (Tij + 2*eta/np.sqrt(np.pi) * ekR) / rij**2
+            Tija = -Rij * invr3[:,:,None]
+            res_dict[1] = Tija
+        if max(multipole_orders) > 1:
+            Tijab  = Rij /rij[:,:,None]**2
+            Tijab  = 3 * Rij[:,:,:,None] * Tijab[:,:,None,:]
+            Tijab -= cp.ones_like(rij)[:,:,None,None] * cp.eye(3)[None,None,:,:]
+            invr5 = invr3 + 4/3*eta**3/np.sqrt(np.pi) * ekR # NOTE this is invr5 * r**2
+            Tijab = Tijab * invr5[:,:,None,None]
+            # NOTE the below is present in Eq 8 but missing in Eq 12
+            # J. Chem. Phys. 119, 7471–7483 (2003)
+            Tijab += 4/3*eta**3/np.sqrt(np.pi)* ekR[:,:,None,None] * cp.eye(3)[None,None,:,:]
+            res_dict[2] = Tijab
+        if max(multipole_orders) > 2:
+            invr7 = invr5 / rij**2 + 8/15 / np.sqrt(np.pi) * eta**5 * ekR  # NOTE this is invr7 * r**2
+            Tijabc  = -15 * Rij[:,:,:,None,None] * Rij[:,:,None,:,None] * Rij[:,:,None,None,:]\
+                / rij[:,:,None,None,None]**2
+            Tijabc += 3 * Rij[:,:,:,None,None] * cp.eye(3)[None,None,None,:,:]
+            Tijabc += 3 * Rij[:,:,None,:,None] * cp.eye(3)[None,None,:,None,:]
+            Tijabc += 3 * Rij[:,:,None,None,:] * cp.eye(3)[None,None,:,:,None]
+            Tijabc = Tijabc * invr7[:,:,None,None,None]
+            ekRR = ekR[:,:,None] * Rij
+            Tijabc -= 8/5 / np.sqrt(np.pi) * eta**5 * ekRR[:,:,:,None,None] * cp.eye(3)[None,None,None,:,:]
+            Tijabc -= 8/5 / np.sqrt(np.pi) * eta**5 * ekRR[:,:,None,:,None] * cp.eye(3)[None,None,:,None,:]
+            Tijabc -= 8/5 / np.sqrt(np.pi) * eta**5 * ekRR[:,:,None,None,:] * cp.eye(3)[None,None,:,:,None]
+            res_dict[3] = Tijabc
+    else:
+        Tij = erfc(eta * rij) / rij
+        res_dict[0] = Tij
+        if max(multipole_orders) > 0:
+            ekR = cp.exp(-eta**2 * rij**2)
+            invr3 = (Tij + 2*eta/np.sqrt(np.pi) * ekR) / rij**2
+            Tija = -Rij * invr3[:,:,None]
+            res_dict[1] = Tija
+        if max(multipole_orders) > 1:
+            Tijab  = Rij /rij[:,:,None]**2
+            Tijab  = 3 * Rij[:,:,:,None] * Tijab[:,:,None,:]
+            Tijab -= cp.ones_like(rij)[:,:,None,None] * cp.eye(3)[None,None,:,:]
+            invr5 = invr3 + 4/3*eta**3/np.sqrt(np.pi) * ekR # NOTE this is invr5 * r**2
+            Tijab = Tijab * invr5[:,:,None,None]
+            eekR = eta[None,:]**3 * ekR
+            Tijab += 4/3/np.sqrt(np.pi)* eekR[:,:,None,None] * cp.eye(3)[None,None,:,:]
+            res_dict[2] = Tijab
+        if max(multipole_orders) > 2:
+            invr7 = invr5 / rij**2 + 8/15 / np.sqrt(np.pi) * eta**5 * ekR  # NOTE this is invr7 * r**2
+            Tijabc  = -15 * Rij[:,:,:,None,None] * Rij[:,:,None,:,None] * Rij[:,:,None,None,:]\
+                / rij[:,:,None,None,None]**2
+            Tijabc += 3 * Rij[:,:,:,None,None] * cp.eye(3)[None,None,None,:,:]
+            Tijabc += 3 * Rij[:,:,None,:,None] * cp.eye(3)[None,None,:,None,:]
+            Tijabc += 3 * Rij[:,:,None,None,:] * cp.eye(3)[None,None,:,:,None]
+            Tijabc = Tijabc * invr7[:,:,None,None,None]
+            eekRR = eta[None,:,None]**2 * eekR[:,:,None] * Rij
+            Tijabc -= 8/5 / np.sqrt(np.pi) * eekRR[:,:,:,None,None] * cp.eye(3)[None,None,None,:,:]
+            Tijabc -= 8/5 / np.sqrt(np.pi) * eekRR[:,:,None,:,None] * cp.eye(3)[None,None,:,None,:]
+            Tijabc -= 8/5 / np.sqrt(np.pi) * eekRR[:,:,None,None,:] * cp.eye(3)[None,None,:,:,None]
+            res_dict[3] = Tijabc
+
+    res = list()
+    for i in np.unique(multipole_orders):
+        res.append(res_dict[i])
+    return res
 
 def get_qm_octupoles(mol, dm):
     dm = cp.asarray(dm)
