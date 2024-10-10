@@ -260,7 +260,7 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                 ewovrl01[i0:i1] -= Tija
                 ewovrl11[i0:i1] -= Tijab
                 ewovrl02[i0:i1] += Tijab / 3
-            ekR = Tij = invr3 = Tijab = invr5 = None
+            Tij = Tijab = None
     
             if all_charges2 is not None:
                 pass
