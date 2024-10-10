@@ -425,7 +425,11 @@ static void rys_j_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                   ShellQuartet *pool, uint32_t *batch_head)
 {
@@ -728,7 +732,11 @@ static void rys_j_with_gout(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             ShellQuartet *pool, uint32_t *batch_head)
 {
