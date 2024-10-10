@@ -45,6 +45,9 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         omega = 0.0
     if vhfopt is None:
         vhfopt = _VHFOpt(mol, 'int2e').build(diag_block_with_triu=False)
+    if vhfopt.h_shls:
+        raise NotImplementedError
+
     out_cupy = isinstance(dm, cupy.ndarray)
     if not isinstance(dm, cupy.ndarray):
         dm = cupy.asarray(dm)

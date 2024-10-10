@@ -705,7 +705,7 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nf3_ij = (lij+1)*(lij+2)*(lij+3)/6
     nf3_kl = (lkl+1)*(lkl+2)*(lkl+3)/6
     nroots = order // 2 + 1
-    lmax = 4
+    lmax = 4  # not angular momentum of orbital basis. see rys_contract_j kernel
     max_order = 6
     if order <= max_order and lij <= lmax and lkl <= lmax:
         if CUDA_VERSION >= 12040 and order <= 2:
