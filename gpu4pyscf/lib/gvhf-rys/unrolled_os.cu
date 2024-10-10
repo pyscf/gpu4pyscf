@@ -89,7 +89,7 @@ void _os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-
+    
         gout0 = 0;
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
@@ -212,8 +212,9 @@ void os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         batch_id = atomicAdd(batch_head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    while (batch_id < bounds.nbatches) {
+    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
+    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
+    while (batch_id < nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;

@@ -36,7 +36,7 @@
 // 2MB per block
 #define QUEUE_DEPTH     262144
 #define TILES_IN_BATCH  (QUEUE_DEPTH/(TILE*TILE*TILE*TILE))
-
+#define QUEUE_DEPTH1    65536
 
 #define MIN(x, y)       ((x) < (y) ? (x) : (y))
 #define MAX(x, y)       ((x) > (y) ? (x) : (y))
@@ -81,8 +81,8 @@ typedef struct {
     uint8_t jprim;
     uint8_t kprim;
     uint8_t lprim;
-    int nbatches;
-    int ntile_pairs;
+    union {int ntile_ij_pairs; int npairs_ij;};
+    union {int ntile_kl_pairs; int npairs_kl;};
     int *tile_ij_mapping;
     int *tile_kl_mapping;
     float *q_cond;

@@ -15,12 +15,16 @@ static int _fill_jk_tasks(ShellQuartet *shl_quartet_idx,
     int *tile_ij_mapping = bounds.tile_ij_mapping;
     int *tile_kl_mapping = bounds.tile_kl_mapping;
     float *q_cond = bounds.q_cond;
+#if TILE == 1
+    float *tile_q_cond = q_cond;
+#else
     float *tile_q_cond = q_cond + nbas*nbas;
+#endif
     float *dm_cond = bounds.dm_cond;
     float cutoff = bounds.cutoff;
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int t_kl0 = batch_kl * TILES_IN_BATCH;
-    int t_kl1 = MIN(t_kl0 + TILES_IN_BATCH, bounds.ntile_pairs);
+    int t_kl1 = MIN(t_kl0 + TILES_IN_BATCH, bounds.ntile_kl_pairs);
     int threads = blockDim.x * blockDim.y;
 
     int tile_ij = tile_ij_mapping[batch_ij];
@@ -173,7 +177,11 @@ static int _fill_sr_jk_tasks(ShellQuartet *shl_quartet_idx,
     int *tile_ij_mapping = bounds.tile_ij_mapping;
     int *tile_kl_mapping = bounds.tile_kl_mapping;
     float *q_cond = bounds.q_cond;
+#if TILE == 1
+    float *tile_q_cond = q_cond;
+#else
     float *tile_q_cond = q_cond + nbas*nbas;
+#endif
     int nbas_tiles = nbas / TILE;
     // TODO: implement q_ijij_cond
     float *s_estimator = tile_q_cond + nbas_tiles*nbas_tiles;
@@ -181,7 +189,7 @@ static int _fill_sr_jk_tasks(ShellQuartet *shl_quartet_idx,
     float cutoff = bounds.cutoff;
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int t_kl0 = batch_kl * TILES_IN_BATCH;
-    int t_kl1 = MIN(t_kl0 + TILES_IN_BATCH, bounds.ntile_pairs);
+    int t_kl1 = MIN(t_kl0 + TILES_IN_BATCH, bounds.ntile_kl_pairs);
     int threads = blockDim.x * blockDim.y;
 
     int tile_ij = tile_ij_mapping[batch_ij];

@@ -1,5 +1,4 @@
 import ctypes
-import functools
 import math
 import numpy as np
 import cupy as cp
@@ -37,8 +36,7 @@ libvhf_rys.RYS_build_jk.restype = ctypes.c_int
 libvhf_rys.cuda_version.restype = ctypes.c_int
 CUDA_VERSION = libvhf_rys.cuda_version()
 
-def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
-           verbose=None):
+def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, verbose=None):
     '''Compute J, K matrices
     '''
     log = logger.new_logger(mol, verbose)
@@ -47,10 +45,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         raise NotImplementedError('JK-builder only supports hermitian density matrix')
 
     if vhfopt is None:
-        with mol.with_range_coulomb(omega):
-            vhfopt = _VHFOpt(mol).build()
-    if omega is None:
-        omega = mol.omega
+        vhfopt = _VHFOpt(mol).build()
 
     mol = vhfopt.mol
     nao, nao_orig = vhfopt.coeff.shape
@@ -84,29 +79,11 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     l_ctr_bas_loc = vhfopt.l_ctr_offsets
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     n_groups = len(uniq_l_ctr)
-    ntiles = mol.nbas // TILE
-    tile_mappings = {}
+    tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
+                                             log_cutoff-log_max_dm)
     workers = gpu_specs['multiProcessorCount']
     pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
     info = cp.empty(2, dtype=np.uint32)
-
-    for i in range(n_groups):
-        for j in range(i+1):
-            ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
-            jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
-            ij_shls = (ish0, ish1, jsh0, jsh1)
-            i0 = ish0 // TILE
-            i1 = ish1 // TILE
-            j0 = jsh0 // TILE
-            j1 = jsh1 // TILE
-            sub_tile_q = vhfopt.tile_q_cond[i0:i1,j0:j1]
-            mask = sub_tile_q > log_cutoff - log_max_dm
-            if i == j:
-                mask = cp.tril(mask)
-            t_ij = (cp.arange(i0, i1, dtype=np.int32)[:,None] * ntiles +
-                    cp.arange(j0, j1, dtype=np.int32))
-            idx = cp.argsort(sub_tile_q[mask])[::-1]
-            tile_mappings[i,j] = t_ij[mask][idx]
     t1 = log.timer_debug1('q_cond and dm_cond', *cput0)
 
     timing_collection = {}
@@ -140,7 +117,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
                         ctypes.c_float(log_cutoff),
                         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                         ctypes.cast(info.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(workers), ctypes.c_double(omega),
+                        ctypes.c_int(workers),
                         mol._atm.ctypes, ctypes.c_int(mol.natm),
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
                     if err != 0:
@@ -171,7 +148,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     log.timer('vj and vk', *cput0)
     return vj, vk
 
-def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
+def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
     '''Compute J matrix
     '''
     log = logger.new_logger(mol, verbose)
@@ -180,10 +157,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
         raise NotImplementedError('JK-builder only supports hermitian density matrix')
 
     if vhfopt is None:
-        with mol.with_range_coulomb(omega):
-            vhfopt = _VHFOpt(mol).build()
-    if omega is None:
-        omega = mol.omega
+        vhfopt = _VHFOpt(mol).build()
 
     mol = vhfopt.mol
     nao, nao_orig = vhfopt.coeff.shape
@@ -281,7 +255,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
                         ctypes.c_float(log_cutoff),
                         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                         ctypes.cast(info.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(workers), ctypes.c_double(omega),
+                        ctypes.c_int(workers),
                         mol._atm.ctypes, ctypes.c_int(mol.natm),
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
                     if err != 0:
@@ -393,22 +367,13 @@ class _VHFOpt:
         mol._bas[:,PTR_BAS_COORD] = mol._atm[mol._bas[:,ATOM_OF],PTR_COORD]
 
         nbas = mol.nbas
-        ntiles = nbas // tile
+        buf_size = nbas**2
+        if tile > 1:
+            ntiles = nbas // tile
+            buf_size += ntiles**2
         if mol.omega < 0:
-            buf = cp.empty(nbas**2*2+ntiles**2, dtype=np.float32)
-            # CVHFnr_sr_int2e_q_cond in pyscf has bugs in upper bound estimator.
-            # Use the local version of s_estimator instead
-            s_estimator = np.empty((nbas,nbas), dtype=np.float32)
-            libvhf_rys.sr_eri_s_estimator(
-                s_estimator.ctypes, ctypes.c_float(mol.omega),
-                mol._atm.ctypes, ctypes.c_int(mol.natm),
-                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-            self.s_estimator = buf[nbas**2+ntiles**2:].reshape(nbas, nbas)
-            self.s_estimator.set(s_estimator)
-        else:
-            buf = cp.empty(nbas**2+ntiles**2, dtype=np.float32)
-        self.q_cond = buf[:nbas**2].reshape(nbas, nbas)
-        self.tile_q_cond = buf[nbas**2:nbas**2+ntiles**2].reshape(ntiles, ntiles)
+            buf_size += nbas**2
+        buf = cp.empty(buf_size, dtype=np.float32)
 
         ao_loc = mol.ao_loc
         q_cond = np.empty((nbas,nbas))
@@ -418,8 +383,26 @@ class _VHFOpt:
             q_cond.ctypes, ao_loc.ctypes,
             mol._atm.ctypes, ctypes.c_int(mol.natm),
             mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+        self.q_cond = buf[:nbas**2].reshape(nbas, nbas)
         self.q_cond.set(np.log(q_cond + 1e-300).astype(np.float32))
-        self.tile_q_cond[:] = self.q_cond.reshape(ntiles,tile,ntiles,tile).max(axis=(1,3))
+        offset = nbas**2
+        if tile > 1:
+            self.tile_q_cond = buf[offset:offset+ntiles**2].reshape(ntiles, ntiles)
+            self.tile_q_cond[:] = self.q_cond.reshape(ntiles,tile,ntiles,tile).max(axis=(1,3))
+            offset += ntiles**2
+        else:
+            self.tile_q_cond = self.q_cond
+
+        if mol.omega < 0:
+            # CVHFnr_sr_int2e_q_cond in pyscf has bugs in upper bound estimator.
+            # Use the local version of s_estimator instead
+            s_estimator = np.empty((nbas,nbas), dtype=np.float32)
+            libvhf_rys.sr_eri_s_estimator(
+                s_estimator.ctypes, ctypes.c_float(mol.omega),
+                mol._atm.ctypes, ctypes.c_int(mol.natm),
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+            self.s_estimator = buf[offset:offset+nbas**2].reshape(nbas, nbas)
+            self.s_estimator.set(s_estimator)
         log.timer('Initialize q_cond', *cput0)
 
         _atm = cp.array(mol._atm)
@@ -586,6 +569,28 @@ def init_constant(mol):
         g_idx.ctypes, offsets.ctypes, mol._env.ctypes, ctypes.c_int(mol._env.size),
         ctypes.c_int(SHM_SIZE))
 
+def _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond, cutoff, tile=TILE):
+    n_groups = len(l_ctr_bas_loc) - 1
+    ntiles = tile_q_cond.shape[0]
+    tile_mappings = {}
+    for i in range(n_groups):
+        for j in range(i+1):
+            ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
+            jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
+            i0 = ish0 // tile
+            i1 = ish1 // tile
+            j0 = jsh0 // tile
+            j1 = jsh1 // tile
+            sub_tile_q = tile_q_cond[i0:i1,j0:j1]
+            mask = sub_tile_q > cutoff
+            if i == j:
+                mask = cp.tril(mask)
+            t_ij = (cp.arange(i0, i1, dtype=np.int32)[:,None] * ntiles +
+                    cp.arange(j0, j1, dtype=np.int32))
+            idx = cp.argsort(sub_tile_q[mask])[::-1]
+            tile_mappings[i,j] = t_ij[mask][idx]
+    return tile_mappings
+
 def _make_j_engine_pair_locs(mol):
     ls = mol._bas[:,ANG_OF]
     ll = (ls[:,None]+ls).ravel()
@@ -610,18 +615,16 @@ def quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     g_size = (li+1)*(lj+1)*(lk+1)*(ll+1)
     nps = l_ctr_pattern[:,1]
     ij_prims = nps[0] * nps[1]
-    nroots = (li+lj+lk+ll) // 2 + 1
+    nroots = order // 2 + 1
 
     if mol.omega >= 0:
         unit = nroots*2 + g_size*3 + ij_prims*4
     else: # SR
         unit = nroots*4 + g_size*3 + ij_prims*4
     counts = shm_size // (unit*8)
-    n = 128
-    while n >= counts:
-        n >>= 1
+    n = min(THREADS, _nearest_power2(counts))
     gout_stride = THREADS // n
-    while gout_stride < 128 and gout_size / (gout_stride*GOUT_WIDTH) > 1:
+    while gout_stride < 16 and gout_size / (gout_stride*GOUT_WIDTH) > 1:
         n //= 2
         gout_stride *= 2
     return n, gout_stride
@@ -638,7 +641,7 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     g_size = (lij+1)*(lkl+1)
     nf3_ij = (lij+1)*(lij+2)*(lij+3)/6
     nf3_kl = (lkl+1)*(lkl+2)*(lkl+3)/6
-    nroots = (li+lj+lk+ll) // 2 + 1
+    nroots = order // 2 + 1
     lmax = 4
     max_order = 6
     if order <= max_order and lij <= lmax and lkl <= lmax:
@@ -660,10 +663,16 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     if mol.omega < 0:
         unit += nroots*2
     counts = shm_size // (unit*8)
-    n = 128
-    while n >= counts:
-        n >>= 1
+    n = min(THREADS, _nearest_power2(counts))
     gout_stride = THREADS // n
     if CUDA_VERSION >= 12040:
         gout_stride *= 2
     return n, gout_stride, with_gout
+
+def _nearest_power2(n):
+    '''nearest 2**x that is smaller than n'''
+    t = 0
+    while n > 1:
+        n >>= 1
+        t += 1
+    return 2**t

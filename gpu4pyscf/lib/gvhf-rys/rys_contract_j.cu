@@ -438,8 +438,9 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         batch_id = atomicAdd(batch_head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    while (batch_id < bounds.nbatches) {
+    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
+    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
+    while (batch_id < nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
@@ -740,8 +741,9 @@ void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         batch_id = atomicAdd(batch_head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    while (batch_id < bounds.nbatches) {
+    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
+    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
+    while (batch_id < nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,

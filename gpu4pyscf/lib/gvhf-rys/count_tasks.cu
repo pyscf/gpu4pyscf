@@ -20,8 +20,9 @@ static void count_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
     __syncthreads();
     double omega = envs.env[PTR_RANGE_OMEGA];
-    int nbatches_kl = (bounds.ntile_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    while (batch_id < bounds.nbatches) {
+    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
+    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
+    while (batch_id < nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int ntasks;

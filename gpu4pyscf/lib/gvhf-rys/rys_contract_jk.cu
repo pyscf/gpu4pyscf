@@ -646,12 +646,15 @@ static void rys_sr_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds
                     }
 
                     __syncthreads();
+                    if (task_id >= ntasks) {
+                        continue;
+                    }
                     double *gx = g;
                     double *gy = gx + nsq_per_block * g_size;
                     double *gz = gy + nsq_per_block * g_size;
 #pragma unroll
                     for (int n = 0; n < GWIDTH; ++n) {
-                        int ijkl = (gout_start + n*gout_stride+gout_id);
+                        int ijkl = gout_start + n*gout_stride+gout_id;
                         int kl = ijkl / nfij;
                         int ij = ijkl % nfij;
                         if (kl >= nfkl) break;
@@ -723,8 +726,9 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         batch_id = atomicAdd(batch_head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    while (batch_id < bounds.nbatches) {
+    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
+    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
+    while (batch_id < nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
@@ -752,8 +756,9 @@ void rys_sr_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         batch_id = atomicAdd(batch_head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    while (batch_id < bounds.nbatches) {
+    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
+    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
+    while (batch_id < nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
