@@ -10,4 +10,3 @@ def KS(mol, xc='LDA,VWN'):
         return RKS(mol, xc)
     else:
         return UKS(mol, xc)
-    

@@ -13,10 +13,29 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
-
 '''
-dispersion correction for HF and DFT
+Compute J and K matrices separately. The J matrix is evaluated using J-engine.
 '''
 
-from pyscf.scf import dispersion
+import pyscf
+from gpu4pyscf import scf
+from gpu4pyscf.scf import jk
+
+mol = pyscf.M(
+atom = '''
+O       0.0000000000    -0.0000000000     0.1174000000
+H      -0.7570000000    -0.0000000000    -0.4696000000
+H       0.7570000000     0.0000000000    -0.4696000000
+''',
+basis='def2-tzvp',
+verbose=5
+)
+
+def get_veff(self, mol, dm, *args, **kwargs):
+    vj = jk.get_j(mol, dm[0] + dm[1])
+    _, vk = jk.get_jk(mol, dm, with_j=False)
+    return vj - vk
+
+scf.uhf.UHF.get_veff = get_veff
+
+mf = mol.UHF().to_gpu().run()

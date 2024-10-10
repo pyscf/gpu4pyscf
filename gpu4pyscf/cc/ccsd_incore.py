@@ -31,7 +31,7 @@ from pyscf.ao2mo import _ao2mo
 from pyscf.cc import ccsd
 from pyscf.cc import _ccsd
 from pyscf import __config__
-from gpu4pyscf.scf import hf as gpu_hf
+from gpu4pyscf.scf import int4c2e
 from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf.lib import logger
 
@@ -171,7 +171,7 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
                                   ((mem_avail-Ht2_mem)*.5/8/nao_cart**2)**.5)))
     logger.debug1(mycc, 'blksize %d nao %d', blksize, nao_cart)
 
-    vhfopt = gpu_hf._VHFOpt(mycc.mol, 'int2e')
+    vhfopt = int4c2e._VHFOpt(mycc.mol, 'int2e')
     vhfopt.build(group_size=blksize, diag_block_with_triu=True)
     mol = vhfopt.mol
 
@@ -219,7 +219,7 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     log_qs = vhfopt.log_qs
     cp_idx, cp_jdx = np.tril_indices(len(vhfopt.uniq_l_ctr))
 
-    if vhfopt.uniq_l_ctr[:,0].max() <= gpu_hf.LMAX_ON_GPU:
+    if vhfopt.uniq_l_ctr[:,0].max() <= int4c2e.LMAX_ON_GPU:
         # Computing ERIs on GPU
         idx, idy = cupy.tril_indices(nao)
         #eribuf = cupy.empty(blksize**2*nao**2)
@@ -279,7 +279,7 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
         cpj = cp_jdx[cp_ij_id]
         li = vhfopt.uniq_l_ctr[cpi,0]
         lj = vhfopt.uniq_l_ctr[cpj,0]
-        if li > gpu_hf.LMAX_ON_GPU or lj > gpu_hf.LMAX_ON_GPU or log_q_ij.size == 0:
+        if li > int4c2e.LMAX_ON_GPU or lj > int4c2e.LMAX_ON_GPU or log_q_ij.size == 0:
             continue
 
         ish0 = l_ctr_offsets[cpi]
@@ -375,7 +375,7 @@ def _fill_eri_block(eri, strides, ao_offsets, vhfopt, group_id):
     cpl = cp_jdx[cp_kl_id]
     lk = vhfopt.uniq_l_ctr[cpk,0]
     ll = vhfopt.uniq_l_ctr[cpl,0]
-    if lk > gpu_hf.LMAX_ON_GPU or ll > gpu_hf.LMAX_ON_GPU:
+    if lk > int4c2e.LMAX_ON_GPU or ll > int4c2e.LMAX_ON_GPU:
         raise NotImplementedError
 
     stream = cupy.cuda.get_current_stream()
@@ -394,7 +394,7 @@ def _fill_eri_block(eri, strides, ao_offsets, vhfopt, group_id):
         cpj = cp_jdx[cp_ij_id]
         li = vhfopt.uniq_l_ctr[cpi,0]
         lj = vhfopt.uniq_l_ctr[cpj,0]
-        if li > gpu_hf.LMAX_ON_GPU or lj > gpu_hf.LMAX_ON_GPU or log_q_ij.size == 0:
+        if li > int4c2e.LMAX_ON_GPU or lj > int4c2e.LMAX_ON_GPU or log_q_ij.size == 0:
             continue
 
         t0 = time.perf_counter()
@@ -446,7 +446,7 @@ def _make_eris_incore(mycc, mo_coeff=None):
                                   (mem_avail*.5/8/nao_cart**2)**.5)))
     logger.debug1(mycc, 'blksize %d nao %d', blksize, nao_cart)
 
-    vhfopt = gpu_hf._VHFOpt(mycc.mol, 'int2e')
+    vhfopt = int4c2e._VHFOpt(mycc.mol, 'int2e')
     vhfopt.build(group_size=blksize, diag_block_with_triu=True)
     mol = vhfopt.mol
     mo = vhfopt.coeff.dot(mo_coeff)
@@ -470,7 +470,7 @@ def _make_eris_incore(mycc, mo_coeff=None):
         cpj = cp_jdx[cp_ij_id]
         li = vhfopt.uniq_l_ctr[cpi,0]
         lj = vhfopt.uniq_l_ctr[cpj,0]
-        if li > gpu_hf.LMAX_ON_GPU or lj > gpu_hf.LMAX_ON_GPU or log_q_ij.size == 0:
+        if li > int4c2e.LMAX_ON_GPU or lj > int4c2e.LMAX_ON_GPU or log_q_ij.size == 0:
             continue
 
         ish0 = l_ctr_offsets[cpi]

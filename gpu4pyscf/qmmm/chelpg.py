@@ -22,12 +22,9 @@ import ctypes
 from pyscf import lib, gto
 from pyscf.scf import _vhf
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.scf.hf import BasisProdCache
+from gpu4pyscf.scf.int4c2e import BasisProdCache, libgint, libgvhf
 from gpu4pyscf.lib.cupy_helper import load_library, block_c2s_diag
 from gpu4pyscf.lib import logger
-
-libgint = load_library('libgint')
-libgvhf = load_library('libgvhf')
 
 from pyscf.data import radii
 modified_Bondi = radii.VDW.copy()

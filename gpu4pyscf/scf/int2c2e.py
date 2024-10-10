@@ -16,11 +16,9 @@
 import ctypes
 import cupy
 import numpy as np
-from gpu4pyscf.scf.hf import _make_s_index_offsets
+from gpu4pyscf.scf.int4c2e import _make_s_index_offsets, libgint
 from gpu4pyscf.lib.cupy_helper import load_library, take_last2d
 from gpu4pyscf.df.int3c2e import VHFOpt, make_fake_mol
-
-libgint = load_library('libgint')
 
 def get_int2c2e_sorted(mol, intopt=None, direct_scf_tol=1e-13, aosym=None, omega=None, stream=None):
     '''

@@ -33,8 +33,7 @@ jobs:
     - name: Build GPU4PySCF
       run: |
         export CUDA_HOME=/usr/local/cuda
-        export PATH=${CUDA_HOME}/bin:${PATH}
-        export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+        export CMAKE_CONFIGURE_ARGS="-DBUILD_LIBXC=OFF -DCUDA_ARCHITECTURES=70-real -DBUILD_CUTLASS=ON"
         sh build.sh
     - name: Test with pytest
       run: |

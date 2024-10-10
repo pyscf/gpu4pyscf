@@ -67,6 +67,16 @@ if (BUILD_MARCH_NATIVE)
   endif()
 endif()
 
+option(ENABLE_OPENMP "Compiling C extensions with openmp" ON)
+set(OPENMP_C_PROPERTIES "")
+if(ENABLE_OPENMP)
+  find_package(OpenMP)
+  if(OPENMP_FOUND)
+    set(HAVE_OPENMP 1)
+    set(OPENMP_C_PROPERTIES OpenMP::OpenMP_C)
+  endif()
+endif()
+
 # See also https://gitlab.kitware.com/cmake/community/wikis/doc/cmake/RPATH-handling
 if (WIN32)
   #?
@@ -136,6 +146,8 @@ option(BUILD_SOLVENT "Using SMD solvent" ON)
 if(BUILD_SOLVENT)
   add_subdirectory(solvent)
 endif()
+
+add_subdirectory(gvhf-rys)
 
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)

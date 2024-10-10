@@ -20,9 +20,11 @@ import numpy as np
 import cupy
 from pyscf import gto, df, lib
 from pyscf.scf import _vhf
-from gpu4pyscf.scf.hf import BasisProdCache, _make_s_index_offsets
+from gpu4pyscf.scf.int4c2e import (BasisProdCache, _make_s_index_offsets,
+                                   libgvhf, libgint)
 from gpu4pyscf.lib.cupy_helper import (
-    block_c2s_diag, cart2sph, block_diag, contract, load_library, get_avail_mem, print_mem_info, take_last2d)
+    block_c2s_diag, cart2sph, block_diag, contract, load_library, get_avail_mem,
+    print_mem_info, take_last2d, libcupy_helper)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import basis_seg_contraction
 
@@ -31,10 +33,6 @@ FREE_CUPY_CACHE = True
 STACK_SIZE_PER_THREAD = 8192 * 4
 BLKSIZE = 128
 NROOT_ON_GPU = 7
-
-libgvhf = load_library('libgvhf')
-libgint = load_library('libgint')
-libcupy_helper = load_library('libcupy_helper')
 
 def make_fake_mol():
     '''

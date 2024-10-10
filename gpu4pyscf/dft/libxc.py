@@ -40,11 +40,9 @@ for path in path_list:
     libxc_path = os.path.abspath(os.path.join(path, 'gpu4pyscf', 'lib', 'deps', 'lib'))
     try:
         _libxc = np.ctypeslib.load_library('libxc', libxc_path)
+        break
     except Exception:
         _libxc = None
-
-    if _libxc is not None:
-        break
 
 libgdft = load_library('libgdft')
 libgdft.GDFT_xc_lda.argtypes = (
