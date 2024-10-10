@@ -700,7 +700,7 @@ class RHF(SCF):
     to_gpu = utils.to_gpu
     device = utils.device
 
-    _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'conv_tol_cpscf', 'disp_with_3body'}
+    _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'conv_tol_cpscf', 'disp_with_3body', 'h1_on_cpu'}
 
     conv_tol_cpscf = 1e-6
     DIIS = diis.SCF_DIIS
@@ -713,6 +713,7 @@ class RHF(SCF):
     get_veff = get_veff
     get_grad = staticmethod(get_grad)
     quad_moment = _quad_moment
+    h1_on_cpu = True
     energy_tot = energy_tot
 
     get_hcore = return_cupy_array(hf.RHF.get_hcore)
