@@ -47,10 +47,10 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
 
 def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
             omega=None):
-    vhfopt = mf._opt.get(omega)
+    vhfopt = mf._opt_gpu.get(omega)
     if vhfopt is None:
         with mol.with_range_coulomb(omega):
-            vhfopt = mf._opt[omega] = jk._VHFOpt(mol, mf.direct_scf_tol).build()
+            vhfopt = mf._opt_gpu[omega] = jk._VHFOpt(mol, mf.direct_scf_tol).build()
 
     vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega)
     return vj, vk
@@ -384,7 +384,7 @@ class SCF(pyscf_lib.StreamObject):
         self.converged = False
         self.scf_summary = {}
 
-        self._opt = {None: None}
+        self._opt_gpu = {None: None}
         self._eri = None # Note: self._eri requires large amount of memory
 
     def check_sanity(self):
@@ -452,8 +452,7 @@ class SCF(pyscf_lib.StreamObject):
     def reset(self, mol=None):
         if mol is not None:
             self.mol = mol
-        self._opt_gpu = None
-        self._opt_gpu_omega = None
+        self._opt_gpu = {None: None}
         self.scf_summary = {}
         return self
 
