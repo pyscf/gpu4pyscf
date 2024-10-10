@@ -78,7 +78,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, verbose=None
     uniq_l = uniq_l_ctr[:,0]
     l_ctr_bas_loc = vhfopt.l_ctr_offsets
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
-    n_groups = len(uniq_l_ctr)
+    n_groups = np.count_nonzero(uniq_l <= LMAX)
     tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
                                              log_cutoff-log_max_dm)
     workers = gpu_specs['multiProcessorCount']
@@ -145,6 +145,43 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, verbose=None
         vj = transpose_sum(vj)
         vj *= 2.
         vj = vj.reshape(dm.shape)
+
+    h_shls = vhfopt.h_shls
+    if h_shls:
+        cput1 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
+        log.debug3('Integrals for %s functions on CPU', l_symb[LMAX+1])
+        scripts = []
+        if with_j:
+            scripts.append('ji->s2kl')
+        if with_k:
+            if hermi == 1:
+                scripts.append('jk->s2il')
+            else:
+                scripts.append('jk->s1il')
+        shls_excludes = [0, h_shls[0]] * 4
+        vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
+                                 dms.get(), 1, mol._atm, mol._bas, mol._env,
+                                 shls_excludes=shls_excludes)
+        if with_j and with_k:
+            vj1 = vs_h[0].reshape(n_dm,nao,nao)
+            vk1 = vs_h[1].reshape(n_dm,nao,nao)
+        elif with_j:
+            vj1 = vs_h[0].reshape(n_dm,nao,nao)
+        else:
+            vk1 = vs_h[0].reshape(n_dm,nao,nao)
+        coeff = vhfopt.coeff
+        idx, idy = np.tril_indices(nao, -1)
+        if with_j:
+            vj1[:,idy,idx] = vj1[:,idx,idy]
+            for i, v in enumerate(vj1):
+                vj[i] += coeff.T.dot(cp.asarray(v)).dot(coeff)
+        if with_k:
+            if hermi:
+                vk1[:,idy,idx] = vk1[:,idx,idy]
+            for i, v in enumerate(vk1):
+                vk[i] += coeff.T.dot(cp.asarray(v)).dot(coeff)
+        log.timer_debug1('get_jk pass 2 for h functions on cpu', *cput1)
+
     log.timer('vj and vk', *cput0)
     return vj, vk
 
@@ -197,7 +234,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
     uniq_l = uniq_l_ctr[:,0]
     l_ctr_bas_loc = vhfopt.l_ctr_offsets
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
-    n_groups = len(uniq_l_ctr)
+    n_groups = np.count_nonzero(uniq_l <= LMAX)
     ntiles = mol.nbas // TILE
     tile_mappings = {}
     workers = gpu_specs['multiProcessorCount']
@@ -284,6 +321,24 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
     vj = transpose_sum(vj)
     vj *= 2.
     vj = vj.reshape(dm.shape)
+
+    h_shls = vhfopt.h_shls
+    if h_shls:
+        cput1 = log.timer_debug1('get_j pass 1 on gpu', *cput0)
+        log.debug3('Integrals for %s functions on CPU', l_symb[LMAX+1])
+        scripts = ['ji->s2kl']
+        shls_excludes = [0, h_shls[0]] * 4
+        vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
+                                 dms.get(), 1, mol._atm, mol._bas, mol._env,
+                                 shls_excludes=shls_excludes)
+        vj1 = vs_h[0].reshape(n_dm,nao,nao)
+        coeff = vhfopt.coeff
+        idx, idy = np.tril_indices(nao, -1)
+        vj1[:,idy,idx] = vj1[:,idx,idy]
+        for i, v in enumerate(vj1):
+            vj[i] += coeff.T.dot(cp.asarray(v)).dot(coeff)
+        log.timer_debug1('get_j pass 2 for h functions on cpu', *cput1)
+
     log.timer('vj', *cput0)
     return vj
 
@@ -295,6 +350,7 @@ class _VHFOpt:
         self.l_ctr_offsets = None
         self.q_cond = None
         self.tile_q_cond = None
+        self.h_shls = None
         self.tile = TILE
 
     def build(self, group_size=None, verbose=None):
@@ -310,8 +366,6 @@ class _VHFOpt:
         uniq_l_ctr, where, inv_idx, l_ctr_counts = np.unique(
             l_ctrs_descend, return_index=True, return_inverse=True, return_counts=True, axis=0)
         uniq_l_ctr[:,1] = -uniq_l_ctr[:,1]
-        if uniq_l_ctr[:,0].max() > LMAX:
-            raise NotImplementedError('GTO angular momemtum > 4 not supported')
 
         nao_orig = self.coeff.shape[1]
         ao_loc = mol.ao_loc
@@ -365,6 +419,15 @@ class _VHFOpt:
 
         # PTR_BAS_COORD is required by nr_contract_jk.c
         mol._bas[:,PTR_BAS_COORD] = mol._atm[mol._bas[:,ATOM_OF],PTR_COORD]
+
+        # very high angular momentum basis are processed on CPU
+        lmax = uniq_l_ctr[:,0].max()
+        nbas_by_l = [l_ctr_counts[uniq_l_ctr[:,0]==l].sum() for l in range(lmax+1)]
+        l_slices = np.append(0, np.cumsum(nbas_by_l))
+        if lmax > LMAX:
+            self.h_shls = l_slices[LMAX+1:].tolist()
+        else:
+            self.h_shls = []
 
         nbas = mol.nbas
         buf_size = nbas**2

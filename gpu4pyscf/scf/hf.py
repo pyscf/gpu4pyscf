@@ -38,7 +38,8 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
            verbose=None):
     '''Compute J, K matrices with CPU-GPU hybrid algorithm
     '''
-    vj, vk = jk.get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega, verbose)
+    with mol.with_range_coulomb(omega):
+        vj, vk = jk.get_jk(mol, dm, hermi, vhfopt, with_j, with_k, verbose)
     if not isinstance(dm, cupy.ndarray):
         if with_j: vj = vj.get()
         if with_k: vk = vk.get()
