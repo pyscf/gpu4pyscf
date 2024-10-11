@@ -108,6 +108,7 @@ def _check_smd(atom, e_ref, solvent='water'):
     mol.stdout.close()
     assert numpy.abs(e_cds - e_ref) < 1e-3
 
+@unittest.skipIf(smd.libsolvent is None, "solvent extension not compiled")
 class KnownValues(unittest.TestCase):
     def test_cds_solvent(self):
         smdobj = smd.SMD(mol)

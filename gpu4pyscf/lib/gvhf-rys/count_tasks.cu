@@ -48,7 +48,7 @@ int RYS_count_jk_tasks(double *vj, double *vk, double *dm, int n_dm, int nao,
                  int *tile_ij_mapping, int *tile_kl_mapping, float *tile_q_cond,
                  float *q_cond, float *dm_cond, float cutoff,
                  ShellQuartet *pool, uint32_t *batch_head, int workers,
-                 double omega, int *atm, int natm, int *bas, int nbas, double *env)
+                 int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
     uint16_t jsh0 = shls_slice[2];
@@ -73,11 +73,9 @@ int RYS_count_jk_tasks(double *vj, double *vk, double *dm, int n_dm, int nao,
     uint8_t stride_j = li + 1;
     uint8_t stride_k = stride_j * (lj + 1);
     uint8_t stride_l = stride_k * (lk + 1);
-    int nbatches_kl = (ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = ntile_ij_pairs * nbatches_kl;
     BoundsInfo bounds = {li, lj, lk, ll, nfi, nfk, nfij, nfkl,
         nroots, stride_j, stride_k, stride_l, iprim, jprim, kprim, lprim,
-        nbatches, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
+        ntile_ij_pairs, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
         q_cond, dm_cond, cutoff};
     JKMatrix jk = {vj, vk, dm, (uint16_t)n_dm};
 

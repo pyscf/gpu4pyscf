@@ -23,7 +23,7 @@ extern __global__ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo
                                      ShellQuartet *pool, uint32_t *batch_head);
 extern __global__ void rys_sr_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                      ShellQuartet *pool, uint32_t *batch_head);
-extern __global__ void rys_jk_kernel_ip1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+extern __global__ void rys_jk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                          ShellQuartet *pool, uint32_t *batch_head);
 extern int rys_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head,
@@ -45,7 +45,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                 int *tile_ij_mapping, int *tile_kl_mapping, float *tile_q_cond,
                 float *q_cond, float *dm_cond, float cutoff,
                 ShellQuartet *pool, uint32_t *batch_head, int workers,
-                double omega, int *atm, int natm, int *bas, int nbas, double *env)
+                int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
     uint16_t jsh0 = shls_slice[2];
@@ -67,6 +67,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
     uint8_t nfkl = nfk * nfl;
     uint8_t order = li + lj + lk + ll;
     uint8_t nroots = order / 2 + 1;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) { // SR ERIs
         nroots *= 2;
     }
@@ -76,11 +77,9 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
     uint8_t stride_k = lij + 1;
     uint8_t stride_l = lij + 1;
     int g_size = (lij + 1) * (lkl + 1);
-    int nbatches_kl = (ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = ntile_ij_pairs * nbatches_kl;
     BoundsInfo bounds = {li, lj, lk, ll, nfi, nfk, nfij, nfkl,
         nroots, stride_j, stride_k, stride_l, iprim, jprim, kprim, lprim,
-        nbatches, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
+        ntile_ij_pairs, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
         q_cond, dm_cond, cutoff};
 
     JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
@@ -118,7 +117,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
                  int *tile_ij_mapping, int *tile_kl_mapping, float *tile_q_cond,
                  float *q_cond, float *dm_cond, float cutoff,
                  ShellQuartet *pool, uint32_t *batch_head, int workers,
-                 double omega, int *atm, int natm, int *bas, int nbas, double *env)
+                 int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
     uint16_t jsh0 = shls_slice[2];
@@ -140,18 +139,17 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
     uint8_t nfkl = nfk * nfl;
     uint8_t order = li + lj + lk + ll;
     uint8_t nroots = order / 2 + 1;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) { // SR ERIs
         nroots *= 2;
     }
     uint8_t stride_j = li + 1;
     uint8_t stride_k = stride_j * (lj + 1);
     uint8_t stride_l = stride_k * (lk + 1);
-    uint16_t g_size = stride_l * (uint16_t)(ll+1);
-    int nbatches_kl = (ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = ntile_ij_pairs * nbatches_kl;
+    uint16_t g_size = stride_l * (uint16_t)(ll + 1);
     BoundsInfo bounds = {li, lj, lk, ll, nfi, nfk, nfij, nfkl,
         nroots, stride_j, stride_k, stride_l, iprim, jprim, kprim, lprim,
-        nbatches, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
+        ntile_ij_pairs, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
         q_cond, dm_cond, cutoff};
 
     JKMatrix jk = {vj, vk, dm, (uint16_t)n_dm};
@@ -173,7 +171,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;// + ij_prims*4*TILE2;
+        int buflen = (nroots*4 + g_size*3 + ij_prims*4) * quartets_per_block;// + ij_prims*4*TILE2;
         rys_sr_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
