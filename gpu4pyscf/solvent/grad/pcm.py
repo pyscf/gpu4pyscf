@@ -26,14 +26,13 @@ from pyscf import lib
 from pyscf import gto
 from pyscf.grad import rhf as rhf_grad
 
-from gpu4pyscf.solvent.pcm import PI, switch_h
+from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract, load_library
 from gpu4pyscf.lib import logger
 from pyscf import lib as pyscf_lib
 
 libdft = lib.load_library('libdft')
-libsolvent = load_library('libsolvent')
 
 def grad_switch_h(x):
     ''' first derivative of h(x)'''
