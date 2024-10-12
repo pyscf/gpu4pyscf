@@ -34,145 +34,16 @@ from gpu4pyscf.scf.jk import (
     _make_tril_tile_mappings, _nearest_power2)
 
 libvhf_rys.RYS_per_atom_jk_ip1.restype = ctypes.c_int
-libvhf_rys.RYS_build_jk_ip1.restype = ctypes.c_int
 
 __all__ = [
-    'get_jk',
     'SCF_GradScanner',
     'Gradients',
     'Grad'
 ]
 
-def get_jk(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=None):
-    '''J = ((-nabla i) j| kl) D_lk
-    K = ((-nabla i) j| kl) D_jk
-    '''
-    log = logger.new_logger(mol, verbose)
-    cput0 = log.init_timer()
-    vhfopt = _VHFOpt(mol)
-    # tile must set to 1. This tile size is assumed in the GPU kernel code
-    vhfopt.tile = 1
-    vhfopt.build()
-
-    mol = vhfopt.mol
-    nao, nao_orig = vhfopt.coeff.shape
-
-    dm = cp.asarray(dm, order='C')
-    dms = dm.reshape(-1,nao_orig,nao_orig)
-    n_dm = dms.shape[0]
-    dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = cp.asarray(dms, order='C')
-    assert n_dm == 1
-
-    natm = mol.natm
-    if atoms_slice is None:
-        atoms_slice = 0, natm
-    atom0, atom1 = atoms_slice
-
-    vj = vk = None
-    vj_ptr = vk_ptr = lib.c_null_ptr()
-    assert with_j or with_k
-    if with_k:
-        vk = cp.zeros(((atom1-atom0)*3, nao, nao))
-        vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
-    if with_j:
-        vj = cp.zeros(((atom1-atom0)*3, nao, nao))
-        vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
-
-    init_constant(mol)
-    ao_loc = mol.ao_loc
-    dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-    log_max_dm = dm_cond.max()
-    log_cutoff = math.log(vhfopt.direct_scf_tol)
-
-    uniq_l_ctr = vhfopt.uniq_l_ctr
-    uniq_l = uniq_l_ctr[:,0]
-    assert uniq_l.max() <= LMAX
-    l_ctr_bas_loc = vhfopt.l_ctr_offsets
-    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
-    n_groups = len(uniq_l_ctr)
-    tril_tile_mappings = _make_tril_tile_mappings(
-        l_ctr_bas_loc, vhfopt.tile_q_cond, log_cutoff-log_max_dm, 1)
-    workers = gpu_specs['multiProcessorCount']
-    QUEUE_DEPTH = 65536 # See rys_contract_jk_ip1 kernel
-    pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
-    info = cp.empty(2, dtype=np.uint32)
-    t1 = log.timer_debug1('q_cond and dm_cond', *cput0)
-
-    timing_collection = {}
-    kern_counts = 0
-    kern = libvhf_rys.RYS_build_jk_ip1
-
-    nbas = mol.nbas
-    assert vhfopt.tile_q_cond.shape == (nbas, nbas)
-    for i in range(n_groups):
-        for j in range(n_groups):
-            ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
-                       l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
-            ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
-            jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
-            ij_shls = (ish0, ish1, jsh0, jsh1)
-
-            sub_tile_q = vhfopt.tile_q_cond[ish0:ish1,jsh0:jsh1]
-            mask = sub_tile_q > log_cutoff - log_max_dm
-            mask[mol._bas[ish0:ish1,ATOM_OF] <  atom0] = False
-            mask[mol._bas[ish0:ish1,ATOM_OF] >= atom1] = False
-            t_ij = (cp.arange(ish0, ish1, dtype=np.int32)[:,None] * nbas +
-                    cp.arange(jsh0, jsh1, dtype=np.int32))
-            idx = cp.argsort(sub_tile_q[mask])[::-1]
-            tile_ij_mapping = t_ij[mask][idx]
-            for k in range(n_groups):
-                for l in range(k+1):
-                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                    kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
-                               l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
-                    tile_kl_mapping = tril_tile_mappings[k,l]
-                    scheme = _ip1_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
-                    err = kern(
-                        vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(n_dm), ctypes.c_int(nao), ctypes.c_int(atom0),
-                        vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
-                        (ctypes.c_int*8)(*ij_shls, *kl_shls),
-                        ctypes.c_int(tile_ij_mapping.size),
-                        ctypes.c_int(tile_kl_mapping.size),
-                        ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.c_float(log_cutoff),
-                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(info.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(workers),
-                        mol._atm.ctypes, ctypes.c_int(mol.natm),
-                        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                    if err != 0:
-                        raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
-                    if log.verbose >= logger.DEBUG1:
-                        t1, t1p = log.timer_debug1(f'processing {llll}, tasks = {info[1]}', *t1), t1
-                        if llll not in timing_collection:
-                            timing_collection[llll] = 0
-                        timing_collection[llll] += t1[1] - t1p[1]
-                        kern_counts += 1
-
-    if log.verbose >= logger.DEBUG1:
-        log.debug1('kernel launches %d', kern_counts)
-        for llll, t in timing_collection.items():
-            log.debug1('%s wall time %.2f', llll, t)
-
-    if with_k:
-        vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
-        vk = vk + vk.transpose(0,2,1)
-        vk = vk.reshape(atom1-atom0, 3, nao_orig, nao_orig)
-    if with_j:
-        vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vj, vhfopt.coeff)
-        vj = vj + vj.transpose(0,2,1)
-        vj *= 2.
-        vj = vj.reshape(atom1-atom0, 3, nao_orig, nao_orig)
-    log.timer('vj and vk gradients', *cput0)
-    return vj, vk
-
 def _jk_energy_per_atom(mol, dm, vhfopt=None, with_j=True, with_k=True, verbose=None):
+    ''' Computes the first-order derivatives of the energy contributions from J and K per atom.
+    '''
     log = logger.new_logger(mol, verbose)
     cput0 = t1 = log.init_timer()
     if vhfopt is None:
@@ -367,15 +238,12 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
             dh1e += get_dh1e_ecp(mol, dm0)
         t1 = log.timer_debug1('gradients of h1e', *t0)
 
-        vhfopt = mf._opt_gpu.get(None, None)
-        ej, ek = _jk_energy_per_atom(mol, dm0, vhfopt, verbose=log)
-        veff = ej - ek * .5
-
+        dvhf = mf_grad.get_veff(mol, dm0, verbose=log)
         dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
-        extra_force = cupy.zeros((len(atmlst),3))
+        extra_force = np.zeros((len(atmlst),3))
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals())
-
+        extra_force = cupy.array(extra_force)
         log.timer_debug1('gradients of 2e part', *t1)
 
     dh = contract('xij,ij->xi', h1, dm0)
@@ -383,7 +251,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     delec = 2.0*(dh - ds)
 
     delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
-    de = 2.0 * veff + dh1e + delec + extra_force
+    de = 2.0 * dvhf + dh1e + delec + extra_force
 
     # for backforward compatiability
     if(hasattr(mf, 'disp') and mf.disp is not None):
@@ -490,18 +358,9 @@ class GradientsBase(lib.StreamObject):
     reset       = rhf_grad_cpu.GradientsBase.reset
     get_hcore   = rhf_grad_cpu.GradientsBase.get_hcore
     get_ovlp    = rhf_grad_cpu.GradientsBase.get_ovlp
-    get_jk      = get_jk
-
-    def get_j(self, mol=None, dm=None, hermi=0, omega=None):
-        with mol.with_range_coulomb(omega):
-            vj, _ = self.get_jk(mol, dm, with_k=False, omega=omega)
-        return vj
-
-    def get_k(self, mol=None, dm=None, hermi=0, omega=None):
-        with mol.with_range_coulomb(omega):
-            _, vk = self.get_jk(mol, dm, with_j=False, omega=omega)
-        return vk
-
+    get_jk      = NotImplemented
+    get_j       = NotImplemented
+    get_k       = NotImplemented
     get_veff    = NotImplemented
     make_rdm1e  = rhf_grad_cpu.GradientsBase.make_rdm1e
     grad_nuc    = rhf_grad_cpu.GradientsBase.grad_nuc
@@ -529,6 +388,18 @@ class Gradients(GradientsBase):
 
     make_rdm1e = rhf_grad_cpu.Gradients.make_rdm1e
     grad_elec = grad_elec
+
+    def get_veff(self, mol, dm, verbose=None):
+        '''
+        Computes the first-order derivatives of the energy contributions from
+        Veff per atom.
+
+        NOTE: This function is incompatible to the one implemented in PySCF CPU version.
+        In the CPU version, get_veff returns the first order derivatives of Veff matrix.
+        '''
+        vhfopt = self.base._opt_gpu.get(None, None)
+        ej, ek = _jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
+        return ej - ek * .5
 
 Grad = Gradients
 

@@ -52,6 +52,13 @@ def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=LINEAR_DEP_THRESHOLD):
     return j2c_solver
 
 def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega=None):
+    '''
+    Computes the first-order derivatives of the energy contributions from
+    J and K terms per atom.
+
+    NOTE: This function is incompatible to the one implemented in PySCF CPU version.
+    In the CPU version, get_jk returns the first order derivatives of J/K matrices.
+    '''
     if mol is None: mol = mf_grad.mol
     #TODO: dm has to be the SCF density matrix in this version.  dm should be
     # extended to any 1-particle density matrix

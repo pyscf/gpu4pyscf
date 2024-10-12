@@ -84,13 +84,11 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
             dh1e += rhf_grad.get_dh1e_ecp(mol, dm0_sf)
         t1 = log.timer_debug1('gradients of h1e', *t0)
 
-        vhfopt = mf._opt_gpu.get(None, None)
-        ej, ek = rhf_grad._jk_energy_per_atom(mol, dm0, vhfopt, verbose=log)
-        veff = ej - ek
-
-        extra_force = cupy.zeros((len(atmlst),3))
+        dvhf = mf_grad.get_veff(mol, dm0, verbose=log)
+        extra_force = np.zeros((len(atmlst),3))
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals())
+        extra_force = cupy.array(extra_force)
         log.timer_debug1('gradients of 2e part', *t1)
 
     dh = contract('xij,ij->xi', h1, dm0_sf)
@@ -98,7 +96,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     delec = 2.0*(dh - ds)
     delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
 
-    de = 2.0 * veff + dh1e + delec + extra_force
+    de = 2.0 * dvhf + dh1e + delec + extra_force
 
     # for backward compatiability
     if(hasattr(mf, 'disp') and mf.disp is not None):
@@ -114,7 +112,18 @@ class Gradients(rhf_grad.GradientsBase):
     from gpu4pyscf.lib.utils import to_gpu, device
 
     grad_elec = grad_elec
-    get_jk = rhf_grad.get_jk
+
+    def get_veff(self, mol, dm, verbose=None):
+        '''
+        Computes the first-order derivatives of the energy contributions from
+        Veff per atom.
+
+        NOTE: This function is incompatible to the one implemented in PySCF CPU version.
+        In the CPU version, get_veff returns the first order derivatives of Veff matrix.
+        '''
+        vhfopt = self.base._opt_gpu.get(None, None)
+        ej, ek = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
+        return ej - ek
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         if mo_energy is None: mo_energy = self.base.mo_energy

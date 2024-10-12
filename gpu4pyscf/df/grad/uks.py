@@ -130,7 +130,7 @@ def get_veff(ks_grad, mol=None, dm=None):
     else:
         e1_aux = None
 
-    vxc = tag_array(vxc, aux=e1_aux)
+    vxc = tag_array(vxc, aux=e1_aux, exc1_grid=exc)
 
     return vxc
 

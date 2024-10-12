@@ -24,6 +24,7 @@ import cupy
 import pyscf
 from pyscf import lib
 from pyscf.grad import uks as uks_grad
+from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint, xc_deriv
@@ -37,9 +38,7 @@ ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
 libgdft = load_library('libgdft')
 libgdft.GDFT_make_dR_dao_w.restype = ctypes.c_int
 
-# TODO: there are many get_jk, which can be replaced by get_j or get_k!
-
-def get_veff(ks_grad, mol=None, dm=None):
+def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     '''
     First order derivative of DFT effective potential matrix (wrt electron coordinates)
 
@@ -96,31 +95,33 @@ def get_veff(ks_grad, mol=None, dm=None):
     occ_coeff0 = cupy.asarray(mo_coeff_alpha[:, mf.mo_occ[0]>0.5], order='C')
     occ_coeff1 = cupy.asarray(mo_coeff_beta[:, mf.mo_occ[1]>0.5], order='C')
     tmp = contract('nij,jk->nik', vxc_tmp[0], occ_coeff0)
-    vxc = contract('nik,ik->ni', tmp, occ_coeff0)
+    exc1_per_atom = contract('nik,ik->ni', tmp, occ_coeff0)
     tmp = contract('nij,jk->nik', vxc_tmp[1], occ_coeff1)
-    vxc+= contract('nik,ik->ni', tmp, occ_coeff1)
+    exc1_per_atom+= contract('nik,ik->ni', tmp, occ_coeff1)
 
     aoslices = mol.aoslice_by_atom()
-    vxc = [vxc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
-    vxc = cupy.asarray(vxc)
+    exc1_per_atom = [exc1_per_atom[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
+    exc1_per_atom = cupy.asarray(exc1_per_atom)
 
+    vhfopt = mf._opt_gpu.get(None, None)
     if not ni.libxc.is_hybrid_xc(mf.xc):
-        vj = ks_grad.get_j(mol, dm[0]+dm[1])
-        vxc += vj
+        ej = rhf_grad._jk_energy_per_atom(
+            mol, dm[0]+dm[1], vhfopt, with_k=False, verbose=verbose)[0]
+        exc1_per_atom += ej
     else:
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
-        vk0 = ks_grad.get_jk(mol, dm[0])[1]
-        vk1 = ks_grad.get_jk(mol, dm[1])[1]
-        vj0 = ks_grad.get_jk(mol, dm[0]+dm[1])[0]
-        vk = (vk0+vk1) * hyb
+        ej, ek = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
+        ek *= hyb
         if omega != 0:
-            vk_lr0 = ks_grad.get_k(mol, dm[0], omega=omega)
-            vk_lr1 = ks_grad.get_k(mol, dm[1], omega=omega)
-            vk += (vk_lr0+vk_lr1) * (alpha - hyb)
+            vhfopt = mf._opt_gpu.get(omega, None)
+            with mol.with_range_coulomb(omega):
+                ek_lr = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt,
+                                                     verbose=verbose)[1]
+            ek += ek_lr * (alpha - hyb)
 
-        vxc += vj0 - vk
+        exc1_per_atom += ej - ek
 
-    return vxc
+    return tag_array(exc1_per_atom, exc1_grid=exc)
 
 
 def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
@@ -356,12 +357,9 @@ class Gradients(uhf_grad.Gradients):
         uhf_grad.Gradients.__init__(self, mf)
         self.grids = None
         self.nlcgrids = None
-        self.grid_response = False
 
     get_veff = get_veff
-    # TODO: add grid response into this function
-    def extra_force(self, atom_id, envs):
-        return 0
+    extra_force = rks_grad.Gradients.extra_force
 
 Grad = Gradients
 from gpu4pyscf import dft
