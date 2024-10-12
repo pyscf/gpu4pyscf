@@ -49,7 +49,10 @@ def get_jk(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=None):
     '''
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
-    vhfopt = _VHFOpt(mol).build()
+    vhfopt = _VHFOpt(mol)
+    # tile must set to 1. This tile size is assumed in the GPU kernel code
+    vhfopt.tile = 1
+    vhfopt.build()
 
     mol = vhfopt.mol
     nao, nao_orig = vhfopt.coeff.shape
@@ -59,6 +62,7 @@ def get_jk(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=None):
     n_dm = dms.shape[0]
     dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = cp.asarray(dms, order='C')
+    assert n_dm == 1
 
     natm = mol.natm
     if atoms_slice is None:
