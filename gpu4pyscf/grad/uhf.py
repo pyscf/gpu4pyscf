@@ -328,9 +328,8 @@ class Gradients(rhf_grad.GradientsBase):
     from gpu4pyscf.lib.utils import to_gpu, device
 
     grad_elec = grad_elec
-    grad_nuc = rhf_grad.grad_nuc
     get_veff =  get_veff
-    get_jk = rhf_grad._get_jk
+    get_jk = rhf_grad.get_jk
 
     def get_j(self, mol=None, dm=None, hermi=0, omega=None):
         vj, _ = self.get_jk(mol, dm, with_k=False, omega=omega)
