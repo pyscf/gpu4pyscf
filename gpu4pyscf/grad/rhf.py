@@ -359,10 +359,9 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         calculate_hs(h1, s1)
         # (i | \nabla hcore | j)
         dh1e = int3c2e.get_dh1e(mol, dm0)
-
         if mol.has_ecp():
             dh1e += get_dh1e_ecp(mol, dm0)
-        t3 = log.timer_debug1('gradients of h1e', *t0)
+        t1 = log.timer_debug1('gradients of h1e', *t0)
 
         vhfopt = mf._opt_gpu.get(None, None)
         ej, ek = _jk_energy_per_atom(mol, dm0, vhfopt, verbose=log)
@@ -373,7 +372,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals())
 
-        log.timer_debug1('gradients of 2e part', *t3)
+        log.timer_debug1('gradients of 2e part', *t1)
 
     dh = contract('xij,ij->xi', h1, dm0)
     ds = contract('xij,ij->xi', s1, dme0)
