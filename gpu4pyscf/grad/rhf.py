@@ -21,7 +21,6 @@ import cupy as cp
 import cupy
 import numpy
 from pyscf import lib, gto
-from pyscf.gto import ATOM_OF
 from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf.scf.hf import KohnShamDFT
@@ -155,31 +154,6 @@ def _ejk_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     counts = shm_size // (unit*8)
     n = min(THREADS, _nearest_power2(counts))
     gout_stride = THREADS // n
-    return n, gout_stride
-
-def _ip1_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
-    ls = l_ctr_pattern[:,0]
-    li, lj, lk, ll = ls
-    order = li + lj + lk + ll
-    nfi = (li + 1) * (li + 2) // 2
-    nfj = (lj + 1) * (lj + 2) // 2
-    nfk = (lk + 1) * (lk + 2) // 2
-    nfl = (ll + 1) * (ll + 2) // 2
-    gout_size = nfi * nfj * nfk * nfl
-    g_size = (li+2)*(lj+1)*(lk+1)*(ll+1)
-    nps = l_ctr_pattern[:,1]
-    ij_prims = nps[0] * nps[1]
-    nroots = (order + 1) // 2 + 1
-
-    unit = nroots*2 + g_size*3
-    shm_size -= ij_prims*12 * 8
-    counts = shm_size // (unit*8)
-    n = min(THREADS, _nearest_power2(counts))
-    gout_stride = THREADS // n
-    gout_width = 18
-    while gout_stride < 16 and gout_size / (gout_stride*gout_width) > 1:
-        n //= 2
-        gout_stride *= 2
     return n, gout_stride
 
 def get_dh1e_ecp(mol, dm):
