@@ -27,12 +27,10 @@ import ctypes
 import numpy
 import numpy as np
 import cupy
+from pyscf.grad import rhf as rhf_grad_cpu
 from pyscf.hessian import rhf as rhf_hess_cpu
 from pyscf.hessian import uhf as uhf_hess_cpu
 from pyscf import lib
-from pyscf import gto
-from pyscf.scf import _vhf
-
 # import _response_functions to load gen_response methods in SCF class
 from gpu4pyscf.scf import _response_functions  # noqa
 # import pyscf.grad.rhf to activate nuc_grad_method method
@@ -41,8 +39,7 @@ from gpu4pyscf.gto.mole import sort_atoms
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, print_mem_info, get_avail_mem
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.grad import rhf as rhf_grad
-from gpu4pyscf.hessian.rhf import HessianBase, _partial_hess_ejk
+from gpu4pyscf.hessian.rhf import HessianBase, _partial_hess_ejk, _get_jk
 
 GB = 1024*1024*1024
 ALIGNED = 4
@@ -147,26 +144,26 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     noccb = moccb.shape[1]
     dm0a = mocca.dot(mocca.T)
     dm0b = moccb.dot(moccb.T)
-    vja, vka = rhf_grad.get_jk(mol, dm0a)
-    vjb, vkb = rhf_grad.get_jk(mol, dm0b)
+    vja, vka = _get_jk(mol, dm0a, verbose=verbose)
+    vjb, vkb = _get_jk(mol, dm0b, verbose=verbose)
     vj = vja + vjb
     vhfa = vj - vka
     vhfb = vj - vkb
+    vj = vja = vjb = None
 
-    hcore_deriv = hessobj.base.nuc_grad_method().hcore_generator(mol)
+    mf_cpu = hessobj.base.to_cpu()
+    hcore_deriv = rhf_grad_cpu.hcore_generator(mf_cpu, mol)
     natm = mol.natm
+    h1moa = np.empty((natm, 3, nmoa,nocca))
+    h1mob = np.empty((natm, 3, nmob,noccb))
     for ia in range(natm):
-        hcore1 = hcore_deriv(ia)
-        vhfa[ia*3:ia*3+3] += hcore1
-        vhfb[ia*3:ia*3+3] += hcore1
-
-    h1aoa = np.empty((natm*3,nmoa,nocca))
-    h1aob = np.empty((natm*3,nmob,noccb))
-    for i, v in enumerate(vhfa):
-        h1aoa[i] = mo_a.T.dot(v.dot(mocca)).get()
-    for i, v in enumerate(vhfb):
-        h1aob[i] = mo_b.T.dot(v.dot(moccb)).get()
-    return h1aoa.reshape(natm,3,nmoa,nocca), h1aob.reshape(natm,3,nmob,noccb)
+        hcore1 = cupy.asarray(hcore_deriv(ia))
+        vhfa[ia] += hcore1
+        vhfb[ia] += hcore1
+        for ix in range(3):
+            h1moa[ia,ix] = mo_a.T.dot(vhfa[ia,ix].dot(mocca)).get()
+            h1mob[ia,ix] = mo_b.T.dot(vhfb[ia,ix].dot(moccb)).get()
+    return h1moa, h1mob
 
 def get_hcore(mol):
     '''Part of the second derivatives of core Hamiltonian'''

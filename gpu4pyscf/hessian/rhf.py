@@ -24,9 +24,10 @@ import numpy
 import cupy
 import cupy as cp
 import numpy as np
+from pyscf.grad import rhf as rhf_grad_cpu
 from pyscf.hessian import rhf as rhf_hess_cpu
 from pyscf import lib
-from pyscf import gto
+from pyscf.gto import ATOM_OF
 # import _response_functions to load gen_response methods in SCF class
 from gpu4pyscf.scf import _response_functions  # noqa
 from gpu4pyscf.gto.mole import sort_atoms
@@ -36,10 +37,12 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, libvhf_rys, _VHFOpt, init_constant,
     _make_tril_tile_mappings, _nearest_power2)
+
+libvhf_rys.RYS_per_atom_jk_ip2.restype = ctypes.c_int
+libvhf_rys.RYS_build_jk_ip1.restype = ctypes.c_int
 
 GB = 1024*1024*1024
 ALIGNED = 4
@@ -157,9 +160,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             e1[j0,i0] = e1[i0,j0].T
 
     log.timer('RHF partial hessian', *time0)
-    return e1, ej,  ek
-
-libvhf_rys.RYS_per_atom_jk_ip2.restype = ctypes.c_int
+    return e1, ej, ek
 
 def _partial_ejk_ip2(mol, dm, vhfopt=None, with_k=True, verbose=None):
     log = logger.new_logger(mol, verbose)
@@ -178,13 +179,12 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, with_k=True, verbose=None):
     assert n_dm <= 2
 
     natm = mol.natm
-    vj = cp.zeros((natm, natm, 3, 3))
-    vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
+    ej = cp.zeros((natm, natm, 3, 3))
+    ek = cp.zeros((natm, natm, 3, 3))
+    vj_ptr = ctypes.cast(ej.data.ptr, ctypes.c_void_p)
     if with_k:
-        vk = cp.zeros((natm, natm, 3, 3))
-        vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
+        vk_ptr = ctypes.cast(ek.data.ptr, ctypes.c_void_p)
     else:
-        vk = None
         vk_ptr = lib.c_null_ptr()
 
     init_constant(mol)
@@ -254,9 +254,9 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, with_k=True, verbose=None):
         for llll, t in timing_collection.items():
             log.debug1('%s wall time %.2f', llll, t)
 
-    vj *= 4.
-    log.timer('jk hessian', *cput0)
-    return vj, vk
+    ej *= 4.
+    log.timer_debug1('ejk_ip2', *cput0)
+    return ej, ek
 
 def _ip2_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ls = l_ctr_pattern[:,0]
@@ -283,18 +283,175 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mocc = cp.asarray(mo_coeff[:,mo_occ>0])
     nocc = mocc.shape[1]
     dm0 = mocc.dot(mocc.T) * 2
-    vj, vk = rhf_grad.get_jk(mol, dm0)
+    vj, vk = _get_jk(mol, dm0, verbose=verbose)
     vhf = vj - vk * .5
+    vj = vk = None
 
-    hcore_deriv = hessobj.base.Gradients().hcore_generator(mol)
+    mf_cpu = hessobj.base.to_cpu()
+    hcore_deriv = rhf_grad_cpu.hcore_generator(mf_cpu, mol)
     natm = mol.natm
+    h1ao = np.empty(natm, 3, nmo,nocc)
     for ia in range(natm):
-        vhf[ia*3:ia*3+3] += hcore_deriv(ia)
+        vhf[ia] += cp.asarray(hcore_deriv(ia))
+        for ix in range(3):
+            h1ao[ia,ix] = mo_coeff.T.dot(vhf[ia,ix].dot(mocc)).get()
+    return h1ao
 
-    h1ao = np.empty(natm*3,nmo,nocc)
-    for i, v in enumerate(vhf):
-        h1ao[i] = mo_coeff.T.dot(v.dot(mocc)).get()
-    return h1ao.reshape(natm,3,nmo,nocc)
+def _get_jk(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=None):
+    r'''
+    For each atom, compute
+    J = ((\nabla_X i) j| kl) (D_lk + D_ji)
+    K = ((\nabla_X i) j| kl) (D_jk + D_li)
+    '''
+    log = logger.new_logger(mol, verbose)
+    cput0 = log.init_timer()
+    vhfopt = _VHFOpt(mol)
+    # tile must set to 1. This tile size is assumed in the GPU kernel code
+    vhfopt.tile = 1
+    vhfopt.build()
+
+    mol = vhfopt.mol
+    nao, nao_orig = vhfopt.coeff.shape
+
+    dm = cp.asarray(dm, order='C')
+    dms = dm.reshape(-1,nao_orig,nao_orig)
+    n_dm = dms.shape[0]
+    dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
+    dms = cp.asarray(dms, order='C')
+    assert n_dm == 1
+
+    natm = mol.natm
+    if atoms_slice is None:
+        atoms_slice = 0, natm
+    atom0, atom1 = atoms_slice
+
+    vj = vk = None
+    vj_ptr = vk_ptr = lib.c_null_ptr()
+    assert with_j or with_k
+    if with_k:
+        vk = cp.zeros(((atom1-atom0)*3, nao, nao))
+        vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
+    if with_j:
+        vj = cp.zeros(((atom1-atom0)*3, nao, nao))
+        vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
+
+    init_constant(mol)
+    ao_loc = mol.ao_loc
+    dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
+    log_max_dm = dm_cond.max()
+    log_cutoff = math.log(vhfopt.direct_scf_tol)
+
+    uniq_l_ctr = vhfopt.uniq_l_ctr
+    uniq_l = uniq_l_ctr[:,0]
+    assert uniq_l.max() <= LMAX
+    l_ctr_bas_loc = vhfopt.l_ctr_offsets
+    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
+    n_groups = len(uniq_l_ctr)
+    tril_tile_mappings = _make_tril_tile_mappings(
+        l_ctr_bas_loc, vhfopt.tile_q_cond, log_cutoff-log_max_dm, 1)
+    workers = gpu_specs['multiProcessorCount']
+    QUEUE_DEPTH = 65536 # See rys_contract_jk_ip1 kernel
+    pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
+    info = cp.empty(2, dtype=np.uint32)
+    t1 = log.timer_debug1('q_cond and dm_cond', *cput0)
+
+    timing_collection = {}
+    kern_counts = 0
+    kern = libvhf_rys.RYS_build_jk_ip1
+
+    nbas = mol.nbas
+    assert vhfopt.tile_q_cond.shape == (nbas, nbas)
+    for i in range(n_groups):
+        for j in range(n_groups):
+            ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
+                       l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
+            ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
+            jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
+            ij_shls = (ish0, ish1, jsh0, jsh1)
+
+            sub_tile_q = vhfopt.tile_q_cond[ish0:ish1,jsh0:jsh1]
+            mask = sub_tile_q > log_cutoff - log_max_dm
+            mask[mol._bas[ish0:ish1,ATOM_OF] <  atom0] = False
+            mask[mol._bas[ish0:ish1,ATOM_OF] >= atom1] = False
+            t_ij = (cp.arange(ish0, ish1, dtype=np.int32)[:,None] * nbas +
+                    cp.arange(jsh0, jsh1, dtype=np.int32))
+            idx = cp.argsort(sub_tile_q[mask])[::-1]
+            tile_ij_mapping = t_ij[mask][idx]
+            for k in range(n_groups):
+                for l in range(k+1):
+                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                    kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
+                               l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
+                    tile_kl_mapping = tril_tile_mappings[k,l]
+                    scheme = _ip1_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
+                    err = kern(
+                        vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(n_dm), ctypes.c_int(nao), ctypes.c_int(atom0),
+                        vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
+                        (ctypes.c_int*8)(*ij_shls, *kl_shls),
+                        ctypes.c_int(tile_ij_mapping.size),
+                        ctypes.c_int(tile_kl_mapping.size),
+                        ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                        ctypes.c_float(log_cutoff),
+                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(info.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(workers),
+                        mol._atm.ctypes, ctypes.c_int(mol.natm),
+                        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+                    if err != 0:
+                        raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                    if log.verbose >= logger.DEBUG1:
+                        t1, t1p = log.timer_debug1(f'processing {llll}, tasks = {info[1]}', *t1), t1
+                        if llll not in timing_collection:
+                            timing_collection[llll] = 0
+                        timing_collection[llll] += t1[1] - t1p[1]
+                        kern_counts += 1
+
+    if log.verbose >= logger.DEBUG1:
+        log.debug1('kernel launches %d', kern_counts)
+        for llll, t in timing_collection.items():
+            log.debug1('%s wall time %.2f', llll, t)
+
+    if with_k:
+        vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
+        vk = vk + vk.transpose(0,2,1)
+        vk = vk.reshape(atom1-atom0, 3, nao_orig, nao_orig)
+    if with_j:
+        vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vj, vhfopt.coeff)
+        vj = vj + vj.transpose(0,2,1)
+        vj *= 2.
+        vj = vj.reshape(atom1-atom0, 3, nao_orig, nao_orig)
+    log.timer('vj and vk gradients', *cput0)
+    return vj, vk
+
+def _ip1_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
+    ls = l_ctr_pattern[:,0]
+    li, lj, lk, ll = ls
+    order = li + lj + lk + ll
+    nfi = (li + 1) * (li + 2) // 2
+    nfj = (lj + 1) * (lj + 2) // 2
+    nfk = (lk + 1) * (lk + 2) // 2
+    nfl = (ll + 1) * (ll + 2) // 2
+    gout_size = nfi * nfj * nfk * nfl
+    g_size = (li+2)*(lj+1)*(lk+1)*(ll+1)
+    nps = l_ctr_pattern[:,1]
+    ij_prims = nps[0] * nps[1]
+    nroots = (order + 1) // 2 + 1
+
+    unit = nroots*2 + g_size*3
+    shm_size -= ij_prims*12 * 8
+    counts = shm_size // (unit*8)
+    n = min(THREADS, _nearest_power2(counts))
+    gout_stride = THREADS // n
+    gout_width = 18
+    while gout_stride < 16 and gout_size / (gout_stride*gout_width) > 1:
+        n //= 2
+        gout_stride *= 2
+    return n, gout_stride
 
 def get_hcore(mol):
     '''Part of the second derivatives of core Hamiltonian'''
@@ -549,7 +706,7 @@ def hcore_generator(hessobj, mol=None):
 
     with_ecp = mol.has_ecp()
     if with_ecp:
-        ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
+        ecp_atoms = set(mol._ecpbas[:,ATOM_OF])
     else:
         ecp_atoms = ()
     aoslices = mol.aoslice_by_atom()
