@@ -38,7 +38,7 @@ def test_j_engine():
     dm = np.random.rand(nao, nao)
     dm = dm.dot(dm.T)
 
-    vj, vk = j_engine.get_j(mol, dm)
+    vj = j_engine.get_j(mol, dm)
     vj1 = vj.get()
     ref = get_jk(mol, dm)[0]
     assert abs(vj1 - ref[0]).max() < 1e-9
