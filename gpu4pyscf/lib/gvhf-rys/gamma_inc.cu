@@ -4,10 +4,8 @@
 #define SQRTPIE4        .886226925452758013
 
 __device__
-static void eval_gamma_inc_fn(double *f, double t, int m)
+static void eval_gamma_inc_fn(double *f, double t, int m, int sq_id, int block_size)
 {
-    int sq_id = threadIdx.x;
-    int block_size = blockDim.x;
     if (t < EPS_FLOAT64) {
         f[sq_id] = 1.;
         for (int i = 1; i <= m; i++) {

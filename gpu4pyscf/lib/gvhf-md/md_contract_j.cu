@@ -239,7 +239,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
             double rr = xpq*xpq + ypq*ypq + zpq*zpq;
             double theta = aij * akl / (aij + akl);
             double theta_rr = theta * rr;
-            eval_gamma_inc_fn(gamma_inc, theta_rr, order);
+            eval_gamma_inc_fn(gamma_inc, theta_rr, order, sq_id, nsq_per_block);
             double a2 = -2. * theta;
             gamma_inc[sq_id] *= fac;
             for (int i = 1; i <= order; i++) {
