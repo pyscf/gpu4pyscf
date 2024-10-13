@@ -59,13 +59,13 @@ class KnownValues(unittest.TestCase):
 
     def test_ejk_ip2(self):
         mol = gto.M(
-        atom = '''
-        O       0.0000000000    -0.0000000000     0.1174000000
-            C 1. 1. 0
-            H1 3.1 0.12 4.35
-            H2 2.1 1.31 6
-        ''',
-        basis='6-31g**', unit='B')
+            atom = '''
+            O       0.0000000000    -0.0000000000     0.1174000000
+                C 1. 1. 0
+                H1 3.1 0.12 4.35
+                H2 2.1 1.31 6
+            ''',
+            basis='6-31g**', unit='B')
         np.random.seed(9)
         nao = mol.nao
         mo_coeff = np.random.rand(nao, nao)
@@ -87,21 +87,19 @@ class KnownValues(unittest.TestCase):
 
     def test_get_jk(self):
         mol = gto.M(
-        atom = '''
-        O       0.0000000000    -0.0000000000     0.1174000000
-        H      -0.7570000000     4.0000000000    -0.4696000000
-        H       0.7570000000     4.0000000000    -0.4696000000
-            C 1. 1. 0
-            H1 3.1 0.12 4.35
-            H2 2.1 1.31 6
-        ''',
-        basis='def2-tzvpp', unit='B')
+            atom = '''
+            O       0.0000000000    -0.0000000000     0.1174000000
+            H      -0.7570000000     4.0000000000    -0.4696000000
+            H       0.7570000000     4.0000000000    -0.4696000000
+                C 1. 1. 0
+                H1 3.1 0.12 4.35
+                H2 2.1 1.31 6
+            ''',
+            basis='def2-tzvpp', unit='B')
         np.random.seed(9)
         nao = mol.nao
         mo_coeff = np.random.rand(nao, nao)
-        dm = mo_coeff.dot(mo_coeff.T) * 2
-        mo_occ = np.ones(nao) * 2
-        mo_energy = np.random.rand(nao)
+        dm = mo_coeff.dot(mo_coeff.T)
 
         vj, vk = rhf_gpu._get_jk(mol, dm)
         assert abs(lib.fp(vj.get()) -  87674.69061160382).max() < 1e-7
