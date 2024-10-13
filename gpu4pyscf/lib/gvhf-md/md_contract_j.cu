@@ -3,11 +3,14 @@
 #include <stdlib.h>
 #include <cuda_runtime.h>
 
-#include "vhf.cuh"
-#include "gamma_inc.cu"
+#include "gvhf-rys/vhf.cuh"
+#include "gvhf-rys/gamma_inc.cu"
 
 #define TILEX   2
 #define TILEY   4
+
+extern __constant__ uint16_t c_Rt_idx[];
+extern __constant__ uint16_t c_Rt_offsets[];
 
 #define ADDR(l, t, u, v) \
         ((l+1)*(l+2)*(l+3)/6 - ((l)-(t)+1)*((l)-(t)+2)*((l)-(t)+3)/6 + \
@@ -17,9 +20,7 @@ __device__
 static void iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz,
                       int l, int sq_id, int nsq_per_block)
 {
-    uint16_t *c_Rt_idx = (uint16_t *)c_g_pair_idx;
-    uint16_t *c_Rt_idx_offsets = (uint16_t *)c_g_pair_offsets;
-    uint16_t *p1 = c_Rt_idx + c_Rt_idx_offsets[l];
+    uint16_t *p1 = c_Rt_idx + c_Rt_offsets[l];
     double *pout = out + nsq_per_block;
     int k = 0;
     for (int v = 0, i = 0; v < l; ++v) {
@@ -238,7 +239,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
             double rr = xpq*xpq + ypq*ypq + zpq*zpq;
             double theta = aij * akl / (aij + akl);
             double theta_rr = theta * rr;
-            eval_gamma_inc_fn(gamma_inc, theta_rr, order, sq_id, nsq_per_block);
+            eval_gamma_inc_fn(gamma_inc, theta_rr, order);
             double a2 = -2. * theta;
             gamma_inc[sq_id] *= fac;
             for (int i = 1; i <= order; i++) {

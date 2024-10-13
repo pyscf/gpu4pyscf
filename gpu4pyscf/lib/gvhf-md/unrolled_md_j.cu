@@ -1,5 +1,5 @@
-#include "vhf.cuh"
-#include "gamma_inc_unrolled.cu"
+#include "gvhf-rys/vhf.cuh"
+#include "gvhf-rys/gamma_inc_unrolled.cu"
 
 
 // TILEX=16, TILEY=16, cache_dm=True

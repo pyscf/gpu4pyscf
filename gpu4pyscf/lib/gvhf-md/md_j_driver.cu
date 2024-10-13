@@ -4,10 +4,16 @@
 #include <string.h>
 #include <cuda_runtime.h>
 
-#include "vhf.cuh"
+#include "gvhf-rys/vhf.cuh"
 
 #define TILEX   2
 #define TILEY   4
+
+__constant__ uint16_t c_Rt_idx[5967];
+__constant__ uint16_t c_Rt_offsets[19];
+__constant__ Fold2Index c_i_in_fold2idx[165];
+__constant__ Fold3Index c_i_in_fold3idx[495];
+
 
 extern __global__ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds);
 int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
@@ -341,7 +347,7 @@ static uint16_t Rt_idx[] = {
 
 // l*(l+1)*(l+2)*(l+3)//24 - l
 static uint16_t Rt_idx_offsets[] = {
-0,0,3,12,31,65,120,203,322,486,705,990,1353,1807,2366,3045,3860,4828,5967
+0,0,3,12,31,65,120,203,322,486,705,990,1353,1807,2366,3045,3860,4828,5967,
 };
 
 extern "C" {
@@ -367,7 +373,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
         ntile_ij_pairs, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
         q_cond, dm_cond, cutoff};
 
-    JKMatrix jk = {n_dm, vj, NULL, dm};
+    JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
 
     if (!md_j_unrolled(&envs, &jk, &bounds, scheme, workers, omega)) {
         int lij = li + lj;
@@ -418,8 +424,8 @@ void init_mdj_constant(int shm_size)
             }
         } }
     }
-    cudaMemcpyToSymbol(c_g_pair_idx, Rt_idx, sizeof(Rt_idx)); // reuse these buffer to store Rt1_idx
-    cudaMemcpyToSymbol(c_g_pair_offsets, Rt_idx_offsets, sizeof(Rt_idx_offsets));
+    cudaMemcpyToSymbol(c_Rt_idx, Rt_idx, sizeof(Rt_idx)); // reuse these buffer to store Rt1_idx
+    cudaMemcpyToSymbol(c_Rt_offsets, Rt_idx_offsets, sizeof(Rt_idx_offsets));
     cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
     cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
     cudaFuncSetAttribute(md_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);

@@ -13,8 +13,7 @@ from gpu4pyscf.lib.cupy_helper import load_library, condense
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import jk
-from gpu4pyscf.scf.jk import (libvhf_rys, basis_seg_contraction,
-                              _make_j_engine_pair_locs, RysIntEnvVars)
+from gpu4pyscf.scf.jk import _make_j_engine_pair_locs, RysIntEnvVars
 
 __all__ = [
     'get_j',
@@ -26,7 +25,8 @@ SHM_SIZE = getattr(__config__, 'GPU_SHM_SIZE',
                    int(gpu_specs['sharedMemPerBlockOptin']//9)*8)
 THREADS = 256
 
-libvhf_rys.MD_build_j.restype = ctypes.c_int
+libvhf_md = load_library('libgvhf_md')
+libvhf_md.MD_build_j.restype = ctypes.c_int
 
 def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
     '''Compute J matrix
@@ -63,7 +63,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
     # Must use this modified _env to ensure the consistency with GPU kernel
     # In this _env, normalization coefficients for s and p funcitons are scaled.
     _env = vhfopt._mol_gpu[2].get()
-    libvhf_rys.Et_dot_dm(
+    libvhf_md.Et_dot_dm(
         dm_xyz.ctypes, dms.ctypes, ao_loc.ctypes, pair_loc.ctypes,
         mol._bas.ctypes, ctypes.c_int(mol.nbas), _env.ctypes)
     dm_xyz = cp.asarray(dm_xyz)
@@ -76,7 +76,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
         pair_loc_on_gpu.data.ptr,
     )
 
-    libvhf_rys.init_mdj_constant(ctypes.c_int(SHM_SIZE))
+    libvhf_md.init_mdj_constant(ctypes.c_int(SHM_SIZE))
 
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
@@ -104,7 +104,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
 
     timing_collection = {}
     kern_counts = 0
-    kern = libvhf_rys.MD_build_j
+    kern = libvhf_md.MD_build_j
 
     for i in range(n_groups):
         for j in range(i+1):
@@ -156,7 +156,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
 
     vj_xyz = vj_xyz.get()
     vj = np.zeros_like(dms)
-    libvhf_rys.jengine_dot_Et(
+    libvhf_md.jengine_dot_Et(
         vj.ctypes, vj_xyz.ctypes, ao_loc.ctypes, pair_loc.ctypes,
         mol._bas.ctypes, ctypes.c_int(mol.nbas), _env.ctypes)
     vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
