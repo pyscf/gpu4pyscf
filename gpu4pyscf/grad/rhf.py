@@ -214,10 +214,9 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
         dvhf = mf_grad.get_veff(mol, dm0, verbose=log)
         dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
-        extra_force = np.zeros((len(atmlst),3))
+        extra_force = cupy.zeros((len(atmlst),3))
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals())
-        extra_force = cupy.array(extra_force)
         log.timer_debug1('gradients of 2e part', *t1)
 
     dh = contract('xij,ij->xi', h1, dm0)

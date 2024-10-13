@@ -291,7 +291,7 @@ class Gradients(uhf_grad.Gradients):
         return vk, vkaux
 
 
-    def get_veff(self, mol=None, dm=None):
+    def get_veff(self, mol=None, dm=None, verbose=None):
         mo_a, mo_b = self.base.mo_coeff
         mo_occa, mo_occb = self.base.mo_occ
         vj0, vk0, vjaux0, vkaux0 = self.get_jk(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa)

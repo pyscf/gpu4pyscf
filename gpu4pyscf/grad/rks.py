@@ -328,6 +328,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
+    natm = mol.natm
     mol = None
     _sorted_mol = opt._sorted_mol
     coeff = cupy.asarray(opt.coeff)
@@ -336,7 +337,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
            for dm in dms.reshape(-1,nao0,nao0)]
 
-    excsum = 0
+    excsum = cupy.zeros((natm, 3))
     vmat = cupy.zeros((3,nao,nao))
     with opt.gdft_envs_cache():
         if xctype == 'LDA':
@@ -359,17 +360,28 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 ao = numint.eval_ao(ni, _sorted_mol, coords[p0:p1, :], ao_deriv)
                 rho = numint.eval_rho(_sorted_mol, ao, dms[0],
                                       xctype=xctype, hermi=1, with_lapl=False)
-                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
+                exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
+                exc = exc[:,0]
 
                 if xctype == 'LDA':
                     wv = weight[p0:p1] * vxc[0]
                     aow = numint._scale_ao(ao[0], wv)
-                    vmat += _d1_dot_(ao[1:4], aow.T)
+                    vtmp = _d1_dot_(ao[1:4], aow.T)
+                    vmat += vtmp
+                    # response of weights
+                    excsum += cupy.einsum('r,nxr->nx', exc*rho, weight1[:,:,p0:p1])
+                    # response of grids coordinates
+                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
+                    rho = vxc = aow = None
 
                 elif xctype == 'GGA':
                     wv = weight[p0:p1] * vxc
                     wv[0] *= .5
-                    vmat += _gga_grad_sum_(ao, wv)
+                    vtmp = _gga_grad_sum_(ao, wv)
+                    vmat += vtmp
+                    excsum += cupy.einsum('r,nxr->nx', exc*rho[0], weight1[:,:,p0:p1])
+                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
+                    rho = vxc = None
 
                 elif xctype == 'NLC':
                     raise NotImplementedError
@@ -379,10 +391,13 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     wv[0] *= .5
                     wv[4] *= .5  # for the factor 1/2 in tau
 
-                    vmat += _gga_grad_sum_(ao, wv)
-                    vmat += _tau_grad_dot_(ao, wv[4])
+                    vtmp  = _gga_grad_sum_(ao, wv)
+                    vtmp += _tau_grad_dot_(ao, wv[4])
+                    vmat += vtmp
+                    excsum += cupy.einsum('r,nxr->nx', exc*rho[0], weight1[:,:,p0:p1])
+                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
+                    rho = vxc = None
 
-    excsum = None
     vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
 
     # - sign because nabla_X = -nabla_x
@@ -510,7 +525,7 @@ def grids_response_cc(grids):
 class Gradients(rhf_grad.Gradients):
     from gpu4pyscf.lib.utils import to_gpu, device
     # attributes
-    grid_response = rks_grad.Gradients.grid_response
+    grid_response = False
     _keys = rks_grad.Gradients._keys
 
     def __init__ (self, mf):

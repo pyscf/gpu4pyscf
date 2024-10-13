@@ -52,6 +52,7 @@ static void rys_jk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bound
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
     double *env = envs.env;
+    double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw[];
     double *g = rw + nsq_per_block * nroots*2;
     double *Rpa_cicj = g + nsq_per_block * g_size*3;
@@ -175,7 +176,17 @@ static void rys_jk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bound
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
                 double theta_rr = theta * rr;
-                rys_roots(nroots, theta_rr, rw);
+                if (omega == 0) {
+                    rys_roots(nroots, theta_rr, rw);
+                } else {
+                    double theta_fac = omega * omega / (omega * omega + theta);
+                    rys_roots(nroots, theta_fac*theta_rr, rw);
+                    double sqrt_theta_fac = sqrt(theta_fac);
+                    for (int irys = 0; irys < nroots; ++irys) {
+                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
+                    }
+                }
                 double s0x, s1x, s2x;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();

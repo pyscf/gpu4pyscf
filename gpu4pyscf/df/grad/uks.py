@@ -23,7 +23,7 @@ from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
 
 
-def get_veff(ks_grad, mol=None, dm=None):
+def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     '''
     First order derivative of DFT effective potential matrix (wrt electron coordinates)
 

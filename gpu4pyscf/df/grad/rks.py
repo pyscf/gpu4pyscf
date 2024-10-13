@@ -24,7 +24,7 @@ from gpu4pyscf.df.grad import rhf as df_rhf_grad
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
 
-def get_veff(ks_grad, mol=None, dm=None):
+def get_veff(ks_grad, mol=None, dm=None, verbose=None):
 
     '''Coulomb + XC functional
     '''

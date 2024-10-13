@@ -274,11 +274,10 @@ class Gradients(rhf_grad.Gradients):
 
     auxbasis_response = True
     get_jk = get_jk
-    grad_elec = rhf_grad.grad_elec
-    
+
     def check_sanity(self):
         assert isinstance(self.base, df.df_jk._DFHF)
-    
+
     def get_j(self, mol=None, dm=None, hermi=0):
         vj, _, vjaux, _ = self.get_jk(mol, dm, with_k=False)
         return vj, vjaux
@@ -287,7 +286,7 @@ class Gradients(rhf_grad.Gradients):
         _, vk, _, vkaux = self.get_jk(mol, dm, with_j=False)
         return vk, vkaux
 
-    def get_veff(self, mol=None, dm=None):
+    def get_veff(self, mol=None, dm=None, verbose=None):
         vj, vk, vjaux, vkaux = self.get_jk(mol, dm)
         vhf = vj - vk*.5
         if self.auxbasis_response:
