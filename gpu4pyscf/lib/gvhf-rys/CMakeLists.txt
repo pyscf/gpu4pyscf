@@ -4,6 +4,7 @@ add_library(gvhf_rys SHARED
   rys_contract_jk.cu rys_jk_driver.cu unrolled_os.cu unrolled_rys.cu
   nr_sr_estimator.c
   rys_contract_j.cu cart2xyz.c unrolled_rys_j.cu
+  md_contract_j.cu md_j_driver.cu md_pairdata.c unrolled_md_j.cu
   count_tasks.cu
 )
 
