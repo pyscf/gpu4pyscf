@@ -280,37 +280,28 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
 
-    # CPU tasks are executed on background
-    def calculate_h1e(h1_gpu, s1_gpu):
-        # (\nabla i | hcore | j) - (\nabla i | j)
-        h1_cpu = mf_grad.get_hcore(mol)
-        s1_cpu = mf_grad.get_ovlp(mol)
-        h1_gpu[:] = cupy.asarray(h1_cpu)
-        s1_gpu[:] = cupy.asarray(s1_cpu)
-        return
+    # (\nabla i | hcore | j) - (\nabla i | j)
+    h1 = cupy.asarray(mf_grad.get_hcore(mol))
+    s1 = cupy.asarray(mf_grad.get_ovlp(mol))
 
-    h1 = cupy.empty([3, dm0.shape[0], dm0.shape[1]])
-    s1 = cupy.empty([3, dm0.shape[0], dm0.shape[1]])
-    with lib.call_in_background(calculate_h1e) as calculate_hs:
-        calculate_hs(h1, s1)
-        # (i | \nabla hcore | j)
-        t3 = log.init_timer()
-        dh1e = int3c2e.get_dh1e(mol, dm0)
+    # (i | \nabla hcore | j)
+    t3 = log.init_timer()
+    dh1e = int3c2e.get_dh1e(mol, dm0)
 
-        if mol.has_ecp():
-            dh1e += get_dh1e_ecp(mol, dm0)
-        t3 = log.timer_debug1('gradients of h1e', *t3)
+    if mol.has_ecp():
+        dh1e += get_dh1e_ecp(mol, dm0)
+    t3 = log.timer_debug1('gradients of h1e', *t3)
 
-        dvhf = mf_grad.get_veff(mol, dm0)
-        log.timer_debug1('gradients of veff', *t3)
-        log.debug('Computing Gradients of NR-HF Coulomb repulsion')
+    dvhf = mf_grad.get_veff(mol, dm0)
+    log.timer_debug1('gradients of veff', *t3)
+    log.debug('Computing Gradients of NR-HF Coulomb repulsion')
 
-        dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
-        extra_force = cupy.zeros((len(atmlst),3))
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += mf_grad.extra_force(ia, locals())
+    dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
+    extra_force = cupy.zeros((len(atmlst),3))
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
 
-        log.timer_debug1('gradients of 2e part', *t3)
+    log.timer_debug1('gradients of 2e part', *t3)
 
     dh = contract('xij,ij->xi', h1, dm0)
     ds = contract('xij,ij->xi', s1, dme0)
