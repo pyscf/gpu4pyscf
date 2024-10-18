@@ -64,6 +64,7 @@ def _grad_with_solvent(method, unrestricted=False):
     grad = g.kernel()
     return grad
 
+@unittest.skipIf(pcm.libsolvent is None, "solvent extension not compiled")
 class KnownValues(unittest.TestCase):
 
     def test_dA_dF(self):

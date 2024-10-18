@@ -80,6 +80,7 @@ def _check_grad(atom, solvent='water'):
     mol.stdout.close()
     assert numpy.linalg.norm(fd_cds - grad_cds) < 1e-8
 
+@unittest.skipIf(smd.libsolvent is None, "solvent extension not compiled")
 class KnownValues(unittest.TestCase):
     def test_grad_water(self):
         mf = dft.rks.RKS(mol, xc='b3lyp').SMD()
