@@ -25,7 +25,7 @@ from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf.lib.cupy_helper import tag_array, contract, empty_mapped
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
-from gpu4pyscf.scf.hf import _VHFOpt
+from gpu4pyscf.scf.int4c2e import _VHFOpt
 from gpu4pyscf.grad import rhf as rhf_grad
 
 LMAX_ON_GPU = 3

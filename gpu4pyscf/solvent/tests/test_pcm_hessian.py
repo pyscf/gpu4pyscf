@@ -18,6 +18,7 @@ import numpy as np
 import pyscf
 import pytest
 from pyscf import gto
+from gpu4pyscf.solvent import pcm
 from gpu4pyscf import scf, dft
 from packaging import version
 
@@ -85,6 +86,7 @@ def _check_hessian(mf, h, ix=0, iy=0):
     print(f'Norm of H({ix},{iy}) diff, {np.linalg.norm(h[ix,:,iy,:] - h_fd)}')
     assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
 
+@unittest.skipIf(pcm.libsolvent is None, "solvent extension not compiled")
 class KnownValues(unittest.TestCase):
     def test_hess_cpcm(self):
         print('testing C-PCM Hessian with DF-RKS')
