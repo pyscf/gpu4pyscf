@@ -20,13 +20,3 @@ dispersion correction for HF and DFT
 '''
 
 from pyscf.scf import dispersion
-from gpu4pyscf.scf import hf, uhf
-from gpu4pyscf.dft import rks, uks
-
-# Inject to SCF class
-hf.SCF.do_disp = dispersion.check_disp
-
-hf.RHF.get_dispersion = dispersion.get_dispersion
-uhf.UHF.get_dispersion = dispersion.get_dispersion
-rks.RKS.get_dispersion = dispersion.get_dispersion
-uks.UKS.get_dispersion = dispersion.get_dispersion

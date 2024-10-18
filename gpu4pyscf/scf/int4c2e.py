@@ -17,13 +17,18 @@
 import ctypes
 import copy
 import numpy as np
+import scipy.linalg
 import cupy
+from pyscf import gto
 from pyscf.scf import _vhf
-from gpu4pyscf.scf.hf import BasisProdCache, _make_s_index_offsets, _VHFOpt
 from gpu4pyscf.lib.cupy_helper import block_c2s_diag, cart2sph, block_diag, contract, load_library, c2s_l
+from gpu4pyscf.lib import logger
 
+LMAX_ON_GPU = 4
+FREE_CUPY_CACHE = True
+BINSIZE = 128   # TODO bug for 256
+libgvhf = load_library('libgvhf')
 libgint = load_library('libgint')
-libcupy_helper = load_library('libcupy_helper')
 
 _einsum = cupy.einsum
 """
@@ -109,7 +114,6 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
     ip_type == 1: int3c2e_ip1
     ip_type == 2: int3c2e_ip2
     '''
-    from gpu4pyscf.scf.hf import _VHFOpt
     fn = getattr(libgint, 'GINTfill_int3c2e_' + ip_type)
     if omega is None: omega = 0.0
     if stream is None: stream = cupy.cuda.get_current_stream()
@@ -439,3 +443,305 @@ def loop_int4c2e_general(intopt, ip_type='', direct_scf_tol=1e-13, omega=None, s
             if cp_ij_id == cp_kl_id:
                 int4c *= 0.5
             yield i0,i1,j0,j1,k0,k1,l0,l1,int4c
+
+class _VHFOpt:
+    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+
+    def __init__(self, mol, intor, prescreen='CVHFnoscreen',
+                 qcondname='CVHFsetnr_direct_scf', dmcondname=None):
+        self.mol, self.coeff = basis_seg_contraction(mol)
+        self.coeff = cupy.asarray(self.coeff)
+        # Note mol._bas will be sorted in .build() method. VHFOpt should be
+        # initialized after mol._bas updated.
+        self._intor = intor
+        self._prescreen = prescreen
+        self._qcondname = qcondname
+        self._dmcondname = dmcondname
+
+    def build(self, cutoff=1e-13, group_size=None, diag_block_with_triu=False):
+        mol = self.mol
+        cput0 = logger.init_timer(mol)
+        # Sort basis according to angular momentum and contraction patterns so
+        # as to group the basis functions to blocks in GPU kernel.
+        l_ctrs = mol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
+        uniq_l_ctr, _, inv_idx, l_ctr_counts = np.unique(
+            l_ctrs, return_index=True, return_inverse=True, return_counts=True, axis=0)
+
+        # Limit the number of AOs in each group
+        if group_size is not None:
+            uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(
+                uniq_l_ctr, l_ctr_counts, group_size)
+
+        if mol.verbose >= logger.DEBUG1:
+            logger.debug1(mol, 'Number of shells for each [l, nprim] group')
+            for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
+                logger.debug1(mol, '    %s : %s', l_ctr, n)
+
+        sorted_idx = np.argsort(inv_idx.ravel(), kind='stable').astype(np.int32)
+        # Sort contraction coefficients before updating self.mol
+        ao_loc = mol.ao_loc_nr(cart=True)
+        nao = ao_loc[-1]
+        # Some addressing problems in GPU kernel code
+        assert nao < 32768
+        ao_idx = np.array_split(np.arange(nao), ao_loc[1:-1])
+        ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
+        self.coeff = self.coeff[ao_idx]
+        # Sort basis inplace
+        mol._bas = mol._bas[sorted_idx]
+
+        # Initialize vhfopt after reordering mol._bas
+        _vhf.VHFOpt.__init__(self, mol, self._intor, self._prescreen,
+                             self._qcondname, self._dmcondname)
+        self.direct_scf_tol = cutoff
+
+        lmax = uniq_l_ctr[:,0].max()
+        nbas_by_l = [l_ctr_counts[uniq_l_ctr[:,0]==l].sum() for l in range(lmax+1)]
+        l_slices = np.append(0, np.cumsum(nbas_by_l))
+        if lmax >= LMAX_ON_GPU:
+            self.g_shls = l_slices[LMAX_ON_GPU:LMAX_ON_GPU+2].tolist()
+        else:
+            self.g_shls = []
+        if lmax > LMAX_ON_GPU:
+            self.h_shls = l_slices[LMAX_ON_GPU+1:].tolist()
+        else:
+            self.h_shls = []
+
+        # TODO: is it more accurate to filter with overlap_cond (or exp_cond)?
+        q_cond = self.get_q_cond()
+        cput1 = logger.timer(mol, 'Initialize q_cond', *cput0)
+        log_qs = []
+        pair2bra = []
+        pair2ket = []
+        bins = []
+        bins_floor = []
+        l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+        for i, (p0, p1) in enumerate(zip(l_ctr_offsets[:-1], l_ctr_offsets[1:])):
+            if uniq_l_ctr[i,0] > LMAX_ON_GPU:
+                # no integrals with h functions should be evaluated on GPU
+                continue
+
+            for q0, q1 in zip(l_ctr_offsets[:i], l_ctr_offsets[1:i+1]):
+                q_sub = q_cond[p0:p1,q0:q1]
+                idx = np.argwhere(q_sub > cutoff)
+                q_sub = q_sub[idx[:,0], idx[:,1]]
+                log_q = np.log(q_sub)
+                log_q[log_q > 0] = 0
+                nbins = (len(log_q) + BINSIZE)//BINSIZE
+                s_index, bin_floor = _make_s_index(log_q, nbins=nbins, cutoff=cutoff)
+
+                ishs = idx[:,0]
+                jshs = idx[:,1]
+                idx = np.lexsort((ishs, jshs, s_index), axis=-1)
+                ishs = ishs[idx]
+                jshs = jshs[idx]
+                s_index = s_index[idx]
+
+                ishs += p0
+                jshs += q0
+                pair2bra.append(ishs)
+                pair2ket.append(jshs)
+                bins.append(_make_bins(s_index, nbins=nbins))
+                bins_floor.append(bin_floor)
+                log_qs.append(cupy.asarray(log_q[idx]))
+
+            q_sub = q_cond[p0:p1,p0:p1]
+            idx = np.argwhere(q_sub > cutoff)
+            if not diag_block_with_triu:
+                # Drop the shell pairs in the upper triangle for diagonal blocks
+                mask = idx[:,0] >= idx[:,1]
+                idx = idx[mask,:]
+
+            q_sub = q_sub[idx[:,0], idx[:,1]]
+            log_q = np.log(q_sub)
+            log_q[log_q > 0] = 0
+            nbins = (len(log_q) + BINSIZE)//BINSIZE
+            s_index, bin_floor = _make_s_index(log_q, nbins=nbins, cutoff=cutoff)
+            ishs = idx[:,0]
+            jshs = idx[:,1]
+            idx = np.lexsort((ishs, jshs, s_index), axis=-1)
+            ishs = ishs[idx]
+            jshs = jshs[idx]
+            s_index = s_index[idx]
+
+            ishs += p0
+            jshs += p0
+            pair2bra.append(ishs)
+            pair2ket.append(jshs)
+            bins.append(_make_bins(s_index, nbins=nbins))
+            bins_floor.append(bin_floor)
+            log_qs.append(cupy.asarray(log_q[idx]))
+
+        # TODO
+        self.pair2bra = pair2bra
+        self.pair2ket = pair2ket
+        self.uniq_l_ctr = uniq_l_ctr
+        self.l_ctr_offsets = l_ctr_offsets
+        self.bas_pair2shls = np.hstack(
+            pair2bra + pair2ket).astype(np.int32).reshape(2,-1)
+
+        self.bas_pairs_locs = np.append(
+            0, np.cumsum([x.size for x in pair2bra])).astype(np.int32)
+        self.bins = bins
+        self.bins_floor = bins_floor
+        self.log_qs = log_qs
+        ao_loc = mol.ao_loc_nr(cart=True)
+        ncptype = len(log_qs)
+        self.bpcache = ctypes.POINTER(BasisProdCache)()
+        if diag_block_with_triu:
+            scale_shellpair_diag = 1.
+        else:
+            scale_shellpair_diag = 0.5
+        libgvhf.GINTinit_basis_prod(
+            ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),
+            ao_loc.ctypes.data_as(ctypes.c_void_p),
+            self.bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
+            self.bas_pairs_locs.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ncptype),
+            mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(mol.natm),
+            mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(mol.nbas),
+            mol._env.ctypes.data_as(ctypes.c_void_p))
+        logger.timer(mol, 'Initialize GPU cache', *cput1)
+        return self
+
+    init_cvhf_direct = _vhf.VHFOpt.init_cvhf_direct
+    get_q_cond       = _vhf.VHFOpt.get_q_cond
+    set_dm           = _vhf.VHFOpt.set_dm
+
+    def clear(self):
+        _vhf.VHFOpt.__del__(self)
+        libgvhf.GINTdel_basis_prod(ctypes.byref(self.bpcache))
+        return self
+
+    def __del__(self):
+        try:
+            self.clear()
+        except AttributeError:
+            pass
+
+class BasisProdCache(ctypes.Structure):
+    pass
+
+def basis_seg_contraction(mol, allow_replica=False):
+    '''transform generally contracted basis to segment contracted basis
+    Kwargs:
+        allow_replica:
+            transform the generally contracted basis to replicated
+            segment-contracted basis
+    '''
+    bas_templates = {}
+    _bas = []
+    _env = mol._env.copy()
+    contr_coeff = []
+    aoslices = mol.aoslice_by_atom()
+    for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
+        key = tuple(mol._bas[ib0:ib1,gto.PTR_EXP])
+        if key in bas_templates:
+            bas_of_ia, coeff = bas_templates[key]
+            bas_of_ia = bas_of_ia.copy()
+            bas_of_ia[:,gto.ATOM_OF] = ia
+        else:
+            # Generate the template for decontracted basis
+            coeff = []
+            bas_of_ia = []
+            for shell in mol._bas[ib0:ib1]:
+                l = shell[gto.ANG_OF]
+                nf = (l + 1) * (l + 2) // 2
+                nctr = shell[gto.NCTR_OF]
+                if nctr == 1:
+                    bas_of_ia.append(shell)
+                    coeff.append(np.eye(nf))
+                    continue
+                # Only basis with nctr > 1 needs to be decontracted
+                nprim = shell[gto.NPRIM_OF]
+                pcoeff = shell[gto.PTR_COEFF]
+                if allow_replica:
+                    coeff.extend([np.eye(nf)] * nctr)
+                    bs = np.repeat(shell[np.newaxis], nctr, axis=0)
+                    bs[:,gto.NCTR_OF] = 1
+                    bs[:,gto.PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr, nprim)
+                    bas_of_ia.append(bs)
+                else:
+                    pexp = shell[gto.PTR_EXP]
+                    exps = _env[pexp:pexp+nprim]
+                    norm = gto.gto_norm(l, exps)
+                    # remove normalization from contraction coefficients
+                    c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
+                    c = np.einsum('ip,p,ef->iepf', c, 1/norm, np.eye(nf))
+                    coeff.append(c.reshape(nf*nctr, nf*nprim).T)
+
+                    _env[pcoeff:pcoeff+nprim] = norm
+                    bs = np.repeat(shell[np.newaxis], nprim, axis=0)
+                    bs[:,gto.NPRIM_OF] = 1
+                    bs[:,gto.NCTR_OF] = 1
+                    bs[:,gto.PTR_EXP] = np.arange(pexp, pexp+nprim)
+                    bs[:,gto.PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim)
+                    bas_of_ia.append(bs)
+
+            bas_of_ia = np.vstack(bas_of_ia)
+            bas_templates[key] = (bas_of_ia, coeff)
+
+        _bas.append(bas_of_ia)
+        contr_coeff.extend(coeff)
+
+    pmol = copy.copy(mol)
+    pmol.cart = True
+    pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
+    pmol._env = _env
+    contr_coeff = scipy.linalg.block_diag(*contr_coeff)
+
+    if not mol.cart:
+        contr_coeff = contr_coeff.dot(mol.cart2sph_coeff())
+    return pmol, contr_coeff
+
+def _make_s_index_offsets(log_q, nbins=10, cutoff=1e-12):
+    '''Divides the shell pairs to "nbins" collections down to "cutoff"'''
+    scale = nbins / np.log(min(cutoff, .1))
+    s_index = np.floor(scale * log_q).astype(np.int32)
+    bins = np.bincount(s_index)
+    if bins.size < nbins:
+        bins = np.append(bins, np.zeros(nbins-bins.size, dtype=np.int32))
+    else:
+        bins = bins[:nbins]
+    assert bins.max() < 65536 * 8
+    return np.append(0, np.cumsum(bins)).astype(np.int32)
+
+def _make_s_index(log_q, nbins=10, cutoff=1e-12):
+    '''Divides the shell pairs to "nbins" collections down to "cutoff"'''
+    scale = nbins / np.log(min(cutoff, .1))
+    s_index = np.floor(scale * log_q).astype(np.int32)
+    bins_floor = np.arange(nbins) / scale
+    return s_index, bins_floor
+
+def _make_bins(s_index, nbins=10):
+    bins = np.bincount(s_index)
+    if bins.size < nbins:
+        bins = np.append(bins, np.zeros(nbins-bins.size, dtype=np.int32))
+    else:
+        bins = bins[:nbins]
+    assert bins.max() < 65536 * 8
+    return np.append(0, np.cumsum(bins)).astype(np.int32)
+
+def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size):
+    '''Splits l_ctr patterns into small groups with group_size the maximum
+    number of AOs in each group
+    '''
+    l = uniq_l_ctr[:,0]
+    _l_ctrs = []
+    _l_ctr_counts = []
+    for l_ctr, counts in zip(uniq_l_ctr, l_ctr_counts):
+        l = l_ctr[0]
+        nf = (l + 1) * (l + 2) // 2
+        max_shells = max(group_size // nf, 2)
+        if l > LMAX_ON_GPU or counts <= max_shells:
+            _l_ctrs.append(l_ctr)
+            _l_ctr_counts.append(counts)
+            continue
+
+        nsubs, rests = counts.__divmod__(max_shells)
+        _l_ctrs.extend([l_ctr] * nsubs)
+        _l_ctr_counts.extend([max_shells] * nsubs)
+        if rests > 0:
+            _l_ctrs.append(l_ctr)
+            _l_ctr_counts.append(rests)
+    uniq_l_ctr = np.vstack(_l_ctrs)
+    l_ctr_counts = np.hstack(_l_ctr_counts)
+    return uniq_l_ctr, l_ctr_counts

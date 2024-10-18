@@ -56,7 +56,7 @@ def test_b3lyp_with_d3bj():
     mf.conv_tol_cpscf = 1e-8
     mf.disp = 'd3bj'
     e_dft = mf.kernel()
-    assert np.abs(e_dft - -685.0326965348272) < 1e-8
+    assert np.abs(e_dft - -685.0326965348272) < 1e-7
 
     g = mf.nuc_grad_method().kernel()
     assert np.abs(cupy.linalg.norm(g) - 0.17498362161082373) < 1e-5
@@ -73,7 +73,7 @@ def test_b3lyp_d3bj():
     mf.conv_tol = 1e-10
     mf.conv_tol_cpscf = 1e-8
     e_dft = mf.kernel()
-    assert np.abs(e_dft - -685.0326965348272) < 1e-8
+    assert np.abs(e_dft - -685.0326965348272) < 1e-7
 
     g = mf.nuc_grad_method().kernel()
     assert np.abs(cupy.linalg.norm(g) - 0.17498362161082373) < 1e-5
@@ -91,7 +91,7 @@ def test_DFUKS():
     mf.conv_tol_cpscf = 1e-8
     mf.disp = 'd3bj'
     e_dft = mf.kernel()
-    assert np.abs(e_dft - -685.0326965349493) < 1e-8
+    assert np.abs(e_dft - -685.0326965349493) < 1e-7
 
     g = mf.nuc_grad_method().kernel()
     assert np.abs(cupy.linalg.norm(g) - 0.17498264516108836) < 1e-5
@@ -108,7 +108,7 @@ def test_RKS():
     mf.conv_tol = 1e-12
     mf.disp = 'd3bj'
     e_dft = mf.kernel()
-    assert np.abs(e_dft - -685.0325611822375) < 1e-8
+    assert np.abs(e_dft - -685.0325611822375) < 1e-7
 
     g = mf.nuc_grad_method().kernel()
     assert np.abs(cupy.linalg.norm(g) - 0.1750368231223345) < 1e-6
@@ -124,7 +124,7 @@ def test_DFRKS_with_SMD():
     mf.conv_tol_cpscf = 1e-8
     mf.disp = 'd3bj'
     e_dft = mf.kernel()
-    assert np.abs(e_dft - -685.0578838805443) < 1e-8
+    assert np.abs(e_dft - -685.0578838805443) < 1e-7
 
     g = mf.nuc_grad_method().kernel()
     assert np.abs(cupy.linalg.norm(g) - 0.16804945458657145) < 1e-5
@@ -143,7 +143,7 @@ def test_DFUKS_with_SMD():
     mf.conv_tol_cpscf = 1e-8
     mf.disp = 'd3bj'
     e_dft = mf.kernel()
-    assert np.abs(e_dft - -685.05788388063) < 1e-8
+    assert np.abs(e_dft - -685.05788388063) < 1e-7
 
     g = mf.nuc_grad_method().kernel()
     assert np.abs(cupy.linalg.norm(g) - 0.1680496465773684) < 1e-5

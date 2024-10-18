@@ -253,7 +253,11 @@ def smd_radii(alpha):
 
 import ctypes
 from gpu4pyscf.lib.cupy_helper import load_library
-libsolvent = load_library('libsolvent')
+try:
+    libsolvent = load_library('libsolvent')
+except OSError:
+    libsolvent = None
+
 def get_cds_legacy(smdobj):
     mol = smdobj.mol
     natm = mol.natm

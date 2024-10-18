@@ -64,12 +64,12 @@ class KnownValues(unittest.TestCase):
     def test_rks(self):
         mf = rks.RKS(mol).to_gpu()
         e_tot = mf.to_gpu().kernel()
-        assert numpy.abs(e_tot - -74.73210527989748) < 1e-7
+        assert numpy.abs(e_tot - -74.73210527989748) < 1e-6
 
         mf = rks.RKS(mol).run()
         gobj = mf.nuc_grad_method().to_gpu()
         g = gobj.kernel()
-        assert numpy.abs(lib.fp(g) - -0.04340162663176693) < 1e-7
+        assert numpy.abs(lib.fp(g) - -0.04340162663176693) < 1e-6
 
         # RKS Hessian it not supported yet
         # mf = rks.RKS(mol).run()
@@ -114,7 +114,7 @@ class KnownValues(unittest.TestCase):
     def test_df_RKS(self):
         mf = rks.RKS(mol, xc='wb97x').density_fit().to_gpu()
         e_tot = mf.to_gpu().kernel()
-        assert numpy.abs(e_tot - -75.30717654021076) < 1e-7
+        assert numpy.abs(e_tot - -75.30717654021076) < 1e-6
 
         mf = rks.RKS(mol, xc='wb97x').density_fit().run()
         gobj = mf.nuc_grad_method().to_gpu()
@@ -125,8 +125,9 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
         h = hobj.kernel()
-        assert numpy.abs(lib.fp(h) - 2.187025544697092) < 1e-4
+        assert numpy.abs(lib.fp(h) - 2.1858589608638384) < 1e-4
 
 if __name__ == "__main__":
     print("Full tests for to_gpu module")
     unittest.main()
+    

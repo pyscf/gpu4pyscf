@@ -20,9 +20,11 @@ import numpy as np
 import cupy
 from pyscf import gto, df, lib
 from pyscf.scf import _vhf
-from gpu4pyscf.scf.hf import BasisProdCache, _make_s_index_offsets
+from gpu4pyscf.scf.int4c2e import (BasisProdCache, _make_s_index_offsets,
+                                   libgvhf, libgint)
 from gpu4pyscf.lib.cupy_helper import (
-    block_c2s_diag, cart2sph, block_diag, contract, load_library, get_avail_mem, print_mem_info, take_last2d)
+    block_c2s_diag, cart2sph, block_diag, contract, load_library, get_avail_mem,
+    print_mem_info, take_last2d, libcupy_helper)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import basis_seg_contraction
 
@@ -31,10 +33,6 @@ FREE_CUPY_CACHE = True
 STACK_SIZE_PER_THREAD = 8192 * 4
 BLKSIZE = 128
 NROOT_ON_GPU = 7
-
-libgvhf = load_library('libgvhf')
-libgint = load_library('libgint')
-libcupy_helper = load_library('libcupy_helper')
 
 def make_fake_mol():
     '''
@@ -1452,118 +1450,6 @@ def get_int3c2e(mol, auxmol=None, auxbasis='weigend+etb', direct_scf_tol=1e-13, 
     int3c = int3c[np.ix_(aux_id, ao_idx, ao_idx)]
 
     return int3c.transpose([2,1,0])
-
-def get_int2c2e_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, aosym=None, omega=None, stream=None):
-    '''
-    Generated int2c2e consistent with pyscf
-    '''
-    if omega is None: omega = 0.0
-    if stream is None: stream = cupy.cuda.get_current_stream()
-    if intopt is None:
-        intopt = VHFOpt(mol, auxmol, 'int2e')
-        intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False)
-    naux = auxmol.nao
-    rows, cols = np.tril_indices(naux)
-
-    nbins = 1
-
-    nao_cart = intopt.mol.nao
-    naux_cart = intopt.auxmol.nao
-    norb_cart = nao_cart + naux_cart + 1
-
-    int2c = cupy.zeros([naux_cart, naux_cart], order='F')
-    ao_offsets = np.array([nao_cart+1, nao_cart, nao_cart+1, nao_cart], dtype=np.int32)
-    strides = np.array([1, naux_cart, naux_cart, naux_cart*naux_cart], dtype=np.int32)
-    for k_id, log_q_k in enumerate(intopt.aux_log_qs):
-        bins_locs_k = _make_s_index_offsets(log_q_k, nbins)
-        cp_k_id = k_id + len(intopt.log_qs)
-        for l_id, log_q_l in enumerate(intopt.aux_log_qs):
-            if k_id > l_id: continue
-            bins_locs_l = _make_s_index_offsets(log_q_l, nbins)
-            cp_l_id = l_id + len(intopt.log_qs)
-            err = libgint.GINTfill_int2e(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
-                intopt.bpcache,
-                ctypes.cast(int2c.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(norb_cart),
-                strides.ctypes.data_as(ctypes.c_void_p),
-                ao_offsets.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_k.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_l.ctypes.data_as(ctypes.c_void_p),
-                ctypes.c_int(nbins),
-                ctypes.c_int(cp_k_id),
-                ctypes.c_int(cp_l_id),
-                ctypes.c_double(omega))
-
-            if err != 0:
-                raise RuntimeError("int2c2e failed\n")
-
-    int2c[rows, cols] = int2c[cols, rows]
-    if not mol.cart:
-        coeff = intopt.aux_cart2sph
-        int2c = coeff.T @ int2c @ coeff
-
-    return int2c
-
-def get_int2c2e_ip_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, intor=None, aosym=None, stream=None):
-    '''
-    TODO: WIP
-    '''
-    if stream is None: stream = cupy.cuda.get_current_stream()
-    if intopt is None:
-        intopt = VHFOpt(mol, auxmol, 'int2e')
-        intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False)
-
-    nbins = 1
-
-    nao_cart = intopt.mol.nao
-    naux_cart = intopt.auxmol.nao
-    norb_cart = nao_cart + naux_cart + 1
-    rows, cols = np.tril_indices(naux_cart)
-
-    int2c = cupy.zeros([naux_cart, naux_cart], order='F')
-    ao_offsets = np.array([nao_cart+1, nao_cart, nao_cart+1, nao_cart], dtype=np.int32)
-    strides = np.array([1, naux_cart, naux_cart, naux_cart*naux_cart], dtype=np.int32)
-    for k_id, log_q_k in enumerate(intopt.aux_log_qs):
-        bins_locs_k = _make_s_index_offsets(log_q_k, nbins)
-        cp_k_id = k_id + len(intopt.log_qs)
-        for l_id, log_q_l in enumerate(intopt.aux_log_qs):
-            if k_id > l_id: continue
-            bins_locs_l = _make_s_index_offsets(log_q_l, nbins)
-            cp_l_id = l_id + len(intopt.log_qs)
-            err = libgint.GINTfill_int2e(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
-                intopt.bpcache,
-                ctypes.cast(int2c.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(norb_cart),
-                strides.ctypes.data_as(ctypes.c_void_p),
-                ao_offsets.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_k.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_l.ctypes.data_as(ctypes.c_void_p),
-                ctypes.c_int(nbins),
-                ctypes.c_int(cp_k_id),
-                ctypes.c_int(cp_l_id))
-
-            if err != 0:
-                raise RuntimeError("int2c2e failed\n")
-
-    int2c[rows, cols] = int2c[cols, rows]
-    if not auxmol.cart:
-        coeff = intopt.aux_cart2sph
-        int2c = coeff.T @ int2c @ coeff
-
-    return int2c
-
-def get_int2c2e(mol, auxmol, direct_scf_tol=1e-13):
-    '''
-    Generate int2c2e on GPU
-    '''
-    intopt = VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=True)
-    int2c = get_int2c2e_sorted(mol, auxmol, intopt=intopt)
-    aux_idx = np.argsort(intopt.aux_ao_idx)
-    int2c = int2c[np.ix_(aux_idx, aux_idx)]
-    return int2c
 
 def sort_mol(mol0, cart=True, log=None):
     '''

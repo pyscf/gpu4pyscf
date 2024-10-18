@@ -34,6 +34,8 @@ c2s_l = mole.get_cart2sph(lmax=LMAX_ON_GPU)
 c2s_offset = np.cumsum([0] + [x.shape[0]*x.shape[1] for x in c2s_l])
 _data = {'c2s': None}
 
+_kernel_registery = {}
+
 def load_library(libname):
     try:
         _loaderpath = os.path.dirname(__file__)
@@ -835,3 +837,124 @@ def grouped_gemm(As, Bs, Cs=None):
     if err != 0:
         raise RuntimeError('failed in grouped_gemm kernel')
     return Cs
+
+def condense(opname, a, loc_x, loc_y=None):
+    assert opname in ('sum', 'max', 'min', 'abssum', 'absmax', 'norm')
+    assert a.dtype == np.float64
+    if loc_y is None:
+        loc_y = loc_x
+    do_transpose = False
+    if a.ndim == 2:
+        if a.flags.f_contiguous:
+            a = a.T
+            loc_x, loc_y = loc_y, loc_x
+            do_transpose = True
+        a = a[None]
+    else:
+        assert a.flags.c_contiguous
+    loc_x = cupy.asarray(loc_x, cupy.int32)
+    loc_y = cupy.asarray(loc_y, cupy.int32)
+    nloc_x = loc_x.size - 1
+    nloc_y = loc_y.size - 1
+    counts, nx, ny = a.shape
+    assert loc_x[-1] == nx
+    assert loc_y[-1] == ny
+
+    #if opname == 'absmax':
+    #    out = cupy.zeros((nloc_x, nloc_y))
+    #    err = libcupy_helper.dabsmax_condense(
+    #        ctypes.cast(out.ctypes.data, ctypes.c_void_p),
+    #        ctypes.cast(a.ctypes.data, ctypes.c_void_p),
+    #        ctypes.cast(loc_x.ctypes.data, ctypes.c_void_p),
+    #        ctypes.cast(loc_y.ctypes.data, ctypes.c_void_p),
+    #        ctypes.c_int(nloc_x), ctypes.c_int(nloc_y), ctypes.c_int(counts))
+    #    if err != 0:
+    #        raise RuntimeError('failed in dabsmax_condense kernel')
+    #    if do_transpose:
+    #        out = out.T
+    #    return out
+
+    fn_name = f'd{opname}_condense'
+    if fn_name not in _kernel_registery:
+        if opname == 'sum':
+            init_code = '0'
+            code = 'val += a[ip*nj+jp];'
+            result_code = 'val'
+        elif opname == 'max':
+            init_code = '0'
+            code = 'double tmp = a[ip*nj+jp]; val = (val > tmp) ? val : tmp;'
+            result_code = 'val'
+        elif opname == 'min':
+            init_code = '0'
+            code = 'double tmp = a[ip*nj+jp]; val = (val < tmp) ? val : tmp;'
+            result_code = 'val'
+        elif opname == 'abssum':
+            init_code = '0'
+            code = 'val += fabs(a[ip*nj+jp]);'
+            result_code = 'val'
+        elif opname == 'absmax':
+            init_code = '0'
+            code = 'double tmp = fabs(a[ip*nj+jp]); val = (val > tmp) ? val : tmp;'
+            result_code = 'val'
+        elif opname == 'norm':
+            init_code = '0'
+            code = 'double tmp = a[ip*nj+jp]; val += tmp * tmp;'
+            result_code = 'fsqrt(val)'
+
+        kernel_code = (f'''\
+extern "C" __global__
+void {fn_name}(double *out, double *a, int *loc_x, int *loc_y,
+               long long nloc_x, long long nloc_y, long long counts)'''
+'''
+{
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = blockIdx.y * blockDim.y + threadIdx.y;
+    if (i >= nloc_x || j >= nloc_y) {
+        return;
+    }
+    size_t ni = loc_x[nloc_x];
+    size_t nj = loc_y[nloc_y];
+    size_t Nloc_y = nloc_y;
+    int i0 = loc_x[i];
+    int i1 = loc_x[i+1];
+    int j0 = loc_y[j];
+    int j1 = loc_y[j+1];
+    double val = ''' + init_code + ''';
+    for (int n = 0; n < counts; ++n) {
+        for (int ip = i0; ip < i1; ++ip) {
+        for (int jp = j0; jp < j1; ++jp) {
+            ''' + code + '''
+        } }
+        a += ni * nj;
+    }
+    out[i*Nloc_y+j] = ''' + result_code + ''';
+}
+''')
+        _kernel_registery[fn_name] = cupy.RawKernel(kernel_code, fn_name)
+
+    kernel = _kernel_registery[fn_name]
+    out = cupy.zeros((nloc_x, nloc_y))
+    blocks = ((nloc_x+15)//16, (nloc_y+15)//16)
+    threads = (16, 16)
+    kernel(blocks, threads, (out, a, loc_x, loc_y, nloc_x, nloc_y, counts))
+    cupy.cuda.Stream.null.synchronize()
+    if do_transpose:
+        out = out.T
+    return out
+
+def sandwich_dot(a, c, out=None):
+    '''Performs c.T.dot(a).dot(c)'''
+    a = cupy.asarray(a)
+    a_ndim = a.ndim
+    if a_ndim == 2:
+        a = a[None]
+    counts = a.shape[0]
+    m = c.shape[1]
+    out = cupy.empty((counts, m, m))
+    tmp = None
+    for i in range(counts):
+        tmp = cupy.dot(c.T, a[i], out=tmp)
+        cupy.dot(tmp, c, out=out[i])
+    if a_ndim == 2:
+        out = out[0]
+    return out

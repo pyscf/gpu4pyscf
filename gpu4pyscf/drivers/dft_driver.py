@@ -208,8 +208,8 @@ def run_dft(mol_name, config, charge=None, spin=0):
             mo_energy[0].sort()
             mo_energy[1].sort()
             na, nb = mf.nelec
-            h5f.create_dataset('e_lomo_alpha',   data=mo_energy[0][na])
-            h5f.create_dataset('e_lomo_beta',    data=mo_energy[1][nb])
+            h5f.create_dataset('e_lumo_alpha',   data=mo_energy[0][na])
+            h5f.create_dataset('e_lumo_beta',    data=mo_energy[1][nb])
             h5f.create_dataset('e_homo_alpha',   data=mo_energy[0][na-1])
             h5f.create_dataset('e_homo_beta',    data=mo_energy[1][nb-1])
         else:
@@ -218,7 +218,7 @@ def run_dft(mol_name, config, charge=None, spin=0):
             if isinstance(mo_energy, cupy.ndarray): mo_energy = mo_energy.get()
             mo_energy.sort()
             nocc = mf.mol.nelectron // 2
-            h5f.create_dataset('e_lomo',     data=mo_energy[nocc])
+            h5f.create_dataset('e_lumo',     data=mo_energy[nocc])
             h5f.create_dataset('e_homo',     data=mo_energy[nocc-1])
     
     ##################### Gradient Calculation ###############################
