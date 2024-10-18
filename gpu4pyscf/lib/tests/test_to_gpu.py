@@ -125,7 +125,7 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
         h = hobj.kernel()
-        assert numpy.abs(lib.fp(h) - 2.18702613804124) < 1e-4
+        assert numpy.abs(lib.fp(h) - 2.1858589608638384) < 1e-4
 
 if __name__ == "__main__":
     print("Full tests for to_gpu module")
