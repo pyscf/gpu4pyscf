@@ -81,7 +81,7 @@ class KnownValues(unittest.TestCase):
         ni_pyscf = pyscf_numint()
         fn = getattr(ni_pyscf, method[:6])
         nref, eref, vref = fn(mol, grids_cpu, xc, dm1, hermi=1)
-
+        
         v = cupy.asarray(v)
         vref = cupy.asarray(vref)
         assert cupy.allclose(e, eref)
@@ -150,34 +150,34 @@ class KnownValues(unittest.TestCase):
         assert cupy.linalg.norm(vxc - cupy.asarray(vxc_ref)) < 1e-6 * cupy.linalg.norm(vxc)
         assert cupy.linalg.norm(fxc - cupy.asarray(fxc_ref)) < 1e-6 * cupy.linalg.norm(fxc)
         assert cupy.linalg.norm(v - cupy.asarray(v_ref)) < 1e-6 * cupy.linalg.norm(v)
-
+    
     def test_rks_lda(self):
         self._check_vxc('nr_rks', LDA)
 
     def test_rks_lda_batch(self):
         self._check_vxc('nr_rks_batch', LDA)
-
+    
     def test_rks_gga(self):
         self._check_vxc('nr_rks', GGA_PBE)
 
     def test_rks_gga_batch(self):
         self._check_vxc('nr_rks_batch', GGA_PBE)
-
+    
     def test_rks_mgga(self):
         self._check_vxc('nr_rks', MGGA_M06)
 
     def test_rks_mgga_batch(self):
         self._check_vxc('nr_rks_batch', MGGA_M06)
-
+    
     def test_uks_lda(self):
         self._check_vxc('nr_uks', LDA)#'lda', -6.362059440515177)
-
+    
     def test_uks_gga(self):
         self._check_vxc('nr_uks', GGA_PBE)#'pbe', -6.732546841646528)
-
+    
     def test_uks_mgga(self):
         self._check_vxc('nr_uks', MGGA_M06)#'m06', 83.5606316500255)
-
+    
     def test_rks_fxc_lda(self):
         self._check_rks_fxc(LDA, hermi=1)
 
@@ -195,6 +195,7 @@ class KnownValues(unittest.TestCase):
 
     def test_uks_fxc_mgga(self):
         self._check_uks_fxc(MGGA_M06, hermi=1)
+    
     '''
     # Not implemented yet
     

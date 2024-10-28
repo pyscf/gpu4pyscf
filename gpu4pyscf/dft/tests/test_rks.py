@@ -65,7 +65,6 @@ class KnownValues(unittest.TestCase):
     '''
     known values are obtained by Q-Chem
     '''
-    '''
     def test_rks_lda(self):
         print('------- LDA ----------------')
         e_tot = run_dft("LDA, vwn5", mol_sph)
@@ -107,14 +106,14 @@ class KnownValues(unittest.TestCase):
         e_ref = -76.4334218842
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5
-    '''
+    
     def test_rks_cart(self):
         print("-------- cart ---------------")
         e_tot = run_dft('b3lyp', mol_cart)
         e_ref = -76.4672144985
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5
-    '''
+    
     def test_rks_d3bj(self):
         print('-------- B3LYP with d3bj -------------')
         e_tot = run_dft('B3LYP', mol_sph, disp='d3bj')
@@ -156,7 +155,7 @@ class KnownValues(unittest.TestCase):
         e_ref = -76.4669590803
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
-    '''
+    
 if __name__ == "__main__":
     print("Full Tests for dft")
     unittest.main()

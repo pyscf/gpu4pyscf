@@ -29,6 +29,7 @@ typedef struct {
 
 typedef struct {
     int ngrids;
+    int blksize;
     int nbas;
     int nao;
     int bas_off;

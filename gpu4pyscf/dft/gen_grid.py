@@ -595,13 +595,10 @@ class Grids(lib.StreamObject):
 
     make_mask = lib.module_method(make_mask, absences=['cutoff'])
 
-    def build_sparsity(self, sorted_mol):
+    def build_sparsity(self, sorted_mol, blksize=ALIGNMENT_UNIT):
         ''' Build sparsity data for sparse AO evaluation
         Sort grids for batching grids
         '''
-        #self.sparse_cache = gen_sparse_cache(sorted_mol, self.coords, GRID_BLKSIZE)
-        #blksize = GRID_BLKSIZE
-        blksize = ALIGNMENT_UNIT
         ngrids = self.coords.shape[0]
         ao_indices, s_index, ao_loc_non0 = gen_sparse_cache(sorted_mol, self.coords, blksize)
         
@@ -618,8 +615,7 @@ class Grids(lib.StreamObject):
         idx = cupy.asarray(idx)
         idx_grids = cupy.tile(idx*blksize, (blksize,1)).T
         idx_grids += cupy.arange(blksize)
-        idx_grids = idx_grids.ravel(order='C')
-        
+        idx_grids = idx_grids.ravel(order='C')[:ngrids]
         self.coords = self.coords[idx_grids]
         self.weights = self.weights[idx_grids]
         

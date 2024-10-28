@@ -441,7 +441,7 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     #output
     exc=cupy.zeros(rho[0,:].size)
     vxc=cupy.zeros([2,rho[0,:].size])
-
+    
     #outer grid needs threshing
     threshind=rho[0,:]>=thresh
     coords=coords[threshind]
@@ -879,8 +879,6 @@ def nr_rks_batch(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         excsum = excsum[0]
         vmat = vmat[0]
     
-    #print(cupy.linalg.norm(vmat), nelec, excsum, cupy.linalg.norm(dms), cupy.linalg.norm(vmat+dms))
-
     return nelec, excsum, vmat
 
 def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
@@ -1170,11 +1168,11 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
 
     t1 = t0 = log.init_timer()
     _sorted_mol = opt._sorted_mol
-    if not hasattr(grids, 'sparse_cache') or len(grids.sparse_cache) == 0:
+    ngrids = grids.coords.shape[0] 
+    if not hasattr(grids, 'sparse_cache') or (blksize, ngrids) not in grids.sparse_cache:
         grids.build_sparsity(_sorted_mol)
         t0 = log.timer_debug1('generate sparsity', *t0)
-
-    ngrids = grids.coords.shape[0]    
+        
     ao_indices, s_index, ao_loc_non0, nao_non0 = grids.sparse_cache[blksize, ngrids]
     rho = cupy.empty(ngrids)
     with opt.gdft_envs_cache():
@@ -1239,18 +1237,18 @@ def get_rho_batch(ni, mol, dm, grids, max_memory=2000, verbose=None):
 
     t1 = t0 = log.init_timer()
     _sorted_mol = opt._sorted_mol
-    if not hasattr(grids, 'sparse_cache') or len(grids.sparse_cache) == 0:
+    ngrids = grids.coords.shape[0]
+    if not hasattr(grids, 'sparse_cache') or (blksize, ngrids) not in grids.sparse_cache:
         grids.build_sparsity(_sorted_mol)
         t0 = log.timer_debug1('generate sparsity', *t0)
 
-    ngrids = grids.coords.shape[0]
-    ao_indices, s_index, ao_loc_non0, nao_non0 = grids.sparse_cache[blksize, ngrids]
+    ao_indices, s_index, ao_loc_non0, nao_non0 = grids.sparse_cache[ALIGNED, ngrids]
     nblocks = len(nao_non0)
     rho = cupy.empty(ngrids)
     with opt.gdft_envs_cache():
         t1 = t0 = log.init_timer()
         for batch_id, (ip0, ip1) in enumerate(lib.prange(0, nblocks, 64)):
-            p0, p1 = ip0*blksize, ip1*blksize
+            p0, p1 = ip0*ALIGNED, ip1*ALIGNED
             coords = grids.coords[p0:p1]
             #pad, idx, non0tab, ao_loc_non0 = grids.sparse_cache[block_id, blksize, ngrids]
             nao_pad = (nao_non0[ip1-1] + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT
@@ -1261,7 +1259,7 @@ def get_rho_batch(ni, mol, dm, grids, max_memory=2000, verbose=None):
                 nao_non0=nao_pad,
                 ao_loc_non0=ao_loc_non0[ip0:ip1],
                 non0tab=s_index[ip0:ip1])
-            ao_mask = ao_mask.reshape([nao_pad, -1, blksize])
+            ao_mask = ao_mask.reshape([nao_pad, -1, ALIGNED])
             
             # TODO: improve efficiency
             for ip in range(ip0,ip1):
@@ -1578,7 +1576,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     with_lapl = MGGA_DENSITY_LAPL
     ao_deriv = 1
     vvrho = []
-    for ao, idx, weight, coords \
+    for ao, idx, weight, _ \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         #rho = eval_rho(opt.mol, ao, dms[0][np.ix_(mask,mask)], xctype='GGA', hermi=1)
         if mo_coeff is None:
@@ -1587,7 +1585,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             mo_coeff_mask = mo_coeff[idx,:]
             rho = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, 'GGA', with_lapl)
         vvrho.append(rho)
-
+        
     rho = cupy.hstack(vvrho)
     t1 = log.timer_debug1('eval rho', *t0)
     exc = 0
@@ -1795,7 +1793,7 @@ def _batch_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         grids.build(with_non0tab=False, sort_grids=True)
     if nao is None:
         nao = mol.nao
-    
+
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     log = logger.new_logger(ni, ni.verbose)
 
@@ -1815,17 +1813,17 @@ def _batch_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     
     mol = None
     _sorted_mol = opt._sorted_mol
-    if not hasattr(grids, 'sparse_cache') or len(grids.sparse_cache) == 0:
-        grids.build_sparsity(_sorted_mol)
-    
     ngrids = grids.coords.shape[0]
-    ao_indices, s_index, ao_loc_non0, nao_non0 = grids.sparse_cache[blksize, ngrids]
+    if not hasattr(grids, 'sparse_cache') or (ALIGNED, ngrids) not in grids.sparse_cache:
+        grids.build_sparsity(_sorted_mol)
+        
+    ao_indices, s_index, ao_loc_non0, nao_non0 = grids.sparse_cache[ALIGNED, ngrids]
     nblocks = len(nao_non0)
     with opt.gdft_envs_cache():
         t1 = log.init_timer()
         for batch_id, (ip0, ip1) in enumerate(lib.prange(0, nblocks, 64)):
-            coords = grids.coords[ip0*blksize:ip1*blksize]
-            weight = grids.weights[ip0*blksize:ip1*blksize]
+            coords = grids.coords[ip0*ALIGNED:ip1*ALIGNED]
+            weight = grids.weights[ip0*ALIGNED:ip1*ALIGNED]
             t1 = log.init_timer()
             nao_pad = (nao_non0[ip1-1] + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT
             nao_pad = min(nao_pad, nao)
@@ -1839,9 +1837,9 @@ def _batch_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             t1 = log.timer_debug2('evaluate ao slice', *t1)
             
             if deriv == 0:
-                ao_mask = ao_mask.reshape([nao_pad, -1, blksize])
+                ao_mask = ao_mask.reshape([nao_pad, -1, ALIGNED])
             else:
-                ao_mask = ao_mask.reshape([comp, nao_pad, -1, blksize])
+                ao_mask = ao_mask.reshape([comp, nao_pad, -1, ALIGNED])
             
             # TODO: improve efficiency
             if deriv == 0:
@@ -1864,7 +1862,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         grids.build(with_non0tab=False, sort_grids=True)
     if nao is None:
         nao = mol.nao
-    
+
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     log = logger.new_logger(ni, ni.verbose)
 
@@ -1881,13 +1879,13 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     if opt is None or mol not in [opt.mol, opt._sorted_mol]:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
-    
+
     mol = None
     _sorted_mol = opt._sorted_mol
-    if not hasattr(grids, 'sparse_cache') or len(grids.sparse_cache) == 0:
-        grids.build_sparsity(_sorted_mol)
-    
     ngrids = grids.coords.shape[0]
+    if not hasattr(grids, 'sparse_cache') or (blksize, ngrids) not in grids.sparse_cache:
+        grids.build_sparsity(_sorted_mol, blksize=blksize)
+
     ao_indices, s_index, ao_loc_non0, nao_non0 = grids.sparse_cache[blksize, ngrids]
     with opt.gdft_envs_cache():
         t1 = log.init_timer()
