@@ -29,19 +29,23 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.dft import numint, xc_deriv, rks
 from gpu4pyscf.dft.numint import _GDFTOpt, AO_THRESHOLD
 from gpu4pyscf.lib.cupy_helper import (
-    contract, get_avail_mem, add_sparse, tag_array, load_library, take_last2d)
+    contract, get_avail_mem, add_sparse, tag_array, take_last2d, sandwich_dot)
 from gpu4pyscf.lib import logger
 from pyscf import __config__
 
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 128*128)
 ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
 
-libgdft = load_library('libgdft')
+libgdft = numint.libgdft
 libgdft.GDFT_make_dR_dao_w.restype = ctypes.c_int
 
-def get_veff(ks_grad, mol=None, dm=None):
+def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     '''
-    First order derivative of DFT effective potential matrix (wrt electron coordinates)
+    Computes the first-order derivatives of the energy contributions from
+    Veff per atom.
+
+    NOTE: This function is incompatible to the one implemented in PySCF CPU version.
+    In the CPU version, get_veff returns the first order derivatives of Veff matrix.
 
     Args:
         ks_grad : grad.rhf.Gradients or grad.rks.Gradients object
@@ -94,23 +98,29 @@ def get_veff(ks_grad, mol=None, dm=None):
     # this can be moved into vxc calculations
     occ_coeff = cupy.asarray(mf.mo_coeff[:, mf.mo_occ>0.5], order='C')
     tmp = contract('nij,jk->nik', vxc, occ_coeff)
-    vxc = 2.0*contract('nik,ik->ni', tmp, occ_coeff)
+    exc1_per_atom = 2.0*contract('nik,ik->ni', tmp, occ_coeff)
 
     aoslices = mol.aoslice_by_atom()
-    vxc = [vxc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
-    vxc = cupy.asarray(vxc)
-    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
-    if abs(hyb) < 1e-10 and abs(alpha) < 1e-10:
-        vj = ks_grad.get_j(mol, dm)
-        vxc += vj
+    exc1_per_atom = [exc1_per_atom[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
+    exc1_per_atom = cupy.asarray(exc1_per_atom)
+
+    vhfopt = mf._opt_gpu.get(None, None)
+    if not ni.libxc.is_hybrid_xc(mf.xc):
+        ej = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, with_k=False,
+                                          verbose=verbose)[0]
+        exc1_per_atom += ej
     else:
-        vj, vk = ks_grad.get_jk(mol, dm)
-        vk *= hyb
+        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
+        ej, ek = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
+        ek *= hyb
         if abs(omega) > 1e-10:  # For range separated Coulomb operator
-            vk_lr = ks_grad.get_k(mol, dm, omega=omega)
-            vk += vk_lr * (alpha - hyb)
-        vxc += vj - vk * .5
-    return vxc
+            vhfopt = mf._opt_gpu.get(omega, None)
+            with mol.with_range_coulomb(omega):
+                ek_lr = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, with_j=False,
+                                                     verbose=verbose)[1]
+            ek += ek_lr * (alpha - hyb)
+        exc1_per_atom += ej - ek * .5
+    return tag_array(exc1_per_atom, exc1_grid=exc)
 
 def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             max_memory=2000, verbose=None):
@@ -318,15 +328,17 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
+    natm = mol.natm
     mol = None
     _sorted_mol = opt._sorted_mol
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
-    dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
-           for dm in dms.reshape(-1,nao0,nao0)]
+    assert dms.ndim == 2
+    #:dms = cupy.einsum('pi,ij,qj->pq', coeff, dms, coeff)
+    dms = sandwich_dot(dms, coeff.T)
 
-    excsum = 0
+    excsum = cupy.zeros((natm, 3))
     vmat = cupy.zeros((3,nao,nao))
     with opt.gdft_envs_cache():
         if xctype == 'LDA':
@@ -347,33 +359,56 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             ngrids = weight.size
             for p0, p1 in lib.prange(0,ngrids,block_size):
                 ao = numint.eval_ao(ni, _sorted_mol, coords[p0:p1, :], ao_deriv)
-                rho = numint.eval_rho(_sorted_mol, ao, dms[0],
-                                      xctype=xctype, hermi=1, with_lapl=False)
-                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
 
                 if xctype == 'LDA':
+                    rho = numint.eval_rho(_sorted_mol, ao[0], dms,
+                                          xctype=xctype, hermi=1, with_lapl=False)
+                    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
+                    exc = exc[:,0]
                     wv = weight[p0:p1] * vxc[0]
                     aow = numint._scale_ao(ao[0], wv)
-                    vmat += _d1_dot_(ao[1:4], aow.T)
+                    vtmp = _d1_dot_(ao[1:4], aow.T)
+                    vmat += vtmp
+                    # response of weights
+                    excsum += cupy.einsum('r,nxr->nx', exc*rho, weight1[:,:,p0:p1])
+                    # response of grids coordinates
+                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
+                    rho = vxc = aow = None
 
                 elif xctype == 'GGA':
+                    rho = numint.eval_rho(_sorted_mol, ao[:4], dms,
+                                          xctype=xctype, hermi=1, with_lapl=False)
+                    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
+                    exc = exc[:,0]
                     wv = weight[p0:p1] * vxc
                     wv[0] *= .5
-                    vmat += _gga_grad_sum_(ao, wv)
+                    vtmp = _gga_grad_sum_(ao, wv)
+                    vmat += vtmp
+                    excsum += cupy.einsum('r,nxr->nx', exc*rho[0], weight1[:,:,p0:p1])
+                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
+                    rho = vxc = None
 
                 elif xctype == 'NLC':
                     raise NotImplementedError
 
                 elif xctype == 'MGGA':
+                    rho = numint.eval_rho(_sorted_mol, ao, dms,
+                                          xctype=xctype, hermi=1, with_lapl=False)
+                    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
+                    exc = exc[:,0]
                     wv = weight[p0:p1] * vxc
                     wv[0] *= .5
                     wv[4] *= .5  # for the factor 1/2 in tau
 
-                    vmat += _gga_grad_sum_(ao, wv)
-                    vmat += _tau_grad_dot_(ao, wv[4])
+                    vtmp  = _gga_grad_sum_(ao, wv)
+                    vtmp += _tau_grad_dot_(ao, wv[4])
+                    vmat += vtmp
+                    excsum += cupy.einsum('r,nxr->nx', exc*rho[0], weight1[:,:,p0:p1])
+                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
+                    rho = vxc = None
 
-    excsum = None
-    vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
+    #:vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
+    vmat = sandwich_dot(vmat, coeff)
 
     # - sign because nabla_X = -nabla_x
     return excsum, -vmat
@@ -500,19 +535,25 @@ def grids_response_cc(grids):
 class Gradients(rhf_grad.Gradients):
     from gpu4pyscf.lib.utils import to_gpu, device
     # attributes
-    grid_response = rks_grad.Gradients.grid_response
+    grid_response = False
     _keys = rks_grad.Gradients._keys
 
-    # method
     def __init__ (self, mf):
         rhf_grad.Gradients.__init__(self, mf)
         self.grids = None
         self.nlcgrids = None
 
     get_veff = get_veff
-    # TODO: add grid response into this function
+
     def extra_force(self, atom_id, envs):
-        return 0
+        if self.grid_response:
+            vhf = envs['dvhf']
+            log = envs['log']
+            log.debug('grids response for atom %d %s',
+                      atom_id, vhf.exc1_grid[atom_id])
+            return vhf.exc1_grid[atom_id]
+        else:
+            return 0
 
 Grad = Gradients
 from gpu4pyscf import dft
