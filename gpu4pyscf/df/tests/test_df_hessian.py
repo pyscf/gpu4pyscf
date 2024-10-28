@@ -309,7 +309,7 @@ class KnownValues(unittest.TestCase):
 
     def test_hessian_qz(self):
         mol = pyscf.M(atom=atom, basis='def2-qzvpp', max_memory=32000, cart=0,
-                      output='/dev/null', mol.verbose=1)
+                      output='/dev/null', verbose=1)
 
         mf = scf.RHF(mol).density_fit()
         mf.conv_tol = 1e-12
