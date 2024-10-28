@@ -43,6 +43,7 @@ __all__ = [
 def _jk_energy_per_atom(mol, dm, vhfopt=None, with_j=True, with_k=True, verbose=None):
     ''' Computes the first-order derivatives of the energy contributions from J and K per atom.
     '''
+    assert mol.omega >= 0
     log = logger.new_logger(mol, verbose)
     cput0 = t1 = log.init_timer()
     if vhfopt is None:

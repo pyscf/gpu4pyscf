@@ -277,6 +277,10 @@ int RYS_per_atom_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao,
     uint8_t nfkl = nfk * nfl;
     uint8_t order = li + lj + lk + ll;
     uint8_t nroots = (order + 1) / 2 + 1;
+    double omega = env[PTR_RANGE_OMEGA];
+    if (omega < 0) { // SR ERIs
+        nroots *= 2;
+    }
     uint8_t stride_j = li + 2;
     uint8_t stride_k = stride_j * (lj + 2);
     uint8_t stride_l = stride_k * (lk + 2);

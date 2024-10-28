@@ -114,9 +114,9 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
         ej, ek = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
         ek *= hyb
         if abs(omega) > 1e-10:  # For range separated Coulomb operator
-            vhfopt = mf._opt_gpu.get(omega)
+            vhfopt = mf._opt_gpu.get(omega, None)
             with mol.with_range_coulomb(omega):
-                ek_lr = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt,
+                ek_lr = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, with_j=False,
                                                      verbose=verbose)[1]
             ek += ek_lr * (alpha - hyb)
         exc1_per_atom += ej - ek * .5
@@ -334,8 +334,8 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
-    dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
-           for dm in dms.reshape(-1,nao0,nao0)]
+    assert dms.ndim == 2
+    dms = cupy.einsum('pi,ij,qj->pq', coeff, dms, coeff)
 
     excsum = cupy.zeros((natm, 3))
     vmat = cupy.zeros((3,nao,nao))
@@ -358,12 +358,12 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             ngrids = weight.size
             for p0, p1 in lib.prange(0,ngrids,block_size):
                 ao = numint.eval_ao(ni, _sorted_mol, coords[p0:p1, :], ao_deriv)
-                rho = numint.eval_rho(_sorted_mol, ao, dms[0],
-                                      xctype=xctype, hermi=1, with_lapl=False)
-                exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
-                exc = exc[:,0]
 
                 if xctype == 'LDA':
+                    rho = numint.eval_rho(_sorted_mol, ao[0], dms,
+                                          xctype=xctype, hermi=1, with_lapl=False)
+                    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
+                    exc = exc[:,0]
                     wv = weight[p0:p1] * vxc[0]
                     aow = numint._scale_ao(ao[0], wv)
                     vtmp = _d1_dot_(ao[1:4], aow.T)
@@ -375,6 +375,10 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     rho = vxc = aow = None
 
                 elif xctype == 'GGA':
+                    rho = numint.eval_rho(_sorted_mol, ao[:4], dms,
+                                          xctype=xctype, hermi=1, with_lapl=False)
+                    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
+                    exc = exc[:,0]
                     wv = weight[p0:p1] * vxc
                     wv[0] *= .5
                     vtmp = _gga_grad_sum_(ao, wv)
@@ -387,6 +391,10 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     raise NotImplementedError
 
                 elif xctype == 'MGGA':
+                    rho = numint.eval_rho(_sorted_mol, ao, dms,
+                                          xctype=xctype, hermi=1, with_lapl=False)
+                    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
+                    exc = exc[:,0]
                     wv = weight[p0:p1] * vxc
                     wv[0] *= .5
                     wv[4] *= .5  # for the factor 1/2 in tau

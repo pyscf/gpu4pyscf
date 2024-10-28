@@ -115,7 +115,7 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
         if omega != 0:
             vhfopt = mf._opt_gpu.get(omega, None)
             with mol.with_range_coulomb(omega):
-                ek_lr = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt,
+                ek_lr = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, with_j=False,
                                                      verbose=verbose)[1]
             ek += ek_lr * (alpha - hyb)
 
@@ -216,6 +216,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
+    assert dms.ndim == 3 and dms.shape[0] == 2
     dms = [cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
            for dm in dms.reshape(-1,nao0,nao0)]
 
@@ -241,11 +242,11 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             for p0, p1 in lib.prange(0,ngrids,block_size):
                 ao = numint.eval_ao(ni, _sorted_mol, coords[p0:p1, :], ao_deriv)
                 if xctype == 'LDA':
-                    rho_a = numint.eval_rho(_sorted_mol, ao, dms[0],
-                                        xctype='GGA', hermi=1, with_lapl=False)
-                    rho_b = numint.eval_rho(_sorted_mol, ao, dms[1],
-                                        xctype='GGA', hermi=1, with_lapl=False)
-                    rho = cupy.array([rho_a[0],rho_b[0]])
+                    rho_a = numint.eval_rho(_sorted_mol, ao[0], dms[0],
+                                        xctype=xctype, hermi=1, with_lapl=False)
+                    rho_b = numint.eval_rho(_sorted_mol, ao[0], dms[1],
+                                        xctype=xctype, hermi=1, with_lapl=False)
+                    rho = cupy.array([rho_a,rho_b])
                     exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
                     exc = exc[:,0]
                 else:
