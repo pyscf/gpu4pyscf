@@ -22,9 +22,8 @@ import cupy
 import numpy
 from pyscf import lib, gto
 from pyscf.grad import rhf as rhf_grad_cpu
-from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf.scf.hf import KohnShamDFT
-from gpu4pyscf.lib.cupy_helper import tag_array, contract, take_last2d, condense
+from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, sandwich_dot
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
@@ -55,7 +54,8 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None, with_j=True, with_k=True, verbose=
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
     n_dm = dms.shape[0]
-    dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
+    #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
+    dms = sandwich_dot(dms, vhfopt.coeff.T)
     dms = cp.asarray(dms, order='C')
     assert n_dm <= 2
 

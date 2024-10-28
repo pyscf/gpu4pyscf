@@ -29,14 +29,14 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.dft import numint, xc_deriv, rks
 from gpu4pyscf.dft.numint import _GDFTOpt, AO_THRESHOLD
 from gpu4pyscf.lib.cupy_helper import (
-    contract, get_avail_mem, add_sparse, tag_array, load_library, take_last2d)
+    contract, get_avail_mem, add_sparse, tag_array, take_last2d, sandwich_dot)
 from gpu4pyscf.lib import logger
 from pyscf import __config__
 
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 128*128)
 ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
 
-libgdft = load_library('libgdft')
+libgdft = numint.libgdft
 libgdft.GDFT_make_dR_dao_w.restype = ctypes.c_int
 
 def get_veff(ks_grad, mol=None, dm=None, verbose=None):
@@ -335,7 +335,8 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
     assert dms.ndim == 2
-    dms = cupy.einsum('pi,ij,qj->pq', coeff, dms, coeff)
+    #:dms = cupy.einsum('pi,ij,qj->pq', coeff, dms, coeff)
+    dms = sandwich_dot(dms, coeff.T)
 
     excsum = cupy.zeros((natm, 3))
     vmat = cupy.zeros((3,nao,nao))
@@ -406,7 +407,8 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
                     rho = vxc = None
 
-    vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
+    #:vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
+    vmat = sandwich_dot(vmat, coeff)
 
     # - sign because nabla_X = -nabla_x
     return excsum, -vmat
