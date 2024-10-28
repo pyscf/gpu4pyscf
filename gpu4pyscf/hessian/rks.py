@@ -92,9 +92,8 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
     natm = mol.natm
     assert atmlst is None
-    nao, nmo = mo_coeff.shape
+    nao = mo_coeff.shape[0]
     mocc = mo_coeff[:,mo_occ>0]
-    nocc = mocc.shape[1]
     dm0 = numpy.dot(mocc, mocc.T) * 2
     avail_mem = get_avail_mem()
     max_memory = avail_mem * .8e-6
@@ -147,7 +146,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
     mo_occ = cupy.asarray(mo_occ)
     mo_coeff = cupy.asarray(mo_coeff)
 
-    nao_sph, nmo = mo_coeff.shape
+    nao_sph = mo_coeff.shape[0]
     ni = mf._numint
     xctype = ni._xc_type(mf.xc)
     shls_slice = (0, mol.nbas)
@@ -331,7 +330,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     mo_occ = cupy.asarray(mo_occ)
     mo_coeff = cupy.asarray(mo_coeff)
 
-    nao, nmo = mo_coeff.shape
+    nao = mo_coeff.shape[0]
     ni = mf._numint
     xctype = ni._xc_type(mf.xc)
     aoslices = mol.aoslice_by_atom()
@@ -511,7 +510,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     mocc = mo_coeff[:,mo_occ>0]
     nocc = mocc.shape[1]
 
-    nao, nmo = mo_coeff.shape
+    nao = mo_coeff.shape[0]
     ni = mf._numint
     xctype = ni._xc_type(mf.xc)
     aoslices = mol.aoslice_by_atom()

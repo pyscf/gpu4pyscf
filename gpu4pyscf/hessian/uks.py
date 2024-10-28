@@ -99,10 +99,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mo_a, mo_b = mo_coeff
     mocca = mo_a[:,mo_occ[0]>0]
     moccb = mo_b[:,mo_occ[1]>0]
-    nao, nmoa = mo_a.shape
-    nmob = mo_b.shape[1]
-    nocca = mocca.shape[1]
-    noccb = moccb.shape[1]
+    nao = mo_a.shape[0]
     dm0a = mocca.dot(mocca.T)
     dm0b = moccb.dot(moccb.T)
     avail_mem = get_avail_mem()

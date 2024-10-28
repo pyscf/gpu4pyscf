@@ -74,7 +74,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                                        None, atmlst, max_memory, log)
         t1 = log.timer_debug1('solving MO1', *t1)
 
-    nao, nmo = mo_coeff.shape
+    nao = mo_coeff.shape[0]
     mocc = cupy.array(mo_coeff[:,mo_occ>0])
     mo_energy = cupy.array(mo_energy)
     s1a = -mol.intor('int1e_ipovlp', comp=3)
@@ -284,10 +284,9 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     assert atmlst is None
     mol = hessobj.mol
     natm = mol.natm
-    nao, nmo = mo_coeff.shape
+    nao = mo_coeff.shape[0]
     mo_coeff = cp.asarray(mo_coeff)
     mocc = cp.asarray(mo_coeff[:,mo_occ>0])
-    nocc = mocc.shape[1]
     dm0 = mocc.dot(mocc.T) * 2
     h1mo = rhf_grad.get_grad_hcore(hessobj.base.Gradients())
 
@@ -497,7 +496,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     '''
     mol = mf.mol
     log = logger.new_logger(mf, verbose)
-    nao, nmo = mo_coeff.shape
+    nao = mo_coeff.shape[0]
     mocc = mo_coeff[:,mo_occ>0]
     nocc = mocc.shape[1]
 
@@ -621,63 +620,6 @@ def hess_nuc_elec(mol, dm):
     from gpu4pyscf.df import int3c2e
     hcore = int3c2e.get_hess_nuc_elec(mol, dm)
     return hcore * 2.0
-
-def gen_hop(hobj, mo_energy=None, mo_coeff=None, mo_occ=None, verbose=None):
-    log = logger.new_logger(hobj, verbose)
-    mol = hobj.mol
-    mf = hobj.base
-
-    if mo_energy is None: mo_energy = mf.mo_energy
-    if mo_occ is None:    mo_occ = mf.mo_occ
-    if mo_coeff is None:  mo_coeff = mf.mo_coeff
-
-    natm = mol.natm
-    nao, nmo = mo_coeff.shape
-    mocc = mo_coeff[:,mo_occ>0]
-    nocc = mocc.shape[1]
-
-    max_memory = max(2000, hobj.max_memory - lib.current_memory()[0])
-    de2 = hobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ, atmlst,
-                                 max_memory, log)
-    de2 += hobj.hess_nuc()
-
-    h1ao_cache = hobj.make_h1(mo_coeff, mo_occ, None, atmlst, log)
-
-    aoslices = mol.aoslice_by_atom()
-    s1a = -mol.intor('int1e_ipovlp', comp=3)
-
-    fvind = gen_vind(mf, mo_coeff, mo_occ)
-    def h_op(x):
-        x = x.reshape(natm,3)
-        hx = numpy.einsum('abxy,ax->by', de2, x)
-        h1ao = 0
-        s1ao = 0
-        for ia in range(natm):
-            shl0, shl1, p0, p1 = aoslices[ia]
-            h1ao += numpy.einsum('x,xij->ij', x[ia], h1ao_cache[ia])
-            s1ao_i = numpy.zeros((3,nao,nao))
-            s1ao_i[:,p0:p1] += s1a[:,p0:p1]
-            s1ao_i[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
-            s1ao += numpy.einsum('x,xij->ij', x[ia], s1ao_i)
-
-        s1vo = mo_coeff.T.dot(s1ao.dot(mocc))
-        h1vo = mo_coeff.T.dot(h1ao.dot(mocc))
-        mo1, mo_e1 = cphf.solve(fvind, mo_energy, mo_occ, h1vo, s1vo)
-        mo1 = numpy.dot(mo_coeff, mo1)
-        mo_e1 = mo_e1.reshape(nocc,nocc)
-        dm1 = numpy.einsum('pi,qi->pq', mo1, mocc)
-        dme1 = numpy.einsum('pi,qi,i->pq', mo1, mocc, mo_energy[mo_occ>0])
-        dme1 = dme1 + dme1.T + mocc.dot(mo_e1.T).dot(mocc.T)
-
-        for ja in range(natm):
-            q0, q1 = aoslices[ja][2:]
-            hx[ja] += numpy.einsum('xpq,pq->x', h1ao_cache[ja], dm1) * 4
-            hx[ja] -= numpy.einsum('xpq,pq->x', s1a[:,q0:q1], dme1[q0:q1]) * 2
-            hx[ja] -= numpy.einsum('xpq,qp->x', s1a[:,q0:q1], dme1[:,q0:q1]) * 2
-        return hx.ravel()
-
-    hdiag = numpy.einsum('aaxx->ax', de2).ravel()
-    return h_op, hdiag
 
 
 def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
@@ -840,7 +782,7 @@ class Hessian(HessianBase):
     partial_hess_elec = partial_hess_elec
     hess_elec = hess_elec
     make_h1 = make_h1
-    gen_hop = gen_hop
+    gen_hop = NotImplemented
 
 # Inject to RHF class
 from gpu4pyscf import scf
