@@ -17,11 +17,6 @@
 #  modified by Xiaojie Wu <wxj6000@gmail.com>
 
 from gpu4pyscf.hessian import rhf, uhf
-from gpu4pyscf.hessian import dispersion
 from gpu4pyscf.hessian.rhf import Hessian as RHF
-
-try:
-    from . import rks
-    from . import uks
-except (ImportError, IOError):
-    pass
+from gpu4pyscf.hessian import rks, uks
+from gpu4pyscf.hessian import dispersion

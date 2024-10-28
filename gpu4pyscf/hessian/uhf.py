@@ -27,19 +27,17 @@ import ctypes
 import numpy
 import numpy as np
 import cupy
-from pyscf.grad import rhf as rhf_grad_cpu
-from pyscf.hessian import rhf as rhf_hess_cpu
-from pyscf.hessian import uhf as uhf_hess_cpu
+import cupy as cp
 from pyscf import lib
 # import _response_functions to load gen_response methods in SCF class
 from gpu4pyscf.scf import _response_functions  # noqa
-# import pyscf.grad.rhf to activate nuc_grad_method method
 from gpu4pyscf.scf import ucphf
 from gpu4pyscf.gto.mole import sort_atoms
-from gpu4pyscf.lib.cupy_helper import contract, tag_array, print_mem_info, get_avail_mem
+from gpu4pyscf.lib.cupy_helper import contract, tag_array, get_avail_mem
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.hessian.rhf import HessianBase, _partial_hess_ejk, _get_jk
+from gpu4pyscf.grad import rhf as rhf_grad
+from gpu4pyscf.hessian import rhf as rhf_hess_gpu
 
 GB = 1024*1024*1024
 ALIGNED = 4
@@ -57,7 +55,6 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
-    if atmlst is None: atmlst = range(mol.natm)
 
     mo_energy = cupy.asarray(mo_energy)
     mo_occ = cupy.asarray(mo_occ)
@@ -86,6 +83,8 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     s1a = -mol.intor('int1e_ipovlp', comp=3)
     s1a = cupy.asarray(s1a)
     aoslices = mol.aoslice_by_atom()
+    if atmlst is None:
+        atmlst = range(mol.natm)
     for i0, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = aoslices[ia]
         s1ao = cupy.zeros((3,nao,nao))
@@ -126,43 +125,95 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
     '''Partial derivative
     '''
-    e1, ej, ek = _partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
-                                   atmlst, max_memory, verbose, True)
+    e1, ej, ek = _partial_hess_ejk(
+        hessobj, mo_energy, mo_coeff, mo_occ, atmlst, max_memory, verbose, True)
     return e1 + ej - ek  # (A,B,dR_A,dR_B)
 
-def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
+def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
+                      atmlst=None, max_memory=4000, verbose=None, with_k=True):
+    log = logger.new_logger(hessobj, verbose)
+    time0 = t1 = (logger.process_clock(), logger.perf_counter())
+
     mol = hessobj.mol
-    if atmlst is None:
-        atmlst = range(mol.natm)
+    mf = hessobj.base
+    if mo_energy is None: mo_energy = mf.mo_energy
+    if mo_occ is None:    mo_occ = mf.mo_occ
+    if mo_coeff is None:  mo_coeff = mf.mo_coeff
+    assert atmlst is None
+    atmlst = range(mol.natm)
+
+    mocca = mo_coeff[0][:,mo_occ[0]>0]
+    moccb = mo_coeff[1][:,mo_occ[1]>0]
+    dm0a = mocca.dot(mocca.T)
+    dm0b = moccb.dot(moccb.T)
+    dm0 = cp.asarray((dm0a, dm0b))
+    vhfopt = mf._opt_gpu.get(None, None)
+    ej, ek = rhf_hess_gpu._partial_ejk_ip2(mol, dm0, vhfopt, with_k, verbose=log)
+    t1 = log.timer_debug1('hessian of 2e part', *t1)
+
+    # Energy weighted density matrix
+    mo_ea = mo_energy[0][mo_occ[0]>0]
+    mo_eb = mo_energy[1][mo_occ[1]>0]
+    dme0 = (mocca*mo_ea).dot(mocca.T)
+    dme0+= (moccb*mo_eb).dot(moccb.T)
+    de_hcore = rhf_hess_gpu._e_hcore_generator(hessobj, dm0a+dm0b)
+    s1aa, s1ab, s1a = rhf_hess_gpu.get_ovlp(mol)
+
+    aoslices = mol.aoslice_by_atom()
+    e1 = cupy.zeros((mol.natm,mol.natm,3,3))
+    for i0, ia in enumerate(atmlst):
+        p0, p1 = aoslices[ia][2:]
+        e1[i0,i0] -= contract('xypq,pq->xy', s1aa[:,:,p0:p1], dme0[p0:p1])*2
+
+        for j0, ja in enumerate(atmlst[:i0+1]):
+            q0, q1 = aoslices[ja][2:]
+            e1[i0,j0] -= contract('xypq,pq->xy', s1ab[:,:,p0:p1,q0:q1], dme0[p0:p1,q0:q1])*2
+            e1[i0,j0] += de_hcore(ia, ja)
+
+        for j0 in range(i0):
+            e1[j0,i0] = e1[i0,j0].T
+
+    log.timer('UHF partial hessian', *time0)
+    return e1, ej, ek
+
+def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
+    assert atmlst is None
+    mol = hessobj.mol
+    natm = mol.natm
 
     mo_a, mo_b = mo_coeff
     mocca = mo_a[:,mo_occ[0]>0]
     moccb = mo_b[:,mo_occ[1]>0]
-    nmoa = mo_a.shape[1]
+    nao, nmoa = mo_a.shape
     nmob = mo_b.shape[1]
     nocca = mocca.shape[1]
     noccb = moccb.shape[1]
     dm0a = mocca.dot(mocca.T)
     dm0b = moccb.dot(moccb.T)
-    vja, vka = _get_jk(mol, dm0a, verbose=verbose)
-    vjb, vkb = _get_jk(mol, dm0b, verbose=verbose)
-    vj = vja + vjb
-    vhfa = vj - vka
-    vhfb = vj - vkb
-    vj = vja = vjb = None
+    grad_obj = hessobj.base.Gradients()
+    h1moa = rhf_grad.get_grad_hcore(grad_obj, mo_a, mo_occ[0])
+    h1mob = rhf_grad.get_grad_hcore(grad_obj, mo_b, mo_occ[1])
 
-    mf_cpu = hessobj.base.to_cpu()
-    hcore_deriv = rhf_grad_cpu.hcore_generator(mf_cpu, mol)
-    natm = mol.natm
-    h1moa = np.empty((natm, 3, nmoa,nocca))
-    h1mob = np.empty((natm, 3, nmob,noccb))
-    for ia in range(natm):
-        hcore1 = cupy.asarray(hcore_deriv(ia))
-        vhfa[ia] += hcore1
-        vhfb[ia] += hcore1
-        for ix in range(3):
-            h1moa[ia,ix] = mo_a.T.dot(vhfa[ia,ix].dot(mocca)).get()
-            h1mob[ia,ix] = mo_b.T.dot(vhfb[ia,ix].dot(moccb)).get()
+    avail_mem = get_avail_mem()
+    slice_size = int(avail_mem*0.6) // (8*3*nao*nao*2)
+    for atoms_slice in lib.prange(0, natm, slice_size):
+        vja, vka = rhf_hess_gpu._get_jk(mol, dm0a, atoms_slice=atoms_slice, verbose=verbose)
+        vjb, vkb = rhf_hess_gpu._get_jk(mol, dm0b, atoms_slice=atoms_slice, verbose=verbose)
+        #:vhfa = vja+vjb - vka
+        #:vhfb = vja+vjb - vkb
+        vhfa = vka
+        vhfb = vkb
+        vhfa *= -1
+        vhfb *= -1
+        vj = vja + vjb
+        vhfa += vj
+        vhfb += vj
+        atom0, atom1 = atoms_slice
+        for i, ia in enumerate(range(atom0, atom1)):
+            for ix in range(3):
+                h1moa[ia,ix] += mo_a.T.dot(vhfa[i,ix].dot(mocca))
+                h1mob[ia,ix] += mo_b.T.dot(vhfb[i,ix].dot(moccb))
+        vj = vja = vjb = vka = vkb = vhfa = vhfb = None
     return h1moa, h1mob
 
 def get_hcore(mol):
@@ -198,7 +249,6 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     '''
     mol = mf.mol
     log = logger.new_logger(mf, verbose)
-    if atmlst is None: atmlst = range(mol.natm)
 
     nao, nmo = mo_coeff[0].shape
     mocca = mo_coeff[0][:,mo_occ[0]>0]
@@ -322,7 +372,6 @@ def gen_hop(hobj, mo_energy=None, mo_coeff=None, mo_occ=None, verbose=None):
     mocc = mo_coeff[:,mo_occ>0]
     nocc = mocc.shape[1]
 
-    atmlst = range(natm)
     max_memory = max(2000, hobj.max_memory - lib.current_memory()[0])
     de2 = hobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ, atmlst,
                                  max_memory, log)
@@ -367,14 +416,15 @@ def gen_hop(hobj, mo_energy=None, mo_coeff=None, mo_occ=None, verbose=None):
     return h_op, hdiag
 
 
-class Hessian(HessianBase):
+class Hessian(rhf_hess_gpu.HessianBase):
     '''Non-relativistic unrestricted Hartree-Fock hessian'''
 
+    from gpu4pyscf.lib.utils import to_gpu, device
+
+    __init__ = rhf_hess_gpu.Hessian.__init__
     partial_hess_elec = partial_hess_elec
     hess_elec = hess_elec
     make_h1 = make_h1
-    kernel = NotImplemented
-    hess = NotImplemented
 
     def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1mo,
                   fx=None, atmlst=None, max_memory=4000, verbose=None):

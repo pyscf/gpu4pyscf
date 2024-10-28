@@ -153,9 +153,10 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
 class UHF(hf.SCF):
     from gpu4pyscf.lib.utils import to_gpu, device
 
+    _keys = {'e_disp', 'conv_tol_cpscf', 'h1e', 's1e', 'init_guess_breaksym'}
+
     init_guess_breaksym = getattr(__config__, 'scf_uhf_init_guess_breaksym', 1)
 
-    _keys = {'e_disp', 'screen_tol', 'conv_tol_cpscf', 'h1e', 's1e', "init_guess_breaksym"}
     def __init__(self, mol):
         hf.SCF.__init__(self, mol)
         self.nelec = None
@@ -214,8 +215,7 @@ class UHF(hf.SCF):
     make_asym_dm       = NotImplemented
     _finalize          = uhf.UHF._finalize
 
-    screen_tol = 1e-14
-    conv_tol_cpscf = 1e-3
+    conv_tol_cpscf = 1e-4
     DIIS = diis.SCF_DIIS
     #get_jk = _get_jk
 

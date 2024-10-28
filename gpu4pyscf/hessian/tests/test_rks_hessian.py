@@ -67,6 +67,12 @@ def _check_vxc(method, xc='LDA'):
     #print(f'testing {method} for {xc}')
     assert numpy.linalg.norm(vxc_cpu - vxc_gpu.get()) < 1e-6
 
+def _vs_cpu(mf, tol=1e-7):
+    mf.conv_tol_cpscf = 1e-8
+    ref = mf.Hessian().kernel()
+    e2_gpu = mf.Hessian().to_gpu().kernel()
+    assert abs(ref - e2_gpu).max() < tol
+
 class KnownValues(unittest.TestCase):
     def test_vxc_diag(self):
         _check_vxc('_get_vxc_diag', xc='LDA')
@@ -82,6 +88,31 @@ class KnownValues(unittest.TestCase):
         _check_vxc('_get_vxc_deriv2', xc='LDA')
         _check_vxc('_get_vxc_deriv2', xc='PBE')
         _check_vxc('_get_vxc_deriv2', xc='TPSS')
+
+    def test_hessian_lda(self, disp=None):
+        print('-----testing LDA Hessian----')
+        mf = mol.RKS(xc='LDA').run()
+        _vs_cpu(mf)
+
+    def test_hessian_gga(self):
+        print('-----testing PBE Hessian----')
+        mf = mol.RKS(xc='PBE').run()
+        _vs_cpu(mf)
+
+    def test_hessian_hybrid(self):
+        print('-----testing B3LYP Hessian----')
+        mf = mol.RKS(xc='b3lyp').run()
+        _vs_cpu(mf)
+
+    def test_hessian_mgga(self):
+        print('-----testing M06 Hessian----')
+        mf = mol.RKS(xc='m06').run()
+        _vs_cpu(mf, tol=1e-6)
+
+    def test_hessian_rsh(self):
+        print('-----testing wb97 Hessian----')
+        mf = mol.RKS(xc='wb97').run()
+        _vs_cpu(mf)
 
 if __name__ == "__main__":
     print("Full Tests for RKS Hessian")

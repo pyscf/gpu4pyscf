@@ -50,6 +50,11 @@ static void rys_ejk_ip2_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo boun
     double *vj = jk.vj;
     double *vk = jk.vk;
     double *dm = jk.dm;
+    double omega = env[PTR_RANGE_OMEGA];
+    extern __shared__ double rw[];
+    double *g = rw + nsq_per_block * nroots*2;
+    double *Rpa_cicj = g + nsq_per_block * g_size*3;
+    double Rqc[3], Rpq[3];
     int at1_at2 = gout_id % 16;
     int at1 = at1_at2 % 4;
     int at2 = at1_at2 / 4;
@@ -67,10 +72,6 @@ static void rys_ejk_ip2_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo boun
     case 2: stride_at2 = stride_k*nsq_per_block; break;
     case 3: stride_at2 = stride_l*nsq_per_block; break;
     }
-    extern __shared__ double rw[];
-    double *g = rw + nsq_per_block * nroots*2;
-    double *Rpa_cicj = g + nsq_per_block * g_size*3;
-    double Rqc[3], Rpq[3];
 
     for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
         __syncthreads();
@@ -226,7 +227,19 @@ static void rys_ejk_ip2_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo boun
                 }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
-                rys_roots(nroots, theta*rr, rw);
+                double theta_rr = theta * rr;
+                if (omega == 0) {
+                    rys_roots(nroots, theta_rr, rw);
+                } else {
+                    double theta_fac = omega * omega / (omega * omega + theta);
+                    rys_roots(nroots, theta_fac*theta_rr, rw);
+                    __syncthreads();
+                    double sqrt_theta_fac = sqrt(theta_fac);
+                    for (int irys = gout_id; irys < nroots; irys+=gout_stride) {
+                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
+                    }
+                }
                 double a2_at1, a2_at2;
                 switch (at1) {
                 case 0: a2_at1 = ai2; break;

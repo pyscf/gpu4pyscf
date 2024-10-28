@@ -235,7 +235,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
 def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     '''
-    derivative of hcore in MO
+    derivatives of Hcore in MO bases
     '''
     mf = mf_grad.base
     mol = mf.mol
@@ -248,7 +248,7 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     nocc = orbo.shape[1]
 
     # derivative w.r.t nuclie position
-    dh1e = cupy.zeros([3,natm,nao,nocc])
+    dh1e = cupy.zeros([natm,3,nao,nocc])
     coords = mol.atom_coords()
     charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
     fakemol = gto.fakemol_for_charges(coords)
@@ -258,10 +258,10 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     orbo_sorted = orbo[intopt.ao_idx]
     mo_coeff_sorted = mo_coeff[intopt.ao_idx]
     for i0,i1,j0,j1,k0,k1,int3c_blk in int3c2e.loop_int3c2e_general(intopt, ip_type='ip1'):
-        dh1e[:,k0:k1,j0:j1,:] += contract('xkji,io->xkjo', int3c_blk, orbo_sorted[i0:i1])
-        dh1e[:,k0:k1,i0:i1,:] += contract('xkji,jo->xkio', int3c_blk, orbo_sorted[j0:j1])
-    dh1e = contract('xkjo,k->xkjo', dh1e, -charges)
-    dh1e = contract('xkjo,jp->xkpo', dh1e, mo_coeff_sorted)
+        dh1e[k0:k1,:,j0:j1,:] += contract('xkji,io->kxjo', int3c_blk, orbo_sorted[i0:i1])
+        dh1e[k0:k1,:,i0:i1,:] += contract('xkji,jo->kxio', int3c_blk, orbo_sorted[j0:j1])
+    dh1e = contract('kxjo,k->kxjo', dh1e, -charges)
+    dh1e = contract('kxjo,jp->kxpo', dh1e, mo_coeff_sorted)
 
     # derivative w.r.t. atomic orbitals
     h1 = mf_grad.get_hcore(mol)
@@ -281,7 +281,7 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
         h1ao += h1ao.transpose([0,2,1])
         h1ao = cupy.asarray(h1ao)
         h1mo = contract('xij,jo->xio', h1ao, orbo)
-        dh1e[:,atm_id] += contract('xio,ip->xpo', h1mo, mo_coeff)
+        dh1e[atm_id] += contract('xio,ip->xpo', h1mo, mo_coeff)
     return dh1e
 
 def as_scanner(mf_grad):

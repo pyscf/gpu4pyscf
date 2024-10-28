@@ -30,8 +30,6 @@ def setUpModule():
         [1   , (0. , -0.757 , 0.587)],
         [1   , (0. , 0.757  , 0.587)] ])
     mol.basis = '6-31g'
-    mol.spin = 1
-    mol.charge = 1
     mol.build()
 
 def tearDownModule():
@@ -40,22 +38,29 @@ def tearDownModule():
     del mol
 
 class KnownValues(unittest.TestCase):
-    @unittest.skip('not implemented')
+    def test_hessian_rhf(self):
+        mf = mol.RHF().run()
+        mf.conv_tol_cpscf = 1e-8
+        hobj = mf.Hessian()
+        ref = hobj.kernel()
+        e2_gpu = hobj.to_gpu().kernel()
+        assert abs(ref - e2_gpu).max() < 1e-8
+
     def test_partial_hess_elec(self):
         mf = scf.RHF(mol)
         mf.conv_tol = 1e-14
         mf.kernel()
         hobj = mf.Hessian()
-        e1_cpu, ej_cpu, ek_cpu = rhf_cpu.partial_hess_elec(hobj)
+        e1_cpu, ej_cpu, ek_cpu = rhf_cpu._partial_hess_ejk(hobj)
 
         mf = mf.to_gpu()
         mf.kernel()
         hobj = mf.Hessian()
-        e1_gpu, ej_gpu, ek_gpu = rhf_gpu.partial_hess_elec(hobj)
+        e1_gpu, ej_gpu, ek_gpu = rhf_gpu._partial_hess_ejk(hobj)
 
-        assert abs(e1_cpu - e1_gpu).max() < 1e-5
-        assert abs(ej_cpu - ej_gpu).max() < 1e-5
-        assert abs(ek_cpu - ek_gpu).max() < 1e-5
+        assert abs(e1_cpu - e1_gpu.get()).max() < 1e-5
+        assert abs(ej_cpu - ej_gpu.get()).max() < 1e-5
+        assert abs(ek_cpu - ek_gpu.get()).max() < 1e-5
 
     def test_ejk_ip2(self):
         mol = gto.M(
@@ -99,11 +104,11 @@ class KnownValues(unittest.TestCase):
         np.random.seed(9)
         nao = mol.nao
         mo_coeff = np.random.rand(nao, nao)
-        dm = mo_coeff.dot(mo_coeff.T)
+        dm = mo_coeff.dot(mo_coeff.T) * 2
 
         vj, vk = rhf_gpu._get_jk(mol, dm)
-        assert abs(lib.fp(vj.get()) -  87674.69061160382).max() < 1e-7
-        assert abs(lib.fp(vk.get()) - -9.317650662101629).max() < 1e-7
+        assert abs(lib.fp(vj.get()) -  87674.69061160382) < 1e-7
+        assert abs(lib.fp(vk.get()) - -9.317650662101629) < 1e-7
 
         h1ao = [None] * mol.natm
         aoslices = mol.aoslice_by_atom()
@@ -126,6 +131,16 @@ class KnownValues(unittest.TestCase):
         refk = h1ao[:,1]
         assert abs(vj.get() - refj).max() < 1e-8
         assert abs(vk.get() - refk).max() < 1e-8
+
+    def test_hessian_rhf_D3(self):
+        print('----- testing RHF with D3BJ ------')
+        mf = mol.RHF()
+        mf.disp = 'd3bj'
+        mf.run()
+        mf.conv_tol_cpscf = 1e-8
+        ref = mf.Hessian().kernel()
+        e2_gpu = mf.Hessian().to_gpu().kernel()
+        assert abs(ref - e2_gpu).max() < 1e-8
 
 if __name__ == "__main__":
     print("Full Tests for RHF Hessian")

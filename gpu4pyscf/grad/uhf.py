@@ -125,3 +125,8 @@ class Gradients(rhf_grad.GradientsBase):
         if mo_coeff is None: mo_coeff = self.base.mo_coeff
         if mo_occ is None: mo_occ = self.base.mo_occ
         return make_rdm1e(mo_energy, mo_coeff, mo_occ)
+
+Grad = Gradients
+
+from gpu4pyscf import scf
+scf.uhf.UHF.Gradients = lib.class_as_method(Gradients)

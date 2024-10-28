@@ -469,7 +469,7 @@ class RHF(SCF):
 
     _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'conv_tol_cpscf', 'disp_with_3body'}
 
-    conv_tol_cpscf = 1e-6
+    conv_tol_cpscf = 1e-4
     DIIS = diis.SCF_DIIS
     get_jk = _get_jk
     _eigh = staticmethod(eigh)

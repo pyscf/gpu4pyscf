@@ -25,15 +25,13 @@ import numpy
 import cupy
 import numpy as np
 from pyscf import lib
-from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.hessian import rhf as rhf_hess
+from gpu4pyscf.grad import rhf as rhf_grad
+# import pyscf.grad.rks to activate nuc_grad_method method
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
-from gpu4pyscf.lib.cupy_helper import contract, add_sparse, take_last2d
+from gpu4pyscf.lib.cupy_helper import contract, add_sparse, take_last2d, get_avail_mem
 from gpu4pyscf.lib import logger
-
-# import pyscf.grad.rks to activate nuc_grad_method method
-from gpu4pyscf.grad import rks  # noqa
 
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
@@ -47,24 +45,25 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
-    if atmlst is None: atmlst = range(mol.natm)
 
-    nao, nmo = mo_coeff.shape
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = cupy.dot(mocc, mocc.T) * 2
 
     if mf.do_nlc():
         raise NotImplementedError
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
+    with_k = abs(hyb) > 1e-10
     de2, ej, ek = rhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
                                              atmlst, max_memory, verbose,
-                                             with_k=(hyb!=0))
-    de2 += ej - hyb * ek  # (A,B,dR_A,dR_B)
-    if abs(omega) > 1e-10:
+                                             with_k=with_k)
+    de2 += ej  # (A,B,dR_A,dR_B)
+    if with_k:
+        de2 -= hyb * ek
+    if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
         vhfopt = mf._opt_gpu.get(omega, None)
         with mol.with_range_coulomb(omega):
             ek_lr = rhf_hess._partial_ejk_ip2(mol, dm0, vhfopt, verbose=verbose)[1]
-        de2 -= (alpha-hyb)*.5 * ek_lr
+        de2 -= (alpha-hyb) * ek_lr
 
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, mf.max_memory*.9-mem_now)
@@ -72,14 +71,16 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     t1 = log.timer_debug1('hessian of 2e part', *t1)
 
     aoslices = mol.aoslice_by_atom()
-    vxc = _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
+    vxc_dm = _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
+    if atmlst is None:
+        atmlst = range(mol.natm)
     for i0, ia in enumerate(atmlst):
         p0, p1 = aoslices[ia,2:]
-        veff = vxc[ia]
+        veff = vxc_dm[ia]
         de2[i0,i0] += contract('xypq,pq->xy', veff_diag[:,:,p0:p1], dm0[p0:p1])*2
         for j0, ja in enumerate(atmlst[:i0+1]):
             q0, q1 = aoslices[ja][2:]
-            de2[i0,j0] += contract('xypq,pq->xy', veff[:,:,q0:q1], dm0[q0:q1])*2
+            de2[i0,j0] += 2.0 * veff[:,:,q0:q1].sum(axis=2)
 
         for j0 in range(i0):
             de2[j0,i0] = de2[i0,j0].T
@@ -89,43 +90,41 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
+    natm = mol.natm
     assert atmlst is None
-    if isinstance(mo_coeff, cupy.ndarray):
-        mo_coeff = mo_coeff.get()
-    if isinstance(mo_occ, cupy.ndarray):
-        mo_occ = mo_occ.get()
-
     nao, nmo = mo_coeff.shape
     mocc = mo_coeff[:,mo_occ>0]
     nocc = mocc.shape[1]
     dm0 = numpy.dot(mocc, mocc.T) * 2
-    hcore_deriv = hessobj.base.nuc_grad_method().hcore_generator(mol)
+    avail_mem = get_avail_mem()
+    max_memory = avail_mem * .8e-6
+    h1mo = _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
+    h1mo += rhf_grad.get_grad_hcore(hessobj.base.Gradients())
 
     mf = hessobj.base
     ni = mf._numint
-    ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
-    vj, vk = rhf_hess._get_jk(mol, dm0, with_k=(hyb!=0), verbose=verbose)
-    vk *= .5 * hyb
-    veff = vj - vk
-    if abs(omega) > 1e-10:
-        with mol.with_range_coulomb(omega):
-            vk_lr = rhf_hess._get_jk(mol, dm0, with_j=False, verbose=verbose)[1]
-            vk_lr *= (alpha-hyb) * .5
-            veff -= vk_lr
-    vj = vk = vk_lr = None
+    with_k = abs(hyb) > 1e-10
 
-    mem_now = lib.current_memory()[0]
-    max_memory = max(2000, mf.max_memory*.9-mem_now)
-    h1ao = _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
-    h1mo = np.empty((mol.natm, 3, nmo, nocc))
-
-    mf_cpu = hessobj.base.to_cpu()
-    hcore_deriv = rhf_grad_cpu.hcore_generator(mf_cpu, mol)
-    for ia in range(mol.natm):
-        veff[ia] += cupy.asarray(hcore_deriv(ia)) + h1ao[ia]
-        for ix in range(3):
-            h1mo[ia,ix] = mo_coeff.T.dot(veff[ia,ix].dot(mocc)).get()
+    avail_mem -= 8 * h1mo.size
+    slice_size = int(avail_mem*0.5) // (8*3*nao*nao)
+    for atoms_slice in lib.prange(0, natm, slice_size):
+        vj, vk = rhf_hess._get_jk(mol, dm0, with_k=with_k,
+                                  atoms_slice=atoms_slice, verbose=verbose)
+        veff = vj
+        if with_k:
+            vk *= .5 * hyb
+            veff -= vk
+        if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
+            with mol.with_range_coulomb(omega):
+                vk_lr = rhf_hess._get_jk(mol, dm0, with_j=False, verbose=verbose)[1]
+                vk_lr *= (alpha-hyb) * .5
+                veff -= vk_lr
+        atom0, atom1 = atoms_slice
+        for i, ia in enumerate(range(atom0, atom1)):
+            for ix in range(3):
+                h1mo[ia,ix] += mo_coeff.T.dot(veff[i,ix].dot(mocc))
+        vj = vk = vk_lr = veff = None
     return h1mo
 
 XX, XY, XZ = 4, 5, 6
@@ -317,6 +316,7 @@ def _d1d2_dot_(vmat, mol, ao1, ao2, mask, ao_loc, dR1_on_bra=True):
         #vmat += contract('yig,xjg->xyij', ao1, ao2)
 
 def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
+    '''Partially contracted vxc*dm'''
     mol = hessobj.mol
     mf = hessobj.base
     log = logger.new_logger(mol, mol.verbose)
@@ -491,6 +491,9 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     return vmat_dm
 
 def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
+    '''
+    Derivatives of Vxc matrix in MO bases
+    '''
     mol = hessobj.mol
     mf = hessobj.base
     log = logger.new_logger(mol, mol.verbose)
@@ -647,8 +650,6 @@ class Hessian(rhf_hess.HessianBase):
     partial_hess_elec = partial_hess_elec
     hess_elec = rhf_hess.hess_elec
     make_h1 = make_h1
-    hess = NotImplemented
-    kernel = NotImplemented
 
 from gpu4pyscf import dft
 dft.rks.RKS.Hessian = lib.class_as_method(Hessian)
