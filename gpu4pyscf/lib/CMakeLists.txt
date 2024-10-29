@@ -148,6 +148,7 @@ if(BUILD_SOLVENT)
 endif()
 
 add_subdirectory(gvhf-rys)
+add_subdirectory(gvhf-md)
 
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
