@@ -65,12 +65,4 @@ class KnownValues(unittest.TestCase):
 
 if __name__ == '__main__':
     print("Full Tests for CCSD")
-    #unittest.main()
-    mol = pyscf.M(atom = [
-        [8 , (0. , 0.     , 0.)],
-        [1 , (0. , -0.757 , 0.587)],
-        [1 , (0. , 0.757  , 0.587)],
-    ], basis = 'cc-pvdz', verbose=0)
-    mf = mol.RHF().run()
-    mcc = ccsd_incore.CCSD(mf)
-    eris = mcc.ao2mo()
+    unittest.main()

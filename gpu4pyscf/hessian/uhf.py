@@ -25,23 +25,19 @@ Non-relativistic UHF analytical Hessian
 from functools import reduce
 import ctypes
 import numpy
+import numpy as np
 import cupy
-from pyscf.hessian import rhf as rhf_hess
-from pyscf.hessian import uhf as uhf_hess
+import cupy as cp
 from pyscf import lib
-from pyscf import gto
-from pyscf.scf import _vhf
-
 # import _response_functions to load gen_response methods in SCF class
 from gpu4pyscf.scf import _response_functions  # noqa
-# import pyscf.grad.rhf to activate nuc_grad_method method
-from pyscf.grad import rhf  # noqa
 from gpu4pyscf.scf import ucphf
 from gpu4pyscf.gto.mole import sort_atoms
-from gpu4pyscf.lib.cupy_helper import contract, tag_array, print_mem_info, get_avail_mem
+from gpu4pyscf.lib.cupy_helper import contract, tag_array, get_avail_mem
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.hessian.rhf import HessianBase
+from gpu4pyscf.grad import rhf as rhf_grad
+from gpu4pyscf.hessian import rhf as rhf_hess_gpu
 
 GB = 1024*1024*1024
 ALIGNED = 4
@@ -59,7 +55,6 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
-    if atmlst is None: atmlst = range(mol.natm)
 
     mo_energy = cupy.asarray(mo_energy)
     mo_occ = cupy.asarray(mo_occ)
@@ -88,6 +83,8 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     s1a = -mol.intor('int1e_ipovlp', comp=3)
     s1a = cupy.asarray(s1a)
     aoslices = mol.aoslice_by_atom()
+    if atmlst is None:
+        atmlst = range(mol.natm)
     for i0, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = aoslices[ia]
         s1ao = cupy.zeros((3,nao,nao))
@@ -128,8 +125,8 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
     '''Partial derivative
     '''
-    e1, ej, ek = _partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
-                                   atmlst, max_memory, verbose, True)
+    e1, ej, ek = _partial_hess_ejk(
+        hessobj, mo_energy, mo_coeff, mo_occ, atmlst, max_memory, verbose, True)
     return e1 + ej - ek  # (A,B,dR_A,dR_B)
 
 def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
@@ -142,152 +139,79 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
-    if atmlst is None: atmlst = range(mol.natm)
+    assert atmlst is None
+    atmlst = range(mol.natm)
 
-    nao, nmo = mo_coeff[0].shape
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = numpy.dot(mocc, mocc.T) * 2
+    mocca = mo_coeff[0][:,mo_occ[0]>0]
+    moccb = mo_coeff[1][:,mo_occ[1]>0]
+    dm0a = mocca.dot(mocca.T)
+    dm0b = moccb.dot(moccb.T)
+    dm0 = cp.asarray((dm0a, dm0b))
+    vhfopt = mf._opt_gpu.get(None, None)
+    ej, ek = rhf_hess_gpu._partial_ejk_ip2(mol, dm0, vhfopt, with_k, verbose=log)
+    t1 = log.timer_debug1('hessian of 2e part', *t1)
+
     # Energy weighted density matrix
-    dme0 = numpy.einsum('pi,qi,i->pq', mocc, mocc, mo_energy[mo_occ>0]) * 2
+    mo_ea = mo_energy[0][mo_occ[0]>0]
+    mo_eb = mo_energy[1][mo_occ[1]>0]
+    dme0 = (mocca*mo_ea).dot(mocca.T)
+    dme0+= (moccb*mo_eb).dot(moccb.T)
+    de_hcore = rhf_hess_gpu._e_hcore_generator(hessobj, dm0a+dm0b)
+    s1aa, s1ab, s1a = rhf_hess_gpu.get_ovlp(mol)
 
-    hcore_deriv = hessobj.hcore_generator(mol)
-    s1aa, s1ab, s1a = get_ovlp(mol)
-    #FIXME
-    if not isinstance(dm0, numpy.ndarray):
-        dm0 = dm0.get()
-    if not isinstance(dme0, numpy.ndarray):
-        dme0 = dme0.get()
-
-    vj1_diag, vk1_diag = \
-            _get_jk(mol, 'int2e_ipip1', 9, 's2kl',
-                    ['lk->s1ij', dm0,   # vj1
-                     'jk->s1il', dm0],  # vk1
-                    vhfopt=_make_vhfopt(mol, dm0, 'ipip1', 'int2e_ipip1ipip2'))
-    vj1_diag = vj1_diag.reshape(3,3,nao,nao)
-    vk1_diag = vk1_diag.reshape(3,3,nao,nao)
-    t1 = log.timer_debug1('contracting int2e_ipip1', *t1)
-
-    ip1ip2_opt = _make_vhfopt(mol, dm0, 'ip1ip2', 'int2e_ip1ip2')
-    ipvip1_opt = _make_vhfopt(mol, dm0, 'ipvip1', 'int2e_ipvip1ipvip2')
     aoslices = mol.aoslice_by_atom()
     e1 = cupy.zeros((mol.natm,mol.natm,3,3))
-    ej = cupy.zeros((mol.natm,mol.natm,3,3))
-    ek = cupy.zeros((mol.natm,mol.natm,3,3))
     for i0, ia in enumerate(atmlst):
-        shl0, shl1, p0, p1 = aoslices[ia]
-        shls_slice = (shl0, shl1) + (0, mol.nbas)*3
-        vj1, vk1, vk2 = _get_jk(mol, 'int2e_ip1ip2', 9, 's1',
-                                ['ji->s1kl', dm0[:,p0:p1],  # vj1
-                                 'li->s1kj', dm0[:,p0:p1],  # vk1
-                                 'lj->s1ki', dm0         ], # vk2
-                                shls_slice=shls_slice, vhfopt=ip1ip2_opt)
-        vk1[:,:,p0:p1] += vk2
-        t1 = log.timer_debug1('contracting int2e_ip1ip2 for atom %d'%ia, *t1)
-        vj2, vk2 = _get_jk(mol, 'int2e_ipvip1', 9, 's2kl',
-                           ['lk->s1ij', dm0         ,  # vj1
-                            'li->s1kj', dm0[:,p0:p1]], # vk1
-                           shls_slice=shls_slice, vhfopt=ipvip1_opt)
-        vj1[:,:,p0:p1] += vj2.transpose(0,2,1) * .5
-        vk1 += vk2.transpose(0,2,1)
-        vj1 = vj1.reshape(3,3,nao,nao)
-        vk1 = vk1.reshape(3,3,nao,nao)
-        t1 = log.timer_debug1('contracting int2e_ipvip1 for atom %d'%ia, *t1)
-
-        ej[i0,i0] += contract('xypq,pq->xy', vj1_diag[:,:,p0:p1], dm0[p0:p1])*2
-        ek[i0,i0] += contract('xypq,pq->xy', vk1_diag[:,:,p0:p1], dm0[p0:p1])
+        p0, p1 = aoslices[ia][2:]
         e1[i0,i0] -= contract('xypq,pq->xy', s1aa[:,:,p0:p1], dme0[p0:p1])*2
 
         for j0, ja in enumerate(atmlst[:i0+1]):
             q0, q1 = aoslices[ja][2:]
-            # *2 for +c.c.
-            ej[i0,j0] += contract('xypq,pq->xy', vj1[:,:,q0:q1], dm0[q0:q1])*4
-            ek[i0,j0] += contract('xypq,pq->xy', vk1[:,:,q0:q1], dm0[q0:q1])
             e1[i0,j0] -= contract('xypq,pq->xy', s1ab[:,:,p0:p1,q0:q1], dme0[p0:p1,q0:q1])*2
-
-            h1ao = hcore_deriv(ia, ja)
-            e1[i0,j0] += contract('xypq,pq->xy', h1ao, dm0)
+            e1[i0,j0] += de_hcore(ia, ja)
 
         for j0 in range(i0):
             e1[j0,i0] = e1[i0,j0].T
-            ej[j0,i0] = ej[i0,j0].T
-            ek[j0,i0] = ek[i0,j0].T
 
-    log.timer('RHF partial hessian', *time0)
+    log.timer('UHF partial hessian', *time0)
     return e1, ej, ek
 
-def _make_vhfopt(mol, dms, key, vhf_intor):
-    if not hasattr(_vhf.libcvhf, vhf_intor):
-        return None
-
-    vhfopt = _vhf.VHFOpt(mol, vhf_intor, 'CVHF'+key+'_prescreen',
-                         'CVHF'+key+'_direct_scf')
-    dms = numpy.asarray(dms, order='C')
-    if dms.ndim == 3:
-        n_dm = dms.shape[0]
-    else:
-        n_dm = 1
-    ao_loc = mol.ao_loc_nr()
-    fsetdm = getattr(_vhf.libcvhf, 'CVHF'+key+'_direct_scf_dm')
-    fsetdm(vhfopt._this,
-           dms.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(n_dm),
-           ao_loc.ctypes.data_as(ctypes.c_void_p),
-           mol._atm.ctypes.data_as(ctypes.c_void_p), mol.natm,
-           mol._bas.ctypes.data_as(ctypes.c_void_p), mol.nbas,
-           mol._env.ctypes.data_as(ctypes.c_void_p))
-
-    # Update the vhfopt's attributes intor.  Function direct_mapdm needs
-    # vhfopt._intor and vhfopt._cintopt to compute J/K.
-    if vhf_intor != 'int2e_'+key:
-        vhfopt._intor = mol._add_suffix('int2e_'+key)
-        vhfopt._cintopt = None
-    return vhfopt
-
-
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
+    assert atmlst is None
     mol = hessobj.mol
-    if atmlst is None:
-        atmlst = range(mol.natm)
+    natm = mol.natm
 
-    nao, nmo = mo_coeff[0].shape
-    mocca = mo_coeff[0][:,mo_occ[0]>0]
-    moccb = mo_coeff[1][:,mo_occ[1]>0]
-    dm0a = numpy.dot(mocca, mocca.T)
-    dm0b = numpy.dot(moccb, moccb.T)
-    hcore_deriv = hessobj.base.nuc_grad_method().hcore_generator(mol)
+    mo_a, mo_b = mo_coeff
+    mocca = mo_a[:,mo_occ[0]>0]
+    moccb = mo_b[:,mo_occ[1]>0]
+    nao = mo_a.shape[0]
+    dm0a = mocca.dot(mocca.T)
+    dm0b = moccb.dot(moccb.T)
+    grad_obj = hessobj.base.Gradients()
+    h1moa = rhf_grad.get_grad_hcore(grad_obj, mo_a, mo_occ[0])
+    h1mob = rhf_grad.get_grad_hcore(grad_obj, mo_b, mo_occ[1])
 
-    aoslices = mol.aoslice_by_atom()
-    h1aoa = [None] * mol.natm
-    h1aob = [None] * mol.natm
-    for i0, ia in enumerate(atmlst):
-        shl0, shl1, p0, p1 = aoslices[ia]
-        shls_slice = (shl0, shl1) + (0, mol.nbas)*3
-        vj1a, vj1b, vj2a, vj2b, vk1a, vk1b, vk2a, vk2b = \
-                _get_jk(mol, 'int2e_ip1', 3, 's2kl',
-                        ['ji->s2kl', -dm0a[:,p0:p1], 'ji->s2kl', -dm0b[:,p0:p1],
-                         'lk->s1ij', -dm0a         , 'lk->s1ij', -dm0b         ,
-                         'li->s1kj', -dm0a[:,p0:p1], 'li->s1kj', -dm0b[:,p0:p1],
-                         'jk->s1il', -dm0a         , 'jk->s1il', -dm0b         ],
-                        shls_slice=shls_slice)
-        vj1 = vj1a + vj1b
-        vj2 = vj2a + vj2b
-        vhfa = vj1 - vk1a
-        vhfb = vj1 - vk1b
-        vhfa[:,p0:p1] += vj2 - vk2a
-        vhfb[:,p0:p1] += vj2 - vk2b
-        h1 = hcore_deriv(ia)
-        h1a = h1 + vhfa + vhfa.transpose(0,2,1)
-        h1b = h1 + vhfb + vhfb.transpose(0,2,1)
-
-        if chkfile is None:
-            h1aoa[ia] = h1a
-            h1aob[ia] = h1b
-        else:
-            lib.chkfile.save(chkfile, 'scf_f1ao/0/%d' % ia, h1a)
-            lib.chkfile.save(chkfile, 'scf_f1ao/1/%d' % ia, h1b)
-    if chkfile is None:
-        return (h1aoa,h1aob)
-    else:
-        return chkfile
+    avail_mem = get_avail_mem()
+    slice_size = int(avail_mem*0.6) // (8*3*nao*nao*2)
+    for atoms_slice in lib.prange(0, natm, slice_size):
+        vja, vka = rhf_hess_gpu._get_jk(mol, dm0a, atoms_slice=atoms_slice, verbose=verbose)
+        vjb, vkb = rhf_hess_gpu._get_jk(mol, dm0b, atoms_slice=atoms_slice, verbose=verbose)
+        #:vhfa = vja+vjb - vka
+        #:vhfb = vja+vjb - vkb
+        vhfa = vka
+        vhfb = vkb
+        vhfa *= -1
+        vhfb *= -1
+        vj = vja + vjb
+        vhfa += vj
+        vhfb += vj
+        atom0, atom1 = atoms_slice
+        for i, ia in enumerate(range(atom0, atom1)):
+            for ix in range(3):
+                h1moa[ia,ix] += mo_a.T.dot(vhfa[i,ix].dot(mocca))
+                h1mob[ia,ix] += mo_b.T.dot(vhfb[i,ix].dot(moccb))
+        vj = vja = vjb = vka = vkb = vhfa = vhfb = None
+    return h1moa, h1mob
 
 def get_hcore(mol):
     '''Part of the second derivatives of core Hamiltonian'''
@@ -311,32 +235,6 @@ def get_ovlp(mol):
     s1ab = mol.intor('int1e_ipovlpip', comp=9).reshape(3,3,nao,nao)
     return s1aa, s1ab, s1a
 
-def _get_jk(mol, intor, comp, aosym, script_dms,
-            shls_slice=None, cintopt=None, vhfopt=None):
-    intor = mol._add_suffix(intor)
-    scripts = script_dms[::2]
-    dms = script_dms[1::2]
-
-    vs = _vhf.direct_bindm(intor, aosym, scripts, dms, comp,
-                           mol._atm, mol._bas, mol._env, vhfopt=vhfopt,
-                           cintopt=cintopt, shls_slice=shls_slice)
-    for k, script in enumerate(scripts):
-        if 's2' in script:
-            hermi = 1
-        elif 'a2' in script:
-            hermi = 2
-        else:
-            continue
-
-        shape = vs[k].shape
-        if shape[-2] == shape[-1]:
-            if comp > 1:
-                for i in range(comp):
-                    lib.hermi_triu(vs[k][i], hermi=hermi, inplace=True)
-            else:
-                lib.hermi_triu(vs[k], hermi=hermi, inplace=True)
-    return vs
-
 def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
               fx=None, atmlst=None, max_memory=4000, verbose=None,
               max_cycle=50, level_shift=0):
@@ -348,7 +246,6 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     '''
     mol = mf.mol
     log = logger.new_logger(mf, verbose)
-    if atmlst is None: atmlst = range(mol.natm)
 
     nao, nmo = mo_coeff[0].shape
     mocca = mo_coeff[0][:,mo_occ[0]>0]
@@ -458,73 +355,15 @@ def gen_vind(mf, mo_coeff, mo_occ):
     return fx
 
 
-def gen_hop(hobj, mo_energy=None, mo_coeff=None, mo_occ=None, verbose=None):
-    log = logger.new_logger(hobj, verbose)
-    mol = hobj.mol
-    mf = hobj.base
-
-    if mo_energy is None: mo_energy = mf.mo_energy
-    if mo_occ is None:    mo_occ = mf.mo_occ
-    if mo_coeff is None:  mo_coeff = mf.mo_coeff
-
-    natm = mol.natm
-    nao, nmo = mo_coeff.shape
-    mocc = mo_coeff[:,mo_occ>0]
-    nocc = mocc.shape[1]
-
-    atmlst = range(natm)
-    max_memory = max(2000, hobj.max_memory - lib.current_memory()[0])
-    de2 = hobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ, atmlst,
-                                 max_memory, log)
-    de2 += hobj.hess_nuc()
-
-    h1ao_cache = hobj.make_h1(mo_coeff, mo_occ, None, atmlst, log)
-
-    aoslices = mol.aoslice_by_atom()
-    s1a = -mol.intor('int1e_ipovlp', comp=3)
-
-    fvind = gen_vind(mf, mo_coeff, mo_occ)
-    def h_op(x):
-        x = x.reshape(natm,3)
-        hx = numpy.einsum('abxy,ax->by', de2, x)
-        h1ao = 0
-        s1ao = 0
-        for ia in range(natm):
-            shl0, shl1, p0, p1 = aoslices[ia]
-            h1ao += numpy.einsum('x,xij->ij', x[ia], h1ao_cache[ia])
-            s1ao_i = numpy.zeros((3,nao,nao))
-            s1ao_i[:,p0:p1] += s1a[:,p0:p1]
-            s1ao_i[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
-            s1ao += numpy.einsum('x,xij->ij', x[ia], s1ao_i)
-
-        s1vo = reduce(numpy.dot, (mo_coeff.T, s1ao, mocc))
-        h1vo = reduce(numpy.dot, (mo_coeff.T, h1ao, mocc))
-        mo1, mo_e1 = ucphf.solve(fvind, mo_energy, mo_occ, h1vo, s1vo)
-        mo1 = numpy.dot(mo_coeff, mo1)
-        mo_e1 = mo_e1.reshape(nocc,nocc)
-        dm1 = numpy.einsum('pi,qi->pq', mo1, mocc)
-        dme1 = numpy.einsum('pi,qi,i->pq', mo1, mocc, mo_energy[mo_occ>0])
-        dme1 = dme1 + dme1.T + reduce(numpy.dot, (mocc, mo_e1.T, mocc.T))
-
-        for ja in range(natm):
-            q0, q1 = aoslices[ja][2:]
-            hx[ja] += numpy.einsum('xpq,pq->x', h1ao_cache[ja], dm1) * 4
-            hx[ja] -= numpy.einsum('xpq,pq->x', s1a[:,q0:q1], dme1[q0:q1]) * 2
-            hx[ja] -= numpy.einsum('xpq,qp->x', s1a[:,q0:q1], dme1[:,q0:q1]) * 2
-        return hx.ravel()
-
-    hdiag = numpy.einsum('aaxx->ax', de2).ravel()
-    return h_op, hdiag
-
-
-class Hessian(HessianBase):
+class Hessian(rhf_hess_gpu.HessianBase):
     '''Non-relativistic unrestricted Hartree-Fock hessian'''
 
+    from gpu4pyscf.lib.utils import to_gpu, device
+
+    __init__ = rhf_hess_gpu.Hessian.__init__
     partial_hess_elec = partial_hess_elec
     hess_elec = hess_elec
     make_h1 = make_h1
-    kernel = NotImplemented
-    hess = NotImplemented
 
     def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1mo,
                   fx=None, atmlst=None, max_memory=4000, verbose=None):
@@ -532,7 +371,7 @@ class Hessian(HessianBase):
                          fx, atmlst, max_memory, verbose,
                          max_cycle=self.max_cycle, level_shift=self.level_shift)
 
-    gen_hop = gen_hop
+    gen_hop = NotImplemented
 
 # Inject to UHF class
 from gpu4pyscf import scf
