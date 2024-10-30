@@ -43,8 +43,6 @@ def tearDownModule():
     mol_cart.stdout.close()
     del mol_sph, mol_cart
 
-# FIXME: Why is the difference between CPU and GPU so large?
-# tol=1e-6 is not acceptable
 def _check_grad(mol, grid_response=False, xc='B3LYP', disp=None, tol=1e-6):
     mf = uks.UKS(mol, xc=xc)
     mf.disp = disp
