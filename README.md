@@ -51,6 +51,8 @@ Features
 - Unrestricted Hartree-Fock and Unrestricted DFT, gradient, and Hessian;
 - MP2/DF-MP2 and CCSD (experimental);
 - Polarizability, IR, and NMR shielding
+- QM/MM with PBC
+- CHELPG, ESP, and RESP atomic charge
 
 Limitations
 --------
@@ -58,7 +60,6 @@ Limitations
 - Atomic basis up to g orbitals;
 - Auxiliary basis up to i orbitals;
 - Density fitting scheme up to ~168 atoms with def2-tzvpd basis, bounded by CPU memory;
-- Hessian is unavailable for Direct SCF yet;
 - meta-GGA without density laplacian;
 - Double hybrid functionals are not supported;
 
