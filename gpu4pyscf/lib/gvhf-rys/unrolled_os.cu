@@ -2,6 +2,8 @@
 #include "vhf.cuh"
 #include "gamma_inc_unrolled.cu"
 #include "create_tasks.cu"
+int os_jk_unrolled_lmax = 1;
+int os_jk_unrolled_max_order = 0;
 
 
 __device__ static

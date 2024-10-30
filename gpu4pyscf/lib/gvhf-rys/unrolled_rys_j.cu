@@ -2,6 +2,9 @@
 #include "vhf.cuh"
 #include "rys_roots_unrolled.cu"
 #include "create_tasks.cu"
+int rys_j_unrolled_lmax = 4;
+int rys_j_unrolled_max_order = 6;
+int rys_j_unrolled_max_gout_size = 90;
 
 
 __device__ static
