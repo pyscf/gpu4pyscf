@@ -59,7 +59,6 @@ def _check_grad(mol, grid_response=False, xc='B3LYP', disp=None, tol=1e-9):
     g_gpu = gpu_gradient.kernel()
 
     cpu_gradient = gpu_gradient.to_cpu()
-    print(cpu_gradient.grid_response)
     g_cpu = cpu_gradient.kernel()
     print('|| CPU - GPU ||:', cupy.linalg.norm(g_cpu - g_gpu))
     assert(cupy.linalg.norm(g_cpu - g_gpu) < tol)
@@ -68,7 +67,6 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_with_grids_response(self):
         print("-----testing DFT gradient with grids response----")
-        #FIXME: The difference (1e-6) between CPU and GPU is too large
         _check_grad(mol_sph, grid_response=True, tol=1e-6)
     
     def test_grad_without_grids_response(self):
