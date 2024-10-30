@@ -22,6 +22,7 @@ import cupy
 import numpy
 from pyscf import lib, gto
 from pyscf.grad import rhf as rhf_grad_cpu
+from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.hf import KohnShamDFT
 from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, sandwich_dot
 from gpu4pyscf.__config__ import props as gpu_specs
@@ -345,17 +346,12 @@ class GradientsBase(lib.StreamObject):
     as_scanner  = as_scanner
     _tag_rdm1   = rhf_grad_cpu.GradientsBase._tag_rdm1
 
-    # to_cpu can be reused only when __init__ still takes mf
-    def to_cpu(self):
-        mf = self.base.to_cpu()
-        from importlib import import_module
-        mod = import_module(self.__module__.replace('gpu4pyscf', 'pyscf'))
-        cls = getattr(mod, self.__class__.__name__)
-        obj = cls(mf)
-        return obj
 
 class Gradients(GradientsBase):
-    from gpu4pyscf.lib.utils import to_gpu, device
+
+    to_cpu = utils.to_cpu
+    to_gpu = utils.to_gpu
+    device = utils.device
 
     make_rdm1e = rhf_grad_cpu.Gradients.make_rdm1e
     grad_elec = grad_elec

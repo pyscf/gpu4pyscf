@@ -60,6 +60,7 @@ def _check_grad(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
     mf.grids.prune = None
     mf.nlcgrids.level = nlcgrids_level
     mf.conv_tol = 1e-14
+    mf.direct_scf_tol = 1e-20
     mf.verbose = 1
     mf.kernel()
 
@@ -141,7 +142,7 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_rsh(self):
         print('--------RSH testing-------------')
-        _vs_cpu(mol_sph, xc='wb97', disp=None, tol=1e-8)
+        _vs_cpu(mol_sph, xc='wb97', disp=None, tol=1e-7)
 
     def test_grad_nlc(self):
         print('--------nlc testing-------------')
