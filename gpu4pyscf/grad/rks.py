@@ -22,12 +22,12 @@ import numpy
 import cupy
 import pyscf
 from pyscf import lib, gto
-from pyscf.dft import radi
 from pyscf.grad import rks as rks_grad
 from gpu4pyscf.lib.utils import patch_cpu_kernel
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.dft import numint, xc_deriv, rks
 from gpu4pyscf.dft.numint import _GDFTOpt, AO_THRESHOLD
+from gpu4pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, add_sparse, tag_array, take_last2d, sandwich_dot)
 from gpu4pyscf.lib import logger
@@ -409,7 +409,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     #:vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
     vmat = sandwich_dot(vmat, coeff)
-
+    
     # - sign because nabla_X = -nabla_x
     return excsum, -vmat
 
@@ -424,7 +424,7 @@ def grids_response_cc(grids):
     atm_dist = gto.inter_distance(mol, atm_coords)
     atm_dist = cupy.asarray(atm_dist)
     atm_coords = cupy.asarray(atm_coords)
-
+    
     def _radii_adjust(mol, atomic_radii):
         charges = mol.atom_charges()
         if grids.radii_adjust == radi.treutler_atomic_radii_adjust:
@@ -514,7 +514,6 @@ def grids_response_cc(grids):
 
         for ia in range(mol.natm):
             dpbecke[:,ia] *= pbecke[ia]
-
         return pbecke, dpbecke
 
     natm = mol.natm

@@ -21,6 +21,7 @@ import numpy
 from pyscf import lib, gto
 from pyscf.grad import uhf
 from pyscf.grad import rhf as rhf_grad_cpu
+from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import tag_array, contract
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
@@ -99,12 +100,14 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         mf_grad.grad_disp = g_disp
         mf_grad.grad_mf = de
 
-    de -= cupy.sum(de, axis=0)/len(atmlst)
     return de.get()
 
 
 class Gradients(rhf_grad.GradientsBase):
-    from gpu4pyscf.lib.utils import to_gpu, device
+    
+    to_cpu = utils.to_cpu
+    to_gpu = utils.to_gpu
+    device = utils.device
 
     grad_elec = grad_elec
 

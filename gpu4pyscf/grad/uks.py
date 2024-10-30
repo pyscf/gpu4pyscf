@@ -90,7 +90,7 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
             vxc_tmp[0] += vnlc
             vxc_tmp[1] += vnlc
     t0 = logger.timer(ks_grad, 'vxc', *t0)
-
+    
     mo_coeff_alpha = mf.mo_coeff[0]
     mo_coeff_beta = mf.mo_coeff[1]
     occ_coeff0 = cupy.asarray(mo_coeff_alpha[:, mf.mo_occ[0]>0.5], order='C')
@@ -195,8 +195,6 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     vmat = take_last2d(vmat, opt.rev_ao_idx)
     exc = None
-    if nset == 1:
-        vmat = vmat[0]
 
     # - sign because nabla_X = -nabla_x
     return exc, -cupy.array(vmat)
