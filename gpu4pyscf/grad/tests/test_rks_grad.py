@@ -64,7 +64,7 @@ def _check_grad(mol, grid_response=False, xc='B3LYP', disp=None, tol=1e-9):
     assert(cupy.linalg.norm(g_cpu - g_gpu) < tol)
 
 class KnownValues(unittest.TestCase):
-
+    
     def test_grad_with_grids_response(self):
         print("-----testing DFT gradient with grids response----")
         _check_grad(mol_sph, grid_response=True, tol=1e-6)

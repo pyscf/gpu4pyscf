@@ -31,10 +31,11 @@ import numpy
 import cupy
 from pyscf import lib
 from pyscf import gto
-from pyscf.gto.eval_gto import BLKSIZE, NBINS, CUTOFF, make_screen_index
+from pyscf.gto.eval_gto import BLKSIZE, NBINS, CUTOFF
 from pyscf import __config__
 from cupyx.scipy.spatial.distance import cdist
 from gpu4pyscf.lib import logger
+from gpu4pyscf.gto.eval_gto import make_screen_index
 from gpu4pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf import __config__ as __gpu4pyscf_config__
@@ -44,8 +45,12 @@ libgdft = load_library('libgdft')
 
 from pyscf.dft.gen_grid import GROUP_BOUNDARY_PENALTY, NELEC_ERROR_TOL, LEBEDEV_ORDER, LEBEDEV_NGRID
 
-GROUP_BOX_SIZE = 3.0
+AO_ALIGNMENT = getattr(__config__, 'ao_aligned', 16)
+GROUP_BOX_SIZE = 1.2
 ALIGNMENT_UNIT = getattr(__gpu4pyscf_config__, 'grid_aligned', 128)
+MIN_BLK_SIZE = getattr(__gpu4pyscf_config__, 'min_grid_blksize', 64*64)
+GRID_BLKSIZE = MIN_BLK_SIZE
+
 # SG0
 # S. Chien and P. Gill,  J. Comput. Chem. 27 (2006) 730-739.
 
@@ -419,7 +424,8 @@ def atomic_group_grids(mol, coords):
         ctypes.c_int(ngrids)
     )
     if err != 0:
-        raise RuntimeError('CUDA Error')
+        raise RuntimeError('CUDA Error in GDFTgroup_grids kernel')
+
     idx = group_ids.argsort()
     return idx
 
@@ -464,6 +470,36 @@ def _load_conf(mod, name, default):
     else:
         return var
 
+def gen_sparse_cache(mol, coords, blksize):
+    '''
+    determine sparse AO indices
+    '''
+    log = logger.new_logger(mol, 6)
+    ao_loc = mol.ao_loc_nr()
+    ngrids = coords.shape[0]
+    t0 = log.init_timer()
+    s_index = make_screen_index(mol, coords, blksize=blksize)
+    s_index[:] = 1
+    t0 = log.timer_debug1('s_index', *t0)
+    s_index_cpu = s_index.get()
+    nblocks = (ngrids + blksize - 1)//blksize
+    nbas = mol.nbas
+    nao = mol.nao
+    ao_indices = numpy.zeros([nblocks, nao], dtype=numpy.int32)
+    ao_loc_non0 = numpy.zeros([nblocks, nbas+1], dtype=numpy.int32)
+
+    # Running on CPU
+    libgdft.GDFTmake_sparse_cache(
+        s_index_cpu.ctypes.data_as(ctypes.c_void_p),
+        ao_loc.ctypes.data_as(ctypes.c_void_p),
+        ctypes.c_int(nblocks),
+        ao_loc_non0.ctypes.data_as(ctypes.c_void_p),
+        ctypes.c_int(nbas),
+        ao_indices.ctypes.data_as(ctypes.c_void_p),
+        ctypes.c_int(nao))
+    t0 = log.timer_debug1('sparse ao kernel', *t0)
+    return ao_indices, s_index, ao_loc_non0
+
 from pyscf.dft import gen_grid
 from gpu4pyscf.lib import utils
 class Grids(lib.StreamObject):
@@ -483,8 +519,9 @@ class Grids(lib.StreamObject):
     alignment    = ALIGNMENT_UNIT
     cutoff       = CUTOFF
     _keys        = gen_grid.Grids._keys
-
-    __init__    = gen_grid.Grids.__init__
+    __init__     = gen_grid.Grids.__init__
+    
+    _keys.update({'sparse_cache'})
 
     def __setattr__(self, key, val):
         if key in ('atom_grid', 'atomic_radii', 'radii_adjust', 'radi_method',
@@ -523,6 +560,7 @@ class Grids(lib.StreamObject):
             self.screen_index = self.non0tab
         else:
             self.screen_index = self.non0tab = None
+
         logger.info(self, 'tot grids = %d', len(self.weights))
         return self
 
@@ -538,6 +576,7 @@ class Grids(lib.StreamObject):
         self.weights = None
         self.non0tab = None
         self.screen_index = None
+        self.sparse_cache = {}
         return self
 
     gen_atomic_grids = lib.module_method(
@@ -556,6 +595,35 @@ class Grids(lib.StreamObject):
 
     make_mask = lib.module_method(make_mask, absences=['cutoff'])
 
+    def build_sparsity(self, sorted_mol, blksize=ALIGNMENT_UNIT):
+        ''' Build sparsity data for sparse AO evaluation
+        Sort grids for batching grids
+        '''
+        ngrids = self.coords.shape[0]
+        ao_indices, s_index, ao_loc_non0 = gen_sparse_cache(sorted_mol, self.coords, blksize)
+        
+        nao_non0 = ao_loc_non0[:,-1]
+        ao_loc_non0 = cupy.asarray(ao_loc_non0)
+        ao_indices = cupy.asarray(ao_indices)
+        
+        # Sort grids based on the number of nonzero AOs
+        idx = numpy.argsort(nao_non0)
+        nao_non0 = nao_non0[idx]
+        ao_indices = ao_indices[idx]
+        s_index = s_index[idx]
+        ao_loc_non0 = cupy.asarray(ao_loc_non0[idx])
+        idx = cupy.asarray(idx)
+        idx_grids = cupy.tile(idx*blksize, (blksize,1)).T
+        idx_grids += cupy.arange(blksize)
+        idx_grids = idx_grids.ravel(order='C')[:ngrids]
+        self.coords = self.coords[idx_grids]
+        self.weights = self.weights[idx_grids]
+        
+        sparse_data = (ao_indices, s_index, ao_loc_non0, nao_non0)
+        self.sparse_cache[blksize, ngrids] = sparse_data
+        
+        return
+    
     def prune_by_density_(self, rho, threshold=0):
         '''Prune grids if the electron density on the grid is small'''
         if threshold == 0:

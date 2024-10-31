@@ -20,6 +20,7 @@
 #include <cuda_runtime.h>
 
 #define NATOM_PER_BLOCK        128
+#define NG_PER_BLOCK           256
 
 __global__
 void GDFTgen_grid_kernel(double *pbecke, const double *coords, const double *atm_coords, const double *a,
