@@ -21,17 +21,12 @@
 #include <cuda_runtime.h>
 
 #include "gint.h"
-// #include "config.h"
 #include "cuda_alloc.cuh"
 #include "cint2e.cuh"
-// #include "g2e.h"
 
 #include "rys_roots.cu"
 #include "g1e.cu"
-// #include "gout3c2e.cu"
-// #include "g3c2e_root1.cu"
-// #include "g2e_root2.cu"
-// #include "g2e_root3.cu"
+#include "g1e_root_123.cu"
 #include "g3c1e.cu"
 
 // 1 roots upto (p|s)  6    = 3*1*(2*1)
@@ -73,16 +68,15 @@ static int GINTfill_int3c1e_tasks(double* output, const BasisProdOffsets offsets
     const dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ngrids+THREADSY-1)/THREADSY);
     int type_ijkl;
     switch (nrys_roots) {
-    // case 1:
-    //     type_ijkl = (envs->i_l << 3) | (envs->j_l << 2) | (envs->k_l << 1) | envs->l_l;
-    //     switch (type_ijkl) {
-    //     case 0b0000: GINTfill_int3c2e_kernel0000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case 0b0010: GINTfill_int3c2e_kernel0010<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case 0b1000: GINTfill_int3c2e_kernel1000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     default:
-    //         fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
-    //     }
-    //     break;
+    case 1:
+        type_ijkl = (i_l << 2) | j_l;
+        switch (type_ijkl) {
+        case (0<<2)|0: GINTfill_int3c1e_kernel00<<<blocks, threads, 0, stream>>>(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
+        case (1<<2)|0: GINTfill_int3c1e_kernel10<<<blocks, threads, 0, stream>>>(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
+        default:
+            fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
+        }
+        break;
     // case 2:
     //     type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;
     //     switch (type_ijkl) {
@@ -121,7 +115,6 @@ static int GINTfill_int3c1e_tasks(double* output, const BasisProdOffsets offsets
     //         GINTfill_int3c2e_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
     //     }
     //     break;
-    case 1: GINTfill_int3c1e_kernel_general<1, GSIZE1_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
     case 2: GINTfill_int3c1e_kernel_general<2, GSIZE2_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
     case 3: GINTfill_int3c1e_kernel_general<3, GSIZE3_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
     case 4: GINTfill_int3c1e_kernel_general<4, GSIZE4_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
@@ -157,27 +150,15 @@ int GINTfill_int3c1e(const cudaStream_t stream, const BasisProdCache* bpcache,
         return 2;
     }
 
-    // if (nrys_roots > 1) {
+    if (nrys_roots > 1) {
         int16_t cart_component[GPU_CART_MAX * 6] {0};
         CINTcart_comp(cart_component + 0 * GPU_CART_MAX, cart_component + 1 * GPU_CART_MAX, cart_component + 2 * GPU_CART_MAX, i_l);
         CINTcart_comp(cart_component + 3 * GPU_CART_MAX, cart_component + 4 * GPU_CART_MAX, cart_component + 5 * GPU_CART_MAX, j_l);
 
         checkCudaErrors(cudaMemcpyToSymbol(c_idx4c, cart_component, sizeof(int16_t) * GPU_CART_MAX * 6));
-    // }
+    }
 
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
-
-    // ERITensor eritensor;
-    // eritensor.stride_j = strides[1];
-    // eritensor.stride_k = strides[2];
-    // eritensor.stride_l = strides[3];
-    // eritensor.ao_offsets_i = ao_offsets[0];
-    // eritensor.ao_offsets_j = ao_offsets[1];
-    // eritensor.ao_offsets_k = ao_offsets[2];
-    // eritensor.ao_offsets_l = ao_offsets[3];
-    // eritensor.nao = nao;
-    // eritensor.data = eri;
-    // BasisProdOffsets offsets;
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;

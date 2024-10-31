@@ -20,11 +20,11 @@ import numpy as np
 from pyscf.scf import _vhf
 from gpu4pyscf.scf.hf import BasisProdCache
 from gpu4pyscf.df.int3c2e import sort_mol
-from gpu4pyscf.lib.cupy_helper import load_library
+from gpu4pyscf.lib.cupy_helper import load_library, cart2sph, block_c2s_diag, get_avail_mem
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import basis_seg_contraction
 
-from gpu4pyscf.df.int3c2e import _split_l_ctr_groups, get_pairing, block_c2s_diag, get_ao_pairs, cart2sph
+from gpu4pyscf.df.int3c2e import _split_l_ctr_groups, get_pairing
 
 BLKSIZE = 128
 
@@ -135,8 +135,7 @@ class VHFOpt(_vhf.VHFOpt):
             self.coeff = self.cart2sph[:, inv_idx]
         cput1 = log.timer_debug1('AO cart2sph coeff', *cput1)
 
-        ao_loc = sorted_mol.ao_loc_nr(cart=_mol.cart)
-        self.ao_pairs_row, self.ao_pairs_col = get_ao_pairs(pair2bra, pair2ket, ao_loc)
+        ao_loc = sorted_mol.ao_loc_nr(cart=True)
         cput1 = log.timer_debug1('Get AO pairs', *cput1)
 
         self.pair2bra = pair2bra
@@ -227,29 +226,48 @@ def intor(mol, intor, grids, direct_scf_tol=1e-13, omega=None):
 
     nao = mol.nao
     ngrids = grids.shape[0]
-    int3c = cupy.zeros([ngrids, nao, nao], order='C')
+    total_double_number = ngrids * nao * nao
+    cupy.get_default_memory_pool().free_all_blocks()
+    avail_mem = get_avail_mem()
+    reserved_available_memory = avail_mem // 4 # Leave space for further allocations
+    allowed_double_number = reserved_available_memory // 8
+    n_grid_split = int(np.ceil(total_double_number / allowed_double_number))
+    if (n_grid_split > 100):
+        raise Exception(f"Available GPU memory ({avail_mem / 1e9 : .1f} GB) is too small for the 3 center integral, which requires {total_double_number * 8 / 1e9 : .1f} GB of memory")
+    ngrids_per_split = (ngrids + n_grid_split - 1) // n_grid_split
+
+    int3c_pinned_memory_pool = cupy.cuda.alloc_pinned_memory(ngrids * nao * nao * np.array([1.0]).nbytes)
+    int3c = np.frombuffer(int3c_pinned_memory_pool, np.float64, ngrids * nao * nao).reshape([ngrids, nao, nao], order='C')
+    # int3c = np.zeros([ngrids, nao, nao], order='C') # Using unpinned (pageable) memory, each memcpy is much slower, but there's no initialization time
+
     grids = cupy.asarray(grids, order='C')
-    for cp_ij_id, _ in enumerate(intopt.log_qs):
-        cpi = intopt.cp_idx[cp_ij_id]
-        cpj = intopt.cp_jdx[cp_ij_id]
-        li = intopt.angular[cpi]
-        lj = intopt.angular[cpj]
-        i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
-        j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
 
-        int3c_slice = cupy.zeros([ngrids, j1-j0, i1-i0], order='C')
-        get_int3c1e_slice(intopt, cp_ij_id, grids, out=int3c_slice, omega=omega)
-        i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
-        j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
-        if not mol.cart:
-            int3c_slice = cart2sph(int3c_slice, axis=1, ang=lj)
-            int3c_slice = cart2sph(int3c_slice, axis=2, ang=li)
-        int3c[:, j0:j1, i0:i1] = int3c_slice
-        # int3c[:, i0:i1, j0:j1] += int3c_slice.transpose([0,2,1])
-    row, col = np.tril_indices(nao)
-    int3c[:, row, col] = int3c[:, col, row]
-    ao_idx = np.argsort(intopt.ao_idx)
-    grid_idx = np.arange(ngrids)
-    int3c = int3c[np.ix_(grid_idx, ao_idx, ao_idx)]
+    for i_grid_split in range(0, ngrids, ngrids_per_split):
+        ngrids_of_split = np.min([ngrids_per_split, ngrids - i_grid_split])
+        int3c_grid_slice = cupy.zeros([ngrids_of_split, nao, nao], order='C')
+        for cp_ij_id, _ in enumerate(intopt.log_qs):
+            cpi = intopt.cp_idx[cp_ij_id]
+            cpj = intopt.cp_jdx[cp_ij_id]
+            li = intopt.angular[cpi]
+            lj = intopt.angular[cpj]
+            i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
+            j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
 
-    return cupy.asnumpy(int3c)
+            int3c_angular_slice = cupy.zeros([ngrids_of_split, j1-j0, i1-i0], order='C')
+            get_int3c1e_slice(intopt, cp_ij_id, grids[i_grid_split : i_grid_split + ngrids_of_split], out=int3c_angular_slice, omega=omega)
+            i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
+            j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
+            if not mol.cart:
+                int3c_angular_slice = cart2sph(int3c_angular_slice, axis=1, ang=lj)
+                int3c_angular_slice = cart2sph(int3c_angular_slice, axis=2, ang=li)
+            int3c_grid_slice[:, j0:j1, i0:i1] = int3c_angular_slice
+        row, col = np.tril_indices(nao)
+        int3c_grid_slice[:, row, col] = int3c_grid_slice[:, col, row]
+        ao_idx = np.argsort(intopt.ao_idx)
+        grid_idx = np.arange(ngrids_of_split)
+        int3c_grid_slice = int3c_grid_slice[np.ix_(grid_idx, ao_idx, ao_idx)]
+
+        cupy.cuda.runtime.memcpy(int3c[i_grid_split : i_grid_split + ngrids_of_split, :, :].ctypes.data, int3c_grid_slice.data.ptr, int3c_grid_slice.nbytes, cupy.cuda.runtime.memcpyDeviceToHost)
+        # int3c[i_grid_split : i_grid_split + ngrids_of_split, :, :] = cupy.asnumpy(int3c_grid_slice) # This is certainly the wrong way of DtoH memcpy
+
+    return int3c

@@ -7,6 +7,7 @@ static void GINTwrite_int3c1e(const double* g, double* output, const int ish, co
                               const int i_l, const int j_l, const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j)
 {
     const int* ao_loc = c_bpcache.ao_loc;
+    
     const int i0 = ao_loc[ish  ] - ao_offsets_i;
     const int i1 = ao_loc[ish+1] - ao_offsets_i;
     const int j0 = ao_loc[jsh  ] - ao_offsets_j;

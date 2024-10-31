@@ -71,26 +71,6 @@ static void GINTg1e(double* __restrict__ g, const double* __restrict__ grid_poin
     const double PAy = Py - Ay;
     const double PAz = Pz - Az;
 
-    // int nmax = envs.li_ceil + envs.lj_ceil;
-    // int mmax = envs.lk_ceil + envs.ll_ceil;
-    // int ijmin = envs.ijmin;
-    // int klmin = envs.klmin;
-    // int dm = envs.stride_klmax;
-    // int dn = envs.stride_ijmax;
-    // int di = envs.stride_ijmax;
-    // int dj = envs.stride_ijmin;
-    // int dk = envs.stride_klmax;
-    // int dl = envs.stride_klmin;
-    // int dij = envs.g_size_ij;
-    // int i, k;
-    // int j, l, m, n, off;
-    // double tmpb0;
-    // double s0x, s1x, s2x, t0x, t1x;
-    // double s0y, s1y, s2y, t0y, t1y;
-    // double s0z, s1z, s2z, t0z, t1z;
-    // double u2, tmp1, tmp2, tmp3, tmp4;
-    // double b00, b10, b01, c00x, c00y, c00z, c0px, c0py, c0pz;
-
     for (int i_root = 0; i_root < NROOTS; i_root++) {
         gx[i_root] = 1.0;
         gy[i_root] = prefactor;
