@@ -38,13 +38,11 @@ THREADS = 256
 # TODO: test different size for L2 cache efficiency
 NAO_IN_GROUP = 1500
 
-def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, verbose=None):
+def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None):
     '''Compute J, K matrices
     '''
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
-    if hermi != 1:
-        raise NotImplementedError('JK-builder only supports hermitian density matrix')
 
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
@@ -54,10 +52,13 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, verbose=None
 
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
-    n_dm = dms.shape[0]
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = sandwich_dot(dms, vhfopt.coeff.T)
     dms = cp.asarray(dms, order='C')
+    if hermi == 0:
+        # Contract the tril and triu parts separately
+        dms = cp.vstack([dms, dms.transpose(0,2,1)])
+    n_dm = dms.shape[0]
 
     vj = vk = None
     vj_ptr = vk_ptr = lib.c_null_ptr()
@@ -137,15 +138,23 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, verbose=None
             log.debug1('%s wall time %.2f', llll, t)
 
     if with_k:
+        if hermi == 1:
+            vk = transpose_sum(vk)
+        else:
+            vk, vkT = vk[:n_dm//2], vk[n_dm//2:]
+            vk += vkT.transpose(0,2,1)
         #:vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
         vk = sandwich_dot(vk, vhfopt.coeff)
-        vk = transpose_sum(vk)
         vk = vk.reshape(dm.shape)
     if with_j:
+        if hermi == 1:
+            vj *= 2.
+        else:
+            vj, vjT = vj[:n_dm//2], vj[n_dm//2:]
+            vj += vjT.transpose(0,2,1)
+        vj = transpose_sum(vj)
         #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vj, vhfopt.coeff)
         vj = sandwich_dot(vj, vhfopt.coeff)
-        vj = transpose_sum(vj)
-        vj *= 2.
         vj = vj.reshape(dm.shape)
 
     h_shls = vhfopt.h_shls
@@ -161,16 +170,20 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, verbose=None
             else:
                 scripts.append('jk->s1il')
         shls_excludes = [0, h_shls[0]] * 4
+        if hermi == 1:
+            dms = dms.get()
+        else:
+            dms = dms[:n_dm//2].get()
         vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
-                                 dms.get(), 1, mol._atm, mol._bas, mol._env,
+                                 dms, 1, mol._atm, mol._bas, mol._env,
                                  shls_excludes=shls_excludes)
         if with_j and with_k:
-            vj1 = vs_h[0].reshape(n_dm,nao,nao)
-            vk1 = vs_h[1].reshape(n_dm,nao,nao)
+            vj1 = vs_h[0]
+            vk1 = vs_h[1]
         elif with_j:
-            vj1 = vs_h[0].reshape(n_dm,nao,nao)
+            vj1 = vs_h[0]
         else:
-            vk1 = vs_h[0].reshape(n_dm,nao,nao)
+            vk1 = vs_h[0]
         coeff = vhfopt.coeff
         idx, idy = np.tril_indices(nao, -1)
         if with_j:
@@ -187,14 +200,11 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, verbose=None
     log.timer('vj and vk', *cput0)
     return vj, vk
 
-def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
+def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     '''Compute J matrix
     '''
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
-    if hermi != 1:
-        raise NotImplementedError('JK-builder only supports hermitian density matrix')
-
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
 
@@ -208,6 +218,9 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = sandwich_dot(dms, vhfopt.coeff.T)
     dms = cp.asarray(dms, order='C')
+    if hermi != 1:
+        dms = transpose_sum(dms)
+        dms *= .5
 
     ao_loc = mol.ao_loc
     dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
