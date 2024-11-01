@@ -32,8 +32,8 @@ verbose=5
 )
 
 def get_veff(self, mol, dm, *args, **kwargs):
-    vj = jk.get_j(mol, dm[0] + dm[1])
-    _, vk = jk.get_jk(mol, dm, with_j=False)
+    vj = jk.get_j(mol, dm[0] + dm[1], hermi=1)
+    _, vk = jk.get_jk(mol, dm, hermi=1, with_j=False)
     return vj - vk
 
 scf.uhf.UHF.get_veff = get_veff
