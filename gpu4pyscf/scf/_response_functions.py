@@ -18,7 +18,6 @@ from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import hf, uhf
 
-# tempory implemention, will be replaced after pyscf 2.2.0
 def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                       singlet=None, hermi=0, max_memory=None):
     '''Generate a function to compute the product of RHF response function and
@@ -33,7 +32,6 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
     if mo_occ is None: mo_occ = mf.mo_occ
     mol = mf.mol
     if isinstance(mf, hf.KohnShamDFT):
-        from pyscf.dft import numint
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
         if getattr(mf, 'nlc', '') != '':
@@ -42,13 +40,6 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                         'not included in the response function.')
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
         hybrid = abs(hyb) > 1e-10
-
-        # mf can be pbc.dft.RKS object with multigrid
-        if (not hybrid and
-            'MultiGridFFTDF' == getattr(mf, 'with_df', None).__class__.__name__):
-            from pyscf.pbc.dft import multigrid
-            dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-            return multigrid._gen_rhf_response(mf, dm0, singlet, hermi)
 
         if singlet is None:
             # for ground state orbital hessian
@@ -113,13 +104,6 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
                         'not included in the response function.')
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
         hybrid = ni.libxc.is_hybrid_xc(mf.xc)
-
-        # mf can be pbc.dft.UKS object with multigrid
-        if (not hybrid and
-            'MultiGridFFTDF' == getattr(mf, 'with_df', None).__class__.__name__):
-            from pyscf.pbc.dft import multigrid
-            dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-            return multigrid._gen_uhf_response(mf, dm0, with_j, hermi)
 
         rho0, vxc, fxc = ni.cache_xc_kernel(mol, mf.grids, mf.xc,
                                             mo_coeff, mo_occ, 1)

@@ -103,10 +103,12 @@ def sort_atoms(mol):
 
     """
     from scipy.spatial import distance_matrix
-    atom_coords = mol.atom_coords()
     charges = mol.atom_charges()
     heavy_atoms = np.argwhere(charges != 1).ravel()
-    
+    if heavy_atoms.size == 0:
+        return range(mol.natm)
+
+    atom_coords = mol.atom_coords()
     visited = np.zeros(len(heavy_atoms), dtype=bool)
     heavy_coords = atom_coords[heavy_atoms,:]
     current_node = np.argmin(heavy_coords[:,0])
@@ -121,13 +123,14 @@ def sort_atoms(mol):
         next_node = np.argmin(distances_to_unvisited)
         path.append(next_node)
         current_node = next_node
-    
+
     # Assign Hydrogen atoms to heavy atoms
     full_path = [[heavy_atoms[idx]] for idx in path]
     hydrogen_atoms = np.argwhere(charges == 1).ravel()
-    dist = distance_matrix(atom_coords[hydrogen_atoms], atom_coords[heavy_atoms])
-    for i, d in enumerate(dist):
-        heavy_idx = np.argmin(d)
-        full_path[heavy_idx].append(hydrogen_atoms[i])
-    
+    if hydrogen_atoms.size > 0:
+        dist = distance_matrix(atom_coords[hydrogen_atoms], atom_coords[heavy_atoms])
+        for i, d in enumerate(dist):
+            heavy_idx = np.argmin(d)
+            full_path[heavy_idx].append(hydrogen_atoms[i])
+
     return [x for heavy_list in full_path for x in heavy_list]

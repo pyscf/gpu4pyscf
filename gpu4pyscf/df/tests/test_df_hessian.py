@@ -33,13 +33,11 @@ eps = 1e-3
 
 def setUpModule():
     global mol_sph, mol_cart
-    mol_sph = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=0)
-    mol_sph.build(output='/dev/null')
-    mol_sph.verbose = 1
+    mol_sph = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=0,
+                      output='/dev/null', verbose=1)
 
-    mol_cart = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=1)
-    mol_cart.build(output='/dev/null')
-    mol_cart.verbose = 1
+    mol_cart = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=1,
+                       output='/dev/null', verbose=1)
 
 def tearDownModule():
     global mol_sph, mol_cart
@@ -310,9 +308,8 @@ class KnownValues(unittest.TestCase):
         _check_dft_hessian(mf, h, ix=0,iy=1)
 
     def test_hessian_qz(self):
-        mol = pyscf.M(atom=atom, basis='def2-qzvpp', max_memory=32000, cart=0)
-        mol.build(output='/dev/null')
-        mol.verbose = 1
+        mol = pyscf.M(atom=atom, basis='def2-qzvpp', max_memory=32000, cart=0,
+                      output='/dev/null', verbose=1)
 
         mf = scf.RHF(mol).density_fit()
         mf.conv_tol = 1e-12

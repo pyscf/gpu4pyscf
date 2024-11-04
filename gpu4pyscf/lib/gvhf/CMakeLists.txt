@@ -19,13 +19,13 @@
 
 add_library(gvhf SHARED
   constant.cu
-  nr_jk_driver.cu
+  #nr_jk_driver.cu
   nr_jk_driver_int3c2e_ip1.cu
   nr_jk_driver_int3c2e_ip2.cu
   nr_jk_driver_int3c2e_pass1.cu
   nr_jk_driver_int3c2e_pass2.cu
-  nr_jk_driver_ip1.cu
-        get_veff_driver_ip1.cu
+  #nr_jk_driver_ip1.cu
+  #get_veff_driver_ip1.cu
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)

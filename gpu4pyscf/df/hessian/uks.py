@@ -55,14 +55,17 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     dm0b = numpy.dot(moccb, moccb.T)
     if mf.nlc != '':
         raise NotImplementedError
-    #enabling range-separated hybrids
+
     omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
+    with_k = abs(hyb) > 1e-10
     de2, ej, ek = df_uhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
                                                 atmlst, max_memory, verbose,
-                                                abs(hyb) > 1e-10)
-    de2 += ej - hyb * ek  # (A,B,dR_A,dR_B)
+                                                with_k=with_k)
+    de2 += ej  # (A,B,dR_A,dR_B)
+    if with_k:
+        de2 -= hyb * ek
 
-    if abs(omega) > 1e-10 and abs(alpha) > 1e-10:
+    if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
         ek_lr = df_uhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
                                             atmlst, max_memory, verbose,
                                             True, omega=omega)[2]
@@ -99,40 +102,38 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, mf.max_memory*.9-mem_now)
-    h1aoa, h1aob = uks_hess._get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
+    h1moa, h1mob = uks_hess._get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
 
     for ia, h1, vj1, vk1 in df_uhf_hess._gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
                                                 atmlst, verbose, abs(hyb) > 1e-10):
 
-        h1aoa[ia] += h1[0] + vj1[0]
-        h1aob[ia] += h1[1] + vj1[1]
-        if abs(hyb) > 1e-10 or abs(alpha) > 1e-10:
+        h1moa[ia] += h1[0] + vj1[0]
+        h1mob[ia] += h1[1] + vj1[1]
+        if abs(hyb) > 1e-10 or abs(alpha-hyb) > 1e-10:
             vk1a, vk1b = vk1
-            h1aoa[ia] -= hyb * vk1a
-            h1aob[ia] -= hyb * vk1b
-    if abs(omega) > 1e-10 and abs(alpha) > 1e-10:
+            h1moa[ia] -= hyb * vk1a
+            h1mob[ia] -= hyb * vk1b
+    if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
         for ia, h1, vj1_lr, vk1_lr in df_uhf_hess._gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
                                                 atmlst, verbose, True, omega=omega):
             vk1a, vk1b = vk1_lr
-            h1aoa[ia] -= (alpha - hyb) * vk1a
-            h1aob[ia] -= (alpha - hyb) * vk1b
-    return h1aoa, h1aob
+            h1moa[ia] -= (alpha - hyb) * vk1a
+            h1mob[ia] -= (alpha - hyb) * vk1b
+    return h1moa, h1mob
 
 class Hessian(uks_hess.Hessian):
     '''Non-relativistic RKS hessian'''
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    def __init__(self, mf):
-        uks_hess.Hessian.__init__(self, mf)
-
-    def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
-                  fx=None, atmlst=None, max_memory=4000, verbose=None):
-        return uhf_hess.solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
-                         fx, atmlst, max_memory, verbose)
-
+    __init__ = uks_hess.Hessian.__init__
     auxbasis_response = 1
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
     hess_elec = uhf_hess.hess_elec
     kernel = rhf_hess.kernel
     hess = kernel
+
+    def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
+                  fx=None, atmlst=None, max_memory=4000, verbose=None):
+        return uhf_hess.solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
+                         fx, atmlst, max_memory, verbose)

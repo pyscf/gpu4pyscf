@@ -53,14 +53,17 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     if mf.nlc != '':
         raise NotImplementedError
-    #enabling range-separated hybrids
+
     omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
+    with_k = abs(hyb) > 1e-10
     de2, ej, ek = df_rhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
                                                 atmlst, max_memory, verbose,
-                                                abs(hyb) > 1e-10)
-    de2 += ej - hyb * ek  # (A,B,dR_A,dR_B)
+                                                with_k=with_k)
+    de2 += ej  # (A,B,dR_A,dR_B)
+    if with_k:
+        de2 -= hyb * ek
 
-    if abs(omega) > 1e-10 and abs(alpha) > 1e-10:
+    if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
         ek_lr = df_rhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
                                             atmlst, max_memory, verbose,
                                             True, omega=omega)[2]
@@ -79,7 +82,8 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         de2[i0,i0] += contract('xypq,pq->xy', veff_diag[:,:,p0:p1], dm0[p0:p1])*2
         for j0, ja in enumerate(atmlst[:i0+1]):
             q0, q1 = aoslices[ja][2:]
-            de2[i0,j0] += 2.0*cupy.sum(veff_dm[:,:,q0:q1], axis=2)#contract('xypq,pq->xy', veff[:,:,q0:q1], dm0[q0:q1])*2
+            #:contract('xypq,pq->xy', veff[:,:,q0:q1], dm0[q0:q1])*2
+            de2[i0,j0] += 2.0*cupy.sum(veff_dm[:,:,q0:q1], axis=2)
         for j0 in range(i0):
             de2[j0,i0] = de2[i0,j0].T
     log.timer('RKS partial hessian', *time0)
@@ -93,26 +97,24 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, mf.max_memory*.9-mem_now)
-    h1ao = rks_hess._get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
+    h1mo = rks_hess._get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
 
     for ia, h1, vj1, vk1 in df_rhf_hess._gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
                                                 atmlst, verbose, abs(hyb) > 1e-10):
-        h1ao[ia] += h1 + vj1
-        if abs(hyb) > 1e-10 or abs(alpha) > 1e-10:
-            h1ao[ia] -= .5 * hyb * vk1
-    if abs(omega) > 1e-10 and abs(alpha) > 1e-10:
+        h1mo[ia] += h1 + vj1
+        if abs(hyb) > 1e-10 or abs(alpha-hyb) > 1e-10:
+            h1mo[ia] -= .5 * hyb * vk1
+    if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
         for ia, h1, vj1_lr, vk1_lr in df_rhf_hess._gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
                                                 atmlst, verbose, True, omega=omega):
-            h1ao[ia] -= .5 * (alpha - hyb) * vk1_lr
-    return h1ao
+            h1mo[ia] -= .5 * (alpha - hyb) * vk1_lr
+    return h1mo
 
 class Hessian(rks_hess.Hessian):
     '''Non-relativistic RKS hessian'''
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    def __init__(self, mf):
-        rks_hess.Hessian.__init__(self, mf)
-
+    __init__ = rks_hess.Hessian.__init__
     auxbasis_response = 1
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1

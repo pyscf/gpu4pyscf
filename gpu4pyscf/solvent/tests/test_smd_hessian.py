@@ -72,6 +72,7 @@ def _check_hess(atom, solvent='water'):
     mol.stdout.close()
     assert(numpy.linalg.norm(hess_cds[0,:,0,:] - h_fd) < 1e-3)
 
+@unittest.skipIf(smd.libsolvent is None, "solvent extension not compiled")
 class KnownValues(unittest.TestCase):
     def test_h2o(self):
         h2o = gto.Mole()

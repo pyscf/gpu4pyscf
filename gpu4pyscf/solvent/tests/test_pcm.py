@@ -22,6 +22,12 @@ from pyscf import gto
 from gpu4pyscf import scf, dft
 from gpu4pyscf.solvent import pcm
 from packaging import version
+try:
+    # Some PCM methods are registered when importing the CPU version.
+    # However, pyscf-2.7 does note automatically import this module.
+    from pyscf.solvent import pcm as pcm_on_cpu
+except ImportError:
+    pass
 
 pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
@@ -55,6 +61,7 @@ def _energy_with_solvent(mf, method):
     e_tot = mf.kernel()
     return e_tot
 
+@unittest.skipIf(pcm.libsolvent is None, "solvent extension not compiled")
 class KnownValues(unittest.TestCase):
     def test_D_S(self):
         cm = pcm.PCM(mol)

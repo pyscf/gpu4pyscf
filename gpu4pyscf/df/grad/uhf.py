@@ -29,6 +29,13 @@ FREE_CUPY_CACHE = True
 BINSIZE = 128
 
 def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega=None, mo_coeff=None, mo_occ=None, dm2 = None):
+    '''
+    Computes the first-order derivatives of the energy contributions from
+    J and K terms per atom.
+
+    NOTE: This function is incompatible to the one implemented in PySCF CPU version.
+    In the CPU version, get_jk returns the first order derivatives of J/K matrices.
+    '''
     if mol is None: mol = mf_grad.mol
     #TODO: dm has to be the SCF density matrix in this version.  dm should be
     # extended to any 1-particle density matrix
@@ -159,8 +166,8 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
 
     nao_cart = intopt.mol.nao
     block_size = with_df.get_blksize(nao=nao_cart)
-    intopt.clear()
-    # rebuild with aosym
+    
+    intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
     intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False,
                  group_size_aux=block_size)#, group_size=block_size)
     if not intopt._mol.cart:
@@ -284,7 +291,7 @@ class Gradients(uhf_grad.Gradients):
         return vk, vkaux
 
 
-    def get_veff(self, mol=None, dm=None):
+    def get_veff(self, mol=None, dm=None, verbose=None):
         mo_a, mo_b = self.base.mo_coeff
         mo_occa, mo_occb = self.base.mo_occ
         vj0, vk0, vjaux0, vkaux0 = self.get_jk(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa)

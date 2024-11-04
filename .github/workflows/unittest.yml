@@ -24,7 +24,7 @@ jobs:
         pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
         python3 -m pip install --upgrade pip
         pip3 install flake8 pytest coverage pytest-cov pyscf-dispersion
-        pip3 install pyscf --upgrade
+        pip3 install "pyscf>2.5"
         pip3 install numpy --upgrade
         pip3 install h5py --upgrade
         pip3 install gpu4pyscf-libxc-cuda12x --upgrade
@@ -33,8 +33,7 @@ jobs:
     - name: Build GPU4PySCF
       run: |
         export CUDA_HOME=/usr/local/cuda
-        export PATH=${CUDA_HOME}/bin:${PATH}
-        export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+        export CMAKE_CONFIGURE_ARGS="-DBUILD_LIBXC=OFF -DCUDA_ARCHITECTURES=70-real -DBUILD_CUTLASS=ON"
         sh build.sh
     - name: Test with pytest
       run: |

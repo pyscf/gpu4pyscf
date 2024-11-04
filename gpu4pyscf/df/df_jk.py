@@ -24,7 +24,7 @@ from pyscf import lib, __config__
 from pyscf.scf import dhf
 from pyscf.df import df_jk, addons
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, take_last2d, transpose_sum, load_library, get_avail_mem
+from gpu4pyscf.lib.cupy_helper import contract, take_last2d, transpose_sum, load_library, get_avail_mem, empty_mapped
 from gpu4pyscf.dft import rks, uks, numint
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.df import df, int3c2e
@@ -52,11 +52,11 @@ def init_workflow(mf, dm0=None):
             rsh_df.build(omega=omega)
         return
 
+    mf.h1e = cupy.asarray(mf.get_hcore(mf.mol))
+    mf.s1e = cupy.asarray(mf.get_ovlp(mf.mol))
     # pre-compute h1e and s1e and cderi for async workflow
     with lib.call_in_background(build_df) as build:
         build()
-        mf.s1e = cupy.asarray(mf.get_ovlp(mf.mol))
-        mf.h1e = cupy.asarray(mf.get_hcore(mf.mol))
         # for DFT object
         if hasattr(mf, '_numint'):
             ni = mf._numint

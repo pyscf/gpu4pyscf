@@ -24,7 +24,7 @@ from gpu4pyscf.df.grad import rhf as df_rhf_grad
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
 
-def get_veff(ks_grad, mol=None, dm=None):
+def get_veff(ks_grad, mol=None, dm=None, verbose=None):
 
     '''Coulomb + XC functional
     '''
@@ -111,7 +111,7 @@ def get_veff(ks_grad, mol=None, dm=None):
         logger.debug1(ks_grad, 'sum(auxbasis response) %s', e1_aux.sum(axis=0))
     else:
         e1_aux = None
-    vxc = tag_array(vxc, aux=e1_aux)
+    vxc = tag_array(vxc, aux=e1_aux, exc1_grid=exc)
     return vxc
 
 class Gradients(rks_grad.Gradients):
@@ -139,9 +139,9 @@ class Gradients(rks_grad.Gradients):
         return vk, vkaux
 
     def extra_force(self, atom_id, envs):
+        e1 = rks_grad.Gradients.extra_force(self, atom_id, envs)
         if self.auxbasis_response:
-            return envs['dvhf'].aux[atom_id]
-        else:
-            return 0
+            e1 += envs['dvhf'].aux[atom_id]
+        return e1
 
 Grad = Gradients

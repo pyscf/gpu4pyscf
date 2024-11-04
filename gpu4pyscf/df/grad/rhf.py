@@ -52,6 +52,13 @@ def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=LINEAR_DEP_THRESHOLD):
     return j2c_solver
 
 def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega=None):
+    '''
+    Computes the first-order derivatives of the energy contributions from
+    J and K terms per atom.
+
+    NOTE: This function is incompatible to the one implemented in PySCF CPU version.
+    In the CPU version, get_jk returns the first order derivatives of J/K matrices.
+    '''
     if mol is None: mol = mf_grad.mol
     #TODO: dm has to be the SCF density matrix in this version.  dm should be
     # extended to any 1-particle density matrix
@@ -161,8 +168,8 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
 
     nao_cart = intopt.mol.nao
     block_size = with_df.get_blksize(nao=nao_cart)
-    intopt.clear()
-    # rebuild with aosym
+
+    intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
     intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False,
                  group_size_aux=block_size)#, group_size=block_size)
     if not intopt._mol.cart:
@@ -267,11 +274,10 @@ class Gradients(rhf_grad.Gradients):
 
     auxbasis_response = True
     get_jk = get_jk
-    grad_elec = rhf_grad.grad_elec
-    
+
     def check_sanity(self):
         assert isinstance(self.base, df.df_jk._DFHF)
-    
+
     def get_j(self, mol=None, dm=None, hermi=0):
         vj, _, vjaux, _ = self.get_jk(mol, dm, with_k=False)
         return vj, vjaux
@@ -280,7 +286,7 @@ class Gradients(rhf_grad.Gradients):
         _, vk, _, vkaux = self.get_jk(mol, dm, with_j=False)
         return vk, vkaux
 
-    def get_veff(self, mol=None, dm=None):
+    def get_veff(self, mol=None, dm=None, verbose=None):
         vj, vk, vjaux, vkaux = self.get_jk(mol, dm)
         vhf = vj - vk*.5
         if self.auxbasis_response:
