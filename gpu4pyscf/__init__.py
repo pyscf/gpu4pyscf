@@ -1,4 +1,4 @@
-__version__ = '1.0.2'
+__version__ = '1.1.0'
 
 # monkey patch libxc reference due to a bug in nvcc
 from pyscf.dft import libxc

@@ -40,22 +40,39 @@ def tearDownModule():
     del mol
 
 class KnownValues(unittest.TestCase):
-    @unittest.skip('not implemented')
+    def test_hessian_uhf(self):
+        mf = mol.UHF().run()
+        mf.conv_tol_cpscf = 1e-8
+        hobj = mf.Hessian()
+        ref = hobj.kernel()
+        e2_gpu = hobj.to_gpu().kernel()
+        assert abs(ref - e2_gpu).max() < 1e-8
+
     def test_partial_hess_elec(self):
         mf = scf.UHF(mol)
         mf.conv_tol = 1e-14
         mf.kernel()
         hobj = mf.Hessian()
-        e1_cpu, ej_cpu, ek_cpu = uhf_cpu.partial_hess_elec(hobj)
+        e1_cpu, ej_cpu, ek_cpu = uhf_cpu._partial_hess_ejk(hobj)
 
         mf = mf.to_gpu()
         mf.kernel()
         hobj = mf.Hessian()
-        e1_gpu, ej_gpu, ek_gpu = uhf_gpu.partial_hess_elec(hobj)
+        e1_gpu, ej_gpu, ek_gpu = uhf_gpu._partial_hess_ejk(hobj)
 
-        assert numpy.linalg.norm(e1_cpu - e1_gpu) < 1e-5
-        assert numpy.linalg.norm(ej_cpu - ej_gpu) < 1e-5
-        assert numpy.linalg.norm(ek_cpu - ek_gpu) < 1e-5
+        assert numpy.linalg.norm(e1_cpu - e1_gpu.get()) < 1e-5
+        assert numpy.linalg.norm(ej_cpu - ej_gpu.get()) < 1e-5
+        assert numpy.linalg.norm(ek_cpu - ek_gpu.get()) < 1e-5
+
+    def test_hessian_uhf_D3(self):
+        print('----- testing UHF with D3BJ ------')
+        mf = mol.UHF()
+        mf.disp = 'd3bj'
+        mf.run()
+        mf.conv_tol_cpscf = 1e-8
+        ref = mf.Hessian().kernel()
+        e2_gpu = mf.Hessian().to_gpu().kernel()
+        assert abs(ref - e2_gpu).max() < 1e-8
 
 if __name__ == "__main__":
     print("Full Tests for UHF Hessian")

@@ -16,13 +16,20 @@ __all__ = [
     'get_jk', 'get_j',
 ]
 
+libvhf_rys = load_library('libgvhf_rys')
+libvhf_rys.RYS_build_jk.restype = ctypes.c_int
+libvhf_rys.cuda_version.restype = ctypes.c_int
+CUDA_VERSION = libvhf_rys.cuda_version()
+
 PTR_BAS_COORD = 7
 LMAX = 4
 TILE = 2
 QUEUE_DEPTH = 262144
-UNROLL_ORDER = 4
-UNROLL_LMAX = 3
-UNROLL_NFMAX = 60
+UNROLL_ORDER = ctypes.c_int.in_dll(libvhf_rys, 'rys_jk_unrolled_max_order').value
+UNROLL_LMAX = ctypes.c_int.in_dll(libvhf_rys, 'rys_jk_unrolled_lmax').value
+UNROLL_NFMAX = ctypes.c_int.in_dll(libvhf_rys, 'rys_jk_unrolled_max_nf').value
+UNROLL_J_LMAX = ctypes.c_int.in_dll(libvhf_rys, 'rys_j_unrolled_lmax').value
+UNROLL_J_MAX_ORDER = ctypes.c_int.in_dll(libvhf_rys, 'rys_j_unrolled_max_order').value
 GOUT_WIDTH = 42
 SHM_SIZE = getattr(__config__, 'GPU_SHM_SIZE',
                    int(gpu_specs['sharedMemPerBlockOptin']//9)*8)
@@ -30,11 +37,6 @@ THREADS = 256
 
 # TODO: test different size for L2 cache efficiency
 NAO_IN_GROUP = 1500
-
-libvhf_rys = load_library('libgvhf_rys')
-libvhf_rys.RYS_build_jk.restype = ctypes.c_int
-libvhf_rys.cuda_version.restype = ctypes.c_int
-CUDA_VERSION = libvhf_rys.cuda_version()
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, verbose=None):
     '''Compute J, K matrices
@@ -705,9 +707,8 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nf3_ij = (lij+1)*(lij+2)*(lij+3)//6
     nf3_kl = (lkl+1)*(lkl+2)*(lkl+3)//6
     nroots = order // 2 + 1
-    lmax = 4  # not angular momentum of orbital basis. see rys_contract_j kernel
-    max_order = 6
-    if order <= max_order and lij <= lmax and lkl <= lmax:
+    # UNROLL_J_LMAX is different to UNROLL_LMAX of orbital basis. see rys_contract_j kernel
+    if order <= UNROLL_J_MAX_ORDER and lij <= UNROLL_J_LMAX and lkl <= UNROLL_J_LMAX:
         if CUDA_VERSION >= 12040 and order <= 2:
             return 512, 1, False
         return 256, 1, False

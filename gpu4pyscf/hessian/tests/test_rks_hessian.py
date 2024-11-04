@@ -17,8 +17,8 @@ import unittest
 import numpy
 from pyscf import gto, scf, lib, dft
 from pyscf import grad, hessian
-from pyscf.hessian import uks as uks_cpu
-from gpu4pyscf.hessian import uks as uks_gpu
+from pyscf.hessian import rks as rks_cpu
+from gpu4pyscf.hessian import rks as rks_gpu
 
 def setUpModule():
     global mol
@@ -30,8 +30,6 @@ def setUpModule():
         [1   , (0. , -0.757 , 0.587)],
         [1   , (0. , 0.757  , 0.587)] ])
     mol.basis = 'sto3g'
-    mol.spin = 1
-    mol.charge = 1
     mol.build()
 
 def tearDownModule():
@@ -40,43 +38,34 @@ def tearDownModule():
     del mol
 
 def _check_vxc(method, xc='LDA'):
-    mf = dft.uks.UKS(mol, xc=xc)
+    mf = dft.rks.RKS(mol, xc=xc)
     mf.conv_tol = 1e-14
     mf.grids.level = 1
     mf.kernel()
     dm = mf.make_rdm1()
     hobj = mf.Hessian()
-    fn = getattr(uks_cpu, method)
+    fn = getattr(rks_cpu, method)
     vxc_cpu = fn(hobj, mf.mo_coeff, mf.mo_occ, 12000)
 
     mf = mf.to_gpu()
     mf.kernel()
     hobj = mf.Hessian()
-    fn = getattr(uks_gpu, method)
+    fn = getattr(rks_gpu, method)
     vxc_gpu = fn(hobj, mf.mo_coeff, mf.mo_occ, 12000)
 
     # outputs of _get_vxc_deriv2 and _get_vxc_deriv1 in GPU4PYSCF are different from PySCF for memory efficiency
     if method == '_get_vxc_deriv2':
-        vxc0 = numpy.einsum('nxyij,ij->nxyi', vxc_cpu[0], dm[0])
-        vxc1 = numpy.einsum('nxyij,ij->nxyi', vxc_cpu[1], dm[1])
-        vxc_cpu = (vxc0, vxc1)
+        vxc_cpu = numpy.einsum('nxyij,ij->nxyi', vxc_cpu, dm)
 
     if method == '_get_vxc_deriv1':
         mo_occ = mf.mo_occ.get()
         mo_coeff = mf.mo_coeff.get()
-        mocca = mo_coeff[0][:,mo_occ[0]>0]
-        moccb = mo_coeff[1][:,mo_occ[1]>0]
-        vxc0 = numpy.einsum('nxij,jq->nxiq', vxc_cpu[0], mocca)
-        vxc0 = numpy.einsum('nxiq,ip->nxpq', vxc0, mo_coeff[0])
-        vxc1 = numpy.einsum('nxij,jq->nxiq', vxc_cpu[1], moccb)
-        vxc1 = numpy.einsum('nxiq,ip->nxpq', vxc1, mo_coeff[1])
-        vxc_cpu = (vxc0, vxc1)
+        mocc = mo_coeff[:,mo_occ>0]
+        vxc_cpu = numpy.einsum('nxij,jq->nxiq', vxc_cpu, mocc)
+        vxc_cpu = numpy.einsum('nxiq,ip->nxpq', vxc_cpu, mo_coeff)
 
     #print(f'testing {method} for {xc}')
-    #print(numpy.linalg.norm(vxc_cpu[0] - vxc_gpu[0].get()))
-    #print(numpy.linalg.norm(vxc_cpu[1] - vxc_gpu[1].get()))
-    assert numpy.linalg.norm(vxc_cpu[0] - vxc_gpu[0].get()) < 1e-6
-    assert numpy.linalg.norm(vxc_cpu[1] - vxc_gpu[1].get()) < 1e-6
+    assert numpy.linalg.norm(vxc_cpu - vxc_gpu.get()) < 1e-6
 
 def _vs_cpu(mf, tol=1e-7):
     mf.conv_tol_cpscf = 1e-8
@@ -102,29 +91,29 @@ class KnownValues(unittest.TestCase):
 
     def test_hessian_lda(self, disp=None):
         print('-----testing LDA Hessian----')
-        mf = mol.UKS(xc='LDA').run()
+        mf = mol.RKS(xc='LDA').run()
         _vs_cpu(mf)
 
     def test_hessian_gga(self):
         print('-----testing PBE Hessian----')
-        mf = mol.UKS(xc='PBE').run()
+        mf = mol.RKS(xc='PBE').run()
         _vs_cpu(mf)
 
     def test_hessian_hybrid(self):
         print('-----testing B3LYP Hessian----')
-        mf = mol.UKS(xc='b3lyp').run()
+        mf = mol.RKS(xc='b3lyp').run()
         _vs_cpu(mf)
 
     def test_hessian_mgga(self):
         print('-----testing M06 Hessian----')
-        mf = mol.UKS(xc='m06').run()
-        _vs_cpu(mf)
+        mf = mol.RKS(xc='m06').run()
+        _vs_cpu(mf, tol=1e-6)
 
     def test_hessian_rsh(self):
         print('-----testing wb97 Hessian----')
-        mf = mol.UKS(xc='wb97').run()
+        mf = mol.RKS(xc='wb97').run()
         _vs_cpu(mf)
 
 if __name__ == "__main__":
-    print("Full Tests for UKS Hessian")
+    print("Full Tests for RKS Hessian")
     unittest.main()

@@ -356,8 +356,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     # Energy weighted density matrix
     # pi,qi,i->pq
     dme0 = cupy.dot(mocc, (mocc * mo_energy[mo_occ>0] * 2).T)
-    hcore_deriv = rhf_hess.hcore_generator(hessobj, mol)
-    hess_nuc_elec = rhf_hess.hess_nuc_elec(mol, dm0.get())
+    de_hcore = rhf_hess._e_hcore_generator(hessobj, dm0)
 
     # ------------------------------------
     #      overlap matrix contributions
@@ -386,9 +385,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             e1[i0,j0] -= cupy.sum(h1ab[p0:p1,q0:q1], axis=[0,1])
             if with_k:
                 ek[i0,j0] += cupy.sum(hk_ao_ao[p0:p1,q0:q1], axis=[0,1])
-            h1ao = hcore_deriv(ia, ja)
-            e1[i0,j0] += contract('xypq,pq->xy', h1ao, dm0)
-            e1[i0,j0] += hess_nuc_elec[:,:,ia,ja]
+            e1[i0,j0] += de_hcore(ia, ja)
         #
         # The first order RI basis response
         #
@@ -446,6 +443,9 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
 
 def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             verbose=None, with_k=True, omega=None):
+    '''
+    A generator to produce the derivatives of Hcore, J, K matrices in MO bases
+    '''
     log = logger.new_logger(hessobj, verbose)
     t0 = log.init_timer()
     log.debug("Generate JK for RHF partial hessian")
@@ -621,7 +621,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             vk1_ao[:,p0:p1,:] -= vk1_buf[:,p0:p1,:]
             vk1_ao[:,:,p0:p1] -= vk1_buf[:,p0:p1,:].transpose(0,2,1)
 
-        h1 =  grad_hcore[:,i0]
+        h1 =  grad_hcore[i0]
         vj1 = vj1_int3c[ia] + _ao2mo(vj1_ao)
         if with_k:
             vk1 = vk1_int3c[ia] + _ao2mo(vk1_ao)
@@ -631,9 +631,8 @@ class Hessian(rhf_hess.Hessian):
     '''Non-relativistic restricted Hartree-Fock hessian'''
 
     from gpu4pyscf.lib.utils import to_gpu, device
-    def __init__(self, mf):
-        rhf_hess.Hessian.__init__(self, mf)
 
+    __init__ = rhf_hess.Hessian.__init__
     auxbasis_response = 1
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1

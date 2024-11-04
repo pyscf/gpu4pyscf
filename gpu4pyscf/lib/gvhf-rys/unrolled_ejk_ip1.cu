@@ -1,6 +1,8 @@
 #include "vhf.cuh"
 #include "rys_roots_unrolled.cu"
 #include "create_tasks_ip1.cu"
+int rys_ejk_ip1_unrolled_lmax = 2;
+int rys_ejk_ip1_unrolled_max_order = 4;
 
 
 __device__ static
