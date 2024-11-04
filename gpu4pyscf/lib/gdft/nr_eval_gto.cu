@@ -226,6 +226,26 @@ static void _memset_sph(double *g_sph, int stride, int grid_id){
     }
 }
 
+__global__
+static void _pad_zeros(BasOffsets offsets, int comp){
+    const int ngrids = offsets.ngrids;
+    const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    if (grid_id >= ngrids) {
+        return;
+    }
+    const int nbas = c_envs.nbas;
+    const int nao = offsets.nao;
+    const int gridblock_id = grid_id / offsets.blksize;
+    double *ao = offsets.data;
+    
+    int nao_non0 = offsets.ao_loc[nbas + gridblock_id*(nbas+1)];
+    for (int i = nao_non0; i < nao; i++){
+        for (int j = 0; j < comp; j++){
+            ao[grid_id + ngrids*i + ngrids*nao*j] = 0.0;
+        }
+    }
+}
+
 template <int ANG> __device__
 static void _cart_gto(double *g, double ce, double *fx, double *fy, double *fz){
     for (int lx = ANG, i = 0; lx >= 0; lx--){
@@ -357,7 +377,7 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
     const int nao = offsets.nao;
     const int ish = offsets.bas_off + bas_id;
     const int gridblock_id = grid_id / offsets.blksize;
-
+    
     if (offsets.non0table[ish + gridblock_id * nbas] <= 0){
         return;
     }
@@ -381,7 +401,7 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
     double rr = rx * rx + ry * ry + rz * rz;
     double *exps = c_envs.env + c_bas_exp[ish];
     double *coeffs = c_envs.env + c_bas_coeff[ish];
-
+    
     double ce = 0;
     double ce_2a = 0;
     for (int ip = 0; ip < offsets.nprim; ++ip) {
@@ -1926,7 +1946,7 @@ inline double CINTcommon_fac_sp(int l)
 }
 
 int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
-                 double *grids, int ngrids,
+                 double *grids, int ngrids, int blksize,
                  int *ao_loc, int nao_non0, int *non0table,
                  int *ctr_offsets, int nctr,
                  int *bas)
@@ -1939,7 +1959,7 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
     offsets.ao_loc = ao_loc;
     offsets.nao = nao_non0;
     offsets.non0table = non0table;
-    offsets.blksize = ngrids;
+    offsets.blksize = blksize;
     dim3 threads(NG_PER_BLOCK);
     dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
     
@@ -2093,6 +2113,11 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
             fprintf(stderr, "deriv %d not supported\n", deriv);
             return 1;
         }
+
+        // pad memory with zeros
+        int comp = (deriv+1) * (deriv+2) * (deriv+3) / 6;
+        blocks.y = 1;
+        _pad_zeros<<<blocks, threads, 0, stream>>> (offsets, comp);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             fprintf(stderr, "CUDA Error of GDFTeval_gto_kernel: %s\n", cudaGetErrorString(err));

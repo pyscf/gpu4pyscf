@@ -28,7 +28,7 @@ from gpu4pyscf.gto.mole import basis_seg_contraction
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, take_last2d, transpose_sum,
     grouped_dot, grouped_gemm, reduce_sparse)
-from gpu4pyscf.dft import xc_deriv, xc_alias, libxc
+from gpu4pyscf.dft import xc_deriv, xc_alias, libxc, gen_grid
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
 
@@ -55,7 +55,7 @@ libgdft.GDFTdot_ao_ao_sparse.restype = ctypes.c_int
 libgdft.GDFTdot_aow_ao_sparse.restype = ctypes.c_int
 
 def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_non0=None, ao_loc_non0=None,
-            non0tab=None, cutoff=None, out=None, verbose=None):
+            non0tab=None, blksize=None, cutoff=None, out=None, verbose=None):
     ''' evaluate ao values for given coords and shell indices
     Kwargs:
         shls_slice :       offsets of shell slices to be evaluated
@@ -66,7 +66,7 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_non0=None, ao_loc_non
     ngrids = coords.shape[0]
     coords = cupy.asarray(coords.T, order='C')
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
-
+    
     opt = getattr(ni, 'gdftopt', None)
     with_opt = True
     if opt is None or mol not in [opt.mol, opt._sorted_mol]:
@@ -77,8 +77,11 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_non0=None, ao_loc_non
     _sorted_mol = opt._sorted_mol
     nbas = _sorted_mol.nbas
 
+    if blksize is None:
+        blksize = GRID_BLKSIZE
+
     if non0tab is None:
-        nblocks = (ngrids+GRID_BLKSIZE-1)//GRID_BLKSIZE
+        nblocks = (ngrids+blksize-1)//blksize
         non0tab = cupy.ones((nblocks,nbas), dtype=np.int32)
         ctr_offsets = opt.l_ctr_offsets
         ao_loc = _sorted_mol.ao_loc_nr()
@@ -87,10 +90,10 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_non0=None, ao_loc_non
         nao_non0 = _sorted_mol.nao
     else:
         ctr_offsets = opt.l_ctr_offsets
-
+    
     nctr = ctr_offsets.size - 1
     stream = cupy.cuda.get_current_stream()
-
+    
     if out is None:
         out = cupy.empty((comp, nao_non0, ngrids), order='C')
 
@@ -104,6 +107,7 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_non0=None, ao_loc_non
                 ctypes.cast(out.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(deriv), ctypes.c_int(_sorted_mol.cart),
                 ctypes.cast(coords.data.ptr, ctypes.c_void_p), ctypes.c_int(ngrids),
+                ctypes.c_int(blksize),
                 ctypes.cast(ao_loc_non0.data.ptr, ctypes.c_void_p), ctypes.c_int(nao_non0),
                 ctypes.cast(non0tab.data.ptr, ctypes.c_void_p),
                 ctr_offsets.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(nctr),
@@ -115,6 +119,7 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_non0=None, ao_loc_non
             ctypes.cast(out.data.ptr, ctypes.c_void_p),
             ctypes.c_int(deriv), ctypes.c_int(_sorted_mol.cart),
             ctypes.cast(coords.data.ptr, ctypes.c_void_p), ctypes.c_int(ngrids),
+            ctypes.c_int(blksize),
             ctypes.cast(ao_loc_non0.data.ptr, ctypes.c_void_p), ctypes.c_int(nao_non0),
             ctypes.cast(non0tab.data.ptr, ctypes.c_void_p),
             ctr_offsets.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(nctr),
@@ -124,7 +129,7 @@ def eval_ao(ni, mol, coords, deriv=0, shls_slice=None, nao_non0=None, ao_loc_non
     
     if deriv == 0:
         out = out[0]
-    
+
     return out
 
 def eval_rho_batch(mol, ao, dm, non0tab=None, xctype='LDA', hermi=0,
@@ -295,7 +300,11 @@ def eval_rho2_batch(mol, ao, mocc_2, non0tab=None, xctype='LDA',
     elif xctype in ('GGA', 'NLC'):
         rho = cupy.empty((4,nbatch*alignment))
         #c0 = cupy.dot(mocc_2.T, ao[0])
+        log = logger.new_logger(mol, verbose)
+        t0 = log.init_timer()
+        t0 = log.timer_debug1('eval rho', *t0)
         c0 = contract('kio,ikg->okg', mocc_2, ao[0])
+        t0 = log.timer_debug1('eval rho', *t0)
         c0 = c0.reshape((-1,nbatch*alignment))
         _contract_rho(c0, c0, rho=rho[0])
         for i in range(1, 4):
@@ -313,12 +322,14 @@ def eval_rho2_batch(mol, ao, mocc_2, non0tab=None, xctype='LDA',
             rho = cupy.empty((5,nbatch*alignment))
             tau_idx = 4
 
-        c0 = cupy.dot(mocc_2.T, ao[0])
+        c0 = contract('kio,ikg->okg', mocc_2, ao[0])
+        c0 = c0.reshape((-1,nbatch*alignment))
         _contract_rho(c0, c0, rho=rho[0])
 
         rho[tau_idx] = 0
         for i in range(1, 4):
-            c1 = cupy.dot(mocc_2.T, ao[i])
+            c1 = contract('kio,ikg->okg', mocc_2, ao[i])
+            c1 = c1.reshape((-1,nbatch*alignment))
             rho[i] = _contract_rho(c0, c1)
             rho[tau_idx] += _contract_rho(c1, c1)
 
@@ -326,7 +337,8 @@ def eval_rho2_batch(mol, ao, mocc_2, non0tab=None, xctype='LDA',
             if ao.shape[0] > 4:
                 XX, YY, ZZ = 4, 7, 9
                 ao2 = ao[XX] + ao[YY] + ao[ZZ]
-                c1 = cupy.dot(mocc_2.T, ao2)
+                c1 = contract('kio,ikg->okg', mocc_2, ao2)
+                c1 = c1.reshape((-1,nbatch*alignment))
                 #:rho[4] = numpy.einsum('pi,pi->p', c0, c1)
                 rho[4] = _contract_rho(c0, c1)
                 rho[4] += rho[5]
@@ -553,7 +565,8 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nset = len(dms)
 
     if mo_coeff is not None:
-        mo_coeff = mo_coeff[opt.ao_idx]
+        mo_occ = cupy.asarray(mo_occ)
+        mo_coeff = cupy.asarray(mo_coeff)[opt.ao_idx]
 
     release_gpu_stack()
     if xctype == 'LDA':
@@ -571,6 +584,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             rho_tot = cupy.empty([nset,6,ngrids])
         else:
             rho_tot = cupy.empty([nset,5,ngrids])
+    
     p0 = p1 = 0
     t1 = t0 = log.init_timer()
     for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
@@ -585,6 +599,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         t1 = log.timer_debug2('eval rho slice', *t1)
     t0 = log.timer_debug1('eval rho', *t0)
     wv = []
+    
     nelec = cupy.empty(nset)
     excsum = cupy.empty(nset)
     for i in range(nset):
@@ -762,7 +777,8 @@ def nr_rks_batch(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nset = len(dms)
     
     if mo_coeff is not None:
-        mo_coeff = mo_coeff[opt.ao_idx]
+        mo_coeff = cupy.asarray(mo_coeff)[opt.ao_idx]
+        mo_occ = cupy.asarray(mo_occ)
         mocc_2 = (mo_coeff * mo_occ**0.5)[:,mo_occ>0]
     
     release_gpu_stack()
@@ -783,7 +799,7 @@ def nr_rks_batch(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             rho_tot = cupy.empty([nset,5,ngrids])
     p0 = p1 = 0
     t1 = t0 = log.init_timer()
-    mo_coeff = None
+    
     for ao_mask, idx, weight, _ in ni.batch_loop(_sorted_mol, grids, nao, ao_deriv):
         p1 = p0 + weight.size
         for i in range(nset):
@@ -1815,10 +1831,16 @@ def _batch_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     _sorted_mol = opt._sorted_mol
     ngrids = grids.coords.shape[0]
     if not hasattr(grids, 'sparse_cache') or (ALIGNED, ngrids) not in grids.sparse_cache:
-        grids.build_sparsity(_sorted_mol)
-        
+        #grids.build_sparsity(_sorted_mol)
+        s_index = grids.make_mask(_sorted_mol, grids.coords, blksize=ALIGNED)
+        ao_indices, ao_loc_non0 = gen_grid.gen_grid_sparsity(_sorted_mol, s_index)
+        nao_non0 = ao_loc_non0[:,-1]
+        ao_loc_non0 = cupy.asarray(ao_loc_non0)
+        ao_indices = cupy.asarray(ao_indices)
+        grids.sparse_cache[ALIGNED, ngrids] = (ao_indices, s_index, ao_loc_non0, nao_non0)
     ao_indices, s_index, ao_loc_non0, nao_non0 = grids.sparse_cache[ALIGNED, ngrids]
     nblocks = len(nao_non0)
+    
     with opt.gdft_envs_cache():
         t1 = log.init_timer()
         for batch_id, (ip0, ip1) in enumerate(lib.prange(0, nblocks, 64)):
@@ -1835,21 +1857,14 @@ def _batch_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 ao_loc_non0=ao_loc_non0[ip0:ip1],
                 non0tab=s_index[ip0:ip1])
             t1 = log.timer_debug2('evaluate ao slice', *t1)
-            
+
             if deriv == 0:
                 ao_mask = ao_mask.reshape([nao_pad, -1, ALIGNED])
             else:
                 ao_mask = ao_mask.reshape([comp, nao_pad, -1, ALIGNED])
-            
-            # TODO: improve efficiency
-            if deriv == 0:
-                for ip in range(ip0,ip1):
-                    ao_mask[nao_non0[ip]:,ip-ip0,:] = 0.0
-            else:
-                for ip in range(ip0,ip1):
-                    ao_mask[:,nao_non0[ip]:,ip-ip0,:] = 0.0
+
             idx = ao_indices[ip0:ip1, :nao_pad]
-            yield ao_mask, idx, weight, nao_pad
+            yield ao_mask, idx, weight, nao_non0[ip0:ip1]
 
 def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 non0tab=None, blksize=None, buf=None, extra=0):
@@ -1884,7 +1899,13 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     _sorted_mol = opt._sorted_mol
     ngrids = grids.coords.shape[0]
     if not hasattr(grids, 'sparse_cache') or (blksize, ngrids) not in grids.sparse_cache:
-        grids.build_sparsity(_sorted_mol, blksize=blksize)
+        #grids.build_sparsity(_sorted_mol, blksize=blksize)
+        s_index = grids.make_mask(_sorted_mol, grids.coords, blksize=blksize)
+        ao_indices, ao_loc_non0 = gen_grid.gen_grid_sparsity(_sorted_mol, s_index)
+        nao_non0 = ao_loc_non0[:,-1]
+        ao_loc_non0 = cupy.asarray(ao_loc_non0)
+        ao_indices = cupy.asarray(ao_indices)
+        grids.sparse_cache[blksize, ngrids] = (ao_indices, s_index, ao_loc_non0, nao_non0)
 
     ao_indices, s_index, ao_loc_non0, nao_non0 = grids.sparse_cache[blksize, ngrids]
     with opt.gdft_envs_cache():
@@ -1893,18 +1914,14 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             coords = grids.coords[ip0:ip1]
             weight = grids.weights[ip0:ip1]
             t1 = log.init_timer()
-            #pad, idx, non0tab, ao_loc_non0 = grids.sparse_cache[block_id, blksize, ngrids]
-            #ao_loc_non0 = grids.ao_loc_non0[block_id]
-            #idx = grids.ao_indices[block_id]
-            #non0tab = grids.screen_index[block_id]
             nao_pad = (nao_non0[block_id] + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT
             nao_pad = min(nao_pad, nao)
             pad = nao_pad - nao_non0[block_id]
-
             ao_mask = eval_ao(
                 ni, _sorted_mol, coords, deriv,
                 nao_non0=nao_pad,
                 ao_loc_non0=ao_loc_non0[block_id],
+                blksize=blksize,
                 non0tab=s_index[block_id])
             t1 = log.timer_debug2('evaluate ao slice', *t1)
             if pad > 0:
@@ -2045,7 +2062,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
 
     get_rho = get_rho
     get_rho_batch = get_rho_batch
-    nr_rks = nr_rks_batch
+    nr_rks = nr_rks#_batch
     nr_rks_batch = nr_rks_batch
     nr_uks = nr_uks
     nr_nlc_vxc = nr_nlc_vxc

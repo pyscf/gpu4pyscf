@@ -355,7 +355,7 @@ def get_partition(mol, atom_grids_tab,
 gen_partition = get_partition
 
 def make_mask(mol, coords, relativity=0, shls_slice=None, cutoff=CUTOFF,
-              verbose=None):
+              verbose=None, blksize=ALIGNMENT_UNIT):
     '''Mask to indicate whether a shell is ignorable on grids. See also the
     function gto.eval_gto.make_screen_index
 
@@ -379,7 +379,35 @@ def make_mask(mol, coords, relativity=0, shls_slice=None, cutoff=CUTOFF,
         2D mask array of shape (N,nbas), where N is the number of grids, nbas
         is the number of shells.
     '''
-    return make_screen_index(mol, coords, shls_slice, cutoff)
+
+    log = logger.new_logger(mol)
+    t0 = log.init_timer()
+    s_index = make_screen_index(mol, coords, blksize=blksize, cutoff=CUTOFF)
+    t0 = log.timer_debug1('s_index', *t0)
+    return s_index
+
+def gen_grid_sparsity(mol, s_index):
+    log = logger.new_logger(mol, 6)
+    t0 = log.init_timer()
+    ao_loc = mol.ao_loc_nr()
+    nblocks = s_index.shape[0]
+    nbas = mol.nbas
+    nao = mol.nao
+    ao_indices = numpy.zeros([nblocks, nao], dtype=numpy.int32)
+    ao_loc_non0 = numpy.zeros([nblocks, nbas+1], dtype=numpy.int32)
+    
+    # Running on CPU
+    s_index_cpu = s_index.get()
+    libgdft.GDFTmake_sparse_cache(
+        s_index_cpu.ctypes.data_as(ctypes.c_void_p),
+        ao_loc.ctypes.data_as(ctypes.c_void_p),
+        ctypes.c_int(nblocks),
+        ao_loc_non0.ctypes.data_as(ctypes.c_void_p),
+        ctypes.c_int(nbas),
+        ao_indices.ctypes.data_as(ctypes.c_void_p),
+        ctypes.c_int(nao))
+    t0 = log.timer_debug1('sparse ao kernel', *t0)
+    return ao_indices, ao_loc_non0
 
 def argsort_group(group_ids, ngroup):
     '''Sort the grids based on the group_ids.
@@ -479,7 +507,6 @@ def gen_sparse_cache(mol, coords, blksize):
     ngrids = coords.shape[0]
     t0 = log.init_timer()
     s_index = make_screen_index(mol, coords, blksize=blksize)
-    s_index[:] = 1
     t0 = log.timer_debug1('s_index', *t0)
     s_index_cpu = s_index.get()
     nblocks = (ngrids + blksize - 1)//blksize
@@ -487,7 +514,7 @@ def gen_sparse_cache(mol, coords, blksize):
     nao = mol.nao
     ao_indices = numpy.zeros([nblocks, nao], dtype=numpy.int32)
     ao_loc_non0 = numpy.zeros([nblocks, nbas+1], dtype=numpy.int32)
-
+    
     # Running on CPU
     libgdft.GDFTmake_sparse_cache(
         s_index_cpu.ctypes.data_as(ctypes.c_void_p),
@@ -541,6 +568,7 @@ class Grids(lib.StreamObject):
             mol, self.atom_grid, self.radi_method, self.level, self.prune, **kwargs)
         self.coords, self.weights = self.get_partition(
             mol, atom_grids_tab, self.radii_adjust, self.atomic_radii, self.becke_scheme)
+    
         if self.alignment > 1:
             padding = _padding_size(self.size, self.alignment)
             logger.debug(self, 'Padding %d grids', padding)
@@ -557,7 +585,7 @@ class Grids(lib.StreamObject):
 
         if with_non0tab:
             self.non0tab = self.make_mask(mol, self.coords)
-            self.screen_index = self.non0tab
+            self.screen_index = self.non0tab    
         else:
             self.screen_index = self.non0tab = None
 
@@ -601,7 +629,6 @@ class Grids(lib.StreamObject):
         '''
         ngrids = self.coords.shape[0]
         ao_indices, s_index, ao_loc_non0 = gen_sparse_cache(sorted_mol, self.coords, blksize)
-        
         nao_non0 = ao_loc_non0[:,-1]
         ao_loc_non0 = cupy.asarray(ao_loc_non0)
         ao_indices = cupy.asarray(ao_indices)
@@ -621,7 +648,6 @@ class Grids(lib.StreamObject):
         
         sparse_data = (ao_indices, s_index, ao_loc_non0, nao_non0)
         self.sparse_cache[blksize, ngrids] = sparse_data
-        
         return
     
     def prune_by_density_(self, rho, threshold=0):

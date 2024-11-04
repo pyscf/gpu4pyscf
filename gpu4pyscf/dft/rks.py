@@ -74,7 +74,7 @@ def initialize_grids(ks, mol=None, dm=None):
     if mol is None: mol = ks.mol
     if ks.grids.coords is None:
         t0 = logger.init_timer(ks)
-        ks.grids.build()
+        ks.grids.build(with_non0tab=False)
         #ks.grids.build(with_non0tab=True)
         ks.grids.weights = cupy.asarray(ks.grids.weights)
         ks.grids.coords = cupy.asarray(ks.grids.coords)
@@ -88,7 +88,7 @@ def initialize_grids(ks, mol=None, dm=None):
             if ks.nlcgrids.coords is None:
                 t0 = logger.init_timer(ks)
                 #ks.nlcgrids.build(with_non0tab=True)
-                ks.nlcgrids.build()
+                ks.nlcgrids.build(with_non0tab=False)
                 ks.nlcgrids.weights = cupy.asarray(ks.nlcgrids.weights)
                 ks.nlcgrids.coords = cupy.asarray(ks.nlcgrids.coords)
                 if ks.small_rho_cutoff > 1e-20 and ground_state:

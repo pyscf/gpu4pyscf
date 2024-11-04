@@ -25,6 +25,7 @@ from pyscf.dft import Grids
 from pyscf.dft.numint import NumInt as pyscf_numint
 from gpu4pyscf.dft.numint import NumInt
 from gpu4pyscf import dft
+from gpu4pyscf.lib.cupy_helper import tag_array
 
 def setUpModule():
     global mol, grids_cpu, grids_gpu, dm, dm0, dm1, mo_occ, mo_coeff
@@ -45,8 +46,14 @@ H        0.000000   -0.755453   -0.471161''',
     dm = dm1
     mo_coeff = mf.mo_coeff
     mo_occ = mf.mo_occ
-    dm0 = (mo_coeff[0]*mo_occ[0]).dot(mo_coeff[0].T)
 
+    # Construct data for restricted cases
+    mo_coeff0 = mf.mo_coeff[0]
+    mo_occ0 = mf.mo_occ[0]*2
+    dm0 = (mo_coeff0*mo_occ0).dot(mo_coeff0.T)
+    occ_coeff0 = cupy.asarray(mo_coeff0[:, mo_occ0>1.0])
+    dm0 = tag_array(dm0, occ_coeff=occ_coeff0, mo_occ=mo_occ0, mo_coeff=mo_coeff0)
+    
     grids_gpu = Grids(mol)
     grids_gpu.level = 1
     grids_gpu.alignment = 256
@@ -72,7 +79,24 @@ MGGA_M06 = 'MGGA_C_M06'
 
 class KnownValues(unittest.TestCase):
 
-    def _check_vxc(self, method, xc):
+    def _check_rks_vxc(self, method, xc):
+        ni = NumInt()
+        fn = getattr(ni, method)
+        n, e, v = fn(mol, grids_gpu, xc, dm0, hermi=1)
+        v = [x.get() for x in v]
+
+        ni_pyscf = pyscf_numint()
+        fn = getattr(ni_pyscf, method[:6])
+        nref, eref, vref = fn(mol, grids_cpu, xc, dm0, hermi=1)
+        
+        v = cupy.asarray(v)
+        vref = cupy.asarray(vref)        
+        
+        assert cupy.allclose(n, nref)
+        assert cupy.allclose(e, eref)
+        assert cupy.allclose(v, vref)
+
+    def _check_uks_vxc(self, method, xc):
         ni = NumInt()
         fn = getattr(ni, method)
         n, e, v = fn(mol, grids_gpu, xc, dm1, hermi=1)
@@ -84,8 +108,9 @@ class KnownValues(unittest.TestCase):
         
         v = cupy.asarray(v)
         vref = cupy.asarray(vref)
-        assert cupy.allclose(e, eref)
+
         assert cupy.allclose(n, nref)
+        assert cupy.allclose(e, eref)
         assert cupy.allclose(v, vref)
 
     def _check_rks_fxc(self, xc, hermi=1):
@@ -150,33 +175,53 @@ class KnownValues(unittest.TestCase):
         assert cupy.linalg.norm(vxc - cupy.asarray(vxc_ref)) < 1e-6 * cupy.linalg.norm(vxc)
         assert cupy.linalg.norm(fxc - cupy.asarray(fxc_ref)) < 1e-6 * cupy.linalg.norm(fxc)
         assert cupy.linalg.norm(v - cupy.asarray(v_ref)) < 1e-6 * cupy.linalg.norm(v)
+
+    def test_eval_ao(self):
+        nao = mol.nao
+        ni = NumInt()
+        ni.build(mol, grids_gpu.coords)
+        opt = ni.gdftopt
+        ao_idx = opt.ao_idx
+        coords_gpu = grids_gpu.coords.get()
+        ao_cpu = mol.eval_gto('GTOval_sph_deriv1', coords_gpu).transpose(0,2,1)
+        ao_cpu = ao_cpu[:, ao_idx.get()]
+        ao_cpu = ao_cpu.reshape([4,nao,-1,256])
+
+        _sorted_mol = opt._sorted_mol
+        grids_gpu.build(_sorted_mol, with_non0tab=True)
+        ao_gpu = cupy.zeros_like(ao_cpu)
+        for ao_gpu_mask, idx, weight, nao_non0 in ni.batch_loop(_sorted_mol, grids_gpu, nao, 1):
+            for i, ao_idx in enumerate(idx):
+                ao_non0_idx = ao_idx[:nao_non0[i]].get()
+                ao_gpu[:,ao_non0_idx,i] = ao_gpu_mask[:,:nao_non0[i],i]
+        assert np.linalg.norm(ao_cpu - ao_gpu.get()) < 1e-10
     
     def test_rks_lda(self):
-        self._check_vxc('nr_rks', LDA)
-
+        self._check_rks_vxc('nr_rks', LDA)
+    
     def test_rks_lda_batch(self):
-        self._check_vxc('nr_rks_batch', LDA)
+        self._check_rks_vxc('nr_rks_batch', LDA)
     
     def test_rks_gga(self):
-        self._check_vxc('nr_rks', GGA_PBE)
+        self._check_rks_vxc('nr_rks', GGA_PBE)
 
     def test_rks_gga_batch(self):
-        self._check_vxc('nr_rks_batch', GGA_PBE)
+        self._check_rks_vxc('nr_rks_batch', GGA_PBE)
     
     def test_rks_mgga(self):
-        self._check_vxc('nr_rks', MGGA_M06)
+        self._check_rks_vxc('nr_rks', MGGA_M06)
 
     def test_rks_mgga_batch(self):
-        self._check_vxc('nr_rks_batch', MGGA_M06)
+        self._check_rks_vxc('nr_rks_batch', MGGA_M06)
     
     def test_uks_lda(self):
-        self._check_vxc('nr_uks', LDA)#'lda', -6.362059440515177)
+        self._check_uks_vxc('nr_uks', LDA)#'lda', -6.362059440515177)
     
     def test_uks_gga(self):
-        self._check_vxc('nr_uks', GGA_PBE)#'pbe', -6.732546841646528)
+        self._check_uks_vxc('nr_uks', GGA_PBE)#'pbe', -6.732546841646528)
     
     def test_uks_mgga(self):
-        self._check_vxc('nr_uks', MGGA_M06)#'m06', 83.5606316500255)
+        self._check_uks_vxc('nr_uks', MGGA_M06)#'m06', 83.5606316500255)
     
     def test_rks_fxc_lda(self):
         self._check_rks_fxc(LDA, hermi=1)
