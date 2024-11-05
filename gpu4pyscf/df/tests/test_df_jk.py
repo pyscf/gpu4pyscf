@@ -17,9 +17,10 @@ import unittest
 import numpy as np
 import cupy
 import pyscf
-from pyscf import df
+from pyscf import df, lib
 from gpu4pyscf import scf as gpu_scf
 from gpu4pyscf.df import int3c2e, df_jk
+from gpu4pyscf.df.df import DF
 
 atom='''
 Ti 0.0 0.0 0.0
@@ -32,11 +33,7 @@ bas='def2-tzvpp'
 
 def setUpModule():
     global mol, auxmol
-    mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
-    mol.output = '/dev/null'
-    mol.cart = True
-    mol.build()
-    mol.verbose = 1
+    mol = pyscf.M(atom=atom, basis=bas, output='/dev/null', cart=True, verbose=1)
     auxmol = df.addons.make_auxmol(mol, auxbasis='sto3g')
 
 def tearDownModule():
@@ -72,9 +69,21 @@ class KnownValues(unittest.TestCase):
         dm = dm + dm.T
         mf = gpu_scf.RHF(mol).density_fit()
         mf.kernel()
-        vj0, _ = mf.get_jk(dm=dm, with_j=True, with_k=False)
+        vj0, _ = mf.get_jk(dm=dm, with_j=True, with_k=False, hermi=1)
         vj = df_jk.get_j(mf.with_df, dm)
         assert cupy.linalg.norm(vj - vj0) < 1e-4
+
+    def test_jk_hermi0(self):
+        dfobj = DF(mol, 'sto3g').build()
+        np.random.seed(3)
+        nao = mol.nao
+        dm = np.random.rand(nao, nao)
+        refj, refk = dfobj.to_cpu().get_jk(dm, hermi=0)
+        vj, vk = dfobj.get_jk(dm, hermi=0)
+        assert abs(vj - refj).max() < 1e-9
+        assert abs(vk - refk).max() < 1e-9
+        assert abs(lib.fp(vj) - 455.864593801164).max() < 1e-9
+        assert abs(lib.fp(vk) - 37.7022369618297).max() < 1e-9
 
 if __name__ == "__main__":
     print("Full Tests for DF JK")

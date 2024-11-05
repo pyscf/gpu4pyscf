@@ -25,6 +25,7 @@ from pyscf import lib as pyscf_lib
 from pyscf.scf import hf
 from pyscf.scf import chkfile
 from gpu4pyscf import lib
+from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import eigh, tag_array, return_cupy_array, cond
 from gpu4pyscf.scf import diis, jk
 from gpu4pyscf.lib import logger
@@ -451,11 +452,13 @@ class SCF(pyscf_lib.StreamObject):
     x2c1e                    = NotImplemented
     x2c                      = NotImplemented
     newton                   = NotImplemented
-    remove_soscf             = NotImplemented
     stability                = NotImplemented
     nuc_grad_method          = NotImplemented
     update_                  = NotImplemented
     istype                   = hf.SCF.istype
+
+    def remove_soscf(self):
+        return self
 
     def reset(self, mol=None):
         if mol is not None:
@@ -469,7 +472,6 @@ class KohnShamDFT:
     A mock DFT base class, to be compatible with PySCF
     '''
 
-from gpu4pyscf.lib import utils
 class RHF(SCF):
 
     to_gpu = utils.to_gpu
