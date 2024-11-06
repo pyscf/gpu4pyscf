@@ -39,7 +39,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                         'deriviative is not available. Its contribution is '
                         'not included in the response function.')
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
-        hybrid = abs(hyb) > 1e-10
+        hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
         if max_memory is None:
             mem_avail = cupy.cuda.runtime.memGetInfo()[0] * .5e-6
@@ -63,7 +63,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                 else:
                     v1 = ni.nr_rks_fxc(mol, mf.grids, mf.xc, dm0, dm1, 0, hermi,
                                        rho0, vxc, fxc, max_memory=max_memory)
-                if hybrid or abs(alpha) > 1e-10:
+                if hybrid:
                     if hermi != 2:
                         vj, vk = mf.get_jk(mol, dm1, hermi=hermi)
                         vk *= hyb

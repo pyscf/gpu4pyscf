@@ -57,7 +57,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         raise NotImplementedError
 
     omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
-    with_k = abs(hyb) > 1e-10
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
     de2, ej, ek = df_uhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
                                                 atmlst, max_memory, verbose,
                                                 with_k=with_k)
@@ -103,13 +103,14 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, mf.max_memory*.9-mem_now)
     h1moa, h1mob = uks_hess._get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
     for ia, h1, vj1, vk1 in df_uhf_hess._gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
-                                                atmlst, verbose, abs(hyb) > 1e-10):
+                                                atmlst, verbose, with_k):
 
         h1moa[ia] += h1[0] + vj1[0]
         h1mob[ia] += h1[1] + vj1[1]
-        if abs(hyb) > 1e-10 or abs(alpha-hyb) > 1e-10:
+        if with_k:
             vk1a, vk1b = vk1
             h1moa[ia] -= hyb * vk1a
             h1mob[ia] -= hyb * vk1b
