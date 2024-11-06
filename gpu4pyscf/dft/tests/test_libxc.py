@@ -61,8 +61,8 @@ class KnownValues(unittest.TestCase):
         ao = ni_cpu.eval_ao(mol, grids.coords, ao_deriv)
         rho = ni_cpu.eval_rho(mol, ao, dm0, xctype=xctype)
 
-        exc_cpu, vxc_cpu, fxc_cpu, kxc_cpu = ni_cpu.eval_xc_eff(xc, rho, deriv=2, xctype=xctype)
-        exc_gpu, vxc_gpu, fxc_gpu, kxc_gpu = ni_gpu.eval_xc_eff(xc, cupy.array(rho), deriv=2, xctype=xctype)
+        exc_cpu, vxc_cpu, fxc_cpu, kxc_cpu = ni_cpu.eval_xc_eff(xc, rho, deriv=3, xctype=xctype)
+        exc_gpu, vxc_gpu, fxc_gpu, kxc_gpu = ni_gpu.eval_xc_eff(xc, cupy.array(rho), deriv=3, xctype=xctype)
 
         assert(np.linalg.norm((exc_gpu[:,0].get() - exc_cpu)) < 1e-10)
         assert(np.linalg.norm((vxc_gpu.get() - vxc_cpu)) < 1e-10)
@@ -70,6 +70,16 @@ class KnownValues(unittest.TestCase):
             assert(np.linalg.norm((fxc_gpu.get() - fxc_cpu))/np.linalg.norm(fxc_cpu) < 1e-6)
         if kxc_gpu is not None:
             assert(np.linalg.norm(kxc_gpu.get() - kxc_cpu) < 1e-5)
+
+        rho = (rho, rho)
+        exc_cpu, vxc_cpu, fxc_cpu, kxc_cpu = ni_cpu.eval_xc_eff(xc, rho, deriv=3, xctype=xctype)
+        exc_gpu, vxc_gpu, fxc_gpu, kxc_gpu = ni_gpu.eval_xc_eff(xc, cupy.array(rho), deriv=3, xctype=xctype)
+        assert(abs((exc_gpu[:,0].get() - exc_cpu)).max() < 1e-10)
+        assert(abs((vxc_gpu.get() - vxc_cpu)).max() < 1e-10)
+        if fxc_gpu is not None:
+            assert(abs((fxc_gpu.get() - fxc_cpu)).max() < 1e-5)
+        if kxc_gpu is not None:
+            assert(abs(kxc_gpu.get() - kxc_cpu).max() < 1e-5)
 
     def test_LDA(self):
         self._check_xc('LDA_C_VWN')

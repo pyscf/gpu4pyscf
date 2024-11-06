@@ -150,6 +150,7 @@ if _libxc is not None:
 
 class XCfun:
     def __init__(self, xc, spin):
+        self.spin = spin
         self._spin = 1 if spin == 'unpolarized' else 2
         self.xc_func = _libxc.xc_func_alloc()
         if isinstance(xc, str):

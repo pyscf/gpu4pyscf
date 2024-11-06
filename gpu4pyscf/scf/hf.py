@@ -442,7 +442,6 @@ class SCF(pyscf_lib.StreamObject):
     get_j                    = hf.SCF.get_j
     get_k                    = hf.SCF.get_k
     get_veff                 = hf.SCF.get_veff
-    analyze                  = hf.SCF.analyze
     mulliken_meta            = hf.SCF.mulliken_meta
     pop                      = hf.SCF.pop
     dip_moment               = hf.SCF.dip_moment
@@ -458,7 +457,11 @@ class SCF(pyscf_lib.StreamObject):
     istype                   = hf.SCF.istype
 
     def remove_soscf(self):
+        lib.logger.warn('remove_soscf has no effect in current version')
         return self
+
+    def analyze(self, *args, **kwargs):
+        return self.to_cpu().analyze()
 
     def reset(self, mol=None):
         if mol is not None:

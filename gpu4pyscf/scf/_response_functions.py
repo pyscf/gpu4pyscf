@@ -71,8 +71,45 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                 elif hermi != 2:
                     v1 += mf.get_j(mol, dm1, hermi=hermi)
                 return v1
-        else:
-            raise NotImplementedError('only singlet response is supported!')
+
+        elif singlet:
+            fxc *= .5
+            def vind(dm1):
+                if hermi == 2:
+                    v1 = cupy.zeros_like(dm1)
+                else:
+                    # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
+                    v1 = ni.nr_rks_fxc_st(mol, mf.grids, mf.xc, dm0, dm1, 0, True,
+                                          rho0, vxc, fxc, max_memory=max_memory)
+                if hybrid:
+                    if hermi != 2:
+                        vj, vk = mf.get_jk(mol, dm1, hermi=hermi)
+                        vk *= hyb
+                        if abs(omega) > 1e-10:  # For range separated Coulomb
+                            vk += mf.get_k(mol, dm1, hermi, omega) * (alpha-hyb)
+                        v1 += vj - .5 * vk
+                    else:
+                        v1 -= .5 * hyb * mf.get_k(mol, dm1, hermi=hermi)
+                elif hermi != 2:
+                    v1 += mf.get_j(mol, dm1, hermi=hermi)
+                return v1
+
+        else:  # triplet
+            fxc *= .5
+            def vind(dm1):
+                if hermi == 2:
+                    v1 = cupy.zeros_like(dm1)
+                else:
+                    # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
+                    v1 = ni.nr_rks_fxc_st(mol, mf.grids, mf.xc, dm0, dm1, 0, False,
+                                          rho0, vxc, fxc, max_memory=max_memory)
+                if hybrid:
+                    vk = mf.get_k(mol, dm1, hermi=hermi)
+                    vk *= hyb
+                    if abs(omega) > 1e-10:  # For range separated Coulomb
+                        vk += mf.get_k(mol, dm1, hermi, omega) * (alpha-hyb)
+                    v1 += -.5 * vk
+                return v1
 
     else:  # HF
         if (singlet is None or singlet) and hermi != 2:

@@ -16,6 +16,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import ctypes
+from functools import lru_cache
 import contextlib
 import numpy as np
 import cupy
@@ -1348,7 +1349,8 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None
 
     if omega is None: omega = ni.omega
     if xctype is None: xctype = ni._xc_type(xc_code)
-    if ni.xcfuns is None: ni.xcfuns = _init_xcfuns(xc_code, spin_polarized)
+
+    xcfuns = ni._init_xcfuns(xc_code, spin_polarized)
 
     inp = {}
     if not spin_polarized:
@@ -1391,13 +1393,13 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None
            "v3sigma2lapl", "v3sigma2tau",
            "v3sigmalapl2", "v3sigmalapltau", "v3sigmatau2",
            "v3lapl3", "v3lapl2tau", "v3lapltau2", "v3tau3"]
-    if len(ni.xcfuns) == 1:
-        xcfun, _ = ni.xcfuns[0]
+    if len(xcfuns) == 1:
+        xcfun, _ = xcfuns[0]
         xc_res = xcfun.compute(inp, do_exc=True, do_vxc=do_vxc, do_fxc=do_fxc, do_kxc=do_kxc)
         ret_full = xc_res
     else:
         ret_full = {}
-        for xcfun, w in ni.xcfuns:
+        for xcfun, w in xcfuns:
             xc_res = xcfun.compute(inp, do_exc=True, do_vxc=do_vxc, do_fxc=do_fxc, do_kxc=do_kxc)
             for label in xc_res:
                 if label in ret_full:
@@ -1707,6 +1709,10 @@ class NumInt(lib.StreamObject, LibXCMixin):
     def to_cpu(self):
         ni = numint.NumInt()
         return ni
+
+    @lru_cache(10)
+    def _init_xcfuns(self, xc_code, spin):
+        return _init_xcfuns(xc_code, spin)
 
 def _make_pairs2shls_idx(pair_mask, l_bas_loc, hermi=0):
     if hermi:
