@@ -125,9 +125,9 @@ class TDBase(lib.StreamObject):
         Natural transition orbital analysis.
 
 		Returns:
-			A list (weights, NTOs).  NTOs are natural orbitals represented in AO
-			basis. The first N_occ NTOs are occupied NTOs and the rest are virtual
-			NTOs. weights and NTOs are all stored in nparray
+            A list (weights, NTOs).  NTOs are natural orbitals represented in AO
+            basis. The first N_occ NTOs are occupied NTOs and the rest are virtual
+            NTOs. weights and NTOs are all stored in nparray
         '''
         return self.to_cpu().get_nto(state, threshold, verbose)
 
