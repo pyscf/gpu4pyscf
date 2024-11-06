@@ -24,7 +24,7 @@ from pyscf.data.nist import HARTREE2EV, HARTREE2WAVENUMBER
 from pyscf.tdscf._lr_eig import eigh as lr_eigh, eig as lr_eig
 from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.tdscf import rhf as tdhf_gpu
 
 __all__ = [
@@ -76,11 +76,13 @@ def gen_tda_operation(mf, fock_ao=None, wfnsym=None):
         zs = cp.asarray(zs)
         za = zs[:,:nocca*nvira].reshape(nz,nocca,nvira)
         zb = zs[:,nocca*nvira:].reshape(nz,noccb,nvirb)
-        dmova = contract('xov,qv->xoq', za, orbva)
-        dmova = contract('po,xoq->xpq', orboa, dmova)
-        dmovb = contract('xov,qv->xoq', zb, orbvb)
-        dmovb = contract('po,xoq->xpq', orbob, dmovb)
-        v1ao = vresp(cp.asarray((dmova,dmovb)))
+        mo1_a = contract('xov,qv->xqo', za, orbva)
+        dmova = contract('po,xqo->xpq', orboa, mo1_a)
+        mo1_b = contract('xov,qv->xqo', zb, orbvb)
+        dmovb = contract('po,xqo->xpq', orbob, mo1_b)
+        dm1 = cp.asarray((dmova, dmovb))
+        dm1 = tag_array(dm1, mo1=[mo1_a,mo1_b], occ_coeff=[orboa,orbob])
+        v1ao = vresp(dm1)
         v1a = contract('po,xpq->xoq', orboa, v1ao[0])
         v1a = contract('xoq,qv->xov', v1a, orbva)
         v1b = contract('po,xpq->xoq', orbob, v1ao[1])

@@ -321,12 +321,13 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
             vj[:,rows,cols] = vj_packed
             vj[:,cols,rows] = vj_packed
 
-    elif hermi == 1 and hasattr(dms_tag, 'mo1'):
-        # CP-HF K matrix
+    elif hasattr(dms_tag, 'mo1'):
+        # K matrix in CP-HF or TDDFT
         occ_coeffs = dms_tag.occ_coeff
         mo1s = dms_tag.mo1
         if not isinstance(occ_coeffs, (tuple, list)):
-            occ_coeffs = [occ_coeffs * 2.0] # For restricted
+            # *2 for double occupancy in RHF/RKS
+            occ_coeffs = [occ_coeffs * 2.0]
         if not isinstance(mo1s, (tuple, list)):
             mo1s = [mo1s]
 
@@ -360,7 +361,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
             vj = cupy.zeros(dms_shape)
             vj[:,rows,cols] = vj_sparse
             vj[:,cols,rows] = vj_sparse
-        if with_k:
+        if with_k and hermi:
             transpose_sum(vk)
         vj_sparse = None
     # general K matrix with density matrix

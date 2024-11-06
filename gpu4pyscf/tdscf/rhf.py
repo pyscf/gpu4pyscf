@@ -24,7 +24,7 @@ from pyscf import lib
 from pyscf.tdscf import rhf as tdhf_cpu
 from pyscf.tdscf._lr_eig import eigh as lr_eigh, eig as lr_eig
 from gpu4pyscf import scf
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import _response_functions # noqa
@@ -53,6 +53,7 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     viridx = mo_occ == 0
     orbv = mo_coeff[:,viridx]
     orbo = mo_coeff[:,occidx]
+    orbo2 = orbo * 2. # *2 for double occupancy
 
     e_ia = hdiag = mo_energy[viridx] - mo_energy[occidx,None]
     hdiag = hdiag.ravel().get()
@@ -61,9 +62,9 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
 
     def vind(zs):
         zs = cp.asarray(zs).reshape(-1,nocc,nvir)
-        # *2 for double occupancy
-        dmov = contract('xov,qv->xoq', zs*2, orbv)
-        dmov = contract('po,xoq->xpq', orbo, dmov)
+        mo1 = contract('xov,qv->xqo', zs, orbv)
+        dmov = contract('po,xqo->xpq', orbo2, mo1)
+        dmov = tag_array(dmov, mo1=mo1, occ_coeff=[orbo2])
         v1ao = vresp(dmov)
         v1ov = contract('po,xpq->xoq', orbo, v1ao)
         v1ov = contract('xoq,qv->xov', v1ov, orbv)
