@@ -41,14 +41,18 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
         hybrid = abs(hyb) > 1e-10
 
+        if max_memory is None:
+            mem_avail = cupy.cuda.runtime.memGetInfo()[0] * .5e-6
+            max_memory = min(mf.max_memory, mem_avail)
+
         if singlet is None:
             # for ground state orbital hessian
-            rho0, vxc, fxc = ni.cache_xc_kernel(mol, mf.grids, mf.xc,
-                                                mo_coeff, mo_occ, 0)
+            spin = 0
         else:
-            rho0, vxc, fxc = ni.cache_xc_kernel(mol, mf.grids, mf.xc,
-                                                [mo_coeff]*2, [mo_occ*.5]*2, spin=1)
-        dm0 = None  #mf.make_rdm1(mo_coeff, mo_occ)
+            spin = 1
+        rho0, vxc, fxc = ni.cache_xc_kernel(
+            mol, mf.grids, mf.xc, mo_coeff, mo_occ, spin, max_memory=max_memory)
+        dm0 = None
 
         if singlet is None:
             # Without specify singlet, used in ground state orbital hessian

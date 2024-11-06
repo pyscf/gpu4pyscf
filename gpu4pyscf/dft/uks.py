@@ -133,7 +133,7 @@ class UKS(rks.KohnShamDFT, uhf.UHF):
         hf.SCF.reset(self, mol)
         self.grids.reset(mol)
         self.nlcgrids.reset(mol)
-        self._numint.gdftopt = None
+        self._numint.reset()
         return self
 
     def nuc_grad_method(self):
