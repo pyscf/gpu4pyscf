@@ -55,7 +55,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         raise NotImplementedError
 
     omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
-    with_k = ni.libxc.is_hybrid_xc(mf.xc)
+    with_k = mf._numint.libxc.is_hybrid_xc(mf.xc)
     de2, ej, ek = df_rhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
                                                 atmlst, max_memory, verbose,
                                                 with_k=with_k)

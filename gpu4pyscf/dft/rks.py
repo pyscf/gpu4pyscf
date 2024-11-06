@@ -151,7 +151,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     t0 = logger.timer_debug1(ks, 'vxc tot', *t0)
 
     #enabling range-separated hybrids
-    if not ni.libxc.is_hybrid_xc(ks.xc)
+    if not ni.libxc.is_hybrid_xc(ks.xc):
         vk = None
         if (ks._eri is None and ks.direct_scf and
             getattr(vhf_last, 'vj', None) is not None):
