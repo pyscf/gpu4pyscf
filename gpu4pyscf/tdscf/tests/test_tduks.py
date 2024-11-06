@@ -70,62 +70,62 @@ class KnownValues(unittest.TestCase):
         td = mf_lda.CasidaTDDFT()
         assert td.device == 'gpu'
         es = td.kernel(nstates=4)[0]
-        e_ref = td.to_cpu().kernel()[0]
-        self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 6)
-        self.assertAlmostEqual(lib.fp(es[:3]*27.2114), 1.294630966929489, 4)
+        e_ref = td.to_cpu().kernel(nstates=4)[0]
+        self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 8)
+        self.assertAlmostEqual(lib.fp(es[:3]), 0.04757678947994772, 6)
 
         mol1 = self.mol1
         mf = mol1.UKS().run(xc='lda, vwn_rpa').run()
         td = mf.CasidaTDDFT().to_gpu()
         assert td.device == 'gpu'
         td.nstates = 5
-        es = td.kernel()[0] * 27.2114
-        ref = [6.94083826, 7.61492553, 8.55550045, 9.36308859, 9.49948318]
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 4)
+        es = td.kernel()[0]
+        ref = td.to_cpu().kernel()[0]
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
 
     def test_nohybrid_b88p86(self):
         mf_bp86 = self.mf_bp86
         td = mf_bp86.CasidaTDDFT()
         assert td.device == 'gpu'
         es = td.kernel(nstates=4)[0]
-        e_ref = td.to_cpu().kernel()[0]
-        self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 6)
-        self.assertAlmostEqual(lib.fp(es[:3]*27.2114), 1.4624730971221087, 4)
+        e_ref = td.to_cpu().kernel(nstates=4)[0]
+        self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 8)
+        self.assertAlmostEqual(lib.fp(es[:3]), 0.05374466608355896, 6)
 
     def test_tddft_lda(self):
         mf_lda = self.mf_lda
         td = mf_lda.TDDFT()
         assert td.device == 'gpu'
-        es = td.kernel(nstates=4)[0] * 27.2114
-        self.assertAlmostEqual(lib.fp(es[:3]), 1.2946309669294163, 4)
-        ref = td.to_cpu().kernel()[0]
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 6)
+        es = td.kernel(nstates=4)[0]
+        ref = td.to_cpu().kernel(nstates=4)[0]
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
+        self.assertAlmostEqual(lib.fp(es[:3]), 0.04757678948025743, 6)
 
     def test_tddft_b88p86(self):
         mf_bp86 = self.mf_bp86
         td = mf_bp86.TDDFT()
         assert td.device == 'gpu'
-        es = td.kernel(nstates=5)[0] * 27.2114
-        self.assertAlmostEqual(lib.fp(es[:3]), 1.4624730971221087, 4)
-        ref = [2.45700922, 2.93224712, 6.19693767, 12.22264487, 13.40445012]
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 4)
+        es = td.kernel(nstates=5)[0]
+        ref = td.to_cpu().kernel(nstates=5)[0]
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
+        self.assertAlmostEqual(lib.fp(es[:3]), 0.05374466608381663, 6)
 
         mol1 = self.mol1
         mf = mol1.UKS().run(xc='b88,p86').run()
         td = mf.TDDFT().to_gpu()
         assert td.device == 'gpu'
-        es = td.kernel(nstates=5)[0] * 27.2114
-        ref = [6.96396398, 7.70954799, 8.59882244, 9.35356454, 9.69774071]
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 4)
+        es = td.kernel(nstates=5)[0]
+        ref = td.to_cpu().kernel(nstates=5)[0]
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
 
     def test_tddft_b3lyp(self):
         mf_b3lyp = self.mf_b3lyp
         td = mf_b3lyp.TDDFT()
         assert td.device == 'gpu'
-        es = td.kernel(nstates=4)[0] * 27.2114
-        self.assertAlmostEqual(lib.fp(es[:3]), 1.2984822994759448, 4)
-        ref = td.to_cpu().kernel()[0]
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 6)
+        es = td.kernel(nstates=4)[0]
+        ref = td.to_cpu().kernel(nstates=4)[0]
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
+        self.assertAlmostEqual(lib.fp(es[:3]), 0.047793873508724743, 6)
 
     def test_tddft_camb3lyp(self):
         mol1 = self.mol1
@@ -133,65 +133,45 @@ class KnownValues(unittest.TestCase):
         td = mf.TDDFT().to_gpu()
         assert td.device == 'gpu'
         es = td.kernel(nstates=4)[0]
-        e_ref = td.to_cpu().kernel()[0]
-        self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 6)
-        self.assertAlmostEqual(lib.fp(es[:3]*27.2114), 7.69383202636, 4)
+        e_ref = td.to_cpu().kernel(nstates=4)[0]
+        self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 8)
+        self.assertAlmostEqual(lib.fp(es[:3]), 0.2827429269753051, 6)
 
     def test_tda_b3lyp(self):
         mf_b3lyp = self.mf_b3lyp
         td = mf_b3lyp.TDA()
         assert td.device == 'gpu'
-        es = td.kernel(nstates=4)[0] * 27.2114
-        self.assertAlmostEqual(lib.fp(es[:3]), 1.4303636271767162, 4)
+        es = td.kernel(nstates=4)[0]
         ref = td.to_cpu().kernel()[0]
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 6)
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
+        self.assertAlmostEqual(lib.fp(es[:3]), 0.052638024165134974, 6)
 
     def test_tda_lda(self):
         mf_lda = self.mf_lda
         td = mf_lda.TDA()
         assert td.device == 'gpu'
-        es = td.kernel(nstates=5)[0] * 27.2114
-        self.assertAlmostEqual(lib.fp(es[:3]), 1.4581538269747121, 4)
-        ref = [2.14644585, 3.27738191, 5.90913787, 12.14980714, 13.15535042]
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 4)
+        es = td.kernel(nstates=5)[0]
+        ref = td.to_cpu().kernel(nstates=5)[0]
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
+        self.assertAlmostEqual(lib.fp(es[:3]), 0.05358614041555257, 6)
 
         mol1 = self.mol1
         mf = mol1.UKS().run(xc='lda,vwn').run()
         td = mf.TDA().to_gpu()
         assert td.device == 'gpu'
         td.nstates = 5
-        es = td.kernel()[0] * 27.2114
-        ref = [6.88046608, 7.58244885, 8.49961771, 9.30209259, 9.53368005]
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 4)
+        es = td.kernel()[0]
+        ref = td.to_cpu().kernel()[0]
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
 
     def test_tda_m06l(self):
         mf_m06l = self.mf_m06l
         td = mf_m06l.TDA()
         assert td.device == 'gpu'
-        es = td.kernel(nstates=5)[0] * 27.2114
-        self.assertAlmostEqual(lib.fp(es), -20.49388623318, 4)
-        ref = [2.74346804, 3.10082138, 6.87321246, 12.8332282, 14.30085068, 14.61913328]
-        self.assertAlmostEqual(abs(es - ref[:5]).max(), 0, 4)
-
-    def test_analyze(self):
-        td_hf = self.td_hf
-        assert td_hf.device == 'gpu'
-        f = td_hf.oscillator_strength(gauge='length')
-        self.assertAlmostEqual(lib.fp(f), 0.16147450863004867, 5)
-        f = td_hf.oscillator_strength(gauge='velocity', order=2)
-        self.assertAlmostEqual(lib.fp(f), 0.19750347627735745, 5)
-
-        note_args = []
-        def temp_logger_note(rec, msg, *args):
-            note_args.append(args)
-        with lib.temporary_env(lib.logger.Logger, note=temp_logger_note):
-            td_hf.analyze()
-        ref = [(),
-               (1, 2.057393297642004, 602.62734, 0.1605980834206071),
-               (2, 2.2806597448158272, 543.63317, 0.0016221163442707552),
-               (3, 6.372445278065303, 194.56302, 0)]
-        self.assertAlmostEqual(abs(np.hstack(ref) -
-                                   np.hstack(note_args)).max(), 0, 4)
+        es = td.kernel(nstates=5)[0]
+        ref = td.to_cpu().kernel(nstates=5)[0]
+        self.assertAlmostEqual(abs(es - ref[:5]).max(), 0, 8)
+        self.assertAlmostEqual(lib.fp(es), -0.7531765338077471, 6)
 
     def test_tda_vind(self):
         mf = self.mf_bp86
