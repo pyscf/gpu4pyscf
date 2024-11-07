@@ -1193,7 +1193,6 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
             #pad, idx, non0tab, ao_loc_non0 = grids.sparse_cache[block_id, blksize, ngrids]
             nao_pad = (nao_non0[block_id] + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT
             nao_pad = min(nao, nao_pad)
-            pad = nao_pad - nao_non0[block_id]
             ao_mask = eval_ao(
                 ni, _sorted_mol, coords, 0,
                 nao_non0=nao_pad,
