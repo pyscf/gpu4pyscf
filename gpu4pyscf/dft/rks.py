@@ -36,7 +36,7 @@ __all__ = [
 libcupy_helper = load_library('libcupy_helper')
 
 def prune_small_rho_grids_(ks, mol, dm, grids):
-    rho = ks._numint.get_rho_batch(mol, dm, grids, ks.max_memory, verbose=ks.verbose)
+    rho = ks._numint.get_rho(mol, dm, grids, ks.max_memory, verbose=ks.verbose)
 
     threshold = ks.small_rho_cutoff
     '''Prune grids if the electron density on the grid is small'''
@@ -86,7 +86,6 @@ def initialize_grids(ks, mol=None, dm=None):
         
         if ks.do_nlc() and ks.nlcgrids.coords is None:
             if ks.nlcgrids.coords is None:
-                t0 = logger.init_timer(ks)
                 #ks.nlcgrids.build(with_non0tab=True)
                 ks.nlcgrids.build(with_non0tab=False)
                 ks.nlcgrids.weights = cupy.asarray(ks.nlcgrids.weights)

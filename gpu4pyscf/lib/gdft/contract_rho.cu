@@ -24,6 +24,9 @@
 #include <assert.h>
 #include <cuda_runtime.h>
 #include "contract_rho.cuh"
+
+#define NG_PER_BLOCK     256
+
 // TODO: improve this?
 __global__
 void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, int nao)
@@ -32,6 +35,16 @@ void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, 
     const bool active = grid_id < ngrids;
     size_t Ngrids = ngrids;
     double v = 0;
+
+    if (active){
+        for (int ao_id = 0; ao_id < nao; ao_id ++) {
+            int ket_idx = grid_id + ao_id * Ngrids;
+            v += bra[ket_idx] * ket[ket_idx];
+        }
+        rho[grid_id] = v;
+    }
+
+    /*
     if (active){
         for (int ao_id = threadIdx.y; ao_id < nao; ao_id += BLKSIZEY) {
             int ket_idx = grid_id + ao_id * Ngrids;
@@ -54,6 +67,7 @@ void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, 
     if (iy == 0 && active) {
         rho[grid_id] = buf[ix];
     }
+    */
 }
 
 __global__
@@ -280,8 +294,10 @@ extern "C"{
 __host__
 int GDFTcontract_rho(cudaStream_t stream, double *rho, double *bra, double *ket, int ngrids, int nao)
 {
-    dim3 threads(BLKSIZEX, BLKSIZEY);
-    dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX);
+    //dim3 threads(BLKSIZEX, BLKSIZEY);
+    //dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX);
+    dim3 threads(NG_PER_BLOCK);
+    dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
     GDFTcontract_rho_kernel<<<blocks, threads, 0, stream>>>(rho, bra, ket, ngrids, nao);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

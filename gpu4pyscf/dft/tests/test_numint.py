@@ -190,10 +190,12 @@ class KnownValues(unittest.TestCase):
         _sorted_mol = opt._sorted_mol
         grids_gpu.build(_sorted_mol, with_non0tab=True)
         ao_gpu = cupy.zeros_like(ao_cpu)
+        offset = 0
         for ao_gpu_mask, idx, weight, nao_non0 in ni.batch_loop(_sorted_mol, grids_gpu, nao, 1):
             for i, ao_idx in enumerate(idx):
                 ao_non0_idx = ao_idx[:nao_non0[i]].get()
-                ao_gpu[:,ao_non0_idx,i] = ao_gpu_mask[:,:nao_non0[i],i]
+                ao_gpu[:,ao_non0_idx,i+offset] = ao_gpu_mask[:,:nao_non0[i],i]
+            offset += len(idx)
         assert np.linalg.norm(ao_cpu - ao_gpu.get()) < 1e-10
     
     def test_rks_lda(self):
@@ -240,7 +242,7 @@ class KnownValues(unittest.TestCase):
 
     def test_uks_fxc_mgga(self):
         self._check_uks_fxc(MGGA_M06, hermi=1)
-    
+
     '''
     # Not implemented yet
     

@@ -382,24 +382,28 @@ def make_mask(mol, coords, relativity=0, shls_slice=None, cutoff=CUTOFF,
 
     log = logger.new_logger(mol)
     t0 = log.init_timer()
-    s_index = make_screen_index(mol, coords, blksize=blksize, cutoff=CUTOFF)
+    s_index = make_screen_index(mol, coords, blksize=blksize, cutoff=1e-10)
     t0 = log.timer_debug1('s_index', *t0)
     return s_index
 
 def gen_grid_sparsity(mol, s_index):
-    log = logger.new_logger(mol, 6)
+    ''' Generate nonzero AO indices, and corresponding ao_loc based on s_index 
+    '''
+    if isinstance(s_index, cupy.ndarray):
+        s_index = s_index.get()
+
+    log = logger.new_logger(mol, mol.verbose)
     t0 = log.init_timer()
     ao_loc = mol.ao_loc_nr()
     nblocks = s_index.shape[0]
     nbas = mol.nbas
     nao = mol.nao
-    ao_indices = numpy.zeros([nblocks, nao], dtype=numpy.int32)
+    ao_indices = -numpy.ones([nblocks, nao], dtype=numpy.int32)
     ao_loc_non0 = numpy.zeros([nblocks, nbas+1], dtype=numpy.int32)
     
     # Running on CPU
-    s_index_cpu = s_index.get()
     libgdft.GDFTmake_sparse_cache(
-        s_index_cpu.ctypes.data_as(ctypes.c_void_p),
+        s_index.ctypes.data_as(ctypes.c_void_p),
         ao_loc.ctypes.data_as(ctypes.c_void_p),
         ctypes.c_int(nblocks),
         ao_loc_non0.ctypes.data_as(ctypes.c_void_p),
@@ -566,26 +570,27 @@ class Grids(lib.StreamObject):
             self.check_sanity()
         atom_grids_tab = self.gen_atomic_grids(
             mol, self.atom_grid, self.radi_method, self.level, self.prune, **kwargs)
-        self.coords, self.weights = self.get_partition(
-            mol, atom_grids_tab, self.radii_adjust, self.atomic_radii, self.becke_scheme)
-    
+        coords, weights = self.get_partition(
+            mol, atom_grids_tab, self.radii_adjust, self.atomic_radii, self.becke_scheme,
+            concat=False)
         if self.alignment > 1:
-            padding = _padding_size(self.size, self.alignment)
+            grid_size = sum([w.size for w in weights])
+            padding = _padding_size(grid_size, self.alignment)
             logger.debug(self, 'Padding %d grids', padding)
             if padding > 0:
-                # cupy.vstack and cupy.hstack convert numpy array into cupy array first
-                self.coords = cupy.vstack(
-                    [self.coords, numpy.repeat([[1e4]*3], padding, axis=0)])
-                self.weights = cupy.hstack([self.weights, numpy.zeros(padding)])
+                coords.append(cupy.asarray(numpy.repeat([[1e4]*3], padding, axis=0)))
+                weights.append(cupy.zeros(padding))
+        self.coords = cupy.vstack(coords)
+        self.weights = cupy.hstack(weights)
+
         if sort_grids:
-            #idx = arg_group_grids(mol, self.coords)
-            idx = atomic_group_grids(mol, self.coords)
+            idx = arg_group_grids(mol, self.coords)
+            #idx = atomic_group_grids(mol, self.coords)
             self.coords = self.coords[idx]
             self.weights = self.weights[idx]
-
         if with_non0tab:
             self.non0tab = self.make_mask(mol, self.coords)
-            self.screen_index = self.non0tab    
+            self.screen_index = self.non0tab
         else:
             self.screen_index = self.non0tab = None
 
@@ -623,31 +628,36 @@ class Grids(lib.StreamObject):
 
     make_mask = lib.module_method(make_mask, absences=['cutoff'])
 
-    def build_sparsity(self, sorted_mol, blksize=ALIGNMENT_UNIT):
+    def cache_sparsity(self, sorted_mol, blksize=ALIGNMENT_UNIT):
         ''' Build sparsity data for sparse AO evaluation
-        Sort grids for batching grids
+        Sort grids based on the number of nonzero AOs
         '''
+        log = logger.new_logger(sorted_mol, sorted_mol.verbose) #ni.verbose)
+        t1 = log.init_timer()
         ngrids = self.coords.shape[0]
-        ao_indices, s_index, ao_loc_non0 = gen_sparse_cache(sorted_mol, self.coords, blksize)
+        s_index = make_mask(sorted_mol, self.coords, blksize=blksize)
+        ao_indices, ao_loc_non0 = gen_grid_sparsity(sorted_mol, s_index)
         nao_non0 = ao_loc_non0[:,-1]
-        ao_loc_non0 = cupy.asarray(ao_loc_non0)
-        ao_indices = cupy.asarray(ao_indices)
-        
+
         # Sort grids based on the number of nonzero AOs
         idx = numpy.argsort(nao_non0)
         nao_non0 = nao_non0[idx]
         ao_indices = ao_indices[idx]
         s_index = s_index[idx]
         ao_loc_non0 = cupy.asarray(ao_loc_non0[idx])
+        
+        ao_indices = cupy.asarray(ao_indices)
         idx = cupy.asarray(idx)
         idx_grids = cupy.tile(idx*blksize, (blksize,1)).T
         idx_grids += cupy.arange(blksize)
         idx_grids = idx_grids.ravel(order='C')[:ngrids]
+        
         self.coords = self.coords[idx_grids]
         self.weights = self.weights[idx_grids]
         
         sparse_data = (ao_indices, s_index, ao_loc_non0, nao_non0)
         self.sparse_cache[blksize, ngrids] = sparse_data
+        t1 = log.timer_debug1('generate sparsity', *t1)
         return
     
     def prune_by_density_(self, rho, threshold=0):

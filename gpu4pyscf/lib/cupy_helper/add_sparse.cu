@@ -20,8 +20,8 @@
 #include <stdio.h>
 #include <cuda_runtime.h>
 
-#define THREADS        32
-#define BLOCK_DIM   32
+#define THREADS     16
+#define BLOCK_DIM   16
 
 __global__
 void _add_sparse(double *a, const double *b, const int *indices, int n, int m, int k, int count)
@@ -31,7 +31,12 @@ void _add_sparse(double *a, const double *b, const int *indices, int n, int m, i
     if (row >= k || col >= k){
         return;
     }
-    int idx_a = indices[row] * n + indices[col];
+    int ix = indices[row];
+    int iy = indices[col];
+    if (ix < 0 || iy < 0){
+        return;
+    }
+    int idx_a = ix * n + iy;
     int idx_b = row * m + col;
     for (int i = 0; i < count; i++){
         //a[idx_a + i*n*n] += b[idx_b + i*m*m];
@@ -51,6 +56,9 @@ void _reduce_sparse(double *a, const double *b, const int *indices, int n, int m
     for (int i = 0; i < count; i++){
         int ix = indices[row + i * k];
         int iy = indices[col + i * k];
+        if (ix < 0 || iy < 0){
+            continue;
+        }
         int idx_a = ix * n + iy;
         int idx_b = row * m + col;
         //a[idx_a + i*n*n] += b[idx_b + i*m*m];
