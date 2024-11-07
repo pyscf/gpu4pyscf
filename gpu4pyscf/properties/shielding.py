@@ -49,9 +49,8 @@ def gen_vind(mf, mo_coeff, mo_occ):
         if hasattr(mf,'with_df'):
             vk = mf.get_jk(mf.mol, dm1, hermi=2, with_j=False)[1]
         else:
-            vk = jk.get_jk(mf.mol, dm1.get(), 'ijkl,jk->il')
+            vk = cupy.array(jk.get_jk(mf.mol, dm1.get(), ['ijkl,jk->il']*3))
         v1 = -.5*hyb * vk
-        v1 = cupy.array(v1)
         tmp = contract('nuv,vi->nui', v1, mocc)
         v1vo = contract('nui,ua->nai', tmp, mvir.conj())
 
@@ -217,9 +216,8 @@ def eval_shielding(mf):
     if hasattr(mf,'with_df'):
         vk = mf.get_jk(mf.mol, s1jkdm1, hermi=2, with_j=False)[1]
     else:
-        vk = jk.get_jk(mf.mol, s1jkdm1.get(), 'ijkl,jk->il')
+        vk = cupy.array(jk.get_jk(mf.mol, s1jkdm1.get(), ['ijkl,jk->il']*3))
     vk2 = -.5*hyb * vk
-    vk2 = cupy.array(vk2)
     h1ao += vk2
     tmp = contract('xuv,ua->xav', h1ao, mvir)
     veff_ai = contract('xav,vi->xai', tmp, mocc)
