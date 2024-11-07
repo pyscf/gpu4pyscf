@@ -239,7 +239,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         for atm_id, (coords, weight, weight1) in enumerate(rks_grad.grids_response_cc(grids)):
             ngrids = weight.size
             for p0, p1 in lib.prange(0,ngrids,block_size):
-                ao = numint.eval_ao(ni, _sorted_mol, coords[p0:p1, :], ao_deriv)
+                ao = numint.eval_ao(_sorted_mol, coords[p0:p1, :], ao_deriv, gdftopt=opt)
                 if xctype == 'LDA':
                     rho_a = numint.eval_rho(_sorted_mol, ao[0], dms[0],
                                         xctype=xctype, hermi=1, with_lapl=False)
