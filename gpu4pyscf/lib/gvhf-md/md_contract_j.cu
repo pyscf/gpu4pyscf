@@ -52,7 +52,11 @@ static void iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz,
     }
 }
 
+#if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128)
+#else
+__global__
+#endif
 void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
 {
     int *pair_ij_mapping = bounds.tile_ij_mapping;
