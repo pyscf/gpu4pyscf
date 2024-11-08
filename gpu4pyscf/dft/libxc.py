@@ -212,12 +212,6 @@ class XCfun:
 
             args.extend([   inp[x] for x in  input_labels])
             args.extend([output[x] for x in output_labels])
-            #cuda_args = []
-            #for arg in args:
-            #    if(isinstance(arg, cupy.ndarray)):
-            #        arg = ctypes.cast(arg.data.ptr, ctypes.c_void_p)
-            #    cuda_args.append(arg)
-            #_libxc.xc_lda(*cuda_args)
 
             out_params = xc_lda_out_params()
             buf_params = xc_lda_out_params()
@@ -251,12 +245,6 @@ class XCfun:
 
             args.extend([   inp[x] for x in  input_labels])
             args.extend([output[x] for x in output_labels])
-            #cuda_args = []
-            #for arg in args:
-            #    if(isinstance(arg, cupy.ndarray)):
-            #        arg = ctypes.cast(arg.data.ptr, ctypes.c_void_p)
-            #    cuda_args.append(arg)
-            #_libxc.xc_gga(*cuda_args)
 
             out_params = xc_gga_out_params()
             buf_params = xc_gga_out_params()
@@ -300,12 +288,6 @@ class XCfun:
                 args.insert(-1, cupy.empty((1)))  # Add none ptr to laplacian
             #args.insert(-1, cupy.zeros_like(inp['rho']))
             args.extend([output[x] for x in output_labels])
-            #cuda_args = []
-            #for arg in args:
-            #    if(isinstance(arg, cupy.ndarray)):
-            #        arg = ctypes.cast(arg.data.ptr, ctypes.c_void_p)
-            #    cuda_args.append(arg)
-            #_libxc.xc_mgga(*cuda_args)
 
             out_params = xc_mgga_out_params()
             buf_params = xc_mgga_out_params()
