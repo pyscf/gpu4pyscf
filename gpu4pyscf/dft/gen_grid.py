@@ -628,7 +628,7 @@ class Grids(lib.StreamObject):
 
     make_mask = lib.module_method(make_mask, absences=['cutoff'])
 
-    def cache_sparsity(self, sorted_mol, blksize=ALIGNMENT_UNIT):
+    def cache_sparsity(self, sorted_mol, blksize=ALIGNMENT_UNIT, sort_grids=False):
         ''' Build sparsity data for sparse AO evaluation
         Sort grids based on the number of nonzero AOs
         '''
@@ -638,22 +638,22 @@ class Grids(lib.StreamObject):
         s_index = make_mask(sorted_mol, self.coords, blksize=blksize)
         ao_indices, ao_loc_non0 = gen_grid_sparsity(sorted_mol, s_index)
         nao_non0 = ao_loc_non0[:,-1]
+        if sort_grids:
+            # Sort grids based on the number of nonzero AOs
+            idx = numpy.argsort(nao_non0)
+            nao_non0 = nao_non0[idx]
+            ao_indices = ao_indices[idx]
+            s_index = s_index[idx]
+            ao_loc_non0 = cupy.asarray(ao_loc_non0[idx])
 
-        # Sort grids based on the number of nonzero AOs
-        idx = numpy.argsort(nao_non0)
-        nao_non0 = nao_non0[idx]
-        ao_indices = ao_indices[idx]
-        s_index = s_index[idx]
-        ao_loc_non0 = cupy.asarray(ao_loc_non0[idx])
-        
-        ao_indices = cupy.asarray(ao_indices)
-        idx = cupy.asarray(idx)
-        idx_grids = cupy.tile(idx*blksize, (blksize,1)).T
-        idx_grids += cupy.arange(blksize)
-        idx_grids = idx_grids.ravel(order='C')[:ngrids]
-        
-        self.coords = self.coords[idx_grids]
-        self.weights = self.weights[idx_grids]
+            ao_indices = cupy.asarray(ao_indices)
+            idx = cupy.asarray(idx)
+            idx_grids = cupy.tile(idx*blksize, (blksize,1)).T
+            idx_grids += cupy.arange(blksize)
+            idx_grids = idx_grids.ravel(order='C')[:ngrids]
+            
+            self.coords = self.coords[idx_grids]
+            self.weights = self.weights[idx_grids]
         
         sparse_data = (ao_indices, s_index, ao_loc_non0, nao_non0)
         self.sparse_cache[blksize, ngrids] = sparse_data

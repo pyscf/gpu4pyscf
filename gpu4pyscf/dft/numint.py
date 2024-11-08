@@ -1829,7 +1829,7 @@ def _batch_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     _sorted_mol = opt._sorted_mol
     ngrids = grids.coords.shape[0]
     if not hasattr(grids, 'sparse_cache') or (ALIGNED, ngrids) not in grids.sparse_cache:
-        grids.cache_sparsity(_sorted_mol, blksize=ALIGNED)
+        grids.cache_sparsity(_sorted_mol, blksize=ALIGNED, sort_grids=True)
 
     ao_indices, s_index, ao_loc_non0, nao_non0 = grids.sparse_cache[ALIGNED, ngrids]
     nblocks = len(nao_non0)
