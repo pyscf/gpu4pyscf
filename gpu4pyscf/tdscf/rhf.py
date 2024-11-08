@@ -64,7 +64,7 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
         zs = cp.asarray(zs).reshape(-1,nocc,nvir)
         mo1 = contract('xov,qv->xqo', zs, orbv)
         dmov = contract('po,xqo->xpq', orbo2, mo1)
-        dmov = tag_array(dmov, mo1=mo1, occ_coeff=[orbo2])
+        dmov = tag_array(dmov, mo1=mo1, occ_coeff=orbo)
         v1ao = vresp(dmov)
         v1ov = contract('po,xpq->xoq', orbo, v1ao)
         v1ov = contract('xoq,qv->xov', v1ov, orbv)
