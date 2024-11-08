@@ -1,6 +1,24 @@
+#!/usr/bin/env python
+#
+# Copyright 2024 The PySCF Developers. All Rights Reserved.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 '''
 J engine using McMurchie-Davidson algorithm
 '''
+
 import ctypes
 import functools
 import math
@@ -9,7 +27,7 @@ import cupy as cp
 import scipy.linalg
 from pyscf import lib
 from pyscf import __config__
-from gpu4pyscf.lib.cupy_helper import load_library, condense
+from gpu4pyscf.lib.cupy_helper import load_library, condense, sandwich_dot, transpose_sum
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import jk
@@ -33,9 +51,6 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
     '''
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
-    if hermi != 1:
-        raise NotImplementedError('JK-builder only supports hermitian density matrix')
-
     if vhfopt is None:
         with mol.with_range_coulomb(omega):
             vhfopt = _VHFOpt(mol).build()
@@ -49,8 +64,13 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
     dms = dm.reshape(-1,nao_orig,nao_orig)
     n_dm = dms.shape[0]
     assert n_dm == 1
-    dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
+    #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
+    dms = sandwich_dot(dms, vhfopt.coeff.T)
     dms = cp.asarray(dms, order='C')
+    if hermi != 1:
+        dms = transpose_sum(dms)
+    else:
+        dms *= 2.
 
     ao_loc = mol.ao_loc
     dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
@@ -159,9 +179,9 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
     libvhf_md.jengine_dot_Et(
         vj.ctypes, vj_xyz.ctypes, ao_loc.ctypes, pair_loc.ctypes,
         mol._bas.ctypes, ctypes.c_int(mol.nbas), _env.ctypes)
-    vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
-    vj = vj + vj.transpose(0,2,1)
-    vj *= 2.
+    #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
+    vj = sandwich_dot(vj, vhfopt.coeff)
+    vj = transpose_sum(vj)
     vj = vj.reshape(dm.shape)
     log.timer('vj', *cput0)
     return vj
