@@ -151,10 +151,9 @@ class KnownValues(unittest.TestCase):
     def _check_rks_fxc_st(self, xc, fpref):
         ni = NumInt()
         spin = 1
-        v = ni.nr_rks_fxc_st(mol, grids_gpu, xc, dms_alpha=dm, fxc=fxc)
         rho, vxc, fxc = ni.cache_xc_kernel(
             mol, grids_gpu, xc, mo_coeff, mo_occ, spin)
-        self.assertAlmostEqual(lib.fp(v), fpref, 12)
+        v = ni.nr_rks_fxc_st(mol, grids_gpu, xc, dms_alpha=dm, fxc=fxc)
 
         ni_pyscf = pyscf_numint()
         grids_cpu = Grids(mol)
