@@ -1211,7 +1211,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao, nao0 = opt.coeff.shape
     mol = None
     _sorted_mol = opt._sorted_mol
-    dms = opt.sort_density_matrix(dms)
+    dms = opt.sort_density_matrix(dms.reshape(-1,nao0,nao0))
     assert len(dms) == 1
 
     if mo_coeff is not None:
