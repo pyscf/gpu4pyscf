@@ -27,7 +27,8 @@ import cupy as cp
 import scipy.linalg
 from pyscf import lib
 from pyscf import __config__
-from gpu4pyscf.lib.cupy_helper import load_library, condense, sandwich_dot
+from gpu4pyscf.lib.cupy_helper import load_library, condense, sandwich_dot,
+transpose_sum
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import jk
