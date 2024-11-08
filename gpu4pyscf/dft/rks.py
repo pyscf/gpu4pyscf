@@ -29,7 +29,7 @@ from gpu4pyscf.lib.cupy_helper import load_library, tag_array
 from pyscf import __config__
 
 __all__ = [
-    'get_veff', 'RKS'
+    'get_veff', 'RKS', 'KohnShamDFT',
 ]
 
 libcupy_helper = load_library('libcupy_helper')
@@ -151,8 +151,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     t0 = logger.timer_debug1(ks, 'vxc tot', *t0)
 
     #enabling range-separated hybrids
-    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
-    if abs(hyb) < 1e-10 and abs(alpha) < 1e-10:
+    if not ni.libxc.is_hybrid_xc(ks.xc):
         vk = None
         if (ks._eri is None and ks.direct_scf and
             getattr(vhf_last, 'vj', None) is not None):
@@ -164,6 +163,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
 
         vxc += vj
     else:
+        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
         if (ks._eri is None and ks.direct_scf and
             getattr(vhf_last, 'vk', None) is not None):
             ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
@@ -232,6 +232,14 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
 # Inherit pyscf KohnShamDFT class since this is tested in the pyscf dispersion code
 class KohnShamDFT(rks.KohnShamDFT):
 
+    to_rhf = NotImplemented
+    to_uhf = NotImplemented
+    to_ghf = NotImplemented
+    to_hf  = NotImplemented
+    to_rks = NotImplemented
+    to_uks = NotImplemented
+    to_gks = NotImplemented
+
     _keys = rks.KohnShamDFT._keys
 
     def __init__(self, xc='LDA,VWN'):
@@ -261,7 +269,7 @@ class KohnShamDFT(rks.KohnShamDFT):
     def dump_flags(self, verbose=None):
         # TODO: add this later
         return
-    
+
     reset = rks.KohnShamDFT.reset
     do_nlc = rks.KohnShamDFT.do_nlc
 
@@ -285,7 +293,7 @@ class RKS(KohnShamDFT, hf.RHF):
         hf.SCF.reset(self, mol)
         self.grids.reset(mol)
         self.nlcgrids.reset(mol)
-        self._numint.gdftopt = None
+        self._numint.reset()
         return self
 
     def nuc_grad_method(self):

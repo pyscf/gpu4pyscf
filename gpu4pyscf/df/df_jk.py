@@ -242,7 +242,7 @@ class _DFHF:
         obj = self.undo_df().to_cpu().density_fit()
         return utils.to_cpu(self, obj)
 
-def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-14, omega=None):
+def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-14, omega=None):
     '''
     get jk with density fitting
     outputs and input are on the same device
@@ -273,16 +273,21 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
     dms_shape = dms.shape
     rows = dfobj.intopt.cderi_row
     cols = dfobj.intopt.cderi_col
-    
+
     if with_j:
         dm_sparse = dms[:,rows,cols]
+        if hermi == 0:
+            dm_sparse += dms[:,cols,rows]
+        else:
+            dm_sparse *= 2
         dm_sparse[:, dfobj.intopt.cderi_diag] *= .5
 
     if with_k:
         vk = cupy.zeros_like(dms)
-    
+
     # SCF K matrix with occ
     if getattr(dms_tag, 'mo_coeff', None) is not None:
+        assert hermi == 1
         mo_occ = dms_tag.mo_occ
         mo_coeff = dms_tag.mo_coeff
         nmo = mo_occ.shape[-1]
@@ -300,7 +305,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
         for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
             # leading dimension is 1
             if with_j:
-                rhoj = 2.0*dm_sparse.dot(cderi_sparse)
+                rhoj = dm_sparse.dot(cderi_sparse)
                 vj_packed += cupy.dot(rhoj, cderi_sparse.T)
             cderi_sparse = rhoj = None
             for i in range(nset):
@@ -316,14 +321,13 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
             vj[:,rows,cols] = vj_packed
             vj[:,cols,rows] = vj_packed
 
-    # CP-HF K matrix
-    elif hasattr(dms_tag, 'mo1'):
+    elif hermi == 1 and hasattr(dms_tag, 'mo1'):
+        # CP-HF K matrix
         occ_coeffs = dms_tag.occ_coeff
         mo1s = dms_tag.mo1
-        mo_occ = dms_tag.mo_occ
-        if not isinstance(occ_coeffs, list):
+        if not isinstance(occ_coeffs, (tuple, list)):
             occ_coeffs = [occ_coeffs * 2.0] # For restricted
-        if not isinstance(mo1s, list):
+        if not isinstance(mo1s, (tuple, list)):
             mo1s = [mo1s]
 
         occ_coeffs = [occ_coeff[ao_idx] for occ_coeff in occ_coeffs]
@@ -336,7 +340,7 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
         blksize = dfobj.get_blksize(extra=2*nao*nocc)
         for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
             if with_j:
-                rhoj = 2.0*dm_sparse.dot(cderi_sparse)
+                rhoj = dm_sparse.dot(cderi_sparse)
                 vj_sparse += cupy.dot(rhoj, cderi_sparse.T)
                 rhoj = None
             cderi_sparse = None
@@ -366,13 +370,13 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
         blksize = dfobj.get_blksize()
         for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
             if with_j:
-                rhoj = 2.0*dm_sparse.dot(cderi_sparse)
+                rhoj = dm_sparse.dot(cderi_sparse)
                 vj_sparse += cupy.dot(rhoj, cderi_sparse.T)
             if with_k:
                 for k in range(nset):
                     rhok = contract('Lij,jk->Lki', cderi, dms[k]).reshape([-1,nao])
-                    #vk[k] += contract('Lki,Lkj->ij', cderi, rhok)
-                    vk[k] += cupy.dot(cderi.reshape([-1,nao]).T, rhok)
+                    #vk[k] += contract('Lki,Lkj->ij', rhok, cderi)
+                    vk[k] += cupy.dot(rhok.T, cderi.reshape([-1,nao]))
         if with_j:
             vj = cupy.zeros(dms_shape)
             vj[:,rows,cols] = vj_sparse

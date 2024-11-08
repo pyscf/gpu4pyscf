@@ -155,7 +155,7 @@ class KnownValues(unittest.TestCase):
 
     def test_rks_mgga(self):
         self._check_vxc('nr_rks', MGGA_M06)
-    
+
     def test_uks_lda(self):
         self._check_vxc('nr_uks', LDA)#'lda', -6.362059440515177)
 
@@ -212,7 +212,26 @@ class KnownValues(unittest.TestCase):
         v = dft.numint._vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars)
         self.assertAlmostEqual(lib.fp(v[0].get()), 0.15894647203764295, 8)
         self.assertAlmostEqual(lib.fp(v[1].get()), 0.20500922537924576, 8)
-        return
+
+    def test_eval_rho(self):
+        np.random.seed(1)
+        dm = np.random.random(dm0.shape)
+        ni_gpu = NumInt()
+        ni_cpu = pyscf_numint()
+        for xctype in ('LDA', 'GGA', 'MGGA'):
+            print(xctype)
+            deriv = 1
+            if xctype == 'LDA':
+                deriv = 0
+            ao_gpu = ni_gpu.eval_ao(mol, grids_gpu.coords, deriv=deriv)
+            ao_cpu = ni_cpu.eval_ao(mol, grids_cpu.coords, deriv=deriv)
+            rho = ni_gpu.eval_rho(mol, ao_gpu, dm, xctype=xctype, hermi=0, with_lapl=False)
+            ref = ni_cpu.eval_rho(mol, ao_cpu, dm, xctype=xctype, hermi=0, with_lapl=False)
+            self.assertAlmostEqual(abs(rho.get() - ref).max(), 0, 10)
+
+            rho = ni_gpu.eval_rho(mol, ao_gpu, dm0, xctype=xctype, hermi=1, with_lapl=False)
+            ref = ni_cpu.eval_rho(mol, ao_cpu, dm0, xctype=xctype, hermi=1, with_lapl=False)
+            self.assertAlmostEqual(abs(rho.get() - ref).max(), 0, 10)
 
 if __name__ == "__main__":
     print("Full Tests for dft numint")

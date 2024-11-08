@@ -108,6 +108,7 @@ class DF(lib.StreamObject):
         self._cderi = cholesky_eri_gpu(intopt, mol, auxmol, self.cd_low, omega=omega)
         log.timer_debug1('cholesky_eri', *t0)
         self.intopt = intopt
+        return self
 
     def get_jk(self, dm, hermi=1, with_j=True, with_k=True,
                direct_scf_tol=getattr(__config__, 'scf_hf_SCF_direct_scf_tol', 1e-13),

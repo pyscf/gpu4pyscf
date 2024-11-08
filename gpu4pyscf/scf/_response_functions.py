@@ -39,16 +39,20 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                         'deriviative is not available. Its contribution is '
                         'not included in the response function.')
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
-        hybrid = abs(hyb) > 1e-10
+        hybrid = ni.libxc.is_hybrid_xc(mf.xc)
+
+        if max_memory is None:
+            mem_avail = cupy.cuda.runtime.memGetInfo()[0] * .5e-6
+            max_memory = min(mf.max_memory, mem_avail)
 
         if singlet is None:
             # for ground state orbital hessian
-            rho0, vxc, fxc = ni.cache_xc_kernel(mol, mf.grids, mf.xc,
-                                                mo_coeff, mo_occ, 0)
+            spin = 0
         else:
-            rho0, vxc, fxc = ni.cache_xc_kernel(mol, mf.grids, mf.xc,
-                                                [mo_coeff]*2, [mo_occ*.5]*2, spin=1)
-        dm0 = None  #mf.make_rdm1(mo_coeff, mo_occ)
+            spin = 1
+        rho0, vxc, fxc = ni.cache_xc_kernel(
+            mol, mf.grids, mf.xc, mo_coeff, mo_occ, spin, max_memory=max_memory)
+        dm0 = None
 
         if singlet is None:
             # Without specify singlet, used in ground state orbital hessian
@@ -59,7 +63,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                 else:
                     v1 = ni.nr_rks_fxc(mol, mf.grids, mf.xc, dm0, dm1, 0, hermi,
                                        rho0, vxc, fxc, max_memory=max_memory)
-                if hybrid or abs(alpha) > 1e-10:
+                if hybrid:
                     if hermi != 2:
                         vj, vk = mf.get_jk(mol, dm1, hermi=hermi)
                         vk *= hyb
@@ -71,8 +75,45 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                 elif hermi != 2:
                     v1 += mf.get_j(mol, dm1, hermi=hermi)
                 return v1
-        else:
-            raise NotImplementedError('only singlet response is supported!')
+
+        elif singlet:
+            fxc *= .5
+            def vind(dm1):
+                if hermi == 2:
+                    v1 = cupy.zeros_like(dm1)
+                else:
+                    # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
+                    v1 = ni.nr_rks_fxc_st(mol, mf.grids, mf.xc, dm0, dm1, 0, True,
+                                          rho0, vxc, fxc, max_memory=max_memory)
+                if hybrid:
+                    if hermi != 2:
+                        vj, vk = mf.get_jk(mol, dm1, hermi=hermi)
+                        vk *= hyb
+                        if abs(omega) > 1e-10:  # For range separated Coulomb
+                            vk += mf.get_k(mol, dm1, hermi, omega) * (alpha-hyb)
+                        v1 += vj - .5 * vk
+                    else:
+                        v1 -= .5 * hyb * mf.get_k(mol, dm1, hermi=hermi)
+                elif hermi != 2:
+                    v1 += mf.get_j(mol, dm1, hermi=hermi)
+                return v1
+
+        else:  # triplet
+            fxc *= .5
+            def vind(dm1):
+                if hermi == 2:
+                    v1 = cupy.zeros_like(dm1)
+                else:
+                    # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
+                    v1 = ni.nr_rks_fxc_st(mol, mf.grids, mf.xc, dm0, dm1, 0, False,
+                                          rho0, vxc, fxc, max_memory=max_memory)
+                if hybrid:
+                    vk = mf.get_k(mol, dm1, hermi=hermi)
+                    vk *= hyb
+                    if abs(omega) > 1e-10:  # For range separated Coulomb
+                        vk += mf.get_k(mol, dm1, hermi, omega) * (alpha-hyb)
+                    v1 += -.5 * vk
+                return v1
 
     else:  # HF
         if (singlet is None or singlet) and hermi != 2:

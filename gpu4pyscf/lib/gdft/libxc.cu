@@ -73,37 +73,121 @@ void _memset_lda(xc_lda_out_params *out, int order, int np, const xc_dimensions 
     if(order >= 0) cudaMemset(out->zk, 0, sizeof(double)*np*dim->zk);
     if(order >= 1) cudaMemset(out->vrho, 0, sizeof(double)*np*dim->vrho);
     if(order >= 2) cudaMemset(out->v2rho2, 0, sizeof(double)*np*dim->v2rho2);
+    if(order >= 3) cudaMemset(out->v3rho3, 0, sizeof(double)*np*dim->v3rho3);
+    if(order >= 4) cudaMemset(out->v4rho4, 0, sizeof(double)*np*dim->v4rho4);
 }
 
 __host__
 void _memset_gga(xc_gga_out_params *out, int order, int np, const xc_dimensions *dim){
     if(order >= 0) cudaMemset(out->zk, 0, sizeof(double)*np*dim->zk);
-    if(order >= 1) cudaMemset(out->vrho, 0, sizeof(double)*np*dim->vrho);
-    if(order >= 1) cudaMemset(out->vsigma, 0, sizeof(double)*np*dim->vsigma); // (sigma, lapl, tau)
-    if(order >= 2) cudaMemset(out->v2rho2, 0, sizeof(double)*np*dim->v2rho2);
-    if(order >= 2) cudaMemset(out->v2rhosigma, 0, sizeof(double)*np*dim->v2rhosigma);
-    if(order >= 2) cudaMemset(out->v2sigma2, 0, sizeof(double)*np*dim->v2sigma2);
+    if(order >= 1) {
+        cudaMemset(out->vrho, 0, sizeof(double)*np*dim->vrho);
+        cudaMemset(out->vsigma, 0, sizeof(double)*np*dim->vsigma); // (sigma, lapl, tau)
+    }
+    if(order >= 2) {
+        cudaMemset(out->v2rho2, 0, sizeof(double)*np*dim->v2rho2);
+        cudaMemset(out->v2rhosigma, 0, sizeof(double)*np*dim->v2rhosigma);
+        cudaMemset(out->v2sigma2, 0, sizeof(double)*np*dim->v2sigma2);
+    }
+    if(order >= 3) {
+        cudaMemset(out->v3rho3,       0, sizeof(double)*np*dim->v3rho3);
+        cudaMemset(out->v3rho2sigma,  0, sizeof(double)*np*dim->v3rho2sigma);
+        cudaMemset(out->v3rhosigma2,  0, sizeof(double)*np*dim->v3rhosigma2);
+        cudaMemset(out->v3sigma3,     0, sizeof(double)*np*dim->v3sigma3);
+    }
+    if(order >= 4) {
+        cudaMemset(out->v4rho4,       0, sizeof(double)*np*dim->v4rho4);
+        cudaMemset(out->v4rho3sigma,  0, sizeof(double)*np*dim->v4rho3sigma);
+        cudaMemset(out->v4rho2sigma2, 0, sizeof(double)*np*dim->v4rho2sigma2);
+        cudaMemset(out->v4rhosigma3,  0, sizeof(double)*np*dim->v4rhosigma3);
+        cudaMemset(out->v4sigma4,     0, sizeof(double)*np*dim->v4sigma4);
+    }
 }
 
 __host__
 void _memset_mgga(xc_mgga_out_params *out, int order, int np, const xc_dimensions *dim){
     if(order >= 0) cudaMemset(out->zk, 0, sizeof(double)*np*dim->zk);
 
-    if(order >= 1) cudaMemset(out->vrho, 0, sizeof(double)*np*dim->vrho);
-    if(order >= 1) cudaMemset(out->vsigma, 0, sizeof(double)*np*dim->vsigma);
-    if(order >= 1 && out->vlapl != NULL) cudaMemset(out->vlapl, 0, sizeof(double)*np*dim->vlapl); // (sigma, lapl, tau)
-    if(order >= 1) cudaMemset(out->vtau, 0, sizeof(double)*np*dim->vtau);
+    if(order >= 1) {
+        cudaMemset(out->vrho, 0, sizeof(double)*np*dim->vrho);
+        cudaMemset(out->vsigma, 0, sizeof(double)*np*dim->vsigma);
+        cudaMemset(out->vtau, 0, sizeof(double)*np*dim->vtau);
+        if(out->vlapl != NULL) cudaMemset(out->vlapl, 0, sizeof(double)*np*dim->vlapl); // (sigma, lapl, tau)
+    }
 
-    if(order >= 2) cudaMemset(out->v2rho2, 0, sizeof(double)*np*dim->v2rho2);
-    if(order >= 2) cudaMemset(out->v2rhosigma, 0, sizeof(double)*np*dim->v2rhosigma);
-    if(order >= 2 && out->v2rholapl != NULL) cudaMemset(out->v2rholapl, 0, sizeof(double)*np*dim->v2rholapl);
-    if(order >= 2) cudaMemset(out->v2rhotau, 0, sizeof(double)*np*dim->v2rhotau);
-    if(order >= 2) cudaMemset(out->v2sigma2, 0, sizeof(double)*np*dim->v2sigma2);
-    if(order >= 2 && out->v2sigmalapl != NULL) cudaMemset(out->v2sigmalapl, 0, sizeof(double)*np*dim->v2sigmalapl);
-    if(order >= 2) cudaMemset(out->v2sigmatau, 0, sizeof(double)*np*dim->v2sigmatau);
-    if(order >= 2 && out->v2lapl2 != NULL) cudaMemset(out->v2lapl2, 0, sizeof(double)*np*dim->v2lapl2);
-    if(order >= 2 && out->v2lapltau != NULL) cudaMemset(out->v2lapltau, 0, sizeof(double)*np*dim->v2lapltau);
-    if(order >= 2) cudaMemset(out->v2tau2, 0, sizeof(double)*np*dim->v2tau2);
+    if(order >= 2) {
+        cudaMemset(out->v2rho2, 0, sizeof(double)*np*dim->v2rho2);
+        cudaMemset(out->v2rhosigma, 0, sizeof(double)*np*dim->v2rhosigma);
+        cudaMemset(out->v2rhotau, 0, sizeof(double)*np*dim->v2rhotau);
+        cudaMemset(out->v2sigma2, 0, sizeof(double)*np*dim->v2sigma2);
+        cudaMemset(out->v2sigmatau, 0, sizeof(double)*np*dim->v2sigmatau);
+        cudaMemset(out->v2tau2, 0, sizeof(double)*np*dim->v2tau2);
+        if(out->v2rholapl != NULL) cudaMemset(out->v2rholapl, 0, sizeof(double)*np*dim->v2rholapl);
+        if(out->v2sigmalapl != NULL) cudaMemset(out->v2sigmalapl, 0, sizeof(double)*np*dim->v2sigmalapl);
+        if(out->v2lapl2 != NULL) cudaMemset(out->v2lapl2, 0, sizeof(double)*np*dim->v2lapl2);
+        if(out->v2lapltau != NULL) cudaMemset(out->v2lapltau, 0, sizeof(double)*np*dim->v2lapltau);
+    }
+
+    if (order >= 3) {
+        cudaMemset(out->v3rho3        , 0, sizeof(double)*np*dim->v3rho3);
+        cudaMemset(out->v3rho2sigma   , 0, sizeof(double)*np*dim->v3rho2sigma);
+        cudaMemset(out->v3rho2tau     , 0, sizeof(double)*np*dim->v3rho2tau);
+        cudaMemset(out->v3rhosigma2   , 0, sizeof(double)*np*dim->v3rhosigma2);
+        cudaMemset(out->v3rhosigmatau , 0, sizeof(double)*np*dim->v3rhosigmatau);
+        cudaMemset(out->v3rhotau2     , 0, sizeof(double)*np*dim->v3rhotau2);
+        cudaMemset(out->v3sigma3      , 0, sizeof(double)*np*dim->v3sigma3);
+        cudaMemset(out->v3sigma2tau   , 0, sizeof(double)*np*dim->v3sigma2tau);
+        cudaMemset(out->v3sigmatau2   , 0, sizeof(double)*np*dim->v3sigmatau2);
+        cudaMemset(out->v3tau3        , 0, sizeof(double)*np*dim->v3tau3);
+        if (out->v3rho2lapl    != NULL) cudaMemset(out->v3rho2lapl    , 0, sizeof(double)*np*dim->v3rho2lapl);
+        if (out->v3rhosigmalapl!= NULL) cudaMemset(out->v3rhosigmalapl, 0, sizeof(double)*np*dim->v3rhosigmalapl);
+        if (out->v3rholapl2    != NULL) cudaMemset(out->v3rholapl2    , 0, sizeof(double)*np*dim->v3rholapl2);
+        if (out->v3rholapltau  != NULL) cudaMemset(out->v3rholapltau  , 0, sizeof(double)*np*dim->v3rholapltau);
+        if (out->v3sigma2lapl  != NULL) cudaMemset(out->v3sigma2lapl  , 0, sizeof(double)*np*dim->v3sigma2lapl);
+        if (out->v3sigmalapl2  != NULL) cudaMemset(out->v3sigmalapl2  , 0, sizeof(double)*np*dim->v3sigmalapl2);
+        if (out->v3sigmalapltau!= NULL) cudaMemset(out->v3sigmalapltau, 0, sizeof(double)*np*dim->v3sigmalapltau);
+        if (out->v3lapl3       != NULL) cudaMemset(out->v3lapl3       , 0, sizeof(double)*np*dim->v3lapl3);
+        if (out->v3lapl2tau    != NULL) cudaMemset(out->v3lapl2tau    , 0, sizeof(double)*np*dim->v3lapl2tau);
+        if (out->v3lapltau2    != NULL) cudaMemset(out->v3lapltau2    , 0, sizeof(double)*np*dim->v3lapltau2);
+    }
+
+    if (order >= 4) {
+        cudaMemset(out->v4rho4           , 0, sizeof(double)*np*dim->v4rho4);
+        cudaMemset(out->v4rho3sigma      , 0, sizeof(double)*np*dim->v4rho3sigma);
+        cudaMemset(out->v4rho3tau        , 0, sizeof(double)*np*dim->v4rho3tau);
+        cudaMemset(out->v4rho2sigma2     , 0, sizeof(double)*np*dim->v4rho2sigma2);
+        cudaMemset(out->v4rho2sigmatau   , 0, sizeof(double)*np*dim->v4rho2sigmatau);
+        cudaMemset(out->v4rho2tau2       , 0, sizeof(double)*np*dim->v4rho2tau2);
+        cudaMemset(out->v4rhosigma3      , 0, sizeof(double)*np*dim->v4rhosigma3);
+        cudaMemset(out->v4rhosigma2tau   , 0, sizeof(double)*np*dim->v4rhosigma2tau);
+        cudaMemset(out->v4rhosigmatau2   , 0, sizeof(double)*np*dim->v4rhosigmatau2);
+        cudaMemset(out->v4rhotau3        , 0, sizeof(double)*np*dim->v4rhotau3);
+        cudaMemset(out->v4sigma4         , 0, sizeof(double)*np*dim->v4sigma4);
+        cudaMemset(out->v4sigma3tau      , 0, sizeof(double)*np*dim->v4sigma3tau);
+        cudaMemset(out->v4sigma2tau2     , 0, sizeof(double)*np*dim->v4sigma2tau2);
+        cudaMemset(out->v4sigmatau3      , 0, sizeof(double)*np*dim->v4sigmatau3);
+        cudaMemset(out->v4tau4           , 0, sizeof(double)*np*dim->v4tau4);
+        if (out->v4rho3lapl       != NULL) cudaMemset(out->v4rho3lapl       , 0, sizeof(double)*np*dim->v4rho3lapl);
+        if (out->v4rho2sigmalapl  != NULL) cudaMemset(out->v4rho2sigmalapl  , 0, sizeof(double)*np*dim->v4rho2sigmalapl);
+        if (out->v4rho2lapl2      != NULL) cudaMemset(out->v4rho2lapl2      , 0, sizeof(double)*np*dim->v4rho2lapl2);
+        if (out->v4rho2lapltau    != NULL) cudaMemset(out->v4rho2lapltau    , 0, sizeof(double)*np*dim->v4rho2lapltau);
+        if (out->v4rhosigma2lapl  != NULL) cudaMemset(out->v4rhosigma2lapl  , 0, sizeof(double)*np*dim->v4rhosigma2lapl);
+        if (out->v4rhosigmalapl2  != NULL) cudaMemset(out->v4rhosigmalapl2  , 0, sizeof(double)*np*dim->v4rhosigmalapl2);
+        if (out->v4rhosigmalapltau!= NULL) cudaMemset(out->v4rhosigmalapltau, 0, sizeof(double)*np*dim->v4rhosigmalapltau);
+        if (out->v4rholapl3       != NULL) cudaMemset(out->v4rholapl3       , 0, sizeof(double)*np*dim->v4rholapl3);
+        if (out->v4rholapl2tau    != NULL) cudaMemset(out->v4rholapl2tau    , 0, sizeof(double)*np*dim->v4rholapl2tau);
+        if (out->v4rholapltau2    != NULL) cudaMemset(out->v4rholapltau2    , 0, sizeof(double)*np*dim->v4rholapltau2);
+        if (out->v4sigma3lapl     != NULL) cudaMemset(out->v4sigma3lapl     , 0, sizeof(double)*np*dim->v4sigma3lapl);
+        if (out->v4sigma2lapl2    != NULL) cudaMemset(out->v4sigma2lapl2    , 0, sizeof(double)*np*dim->v4sigma2lapl2);
+        if (out->v4sigma2lapltau  != NULL) cudaMemset(out->v4sigma2lapltau  , 0, sizeof(double)*np*dim->v4sigma2lapltau);
+        if (out->v4sigmalapl3     != NULL) cudaMemset(out->v4sigmalapl3     , 0, sizeof(double)*np*dim->v4sigmalapl3);
+        if (out->v4sigmalapl2tau  != NULL) cudaMemset(out->v4sigmalapl2tau  , 0, sizeof(double)*np*dim->v4sigmalapl2tau);
+        if (out->v4sigmalapltau2  != NULL) cudaMemset(out->v4sigmalapltau2  , 0, sizeof(double)*np*dim->v4sigmalapltau2);
+        if (out->v4lapl4          != NULL) cudaMemset(out->v4lapl4          , 0, sizeof(double)*np*dim->v4lapl4);
+        if (out->v4lapl3tau       != NULL) cudaMemset(out->v4lapl3tau       , 0, sizeof(double)*np*dim->v4lapl3tau);
+        if (out->v4lapl2tau2      != NULL) cudaMemset(out->v4lapl2tau2      , 0, sizeof(double)*np*dim->v4lapl2tau2);
+        if (out->v4lapltau3       != NULL) cudaMemset(out->v4lapltau3       , 0, sizeof(double)*np*dim->v4lapltau3);
+    }
 }
 
 __host__

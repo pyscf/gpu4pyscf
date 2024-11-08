@@ -53,7 +53,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     if mf.nlc != '':
         raise NotImplementedError
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
-    with_k = abs(hyb) > 1e-10
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
     de2, ej, ek = uhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
                                              atmlst, max_memory, verbose,
                                              with_k=with_k)
@@ -112,7 +112,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mf = hessobj.base
     ni = mf._numint
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
-    with_k = abs(hyb) > 1e-10
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
     avail_mem -= 8 * (h1moa.size + h1mob.size)
     slice_size = int(avail_mem*0.5) // (8*3*nao*nao)
