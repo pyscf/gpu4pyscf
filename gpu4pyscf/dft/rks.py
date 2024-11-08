@@ -21,12 +21,13 @@ import cupy
 
 from pyscf import lib
 from pyscf.dft import rks
+from pyscf import __config__
 
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
 from gpu4pyscf.scf import hf
 from gpu4pyscf.lib.cupy_helper import load_library, tag_array
-from pyscf import __config__
+from gpu4pyscf.dft.numint import GRID_BLKSIZE
 
 __all__ = [
     'get_veff', 'RKS'
@@ -59,12 +60,13 @@ def prune_small_rho_grids_(ks, mol, dm, grids):
                 grids.coords = cupy.vstack(
                         [grids.coords, pad])
                 grids.weights = cupy.hstack([grids.weights, cupy.zeros(padding)])
-
+                
         # make_mask has to be executed on cpu for now.
         #grids.non0tab = grids.make_mask(mol, grids.coords)
         #grids.screen_index = grids.non0tab
         #if ks._numint.use_sparsity:
         #    ks._numint.build(mol, grids.coords)
+        grids.sparse_cache = {}
     return grids
 
 def initialize_grids(ks, mol=None, dm=None):
@@ -72,7 +74,7 @@ def initialize_grids(ks, mol=None, dm=None):
     if mol is None: mol = ks.mol
     if ks.grids.coords is None:
         t0 = logger.init_timer(ks)
-        ks.grids.build()
+        ks.grids.build(with_non0tab=False)
         #ks.grids.build(with_non0tab=True)
         ks.grids.weights = cupy.asarray(ks.grids.weights)
         ks.grids.coords = cupy.asarray(ks.grids.coords)
@@ -81,12 +83,11 @@ def initialize_grids(ks, mol=None, dm=None):
             # Filter grids the first time setup grids
             ks.grids = prune_small_rho_grids_(ks, ks.mol, dm, ks.grids)
         t0 = logger.timer_debug1(ks, 'setting up grids', *t0)
-
+        
         if ks.do_nlc() and ks.nlcgrids.coords is None:
             if ks.nlcgrids.coords is None:
-                t0 = logger.init_timer(ks)
                 #ks.nlcgrids.build(with_non0tab=True)
-                ks.nlcgrids.build()
+                ks.nlcgrids.build(with_non0tab=False)
                 ks.nlcgrids.weights = cupy.asarray(ks.nlcgrids.weights)
                 ks.nlcgrids.coords = cupy.asarray(ks.nlcgrids.coords)
                 if ks.small_rho_cutoff > 1e-20 and ground_state:

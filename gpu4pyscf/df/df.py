@@ -103,7 +103,7 @@ class DF(lib.StreamObject):
 
         v = w = None
         naux = self.naux = self.cd_low.shape[1]
-        log.debug('size of aux basis %d', naux)
+        log.debug('Size of aux basis %d', naux)
 
         self._cderi = cholesky_eri_gpu(intopt, mol, auxmol, self.cd_low, omega=omega)
         log.timer_debug1('cholesky_eri', *t0)
@@ -213,7 +213,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
     if naux * npair * 8 < 0.4 * avail_mem:
         try:
             cderi = cupy.empty([naux, npair], order='C')
-            log.debug(f"Saving CDERI on GPU. CDERI size {cderi.nbytes/GB}")
+            log.debug(f"Saving CDERI on GPU. CDERI size {cderi.nbytes/GB:.3f} GB")
         except Exception:
             use_gpu_memory = False
     else:
@@ -276,7 +276,6 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
         ints_slices_f= cupy.empty([naoaux,len(row)], order='F')
         ints_slices_f[:] = ints_slices[:,col,row]
         ints_slices = None
-
         if cd_low.tag == 'eig':
             cderi_block = cupy.dot(cd_low.T, ints_slices_f)
             ints_slices = None
