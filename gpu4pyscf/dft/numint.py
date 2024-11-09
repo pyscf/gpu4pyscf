@@ -1019,7 +1019,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 add_sparse(vmat[i], vmat_tmp, mask)
 
         t1 = log.timer_debug2('integration', *t1)
-        ao = c0 = rho1 = None
+        ao = rho1 = None
     t0 = log.timer_debug1('vxc', *t0)
 
     vmat = opt.transform_vxc_matrix(vmat)
