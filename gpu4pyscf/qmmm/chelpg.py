@@ -38,7 +38,7 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     but without transformation for auxiliary basis.
     '''
     sorted_mol, sorted_idx, uniq_l_ctr, l_ctr_counts = int3c2e.sort_mol(
-        intopt.mol)
+        intopt._mol_)
     if group_size is not None:
         uniq_l_ctr, l_ctr_counts = int3c2e._split_l_ctr_groups(
             uniq_l_ctr, l_ctr_counts, group_size)
@@ -49,7 +49,7 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
 
     # sort auxiliary mol
     sorted_auxmol, sorted_aux_idx, aux_uniq_l_ctr, aux_l_ctr_counts = int3c2e.sort_mol(
-        intopt.auxmol)
+        intopt._auxmol_)
     if group_size_aux is not None:
         aux_uniq_l_ctr, aux_l_ctr_counts = int3c2e._split_l_ctr_groups(
             aux_uniq_l_ctr, aux_l_ctr_counts, group_size_aux)
@@ -77,8 +77,8 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     intopt.sph_ao_loc = [sph_ao_loc[cp] for cp in l_ctr_offsets]
     intopt.angular = [l[0] for l in uniq_l_ctr]
 
-    cart_ao_loc = intopt.mol.ao_loc_nr(cart=True)
-    sph_ao_loc = intopt.mol.ao_loc_nr(cart=False)
+    cart_ao_loc = intopt._mol_.ao_loc_nr(cart=True)
+    sph_ao_loc = intopt._mol_.ao_loc_nr(cart=False)
     nao = sph_ao_loc[-1]
     ao_idx = np.array_split(np.arange(nao), sph_ao_loc[1:-1])
     intopt.sph_ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
@@ -89,9 +89,9 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     intopt.cart_ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
     ncart = cart_ao_loc[-1]
     nsph = sph_ao_loc[-1]
-    intopt.cart2sph = block_c2s_diag(ncart, nsph, intopt.angular, l_ctr_counts)
-    inv_idx = np.argsort(intopt.sph_ao_idx, kind='stable').astype(np.int32)
-    intopt.coeff = intopt.cart2sph[:, inv_idx]
+    intopt.cart2sph = block_c2s_diag(intopt.angular, l_ctr_counts)
+    #inv_idx = np.argsort(intopt.sph_ao_idx, kind='stable').astype(np.int32)
+    #intopt.coeff = intopt.cart2sph[:, inv_idx]
 
     # pairing auxiliary basis with fake basis set
     fake_l_ctr_offsets = np.append(0, np.cumsum(fake_l_ctr_counts))
@@ -106,8 +106,8 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     intopt.sph_aux_loc = [sph_aux_loc[cp] for cp in aux_l_ctr_offsets]
     intopt.aux_angular = [l[0] for l in aux_uniq_l_ctr]
 
-    cart_aux_loc = intopt.auxmol.ao_loc_nr(cart=True)
-    sph_aux_loc = intopt.auxmol.ao_loc_nr(cart=False)
+    cart_aux_loc = intopt._auxmol_.ao_loc_nr(cart=True)
+    sph_aux_loc = intopt._auxmol_.ao_loc_nr(cart=False)
     ncart = cart_aux_loc[-1]
     nsph = sph_aux_loc[-1]
     # inv_idx = np.argsort(intopt.sph_aux_idx, kind='stable').astype(np.int32)
@@ -158,6 +158,13 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
         nl = int(round(np.sqrt(ncptype)))
         intopt.cp_idx, intopt.cp_jdx = np.unravel_index(
             np.arange(ncptype), (nl, nl))
+
+    intopt._sorted_mol = sorted_mol
+    intopt._sorted_auxmol = sorted_auxmol
+    if intopt._mol_.cart:
+        intopt.ao_idx = intopt.cart_ao_idx
+    else:
+        intopt.ao_idx = intopt.sph_ao_idx
 
 def eval_chelpg_layer_gpu(mf, deltaR=0.3, Rhead=2.8, ifqchem=True, Rvdw=modified_Bondi, verbose=None):
     """Cal chelpg charge
@@ -248,8 +255,8 @@ def eval_chelpg_layer_gpu(mf, deltaR=0.3, Rhead=2.8, ifqchem=True, Rvdw=modified
     for ibatch in range(0, ngrids, nbatch):
         max_grid = min(ibatch+nbatch, ngrids)
         num_grids = max_grid - ibatch
-        ptr = intopt.auxmol._atm[:num_grids, gto.PTR_COORD]
-        intopt.auxmol._env[np.vstack(
+        ptr = intopt._auxmol_._atm[:num_grids, gto.PTR_COORD]
+        intopt._auxmol_._env[np.vstack(
             (ptr, ptr+1, ptr+2)).T] = gridcoords[ibatch:max_grid]
         _build_VHFOpt(intopt, 1e-14, diag_block_with_triu=False, aosym=True)
         potential_real[ibatch:max_grid] -= 2.0 * \

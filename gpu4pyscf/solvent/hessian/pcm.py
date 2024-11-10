@@ -105,7 +105,7 @@ def hess_qv(pcmobj, dm, verbose=None):
     rev_cart_ao_idx = numpy.argsort(cart_ao_idx)
     dvj = dvj[:,rev_cart_ao_idx]
 
-    aoslice = intopt.mol.aoslice_by_atom()
+    aoslice = intopt._mol_.aoslice_by_atom()
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
     dvj= 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     de = dq + dvj

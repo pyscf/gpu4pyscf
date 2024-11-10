@@ -243,11 +243,11 @@ def grad_qv(pcmobj, dm):
     dvj, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip1', q_sym, None, dm_cart)
     dq, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip2', q_sym, None, dm_cart)
 
-    cart_ao_idx = intopt.cart_ao_idx
-    rev_cart_ao_idx = numpy.argsort(cart_ao_idx)
-    dvj = dvj[:,rev_cart_ao_idx]
-
-    aoslice = intopt.mol.aoslice_by_atom()
+    if not mol.cart:
+        dvj = dvj @ intopt.cart2sph
+    dvj = intopt.unsort_orbitals(dvj, axis=[1])
+    
+    aoslice = intopt._mol_.aoslice_by_atom()
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
     dvj= 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     de = dq + dvj

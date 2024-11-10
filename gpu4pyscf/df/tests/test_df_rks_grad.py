@@ -117,17 +117,17 @@ def _vs_cpu(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-9):
     assert abs(g_analy - ref).max() < tol
 
 class KnownValues(unittest.TestCase):
-
+    
     def test_grad_with_grids_response(self):
         print("-----testing DF DFT gradient with grids response----")
         _check_grad(mol_sph, grid_response=True, xc='LDA', disp=None)
         _check_grad(mol_sph, grid_response=True, xc='B3LYP', disp=None)
         _check_grad(mol_sph, grid_response=True, xc='m06', disp=None, tol=1e-4)
-
+    
     def test_grad_lda(self):
         print("-----LDA testing-------")
         _vs_cpu(mol_sph, xc='LDA', disp=None)
-
+    
     def test_grad_gga(self):
         print('-----GGA testing-------')
         _vs_cpu(mol_sph, xc='PBE', disp=None)
@@ -147,7 +147,7 @@ class KnownValues(unittest.TestCase):
     def test_grad_nlc(self):
         print('--------nlc testing-------------')
         _vs_cpu(mol_sph, xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-7)
-
+    
     def test_grad_cart(self):
         print('------ Cart testing--------')
         _vs_cpu(mol_cart, xc='B3LYP', disp=None)
@@ -163,7 +163,7 @@ class KnownValues(unittest.TestCase):
     def test_grad_wb97m_d3bj(self):
         print('------ wB97m-d3bj --------')
         _vs_cpu(mol_sph, xc='wb97m-d3bj', tol=1e-8)
-
+    
 if __name__ == "__main__":
     print("Full Tests for DF Gradient")
     unittest.main()
