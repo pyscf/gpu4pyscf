@@ -247,7 +247,7 @@ def grad_qv(pcmobj, dm):
         dvj = dvj @ intopt.cart2sph
     dvj = intopt.unsort_orbitals(dvj, axis=[1])
     
-    aoslice = intopt._mol_.aoslice_by_atom()
+    aoslice = intopt.mol.aoslice_by_atom()
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
     dvj= 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     de = dq + dvj

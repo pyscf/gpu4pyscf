@@ -38,7 +38,7 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     but without transformation for auxiliary basis.
     '''
     sorted_mol, sorted_idx, uniq_l_ctr, l_ctr_counts = int3c2e.sort_mol(
-        intopt._mol_)
+        intopt.mol)
     if group_size is not None:
         uniq_l_ctr, l_ctr_counts = int3c2e._split_l_ctr_groups(
             uniq_l_ctr, l_ctr_counts, group_size)
@@ -48,7 +48,7 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     _, _, fake_uniq_l_ctr, fake_l_ctr_counts = int3c2e.sort_mol(fake_mol)
 
     # sort auxiliary mol
-    sorted_auxmol, sorted_aux_idx, aux_uniq_l_ctr, aux_l_ctr_counts = int3c2e.sort_mol(
+    sorted_auxmol, _, aux_uniq_l_ctr, aux_l_ctr_counts = int3c2e.sort_mol(
         intopt._auxmol_)
     if group_size_aux is not None:
         aux_uniq_l_ctr, aux_l_ctr_counts = int3c2e._split_l_ctr_groups(
@@ -77,8 +77,8 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     intopt.sph_ao_loc = [sph_ao_loc[cp] for cp in l_ctr_offsets]
     intopt.angular = [l[0] for l in uniq_l_ctr]
 
-    cart_ao_loc = intopt._mol_.ao_loc_nr(cart=True)
-    sph_ao_loc = intopt._mol_.ao_loc_nr(cart=False)
+    cart_ao_loc = intopt.mol.ao_loc_nr(cart=True)
+    sph_ao_loc = intopt.mol.ao_loc_nr(cart=False)
     nao = sph_ao_loc[-1]
     ao_idx = np.array_split(np.arange(nao), sph_ao_loc[1:-1])
     intopt.sph_ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
@@ -88,7 +88,6 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     ao_idx = np.array_split(np.arange(nao), cart_ao_loc[1:-1])
     intopt.cart_ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
     ncart = cart_ao_loc[-1]
-    nsph = sph_ao_loc[-1]
     intopt.cart2sph = block_c2s_diag(intopt.angular, l_ctr_counts)
     #inv_idx = np.argsort(intopt.sph_ao_idx, kind='stable').astype(np.int32)
     #intopt.coeff = intopt.cart2sph[:, inv_idx]
@@ -109,7 +108,6 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     cart_aux_loc = intopt._auxmol_.ao_loc_nr(cart=True)
     sph_aux_loc = intopt._auxmol_.ao_loc_nr(cart=False)
     ncart = cart_aux_loc[-1]
-    nsph = sph_aux_loc[-1]
     # inv_idx = np.argsort(intopt.sph_aux_idx, kind='stable').astype(np.int32)
     aux_l_ctr_offsets += fake_l_ctr_offsets[-1]
 
@@ -161,7 +159,7 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
 
     intopt._sorted_mol = sorted_mol
     intopt._sorted_auxmol = sorted_auxmol
-    if intopt._mol_.cart:
+    if intopt.mol.cart:
         intopt.ao_idx = intopt.cart_ao_idx
     else:
         intopt.ao_idx = intopt.sph_ao_idx

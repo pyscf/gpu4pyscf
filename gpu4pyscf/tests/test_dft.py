@@ -132,6 +132,7 @@ class KnownValues(unittest.TestCase):
         assert np.abs(e_dft - -685.0578838805443) < 1e-7
 
         g = mf.nuc_grad_method().kernel()
+        print(np.abs(cupy.linalg.norm(g)))
         assert np.abs(cupy.linalg.norm(g) - 0.16804945458657145) < 1e-5
 
         h = mf.Hessian().kernel()
@@ -151,6 +152,7 @@ class KnownValues(unittest.TestCase):
         assert np.abs(e_dft - -685.05788388063) < 1e-7
 
         g = mf.nuc_grad_method().kernel()
+        print(np.abs(cupy.linalg.norm(g)))
         assert np.abs(cupy.linalg.norm(g) - 0.1680496465773684) < 1e-5
 
         h = mf.Hessian().kernel()
