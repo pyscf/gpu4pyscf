@@ -49,7 +49,7 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
 
     # sort auxiliary mol
     sorted_auxmol, _, aux_uniq_l_ctr, aux_l_ctr_counts = int3c2e.sort_mol(
-        intopt._auxmol_)
+        intopt.auxmol)
     if group_size_aux is not None:
         aux_uniq_l_ctr, aux_l_ctr_counts = int3c2e._split_l_ctr_groups(
             aux_uniq_l_ctr, aux_l_ctr_counts, group_size_aux)
@@ -105,8 +105,8 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     intopt.sph_aux_loc = [sph_aux_loc[cp] for cp in aux_l_ctr_offsets]
     intopt.aux_angular = [l[0] for l in aux_uniq_l_ctr]
 
-    cart_aux_loc = intopt._auxmol_.ao_loc_nr(cart=True)
-    sph_aux_loc = intopt._auxmol_.ao_loc_nr(cart=False)
+    cart_aux_loc = intopt.auxmol.ao_loc_nr(cart=True)
+    sph_aux_loc = intopt.auxmol.ao_loc_nr(cart=False)
     ncart = cart_aux_loc[-1]
     # inv_idx = np.argsort(intopt.sph_aux_idx, kind='stable').astype(np.int32)
     aux_l_ctr_offsets += fake_l_ctr_offsets[-1]
@@ -253,8 +253,8 @@ def eval_chelpg_layer_gpu(mf, deltaR=0.3, Rhead=2.8, ifqchem=True, Rvdw=modified
     for ibatch in range(0, ngrids, nbatch):
         max_grid = min(ibatch+nbatch, ngrids)
         num_grids = max_grid - ibatch
-        ptr = intopt._auxmol_._atm[:num_grids, gto.PTR_COORD]
-        intopt._auxmol_._env[np.vstack(
+        ptr = intopt.auxmol._atm[:num_grids, gto.PTR_COORD]
+        intopt.auxmol._env[np.vstack(
             (ptr, ptr+1, ptr+2)).T] = gridcoords[ibatch:max_grid]
         _build_VHFOpt(intopt, 1e-14, diag_block_with_triu=False, aosym=True)
         potential_real[ibatch:max_grid] -= 2.0 * \

@@ -312,8 +312,8 @@ class VHFOpt(_vhf.VHFOpt):
     
     @property
     def coeff(self):
-        nao = self._mol_.nao
-        if self._mol_.cart:
+        nao = self.mol.nao
+        if self.mol.cart:
             coeff = cupy.eye(nao)
             self._coeff = self.unsort_orbitals(coeff, axis=[1])
         else:
@@ -322,8 +322,8 @@ class VHFOpt(_vhf.VHFOpt):
 
     @property
     def aux_coeff(self):
-        naux = self._auxmol_.nao
-        if self._auxmol_.cart:
+        naux = self.auxmol.nao
+        if self.auxmol.cart:
             coeff = cupy.eye(naux)
             self._aux_coeff = self.unsort_orbitals(coeff, aux_axis=[1])
         else:

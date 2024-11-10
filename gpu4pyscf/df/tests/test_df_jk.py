@@ -54,7 +54,7 @@ class KnownValues(unittest.TestCase):
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
         intopt.build(1e-14, diag_block_with_triu=False, aosym=True)
         cupy.random.seed(np.asarray(1, dtype=np.uint64))
-        nao = intopt._mol_.nao
+        nao = intopt.mol.nao
         dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T
 
@@ -73,7 +73,7 @@ class KnownValues(unittest.TestCase):
         intopt = int3c2e.VHFOpt(mol_sph, auxmol, 'int2e')
         intopt.build(1e-14, diag_block_with_triu=False, aosym=True)
         cupy.random.seed(np.asarray(1, dtype=np.uint64))
-        nao = intopt._mol_.nao
+        nao = intopt.mol.nao
         dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T
         
