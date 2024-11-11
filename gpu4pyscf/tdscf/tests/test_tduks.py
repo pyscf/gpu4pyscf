@@ -49,17 +49,17 @@ class KnownValues(unittest.TestCase):
 
         mf_lda = mol.UKS().set(xc='lda', conv_tol=1e-12).to_gpu()
         mf_lda.grids.prune = None
-        cls.mf_lda = mf_lda.run()
+        cls.mf_lda = mf_lda.density_fit().run()
 
         mf_bp86 = mol.UKS().set(xc='b88,p86', conv_tol=1e-12).to_gpu()
         mf_bp86.grids.prune = None
-        cls.mf_bp86 = mf_bp86.run()
+        cls.mf_bp86 = mf_bp86.density_fit().run()
 
         mf_b3lyp = mol.UKS().set(xc='b3lyp5', conv_tol=1e-12).to_gpu()
         mf_b3lyp.grids.prune = None
         cls.mf_b3lyp = mf_b3lyp.density_fit().run()
 
-        cls.mf_m06l = mol.UKS().to_gpu().run(xc='m06l')
+        cls.mf_m06l = mol.UKS().to_gpu().density_fit().run(xc='m06l')
 
     @classmethod
     def tearDownClass(cls):
@@ -72,7 +72,7 @@ class KnownValues(unittest.TestCase):
         es = td.kernel(nstates=4)[0]
         e_ref = td.to_cpu().kernel(nstates=4)[0]
         self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 8)
-        self.assertAlmostEqual(lib.fp(es[:3]), 0.04757678947994772, 6)
+        self.assertAlmostEqual(lib.fp(es[:3]), 0.0476763425122965, 6)
 
         mol1 = self.mol1
         mf = mol1.UKS().run(xc='lda, vwn_rpa').run()
@@ -90,7 +90,7 @@ class KnownValues(unittest.TestCase):
         es = td.kernel(nstates=4)[0]
         e_ref = td.to_cpu().kernel(nstates=4)[0]
         self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 8)
-        self.assertAlmostEqual(lib.fp(es[:3]), 0.05374466608355896, 6)
+        self.assertAlmostEqual(lib.fp(es[:3]), 0.05383891686210346, 6)
 
     def test_tddft_lda(self):
         mf_lda = self.mf_lda
@@ -99,7 +99,7 @@ class KnownValues(unittest.TestCase):
         es = td.kernel(nstates=4)[0]
         ref = td.to_cpu().kernel(nstates=4)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
-        self.assertAlmostEqual(lib.fp(es[:3]), 0.04757678948025743, 6)
+        self.assertAlmostEqual(lib.fp(es[:3]), 0.0476763425122965, 6)
 
     def test_tddft_b88p86(self):
         mf_bp86 = self.mf_bp86
@@ -108,7 +108,7 @@ class KnownValues(unittest.TestCase):
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
-        self.assertAlmostEqual(lib.fp(es[:3]), 0.05374466608381663, 6)
+        self.assertAlmostEqual(lib.fp(es[:3]), 0.05383891686259823, 6)
 
         mol1 = self.mol1
         mf = mol1.UKS().run(xc='b88,p86').run()
@@ -142,7 +142,7 @@ class KnownValues(unittest.TestCase):
         td = mf_b3lyp.TDA()
         assert td.device == 'gpu'
         es = td.kernel(nstates=4)[0]
-        ref = td.to_cpu().kernel()[0]
+        ref = td.to_cpu().kernel(nstates=4)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
         self.assertAlmostEqual(lib.fp(es[:3]), 0.052638024165134974, 6)
 
@@ -153,7 +153,7 @@ class KnownValues(unittest.TestCase):
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
-        self.assertAlmostEqual(lib.fp(es[:3]), 0.05358614041555257, 6)
+        self.assertAlmostEqual(lib.fp(es[:3]), 0.05368082550881462, 6)
 
         mol1 = self.mol1
         mf = mol1.UKS().run(xc='lda,vwn').run()
@@ -171,7 +171,7 @@ class KnownValues(unittest.TestCase):
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref[:5]).max(), 0, 8)
-        self.assertAlmostEqual(lib.fp(es), -0.7531765338077471, 6)
+        self.assertAlmostEqual(lib.fp(es), -0.7530329968766932, 6)
 
     def test_tda_vind(self):
         mf = self.mf_bp86
