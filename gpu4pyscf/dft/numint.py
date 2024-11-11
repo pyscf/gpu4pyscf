@@ -439,11 +439,11 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao, nao0 = opt.coeff.shape
     dms = cupy.asarray(dms)
     dm_shape = dms.shape
-    dms = opt.sort_density_matrix(dms.reshape(-1,nao0,nao0))
+    dms = opt.sort_orbitals(dms.reshape(-1,nao0,nao0), axis=[1,2])
     nset = len(dms)
 
     if mo_coeff is not None:
-        mo_coeff = opt.sort_orbitals(mo_coeff)
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
 
     nelec = cupy.empty(nset)
     excsum = cupy.empty(nset)
@@ -527,7 +527,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         p0 = p1
         t1 = log.timer_debug2('integration', *t1)
     t0 = log.timer_debug1('vxc integration', *t0)
-    vmat = opt.transform_vxc_matrix(vmat)
+    vmat = opt.unsort_orbitals(vmat, axis=[1,2])
 
     if xctype != 'LDA':
         transpose_sum(vmat)
@@ -649,11 +649,11 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao, nao0 = opt.coeff.shape
     dms = cupy.asarray(dms)
     dm_shape = dms.shape
-    dms = opt.sort_density_matrix(dms.reshape(-1,nao0,nao0))
+    dms = opt.sort_orbitals(dms.reshape(-1,nao0,nao0), axis=[1,2])
     nset = len(dms)
 
     if mo_coeff is not None:
-        mo_coeff = opt.sort_orbitals(mo_coeff)
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
 
     nelec = cupy.zeros(nset)
     excsum = cupy.zeros(nset)
@@ -761,7 +761,7 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 raise NotImplementedError(f'numint.nr_rks for functional {xc_code}')
         t1 = log.timer_debug2('integration', *t1)
     t0 = log.timer_debug1('vxc integration', *t0)
-    vmat = opt.transform_vxc_matrix(vmat)
+    vmat = opt.unsort_orbitals(vmat, axis=[1,2])
 
     if xctype != 'LDA':
         transpose_sum(vmat)
@@ -793,12 +793,14 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao, nao0 = opt.coeff.shape
     dma, dmb = dms
     dm_shape = dma.shape
-    dma = opt.sort_density_matrix(cupy.asarray(dma).reshape(-1,nao0,nao0))
-    dmb = opt.sort_density_matrix(cupy.asarray(dmb).reshape(-1,nao0,nao0))
+    dma = cupy.asarray(dma).reshape(-1,nao0,nao0)
+    dmb = cupy.asarray(dmb).reshape(-1,nao0,nao0)
+    dma = opt.sort_orbitals(dma, axis=[1,2])
+    dmb = opt.sort_orbitals(dmb, axis=[1,2])
     nset = len(dma)
 
     if mo_coeff is not None:
-        mo_coeff = opt.sort_orbitals(mo_coeff)
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
 
     nelec = np.zeros((2,nset))
     excsum = np.zeros(nset)
@@ -868,8 +870,8 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             excsum[i] += cupy.dot(den_b, exc[:,0])
             t1 = log.timer_debug1('integration', *t1)
 
-    vmata = opt.transform_vxc_matrix(vmata)
-    vmatb = opt.transform_vxc_matrix(vmatb)
+    vmata = opt.unsort_orbitals(vmata, axis=[1,2])
+    vmatb = opt.unsort_orbitals(vmatb, axis=[1,2])
     if xctype != 'LDA':
         for i in range(nset):
             vmata[i] = vmata[i] + vmata[i].T
@@ -949,9 +951,11 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     # AO basis -> gdftopt AO basis
     with_mocc = hasattr(dms, 'mo1')
     if with_mocc:
-        mo1 = opt.sort_orbitals(dms.mo1) * 2.0**0.5
-        occ_coeff = opt.sort_orbitals(dms.occ_coeff) * 2.0**0.5
-    dms = opt.sort_density_matrix(dms.reshape(-1,nao0,nao0))
+        mo1 = opt.sort_orbitals(dms.mo1, axis=[1])
+        mo1 = mo1 * 2.0**0.5
+        occ_coeff = opt.sort_orbitals(dms.occ_coeff, axis=[0])
+        occ_coeff = occ_coeff * 2.0**0.5
+    dms = opt.sort_orbitals(dms.reshape(-1,nao0,nao0), axis=[1,2])
     nset = len(dms)
     vmat = cupy.zeros((nset, nao, nao))
 
@@ -1017,7 +1021,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         ao = c0 = rho1 = None
     t0 = log.timer_debug1('vxc', *t0)
 
-    vmat = opt.transform_vxc_matrix(vmat)
+    vmat = opt.unsort_orbitals(vmat, axis=[1,2])
     if xctype != 'LDA':
         transpose_sum(vmat)
 
@@ -1064,13 +1068,15 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     if with_mocc:
         mo1a, mo1b = dms.mo1
         occ_coeffa, occ_coeffb = dms.occ_coeff
-        mo1a = opt.sort_orbitals(mo1a)
-        mo1b = opt.sort_orbitals(mo1b)
-        occ_coeff_a = opt.sort_orbitals(occ_coeffa)
-        occ_coeff_b = opt.sort_orbitals(occ_coeffb)
+        mo1a = opt.sort_orbitals(mo1a, axis=[1])
+        mo1b = opt.sort_orbitals(mo1b, axis=[1])
+        occ_coeff_a = opt.sort_orbitals(occ_coeffa, axis=[0])
+        occ_coeff_b = opt.sort_orbitals(occ_coeffb, axis=[0])
 
-    dma = opt.sort_density_matrix(cupy.asarray(dma).reshape(-1,nao0,nao0))
-    dmb = opt.sort_density_matrix(cupy.asarray(dmb).reshape(-1,nao0,nao0))
+    dma = cupy.asarray(dma).reshape(-1,nao0,nao0)
+    dmb = cupy.asarray(dmb).reshape(-1,nao0,nao0)
+    dma = opt.sort_orbitals(dma, axis=[1,2])
+    dmb = opt.sort_orbitals(dmb, axis=[1,2])
 
     nset = len(dma)
     vmata = cupy.zeros((nset, nao, nao))
@@ -1149,8 +1155,8 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 vb += _tau_dot(ao, ao, wv[1,4])
                 add_sparse(vmata[i], va, mask)
                 add_sparse(vmatb[i], vb, mask)
-    vmata = opt.transform_vxc_matrix(vmata)
-    vmatb = opt.transform_vxc_matrix(vmatb)
+    vmata = opt.unsort_orbitals(vmata, axis=[1,2])
+    vmatb = opt.unsort_orbitals(vmatb, axis=[1,2])
     if xctype != 'LDA':
         # For real orbitals, K_{ia,bj} = K_{ia,jb}. It simplifies real fxc_jb
         # [(\nabla mu) nu + mu (\nabla nu)] * fxc_jb = ((\nabla mu) nu f_jb) + h.c.
@@ -1211,11 +1217,14 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao, nao0 = opt.coeff.shape
     mol = None
     _sorted_mol = opt._sorted_mol
-    dms = opt.sort_density_matrix(dms.reshape(-1,nao0,nao0))
+    
+    dms = dms.reshape(-1,nao0,nao0)
     assert len(dms) == 1
+    dms = opt.sort_orbitals(dms, axis=[1,2])
 
     if mo_coeff is not None:
-        mo_coeff = opt.coeff @ mo_coeff
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
+
     with_lapl = MGGA_DENSITY_LAPL
     ao_deriv = 1
     vvrho = []
@@ -1259,7 +1268,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     t1 = log.timer_debug1('integration', *t1)
 
     transpose_sum(vmat)
-    vmat = opt.transform_vxc_matrix(vmat)
+    vmat = opt.unsort_orbitals(vmat, axis=[0,1])
     log.timer_debug1('eval vv10', *t0)
     return nelec, excsum, vmat
 
@@ -1286,7 +1295,7 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
     mo_coeff = cupy.asarray(mo_coeff)
     nao = opt.coeff.shape[0]
     if mo_coeff.ndim == 2: # RHF
-        mo_coeff = opt.sort_orbitals(mo_coeff)
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
         rho = []
         t1 = t0 = log.init_timer()
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
@@ -1302,7 +1311,7 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
         t0 = log.timer_debug1('eval rho in fxc', *t0)
     else:
         assert spin == 1
-        mo_coeff = opt.sort_orbitals(mo_coeff)
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
         rhoa = []
         rhob = []
         t1 = t0 = log.init_timer()
@@ -1986,9 +1995,7 @@ class _GDFTOpt:
             coeff = np.vstack([coeff, np.zeros((paddings, coeff.shape[1]))])
         pmol._decontracted = True
         self._sorted_mol = pmol
-        inv_idx = np.argsort(ao_idx, kind='stable').astype(np.int32)
-        self.ao_idx = cupy.asarray(ao_idx, dtype=np.int32)
-        self.rev_ao_idx = cupy.asarray(inv_idx, dtype=np.int32)
+        self._ao_idx = cupy.asarray(ao_idx, dtype=np.int32)
         self.coeff = coeff[ao_idx]
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts)).astype(np.int32)
         self.l_bas_offsets = np.append(0, np.cumsum(l_counts)).astype(np.int32)
@@ -2015,38 +2022,40 @@ class _GDFTOpt:
         finally:
             libgdft.GDFTdel_envs(ctypes.byref(self.envs_cache))
 
-    def sort_orbitals(self, mo):
-        '''Transformation coeff @ mo
-        If mo contains multiple sets of orbitals, apply this transformation for each
+    def sort_orbitals(self, mat, axis=[]):
+        ''' Transform given axis of a matrix into sorted AO
         '''
-        idx = self.ao_idx
-        if mo.ndim == 2:
-            return mo[idx]
-        else:
-            assert mo.ndim == 3
-            return mo[:,idx]
+        idx = self._ao_idx
+        shape_ones = (1,) * mat.ndim
+        fancy_index = []
+        for dim, n in enumerate(mat.shape):
+            if dim in axis:
+                assert n == len(idx)
+                indices = idx
+            else:
+                indices = np.arange(n)
+            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
+            fancy_index.append(indices.reshape(idx_shape))
+        return mat[tuple(fancy_index)]
 
-    def sort_density_matrix(self, dm):
-        '''Transformation coeff @ dm @ coeff.T
-        If dm contains multiple density matrices, apply this transformation for each
+    def unsort_orbitals(self, sorted_mat, axis=[], out=None):
+        ''' Transform given axis of a matrix into original AO
         '''
-        idx = self.ao_idx
-        if dm.ndim == 2:
-            return dm[idx[:,None], idx]
-        else:
-            assert dm.ndim == 3
-            return dm[:,idx[:,None], idx]
-
-    def transform_vxc_matrix(self, vxc):
-        '''Transformation coeff.T @ vxc @ coeff
-        If vxc contains multiple matrices, apply this transformation for each
-        '''
-        idx = self.rev_ao_idx
-        if vxc.ndim == 2:
-            return vxc[idx[:,None], idx]
-        else:
-            assert vxc.ndim == 3
-            return vxc[:,idx[:,None], idx]
+        idx = self._ao_idx
+        shape_ones = (1,) * sorted_mat.ndim
+        fancy_index = []
+        for dim, n in enumerate(sorted_mat.shape):
+            if dim in axis:
+                assert n == len(idx)
+                indices = idx
+            else:
+                indices = np.arange(n)
+            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
+            fancy_index.append(indices.reshape(idx_shape))
+        if out is None:
+            out = cupy.empty_like(sorted_mat)
+        out[tuple(fancy_index)] = sorted_mat
+        return out
 
 class _GDFTEnvsCache(ctypes.Structure):
     pass

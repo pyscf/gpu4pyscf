@@ -69,8 +69,8 @@ class VHFOpt(_vhf.VHFOpt):
         self._sorted_mol = None     # sorted mol
         self._sorted_auxmol = None  # sorted auxilary mol
 
-        self.ao_idx = None
-        self.aux_ao_idx = None
+        self._ao_idx = None
+        self._aux_ao_idx = None
 
         self._intor = intor
         self._prescreen = prescreen
@@ -169,7 +169,7 @@ class VHFOpt(_vhf.VHFOpt):
         # Sorted AO indices
         ao_loc = mol.ao_loc_nr(cart=_mol.cart)
         ao_idx = np.array_split(np.arange(_mol.nao), ao_loc[1:-1])
-        self.ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
+        self._ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
 
         # cartesian ao index
         self.cart2sph = block_c2s_diag(self.angular, l_ctr_counts)
@@ -189,7 +189,7 @@ class VHFOpt(_vhf.VHFOpt):
 
         aux_loc = _auxmol.ao_loc_nr(cart=_auxmol.cart)
         ao_idx = np.array_split(np.arange(_auxmol.nao), aux_loc[1:-1])
-        self.aux_ao_idx = np.hstack([ao_idx[i] for i in sorted_aux_idx])
+        self._aux_ao_idx = np.hstack([ao_idx[i] for i in sorted_aux_idx])
 
         # cartesian aux index
         self.aux_cart2sph = block_c2s_diag(self.aux_angular, aux_l_ctr_counts)
@@ -269,10 +269,11 @@ class VHFOpt(_vhf.VHFOpt):
         self._sorted_auxmol = _sorted_auxmol
 
     def sort_orbitals(self, mat, axis=[], aux_axis=[]):
-        ''' Transform a matrix in AO into a matrix in sorted AO
+        ''' Transform given axis of a matrix into sorted AO,
+        and transform given auxiliary axis of a matrix into sorted auxiliary AO
         '''
-        idx = self.ao_idx
-        aux_idx = self.aux_ao_idx
+        idx = self._ao_idx
+        aux_idx = self._aux_ao_idx
         shape_ones = (1,) * mat.ndim
         fancy_index = []
         for dim, n in enumerate(mat.shape):
@@ -289,10 +290,11 @@ class VHFOpt(_vhf.VHFOpt):
         return mat[tuple(fancy_index)]
 
     def unsort_orbitals(self, sorted_mat, axis=[], aux_axis=[]):
-        ''' Transform a matrix in sorted AO into a matrix in the original AO
+        ''' Transform given axis of a matrix into sorted AO,
+        and transform given auxiliary axis of a matrix into original auxiliary AO
         '''
-        idx = self.ao_idx
-        aux_idx = self.aux_ao_idx
+        idx = self._ao_idx
+        aux_idx = self._aux_ao_idx
         shape_ones = (1,) * sorted_mat.ndim
         fancy_index = []
         for dim, n in enumerate(sorted_mat.shape):
@@ -566,9 +568,9 @@ def loop_aux_jk(intopt, ip_type='', omega=None, stream=None):
     if omega is None: omega = 0.0
     if stream is None: stream = cupy.cuda.get_current_stream()
 
-    nao = len(intopt.ao_idx)
-    nao_cart = intopt.mol.nao
-    naux_cart = intopt.auxmol.nao
+    nao = intopt.mol.nao
+    nao_cart = intopt._sorted_mol.nao
+    naux_cart = intopt._sorted_auxmol.nao
     norb_cart = nao_cart + naux_cart + 1
     ao_loc = intopt.ao_loc
     aux_ao_loc = intopt.aux_ao_loc
@@ -783,8 +785,8 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
     # vj and vk responses (due to int3c2e_ip1) to changes in atomic positions
     '''
     ao2atom = get_ao2atom(intopt, aoslices)
-    natom = len(aoslices)
-    nao = len(intopt.ao_idx)
+    natom = intopt.mol.natm
+    nao = intopt.mol.nao
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     nocc = orbo.shape[1]
     vj1_buf = cupy.zeros([3,nao,nao])
@@ -842,8 +844,8 @@ def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices, with_k=True, ome
     vj and vk responses (due to int3c2e_ip2) to changes in atomic positions
     '''
     aux2atom = get_aux2atom(intopt, auxslices)
-    natom = len(auxslices)
-    nao = len(intopt.ao_idx)
+    natom = intopt.mol.natm
+    nao = intopt.mol.nao
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     nocc = orbo.shape[1]
     vj1 = cupy.zeros([natom,3,nao,nocc])
@@ -1038,8 +1040,7 @@ def get_hess_nuc_elec(mol, dm):
     fakemol.stdout = mol.stdout
     intopt = VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
-    ao_idx = intopt.ao_idx
-    dm = take_last2d(cupy.asarray(dm), ao_idx)
+    dm = intopt.sort_orbitals(cupy.asarray(dm), axis=[0,1])
 
     natm = mol.natm
     nao = mol.nao
@@ -1205,9 +1206,6 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
             k0, k1 = aux_ao_loc[aux_id], aux_ao_loc[aux_id+1]
 
             int3c[:, k0:k1, j0:j1, i0:i1] = int3c_blk
-    #ao_idx = np.argsort(intopt.ao_idx)
-    #aux_idx = np.argsort(intopt.aux_ao_idx)
-    #int3c = int3c[cupy.ix_(np.arange(3), aux_idx, ao_idx, ao_idx)]
     int3c = intopt.unsort_orbitals(int3c, aux_axis=[1], axis=[2,3])
     return int3c.transpose([0,3,2,1])
 
@@ -1330,7 +1328,7 @@ def get_dh1e(mol, dm0):
     fakemol.stdout = mol.stdout
     intopt = VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
-    dm0_sorted = take_last2d(dm0, intopt.ao_idx)
+    dm0_sorted = intopt.sort_orbitals(dm0, axis=[0,1])
     dh1e = cupy.zeros([natm,3])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip1'):
         dh1e[k0:k1,:3] += contract('xkji,ij->kx', int3c_blk, dm0_sorted[i0:i1,j0:j1])
@@ -1349,7 +1347,7 @@ def get_d2h1e(mol, dm0):
     d2h1e_offdiag = cupy.zeros([natm, nao, 9])
     intopt = VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
-    dm0_sorted = take_last2d(dm0, intopt.ao_idx)
+    dm0_sorted = intopt.sort_orbitals(dm0, axis=[0,1])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipip1'):
         d2h1e_diag[k0:k1,:9] -= contract('xaji,ij->ax', int3c_blk, dm0_sorted[i0:i1,j0:j1])
         d2h1e_offdiag[k0:k1,i0:i1,:9] += contract('xaji,ij->aix', int3c_blk, dm0_sorted[i0:i1,j0:j1])

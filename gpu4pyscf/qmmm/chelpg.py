@@ -89,8 +89,6 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     intopt.cart_ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
     ncart = cart_ao_loc[-1]
     intopt.cart2sph = block_c2s_diag(intopt.angular, l_ctr_counts)
-    #inv_idx = np.argsort(intopt.sph_ao_idx, kind='stable').astype(np.int32)
-    #intopt.coeff = intopt.cart2sph[:, inv_idx]
 
     # pairing auxiliary basis with fake basis set
     fake_l_ctr_offsets = np.append(0, np.cumsum(fake_l_ctr_counts))
@@ -160,9 +158,9 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     intopt._sorted_mol = sorted_mol
     intopt._sorted_auxmol = sorted_auxmol
     if intopt.mol.cart:
-        intopt.ao_idx = intopt.cart_ao_idx
+        intopt._ao_idx = intopt.cart_ao_idx
     else:
-        intopt.ao_idx = intopt.sph_ao_idx
+        intopt._ao_idx = intopt.sph_ao_idx
 
 def eval_chelpg_layer_gpu(mf, deltaR=0.3, Rhead=2.8, ifqchem=True, Rvdw=modified_Bondi, verbose=None):
     """Cal chelpg charge

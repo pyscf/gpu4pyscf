@@ -183,8 +183,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
         opt = ni.gdftopt
     _sorted_mol = opt._sorted_mol
 
-    coeff = cupy.asarray(opt.coeff)
-    mo_coeff = contract('nij,pi->npj', mo_coeff, coeff)
+    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
     nao = mo_coeff.shape[1]
     # TODO: check mol in opt?
     vmata = cupy.zeros((6,nao,nao))
@@ -304,10 +303,10 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
     vmatb = vmatb[[0,1,2,
                  1,3,4,
                  2,4,5]]
-    vmata = contract('npq,qj->npj', vmata, coeff)
-    vmata = contract('pi,npj->nij', coeff, vmata).reshape(3,3,nao_sph,nao_sph)
-    vmatb = contract('npq,qj->npj', vmatb, coeff)
-    vmatb = contract('pi,npj->nij', coeff, vmatb).reshape(3,3,nao_sph,nao_sph)
+    vmata = opt.unsort_orbitals(vmata, axis=[1,2])
+    vmata = vmata.reshape(3,3,nao_sph,nao_sph)
+    vmatb = opt.unsort_orbitals(vmatb, axis=[1,2])
+    vmatb = vmatb.reshape(3,3,nao_sph,nao_sph)
     return vmata, vmatb
 
 def _make_dR_rho1(ao, ao_dm0, atm_id, aoslices, xctype):
@@ -400,8 +399,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
 
     coeff = cupy.asarray(opt.coeff)
     dm0a, dm0b = mf.make_rdm1(mo_coeff, mo_occ)
-    dm0a_sorted = take_last2d(dm0a, opt.ao_idx)
-    dm0b_sorted = take_last2d(dm0b, opt.ao_idx)
+    dm0a_sorted = opt.sort_orbitals(dm0a, axis=[0,1])
+    dm0b_sorted = opt.sort_orbitals(dm0b, axis=[0,1])
     vmata_dm = cupy.zeros((mol.natm,3,3,nao))
     vmatb_dm = cupy.zeros((mol.natm,3,3,nao))
     ipipa = cupy.zeros((3,3,nao,nao))
@@ -423,8 +422,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             _d1d2_dot_(ipipa, mol, aowa, ao[1:4], mask, ao_loc, False)
             aowb = [numint._scale_ao(ao[i], wv[1]) for i in range(1, 4)]
             _d1d2_dot_(ipipb, mol, aowb, ao[1:4], mask, ao_loc, False)
-            dm0a_mask = dm0a_sorted[numpy.ix_(mask, mask)]
-            dm0b_mask = dm0b_sorted[numpy.ix_(mask, mask)]
+            dm0a_mask = dm0a_sorted[mask, mask[:,None]]
+            dm0b_mask = dm0b_sorted[mask, mask[:,None]]
 
             ao_dma_mask = contract('nig,ij->njg', ao_mask[:4], dm0a_mask)
             ao_dmb_mask = contract('nig,ij->njg', ao_mask[:4], dm0b_mask)
@@ -451,8 +450,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             t1 = log.timer_debug2('integration', *t1)
         for ia in range(_sorted_mol.natm):
             p0, p1 = aoslices[ia][2:]
-            vmata_dm[ia] = vmata_dm[ia][:,:,opt.rev_ao_idx]
-            vmatb_dm[ia] = vmatb_dm[ia][:,:,opt.rev_ao_idx]
+            vmata_dm[ia][:,:,opt._ao_idx] = vmata_dm[ia]
+            vmatb_dm[ia][:,:,opt._ao_idx] = vmatb_dm[ia]
             vmata_dm[ia] += contract('xypq,pq->xyp', ipipa[:,:,:,p0:p1], dm0a[:,p0:p1])
             vmatb_dm[ia] += contract('xypq,pq->xyp', ipipb[:,:,:,p0:p1], dm0b[:,p0:p1])
     elif xctype == 'GGA':
@@ -476,8 +475,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0a = [numint._dot_ao_dm(mol, ao[i], dm0a, mask, shls_slice, ao_loc) for i in range(4)]
             ao_dm0b = [numint._dot_ao_dm(mol, ao[i], dm0b, mask, shls_slice, ao_loc) for i in range(4)]
             wf = weight * fxc
-            dm0a_mask = dm0a_sorted[numpy.ix_(mask, mask)]
-            dm0b_mask = dm0b_sorted[numpy.ix_(mask, mask)]
+            dm0a_mask = dm0a_sorted[mask, mask[:,None]]
+            dm0b_mask = dm0b_sorted[mask, mask[:,None]]
             ao_dma_mask = contract('nig,ij->njg', ao_mask[:4], dm0a_mask)
             ao_dmb_mask = contract('nig,ij->njg', ao_mask[:4], dm0b_mask)
             vmata_dm_tmp = cupy.empty([3,3,nao_non0])
@@ -507,8 +506,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0a = ao_dm0b = aow = None
             t1 = log.timer_debug2('integration', *t1)
         for ia in range(_sorted_mol.natm):
-            vmata_dm[ia] = vmata_dm[ia][:,:,opt.rev_ao_idx]
-            vmatb_dm[ia] = vmatb_dm[ia][:,:,opt.rev_ao_idx]
+            vmata_dm[ia][:,:,opt._ao_idx] = vmata_dm[ia]
+            vmatb_dm[ia][:,:,opt._ao_idx] = vmatb_dm[ia]
             p0, p1 = aoslices[ia][2:]
             vmata_dm[ia] += contract('xypq,pq->xyp', ipipa[:,:,:,p0:p1], dm0a[:,p0:p1])
             vmata_dm[ia] += contract('yxqp,pq->xyp', ipipa[:,:,p0:p1], dm0a[:,p0:p1])
@@ -546,8 +545,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             _d1d2_dot_(ipipb, mol, [aow[1], aow[3], aow[4]], [ao[YX], ao[YY], ao[YZ]], mask, ao_loc, False)
             _d1d2_dot_(ipipb, mol, [aow[2], aow[4], aow[5]], [ao[ZX], ao[ZY], ao[ZZ]], mask, ao_loc, False)
 
-            dm0a_mask = dm0a_sorted[numpy.ix_(mask, mask)]
-            dm0b_mask = dm0b_sorted[numpy.ix_(mask, mask)]
+            dm0a_mask = dm0a_sorted[mask, mask[:,None]]
+            dm0b_mask = dm0b_sorted[mask, mask[:,None]]
             ao_dm0a = [numint._dot_ao_dm(mol, ao[i], dm0a, mask, shls_slice, ao_loc) for i in range(4)]
             ao_dm0b = [numint._dot_ao_dm(mol, ao[i], dm0b, mask, shls_slice, ao_loc) for i in range(4)]
             ao_dma_mask = contract('nig,ij->njg', ao_mask[:4], dm0a_mask)
@@ -622,8 +621,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 vmatb_dm[ia][:,:,mask] += vmatb_dm_tmp
             t1 = log.timer_debug2('integration', *t1)
         for ia in range(_sorted_mol.natm):
-            vmata_dm[ia] = vmata_dm[ia][:,:,opt.rev_ao_idx]
-            vmatb_dm[ia] = vmatb_dm[ia][:,:,opt.rev_ao_idx]
+            vmata_dm[ia][:,:,opt._ao_idx] = vmata_dm[ia]
+            vmatb_dm[ia][:,:,opt._ao_idx] = vmatb_dm[ia]
             p0, p1 = aoslices[ia][2:]
             vmata_dm[ia] += contract('xypq,pq->xyp', ipipa[:,:,:,p0:p1], dm0a[:,p0:p1])
             vmata_dm[ia] += contract('yxqp,pq->xyp', ipipa[:,:,p0:p1], dm0a[:,p0:p1])

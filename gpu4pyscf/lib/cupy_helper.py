@@ -228,7 +228,10 @@ def dist_matrix(x, y, out=None):
 
 def block_c2s_diag(angular, counts):
     '''
-    constract a cartesian to spherical transformation of n shells
+    Diagonal blocked cartesian to spherical transformation
+    Args: 
+        angular (list): angular momentum type, e.g. [0,1,2,3]
+        counts (list): count of each angular momentum
     '''
     if _data['c2s'] is None:
         c2s_data = cupy.concatenate([cupy.asarray(x.ravel()) for x in c2s_l])
