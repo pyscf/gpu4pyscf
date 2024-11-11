@@ -289,12 +289,19 @@ def eval_rho3(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
         rho[tau_idx] *= .5
     return rho
 
-def eval_rho4(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
+def eval_rho4(mol, ao, mo0, mo1, non0tab=None, xctype='LDA', hermi=0,
               with_lapl=True, verbose=None):
-    ''' ao: nd x nao x ng
-        c0: nd x nocc x ng
-        mo1: na x nao x nocc
+    '''Evaluate density using first order orbitals. This density is typically
+    derived from the non-symmetric density matrix (hermi=0) in TDDFT
+    dm[i] = mo0.dot(mo1[i].T) and symmetric density matrix (hermi=1) in CPHF
+    dm[i] = mo0.dot(mo1[i].T) + mo1[i].dot(mo0.T)
+
+    ao: nd x nao x ng
+    mo0: nao x nocc
+    mo1: na x nao x nocc
     '''
+    log = logger.new_logger(mol, verbose)
+    t0 = log.init_timer()
     xctype = xctype.upper()
     if xctype == 'LDA' or xctype == 'HF':
         _, ngrids = ao.shape
@@ -302,30 +309,34 @@ def eval_rho4(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
         _, ngrids = ao[0].shape
 
     na = mo1.shape[0]
-    cpos1= mo1
     if xctype == 'LDA' or xctype == 'HF':
-        c_0 = contract('aio,ig->aog', cpos1, ao)#cupy.dot(cpos1.T, ao)
+        c0 = mo0.T.dot(ao)
+        t1 = log.timer_debug2('eval occ_coeff', *t0)
+        c_0 = contract('aio,ig->aog', mo1, ao)
         rho = cupy.empty([na,ngrids])
         for i in range(na):
             rho[i] = _contract_rho(c0, c_0[i])
-        rho *= 2.0
     elif xctype in ('GGA', 'NLC'):
-        log = logger.new_logger(mol, mol.verbose)
-        t0 = log.init_timer()
-        c_0 = contract('nig,aio->anog', ao, cpos1)
-        t0 = log.timer_debug2('ao * cpos', *t0)
+        c0 = contract('nig,io->nog', ao, mo0)
+        t1 = log.timer_debug2('eval occ_coeff', *t0)
+        c_0 = contract('nig,aio->anog', ao, mo1)
+        t1 = log.timer_debug2('ao * cpos', *t1)
         rho = cupy.empty([na, 4, ngrids])
         for i in range(na):
             _contract_rho_gga(c0, c_0[i], rho=rho[i])
-        t0 = log.timer_debug2('contract rho', *t0)
     else: # meta-GGA
         if with_lapl:
             raise NotImplementedError("mGGA with lapl not implemented")
+        c0 = contract('nig,io->nog', ao, mo0)
+        t1 = log.timer_debug2('eval occ_coeff', *t0)
         rho = cupy.empty((na,5,ngrids))
-        c_0 = contract('nig,aio->anog', ao, cpos1)
+        c_0 = contract('nig,aio->anog', ao, mo1)
         for i in range(na):
             _contract_rho_mgga(c0, c_0[i], rho=rho[i])
-
+    if hermi:
+        # corresponding to the density of ao * mo1[i].dot(mo0.T) * ao
+        rho *= 2.
+    t0 = log.timer_debug2('contract rho', *t0)
     return rho
 
 def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
@@ -951,11 +962,9 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     # AO basis -> gdftopt AO basis
     with_mocc = hasattr(dms, 'mo1')
     if with_mocc:
-        mo1 = opt.sort_orbitals(dms.mo1, axis=[1])
-        mo1 = mo1 * 2.0**0.5
-        occ_coeff = opt.sort_orbitals(dms.occ_coeff, axis=[0])
-        occ_coeff = occ_coeff * 2.0**0.5
-    dms = opt.sort_orbitals(dms.reshape(-1,nao0,nao0), axis=[1,2])
+        mo1 = opt.sort_orbitals(dms.mo1, axis=[1)
+        occ_coeff = opt.sort_orbitals(dms.occ_coeff) * 2.0
+    dms = opt.sort_orbitals(dms.reshape(-1,nao0,nao0), axis=[1,2)
     nset = len(dms)
     vmat = cupy.zeros((nset, nao, nao))
 
@@ -973,20 +982,14 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         # precompute molecular orbitals
         if with_mocc:
             occ_coeff_mask = occ_coeff[mask]
-            if xctype == 'LDA':
-                c0 = _dot_ao_dm(_sorted_mol, ao, occ_coeff_mask, None, None, None)
-            elif xctype == "GGA":
-                c0 = contract('nig,io->nog', ao, occ_coeff_mask)
-            else: # mgga
-                c0 = contract('nig,io->nog', ao, occ_coeff_mask)
-        t1 = log.timer_debug2(f'eval occ_coeff, with mocc: {with_mocc}', *t1)
-        if with_mocc:
-            rho1 = eval_rho4(_sorted_mol, ao, c0, mo1[:,mask], xctype=xctype, with_lapl=False)
+            rho1 = eval_rho4(_sorted_mol, ao, occ_coeff_mask, mo1[:,mask],
+                             xctype=xctype, hermi=hermi, with_lapl=False)
         else:
             # slow version
             rho1 = []
             for i in range(nset):
-                rho_tmp = eval_rho(_sorted_mol, ao, dms[i][np.ix_(mask,mask)], xctype=xctype, hermi=hermi, with_lapl=with_lapl)
+                rho_tmp = eval_rho(_sorted_mol, ao, dms[i][np.ix_(mask,mask)],
+                                   xctype=xctype, hermi=hermi, with_lapl=with_lapl)
                 rho1.append(rho_tmp)
             rho1 = cupy.stack(rho1, axis=0)
         t1 = log.timer_debug2('eval rho', *t1)
@@ -1018,7 +1021,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 add_sparse(vmat[i], vmat_tmp, mask)
 
         t1 = log.timer_debug2('integration', *t1)
-        ao = c0 = rho1 = None
+        ao = rho1 = None
     t0 = log.timer_debug1('vxc', *t0)
 
     vmat = opt.unsort_orbitals(vmat, axis=[1,2])
@@ -1097,27 +1100,21 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         if with_mocc:
             occ_coeff_a_mask = occ_coeff_a[mask]
             occ_coeff_b_mask = occ_coeff_b[mask]
-            if xctype == 'LDA':
-                c0_a = _dot_ao_dm(_sorted_mol, ao, occ_coeff_a_mask, None, None, None)
-                c0_b = _dot_ao_dm(_sorted_mol, ao, occ_coeff_b_mask, None, None, None)
-            elif xctype == "GGA":
-                c0_a = contract('nig,io->nog', ao, occ_coeff_a_mask)
-                c0_b = contract('nig,io->nog', ao, occ_coeff_b_mask)
-            else: # mgga
-                c0_a = contract('nig,io->nog', ao, occ_coeff_a_mask)
-                c0_b = contract('nig,io->nog', ao, occ_coeff_b_mask)
-
         if with_mocc:
-            rho1a = eval_rho4(_sorted_mol, ao, c0_a, mo1a[:,mask], xctype=xctype, with_lapl=with_lapl)
-            rho1b = eval_rho4(_sorted_mol, ao, c0_b, mo1b[:,mask], xctype=xctype, with_lapl=with_lapl)
+            rho1a = eval_rho4(_sorted_mol, ao, occ_coeff_a_mask, mo1a[:,mask],
+                              xctype=xctype, hermi=hermi, with_lapl=with_lapl)
+            rho1b = eval_rho4(_sorted_mol, ao, occ_coeff_b_mask, mo1b[:,mask],
+                              xctype=xctype, hermi=hermi, with_lapl=with_lapl)
         else:
             # slow version
             rho1a = []
             rho1b = []
             for i in range(nset):
-                rho_tmp = eval_rho(_sorted_mol, ao, dma[i][np.ix_(mask,mask)], xctype=xctype, hermi=hermi, with_lapl=with_lapl)
+                rho_tmp = eval_rho(_sorted_mol, ao, dma[i][np.ix_(mask,mask)],
+                                   xctype=xctype, hermi=hermi, with_lapl=with_lapl)
                 rho1a.append(rho_tmp)
-                rho_tmp = eval_rho(_sorted_mol, ao, dmb[i][np.ix_(mask,mask)], xctype=xctype, hermi=hermi, with_lapl=with_lapl)
+                rho_tmp = eval_rho(_sorted_mol, ao, dmb[i][np.ix_(mask,mask)],
+                                   xctype=xctype, hermi=hermi, with_lapl=with_lapl)
                 rho1b.append(rho_tmp)
             rho1a = cupy.stack(rho1a, axis=0)
             rho1b = cupy.stack(rho1b, axis=0)

@@ -36,12 +36,12 @@ class KnownValues(unittest.TestCase):
         cls.mf = mf = mol.RHF().to_gpu().run()
         cls.td_hf = mf.TDHF().run(conv_tol=1e-6)
 
-        mf_lda = mol.RKS().to_gpu()
+        mf_lda = mol.RKS().to_gpu().density_fit()
         mf_lda.xc = 'lda, vwn'
         mf_lda.grids.prune = None
         cls.mf_lda = mf_lda.run(conv_tol=1e-10)
 
-        mf_bp86 = mol.RKS().to_gpu()
+        mf_bp86 = mol.RKS().to_gpu().density_fit()
         mf_bp86.xc = 'b88,p86'
         mf_bp86.grids.prune = None
         cls.mf_bp86 = mf_bp86.run(conv_tol=1e-10)
@@ -51,7 +51,7 @@ class KnownValues(unittest.TestCase):
         mf_b3lyp.grids.prune = None
         cls.mf_b3lyp = mf_b3lyp.run(conv_tol=1e-10)
 
-        cls.mf_m06l = mol.RKS().to_gpu().run(xc='m06l', conv_tol=1e-10)
+        cls.mf_m06l = mol.RKS().to_gpu().density_fit().run(xc='m06l', conv_tol=1e-10)
 
     @classmethod
     def tearDownClass(cls):
@@ -61,10 +61,10 @@ class KnownValues(unittest.TestCase):
         mf_lda = self.mf_lda
         td = mf_lda.CasidaTDDFT()
         assert td.device == 'gpu'
-        es = td.kernel(nstates=5)[0] * 27.2114
-        ref = [9.67249402,  9.67249402, 14.79447862, 30.32465371, 30.32465371]
+        es = td.kernel(nstates=5)[0]
+        ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 5)
-        self.assertAlmostEqual(lib.fp(es), -41.100806721759945, 5)
+        self.assertAlmostEqual(lib.fp(es), -1.5103950945691957, 5)
 
     def test_nohbrid_b88p86(self):
         mf_bp86 = self.mf_bp86
@@ -73,14 +73,16 @@ class KnownValues(unittest.TestCase):
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel()[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
-        self.assertAlmostEqual(lib.fp(es), -1.486949764908942, 6)
+        self.assertAlmostEqual(lib.fp(es), -1.4869180666784665, 6)
 
     def test_tddft_lda(self):
         mf_lda = self.mf_lda
         td = mf_lda.TDDFT()
         assert td.device == 'gpu'
-        es = td.kernel(nstates=5)[0] * 27.2114
-        self.assertAlmostEqual(lib.fp(es), -41.100806721759945, 5)
+        es = td.kernel(nstates=5)[0]
+        ref = td.to_cpu().kernel(nstates=5)[0]
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
+        self.assertAlmostEqual(lib.fp(es), -1.5103950945691957, 6)
 
     def test_tddft_b88p86(self):
         mf_bp86 = self.mf_bp86
@@ -90,7 +92,7 @@ class KnownValues(unittest.TestCase):
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
-        self.assertAlmostEqual(lib.fp(es), -1.486949764908942, 6)
+        self.assertAlmostEqual(lib.fp(es), -1.4869180666784665, 6)
 
     def test_tddft_b3lyp(self):
         mf_b3lyp = self.mf_b3lyp
@@ -120,17 +122,19 @@ class KnownValues(unittest.TestCase):
         mf.scf()
         td = mf.TDA().to_gpu()
         assert td.device == 'gpu'
-        es = td.kernel(nstates=5)[0] * 27.2114
-        self.assertAlmostEqual(lib.fp(es), -41.385520327568869, 4)
-        ref = td.to_cpu().kernel(nstates=5)[0] * 27.2114
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 6)
+        es = td.kernel(nstates=5)[0]
+        ref = td.to_cpu().kernel(nstates=5)[0]
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
+        self.assertAlmostEqual(lib.fp(es), -1.520888995669812, 6)
 
     def test_tda_lda(self):
         mf_lda = self.mf_lda
         td = mf_lda.TDA()
         assert td.device == 'gpu'
-        es = td.kernel(nstates=5)[0] * 27.2114
-        self.assertAlmostEqual(lib.fp(es), -41.201828219760415, 4)
+        es = td.kernel(nstates=5)[0]
+        ref = td.to_cpu().kernel(nstates=5)[0]
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
+        self.assertAlmostEqual(lib.fp(es), -1.5141057378565799, 6)
 
     def test_tda_b3lyp_triplet(self):
         mf_b3lyp = self.mf_b3lyp
@@ -148,19 +152,20 @@ class KnownValues(unittest.TestCase):
         td = mf_lda.TDA()
         assert td.device == 'gpu'
         td.singlet = False
-        es = td.kernel(nstates=6)[0] * 27.2114
-        self.assertAlmostEqual(lib.fp(es[[0,1,2,4,5]]), -39.988118769202416, 5)
-        ref = [9.0139312, 9.0139312, 12.42444659, 29.38040677, 29.63058493, 29.63058493]
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 4)
+        es = td.kernel(nstates=6)[0]
+        ref = td.to_cpu().kernel(nstates=6)[0]
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
+        self.assertAlmostEqual(lib.fp(es[[0,1,2,4,5]]), -1.4695846533898422, 6)
 
     def test_tddft_b88p86_triplet(self):
         mf_bp86 = self.mf_bp86
         td = mf_bp86.TDDFT()
         assert td.device == 'gpu'
         td.singlet = False
-        es = td.kernel(nstates=5)[0] * 27.2114
-        ref = [9.09315203, 9.09315203, 12.29837275, 29.26724001, 29.26724001]
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 4)
+        es = td.kernel(nstates=5)[0]
+        ref = td.to_cpu().kernel(nstates=5)[0]
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
+        self.assertAlmostEqual(lib.fp(es), -1.4412243124430528, 6)
 
     def test_tda_rsh(self):
         mol = gto.M(atom='H 0 0 0.6; H 0 0 0', basis = "6-31g")
@@ -181,7 +186,7 @@ class KnownValues(unittest.TestCase):
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
-        self.assertAlmostEqual(lib.fp(es), -1.5621175117266533, 6)
+        self.assertAlmostEqual(lib.fp(es), -1.5620823865741496, 6)
 
     def test_analyze(self):
         td_hf = self.td_hf

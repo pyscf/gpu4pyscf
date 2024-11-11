@@ -56,6 +56,7 @@ void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, 
     }
 }
 
+// half of the GGA rho
 __global__
 void GDFTcontract_rho4_kernel(double *rho, double *bra, double *ket, int ngrids, int nao, int count)
 {
@@ -109,7 +110,7 @@ void GDFTcontract_rho_gga_kernel(double *rho, double *bra, double *ket, int ngri
     double v[4] = {0.0, 0.0, 0.0, 0.0};
     if (active){
         for (int ao_id = threadIdx.y; ao_id < nao; ao_id += BLKSIZEY) {
-            int ket_idx = grid_id + ao_id * Ngrids;
+            size_t ket_idx = grid_id + ao_id * Ngrids;
             double bra_tmp = bra[ket_idx];
             double ket_tmp = ket[ket_idx];
 
@@ -143,7 +144,7 @@ void GDFTcontract_rho_gga_kernel(double *rho, double *bra, double *ket, int ngri
         if (blockDim.y >= 2  && iy < 1)  buf[ixy] += buf[ixy + BLKSIZEX * 1];  __syncthreads();
 
         if (iy == 0 && active) {
-            rho[grid_id + ngrids * i] = 2.0 * buf[ix];
+            rho[grid_id + ngrids * i] = buf[ix];
         }
     }
 }
@@ -161,7 +162,7 @@ void GDFTcontract_rho_mgga_kernel(double *rho, double *bra, double *ket, int ngr
     double v[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
     if (active){
         for (int ao_id = threadIdx.y; ao_id < nao; ao_id += BLKSIZEY) {
-            int ket_idx = grid_id + ao_id * Ngrids;
+            size_t ket_idx = grid_id + ao_id * Ngrids;
             double bra_tmp0 = bra[ket_idx];
             double ket_tmp0 = ket[ket_idx];
 
@@ -207,7 +208,7 @@ void GDFTcontract_rho_mgga_kernel(double *rho, double *bra, double *ket, int ngr
         if (blockDim.y >= 2  && iy < 1)  buf[ixy] += buf[ixy + BLKSIZEX * 1];  __syncthreads();
 
         if (iy == 0 && active) {
-            rho[grid_id + ngrids * i] = 2.0 * buf[ix];
+            rho[grid_id + ngrids * i] = buf[ix];
         }
     }
 }
