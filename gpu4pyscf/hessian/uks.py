@@ -422,8 +422,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             _d1d2_dot_(ipipa, mol, aowa, ao[1:4], mask, ao_loc, False)
             aowb = [numint._scale_ao(ao[i], wv[1]) for i in range(1, 4)]
             _d1d2_dot_(ipipb, mol, aowb, ao[1:4], mask, ao_loc, False)
-            dm0a_mask = dm0a_sorted[mask, mask[:,None]]
-            dm0b_mask = dm0b_sorted[mask, mask[:,None]]
+            dm0a_mask = dm0a_sorted[mask[:,None], mask]
+            dm0b_mask = dm0b_sorted[mask[:,None], mask]
 
             ao_dma_mask = contract('nig,ij->njg', ao_mask[:4], dm0a_mask)
             ao_dmb_mask = contract('nig,ij->njg', ao_mask[:4], dm0b_mask)
@@ -475,8 +475,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0a = [numint._dot_ao_dm(mol, ao[i], dm0a, mask, shls_slice, ao_loc) for i in range(4)]
             ao_dm0b = [numint._dot_ao_dm(mol, ao[i], dm0b, mask, shls_slice, ao_loc) for i in range(4)]
             wf = weight * fxc
-            dm0a_mask = dm0a_sorted[mask, mask[:,None]]
-            dm0b_mask = dm0b_sorted[mask, mask[:,None]]
+            dm0a_mask = dm0a_sorted[mask[:,None], mask]
+            dm0b_mask = dm0b_sorted[mask[:,None], mask]
             ao_dma_mask = contract('nig,ij->njg', ao_mask[:4], dm0a_mask)
             ao_dmb_mask = contract('nig,ij->njg', ao_mask[:4], dm0b_mask)
             vmata_dm_tmp = cupy.empty([3,3,nao_non0])
@@ -545,8 +545,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             _d1d2_dot_(ipipb, mol, [aow[1], aow[3], aow[4]], [ao[YX], ao[YY], ao[YZ]], mask, ao_loc, False)
             _d1d2_dot_(ipipb, mol, [aow[2], aow[4], aow[5]], [ao[ZX], ao[ZY], ao[ZZ]], mask, ao_loc, False)
 
-            dm0a_mask = dm0a_sorted[mask, mask[:,None]]
-            dm0b_mask = dm0b_sorted[mask, mask[:,None]]
+            dm0a_mask = dm0a_sorted[mask[:,None], mask]
+            dm0b_mask = dm0b_sorted[mask[:,None], mask]
             ao_dm0a = [numint._dot_ao_dm(mol, ao[i], dm0a, mask, shls_slice, ao_loc) for i in range(4)]
             ao_dm0b = [numint._dot_ao_dm(mol, ao[i], dm0b, mask, shls_slice, ao_loc) for i in range(4)]
             ao_dma_mask = contract('nig,ij->njg', ao_mask[:4], dm0a_mask)
