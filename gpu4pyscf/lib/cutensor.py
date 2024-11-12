@@ -42,20 +42,20 @@ def _auto_create_mode(array, mode):
             'ndim mismatch: {} != {}'.format(array.ndim, mode.ndim))
     return mode
 
-def _create_tensor_descriptor(a):
-    handle = cutensor._get_handle()
-    key = (handle.ptr, a.dtype, tuple(a.shape), tuple(a.strides))
-    # hard coded
-    alignment_req = 8
-    if key not in _tensor_descriptors:
-        num_modes = a.ndim
-        extent = np.array(a.shape, dtype=np.int64)
-        stride = np.array(a.strides, dtype=np.int64) // a.itemsize
-        cutensor_dtype = cutensor._get_cutensor_dtype(a.dtype)
-        _tensor_descriptors[key] = cutensor.TensorDescriptor(
-            handle.ptr, num_modes, extent.ctypes.data, stride.ctypes.data,
-            cutensor_dtype, alignment_req=alignment_req)
-    return _tensor_descriptors[key]
+#def _create_tensor_descriptor(a):
+#    handle = cutensor._get_handle()
+#    key = (handle.ptr, a.dtype, tuple(a.shape), tuple(a.strides))
+#    # hard coded
+#    alignment_req = 8
+#    if key not in _tensor_descriptors:
+#        num_modes = a.ndim
+#        extent = np.array(a.shape, dtype=np.int64)
+#        stride = np.array(a.strides, dtype=np.int64) // a.itemsize
+#        cutensor_dtype = cutensor._get_cutensor_dtype(a.dtype)
+#        _tensor_descriptors[key] = cutensor.TensorDescriptor(
+#            handle.ptr, num_modes, extent.ctypes.data, stride.ctypes.data,
+#            cutensor_dtype, alignment_req=alignment_req)
+#    return _tensor_descriptors[key]
 
 def contraction(
     pattern, a, b, alpha, beta,
@@ -80,14 +80,14 @@ def contraction(
     mode_b = list(str_b)
     mode_c = list(str_c)
 
-    if(out is not None):
-        c = out
-    else:
-        c = cupy.empty([shape[k] for k in str_c], order='C')
+    if out is None:
+        dtype = np.result_type(a, b, alpha)
+        out = cupy.empty([shape[k] for k in str_c], order='C', dtype=dtype)
+    c = out
 
-    desc_a = _create_tensor_descriptor(a)
-    desc_b = _create_tensor_descriptor(b)
-    desc_c = _create_tensor_descriptor(c)
+    desc_a = cutensor.create_tensor_descriptor(a)
+    desc_b = cutensor.create_tensor_descriptor(b)
+    desc_c = cutensor.create_tensor_descriptor(c)
 
     mode_a = _auto_create_mode(a, mode_a)
     mode_b = _auto_create_mode(b, mode_b)
