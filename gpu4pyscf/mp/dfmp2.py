@@ -100,8 +100,7 @@ class DFMP2(mp2.MP2):
         mo_coeff = cupy.asarray(mo_coeff, order='C')
         Lov = None
         with_df = self.with_df
-        ao_idx = with_df.intopt.ao_idx
-        mo_coeff = mo_coeff[ao_idx]
+        mo_coeff = with_df.intopt.sort_orbitals(mo_coeff, axis=[0])
         orbo = mo_coeff[:,:nocc]
         orbv = mo_coeff[:,nocc:]
         blksize = with_df.get_blksize()

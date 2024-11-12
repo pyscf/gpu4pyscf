@@ -86,7 +86,7 @@ def basis_seg_contraction(mol, allow_replica=False):
     pmol.output = mol.output
     pmol.verbose = mol.verbose
     pmol.stdout = mol.stdout
-    pmol.cart = True
+    pmol.cart = True #mol.cart
     pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
     pmol._env = _env
     return pmol

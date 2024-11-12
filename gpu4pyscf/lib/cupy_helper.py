@@ -226,9 +226,12 @@ def dist_matrix(x, y, out=None):
         raise RuntimeError('failed in calculating distance matrix')
     return out
 
-def block_c2s_diag(ncart, nsph, angular, counts):
+def block_c2s_diag(angular, counts):
     '''
-    constract a cartesian to spherical transformation of n shells
+    Diagonal blocked cartesian to spherical transformation
+    Args: 
+        angular (list): angular momentum type, e.g. [0,1,2,3]
+        counts (list): count of each angular momentum
     '''
     if _data['c2s'] is None:
         c2s_data = cupy.concatenate([cupy.asarray(x.ravel()) for x in c2s_l])
@@ -246,7 +249,8 @@ def block_c2s_diag(ncart, nsph, angular, counts):
         offsets += [c2s_offset[l]] * count
     rows = cupy.hstack(rows)
     cols = cupy.hstack(cols)
-
+    
+    ncart, nsph = int(rows[-1]), int(cols[-1])
     cart2sph = cupy.zeros([ncart, nsph])
     offsets = cupy.asarray(offsets, dtype='int32')
 

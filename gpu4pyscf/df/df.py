@@ -91,7 +91,7 @@ class DF(lib.StreamObject):
         log.timer_debug1('prepare intopt', *t0)
         self.j2c = j2c.copy()
 
-        j2c = take_last2d(j2c, intopt.aux_ao_idx)
+        j2c = intopt.sort_orbitals(j2c, aux_axis=[0,1])
         try:
             self.cd_low = cholesky(j2c)
             self.cd_low = tag_array(self.cd_low, tag='cd')
