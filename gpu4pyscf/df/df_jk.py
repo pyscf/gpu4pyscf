@@ -268,11 +268,11 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
 
     assert nao == dfobj.nao
     vj = vk = None
-    ao_idx = dfobj.intopt.ao_idx
-    dms = take_last2d(dms, ao_idx)
+    intopt = dfobj.intopt
+    dms = intopt.sort_orbitals(dms, axis=[1,2])
     dms_shape = dms.shape
-    rows = dfobj.intopt.cderi_row
-    cols = dfobj.intopt.cderi_col
+    rows = intopt.cderi_row
+    cols = intopt.cderi_col
 
     if with_j:
         dm_sparse = dms[:,rows,cols]
@@ -280,7 +280,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
             dm_sparse += dms[:,cols,rows]
         else:
             dm_sparse *= 2
-        dm_sparse[:, dfobj.intopt.cderi_diag] *= .5
+        dm_sparse[:, intopt.cderi_diag] *= .5
 
     if with_k:
         vk = cupy.zeros_like(dms)
@@ -293,11 +293,12 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
         nmo = mo_occ.shape[-1]
         mo_coeff = mo_coeff.reshape(-1,nao,nmo)
         mo_occ   = mo_occ.reshape(-1,nmo)
+        mo_coeff = intopt.sort_orbitals(mo_coeff, axis=[1])
         nocc = 0
         occ_coeff = [0]*nset
         for i in range(nset):
             occ_idx = mo_occ[i] > 0
-            occ_coeff[i] = mo_coeff[i][:,occ_idx][ao_idx] * mo_occ[i][occ_idx]**0.5
+            occ_coeff[i] = mo_coeff[i][:,occ_idx] * mo_occ[i][occ_idx]**0.5
             nocc += mo_occ[i].sum()
         blksize = dfobj.get_blksize(extra=nao*nocc)
         if with_j:
@@ -331,8 +332,8 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
         if not isinstance(mo1s, (tuple, list)):
             mo1s = [mo1s]
 
-        occ_coeffs = [occ_coeff[ao_idx] for occ_coeff in occ_coeffs]
-        mo1s = [mo1[:,ao_idx] for mo1 in mo1s]
+        occ_coeffs = [intopt.sort_orbitals(occ_coeff, axis=[0]) for occ_coeff in occ_coeffs]
+        mo1s = [intopt.sort_orbitals(mo1, axis=[1]) for mo1 in mo1s]
 
         if with_j:
             vj_sparse = cupy.zeros_like(dm_sparse)
@@ -384,12 +385,11 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
             vj[:,cols,rows] = vj_sparse
         rhok = None
 
-    rev_ao_idx = dfobj.intopt.rev_ao_idx
     if with_j:
-        vj = take_last2d(vj, rev_ao_idx)
+        vj = intopt.unsort_orbitals(vj, axis=[1,2])
         vj = vj.reshape(out_shape)
     if with_k:
-        vk = take_last2d(vk, rev_ao_idx)
+        vk = intopt.unsort_orbitals(vk, axis=[1,2])
         vk = vk.reshape(out_shape)
     t1 = log.timer_debug1('vj and vk', *t1)
     if out_cupy:
