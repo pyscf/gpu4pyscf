@@ -26,8 +26,9 @@ from pyscf.pbc.scf import hf as hf_cpu
 from gpu4pyscf.pbc import df
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import hf as mol_hf
-from gpu4pyscf.lib.cupy_helper import return_cupy_array, cond
+from gpu4pyscf.lib.cupy_helper import return_cupy_array, cond, contract
 from gpu4pyscf.lib import utils
+#from gpu4pyscf.dft.rks import KohnShamDFT
 
 __all__ = [
     'RHF', 'SCF'
@@ -122,7 +123,7 @@ class SCF(mol_hf.SCF):
 
     def check_sanity(self):
         if (isinstance(self.exxdiv, str) and self.exxdiv.lower() != 'ewald' and
-            isinstance(self.with_df, df.df.DF)):
+            isinstance(self.with_df, df.DF)):
             logger.warn(self, 'exxdiv %s is not supported in DF', self.exxdiv)
 
         if self.verbose >= logger.DEBUG:
@@ -133,14 +134,25 @@ class SCF(mol_hf.SCF):
     kpts = hf_cpu.SCF.kpts
     mol = hf_cpu.SCF.mol # required by the hf.kernel
 
-    get_bands = get_bands
-    get_rho = get_rho
-
     reset = hf_cpu.SCF.reset
     build = hf_cpu.SCF.build
     dump_flags = hf_cpu.SCF.dump_flags
-    get_hcore = return_cupy_array(hf_cpu.SCF.get_hcore)
+
+    get_bands = get_bands
+    get_rho = get_rho
+
     get_ovlp = return_cupy_array(hf_cpu.SCF.get_ovlp)
+
+    def get_hcore(self, cell=None, kpt=None):
+        if cell is None: cell = self.cell
+        if kpt is None: kpt = self.kpt
+        if cell.pseudo:
+            nuc = self.with_df.get_pp(kpt)
+        else:
+            nuc = self.with_df.get_nuc(kpt)
+        if len(cell._ecpbas) > 0:
+            raise NotImplementedError('ECP in PBC SCF')
+        return nuc + cp.asarray(cell.pbc_intor('int1e_kin', 1, 1, kpt))
 
     def get_jk(self, cell=None, dm=None, hermi=1, kpt=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, **kwargs):
@@ -194,7 +206,13 @@ class SCF(mol_hf.SCF):
     get_veff = hf_cpu.SCF.get_veff
     energy_nuc = hf_cpu.SCF.energy_nuc
     _finalize = hf_cpu.SCF._finalize
-    get_init_guess = return_cupy_array(hf_cpu.SCF.get_init_guess)
+
+    def get_init_guess(self, cell=None, key='minao', s1e=None):
+        if cell is None: cell = self.cell
+        dm = mol_hf.SCF.get_init_guess(self, cell, key)
+        dm = normalize_dm_(self, dm, s1e)
+        return dm
+
     init_guess_by_1e = hf_cpu.SCF.init_guess_by_1e
     init_guess_by_chkfile = hf_cpu.SCF.init_guess_by_chkfile
     from_chk = hf_cpu.SCF.from_chk
@@ -206,15 +224,6 @@ class SCF(mol_hf.SCF):
     x2c = x2c1e = sfx2c1e = NotImplemented
     spin_square = NotImplemented
     dip_moment = NotImplemented
-
-class KohnShamDFT:
-    '''A mock DFT base class
-
-    The base class is defined in the pbc.dft.rks module. This class can
-    be used to verify if an SCF object is an pbc-Hartree-Fock method or an
-    pbc-DFT method. It should be overwritten by the actual KohnShamDFT class
-    when loading dft module.
-    '''
 
 
 class RHF(SCF):
@@ -235,3 +244,17 @@ def _format_jks(vj, dm, kpts_band):
     elif getattr(dm, "ndim", 0) == 2:
         vj = vj[0]
     return vj
+
+def normalize_dm_(mf, dm, s1e=None):
+    '''
+    Force density matrices integrated to the correct number of electrons.
+    '''
+    cell = mf.cell
+    if s1e is None:
+        s1e = mf.get_ovlp(cell)
+    ne = contract('ij,ji->', dm, s1e).real
+    if abs(ne - cell.nelectron) > 0.01:
+        logger.debug(mf, 'Big errors in the electron number of initial guess '
+                     'density matrix (Ne/cell = %g)!', ne)
+        dm *= cell.nelectron / ne
+    return dm

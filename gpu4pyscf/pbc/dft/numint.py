@@ -25,8 +25,45 @@ from gpu4pyscf.dft import numint
 from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract
 from gpu4pyscf.lib import utils
 
-eval_ao = return_cupy_array(numint_cpu.eval_ao)
-eval_ao_kpts = return_cupy_array(numint_cpu.eval_ao_kpts)
+def eval_ao(cell, coords, kpt=np.zeros(3), deriv=0, relativity=0, shls_slice=None,
+            non0tab=None, cutoff=None, out=None, verbose=None):
+    '''Collocate AO crystal orbitals (opt. gradients) on the real-space grid.
+
+    Args:
+        cell : instance of :class:`Cell`
+
+        coords : (nx*ny*nz, 3) ndarray
+            The real-space grid point coordinates.
+
+    Kwargs:
+        kpt : (3,) ndarray
+            The k-point corresponding to the crystal AO.
+        deriv : int
+            AO derivative order.  It affects the shape of the return array.
+            If deriv=0, the returned AO values are stored in a (N,nao) array.
+            Otherwise the AO values are stored in an array of shape (M,N,nao).
+            Here N is the number of grids, nao is the number of AO functions,
+            M is the size associated to the derivative deriv.
+
+    Returns:
+        aoR : ([4,] nx*ny*nz, nao=cell.nao_nr()) ndarray
+            The value of the AO crystal orbitals on the real-space grid by default.
+            If deriv=1, also contains the value of the orbitals gradient in the
+            x, y, and z directions.  It can be either complex or float array,
+            depending on the kpt argument.  If kpt is not given (gamma point),
+            aoR is a float array.
+    '''
+    ao_kpts = eval_ao_kpts(cell, coords, np.reshape(kpt, (-1,3)), deriv)
+    return ao_kpts[0]
+
+def eval_ao_kpts(cell, coords, kpts=None, deriv=0, relativity=0,
+                 shls_slice=None, non0tab=None, cutoff=None, out=None, verbose=None):
+    '''
+    Returns:
+        ao_kpts: (nkpts, [comp], ngrids, nao) ndarray
+            AO values at each k-point
+    '''
+    return [cp.asarray(ao) for ao in numint_cpu.eval_ao_kpts(cell, coords, kpts, deriv)]
 
 
 def eval_rho(cell, ao, dm, non0tab=None, xctype='LDA', hermi=0, with_lapl=False,
@@ -235,7 +272,7 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
                            hermi, with_lapl, verbose)
                   for k in range(nkpts)]
         dtype = np.result_type(*rho_ks)
-        rho = np.zeros(rho_ks[0].shape, dtype=dtype)
+        rho = cp.zeros(rho_ks[0].shape, dtype=dtype)
         for k in range(nkpts):
             rho += rho_ks[k]
         rho *= 1./nkpts

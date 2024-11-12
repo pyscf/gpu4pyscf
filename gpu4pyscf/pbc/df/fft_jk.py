@@ -76,24 +76,24 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
         vR = cp.zeros((nset,ngrids))
         ao_ks = ni.eval_ao(cell, mydf.grids.coords, kpts)
         for i in range(nset):
-            rhoR = ni.eval_rho(ao_ks, dm_kpts[i], hermi=hermi).real
+            rhoR = ni.eval_rho(cell, ao_ks, dm_kpts[i], hermi=hermi).real
             rhoG = tools.fft(rhoR, mesh)
             vG = coulG * rhoG
             vR = tools.ifft(vG, mesh).real
             vR *= cell.vol / ngrids
             for k, ao in enumerate(ao_ks):
-                aow = ao * vR[i,:,None]
+                aow = ao * vR[:,None]
                 vj_kpts[i,k] += ao.conj().T.dot(aow)
     else:
         ao_ks = ni.eval_ao(cell, mydf.grids.coords, kpts)
         for i in range(nset):
-            rhoR = ni.eval_rho(ao_ks, dm_kpts[i], hermi=hermi)
+            rhoR = ni.eval_rho(cell, ao_ks, dm_kpts[i], hermi=hermi)
             rhoG = tools.fft(rhoR, mesh)
             vG = coulG * rhoG
             vR = tools.ifft(vG, mesh)
             vR *= cell.vol / ngrids
             for k, ao in enumerate(ao_ks):
-                aow = ao * vR[i,:,None]
+                aow = ao * vR[:,None]
                 vj_kpts[i,k] += ao.conj().T.dot(aow)
 
     return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
@@ -147,9 +147,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     nband = len(kpts_band)
 
     if is_zero(kpts_band) and is_zero(kpts):
-        vk_kpts = np.zeros((nset,nband,nao,nao), dtype=dms.dtype)
+        vk_kpts = cp.zeros((nset,nband,nao,nao), dtype=dms.dtype)
     else:
-        vk_kpts = np.zeros((nset,nband,nao,nao), dtype=np.complex128)
+        vk_kpts = cp.zeros((nset,nband,nao,nao), dtype=np.complex128)
 
     coords = mydf.grids.coords
     ao2_kpts = ni.eval_ao(cell, coords, kpts=kpts)
@@ -170,14 +170,16 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     blksize = 32
 
     for k2, ao2 in enumerate(ao2_kpts):
+        ao2T = ao2.T
         kpt2 = kpts[k2]
         naoj = ao2.shape[1]
         if mo2_kpts is None:
-            ao_dms = [dms[i,k2].dot(ao2.conj().T) for i in range(nset)]
+            ao_dms = [dms[i,k2].dot(ao2T.conj()) for i in range(nset)]
         else:
-            ao_dms = [ao2.conj().T]
+            ao_dms = [ao2T.conj()]
 
         for k1, ao1 in enumerate(ao1_kpts):
+            ao1T = ao1.T
             kpt1 = kpts_band[k1]
 
             # If we have an ewald exxdiv, we add the G=0 correction near the
@@ -193,7 +195,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
                 expmikr = cp.exp(-1j * cp.asarray(coords.dot(kpt2-kpt1)))
 
             for p0, p1 in lib.prange(0, nao, blksize):
-                rho1 = np.einsum('gi,gj->ijg', ao1[:,p0:p1].conj()*expmikr, ao2)
+                rho1 = contract('ig,jg->ijg', ao1T[p0:p1].conj()*expmikr, ao2T)
                 vG = tools.fft(rho1.reshape(-1,ngrids), mesh)
                 rho1 = None
                 vG *= coulG
@@ -243,7 +245,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None,
         The function returns one J and one K matrix, corresponding to the input
         density matrix (both order and shape).
     '''
-    dm = np.asarray(dm, order='C')
+    dm = cp.asarray(dm, order='C')
     vj = vk = None
     if with_j:
         vj = get_j(mydf, dm, hermi, kpt, kpts_band)
@@ -274,7 +276,7 @@ def get_j(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None):
         The function returns one J matrix, corresponding to the input
         density matrix (both order and shape).
     '''
-    dm = np.asarray(dm, order='C')
+    dm = cp.asarray(dm, order='C')
     nao = dm.shape[-1]
     dm_kpts = dm.reshape(-1,1,nao,nao)
     vj = get_j_kpts(mydf, dm_kpts, hermi, kpt.reshape(1,3), kpts_band)
@@ -308,7 +310,7 @@ def get_k(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, exxdiv=None):
         The function returns one J and one K matrix, corresponding to the input
         density matrix (both order and shape).
     '''
-    dm = np.asarray(dm, order='C')
+    dm = cp.asarray(dm, order='C')
     nao = dm.shape[-1]
     dm_kpts = dm.reshape(-1,1,nao,nao)
     vk = get_k_kpts(mydf, dm_kpts, hermi, kpt.reshape(1,3), kpts_band, exxdiv)

@@ -33,7 +33,7 @@ from gpu4pyscf.pbc.dft import numint
 from gpu4pyscf.lib import utils
 
 __all__ = [
-    'get_nuc', 'get_pp', 'FFTDF'
+    'get_nuc', 'get_pp', 'get_SI', 'FFTDF'
 ]
 
 def get_nuc(mydf, kpts=None):
@@ -42,9 +42,9 @@ def get_nuc(mydf, kpts=None):
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
     mesh = mydf.mesh
-    charge = -cell.atom_charges()
+    charge = cp.asarray(-cell.atom_charges())
     Gv = cell.get_Gv(mesh)
-    SI = cell.get_SI(mesh=mesh)
+    SI = get_SI(cell, mesh=mesh)
     rhoG = charge.dot(SI)
 
     coulG = tools.get_coulG(cell, mesh=mesh, Gv=Gv)
@@ -75,7 +75,7 @@ def get_pp(mydf, kpts=None):
     assert cell.dimension > 1
     mesh = mydf.mesh
     Gv = cell.get_Gv(mesh)
-    SI = cell.get_SI(mesh=mesh)
+    SI = get_SI(cell, mesh=mesh)
     vpplocG = pseudo.get_vlocG(cell, Gv)
     vpplocG = -np.einsum('ij,ij->j', SI, vpplocG)
     vpplocG = cp.asarray(vpplocG)
@@ -161,6 +161,44 @@ def get_pp(mydf, kpts=None):
     if is_single_kpt:
         vpp = vpp[0]
     return vpp
+
+def get_SI(cell, Gv=None, mesh=None, atmlst=None):
+    '''Calculate the structure factor (0D, 1D, 2D, 3D) for all atoms; see MH (3.34).
+
+    Args:
+        cell : instance of :class:`Cell`
+
+        Gv : (N,3) array
+            G vectors
+
+        atmlst : list of ints, optional
+            Indices of atoms for which the structure factors are computed.
+
+    Returns:
+        SI : (natm, ngrids) ndarray, dtype=np.complex128
+            The structure factor for each atom at each G-vector.
+    '''
+    coords = cp.asarray(cell.atom_coords())
+    if atmlst is not None:
+        coords = coords[np.asarray(atmlst)]
+    if Gv is None:
+        if mesh is None:
+            mesh = cell.mesh
+        basex, basey, basez = cell.get_Gv_weights(mesh)[1]
+        basex = cp.asarray(basex)
+        basey = cp.asarray(basey)
+        basez = cp.asarray(basez)
+        b = cp.asarray(cell.reciprocal_vectors())
+        rb = coords.dot(b.T)
+        SIx = cp.exp(-1j*rb[:,0,None] * basex)
+        SIy = cp.exp(-1j*rb[:,1,None] * basey)
+        SIz = cp.exp(-1j*rb[:,2,None] * basez)
+        SI = SIx[:,:,None,None] * SIy[:,None,:,None] * SIz[:,None,None,:]
+        natm = coords.shape[0]
+        SI = SI.reshape(natm, -1)
+    else:
+        SI = cp.exp(-1j*coords.dot(cp.asarray(Gv).T))
+    return SI
 
 
 class FFTDF(lib.StreamObject):
