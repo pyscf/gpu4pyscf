@@ -34,7 +34,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
     if isinstance(mf, hf.KohnShamDFT):
         grids = mf.cphf_grids
         if grids.coords is None:
-            grids.build(with_non0tab=False, sort_grids=True)
+            grids.build(mol=mol, with_non0tab=False, sort_grids=True)
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
         if getattr(mf, 'nlc', '') != '':
@@ -142,7 +142,7 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
     if isinstance(mf, hf.KohnShamDFT):
         grids = mf.cphf_grids
         if grids.coords is None:
-            grids.build(with_non0tab=False, sort_grids=True)
+            grids.build(mol=mol, with_non0tab=False, sort_grids=True)
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
         if mf.do_nlc():
