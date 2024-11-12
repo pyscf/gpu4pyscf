@@ -32,6 +32,9 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
     if mo_occ is None: mo_occ = mf.mo_occ
     mol = mf.mol
     if isinstance(mf, hf.KohnShamDFT):
+        grids = mf.cphf_grids
+        if grids.coords is None:
+            grids.build(with_non0tab=False, sort_grids=True)
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
         if getattr(mf, 'nlc', '') != '':
@@ -51,7 +54,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
         else:
             spin = 1
         rho0, vxc, fxc = ni.cache_xc_kernel(
-            mol, mf.grids, mf.xc, mo_coeff, mo_occ, spin, max_memory=max_memory)
+            mol, grids, mf.xc, mo_coeff, mo_occ, spin, max_memory=max_memory)
         dm0 = None
 
         if singlet is None:
@@ -61,7 +64,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                 if hermi == 2:
                     v1 = cupy.zeros_like(dm1)
                 else:
-                    v1 = ni.nr_rks_fxc(mol, mf.grids, mf.xc, dm0, dm1, 0, hermi,
+                    v1 = ni.nr_rks_fxc(mol, grids, mf.xc, dm0, dm1, 0, hermi,
                                        rho0, vxc, fxc, max_memory=max_memory)
                 if hybrid:
                     if hermi != 2:
@@ -83,7 +86,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                     v1 = cupy.zeros_like(dm1)
                 else:
                     # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
-                    v1 = ni.nr_rks_fxc_st(mol, mf.grids, mf.xc, dm0, dm1, 0, True,
+                    v1 = ni.nr_rks_fxc_st(mol, grids, mf.xc, dm0, dm1, 0, True,
                                           rho0, vxc, fxc, max_memory=max_memory)
                 if hybrid:
                     if hermi != 2:
@@ -105,7 +108,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                     v1 = cupy.zeros_like(dm1)
                 else:
                     # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
-                    v1 = ni.nr_rks_fxc_st(mol, mf.grids, mf.xc, dm0, dm1, 0, False,
+                    v1 = ni.nr_rks_fxc_st(mol, grids, mf.xc, dm0, dm1, 0, False,
                                           rho0, vxc, fxc, max_memory=max_memory)
                 if hybrid:
                     vk = mf.get_k(mol, dm1, hermi=hermi)
@@ -137,6 +140,9 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
     if mo_occ is None: mo_occ = mf.mo_occ
     mol = mf.mol
     if isinstance(mf, hf.KohnShamDFT):
+        grids = mf.cphf_grids
+        if grids.coords is None:
+            grids.build(with_non0tab=False, sort_grids=True)
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
         if mf.do_nlc():
@@ -146,7 +152,7 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
         hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
-        rho0, vxc, fxc = ni.cache_xc_kernel(mol, mf.grids, mf.xc,
+        rho0, vxc, fxc = ni.cache_xc_kernel(mol, grids, mf.xc,
                                             mo_coeff, mo_occ, 1)
         dm0 = None
 
@@ -158,7 +164,7 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
             if hermi == 2:
                 v1 = cupy.zeros_like(dm1)
             else:
-                v1 = ni.nr_uks_fxc(mol, mf.grids, mf.xc, dm0, dm1, 0, hermi,
+                v1 = ni.nr_uks_fxc(mol, grids, mf.xc, dm0, dm1, 0, hermi,
                                    rho0, vxc, fxc, max_memory=max_memory)
             if not hybrid:
                 if with_j:

@@ -253,6 +253,14 @@ class KohnShamDFT(rks.KohnShamDFT):
         self.nlcgrids = gen_grid.Grids(self.mol)
         self.nlcgrids.level = getattr(
             __config__, 'dft_rks_RKS_nlcgrids_level', self.nlcgrids.level)
+        
+        # Default CPHF grids is SG1 grids
+        # Reference:
+        # https://gaussian.com/integral/?tabid=1#Integral_keyword__Grid_option
+        self.cphf_grids = gen_grid.Grids(self.mol)
+        self.cphf_grids.prune = gen_grid.sg1_prune
+        self.cphf_grids.atom_grid = (50,194)
+        
         # Use rho to filter grids
         self.small_rho_cutoff = getattr(
             __config__, 'dft_rks_RKS_small_rho_cutoff', 1e-7)
@@ -293,6 +301,7 @@ class RKS(KohnShamDFT, hf.RHF):
         hf.SCF.reset(self, mol)
         self.grids.reset(mol)
         self.nlcgrids.reset(mol)
+        self.cphf_grids.reset(mol)
         self._numint.reset()
         return self
 
