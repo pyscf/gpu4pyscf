@@ -963,7 +963,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     with_mocc = hasattr(dms, 'mo1')
     if with_mocc:
         mo1 = opt.sort_orbitals(dms.mo1, axis=[1])
-        occ_coeff = opt.sort_orbitals(dms.occ_coeff) * 2.0
+        occ_coeff = opt.sort_orbitals(dms.occ_coeff, axis=[0]) * 2.0
     dms = opt.sort_orbitals(dms.reshape(-1,nao0,nao0), axis=[1,2])
     nset = len(dms)
     vmat = cupy.zeros((nset, nao, nao))
