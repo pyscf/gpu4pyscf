@@ -62,13 +62,6 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     dms = _format_dms(dm_kpts, kpts)
     nset, nkpts, nao = dms.shape[:3]
 
-    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
-    nband = len(kpts_band)
-    if is_zero(kpts_band):
-        vj_kpts = cp.zeros((nset,nband,nao,nao))
-    else:
-        vj_kpts = cp.zeros((nset,nband,nao,nao), dtype=np.complex128)
-
     coulG = tools.get_coulG(cell, mesh=mesh)
     ngrids = len(coulG)
 
@@ -79,22 +72,30 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
             rhoR = ni.eval_rho(cell, ao_ks, dm_kpts[i], hermi=hermi).real
             rhoG = tools.fft(rhoR, mesh)
             vG = coulG * rhoG
-            vR = tools.ifft(vG, mesh).real
-            vR *= cell.vol / ngrids
-            for k, ao in enumerate(ao_ks):
-                aow = ao * vR[:,None]
-                vj_kpts[i,k] += ao.conj().T.dot(aow)
+            vR[i] = tools.ifft(vG, mesh).real
     else:
+        vR = cp.zeros((nset,ngrids), dtype=np.complex128)
         ao_ks = ni.eval_ao(cell, mydf.grids.coords, kpts)
         for i in range(nset):
             rhoR = ni.eval_rho(cell, ao_ks, dm_kpts[i], hermi=hermi)
             rhoG = tools.fft(rhoR, mesh)
             vG = coulG * rhoG
-            vR = tools.ifft(vG, mesh)
-            vR *= cell.vol / ngrids
-            for k, ao in enumerate(ao_ks):
-                aow = ao * vR[:,None]
-                vj_kpts[i,k] += ao.conj().T.dot(aow)
+            vR[i] = tools.ifft(vG, mesh)
+
+    vR *= cell.vol / ngrids
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    nband = len(kpts_band)
+    if is_zero(kpts_band):
+        vj_kpts = cp.zeros((nset,nband,nao,nao))
+    else:
+        vj_kpts = cp.zeros((nset,nband,nao,nao), dtype=np.complex128)
+
+    if input_band is not None:
+        ao_ks = ni.eval_ao(cell, mydf.grids.coords, kpts_band)
+    for k, ao in enumerate(ao_ks):
+        for i in range(nset):
+            aow = ao * vR[i,:,None]
+            vj_kpts[i,k] += ao.conj().T.dot(aow)
 
     return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
 

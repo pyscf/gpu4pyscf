@@ -28,7 +28,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.lib.cupy_helper import return_cupy_array, cond, contract
 from gpu4pyscf.lib import utils
-#from gpu4pyscf.dft.rks import KohnShamDFT
+from gpu4pyscf.pbc.dft import KohnShamDFT
 
 __all__ = [
     'RHF', 'SCF'
@@ -51,8 +51,8 @@ def get_bands(mf, kpts_band, cell=None, dm=None, kpt=None):
     single_kpt_band = (getattr(kpts_band, 'ndim', None) == 1)
     kpts_band = kpts_band.reshape(-1,3)
 
-    fock = mf.get_hcore(cell, kpts_band)
-    fock = fock + mf.get_veff(cell, dm, kpt=kpt, kpts_band=kpts_band)
+    fock = mf.get_veff(cell, dm, kpt=kpt, kpts_band=kpts_band)
+    fock += mf.get_hcore(cell, kpts_band)
     s1e = mf.get_ovlp(cell, kpts_band)
     nkpts = len(kpts_band)
     mo_energy = []

@@ -29,3 +29,5 @@ from .gen_grid import UniformGrids, BeckeGrids
 #UKS = uks.UKS
 #KRKS = krks.KRKS
 #KUKS = kuks.KUKS
+
+class KohnShamDFT: pass

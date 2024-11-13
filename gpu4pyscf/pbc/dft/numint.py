@@ -236,8 +236,7 @@ class NumInt(lib.StreamObject, numint.LibXCMixin):
     device = utils.device
 
     def to_cpu(self):
-        obj = utils.to_cpu(self)
-        return obj.reset()
+        return numint_cpu.NumInt()
 
 _NumInt = NumInt
 
@@ -297,7 +296,6 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
     device = utils.device
 
     def to_cpu(self):
-        obj = utils.to_cpu(self)
-        return obj.reset()
+        return numint_cpu.KNumInt()
 
 _KNumInt = KNumInt
