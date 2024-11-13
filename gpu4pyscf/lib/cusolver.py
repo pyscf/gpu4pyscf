@@ -66,10 +66,43 @@ libcusolver.cusolverDnDsygvd.argtypes = [
     ctypes.c_void_p   # *devInfo
 ]
 
+# https://docs.nvidia.com/cuda/cusolver/index.html#cusolverdn-t-sygvd
+libcusolver.cusolverDnZhegvd_bufferSize.argtypes = [
+    ctypes.c_void_p, # handle
+    ctypes.c_int,    # itype
+    ctypes.c_int,    # jobz
+    ctypes.c_int,    # uplo
+    ctypes.c_int,    # n
+    ctypes.c_void_p, # *A
+    ctypes.c_int,    # lda
+    ctypes.c_void_p, # *B
+    ctypes.c_int,    # ldb
+    ctypes.c_void_p, # *w
+    ctypes.c_void_p  # *lwork
+]
+
+libcusolver.cusolverDnZhegvd.argtypes = [
+    ctypes.c_void_p,  # handle
+    ctypes.c_int,     # itype
+    ctypes.c_int,     # jobz
+    ctypes.c_int,     # uplo
+    ctypes.c_int,     # n
+    ctypes.c_void_p,  # *A
+    ctypes.c_int,     # lda
+    ctypes.c_void_p,  # *B
+    ctypes.c_int,     # ldb
+    ctypes.c_void_p,  # *w
+    ctypes.c_void_p,  # *work
+    ctypes.c_int,     # lwork
+    ctypes.c_void_p   # *devInfo
+]
+
 def eigh(h, s):
     '''
     solve generalized eigenvalue problem
     '''
+    assert h.dtype == s.dtype
+    assert h.dtype in (np.float64, np.complex128)
     n = h.shape[0]
     w = cupy.zeros(n)
     A = h.copy()
@@ -77,11 +110,15 @@ def eigh(h, s):
     _handle = device.get_cusolver_handle()
 
     # TODO: reuse workspace
-    if n in _buffersize:
-        lwork = _buffersize[n]
+    if (h.dtype, n) in _buffersize:
+        lwork = _buffersize[h.dtype, n]
     else:
-        lwork = ctypes.c_int()
-        status = libcusolver.cusolverDnDsygvd_bufferSize(
+        lwork = ctypes.c_int(0)
+        if h.dtype == np.float64:
+            fn = libcusolver.cusolverDnDsygvd_bufferSize
+        else:
+            fn = libcusolver.cusolverDnZhegvd_bufferSize
+        status = fn(
             _handle,
             CUSOLVER_EIG_TYPE_1,
             CUSOLVER_EIG_MODE_VECTOR,
@@ -98,10 +135,14 @@ def eigh(h, s):
 
         if status != 0:
             raise RuntimeError("failed in buffer size")
-    
-    work = cupy.empty(lwork)
+
+    if h.dtype == np.float64:
+        fn = libcusolver.cusolverDnDsygvd
+    else:
+        fn = libcusolver.cusolverDnZhegvd
+    work = cupy.empty(lwork, dtype=h.dtype)
     devInfo = cupy.empty(1, dtype=np.int32)
-    status = libcusolver.cusolverDnDsygvd(
+    status = fn(
         _handle,
         CUSOLVER_EIG_TYPE_1,
         CUSOLVER_EIG_MODE_VECTOR,
@@ -116,7 +157,7 @@ def eigh(h, s):
         lwork,
         devInfo.data.ptr
     )
-    
+
     if status != 0:
         raise RuntimeError("failed in eigh kernel")
     return w, A.T
@@ -126,10 +167,14 @@ def cholesky(A):
     assert A.flags['C_CONTIGUOUS']
     x = A.copy()
     handle = device.get_cusolver_handle()
-    potrf = cusolver.dpotrf
-    potrf_bufferSize = cusolver.dpotrf_bufferSize
+    if A.dtype == np.float64:
+        potrf = cusolver.dpotrf
+        potrf_bufferSize = cusolver.dpotrf_bufferSize
+    else:
+        potrf = cusolver.zpotrf
+        potrf_bufferSize = cusolver.zpotrf_bufferSize
     buffersize = potrf_bufferSize(handle, cublas.CUBLAS_FILL_MODE_UPPER, n, x.data.ptr, n)
-    workspace = cupy.empty(buffersize)
+    workspace = cupy.empty(buffersize, dtype=A.dtype)
     dev_info = cupy.empty(1, dtype=np.int32)
     potrf(handle, cublas.CUBLAS_FILL_MODE_UPPER, n, x.data.ptr, n,
         workspace.data.ptr, buffersize, dev_info.data.ptr)
