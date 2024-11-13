@@ -19,7 +19,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import hf, uhf
 
 def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
-                      singlet=None, hermi=0, max_memory=None):
+                      singlet=None, hermi=0, grids=None, max_memory=None):
     '''Generate a function to compute the product of RHF response function and
     RHF density matrices.
 
@@ -31,9 +31,11 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
     if mo_coeff is None: mo_coeff = mf.mo_coeff
     if mo_occ is None: mo_occ = mf.mo_occ
     mol = mf.mol
+    
     if isinstance(mf, hf.KohnShamDFT):
-        grids = mf.cphf_grids
-        if grids.coords is None:
+        if grids is None:
+            grids = mf.grids
+        if grids and grids.coords is None:
             grids.build(mol=mol, with_non0tab=False, sort_grids=True)
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
@@ -131,7 +133,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
 
 
 def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
-                      with_j=True, hermi=0, max_memory=None):
+                      with_j=True, hermi=0, grids=None, max_memory=None):
     '''Generate a function to compute the product of UHF response function and
     UHF density matrices.
     '''
@@ -140,8 +142,9 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
     if mo_occ is None: mo_occ = mf.mo_occ
     mol = mf.mol
     if isinstance(mf, hf.KohnShamDFT):
-        grids = mf.cphf_grids
-        if grids.coords is None:
+        if grids is None:
+            grids = mf.grids
+        if grids and grids.coords is None:
             grids.build(mol=mol, with_non0tab=False, sort_grids=True)
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
