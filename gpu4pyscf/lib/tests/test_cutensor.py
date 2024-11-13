@@ -38,6 +38,13 @@ class KnownValues(unittest.TestCase):
         c_contract = contract('lkji,jk->il', a, b[10:20,10:20])
         assert cupy.linalg.norm(c_einsum - c_contract) < 1e-10
 
+    def test_complex_valued(self):
+        a = cupy.random.rand(10,9,11) + cupy.random.rand(10,9,11)*1j
+        b = cupy.random.rand(11,7,13) + cupy.random.rand(11,7,13)*1j
+        c_einsum = cupy.einsum('ijk,ikl->jl', a[3:9,:,4:10], b[3:9,:6, 7:13])
+        c_contract = contract('ijk,ikl->jl', a[3:9,:,4:10], b[3:9,:6, 7:13])
+        assert cupy.linalg.norm(c_einsum - c_contract) < 1e-10
+
     def test_cache(self):
         a = cupy.random.rand(20,20,20,20)
         b = cupy.random.rand(20,20)
