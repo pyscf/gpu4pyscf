@@ -49,17 +49,22 @@ class KnownValues(unittest.TestCase):
 
         mf_lda = mol.UKS().set(xc='lda', conv_tol=1e-12).to_gpu()
         mf_lda.grids.prune = None
+        mf_lda.cphf_grids = mf_lda.grids
         cls.mf_lda = mf_lda.density_fit().run()
 
         mf_bp86 = mol.UKS().set(xc='b88,p86', conv_tol=1e-12).to_gpu()
         mf_bp86.grids.prune = None
+        mf_bp86.cphf_grids = mf_bp86.grids
         cls.mf_bp86 = mf_bp86.density_fit().run()
 
         mf_b3lyp = mol.UKS().set(xc='b3lyp5', conv_tol=1e-12).to_gpu()
         mf_b3lyp.grids.prune = None
+        mf_b3lyp.cphf_grids = mf_b3lyp.grids
         cls.mf_b3lyp = mf_b3lyp.density_fit().run()
 
-        cls.mf_m06l = mol.UKS().to_gpu().density_fit().run(xc='m06l')
+        mf_m06l = mol.UKS().to_gpu().density_fit().run(xc='m06l')
+        mf_m06l.cphf_grids = mf_m06l.grids
+        cls.mf_m06l = mf_m06l
 
     @classmethod
     def tearDownClass(cls):
@@ -76,6 +81,7 @@ class KnownValues(unittest.TestCase):
 
         mol1 = self.mol1
         mf = mol1.UKS().run(xc='lda, vwn_rpa').run()
+        mf.cphf_grids = mf.grids
         td = mf.CasidaTDDFT().to_gpu()
         assert td.device == 'gpu'
         td.nstates = 5
@@ -112,6 +118,7 @@ class KnownValues(unittest.TestCase):
 
         mol1 = self.mol1
         mf = mol1.UKS().run(xc='b88,p86').run()
+        mf.cphf_grids = mf.grids
         td = mf.TDDFT().to_gpu()
         assert td.device == 'gpu'
         es = td.kernel(nstates=5)[0]
@@ -130,6 +137,7 @@ class KnownValues(unittest.TestCase):
     def test_tddft_camb3lyp(self):
         mol1 = self.mol1
         mf = mol1.UKS(xc='camb3lyp').run()
+        mf.cphf_grids = mf.grids
         td = mf.TDDFT().to_gpu()
         assert td.device == 'gpu'
         es = td.kernel(nstates=4)[0]
@@ -157,6 +165,7 @@ class KnownValues(unittest.TestCase):
 
         mol1 = self.mol1
         mf = mol1.UKS().run(xc='lda,vwn').run()
+        mf.cphf_grids = mf.grids
         td = mf.TDA().to_gpu()
         assert td.device == 'gpu'
         td.nstates = 5
