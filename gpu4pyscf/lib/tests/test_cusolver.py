@@ -42,7 +42,7 @@ def test_eigh_cmplx():
     ref = scipy.linalg.eigh(a, b)
     e, c = eigh(cp.asarray(a), cp.asarray(b))
     assert abs(e.get() - ref[0]).max() < 1e-10
-    ovlp = c.get().T.dot(b).dot(ref[1])
+    ovlp = c.get().conj().T.dot(b).dot(ref[1])
     assert abs(abs(ovlp) - np.eye(n)).max() < 1e-10
 
 def test_cholesky_real():
