@@ -396,7 +396,6 @@ class SCF(pyscf_lib.StreamObject):
     get_fock                 = get_fock
     get_occ                  = get_occ
     get_grad                 = staticmethod(get_grad)
-    get_veff                 = get_veff
     dump_chk                 = hf.SCF.dump_chk
     init_guess_by_minao      = hf.SCF.init_guess_by_minao
     init_guess_by_atom       = hf.SCF.init_guess_by_atom

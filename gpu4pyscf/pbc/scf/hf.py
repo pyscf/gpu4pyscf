@@ -23,12 +23,10 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.pbc.scf import hf as hf_cpu
-from gpu4pyscf.pbc import df
-from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import logger, utils
+from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract
 from gpu4pyscf.scf import hf as mol_hf
-from gpu4pyscf.lib.cupy_helper import return_cupy_array, cond, contract
-from gpu4pyscf.lib import utils
-from gpu4pyscf.pbc.dft import KohnShamDFT
+from gpu4pyscf.pbc import df
 
 __all__ = [
     'RHF', 'SCF'
@@ -171,7 +169,7 @@ class SCF(mol_hf.SCF):
         if dm is None: dm = self.make_rdm1()
         if kpt is None: kpt = self.kpt
 
-        cpu0 = (logger.process_clock(), logger.perf_counter())
+        cpu0 = logger.init_timer(self)
         dm = cp.asarray(dm)
         nao = dm.shape[-1]
         vj, vk = self.with_df.get_jk(dm.reshape(-1,nao,nao), hermi, kpt, kpts_band,
@@ -224,6 +222,16 @@ class SCF(mol_hf.SCF):
     x2c = x2c1e = sfx2c1e = NotImplemented
     spin_square = NotImplemented
     dip_moment = NotImplemented
+
+
+class KohnShamDFT:
+    '''A mock DFT base class
+
+    The base class is defined in the pbc.dft.rks module. This class can
+    be used to verify if an SCF object is an pbc-Hartree-Fock method or an
+    pbc-DFT method. It should be overwritten by the actual KohnShamDFT class
+    when loading dft module.
+    '''
 
 
 class RHF(SCF):

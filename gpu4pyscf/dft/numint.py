@@ -459,6 +459,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         excsum[i] = cupy.dot(den, exc[:,0])
 
         wv.append(vxc * grids.weights)
+        # *.5 for v+v.conj().T at the end
         if xctype == 'GGA':
             wv[i][0] *= .5
         if xctype == 'MGGA':

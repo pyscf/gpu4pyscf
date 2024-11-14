@@ -24,7 +24,6 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.lib.kpts_helper import is_zero, member
 from pyscf.pbc.df.df_jk import _format_dms, _format_kpts_band, _format_jks
-from gpu4pyscf.dft import numint
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
@@ -127,7 +126,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     mesh = mydf.mesh
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
-    coords = cell.gen_uniform_grids(mesh)
+    coords = mydf.grids.coords
     ngrids = coords.shape[0]
 
     if getattr(dm_kpts, 'mo_coeff', None) is not None:
@@ -152,7 +151,6 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     else:
         vk_kpts = cp.zeros((nset,nband,nao,nao), dtype=np.complex128)
 
-    coords = mydf.grids.coords
     ao2_kpts = ni.eval_ao(cell, coords, kpts=kpts)
     if input_band is None:
         ao1_kpts = ao2_kpts
@@ -193,7 +191,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
             if is_zero(kpt1-kpt2):
                 expmikr = cp.array(1.)
             else:
-                expmikr = cp.exp(-1j * cp.asarray(coords.dot(kpt2-kpt1)))
+                expmikr = cp.exp(-1j * coords.dot(cp.asarray(kpt2-kpt1)))
 
             for p0, p1 in lib.prange(0, nao, blksize):
                 rho1 = contract('ig,jg->ijg', ao1T[p0:p1].conj()*expmikr, ao2T)

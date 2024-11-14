@@ -26,17 +26,16 @@ from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.df.aft import _check_kpts, ft_ao
 from pyscf.pbc.gto import pseudo
 from pyscf.pbc.lib.kpts_helper import is_zero
-from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.df import fft_jk
-from gpu4pyscf.pbc.dft import numint
-from gpu4pyscf.lib import utils
 
 __all__ = [
     'get_nuc', 'get_pp', 'get_SI', 'FFTDF'
 ]
 
 def get_nuc(mydf, kpts=None):
+    from gpu4pyscf.pbc.dft import numint
     kpts, is_single_kpt = _check_kpts(mydf, kpts)
     cell = mydf.cell
     assert cell.low_dim_ft_type != 'inf_vacuum'
@@ -69,6 +68,7 @@ def get_nuc(mydf, kpts=None):
 def get_pp(mydf, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
     '''
+    from gpu4pyscf.pbc.dft import numint
     kpts, is_single_kpt = _check_kpts(mydf, kpts)
     cell = mydf.cell
     assert cell.low_dim_ft_type != 'inf_vacuum'

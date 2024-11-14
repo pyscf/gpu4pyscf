@@ -17,6 +17,7 @@
 
 import ctypes
 import numpy as np
+import cupy as cp
 from pyscf import lib
 from pyscf.lib import logger
 from pyscf.pbc.dft import gen_grid as gen_grid_cpu
@@ -40,7 +41,7 @@ class UniformGrids(lib.StreamObject):
         if self._coords is not None:
             return self._coords
         else:
-            return get_uniform_grids(self.cell, self.mesh)
+            return cp.asarray(get_uniform_grids(self.cell, self.mesh))
     @coords.setter
     def coords(self, x):
         self._coords = x
@@ -51,7 +52,7 @@ class UniformGrids(lib.StreamObject):
             return self._weights
         else:
             ngrids = np.prod(self.mesh)
-            weights = np.empty(ngrids)
+            weights = cp.empty(ngrids)
             weights[:] = self.cell.vol / ngrids
             return weights
     @weights.setter
@@ -74,4 +75,5 @@ class UniformGrids(lib.StreamObject):
         obj = utils.to_cpu(self)
         return obj.reset()
 
-BeckeGrids = NotImplemented
+class BeckeGrids:
+    pass
