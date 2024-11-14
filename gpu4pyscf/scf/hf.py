@@ -422,7 +422,7 @@ class SCF(pyscf_lib.StreamObject):
     get_jk                   = _get_jk
     get_j                    = hf.SCF.get_j
     get_k                    = hf.SCF.get_k
-    get_veff                 = hf.SCF.get_veff
+    get_veff                 = NotImplemented
     mulliken_meta            = hf.SCF.mulliken_meta
     pop                      = hf.SCF.pop
     _is_mem_enough           = NotImplemented
@@ -446,14 +446,14 @@ class SCF(pyscf_lib.StreamObject):
 
     def dip_moment(self, mol=None, dm=None, unit='Debye', origin=None,
                    verbose=logger.NOTE):
-        if mol is None: mol = mf.mol
-        if dm is None: dm = mf.make_rdm1()
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
         return hf.dip_moment(mol, dm.get(), unit, origin, verbose)
 
     def quad_moment(self, mol=None, dm=None, unit='DebyeAngstrom', origin=None,
                     verbose=logger.NOTE):
-        if mol is None: mol = mf.mol
-        if dm is None: dm = mf.make_rdm1()
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
         return hf.quad_moment(mol, dm.get(), unit, origin, verbose)
 
     def remove_soscf(self):
@@ -481,6 +481,8 @@ class RHF(SCF):
     device = utils.device
 
     _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'conv_tol_cpscf', 'disp_with_3body'}
+
+    get_veff = get_veff
 
     def check_sanity(self):
         mol = self.mol

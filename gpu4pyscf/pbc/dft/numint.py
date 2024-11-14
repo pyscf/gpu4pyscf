@@ -287,8 +287,8 @@ class NumInt(lib.StreamObject, numint.LibXCMixin):
             vmat = cp.zeros((nband, nao, nao))
         else:
             vmat = cp.zeros((nband, nao, nao), dtype=np.complex128)
-        p0 = p1 = 0
         v_hermi = 1  # the output matrix must be hermitian
+        p0 = p1 = 0
         for ao_ks, weight, coords \
                 in self.block_loop(cell, grids, ao_deriv, kpts_band=kpts_band):
             p0, p1 = p1, p1 + weight.size
@@ -303,7 +303,8 @@ class NumInt(lib.StreamObject, numint.LibXCMixin):
                     aow = _scale_ao(ao[:4], wv[:4,p0:p1])
                     vmat[k] += ao[0].conj().T.dot(aow)
                     vmat[k] += _tau_dot(ao, ao, wv[4,p0:p1])
-        if xctype != 'LDA':
+
+        if v_hermi and xctype != 'LDA':
             vmat = vmat + vmat.transpose(0, 2, 1).conj()
         if input_band is None:
             vmat = vmat[0]
