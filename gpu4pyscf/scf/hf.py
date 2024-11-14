@@ -240,7 +240,8 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
             break
 
     if (cycle + 1 == mf.max_cycle):
-        logger.warn("SCF failed to converge")
+        assert not scf_conv
+        logger.warn(mf, "SCF failed to converge")
 
     return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
