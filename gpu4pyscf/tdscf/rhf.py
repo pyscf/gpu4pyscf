@@ -62,15 +62,14 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
 
     def vind(zs):
         zs = cp.asarray(zs).reshape(-1,nocc,nvir)
-        mo1 = contract('xov,qv->xoq', zs, orbv)
-        dmov = contract('po,xoq->xpq', orbo2, mo1)
-        dmov = tag_array(dmov, mo1=mo1, occ_coeff=orbo)
-        v1ao = vresp(dmov)
-        v1ov = contract('po,xpq->xoq', orbo, v1ao)
-        v1ov = contract('xoq,qv->xov', v1ov, orbv)
-        #:v1ov += einsum('xia,ia->xia', zs, e_ia)
-        v1ov += zs * e_ia
-        return v1ov.reshape(v1ov.shape[0],-1).get()
+        mo1 = contract('xov,pv->xpo', zs, orbv)
+        dms = contract('xpo,qo->xpq', mo1, orbo2.conj())
+        dms = tag_array(dms, mo1=mo1, occ_coeff=orbo)
+        v1ao = vresp(dms)
+        v1mo = contract('xpq,qo->xpo', v1ao, orbo)
+        v1mo = contract('xpo,pv->xov', v1mo, orbv.conj())
+        v1mo += zs * e_ia
+        return v1mo.reshape(v1mo.shape[0],-1).get()
 
     return vind, hdiag
 
@@ -241,7 +240,7 @@ class TDA(TDBase):
         nvir = nmo - nocc
         # 1/sqrt(2) because self.x is for alpha excitation and 2(X^+*X) = 1
         self.xy = [(xi.reshape(nocc,nvir) * .5**.5, 0) for xi in x1]
-        log.timer('TDA', *t0)
+        log.timer('TDA', *cpu0)
         self._finalize()
         return self.e, self.xy
 
@@ -272,29 +271,21 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
 
     def vind(xys):
         xys = cp.asarray(xys).reshape(-1,2,nocc,nvir)
+        nz = len(xys)
         xs, ys = xys.transpose(1,0,2,3)
         # *2 for double occupancy
-        tmp = contract('xov,qv->xoq', xs*2, orbv)
-        dms = contract('po,xoq->xpq', orbo, tmp)
-        tmp = contract('xov,pv->xop', ys*2, orbv)
-        dms += contract('xop,qo->xpq', tmp, orbo)
+        tmp = contract('xov,pv->xpo', xs, orbv*2)
+        dms = contract('xpo,qo->xpq', tmp, orbo.conj())
+        tmp = contract('xov,qv->xoq', ys, orbv.conj()*2)
+        dms+= contract('xoq,po->xpq', tmp, orbo)
         v1ao = vresp(dms) # = <mb||nj> Xjb + <mj||nb> Yjb
-        # A ~= <ib||aj>, B = <ij||ab>
-        # AX + BY
-        # = <ib||aj> Xjb + <ij||ab> Yjb
-        # = (<mb||nj> Xjb + <mj||nb> Yjb) Cmi* Cna
-        v1ov = contract('po,xpq->xoq', orbo, v1ao)
-        v1ov = contract('xoq,qv->xov', v1ov, orbv)
-        # (B*)X + (A*)Y
-        # = <ab||ij> Xjb + <aj||ib> Yjb
-        # = (<mb||nj> Xjb + <mj||nb> Yjb) Cma* Cni
-        v1vo = contract('xpq,qo->xpo', v1ao, orbo)
-        v1vo = contract('xpo,pv->xov', v1vo, orbv)
-        v1ov += xs * e_ia  # AX
-        v1vo += ys * e_ia  # (A*)Y
-        # (AX, -AY)
-        nz = xys.shape[0]
-        hx = cp.hstack((v1ov.reshape(nz,-1), -v1vo.reshape(nz,-1)))
+        v1_top = contract('xpq,qo->xpo', v1ao, orbo)
+        v1_top = contract('xpo,pv->xov', v1_top, orbv)
+        v1_bot = contract('xpq,po->xoq', v1ao, orbo)
+        v1_bot = contract('xoq,qv->xov', v1_bot, orbv)
+        v1_top += xs * e_ia  # AX
+        v1_bot += ys * e_ia  # (A*)Y
+        hx = cp.hstack((v1_top.reshape(nz,-1), -v1_bot.reshape(nz,-1)))
         return hx.get()
 
     return vind, hdiag

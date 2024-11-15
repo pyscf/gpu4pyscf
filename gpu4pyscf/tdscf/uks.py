@@ -21,7 +21,7 @@ from pyscf import symm
 from pyscf import lib
 from pyscf.tdscf._lr_eig import eigh as lr_eigh
 from gpu4pyscf.dft.rks import KohnShamDFT
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, tag_array, transpose_sum
 from gpu4pyscf.lib import logger
 from gpu4pyscf.tdscf import uhf as tdhf_gpu
 from gpu4pyscf import dft
@@ -34,7 +34,7 @@ TDA = tdhf_gpu.TDA
 TDDFT = tdhf_gpu.TDHF
 TDUKS = TDDFT
 SpinFlipTDA = tdhf_gpu.SpinFlipTDA
-SpinFlipTDDFT = tdhf_gpu.SpinFlipTDDFT
+SpinFlipTDDFT = tdhf_gpu.SpinFlipTDHF
 
 class CasidaTDDFT(TDDFT):
     '''Solve the Casida TDDFT formula (A-B)(A+B)(X+Y) = (X+Y)w^2
@@ -77,23 +77,24 @@ class CasidaTDDFT(TDDFT):
         noccb, nvirb = e_ia_b.shape
 
         def vind(zs):
+            assert zs.dtype == np.float64
             nz = len(zs)
             zs = cp.asarray(zs).reshape(nz,-1)
             dmsa = (zs[:,:nocca*nvira] * d_ia[:nocca*nvira]).reshape(nz,nocca,nvira)
             dmsb = (zs[:,nocca*nvira:] * d_ia[nocca*nvira:]).reshape(nz,noccb,nvirb)
-            dmsa = contract('xov,qv->xoq', dmsa, orbva)
-            dmsa = contract('po,xoq->xpq', orboa, dmsa)
-            dmsb = contract('xov,qv->xoq', dmsb, orbvb)
-            dmsb = contract('po,xoq->xpq', orbob, dmsb)
-            dmsa = dmsa + dmsa.conj().transpose(0,2,1)
-            dmsb = dmsb + dmsb.conj().transpose(0,2,1)
-
-            v1ao = vresp(cp.asarray((dmsa,dmsb)))
-
-            v1a = contract('po,xpq->xoq', orboa, v1ao[0])
-            v1a = contract('xoq,qv->xov', v1a, orbva)
-            v1b = contract('po,xpq->xoq', orbob, v1ao[1])
-            v1b = contract('xoq,qv->xov', v1b, orbvb)
+            mo1a = contract('xov,pv->xpo', dmsa, orbva)
+            dmsa = contract('xpo,qo->xpq', mo1a, orboa)
+            mo1b = contract('xov,pv->xpo', dmsb, orbvb)
+            dmsb = contract('xpo,qo->xpq', mo1b, orbob)
+            dmsa = transpose_sum(dmsa)
+            dmsb = transpose_sum(dmsb)
+            dms = cp.asarray((dmsa, dmsb))
+            dms = tag_array(dms, mo1=[mo1a,mo1b], occ_coeff=[orboa,orbob])
+            v1ao = vresp(dms)
+            v1a = contract('xpq,qo->xpo', v1ao[0], orboa)
+            v1a = contract('xpo,pv->xov', v1a, orbva)
+            v1b = contract('xpq,qo->xpo', v1ao[1], orbob)
+            v1b = contract('xpo,pv->xov', v1b, orbvb)
             hx = cp.hstack((v1a.reshape(nz,-1), v1b.reshape(nz,-1)))
             hx += ed_ia * zs
             hx *= d_ia
@@ -193,55 +194,3 @@ dft.uks.UKS.CasidaTDDFT   = lib.class_as_method(CasidaTDDFT)
 dft.uks.UKS.TDDFT         = tddft
 dft.uks.UKS.SFTDA         = SpinFlipTDA
 dft.uks.UKS.SFTDDFT       = SpinFlipTDDFT
-
-
-class CasidaSpinFlipTDDFT(TDBase):
-    def init_guess(self, mf=None, nstates=None, wfnsym=None):
-        if mf is None: mf = self._scf
-        if nstates is None: nstates = self.nstates
-
-        mol = mf.mol
-        mo_energy = mf.mo_energy
-        mo_occ = mf.mo_occ
-        occidxa = numpy.where(mo_occ[0]>0)[0]
-        occidxb = numpy.where(mo_occ[1]>0)[0]
-        viridxa = numpy.where(mo_occ[0]==0)[0]
-        viridxb = numpy.where(mo_occ[1]==0)[0]
-        e_ia_b2a = (mo_energy[0][viridxa,None] - mo_energy[1][occidxb]).T
-        e_ia_a2b = (mo_energy[1][viridxb,None] - mo_energy[0][occidxa]).T
-
-        if wfnsym is not None and mol.symmetry:
-            raise NotImplementedError("UKS Spin Flip TDA/ TDDFT haven't taken symmetry\
-                                      into account.")
-
-        e_ia_b2a = e_ia_b2a.ravel()
-        e_ia_a2b = e_ia_a2b.ravel()
-        nov_b2a = e_ia_b2a.size
-        nov_a2b = e_ia_a2b.size
-
-        if self.extype==0:
-            nstates = min(nstates, nov_b2a)
-            e_threshold = numpy.sort(e_ia_b2a)[nstates-1]
-            e_threshold += self.deg_eia_thresh
-
-            idx = numpy.where(e_ia_b2a <= e_threshold)[0]
-            x0 = numpy.zeros((idx.size, nov_b2a))
-            for i, j in enumerate(idx):
-                x0[i, j] = 1  # Koopmans' excitations
-
-            y0 = numpy.zeros((len(idx),nov_a2b))
-            z0 = numpy.concatenate((x0,y0),axis=1)
-
-        elif self.extype==1:
-            nstates = min(nstates, nov_a2b)
-            e_threshold = numpy.sort(e_ia_a2b)[nstates-1]
-            e_threshold += self.deg_eia_thresh
-
-            idx = numpy.where(e_ia_a2b <= e_threshold)[0]
-            x0 = numpy.zeros((idx.size, nov_a2b))
-            for i, j in enumerate(idx):
-                x0[i, j] = 1  # Koopmans' excitations
-
-            y0 = numpy.zeros((len(idx),nov_b2a))
-            z0 = numpy.concatenate((x0,y0),axis=1)
-        return z0
