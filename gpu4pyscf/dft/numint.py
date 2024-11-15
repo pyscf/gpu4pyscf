@@ -1051,7 +1051,7 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         # precompute fxc_w
         fxc_w = fxc[:,:,:,:,p0:p1] * weights
 
-        rho1 = cp.empty((2, nset, nvar, p1-p0))
+        rho1 = cupy.empty((2, nset, nvar, p1-p0))
         # precompute molecular orbitals
         if with_mocc:
             occ_coeff_a_mask = occ_coeff_a[mask]
@@ -1074,13 +1074,13 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 va = ao.dot(_scale_ao(ao, wv[0,0]).T)
                 vb = ao.dot(_scale_ao(ao, wv[1,0]).T)
             elif xctype == 'GGA':
-                wv[:,0] *= .5
+                wv[:,0] *= .5 # for transpose_sum at the end
                 va = ao[0].dot(_scale_ao(ao, wv[0]).T)
                 vb = ao[0].dot(_scale_ao(ao, wv[1]).T)
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             else:
-                wv[:,[0,4]] *= .5
+                wv[:,[0,4]] *= .5 # for transpose_sum at the end
                 va = ao[0].dot(_scale_ao(ao[:4], wv[0,:4]).T)
                 vb = ao[0].dot(_scale_ao(ao[:4], wv[1,:4]).T)
                 va += _tau_dot(ao, ao, wv[0,4])
