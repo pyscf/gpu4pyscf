@@ -192,5 +192,5 @@ dft.uks.UKS.TDHF          = None
 dft.uks.UKS.TDDFTNoHybrid = lib.class_as_method(TDDFTNoHybrid)
 dft.uks.UKS.CasidaTDDFT   = lib.class_as_method(CasidaTDDFT)
 dft.uks.UKS.TDDFT         = tddft
-dft.uks.UKS.SFTDA         = SpinFlipTDA
-dft.uks.UKS.SFTDDFT       = SpinFlipTDDFT
+dft.uks.UKS.SFTDA         = lib.class_as_method(SpinFlipTDA)
+dft.uks.UKS.SFTDDFT       = lib.class_as_method(SpinFlipTDDFT)

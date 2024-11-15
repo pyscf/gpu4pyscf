@@ -310,6 +310,7 @@ class SpinFlipTDA(TDBase):
             viridxb = mo_occ_b ==0
             e_ia = mo_energy_b[viridxb] - mo_energy_a[occidxa,None]
 
+        e_ia = e_ia.ravel()
         nov = e_ia.size
         nstates = min(nstates, nov)
         e_threshold = np.partition(e_ia, nstates-1)[nstates-1]
@@ -329,7 +330,7 @@ class SpinFlipTDA(TDBase):
         return x0.reshape(len(x0), -1)
 
     def dump_flags(self, verbose=None):
-        super().dump_flags(verbose)
+        TDBase.dump_flags(self, verbose)
         logger.info(self, 'extype = %s', self.extype)
         logger.info(self, 'collinear = %s', self.collinear)
         if self.collinear == 'mcol':
@@ -337,7 +338,7 @@ class SpinFlipTDA(TDBase):
         return self
 
     def check_sanity(self):
-        super().check_sanity()
+        TDBase.check_sanity(self)
         assert self.extype in (0, 1)
         assert self.collinear in ('col', 'ncol', 'mcol')
         return self
@@ -354,10 +355,10 @@ class SpinFlipTDA(TDBase):
         else:
             self.nstates = nstates
 
-        if isinstance(self._scf, KohnShamDFT):
+        if self.collinear == 'col' and isinstance(self._scf, KohnShamDFT):
             mf = self._scf
             ni = mf._numint
-            if self.collinear == 'col' and not ni.libxc.is_hybrid_xc(mf.xc):
+            if not ni.libxc.is_hybrid_xc(mf.xc):
                 self.converged = True
                 self.e, xs = self._init_guess()
                 self.xy = [(x, 0) for x in xs]
@@ -375,7 +376,7 @@ class SpinFlipTDA(TDBase):
         vind, hdiag = self.gen_vind()
         precond = self.get_precond(hdiag)
 
-        self.converged, self.e, x1 = lr_eig(
+        self.converged, self.e, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
             nroots=nstates, x0sym=x0sym, pick=all_eigs, max_cycle=self.max_cycle,
             max_memory=self.max_memory, verbose=log)
@@ -705,10 +706,10 @@ class SpinFlipTDHF(TDBase):
         nvira = nmo - nocca
         nvirb = nmo - noccb
         if self.extype == 0:
-            y0 = cp.zeros((nx, nocca*nvirb))
+            y0 = np.zeros((nx, nocca*nvirb))
         else:
-            y0 = cp.zeros((nx, noccb*nvira))
-        return cp.hstack([x0.reshape(nx,-1), y0])
+            y0 = np.zeros((nx, noccb*nvira))
+        return np.hstack([x0.reshape(nx,-1), y0])
 
     dump_flags = SpinFlipTDA.dump_flags
     check_sanity = SpinFlipTDA.check_sanity
@@ -716,6 +717,9 @@ class SpinFlipTDHF(TDBase):
     def kernel(self, x0=None, nstates=None):
         '''Spin-flip TDA diagonalization solver
         '''
+        # TODO: Enable this feature after updating the TDDFT davidson algorithm
+        # in pyscf main branch
+        raise RuntimeError('Numerical issues in lr_eig')
         log = logger.new_logger(self)
         cpu0 = log.init_timer()
         self.check_sanity()
@@ -725,24 +729,25 @@ class SpinFlipTDHF(TDBase):
         else:
             self.nstates = nstates
 
-        if isinstance(self._scf, KohnShamDFT):
+        if self.collinear == 'col' and isinstance(self._scf, KohnShamDFT):
             raise NotImplementedError
 
         x0sym = None
         if x0 is None:
             x0 = self.init_guess()
 
-        # Keep all eigenvalues as SF-TDDFT allows triplet to singlet
-        # "dexcitation"
-        def all_eigs(w, v, nroots, envs):
-            return w, v, np.arange(w.size)
+        real_system = self._scf.mo_coeff[0].dtype == np.float64
+        def pickeig(w, v, nroots, envs):
+            realidx = np.where((abs(w.imag) < REAL_EIG_THRESHOLD) &
+                                  (w.real > self.positive_eig_threshold))[0]
+            return lib.linalg_helper._eigs_cmplx2real(w, v, realidx, real_system)
 
         vind, hdiag = self.gen_vind()
         precond = self.get_precond(hdiag)
 
         self.converged, self.e, x1 = lr_eig(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
-            nroots=nstates, x0sym=x0sym, pick=all_eigs, max_cycle=self.max_cycle,
+            nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,
             max_memory=self.max_memory, verbose=log)
 
         nmo = self._scf.mo_occ[0].size
@@ -755,16 +760,16 @@ class SpinFlipTDHF(TDBase):
                 x = z[:noccb*nvira].reshape(noccb,nvira)
                 y = z[noccb*nvira:].reshape(nocca,nvirb)
                 norm = lib.norm(x)**2 - lib.norm(y)**2
-                assert norm > 0
-                norm = norm ** -.5
+                #assert norm > 0
+                norm = abs(norm) ** -.5
                 return x*norm, y*norm
         elif self.extype == 1:
             def norm_xy(z):
                 x = z[:nocca*nvirb].reshape(nocca,nvirb)
                 y = z[nocca*nvirb:].reshape(noccb,nvira)
                 norm = lib.norm(x)**2 - lib.norm(y)**2
-                assert norm > 0
-                norm = norm ** -.5
+                #assert norm > 0
+                norm = abs(norm) ** -.5
                 return x*norm, y*norm
 
         self.xy = [norm_xy(z) for z in x1]

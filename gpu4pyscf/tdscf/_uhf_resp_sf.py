@@ -23,7 +23,7 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.lib import logger
-from pyscf.dft import xc_deriv
+from pyscf.dft import numint2c, xc_deriv
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.dft.numint import _scale_ao, _tau_dot, eval_rho, eval_rho2
 from gpu4pyscf.lib.cupy_helper import transpose_sum, add_sparse, contract
@@ -50,8 +50,8 @@ def gen_uhf_response_sf(mf, mo_coeff=None, mo_occ=None, hermi=0,
         hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
         if collinear in ('ncol', 'mcol'):
-            ni.collinear_samples = collinear_samples
-            fxc = cache_xc_kernel_sf(ni, mol, mf.grids, mf.xc, mo_coeff, mo_occ, 1)[2]
+            fxc = cache_xc_kernel_sf(ni, mol, mf.grids, mf.xc, mo_coeff, mo_occ,
+                                     collinear_samples)[2]
         dm0 = None
 
         def vind(dm1):
@@ -75,16 +75,23 @@ def gen_uhf_response_sf(mf, mo_coeff=None, mo_occ=None, hermi=0,
             return v1
         return vind
 
+    else: #HF
+        def vind(dm1):
+            vk = mf.get_k(mol, dm1, hermi)
+            return -vk
+        return vind
+
 # This function is copied from pyscf.dft.numint2c.py
 def __mcfun_fn_eval_xc(ni, xc_code, xctype, rho, deriv):
     evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype)
+    evfk = list(evfk)
     for order in range(1, deriv+1):
         if evfk[order] is not None:
             evfk[order] = xc_deriv.ud2ts(evfk[order])
     return evfk
 
 # Edited based on pyscf.dft.numint2c.mcfun_eval_xc_adapter
-def mcfun_eval_xc_adapter_sf(ni, xc_code):
+def mcfun_eval_xc_adapter_sf(ni, xc_code, collinear_samples):
     '''Wrapper to generate the eval_xc function required by mcfun
     '''
 
@@ -94,6 +101,9 @@ def mcfun_eval_xc_adapter_sf(ni, xc_code):
         raise ImportError('This feature requires mcfun library.\n'
                           'Try install mcfun with `pip install mcfun`')
 
+    ni = numint2c.NumInt2C()
+    ni.collinear = 'mcol'
+    ni.collinear_samples = collinear_samples
     xctype = ni._xc_type(xc_code)
     fn_eval_xc = functools.partial(__mcfun_fn_eval_xc, ni, xc_code, xctype)
     nproc = lib.num_threads()
@@ -101,11 +111,12 @@ def mcfun_eval_xc_adapter_sf(ni, xc_code):
     def eval_xc_eff(xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None):
         res = mcfun.eval_xc_eff_sf(
             fn_eval_xc, rho.get(), deriv,
-            collinear_samples=ni.collinear_samples, workers=nproc)
+            collinear_samples=collinear_samples, workers=nproc)
         return [x if x is None else cp.asarray(x) for x in res]
     return eval_xc_eff
 
-def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=1):
+def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ,
+                       collinear_samples):
     '''Compute the fxc_sf, which can be used in SF-TDDFT/TDA
     '''
     xctype = ni._xc_type(xc_code)
@@ -115,8 +126,8 @@ def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=1):
         ao_deriv = 1
     else:
         ao_deriv = 0
-    assert isinstance(mo_coeff[0], cp.ndarray)
-    assert mo_coeff[0].ndim == 2
+    assert isinstance(mo_coeff, cp.ndarray)
+    assert mo_coeff.ndim == 3
     assert spin == 1
 
     nao = mo_coeff[0].shape[0]
@@ -129,19 +140,21 @@ def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=1):
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
     _sorted_mol = opt._sorted_mol
+    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
 
     for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
-        rhoa_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff[0][idx,:],
+        rhoa_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff[0,idx,:],
                                mo_occ[0], None, xctype, with_lapl)
-        rhob_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff[1][idx,:],
+        rhob_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff[1,idx,:],
                                mo_occ[1], None, xctype, with_lapl)
         rhoa.append(rhoa_slice)
         rhob.append(rhob_slice)
     rho_ab = (cp.hstack(rhoa), cp.hstack(rhob))
     rho_z = cp.array([rho_ab[0]+rho_ab[1],
                       rho_ab[0]-rho_ab[1]])
-    eval_xc_eff = mcfun_eval_xc_adapter_sf(ni, xc_code)
-    return eval_xc_eff(xc_code, rho_z, deriv=2, xctype=xctype)
+    eval_xc_eff = mcfun_eval_xc_adapter_sf(ni, xc_code, collinear_samples)
+    vxc, fxc = eval_xc_eff(xc_code, rho_z, deriv=2, xctype=xctype)[1:3]
+    return rho_ab, vxc, fxc
 
 def nr_uks_fxc_sf(ni, mol, grids, xc_code, dm0, dms, relativity=0, hermi=0,
                   rho0=None, vxc=None, fxc=None):
@@ -178,7 +191,7 @@ def nr_uks_fxc_sf(ni, mol, grids, xc_code, dm0, dms, relativity=0, hermi=0,
     for ao, mask, weights, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
         p0, p1 = p1, p1+len(weights)
         # precompute fxc_w. *2.0 becausue xx + yy
-        fxc_w = fxc[:,:,:,:,p0:p1] * weights * 2.
+        fxc_w = fxc[:,:,p0:p1] * weights * 2.
 
         for i in range(nset):
             rho1 = eval_rho(_sorted_mol, ao, dms[i,mask[:,None],mask],
@@ -188,11 +201,11 @@ def nr_uks_fxc_sf(ni, mol, grids, xc_code, dm0, dms, relativity=0, hermi=0,
                 vtmp = ao.dot(_scale_ao(ao, wv).T)
             elif xctype == 'GGA':
                 wv = contract('bg,abg->ag', rho1, fxc_w)
-                wv[0] *= .5
+                wv[0] *= .5 # for transpose_sum at the end
                 vtmp = ao[0].dot(_scale_ao(ao, wv).T)
             elif xctype == 'MGGA':
                 wv = contract('bg,abg->ag', rho1, fxc_w)
-                wv[[0,4]] *= .5
+                wv[[0,4]] *= .5 # for transpose_sum at the end
                 vtmp = ao[0].dot(_scale_ao(ao[:4], wv[:4]).T)
                 vtmp += _tau_dot(ao, ao, wv[4])
             add_sparse(vmat[i], vtmp, mask)

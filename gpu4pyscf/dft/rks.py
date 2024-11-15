@@ -228,6 +228,8 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
 # Inherit pyscf KohnShamDFT class since this is tested in the pyscf dispersion code
 class KohnShamDFT(rks.KohnShamDFT):
 
+    _keys = {'cphf_grids', *rks.KohnShamDFT._keys}
+
     to_rhf = NotImplemented
     to_uhf = NotImplemented
     to_ghf = NotImplemented
