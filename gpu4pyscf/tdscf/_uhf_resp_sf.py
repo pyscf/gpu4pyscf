@@ -128,7 +128,6 @@ def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ,
         ao_deriv = 0
     assert isinstance(mo_coeff, cp.ndarray)
     assert mo_coeff.ndim == 3
-    assert spin == 1
 
     nao = mo_coeff[0].shape[0]
     rhoa = []

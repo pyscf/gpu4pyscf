@@ -72,11 +72,13 @@ class KnownValues(unittest.TestCase):
     @unittest.skip('Numerical issues encountered in non-hermitian diagonalization')
     def test_tdhf(self):
         mf = self.mf
-        self.assertAlmostEqual(abs(e - ref).max(), 0, 4)
         ref = [1.74385401, 9.38227395, 14.90168875]
         td = mf.SFTDHF().run(extype=0, conv_tol=1e-7)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
+
         ref = [0.41701647, 9.59644331, 22.99972711]
         td = mf.SFTDHF().run(extype=1, conv_tol=1e-7)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
 
 if __name__ == "__main__":
     print("Full Tests for spin-flip-TDA and spin-flip-TDDFT")
