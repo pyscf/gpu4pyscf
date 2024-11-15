@@ -1051,16 +1051,17 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         # precompute fxc_w
         fxc_w = fxc[:,:,:,:,p0:p1] * weights
 
-        rho1 = cupy.empty((2, nset, nvar, p1-p0))
         # precompute molecular orbitals
         if with_mocc:
             occ_coeff_a_mask = occ_coeff_a[mask]
             occ_coeff_b_mask = occ_coeff_b[mask]
-            rho1[0] = eval_rho4(_sorted_mol, ao, occ_coeff_a_mask, mo1a[:,mask],
-                                xctype=xctype, hermi=hermi)
-            rho1[1] = eval_rho4(_sorted_mol, ao, occ_coeff_b_mask, mo1b[:,mask],
-                                xctype=xctype, hermi=hermi)
+            rho1a = eval_rho4(_sorted_mol, ao, occ_coeff_a_mask, mo1a[:,mask],
+                              xctype=xctype, hermi=hermi)
+            rho1b = eval_rho4(_sorted_mol, ao, occ_coeff_b_mask, mo1b[:,mask],
+                              xctype=xctype, hermi=hermi)
+            rho1 = cupy.stack([rho1a, rho1b]).reshape(2, nset, nvar, p1-p0)
         else: # slow version
+            rho1 = cupy.empty((2, nset, nvar, p1-p0))
             for i in range(nset):
                 rho1[0,i] = eval_rho(_sorted_mol, ao, dma[i,mask[:,None],mask],
                                      xctype=xctype, hermi=hermi)
@@ -1069,7 +1070,7 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         t0 = log.timer_debug1('rho', *t0)
 
         for i in range(nset):
-            wv = contract('axg,axbyg->byg', rho1[i], fxc_w)
+            wv = contract('axg,axbyg->byg', rho1[:,i], fxc_w)
             if xctype == 'LDA':
                 va = ao.dot(_scale_ao(ao, wv[0,0]).T)
                 vb = ao.dot(_scale_ao(ao, wv[1,0]).T)
