@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright 2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2024 The GPU4PySCF Developers. All Rights Reserved.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -62,8 +62,8 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
 
     def vind(zs):
         zs = cp.asarray(zs).reshape(-1,nocc,nvir)
-        mo1 = contract('xov,qv->xqo', zs, orbv)
-        dmov = contract('po,xqo->xpq', orbo2, mo1)
+        mo1 = contract('xov,qv->xoq', zs, orbv)
+        dmov = contract('po,xoq->xpq', orbo2, mo1)
         dmov = tag_array(dmov, mo1=mo1, occ_coeff=orbo)
         v1ao = vresp(dmov)
         v1ov = contract('po,xpq->xoq', orbo, v1ao)
@@ -172,7 +172,7 @@ class TDA(TDBase):
             mf = self._scf
         return gen_tda_operation(mf, singlet=self.singlet)
 
-    def init_guess(self, mf, nstates=None, wfnsym=None, return_symmetry=False):
+    def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
         '''
         Generate initial guess for TDA
 
@@ -180,6 +180,7 @@ class TDA(TDBase):
             nstates : int
                 The number of initial guess vectors.
         '''
+        if mf is None: mf = self._scf
         if nstates is None: nstates = self.nstates
         assert wfnsym is None
         assert not return_symmetry
@@ -209,8 +210,8 @@ class TDA(TDBase):
     def kernel(self, x0=None, nstates=None):
         '''TDA diagonalization solver
         '''
-        log = logger.Logger(self.stdout, self.verbose)
-        t0 = log.init_timer()
+        log = logger.new_logger(self)
+        cpu0 = log.init_timer()
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -228,7 +229,7 @@ class TDA(TDBase):
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess(self._scf, self.nstates)
+            x0 = self.init_guess()
 
         self.converged, self.e, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -308,7 +309,7 @@ class TDHF(TDBase):
             mf = self._scf
         return gen_tdhf_operation(mf, singlet=self.singlet)
 
-    def init_guess(self, mf, nstates=None, wfnsym=None, return_symmetry=False):
+    def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
         x0 = TDA.init_guess(self, mf, nstates, wfnsym, return_symmetry)
         y0 = np.zeros_like(x0)
         return np.hstack([x0, y0])
@@ -316,7 +317,8 @@ class TDHF(TDBase):
     def kernel(self, x0=None, nstates=None):
         '''TDHF diagonalization with non-Hermitian eigenvalue solver
         '''
-        cpu0 = (logger.process_clock(), logger.perf_counter())
+        log = logger.new_logger(self)
+        cpu0 = log.init_timer()
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -324,8 +326,6 @@ class TDHF(TDBase):
         else:
             self.nstates = nstates
         mol = self.mol
-
-        log = logger.Logger(self.stdout, self.verbose)
 
         vind, hdiag = self.gen_vind(self._scf)
         precond = self.get_precond(hdiag)
@@ -349,7 +349,7 @@ class TDHF(TDBase):
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess(self._scf, self.nstates)
+            x0 = self.init_guess()
 
         self.converged, w, x1 = lr_eig(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,

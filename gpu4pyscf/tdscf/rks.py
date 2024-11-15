@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright 2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2024 The GPU4PySCF Developers. All Rights Reserved.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,6 +21,7 @@ from pyscf import lib
 from pyscf.tdscf._lr_eig import eigh as lr_eigh
 from gpu4pyscf.dft.rks import KohnShamDFT
 from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib import logger
 from gpu4pyscf.tdscf import rhf as tdhf_gpu
 from gpu4pyscf import dft
 
@@ -79,7 +80,8 @@ class CasidaTDDFT(TDDFT):
     def kernel(self, x0=None, nstates=None):
         '''TDDFT diagonalization solver
         '''
-        cpu0 = (lib.logger.process_clock(), lib.logger.perf_counter())
+        log = logger.new_logger(self)
+        cpu0 = log.init_timer()
         mf = self._scf
         if mf._numint.libxc.is_hybrid_xc(mf.xc):
             raise RuntimeError('%s cannot be used with hybrid functional'
@@ -91,8 +93,6 @@ class CasidaTDDFT(TDDFT):
         else:
             self.nstates = nstates
 
-        log = lib.logger.Logger(self.stdout, self.verbose)
-
         vind, hdiag = self.gen_vind(self._scf)
         precond = self.get_precond(hdiag)
 
@@ -102,7 +102,7 @@ class CasidaTDDFT(TDDFT):
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess(self._scf, self.nstates)
+            x0 = self.init_guess()
 
         self.converged, w2, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,

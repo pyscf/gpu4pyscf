@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright 2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2024 The GPU4PySCF Developers. All Rights Reserved.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -33,6 +33,8 @@ __all__ = [
 TDA = tdhf_gpu.TDA
 TDDFT = tdhf_gpu.TDHF
 TDUKS = TDDFT
+SpinFlipTDA = tdhf_gpu.SpinFlipTDA
+SpinFlipTDDFT = tdhf_gpu.SpinFlipTDDFT
 
 class CasidaTDDFT(TDDFT):
     '''Solve the Casida TDDFT formula (A-B)(A+B)(X+Y) = (X+Y)w^2
@@ -102,7 +104,8 @@ class CasidaTDDFT(TDDFT):
     def kernel(self, x0=None, nstates=None):
         '''TDDFT diagonalization solver
         '''
-        cpu0 = (logger.process_clock(), logger.perf_counter())
+        log = logger.new_logger(self)
+        cpu0 = log.init_timer()
         mf = self._scf
         if mf._numint.libxc.is_hybrid_xc(mf.xc):
             raise RuntimeError('%s cannot be used with hybrid functional'
@@ -113,7 +116,6 @@ class CasidaTDDFT(TDDFT):
             nstates = self.nstates
         else:
             self.nstates = nstates
-        log = logger.Logger(self.stdout, self.verbose)
 
         vind, hdiag = self.gen_vind(self._scf)
         precond = self.get_precond(hdiag)
@@ -124,7 +126,7 @@ class CasidaTDDFT(TDDFT):
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess(self._scf, self.nstates)
+            x0 = self.init_guess()
 
         self.converged, w2, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -189,3 +191,57 @@ dft.uks.UKS.TDHF          = None
 dft.uks.UKS.TDDFTNoHybrid = lib.class_as_method(TDDFTNoHybrid)
 dft.uks.UKS.CasidaTDDFT   = lib.class_as_method(CasidaTDDFT)
 dft.uks.UKS.TDDFT         = tddft
+dft.uks.UKS.SFTDA         = SpinFlipTDA
+dft.uks.UKS.SFTDDFT       = SpinFlipTDDFT
+
+
+class CasidaSpinFlipTDDFT(TDBase):
+    def init_guess(self, mf=None, nstates=None, wfnsym=None):
+        if mf is None: mf = self._scf
+        if nstates is None: nstates = self.nstates
+
+        mol = mf.mol
+        mo_energy = mf.mo_energy
+        mo_occ = mf.mo_occ
+        occidxa = numpy.where(mo_occ[0]>0)[0]
+        occidxb = numpy.where(mo_occ[1]>0)[0]
+        viridxa = numpy.where(mo_occ[0]==0)[0]
+        viridxb = numpy.where(mo_occ[1]==0)[0]
+        e_ia_b2a = (mo_energy[0][viridxa,None] - mo_energy[1][occidxb]).T
+        e_ia_a2b = (mo_energy[1][viridxb,None] - mo_energy[0][occidxa]).T
+
+        if wfnsym is not None and mol.symmetry:
+            raise NotImplementedError("UKS Spin Flip TDA/ TDDFT haven't taken symmetry\
+                                      into account.")
+
+        e_ia_b2a = e_ia_b2a.ravel()
+        e_ia_a2b = e_ia_a2b.ravel()
+        nov_b2a = e_ia_b2a.size
+        nov_a2b = e_ia_a2b.size
+
+        if self.extype==0:
+            nstates = min(nstates, nov_b2a)
+            e_threshold = numpy.sort(e_ia_b2a)[nstates-1]
+            e_threshold += self.deg_eia_thresh
+
+            idx = numpy.where(e_ia_b2a <= e_threshold)[0]
+            x0 = numpy.zeros((idx.size, nov_b2a))
+            for i, j in enumerate(idx):
+                x0[i, j] = 1  # Koopmans' excitations
+
+            y0 = numpy.zeros((len(idx),nov_a2b))
+            z0 = numpy.concatenate((x0,y0),axis=1)
+
+        elif self.extype==1:
+            nstates = min(nstates, nov_a2b)
+            e_threshold = numpy.sort(e_ia_a2b)[nstates-1]
+            e_threshold += self.deg_eia_thresh
+
+            idx = numpy.where(e_ia_a2b <= e_threshold)[0]
+            x0 = numpy.zeros((idx.size, nov_a2b))
+            for i, j in enumerate(idx):
+                x0[i, j] = 1  # Koopmans' excitations
+
+            y0 = numpy.zeros((len(idx),nov_b2a))
+            z0 = numpy.concatenate((x0,y0),axis=1)
+        return z0
