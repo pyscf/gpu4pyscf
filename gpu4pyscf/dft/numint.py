@@ -939,7 +939,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
             # slow version
             rho1 = []
             for i in range(nset):
-                rho_tmp = eval_rho(_sorted_mol, ao, dms[i][mask[:,None],mask],
+                rho_tmp = eval_rho(_sorted_mol, ao, dms[i,mask[:,None],mask],
                                    xctype=xctype, hermi=hermi)
                 rho1.append(rho_tmp)
             rho1 = cupy.stack(rho1, axis=0)
@@ -956,12 +956,10 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         for i in range(nset):
             if xctype == 'LDA':
                 vmat_tmp = ao.dot(_scale_ao(ao, wv[i]).T)
-                add_sparse(vmat[i], vmat_tmp, mask)
             elif xctype == 'GGA':
                 wv[i,0] *= .5
                 aow = _scale_ao(ao, wv[i])
                 vmat_tmp = aow.dot(ao[0].T)
-                add_sparse(vmat[i], vmat_tmp, mask)
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             else:
@@ -969,7 +967,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 wv[i,4] *= .5
                 vmat_tmp = ao[0].dot(_scale_ao(ao[:4], wv[i,:4]).T)
                 vmat_tmp+= _tau_dot(ao, ao, wv[i,4])
-                add_sparse(vmat[i], vmat_tmp, mask)
+            add_sparse(vmat[i], vmat_tmp, mask)
 
         t1 = log.timer_debug2('integration', *t1)
         ao = rho1 = None
@@ -1038,78 +1036,64 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
 
     if xctype == 'LDA':
         ao_deriv = 0
+        nvar = 1
+    elif xctype == 'GGA':
+        ao_deriv = 1
+        nvar = 4
     else:
         ao_deriv = 1
-    p0 = 0
-    p1 = 0
-    for ao, mask, weights, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
-                                                   max_memory=max_memory):
+        nvar = 5
+    p0 = p1 = 0
+    for ao, mask, weights, coords in ni.block_loop(
+            _sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         t0 = log.init_timer()
         p0, p1 = p1, p1+len(weights)
+        # precompute fxc_w
+        fxc_w = fxc[:,:,:,:,p0:p1] * weights
+
+        rho1 = cp.empty((2, nset, nvar, p1-p0))
         # precompute molecular orbitals
         if with_mocc:
             occ_coeff_a_mask = occ_coeff_a[mask]
             occ_coeff_b_mask = occ_coeff_b[mask]
-        if with_mocc:
-            rho1a = eval_rho4(_sorted_mol, ao, occ_coeff_a_mask, mo1a[:,mask],
-                              xctype=xctype, hermi=hermi)
-            rho1b = eval_rho4(_sorted_mol, ao, occ_coeff_b_mask, mo1b[:,mask],
-                              xctype=xctype, hermi=hermi)
-        else:
-            # slow version
-            rho1a = []
-            rho1b = []
+            rho1[0] = eval_rho4(_sorted_mol, ao, occ_coeff_a_mask, mo1a[:,mask],
+                                xctype=xctype, hermi=hermi)
+            rho1[1] = eval_rho4(_sorted_mol, ao, occ_coeff_b_mask, mo1b[:,mask],
+                                xctype=xctype, hermi=hermi)
+        else: # slow version
             for i in range(nset):
-                rho_tmp = eval_rho(_sorted_mol, ao, dma[i][mask[:,None],mask],
-                                   xctype=xctype, hermi=hermi)
-                rho1a.append(rho_tmp)
-                rho_tmp = eval_rho(_sorted_mol, ao, dmb[i][mask[:,None],mask],
-                                   xctype=xctype, hermi=hermi)
-                rho1b.append(rho_tmp)
-            rho1a = cupy.stack(rho1a, axis=0)
-            rho1b = cupy.stack(rho1b, axis=0)
-        rho1 = cupy.stack([rho1a, rho1b], axis=0)
+                rho1[0,i] = eval_rho(_sorted_mol, ao, dma[i,mask[:,None],mask],
+                                     xctype=xctype, hermi=hermi)
+                rho1[1,i] = eval_rho(_sorted_mol, ao, dmb[i,mask[:,None],mask],
+                                     xctype=xctype, hermi=hermi)
         t0 = log.timer_debug1('rho', *t0)
 
-        # precompute fxc_w
-        if xctype == 'LDA':
-            fxc_w = fxc[:,0,:,0,p0:p1] * weights
-        else:
-            fxc_w = fxc[:,:,:,:,p0:p1] * weights
-
         for i in range(nset):
+            wv = contract('axg,axbyg->byg', rho1[i], fxc_w)
             if xctype == 'LDA':
-                wv = contract('ag,abg->bg', rho1[:,i], fxc_w)
-                va = ao.dot(_scale_ao(ao, wv[0]).T)
-                vb = ao.dot(_scale_ao(ao, wv[1]).T)
-                add_sparse(vmata[i], va, mask)
-                add_sparse(vmatb[i], vb, mask)
+                va = ao.dot(_scale_ao(ao, wv[0,0]).T)
+                vb = ao.dot(_scale_ao(ao, wv[1,0]).T)
             elif xctype == 'GGA':
-                wv = contract('axg,axbyg->byg', rho1[:,i], fxc_w)
                 wv[:,0] *= .5
                 va = ao[0].dot(_scale_ao(ao, wv[0]).T)
                 vb = ao[0].dot(_scale_ao(ao, wv[1]).T)
-                add_sparse(vmata[i], va, mask)
-                add_sparse(vmatb[i], vb, mask)
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             else:
-                wv = contract('axg,axbyg->byg', rho1[:,i], fxc_w)
-                wv[:,[0, 4]] *= .5
+                wv[:,[0,4]] *= .5
                 va = ao[0].dot(_scale_ao(ao[:4], wv[0,:4]).T)
                 vb = ao[0].dot(_scale_ao(ao[:4], wv[1,:4]).T)
                 va += _tau_dot(ao, ao, wv[0,4])
                 vb += _tau_dot(ao, ao, wv[1,4])
-                add_sparse(vmata[i], va, mask)
-                add_sparse(vmatb[i], vb, mask)
+            add_sparse(vmata[i], va, mask)
+            add_sparse(vmatb[i], vb, mask)
     vmata = opt.unsort_orbitals(vmata, axis=[1,2])
     vmatb = opt.unsort_orbitals(vmatb, axis=[1,2])
     if xctype != 'LDA':
         # For real orbitals, K_{ia,bj} = K_{ia,jb}. It simplifies real fxc_jb
         # [(\nabla mu) nu + mu (\nabla nu)] * fxc_jb = ((\nabla mu) nu f_jb) + h.c.
-        for i in range(nset):
-            vmata[i] = vmata[i] + vmata[i].T
-            vmatb[i] = vmatb[i] + vmatb[i].T
+        transpose_sum(vmata)
+        transpose_sum(vmatb)
 
     if FREE_CUPY_CACHE:
         dma = dmb = None
