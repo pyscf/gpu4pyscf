@@ -105,8 +105,14 @@ def eigh(h, s):
     assert h.dtype in (np.float64, np.complex128)
     n = h.shape[0]
     w = cupy.zeros(n)
-    A = h.copy()
-    B = s.copy()
+    if h.dtype == np.complex128 and h.flags.c_contiguous:
+        # zhegvd requires the matrices in F-order. For hermitian matrices,
+        # .T.copy() is equivalent to .conj()
+        A = h.conj()
+        B = s.conj()
+    else:
+        A = h.copy()
+        B = s.copy()
     _handle = device.get_cusolver_handle()
 
     # TODO: reuse workspace

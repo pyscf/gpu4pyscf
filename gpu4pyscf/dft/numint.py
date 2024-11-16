@@ -42,7 +42,6 @@ AO_THRESHOLD = 1e-10
 
 # Should we release the cupy cache?
 FREE_CUPY_CACHE = False
-MGGA_DENSITY_LAPL = False
 USE_SPARSITY = 2    # 0: no sparsity, 1: in-house GEMM, 2: sparse in AO direction
 
 libgdft = load_library('libgdft')
@@ -63,6 +62,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
     Returns:
         ao: comp x nao_slice x ngrids, ao is in C-contiguous.
             Note, the structure of the ao tensor is different to that in PySCF
+            TODO: transpose ao to make the output compatible with PySCF
     '''
     if gdftopt is None:
         opt = _GDFTOpt.from_mol(mol)
@@ -126,7 +126,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
     return out
 
 def eval_rho(mol, ao, dm, non0tab=None, xctype='LDA', hermi=0,
-             with_lapl=True, verbose=None):
+             with_lapl=False, verbose=None):
     xctype = xctype.upper()
     if xctype in ('LDA', 'HF'):
         _, ngrids = ao.shape
@@ -150,13 +150,9 @@ def eval_rho(mol, ao, dm, non0tab=None, xctype='LDA', hermi=0,
             for i in range(1, 4):
                 rho[i] += _contract_rho(ao[i], c0)
     else:  # meta-GGA
-        if with_lapl:
-            # rho[4] = \nabla^2 rho, rho[5] = 1/2 |nabla f|^2
-            rho = cupy.empty((6,ngrids))
-            tau_idx = 5
-        else:
-            rho = cupy.empty((5,ngrids))
-            tau_idx = 4
+        assert not with_lapl
+        rho = cupy.empty((5,ngrids))
+        tau_idx = 4
         c0 = dm.dot(ao[0])
         rho[0] = _contract_rho(c0, ao[0])
 
@@ -174,11 +170,11 @@ def eval_rho(mol, ao, dm, non0tab=None, xctype='LDA', hermi=0,
     return rho
 
 def eval_rho1(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
-              with_lapl=True, verbose=None):
+              with_lapl=False, verbose=None):
     raise NotImplementedError
 
 def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
-              with_lapl=True, verbose=None, out=None):
+              with_lapl=False, verbose=None, out=None):
     xctype = xctype.upper()
     if xctype == 'LDA' or xctype == 'HF':
         _, ngrids = ao.shape
@@ -198,40 +194,24 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
             _contract_rho(c0, c1, rho=rho[i])
         rho[1:] *= 2
     else: # meta-GGA
-        if with_lapl:
-            # rho[4] = \nabla^2 rho, rho[5] = 1/2 |nabla f|^2
-            rho = cupy.empty((6,ngrids))
-            tau_idx = 5
-        else:
-            rho = cupy.empty((5,ngrids))
-            tau_idx = 4
+        assert not with_lapl
+        rho = cupy.empty((5,ngrids))
+        tau_idx = 4
 
         c0 = cupy.dot(cpos.T, ao[0])
         _contract_rho(c0, c0, rho=rho[0])
-
         rho[tau_idx] = 0
         for i in range(1, 4):
             c1 = cupy.dot(cpos.T, ao[i])
             rho[i] = _contract_rho(c0, c1)
             rho[tau_idx] += _contract_rho(c1, c1)
 
-        if with_lapl:
-            if ao.shape[0] > 4:
-                XX, YY, ZZ = 4, 7, 9
-                ao2 = ao[XX] + ao[YY] + ao[ZZ]
-                c1 = cupy.dot(cpos.T, ao2)
-                #:rho[4] = numpy.einsum('pi,pi->p', c0, c1)
-                rho[4] = _contract_rho(c0, c1)
-                rho[4] += rho[5]
-                rho[4] *= 2
-            else:
-                rho[4] = 0
         rho[1:4] *= 2
         rho[tau_idx] *= .5
     return rho
 
 def eval_rho3(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
-              with_lapl=True, verbose=None):
+              with_lapl=False, verbose=None):
     xctype = xctype.upper()
     if xctype == 'LDA' or xctype == 'HF':
         _, ngrids = ao.shape
@@ -254,15 +234,9 @@ def eval_rho3(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
             rho[i] += _contract_rho(c0[0], c_0[i])
         rho *= 2.0
     else: # meta-GGA
-        # TODO: complete this
-        if with_lapl:
-            raise NotImplementedError("mGGA with lapl not implemented")
-            # rho[4] = \nabla^2 rho, rho[5] = 1/2 |nabla f|^2
-            rho = cupy.empty((6,ngrids))
-            tau_idx = 5
-        else:
-            rho = cupy.empty((5,ngrids))
-            tau_idx = 4
+        assert not with_lapl
+        rho = cupy.empty((5,ngrids))
+        tau_idx = 4
         c_0 = contract('nig,io->nog', ao, cpos1)
         #:rho[0] = numpy.einsum('pi,pi->p', c0, c0)
         rho[0] = _contract_rho(c0[0], c_0[0])
@@ -274,23 +248,11 @@ def eval_rho3(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
             rho[i]+= _contract_rho(c0[0], c_0[i])
             rho[tau_idx] += _contract_rho(c_0[i], c0[i])
         rho *= 2.0
-        if with_lapl:
-            raise NotImplementedError("mGGA with lapl not implemented")
-            if ao.shape[0] > 4:
-                XX, YY, ZZ = 4, 7, 9
-                ao2 = ao[XX] + ao[YY] + ao[ZZ]
-                c1 = _dot_ao_dm(mol, ao2, cpos1, non0tab, shls_slice, ao_loc)
-                #:rho[4] = numpy.einsum('pi,pi->p', c0, c1)
-                rho[4] = _contract_rho(c0, c1)
-                rho[4] += rho[5]
-                rho[4] *= 2
-            else:
-                rho[4] = 0
         rho[tau_idx] *= .5
     return rho
 
 def eval_rho4(mol, ao, mo0, mo1, non0tab=None, xctype='LDA', hermi=0,
-              with_lapl=True, verbose=None):
+              with_lapl=False, verbose=None):
     '''Evaluate density using first order orbitals. This density is typically
     derived from the non-symmetric density matrix (hermi=0) in TDDFT
     dm[i] = mo0.dot(mo1[i].T) and symmetric density matrix (hermi=1) in CPHF
@@ -325,11 +287,9 @@ def eval_rho4(mol, ao, mo0, mo1, non0tab=None, xctype='LDA', hermi=0,
         for i in range(na):
             _contract_rho_gga(c0, c_0[i], rho=rho[i])
     else: # meta-GGA
-        if with_lapl:
-            raise NotImplementedError("mGGA with lapl not implemented")
-        c0 = contract('nig,io->nog', ao, mo0)
-        t1 = log.timer_debug2('eval occ_coeff', *t0)
+        assert not with_lapl
         rho = cupy.empty((na,5,ngrids))
+        c0 = contract('nig,io->nog', ao, mo0)
         c_0 = contract('nig,aio->anog', ao, mo1)
         for i in range(na):
             _contract_rho_mgga(c0, c_0[i], rho=rho[i])
@@ -465,17 +425,13 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         ao_deriv = 0
     else:
         ao_deriv = 1
-    with_lapl = MGGA_DENSITY_LAPL
     ngrids = grids.weights.size
     if xctype == 'LDA':
         rho_tot = cupy.empty([nset,1,ngrids])
     elif xctype == 'GGA':
         rho_tot = cupy.empty([nset,4,ngrids])
     else:
-        if with_lapl:
-            rho_tot = cupy.empty([nset,6,ngrids])
-        else:
-            rho_tot = cupy.empty([nset,5,ngrids])
+        rho_tot = cupy.empty([nset,5,ngrids])
     p0 = p1 = 0
     t1 = t0 = log.init_timer()
     for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
@@ -483,10 +439,10 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         p1 = p0 + weight.size
         for i in range(nset):
             if mo_coeff is None:
-                rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms[i][idx[:,None],idx], xctype=xctype, hermi=1, with_lapl=with_lapl)
+                rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms[i][idx[:,None],idx], xctype=xctype, hermi=1)
             else:
                 mo_coeff_mask = mo_coeff[idx,:]
-                rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype, with_lapl)
+                rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype)
         p0 = p1
         t1 = log.timer_debug2('eval rho slice', *t1)
     t0 = log.timer_debug1('eval rho', *t0)
@@ -503,6 +459,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         excsum[i] = cupy.dot(den, exc[:,0])
 
         wv.append(vxc * grids.weights)
+        # *.5 for v+v.conj().T at the end
         if xctype == 'GGA':
             wv[i][0] *= .5
         if xctype == 'MGGA':
@@ -555,7 +512,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     return nelec, excsum, vmat
 
 def eval_rho_group(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='LDA',
-              with_lapl=True, verbose=None, out=None):
+              with_lapl=False, verbose=None, out=None):
     groups = len(ao_group)
     xctype = xctype.upper()
     if xctype == 'LDA' or xctype == 'HF':
@@ -602,6 +559,7 @@ def eval_rho_group(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='
             rho[1:] *= 2
             rho_group.append(rho)
     else: # meta-GGA
+        assert not with_lapl
         c0_group = []
         cpos_group4 = []
         ao_group4 = []
@@ -675,17 +633,13 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         ao_deriv = 0
     else:
         ao_deriv = 1
-    with_lapl = MGGA_DENSITY_LAPL
     ngrids = grids.weights.size
     if xctype == 'LDA':
         rho_tot = cupy.empty([nset,1,ngrids])
     elif xctype == 'GGA':
         rho_tot = cupy.empty([nset,4,ngrids])
     else:
-        if with_lapl:
-            rho_tot = cupy.empty([nset,6,ngrids])
-        else:
-            rho_tot = cupy.empty([nset,5,ngrids])
+        rho_tot = cupy.empty([nset,5,ngrids])
     p0 = p1 = 0
     t1 = t0 = log.init_timer()
     for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
@@ -693,10 +647,10 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         p1 = p0 + weight.size
         for i in range(nset):
             if mo_coeff is None:
-                rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms[i][idx[:,None],idx], xctype=xctype, hermi=1, with_lapl=with_lapl)
+                rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms[i][idx[:,None],idx], xctype=xctype, hermi=1)
             else:
                 mo_coeff_mask = mo_coeff[idx,:]
-                rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype, with_lapl)
+                rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype)
         p0 = p1
         t1 = log.timer_debug2('eval rho slice', *t1)
     t0 = log.timer_debug1('eval rho', *t0)
@@ -823,19 +777,18 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         ao_deriv = 0
     else:
         ao_deriv = 1
-    with_lapl = MGGA_DENSITY_LAPL
 
     for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                  max_memory=max_memory):
         for i in range(nset):
             t0 = log.init_timer()
             if mo_coeff is None:
-                rho_a = eval_rho(_sorted_mol, ao_mask, dma[i][idx[:,None],idx], xctype=xctype, hermi=1, with_lapl=with_lapl)
-                rho_b = eval_rho(_sorted_mol, ao_mask, dmb[i][idx[:,None],idx], xctype=xctype, hermi=1, with_lapl=with_lapl)
+                rho_a = eval_rho(_sorted_mol, ao_mask, dma[i][idx[:,None],idx], xctype=xctype, hermi=1)
+                rho_b = eval_rho(_sorted_mol, ao_mask, dmb[i][idx[:,None],idx], xctype=xctype, hermi=1)
             else:
                 mo_coeff_mask = mo_coeff[:, idx,:]
-                rho_a = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype, with_lapl)
-                rho_b = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[1], mo_occ[1], None, xctype, with_lapl)
+                rho_a = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype)
+                rho_b = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[1], mo_occ[1], None, xctype)
 
             rho = cupy.stack([rho_a, rho_b], axis=0)
             exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
@@ -917,7 +870,6 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
     dm = coeff @ cupy.asarray(dm) @ coeff.T
     if mo_coeff is not None:
         mo_coeff = coeff @ mo_coeff
-    with_lapl = MGGA_DENSITY_LAPL
 
     mem_avail = get_avail_mem()
     blksize = mem_avail*.2/8/nao//ALIGNED * ALIGNED
@@ -933,9 +885,9 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
             coords = grids.coords[p0:p1]
             ao = eval_ao(_sorted_mol, coords, 0, gdftopt=opt)
             if mo_coeff is None:
-                rho[p0:p1] = eval_rho(_sorted_mol, ao, dm, xctype='LDA', hermi=1, with_lapl=with_lapl)
+                rho[p0:p1] = eval_rho(_sorted_mol, ao, dm, xctype='LDA', hermi=1)
             else:
-                rho[p0:p1] = eval_rho2(_sorted_mol, ao, mo_coeff, mo_occ, None, 'LDA', with_lapl)
+                rho[p0:p1] = eval_rho2(_sorted_mol, ao, mo_coeff, mo_occ, None, 'LDA')
             t1 = log.timer_debug2('eval rho slice', *t1)
     t0 = log.timer_debug1('eval rho', *t0)
 
@@ -972,7 +924,6 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         ao_deriv = 0
     else:
         ao_deriv = 1
-    with_lapl = MGGA_DENSITY_LAPL
     p0 = 0
     p1 = 0
     t1 = t0 = log.init_timer()
@@ -983,13 +934,13 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         if with_mocc:
             occ_coeff_mask = occ_coeff[mask]
             rho1 = eval_rho4(_sorted_mol, ao, occ_coeff_mask, mo1[:,mask],
-                             xctype=xctype, hermi=hermi, with_lapl=False)
+                             xctype=xctype, hermi=hermi)
         else:
             # slow version
             rho1 = []
             for i in range(nset):
-                rho_tmp = eval_rho(_sorted_mol, ao, dms[i][mask[:,None],mask],
-                                   xctype=xctype, hermi=hermi, with_lapl=with_lapl)
+                rho_tmp = eval_rho(_sorted_mol, ao, dms[i,mask[:,None],mask],
+                                   xctype=xctype, hermi=hermi)
                 rho1.append(rho_tmp)
             rho1 = cupy.stack(rho1, axis=0)
         t1 = log.timer_debug2('eval rho', *t1)
@@ -1005,12 +956,10 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         for i in range(nset):
             if xctype == 'LDA':
                 vmat_tmp = ao.dot(_scale_ao(ao, wv[i]).T)
-                add_sparse(vmat[i], vmat_tmp, mask)
             elif xctype == 'GGA':
                 wv[i,0] *= .5
                 aow = _scale_ao(ao, wv[i])
                 vmat_tmp = aow.dot(ao[0].T)
-                add_sparse(vmat[i], vmat_tmp, mask)
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             else:
@@ -1018,7 +967,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 wv[i,4] *= .5
                 vmat_tmp = ao[0].dot(_scale_ao(ao[:4], wv[i,:4]).T)
                 vmat_tmp+= _tau_dot(ao, ao, wv[i,4])
-                add_sparse(vmat[i], vmat_tmp, mask)
+            add_sparse(vmat[i], vmat_tmp, mask)
 
         t1 = log.timer_debug2('integration', *t1)
         ao = rho1 = None
@@ -1087,79 +1036,65 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
 
     if xctype == 'LDA':
         ao_deriv = 0
+        nvar = 1
+    elif xctype == 'GGA':
+        ao_deriv = 1
+        nvar = 4
     else:
         ao_deriv = 1
-    with_lapl = MGGA_DENSITY_LAPL
-    p0 = 0
-    p1 = 0
-    for ao, mask, weights, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
-                                                   max_memory=max_memory):
+        nvar = 5
+    p0 = p1 = 0
+    for ao, mask, weights, coords in ni.block_loop(
+            _sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         t0 = log.init_timer()
         p0, p1 = p1, p1+len(weights)
+        # precompute fxc_w
+        fxc_w = fxc[:,:,:,:,p0:p1] * weights
+
         # precompute molecular orbitals
         if with_mocc:
             occ_coeff_a_mask = occ_coeff_a[mask]
             occ_coeff_b_mask = occ_coeff_b[mask]
-        if with_mocc:
             rho1a = eval_rho4(_sorted_mol, ao, occ_coeff_a_mask, mo1a[:,mask],
-                              xctype=xctype, hermi=hermi, with_lapl=with_lapl)
+                              xctype=xctype, hermi=hermi)
             rho1b = eval_rho4(_sorted_mol, ao, occ_coeff_b_mask, mo1b[:,mask],
-                              xctype=xctype, hermi=hermi, with_lapl=with_lapl)
-        else:
-            # slow version
-            rho1a = []
-            rho1b = []
+                              xctype=xctype, hermi=hermi)
+            rho1 = cupy.stack([rho1a, rho1b]).reshape(2, nset, nvar, p1-p0)
+        else: # slow version
+            rho1 = cupy.empty((2, nset, nvar, p1-p0))
             for i in range(nset):
-                rho_tmp = eval_rho(_sorted_mol, ao, dma[i][mask[:,None],mask],
-                                   xctype=xctype, hermi=hermi, with_lapl=with_lapl)
-                rho1a.append(rho_tmp)
-                rho_tmp = eval_rho(_sorted_mol, ao, dmb[i][mask[:,None],mask],
-                                   xctype=xctype, hermi=hermi, with_lapl=with_lapl)
-                rho1b.append(rho_tmp)
-            rho1a = cupy.stack(rho1a, axis=0)
-            rho1b = cupy.stack(rho1b, axis=0)
-        rho1 = cupy.stack([rho1a, rho1b], axis=0)
+                rho1[0,i] = eval_rho(_sorted_mol, ao, dma[i,mask[:,None],mask],
+                                     xctype=xctype, hermi=hermi)
+                rho1[1,i] = eval_rho(_sorted_mol, ao, dmb[i,mask[:,None],mask],
+                                     xctype=xctype, hermi=hermi)
         t0 = log.timer_debug1('rho', *t0)
 
-        # precompute fxc_w
-        if xctype == 'LDA':
-            fxc_w = fxc[:,0,:,0,p0:p1] * weights
-        else:
-            fxc_w = fxc[:,:,:,:,p0:p1] * weights
-
         for i in range(nset):
+            wv = contract('axg,axbyg->byg', rho1[:,i], fxc_w)
             if xctype == 'LDA':
-                wv = contract('ag,abg->bg', rho1[:,i], fxc_w)
-                va = ao.dot(_scale_ao(ao, wv[0]).T)
-                vb = ao.dot(_scale_ao(ao, wv[1]).T)
-                add_sparse(vmata[i], va, mask)
-                add_sparse(vmatb[i], vb, mask)
+                va = ao.dot(_scale_ao(ao, wv[0,0]).T)
+                vb = ao.dot(_scale_ao(ao, wv[1,0]).T)
             elif xctype == 'GGA':
-                wv = contract('axg,axbyg->byg', rho1[:,i], fxc_w)
-                wv[:,0] *= .5
+                wv[:,0] *= .5 # for transpose_sum at the end
                 va = ao[0].dot(_scale_ao(ao, wv[0]).T)
                 vb = ao[0].dot(_scale_ao(ao, wv[1]).T)
-                add_sparse(vmata[i], va, mask)
-                add_sparse(vmatb[i], vb, mask)
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             else:
-                wv = contract('axg,axbyg->byg', rho1[:,i], fxc_w)
-                wv[:,[0, 4]] *= .5
+                wv[:,[0,4]] *= .5 # for transpose_sum at the end
                 va = ao[0].dot(_scale_ao(ao[:4], wv[0,:4]).T)
                 vb = ao[0].dot(_scale_ao(ao[:4], wv[1,:4]).T)
                 va += _tau_dot(ao, ao, wv[0,4])
                 vb += _tau_dot(ao, ao, wv[1,4])
-                add_sparse(vmata[i], va, mask)
-                add_sparse(vmatb[i], vb, mask)
+            add_sparse(vmata[i], va, mask)
+            add_sparse(vmatb[i], vb, mask)
     vmata = opt.unsort_orbitals(vmata, axis=[1,2])
     vmatb = opt.unsort_orbitals(vmatb, axis=[1,2])
     if xctype != 'LDA':
         # For real orbitals, K_{ia,bj} = K_{ia,jb}. It simplifies real fxc_jb
         # [(\nabla mu) nu + mu (\nabla nu)] * fxc_jb = ((\nabla mu) nu f_jb) + h.c.
-        for i in range(nset):
-            vmata[i] = vmata[i] + vmata[i].T
-            vmatb[i] = vmatb[i] + vmatb[i].T
+        transpose_sum(vmata)
+        transpose_sum(vmatb)
 
     if FREE_CUPY_CACHE:
         dma = dmb = None
@@ -1221,17 +1156,15 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     if mo_coeff is not None:
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
-
-    with_lapl = MGGA_DENSITY_LAPL
     ao_deriv = 1
     vvrho = []
     for ao, idx, weight, coords \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         if mo_coeff is None:
-            rho = eval_rho(_sorted_mol, ao, dms[0][idx[:,None],idx], xctype='GGA', hermi=1, with_lapl=with_lapl)
+            rho = eval_rho(_sorted_mol, ao, dms[0][idx[:,None],idx], xctype='GGA', hermi=1)
         else:
             mo_coeff_mask = mo_coeff[idx,:]
-            rho = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, 'GGA', with_lapl)
+            rho = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, 'GGA')
         vvrho.append(rho)
 
     rho = cupy.hstack(vvrho)
@@ -1280,7 +1213,6 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
         raise NotImplementedError('NLC')
     else:
         ao_deriv = 0
-    with_lapl = MGGA_DENSITY_LAPL
     opt = getattr(ni, 'gdftopt', None)
     if opt is None or mol not in [opt.mol, opt._sorted_mol]:
         ni.build(mol, grids.coords)
@@ -1297,7 +1229,7 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                      max_memory=max_memory):
             mo_coeff_mask = mo_coeff[idx,:]
-            rho_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype, with_lapl)
+            rho_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype)
             rho.append(rho_slice)
             t1 = log.timer_debug2('eval rho slice', *t1)
         rho = cupy.hstack(rho)
@@ -1314,8 +1246,8 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                      max_memory=max_memory):
             mo_coeff_mask = mo_coeff[:,idx,:]
-            rhoa_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype, with_lapl)
-            rhob_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[1], mo_occ[1], None, xctype, with_lapl)
+            rhoa_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype)
+            rhob_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[1], mo_occ[1], None, xctype)
             rhoa.append(rhoa_slice)
             rhob.append(rhob_slice)
             t1 = log.timer_debug2('eval rho in fxc', *t1)

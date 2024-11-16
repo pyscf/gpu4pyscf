@@ -25,14 +25,12 @@ from pyscf.dft import rks
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
 from gpu4pyscf.scf import hf
-from gpu4pyscf.lib.cupy_helper import load_library, tag_array
+from gpu4pyscf.lib.cupy_helper import tag_array
 from pyscf import __config__
 
 __all__ = [
     'get_veff', 'RKS', 'KohnShamDFT',
 ]
-
-libcupy_helper = load_library('libcupy_helper')
 
 def prune_small_rho_grids_(ks, mol, dm, grids):
     rho = ks._numint.get_rho(mol, dm, grids, ks.max_memory, verbose=ks.verbose)
@@ -134,16 +132,14 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     if hermi == 2:  # because rho = 0
         n, exc, vxc = 0, 0, 0
     else:
-        max_memory = ks.max_memory - lib.current_memory()[0]
-        n, exc, vxc = ni.nr_rks(mol, ks.grids, ks.xc, dm, max_memory=max_memory)
+        n, exc, vxc = ni.nr_rks(mol, ks.grids, ks.xc, dm)
         if ks.do_nlc():
             if ni.libxc.is_nlc(ks.xc):
                 xc = ks.xc
             else:
                 assert ni.libxc.is_nlc(ks.nlc)
                 xc = ks.nlc
-            n, enlc, vnlc = ni.nr_nlc_vxc(mol, ks.nlcgrids, xc, dm,
-                                          max_memory=max_memory)
+            n, enlc, vnlc = ni.nr_nlc_vxc(mol, ks.nlcgrids, xc, dm)
 
             exc += enlc
             vxc += vnlc
