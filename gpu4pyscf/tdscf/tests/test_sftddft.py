@@ -23,7 +23,7 @@ from gpu4pyscf import tdscf
 try:
     import mcfun
 except ImportError:
-    mcfun is None
+    mcfun = None
 
 class KnownValues(unittest.TestCase):
     @classmethod
