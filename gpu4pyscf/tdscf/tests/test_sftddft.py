@@ -56,7 +56,7 @@ class KnownValues(unittest.TestCase):
         td = mf.SFTDA().run(extype=1, conv_tol=1e-7)
         self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
 
-    @unittest.skipIf(mcfun is None)
+    @unittest.skipIf(mcfun is None, 'MCfun not available')
     def test_mcol_b3lyp_tda(self):
         mf = self.mf
         # sftddft not available in pyscf main branch. References are created

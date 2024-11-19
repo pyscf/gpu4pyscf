@@ -615,46 +615,48 @@ class SpinFlipTDHF(TDBase):
                 dm_a2b = contract('xov,qv->xoq', zs_a2b, orbvb.conj())
                 dm_a2b = contract('xoq,po->xpq', dm_a2b, orboa)
 
-            # Compute individual terms in
+            '''
+            # The slow way to compute individual terms in
             # [A   B] [X]
             # [B* A*] [Y]
-            # dms = cp.vstack([dm_b2a, dm_a2b])
-            # v1ao = vresp(dms)
-            # v1ao_b2a, v1ao_a2b = v1ao[:nz], v1ao[nz:]
-            # if extype == 0:
-            #     # A*X = (aI||Jb) * z_b2a = -(ab|IJ) * z_b2a
-            #     v1A_b2a = contract('xpq,qo->xpo', v1ao_b2a, orbob)
-            #     v1A_b2a = contract('xpo,pv->xov', v1A_b2a, orbva.conj())
-            #     # (A*)*Y = (iA||Bj) * z_a2b = -(ij|BA) * z_a2b
-            #     v1A_a2b = contract('xpq,po->xoq', v1ao_a2b, orboa.conj())
-            #     v1A_a2b = contract('xoq,qv->xov', v1A_a2b, orbvb)
-            #     # B*Y = (aI||Bj) * z_a2b = -(aj|BI) * z_a2b
-            #     v1B_b2a = contract('xpq,qo->xpo', v1ao_a2b, orbob)
-            #     v1B_b2a = contract('xpo,pv->xov', v1B_b2a, orbva.conj())
-            #     # (B*)*X = (iA||Jb) * z_b2a = -(ib|JA) * z_b2a
-            #     v1B_a2b = contract('xpq,po->xoq', v1ao_b2a, orboa.conj())
-            #     v1B_a2b = contract('xoq,qv->xov', v1B_a2b, orbvb)
-            #     # add the orbital energy difference in A matrix.
-            #     v1_top = v1A_b2a + v1B_b2a + zs_b2a * e_ia_b2a
-            #     v1_bot = v1B_a2b + v1A_a2b + zs_a2b * e_ia_a2b
-            #     hx = cp.hstack([v1_top.reshape(nz,-1), -v1_bot.reshape(nz,-1)])
-            # else:
-            #     # A*X = (Ai||jB) * z_a2b = -(AB|ij) * z_a2b
-            #     v1A_a2b = contract('xpq,qo->xpo', v1ao_a2b, orboa)
-            #     v1A_a2b = contract('xpo,pv->xov', v1A_a2b, orbvb.conj())
-            #     # (A*)*Y = (Ia||bJ) * z_b2a = -(IJ|ba) * z_b2a
-            #     v1A_b2a = contract('xpq,po->xoq', v1ao_b2a, orbob.conj())
-            #     v1A_b2a = contract('xoq,qv->xov', v1A_b2a, orbva)
-            #     # B*Y = (Ai||bJ) * z_b2a = -(AJ|bi) * z_b2a
-            #     v1B_a2b = contract('xpq,qo->xpo', v1ao_b2a, orboa)
-            #     v1B_a2b = contract('xpo,pv->xov', v1B_a2b, orbvb.conj())
-            #     # (B*)*X = (Ia||jB) * z_a2b = -(IB|ja) * z_a2b
-            #     v1B_b2a = contract('xpq,po->xoq', v1ao_a2b, orbob.conj())
-            #     v1B_b2a = contract('xoq,qv->xov', v1B_b2a, orbva)
-            #     # add the orbital energy difference in A matrix.
-            #     v1_top = v1A_a2b + v1B_a2b + zs_a2b * e_ia_a2b
-            #     v1_bot = v1B_b2a + v1A_b2a + zs_b2a * e_ia_b2a
-            #     hx = cp.hstack([v1_top.reshape(nz,-1), -v1_bot.reshape(nz,-1)])
+            dms = cp.vstack([dm_b2a, dm_a2b])
+            v1ao = vresp(dms)
+            v1ao_b2a, v1ao_a2b = v1ao[:nz], v1ao[nz:]
+            if extype == 0:
+                # A*X = (aI||Jb) * z_b2a = -(ab|IJ) * z_b2a
+                v1A_b2a = contract('xpq,qo->xpo', v1ao_b2a, orbob)
+                v1A_b2a = contract('xpo,pv->xov', v1A_b2a, orbva.conj())
+                # (A*)*Y = (iA||Bj) * z_a2b = -(ij|BA) * z_a2b
+                v1A_a2b = contract('xpq,po->xoq', v1ao_a2b, orboa.conj())
+                v1A_a2b = contract('xoq,qv->xov', v1A_a2b, orbvb)
+                # B*Y = (aI||Bj) * z_a2b = -(aj|BI) * z_a2b
+                v1B_b2a = contract('xpq,qo->xpo', v1ao_a2b, orbob)
+                v1B_b2a = contract('xpo,pv->xov', v1B_b2a, orbva.conj())
+                # (B*)*X = (iA||Jb) * z_b2a = -(ib|JA) * z_b2a
+                v1B_a2b = contract('xpq,po->xoq', v1ao_b2a, orboa.conj())
+                v1B_a2b = contract('xoq,qv->xov', v1B_a2b, orbvb)
+                # add the orbital energy difference in A matrix.
+                v1_top = v1A_b2a + v1B_b2a + zs_b2a * e_ia_b2a
+                v1_bot = v1B_a2b + v1A_a2b + zs_a2b * e_ia_a2b
+                hx = cp.hstack([v1_top.reshape(nz,-1), -v1_bot.reshape(nz,-1)])
+            else:
+                # A*X = (Ai||jB) * z_a2b = -(AB|ij) * z_a2b
+                v1A_a2b = contract('xpq,qo->xpo', v1ao_a2b, orboa)
+                v1A_a2b = contract('xpo,pv->xov', v1A_a2b, orbvb.conj())
+                # (A*)*Y = (Ia||bJ) * z_b2a = -(IJ|ba) * z_b2a
+                v1A_b2a = contract('xpq,po->xoq', v1ao_b2a, orbob.conj())
+                v1A_b2a = contract('xoq,qv->xov', v1A_b2a, orbva)
+                # B*Y = (Ai||bJ) * z_b2a = -(AJ|bi) * z_b2a
+                v1B_a2b = contract('xpq,qo->xpo', v1ao_b2a, orboa)
+                v1B_a2b = contract('xpo,pv->xov', v1B_a2b, orbvb.conj())
+                # (B*)*X = (Ia||jB) * z_a2b = -(IB|ja) * z_a2b
+                v1B_b2a = contract('xpq,po->xoq', v1ao_a2b, orbob.conj())
+                v1B_b2a = contract('xoq,qv->xov', v1B_b2a, orbva)
+                # add the orbital energy difference in A matrix.
+                v1_top = v1A_a2b + v1B_a2b + zs_a2b * e_ia_a2b
+                v1_bot = v1B_b2a + v1A_b2a + zs_b2a * e_ia_b2a
+                hx = cp.hstack([v1_top.reshape(nz,-1), -v1_bot.reshape(nz,-1)])
+            '''
 
             # [A   B] [X]
             # [B* A*] [Y]
