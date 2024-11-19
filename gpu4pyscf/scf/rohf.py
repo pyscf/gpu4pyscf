@@ -84,7 +84,6 @@ class ROHF(hf.RHF):
     get_hcore = hf.RHF.get_hcore
     get_ovlp = hf.RHF.get_ovlp
     get_init_guess = uhf.UHF.get_init_guess
-    make_rdm1 = hf.return_cupy_array(rohf_cpu.ROHF.make_rdm1)
     make_rdm2 = NotImplemented
     x2c = x2c1e = sfx2c1e = NotImplemented
     to_rhf = NotImplemented
