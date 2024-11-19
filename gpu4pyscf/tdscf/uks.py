@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright 2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2024 The GPU4PySCF Developers. All Rights Reserved.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@ from pyscf import symm
 from pyscf import lib
 from pyscf.tdscf._lr_eig import eigh as lr_eigh
 from gpu4pyscf.dft.rks import KohnShamDFT
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, tag_array, transpose_sum
 from gpu4pyscf.lib import logger
 from gpu4pyscf.tdscf import uhf as tdhf_gpu
 from gpu4pyscf import dft
@@ -33,6 +33,8 @@ __all__ = [
 TDA = tdhf_gpu.TDA
 TDDFT = tdhf_gpu.TDHF
 TDUKS = TDDFT
+SpinFlipTDA = tdhf_gpu.SpinFlipTDA
+SpinFlipTDDFT = tdhf_gpu.SpinFlipTDHF
 
 class CasidaTDDFT(TDDFT):
     '''Solve the Casida TDDFT formula (A-B)(A+B)(X+Y) = (X+Y)w^2
@@ -75,23 +77,24 @@ class CasidaTDDFT(TDDFT):
         noccb, nvirb = e_ia_b.shape
 
         def vind(zs):
+            assert zs.dtype == np.float64
             nz = len(zs)
             zs = cp.asarray(zs).reshape(nz,-1)
             dmsa = (zs[:,:nocca*nvira] * d_ia[:nocca*nvira]).reshape(nz,nocca,nvira)
             dmsb = (zs[:,nocca*nvira:] * d_ia[nocca*nvira:]).reshape(nz,noccb,nvirb)
-            dmsa = contract('xov,qv->xoq', dmsa, orbva)
-            dmsa = contract('po,xoq->xpq', orboa, dmsa)
-            dmsb = contract('xov,qv->xoq', dmsb, orbvb)
-            dmsb = contract('po,xoq->xpq', orbob, dmsb)
-            dmsa = dmsa + dmsa.conj().transpose(0,2,1)
-            dmsb = dmsb + dmsb.conj().transpose(0,2,1)
-
-            v1ao = vresp(cp.asarray((dmsa,dmsb)))
-
-            v1a = contract('po,xpq->xoq', orboa, v1ao[0])
-            v1a = contract('xoq,qv->xov', v1a, orbva)
-            v1b = contract('po,xpq->xoq', orbob, v1ao[1])
-            v1b = contract('xoq,qv->xov', v1b, orbvb)
+            mo1a = contract('xov,pv->xpo', dmsa, orbva)
+            dmsa = contract('xpo,qo->xpq', mo1a, orboa)
+            mo1b = contract('xov,pv->xpo', dmsb, orbvb)
+            dmsb = contract('xpo,qo->xpq', mo1b, orbob)
+            dmsa = transpose_sum(dmsa)
+            dmsb = transpose_sum(dmsb)
+            dms = cp.asarray((dmsa, dmsb))
+            dms = tag_array(dms, mo1=[mo1a,mo1b], occ_coeff=[orboa,orbob])
+            v1ao = vresp(dms)
+            v1a = contract('xpq,qo->xpo', v1ao[0], orboa)
+            v1a = contract('xpo,pv->xov', v1a, orbva)
+            v1b = contract('xpq,qo->xpo', v1ao[1], orbob)
+            v1b = contract('xpo,pv->xov', v1b, orbvb)
             hx = cp.hstack((v1a.reshape(nz,-1), v1b.reshape(nz,-1)))
             hx += ed_ia * zs
             hx *= d_ia
@@ -102,7 +105,8 @@ class CasidaTDDFT(TDDFT):
     def kernel(self, x0=None, nstates=None):
         '''TDDFT diagonalization solver
         '''
-        cpu0 = (logger.process_clock(), logger.perf_counter())
+        log = logger.new_logger(self)
+        cpu0 = log.init_timer()
         mf = self._scf
         if mf._numint.libxc.is_hybrid_xc(mf.xc):
             raise RuntimeError('%s cannot be used with hybrid functional'
@@ -113,7 +117,6 @@ class CasidaTDDFT(TDDFT):
             nstates = self.nstates
         else:
             self.nstates = nstates
-        log = logger.Logger(self.stdout, self.verbose)
 
         vind, hdiag = self.gen_vind(self._scf)
         precond = self.get_precond(hdiag)
@@ -124,7 +127,7 @@ class CasidaTDDFT(TDDFT):
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess(self._scf, self.nstates)
+            x0 = self.init_guess()
 
         self.converged, w2, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -189,3 +192,5 @@ dft.uks.UKS.TDHF          = None
 dft.uks.UKS.TDDFTNoHybrid = lib.class_as_method(TDDFTNoHybrid)
 dft.uks.UKS.CasidaTDDFT   = lib.class_as_method(CasidaTDDFT)
 dft.uks.UKS.TDDFT         = tddft
+dft.uks.UKS.SFTDA         = lib.class_as_method(SpinFlipTDA)
+dft.uks.UKS.SFTDDFT       = lib.class_as_method(SpinFlipTDDFT)

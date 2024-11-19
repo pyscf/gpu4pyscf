@@ -39,16 +39,12 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
             grids.build(mol=mol, with_non0tab=False, sort_grids=True)
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
-        if getattr(mf, 'nlc', '') != '':
+        if mf.do_nlc():
             logger.warn(mf, 'NLC functional found in DFT object.  Its second '
                         'deriviative is not available. Its contribution is '
                         'not included in the response function.')
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
         hybrid = ni.libxc.is_hybrid_xc(mf.xc)
-
-        if max_memory is None:
-            mem_avail = cupy.cuda.runtime.memGetInfo()[0] * .5e-6
-            max_memory = min(mf.max_memory, mem_avail)
 
         if singlet is None:
             # for ground state orbital hessian
@@ -158,10 +154,6 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
         rho0, vxc, fxc = ni.cache_xc_kernel(mol, grids, mf.xc,
                                             mo_coeff, mo_occ, 1)
         dm0 = None
-
-        if max_memory is None:
-            mem_now = lib.current_memory()[0]
-            max_memory = max(2000, mf.max_memory*.8-mem_now)
 
         def vind(dm1):
             if hermi == 2:

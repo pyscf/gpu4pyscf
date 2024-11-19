@@ -353,8 +353,8 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
                     rhok = contract('Lij,jk->Lki', cderi, occ_coeff).reshape([-1,nao])
                     for i in range(mo1.shape[0]):
                         rhok1 = contract('Lij,jk->Lki', cderi, mo1[i]).reshape([-1,nao])
-                        #contract('Lki,Lkj->ij', rhok, rhok1, alpha=1.0, beta=1.0, out=vk[iset])
-                        vk[iset] += cupy.dot(rhok.T, rhok1)
+                        #contract('Lki,Lkj->ij', rhok1, rhok, alpha=1.0, beta=1.0, out=vk[iset])
+                        vk[iset] += cupy.dot(rhok1.T, rhok)
                         iset += 1
                 mo1 = rhok1 = rhok = None
             cderi = None
