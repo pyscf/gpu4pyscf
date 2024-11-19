@@ -362,11 +362,12 @@ def transpose_sum(a, stream=None):
     return a + a.transpose(0,2,1)
     '''
     assert a.flags.c_contiguous
-    n = a.shape[-1]
+    out = a
     if a.ndim == 2:
-        a = a.reshape([-1,n,n])
+        a = a[None]
     assert a.ndim == 3
-    count = a.shape[0]
+    count, m, n = a.shape
+    assert m == n
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.transpose_sum(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -376,7 +377,7 @@ def transpose_sum(a, stream=None):
     )
     if err != 0:
         raise RuntimeError('failed in transpose_sum kernel')
-    return a
+    return out
 
 # for i > j of 2d mat, mat[j,i] = mat[i,j]
 def hermi_triu(mat, hermi=1, inplace=True):
@@ -915,10 +916,11 @@ def sandwich_dot(a, c, out=None):
         a = a[None]
     counts = a.shape[0]
     m = c.shape[1]
-    out = cupy.empty((counts, m, m))
+    dtype = np.result_type(a, c)
+    out = cupy.empty((counts, m, m), dtype=dtype)
     tmp = None
     for i in range(counts):
-        tmp = cupy.dot(c.T, a[i], out=tmp)
+        tmp = cupy.dot(c.conj().T, a[i], out=tmp)
         cupy.dot(tmp, c, out=out[i])
     if a_ndim == 2:
         out = out[0]

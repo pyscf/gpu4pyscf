@@ -311,6 +311,27 @@ def scf(mf, dm0=None, **kwargs):
     mf._finalize()
     return mf.e_tot
 
+def canonicalize(mf, mo_coeff, mo_occ, fock=None):
+    '''Canonicalization diagonalizes the Fock matrix within occupied, open,
+    virtual subspaces separatedly (without change occupancy).
+    '''
+    if fock is None:
+        dm = mf.make_rdm1(mo_coeff, mo_occ)
+        fock = mf.get_fock(dm=dm)
+    coreidx = mo_occ == 2
+    viridx = mo_occ == 0
+    openidx = ~(coreidx | viridx)
+    mo = cupy.empty_like(mo_coeff)
+    mo_e = cupy.empty(mo_occ.size)
+    for idx in (coreidx, openidx, viridx):
+        if cupy.any(idx) > 0:
+            orb = mo_coeff[:,idx]
+            f1 = orb.conj().T.dot(fock).dot(orb)
+            e, c = cupy.linalg.eigh(f1)
+            mo[:,idx] = orb.dot(c)
+            mo_e[idx] = e
+    return mo_e, mo
+
 def as_scanner(mf):
     if isinstance(mf, pyscf_lib.SinglePointScanner):
         return mf
@@ -454,6 +475,7 @@ class SCF(pyscf_lib.StreamObject):
     stability                = NotImplemented
     nuc_grad_method          = NotImplemented
     update_                  = NotImplemented
+    canonicalize             = NotImplemented
     istype                   = hf.SCF.istype
 
     def remove_soscf(self):
@@ -500,7 +522,6 @@ class RHF(SCF):
     get_init_guess = return_cupy_array(hf.RHF.get_init_guess)
     init_direct_scf = NotImplemented
     make_rdm2 = NotImplemented
-    newton = NotImplemented
     x2c = x2c1e = sfx2c1e = NotImplemented
     to_rhf = NotImplemented
     to_uhf = NotImplemented
@@ -509,7 +530,6 @@ class RHF(SCF):
     to_uks = NotImplemented
     to_gks = NotImplemented
     to_ks = NotImplemented
-    canonicalize = NotImplemented
     # TODO: Enable followings after testing
     analyze = NotImplemented
     stability = NotImplemented
@@ -518,6 +538,7 @@ class RHF(SCF):
 
     scf = scf
     kernel = scf
+    canonicalize = canonicalize
 
     def check_sanity(self):
         mol = self.mol
@@ -533,6 +554,10 @@ class RHF(SCF):
     def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
         import gpu4pyscf.df.df_jk
         return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
+
+    def newton(self):
+        from gpu4pyscf.scf.soscf import newton
+        return newton(self)
 
     def to_cpu(self):
         mf = hf.RHF(self.mol)
