@@ -352,7 +352,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         for atm_id, (coords, weight, weight1) in enumerate(grids_response_cc(grids)):
             ngrids = weight.size
             for p0, p1 in lib.prange(0,ngrids,block_size):
-                ao = numint.eval_ao(_sorted_mol, coords[p0:p1, :], ao_deriv, gdftopt=opt)
+                ao = numint.eval_ao(_sorted_mol, coords[p0:p1, :], ao_deriv, gdftopt=opt, transpose=False)
 
                 if xctype == 'LDA':
                     rho = numint.eval_rho(_sorted_mol, ao[0], dms,
@@ -403,7 +403,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     #:vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
     vmat = sandwich_dot(vmat, coeff)
-    
+
     # - sign because nabla_X = -nabla_x
     return excsum, -vmat
 
@@ -418,7 +418,7 @@ def grids_response_cc(grids):
     atm_dist = gto.inter_distance(mol, atm_coords)
     atm_dist = cupy.asarray(atm_dist)
     atm_coords = cupy.asarray(atm_coords)
-    
+
     def _radii_adjust(mol, atomic_radii):
         charges = mol.atom_charges()
         if grids.radii_adjust == radi.treutler_atomic_radii_adjust:

@@ -53,7 +53,8 @@ libgdft.GDFTdot_ao_ao_sparse.restype = ctypes.c_int
 libgdft.GDFTdot_aow_ao_sparse.restype = ctypes.c_int
 
 def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=None,
-            non0tab=None, out=None, verbose=None, ctr_offsets_slice=None, gdftopt=None):
+            non0tab=None, out=None, verbose=None, ctr_offsets_slice=None, gdftopt=None,
+            transpose=True):
     ''' evaluate ao values for given coords and shell indices
     Kwargs:
         shls_slice :       offsets of shell slices to be evaluated
@@ -61,15 +62,14 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
         ctr_offsets_slice: offsets of contraction patterns
     Returns:
         ao: comp x nao_slice x ngrids, ao is in C-contiguous.
-            Note, the structure of the ao tensor is different to that in PySCF
-            TODO: transpose ao to make the output compatible with PySCF
+            comp x ngrids x nao_slice if tranpose, be compatiable with PySCF.
     '''
     if gdftopt is None:
         opt = _GDFTOpt.from_mol(mol)
         with opt.gdft_envs_cache():
             return eval_ao(
                 mol, coords, deriv, shls_slice, nao_slice, ao_loc_slice,
-                non0tab, out, verbose, ctr_offsets_slice, opt)
+                non0tab, out, verbose, ctr_offsets_slice, opt, transpose)
 
     opt = gdftopt
     _sorted_mol = opt._sorted_mol
@@ -121,6 +121,9 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
         coeff = cupy.asarray(opt.coeff)
         out = contract('nig,ij->njg', out, coeff)
 
+    if transpose:
+        out = out.transpose(0,2,1)
+    
     if deriv == 0:
         out = out[0]
     return out
@@ -883,7 +886,7 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
         t1 = t0 = log.init_timer()
         for p0, p1 in lib.prange(0,ngrids,blksize):
             coords = grids.coords[p0:p1]
-            ao = eval_ao(_sorted_mol, coords, 0, gdftopt=opt)
+            ao = eval_ao(_sorted_mol, coords, 0, gdftopt=opt, transpose=False)
             if mo_coeff is None:
                 rho[p0:p1] = eval_rho(_sorted_mol, ao, dm, xctype='LDA', hermi=1)
             else:
@@ -1469,7 +1472,10 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 nao_slice=len(idx),
                 shls_slice=non0shl_idx,
                 ao_loc_slice=ao_loc_slice,
-                ctr_offsets_slice=ctr_offsets_slice, gdftopt=opt)
+                ctr_offsets_slice=ctr_offsets_slice,
+                gdftopt=opt,
+                transpose=False
+            )
 
             t1 = log.timer_debug2('evaluate ao slice', *t1)
             if pad > 0:
@@ -1534,7 +1540,10 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 nao_slice=len(idx),
                 shls_slice=non0shl_idx,
                 ao_loc_slice=ao_loc_slice,
-                ctr_offsets_slice=ctr_offsets_slice, gdftopt=opt)
+                ctr_offsets_slice=ctr_offsets_slice,
+                gdftopt=opt,
+                transpose=False
+            )
 
             if pad > 0:
                 if deriv == 0:
