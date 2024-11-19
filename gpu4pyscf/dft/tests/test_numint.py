@@ -219,11 +219,10 @@ class KnownValues(unittest.TestCase):
         ni_gpu = NumInt()
         ni_cpu = pyscf_numint()
         for xctype in ('LDA', 'GGA', 'MGGA'):
-            print(xctype)
             deriv = 1
             if xctype == 'LDA':
                 deriv = 0
-            ao_gpu = ni_gpu.eval_ao(mol, grids_gpu.coords, deriv=deriv)
+            ao_gpu = ni_gpu.eval_ao(mol, grids_gpu.coords, deriv=deriv, transpose=False)
             ao_cpu = ni_cpu.eval_ao(mol, grids_cpu.coords, deriv=deriv)
             rho = ni_gpu.eval_rho(mol, ao_gpu, dm, xctype=xctype, hermi=0, with_lapl=False)
             ref = ni_cpu.eval_rho(mol, ao_cpu, dm, xctype=xctype, hermi=0, with_lapl=False)
