@@ -118,16 +118,6 @@ class KnownValues(unittest.TestCase):
     @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_gpu(self):
         import pyscf
-        # Not implemented yet
-        '''
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').SMD()
-        mf.kernel()
-        hessobj = mf.Hessian()
-        hess_cpu = hessobj.kernel()
-        hessobj = hessobj.to_gpu()
-        hess_gpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-8
-        '''
         mol = gto.Mole()
         mol.atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -137,6 +127,17 @@ H       0.7570000000     0.0000000000    -0.4696000000
         mol.basis = 'sto-3g'
         mol.output = '/dev/null'
         mol.build(verbose=0)
+        mf = pyscf.dft.RKS(mol, xc='b3lyp').PCM()
+        mf.conv_tol = 1e-12
+        mf.conv_tol_cpscf = 1e-7
+        mf.grids.atom_grid = (50,194)
+        mf.kernel()
+        hessobj = mf.Hessian()
+        hess_cpu = hessobj.kernel()
+        hessobj = hessobj.to_gpu()
+        hess_gpu = hessobj.kernel()
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+
         mf = pyscf.dft.RKS(mol, xc='b3lyp').density_fit().PCM()
         mf.conv_tol = 1e-12
         mf.conv_tol_cpscf = 1e-7
@@ -167,6 +168,18 @@ H       0.7570000000     0.0000000000    -0.4696000000
         mol.basis = 'sto-3g'
         mol.output = '/dev/null'
         mol.build(verbose=0)
+        
+        mf = dft.RKS(mol, xc='b3lyp').PCM()
+        mf.conv_tol = 1e-12
+        mf.conv_tol_cpscf = 1e-7
+        mf.grids.atom_grid = (50,194)
+        mf.kernel()
+        hessobj = mf.Hessian()
+        hess_gpu = hessobj.kernel()
+        hessobj = hessobj.to_cpu()
+        hess_cpu = hessobj.kernel()
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+
         mf = dft.RKS(mol, xc='b3lyp').density_fit().PCM()
         mf.conv_tol = 1e-12
         mf.conv_tol_cpscf = 1e-7

@@ -91,7 +91,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
     natm = mol.natm
-    assert atmlst is None
+    assert atmlst is None or atmlst == range(natm)
     nao = mo_coeff.shape[0]
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = numpy.dot(mocc, mocc.T) * 2

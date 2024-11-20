@@ -238,8 +238,6 @@ class KohnShamDFT(rks.KohnShamDFT):
     to_uks = NotImplemented
     to_gks = NotImplemented
 
-    _keys = rks.KohnShamDFT._keys
-
     def __init__(self, xc='LDA,VWN'):
         self.xc = xc
         self.disp = None
