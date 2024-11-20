@@ -400,7 +400,7 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
 def _nr_rks_task(ni, mol, grids, device_id, xc_code, dms, mo_coeff, mo_occ, 
                  vmat_total, nelec_total, excsum_total,
                  verbose=None, with_lapl=False, grid_range=()):
-    ''' Execute nr_rks task on one device
+    ''' nr_rks task on one device
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
         if dms is not None: dms = cupy.asarray(dms)
@@ -537,7 +537,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         thread = threading.Thread(target=_nr_rks_task,
                                   args=(ni, mol, grids, gpu_id, xc_code, dms, mo_coeff, mo_occ, 
                                         vmat_total, nelec_total, excsum_total),
-                                  kwargs={"verbose":verbose, "with_lapl":with_lapl})
+                                  kwargs={"verbose":verbose})
         thread.start()
         threads.append(thread)
         
@@ -563,7 +563,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         nelec = nelec[0]
         excsum = excsum[0]
         vmat = vmat[0]
-    t0 = log.timer_debug1(f'nr_rks', *t0)
+    t0 = log.timer_debug1('nr_rks', *t0)
     return nelec, excsum, vmat
 
 def eval_rho_group(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='LDA',
