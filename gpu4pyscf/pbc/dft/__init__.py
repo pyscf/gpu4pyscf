@@ -15,8 +15,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+'''Kohn-Sham DFT for periodic systems
+'''
 
-from gpu4pyscf.tdscf import rhf
-from gpu4pyscf.tdscf import uhf
-from gpu4pyscf.tdscf import rks
-from gpu4pyscf.tdscf import uks
+from .gen_grid import UniformGrids, BeckeGrids
+from . import rks
+#from . import uks
+#from . import krks
+#from . import kuks
+from .rks import KohnShamDFT
+
+RKS = rks.RKS
+#UKS = uks.UKS
+#KRKS = krks.KRKS
+#KUKS = kuks.KUKS

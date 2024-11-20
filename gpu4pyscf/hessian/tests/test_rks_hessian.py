@@ -70,7 +70,9 @@ def _check_vxc(method, xc='LDA'):
 def _vs_cpu(mf, tol=1e-7):
     mf.conv_tol_cpscf = 1e-8
     ref = mf.Hessian().kernel()
-    e2_gpu = mf.Hessian().to_gpu().kernel()
+    hessobj = mf.Hessian().to_gpu()
+    hessobj.base.cphf_grids = hessobj.base.grids
+    e2_gpu = hessobj.kernel()
     assert abs(ref - e2_gpu).max() < tol
 
 class KnownValues(unittest.TestCase):

@@ -25,14 +25,12 @@ from pyscf.dft import rks
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
 from gpu4pyscf.scf import hf
-from gpu4pyscf.lib.cupy_helper import load_library, tag_array
+from gpu4pyscf.lib.cupy_helper import tag_array
 from pyscf import __config__
 
 __all__ = [
     'get_veff', 'RKS', 'KohnShamDFT',
 ]
-
-libcupy_helper = load_library('libcupy_helper')
 
 def prune_small_rho_grids_(ks, mol, dm, grids):
     rho = ks._numint.get_rho(mol, dm, grids, ks.max_memory, verbose=ks.verbose)
@@ -134,16 +132,14 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     if hermi == 2:  # because rho = 0
         n, exc, vxc = 0, 0, 0
     else:
-        max_memory = ks.max_memory - lib.current_memory()[0]
-        n, exc, vxc = ni.nr_rks(mol, ks.grids, ks.xc, dm, max_memory=max_memory)
+        n, exc, vxc = ni.nr_rks(mol, ks.grids, ks.xc, dm)
         if ks.do_nlc():
             if ni.libxc.is_nlc(ks.xc):
                 xc = ks.xc
             else:
                 assert ni.libxc.is_nlc(ks.nlc)
                 xc = ks.nlc
-            n, enlc, vnlc = ni.nr_nlc_vxc(mol, ks.nlcgrids, xc, dm,
-                                          max_memory=max_memory)
+            n, enlc, vnlc = ni.nr_nlc_vxc(mol, ks.nlcgrids, xc, dm)
 
             exc += enlc
             vxc += vnlc
@@ -232,6 +228,8 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
 # Inherit pyscf KohnShamDFT class since this is tested in the pyscf dispersion code
 class KohnShamDFT(rks.KohnShamDFT):
 
+    _keys = {'cphf_grids', *rks.KohnShamDFT._keys}
+
     to_rhf = NotImplemented
     to_uhf = NotImplemented
     to_ghf = NotImplemented
@@ -253,6 +251,14 @@ class KohnShamDFT(rks.KohnShamDFT):
         self.nlcgrids = gen_grid.Grids(self.mol)
         self.nlcgrids.level = getattr(
             __config__, 'dft_rks_RKS_nlcgrids_level', self.nlcgrids.level)
+        
+        # Default CPHF grids is SG1 grids
+        # Reference:
+        # https://gaussian.com/integral/?tabid=1#Integral_keyword__Grid_option
+        self.cphf_grids = gen_grid.Grids(self.mol)
+        self.cphf_grids.prune = gen_grid.sg1_prune
+        self.cphf_grids.atom_grid = (50,194)
+        
         # Use rho to filter grids
         self.small_rho_cutoff = getattr(
             __config__, 'dft_rks_RKS_small_rho_cutoff', 1e-7)
@@ -293,6 +299,7 @@ class RKS(KohnShamDFT, hf.RHF):
         hf.SCF.reset(self, mol)
         self.grids.reset(mol)
         self.nlcgrids.reset(mol)
+        self.cphf_grids.reset(mol)
         self._numint.reset()
         return self
 

@@ -562,7 +562,8 @@ def gen_vind(mf, mo_coeff, mo_occ):
     mocc = mo_coeff[:,mo_occ>0]
     nocc = mocc.shape[1]
     mocc_2 = mocc * 2
-    vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1)
+    grids = getattr(mf, 'cphf_grids', None)
+    vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1, grids=grids)
 
     def fx(mo1):
         mo1 = cupy.asarray(mo1)

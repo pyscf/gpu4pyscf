@@ -70,7 +70,8 @@ def spin_square(mo, s=1):
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
     if dm is None: dm = mf.make_rdm1()
-    if h1e is None: h1e = cupy.asarray(mf.get_hcore())
+    if h1e is None: h1e = mf.get_hcore()
+    if s1e is None: s1e = mf.get_ovlp()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
     if not isinstance(s1e, cupy.ndarray): s1e = cupy.asarray(s1e)
     if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
@@ -150,6 +151,36 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
     logger.debug(mf, 'E1 = %s  Ecoul = %s', e1, e_coul.real)
     return e_elec, e_coul
 
+def canonicalize(mf, mo_coeff, mo_occ, fock=None):
+    '''Canonicalization diagonalizes the UHF Fock matrix within occupied,
+    virtual subspaces separatedly (without change occupancy).
+    '''
+    mo_occ = cupy.asarray(mo_occ)
+    assert mo_occ.ndim == 2
+    if fock is None:
+        dm = mf.make_rdm1(mo_coeff, mo_occ)
+        fock = mf.get_fock(dm=dm)
+    occidxa = mo_occ[0] == 1
+    occidxb = mo_occ[1] == 1
+    viridxa = mo_occ[0] == 0
+    viridxb = mo_occ[1] == 0
+
+    def eig_(fock, mo_coeff, idx, es, cs):
+        if cupy.any(idx) > 0:
+            orb = mo_coeff[:,idx]
+            f1 = orb.conj().T.dot(fock).dot(orb)
+            e, c = cupy.linalg.eigh(f1)
+            es[idx] = e
+            cs[:,idx] = cupy.dot(orb, c)
+
+    mo = cupy.empty_like(mo_coeff)
+    mo_e = cupy.empty(mo_occ.shape)
+    eig_(fock[0], mo_coeff[0], occidxa, mo_e[0], mo[0])
+    eig_(fock[0], mo_coeff[0], viridxa, mo_e[0], mo[0])
+    eig_(fock[1], mo_coeff[1], occidxb, mo_e[1], mo[1])
+    eig_(fock[1], mo_coeff[1], viridxb, mo_e[1], mo[1])
+    return mo_e, mo
+
 class UHF(hf.SCF):
     from gpu4pyscf.lib.utils import to_gpu, device
 
@@ -195,6 +226,7 @@ class UHF(hf.SCF):
             fock = self.get_hcore(self.mol) + self.get_veff(self.mol, dm1)
         return get_grad(mo_coeff, mo_occ, fock)
 
+    make_asym_dm       = NotImplemented
     make_rdm2                = NotImplemented
     energy_elec              = energy_elec
     get_init_guess           = hf.return_cupy_array(uhf.UHF.get_init_guess)
@@ -204,15 +236,6 @@ class UHF(hf.SCF):
     init_guess_by_mod_huckel = uhf.UHF.init_guess_by_mod_huckel
     init_guess_by_1e         = uhf.UHF.init_guess_by_1e
     init_guess_by_chkfile    = uhf.UHF.init_guess_by_chkfile
-
-    analyze            = NotImplemented
-    mulliken_pop       = NotImplemented
-    mulliken_spin_pop  = NotImplemented
-    mulliken_meta      = NotImplemented
-    mulliken_meta_spin = NotImplemented
-    canonicalize       = NotImplemented
-    det_ovlp           = NotImplemented
-    make_asym_dm       = NotImplemented
     _finalize          = uhf.UHF._finalize
 
     conv_tol_cpscf = 1e-4
@@ -225,9 +248,9 @@ class UHF(hf.SCF):
     density_fit = hf.RHF.density_fit
     energy_tot = hf.RHF.energy_tot
     energy_elec = energy_elec
+    canonicalize = canonicalize
 
     make_rdm2 = NotImplemented
-    newton = NotImplemented
     x2c = x2c1e = sfx2c1e = NotImplemented
     to_rhf = NotImplemented
     to_uhf = NotImplemented
@@ -236,7 +259,6 @@ class UHF(hf.SCF):
     to_uks = NotImplemented
     to_gks = NotImplemented
     to_ks = NotImplemented
-    canonicalize = NotImplemented
     # TODO: Enable followings after testing
     analyze = NotImplemented
     stability = NotImplemented
@@ -289,6 +311,10 @@ class UHF(hf.SCF):
     def nuc_grad_method(self):
         from gpu4pyscf.grad import uhf
         return uhf.Gradients(self)
+
+    def newton(self):
+        from gpu4pyscf.scf.soscf import newton
+        return newton(self)
 
     def to_cpu(self):
         from gpu4pyscf.lib import utils

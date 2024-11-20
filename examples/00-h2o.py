@@ -60,6 +60,7 @@ g_dft = g.kernel()
 # Compute Hessian
 h = mf_GPU.Hessian()
 h.auxbasis_response = 2                # 0: no aux contribution, 1: some contributions, 2: all
+mf_GPU.cphf_grids.atom_grid = (50,194) # customize grids for solving CPSCF equation, SG1 by default
 h_dft = h.kernel()
 
 # harmonic analysis

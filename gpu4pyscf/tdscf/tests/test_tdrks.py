@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright 2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2024 The GPU4PySCF Developers. All Rights Reserved.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -39,19 +39,25 @@ class KnownValues(unittest.TestCase):
         mf_lda = mol.RKS().to_gpu().density_fit()
         mf_lda.xc = 'lda, vwn'
         mf_lda.grids.prune = None
+        mf_lda.cphf_grids = mf_lda.grids
         cls.mf_lda = mf_lda.run(conv_tol=1e-10)
 
         mf_bp86 = mol.RKS().to_gpu().density_fit()
         mf_bp86.xc = 'b88,p86'
         mf_bp86.grids.prune = None
+        mf_bp86.cphf_grids = mf_bp86.grids
         cls.mf_bp86 = mf_bp86.run(conv_tol=1e-10)
 
         mf_b3lyp = mol.RKS().to_gpu().density_fit()
         mf_b3lyp.xc = 'b3lyp5'
         mf_b3lyp.grids.prune = None
+        mf_b3lyp.cphf_grids = mf_b3lyp.grids
         cls.mf_b3lyp = mf_b3lyp.run(conv_tol=1e-10)
 
-        cls.mf_m06l = mol.RKS().to_gpu().density_fit().run(xc='m06l', conv_tol=1e-10)
+        mf_m06l = mol.RKS().to_gpu().density_fit()
+        mf_m06l.xc = 'm06l'
+        mf_m06l.cphf_grids = mf_m06l.grids
+        cls.mf_m06l = mf_m06l.run(conv_tol=1e-10)
 
     @classmethod
     def tearDownClass(cls):
@@ -106,6 +112,7 @@ class KnownValues(unittest.TestCase):
     def test_tddft_camb3lyp(self):
         mol = self.mol
         mf = mol.RKS(xc='camb3lyp').run()
+        mf.cphf_grids = mf.grids
         td = mf.TDDFT().to_gpu()
         assert td.device == 'gpu'
         td.conv_tol = 1e-5
@@ -119,6 +126,7 @@ class KnownValues(unittest.TestCase):
         mf = mol.RKS()
         mf.xc = 'b3lypg'
         mf.grids.prune = None
+        mf.cphf_grids = mf.grids
         mf.scf()
         td = mf.TDA().to_gpu()
         assert td.device == 'gpu'
@@ -172,6 +180,7 @@ class KnownValues(unittest.TestCase):
         mf = mol.RKS()
         mf.xc = 'wb97'
         mf.kernel()
+        mf.cphf_grids = mf.grids
         td = mf.TDA().to_gpu()
         assert td.device == 'gpu'
         e_td = td.set(nstates=5).kernel()[0]

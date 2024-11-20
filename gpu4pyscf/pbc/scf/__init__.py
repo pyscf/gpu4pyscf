@@ -15,8 +15,18 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+'''Hartree-Fock for periodic systems
+'''
 
-from gpu4pyscf.tdscf import rhf
-from gpu4pyscf.tdscf import uhf
-from gpu4pyscf.tdscf import rks
-from gpu4pyscf.tdscf import uks
+from .import hf
+#from . import uhf
+#from . import khf
+#from . import kuhf
+
+rhf = hf
+#krhf = khf
+
+#UHF = uhf.UHF
+RHF = rhf.RHF
+#KRHF = krhf.KRHF
+#KUHF = kuhf.KRHF

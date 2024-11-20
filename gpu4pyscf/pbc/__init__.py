@@ -15,8 +15,5 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
-from gpu4pyscf.tdscf import rhf
-from gpu4pyscf.tdscf import uhf
-from gpu4pyscf.tdscf import rks
-from gpu4pyscf.tdscf import uks
+from gpu4pyscf.pbc import scf
+from gpu4pyscf.pbc import dft

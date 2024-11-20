@@ -19,7 +19,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import hf, uhf
 
 def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
-                      singlet=None, hermi=0, max_memory=None):
+                      singlet=None, hermi=0, grids=None, max_memory=None):
     '''Generate a function to compute the product of RHF response function and
     RHF density matrices.
 
@@ -31,19 +31,20 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
     if mo_coeff is None: mo_coeff = mf.mo_coeff
     if mo_occ is None: mo_occ = mf.mo_occ
     mol = mf.mol
+    
     if isinstance(mf, hf.KohnShamDFT):
+        if grids is None:
+            grids = mf.grids
+        if grids and grids.coords is None:
+            grids.build(mol=mol, with_non0tab=False, sort_grids=True)
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
-        if getattr(mf, 'nlc', '') != '':
+        if mf.do_nlc():
             logger.warn(mf, 'NLC functional found in DFT object.  Its second '
                         'deriviative is not available. Its contribution is '
                         'not included in the response function.')
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
         hybrid = ni.libxc.is_hybrid_xc(mf.xc)
-
-        if max_memory is None:
-            mem_avail = cupy.cuda.runtime.memGetInfo()[0] * .5e-6
-            max_memory = min(mf.max_memory, mem_avail)
 
         if singlet is None:
             # for ground state orbital hessian
@@ -51,7 +52,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
         else:
             spin = 1
         rho0, vxc, fxc = ni.cache_xc_kernel(
-            mol, mf.grids, mf.xc, mo_coeff, mo_occ, spin, max_memory=max_memory)
+            mol, grids, mf.xc, mo_coeff, mo_occ, spin, max_memory=max_memory)
         dm0 = None
 
         if singlet is None:
@@ -61,7 +62,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                 if hermi == 2:
                     v1 = cupy.zeros_like(dm1)
                 else:
-                    v1 = ni.nr_rks_fxc(mol, mf.grids, mf.xc, dm0, dm1, 0, hermi,
+                    v1 = ni.nr_rks_fxc(mol, grids, mf.xc, dm0, dm1, 0, hermi,
                                        rho0, vxc, fxc, max_memory=max_memory)
                 if hybrid:
                     if hermi != 2:
@@ -83,7 +84,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                     v1 = cupy.zeros_like(dm1)
                 else:
                     # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
-                    v1 = ni.nr_rks_fxc_st(mol, mf.grids, mf.xc, dm0, dm1, 0, True,
+                    v1 = ni.nr_rks_fxc_st(mol, grids, mf.xc, dm0, dm1, 0, True,
                                           rho0, vxc, fxc, max_memory=max_memory)
                 if hybrid:
                     if hermi != 2:
@@ -105,7 +106,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                     v1 = cupy.zeros_like(dm1)
                 else:
                     # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
-                    v1 = ni.nr_rks_fxc_st(mol, mf.grids, mf.xc, dm0, dm1, 0, False,
+                    v1 = ni.nr_rks_fxc_st(mol, grids, mf.xc, dm0, dm1, 0, False,
                                           rho0, vxc, fxc, max_memory=max_memory)
                 if hybrid:
                     vk = mf.get_k(mol, dm1, hermi=hermi)
@@ -128,7 +129,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
 
 
 def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
-                      with_j=True, hermi=0, max_memory=None):
+                      with_j=True, hermi=0, grids=None, max_memory=None):
     '''Generate a function to compute the product of UHF response function and
     UHF density matrices.
     '''
@@ -137,6 +138,10 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
     if mo_occ is None: mo_occ = mf.mo_occ
     mol = mf.mol
     if isinstance(mf, hf.KohnShamDFT):
+        if grids is None:
+            grids = mf.grids
+        if grids and grids.coords is None:
+            grids.build(mol=mol, with_non0tab=False, sort_grids=True)
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
         if mf.do_nlc():
@@ -146,19 +151,15 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
         hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
-        rho0, vxc, fxc = ni.cache_xc_kernel(mol, mf.grids, mf.xc,
+        rho0, vxc, fxc = ni.cache_xc_kernel(mol, grids, mf.xc,
                                             mo_coeff, mo_occ, 1)
         dm0 = None
-
-        if max_memory is None:
-            mem_now = lib.current_memory()[0]
-            max_memory = max(2000, mf.max_memory*.8-mem_now)
 
         def vind(dm1):
             if hermi == 2:
                 v1 = cupy.zeros_like(dm1)
             else:
-                v1 = ni.nr_uks_fxc(mol, mf.grids, mf.xc, dm0, dm1, 0, hermi,
+                v1 = ni.nr_uks_fxc(mol, grids, mf.xc, dm0, dm1, 0, hermi,
                                    rho0, vxc, fxc, max_memory=max_memory)
             if not hybrid:
                 if with_j:
