@@ -80,6 +80,7 @@ class KnownValues(unittest.TestCase):
 
         v = cupy.asarray(v)
         vref = cupy.asarray(vref)
+
         assert cupy.allclose(e, eref)
         assert cupy.allclose(n, nref)
         assert cupy.allclose(v, vref)
@@ -219,7 +220,6 @@ class KnownValues(unittest.TestCase):
         ni_gpu = NumInt()
         ni_cpu = pyscf_numint()
         for xctype in ('LDA', 'GGA', 'MGGA'):
-            print(xctype)
             deriv = 1
             if xctype == 'LDA':
                 deriv = 0

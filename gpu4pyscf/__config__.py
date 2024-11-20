@@ -1,5 +1,13 @@
 import cupy
 
+_num_devices = cupy.cuda.runtime.getDeviceCount()
+
+# TODO: switch to non_blocking stream (blocked by libxc)
+_streams = [None] * _num_devices
+for device_id in range(_num_devices):
+    with cupy.cuda.Device(device_id):
+        _streams[device_id] = cupy.cuda.stream.Stream(non_blocking=False)
+
 props = cupy.cuda.runtime.getDeviceProperties(0)
 GB = 1024*1024*1024
 # such as A100-80G
@@ -36,3 +44,4 @@ else:
     number_of_threads = 1024 * 80
 
 cupy.get_default_memory_pool().set_limit(fraction=mem_fraction)
+

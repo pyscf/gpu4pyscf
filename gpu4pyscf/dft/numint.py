@@ -27,10 +27,11 @@ from pyscf.gto.eval_gto import NBINS, CUTOFF, make_screen_index
 from gpu4pyscf.gto.mole import basis_seg_contraction
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, transpose_sum,
-    grouped_dot, grouped_gemm)
+    grouped_dot, grouped_gemm, reduce_to_device)
 from gpu4pyscf.dft import xc_deriv, xc_alias, libxc
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
+from gpu4pyscf.__config__ import _streams
 
 LMAX_ON_GPU = 6
 BAS_ALIGNED = 1
@@ -43,7 +44,6 @@ AO_THRESHOLD = 1e-10
 # Should we release the cupy cache?
 FREE_CUPY_CACHE = False
 MGGA_DENSITY_LAPL = False
-USE_SPARSITY = 2    # 0: no sparsity, 1: in-house GEMM, 2: sparse in AO direction
 
 libgdft = load_library('libgdft')
 libgdft.GDFTeval_gto.restype = ctypes.c_int
@@ -91,7 +91,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
     coords = cupy.asarray(coords.T, order='C')
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     stream = cupy.cuda.get_current_stream()
-
+    
     # ao must be set to zero due to implementation
     if deriv > 1:
         if out is None:
@@ -120,7 +120,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
     if mol is not _sorted_mol:
         coeff = cupy.asarray(opt.coeff)
         out = contract('nig,ij->njg', out, coeff)
-
+    
     if deriv == 0:
         out = out[0]
     return out
@@ -434,111 +434,164 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     vxc[1,threshind] = 1.5*W*dW0dG
     return exc,vxc
 
+def _nr_rks_task(ni, mol, grids, device_id, xc_code, dms, mo_coeff, mo_occ, 
+                 vmat_total, nelec_total, excsum_total,
+                 verbose=None, with_lapl=False, grid_range=()):
+    ''' Execute nr_rks task on one device
+    '''
+    with cupy.cuda.Device(device_id), _streams[device_id]:
+        if dms is not None: dms = cupy.asarray(dms)
+        if mo_coeff is not None: mo_coeff = cupy.asarray(mo_coeff)
+        if mo_occ is not None: mo_occ = cupy.asarray(mo_occ)
+        
+        cupy.cuda.get_current_stream().synchronize()
+
+        log = logger.new_logger(mol)
+        t0 = log.init_timer()
+        xctype = ni._xc_type(xc_code)
+        nao = mol.nao
+        opt = ni.gdftopt
+        _sorted_mol = opt._sorted_mol
+        nset = dms.shape[0]
+        if xctype == 'LDA':
+            ao_deriv = 0
+        else:
+            ao_deriv = 1
+        
+        ngrids_glob = grids.coords.shape[0]
+        num_devices = cupy.cuda.runtime.getDeviceCount()
+        ngrids_per_device = (ngrids_glob + num_devices - 1) // num_devices
+        grid_start = device_id * ngrids_per_device
+        grid_end = (device_id + 1) * ngrids_per_device
+        ngrids_local = grid_end - grid_start
+        
+        weights = cupy.empty([ngrids_local])
+        if xctype == 'LDA':
+            rho_tot = cupy.empty([nset,1,ngrids_local])
+        elif xctype == 'GGA':
+            rho_tot = cupy.empty([nset,4,ngrids_local])
+        else:
+            rho_tot = cupy.empty([nset,5,ngrids_local])
+
+        p0 = p1 = 0
+        for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
+                                                    max_memory=None, grid_range=(grid_start, grid_end)):
+            p1 = p0 + weight.size
+            weights[p0:p1] = weight
+            for i in range(nset):
+                if mo_coeff is None:
+                    rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms[i][idx[:,None],idx], 
+                                                xctype=xctype, hermi=1, with_lapl=with_lapl)
+                else:
+                    mo_coeff_mask = mo_coeff[idx,:]
+                    rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, 
+                                                None, xctype, with_lapl)
+            cupy.cuda.get_current_stream().synchronize()
+            p0 = p1
+        t0 = log.timer_debug1(f'eval rho on Device {device_id}', *t0)
+        
+        # libxc calls are still running on default stream
+        nelec = cupy.zeros(nset)
+        excsum = cupy.zeros(nset)
+        wv = []
+        for i in range(nset):
+            if xctype == 'LDA':
+                exc, vxc = ni.eval_xc_eff(xc_code, rho_tot[i][0], deriv=1, xctype=xctype)[:2]
+            else:
+                exc, vxc = ni.eval_xc_eff(xc_code, rho_tot[i], deriv=1, xctype=xctype)[:2]
+            vxc = cupy.asarray(vxc, order='C')
+            exc = cupy.asarray(exc, order='C')
+            den = rho_tot[i][0] * weights
+            nelec[i] = den.sum()
+            excsum[i] = cupy.dot(den, exc[:,0])
+            wv.append(vxc * weights)
+            if xctype == 'GGA':
+                wv[i][0] *= .5
+            if xctype == 'MGGA':
+                wv[i][[0,4]] *= .5
+        t0 = log.timer_debug1(f'eval vxc on Device {device_id}', *t0)
+        cupy.cuda.get_current_stream().synchronize()
+        nelec_total[device_id] = nelec.get()
+        excsum_total[device_id] = excsum.get()
+        
+        vmat = cupy.zeros((nset, nao, nao))
+        
+        t1 = t0
+        p0 = p1 = 0
+        for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
+                                                    max_memory=None, grid_range=(grid_start, grid_end)):
+            p1 = p0 + weight.size
+            for i in range(nset):
+                if xctype == 'LDA':
+                    aow = _scale_ao(ao_mask, wv[i][0,p0:p1])
+                    add_sparse(vmat[i], ao_mask.dot(aow.T), idx)
+                elif xctype == 'GGA':
+                    aow = _scale_ao(ao_mask, wv[i][:,p0:p1])
+                    add_sparse(vmat[i], ao_mask[0].dot(aow.T), idx)
+                elif xctype == 'NLC':
+                    raise NotImplementedError('NLC')
+                elif xctype == 'MGGA':
+                    aow = _scale_ao(ao_mask, wv[i][:4,p0:p1])
+                    vtmp = ao_mask[0].dot(aow.T)
+                    vtmp+= _tau_dot(ao_mask, ao_mask, wv[i][4,p0:p1])
+                    add_sparse(vmat[i], vtmp, idx)
+                elif xctype == 'HF':
+                    pass
+                else:
+                    raise NotImplementedError(f'numint.nr_rks for functional {xc_code}')
+            cupy.cuda.get_current_stream().synchronize()
+            p0 = p1
+        t0 = log.timer_debug1(f'eval integration on {device_id}', *t0)
+        vmat_total[device_id] = vmat
+    return
+
 def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
            max_memory=2000, verbose=None):
     log = logger.new_logger(mol, verbose)
+    #if grids.coords is None:
+    #    grids.build(with_non0tab=False, sort_grids=True)
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
-
+    nao = mol.nao
     mo_coeff = getattr(dms, 'mo_coeff', None)
     mo_occ = getattr(dms,'mo_occ', None)
-    mol = None
-    _sorted_mol = opt._sorted_mol
-    nao, nao0 = opt.coeff.shape
     dms = cupy.asarray(dms)
     dm_shape = dms.shape
-    dms = opt.sort_orbitals(dms.reshape(-1,nao0,nao0), axis=[1,2])
-    nset = len(dms)
+    dms = opt.sort_orbitals(dms.reshape(-1,nao,nao), axis=[1,2])
 
     if mo_coeff is not None:
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
 
-    nelec = cupy.empty(nset)
-    excsum = cupy.empty(nset)
-    vmat = cupy.zeros((nset, nao, nao))
-
     release_gpu_stack()
-    if xctype == 'LDA':
-        ao_deriv = 0
-    else:
-        ao_deriv = 1
     with_lapl = MGGA_DENSITY_LAPL
-    ngrids = grids.weights.size
-    if xctype == 'LDA':
-        rho_tot = cupy.empty([nset,1,ngrids])
-    elif xctype == 'GGA':
-        rho_tot = cupy.empty([nset,4,ngrids])
-    else:
-        if with_lapl:
-            rho_tot = cupy.empty([nset,6,ngrids])
-        else:
-            rho_tot = cupy.empty([nset,5,ngrids])
-    p0 = p1 = 0
-    t1 = t0 = log.init_timer()
-    for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
-                                                 max_memory=max_memory):
-        p1 = p0 + weight.size
-        for i in range(nset):
-            if mo_coeff is None:
-                rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms[i][idx[:,None],idx], xctype=xctype, hermi=1, with_lapl=with_lapl)
-            else:
-                mo_coeff_mask = mo_coeff[idx,:]
-                rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype, with_lapl)
-        p0 = p1
-        t1 = log.timer_debug2('eval rho slice', *t1)
-    t0 = log.timer_debug1('eval rho', *t0)
-    wv = []
-    for i in range(nset):
-        if xctype == 'LDA':
-            exc, vxc = ni.eval_xc_eff(xc_code, rho_tot[i][0], deriv=1, xctype=xctype)[:2]
-        else:
-            exc, vxc = ni.eval_xc_eff(xc_code, rho_tot[i], deriv=1, xctype=xctype)[:2]
-        vxc = cupy.asarray(vxc, order='C')
-        exc = cupy.asarray(exc, order='C')
-        den = rho_tot[i][0] * grids.weights
-        nelec[i] = den.sum()
-        excsum[i] = cupy.dot(den, exc[:,0])
 
-        wv.append(vxc * grids.weights)
-        if xctype == 'GGA':
-            wv[i][0] *= .5
-        if xctype == 'MGGA':
-            wv[i][[0,4]] *= .5
-    t0 = log.timer_debug1('eval vxc', *t0)
+    num_devices = cupy.cuda.runtime.getDeviceCount()
+    import threading
+    threads = []
+    vmat_total = [None] * num_devices
+    nelec_total = [None] * num_devices
+    excsum_total = [None] * num_devices
+    for gpu_id in range(num_devices):
+        thread = threading.Thread(target=_nr_rks_task,
+                                  args=(ni, mol, grids, gpu_id, xc_code, dms, mo_coeff, mo_occ, 
+                                        vmat_total, nelec_total, excsum_total),
+                                  kwargs={"verbose":verbose, "with_lapl":with_lapl})
+        thread.start()
+        threads.append(thread)
+        
+    for thread in threads:
+        thread.join()
 
-    if USE_SPARSITY != 2:
-        raise NotImplementedError(f'USE_SPARSITY = {USE_SPARSITY} is not implemented')
+    for stream in _streams:
+        stream.synchronize()
 
-    t1 = t0
-    p0 = p1 = 0
-    for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
-                                                 max_memory=max_memory):
-        p1 = p0 + weight.size
-        for i in range(nset):
-            if xctype == 'LDA':
-                aow = _scale_ao(ao_mask, wv[i][0,p0:p1])
-                add_sparse(vmat[i], ao_mask.dot(aow.T), idx)
-            elif xctype == 'GGA':
-                aow = _scale_ao(ao_mask, wv[i][:,p0:p1])
-                add_sparse(vmat[i], ao_mask[0].dot(aow.T), idx)
-            elif xctype == 'NLC':
-                raise NotImplementedError('NLC')
-            elif xctype == 'MGGA':
-                aow = _scale_ao(ao_mask, wv[i][:4,p0:p1])
-                vtmp = ao_mask[0].dot(aow.T)
-                vtmp+= _tau_dot(ao_mask, ao_mask, wv[i][4,p0:p1])
-                add_sparse(vmat[i], vtmp, idx)
-            elif xctype == 'HF':
-                pass
-            else:
-                raise NotImplementedError(f'numint.nr_rks for functional {xc_code}')
-        p0 = p1
-        t1 = log.timer_debug2('integration', *t1)
-    t0 = log.timer_debug1('vxc integration', *t0)
+    vmat = reduce_to_device(vmat_total)
     vmat = opt.unsort_orbitals(vmat, axis=[1,2])
+    nelec = np.sum(nelec_total, axis=0)
+    excsum = np.sum(excsum_total, axis=0)
 
     if xctype != 'LDA':
         transpose_sum(vmat)
@@ -1449,6 +1502,8 @@ def _sparse_index(mol, coords, l_ctr_offsets):
     nctr = len(l_ctr_offsets) - 1
     ao_loc = mol.ao_loc_nr()
     non0shl_idx = cupy.zeros(len(ao_loc)-1, dtype=np.int32)
+    coords = cupy.asarray(coords)
+    
     libgdft.GDFTscreen_index(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(non0shl_idx.data.ptr, ctypes.c_void_p),
@@ -1490,7 +1545,76 @@ def _sparse_index(mol, coords, l_ctr_offsets):
     return pad, cupy.asarray(idx), non0shl_idx, ctr_offsets_slice, ao_loc_slice
 
 def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
-                non0tab=None, blksize=None, buf=None, extra=0):
+                non0tab=None, blksize=None, buf=None, extra=0, grid_range=None):
+    '''
+    Define this macro to loop over grids by blocks.
+    Sparsity is not implemented yet
+    sorted_ao: by default ao_value is sorted for GPU
+    '''
+    log = logger.new_logger(ni, ni.verbose)
+    if grids.coords is None:
+        grids.build(with_non0tab=False, sort_grids=True)
+    if nao is None:
+        nao = mol.nao
+    
+    if grid_range is None:
+        grid_start, grid_end = 0, grids.coords.shape[0]
+    else:
+        grid_start, grid_end = grid_range
+    ngrids = grid_end - grid_start
+
+    device_id = cupy.cuda.Device().id
+    log.debug(f'{grid_start} - {grid_end} grids are calculated on Device {device_id}.')
+    
+    comp = (deriv+1)*(deriv+2)*(deriv+3)//6
+    if blksize is None:
+        #cupy.get_default_memory_pool().free_all_blocks()
+        mem_avail = get_avail_mem()
+        blksize = int((mem_avail*.2/8/((comp+1)*nao + extra))/ ALIGNED) * ALIGNED
+        blksize = min(blksize, MIN_BLK_SIZE)
+        log.debug(f'{mem_avail/1e6} MB memory is available on Device {device_id}, block_size {blksize}')
+        if blksize < ALIGNED:
+            raise RuntimeError('Not enough GPU memory')
+
+    opt = getattr(ni, 'gdftopt', None)
+    if opt is None or mol not in [opt.mol, opt._sorted_mol]:
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+
+    coords_device = cupy.asarray(grids.coords)
+    weights_device = cupy.asarray(grids.weights)
+    _sorted_mol = opt._sorted_mol
+
+    mol = None
+    with opt.gdft_envs_cache():
+        t1 = log.init_timer()
+        for block_id, (ip0, ip1) in enumerate(lib.prange(grid_start, grid_end, blksize)):
+            coords = coords_device[ip0:ip1]
+            weight = weights_device[ip0:ip1]
+            # cache ao indices
+            lookup_key = (device_id, block_id, blksize, ngrids)
+            if lookup_key not in ni.non0ao_idx:
+                ni.non0ao_idx[lookup_key] = _sparse_index(_sorted_mol, coords, opt.l_ctr_offsets)
+            
+            pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[lookup_key]
+            ao_mask = eval_ao(
+                _sorted_mol, coords, deriv,
+                nao_slice=len(idx),
+                shls_slice=non0shl_idx,
+                ao_loc_slice=ao_loc_slice,
+                ctr_offsets_slice=ctr_offsets_slice, 
+                gdftopt=opt)
+            
+            #t1 = log.timer_debug2('evaluate ao slice', *t1)
+            if pad > 0:
+                if deriv == 0:
+                    ao_mask[-pad:,:] = 0.0
+                else:
+                    ao_mask[:,-pad:,:] = 0.0
+            yield ao_mask, idx, weight, ip0
+
+def _parallel_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
+                non0tab=None, blksize=None, buf=None, extra=0, multi_gpu=False):
     '''
     Define this macro to loop over grids by blocks.
     Sparsity is not implemented yet
@@ -1503,7 +1627,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     ngrids = grids.coords.shape[0]
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     log = logger.new_logger(ni, ni.verbose)
-
+    
     if blksize is None:
         #cupy.get_default_memory_pool().free_all_blocks()
         mem_avail = get_avail_mem()
@@ -1512,41 +1636,63 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, blksize)
         if blksize < ALIGNED:
             raise RuntimeError('Not enough GPU memory')
-
+    
     opt = getattr(ni, 'gdftopt', None)
     if opt is None or mol not in [opt.mol, opt._sorted_mol]:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
 
-    mol = None
+    num_gpus = cupy.cuda.runtime.getDeviceCount()
+    coords_dist = [None] * num_gpus
+    weights_dist = [None] * num_gpus
+    for gpu_id in range(num_gpus):
+        with cupy.cuda.Device(gpu_id), _streams[gpu_id] as s:
+            coords_dist[gpu_id] = cupy.asarray(grids.coords)
+            weights_dist[gpu_id] = cupy.asarray(grids.weights)
+    
     _sorted_mol = opt._sorted_mol
     with opt.gdft_envs_cache():
-        block_id = 0
-        t1 = log.init_timer()
-        for ip0, ip1 in lib.prange(0, ngrids, blksize):
-            coords = grids.coords[ip0:ip1]
-            weight = grids.weights[ip0:ip1]
-            t1 = log.init_timer()
-            # cache ao indices
+        for block_id, (ip0, ip1) in enumerate(lib.prange(0, ngrids, blksize)):
+            if multi_gpu:
+                gpu_id = block_id % num_gpus
+            else:
+                gpu_id = cupy.cuda.Device().id
+            coords = coords_dist[gpu_id][ip0:ip1]
             if (block_id, blksize, ngrids) not in ni.non0ao_idx:
-                ni.non0ao_idx[block_id, blksize, ngrids] = _sparse_index(_sorted_mol, coords, opt.l_ctr_offsets)
+                with cupy.cuda.Device(gpu_id), _streams[gpu_id] as s:
+                    ni.non0ao_idx[block_id, blksize, ngrids] = _sparse_index(_sorted_mol, coords, opt.l_ctr_offsets)
 
-            pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[block_id, blksize, ngrids]
-            ao_mask = eval_ao(
-                _sorted_mol, coords, deriv,
-                nao_slice=len(idx),
-                shls_slice=non0shl_idx,
-                ao_loc_slice=ao_loc_slice,
-                ctr_offsets_slice=ctr_offsets_slice, gdftopt=opt)
-
-            t1 = log.timer_debug2('evaluate ao slice', *t1)
-            if pad > 0:
-                if deriv == 0:
-                    ao_mask[-pad:,:] = 0.0
-                else:
-                    ao_mask[:,-pad:,:] = 0.0
-            block_id += 1
-            yield ao_mask, idx, weight, coords
+    mol = None
+    with opt.gdft_envs_cache():
+        t1 = log.init_timer()
+        for block_id, (ip0, ip1) in enumerate(lib.prange(0, ngrids, blksize)):
+            if multi_gpu:
+                gpu_id = block_id % num_gpus
+            else:
+                gpu_id = cupy.cuda.Device().id
+            
+            with cupy.cuda.Device(gpu_id), _streams[gpu_id] as s:
+                coords = coords_dist[gpu_id][ip0:ip1]
+                weight = weights_dist[gpu_id][ip0:ip1]
+                # cache ao indices
+                #if (block_id, blksize, ngrids) not in ni.non0ao_idx:
+                #    ni.non0ao_idx[block_id, blksize, ngrids] = _sparse_index(_sorted_mol, coords, opt.l_ctr_offsets)
+                
+                pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[block_id, blksize, ngrids]
+                ao_mask = eval_ao(
+                    _sorted_mol, coords, deriv,
+                    nao_slice=len(idx),
+                    shls_slice=non0shl_idx,
+                    ao_loc_slice=ao_loc_slice,
+                    ctr_offsets_slice=ctr_offsets_slice, gdftopt=opt)
+                
+                t1 = log.timer_debug2('evaluate ao slice', *t1)
+                if pad > 0:
+                    if deriv == 0:
+                        ao_mask[-pad:,:] = 0.0
+                    else:
+                        ao_mask[:,-pad:,:] = 0.0
+                yield ao_mask, idx, weight, ip0
 
 def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 non0tab=None, blksize=None, buf=None, extra=0):
@@ -1661,24 +1807,8 @@ class NumInt(lib.StreamObject, LibXCMixin):
 
     def build(self, mol, coords):
         self.gdftopt = _GDFTOpt.from_mol(mol)
-        if USE_SPARSITY == 1:
-            pmol = self.gdftopt.mol
-            nbas4 = pmol.nbas // BAS_ALIGNED
-            ovlp_cond = pmol.get_overlap_cond()
-            ovlp_cond = ovlp_cond.reshape(
-                nbas4, BAS_ALIGNED, nbas4, BAS_ALIGNED).transpose(0,2,1,3)
-            log_cutoff = -np.log(self.cutoff)
-            pair_mask = (ovlp_cond < log_cutoff).reshape(nbas4, nbas4, -1).any(axis=2)
-            self.pair_mask = np.asarray(pair_mask, dtype=np.uint8)
-            if isinstance(coords, cupy.ndarray): coords = coords.get()
-            screen_index = make_screen_index(pmol, coords, blksize=GRID_BLKSIZE)
-            screen_index = screen_index.reshape(-1, nbas4, BAS_ALIGNED).max(axis=2)
-            self.screen_index = np.asarray(screen_index, dtype=np.uint8)
-        elif USE_SPARSITY == 2:
-            # blocksize will be fixed, once it is determined,
-            # nonzero ao index will be saved
-            self.grid_blksize = None
-            self.non0ao_idx = {}
+        self.grid_blksize = None
+        self.non0ao_idx = {}
         return self
 
     get_rho = get_rho
@@ -1925,7 +2055,7 @@ def _tau_dot(bra, ket, wv):
 
 class _GDFTOpt:
     def __init__(self, mol):
-        self.envs_cache = ctypes.POINTER(_GDFTEnvsCache)()
+        self.envs_cache = {}
         self._sorted_mol = None       # sorted mol object based on contraction pattern
         self.mol = mol
 
@@ -2006,17 +2136,20 @@ class _GDFTOpt:
     @contextlib.contextmanager
     def gdft_envs_cache(self):
         _sorted_mol = self._sorted_mol
-        #ao_loc = mol.ao_loc_nr(cart=True)
         ao_loc = _sorted_mol.ao_loc_nr()
+        device_id = cupy.cuda.Device().id
+        envs_cache = ctypes.POINTER(_GDFTEnvsCache)()
         libgdft.GDFTinit_envs(
-            ctypes.byref(self.envs_cache), ao_loc.ctypes.data_as(ctypes.c_void_p),
+            ctypes.byref(envs_cache), ao_loc.ctypes.data_as(ctypes.c_void_p),
             _sorted_mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_sorted_mol.natm),
             _sorted_mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_sorted_mol.nbas),
             _sorted_mol._env.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_sorted_mol._env.size))
+        self.envs_cache[device_id] = envs_cache
         try:
             yield
         finally:
-            libgdft.GDFTdel_envs(ctypes.byref(self.envs_cache))
+            envs_cache = self.envs_cache[device_id]
+            libgdft.GDFTdel_envs(ctypes.byref(envs_cache))
 
     def sort_orbitals(self, mat, axis=[]):
         ''' Transform given axis of a matrix into sorted AO

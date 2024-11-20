@@ -16,7 +16,7 @@
 
 import copy
 import cupy
-import ctypes
+import threading
 import numpy as np
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
@@ -26,7 +26,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
-from cupyx import scipy
+from gpu4pyscf.__config__ import _streams
 
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
@@ -46,6 +46,7 @@ class DF(lib.StreamObject):
         self.stdout = mol.stdout
         self.verbose = mol.verbose
         self.max_memory = mol.max_memory
+        self.use_gpu_memory = True
         self._auxbasis = auxbasis
 
         self.auxmol = None
@@ -87,7 +88,8 @@ class DF(lib.StreamObject):
         j2c = cupy.asarray(j2c_cpu, order='C')
         t0 = log.timer_debug1('2c2e', *t0)
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-        intopt.build(direct_scf_tol, diag_block_with_triu=False, aosym=True, group_size=GROUP_SIZE)
+        intopt.build(direct_scf_tol, diag_block_with_triu=False, aosym=True, 
+                     group_size=GROUP_SIZE, group_size_aux=GROUP_SIZE)
         log.timer_debug1('prepare intopt', *t0)
         self.j2c = j2c.copy()
 
@@ -105,7 +107,8 @@ class DF(lib.StreamObject):
         naux = self.naux = self.cd_low.shape[1]
         log.debug('size of aux basis %d', naux)
 
-        self._cderi = cholesky_eri_gpu(intopt, mol, auxmol, self.cd_low, omega=omega)
+        self._cderi = cholesky_eri_gpu(intopt, mol, auxmol, self.cd_low, 
+                                       omega=omega, use_gpu_memory=self.use_gpu_memory)
         log.timer_debug1('cholesky_eri', *t0)
         self.intopt = intopt
         return self
@@ -136,24 +139,24 @@ class DF(lib.StreamObject):
         blksize = int(mem_avail*0.2/8/(nao*nao + extra) / ALIGNED) * ALIGNED
         blksize = min(blksize, MIN_BLK_SIZE)
         log = logger.new_logger(self.mol, self.mol.verbose)
-        log.debug(f"GPU Memory {mem_avail/1e9:.3f} GB available, block size = {blksize}")
+        device_id = cupy.cuda.Device().id
+        log.debug(f"{mem_avail/1e9:.3f} GB memory available on Device {device_id}, block size = {blksize}")
         if blksize < ALIGNED:
             raise RuntimeError("Not enough GPU memory")
         return blksize
 
     def loop(self, blksize=None, unpack=True):
         ''' loop over all cderi and unpack the CDERI in (Lij) format '''
-        cderi_sparse = self._cderi
+        device_id = cupy.cuda.Device().id
+        cderi_sparse = self._cderi[device_id]
         if blksize is None:
             blksize = self.get_blksize()
         nao = self.nao
-        naux = self.naux
+        naux = cderi_sparse.shape[0]
         rows = self.intopt.cderi_row
         cols = self.intopt.cderi_col
         buf_prefetch = None
         buf_cderi = cupy.zeros([blksize,nao,nao])
-        data_stream = cupy.cuda.stream.Stream(non_blocking=True)
-        compute_stream = cupy.cuda.get_current_stream()
         for p0, p1 in lib.prange(0, naux, blksize):
             p2 = min(naux, p1+blksize)
             if isinstance(cderi_sparse, cupy.ndarray):
@@ -163,10 +166,8 @@ class DF(lib.StreamObject):
                 if buf_prefetch is None:
                     buf = cupy.asarray(cderi_sparse[p0:p1,:])
                 buf_prefetch = cupy.empty([p2-p1,cderi_sparse.shape[1]])
-            with data_stream:
-                if isinstance(cderi_sparse, np.ndarray) and p1 < p2:
-                    buf_prefetch.set(cderi_sparse[p1:p2,:])
-                stop_event = data_stream.record()
+            if isinstance(cderi_sparse, np.ndarray) and p1 < p2:
+                buf_prefetch.set(cderi_sparse[p1:p2,:])
             if unpack:
                 buf_cderi[:p1-p0,rows,cols] = buf
                 buf_cderi[:p1-p0,cols,rows] = buf
@@ -174,7 +175,6 @@ class DF(lib.StreamObject):
             else:
                 buf2 = None
             yield buf2, buf.T
-            compute_stream.wait_event(stop_event)
             if isinstance(cderi_sparse, np.ndarray):
                 cupy.cuda.Device().synchronize()
 
@@ -198,103 +198,164 @@ class DF(lib.StreamObject):
     get_ao_eri = get_eri = NotImplemented
     get_mo_eri = ao2mo = NotImplemented
 
-def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, omega=None, sr_only=False):
+def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, 
+                     omega=None, sr_only=False, use_gpu_memory=True):
     '''
     Returns:
         2D array of (naux,nao*(nao+1)/2) in C-contiguous
     '''
-    naoaux, naux = cd_low.shape
-    npair = len(intopt.cderi_row)
+    naux = cd_low.shape[1]
+    npairs = len(intopt.cderi_row)
     log = logger.new_logger(mol, mol.verbose)
-    nq = len(intopt.log_qs)
+    num_gpus = cupy.cuda.runtime.getDeviceCount()
 
     # if the matrix exceeds the limit, store CDERI in CPU memory
+    # TODO: better estimate of memory consumption for each device
     avail_mem = get_avail_mem()
-    use_gpu_memory = True
-    if naux * npair * 8 < 0.4 * avail_mem:
-        try:
-            cderi = cupy.empty([naux, npair], order='C')
-            log.debug(f"Saving CDERI on GPU. CDERI size {cderi.nbytes/GB}")
-        except Exception:
-            use_gpu_memory = False
+    
+    if use_gpu_memory:
+        # If GPU memory is not enough
+        use_gpu_memory = naux * npairs * 8 < 0.4 * avail_mem
+    
+    if use_gpu_memory:
+        log.debug("Saving CDERI on GPU")
     else:
-        use_gpu_memory = False
-    if(not use_gpu_memory):
-        log.debug("Saving cderi on CPU memory.")
-        # TODO: async allocate memory
-        try:
-            mem = cupy.cuda.alloc_pinned_memory(naux * npair * 8)
-            cderi = np.ndarray([naux, npair], dtype=np.float64, order='C', buffer=mem)
-        except Exception:
-            raise RuntimeError('Out of CPU memory')
-    if(not use_gpu_memory):
-        data_stream = cupy.cuda.stream.Stream(non_blocking=False)
-    count = 0
-    nq = len(intopt.log_qs)
+        log.debug("Saving CDERI on CPU")
+
+    _cderi = {}
+    blksize = (naux + num_gpus - 1) // num_gpus
+    for device_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
+        if use_gpu_memory:
+            with cupy.cuda.Device(device_id), _streams[device_id]:
+                _cderi[device_id] = cupy.empty([p1-p0, npairs])
+            log.debug(f"CDERI size {_cderi[device_id].nbytes/GB} on Device {device_id}")
+        else:
+            mem = cupy.cuda.alloc_pinned_memory(p1-p0 * npairs * 8)
+            cderi_blk = np.ndarray([p1-p0, npairs], dtype=np.float64, order='C', buffer=mem)
+            _cderi[device_id] = cderi_blk
+
+    npairs_per_ctr = [len(intopt.ao_pairs_row[cp_ij_id]) for cp_ij_id in range(len(intopt.log_qs))]
+    
+    npairs_per_ctr = np.array(npairs_per_ctr)
+    total_task_list = np.argsort(npairs_per_ctr)
+    task_list_per_device = []
+    for device_id in range(num_gpus):
+        task_list_per_device.append(total_task_list[device_id::num_gpus])
+
     cd_low_f = cupy.array(cd_low, order='F', copy=False)
-    for cp_ij_id, _ in enumerate(intopt.log_qs):
-        if len(intopt.ao_pairs_row[cp_ij_id]) == 0: continue
-        t1 = log.init_timer()
-        cpi = intopt.cp_idx[cp_ij_id]
-        cpj = intopt.cp_jdx[cp_ij_id]
-        li = intopt.angular[cpi]
-        lj = intopt.angular[cpj]
-        i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
-        j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
-        ni = i1 - i0
-        nj = j1 - j0
-        if sr_only:
-            # TODO: in-place implementation or short-range kernel
-            ints_slices = cupy.zeros([naoaux, nj, ni], order='C')
-            for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-                k0 = intopt.aux_ao_loc[cp_kl_id]
-                k1 = intopt.aux_ao_loc[cp_kl_id+1]
-                int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1])
-            if omega is not None:
-                ints_slices_lr = cupy.zeros([naoaux, nj, ni], order='C')
-                for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-                    k0 = intopt.aux_ao_loc[cp_kl_id]
-                    k1 = intopt.aux_ao_loc[cp_kl_id+1]
-                    int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1], omega=omega)
-                ints_slices -= ints_slices_lr
-        else:
-            # Initialization is required due to cutensor operations later
-            ints_slices = cupy.zeros([naoaux, nj, ni], order='C')
-            for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-                k0 = intopt.aux_ao_loc[cp_kl_id]
-                k1 = intopt.aux_ao_loc[cp_kl_id+1]
+    cd_low_f = tag_array(cd_low_f, tag=cd_low.tag)
 
-                int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1], omega=omega)
-        if lj>1 and not mol.cart: ints_slices = cart2sph(ints_slices, axis=1, ang=lj)
-        if li>1 and not mol.cart: ints_slices = cart2sph(ints_slices, axis=2, ang=li)
+    for gpu_id in range(num_gpus):
+        cupy.cuda.Device(gpu_id).synchronize()
 
-        i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
-        j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
+    threads = []
+    for device_id in range(num_gpus):
+        task_list = task_list_per_device[device_id]
+        thread = threading.Thread(target=execute_task,
+                                  args=(intopt, cd_low_f, task_list, device_id, _cderi),
+                                  kwargs={"omega":omega, "sr_only":sr_only})
+        thread.start()
+        threads.append(thread)
+    
+    for thread in threads:
+        thread.join()
 
-        row = intopt.ao_pairs_row[cp_ij_id] - i0
-        col = intopt.ao_pairs_col[cp_ij_id] - j0
-
-        ints_slices_f= cupy.empty([naoaux,len(row)], order='F')
-        ints_slices_f[:] = ints_slices[:,col,row]
-        ints_slices = None
-
-        if cd_low.tag == 'eig':
-            cderi_block = cupy.dot(cd_low.T, ints_slices_f)
-            ints_slices = None
-        elif cd_low.tag == 'cd':
-            cderi_block = solve_triangular(cd_low_f, ints_slices_f, lower=True, overwrite_b=True)
-        ij0, ij1 = count, count+cderi_block.shape[1]
-        count = ij1
-        if isinstance(cderi, cupy.ndarray):
-            cderi[:,ij0:ij1] = cderi_block
-        else:
-            with data_stream:
-                for i in range(naux):
-                    cderi_block[i].get(out=cderi[i,ij0:ij1])
-        t1 = log.timer_debug1(f'solve {cp_ij_id} / {nq}', *t1)
+    for s in _streams:
+        s.synchronize()
+    
+    for gpu_id in range(num_gpus):
+        cupy.cuda.Device(gpu_id).synchronize()
 
     if not use_gpu_memory:
         cupy.cuda.Device().synchronize()
-    return cderi
+    
+    return _cderi
 
+def execute_task(intopt, cd_low, task_list, device_id, _cderi, omega=None, sr_only=False):
+    nq = len(intopt.log_qs)
+    mol = intopt.mol
+    naux = cd_low.shape[1]
+    naoaux = cd_low.shape[0]
+    npairs = [len(intopt.ao_pairs_row[cp_ij]) for cp_ij in range(len(intopt.log_qs))]
+    pairs_loc = np.append(0, np.cumsum(npairs))
+    num_gpus = cupy.cuda.runtime.getDeviceCount()
+    blksize = (naux + num_gpus - 1) // num_gpus
+    with cupy.cuda.Device(device_id), _streams[device_id]:
+        log = logger.new_logger(mol, mol.verbose)
+        t1 = log.init_timer()
+        cd_low_tag = cd_low.tag
+        cd_low = cupy.asarray(cd_low)
 
+        cart_ao_loc = intopt.cart_ao_loc
+        aux_ao_loc = intopt.aux_ao_loc
+        ao_loc = intopt.ao_loc
+        for cp_ij_id in task_list:
+            cpi = intopt.cp_idx[cp_ij_id]
+            cpj = intopt.cp_jdx[cp_ij_id]
+            li = intopt.angular[cpi]
+            lj = intopt.angular[cpj]
+            i0, i1 = cart_ao_loc[cpi], cart_ao_loc[cpi+1]
+            j0, j1 = cart_ao_loc[cpj], cart_ao_loc[cpj+1]
+            ni = i1 - i0
+            nj = j1 - j0
+            if sr_only:
+                # TODO: in-place implementation or short-range kernel
+                ints_slices = cupy.zeros([naoaux, nj, ni], order='C')
+                for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
+                    k0 = aux_ao_loc[cp_kl_id]
+                    k1 = aux_ao_loc[cp_kl_id+1]
+                    int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1])
+                if omega is not None:
+                    ints_slices_lr = cupy.zeros([naoaux, nj, ni], order='C')
+                    for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
+                        k0 = aux_ao_loc[cp_kl_id]
+                        k1 = aux_ao_loc[cp_kl_id+1]
+                        int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1], omega=omega)
+                    ints_slices -= ints_slices_lr
+            else:
+                # Initialization is required due to cutensor operations later
+                ints_slices = cupy.zeros([naoaux, nj, ni], order='C')
+                for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
+                    k0 = aux_ao_loc[cp_kl_id]
+                    k1 = aux_ao_loc[cp_kl_id+1]
+
+                    int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1], omega=omega)
+            if lj>1 and not mol.cart: ints_slices = cart2sph(ints_slices, axis=1, ang=lj)
+            if li>1 and not mol.cart: ints_slices = cart2sph(ints_slices, axis=2, ang=li)
+
+            i0, i1 = ao_loc[cpi], ao_loc[cpi+1]
+            j0, j1 = ao_loc[cpj], ao_loc[cpj+1]
+
+            row = intopt.ao_pairs_row[cp_ij_id] - i0
+            col = intopt.ao_pairs_col[cp_ij_id] - j0
+            
+            ints_slices_f= cupy.empty([naoaux,len(row)], order='F')
+            ints_slices_f[:] = ints_slices[:,col,row]
+            ints_slices = None
+            if cd_low_tag == 'eig':
+                cderi_block = cupy.dot(cd_low.T, ints_slices_f)
+                ints_slices = None
+            elif cd_low_tag == 'cd':
+                cderi_block = solve_triangular(cd_low, ints_slices_f, lower=True, overwrite_b=True)
+            else:
+                RuntimeError('Tag is not found in lower triangular matrix.')
+            t1 = log.timer_debug1(f'solve {cp_ij_id} / {nq} on Device {device_id}', *t1)
+
+            # TODO: 
+            # 1) async data transfer
+            # 2) auxiliary basis in the last dimension 
+
+            # if CDERI is saved on CPU
+            ij0 = pairs_loc[cp_ij_id]
+            ij1 = pairs_loc[cp_ij_id+1]
+            if isinstance(_cderi, np.ndarray):
+                for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
+                    for i in range(p0,p1):
+                        cderi_block[i].get(out=_cderi[slice_id][i,ij0:ij1])
+            else:
+                # Copy data to other Devices
+                for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
+                    _cderi[slice_id][:,ij0:ij1] = cderi_block[p0:p1]
+            
+            t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)
+    return

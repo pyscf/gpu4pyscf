@@ -19,16 +19,18 @@ import copy
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import scf, gto
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.cupy_helper import tag_array, contract, load_library, take_last2d
+from gpu4pyscf.lib.cupy_helper import tag_array, contract, load_library
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
+from gpu4pyscf.df.grad.jk import get_rhoj_rhok
 
 libgvhf = load_library('libgvhf')
 FREE_CUPY_CACHE = True
 BINSIZE = 128
 
-def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega=None, mo_coeff=None, mo_occ=None, dm2 = None):
+def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, 
+           omega=None, mo_coeff=None, mo_occ=None, dm2 = None):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
@@ -80,6 +82,10 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
 
     # (L|ij) -> rhoj: (L), rhok: (L|oo)
     low = with_df.cd_low
+    rhoj, rhok = get_rhoj_rhok(with_df, dm, orbo, with_j=with_j, with_k=with_k)
+    if dm2 is not None:
+        rhoj2, _   = get_rhoj_rhok(with_df, dm2_tmp, orbo, with_j=with_j, with_k=False)
+    '''
     rows = with_df.intopt.cderi_row
     cols = with_df.intopt.cderi_col
     dm_sparse = dm[rows, cols]
@@ -108,6 +114,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
             contract('Lki,il->Lkl', tmp, orbo, out=rhok[p0:p1])
         p0 = p1
     tmp = dm_sparse = cderi_sparse = cderi = None
+    '''
 
     # (d/dX P|Q) contributions
     if omega and omega > 1e-10:
