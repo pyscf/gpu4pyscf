@@ -515,8 +515,6 @@ def _nr_rks_task(ni, mol, grids, device_id, xc_code, dms, mo_coeff, mo_occ,
         excsum_total[device_id] = excsum.get()
         
         vmat = cupy.zeros((nset, nao, nao))
-        
-        t1 = t0
         p0 = p1 = 0
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                     max_memory=None, grid_range=(grid_start, grid_end)):
@@ -548,8 +546,7 @@ def _nr_rks_task(ni, mol, grids, device_id, xc_code, dms, mo_coeff, mo_occ,
 def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
            max_memory=2000, verbose=None):
     log = logger.new_logger(mol, verbose)
-    #if grids.coords is None:
-    #    grids.build(with_non0tab=False, sort_grids=True)
+    t0 = log.init_timer()
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
@@ -604,7 +601,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         nelec = nelec[0]
         excsum = excsum[0]
         vmat = vmat[0]
-
+    t0 = log.timer_debug1(f'nr_rks', *t0)
     return nelec, excsum, vmat
 
 def eval_rho_group(mol, ao_group, mo_coeff_group, mo_occ, non0tab=None, xctype='LDA',
@@ -1587,7 +1584,6 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
 
     mol = None
     with opt.gdft_envs_cache():
-        t1 = log.init_timer()
         for block_id, (ip0, ip1) in enumerate(lib.prange(grid_start, grid_end, blksize)):
             coords = coords_device[ip0:ip1]
             weight = weights_device[ip0:ip1]
@@ -1605,94 +1601,12 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 ctr_offsets_slice=ctr_offsets_slice, 
                 gdftopt=opt)
             
-            #t1 = log.timer_debug2('evaluate ao slice', *t1)
             if pad > 0:
                 if deriv == 0:
                     ao_mask[-pad:,:] = 0.0
                 else:
                     ao_mask[:,-pad:,:] = 0.0
             yield ao_mask, idx, weight, ip0
-
-def _parallel_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
-                non0tab=None, blksize=None, buf=None, extra=0, multi_gpu=False):
-    '''
-    Define this macro to loop over grids by blocks.
-    Sparsity is not implemented yet
-    sorted_ao: by default ao_value is sorted for GPU
-    '''
-    if grids.coords is None:
-        grids.build(with_non0tab=False, sort_grids=True)
-    if nao is None:
-        nao = mol.nao
-    ngrids = grids.coords.shape[0]
-    comp = (deriv+1)*(deriv+2)*(deriv+3)//6
-    log = logger.new_logger(ni, ni.verbose)
-    
-    if blksize is None:
-        #cupy.get_default_memory_pool().free_all_blocks()
-        mem_avail = get_avail_mem()
-        blksize = int((mem_avail*.2/8/((comp+1)*nao + extra))/ ALIGNED) * ALIGNED
-        blksize = min(blksize, MIN_BLK_SIZE)
-        log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, blksize)
-        if blksize < ALIGNED:
-            raise RuntimeError('Not enough GPU memory')
-    
-    opt = getattr(ni, 'gdftopt', None)
-    if opt is None or mol not in [opt.mol, opt._sorted_mol]:
-        ni.build(mol, grids.coords)
-        opt = ni.gdftopt
-
-    num_gpus = cupy.cuda.runtime.getDeviceCount()
-    coords_dist = [None] * num_gpus
-    weights_dist = [None] * num_gpus
-    for gpu_id in range(num_gpus):
-        with cupy.cuda.Device(gpu_id), _streams[gpu_id] as s:
-            coords_dist[gpu_id] = cupy.asarray(grids.coords)
-            weights_dist[gpu_id] = cupy.asarray(grids.weights)
-    
-    _sorted_mol = opt._sorted_mol
-    with opt.gdft_envs_cache():
-        for block_id, (ip0, ip1) in enumerate(lib.prange(0, ngrids, blksize)):
-            if multi_gpu:
-                gpu_id = block_id % num_gpus
-            else:
-                gpu_id = cupy.cuda.Device().id
-            coords = coords_dist[gpu_id][ip0:ip1]
-            if (block_id, blksize, ngrids) not in ni.non0ao_idx:
-                with cupy.cuda.Device(gpu_id), _streams[gpu_id] as s:
-                    ni.non0ao_idx[block_id, blksize, ngrids] = _sparse_index(_sorted_mol, coords, opt.l_ctr_offsets)
-
-    mol = None
-    with opt.gdft_envs_cache():
-        t1 = log.init_timer()
-        for block_id, (ip0, ip1) in enumerate(lib.prange(0, ngrids, blksize)):
-            if multi_gpu:
-                gpu_id = block_id % num_gpus
-            else:
-                gpu_id = cupy.cuda.Device().id
-            
-            with cupy.cuda.Device(gpu_id), _streams[gpu_id] as s:
-                coords = coords_dist[gpu_id][ip0:ip1]
-                weight = weights_dist[gpu_id][ip0:ip1]
-                # cache ao indices
-                #if (block_id, blksize, ngrids) not in ni.non0ao_idx:
-                #    ni.non0ao_idx[block_id, blksize, ngrids] = _sparse_index(_sorted_mol, coords, opt.l_ctr_offsets)
-                
-                pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[block_id, blksize, ngrids]
-                ao_mask = eval_ao(
-                    _sorted_mol, coords, deriv,
-                    nao_slice=len(idx),
-                    shls_slice=non0shl_idx,
-                    ao_loc_slice=ao_loc_slice,
-                    ctr_offsets_slice=ctr_offsets_slice, gdftopt=opt)
-                
-                t1 = log.timer_debug2('evaluate ao slice', *t1)
-                if pad > 0:
-                    if deriv == 0:
-                        ao_mask[-pad:,:] = 0.0
-                    else:
-                        ao_mask[:,-pad:,:] = 0.0
-                yield ao_mask, idx, weight, ip0
 
 def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 non0tab=None, blksize=None, buf=None, extra=0):
