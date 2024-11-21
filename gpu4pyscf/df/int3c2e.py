@@ -84,9 +84,6 @@ class VHFOpt(_vhf.VHFOpt):
         self.sph_ao_loc = []
         self.sph_aux_loc = []
 
-        self.cart2sph = None
-        self.aux_cart2sph = None
-
         self.angular = None
         self.aux_angular = None
 
@@ -130,6 +127,7 @@ class VHFOpt(_vhf.VHFOpt):
         if group_size is not None :
             uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size)
         self.nctr = len(uniq_l_ctr)
+        self.l_ctr_counts = l_ctr_counts
 
         # sort fake mol
         fake_mol = make_fake_mol()
@@ -139,7 +137,8 @@ class VHFOpt(_vhf.VHFOpt):
         _sorted_auxmol, sorted_aux_idx, aux_uniq_l_ctr, aux_l_ctr_counts = sort_mol(auxmol, log=log)
         if group_size_aux is not None:
             aux_uniq_l_ctr, aux_l_ctr_counts = _split_l_ctr_groups(aux_uniq_l_ctr, aux_l_ctr_counts, group_size_aux)
-        
+        self.aux_l_ctr_counts = aux_l_ctr_counts
+
         _tot_mol = _sorted_mol + fake_mol + _sorted_auxmol
         _tot_mol.cart = True
         self._tot_mol = _tot_mol
@@ -157,7 +156,7 @@ class VHFOpt(_vhf.VHFOpt):
             l_ctr_offsets, l_ctr_offsets, q_cond,
             diag_block_with_triu=diag_block_with_triu, aosym=aosym)
         self.log_qs = log_qs.copy()
-        cput1 = log.timer_debug1('Get pairing', *cput1)
+        cput1 = log.timer_debug1('Get AO pairing', *cput1)
 
         # contraction coefficient for ao basis
         cart_ao_loc = _sorted_mol.ao_loc_nr(cart=True)
@@ -170,10 +169,7 @@ class VHFOpt(_vhf.VHFOpt):
         ao_loc = mol.ao_loc_nr(cart=_mol.cart)
         ao_idx = np.array_split(np.arange(_mol.nao), ao_loc[1:-1])
         self._ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
-
-        # cartesian ao index
-        self.cart2sph = block_c2s_diag(self.angular, l_ctr_counts)
-        cput1 = log.timer_debug1('AO cart2sph coeff', *cput1)
+        cput1 = log.timer_debug1('AO indices', *cput1)
 
         # pairing auxiliary basis with fake basis set
         fake_l_ctr_offsets = np.append(0, np.cumsum(fake_l_ctr_counts))
@@ -189,12 +185,8 @@ class VHFOpt(_vhf.VHFOpt):
 
         aux_loc = _auxmol.ao_loc_nr(cart=_auxmol.cart)
         ao_idx = np.array_split(np.arange(_auxmol.nao), aux_loc[1:-1])
-        self._aux_ao_idx = np.hstack([ao_idx[i] for i in sorted_aux_idx])
-
-        # cartesian aux index
-        self.aux_cart2sph = block_c2s_diag(self.aux_angular, aux_l_ctr_counts)
-        aux_l_ctr_offsets += fake_l_ctr_offsets[-1]
-        cput1 = log.timer_debug1('aux cart2sph coeff', *cput1)
+        self._aux_ao_idx = np.hstack([ao_idx[i] for i in sorted_aux_idx])        
+        cput1 = log.timer_debug1('Aux AO indices', *cput1)
 
         ao_loc = _sorted_mol.ao_loc_nr(cart=_mol.cart)
         self.ao_pairs_row, self.ao_pairs_col = get_ao_pairs(pair2bra, pair2ket, ao_loc)
@@ -208,6 +200,7 @@ class VHFOpt(_vhf.VHFOpt):
         aux_pair2bra = []
         aux_pair2ket = []
         aux_log_qs = []
+        aux_l_ctr_offsets += fake_l_ctr_offsets[-1]
         for p0, p1 in zip(aux_l_ctr_offsets[:-1], aux_l_ctr_offsets[1:]):
             aux_pair2bra.append(np.arange(p0,p1,dtype=np.int32))
             aux_pair2ket.append(fake_l_ctr_offsets[0] * np.ones(p1-p0, dtype=np.int32))
@@ -311,6 +304,14 @@ class VHFOpt(_vhf.VHFOpt):
         mat = cupy.empty_like(sorted_mat)
         mat[tuple(fancy_index)] = sorted_mat
         return mat
+    
+    @property
+    def cart2sph(self):
+        return block_c2s_diag(self.angular, self.l_ctr_counts)
+    
+    @property
+    def aux_cart2sph(self):
+        return block_c2s_diag(self.aux_angular, self.aux_l_ctr_counts)
     
     @property
     def coeff(self):

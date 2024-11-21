@@ -110,21 +110,21 @@ class KnownValues(unittest.TestCase):
                 dD0 = (D0 - D1)/(2.0*eps)
                 dS0 = (S0 - S1)/(2.0*eps)
 
-                assert numpy.linalg.norm(dF0 - dF[:,ia,j]) < 1e-8
-                assert numpy.linalg.norm(dA0 - dA[:,ia,j]) < 1e-8
+                assert numpy.linalg.norm(dF0 - dF[j,:,ia]) < 1e-8
+                assert numpy.linalg.norm(dA0 - dA[j,:,ia]) < 1e-8
 
                 # the diagonal entries are calcualted separately
-                assert numpy.linalg.norm(dSii[:,ia,j] - numpy.diag(dS0)) < 1e-8
+                assert numpy.linalg.norm(dSii[j,:,ia] - numpy.diag(dS0)) < 1e-8
                 numpy.fill_diagonal(dS0, 0)
 
                 dS_ia = numpy.zeros_like(dS0)
-                dS_ia[p0:p1] = dS[p0:p1,:,j]
-                dS_ia[:,p0:p1] -= dS[:,p0:p1,j]
+                dS_ia[p0:p1] = dS[j,p0:p1,:]
+                dS_ia[:,p0:p1] -= dS[j,:,p0:p1]
                 assert numpy.linalg.norm(dS0 - dS_ia) < 1e-8
 
                 dD_ia = numpy.zeros_like(dD0)
-                dD_ia[p0:p1] = dD[p0:p1,:,j]
-                dD_ia[:,p0:p1] -= dD[:,p0:p1,j]
+                dD_ia[p0:p1] = dD[j,p0:p1,:]
+                dD_ia[:,p0:p1] -= dD[j,:,p0:p1]
                 assert numpy.linalg.norm(dD0 - dD_ia) < 1e-8
 
     def test_dD_dS(self):
@@ -136,7 +136,7 @@ class KnownValues(unittest.TestCase):
         dF, dA = pcm_grad.get_dF_dA(cm.surface)
         dD0, dS0, dSii0 = pcm_grad.get_dD_dS(cm.surface, dF, with_S=True, with_D=True)
         dD1, dS1, dSii1 = pcm_grad.get_dD_dS_slow(cm.surface, dF, with_S=True, with_D=True)
-
+        
         assert cupy.linalg.norm(dD0 - dD1) < 1e-8
         assert cupy.linalg.norm(dS0 - dS1) < 1e-8
         assert cupy.linalg.norm(dSii0 - dSii1) < 1e-8

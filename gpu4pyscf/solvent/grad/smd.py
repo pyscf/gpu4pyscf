@@ -66,14 +66,9 @@ def grad_solver(smdobj, dm):
     epsilon = smdobj.eps
     de = cupy.zeros([smdobj.mol.natm,3])
 
-    # same as IEF-PCM
-    dD = dD.transpose([2,0,1])
-    dS = dS.transpose([2,0,1])
-    dSii = dSii.transpose([2,0,1])
-    dA = dA.transpose([2,0,1])
     def contract_bra(a, B, c):
         ''' i,xij,j->jx '''
-        tmp = contract('i,xij->xj', a, B)
+        tmp = a.dot(B)
         return (tmp * c).T
 
     def contract_ket(a, B, c):
@@ -171,7 +166,6 @@ class WithSolventGrad:
         self.de_solvent+= pcm_grad.grad_nuc(self.base.with_solvent, dm)
         self.de_cds     = get_cds(self.base.with_solvent)
         self.de = self.de_solute + self.de_solvent + self.de_cds
-
         if self.verbose >= logger.NOTE:
             logger.note(self, '--------------- %s (+%s) gradients ---------------',
                         self.base.__class__.__name__,
