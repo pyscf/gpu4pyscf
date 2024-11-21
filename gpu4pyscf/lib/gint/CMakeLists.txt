@@ -33,6 +33,7 @@ add_library(gint SHARED
   nr_fill_ao_int3c2e_ipip2.cu
   nr_fill_ao_int3c2e_ip1ip2.cu
   nr_fill_ao_int3c2e_ipvip1.cu
+  j_engine_matrix_reorder.c
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)

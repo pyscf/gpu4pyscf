@@ -130,3 +130,93 @@ static void GINTg1e(double* __restrict__ g, const double* __restrict__ grid_poin
     }
 }
 
+template <int NROOTS>
+__device__
+static void GINT_g1e_without_hrr(double* __restrict__ g, const double* __restrict__ grid_point, const int ish, const int prim_ij,
+                                 const int l, const double omega)
+{
+    const double* __restrict__ a12 = c_bpcache.a12;
+    const double* __restrict__ e12 = c_bpcache.e12;
+    const double* __restrict__ x12 = c_bpcache.x12;
+    const double* __restrict__ y12 = c_bpcache.y12;
+    const double* __restrict__ z12 = c_bpcache.z12;
+    const double aij = a12[prim_ij];
+    const double eij = e12[prim_ij];
+    const double Px  = x12[prim_ij];
+    const double Py  = y12[prim_ij];
+    const double Pz  = z12[prim_ij];
+    const double Cx = grid_point[0];
+    const double Cy = grid_point[1];
+    const double Cz = grid_point[2];
+
+    const double PCx = Px - Cx;
+    const double PCy = Py - Cy;
+    const double PCz = Pz - Cz;
+    double a0 = aij;
+    const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+    a0 *= theta;
+
+    const double prefactor = 2.0 * M_PI / a0 * eij;
+    const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
+    double uw[NROOTS * 2];
+    GINTrys_root<NROOTS>(boys_input, uw);
+    GINTscale_u<NROOTS>(uw, theta);
+
+    const double* __restrict__ u = uw;
+    const double* __restrict__ w = u + NROOTS;
+    const int g_size = NROOTS * (l + 1);
+    double* __restrict__ gx = g;
+    double* __restrict__ gy = g + g_size;
+    double* __restrict__ gz = g + g_size * 2;
+
+    const int nbas = c_bpcache.nbas;
+    const double* __restrict__ bas_x = c_bpcache.bas_coords;
+    const double* __restrict__ bas_y = bas_x + nbas;
+    const double* __restrict__ bas_z = bas_y + nbas;
+    const double Ax = bas_x[ish];
+    const double Ay = bas_y[ish];
+    const double Az = bas_z[ish];
+    const double PAx = Px - Ax;
+    const double PAy = Py - Ay;
+    const double PAz = Pz - Az;
+
+    for (int i_root = 0; i_root < NROOTS; i_root++) {
+        gx[i_root] = 1.0;
+        gy[i_root] = prefactor;
+        gz[i_root] = w[i_root];
+
+        const double u2 = a0 * u[i_root];
+        const double t2 = u2 / (u2 + a0);
+        const double b10 = 0.5 / a0 * (1.0 - t2);
+        const double c00x = PAx - t2 * PCx;
+        const double c00y = PAy - t2 * PCy;
+        const double c00z = PAz - t2 * PCz;
+
+        if (l > 0) {
+            double s0x = gx[i_root]; // i - 1
+            double s0y = gy[i_root];
+            double s0z = gz[i_root];
+            double s1x = c00x * s0x; // i
+            double s1y = c00y * s0y;
+            double s1z = c00z * s0z;
+            gx[i_root + 1 * NROOTS] = s1x;
+            gy[i_root + 1 * NROOTS] = s1y;
+            gz[i_root + 1 * NROOTS] = s1z;
+            for (int i_rys = 1; i_rys < l; i_rys++) {
+                const double s2x = c00x * s1x + i_rys * b10 * s0x; // i + 1
+                const double s2y = c00y * s1y + i_rys * b10 * s0y;
+                const double s2z = c00z * s1z + i_rys * b10 * s0z;
+                gx[i_root + (i_rys+1) * NROOTS] = s2x;
+                gy[i_root + (i_rys+1) * NROOTS] = s2y;
+                gz[i_root + (i_rys+1) * NROOTS] = s2z;
+                s0x = s1x;
+                s0y = s1y;
+                s0z = s1z;
+                s1x = s2x;
+                s1y = s2y;
+                s1z = s2z;
+            }
+        }
+    }
+
+}

@@ -251,6 +251,12 @@ typedef struct {
 } BasisProdOffsets;
 
 typedef struct {
+    int density_offset_of_angular_pair;
+    int pair_offset_of_angular_pair;
+    int n_pair_of_angular_pair;
+} HermiteDensityOffsets;
+
+typedef struct {
     int nbas;  // len(bas_coords)
     int ncptype;  // len(cptype)
     ContractionProdType *cptype;
@@ -258,6 +264,7 @@ typedef struct {
     int *primitive_pairs_locs;  // len(a12) = sum(cptype[:].nparis*cptype[:].nprim_12)
     int *bas_pair2shls;
     double *aexyz;
+    double *h_bas_coords;
 
     // Data below held on GPU global memory
     double *bas_coords;  // basis coordinates
@@ -272,7 +279,6 @@ typedef struct {
     double *a1;
     double *a2;
 } BasisProdCache;
-
 
 typedef struct {
         int stride_j;

@@ -77,44 +77,6 @@ static int GINTfill_int3c1e_tasks(double* output, const BasisProdOffsets offsets
             fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
         }
         break;
-    // case 2:
-    //     type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;
-    //     switch (type_ijkl) {
-    //     case (0<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel0020<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (0<<6)|(0<<4)|(3<<2)|0: GINTfill_int2e_kernel0030<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (1<<6)|(0<<4)|(1<<2)|0: GINTfill_int2e_kernel1010<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (1<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel1020<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (1<<6)|(1<<4)|(0<<2)|0: GINTfill_int2e_kernel1100<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (1<<6)|(1<<4)|(1<<2)|0: GINTfill_int2e_kernel1110<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (2<<6)|(0<<4)|(0<<2)|0: GINTfill_int2e_kernel2000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (2<<6)|(0<<4)|(1<<2)|0: GINTfill_int2e_kernel2010<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (2<<6)|(1<<4)|(0<<2)|0: GINTfill_int2e_kernel2100<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (3<<6)|(0<<4)|(0<<2)|0: GINTfill_int2e_kernel3000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     default:
-    //         GINTfill_int3c2e_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     }
-    //     break;
-    // case 3:
-    //     type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;
-    //     switch (type_ijkl) {
-    //     case (1<<6)|(0<<4)|(3<<2)|0: GINTfill_int2e_kernel1030<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (1<<6)|(1<<4)|(2<<2)|0: GINTfill_int2e_kernel1120<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (1<<6)|(1<<4)|(3<<2)|0: GINTfill_int2e_kernel1130<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (2<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel2020<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (2<<6)|(0<<4)|(3<<2)|0: GINTfill_int2e_kernel2030<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (2<<6)|(1<<4)|(1<<2)|0: GINTfill_int2e_kernel2110<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (2<<6)|(1<<4)|(2<<2)|0: GINTfill_int2e_kernel2120<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (2<<6)|(2<<4)|(0<<2)|0: GINTfill_int2e_kernel2200<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (2<<6)|(2<<4)|(1<<2)|0: GINTfill_int2e_kernel2210<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (3<<6)|(0<<4)|(1<<2)|0: GINTfill_int2e_kernel3010<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (3<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel3020<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (3<<6)|(1<<4)|(0<<2)|0: GINTfill_int2e_kernel3100<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (3<<6)|(1<<4)|(1<<2)|0: GINTfill_int2e_kernel3110<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     case (3<<6)|(2<<4)|(0<<2)|0: GINTfill_int2e_kernel3200<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     default:
-    //         GINTfill_int3c2e_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-    //     }
-    //     break;
     case 2: GINTfill_int3c1e_kernel_general<2, GSIZE2_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
     case 3: GINTfill_int3c1e_kernel_general<3, GSIZE3_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
     case 4: GINTfill_int3c1e_kernel_general<4, GSIZE4_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
@@ -126,7 +88,45 @@ static int GINTfill_int3c1e_tasks(double* output, const BasisProdOffsets offsets
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error of GINTfill_int3c2e_kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+static int GINTfill_int3c1e_density_contracted_tasks(double* output, const double* density, const HermiteDensityOffsets hermite_density_offsets,
+                                                     const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
+                                                     const double omega, const double* grid_points, const cudaStream_t stream)
+{
+    const int nrys_roots = (i_l + j_l) / 2 + 1;
+    const int ntasks_ij = offsets.ntasks_ij;
+    const int ngrids = offsets.ntasks_kl;
+
+    const dim3 threads(THREADSX, THREADSY);
+    const dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ngrids+THREADSY-1)/THREADSY);
+    int type_ijkl;
+    switch (nrys_roots) {
+    case 1:
+        type_ijkl = (i_l << 2) | j_l;
+        switch (type_ijkl) {
+        case (0<<2)|0: GINTfill_int3c1e_density_contracted_kernel00<<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points); break;
+        case (1<<2)|0: GINTfill_int3c1e_density_contracted_kernel10<<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points); break;
+        default:
+            fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
+        }
+        break;
+    case 2: GINT_int3c1e_density_contracted_kernel_general<2> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points); break;
+    case 3: GINT_int3c1e_density_contracted_kernel_general<3> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points); break;
+    case 4: GINT_int3c1e_density_contracted_kernel_general<4> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points); break;
+    case 5: GINT_int3c1e_density_contracted_kernel_general<5> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points); break;
+    default:
+        fprintf(stderr, "rys roots %d\n", nrys_roots);
+        return 1;
+    }
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
         return 1;
     }
     return 0;
@@ -146,7 +146,8 @@ int GINTfill_int3c1e(const cudaStream_t stream, const BasisProdCache* bpcache,
     const int nrys_roots = (i_l + j_l) / 2 + 1;
     const int nprim_ij = cp_ij->nprim_12;
 
-    if (nrys_roots > 9) {
+    if (nrys_roots > 5) {
+        fprintf(stderr, "nrys_roots = %d too high\n", nrys_roots);
         return 2;
     }
 
@@ -181,6 +182,61 @@ int GINTfill_int3c1e(const cudaStream_t stream, const BasisProdCache* bpcache,
         const int err = GINTfill_int3c1e_tasks(integrals, offsets, i_l, j_l, nprim_ij,
                                                strides[0], strides[1], ao_offsets[0], ao_offsets[1],
                                                omega, grid_points, stream);
+
+        if (err != 0) {
+            return err;
+        }
+    }
+
+    return 0;
+}
+
+int GINTfill_int3c1e_density_contracted(const cudaStream_t stream, const BasisProdCache* bpcache,
+                                        const double* grid_points, const int ngrids,
+                                        const double* dm_pair_ordered, const int* density_offset,
+                                        double* integral_density_contracted,
+                                        const int* bins_locs_ij, int nbins,
+                                        const int cp_ij_id, const double omega)
+{
+    const ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
+    const int i_l = cp_ij->l_bra;
+    const int j_l = cp_ij->l_ket;
+    const int nrys_roots = (i_l + j_l) / 2 + 1;
+    const int nprim_ij = cp_ij->nprim_12;
+
+    if (nrys_roots > 5) {
+        fprintf(stderr, "nrys_roots = %d too high\n", nrys_roots);
+        return 2;
+    }
+
+    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
+
+    const int* bas_pairs_locs = bpcache->bas_pairs_locs;
+    const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
+    for (int ij_bin = 0; ij_bin < nbins; ij_bin++) {
+        const int bas_ij0 = bins_locs_ij[ij_bin];
+        const int bas_ij1 = bins_locs_ij[ij_bin + 1];
+        const int ntasks_ij = bas_ij1 - bas_ij0;
+        if (ntasks_ij <= 0) {
+            continue;
+        }
+
+        BasisProdOffsets offsets;
+        offsets.ntasks_ij = ntasks_ij;
+        offsets.ntasks_kl = ngrids;
+        offsets.bas_ij = bas_pairs_locs[cp_ij_id] + bas_ij0;
+        offsets.bas_kl = -1;
+        offsets.primitive_ij = primitive_pairs_locs[cp_ij_id] + bas_ij0 * nprim_ij;
+        offsets.primitive_kl = -1;
+
+        HermiteDensityOffsets hermite_density_offsets;
+        hermite_density_offsets.density_offset_of_angular_pair = density_offset[cp_ij_id];
+        hermite_density_offsets.pair_offset_of_angular_pair = bas_pairs_locs[cp_ij_id];
+        hermite_density_offsets.n_pair_of_angular_pair = bas_pairs_locs[cp_ij_id + 1] - bas_pairs_locs[cp_ij_id];
+
+        const int err = GINTfill_int3c1e_density_contracted_tasks(integral_density_contracted, dm_pair_ordered, hermite_density_offsets,
+                                                                  offsets, i_l, j_l, nprim_ij,
+                                                                  omega, grid_points, stream);
 
         if (err != 0) {
             return err;
