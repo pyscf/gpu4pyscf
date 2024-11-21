@@ -110,9 +110,9 @@ static void _pcm_dD_dS(double *matrix_dd, double *matrix_ds,
     double dy_rij = dy / rij;
     double dz_rij = dz / rij;
 
-    matrix_ds[3*(i*n+j)]   = dS_dr * dx_rij;
-    matrix_ds[3*(i*n+j)+1] = dS_dr * dy_rij;
-    matrix_ds[3*(i*n+j)+2] = dS_dr * dz_rij;
+    matrix_ds[i*n+j       ] = dS_dr * dx_rij;
+    matrix_ds[i*n+j +  n*n] = dS_dr * dy_rij;
+    matrix_ds[i*n+j +2*n*n] = dS_dr * dz_rij;
 
     if (matrix_dd != NULL){
         double nxj = norm_vec[3*j];
@@ -123,9 +123,10 @@ static void _pcm_dD_dS(double *matrix_dd, double *matrix_ds,
         double dD_dri = 4.0*xi_r2_ij*xi_ij / SQRT_PI*exp(-xi_r2_ij)*nj_rij/rij3;
         if (i == j) dD_dri = 0.0;
 
-        matrix_dd[3*(i*n+j)]   = dD_dri*dx_rij + dS_dr*(-nxj/rij + 3.0*nj_rij/rij2*dx_rij);
-        matrix_dd[3*(i*n+j)+1] = dD_dri*dy_rij + dS_dr*(-nyj/rij + 3.0*nj_rij/rij2*dy_rij);
-        matrix_dd[3*(i*n+j)+2] = dD_dri*dz_rij + dS_dr*(-nzj/rij + 3.0*nj_rij/rij2*dz_rij);
+        nj_rij = 3.0*nj_rij/rij2;
+        matrix_dd[i*n+j        ] = dD_dri*dx_rij + dS_dr*(-nxj/rij + nj_rij*dx_rij);
+        matrix_dd[i*n+j +   n*n] = dD_dri*dy_rij + dS_dr*(-nyj/rij + nj_rij*dy_rij);
+        matrix_dd[i*n+j + 2*n*n] = dD_dri*dz_rij + dS_dr*(-nzj/rij + nj_rij*dz_rij);
     }
 }
 

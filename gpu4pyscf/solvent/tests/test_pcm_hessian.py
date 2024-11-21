@@ -46,11 +46,15 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-def _make_mf(method='C-PCM', restricted=True):
+def _make_mf(method='C-PCM', restricted=True, density_fit=True):
     if restricted:
-        mf = dft.rks.RKS(mol, xc=xc).density_fit().PCM()
+        mf = dft.rks.RKS(mol, xc=xc)
     else:
-        mf = dft.uks.UKS(mol, xc=xc).density_fit().PCM()
+        mf = dft.uks.UKS(mol, xc=xc)
+    
+    if density_fit:
+        mf = mf.density_fit()
+    mf = mf.PCM()
     mf.with_solvent.method = method
     mf.with_solvent.eps = epsilon
     mf.with_solvent.lebedev_order = lebedev_order
@@ -88,7 +92,7 @@ def _check_hessian(mf, h, ix=0, iy=0):
 
 @unittest.skipIf(pcm.libsolvent is None, "solvent extension not compiled")
 class KnownValues(unittest.TestCase):
-    def test_hess_cpcm(self):
+    def test_df_hess_cpcm(self):
         print('testing C-PCM Hessian with DF-RKS')
         mf = _make_mf(method='C-PCM')
         hobj = mf.Hessian()
@@ -97,7 +101,15 @@ class KnownValues(unittest.TestCase):
         _check_hessian(mf, h, ix=0, iy=0)
         _check_hessian(mf, h, ix=0, iy=1)
 
-    def test_hess_iefpcm(self):
+    def test_hess_cpcm(self):
+        print('testing C-PCM Hessian with RKS')
+        mf = _make_mf(method='C-PCM', density_fit=False)
+        hobj = mf.Hessian()
+        h = hobj.kernel()
+        _check_hessian(mf, h, ix=0, iy=0)
+        _check_hessian(mf, h, ix=0, iy=1)
+
+    def test_df_hess_iefpcm(self):
         print("testing IEF-PCM hessian with DF-RKS")
         mf = _make_mf(method='IEF-PCM')
         hobj = mf.Hessian()
@@ -106,11 +118,27 @@ class KnownValues(unittest.TestCase):
         _check_hessian(mf, h, ix=0, iy=0)
         _check_hessian(mf, h, ix=0, iy=1)
 
-    def test_uhf_hess_iefpcm(self):
+    def test_hess_iefpcm(self):
+        print("testing IEF-PCM hessian with RKS")
+        mf = _make_mf(method='IEF-PCM', density_fit=False)
+        hobj = mf.Hessian()
+        h = hobj.kernel()
+        _check_hessian(mf, h, ix=0, iy=0)
+        _check_hessian(mf, h, ix=0, iy=1)
+
+    def test_df_uks_hess_iefpcm(self):
         print("testing IEF-PCM hessian with DF-UKS")
-        mf = _make_mf(method='IEF-PCM', restricted=False)
+        mf = _make_mf(method='IEF-PCM', restricted=False, density_fit=True)
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_hessian(mf, h, ix=0, iy=0)
+        _check_hessian(mf, h, ix=0, iy=1)
+
+    def test_uks_hess_iefpcm(self):
+        print("testing IEF-PCM hessian with UHF")
+        mf = _make_mf(method='IEF-PCM', restricted=False, density_fit=False)
+        hobj = mf.Hessian()
         h = hobj.kernel()
         _check_hessian(mf, h, ix=0, iy=0)
         _check_hessian(mf, h, ix=0, iy=1)
@@ -118,16 +146,6 @@ class KnownValues(unittest.TestCase):
     @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_gpu(self):
         import pyscf
-        # Not implemented yet
-        '''
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').SMD()
-        mf.kernel()
-        hessobj = mf.Hessian()
-        hess_cpu = hessobj.kernel()
-        hessobj = hessobj.to_gpu()
-        hess_gpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-8
-        '''
         mol = gto.Mole()
         mol.atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -137,6 +155,17 @@ H       0.7570000000     0.0000000000    -0.4696000000
         mol.basis = 'sto-3g'
         mol.output = '/dev/null'
         mol.build(verbose=0)
+        mf = pyscf.dft.RKS(mol, xc='b3lyp').PCM()
+        mf.conv_tol = 1e-12
+        mf.conv_tol_cpscf = 1e-7
+        mf.grids.atom_grid = (50,194)
+        mf.kernel()
+        hessobj = mf.Hessian()
+        hess_cpu = hessobj.kernel()
+        hessobj = hessobj.to_gpu()
+        hess_gpu = hessobj.kernel()
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+
         mf = pyscf.dft.RKS(mol, xc='b3lyp').density_fit().PCM()
         mf.conv_tol = 1e-12
         mf.conv_tol_cpscf = 1e-7
@@ -150,14 +179,6 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
     @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_cpu(self):
-        # Not implemented yet
-        '''
-        mf = dft.RKS(mol, xc='b3lyp').SMD()
-        e_gpu = mf.kernel()
-        mf = mf.to_cpu()
-        e_cpu = mf.kernel()
-        assert abs(e_cpu - e_gpu) < 1e-8
-        '''
         mol = gto.Mole()
         mol.atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -167,6 +188,18 @@ H       0.7570000000     0.0000000000    -0.4696000000
         mol.basis = 'sto-3g'
         mol.output = '/dev/null'
         mol.build(verbose=0)
+        
+        mf = dft.RKS(mol, xc='b3lyp').PCM()
+        mf.conv_tol = 1e-12
+        mf.conv_tol_cpscf = 1e-7
+        mf.grids.atom_grid = (50,194)
+        mf.kernel()
+        hessobj = mf.Hessian()
+        hess_gpu = hessobj.kernel()
+        hessobj = hessobj.to_cpu()
+        hess_cpu = hessobj.kernel()
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+
         mf = dft.RKS(mol, xc='b3lyp').density_fit().PCM()
         mf.conv_tol = 1e-12
         mf.conv_tol_cpscf = 1e-7

@@ -119,6 +119,25 @@ class KnownValues(unittest.TestCase):
         g = mf.nuc_grad_method().kernel()
         assert np.abs(cupy.linalg.norm(g) - 0.1750368231223345) < 1e-6
 
+        h = mf.Hessian().kernel()
+        assert np.abs(cupy.linalg.norm(h) - 3.760381249106394) < 1e-4
+
+    @pytest.mark.smoke
+    def test_UKS(self):
+        print('-------- UKS with D3(BJ) -------')
+        mf = uks.UKS(mol, xc='b3lyp')
+        mf.grids.atom_grid = (99,590)
+        mf.conv_tol = 1e-12
+        mf.disp = 'd3bj'
+        e_dft = mf.kernel()
+        assert np.abs(e_dft - -685.0325611822375) < 1e-7
+
+        g = mf.nuc_grad_method().kernel()
+        assert np.abs(cupy.linalg.norm(g) - 0.1750368231223345) < 1e-6
+
+        h = mf.Hessian().kernel()
+        assert np.abs(cupy.linalg.norm(h) - 3.760381249106394) < 1e-4
+
     @pytest.mark.smoke
     def test_DFRKS_with_SMD(self):
         print('----- DFRKS with SMD -----')
@@ -132,10 +151,10 @@ class KnownValues(unittest.TestCase):
         assert np.abs(e_dft - -685.0578838805443) < 1e-7
 
         g = mf.nuc_grad_method().kernel()
-        assert np.abs(cupy.linalg.norm(g) - 0.16905807654571403) < 1e-5
+        assert np.abs(cupy.linalg.norm(g) - 0.16804945458657145) < 1e-5
 
         h = mf.Hessian().kernel()
-        assert np.abs(cupy.linalg.norm(h) - 3.743840896534178) < 1e-4
+        assert np.abs(cupy.linalg.norm(h) - 3.741783814494321) < 1e-4
 
     @pytest.mark.smoke
     def test_DFUKS_with_SMD(self):
@@ -150,10 +169,10 @@ class KnownValues(unittest.TestCase):
         assert np.abs(e_dft - -685.05788388063) < 1e-7
 
         g = mf.nuc_grad_method().kernel()
-        assert np.abs(cupy.linalg.norm(g) - 0.1690582751813457) < 1e-5
+        assert np.abs(cupy.linalg.norm(g) - 0.1680496465773684) < 1e-5
 
         h = mf.Hessian().kernel()
-        assert np.abs(cupy.linalg.norm(h) - 3.743858482519822) < 1e-4
+        assert np.abs(cupy.linalg.norm(h) - 3.7417788481647563) < 1e-4
 
 if __name__ == "__main__":
     print("Full Smoke Tests")

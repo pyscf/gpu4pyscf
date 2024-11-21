@@ -31,6 +31,7 @@ from gpu4pyscf.lib.cupy_helper import contract
 def get_cds(smdobj):
     return smd.get_cds_legacy(smdobj)[1]
 
+"""
 def grad_solver(smdobj, dm):
     '''
     dE = 0.5*v* d(K^-1 R) *v + q*dv
@@ -61,19 +62,13 @@ def grad_solver(smdobj, dm):
 
     with_D = smdobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE', 'SMD']
     dD, dS, dSii = pcm_grad.get_dD_dS(smdobj.surface, dF, with_D=with_D, with_S=True)
-    DA = D*A
 
     epsilon = smdobj.eps
     de = cupy.zeros([smdobj.mol.natm,3])
 
-    # same as IEF-PCM
-    dD = dD.transpose([2,0,1])
-    dS = dS.transpose([2,0,1])
-    dSii = dSii.transpose([2,0,1])
-    dA = dA.transpose([2,0,1])
     def contract_bra(a, B, c):
         ''' i,xij,j->jx '''
-        tmp = contract('i,xij->xj', a, B)
+        tmp = a.dot(B)
         return (tmp * c).T
 
     def contract_ket(a, B, c):
@@ -103,7 +98,7 @@ def grad_solver(smdobj, dm):
     vK_1_q = vK_1 * q
     de_dS0 += 0.5*contract('i,xin->nx', vK_1_q, dSii)
 
-    vK_1_DA = cupy.dot(vK_1, DA)
+    vK_1_DA = vK_1_D*A
     de_dS1  = 0.5*contract_ket(vK_1_DA, dS, q)
     de_dS1 -= 0.5*contract_bra(vK_1_DA, dS, q)
     de_dS1  = cupy.asarray([cupy.sum(de_dS1[p0:p1], axis=0) for p0,p1 in gridslice])
@@ -117,7 +112,6 @@ def grad_solver(smdobj, dm):
     de_dD -= 0.5*contract_bra(vK_1, dD, ASq)
     de_dD  = cupy.asarray([cupy.sum(de_dD[p0:p1], axis=0) for p0,p1 in gridslice])
 
-    vK_1_D = cupy.dot(vK_1, D)
     de_dA = 0.5*contract('j,xjn->nx', vK_1_D*Sq, dA)   # 0.5*cupy.einsum('j,xjn,j->nx', vK_1_D, dA, Sq)
 
     de_dK = de_dS0 - fac * (de_dD + de_dA + de_dS1)
@@ -125,6 +119,8 @@ def grad_solver(smdobj, dm):
 
     t1 = log.timer_debug1('grad solver', *t1)
     return de.get()
+"""
+grad_solver = pcm_grad.grad_solver
 
 def make_grad_object(grad_method):
     '''For grad_method in vacuum, add nuclear gradients of solvent smdobj'''
@@ -171,7 +167,6 @@ class WithSolventGrad:
         self.de_solvent+= pcm_grad.grad_nuc(self.base.with_solvent, dm)
         self.de_cds     = get_cds(self.base.with_solvent)
         self.de = self.de_solute + self.de_solvent + self.de_cds
-
         if self.verbose >= logger.NOTE:
             logger.note(self, '--------------- %s (+%s) gradients ---------------',
                         self.base.__class__.__name__,

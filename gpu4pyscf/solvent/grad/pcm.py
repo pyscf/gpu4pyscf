@@ -52,7 +52,6 @@ def get_dF_dA(surface):
     '''
     J. Chem. Phys. 133, 244111 (2010), Appendix C
     '''
-
     atom_coords = surface['atom_coords']
     grid_coords = surface['grid_coords']
     switch_fun  = surface['switch_fun']
@@ -97,10 +96,11 @@ def get_dF_dA(surface):
         Ai = cupy.expand_dims(Ai, axis=-2)
         dF[p0:p1,:,:] -= Fi * dfiJ
         dA[p0:p1,:,:] -= Ai * dfiJ
-
+    dF = dF.transpose([2,0,1])
+    dA = dA.transpose([2,0,1])
     return dF, dA
 
-def get_dD_dS_slow(surface, dF, with_S=True, with_D=False):
+def get_dD_dS_slow(surface, with_S=True, with_D=False):
     '''
     derivative of D and S w.r.t grids, partial_i D_ij = -partial_j D_ij
     S is symmetric, D is not
@@ -108,7 +108,6 @@ def get_dD_dS_slow(surface, dF, with_S=True, with_D=False):
     grid_coords = surface['grid_coords']
     exponents   = surface['charge_exp']
     norm_vec    = surface['norm_vec']
-    switch_fun  = surface['switch_fun']
 
     xi_i, xi_j = cupy.meshgrid(exponents, exponents, indexing='ij')
     xi_ij = xi_i * xi_j / (xi_i**2 + xi_j**2)**0.5
@@ -138,24 +137,25 @@ def get_dD_dS_slow(surface, dF, with_S=True, with_D=False):
 
         dD = dD_dri * drij + dS_dr * (-nj/rij + 3.0*nj_rij/rij**2 * drij)
         dD_dri = None
-    dSii_dF = -exponents * (2.0/PI)**0.5 / switch_fun**2
-    dSii = cupy.expand_dims(dSii_dF, axis=(1,2)) * dF
+    dD = dD.transpose([2,0,1])
+    dS = dS.transpose([2,0,1])
+    return dD, dS
 
-    return dD, dS, dSii
-
-def get_dD_dS(surface, dF, with_S=True, with_D=False, stream=None):
+def get_dD_dS(surface, with_S=True, with_D=False, stream=None):
+    ''' Derivatives of D matrix and S matrix (offdiagonals only)
+    '''
     charge_exp  = surface['charge_exp']
     grid_coords = surface['grid_coords']
     switch_fun  = surface['switch_fun']
     norm_vec    = surface['norm_vec']
     R_vdw       = surface['R_vdw']
     n = charge_exp.shape[0]
-    dS = cupy.empty([n,n,3])
+    dS = cupy.empty([3,n,n])
     dD = None
     dS_ptr = ctypes.cast(dS.data.ptr, ctypes.c_void_p)
     dD_ptr = pyscf_lib.c_null_ptr()
     if with_D:
-        dD = cupy.empty([n,n,3])
+        dD = cupy.empty([3,n,n])
         dD_ptr = ctypes.cast(dD.data.ptr, ctypes.c_void_p)
     if stream is None:
         stream = cupy.cuda.get_current_stream()
@@ -171,10 +171,16 @@ def get_dD_dS(surface, dF, with_S=True, with_D=False, stream=None):
     )
     if err != 0:
         raise RuntimeError('Failed in generating PCM dD and dS matrices.')
+    return dD, dS
 
+def get_dSii(surface, dF):
+    ''' Derivative of S matrix (diagonal only)
+    '''
+    charge_exp  = surface['charge_exp']
+    switch_fun  = surface['switch_fun']
     dSii_dF = -charge_exp * (2.0/PI)**0.5 / switch_fun**2
-    dSii = cupy.expand_dims(dSii_dF, axis=(1,2)) * dF
-    return dD, dS, dSii
+    dSii = dSii_dF[:,None] * dF
+    return dSii
 
 def grad_nuc(pcmobj, dm):
     mol = pcmobj.mol
@@ -243,13 +249,16 @@ def grad_qv(pcmobj, dm):
     dvj, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip1', q_sym, None, dm_cart)
     dq, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip2', q_sym, None, dm_cart)
 
-    if not mol.cart:
-        dvj = dvj @ intopt.cart2sph
-    dvj = intopt.unsort_orbitals(dvj, axis=[1])
-    
-    aoslice = intopt.mol.aoslice_by_atom()
+    _sorted_mol = intopt._sorted_mol
+    nao_cart = _sorted_mol.nao
+    natm = _sorted_mol.natm
+    ao2atom = numpy.zeros([nao_cart, natm])
+    ao_loc = _sorted_mol.ao_loc
+    for ibas, iatm in enumerate(_sorted_mol._bas[:,gto.ATOM_OF]):
+        ao2atom[ao_loc[ibas]:ao_loc[ibas+1],iatm] = 1
+    ao2atom = cupy.asarray(ao2atom)
+    dvj = 2.0 * ao2atom.T @ dvj.T
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
-    dvj= 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     de = dq + dvj
     t1 = log.timer_debug1('grad qv', *t1)
     return de.get()
@@ -279,45 +288,38 @@ def grad_solver(pcmobj, dm):
     q            = pcmobj._intermediates['q']
 
     vK_1 = cupy.linalg.solve(K.T, v_grids)
-
-    dF, dA = get_dF_dA(pcmobj.surface)
-
-    with_D = pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE', 'SMD']
-    dD, dS, dSii = get_dD_dS(pcmobj.surface, dF, with_D=with_D, with_S=True)
-
-    if pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE', 'SMD']:
-        DA = D*A
-
     epsilon = pcmobj.eps
 
-    #de_dF = v0 * -dSii_dF * q
-    #de += 0.5*numpy.einsum('i,inx->nx', de_dF, dF)
-    # dQ = v^T K^-1 (dR - dK K^-1 R) v
     de = cupy.zeros([pcmobj.mol.natm,3])
     if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
-        dS = dS.transpose([2,0,1])
-        dSii = dSii.transpose([2,0,1])
-
+        dD, dS = get_dD_dS(pcmobj.surface, with_D=False, with_S=True)
+        
         # dR = 0, dK = dS
         de_dS = (vK_1 * dS.dot(q)).T                  # cupy.einsum('i,xij,j->ix', vK_1, dS, q)
-        de -= cupy.asarray([cupy.sum(de_dS[p0:p1], axis=0) for p0,p1, in gridslice])
+        de -= cupy.asarray([cupy.sum(de_dS[p0:p1], axis=0) for p0,p1 in gridslice])
+        dD = dS = None
+
+        dF, dA = get_dF_dA(pcmobj.surface)
+        dSii = get_dSii(pcmobj.surface, dF)
         de -= 0.5*contract('i,xij->jx', vK_1*q, dSii) # 0.5*cupy.einsum('i,xij,i->jx', vK_1, dSii, q)
 
     elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE', 'SMD']:
-        dD = dD.transpose([2,0,1])
-        dS = dS.transpose([2,0,1])
-        dSii = dSii.transpose([2,0,1])
-        dA = dA.transpose([2,0,1])
+        dF, dA = get_dF_dA(pcmobj.surface)
+        dSii = get_dSii(pcmobj.surface, dF)
+        dF = None
+
+        dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
+
         def contract_bra(a, B, c):
             ''' i,xij,j->jx '''
-            tmp = contract('i,xij->xj', a, B)
-            return (tmp * c).T
+            tmp = a.dot(B)
+            return (tmp*c).T
 
         def contract_ket(a, B, c):
             ''' i,xij,j->ix '''
             tmp = B.dot(c)
             return (a*tmp).T
-
+        
         # IEF-PCM and SS(V)PE formally are the same in gradient calculation
         # dR = f_eps/(2*pi) * (dD*A + D*dA),
         # dK = dS - f_eps/(2*pi) * (dD*A*S + D*dA*S + D*A*dS)
@@ -340,7 +342,7 @@ def grad_solver(pcmobj, dm):
         vK_1_q = vK_1 * q
         de_dS0 += 0.5*contract('i,xin->nx', vK_1_q, dSii)
 
-        vK_1_DA = cupy.dot(vK_1, DA)
+        vK_1_DA = vK_1_D*A
         de_dS1  = 0.5*contract_ket(vK_1_DA, dS, q)
         de_dS1 -= 0.5*contract_bra(vK_1_DA, dS, q)
         de_dS1  = cupy.asarray([cupy.sum(de_dS1[p0:p1], axis=0) for p0,p1 in gridslice])
@@ -354,7 +356,6 @@ def grad_solver(pcmobj, dm):
         de_dD -= 0.5*contract_bra(vK_1, dD, ASq)
         de_dD  = cupy.asarray([cupy.sum(de_dD[p0:p1], axis=0) for p0,p1 in gridslice])
 
-        vK_1_D = cupy.dot(vK_1, D)
         de_dA = 0.5*contract('j,xjn->nx', vK_1_D*Sq, dA)   # 0.5*cupy.einsum('j,xjn,j->nx', vK_1_D, dA, Sq)
 
         de_dK = de_dS0 - fac * (de_dD + de_dA + de_dS1)

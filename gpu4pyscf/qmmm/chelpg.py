@@ -42,6 +42,7 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     if group_size is not None:
         uniq_l_ctr, l_ctr_counts = int3c2e._split_l_ctr_groups(
             uniq_l_ctr, l_ctr_counts, group_size)
+    intopt.l_ctr_counts = l_ctr_counts
 
     # sort fake mol
     fake_mol = int3c2e.make_fake_mol()
@@ -53,7 +54,8 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     if group_size_aux is not None:
         aux_uniq_l_ctr, aux_l_ctr_counts = int3c2e._split_l_ctr_groups(
             aux_uniq_l_ctr, aux_l_ctr_counts, group_size_aux)
-
+    intopt.aux_l_ctr_counts = aux_l_ctr_counts
+    
     tmp_mol = gto.mole.conc_mol(fake_mol, sorted_auxmol)
     tot_mol = gto.mole.conc_mol(sorted_mol, tmp_mol)
 
@@ -88,7 +90,6 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     ao_idx = np.array_split(np.arange(nao), cart_ao_loc[1:-1])
     intopt.cart_ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
     ncart = cart_ao_loc[-1]
-    intopt.cart2sph = block_c2s_diag(intopt.angular, l_ctr_counts)
 
     # pairing auxiliary basis with fake basis set
     fake_l_ctr_offsets = np.append(0, np.cumsum(fake_l_ctr_counts))
