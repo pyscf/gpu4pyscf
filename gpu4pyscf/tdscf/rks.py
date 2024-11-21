@@ -38,6 +38,7 @@ class CasidaTDDFT(TDDFT):
     '''
 
     init_guess = TDA.init_guess
+    get_precond = TDA.get_precond
 
     def gen_vind(self, mf=None):
         if mf is None:
@@ -124,7 +125,7 @@ class CasidaTDDFT(TDDFT):
             x = (zp + zm) * .5
             y = (zp - zm) * .5
             norm = lib.norm(x)**2 - lib.norm(y)**2
-            norm = (.5/norm)**.5  # normalize to 0.5 for alpha spin
+            norm = abs(.5/norm)**.5  # normalize to 0.5 for alpha spin
             return (x*norm, y*norm)
 
         idx = np.where(w2 > self.positive_eig_threshold)[0]
