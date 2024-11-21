@@ -1545,7 +1545,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                     ao_mask[-pad:,:] = 0.0
                 else:
                     ao_mask[:,-pad:,:] = 0.0
-            yield ao_mask, idx, weight, ip0
+            yield ao_mask, idx, weight, coords
 
 def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 non0tab=None, blksize=None, buf=None, extra=0):
