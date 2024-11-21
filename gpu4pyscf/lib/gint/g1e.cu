@@ -44,10 +44,11 @@ static void GINTg1e(double* __restrict__ g, const double* __restrict__ grid_poin
     const double PCy = Py - Cy;
     const double PCz = Pz - Cz;
     double a0 = aij;
-    const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+    const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
+    const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
     a0 *= theta;
 
-    const double prefactor = 2.0 * M_PI / a0 * eij;
+    const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta;
     const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
     double uw[NROOTS * 2];
     GINTrys_root<NROOTS>(boys_input, uw);
@@ -77,8 +78,8 @@ static void GINTg1e(double* __restrict__ g, const double* __restrict__ grid_poin
         gz[i_root] = w[i_root];
 
         const double u2 = a0 * u[i_root];
-        const double t2 = u2 / (u2 + a0);
-        const double b10 = 0.5 / a0 * (1.0 - t2);
+        const double t2 = u2 / (u2 + aij);
+        const double b10 = 0.5 / aij * (1.0 - t2);
         const double c00x = PAx - t2 * PCx;
         const double c00y = PAy - t2 * PCy;
         const double c00z = PAz - t2 * PCz;
@@ -153,10 +154,11 @@ static void GINT_g1e_without_hrr(double* __restrict__ g, const double* __restric
     const double PCy = Py - Cy;
     const double PCz = Pz - Cz;
     double a0 = aij;
-    const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+    const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
+    const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
     a0 *= theta;
 
-    const double prefactor = 2.0 * M_PI / a0 * eij;
+    const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta;
     const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
     double uw[NROOTS * 2];
     GINTrys_root<NROOTS>(boys_input, uw);
@@ -186,8 +188,8 @@ static void GINT_g1e_without_hrr(double* __restrict__ g, const double* __restric
         gz[i_root] = w[i_root];
 
         const double u2 = a0 * u[i_root];
-        const double t2 = u2 / (u2 + a0);
-        const double b10 = 0.5 / a0 * (1.0 - t2);
+        const double t2 = u2 / (u2 + aij);
+        const double b10 = 0.5 / aij * (1.0 - t2);
         const double c00x = PAx - t2 * PCx;
         const double c00y = PAy - t2 * PCy;
         const double c00z = PAz - t2 * PCz;

@@ -62,10 +62,11 @@ static void GINTfill_int3c1e_kernel00(double* output, const BasisProdOffsets off
         const double PCy = Py - Cy;
         const double PCz = Pz - Cz;
         double a0 = aij;
-        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
+        const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
         a0 *= theta;
 
-        const double prefactor = 2.0 * M_PI / a0 * eij;
+        const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta;
         const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
         double eri = prefactor;
         if (boys_input > 3.e-7) {
@@ -124,10 +125,11 @@ static void GINTfill_int3c1e_density_contracted_kernel00(double* output, const d
         const double PCy = Py - Cy;
         const double PCz = Pz - Cz;
         double a0 = aij;
-        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
+        const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
         a0 *= theta;
 
-        const double prefactor = 2.0 * M_PI / a0 * eij;
+        const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta;
         const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
         double eri = prefactor;
         if (boys_input > 3.e-7) {
@@ -197,11 +199,12 @@ static void GINTfill_int3c1e_kernel10(double* output, const BasisProdOffsets off
         const double PAy = Py - Ay;
         const double PAz = Pz - Az;
         double a0 = aij;
-        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        const double one_over_two_p = 0.5 / aij;
+        const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
+        const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
         a0 *= theta;
-        const double one_over_two_p = 0.5 / a0;
 
-        const double prefactor = 2.0 * M_PI / a0 * eij;
+        const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta;
         const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
         double eri_x = prefactor;
         double eri_y = prefactor;
@@ -282,11 +285,12 @@ static void GINTfill_int3c1e_density_contracted_kernel10(double* output, const d
         const double PAy = Py - Ay;
         const double PAz = Pz - Az;
         double a0 = aij;
-        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        const double one_over_two_p = 0.5 / aij;
+        const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
+        const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
         a0 *= theta;
-        const double one_over_two_p = 0.5 / a0;
 
-        const double prefactor = 2.0 * M_PI / a0 * eij;
+        const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta;
         const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
         double eri_x = prefactor;
         double eri_y = prefactor;
