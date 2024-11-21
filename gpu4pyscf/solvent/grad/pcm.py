@@ -294,19 +294,19 @@ def grad_solver(pcmobj, dm):
         # dR = 0, dK = dS
         de_dS = (vK_1 * dS.dot(q)).T                  # cupy.einsum('i,xij,j->xi', vK_1, dS, q)
         de -= cupy.asarray([cupy.sum(de_dS[p0:p1], axis=0) for p0,p1 in gridslice])
-        de -= 0.5*contract('i,xij->jx', vK_1*q, dSii) #contract('i,xij->xj', vK_1*q, dSii) # 0.5*cupy.einsum('i,xij,i->jx', vK_1, dSii, q)
+        de -= 0.5*contract('i,xij->jx', vK_1*q, dSii) # 0.5*cupy.einsum('i,xij,i->jx', vK_1, dSii, q)
 
     elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE', 'SMD']:
         dD, dS, dSii = get_dD_dS(pcmobj.surface, dF, with_D=True, with_S=True)
         DA = D*A
 
         def contract_bra(a, B, c):
-            ''' i,xij,j->xj '''
+            ''' i,xij,j->jx '''
             tmp = a.dot(B)
             return (tmp*c).T
 
         def contract_ket(a, B, c):
-            ''' i,xij,j->xi '''
+            ''' i,xij,j->ix '''
             tmp = B.dot(c)
             return (a*tmp).T
         
