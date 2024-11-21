@@ -124,7 +124,8 @@ class VHFOpt(_vhf.VHFOpt):
         self.cart_ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
         ncart = cart_ao_loc[-1]
         nsph = sph_ao_loc[-1]
-        self.cart2sph = block_c2s_diag(ncart, nsph, self.angular, l_ctr_counts)
+        self.cart2sph = block_c2s_diag(self.angular, l_ctr_counts)
+        cput1 = log.timer_debug1('AO cart2sph coeff', *cput1)
 
         if _mol.cart:
             inv_idx = np.argsort(self.cart_ao_idx, kind='stable').astype(np.int32)
