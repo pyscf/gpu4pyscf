@@ -139,16 +139,18 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
         with cupy.cuda.Device(n), _streams[n]:
             bpcache = ctypes.POINTER(BasisProdCache)()
             scale_shellpair_diag = 1.
+            
             libgint.GINTinit_basis_prod(
-                ctypes.byref(intopt.bpcache), ctypes.c_double(scale_shellpair_diag),
+                ctypes.byref(bpcache), 
+                ctypes.c_double(scale_shellpair_diag),
                 ao_loc.ctypes.data_as(ctypes.c_void_p),
                 bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
-                bas_pairs_locs.ctypes.data_as(
-                    ctypes.c_void_p), ctypes.c_int(ncptype),
-                tot_mol._atm.ctypes.data_as(
-                    ctypes.c_void_p), ctypes.c_int(tot_mol.natm),
-                tot_mol._bas.ctypes.data_as(
-                    ctypes.c_void_p), ctypes.c_int(tot_mol.nbas),
+                bas_pairs_locs.ctypes.data_as(ctypes.c_void_p), 
+                ctypes.c_int(ncptype),
+                tot_mol._atm.ctypes.data_as(ctypes.c_void_p), 
+                ctypes.c_int(tot_mol.natm),
+                tot_mol._bas.ctypes.data_as(ctypes.c_void_p), 
+                ctypes.c_int(tot_mol.nbas),
                 tot_mol._env.ctypes.data_as(ctypes.c_void_p))
             intopt._bpcache[n] = bpcache
     intopt.bas_pairs_locs = bas_pairs_locs
