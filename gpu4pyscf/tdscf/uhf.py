@@ -21,7 +21,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.tdscf import uhf as tdhf_cpu
 from pyscf.data.nist import HARTREE2EV, HARTREE2WAVENUMBER
-from pyscf.tdscf._lr_eig import eigh as lr_eigh, eig as lr_eig
+from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, eig as lr_eig, real_eig
 from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
@@ -426,16 +426,16 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     e_ia_a = mo_energy[0][viridxa] - mo_energy[0][occidxa,None]
     e_ia_b = mo_energy[1][viridxb] - mo_energy[1][occidxb,None]
     e_ia = hdiag = cp.hstack((e_ia_a.ravel(), e_ia_b.ravel()))
-    hdiag = cp.hstack((hdiag, -hdiag)).get()
     nocca, nvira = e_ia_a.shape
     noccb, nvirb = e_ia_b.shape
 
     vresp = mf.gen_response(hermi=0)
 
-    def vind(xys):
-        nz = len(xys)
-        xys = cp.asarray(xys).reshape(nz,2,-1)
-        xs, ys = xys.transpose(1,0,2)
+    def vind(zs):
+        nz = len(zs)
+        xs, ys = zs.reshape(nz,2,-1).transpose(1,0,2)
+        xs = cp.asarray(xs)
+        ys = cp.asarray(ys)
         xa = xs[:,:nocca*nvira].reshape(nz,nocca,nvira)
         xb = xs[:,nocca*nvira:].reshape(nz,noccb,nvirb)
         ya = ys[:,:nocca*nvira].reshape(nz,nocca,nvira)
@@ -464,10 +464,10 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
         v1_bot[:,:nocca*nvira] += v1a_bot.reshape(nz,-1)
         v1_top[:,nocca*nvira:] += v1b_top.reshape(nz,-1)
         v1_bot[:,nocca*nvira:] += v1b_bot.reshape(nz,-1)
-        hx = cp.hstack((v1_top, -v1_bot))
-        return hx.get()
+        return cp.hstack([v1_top, -v1_bot]).get()
 
-    return vind, hdiag
+    hdiag = cp.hstack([hdiag.ravel(), -hdiag.ravel()])
+    return vind, hdiag.get()
 
 
 class TDHF(TDBase):
@@ -480,7 +480,10 @@ class TDHF(TDBase):
             mf = self._scf
         return gen_tdhf_operation(mf, singlet=self.singlet)
 
+    get_precond = tdhf_gpu.TDHF.get_precond
+
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
+        assert not return_symmetry
         x0 = TDA.init_guess(self, mf, nstates, wfnsym, return_symmetry)
         y0 = np.zeros_like(x0)
         return np.hstack([x0, y0])
@@ -503,46 +506,35 @@ class TDHF(TDBase):
         # handle single kpt PBC SCF
         if getattr(self._scf, 'kpt', None) is not None:
             from pyscf.pbc.lib.kpts_helper import gamma_point
-            real_system = (gamma_point(self._scf.kpt) and
-                           self._scf.mo_coeff[0].dtype == np.double)
-        else:
-            real_system = True
-
-        # We only need positive eigenvalues
-        def pickeig(w, v, nroots, envs):
-            realidx = np.where((abs(w.imag) < REAL_EIG_THRESHOLD) &
-                                  (w.real > self.positive_eig_threshold))[0]
-            return lib.linalg_helper._eigs_cmplx2real(w, v, realidx, real_system)
+            assert gamma_point(self._scf.kpt)
 
         x0sym = None
         if x0 is None:
             x0 = self.init_guess()
 
-        self.converged, w, x1 = lr_eig(
+        self.converged, self.e, x1 = real_eig(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
-            nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,
+            nroots=nstates, x0sym=x0sym, max_cycle=self.max_cycle,
             max_memory=self.max_memory, verbose=log)
 
         nmo = self._scf.mo_occ[0].size
         nocca, noccb = self._scf.nelec
         nvira = nmo - nocca
         nvirb = nmo - noccb
-        e = []
         xy = []
         for i, z in enumerate(x1):
-            x, y = z.reshape(2,-1)
+            x, y = z.reshape(2, -1)
             norm = lib.norm(x)**2 - lib.norm(y)**2
-            if norm > 0:
-                norm = norm**-.5
-                e.append(w[i])
-                xy.append(((x[:nocca*nvira].reshape(nocca,nvira) * norm,  # X_alpha
-                            x[nocca*nvira:].reshape(noccb,nvirb) * norm), # X_beta
-                           (y[:nocca*nvira].reshape(nocca,nvira) * norm,  # Y_alpha
-                            y[nocca*nvira:].reshape(noccb,nvirb) * norm)))# Y_beta
-        self.e = np.array(e)
+            if norm < 0:
+                log.warn('TDDFT amplitudes |X| smaller than |Y|')
+            norm = abs(norm)**-.5
+            xy.append(((x[:nocca*nvira].reshape(nocca,nvira) * norm,  # X_alpha
+                        x[nocca*nvira:].reshape(noccb,nvirb) * norm), # X_beta
+                       (y[:nocca*nvira].reshape(nocca,nvira) * norm,  # Y_alpha
+                        y[nocca*nvira:].reshape(noccb,nvirb) * norm)))# Y_beta
         self.xy = xy
 
-        log.timer('TDDFT', *cpu0)
+        log.timer('TDHF/TDDFT', *cpu0)
         self._finalize()
         return self.e, self.xy
 

@@ -114,7 +114,7 @@ class KnownValues(unittest.TestCase):
         nvirb = nmo - noccb
         zs = np.random.rand(3,2,nocca*nvira+noccb*nvirb)
         ref = mf.to_cpu().TDHF().set().gen_vind()[0](zs)
-        dat = mf.TDHF().set().gen_vind()[0](cp.asarray(zs))
+        dat = mf.TDHF().set().gen_vind()[0](zs)
         self.assertAlmostEqual(abs(ref - dat).max(), 0, 9)
 
 if __name__ == "__main__":
