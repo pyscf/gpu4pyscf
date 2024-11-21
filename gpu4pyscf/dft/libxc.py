@@ -124,17 +124,18 @@ def _check_arrays(current_arrays, fields, sizes, factor, required):
     """
     A specialized function built to construct and check the sizes of arrays given to the LibXCFunctional class.
     """
-
     # Nothing supplied so we build it out
     if current_arrays is None:
         current_arrays = {}
 
+    if not required:
+        for label in fields:
+            current_arrays[label] = None
+        return current_arrays
+
     for label in fields:
-        if required:
-            size = sizes[label]
-            current_arrays[label] = cupy.empty((factor, size), dtype=np.float64)
-        else:
-            current_arrays[label] = None # cupy.empty((1))
+        size = sizes[label]
+        current_arrays[label] = cupy.empty((factor, size), dtype=np.float64)
 
     return current_arrays
 
@@ -150,6 +151,7 @@ if _libxc is not None:
 
 class XCfun:
     def __init__(self, xc, spin):
+        self.spin = spin
         self._spin = 1 if spin == 'unpolarized' else 2
         self.xc_func = _libxc.xc_func_alloc()
         if isinstance(xc, str):
@@ -178,6 +180,9 @@ class XCfun:
     rsh_coeff = dft.libxc.rsh_coeff
 
     def compute(self, inp, output=None, do_exc=True, do_vxc=True, do_fxc=False, do_kxc=False, do_lxc=False):
+        # TODO: turn to dft.libxc.eval_xc for do_kxc and do_lxc
+        assert not do_kxc
+        assert not do_lxc
         if isinstance(inp, cupy.ndarray):
             inp = {"rho": cupy.asarray(inp, dtype=cupy.double)}
         elif isinstance(inp, dict):
@@ -207,12 +212,6 @@ class XCfun:
 
             args.extend([   inp[x] for x in  input_labels])
             args.extend([output[x] for x in output_labels])
-            cuda_args = []
-            for arg in args:
-                if(isinstance(arg, cupy.ndarray)):
-                    arg = ctypes.cast(arg.data.ptr, ctypes.c_void_p)
-                cuda_args.append(arg)
-            #_libxc.xc_lda(*cuda_args)
 
             out_params = xc_lda_out_params()
             buf_params = xc_lda_out_params()
@@ -246,12 +245,6 @@ class XCfun:
 
             args.extend([   inp[x] for x in  input_labels])
             args.extend([output[x] for x in output_labels])
-            cuda_args = []
-            for arg in args:
-                if(isinstance(arg, cupy.ndarray)):
-                    arg = ctypes.cast(arg.data.ptr, ctypes.c_void_p)
-                cuda_args.append(arg)
-            #_libxc.xc_gga(*cuda_args)
 
             out_params = xc_gga_out_params()
             buf_params = xc_gga_out_params()
@@ -295,12 +288,6 @@ class XCfun:
                 args.insert(-1, cupy.empty((1)))  # Add none ptr to laplacian
             #args.insert(-1, cupy.zeros_like(inp['rho']))
             args.extend([output[x] for x in output_labels])
-            cuda_args = []
-            for arg in args:
-                if(isinstance(arg, cupy.ndarray)):
-                    arg = ctypes.cast(arg.data.ptr, ctypes.c_void_p)
-                cuda_args.append(arg)
-            #_libxc.xc_mgga(*cuda_args)
 
             out_params = xc_mgga_out_params()
             buf_params = xc_mgga_out_params()
@@ -310,13 +297,14 @@ class XCfun:
                     setattr(buf_params, label, buf[label].data.ptr)
                     setattr(out_params, label, output[label].data.ptr)
             stream = cupy.cuda.get_current_stream()
+            lapl = cupy.empty(1)
             err = libgdft.GDFT_xc_mgga(
                 stream.ptr,
                 self.xc_func,
                 npoints,
                 inp['rho'].data.ptr,
                 inp['sigma'].data.ptr,
-                cupy.empty(1).data.ptr,
+                lapl.data.ptr,
                 inp['tau'].data.ptr,
                 ctypes.byref(out_params),
                 ctypes.byref(buf_params)

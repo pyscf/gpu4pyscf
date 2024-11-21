@@ -91,7 +91,7 @@ class DF(lib.StreamObject):
         log.timer_debug1('prepare intopt', *t0)
         self.j2c = j2c.copy()
 
-        j2c = take_last2d(j2c, intopt.aux_ao_idx)
+        j2c = intopt.sort_orbitals(j2c, aux_axis=[0,1])
         try:
             self.cd_low = cholesky(j2c)
             self.cd_low = tag_array(self.cd_low, tag='cd')
@@ -108,6 +108,7 @@ class DF(lib.StreamObject):
         self._cderi = cholesky_eri_gpu(intopt, mol, auxmol, self.cd_low, omega=omega)
         log.timer_debug1('cholesky_eri', *t0)
         self.intopt = intopt
+        return self
 
     def get_jk(self, dm, hermi=1, with_j=True, with_k=True,
                direct_scf_tol=getattr(__config__, 'scf_hf_SCF_direct_scf_tol', 1e-13),

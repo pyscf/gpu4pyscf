@@ -135,9 +135,8 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms).reshape(-1,nao0,nao0)
-    dms = take_last2d(dms, opt.ao_idx)
-    mo_coeff = mo_coeff[opt.ao_idx]
-
+    dms = opt.sort_orbitals(dms, axis=[1,2])
+    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     nset = len(dms)
     assert nset == 1
     vmat = cupy.zeros((nset,3,nao,nao))
@@ -179,8 +178,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 vtmp = _gga_grad_sum_(ao_mask, wv)
                 vtmp += _tau_grad_dot_(ao_mask, wv[4])
                 add_sparse(vmat[idm], vtmp, idx)
-    #vmat = [cupy.einsum('pi,npq,qj->nij', coeff, v, coeff) for v in vmat]
-    vmat = take_last2d(vmat, opt.rev_ao_idx)
+    vmat = opt.unsort_orbitals(vmat, axis=[2,3])
     exc = None
     if nset == 1:
         vmat = vmat[0]
@@ -203,10 +201,9 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     _sorted_mol = opt._sorted_mol
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
-    dms = cupy.asarray(dms)
-    dms = [coeff @ dm @ coeff.T
-           for dm in dms.reshape(-1,nao0,nao0)]
-    mo_coeff = coeff @ mo_coeff
+    dms = cupy.asarray(dms).reshape(-1,nao0,nao0)
+    dms = opt.sort_orbitals(dms, axis=[1,2])
+    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     nset = len(dms)
     assert nset == 1
 
@@ -238,10 +235,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         vmat_tmp = _gga_grad_sum_(ao_mask, wv)
         add_sparse(vmat, vmat_tmp, mask)
 
-    #vmat = contract('npq,qj->npj', vmat, coeff)
-    #vmat = contract('pi,npj->nij', coeff, vmat)
-    rev_ao_idx = opt.rev_ao_idx
-    vmat = take_last2d(vmat, rev_ao_idx)
+    vmat = opt.unsort_orbitals(vmat, axis=[1,2])
     exc = None
     # - sign because nabla_X = -nabla_x
     return exc, -vmat
@@ -358,7 +352,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         for atm_id, (coords, weight, weight1) in enumerate(grids_response_cc(grids)):
             ngrids = weight.size
             for p0, p1 in lib.prange(0,ngrids,block_size):
-                ao = numint.eval_ao(ni, _sorted_mol, coords[p0:p1, :], ao_deriv)
+                ao = numint.eval_ao(_sorted_mol, coords[p0:p1, :], ao_deriv, gdftopt=opt, transpose=False)
 
                 if xctype == 'LDA':
                     rho = numint.eval_rho(_sorted_mol, ao[0], dms,
@@ -409,7 +403,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     #:vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
     vmat = sandwich_dot(vmat, coeff)
-    
+
     # - sign because nabla_X = -nabla_x
     return excsum, -vmat
 
@@ -424,7 +418,7 @@ def grids_response_cc(grids):
     atm_dist = gto.inter_distance(mol, atm_coords)
     atm_dist = cupy.asarray(atm_dist)
     atm_coords = cupy.asarray(atm_coords)
-    
+
     def _radii_adjust(mol, atomic_radii):
         charges = mol.atom_charges()
         if grids.radii_adjust == radi.treutler_atomic_radii_adjust:

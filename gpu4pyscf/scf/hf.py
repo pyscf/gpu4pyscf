@@ -25,13 +25,14 @@ from pyscf import lib as pyscf_lib
 from pyscf.scf import hf
 from pyscf.scf import chkfile
 from gpu4pyscf import lib
+from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import eigh, tag_array, return_cupy_array, cond
 from gpu4pyscf.scf import diis, jk
 from gpu4pyscf.lib import logger
 
 __all__ = [
     'get_jk', 'get_occ', 'get_grad', 'damping', 'level_shift', 'get_fock',
-    'energy_elec', 'RHF'
+    'energy_elec', 'RHF', 'SCF'
 ]
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
@@ -238,32 +239,12 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
             scf_conv = True
             break
 
-    if(cycle == mf.max_cycle):
-        logger.warn("SCF failed to converge")
+    if (cycle + 1 == mf.max_cycle):
+        assert not scf_conv
+        logger.warn(mf, "SCF failed to converge")
 
     return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
-
-def _quad_moment(mf, mol=None, dm=None, unit='Debye-Ang'):
-    from pyscf.data import nist
-    if mol is None: mol = mf.mol
-    if dm is None: dm = mf.make_rdm1()
-    nao = mol.nao
-    with mol.with_common_orig((0,0,0)):
-        ao_quad = mol.intor_symmetric('int1e_rr').reshape(3,3,nao,nao)
-
-    el_quad = np.einsum('xyij,ji->xy', ao_quad, dm).real
-
-    # Nuclear contribution
-    charges = mol.atom_charges()
-    coords  = mol.atom_coords()
-    nucl_quad = np.einsum('i,ix,iy->xy', charges, coords, coords)
-
-    mol_quad = nucl_quad - el_quad
-
-    if unit.upper() == 'DEBYE-ANG':
-        mol_quad *= nist.AU2DEBYE * nist.BOHR
-    return mol_quad
 
 def energy_tot(mf, dm=None, h1e=None, vhf=None):
     r'''Total Hartree-Fock energy, electronic part plus nuclear repulstion
@@ -310,6 +291,27 @@ def scf(mf, dm0=None, **kwargs):
     mf._finalize()
     return mf.e_tot
 
+def canonicalize(mf, mo_coeff, mo_occ, fock=None):
+    '''Canonicalization diagonalizes the Fock matrix within occupied, open,
+    virtual subspaces separatedly (without change occupancy).
+    '''
+    if fock is None:
+        dm = mf.make_rdm1(mo_coeff, mo_occ)
+        fock = mf.get_fock(dm=dm)
+    coreidx = mo_occ == 2
+    viridx = mo_occ == 0
+    openidx = ~(coreidx | viridx)
+    mo = cupy.empty_like(mo_coeff)
+    mo_e = cupy.empty(mo_occ.size)
+    for idx in (coreidx, openidx, viridx):
+        if cupy.any(idx) > 0:
+            orb = mo_coeff[:,idx]
+            f1 = orb.conj().T.dot(fock).dot(orb)
+            e, c = cupy.linalg.eigh(f1)
+            mo[:,idx] = orb.dot(c)
+            mo_e[idx] = e
+    return mo_e, mo
+
 def as_scanner(mf):
     if isinstance(mf, pyscf_lib.SinglePointScanner):
         return mf
@@ -354,9 +356,10 @@ class SCF(pyscf_lib.StreamObject):
     conv_tol_grad       = hf.SCF.conv_tol_grad
     max_cycle           = hf.SCF.max_cycle
     init_guess          = hf.SCF.init_guess
+    conv_tol_cpscf      = 1e-4
 
     disp                = None
-    DIIS                = hf.SCF.DIIS
+    DIIS                = diis.SCF_DIIS
     diis                = hf.SCF.diis
     diis_space          = hf.SCF.diis_space
     diis_damp           = hf.SCF.diis_damp
@@ -410,9 +413,11 @@ class SCF(pyscf_lib.StreamObject):
     build                    = hf.SCF.build
     opt                      = NotImplemented
     dump_flags               = hf.SCF.dump_flags
-    get_fock                 = hf.SCF.get_fock
-    get_occ                  = hf.SCF.get_occ
-    get_grad                 = hf.SCF.get_grad
+    get_hcore                = return_cupy_array(hf.SCF.get_hcore)
+    get_ovlp                 = return_cupy_array(hf.SCF.get_ovlp)
+    get_fock                 = get_fock
+    get_occ                  = get_occ
+    get_grad                 = staticmethod(get_grad)
     dump_chk                 = hf.SCF.dump_chk
     init_guess_by_minao      = hf.SCF.init_guess_by_minao
     init_guess_by_atom       = hf.SCF.init_guess_by_atom
@@ -421,41 +426,65 @@ class SCF(pyscf_lib.StreamObject):
     init_guess_by_1e         = hf.SCF.init_guess_by_1e
     init_guess_by_chkfile    = hf.SCF.init_guess_by_chkfile
     from_chk                 = hf.SCF.from_chk
-    get_init_guess           = hf.SCF.get_init_guess
-    make_rdm1                = hf.SCF.make_rdm1
-    make_rdm2                = hf.SCF.make_rdm2
-    energy_elec              = hf.SCF.energy_elec
-    energy_tot               = hf.SCF.energy_tot
+    get_init_guess           = return_cupy_array(hf.SCF.get_init_guess)
+    make_rdm1                = make_rdm1
+    make_rdm2                = NotImplemented
+    energy_elec              = energy_elec
+    energy_tot               = energy_tot
     energy_nuc               = hf.SCF.energy_nuc
     check_convergence        = None
     _eigh                    = staticmethod(eigh)
     eig                      = hf.SCF.eig
     do_disp                  = hf.SCF.do_disp
     get_dispersion           = hf.SCF.get_dispersion
-
-    scf                      = hf.SCF.scf
+    kernel = scf             = scf
     as_scanner               = hf.SCF.as_scanner
     _finalize                = hf.SCF._finalize
     init_direct_scf          = hf.SCF.init_direct_scf
-    get_jk                   = hf.SCF.get_jk
+    get_jk                   = _get_jk
     get_j                    = hf.SCF.get_j
     get_k                    = hf.SCF.get_k
-    get_veff                 = hf.SCF.get_veff
-    analyze                  = hf.SCF.analyze
+    get_veff                 = NotImplemented
     mulliken_meta            = hf.SCF.mulliken_meta
     pop                      = hf.SCF.pop
-    dip_moment               = hf.SCF.dip_moment
     _is_mem_enough           = NotImplemented
     density_fit              = NotImplemented
-    sfx2c1e                  = NotImplemented
-    x2c1e                    = NotImplemented
-    x2c                      = NotImplemented
     newton                   = NotImplemented
-    remove_soscf             = NotImplemented
+    x2c = x2c1e = sfx2c1e    = NotImplemented
     stability                = NotImplemented
     nuc_grad_method          = NotImplemented
     update_                  = NotImplemented
+    canonicalize             = NotImplemented
     istype                   = hf.SCF.istype
+    to_rhf                   = NotImplemented
+    to_uhf                   = NotImplemented
+    to_ghf                   = NotImplemented
+    to_rks                   = NotImplemented
+    to_uks                   = NotImplemented
+    to_gks                   = NotImplemented
+    to_ks                    = NotImplemented
+    canonicalize             = NotImplemented
+    mulliken_pop             = NotImplemented
+    mulliken_meta            = NotImplemented
+
+    def dip_moment(self, mol=None, dm=None, unit='Debye', origin=None,
+                   verbose=logger.NOTE):
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        return hf.dip_moment(mol, dm.get(), unit, origin, verbose)
+
+    def quad_moment(self, mol=None, dm=None, unit='DebyeAngstrom', origin=None,
+                    verbose=logger.NOTE):
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        return hf.quad_moment(mol, dm.get(), unit, origin, verbose)
+
+    def remove_soscf(self):
+        lib.logger.warn('remove_soscf has no effect in current version')
+        return self
+
+    def analyze(self, *args, **kwargs):
+        return self.to_cpu().analyze()
 
     def reset(self, mol=None):
         if mol is not None:
@@ -469,7 +498,6 @@ class KohnShamDFT:
     A mock DFT base class, to be compatible with PySCF
     '''
 
-from gpu4pyscf.lib import utils
 class RHF(SCF):
 
     to_gpu = utils.to_gpu
@@ -477,42 +505,8 @@ class RHF(SCF):
 
     _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'conv_tol_cpscf', 'disp_with_3body'}
 
-    conv_tol_cpscf = 1e-4
-    DIIS = diis.SCF_DIIS
-    get_jk = _get_jk
-    _eigh = staticmethod(eigh)
-    make_rdm1 = make_rdm1
-    energy_elec = energy_elec
-    get_fock = get_fock
-    get_occ = get_occ
     get_veff = get_veff
-    get_grad = staticmethod(get_grad)
-    quad_moment = _quad_moment
-    energy_tot = energy_tot
-
-    get_hcore = return_cupy_array(hf.RHF.get_hcore)
-    get_ovlp = return_cupy_array(hf.RHF.get_ovlp)
-    get_init_guess = return_cupy_array(hf.RHF.get_init_guess)
-    init_direct_scf = NotImplemented
-    make_rdm2 = NotImplemented
-    newton = NotImplemented
-    x2c = x2c1e = sfx2c1e = NotImplemented
-    to_rhf = NotImplemented
-    to_uhf = NotImplemented
-    to_ghf = NotImplemented
-    to_rks = NotImplemented
-    to_uks = NotImplemented
-    to_gks = NotImplemented
-    to_ks = NotImplemented
-    canonicalize = NotImplemented
-    # TODO: Enable followings after testing
-    analyze = NotImplemented
-    stability = NotImplemented
-    mulliken_pop = NotImplemented
-    mulliken_meta = NotImplemented
-
-    scf = scf
-    kernel = scf
+    canonicalize = canonicalize
 
     def check_sanity(self):
         mol = self.mol
@@ -528,6 +522,10 @@ class RHF(SCF):
     def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
         import gpu4pyscf.df.df_jk
         return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
+
+    def newton(self):
+        from gpu4pyscf.scf.soscf import newton
+        return newton(self)
 
     def to_cpu(self):
         mf = hf.RHF(self.mol)

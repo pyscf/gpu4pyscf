@@ -226,9 +226,12 @@ def dist_matrix(x, y, out=None):
         raise RuntimeError('failed in calculating distance matrix')
     return out
 
-def block_c2s_diag(ncart, nsph, angular, counts):
+def block_c2s_diag(angular, counts):
     '''
-    constract a cartesian to spherical transformation of n shells
+    Diagonal blocked cartesian to spherical transformation
+    Args: 
+        angular (list): angular momentum type, e.g. [0,1,2,3]
+        counts (list): count of each angular momentum
     '''
     if _data['c2s'] is None:
         c2s_data = cupy.concatenate([cupy.asarray(x.ravel()) for x in c2s_l])
@@ -246,7 +249,8 @@ def block_c2s_diag(ncart, nsph, angular, counts):
         offsets += [c2s_offset[l]] * count
     rows = cupy.hstack(rows)
     cols = cupy.hstack(cols)
-
+    
+    ncart, nsph = int(rows[-1]), int(cols[-1])
     cart2sph = cupy.zeros([ncart, nsph])
     offsets = cupy.asarray(offsets, dtype='int32')
 
@@ -358,11 +362,12 @@ def transpose_sum(a, stream=None):
     return a + a.transpose(0,2,1)
     '''
     assert a.flags.c_contiguous
-    n = a.shape[-1]
+    out = a
     if a.ndim == 2:
-        a = a.reshape([-1,n,n])
+        a = a[None]
     assert a.ndim == 3
-    count = a.shape[0]
+    count, m, n = a.shape
+    assert m == n
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.transpose_sum(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -372,7 +377,7 @@ def transpose_sum(a, stream=None):
     )
     if err != 0:
         raise RuntimeError('failed in transpose_sum kernel')
-    return a
+    return out
 
 # for i > j of 2d mat, mat[j,i] = mat[i,j]
 def hermi_triu(mat, hermi=1, inplace=True):
@@ -911,10 +916,11 @@ def sandwich_dot(a, c, out=None):
         a = a[None]
     counts = a.shape[0]
     m = c.shape[1]
-    out = cupy.empty((counts, m, m))
+    dtype = np.result_type(a, c)
+    out = cupy.empty((counts, m, m), dtype=dtype)
     tmp = None
     for i in range(counts):
-        tmp = cupy.dot(c.T, a[i], out=tmp)
+        tmp = cupy.dot(c.conj().T, a[i], out=tmp)
         cupy.dot(tmp, c, out=out[i])
     if a_ndim == 2:
         out = out[0]

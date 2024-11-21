@@ -100,23 +100,23 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     # ================================ sorted AO begin ===============================================
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
     intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
-    ao_idx = intopt.ao_idx
-    aux_ao_idx = intopt.aux_ao_idx
 
-    mocca = mocca[ao_idx, :]
-    moccb = moccb[ao_idx, :]
-    dm0a = take_last2d(dm0a, ao_idx)
-    dm0b = take_last2d(dm0b, ao_idx)
+    mocca = intopt.sort_orbitals(mocca, axis=[0])
+    moccb = intopt.sort_orbitals(moccb, axis=[0])
+    dm0a = intopt.sort_orbitals(dm0a, axis=[0,1])
+    dm0b = intopt.sort_orbitals(dm0b, axis=[0,1])
+
     dm0a_tag = tag_array(dm0a, occ_coeff=mocca)
     dm0b_tag = tag_array(dm0b, occ_coeff=moccb)
     int2c = cupy.asarray(int2c, order='C')
-    int2c = take_last2d(int2c, aux_ao_idx)
+    int2c = intopt.sort_orbitals(int2c, aux_axis=[0,1])
+
     int2c_inv = pinv(int2c, lindep=LINEAR_DEP_THR)
     solve_j2c = _gen_metric_solver(int2c)
     int2c = None
 
     int2c_ip1 = cupy.asarray(int2c_ip1, order='C')
-    int2c_ip1 = take_last2d(int2c_ip1, aux_ao_idx)
+    int2c_ip1 = intopt.sort_orbitals(int2c_ip1, aux_axis=[1,2])
 
     hj_ao_ao = cupy.zeros([nao,nao,3,3])
     hk_ao_ao = cupy.zeros([nao,nao,3,3])
@@ -272,7 +272,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         else:
             int2c_ipip1 = auxmol.intor('int2c2e_ipip1', aosym='s1')
         int2c_ipip1 = cupy.asarray(int2c_ipip1, order='C')
-        int2c_ipip1 = take_last2d(int2c_ipip1, aux_ao_idx)
+        int2c_ipip1 = intopt.sort_orbitals(int2c_ipip1, aux_axis=[1,2])
         rhoj2c_P = contract('xpq,q->xp', int2c_ipip1, rhoj0_P)
         # (00|0)(2|0)(0|00)
         # p,xp->px
@@ -289,7 +289,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         else:
             int2c_ip1ip2 = auxmol.intor('int2c2e_ip1ip2', aosym='s1')
         int2c_ip1ip2 = cupy.asarray(int2c_ip1ip2, order='C')
-        int2c_ip1ip2 = take_last2d(int2c_ip1ip2, aux_ao_idx)
+        int2c_ip1ip2 = intopt.sort_orbitals(int2c_ip1ip2, aux_axis=[1,2])
         hj_aux_aux = -.5 * contract('p,xpq->pqx', rhoj0_P, int2c_ip1ip2*rhoj0_P).reshape(naux, naux,3,3)
         if with_k:
             hk_aux_aux = -.5 * contract('xpq,pq->pqx', int2c_ip1ip2, rho2c_0).reshape(naux,naux,3,3)
@@ -349,32 +349,23 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             rho2c_10= int2c_ip1_inv = None
     t1 = log.timer_debug1('contract int2c_*', *t1)
 
-    ao_idx = np.argsort(intopt.ao_idx)
-    aux_idx = np.argsort(intopt.aux_ao_idx)
-    rev_ao_ao = cupy.ix_(ao_idx, ao_idx)
-    #dm0 = dm0[rev_ao_ao]
-    hj_ao_diag = hj_ao_diag[ao_idx]
-    hj_ao_ao = hj_ao_ao[rev_ao_ao]
+    hj_ao_diag = intopt.unsort_orbitals(hj_ao_diag, axis=[0])
+    hj_ao_ao = intopt.unsort_orbitals(hj_ao_ao, axis=[0,1])
     if hessobj.auxbasis_response:
-        rev_ao_aux = cupy.ix_(ao_idx, aux_idx)
-        hj_ao_aux = hj_ao_aux[rev_ao_aux]
+        hj_ao_aux = intopt.unsort_orbitals(hj_ao_aux, axis=[0], aux_axis=[1])
     if hessobj.auxbasis_response > 1:
-        rev_aux_aux = cupy.ix_(aux_idx, aux_idx)
-        hj_aux_diag = hj_aux_diag[aux_idx]
-        hj_aux_aux = hj_aux_aux[rev_aux_aux]
-
+        hj_aux_diag = intopt.unsort_orbitals(hj_aux_diag, aux_axis=[0])
+        hj_aux_aux = intopt.unsort_orbitals(hj_aux_aux, aux_axis=[0,1])
     if with_k:
-        hk_ao_diag = hk_ao_diag[ao_idx]
-        hk_ao_ao = hk_ao_ao[rev_ao_ao]
+        hk_ao_diag = intopt.unsort_orbitals(hk_ao_diag, axis=[0])
+        hk_ao_ao = intopt.unsort_orbitals(hk_ao_ao, axis=[0,1])
         if hessobj.auxbasis_response:
-            hk_ao_aux = hk_ao_aux[rev_ao_aux]
+            hk_ao_aux = intopt.unsort_orbitals(hk_ao_aux, axis=[0], aux_axis=[1])
         if hessobj.auxbasis_response > 1:
-            hk_aux_diag = hk_aux_diag[aux_idx]
-            hk_aux_aux = hk_aux_aux[rev_aux_aux]
-
-    mocca = mocca[ao_idx]
-    moccb = moccb[ao_idx]
-
+            hk_aux_diag = intopt.unsort_orbitals(hk_aux_diag, aux_axis=[0])
+            hk_aux_aux = intopt.unsort_orbitals(hk_aux_aux, aux_axis=[0,1])
+    mocca = intopt.unsort_orbitals(mocca, axis=[0])
+    moccb = intopt.unsort_orbitals(moccb, axis=[0])
     #======================================== sort AO end ===========================================
     # Energy weighted density matrix
     # pi,qi,i->pq
@@ -517,17 +508,15 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
                  aosym=False, 
                  group_size_aux=BLKSIZE, 
                  group_size=BLKSIZE)
-    ao_idx = intopt.ao_idx
-    aux_ao_idx = intopt.aux_ao_idx
-
-    mocca = mocca[ao_idx, :]
-    moccb = moccb[ao_idx, :]
-    mo_coeff = mo_coeff[:, ao_idx,:]
-    dm0a = take_last2d(dm0a, ao_idx)
-    dm0b = take_last2d(dm0b, ao_idx)
+    
+    mocca = intopt.sort_orbitals(mocca, axis=[0])
+    moccb = intopt.sort_orbitals(moccb, axis=[0])
+    mo_coeff = intopt.sort_orbitals(mo_coeff, axis=[1])
+    dm0a = intopt.sort_orbitals(dm0a, axis=[0,1])
+    dm0b = intopt.sort_orbitals(dm0b, axis=[0,1])
     dm0 = dm0a + dm0b
 
-    int2c = take_last2d(int2c, aux_ao_idx)
+    int2c = intopt.sort_orbitals(int2c, aux_axis=[0,1])
     solve_j2c = _gen_metric_solver(int2c)
     int2c = None
 
@@ -567,10 +556,10 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     vj1_buf, vk1a_buf, vj1a_ao, vk1a_ao = fn(intopt, rhoj0, rhok0a_Pl_, dm0_tag, aoslices, omega=omega)
     dm0_tag = tag_array(dm0, occ_coeff=moccb)
     vj1_buf, vk1b_buf, vj1b_ao, vk1b_ao = fn(intopt, rhoj0, rhok0b_Pl_, dm0_tag, aoslices, omega=omega)
-    rev_ao_idx = np.argsort(ao_idx)
-    vj1_buf = take_last2d(vj1_buf, rev_ao_idx)
-    vk1a_buf = take_last2d(vk1a_buf, rev_ao_idx)
-    vk1b_buf = take_last2d(vk1b_buf, rev_ao_idx)
+
+    vj1_buf = intopt.unsort_orbitals(vj1_buf, axis=[1,2])
+    vk1a_buf = intopt.unsort_orbitals(vk1a_buf, axis=[1,2])
+    vk1b_buf = intopt.unsort_orbitals(vk1b_buf, axis=[1,2])
 
     vj1a_int3c = -contract('nxiq,ip->nxpq', vj1a_ao, mo_coeff[0])
     vj1b_int3c = -contract('nxiq,ip->nxpq', vj1b_ao, mo_coeff[1])
@@ -597,13 +586,13 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         else:
             int2c_ip1 = auxmol.intor('int2c2e_ip1', aosym='s1')
         int2c_ip1 = cupy.asarray(int2c_ip1, order='C')
-        int2c_ip1 = take_last2d(int2c_ip1, aux_ao_idx)
+        int2c_ip1 = intopt.sort_orbitals(int2c_ip1, aux_axis=[1,2])
 
         # generate rhok0_P__
         if isinstance(rhok0a_Pl_, cupy.ndarray):
             rhok0a_P__ = contract('pio,ir->pro', rhok0a_Pl_, mocca)
         else:
-            naux = len(aux_ao_idx)
+            naux = auxmol.nao
             nocc = mocca.shape[1]
             rhok0a_P__ = cupy.empty([naux,nocc,nocc])
             for p0, p1 in lib.prange(0,naux,64):
@@ -615,7 +604,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         if isinstance(rhok0b_Pl_, cupy.ndarray):
             rhok0b_P__ = contract('pio,ir->pro', rhok0b_Pl_, moccb)
         else:
-            naux = len(aux_ao_idx)
+            naux = auxmol.nao
             nocc = moccb.shape[1]
             rhok0b_P__ = cupy.empty([naux,nocc,nocc])
             for p0, p1 in lib.prange(0,naux,64):
@@ -670,9 +659,9 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         vk1a_int3c_ip2 = vk1b_int3c_ip2 = None
         t0 = log.timer_debug1('Fock matrix due to int3c2e_ip2', *t0)
 
-    mocca = mocca[rev_ao_idx]
-    moccb = moccb[rev_ao_idx]
-    mo_coeff = mo_coeff[:,rev_ao_idx]
+    mocca = intopt.unsort_orbitals(mocca, axis=[0])
+    moccb = intopt.unsort_orbitals(moccb, axis=[0])
+    mo_coeff = intopt.unsort_orbitals(mo_coeff, axis=[1])
     release_gpu_stack()
 
     # ========================== sorted AO end ================================

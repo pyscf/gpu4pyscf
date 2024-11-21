@@ -561,15 +561,17 @@ def gen_vind(mf, mo_coeff, mo_occ):
     nao, nmo = mo_coeff.shape
     mocc = mo_coeff[:,mo_occ>0]
     nocc = mocc.shape[1]
-    vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1)
+    mocc_2 = mocc * 2
+    grids = getattr(mf, 'cphf_grids', None)
+    vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1, grids=grids)
 
     def fx(mo1):
         mo1 = cupy.asarray(mo1)
         mo1 = mo1.reshape(-1,nmo,nocc)
         mo1_mo = contract('npo,ip->nio', mo1, mo_coeff)
-        #dm1 = contract('nio,jo->nij', 2.0*mo1_mo, mocc)
+        #dm1 = contract('nio,jo->nij', mo1_mo, mocc_2)
         #dm1 = dm1 + dm1.transpose(0,2,1)
-        dm1 = mo1_mo.dot(2.0*mocc.T)
+        dm1 = mo1_mo.dot(mocc_2.T)
         transpose_sum(dm1)
         dm1 = tag_array(dm1, mo1=mo1_mo, occ_coeff=mocc, mo_occ=mo_occ)
         v1 = vresp(dm1)

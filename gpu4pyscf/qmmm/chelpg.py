@@ -48,7 +48,7 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     _, _, fake_uniq_l_ctr, fake_l_ctr_counts = int3c2e.sort_mol(fake_mol)
 
     # sort auxiliary mol
-    sorted_auxmol, sorted_aux_idx, aux_uniq_l_ctr, aux_l_ctr_counts = int3c2e.sort_mol(
+    sorted_auxmol, _, aux_uniq_l_ctr, aux_l_ctr_counts = int3c2e.sort_mol(
         intopt.auxmol)
     if group_size_aux is not None:
         aux_uniq_l_ctr, aux_l_ctr_counts = int3c2e._split_l_ctr_groups(
@@ -88,10 +88,7 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     ao_idx = np.array_split(np.arange(nao), cart_ao_loc[1:-1])
     intopt.cart_ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
     ncart = cart_ao_loc[-1]
-    nsph = sph_ao_loc[-1]
-    intopt.cart2sph = block_c2s_diag(ncart, nsph, intopt.angular, l_ctr_counts)
-    inv_idx = np.argsort(intopt.sph_ao_idx, kind='stable').astype(np.int32)
-    intopt.coeff = intopt.cart2sph[:, inv_idx]
+    intopt.cart2sph = block_c2s_diag(intopt.angular, l_ctr_counts)
 
     # pairing auxiliary basis with fake basis set
     fake_l_ctr_offsets = np.append(0, np.cumsum(fake_l_ctr_counts))
@@ -109,7 +106,6 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     cart_aux_loc = intopt.auxmol.ao_loc_nr(cart=True)
     sph_aux_loc = intopt.auxmol.ao_loc_nr(cart=False)
     ncart = cart_aux_loc[-1]
-    nsph = sph_aux_loc[-1]
     # inv_idx = np.argsort(intopt.sph_aux_idx, kind='stable').astype(np.int32)
     aux_l_ctr_offsets += fake_l_ctr_offsets[-1]
 
@@ -158,6 +154,13 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
         nl = int(round(np.sqrt(ncptype)))
         intopt.cp_idx, intopt.cp_jdx = np.unravel_index(
             np.arange(ncptype), (nl, nl))
+
+    intopt._sorted_mol = sorted_mol
+    intopt._sorted_auxmol = sorted_auxmol
+    if intopt.mol.cart:
+        intopt._ao_idx = intopt.cart_ao_idx
+    else:
+        intopt._ao_idx = intopt.sph_ao_idx
 
 def eval_chelpg_layer_gpu(mf, deltaR=0.3, Rhead=2.8, ifqchem=True, Rvdw=modified_Bondi, verbose=None):
     """Cal chelpg charge

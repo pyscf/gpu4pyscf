@@ -33,7 +33,7 @@ def get_int2c2e_sorted(mol, intopt=None, direct_scf_tol=1e-13, aosym=None, omega
     nao = mol.nao
     rows, cols = np.tril_indices(nao)
 
-    nao_cart = intopt.mol.nao
+    nao_cart = intopt._sorted_mol.nao
     norb_cart = nao_cart + 1
 
     int2c = cupy.zeros([nao_cart, nao_cart], order='F')
@@ -137,5 +137,5 @@ def get_int2c2e(mol, direct_scf_tol=1e-13):
     intopt = VHFOpt(mol, mol, 'int2e')
     intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=True)
     int2c = get_int2c2e_sorted(mol, intopt=intopt)
-    int2c = take_last2d(int2c, intopt.rev_ao_idx)
+    int2c = intopt.unsort_orbitals(int2c, axis=[0,1])
     return int2c

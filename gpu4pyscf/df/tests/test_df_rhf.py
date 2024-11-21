@@ -31,15 +31,11 @@ bas='def2tzvpp'
 
 def setUpModule():
     global mol_sph, mol_cart
-    mol_sph = pyscf.M(atom=atom, basis=bas, max_memory=32000, cart=0)
-    mol_sph.output = '/dev/null'
-    mol_sph.build()
-    mol_sph.verbose = 1
+    mol_sph = pyscf.M(atom=atom, basis=bas, cart=0,
+                      symmetry=True, output='/dev/null', verbose=1)
 
-    mol_cart = pyscf.M(atom=atom, basis=bas, max_memory=32000, cart=1)
-    mol_cart.output = '/dev/null'
-    mol_cart.build()
-    mol_cart.verbose = 1
+    mol_cart = pyscf.M(atom=atom, basis=bas, cart=1,
+                       output='/dev/null', verbose=1)
 
 def tearDownModule():
     global mol_sph, mol_cart

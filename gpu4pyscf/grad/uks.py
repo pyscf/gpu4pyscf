@@ -90,7 +90,7 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
             vxc_tmp[0] += vnlc
             vxc_tmp[1] += vnlc
     t0 = logger.timer(ks_grad, 'vxc', *t0)
-    
+
     mo_coeff_alpha = mf.mo_coeff[0]
     mo_coeff_beta = mf.mo_coeff[1]
     occ_coeff0 = cupy.asarray(mo_coeff_alpha[:, mf.mo_occ[0]>0.5], order='C')
@@ -139,9 +139,8 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
-    dms = take_last2d(dms, opt.ao_idx)
-    mo_coeff = mo_coeff[:, opt.ao_idx]
-
+    dms = opt.sort_orbitals(dms, axis=[1,2])
+    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
     nset = len(dms)
     vmat = cupy.zeros((nset,3,nao,nao))
     if xctype == 'LDA':
@@ -193,7 +192,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             vtmp += rks_grad._tau_grad_dot_(ao_mask, wv[1,4])
             add_sparse(vmat[1], vtmp, idx)
 
-    vmat = take_last2d(vmat, opt.rev_ao_idx)
+    vmat = opt.unsort_orbitals(vmat, axis=[2,3])
     exc = None
 
     # - sign because nabla_X = -nabla_x
@@ -216,8 +215,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao, nao0 = coeff.shape
     dms = cupy.asarray(dms)
     assert dms.ndim == 3 and dms.shape[0] == 2
-    #:dms = cupy.einsum('pi,nij,qj->npq', coeff, dms, coeff)
-    dms = sandwich_dot(dms.reshape(-1,nao0,nao0), coeff.T)
+    dms = opt.sort_orbitals(dms.reshape(-1,nao0,nao0), axis=[1,2])
 
     excsum = cupy.zeros((natm, 3))
     vmat = cupy.zeros((2,3,nao,nao))
@@ -239,7 +237,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         for atm_id, (coords, weight, weight1) in enumerate(rks_grad.grids_response_cc(grids)):
             ngrids = weight.size
             for p0, p1 in lib.prange(0,ngrids,block_size):
-                ao = numint.eval_ao(ni, _sorted_mol, coords[p0:p1, :], ao_deriv)
+                ao = numint.eval_ao(_sorted_mol, coords[p0:p1, :], ao_deriv, gdftopt=opt, transpose=False)
                 if xctype == 'LDA':
                     rho_a = numint.eval_rho(_sorted_mol, ao[0], dms[0],
                                         xctype=xctype, hermi=1, with_lapl=False)
@@ -304,9 +302,7 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[1]) * 2
                     rho = vxc = None
 
-    #:vmat = cupy.einsum('pi,snpq,qj->snij', coeff, vmat, coeff)
-    vmat = sandwich_dot(vmat.reshape(6,nao,nao), coeff).reshape(2,3,nao0,nao0)
-
+    vmat = opt.unsort_orbitals(vmat, axis=[2,3])
     # - sign because nabla_X = -nabla_x
     return excsum, -vmat
 
@@ -326,8 +322,8 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
     _sorted_mol = opt._sorted_mol
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
-    mo_coeff_0 = coeff @ mo_coeff[0]
-    mo_coeff_1 = coeff @ mo_coeff[1]
+    mo_coeff_0 = opt.sort_orbitals(mo_coeff[0], axis=[0])
+    mo_coeff_1 = opt.sort_orbitals(mo_coeff[1], axis=[0])
     nset = 1
     assert nset == 1
 
@@ -361,8 +357,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
         vmat_tmp = rks_grad._gga_grad_sum_(ao_mask, wv)
         add_sparse(vmat, vmat_tmp, mask)
 
-    rev_ao_idx = opt.rev_ao_idx
-    vmat = take_last2d(vmat, rev_ao_idx)
+    vmat = opt.unsort_orbitals(vmat, axis=[1,2])
     exc = None
     # - sign because nabla_X = -nabla_x
     return exc, -vmat

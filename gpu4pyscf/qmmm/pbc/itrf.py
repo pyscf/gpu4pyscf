@@ -1026,7 +1026,8 @@ class QMMMGrad:
                 v = cp.zeros_like(g_qm)
                 for i0,i1,j0,j1,k0,k1,j3c in int3c2e.loop_int3c2e_general(intopt, ip_type='ip1'):
                     v[:,i0:i1,j0:j1] += contract('xkji,k->xij', j3c, charges[k0:k1])
-                g_qm += cupy_helper.take_last2d(v, intopt.rev_ao_idx)
+                v = intopt.unsort_orbitals(v, axis=[1,2])
+                g_qm += v #cupy_helper.take_last2d(v, intopt.rev_ao_idx)
             elif mm_mol.charge_model == 'point' and len(coords) != 0:
                 max_memory = self.max_memory - lib.current_memory()[0]
                 blksize = int(min(max_memory*1e6/8/nao**2/3, 200))
@@ -1079,7 +1080,7 @@ class QMMMGrad:
             intopt.build(self.base.direct_scf_tol, diag_block_with_triu=True, aosym=False, 
                          group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
 
-            dm_ = cupy_helper.take_last2d(dm, intopt.sph_ao_idx)
+            dm_ = intopt.sort_orbitals(dm, axis=[0,1])
             for i0,i1,j0,j1,k0,k1,j3c in int3c2e.loop_int3c2e_general(intopt, ip_type='ip2'):
                 j3c = contract('xkji,k->xkji', j3c, charges[k0:k1])
                 g_[k0:k1] += contract('xkji,ij->kx', j3c, dm_[i0:i1,j0:j1])

@@ -17,7 +17,7 @@ import numpy as np
 import cupy
 import copy
 from cupyx.scipy.linalg import solve_triangular
-from pyscf import scf
+from pyscf import scf, gto
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import tag_array, contract, load_library, take_last2d
 from gpu4pyscf.grad import uhf as uhf_grad
@@ -68,13 +68,14 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         mo_coeff = cupy.asarray(mf_grad.base.mo_coeff)
     if mo_occ is None:
         mo_occ = cupy.asarray(mf_grad.base.mo_occ)
-    ao_idx = intopt.ao_idx
-    dm = take_last2d(dm0, ao_idx)
+
+    dm = intopt.sort_orbitals(dm0, axis=[0,1])
     if dm2 is not None:
-        dm2_tmp = take_last2d(dm2, ao_idx)
+        dm2_tmp = intopt.sort_orbitals(dm2, axis=[0,1])
+
     # (L|ij) -> rhoj: (L), rhok: (L|oo)
     orbo = mo_coeff[:,mo_occ>0] * mo_occ[mo_occ>0] ** 0.5
-    orbo = orbo[ao_idx, :]
+    orbo = intopt.sort_orbitals(orbo, axis=[0])
     nocc = orbo.shape[-1]
 
     # (L|ij) -> rhoj: (L), rhok: (L|oo)
@@ -115,8 +116,6 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     else:
         int2c_e1 = auxmol.intor('int2c2e_ip1')
     int2c_e1 = cupy.asarray(int2c_e1)
-    aux_ao_idx = intopt.aux_ao_idx
-    rev_aux_idx = np.argsort(aux_ao_idx)
     auxslices = auxmol.aoslice_by_atom()
     aux_cart2sph = intopt.aux_cart2sph
     low_t = low.T.copy()
@@ -133,11 +132,11 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
             rhoj_cart = contract('pq,q->p', aux_cart2sph, rhoj)
         else:
             rhoj_cart = rhoj
-
-        rhoj = rhoj[rev_aux_idx]
+        rhoj = intopt.unsort_orbitals(rhoj, aux_axis=[0])
 
         if dm2 is not None:
-            rhoj2 = rhoj2[rev_aux_idx]
+            rhoj2 = intopt.unsort_orbitals(rhoj2, aux_axis=[0])
+
         tmp = contract('xpq,q->xp', int2c_e1, rhoj)
         if dm2 is not None:
             vjaux = -contract('xp,p->xp', tmp, rhoj2)
@@ -151,7 +150,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         elif low.tag == 'cd':
             rhok = solve_triangular(low_t, rhok.reshape(naux, -1), lower=False, overwrite_b=True).reshape(naux, nocc, nocc)
         tmp = contract('pij,qij->pq', rhok, rhok)
-        tmp = take_last2d(tmp, rev_aux_idx)
+        tmp = intopt.unsort_orbitals(tmp, aux_axis=[0,1])
         vkaux = -contract('xpq,pq->xp', int2c_e1, tmp)
         vkaux_2c = cupy.array([-vkaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
         vkaux = tmp = None
@@ -164,33 +163,34 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     t0 = log.timer_debug1('rhoj and rhok', *t0)
     int2c_e1 = None
 
-    nao_cart = intopt.mol.nao
+    nao_cart = intopt._sorted_mol.nao
     block_size = with_df.get_blksize(nao=nao_cart)
     
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
     intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False,
                  group_size_aux=block_size)#, group_size=block_size)
-    if not intopt._mol.cart:
+    
+    if not mol.cart:
         # sph2cart for ao
         cart2sph = intopt.cart2sph
         orbo_cart = cart2sph @ orbo
         if dm2 is None:
             dm_cart = cart2sph @ dm @ cart2sph.T
         else:
-            dm2_tmp = take_last2d(dm2, ao_idx)
+            dm2_tmp = intopt.sort_orbitals(dm2, axis=[0,1])
             dm_cart = cart2sph @ dm2_tmp @ cart2sph.T
     else:
         if dm2 is None:
             dm_cart = dm
         else:
-            dm_cart = take_last2d(dm2, ao_idx)
+            dm_cart = intopt.sort_orbitals(dm2, axis=[0,1])
         orbo_cart = orbo
     dm = orbo = None
 
     vj = vk = rhoj_tmp = rhok_tmp = None
     vjaux = vkaux = None
 
-    naux_cart = intopt.auxmol.nao
+    naux_cart = intopt._sorted_auxmol.nao
     if with_j:
         vj = cupy.zeros((3,nao_cart), order='C')
         vjaux = cupy.zeros((3,naux_cart))
@@ -198,8 +198,8 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         vk = cupy.zeros((3,nao_cart), order='C')
         vkaux = cupy.zeros((3,naux_cart))
     cupy.get_default_memory_pool().free_all_blocks()
+    t1 = log.init_timer()
     for cp_kl_id in range(len(intopt.aux_log_qs)):
-        t1 = log.init_timer()
         k0, k1 = intopt.cart_aux_loc[cp_kl_id], intopt.cart_aux_loc[cp_kl_id+1]
         assert k1-k0 <= block_size
         if with_j:
@@ -239,32 +239,34 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         rhoj_tmp = rhok_tmp = vj_tmp = vk_tmp = None
         t1 = log.timer_debug1(f'calculate {cp_kl_id:3d} / {len(intopt.aux_log_qs):3d}, {k1-k0:3d} slices', *t1)
 
-    cart_ao_idx = intopt.cart_ao_idx
-    rev_cart_ao_idx = np.argsort(cart_ao_idx)
-    aoslices = intopt.mol.aoslice_by_atom()
+    # NOTE: vj and vk are still in cartesian
+    _sorted_mol = intopt._sorted_mol
+    natm = _sorted_mol.natm
+    ao2atom = np.zeros([nao_cart, natm])
+    ao_loc = _sorted_mol.ao_loc
+    for ibas, iatm in enumerate(_sorted_mol._bas[:,gto.ATOM_OF]):
+        ao2atom[ao_loc[ibas]:ao_loc[ibas+1],iatm] = 1
+    ao2atom = cupy.asarray(ao2atom)
     if with_j:
-        vj = vj[:, rev_cart_ao_idx]
-        vj = [-vj[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
-        vj = cupy.asarray(vj)
+        vj = -ao2atom.T @ vj.T
     if with_k:
-        vk = vk[:, rev_cart_ao_idx]
-        vk = [-vk[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
-        vk = cupy.asarray(vk)
+        vk = -ao2atom.T @ vk.T
     t0 = log.timer_debug1('(di,j|P) and (i,j|dP)', *t0)
 
-    cart_aux_idx = intopt.cart_aux_idx
-    rev_cart_aux_idx = np.argsort(cart_aux_idx)
-    auxslices = intopt.auxmol.aoslice_by_atom()
-
+    _sorted_auxmol = intopt._sorted_auxmol
+    natm = _sorted_auxmol.natm
+    aux2atom = np.zeros([naux_cart, natm])
+    ao_loc = _sorted_auxmol.ao_loc
+    for ibas, iatm in enumerate(_sorted_auxmol._bas[:,gto.ATOM_OF]):
+        aux2atom[ao_loc[ibas]:ao_loc[ibas+1],iatm] = 1
+    aux2atom = cupy.asarray(aux2atom)
     if with_j:
-        vjaux = vjaux[:, rev_cart_aux_idx]
-        vjaux_3c = cupy.asarray([-vjaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
-        vjaux = vjaux_2c + vjaux_3c
+        vjaux_3c = aux2atom.T @ vjaux.T
+        vjaux = vjaux_2c - vjaux_3c
 
     if with_k:
-        vkaux = vkaux[:, rev_cart_aux_idx]
-        vkaux_3c = cupy.asarray([-vkaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
-        vkaux = vkaux_2c + vkaux_3c
+        vkaux_3c = aux2atom.T @ vkaux.T
+        vkaux = vkaux_2c - vkaux_3c
     return vj, vk, vjaux, vkaux
 
 class Gradients(uhf_grad.Gradients):
