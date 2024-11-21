@@ -74,8 +74,8 @@ class KnownValues(unittest.TestCase):
         cm.build()
 
         dF, dA = pcm_grad.get_dF_dA(cm.surface)
-        dD, dS, dSii = pcm_grad.get_dD_dS(cm.surface, dF, with_S=True, with_D=True)
-
+        dD, dS = pcm_grad.get_dD_dS(cm.surface, with_S=True, with_D=True)
+        dSii = pcm_grad.get_dSii(cm.surface, dF)
         def get_FADS(mol):
             mol.build()
             cm = pcm.PCM(mol)
@@ -133,13 +133,11 @@ class KnownValues(unittest.TestCase):
         cm.method = 'IEF-PCM'
         cm.build()
 
-        dF, dA = pcm_grad.get_dF_dA(cm.surface)
-        dD0, dS0, dSii0 = pcm_grad.get_dD_dS(cm.surface, dF, with_S=True, with_D=True)
-        dD1, dS1, dSii1 = pcm_grad.get_dD_dS_slow(cm.surface, dF, with_S=True, with_D=True)
+        dD0, dS0 = pcm_grad.get_dD_dS(cm.surface, with_S=True, with_D=True)
+        dD1, dS1 = pcm_grad.get_dD_dS_slow(cm.surface, with_S=True, with_D=True)
         
         assert cupy.linalg.norm(dD0 - dD1) < 1e-8
         assert cupy.linalg.norm(dS0 - dS1) < 1e-8
-        assert cupy.linalg.norm(dSii0 - dSii1) < 1e-8
 
     def test_grad_CPCM(self):
         grad = _grad_with_solvent('C-PCM')

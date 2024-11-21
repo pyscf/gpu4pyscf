@@ -100,7 +100,7 @@ def get_dF_dA(surface):
     dA = dA.transpose([2,0,1])
     return dF, dA
 
-def get_dD_dS_slow(surface, dF, with_S=True, with_D=False):
+def get_dD_dS_slow(surface, with_S=True, with_D=False):
     '''
     derivative of D and S w.r.t grids, partial_i D_ij = -partial_j D_ij
     S is symmetric, D is not
@@ -108,7 +108,6 @@ def get_dD_dS_slow(surface, dF, with_S=True, with_D=False):
     grid_coords = surface['grid_coords']
     exponents   = surface['charge_exp']
     norm_vec    = surface['norm_vec']
-    switch_fun  = surface['switch_fun']
 
     xi_i, xi_j = cupy.meshgrid(exponents, exponents, indexing='ij')
     xi_ij = xi_i * xi_j / (xi_i**2 + xi_j**2)**0.5
@@ -138,13 +137,13 @@ def get_dD_dS_slow(surface, dF, with_S=True, with_D=False):
 
         dD = dD_dri * drij + dS_dr * (-nj/rij + 3.0*nj_rij/rij**2 * drij)
         dD_dri = None
-    dSii_dF = -exponents * (2.0/PI)**0.5 / switch_fun**2
-    dSii = dSii_dF[:,None] * dF
     dD = dD.transpose([2,0,1])
     dS = dS.transpose([2,0,1])
-    return dD, dS, dSii
+    return dD, dS
 
-def get_dD_dS(surface, dF, with_S=True, with_D=False, stream=None):
+def get_dD_dS(surface, with_S=True, with_D=False, stream=None):
+    ''' Derivatives of D matrix and S matrix (offdiagonals only)
+    '''
     charge_exp  = surface['charge_exp']
     grid_coords = surface['grid_coords']
     switch_fun  = surface['switch_fun']
@@ -172,10 +171,16 @@ def get_dD_dS(surface, dF, with_S=True, with_D=False, stream=None):
     )
     if err != 0:
         raise RuntimeError('Failed in generating PCM dD and dS matrices.')
+    return dD, dS
 
+def get_dSii(surface, dF):
+    ''' Derivative of S matrix (diagonal only)
+    '''
+    charge_exp  = surface['charge_exp']
+    switch_fun  = surface['switch_fun']
     dSii_dF = -charge_exp * (2.0/PI)**0.5 / switch_fun**2
     dSii = dSii_dF[:,None] * dF
-    return dD, dS, dSii
+    return dSii
 
 def grad_nuc(pcmobj, dm):
     mol = pcmobj.mol
@@ -283,22 +288,27 @@ def grad_solver(pcmobj, dm):
     q            = pcmobj._intermediates['q']
 
     vK_1 = cupy.linalg.solve(K.T, v_grids)
-    dF, dA = get_dF_dA(pcmobj.surface)
     epsilon = pcmobj.eps
 
     de = cupy.zeros([pcmobj.mol.natm,3])
     if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
-        dD, dS, dSii = get_dD_dS(pcmobj.surface, dF, with_D=False, with_S=True)
-        dF = dA = None
+        dD, dS = get_dD_dS(pcmobj.surface, with_D=False, with_S=True)
         
         # dR = 0, dK = dS
-        de_dS = (vK_1 * dS.dot(q)).T                  # cupy.einsum('i,xij,j->xi', vK_1, dS, q)
+        de_dS = (vK_1 * dS.dot(q)).T                  # cupy.einsum('i,xij,j->ix', vK_1, dS, q)
         de -= cupy.asarray([cupy.sum(de_dS[p0:p1], axis=0) for p0,p1 in gridslice])
+        dD = dS = None
+
+        dF, dA = get_dF_dA(pcmobj.surface)
+        dSii = get_dSii(pcmobj.surface, dF)
         de -= 0.5*contract('i,xij->jx', vK_1*q, dSii) # 0.5*cupy.einsum('i,xij,i->jx', vK_1, dSii, q)
 
     elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE', 'SMD']:
-        dD, dS, dSii = get_dD_dS(pcmobj.surface, dF, with_D=True, with_S=True)
-        DA = D*A
+        dF, dA = get_dF_dA(pcmobj.surface)
+        dSii = get_dSii(pcmobj.surface, dF)
+        dF = None
+
+        dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
 
         def contract_bra(a, B, c):
             ''' i,xij,j->jx '''
@@ -332,7 +342,7 @@ def grad_solver(pcmobj, dm):
         vK_1_q = vK_1 * q
         de_dS0 += 0.5*contract('i,xin->nx', vK_1_q, dSii)
 
-        vK_1_DA = cupy.dot(vK_1, DA)
+        vK_1_DA = vK_1_D*A
         de_dS1  = 0.5*contract_ket(vK_1_DA, dS, q)
         de_dS1 -= 0.5*contract_bra(vK_1_DA, dS, q)
         de_dS1  = cupy.asarray([cupy.sum(de_dS1[p0:p1], axis=0) for p0,p1 in gridslice])
@@ -346,7 +356,6 @@ def grad_solver(pcmobj, dm):
         de_dD -= 0.5*contract_bra(vK_1, dD, ASq)
         de_dD  = cupy.asarray([cupy.sum(de_dD[p0:p1], axis=0) for p0,p1 in gridslice])
 
-        vK_1_D = cupy.dot(vK_1, D)
         de_dA = 0.5*contract('j,xjn->nx', vK_1_D*Sq, dA)   # 0.5*cupy.einsum('j,xjn,j->nx', vK_1_D, dA, Sq)
 
         de_dK = de_dS0 - fac * (de_dD + de_dA + de_dS1)
