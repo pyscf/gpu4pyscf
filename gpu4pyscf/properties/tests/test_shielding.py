@@ -114,6 +114,15 @@ class KnownValues(unittest.TestCase):
    Atom H     3      31.39160966       19.36647972
     
     '''
+    def test_rks_lda(self):
+        print('-------- RKS LDA -------------')
+        e_tot, tensor = run_dft_nmr_shielding('LDA,vwn5')
+        nmr_total = tensor[0].get()+tensor[1].get()
+        isotropic_pyscf = np.array([nmr_total[0].trace()/3, nmr_total[1].trace()/3, nmr_total[2].trace()/3])
+        isotropic_qchem = np.array([338.70405899, 31.07348461, 31.07259871])
+        assert np.allclose(e_tot, -75.90464078)
+        assert np.allclose(isotropic_pyscf, isotropic_qchem, rtol=1.0E-4)
+
     def test_rks_b3lyp(self):
         print('-------- RKS B3LYP -------------')
         e_tot, tensor = run_dft_nmr_shielding('B3LYP')
@@ -121,6 +130,15 @@ class KnownValues(unittest.TestCase):
         isotropic_pyscf = np.array([nmr_total[0].trace()/3, nmr_total[1].trace()/3, nmr_total[2].trace()/3])
         isotropic_qchem = np.array([332.07586444, 31.39150070, 31.39060707])
         assert np.allclose(e_tot, -76.4666494276)
+        assert np.allclose(isotropic_pyscf, isotropic_qchem, rtol=1.0E-4)
+
+    def test_rks_lda_df(self):
+        print('-------- RKS density fitting LDA -------------')
+        e_tot, tensor = run_dft_df_nmr_shielding('LDA,vwn5')
+        nmr_total = tensor[0].get()+tensor[1].get()
+        isotropic_pyscf = np.array([nmr_total[0].trace()/3, nmr_total[1].trace()/3, nmr_total[2].trace()/3])
+        isotropic_qchem = np.array([338.71137749, 31.07428641, 31.07339795])
+        assert np.allclose(e_tot, -75.90467665)
         assert np.allclose(isotropic_pyscf, isotropic_qchem, rtol=1.0E-4)
 
     def test_rks_b3lyp_df(self):
@@ -132,7 +150,6 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(e_tot, -76.4666819553)
         assert np.allclose(isotropic_pyscf, isotropic_qchem, rtol=1.0E-4)
 
-
 if __name__ == "__main__":
-    print("Full Tests for nmr shielding constants")
+    print("Full Tests for NMR Shielding Constants")
     unittest.main()
