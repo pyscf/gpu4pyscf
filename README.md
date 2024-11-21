@@ -51,8 +51,8 @@ Features
 - PCM models, SMD model, their analytical gradients, and semi-analytical Hessian matrix;
 - Unrestricted Hartree-Fock and Unrestricted DFT, gradient, and Hessian;
 - MP2/DF-MP2 and CCSD (experimental);
-- Polarizability, IR, and NMR shielding
-- QM/MM with PBC
+- Polarizability, IR, and NMR shielding (experimental);
+- QM/MM with PBC;
 - CHELPG, ESP, and RESP atomic charge
 
 Limitations

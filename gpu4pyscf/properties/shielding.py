@@ -93,7 +93,7 @@ def nr_rks(ni, mol, grids, xc_code, dms):
             giao = cupy.array(giao)
             giao_aux = giao[:,:,index]
             for idirect in range(3):
-                vtmp = contract('pu,p,vp->uv', giao_aux[idirect], wv, ao)
+                vtmp = contract('pu,vp->uv', giao_aux[idirect], wv*ao)
                 vtmp = cupy.ascontiguousarray(vtmp)
                 add_sparse(vmat[idirect], vtmp, index)
 
