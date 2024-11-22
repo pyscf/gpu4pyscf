@@ -136,9 +136,25 @@ def return_cupy_array(fn):
         return to_cupy(ret)
     return filter_ret
 
-def unpack_tril(cderi_tril, cderi, stream=None):
-    nao = cderi.shape[1]
+def unpack_tril(cderi_tril, cderi=None, stream=None):
+    assert cderi_tril.flags.c_contiguous
+    if cderi_tril.ndim == 1:
+        cderi_tril = cderi_tril[None]
     count = cderi_tril.shape[0]
+    if cderi is None:
+        nao = int((2*cderi_tril.shape[1])**.5)
+        cderi = cupy.empty((count,nao,nao), dtype=cderi_tril.dtype)
+    else:
+        nao = cderi.shape[1]
+
+    if cderi_tril.dtype != np.float64:
+        idx = cupy.arange(nao)
+        mask = idx[:,None] >= idx
+        cderiT = cderi.transpose(0,2,1)
+        cderiT[:,mask] = cderi_tril.conj()
+        cderi [:,mask] = cderi_tril
+        return cderi
+
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.unpack_tril(
@@ -149,7 +165,7 @@ def unpack_tril(cderi_tril, cderi, stream=None):
         ctypes.c_int(count))
     if err != 0:
         raise RuntimeError('failed in unpack_tril kernel')
-    return
+    return cderi
 
 def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
     if stream is None:
