@@ -145,19 +145,21 @@ class DF(lib.StreamObject):
         return blksize
 
     def loop(self, blksize=None, unpack=True):
-        ''' loop over all cderi and unpack the CDERI in (Lij) format '''
+        ''' loop over cderi for the current device 
+            and unpack the CDERI in (Lij) format 
+        '''
         device_id = cupy.cuda.Device().id
         cderi_sparse = self._cderi[device_id]
         if blksize is None:
             blksize = self.get_blksize()
         nao = self.nao
-        naux = cderi_sparse.shape[0]
+        naux_slice = cderi_sparse.shape[0]
         rows = self.intopt.cderi_row
         cols = self.intopt.cderi_col
         buf_prefetch = None
         buf_cderi = cupy.zeros([blksize,nao,nao])
-        for p0, p1 in lib.prange(0, naux, blksize):
-            p2 = min(naux, p1+blksize)
+        for p0, p1 in lib.prange(0, naux_slice, blksize):
+            p2 = min(naux_slice, p1+blksize)
             if isinstance(cderi_sparse, cupy.ndarray):
                 buf = cderi_sparse[p0:p1,:]
             if isinstance(cderi_sparse, np.ndarray):
@@ -250,7 +252,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     threads = []
     for device_id in range(num_gpus):
         task_list = task_list_per_device[device_id]
-        thread = threading.Thread(target=execute_task,
+        thread = threading.Thread(target=_cderi_task,
                                   args=(intopt, cd_low_f, task_list, device_id, _cderi),
                                   kwargs={"omega":omega, "sr_only":sr_only})
         thread.start()
@@ -270,7 +272,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     
     return _cderi
 
-def execute_task(intopt, cd_low, task_list, device_id, _cderi, omega=None, sr_only=False):
+def _cderi_task(intopt, cd_low, task_list, device_id, _cderi, omega=None, sr_only=False):
     nq = len(intopt.log_qs)
     mol = intopt.mol
     naux = cd_low.shape[1]

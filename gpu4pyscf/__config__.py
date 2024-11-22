@@ -2,7 +2,7 @@ import cupy
 
 _num_devices = cupy.cuda.runtime.getDeviceCount()
 
-# TODO: switch to non_blocking stream (blocked by libxc)
+# TODO: switch to non_blocking stream (currently blocked by libxc)
 _streams = [None] * _num_devices
 for device_id in range(_num_devices):
     with cupy.cuda.Device(device_id):
