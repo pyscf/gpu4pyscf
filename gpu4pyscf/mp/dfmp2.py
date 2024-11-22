@@ -13,17 +13,48 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import threading
 import numpy as np
 import cupy
 from pyscf.mp import mp2 as mp2_pyscf
 from gpu4pyscf import df
 from gpu4pyscf.mp import mp2
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, tag_array
+from gpu4pyscf.lib.cupy_helper import contract, tag_array, reduce_to_device
+from gpu4pyscf.__config__ import _streams, _num_devices
 from pyscf import __config__
 
 WITH_T2 = getattr(__config__, 'mp_dfmp2_with_t2', True)
 _einsum = cupy.einsum
+
+def _dfmp2_tasks(mp, mo_coeff, mo_energy, device_id, Lov_dist):
+    with cupy.cuda.Device(device_id), _streams[device_id]:
+        mo_energy = cupy.asarray(mo_energy)
+        mo_coeff = cupy.asarray(mo_coeff)
+        
+        nocc = mp.nocc
+        nvir = mp.nmo - nocc
+
+        _cderi = mp.with_df._cderi[device_id]
+        naux_slice = _cderi.shape[0]
+        Lov = cupy.empty((naux_slice, nocc*nvir))
+        p1 = 0
+        for istep, qov in enumerate(mp.loop_ao2mo(mo_coeff, nocc)):
+            logger.debug(mp, 'Load cderi step %d', istep)
+            p0, p1 = p1, p1 + qov.shape[0]
+            Lov[p0:p1] = qov.reshape([p1-p0,nocc*nvir])
+        Lov_dist[device_id] = Lov
+    return
+
+def get_occ_blk(Lov_dist, i, nocc, nvir):
+    occ_blk_dist = [None] * _num_devices
+    for device_id in range(_num_devices):
+        Lov = Lov_dist[device_id]
+        mat = cupy.dot(Lov[:,i*nvir:(i+1)*nvir].T,
+                        Lov).reshape(nvir,nocc,nvir)
+        occ_blk_dist[device_id] = mat
+    occ_blk = reduce_to_device(occ_blk_dist)
+    return occ_blk
 
 def kernel(mp, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2,
            verbose=logger.NOTE):
@@ -37,31 +68,36 @@ def kernel(mp, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2,
     if mo_coeff is None:  mo_coeff = eris.mo_coeff
     mo_energy = cupy.asarray(mo_energy)
     mo_coeff = cupy.asarray(mo_coeff)
+    
+    if mp.with_df.naux is None:
+        mp.with_df.build()
+
+    Lov_dist = [None] * _num_devices
+    threads = []
+    for device_id in range(_num_devices):
+        thread = threading.Thread(
+            target=_dfmp2_tasks,
+            args=(mp, mo_coeff, mo_energy, device_id, Lov_dist))
+        thread.start()
+        threads.append(thread)
+
+    for thread in threads:
+        thread.join()
+
+    for stream in _streams:
+        stream.synchronize()
 
     nocc = mp.nocc
     nvir = mp.nmo - nocc
-    if mp.with_df.naux is None:
-        mp.with_df.build()
-    naux = mp.with_df.naux
     eia = mo_energy[:nocc,None] - mo_energy[None,nocc:]
-
     if with_t2:
         t2 = cupy.empty((nocc,nocc,nvir,nvir), dtype=mo_coeff.dtype)
     else:
         t2 = None
-
-    Lov = cupy.empty((naux, nocc*nvir))
-    p1 = 0
-    for istep, qov in enumerate(mp.loop_ao2mo(mo_coeff, nocc)):
-        logger.debug(mp, 'Load cderi step %d', istep)
-        p0, p1 = p1, p1 + qov.shape[0]
-        Lov[p0:p1] = qov.reshape([p1-p0,nocc*nvir])
-
+    
     emp2_ss = emp2_os = 0
-
     for i in range(nocc):
-        buf = cupy.dot(Lov[:,i*nvir:(i+1)*nvir].T,
-                        Lov).reshape(nvir,nocc,nvir)
+        buf = get_occ_blk(Lov_dist, i, nocc, nvir)
         gi = cupy.array(buf, copy=False)
         gi = gi.reshape(nvir,nocc,nvir).transpose(1,0,2)
         #lib.direct_sum('jb+a->jba', eia, eia[i])

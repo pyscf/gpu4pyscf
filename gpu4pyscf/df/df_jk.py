@@ -24,13 +24,11 @@ import threading
 from pyscf import lib, __config__
 from pyscf.scf import dhf
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, transpose_sum, load_library, reduce_to_device
+from gpu4pyscf.lib.cupy_helper import contract, transpose_sum, reduce_to_device
 from gpu4pyscf.dft import rks, uks, numint
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.df import df, int3c2e
 from gpu4pyscf.__config__ import _streams
-
-libcupy_helper = load_library('libcupy_helper')
 
 def _pin_memory(array):
     mem = cupy.cuda.alloc_pinned_memory(array.nbytes)

@@ -15,9 +15,9 @@
 
 import threading
 import cupy
-from gpu4pyscf.__config__ import _streams
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
+from gpu4pyscf.__config__ import _streams
 
 def _jk_task(with_df, dm, orbo, device_id, rhoj_total, rhok_total, with_j=True, with_k=True):
     '''  # (L|ij) -> rhoj: (L), rhok: (L|oo)

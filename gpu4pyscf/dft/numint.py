@@ -23,7 +23,7 @@ import cupy
 
 from pyscf import gto, lib, dft
 from pyscf.dft import numint
-from pyscf.gto.eval_gto import NBINS, CUTOFF, make_screen_index
+from pyscf.gto.eval_gto import NBINS, CUTOFF
 from gpu4pyscf.gto.mole import basis_seg_contraction
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, transpose_sum,

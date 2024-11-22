@@ -16,10 +16,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # modified by Xiaojie Wu (wxj6000@gmail.com)
-import numpy
 import cupy
-
-from pyscf import lib
 from pyscf.dft import rks
 
 from gpu4pyscf.lib import logger

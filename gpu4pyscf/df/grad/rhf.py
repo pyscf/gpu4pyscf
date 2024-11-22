@@ -19,14 +19,11 @@ import cupy
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import scf, gto
 from gpu4pyscf.df import int3c2e, df
-from gpu4pyscf.lib.cupy_helper import (print_mem_info, tag_array,
-unpack_tril, contract, load_library, reduce_to_device, cholesky)
+from gpu4pyscf.lib.cupy_helper import tag_array, contract, cholesky
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df.grad.jk import get_rhoj_rhok
-
-libcupy_helper = load_library('libcupy_helper')
 
 LINEAR_DEP_THRESHOLD = df.LINEAR_DEP_THR
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)

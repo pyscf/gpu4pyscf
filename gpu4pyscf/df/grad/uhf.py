@@ -25,7 +25,6 @@ from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df.grad.jk import get_rhoj_rhok
 
-libgvhf = load_library('libgvhf')
 FREE_CUPY_CACHE = True
 BINSIZE = 128
 

@@ -15,16 +15,13 @@
 
 
 import ctypes
-import copy
 import numpy as np
 import cupy
 from pyscf import gto, df, lib
 from pyscf.scf import _vhf
-from gpu4pyscf.scf.int4c2e import (BasisProdCache, _make_s_index_offsets,
-                                   libgvhf, libgint)
-from gpu4pyscf.lib.cupy_helper import (
-    block_c2s_diag, cart2sph, block_diag, contract, load_library, get_avail_mem,
-    print_mem_info, take_last2d, libcupy_helper)
+from gpu4pyscf.scf.int4c2e import BasisProdCache, libgvhf, libgint
+from gpu4pyscf.lib.cupy_helper import block_c2s_diag, cart2sph, contract, get_avail_mem
+
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import basis_seg_contraction
 from gpu4pyscf.__config__ import _num_devices, _streams
@@ -197,8 +194,8 @@ class VHFOpt(_vhf.VHFOpt):
 
         ao_loc = _sorted_mol.ao_loc_nr(cart=_mol.cart)
         self.ao_pairs_row, self.ao_pairs_col = get_ao_pairs(pair2bra, pair2ket, ao_loc)
-        cderi_row = np.hstack(self.ao_pairs_row)#cupy.hstack(self.ao_pairs_row)
-        cderi_col = np.hstack(self.ao_pairs_col)#cupy.hstack(self.ao_pairs_col)
+        cderi_row = np.hstack(self.ao_pairs_row)
+        cderi_col = np.hstack(self.ao_pairs_col)
         self.cderi_row = cderi_row
         self.cderi_col = cderi_col
         self.cderi_diag = np.argwhere(cderi_row == cderi_col)[:,0]

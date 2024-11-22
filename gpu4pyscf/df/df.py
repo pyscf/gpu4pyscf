@@ -21,8 +21,7 @@ import numpy as np
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from pyscf.df import df, addons, incore
-from gpu4pyscf.lib.cupy_helper import (
-    cholesky, tag_array, get_avail_mem, cart2sph, take_last2d, transpose_sum)
+from gpu4pyscf.lib.cupy_helper import cholesky, tag_array, get_avail_mem, cart2sph
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__

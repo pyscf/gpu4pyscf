@@ -18,7 +18,6 @@
 Hessian of dispersion correction for HF and DFT
 '''
 
-import numpy
 from pyscf.hessian import dispersion
 from gpu4pyscf import dft
 

@@ -18,9 +18,7 @@ Non-relativistic UKS analytical Hessian
 '''
 
 
-import numpy
 import cupy
-import numpy as np
 import cupy as cp
 from pyscf import lib
 from gpu4pyscf.hessian import rhf as rhf_hess
