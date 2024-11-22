@@ -1,4 +1,4 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -122,12 +122,11 @@ class VHFOpt(_vhf.VHFOpt):
         nao = cart_ao_loc[-1]
         ao_idx = np.array_split(np.arange(nao), cart_ao_loc[1:-1])
         self.cart_ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
-        ncart = cart_ao_loc[-1]
-        nsph = sph_ao_loc[-1]
         self.cart2sph = block_c2s_diag(self.angular, l_ctr_counts)
         cput1 = log.timer_debug1('AO cart2sph coeff', *cput1)
 
         if _mol.cart:
+            ncart = cart_ao_loc[-1]
             inv_idx = np.argsort(self.cart_ao_idx, kind='stable').astype(np.int32)
             self.coeff = cp.eye(ncart)[:,inv_idx]
         else:
@@ -150,7 +149,8 @@ class VHFOpt(_vhf.VHFOpt):
         cp_idx, cp_jdx = np.tril_indices(len(uniq_l_ctr))
         l_ij = list(zip(uniq_l_ctr[cp_idx, 0], uniq_l_ctr[cp_jdx, 0]))
         self.l_ij = np.asarray(l_ij)
-        def get_n_hermite_density_of_angular_pair(l): return (l + 1) * (l + 2) * (l + 3) // 6
+        def get_n_hermite_density_of_angular_pair(l):
+            return (l + 1) * (l + 2) * (l + 3) // 6
         n_density_per_pair = np.array([ get_n_hermite_density_of_angular_pair(li + lj) for (li, lj) in l_ij ])
         n_density_per_angular_pair = (bas_pairs_locs[1:] - bas_pairs_locs[:-1]) * n_density_per_pair
         self.density_offset = np.append(0, np.cumsum(n_density_per_angular_pair)).astype(np.int32)
@@ -235,7 +235,8 @@ def get_int3c1e(mol, grids, direct_scf_tol, omega):
     allowed_double_number = reserved_available_memory // 8
     n_grid_split = int(np.ceil(total_double_number / allowed_double_number))
     if (n_grid_split > 100):
-        raise Exception(f"Available GPU memory ({avail_mem / 1e9 : .1f} GB) is too small for the 3 center integral, which requires {total_double_number * 8 / 1e9 : .1f} GB of memory")
+        raise Exception(f"Available GPU memory ({avail_mem / 1e9 : .1f} GB) is too small for the 3 center integral, "
+                        "which requires {total_double_number * 8 / 1e9 : .1f} GB of memory")
     ngrids_per_split = (ngrids + n_grid_split - 1) // n_grid_split
 
     int3c_pinned_memory_pool = cp.cuda.alloc_pinned_memory(ngrids * nao * nao * np.array([1.0]).nbytes)
@@ -269,7 +270,10 @@ def get_int3c1e(mol, grids, direct_scf_tol, omega):
         grid_idx = np.arange(ngrids_of_split)
         int3c_grid_slice = int3c_grid_slice[np.ix_(grid_idx, ao_idx, ao_idx)]
 
-        cp.cuda.runtime.memcpy(int3c[i_grid_split : i_grid_split + ngrids_of_split, :, :].ctypes.data, int3c_grid_slice.data.ptr, int3c_grid_slice.nbytes, cp.cuda.runtime.memcpyDeviceToHost)
+        cp.cuda.runtime.memcpy(int3c[i_grid_split : i_grid_split + ngrids_of_split, :, :].ctypes.data,
+                               int3c_grid_slice.data.ptr,
+                               int3c_grid_slice.nbytes,
+                               cp.cuda.runtime.memcpyDeviceToHost)
         # int3c[i_grid_split : i_grid_split + ngrids_of_split, :, :] = cp.asnumpy(int3c_grid_slice) # This is certainly the wrong way of DtoH memcpy
 
     return int3c
@@ -292,8 +296,8 @@ def get_int3c1e_density_contracted(mol, grids, dm, direct_scf_tol, omega):
         cart2sph_transformation_matrix = cp.asnumpy(intopt.cart2sph)
         # TODO: This part is inefficient (O(N^3)), should be changed to the O(N^2) algorithm
         dm = cart2sph_transformation_matrix @ dm @ cart2sph_transformation_matrix.T
-    ao_loc_sorted_order = intopt.sorted_mol.ao_loc_nr(cart = True) # This ao_loc order is consistent with the density matrix order and intopt.bas_pair2shls order
 
+    ao_loc_sorted_order = intopt.sorted_mol.ao_loc_nr(cart = True)
     l_ij = intopt.l_ij.T.flatten()
     n_total_hermite_density = intopt.density_offset[-1]
     dm_pair_ordered = np.zeros(n_total_hermite_density)
@@ -341,7 +345,9 @@ def get_int3c1e_density_contracted(mol, grids, dm, direct_scf_tol, omega):
 
 def intor(mol, intor, grids, dm=None, charges=None, direct_scf_tol=1e-13, omega=None):
     assert intor == 'int1e_grids' and grids is not None
-    assert dm is None or charges is None, "Are you sure you want to contract the one electron integrals with both charge and density? If so, pass in density, obtain the result with n_charge and contract with the charges yourself."
+    assert dm is None or charges is None, \
+        "Are you sure you want to contract the one electron integrals with both charge and density? " + \
+        "If so, pass in density, obtain the result with n_charge and contract with the charges yourself."
 
     if dm is None and charges is None:
         return get_int3c1e(mol, grids, direct_scf_tol, omega)
