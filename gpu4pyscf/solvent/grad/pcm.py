@@ -400,7 +400,6 @@ class WithSolventGrad:
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         mol = self.base.mol
-        log = logger.new_logger(mol, self.base.verbose)
         dm = kwargs.pop('dm', None)
         if dm is None:
             dm = self.base.make_rdm1(ao_repr=True)
