@@ -817,14 +817,11 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
 
     constexpr int LL = 0;
     constexpr int ijmin = LJ;
-    //constexpr int klmin = LL;
 
     constexpr int di = NROOTS;         // stride_ijmax, 
     constexpr int dj = di * (LI+1);    // stride_ijmin,
     constexpr int dk = dj * (LJ+1);    // stride_klmax,
-    //constexpr int dl = dk * (LK+1);    // stride_klmin,
-    //constexpr int g_size_ij = dk;
-    //constexpr int dij = g_size_ij;
+
     constexpr int dm = dk;
     constexpr int dn = di;
 
@@ -832,7 +829,6 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
     constexpr int MMAX = LK + LL; 
 
     int nmax = NMAX;
-    //int mmax = MMAX;
 
     double tmpb0;
     double s0x, s1x, s2x, t0x, t1x;
