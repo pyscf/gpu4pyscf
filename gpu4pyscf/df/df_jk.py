@@ -241,9 +241,8 @@ class _DFHF:
         obj = self.undo_df().to_cpu().density_fit()
         return utils.to_cpu(self, obj)
 
-def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ, device_id,
-                     vj_total, vk_total,
-                     with_j=True, with_k=True, hermi=0):
+def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ, vj_total, vk_total,
+                     with_j=True, with_k=True, hermi=0, device_id=0):
     ''' Calculate J and K matrices on single GPU
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -307,11 +306,11 @@ def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ, device_id,
         t0 = log.timer_debug1(f'vj and vk on Device {device_id}', *t0)
     return
 
-def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs, device_id,
+def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs,
                       vj_total, vk_total,
-                      with_j=True, with_k=True, hermi=0):
+                      with_j=True, with_k=True, hermi=0, device_id=0):
     ''' Calculate J and K matrices with mo response
-    For CP-HF or TDDFT
+        For CP-HF or TDDFT
     '''
     vj = vk = None
     with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -373,9 +372,8 @@ def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs, device_id,
         t0 = log.timer_debug1(f'vj and vk on Device {device_id}', *t0)
     return
 
-def _jk_task_with_dm(dfobj, dms, device_id,
-                     vj_total, vk_total,
-                     with_j=True, with_k=True, hermi=0):
+def _jk_task_with_dm(dfobj, dms, vj_total, vk_total,
+                     with_j=True, with_k=True, hermi=0, device_id=0):
     ''' Calculate J and K matrices with density matrix
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -465,9 +463,11 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
 
         threads = []
         for device_id in range(num_gpus):
-            thread = threading.Thread(target=_jk_task_with_mo, 
-                                      args=(dfobj, dms, mo_coeff, mo_occ, device_id, vj_total, vk_total),
-                                      kwargs={"hermi": hermi, "with_j": with_j, "with_k": with_k})
+            thread = threading.Thread(
+                target=_jk_task_with_mo, 
+                args=(dfobj, dms, mo_coeff, mo_occ, vj_total, vk_total),
+                kwargs={"hermi": hermi, "device_id": device_id,
+                        "with_j": with_j, "with_k": with_k})
             thread.start()
             threads.append(thread)
 
@@ -484,9 +484,11 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
 
         threads = []
         for device_id in range(num_gpus):
-            thread = threading.Thread(target=_jk_task_with_mo1, 
-                                      args=(dfobj, dms, mo1s, occ_coeffs, device_id, vj_total, vk_total),
-                                      kwargs={"hermi": hermi, "with_j": with_j, "with_k": with_k})
+            thread = threading.Thread(
+                target=_jk_task_with_mo1, 
+                args=(dfobj, dms, mo1s, occ_coeffs, vj_total, vk_total),
+                kwargs={"hermi": hermi, 'device_id': device_id,
+                        "with_j": with_j, "with_k": with_k})
             thread.start()
             threads.append(thread)
 
@@ -494,9 +496,11 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
     else:
         threads = []
         for device_id in range(num_gpus):
-            thread = threading.Thread(target=_jk_task_with_dm, 
-                                      args=(dfobj, dms, device_id, vj_total, vk_total),
-                                      kwargs={"hermi": hermi, "with_j": with_j, "with_k": with_k})
+            thread = threading.Thread(
+                target=_jk_task_with_dm, 
+                args=(dfobj, dms, vj_total, vk_total),
+                kwargs={"hermi": hermi, "device_id": device_id,
+                        "with_j": with_j, "with_k": with_k})
             thread.start()
             threads.append(thread)
     

@@ -27,7 +27,7 @@ from pyscf import __config__
 WITH_T2 = getattr(__config__, 'mp_dfmp2_with_t2', True)
 _einsum = cupy.einsum
 
-def _dfmp2_tasks(mp, mo_coeff, mo_energy, device_id, Lov_dist):
+def _dfmp2_tasks(mp, mo_coeff, mo_energy, Lov_dist, device_id=0):
     with cupy.cuda.Device(device_id), _streams[device_id]:
         mo_energy = cupy.asarray(mo_energy)
         mo_coeff = cupy.asarray(mo_coeff)
@@ -77,7 +77,8 @@ def kernel(mp, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2,
     for device_id in range(_num_devices):
         thread = threading.Thread(
             target=_dfmp2_tasks,
-            args=(mp, mo_coeff, mo_energy, device_id, Lov_dist))
+            args=(mp, mo_coeff, mo_energy, Lov_dist),
+            kwargs={"device_id": device_id})
         thread.start()
         threads.append(thread)
 

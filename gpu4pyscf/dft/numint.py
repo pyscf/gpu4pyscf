@@ -397,9 +397,9 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     vxc[1,threshind] = 1.5*W*dW0dG
     return exc,vxc
 
-def _nr_rks_task(ni, mol, grids, device_id, xc_code, dms, mo_coeff, mo_occ, 
+def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, 
                  vmat_total, nelec_total, excsum_total,
-                 verbose=None, with_lapl=False, grid_range=()):
+                 verbose=None, with_lapl=False, grid_range=(), device_id=0):
     ''' nr_rks task on one device
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -533,11 +533,12 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     vmat_total = [None] * num_devices
     nelec_total = [None] * num_devices
     excsum_total = [None] * num_devices
-    for gpu_id in range(num_devices):
-        thread = threading.Thread(target=_nr_rks_task,
-                                  args=(ni, mol, grids, gpu_id, xc_code, dms, mo_coeff, mo_occ, 
-                                        vmat_total, nelec_total, excsum_total),
-                                  kwargs={"verbose":verbose})
+    for device_id in range(num_devices):
+        thread = threading.Thread(
+            target=_nr_rks_task,
+            args=(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, 
+                vmat_total, nelec_total, excsum_total),
+                kwargs={"verbose": verbose, "device_id": device_id})
         thread.start()
         threads.append(thread)
         

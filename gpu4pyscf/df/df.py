@@ -38,7 +38,7 @@ GROUP_SIZE = 256
 class DF(lib.StreamObject):
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    _keys = {'intopt', 'mol', 'auxmol'}
+    _keys = {'intopt', 'mol', 'auxmol', 'use_gpu_memory'}
 
     def __init__(self, mol, auxbasis=None):
         self.mol = mol
@@ -231,7 +231,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
                 _cderi[device_id] = cupy.empty([p1-p0, npairs])
             log.debug(f"CDERI size {_cderi[device_id].nbytes/GB} on Device {device_id}")
         else:
-            mem = cupy.cuda.alloc_pinned_memory(p1-p0 * npairs * 8)
+            mem = cupy.cuda.alloc_pinned_memory((p1-p0) * npairs * 8)
             cderi_blk = np.ndarray([p1-p0, npairs], dtype=np.float64, order='C', buffer=mem)
             _cderi[device_id] = cderi_blk
 

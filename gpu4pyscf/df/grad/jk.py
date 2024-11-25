@@ -19,7 +19,8 @@ from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams
 
-def _jk_task(with_df, dm, orbo, device_id, rhoj_total, rhok_total, with_j=True, with_k=True):
+def _jk_task(with_df, dm, orbo, rhoj_total, rhok_total, 
+             with_j=True, with_k=True, device_id=0):
     '''  # (L|ij) -> rhoj: (L), rhok: (L|oo)
     '''
     rhoj = rhok = None
@@ -64,9 +65,10 @@ def get_rhoj_rhok(with_df, dm, orbo, with_j=True, with_k=True):
     rhok_total = [None] * num_gpus
     threads = []
     for device_id in range(num_gpus):
-        thread = threading.Thread(target=_jk_task, 
-                                    args=(with_df, dm, orbo, device_id, rhoj_total, rhok_total),
-                                    kwargs={"with_j": with_j, "with_k": with_k})
+        thread = threading.Thread(
+            target=_jk_task, 
+            args=(with_df, dm, orbo, rhoj_total, rhok_total),
+            kwargs={"with_j": with_j, "with_k": with_k, "device_id": device_id})
         thread.start()
         threads.append(thread)
     for thread in threads:

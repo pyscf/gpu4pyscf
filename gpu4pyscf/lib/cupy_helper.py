@@ -26,7 +26,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
-from gpu4pyscf.__config__ import _streams
+from gpu4pyscf.__config__ import _streams, _num_devices
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
@@ -86,20 +86,23 @@ def get_avail_mem():
 def broadcast_to_devices():
     ''' Broadcast cupy ndarray to all the devices, return a list of cupy ndarray
     '''
-
+    raise NotImplementedError
 
 def reduce_to_device(array_list):
     ''' Reduce a list of ndarray in different devices to device 0
     TODO: reduce memory footprint, improve throughput
     '''
-    num_devices = len(array_list)
+    assert len(array_list) == _num_devices
+    if _num_devices == 0:
+        return array_list[0]
+    
     for s in _streams:
         s.synchronize()
     
-    for device_id in range(num_devices):
+    for device_id in range(_num_devices):
         cupy.cuda.Device(device_id).synchronize()
     
-    results = [None] * num_devices
+    results = [None] * _num_devices
     # Asynchronously add each matrix from its device
     for device_id, matrix in enumerate(array_list):
         if device_id == 0:
@@ -121,7 +124,7 @@ def reduce_to_device(array_list):
     for s in _streams:
         s.synchronize()
     
-    for device_id in range(num_devices):
+    for device_id in range(_num_devices):
         cupy.cuda.Device(device_id).synchronize()
 
     for arr in results[1:]:
