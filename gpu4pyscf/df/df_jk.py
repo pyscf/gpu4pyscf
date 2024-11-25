@@ -182,6 +182,8 @@ class _DFHF:
             return uhf_grad.Gradients(self)
         raise NotImplementedError()
 
+    Gradients = nuc_grad_method
+
     def Hessian(self):
         from gpu4pyscf.dft.rks import KohnShamDFT
         if isinstance(self, hf.RHF):
@@ -200,6 +202,7 @@ class _DFHF:
                 return uhf_hess.Hessian(self)
         else:
             raise NotImplementedError
+
     @property
     def auxbasis(self):
         return getattr(self.with_df, 'auxbasis', None)

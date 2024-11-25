@@ -356,7 +356,7 @@ class Gradients(GradientsBase):
     make_rdm1e = rhf_grad_cpu.Gradients.make_rdm1e
     grad_elec = grad_elec
 
-    def get_veff(self, mol, dm, verbose=None):
+    def get_veff(self, mol=None, dm=None, verbose=None):
         '''
         Computes the first-order derivatives of the energy contributions from
         Veff per atom.
@@ -364,6 +364,8 @@ class Gradients(GradientsBase):
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         '''
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.base.make_rdm1()
         vhfopt = self.base._opt_gpu.get(None, None)
         ej, ek = _jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
         return ej - ek * .5

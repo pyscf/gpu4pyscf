@@ -198,7 +198,8 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     else:
         mf_diis = None
 
-    if dump_chk and mf.chkfile:
+    dump_chk = dump_chk and mf.chkfile is not None
+    if dump_chk:
         # Explicit overwrite the mol object in chkfile
         # Note in pbc.scf, mf.mol == mf.cell, cell is saved under key "mol"
         chkfile.save_mol(mol, mf.chkfile)
@@ -226,12 +227,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
                     cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
 
         if dump_chk:
-            local_variables = locals()
-            for key in local_variables:
-                value = local_variables[key]
-                if (type(value) is cupy.ndarray):
-                    local_variables[key] = cupy.asnumpy(value)
-            mf.dump_chk(local_variables)
+            mf.dump_chk(locals())
 
         e_diff = abs(e_tot-last_hf_e)
         norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, f))
@@ -418,7 +414,6 @@ class SCF(pyscf_lib.StreamObject):
     get_fock                 = get_fock
     get_occ                  = get_occ
     get_grad                 = staticmethod(get_grad)
-    dump_chk                 = hf.SCF.dump_chk
     init_guess_by_minao      = hf.SCF.init_guess_by_minao
     init_guess_by_atom       = hf.SCF.init_guess_by_atom
     init_guess_by_huckel     = hf.SCF.init_guess_by_huckel
@@ -492,6 +487,14 @@ class SCF(pyscf_lib.StreamObject):
         self._opt_gpu = {None: None}
         self.scf_summary = {}
         return self
+
+    def dump_chk(self, envs):
+        assert isinstance(envs, dict)
+        if self.chkfile:
+            chkfile.dump_scf(
+                self.mol, self.chkfile, envs['e_tot'],
+                cupy.asnumpy(envs['mo_energy']), cupy.asnumpy(envs['mo_coeff']),
+                cupy.asnumpy(envs['mo_occ']), overwrite_mol=False)
 
 class KohnShamDFT:
     '''

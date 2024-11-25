@@ -1643,7 +1643,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
         return ni
 
     @lru_cache(10)
-    def _init_xcfuns(self, xc_code, spin):
+    def _init_xcfuns(self, xc_code, spin=0):
         return _init_xcfuns(xc_code, spin)
 
     def reset(self):
