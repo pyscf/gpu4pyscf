@@ -247,8 +247,9 @@ def grad_qv(pcmobj, dm):
     dm_cart = coeff @ dm @ coeff.T
 
     dvj, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip1', q_sym, None, dm_cart)
+    t1 = log.timer_debug1('grad ip1', *t1)
     dq, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip2', q_sym, None, dm_cart)
-
+    t1 = log.timer_debug1('grad ip2', *t1)
     _sorted_mol = intopt._sorted_mol
     nao_cart = _sorted_mol.nao
     natm = _sorted_mol.natm
@@ -261,6 +262,7 @@ def grad_qv(pcmobj, dm):
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
     de = dq + dvj
     t1 = log.timer_debug1('grad qv', *t1)
+    exit()
     return de.get()
 
 def grad_solver(pcmobj, dm):
@@ -399,14 +401,23 @@ class WithSolventGrad:
         return pcm.make_grad_object(grad_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
+        mol = self.base.mol
+        log = logger.new_logger(mol, self.base.verbose)
         dm = kwargs.pop('dm', None)
         if dm is None:
             dm = self.base.make_rdm1(ao_repr=True)
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
+        t0 = log.init_timer()
         self.de_solute = super().kernel(*args, **kwargs)
+        t0 = log.timer_debug1('Solute gradient', *t0)
+
         self.de_solvent = grad_qv(self.base.with_solvent, dm)
+        t0 = log.timer_debug1('Solvent contribution, GTO integral', *t0)
+        
         self.de_solvent+= grad_solver(self.base.with_solvent, dm)
+        t0 = log.timer_debug1('Solute contribution, linear system', *t0)
+        
         self.de_solvent+= grad_nuc(self.base.with_solvent, dm)
         self.de = self.de_solute + self.de_solvent
 

@@ -29,7 +29,6 @@
 #include "rys_roots.cu"
 #include "g2e.cu"
 #include "gout3c2e.cu"
-#include "g3c2e_root1.cu"
 #include "g2e_root2.cu"
 #include "g2e_root3.cu"
 #include "g3c2e.cu"

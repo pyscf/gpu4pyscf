@@ -41,20 +41,88 @@ static int GINTrun_tasks_int3c2e_ip1_jk(JKMatrix *jk, BasisProdOffsets *offsets,
     assert(ntasks_kl < 65536*THREADSY);
     dim3 threads(THREADSX, THREADSY);
     dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
-
-    switch (envs->nrys_roots) {
-        case 1: GINTrun_int3c2e_ip1_jk_kernel1000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 2: GINTint3c2e_ip1_jk_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 3: GINTint3c2e_ip1_jk_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 4: GINTint3c2e_ip1_jk_kernel<4, GSIZE4_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 5: GINTint3c2e_ip1_jk_kernel<5, GSIZE5_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 6: GINTint3c2e_ip1_jk_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 7: GINTint3c2e_ip1_jk_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 8: GINTint3c2e_ip1_jk_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 9: GINTint3c2e_ip1_jk_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        default:
-            fprintf(stderr, "rys roots %d\n", nrys_roots);
-        return 1;
+    int li = envs->i_l;
+    int lj = envs->j_l;
+    int lk = envs->k_l;
+    int type_ijk = li * 100 + lj * 10 + lk;
+    
+    switch (type_ijk) {
+        case   0: GINTint3c2e_ip1_jk_kernel000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case   1: GINTint3c2e_ip1_jk_kernel<0,0,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case   2: GINTint3c2e_ip1_jk_kernel<0,0,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case   3: GINTint3c2e_ip1_jk_kernel<0,0,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case  10: GINTint3c2e_ip1_jk_kernel<0,1,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case  11: GINTint3c2e_ip1_jk_kernel<0,1,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case  12: GINTint3c2e_ip1_jk_kernel<0,1,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case  13: GINTint3c2e_ip1_jk_kernel<0,1,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case  20: GINTint3c2e_ip1_jk_kernel<0,2,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case  21: GINTint3c2e_ip1_jk_kernel<0,2,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case  22: GINTint3c2e_ip1_jk_kernel<0,2,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case  23: GINTint3c2e_ip1_jk_kernel<0,2,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case  30: GINTint3c2e_ip1_jk_kernel<0,3,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case  31: GINTint3c2e_ip1_jk_kernel<0,3,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case  32: GINTint3c2e_ip1_jk_kernel<0,3,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case  33: GINTint3c2e_ip1_jk_kernel<0,3,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 100: GINTint3c2e_ip1_jk_kernel<1,0,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 101: GINTint3c2e_ip1_jk_kernel<1,0,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 102: GINTint3c2e_ip1_jk_kernel<1,0,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 103: GINTint3c2e_ip1_jk_kernel<1,0,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 110: GINTint3c2e_ip1_jk_kernel<1,1,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 111: GINTint3c2e_ip1_jk_kernel<1,1,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 112: GINTint3c2e_ip1_jk_kernel<1,1,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 113: GINTint3c2e_ip1_jk_kernel<1,1,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 120: GINTint3c2e_ip1_jk_kernel<1,2,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 121: GINTint3c2e_ip1_jk_kernel<1,2,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 122: GINTint3c2e_ip1_jk_kernel<1,2,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 123: GINTint3c2e_ip1_jk_kernel<1,2,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 130: GINTint3c2e_ip1_jk_kernel<1,3,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 131: GINTint3c2e_ip1_jk_kernel<1,3,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 132: GINTint3c2e_ip1_jk_kernel<1,3,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 133: GINTint3c2e_ip1_jk_kernel<1,3,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 200: GINTint3c2e_ip1_jk_kernel<2,0,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 201: GINTint3c2e_ip1_jk_kernel<2,0,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 202: GINTint3c2e_ip1_jk_kernel<2,0,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 203: GINTint3c2e_ip1_jk_kernel<2,0,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 210: GINTint3c2e_ip1_jk_kernel<2,1,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 211: GINTint3c2e_ip1_jk_kernel<2,1,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 212: GINTint3c2e_ip1_jk_kernel<2,1,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 213: GINTint3c2e_ip1_jk_kernel<2,1,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 220: GINTint3c2e_ip1_jk_kernel<2,2,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 221: GINTint3c2e_ip1_jk_kernel<2,2,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 222: GINTint3c2e_ip1_jk_kernel<2,2,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 223: GINTint3c2e_ip1_jk_kernel<2,2,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 230: GINTint3c2e_ip1_jk_kernel<2,3,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 231: GINTint3c2e_ip1_jk_kernel<2,3,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 232: GINTint3c2e_ip1_jk_kernel<2,3,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 233: GINTint3c2e_ip1_jk_kernel<2,3,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 300: GINTint3c2e_ip1_jk_kernel<3,0,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 301: GINTint3c2e_ip1_jk_kernel<3,0,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 302: GINTint3c2e_ip1_jk_kernel<3,0,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 303: GINTint3c2e_ip1_jk_kernel<3,0,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 310: GINTint3c2e_ip1_jk_kernel<3,1,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 311: GINTint3c2e_ip1_jk_kernel<3,1,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 312: GINTint3c2e_ip1_jk_kernel<3,1,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 313: GINTint3c2e_ip1_jk_kernel<3,1,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 320: GINTint3c2e_ip1_jk_kernel<3,2,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 321: GINTint3c2e_ip1_jk_kernel<3,2,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 322: GINTint3c2e_ip1_jk_kernel<3,2,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 323: GINTint3c2e_ip1_jk_kernel<3,2,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 330: GINTint3c2e_ip1_jk_kernel<3,3,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 331: GINTint3c2e_ip1_jk_kernel<3,3,1><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 332: GINTint3c2e_ip1_jk_kernel<3,3,2><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 333: GINTint3c2e_ip1_jk_kernel<3,3,3><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        default: switch (nrys_roots) {
+            //case 2: GINTint3c2e_ip1_jk_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+            case 3: GINTint3c2e_ip1_jk_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+            case 4: GINTint3c2e_ip1_jk_kernel<4, GSIZE4_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+            case 5: GINTint3c2e_ip1_jk_kernel<5, GSIZE5_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+            case 6: GINTint3c2e_ip1_jk_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+            case 7: GINTint3c2e_ip1_jk_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+            case 8: GINTint3c2e_ip1_jk_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+            case 9: GINTint3c2e_ip1_jk_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+            default: fprintf(stderr, "rys roots %d\n", nrys_roots);
+            return 1;
+        }
     }
 
     cudaError_t err = cudaGetLastError();
@@ -67,7 +135,7 @@ static int GINTrun_tasks_int3c2e_ip1_jk(JKMatrix *jk, BasisProdOffsets *offsets,
 
 
 extern "C" { __host__
-int GINTbuild_int3c2e_ip1_jk(BasisProdCache *bpcache,
+int GINTbuild_int3c2e_ip1_jk(cudaStream_t stream, BasisProdCache *bpcache,
                  double *vj, double *vk, double *dm, double *rhoj, double *rhok,
                  int *ao_offsets, int nao, int naux, int n_dm,
                  int *bins_locs_ij, int ntasks_kl, int ncp_ij, int cp_kl_id, double omega)
@@ -96,11 +164,6 @@ int GINTbuild_int3c2e_ip1_jk(BasisProdCache *bpcache,
     int *bas_pairs_locs = bpcache->bas_pairs_locs;
     int *primitive_pairs_locs = bpcache->primitive_pairs_locs;
 
-    cudaStream_t streams[MAX_STREAMS];
-    for (int n = 0; n < MAX_STREAMS; n++){
-        checkCudaErrors(cudaStreamCreate(&streams[n]));
-    }
-
     int *idx = (int *)malloc(sizeof(int) * TOT_NF * 3);
     int *l_locs = (int *)malloc(sizeof(int) * (GPU_LMAX + 2));
     GINTinit_index1d_xyz(idx, l_locs);
@@ -110,7 +173,6 @@ int GINTbuild_int3c2e_ip1_jk(BasisProdCache *bpcache,
     free(l_locs);
 
     for (int cp_ij_id = 0; cp_ij_id < ncp_ij; cp_ij_id++){
-        int n_stream = cp_ij_id % MAX_STREAMS;
         GINTEnvVars envs;
         ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
         GINTinit_EnvVars(&envs, cp_ij, cp_kl, ng);
@@ -118,7 +180,6 @@ int GINTbuild_int3c2e_ip1_jk(BasisProdCache *bpcache,
         if (envs.nrys_roots > 9) {
             return 2;
         }
-
         int ntasks_ij = bins_locs_ij[cp_ij_id+1] - bins_locs_ij[cp_ij_id];
         if (ntasks_ij <= 0) continue;
 
@@ -130,19 +191,12 @@ int GINTbuild_int3c2e_ip1_jk(BasisProdCache *bpcache,
         offsets.primitive_ij = primitive_pairs_locs[cp_ij_id];
         offsets.primitive_kl = primitive_pairs_locs[cp_kl_id];
 
-        int err = GINTrun_tasks_int3c2e_ip1_jk(&jk, &offsets, &envs, streams[n_stream]);
+        int err = GINTrun_tasks_int3c2e_ip1_jk(&jk, &offsets, &envs, stream);
 
         if (err != 0) {
             return err;
         }
     }
-    for (int n = 0; n < MAX_STREAMS; n++){
-        checkCudaErrors(cudaStreamSynchronize(streams[n]));
-    }
-    for (int n = 0; n < MAX_STREAMS; n++){    
-        checkCudaErrors(cudaStreamDestroy(streams[n]));
-    }
-
     return 0;
 }
 
