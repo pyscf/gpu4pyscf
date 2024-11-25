@@ -399,7 +399,6 @@ class WithSolventGrad:
         return pcm.make_grad_object(grad_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
-        mol = self.base.mol
         dm = kwargs.pop('dm', None)
         if dm is None:
             dm = self.base.make_rdm1(ao_repr=True)
@@ -408,7 +407,6 @@ class WithSolventGrad:
         self.de_solute = super().kernel(*args, **kwargs)
         self.de_solvent = grad_qv(self.base.with_solvent, dm)
         self.de_solvent+= grad_solver(self.base.with_solvent, dm)
-
         self.de_solvent+= grad_nuc(self.base.with_solvent, dm)
         self.de = self.de_solute + self.de_solvent
 
