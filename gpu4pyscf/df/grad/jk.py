@@ -13,14 +13,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import threading
+from concurrent.futures import ThreadPoolExecutor
 import cupy
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
-from gpu4pyscf.__config__ import _streams
+from gpu4pyscf.__config__ import _streams, _num_devices
 
-def _jk_task(with_df, dm, orbo, rhoj_total, rhok_total, 
-             with_j=True, with_k=True, device_id=0):
+def _jk_task(with_df, dm, orbo, with_j=True, with_k=True, device_id=0):
     '''  # (L|ij) -> rhoj: (L), rhok: (L|oo)
     '''
     rhoj = rhok = None
@@ -52,31 +51,27 @@ def _jk_task(with_df, dm, orbo, rhoj_total, rhok_total,
                 contract('Lki,il->Lkl', tmp, orbo, out=rhok[p0:p1])
             p0 = p1
             cupy.cuda.get_current_stream().synchronize()
-        rhoj_total[device_id] = rhoj
-        rhok_total[device_id] = rhok
         t0 = log.timer_debug1(f'rhoj and rhok on Device {device_id}', *t0)
-    return
+    return rhoj, rhok
 
 def get_rhoj_rhok(with_df, dm, orbo, with_j=True, with_k=True):
     ''' Calculate rhoj and rhok on Multi-GPU system
     '''
-    num_gpus = cupy.cuda.runtime.getDeviceCount()
-    rhoj_total = [None] * num_gpus
-    rhok_total = [None] * num_gpus
-    threads = []
-    for device_id in range(num_gpus):
-        thread = threading.Thread(
-            target=_jk_task, 
-            args=(with_df, dm, orbo, rhoj_total, rhok_total),
-            kwargs={"with_j": with_j, "with_k": with_k, "device_id": device_id})
-        thread.start()
-        threads.append(thread)
-    for thread in threads:
-        thread.join()
-
-    for stream in _streams:
-        stream.synchronize()
+    futures = []
+    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
+        for device_id in range(_num_devices):
+            future = executor.submit(
+                _jk_task, with_df, dm, orbo,
+                with_j=with_j, with_k=with_k, device_id=device_id)
+            futures.append(future)
     
+    rhoj_total = []
+    rhok_total = []
+    for future in futures:
+        rhoj, rhok = future.result()
+        rhoj_total.append(rhoj)
+        rhok_total.append(rhok)
+        
     rhoj = rhok = None
     if with_j:
         rhoj = cupy.concatenate(rhoj_total)
