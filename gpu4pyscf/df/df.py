@@ -16,7 +16,7 @@
 
 import copy
 import cupy
-import threading
+from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
@@ -25,14 +25,13 @@ from gpu4pyscf.lib.cupy_helper import cholesky, tag_array, get_avail_mem, cart2s
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
-from gpu4pyscf.__config__ import _streams
+from gpu4pyscf.__config__ import _streams, _num_devices
 
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
 GB = 1024*1024*1024
 
-# TODO: reuse the setting in pyscf 2.6
-LINEAR_DEP_THR = 1e-7#incore.LINEAR_DEP_THR
+LINEAR_DEP_THR = incore.LINEAR_DEP_THR
 GROUP_SIZE = 256
 
 class DF(lib.StreamObject):
@@ -208,7 +207,6 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     naux = cd_low.shape[1]
     npairs = len(intopt.cderi_row)
     log = logger.new_logger(mol, mol.verbose)
-    num_gpus = cupy.cuda.runtime.getDeviceCount()
 
     # if the matrix exceeds the limit, store CDERI in CPU memory
     # TODO: better estimate of memory consumption for each device
@@ -224,7 +222,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
         log.debug("Saving CDERI on CPU")
 
     _cderi = {}
-    blksize = (naux + num_gpus - 1) // num_gpus
+    blksize = (naux + _num_devices - 1) // _num_devices
     for device_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
         if use_gpu_memory:
             with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -240,47 +238,41 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     npairs_per_ctr = np.array(npairs_per_ctr)
     total_task_list = np.argsort(npairs_per_ctr)
     task_list_per_device = []
-    for device_id in range(num_gpus):
-        task_list_per_device.append(total_task_list[device_id::num_gpus])
+    for device_id in range(_num_devices):
+        task_list_per_device.append(total_task_list[device_id::_num_devices])
 
     cd_low_f = cupy.array(cd_low, order='F', copy=False)
     cd_low_f = tag_array(cd_low_f, tag=cd_low.tag)
 
-    for gpu_id in range(num_gpus):
+    for gpu_id in range(_num_devices):
         cupy.cuda.Device(gpu_id).synchronize()
 
-    threads = []
-    for device_id in range(num_gpus):
-        task_list = task_list_per_device[device_id]
-        thread = threading.Thread(target=_cderi_task,
-                                  args=(intopt, cd_low_f, task_list, device_id, _cderi),
-                                  kwargs={"omega":omega, "sr_only":sr_only})
-        thread.start()
-        threads.append(thread)
+    futures = []
+    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
+        for device_id in range(_num_devices):
+            task_list = task_list_per_device[device_id]
+            future = executor.submit(_cderi_task, intopt, cd_low_f, task_list, _cderi,
+                                     omega=omega, sr_only=sr_only, device_id=device_id)
+            futures.append(future)
     
-    for thread in threads:
-        thread.join()
-
-    for s in _streams:
-        s.synchronize()
-    
-    for gpu_id in range(num_gpus):
-        cupy.cuda.Device(gpu_id).synchronize()
+    for device_id in range(_num_devices):
+        cupy.cuda.Device(device_id).synchronize()
 
     if not use_gpu_memory:
         cupy.cuda.Device().synchronize()
     
     return _cderi
 
-def _cderi_task(intopt, cd_low, task_list, device_id, _cderi, omega=None, sr_only=False):
+def _cderi_task(intopt, cd_low, task_list, _cderi, omega=None, sr_only=False, device_id=0):
+    ''' Execute CDERI tasks on one device
+    '''
     nq = len(intopt.log_qs)
     mol = intopt.mol
     naux = cd_low.shape[1]
     naoaux = cd_low.shape[0]
     npairs = [len(intopt.ao_pairs_row[cp_ij]) for cp_ij in range(len(intopt.log_qs))]
     pairs_loc = np.append(0, np.cumsum(npairs))
-    num_gpus = cupy.cuda.runtime.getDeviceCount()
-    blksize = (naux + num_gpus - 1) // num_gpus
+    blksize = (naux + _num_devices - 1) // _num_devices
     with cupy.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(mol, mol.verbose)
         t1 = log.init_timer()
