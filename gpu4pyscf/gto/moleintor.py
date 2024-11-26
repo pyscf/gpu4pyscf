@@ -18,6 +18,7 @@ import cupy as cp
 import numpy as np
 
 from pyscf.scf import _vhf
+from pyscf.gto import ATOM_OF
 from gpu4pyscf.lib.cupy_helper import load_library, cart2sph, block_c2s_diag, get_avail_mem
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.int4c2e import BasisProdCache
@@ -186,7 +187,6 @@ class VHFOpt(_vhf.VHFOpt):
 
 def get_int3c1e_slice(intopt, cp_ij_id, grids, out, omega):
     stream = cp.cuda.get_current_stream()
-    if omega is None: omega = 0.0
     nao_cart = intopt.mol.nao
 
     cpi = intopt.cp_idx[cp_ij_id]
@@ -222,7 +222,10 @@ def get_int3c1e_slice(intopt, cp_ij_id, grids, out, omega):
     if err != 0:
         raise RuntimeError('GINTfill_int3c1e failed')
 
-def get_int3c1e(mol, grids, direct_scf_tol, omega):
+def get_int3c1e(mol, grids, direct_scf_tol):
+    omega = mol.omega
+    assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
+
     intopt = VHFOpt(mol, 'int2e')
     intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=True, group_size=BLKSIZE)
 
@@ -257,7 +260,7 @@ def get_int3c1e(mol, grids, direct_scf_tol, omega):
             j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
 
             int3c_angular_slice = cp.zeros([ngrids_of_split, j1-j0, i1-i0], order='C')
-            get_int3c1e_slice(intopt, cp_ij_id, grids[i_grid_split : i_grid_split + ngrids_of_split], out=int3c_angular_slice, omega=omega)
+            get_int3c1e_slice(intopt, cp_ij_id, grids[i_grid_split : i_grid_split + ngrids_of_split, :], out=int3c_angular_slice, omega=omega)
             i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
             j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
             if not mol.cart:
@@ -270,15 +273,14 @@ def get_int3c1e(mol, grids, direct_scf_tol, omega):
         grid_idx = np.arange(ngrids_of_split)
         int3c_grid_slice = int3c_grid_slice[np.ix_(grid_idx, ao_idx, ao_idx)]
 
-        cp.cuda.runtime.memcpy(int3c[i_grid_split : i_grid_split + ngrids_of_split, :, :].ctypes.data,
-                               int3c_grid_slice.data.ptr,
-                               int3c_grid_slice.nbytes,
-                               cp.cuda.runtime.memcpyDeviceToHost)
-        # int3c[i_grid_split : i_grid_split + ngrids_of_split, :, :] = cp.asnumpy(int3c_grid_slice) # This is certainly the wrong way of DtoH memcpy
+        int3c_grid_slice.get(out = int3c[i_grid_split : i_grid_split + ngrids_of_split, :, :])
 
     return int3c
 
-def get_int3c1e_density_contracted(mol, grids, dm, direct_scf_tol, omega):
+def get_int3c1e_density_contracted(mol, grids, dm, direct_scf_tol):
+    omega = mol.omega
+    assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
+
     if cp.get_array_module(dm) is cp:
         dm = cp.asnumpy(dm)
     assert cp.get_array_module(dm) is np
@@ -289,19 +291,20 @@ def get_int3c1e_density_contracted(mol, grids, dm, direct_scf_tol, omega):
 
     nao_cart = intopt.mol.nao
     ngrids = grids.shape[0]
-    # TODO: Split ngrids to make sure GPU block and thread doesn't overflow
 
     dm = dm[np.ix_(intopt.ao_idx, intopt.ao_idx)] # intopt.ao_idx is in spherical basis
     if not mol.cart:
         cart2sph_transformation_matrix = cp.asnumpy(intopt.cart2sph)
         # TODO: This part is inefficient (O(N^3)), should be changed to the O(N^2) algorithm
         dm = cart2sph_transformation_matrix @ dm @ cart2sph_transformation_matrix.T
+    dm = dm.flatten(order='F') # Column major order matches (i + j * n_ao) access pattern in the C function
 
     ao_loc_sorted_order = intopt.sorted_mol.ao_loc_nr(cart = True)
     l_ij = intopt.l_ij.T.flatten()
+    bas_coords = intopt.sorted_mol.atom_coords()[intopt.sorted_mol._bas[:, ATOM_OF]].flatten()
+
     n_total_hermite_density = intopt.density_offset[-1]
     dm_pair_ordered = np.zeros(n_total_hermite_density)
-    dm = dm.flatten(order='F') # Column major order matches (i + j * n_ao) access pattern in the following function
     libgvhf.GINTinit_J_density_rys_preprocess(dm.ctypes.data_as(ctypes.c_void_p),
                                               dm_pair_ordered.ctypes.data_as(ctypes.c_void_p),
                                               ctypes.c_int(1), ctypes.c_int(nao_cart), ctypes.c_int(len(intopt.bas_pairs_locs) - 1),
@@ -310,36 +313,50 @@ def get_int3c1e_density_contracted(mol, grids, dm, direct_scf_tol, omega):
                                               l_ij.ctypes.data_as(ctypes.c_void_p),
                                               intopt.density_offset.ctypes.data_as(ctypes.c_void_p),
                                               ao_loc_sorted_order.ctypes.data_as(ctypes.c_void_p),
-                                              intopt.bpcache)
+                                              bas_coords.ctypes.data_as(ctypes.c_void_p))
 
     dm_pair_ordered = cp.asarray(dm_pair_ordered)
     grids = cp.asarray(grids, order='C')
     int3c_density_contracted = cp.zeros(ngrids)
 
-    for cp_ij_id, _ in enumerate(intopt.log_qs):
-        stream = cp.cuda.get_current_stream()
-        if omega is None: omega = 0.0
+    n_threads_per_block_1d = 16
+    n_max_blocks_per_grid_1d = 65535
+    n_max_threads_1d = n_threads_per_block_1d * n_max_blocks_per_grid_1d
+    n_grid_split = int(np.ceil(ngrids / n_max_threads_1d))
+    if (n_grid_split > 100):
+        print(f"Grid dimension = {ngrids} is too large, more than 100 kernels for one electron integral will be launched.")
+    ngrids_per_split = (ngrids + n_grid_split - 1) // n_grid_split
 
-        log_q_ij = intopt.log_qs[cp_ij_id]
+    for i_grid_split in range(0, ngrids, ngrids_per_split):
+        ngrids_of_split = np.min([ngrids_per_split, ngrids - i_grid_split])
+        for cp_ij_id, _ in enumerate(intopt.log_qs):
+            stream = cp.cuda.get_current_stream()
 
-        nbins = 1
-        bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
+            log_q_ij = intopt.log_qs[cp_ij_id]
 
-        err = libgint.GINTfill_int3c1e_density_contracted(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
-            intopt.bpcache,
-            ctypes.cast(grids.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(grids.shape[0]),
-            ctypes.cast(dm_pair_ordered.data.ptr, ctypes.c_void_p),
-            intopt.density_offset.ctypes.data_as(ctypes.c_void_p),
-            ctypes.cast(int3c_density_contracted.data.ptr, ctypes.c_void_p),
-            bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
-            ctypes.c_int(nbins),
-            ctypes.c_int(cp_ij_id),
-            ctypes.c_double(omega))
+            nbins = 1
+            bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
 
-        if err != 0:
-            raise RuntimeError('GINTfill_int3c1e failed')
+
+            n_pair_sum_per_thread = nao_cart # 1 means every thread processes one pair and one grid
+                                             # nao_cart or larger number gaurantees one thread processes one grid and all pairs of the same type
+
+            err = libgint.GINTfill_int3c1e_density_contracted(
+                ctypes.cast(stream.ptr, ctypes.c_void_p),
+                intopt.bpcache,
+                ctypes.cast(grids[i_grid_split : i_grid_split + ngrids_of_split, :].data.ptr, ctypes.c_void_p),
+                ctypes.c_int(ngrids_of_split),
+                ctypes.cast(dm_pair_ordered.data.ptr, ctypes.c_void_p),
+                intopt.density_offset.ctypes.data_as(ctypes.c_void_p),
+                ctypes.cast(int3c_density_contracted[i_grid_split : i_grid_split + ngrids_of_split].data.ptr, ctypes.c_void_p),
+                bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
+                ctypes.c_int(nbins),
+                ctypes.c_int(cp_ij_id),
+                ctypes.c_double(omega),
+                ctypes.c_int(n_pair_sum_per_thread))
+
+            if err != 0:
+                raise RuntimeError('GINTfill_int3c1e failed')
 
     return cp.asnumpy(int3c_density_contracted)
 
@@ -350,9 +367,9 @@ def intor(mol, intor, grids, dm=None, charges=None, direct_scf_tol=1e-13, omega=
         "If so, pass in density, obtain the result with n_charge and contract with the charges yourself."
 
     if dm is None and charges is None:
-        return get_int3c1e(mol, grids, direct_scf_tol, omega)
+        return get_int3c1e(mol, grids, direct_scf_tol)
     elif dm is not None:
-        return get_int3c1e_density_contracted(mol, grids, dm, direct_scf_tol, omega)
+        return get_int3c1e_density_contracted(mol, grids, dm, direct_scf_tol)
     elif charges is not None:
         raise NotImplementedError()
     else:

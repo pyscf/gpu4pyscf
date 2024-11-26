@@ -264,7 +264,6 @@ typedef struct {
     int *primitive_pairs_locs;  // len(a12) = sum(cptype[:].nparis*cptype[:].nprim_12)
     int *bas_pair2shls;
     double *aexyz;
-    double *h_bas_coords;
 
     // Data below held on GPU global memory
     double *bas_coords;  // basis coordinates

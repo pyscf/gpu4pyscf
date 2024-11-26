@@ -102,13 +102,8 @@ int hermite_xyz_to_t_index(const int x, const int y, const int z, const int l)
 
 void GINTinit_J_density_rys_preprocess(const double* D_matrix, double* D_pair_ordered, const int n_dm, const int n_ao, const int n_pair_type,
                                        const int* bas_pair2shls, const int* bas_pairs_locs, const int* l_ij, const int* density_offset, const int* ao_loc,
-                                       const BasisProdCache* bpcache)
+                                       const double* bas_coords)
 {
-    const double* bas_coords = bpcache->h_bas_coords;
-    const int nbas = bpcache->nbas;
-    const double* bas_x = bas_coords;
-    const double* bas_y = bas_x + nbas;
-    const double* bas_z = bas_y + nbas;
     const int n_bas_pairs = bas_pairs_locs[n_pair_type];
     const int n_total_hermite_density = density_offset[n_pair_type];
     for (int i_dm = 0; i_dm < n_dm; i_dm++) {
@@ -120,12 +115,12 @@ void GINTinit_J_density_rys_preprocess(const double* D_matrix, double* D_pair_or
             for (int i_pair = bas_pairs_locs[i_pair_type]; i_pair < bas_pairs_locs[i_pair_type + 1]; i_pair++) {
                 const int ish = bas_pair2shls[i_pair];
                 const int jsh = bas_pair2shls[n_bas_pairs + i_pair];
-                const double Ax = bas_x[ish];
-                const double Ay = bas_y[ish];
-                const double Az = bas_z[ish];
-                const double Bx = bas_x[jsh];
-                const double By = bas_y[jsh];
-                const double Bz = bas_z[jsh];
+                const double Ax = bas_coords[ish * 3 + 0];
+                const double Ay = bas_coords[ish * 3 + 1];
+                const double Az = bas_coords[ish * 3 + 2];
+                const double Bx = bas_coords[jsh * 3 + 0];
+                const double By = bas_coords[jsh * 3 + 1];
+                const double Bz = bas_coords[jsh * 3 + 2];
                 const int i0 = ao_loc[ish];
                 const int j0 = ao_loc[jsh];
 

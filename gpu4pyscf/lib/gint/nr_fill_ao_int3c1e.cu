@@ -96,10 +96,10 @@ static int GINTfill_int3c1e_tasks(double* output, const BasisProdOffsets offsets
 
 static int GINTfill_int3c1e_density_contracted_tasks(double* output, const double* density, const HermiteDensityOffsets hermite_density_offsets,
                                                      const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
-                                                     const double omega, const double* grid_points, const cudaStream_t stream)
+                                                     const double omega, const double* grid_points, const int n_pair_sum_per_thread, const cudaStream_t stream)
 {
     const int nrys_roots = (i_l + j_l) / 2 + 1;
-    const int ntasks_ij = offsets.ntasks_ij;
+    const int ntasks_ij = (offsets.ntasks_ij + n_pair_sum_per_thread - 1) / n_pair_sum_per_thread;
     const int ngrids = offsets.ntasks_kl;
 
     const dim3 threads(THREADSX, THREADSY);
@@ -196,7 +196,7 @@ int GINTfill_int3c1e_density_contracted(const cudaStream_t stream, const BasisPr
                                         const double* dm_pair_ordered, const int* density_offset,
                                         double* integral_density_contracted,
                                         const int* bins_locs_ij, int nbins,
-                                        const int cp_ij_id, const double omega)
+                                        const int cp_ij_id, const double omega, const int n_pair_sum_per_thread)
 {
     const ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
     const int i_l = cp_ij->l_bra;
@@ -236,7 +236,7 @@ int GINTfill_int3c1e_density_contracted(const cudaStream_t stream, const BasisPr
 
         const int err = GINTfill_int3c1e_density_contracted_tasks(integral_density_contracted, dm_pair_ordered, hermite_density_offsets,
                                                                   offsets, i_l, j_l, nprim_ij,
-                                                                  omega, grid_points, stream);
+                                                                  omega, grid_points, n_pair_sum_per_thread, stream);
 
         if (err != 0) {
             return err;

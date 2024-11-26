@@ -102,20 +102,21 @@ class KnownValues(unittest.TestCase):
         omega = 0.8
         mol_sph_omega = mol_sph.copy()
         mol_sph_omega.set_range_coulomb(omega)
+
         ref_int1e = mol_sph_omega.intor('int1e_grids', grids=grid_points)
-        test_int1e = intor(mol_sph, 'int1e_grids', grid_points, omega = omega)
+        test_int1e = intor(mol_sph_omega, 'int1e_grids', grid_points)
         assert np.abs(ref_int1e - test_int1e).max() < integral_threshold
 
     def test_int1e_grids_density_contracted_omega(self):
+        np.random.seed(12349)
+        dm = np.random.uniform(-2.0, 2.0, (mol_sph.nao, mol_sph.nao))
+
         omega = 1.2
         mol_sph_omega = mol_sph.copy()
         mol_sph_omega.set_range_coulomb(omega)
 
-        np.random.seed(12349)
-        dm = np.random.uniform(-2.0, 2.0, (mol_sph.nao, mol_sph.nao))
-
         ref_int1e_dot_D = np.einsum('pij,ij->p', mol_sph_omega.intor('int1e_grids', grids=grid_points), dm)
-        test_int1e_dot_D = intor(mol_sph, 'int1e_grids', grid_points, dm = dm, omega = omega)
+        test_int1e_dot_D = intor(mol_sph_omega, 'int1e_grids', grid_points, dm = dm)
         assert np.abs(ref_int1e_dot_D - test_int1e_dot_D).max() < integral_threshold
 
 if __name__ == "__main__":

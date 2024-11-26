@@ -96,45 +96,53 @@ void GINT_int3c1e_density_contracted_kernel_general(double* output, const double
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
-
-    if (task_ij >= ntasks_ij || task_grid >= ngrids) {
+    if (task_grid >= ngrids) {
         return;
     }
-    const int bas_ij = offsets.bas_ij + task_ij;
-    const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-    const int* bas_pair2bra = c_bpcache.bas_pair2bra;
-    // const int* bas_pair2ket = c_bpcache.bas_pair2ket;
-    const int ish = bas_pair2bra[bas_ij];
-    // const int jsh = bas_pair2ket[bas_ij];
 
-    const double* grid_point = grid_points + task_grid * 3;
+    double eri_with_density_pair_sum = 0.0;
+    for (int task_ij = blockIdx.x * blockDim.x + threadIdx.x; task_ij < ntasks_ij; task_ij += gridDim.x * blockDim.x) {
+        const int bas_ij = offsets.bas_ij + task_ij;
+        const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
+        const int* bas_pair2bra = c_bpcache.bas_pair2bra;
+        // const int* bas_pair2ket = c_bpcache.bas_pair2ket;
+        const int ish = bas_pair2bra[bas_ij];
+        // const int jsh = bas_pair2ket[bas_ij];
 
-    constexpr int l_max = (NROOTS - 1) * 2 + 1;
-    double D_hermite[(l_max + 1) * (l_max + 2) * (l_max + 3) / 6];
-    const int l = i_l + j_l;
-    for (int i_t = 0; i_t < (l + 1) * (l + 2) * (l + 3) / 6; i_t++) {
-        D_hermite[i_t] = density[bas_ij - hermite_density_offsets.pair_offset_of_angular_pair + hermite_density_offsets.density_offset_of_angular_pair + i_t * hermite_density_offsets.n_pair_of_angular_pair];
-    }
+        const double* grid_point = grid_points + task_grid * 3;
 
-    double eri_with_density = 0.0;
-    for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        double g[NROOTS * (l_max + 1) * 3];
-        GINT_g1e_without_hrr<NROOTS>(g, grid_point, ish, ij, l, omega);
+        constexpr int l_max = (NROOTS - 1) * 2 + 1;
+        double D_hermite[(l_max + 1) * (l_max + 2) * (l_max + 3) / 6];
+        const int l = i_l + j_l;
+        for (int i_t = 0; i_t < (l + 1) * (l + 2) * (l + 3) / 6; i_t++) {
+            D_hermite[i_t] = density[bas_ij - hermite_density_offsets.pair_offset_of_angular_pair + hermite_density_offsets.density_offset_of_angular_pair + i_t * hermite_density_offsets.n_pair_of_angular_pair];
+        }
 
-        double eri_with_density_primitive = 0.0;
-        for (int i_x = 0, i_t = 0; i_x <= l; i_x++)
-            for (int i_y = 0; i_x + i_y <= l; i_y++)
-                for (int i_z = 0; i_x + i_y + i_z <= l; i_z++, i_t++)
-                    for (int i_root = 0; i_root < NROOTS; i_root++) {
-                        const double gx = g[i_root + NROOTS * i_x];
-                        const double gy = g[i_root + NROOTS * i_y + NROOTS * (l + 1)];
-                        const double gz = g[i_root + NROOTS * i_z + NROOTS * (l + 1) * 2];
-                        eri_with_density_primitive += gx * gy * gz * D_hermite[i_t];
+        double eri_with_density_per_pair = 0.0;
+        for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+            double g[NROOTS * (l_max + 1) * 3];
+            GINT_g1e_without_hrr<NROOTS>(g, grid_point, ish, ij, l, omega);
+
+            double eri_with_density_per_primitive = 0.0;
+            for (int i_x = 0, i_t = 0; i_x <= l; i_x++) {
+                for (int i_y = 0; i_x + i_y <= l; i_y++) {
+                    for (int i_z = 0; i_x + i_y + i_z <= l; i_z++, i_t++) {
+                        const double D_t = D_hermite[i_t];
+    #pragma unroll
+                        for (int i_root = 0; i_root < NROOTS; i_root++) {
+                            const double gx = g[i_root + NROOTS * i_x];
+                            const double gy = g[i_root + NROOTS * i_y + NROOTS * (l + 1)];
+                            const double gz = g[i_root + NROOTS * i_z + NROOTS * (l + 1) * 2];
+                            eri_with_density_per_primitive += gx * gy * gz * D_t;
+                        }
                     }
+                }
+            }
 
-        eri_with_density += eri_with_density_primitive;
+            eri_with_density_per_pair += eri_with_density_per_primitive;
+        }
+        eri_with_density_pair_sum += eri_with_density_per_pair;
     }
-    atomicAdd(output + task_grid, eri_with_density);
+    atomicAdd(output + task_grid, eri_with_density_pair_sum);
 }

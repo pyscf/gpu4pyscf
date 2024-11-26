@@ -116,9 +116,9 @@ static void GINTg1e(double* __restrict__ g, const double* __restrict__ grid_poin
         const double ABy = Ay - By;
         const double ABz = Az - Bz;
 
-        for (int i_root = 0; i_root < NROOTS; i_root++) {
-            for (int j_rys = 0; j_rys < j_l; j_rys++) {
-                for (int i_rys = i_l + j_l - j_rys - 1; i_rys >= 0; i_rys--) {
+        for (int j_rys = 0; j_rys < j_l; j_rys++) {
+            for (int i_rys = i_l + j_l - j_rys - 1; i_rys >= 0; i_rys--) {
+                for (int i_root = 0; i_root < NROOTS; i_root++) {
                     gx[i_root + (i_rys + (j_rys+1) * (i_l+1)) * NROOTS] = gx[i_root + (i_rys+1 + j_rys * (i_l+1)) * NROOTS] + ABx * gx[i_root + (i_rys + j_rys * (i_l+1)) * NROOTS];
                     gy[i_root + (i_rys + (j_rys+1) * (i_l+1)) * NROOTS] = gy[i_root + (i_rys+1 + j_rys * (i_l+1)) * NROOTS] + ABy * gy[i_root + (i_rys + j_rys * (i_l+1)) * NROOTS];
                     gz[i_root + (i_rys + (j_rys+1) * (i_l+1)) * NROOTS] = gz[i_root + (i_rys+1 + j_rys * (i_l+1)) * NROOTS] + ABz * gz[i_root + (i_rys + j_rys * (i_l+1)) * NROOTS];
