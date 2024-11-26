@@ -433,9 +433,9 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             rho_tot = cupy.empty([nset,5,ngrids_local])
 
         p0 = p1 = 0
-        for ao_mask, idx, weight, _ in ni.block_loop(
-            _sorted_mol, grids, nao, ao_deriv,
-            max_memory=None, grid_range=(grid_start, grid_end)):
+        for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
+                                                     max_memory=None, 
+                                                     grid_range=(grid_start, grid_end)):
             p1 = p0 + weight.size
             weights[p0:p1] = weight
             for i in range(nset):
@@ -472,9 +472,9 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
 
         vmat = cupy.zeros((nset, nao, nao))
         p0 = p1 = 0
-        for ao_mask, idx, weight, _ in ni.block_loop(
-            _sorted_mol, grids, nao, ao_deriv,
-            max_memory=None, grid_range=(grid_start, grid_end)):
+        for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
+                                                     max_memory=None, 
+                                                     grid_range=(grid_start, grid_end)):
             p1 = p0 + weight.size
             for i in range(nset):
                 if xctype == 'LDA':
@@ -686,8 +686,8 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         rho_tot = cupy.empty([nset,5,ngrids])
     p0 = p1 = 0
     t1 = t0 = log.init_timer()
-    for ao_mask, idx, weight, _ in ni.block_loop(
-        _sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
+    for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, 
+                                                 max_memory=max_memory):
         p1 = p0 + weight.size
         for i in range(nset):
             if mo_coeff is None:
@@ -722,8 +722,7 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     t1 = t0
     p0 = p1 = 0
-    for ao_mask_group, idx_group, weight_group, _ in ni.grouped_block_loop(
-        _sorted_mol, grids, nao, ao_deriv):
+    for ao_mask_group, idx_group, weight_group, _ in ni.grouped_block_loop(_sorted_mol, grids, nao, ao_deriv):
         p0_raw = p0
         for i in range(nset):
             p0 = p0_raw
@@ -822,9 +821,9 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         grid_start = device_id * ngrids_per_device
         grid_end = (device_id + 1) * ngrids_per_device
 
-        for ao_mask, idx, weight, _ in ni.block_loop(
-            _sorted_mol, grids, nao, ao_deriv,
-            max_memory=None, grid_range=(grid_start, grid_end)):
+        for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
+                                                     max_memory=None, 
+                                                     grid_range=(grid_start, grid_end)):
             for i in range(nset):
                 t0 = log.init_timer()
                 if mo_coeff is None:
