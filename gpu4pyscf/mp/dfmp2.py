@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import threading
+from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import cupy
 from pyscf.mp import mp2 as mp2_pyscf
@@ -27,7 +27,7 @@ from pyscf import __config__
 WITH_T2 = getattr(__config__, 'mp_dfmp2_with_t2', True)
 _einsum = cupy.einsum
 
-def _dfmp2_tasks(mp, mo_coeff, mo_energy, Lov_dist, device_id=0):
+def _dfmp2_tasks(mp, mo_coeff, mo_energy, device_id=0):
     with cupy.cuda.Device(device_id), _streams[device_id]:
         mo_energy = cupy.asarray(mo_energy)
         mo_coeff = cupy.asarray(mo_coeff)
@@ -43,8 +43,7 @@ def _dfmp2_tasks(mp, mo_coeff, mo_energy, Lov_dist, device_id=0):
             logger.debug(mp, 'Load cderi step %d', istep)
             p0, p1 = p1, p1 + qov.shape[0]
             Lov[p0:p1] = qov.reshape([p1-p0,nocc*nvir])
-        Lov_dist[device_id] = Lov
-    return
+    return Lov
 
 def get_occ_blk(Lov_dist, i, nocc, nvir):
     occ_blk_dist = [None] * _num_devices
@@ -72,21 +71,15 @@ def kernel(mp, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2,
     if mp.with_df.naux is None:
         mp.with_df.build()
 
-    Lov_dist = [None] * _num_devices
-    threads = []
-    for device_id in range(_num_devices):
-        thread = threading.Thread(
-            target=_dfmp2_tasks,
-            args=(mp, mo_coeff, mo_energy, Lov_dist),
-            kwargs={"device_id": device_id})
-        thread.start()
-        threads.append(thread)
+    # Submit tasks to different devices
+    futures = []
+    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
+        for device_id in range(_num_devices):
+            future = executor.submit(_dfmp2_tasks, mp, mo_coeff, mo_energy, 
+                                     device_id=device_id)
+            futures.append(future)
 
-    for thread in threads:
-        thread.join()
-
-    for stream in _streams:
-        stream.synchronize()
+    Lov_dist = [future.result() for future in futures]
 
     nocc = mp.nocc
     nvir = mp.nmo - nocc

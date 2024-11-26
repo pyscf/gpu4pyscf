@@ -18,9 +18,9 @@
 # Modified by Xiaojie Wu <wxj6000@gmail.com>
 
 import copy
+from concurrent.futures import ThreadPoolExecutor
 import cupy
 import numpy
-import threading
 from pyscf import lib, __config__
 from pyscf.scf import dhf
 from gpu4pyscf.lib import logger
@@ -28,7 +28,7 @@ from gpu4pyscf.lib.cupy_helper import contract, transpose_sum, reduce_to_device
 from gpu4pyscf.dft import rks, uks, numint
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.df import df, int3c2e
-from gpu4pyscf.__config__ import _streams
+from gpu4pyscf.__config__ import _streams, _num_devices
 
 def _pin_memory(array):
     mem = cupy.cuda.alloc_pinned_memory(array.nbytes)
@@ -241,7 +241,7 @@ class _DFHF:
         obj = self.undo_df().to_cpu().density_fit()
         return utils.to_cpu(self, obj)
 
-def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ, vj_total, vk_total,
+def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ,
                      with_j=True, with_k=True, hermi=0, device_id=0):
     ''' Calculate J and K matrices on single GPU
     '''
@@ -301,13 +301,10 @@ def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ, vj_total, vk_total,
                 vj = cupy.zeros(dms_shape)
                 vj[:,rows,cols] = vj_packed
                 vj[:,cols,rows] = vj_packed
-        vj_total[device_id] = vj
-        vk_total[device_id] = vk
         t0 = log.timer_debug1(f'vj and vk on Device {device_id}', *t0)
-    return
+    return vj, vk
 
 def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs,
-                      vj_total, vk_total,
                       with_j=True, with_k=True, hermi=0, device_id=0):
     ''' Calculate J and K matrices with mo response
         For CP-HF or TDDFT
@@ -367,13 +364,10 @@ def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs,
             transpose_sum(vk)
         vj_sparse = None
 
-        vj_total[device_id] = vj
-        vk_total[device_id] = vk
         t0 = log.timer_debug1(f'vj and vk on Device {device_id}', *t0)
-    return
+    return vj, vk
 
-def _jk_task_with_dm(dfobj, dms, vj_total, vk_total,
-                     with_j=True, with_k=True, hermi=0, device_id=0):
+def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0):
     ''' Calculate J and K matrices with density matrix
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -415,10 +409,8 @@ def _jk_task_with_dm(dfobj, dms, vj_total, vk_total,
             vj[:,rows,cols] = vj_sparse
             vj[:,cols,rows] = vj_sparse
 
-        vj_total[device_id] = vj
-        vk_total[device_id] = vk
         t0 = log.timer_debug1(f'vj and vk on Device {device_id}', *t0)
-    return
+    return vj, vk
 
 def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-14, omega=None):
     '''
@@ -450,9 +442,6 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
     intopt = dfobj.intopt
     dms = intopt.sort_orbitals(dms, axis=[1,2])
 
-    num_gpus = cupy.cuda.runtime.getDeviceCount()
-    vj_total = [None] * num_gpus
-    vk_total = [None] * num_gpus
     if getattr(dms_tag, 'mo_coeff', None) is not None:
         mo_occ = dms_tag.mo_occ
         mo_coeff = dms_tag.mo_coeff
@@ -461,15 +450,15 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
         mo_occ   = mo_occ.reshape(-1,nmo)
         mo_coeff = intopt.sort_orbitals(mo_coeff, axis=[1])
 
-        threads = []
-        for device_id in range(num_gpus):
-            thread = threading.Thread(
-                target=_jk_task_with_mo, 
-                args=(dfobj, dms, mo_coeff, mo_occ, vj_total, vk_total),
-                kwargs={"hermi": hermi, "device_id": device_id,
-                        "with_j": with_j, "with_k": with_k})
-            thread.start()
-            threads.append(thread)
+        futures = []
+        with ThreadPoolExecutor(max_workers=_num_devices) as executor:
+            for device_id in range(_num_devices):
+                future = executor.submit(
+                    _jk_task_with_mo, 
+                    dfobj, dms, mo_coeff, mo_occ,
+                    hermi=hermi, device_id=device_id,
+                    with_j=with_j, with_k=with_k)
+                futures.append(future)
 
     elif hasattr(dms_tag, 'mo1'):
         occ_coeffs = dms_tag.occ_coeff
@@ -482,42 +471,37 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
         occ_coeffs = [intopt.sort_orbitals(occ_coeff, axis=[0]) for occ_coeff in occ_coeffs]
         mo1s = [intopt.sort_orbitals(mo1, axis=[1]) for mo1 in mo1s]
 
-        threads = []
-        for device_id in range(num_gpus):
-            thread = threading.Thread(
-                target=_jk_task_with_mo1, 
-                args=(dfobj, dms, mo1s, occ_coeffs, vj_total, vk_total),
-                kwargs={"hermi": hermi, 'device_id': device_id,
-                        "with_j": with_j, "with_k": with_k})
-            thread.start()
-            threads.append(thread)
+        futures = []
+        with ThreadPoolExecutor(max_workers=_num_devices) as executor:
+            for device_id in range(_num_devices):
+                future = executor.submit(
+                    _jk_task_with_mo1, 
+                    dfobj, dms, mo1s, occ_coeffs,
+                    hermi=hermi, device_id=device_id,
+                    with_j=with_j, with_k=with_k)
+                futures.append(future)
 
     # general K matrix with density matrix
     else:
-        threads = []
-        for device_id in range(num_gpus):
-            thread = threading.Thread(
-                target=_jk_task_with_dm, 
-                args=(dfobj, dms, vj_total, vk_total),
-                kwargs={"hermi": hermi, "device_id": device_id,
-                        "with_j": with_j, "with_k": with_k})
-            thread.start()
-            threads.append(thread)
-    
-    for thread in threads:
-        thread.join()
-
-    for stream in _streams:
-        stream.synchronize()
+        futures = []
+        with ThreadPoolExecutor(max_workers=_num_devices) as executor:
+            for device_id in range(_num_devices):
+                future = executor.submit(
+                    _jk_task_with_dm, dfobj, dms,
+                    hermi=hermi, device_id=device_id,
+                    with_j=with_j, with_k=with_k)
+                futures.append(future)
 
     vj = vk = None
     if with_j:
-        vj = reduce_to_device(vj_total)
+        vj = [future.result()[0] for future in futures]
+        vj = reduce_to_device(vj)
         vj = intopt.unsort_orbitals(vj, axis=[1,2])
         vj = vj.reshape(out_shape)
     
     if with_k:
-        vk = reduce_to_device(vk_total)
+        vk = [future.result()[1] for future in futures]
+        vk = reduce_to_device(vk)
         vk = intopt.unsort_orbitals(vk, axis=[1,2])
         vk = vk.reshape(out_shape)
 
