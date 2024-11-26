@@ -473,7 +473,7 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
     double* __restrict__ bas_x = c_bpcache.bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
-    double xixj, yiyj, zizj; //, xkxl, ykyl, zkzl;
+    
     double xi = bas_x[ish];
     double yi = bas_y[ish];
     double zi = bas_z[ish];
@@ -497,27 +497,20 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
     int dj = envs.stride_ijmin;
     int dk = envs.stride_klmax;
 
-    double tmpb0;
-    double s0x, s1x, s2x, t0x, t1x;
-    double s0y, s1y, s2y, t0y, t1y;
-    double s0z, s1z, s2z, t0z, t1z;
-    double u2, tmp1, tmp2, tmp3, tmp4;
-    double b00, b10, b01, c00x, c00y, c00z, c0px, c0py, c0pz;
-
     for (int i = 0; i < NROOTS; ++i) {
         gx[i] = norm;
         gy[i] = fac;
         gz[i] = w[i];
 
-        u2 = a0 * u[i];
-        tmp4 = .5 / (u2 * aijkl + a1);
-        b00 = u2 * tmp4;
-        tmp1 = 2 * b00;
-        tmp2 = tmp1 * akl;
-        b10 = b00 + tmp4 * akl;
-        c00x = xijxi - tmp2 * xijxkl;
-        c00y = yijyi - tmp2 * yijykl;
-        c00z = zijzi - tmp2 * zijzkl;
+        double u2 = a0 * u[i];
+        double tmp4 = .5 / (u2 * aijkl + a1);
+        double b00 = u2 * tmp4;
+        double tmp1 = 2 * b00;
+        double tmp2 = tmp1 * akl;
+        double b10 = b00 + tmp4 * akl;
+        double c00x = xijxi - tmp2 * xijxkl;
+        double c00y = yijyi - tmp2 * yijykl;
+        double c00z = zijzi - tmp2 * zijzkl;
 
         if (nmax > 0) {
             // gx(irys,0,1) = c00(irys) * gx(irys,0,0)
@@ -530,19 +523,19 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
             //        gz[j+dn] = c00z[i] * gz[j] + n * b10[i] * gz[j-dn];
             //    }
             //}
-            s0x = gx[i];
-            s0y = gy[i];
-            s0z = gz[i];
-            s1x = c00x * s0x;
-            s1y = c00y * s0y;
-            s1z = c00z * s0z;
+            double s0x = gx[i];
+            double s0y = gy[i];
+            double s0z = gz[i];
+            double s1x = c00x * s0x;
+            double s1y = c00y * s0y;
+            double s1z = c00z * s0z;
             gx[i+dn] = s1x;
             gy[i+dn] = s1y;
             gz[i+dn] = s1z;
             for (int n = 1; n < nmax; ++n) {
-                s2x = c00x * s1x + n * b10 * s0x;
-                s2y = c00y * s1y + n * b10 * s0y;
-                s2z = c00z * s1z + n * b10 * s0z;
+                double s2x = c00x * s1x + n * b10 * s0x;
+                double s2y = c00y * s1y + n * b10 * s0y;
+                double s2z = c00z * s1z + n * b10 * s0z;
                 gx[i+(n+1)*dn] = s2x;
                 gy[i+(n+1)*dn] = s2y;
                 gz[i+(n+1)*dn] = s2z;
@@ -566,24 +559,24 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
             //        gz[j+dm] = c0pz[i] * gz[j] + m * b01[i] * gz[j-dm];
             //    }
             //}
-            tmp3 = tmp1 * aij;
-            b01 = b00 + tmp4 * aij;
-            c0px = xklxk + tmp3 * xijxkl;
-            c0py = yklyk + tmp3 * yijykl;
-            c0pz = zklzk + tmp3 * zijzkl;
-            s0x = gx[i];
-            s0y = gy[i];
-            s0z = gz[i];
-            s1x = c0px * s0x;
-            s1y = c0py * s0y;
-            s1z = c0pz * s0z;
+            double tmp3 = tmp1 * aij;
+            double b01 = b00 + tmp4 * aij;
+            double c0px = xklxk + tmp3 * xijxkl;
+            double c0py = yklyk + tmp3 * yijykl;
+            double c0pz = zklzk + tmp3 * zijzkl;
+            double s0x = gx[i];
+            double s0y = gy[i];
+            double s0z = gz[i];
+            double s1x = c0px * s0x;
+            double s1y = c0py * s0y;
+            double s1z = c0pz * s0z;
             gx[i+dm] = s1x;
             gy[i+dm] = s1y;
             gz[i+dm] = s1z;
             for (int m = 1; m < mmax; ++m) {
-                s2x = c0px * s1x + m * b01 * s0x;
-                s2y = c0py * s1y + m * b01 * s0y;
-                s2z = c0pz * s1z + m * b01 * s0z;
+                double s2x = c0px * s1x + m * b01 * s0x;
+                double s2y = c0py * s1y + m * b01 * s0y;
+                double s2z = c0pz * s1z + m * b01 * s0z;
                 gx[i+(m+1)*dm] = s2x;
                 gy[i+(m+1)*dm] = s2y;
                 gz[i+(m+1)*dm] = s2z;
@@ -608,19 +601,19 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
                 //        gz[j+dm] = c0pz[i]*gz[j] + m*b01[i]*gz[j-dm] + b00[i]*gz[j-dn];
                 //    }
                 //}
-                s0x = gx[i+dn];
-                s0y = gy[i+dn];
-                s0z = gz[i+dn];
-                s1x = c0px * s0x + b00 * gx[i];
-                s1y = c0py * s0y + b00 * gy[i];
-                s1z = c0pz * s0z + b00 * gz[i];
+                double s0x = gx[i+dn];
+                double s0y = gy[i+dn];
+                double s0z = gz[i+dn];
+                double s1x = c0px * s0x + b00 * gx[i];
+                double s1y = c0py * s0y + b00 * gy[i];
+                double s1z = c0pz * s0z + b00 * gz[i];
                 gx[i+dn+dm] = s1x;
                 gy[i+dn+dm] = s1y;
                 gz[i+dn+dm] = s1z;
                 for (int m = 1; m < mmax; ++m) {
-                    s2x = c0px*s1x + m*b01*s0x + b00*gx[i+m*dm];
-                    s2y = c0py*s1y + m*b01*s0y + b00*gy[i+m*dm];
-                    s2z = c0pz*s1z + m*b01*s0z + b00*gz[i+m*dm];
+                    double s2x = c0px*s1x + m*b01*s0x + b00*gx[i+m*dm];
+                    double s2y = c0py*s1y + m*b01*s0y + b00*gy[i+m*dm];
+                    double s2z = c0pz*s1z + m*b01*s0z + b00*gz[i+m*dm];
                     gx[i+dn+(m+1)*dm] = s2x;
                     gy[i+dn+(m+1)*dm] = s2y;
                     gz[i+dn+(m+1)*dm] = s2z;
@@ -648,17 +641,17 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
             //}
             int off = m * dm;
             int j = off + i;
-            s0x = gx[j];
-            s0y = gy[j];
-            s0z = gz[j];
-            s1x = gx[j + dn];
-            s1y = gy[j + dn];
-            s1z = gz[j + dn];
-            tmpb0 = m * b00;
+            double s0x = gx[j];
+            double s0y = gy[j];
+            double s0z = gz[j];
+            double s1x = gx[j + dn];
+            double s1y = gy[j + dn];
+            double s1z = gz[j + dn];
+            double tmpb0 = m * b00;
             for (int n = 1; n < nmax; ++n) {
-                s2x = c00x*s1x + n*b10*s0x + tmpb0*gx[j+n*dn-dm];
-                s2y = c00y*s1y + n*b10*s0y + tmpb0*gy[j+n*dn-dm];
-                s2z = c00z*s1z + n*b10*s0z + tmpb0*gz[j+n*dn-dm];
+                double s2x = c00x*s1x + n*b10*s0x + tmpb0*gx[j+n*dn-dm];
+                double s2y = c00y*s1y + n*b10*s0y + tmpb0*gy[j+n*dn-dm];
+                double s2z = c00z*s1z + n*b10*s0z + tmpb0*gz[j+n*dn-dm];
                 gx[j+(n+1)*dn] = s2x;
                 gy[j+(n+1)*dn] = s2y;
                 gz[j+(n+1)*dn] = s2z;
@@ -674,9 +667,9 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
 
     if (ijmin > 0) {
         // g(i,j) = rirj * g(i,j-1) +  g(i+1,j-1)
-        xixj = xi - bas_x[jsh];
-        yiyj = yi - bas_y[jsh];
-        zizj = zi - bas_z[jsh];
+        double xixj = xi - bas_x[jsh];
+        double yiyj = yi - bas_y[jsh];
+        double zizj = zi - bas_z[jsh];
         //for (k = 0; k <= mmax; ++k) {
         //for (j = 0; j < ijmin; ++j) {
         //for (i = nmax-1-j; i >= 0; i--) {
@@ -694,25 +687,25 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
         for (int k = 0; k <= mmax; ++k) {
             int off = k * dk + j * dj;
             for (int n = off; n < off+NROOTS; ++n) {
-                s0x = gx[n+nmax*di-di];
-                s0y = gy[n+nmax*di-di];
-                s0z = gz[n+nmax*di-di];
-                t1x = xixj * s0x + gx[n+nmax*di];
-                t1y = yiyj * s0y + gy[n+nmax*di];
-                t1z = zizj * s0z + gz[n+nmax*di];
+                double s0x = gx[n+nmax*di-di];
+                double s0y = gy[n+nmax*di-di];
+                double s0z = gz[n+nmax*di-di];
+                double t1x = xixj * s0x + gx[n+nmax*di];
+                double t1y = yiyj * s0y + gy[n+nmax*di];
+                double t1z = zizj * s0z + gz[n+nmax*di];
                 gx[dj+n+nmax*di-di] = t1x;
                 gy[dj+n+nmax*di-di] = t1y;
                 gz[dj+n+nmax*di-di] = t1z;
-                s1x = s0x;
-                s1y = s0y;
-                s1z = s0z;
+                double s1x = s0x;
+                double s1y = s0y;
+                double s1z = s0z;
                 for (int i = nmax-2; i >= 0; i--) {
                     s0x = gx[n+i*di];
                     s0y = gy[n+i*di];
                     s0z = gz[n+i*di];
-                    t0x = xixj * s0x + s1x;
-                    t0y = yiyj * s0y + s1y;
-                    t0z = zizj * s0z + s1z;
+                    double t0x = xixj * s0x + s1x;
+                    double t0y = yiyj * s0y + s1y;
+                    double t0z = zizj * s0z + s1z;
                     gx[dj+n+i*di] = t0x;
                     gy[dj+n+i*di] = t0y;
                     gz[dj+n+i*di] = t0z;
@@ -733,13 +726,13 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
             for (int k = 0; k <= mmax; ++k) {
                 int off = k * dk + j * dj;
                 for (int n = off; n < off+NROOTS; ++n) {
-                    s1x = gx[n + nmax*di];
-                    s1y = gy[n + nmax*di];
-                    s1z = gz[n + nmax*di];
+                    double s1x = gx[n + nmax*di];
+                    double s1y = gy[n + nmax*di];
+                    double s1z = gz[n + nmax*di];
                     for (int i = nmax-1; i >= 0; i--) {
-                        s0x = gx[n+i*di];
-                        s0y = gy[n+i*di];
-                        s0z = gz[n+i*di];
+                        double s0x = gx[n+i*di];
+                        double s0y = gy[n+i*di];
+                        double s0z = gz[n+i*di];
                         gx[dj+n+i*di] = xixj * s0x + s1x;
                         gy[dj+n+i*di] = yiyj * s0y + s1y;
                         gz[dj+n+i*di] = zizj * s0z + s1z;
@@ -801,7 +794,7 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
     double* __restrict__ bas_x = c_bpcache.bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
-    double xixj, yiyj, zizj;//, xkxl, ykyl, zkzl;
+    
     double xi = bas_x[ish];
     double yi = bas_y[ish];
     double zi = bas_z[ish];
@@ -828,29 +821,20 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
     constexpr int NMAX = LI + LJ;
     constexpr int MMAX = LK + LL; 
 
-    int nmax = NMAX;
-
-    double tmpb0;
-    double s0x, s1x, s2x, t0x, t1x;
-    double s0y, s1y, s2y, t0y, t1y;
-    double s0z, s1z, s2z, t0z, t1z;
-    double u2, tmp1, tmp2, tmp3, tmp4;
-    double b00, b10, b01, c00x, c00y, c00z, c0px, c0py, c0pz;
-
     for (int i = 0; i < NROOTS; ++i) {
         gx[i] = norm;
         gy[i] = fac;
         gz[i] = w[i];
 
-        u2 = a0 * u[i];
-        tmp4 = .5 / (u2 * aijkl + a1);
-        b00 = u2 * tmp4;
-        tmp1 = 2 * b00;
-        tmp2 = tmp1 * akl;
-        b10 = b00 + tmp4 * akl;
-        c00x = xijxi - tmp2 * xijxkl;
-        c00y = yijyi - tmp2 * yijykl;
-        c00z = zijzi - tmp2 * zijzkl;
+        double u2 = a0 * u[i];
+        double tmp4 = .5 / (u2 * aijkl + a1);
+        double b00 = u2 * tmp4;
+        double tmp1 = 2 * b00;
+        double tmp2 = tmp1 * akl;
+        double b10 = b00 + tmp4 * akl;
+        double c00x = xijxi - tmp2 * xijxkl;
+        double c00y = yijyi - tmp2 * yijykl;
+        double c00z = zijzi - tmp2 * zijzkl;
 
         if (NMAX > 0) {
             // gx(irys,0,1) = c00(irys) * gx(irys,0,0)
@@ -863,19 +847,19 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
             //        gz[j+dn] = c00z[i] * gz[j] + n * b10[i] * gz[j-dn];
             //    }
             //}
-            s0x = gx[i];
-            s0y = gy[i];
-            s0z = gz[i];
-            s1x = c00x * s0x;
-            s1y = c00y * s0y;
-            s1z = c00z * s0z;
+            double s0x = gx[i];
+            double s0y = gy[i];
+            double s0z = gz[i];
+            double s1x = c00x * s0x;
+            double s1y = c00y * s0y;
+            double s1z = c00z * s0z;
             gx[i+dn] = s1x;
             gy[i+dn] = s1y;
             gz[i+dn] = s1z;
             for (int n = 1; n < NMAX; ++n) {
-                s2x = c00x * s1x + n * b10 * s0x;
-                s2y = c00y * s1y + n * b10 * s0y;
-                s2z = c00z * s1z + n * b10 * s0z;
+                double s2x = c00x * s1x + n * b10 * s0x;
+                double s2y = c00y * s1y + n * b10 * s0y;
+                double s2z = c00z * s1z + n * b10 * s0z;
                 gx[i+(n+1)*dn] = s2x;
                 gy[i+(n+1)*dn] = s2y;
                 gz[i+(n+1)*dn] = s2z;
@@ -899,24 +883,24 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
             //        gz[j+dm] = c0pz[i] * gz[j] + m * b01[i] * gz[j-dm];
             //    }
             //}
-            tmp3 = tmp1 * aij;
-            b01 = b00 + tmp4 * aij;
-            c0px = xklxk + tmp3 * xijxkl;
-            c0py = yklyk + tmp3 * yijykl;
-            c0pz = zklzk + tmp3 * zijzkl;
-            s0x = gx[i];
-            s0y = gy[i];
-            s0z = gz[i];
-            s1x = c0px * s0x;
-            s1y = c0py * s0y;
-            s1z = c0pz * s0z;
+            double tmp3 = tmp1 * aij;
+            double b01 = b00 + tmp4 * aij;
+            double c0px = xklxk + tmp3 * xijxkl;
+            double c0py = yklyk + tmp3 * yijykl;
+            double c0pz = zklzk + tmp3 * zijzkl;
+            double s0x = gx[i];
+            double s0y = gy[i];
+            double s0z = gz[i];
+            double s1x = c0px * s0x;
+            double s1y = c0py * s0y;
+            double s1z = c0pz * s0z;
             gx[i+dm] = s1x;
             gy[i+dm] = s1y;
             gz[i+dm] = s1z;
             for (int m = 1; m < MMAX; ++m) {
-                s2x = c0px * s1x + m * b01 * s0x;
-                s2y = c0py * s1y + m * b01 * s0y;
-                s2z = c0pz * s1z + m * b01 * s0z;
+                double s2x = c0px * s1x + m * b01 * s0x;
+                double s2y = c0py * s1y + m * b01 * s0y;
+                double s2z = c0pz * s1z + m * b01 * s0z;
                 gx[i+(m+1)*dm] = s2x;
                 gy[i+(m+1)*dm] = s2y;
                 gz[i+(m+1)*dm] = s2z;
@@ -941,19 +925,19 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
                 //        gz[j+dm] = c0pz[i]*gz[j] + m*b01[i]*gz[j-dm] + b00[i]*gz[j-dn];
                 //    }
                 //}
-                s0x = gx[i+dn];
-                s0y = gy[i+dn];
-                s0z = gz[i+dn];
-                s1x = c0px * s0x + b00 * gx[i];
-                s1y = c0py * s0y + b00 * gy[i];
-                s1z = c0pz * s0z + b00 * gz[i];
+                double s0x = gx[i+dn];
+                double s0y = gy[i+dn];
+                double s0z = gz[i+dn];
+                double s1x = c0px * s0x + b00 * gx[i];
+                double s1y = c0py * s0y + b00 * gy[i];
+                double s1z = c0pz * s0z + b00 * gz[i];
                 gx[i+dn+dm] = s1x;
                 gy[i+dn+dm] = s1y;
                 gz[i+dn+dm] = s1z;
                 for (int m = 1; m < MMAX; ++m) {
-                    s2x = c0px*s1x + m*b01*s0x + b00*gx[i+m*dm];
-                    s2y = c0py*s1y + m*b01*s0y + b00*gy[i+m*dm];
-                    s2z = c0pz*s1z + m*b01*s0z + b00*gz[i+m*dm];
+                    double s2x = c0px*s1x + m*b01*s0x + b00*gx[i+m*dm];
+                    double s2y = c0py*s1y + m*b01*s0y + b00*gy[i+m*dm];
+                    double s2z = c0pz*s1z + m*b01*s0z + b00*gz[i+m*dm];
                     gx[i+dn+(m+1)*dm] = s2x;
                     gy[i+dn+(m+1)*dm] = s2y;
                     gz[i+dn+(m+1)*dm] = s2z;
@@ -981,17 +965,17 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
             //}
             int off = m * dm;
             int j = off + i;
-            s0x = gx[j];
-            s0y = gy[j];
-            s0z = gz[j];
-            s1x = gx[j + dn];
-            s1y = gy[j + dn];
-            s1z = gz[j + dn];
-            tmpb0 = m * b00;
+            double s0x = gx[j];
+            double s0y = gy[j];
+            double s0z = gz[j];
+            double s1x = gx[j + dn];
+            double s1y = gy[j + dn];
+            double s1z = gz[j + dn];
+            double tmpb0 = m * b00;
             for (int n = 1; n < NMAX; ++n) {
-                s2x = c00x*s1x + n*b10*s0x + tmpb0*gx[j+n*dn-dm];
-                s2y = c00y*s1y + n*b10*s0y + tmpb0*gy[j+n*dn-dm];
-                s2z = c00z*s1z + n*b10*s0z + tmpb0*gz[j+n*dn-dm];
+                double s2x = c00x*s1x + n*b10*s0x + tmpb0*gx[j+n*dn-dm];
+                double s2y = c00y*s1y + n*b10*s0y + tmpb0*gy[j+n*dn-dm];
+                double s2z = c00z*s1z + n*b10*s0z + tmpb0*gz[j+n*dn-dm];
                 gx[j+(n+1)*dn] = s2x;
                 gy[j+(n+1)*dn] = s2y;
                 gz[j+(n+1)*dn] = s2z;
@@ -1007,9 +991,9 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
 
     if (ijmin > 0) {
         // g(i,j) = rirj * g(i,j-1) +  g(i+1,j-1)
-        xixj = xi - bas_x[jsh];
-        yiyj = yi - bas_y[jsh];
-        zizj = zi - bas_z[jsh];
+        double xixj = xi - bas_x[jsh];
+        double yiyj = yi - bas_y[jsh];
+        double zizj = zi - bas_z[jsh];
         //for (k = 0; k <= mmax; ++k) {
         //for (j = 0; j < ijmin; ++j) {
         //for (i = nmax-1-j; i >= 0; i--) {
@@ -1022,30 +1006,31 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
         //} } }
 
         // unrolling j
+        int nmax = NMAX;
         int j;
         for (j = 0; j < ijmin-1; j+=2, nmax-=2) {
         for (int k = 0; k <= MMAX; ++k) {
             int off = k * dk + j * dj;
             for (int n = off; n < off+NROOTS; ++n) {
-                s0x = gx[n+nmax*di-di];
-                s0y = gy[n+nmax*di-di];
-                s0z = gz[n+nmax*di-di];
-                t1x = xixj * s0x + gx[n+nmax*di];
-                t1y = yiyj * s0y + gy[n+nmax*di];
-                t1z = zizj * s0z + gz[n+nmax*di];
+                double s0x = gx[n+nmax*di-di];
+                double s0y = gy[n+nmax*di-di];
+                double s0z = gz[n+nmax*di-di];
+                double t1x = xixj * s0x + gx[n+nmax*di];
+                double t1y = yiyj * s0y + gy[n+nmax*di];
+                double t1z = zizj * s0z + gz[n+nmax*di];
                 gx[dj+n+nmax*di-di] = t1x;
                 gy[dj+n+nmax*di-di] = t1y;
                 gz[dj+n+nmax*di-di] = t1z;
-                s1x = s0x;
-                s1y = s0y;
-                s1z = s0z;
+                double s1x = s0x;
+                double s1y = s0y;
+                double s1z = s0z;
                 for (int i = nmax-2; i >= 0; i--) {
                     s0x = gx[n+i*di];
                     s0y = gy[n+i*di];
                     s0z = gz[n+i*di];
-                    t0x = xixj * s0x + s1x;
-                    t0y = yiyj * s0y + s1y;
-                    t0z = zizj * s0z + s1z;
+                    double t0x = xixj * s0x + s1x;
+                    double t0y = yiyj * s0y + s1y;
+                    double t0z = zizj * s0z + s1z;
                     gx[dj+n+i*di] = t0x;
                     gy[dj+n+i*di] = t0y;
                     gz[dj+n+i*di] = t0z;
@@ -1066,13 +1051,13 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, double norm
             for (int k = 0; k <= MMAX; ++k) {
                 int off = k * dk + j * dj;
                 for (int n = off; n < off+NROOTS; ++n) {
-                    s1x = gx[n + nmax*di];
-                    s1y = gy[n + nmax*di];
-                    s1z = gz[n + nmax*di];
+                    double s1x = gx[n + nmax*di];
+                    double s1y = gy[n + nmax*di];
+                    double s1z = gz[n + nmax*di];
                     for (int i = nmax-1; i >= 0; i--) {
-                        s0x = gx[n+i*di];
-                        s0y = gy[n+i*di];
-                        s0z = gz[n+i*di];
+                        double s0x = gx[n+i*di];
+                        double s0y = gy[n+i*di];
+                        double s0z = gz[n+i*di];
                         gx[dj+n+i*di] = xixj * s0x + s1x;
                         gy[dj+n+i*di] = yiyj * s0y + s1y;
                         gz[dj+n+i*di] = zizj * s0z + s1z;
