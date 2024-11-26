@@ -136,6 +136,14 @@ def return_cupy_array(fn):
         return to_cupy(ret)
     return filter_ret
 
+def pack_tril(a):
+    if a.ndim == 2:
+        a = a[None]
+    n = a.shape[-1]
+    idx = cupy.arange(n)
+    mask = idx[:,None] >= idx
+    return a[:,mask]
+
 def unpack_tril(cderi_tril, cderi=None, stream=None):
     assert cderi_tril.flags.c_contiguous
     if cderi_tril.ndim == 1:

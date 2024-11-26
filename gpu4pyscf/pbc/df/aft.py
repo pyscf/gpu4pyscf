@@ -207,7 +207,4 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
 
     to_gpu = utils.to_gpu
     device = utils.device
-
-    def to_cpu(self):
-        obj = utils.to_cpu(self)
-        return obj.reset()
+    to_cpu = utils.to_cpu
