@@ -355,10 +355,9 @@ def get_int3c1e_density_contracted(mol, grids, dm, direct_scf_tol):
     omega = mol.omega
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
-    if cp.get_array_module(dm) is cp:
-        dm = cp.asnumpy(dm)
-    assert cp.get_array_module(dm) is np
+    dm = cp.asarray(dm)
     assert dm.ndim == 2
+    assert dm.shape[0] == dm.shape[1] and dm.shape[0] == mol.nao
 
     intopt = VHFOpt(mol, 'int2e')
     intopt.build(direct_scf_tol, diag_block_with_triu=False, aosym=True, group_size=BLKSIZE)
@@ -368,10 +367,12 @@ def get_int3c1e_density_contracted(mol, grids, dm, direct_scf_tol):
 
     dm = dm[np.ix_(intopt.ao_idx, intopt.ao_idx)] # intopt.ao_idx is in spherical basis
     if not mol.cart:
-        cart2sph_transformation_matrix = cp.asnumpy(intopt.cart2sph)
+        cart2sph_transformation_matrix = intopt.cart2sph
         # TODO: This part is inefficient (O(N^3)), should be changed to the O(N^2) algorithm
         dm = cart2sph_transformation_matrix @ dm @ cart2sph_transformation_matrix.T
     dm = dm.flatten(order='F') # Column major order matches (i + j * n_ao) access pattern in the C function
+
+    dm = cp.asnumpy(dm)
 
     ao_loc_sorted_order = intopt.sorted_mol.ao_loc_nr(cart = True)
     l_ij = intopt.l_ij.T.flatten()
@@ -434,7 +435,7 @@ def get_int3c1e_density_contracted(mol, grids, dm, direct_scf_tol):
 
     return cp.asnumpy(int3c_density_contracted)
 
-def intor(mol, intor, grids, dm=None, charges=None, direct_scf_tol=1e-13, omega=None):
+def intor(mol, intor, grids, dm=None, charges=None, direct_scf_tol=1e-13):
     assert intor == 'int1e_grids' and grids is not None
     assert dm is None or charges is None, \
         "Are you sure you want to contract the one electron integrals with both charge and density? " + \
