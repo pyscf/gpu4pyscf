@@ -227,7 +227,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
         if use_gpu_memory:
             with cupy.cuda.Device(device_id), _streams[device_id]:
                 _cderi[device_id] = cupy.empty([p1-p0, npairs])
-            log.debug(f"CDERI size {_cderi[device_id].nbytes/GB} on Device {device_id}")
+            log.debug(f"CDERI size {_cderi[device_id].nbytes/GB:.3f} on Device {device_id}")
         else:
             mem = cupy.cuda.alloc_pinned_memory((p1-p0) * npairs * 8)
             cderi_blk = np.ndarray([p1-p0, npairs], dtype=np.float64, order='C', buffer=mem)
@@ -254,6 +254,9 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
             future = executor.submit(_cderi_task, intopt, cd_low_f, task_list, _cderi,
                                      omega=omega, sr_only=sr_only, device_id=device_id)
             futures.append(future)
+    
+    for future in futures:
+        future.result()
     
     for device_id in range(_num_devices):
         cupy.cuda.Device(device_id).synchronize()

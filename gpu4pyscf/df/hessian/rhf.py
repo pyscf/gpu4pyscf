@@ -32,9 +32,7 @@ Ref:
 '''
 
 
-import numpy
 import cupy
-import numpy as np
 from pyscf import lib
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
@@ -147,7 +145,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         nocc = mocc.shape[1]
         slice_size = naux*nocc*9   # largest slice of intermediate variables
         blksize = int(mem_avail*0.2/8/slice_size/ALIGNED) * ALIGNED
-        log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
+        log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, {blksize} aux AOs per block')
         if blksize < ALIGNED:
             raise RuntimeError('Not enough memory for intermediate variables')
 
@@ -192,7 +190,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
         mem_avail = get_avail_mem()
         blksize = int((mem_avail*0.4/(nao*nao*3*8)/ALIGNED))*ALIGNED
-        log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
+        log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, {blksize} aux AOs per block')
         for k0, k1 in lib.prange(0,nnz,blksize):
             rhok1_Pko_kslice = cupy.asarray(rhok1_Pko[k0:k1])
 
@@ -469,7 +467,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
     mem_avail = get_avail_mem()
     blksize = int(mem_avail*0.2/(nao*nao*8*3)/ALIGNED) * ALIGNED
-    log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
+    log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, {blksize} aux AOs per block')
 
     intopt.build(mf.direct_scf_tol,
                  diag_block_with_triu=True,
@@ -536,7 +534,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         aux2atom = int3c2e.get_aux2atom(intopt, auxslices)
         mem_avail = get_avail_mem()
         blksize = int(0.2*mem_avail/(3*naux*nocc*8)/ALIGNED) * ALIGNED
-        log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
+        log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, {blksize} AOs per block')
         if blksize < ALIGNED:
             raise RuntimeError('Not enough memory to compute int3c2e_ip2')
 

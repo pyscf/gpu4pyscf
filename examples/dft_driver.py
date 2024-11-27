@@ -35,10 +35,10 @@ mol = pyscf.M(
     basis=bas,
     max_memory=32000)
 # set verbose >= 6 for debugging timer
-mol.verbose = 6
+mol.verbose = 7
 
 mf_df = dft.RKS(mol, xc=args.xc).density_fit(auxbasis=args.auxbasis)
-mf_df.verbose = 6
+mf_df.verbose = 7
 
 if args.solvent:
     mf_df = mf_df.PCM()
@@ -56,7 +56,7 @@ mf_df.conv_tol_cpscf = 1e-3
 e_tot = mf_df.kernel()
 scf_time = time.time() - start_time
 print(f'compute time for energy: {scf_time:.3f} s')
-exit()
+
 start_time = time.time()
 g = mf_df.nuc_grad_method()
 g.auxbasis_response = True
