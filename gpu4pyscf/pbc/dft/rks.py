@@ -19,11 +19,14 @@
 Non-relativistic Restricted Kohn-Sham for periodic systems at a single k-point
 '''
 
+__all__ = [
+    'RKS', 'KohnShamDFT',
+]
 
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.pbc.dft import rks as ks_cpu
+from pyscf.pbc.dft import rks as rks_cpu
 from pyscf.pbc.scf import khf
 from pyscf.pbc.dft import multigrid
 from gpu4pyscf.lib import logger, utils
@@ -31,12 +34,8 @@ from gpu4pyscf.dft import rks as mol_ks
 from gpu4pyscf.pbc.scf import hf as pbchf
 from gpu4pyscf.pbc.dft import gen_grid
 from gpu4pyscf.pbc.dft import numint
-from gpu4pyscf.lib.cupy_helper import contract, tag_array
+from gpu4pyscf.lib.cupy_helper import return_cupy_array, tag_array
 from pyscf import __config__
-
-__all__ = [
-    'get_veff', 'RKS', 'KohnShamDFT',
-]
 
 def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
              kpt=None, kpts_band=None):
@@ -60,6 +59,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     if dm is None: dm = ks.make_rdm1()
     if kpt is None: kpt = ks.kpt
     t0 = logger.init_timer(ks)
+    log = logger.new_logger()
 
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)
@@ -77,7 +77,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     else:
         n, exc, vxc = ni.nr_rks(cell, ks.grids, ks.xc, dm, 0, hermi,
                                 kpt, kpts_band)
-        logger.info(ks, 'nelec by numeric integration = %s', n)
+        log.info('nelec by numeric integration = %s', n)
         if ks.do_nlc():
             if ni.libxc.is_nlc(ks.xc):
                 xc = ks.xc
@@ -87,8 +87,8 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
             n, enlc, vnlc = ni.nr_nlc_vxc(cell, ks.nlcgrids, xc, dm, 0, hermi, kpt)
             exc += enlc
             vxc += vnlc
-            logger.info(ks, 'nelec with nlc grids = %s', n)
-        t0 = logger.timer(ks, 'vxc', *t0)
+            log.info('nelec with nlc grids = %s', n)
+        t0 = log.timer('vxc', *t0)
 
     if not hybrid:
         vj = ks.get_j(cell, dm, hermi, kpt, kpts_band)
@@ -112,13 +112,14 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
             vklr = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
             vklr *= (alpha - hyb)
             vk += vklr
-        vxc += vj - vk * .5
+        vxc += vj
+        vxc -= vk * .5
 
         if ground_state:
-            exc -= contract('ij,ji->', dm, vk).real * .5 * .5
+            exc -= cp.einsum('ij,ji->', dm, vk).real * .5 * .5
 
     if ground_state:
-        ecoul = contract('ij,ji->', dm, vj).real * .5
+        ecoul = cp.einsum('ij,ji->', dm, vj).real * .5
     else:
         ecoul = None
 
@@ -128,42 +129,30 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
 def prune_small_rho_grids_(ks, cell, dm, grids, kpts):
     raise NotImplementedError
 
-def get_rho(mf, dm=None, grids=None, kpt=None):
-    if dm is None: dm = mf.make_rdm1()
-    if grids is None: grids = mf.grids
-    if kpt is None: kpt = mf.kpt
-    if dm[0].ndim == 2:  # the UKS density matrix
-        dm = dm[0] + dm[1]
-    if isinstance(mf.with_df, multigrid.MultiGridFFTDF):
-        rho = mf.with_df.get_rho(dm, kpt)
-    else:
-        rho = mf._numint.get_rho(mf.cell, dm, grids, kpt, mf.max_memory)
-    return rho
-
-
 class KohnShamDFT(mol_ks.KohnShamDFT):
     '''PBC-KS'''
 
-    _keys = ks_cpu.KohnShamDFT._keys
+    _keys = rks_cpu.KohnShamDFT._keys
+
+    small_rho_cutoff = getattr(
+        __config__, 'dft_rks_RKS_small_rho_cutoff', 1e-7)
 
     def __init__(self, xc='LDA,VWN'):
         self.xc = xc
         self.grids = gen_grid.UniformGrids(self.cell)
         self.nlc = ''
         self.nlcgrids = gen_grid.UniformGrids(self.cell)
-        self.small_rho_cutoff = getattr(
-            __config__, 'dft_rks_RKS_small_rho_cutoff', 1e-7)
         if isinstance(self, khf.KSCF):
             self._numint = numint.KNumInt(self.kpts)
         else:
             self._numint = numint.NumInt()
 
-    build = ks_cpu.KohnShamDFT.build
-    reset = ks_cpu.KohnShamDFT.reset
-    dump_flags = ks_cpu.KohnShamDFT.dump_flags
+    build = rks_cpu.KohnShamDFT.build
+    reset = rks_cpu.KohnShamDFT.reset
+    dump_flags = rks_cpu.KohnShamDFT.dump_flags
 
     get_veff = NotImplemented
-    get_rho = get_rho
+    get_rho = return_cupy_array(rks_cpu.get_rho)
 
     density_fit = NotImplemented
     rs_density_fit = NotImplemented
@@ -223,6 +212,6 @@ class RKS(KohnShamDFT, pbchf.RHF):
     device = utils.device
 
     def to_cpu(self):
-        mf = ks_cpu.RKS(self.cell)
+        mf = rks_cpu.RKS(self.cell)
         utils.to_cpu(self, out=mf)
         return mf

@@ -17,6 +17,9 @@
 
 '''Density expansion on plane waves'''
 
+__all__ = [
+    'get_pp', 'get_nuc', 'AFTDF'
+]
 
 import contextlib
 import numpy as np

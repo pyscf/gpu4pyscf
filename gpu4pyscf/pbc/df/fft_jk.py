@@ -19,6 +19,11 @@
 JK with GPW
 '''
 
+__all__ = [
+    'get_j_kpts', 'get_k_kpts', 'get_jk', 'get_j', 'get_k',
+    'get_j_e1_kpts', 'get_k_e1_kpts'
+]
+
 import numpy as np
 import cupy as cp
 from pyscf import lib
@@ -27,11 +32,6 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
-
-__all__ = [
-    'get_j_kpts', 'get_k_kpts', 'get_jk', 'get_j', 'get_k',
-    'get_j_e1_kpts', 'get_k_e1_kpts'
-]
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.

@@ -19,6 +19,9 @@
 JK with analytic Fourier transformation
 '''
 
+__all__ = [
+    'get_j_kpts', 'get_k_kpts', 'get_jk'
+]
 
 import ctypes
 import numpy as np
@@ -32,10 +35,6 @@ from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks, _ewald_exxdiv_for_G0
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
-
-__all__ = [
-    'get_j_kpts', 'get_k_kpts', 'get_jk'
-]
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     if kpts_band is not None:

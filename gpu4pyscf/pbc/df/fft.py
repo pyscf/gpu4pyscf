@@ -17,6 +17,10 @@
 
 '''GPW method'''
 
+__all__ = [
+    'get_nuc', 'get_pp', 'get_SI', 'FFTDF'
+]
+
 import numpy as np
 import cupy as cp
 from pyscf import gto
@@ -29,10 +33,6 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.df import fft_jk
-
-__all__ = [
-    'get_nuc', 'get_pp', 'get_SI', 'FFTDF'
-]
 
 def get_nuc(mydf, kpts=None):
     from gpu4pyscf.pbc.dft import numint

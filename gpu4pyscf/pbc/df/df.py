@@ -22,6 +22,8 @@ Divide the 3-center Coulomb integrals to two parts.  Compute the local
 part in real space, long range part in reciprocal space.
 '''
 
+__all__ = ['GDF']
+
 import ctypes
 import tempfile
 import numpy as np
@@ -37,10 +39,6 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.df import df_jk
 from gpu4pyscf.lib.cupy_helper import return_cupy_array, pack_tril, unpack_tril
 from gpu4pyscf.lib import utils
-
-LINEAR_DEP_THR = df_cpu.LINEAR_DEP_THR
-LONGRANGE_AFT_TURNOVER_THRESHOLD = df_cpu.LONGRANGE_AFT_TURNOVER_THRESHOLD
-
 
 class GDF(lib.StreamObject):
     '''Gaussian density fitting

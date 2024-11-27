@@ -15,6 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+__all__ = [
+    'density_fit', 'get_j_kpts', 'get_k_kpts',
+    'get_j_kpts_kshift', 'get_k_kpts_kshift'
+]
 
 import numpy as np
 import cupy as cp
@@ -24,11 +28,6 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, unpack_tril
 from gpu4pyscf.pbc.df.fft_jk import _ewald_exxdiv_for_G0, _format_dms, _format_jks
-
-__all__ = [
-    'density_fit', 'get_j_kpts', 'get_k_kpts',
-    'get_j_kpts_kshift', 'get_k_kpts_kshift'
-]
 
 def density_fit(mf, auxbasis=None, mesh=None, with_df=None):
     '''Generte density-fitting SCF object
