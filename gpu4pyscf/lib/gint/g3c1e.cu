@@ -15,7 +15,6 @@
  */
 
 #include "gint.h"
-#include "config.h" // For SQRTPI
 
 template <int NROOTS>
 __device__
@@ -23,7 +22,7 @@ static void GINTwrite_int3c1e(const double* g, double* output, const int ish, co
                               const int i_l, const int j_l, const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j)
 {
     const int* ao_loc = c_bpcache.ao_loc;
-    
+
     const int i0 = ao_loc[ish  ] - ao_offsets_i;
     const int i1 = ao_loc[ish+1] - ao_offsets_i;
     const int j0 = ao_loc[jsh  ] - ao_offsets_j;
@@ -88,6 +87,89 @@ void GINTfill_int3c1e_kernel_general(double* output, const BasisProdOffsets offs
     }
 }
 
+
+template <int NROOTS>
+__device__
+static void GINTwrite_int3c1e_charge_contracted(const double* g, double* local_output, double prefactor, const int i_l, const int j_l)
+{
+    const int16_t* cart_component_ix = c_idx4c;
+    const int16_t* cart_component_iy = c_idx4c + GPU_CART_MAX;
+    const int16_t* cart_component_iz = c_idx4c + GPU_CART_MAX * 2;
+    const int16_t* cart_component_jx = c_idx4c + GPU_CART_MAX * 3;
+    const int16_t* cart_component_jy = c_idx4c + GPU_CART_MAX * 4;
+    const int16_t* cart_component_jz = c_idx4c + GPU_CART_MAX * 5;
+
+    const int g_size = NROOTS * (i_l + 1) * (j_l + 1);
+    const double* __restrict__ gx = g;
+    const double* __restrict__ gy = g + g_size;
+    const double* __restrict__ gz = g + g_size * 2;
+
+    for (int j = 0; j < (j_l + 1) * (j_l + 2) / 2; j++) {
+        for (int i = 0; i < (i_l + 1) * (i_l + 2) / 2; i++) {
+            const int ix = cart_component_ix[i] + cart_component_jx[j] * (i_l+1);
+            const int iy = cart_component_iy[i] + cart_component_jy[j] * (i_l+1);
+            const int iz = cart_component_iz[i] + cart_component_jz[j] * (i_l+1);
+
+            double eri = 0;
+#pragma unroll
+            for (int i_root = 0; i_root < NROOTS; i_root++) {
+                eri += gx[ix * NROOTS + i_root] * gy[iy * NROOTS + i_root] * gz[iz * NROOTS + i_root];
+            }
+            local_output[i + j * ((i_l + 1) * (i_l + 2) / 2)] += eri * prefactor;
+        }
+    }
+}
+
+template <int NROOTS, int GSIZE_INT3C_1E>
+__global__
+void GINTfill_int3c1e_charge_contracted_kernel_general(double* output, const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
+                                                       const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
+                                                       const double omega, const double* grid_points)
+{
+    const int ntasks_ij = offsets.ntasks_ij;
+    const int ngrids = offsets.ntasks_kl;
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    if (task_ij >= ntasks_ij) {
+        return;
+    }
+
+    const int bas_ij = offsets.bas_ij + task_ij;
+    const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
+    const int* bas_pair2bra = c_bpcache.bas_pair2bra;
+    const int* bas_pair2ket = c_bpcache.bas_pair2ket;
+    const int ish = bas_pair2bra[bas_ij];
+    const int jsh = bas_pair2ket[bas_ij];
+
+    constexpr int l_sum_max = (NROOTS - 1) * 2 + 1;
+    constexpr int l_i_max_density_elements = (l_sum_max + 1) / 2;
+    constexpr int l_j_max_density_elements = l_sum_max - l_i_max_density_elements;
+    double output_cache[(l_i_max_density_elements + 1) * (l_i_max_density_elements + 2) / 2
+                        * (l_j_max_density_elements + 1) * (l_j_max_density_elements + 2) / 2] { 0.0 };
+
+    for (int task_grid = blockIdx.y * blockDim.y + threadIdx.y; task_grid < ngrids; task_grid += gridDim.y * blockDim.y) {
+        const double* grid_point = grid_points + task_grid * 4;
+        const double charge = grid_point[3];
+
+        double g[GSIZE_INT3C_1E];
+
+        for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+            GINTg1e<NROOTS>(g, grid_point, ish, jsh, ij, i_l, j_l, omega);
+            GINTwrite_int3c1e_charge_contracted<NROOTS>(g, output_cache, charge, i_l, j_l);
+        }
+    }
+
+    const int* ao_loc = c_bpcache.ao_loc;
+
+    const int i0 = ao_loc[ish  ] - ao_offsets_i;
+    const int j0 = ao_loc[jsh  ] - ao_offsets_j;
+    for (int j = 0; j < (j_l + 1) * (j_l + 2) / 2; j++) {
+        for (int i = 0; i < (i_l + 1) * (i_l + 2) / 2; i++) {
+            const double eri_grid_sum = output_cache[i + j * ((i_l + 1) * (i_l + 2) / 2)];
+            atomicAdd(output + ((i + i0) + (j + j0) * stride_j), eri_grid_sum);
+        }
+    }
+}
+
 template <int NROOTS>
 __global__
 void GINT_int3c1e_density_contracted_kernel_general(double* output, const double* density, const HermiteDensityOffsets hermite_density_offsets,
@@ -101,6 +183,11 @@ void GINT_int3c1e_density_contracted_kernel_general(double* output, const double
         return;
     }
 
+    const double* grid_point = grid_points + task_grid * 3;
+    const double Cx = grid_point[0];
+    const double Cy = grid_point[1];
+    const double Cz = grid_point[2];
+
     double eri_with_density_pair_sum = 0.0;
     for (int task_ij = blockIdx.x * blockDim.x + threadIdx.x; task_ij < ntasks_ij; task_ij += gridDim.x * blockDim.x) {
         const int bas_ij = offsets.bas_ij + task_ij;
@@ -109,8 +196,6 @@ void GINT_int3c1e_density_contracted_kernel_general(double* output, const double
         // const int* bas_pair2ket = c_bpcache.bas_pair2ket;
         const int ish = bas_pair2bra[bas_ij];
         // const int jsh = bas_pair2ket[bas_ij];
-
-        const double* grid_point = grid_points + task_grid * 3;
 
         constexpr int l_max = (NROOTS - 1) * 2 + 1;
         double D_hermite[(l_max + 1) * (l_max + 2) * (l_max + 3) / 6];
@@ -122,14 +207,14 @@ void GINT_int3c1e_density_contracted_kernel_general(double* output, const double
         double eri_with_density_per_pair = 0.0;
         for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
             double g[NROOTS * (l_max + 1) * 3];
-            GINT_g1e_without_hrr<NROOTS>(g, grid_point, ish, ij, l, omega);
+            GINT_g1e_without_hrr<NROOTS>(g, Cx, Cy, Cz, ish, ij, l, omega);
 
             double eri_with_density_per_primitive = 0.0;
             for (int i_x = 0, i_t = 0; i_x <= l; i_x++) {
                 for (int i_y = 0; i_x + i_y <= l; i_y++) {
                     for (int i_z = 0; i_x + i_y + i_z <= l; i_z++, i_t++) {
                         const double D_t = D_hermite[i_t];
-    #pragma unroll
+#pragma unroll
                         for (int i_root = 0; i_root < NROOTS; i_root++) {
                             const double gx = g[i_root + NROOTS * i_x];
                             const double gy = g[i_root + NROOTS * i_y + NROOTS * (l + 1)];

@@ -98,6 +98,20 @@ class KnownValues(unittest.TestCase):
         test_int1e_dot_D = intor(mol_sph, 'int1e_grids', grid_points, dm = dm)
         assert np.abs(ref_int1e_dot_D - test_int1e_dot_D).max() < density_contraction_threshold
 
+    def test_int1e_grids_charge_contracted_cart(self):
+        np.random.seed(12347)
+        charges = np.random.uniform(-2.0, 2.0, grid_points.shape[0])
+        ref_int1e_dot_q = np.einsum('pij,p->ij', mol_cart.intor('int1e_grids', grids=grid_points), charges)
+        test_int1e_dot_q = intor(mol_cart, 'int1e_grids', grid_points, charges = charges)
+        assert np.abs(ref_int1e_dot_q - test_int1e_dot_q).max() < density_contraction_threshold
+
+    def test_int1e_grids_charge_contracted_sph(self):
+        np.random.seed(12348)
+        charges = np.random.uniform(-2.0, 2.0, grid_points.shape[0])
+        ref_int1e_dot_q = np.einsum('pij,p->ij', mol_sph.intor('int1e_grids', grids=grid_points), charges)
+        test_int1e_dot_q = intor(mol_sph, 'int1e_grids', grid_points, charges = charges)
+        assert np.abs(ref_int1e_dot_q - test_int1e_dot_q).max() < density_contraction_threshold
+
     def test_int1e_grids_full_tensor_omega(self):
         omega = 0.8
         mol_sph_omega = mol_sph.copy()
@@ -118,6 +132,18 @@ class KnownValues(unittest.TestCase):
         ref_int1e_dot_D = np.einsum('pij,ij->p', mol_sph_omega.intor('int1e_grids', grids=grid_points), dm)
         test_int1e_dot_D = intor(mol_sph_omega, 'int1e_grids', grid_points, dm = dm)
         assert np.abs(ref_int1e_dot_D - test_int1e_dot_D).max() < integral_threshold
+
+    def test_int1e_grids_charge_contracted_omega(self):
+        np.random.seed(12349)
+        charges = np.random.uniform(-2.0, 2.0, grid_points.shape[0])
+
+        omega = 1.2
+        mol_sph_omega = mol_sph.copy()
+        mol_sph_omega.set_range_coulomb(omega)
+
+        ref_int1e_dot_q = np.einsum('pij,p->ij', mol_sph_omega.intor('int1e_grids', grids=grid_points), charges)
+        test_int1e_dot_q = intor(mol_sph_omega, 'int1e_grids', grid_points, charges = charges)
+        assert np.abs(ref_int1e_dot_q - test_int1e_dot_q).max() < integral_threshold
 
 if __name__ == "__main__":
     print("Full Tests for One Electron Coulomb Integrals")

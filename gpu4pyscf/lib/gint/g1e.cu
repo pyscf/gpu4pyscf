@@ -69,6 +69,7 @@ static void GINTg1e(double* __restrict__ g, const double* __restrict__ grid_poin
     const double PAy = Py - Ay;
     const double PAz = Pz - Az;
 
+#pragma unroll
     for (int i_root = 0; i_root < NROOTS; i_root++) {
         gx[i_root] = 1.0;
         gy[i_root] = prefactor;
@@ -130,8 +131,8 @@ static void GINTg1e(double* __restrict__ g, const double* __restrict__ grid_poin
 
 template <int NROOTS>
 __device__
-static void GINT_g1e_without_hrr(double* __restrict__ g, const double* __restrict__ grid_point, const int ish, const int prim_ij,
-                                 const int l, const double omega)
+static void GINT_g1e_without_hrr(double* __restrict__ g, const double grid_x, const double grid_y, const double grid_z,
+                                 const int ish, const int prim_ij, const int l, const double omega)
 {
     const double* __restrict__ a12 = c_bpcache.a12;
     const double* __restrict__ e12 = c_bpcache.e12;
@@ -143,13 +144,10 @@ static void GINT_g1e_without_hrr(double* __restrict__ g, const double* __restric
     const double Px  = x12[prim_ij];
     const double Py  = y12[prim_ij];
     const double Pz  = z12[prim_ij];
-    const double Cx = grid_point[0];
-    const double Cy = grid_point[1];
-    const double Cz = grid_point[2];
 
-    const double PCx = Px - Cx;
-    const double PCy = Py - Cy;
-    const double PCz = Pz - Cz;
+    const double PCx = Px - grid_x;
+    const double PCy = Py - grid_y;
+    const double PCz = Pz - grid_z;
     double a0 = aij;
     const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
     const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
@@ -179,6 +177,7 @@ static void GINT_g1e_without_hrr(double* __restrict__ g, const double* __restric
     const double PAy = Py - Ay;
     const double PAz = Pz - Az;
 
+#pragma unroll
     for (int i_root = 0; i_root < NROOTS; i_root++) {
         gx[i_root] = 1.0;
         gy[i_root] = prefactor;
