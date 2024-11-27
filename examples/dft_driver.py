@@ -56,7 +56,7 @@ mf_df.conv_tol_cpscf = 1e-3
 e_tot = mf_df.kernel()
 scf_time = time.time() - start_time
 print(f'compute time for energy: {scf_time:.3f} s')
-exit()
+
 start_time = time.time()
 g = mf_df.nuc_grad_method()
 g.auxbasis_response = True
