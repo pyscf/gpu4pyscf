@@ -14,6 +14,77 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// Unrolled version
+template <int LI, int LJ, int LK> __global__
+void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
+{
+    int ntasks_ij = offsets.ntasks_ij;
+    int ntasks_kl = offsets.ntasks_kl;
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    bool active = true;
+    if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
+        active = false;
+        task_ij = 0;
+        task_kl = 0;
+    }
+    double norm = envs.fac;
+    int bas_ij = offsets.bas_ij + task_ij;
+    int bas_kl = offsets.bas_kl + task_kl;
+    int nprim_ij = envs.nprim_ij;
+    int nprim_kl = envs.nprim_kl;
+    int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
+    int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
+    int *bas_pair2bra = c_bpcache.bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int ish = bas_pair2bra[bas_ij];
+    int jsh = bas_pair2ket[bas_ij];
+    int ksh = bas_pair2bra[bas_kl];
+    int lsh = bas_pair2ket[bas_kl];
+    double* __restrict__ exp = c_bpcache.a1;
+    constexpr int LI_CEIL = LI + 1;
+    constexpr int NROOTS = (LI_CEIL+LJ+LK)/2 + 1;
+    constexpr int GSIZE = 3 * NROOTS * (LI_CEIL+1)*(LJ+1)*(LK+1);
+
+    double g[2*GSIZE];
+    double *f = g + GSIZE;
+
+    int as_ish, as_jsh, as_ksh, as_lsh;
+    if (envs.ibase) {
+        as_ish = ish;
+        as_jsh = jsh;
+    } else {
+        as_ish = jsh;
+        as_jsh = ish;
+    }
+    if (envs.kbase) {
+        as_ksh = ksh;
+        as_lsh = lsh;
+    } else {
+        as_ksh = lsh;
+        as_lsh = ksh;
+    }
+
+    constexpr int nfi = (LI+1)*(LI+2)/2;
+    double j3[nfi * 3];
+    double k3[nfi * 3];
+    for (int k = 0; k < nfi * 3; k++){
+        j3[k] = 0.0;
+        k3[k] = 0.0;
+    }
+    if (active) {
+        for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+            for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+                GINTg0_int3c2e<LI_CEIL, LJ, LK>(envs, g, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+                double ai2 = -2.0*exp[ij];
+                GINTnabla1i_2e<LI, LJ, LK, NROOTS>(envs, f, g, ai2);
+                GINTkernel_int3c2e_ip1_getjk_direct<LI, LJ, LK>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
+            }
+        }
+    }
+
+    write_int3c2e_ip1_jk(jk, j3, k3, ish);
+}
 
 template <int NROOTS, int GSIZE> __global__
 void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
@@ -71,7 +142,7 @@ void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
     if (active) {
         for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
             for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-            GINTg0_2e_2d4d<NROOTS>(envs, g, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+            GINTg0_int3c2e<NROOTS>(envs, g, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
             double ai2 = -2.0*exp[ij];
             GINTnabla1i_2e<NROOTS>(envs, f, g, ai2, envs.i_l, envs.j_l, envs.k_l);
             GINTkernel_int3c2e_ip1_getjk_direct<NROOTS>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
@@ -83,7 +154,7 @@ void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
 }
 
 __global__
-static void GINTrun_int3c2e_ip1_jk_kernel1000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
+static void GINTint3c2e_ip1_jk_kernel000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;

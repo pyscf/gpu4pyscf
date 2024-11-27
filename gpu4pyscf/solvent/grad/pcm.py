@@ -248,7 +248,7 @@ def grad_qv(pcmobj, dm):
 
     dvj, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip1', q_sym, None, dm_cart)
     dq, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip2', q_sym, None, dm_cart)
-
+    
     _sorted_mol = intopt._sorted_mol
     nao_cart = _sorted_mol.nao
     natm = _sorted_mol.natm

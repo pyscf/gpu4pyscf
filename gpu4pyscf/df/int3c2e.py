@@ -391,12 +391,14 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
                 rhok_tmp.get(out=wk[k0:k1])
     return wj, wk
 
-def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None):
+def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None, stream=None):
     '''
     build jk with int3c2e slice (sliced in k dimension)
     '''
-    fn = getattr(libgvhf, 'GINTbuild_int3c2e_' + ip_type + '_jk')
     if omega is None: omega = 0.0
+    if stream is None: stream = cupy.cuda.get_current_stream()
+
+    fn = getattr(libgvhf, 'GINTbuild_int3c2e_' + ip_type + '_jk')
     nao = intopt._sorted_mol.nao
     n_dm = 1
 
@@ -431,6 +433,7 @@ def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None):
     ntasks_kl = len(log_q_kl)
     ncp_ij = len(intopt.log_qs)
     err = fn(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
         vj_ptr,
         vk_ptr,
