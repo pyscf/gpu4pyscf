@@ -33,6 +33,13 @@ flops = 2*np.prod(a0.shape) * b0.shape[0]
 print(flops/perf.gpu_times.mean()/1024**3, 'GFLOPS')
 
 print('benchmarking tensor contraction with stride')
+a0 = a[64:480,:,:128]
+b0 = b[:,64:480]
+perf = profiler.benchmark(contract, ('kji,lk->ijl', a0, b0), n_repeat=20, n_warmup=3)
+flops = 2*np.prod(a0.shape) * b0.shape[0]
+print(flops/perf.gpu_times.mean()/1024**3, 'GFLOPS')
+
+print('benchmarking tensor contraction with stride')
 a0 = cupy.random.random([320,128*128])
 b0 = cupy.random.random([320,128*128])
 perf = profiler.benchmark(contract, ('jk,jk->j', a0, b0), n_repeat=20, n_warmup=3)

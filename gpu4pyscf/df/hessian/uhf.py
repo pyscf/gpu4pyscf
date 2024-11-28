@@ -41,7 +41,7 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import uhf as uhf_hess
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.lib.cupy_helper import (
-    contract, tag_array, get_avail_mem, release_gpu_stack, take_last2d, pinv)
+    contract, tag_array, get_avail_mem, release_gpu_stack, pinv)
 from gpu4pyscf.df import int3c2e, df
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__

@@ -14,7 +14,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-import numpy
 import cupy
 import pyscf
 from pyscf import lib

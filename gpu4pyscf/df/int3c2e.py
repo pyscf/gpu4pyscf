@@ -15,18 +15,16 @@
 
 
 import ctypes
-import copy
 import numpy as np
 import cupy
 from pyscf import gto, df, lib
 from pyscf.scf import _vhf
-from gpu4pyscf.scf.int4c2e import (BasisProdCache, _make_s_index_offsets,
-                                   libgvhf, libgint)
-from gpu4pyscf.lib.cupy_helper import (
-    block_c2s_diag, cart2sph, block_diag, contract, load_library, get_avail_mem,
-    print_mem_info, take_last2d, libcupy_helper)
+from gpu4pyscf.scf.int4c2e import BasisProdCache, libgvhf, libgint
+from gpu4pyscf.lib.cupy_helper import block_c2s_diag, cart2sph, contract, get_avail_mem
+
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import basis_seg_contraction
+from gpu4pyscf.__config__ import _num_devices, _streams
 
 LMAX_ON_GPU = 8
 FREE_CUPY_CACHE = True
@@ -77,8 +75,6 @@ class VHFOpt(_vhf.VHFOpt):
         self._qcondname = qcondname
         self._dmcondname = dmcondname
 
-        self.bpcache = None
-
         self.cart_ao_loc = []
         self.cart_aux_loc = []
         self.sph_ao_loc = []
@@ -97,8 +93,8 @@ class VHFOpt(_vhf.VHFOpt):
 
     def clear(self):
         _vhf.VHFOpt.__del__(self)
-        if self.bpcache is not None:
-            libgvhf.GINTdel_basis_prod(ctypes.byref(self.bpcache))
+        for n, bpcache in self._bpcache.items():
+            libgvhf.GINTdel_basis_prod(ctypes.byref(bpcache))
         return self
 
     def __del__(self):
@@ -190,11 +186,11 @@ class VHFOpt(_vhf.VHFOpt):
 
         ao_loc = _sorted_mol.ao_loc_nr(cart=_mol.cart)
         self.ao_pairs_row, self.ao_pairs_col = get_ao_pairs(pair2bra, pair2ket, ao_loc)
-        cderi_row = cupy.hstack(self.ao_pairs_row)
-        cderi_col = cupy.hstack(self.ao_pairs_col)
+        cderi_row = np.hstack(self.ao_pairs_row)
+        cderi_col = np.hstack(self.ao_pairs_col)
         self.cderi_row = cderi_row
         self.cderi_col = cderi_col
-        self.cderi_diag = cupy.argwhere(cderi_row == cderi_col)[:,0]
+        self.cderi_diag = np.argwhere(cderi_row == cderi_col)[:,0]
         cput1 = log.timer_debug1('Get AO pairs', *cput1)
 
         aux_pair2bra = []
@@ -228,16 +224,20 @@ class VHFOpt(_vhf.VHFOpt):
         ao_loc = _tot_mol.ao_loc_nr(cart=True)
         ncptype = len(log_qs)
 
-        self.bpcache = ctypes.POINTER(BasisProdCache)()
-        scale_shellpair_diag = 1.
-        libgint.GINTinit_basis_prod(
-            ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),
-            ao_loc.ctypes.data_as(ctypes.c_void_p),
-            bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
-            bas_pairs_locs.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ncptype),
-            _tot_mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_tot_mol.natm),
-            _tot_mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_tot_mol.nbas),
-            _tot_mol._env.ctypes.data_as(ctypes.c_void_p))
+        self._bpcache = {}
+        for n in range(_num_devices):
+            with cupy.cuda.Device(n), _streams[n]:
+                bpcache = ctypes.POINTER(BasisProdCache)()
+                scale_shellpair_diag = 1.
+                libgint.GINTinit_basis_prod(
+                    ctypes.byref(bpcache), ctypes.c_double(scale_shellpair_diag),
+                    ao_loc.ctypes.data_as(ctypes.c_void_p),
+                    bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
+                    bas_pairs_locs.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ncptype),
+                    _tot_mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_tot_mol.natm),
+                    _tot_mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_tot_mol.nbas),
+                    _tot_mol._env.ctypes.data_as(ctypes.c_void_p))
+                self._bpcache[n] = bpcache
 
         cput1 = log.timer_debug1('Initialize GPU cache', *cput1)
         self.bas_pairs_locs = bas_pairs_locs
@@ -260,6 +260,12 @@ class VHFOpt(_vhf.VHFOpt):
 
         self._sorted_mol = _sorted_mol
         self._sorted_auxmol = _sorted_auxmol
+    
+    @property
+    def bpcache(self):
+        device_id = cupy.cuda.Device().id
+        bpcache = self._bpcache[device_id]
+        return bpcache
 
     def sort_orbitals(self, mat, axis=[], aux_axis=[]):
         ''' Transform given axis of a matrix into sorted AO,
@@ -453,7 +459,6 @@ def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None, st
         raise RuntimeError(f'GINT_getjk_int2e_ip failed, err={err}')
 
     return vj, vk
-
 
 def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
     '''
@@ -1385,10 +1390,12 @@ def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, cart=False, aosym=None, out=N
     nbins = 1
     bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
     bins_locs_kl = np.array([0, len(log_q_kl)], dtype=np.int32)
-
-    i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
-    j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
-    k0, k1 = intopt.cart_aux_loc[cp_aux_id], intopt.cart_aux_loc[cp_aux_id+1]
+    
+    cart_ao_loc = intopt.cart_ao_loc
+    cart_aux_loc = intopt.cart_aux_loc
+    i0, i1 = cart_ao_loc[cpi], cart_ao_loc[cpi+1]
+    j0, j1 = cart_ao_loc[cpj], cart_ao_loc[cpj+1]
+    k0, k1 = cart_aux_loc[cp_aux_id], cart_aux_loc[cp_aux_id+1]
 
     ni = i1 - i0
     nj = j1 - j0
@@ -1425,10 +1432,13 @@ def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, cart=False, aosym=None, out=N
 
     if err != 0:
         raise RuntimeError('GINT_fill_int2e failed')
-
+    
     # move this operation to j2c?
     if lk > 1 and intopt.auxmol.cart == 0:
         int3c_blk = cart2sph(int3c_blk, axis=0, ang=lk, out=out)
+    
+    stream.synchronize()
+
     return int3c_blk
 
 def get_int3c2e(mol, auxmol=None, auxbasis='weigend+etb', direct_scf_tol=1e-13, aosym=True, omega=None):

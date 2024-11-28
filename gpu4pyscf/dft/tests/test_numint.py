@@ -80,6 +80,7 @@ class KnownValues(unittest.TestCase):
 
         v = cupy.asarray(v)
         vref = cupy.asarray(vref)
+
         assert cupy.allclose(e, eref)
         assert cupy.allclose(n, nref)
         assert cupy.allclose(v, vref)

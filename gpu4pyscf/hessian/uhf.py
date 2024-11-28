@@ -23,9 +23,6 @@ Non-relativistic UHF analytical Hessian
 '''
 
 from functools import reduce
-import ctypes
-import numpy
-import numpy as np
 import cupy
 import cupy as cp
 from pyscf import lib
@@ -35,7 +32,6 @@ from gpu4pyscf.scf import ucphf
 from gpu4pyscf.gto.mole import sort_atoms
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, get_avail_mem
 from gpu4pyscf.lib import logger
-from gpu4pyscf.df import int3c2e
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess_gpu
 
