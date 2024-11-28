@@ -62,27 +62,28 @@ SCFDIIS = SCF_DIIS = DIIS = CDIIS
 def get_err_vec(s, d, f):
     '''error vector = SDF - FDS'''
     if f.ndim == s.ndim+1: # UHF
-        if f.shape[0] == 2: # molecular SCF or single k-point
-            sdf = cupy.hstack([s.dot(d[0]).dot(f[0]),
-                               s.dot(d[1]).dot(f[1])])
-            errvec = sdf.conj().T - sdf
+        assert len(f) == 2
+        if s.ndim == 2: # molecular SCF or single k-point
+            sdf = cupy.stack([s.dot(d[0]).dot(f[0]),
+                              s.dot(d[1]).dot(f[1])])
+            errvec = sdf - sdf.conj().transpose(0,2,1)
         else: # k-points
             nkpts = len(f)
-            sdf = cp.empty_like(f)
+            sdf = cupy.empty_like(f)
             for k in range(nkpts):
                 sdf[0,k] = s[k].dot(d[0,k]).dot(f[0,k])
                 sdf[1,k] = s[k].dot(d[1,k]).dot(f[1,k])
             sdf = sdf - sdf.conj().transpose(0,1,3,2)
             df0 = contract('Kij,Kjk->Kik', d[0], f[0])
             df1 = contract('Kij,Kjk->Kik', d[1], f[1])
-            sdf = cp.stack([contract('Kij,Kjk->Kik', s, df0),
-                            contract('Kij,Kjk->Kik', s, df1)])
+            sdf = cupy.stack([contract('Kij,Kjk->Kik', s, df0),
+                              contract('Kij,Kjk->Kik', s, df1)])
             errvec = sdf - sdf.conj().transpose(0,1,3,2)
     else: # RHF
         assert f.ndim == s.ndim
         if f.ndim == 2: # molecular SCF or single k-point
             sdf = s.dot(d).dot(f)
-            errvec = sdf.conj().T - sdf
+            errvec = sdf - sdf.conj().T
         else: # k-points
             nkpts = len(f)
             sd = contract('Kij,Kjk->Kik', s, d)

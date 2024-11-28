@@ -27,11 +27,10 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.pbc.dft import rks as rks_cpu
-from pyscf.pbc.scf import khf
 from pyscf.pbc.dft import multigrid
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.dft import rks as mol_ks
-from gpu4pyscf.pbc.scf import hf as pbchf
+from gpu4pyscf.pbc.scf import hf as pbchf, khf
 from gpu4pyscf.pbc.dft import gen_grid
 from gpu4pyscf.pbc.dft import numint
 from gpu4pyscf.lib.cupy_helper import return_cupy_array, tag_array
@@ -58,8 +57,8 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     if cell is None: cell = ks.cell
     if dm is None: dm = ks.make_rdm1()
     if kpt is None: kpt = ks.kpt
-    t0 = logger.init_timer(ks)
-    log = logger.new_logger()
+    log = logger.new_logger(ks)
+    t0 = log.init_timer()
 
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)

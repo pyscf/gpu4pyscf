@@ -29,4 +29,4 @@ krhf = khf
 UHF = uhf.UHF
 RHF = rhf.RHF
 KRHF = krhf.KRHF
-KUHF = kuhf.KRHF
+KUHF = kuhf.KUHF

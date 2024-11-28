@@ -68,7 +68,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
         vR = cp.zeros((nset,ngrids))
         ao_ks = ni.eval_ao(cell, mydf.grids.coords, kpts)
         for i in range(nset):
-            rhoR = ni.eval_rho(cell, ao_ks, dm_kpts[i], hermi=hermi).real
+            rhoR = ni.eval_rho(cell, ao_ks, dms[i], hermi=hermi).real
             rhoG = tools.fft(rhoR, mesh)
             vG = coulG * rhoG
             vR[i] = tools.ifft(vG, mesh).real
@@ -76,7 +76,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
         vR = cp.zeros((nset,ngrids), dtype=np.complex128)
         ao_ks = ni.eval_ao(cell, mydf.grids.coords, kpts)
         for i in range(nset):
-            rhoR = ni.eval_rho(cell, ao_ks, dm_kpts[i], hermi=hermi)
+            rhoR = ni.eval_rho(cell, ao_ks, dms[i], hermi=hermi)
             rhoG = tools.fft(rhoR, mesh)
             vG = coulG * rhoG
             vR[i] = tools.ifft(vG, mesh)

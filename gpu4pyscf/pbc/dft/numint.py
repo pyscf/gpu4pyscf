@@ -18,11 +18,11 @@
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.pbc.lib.kpts_helper import is_zero
-from pyscf.pbc.df.df_jk import _format_dms, _format_kpts_band, _format_jks
 from pyscf.pbc.dft import numint as numint_cpu
-from pyscf.dft.gen_grid import CUTOFF
+from pyscf.pbc.df.fft_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts import KPoints
+from pyscf.pbc.lib.kpts_helper import is_zero
+from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.dft import numint
 from gpu4pyscf.lib.cupy_helper import transpose_sum, contract, get_avail_mem
 from gpu4pyscf.lib import utils
@@ -189,7 +189,159 @@ def eval_rho(cell, ao, dm, non0tab=None, xctype='LDA', hermi=0, with_lapl=False,
             rho[tau_idx] *= .5
     return rho
 
-nr_uks_vxc = nr_uks = NotImplemented
+def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
+           kpts=None, kpts_band=None, max_memory=2000, verbose=None):
+    if kpts is None:
+        kpts = numpy.zeros((1,3))
+    elif isinstance(kpts, KPoints):
+        kpts = kpts.kpts
+
+    dms = _format_dms(dm_kpts, kpts)
+    nset, nkpts, nao = dms.shape[:3]
+    assert nset == 1
+    dms = dms[0]
+    ngrids = grids.size
+
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    nband = len(kpts_band)
+    if is_zero(kpts_band):
+        vmat = cp.zeros((nband,nao,nao))
+    else:
+        vmat = cp.zeros((nband,nao,nao), dtype=np.complex128)
+
+    xctype = ni._xc_type(xc_code)
+    if xctype == 'LDA':
+        ao_deriv = 0
+        nvar = 1
+    elif xctype == 'GGA':
+        ao_deriv = 1
+        nvar = 4
+    elif xctype == 'MGGA':
+        ao_deriv = 1
+        nvar = 5
+    elif xctype == 'HF':
+        return 0, 0, vmat
+    else:
+        raise NotImplementedError(f'r_vxc for functional {xc_code}')
+
+    rho = cp.empty([nvar,ngrids])
+    p0 = p1 = 0
+    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
+        p0, p1 = p1, p1 + weight.size
+        rho[:,p0:p1] = ni.eval_rho(cell, ao_ks, dms, xctype=xctype, hermi=hermi)
+
+    exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
+    den = rho[0] * grids.weights
+    nelec = den.sum()
+    excsum = den.dot(exc[:,0])
+
+    wv = vxc * grids.weights
+    # *.5 for v+v.conj().T at the end
+    if xctype == 'GGA':
+        wv[0] *= .5
+    elif xctype == 'MGGA':
+        wv[[0,4]] *= .5
+
+    v_hermi = 1  # the output matrix must be hermitian
+    p0 = p1 = 0
+    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts_band):
+        p0, p1 = p1, p1 + weight.size
+        for k, ao in enumerate(ao_ks):
+            if xctype == 'LDA':
+                aow = _scale_ao(ao, wv[0,p0:p1])
+                vmat[k] += ao.conj().T.dot(aow)
+            elif xctype == 'GGA':
+                aow = _scale_ao(ao[:4], wv[:4,p0:p1])
+                vmat[k] += ao[0].conj().T.dot(aow)
+            elif xctype == 'MGGA':
+                aow = _scale_ao(ao[:4], wv[:4,p0:p1])
+                vmat[k] += ao[0].conj().T.dot(aow)
+                vmat[k] += _tau_dot(ao, ao, wv[4,p0:p1])
+
+    if v_hermi and xctype != 'LDA':
+        vmat = vmat + vmat.transpose(0, 2, 1).conj()
+    return nelec, excsum, vmat
+
+def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
+           kpts=None, kpts_band=None, max_memory=2000, verbose=None):
+    if kpts is None:
+        kpts = numpy.zeros((1,3))
+    elif isinstance(kpts, KPoints):
+        kpts = kpts.kpts
+
+    dms = _format_dms(dm_kpts, kpts)
+    nset, nkpts, nao = dms.shape[:3]
+    assert nset == 2
+    ngrids = grids.size
+
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    nband = len(kpts_band)
+    if is_zero(kpts_band):
+        vmat = cp.zeros((2,nband,nao,nao))
+    else:
+        vmat = cp.zeros((2,nband,nao,nao), dtype=np.complex128)
+
+    xctype = ni._xc_type(xc_code)
+    if xctype == 'LDA':
+        ao_deriv = 0
+        nvar = 1
+    elif xctype == 'GGA':
+        ao_deriv = 1
+        nvar = 4
+    elif xctype == 'MGGA':
+        ao_deriv = 1
+        nvar = 5
+    elif xctype == 'HF':
+        return 0, 0, vmat
+    else:
+        raise NotImplementedError(f'r_vxc for functional {xc_code}')
+
+    rho = cp.empty([2,nvar,ngrids])
+    p0 = p1 = 0
+    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
+        p0, p1 = p1, p1 + weight.size
+        rho[0,:,p0:p1] = ni.eval_rho(cell, ao_ks, dms[0], xctype=xctype, hermi=hermi)
+        rho[1,:,p0:p1] = ni.eval_rho(cell, ao_ks, dms[1], xctype=xctype, hermi=hermi)
+
+    exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
+    den = rho[:,0] * grids.weights
+    nelec = den.sum(axis=1)
+    excsum = float(den.dot(exc[:,0]).sum())
+
+    wv = vxc * grids.weights
+    # *.5 for v+v.conj().T at the end
+    if xctype == 'GGA':
+        wv[:,0] *= .5
+    elif xctype == 'MGGA':
+        wv[:,[0,4]] *= .5
+
+    v_hermi = 1  # the output matrix must be hermitian
+    p0 = p1 = 0
+    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts_band):
+        p0, p1 = p1, p1 + weight.size
+        for k, ao in enumerate(ao_ks):
+            if xctype == 'LDA':
+                aow = _scale_ao(ao, wv[0,0,p0:p1])
+                vmat[0,k] += ao.conj().T.dot(aow)
+                aow = _scale_ao(ao, wv[1,0,p0:p1])
+                vmat[1,k] += ao.conj().T.dot(aow)
+            elif xctype == 'GGA':
+                aow = _scale_ao(ao[:4], wv[0,:4,p0:p1])
+                vmat[0,k] += ao[0].conj().T.dot(aow)
+                aow = _scale_ao(ao[:4], wv[1,:4,p0:p1])
+                vmat[1,k] += ao[0].conj().T.dot(aow)
+            elif xctype == 'MGGA':
+                aow = _scale_ao(ao[:4], wv[0,:4,p0:p1])
+                vmat[0,k] += ao[0].conj().T.dot(aow)
+                aow = _scale_ao(ao[:4], wv[1,:4,p0:p1])
+                vmat[1,k] += ao[0].conj().T.dot(aow)
+                vmat[0,k] += _tau_dot(ao, ao, wv[0,4,p0:p1])
+                vmat[1,k] += _tau_dot(ao, ao, wv[1,4,p0:p1])
+
+    if v_hermi and xctype != 'LDA':
+        vmat = vmat + vmat.conj().transpose(0, 1, 3, 2)
+    return nelec, excsum, vmat
+
 nr_nlc_vxc = NotImplemented
 nr_rks_fxc = NotImplemented
 nr_rks_fxc_st = NotImplemented
@@ -234,10 +386,24 @@ class NumInt(lib.StreamObject, numint.LibXCMixin):
 
     get_vxc = nr_vxc = numint_cpu.NumInt.nr_vxc
 
-    def nr_rks(self, cell, grids, xc_code, dms, relativity=0, hermi=1,
+    def nr_rks(self, cell, grids, xc_code, dm, relativity=0, hermi=1,
                kpt=None, kpts_band=None, max_memory=2000, verbose=None):
         if kpt is None:
             kpt = np.zeros(3)
+
+        dm = cp.asarray(dm)
+        dm_shape = dm.shape
+        nao = dm_shape[-1]
+        dm = dm.reshape(nao,nao)
+        ngrids = grids.size
+
+        kpts_band, input_band = _format_kpts_band(kpts_band, kpt[None]), kpts_band
+        nband = len(kpts_band)
+        if is_zero(kpts_band):
+            vmat = cp.zeros((nband,nao,nao))
+        else:
+            vmat = cp.zeros((nband,nao,nao), dtype=np.complex128)
+
         xctype = self._xc_type(xc_code)
         if xctype == 'LDA':
             ao_deriv = 0
@@ -249,30 +415,20 @@ class NumInt(lib.StreamObject, numint.LibXCMixin):
             ao_deriv = 1
             nvar = 5
         elif xctype == 'HF':
-            return 0, 0, cp.zeros_like(dms)
+            return 0, 0, vmat
         else:
-            raise NotImplementedError(f'nr_rks for functional {xc_code}')
-
-        dms = cp.asarray(dms)
-        dm_shape = dms.shape
-        nao = dm_shape[-1]
-        dms = dms.reshape(nao,nao)
-        ngrids = grids.size
+            raise NotImplementedError(f'r_vxc for functional {xc_code}')
 
         rho = cp.empty([nvar,ngrids])
         p0 = p1 = 0
-        for ao_ks, weight, coords \
-                in self.block_loop(cell, grids, ao_deriv, kpt=kpt):
+        for ao, weight, coords in self.block_loop(cell, grids, ao_deriv, kpt):
             p0, p1 = p1, p1 + weight.size
-            rho[:,p0:p1] = eval_rho(cell, ao_ks[0], dms, xctype=xctype, hermi=hermi)
+            rho[:,p0:p1] = self.eval_rho(cell, ao, dm, xctype=xctype, hermi=hermi)
 
-        if xctype == 'LDA':
-            exc, vxc = self.eval_xc_eff(xc_code, rho[0], deriv=1, xctype=xctype)[:2]
-        else:
-            exc, vxc = self.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
+        exc, vxc = self.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
         den = rho[0] * grids.weights
         nelec = den.sum()
-        excsum = cp.sum(den * exc[:,0])
+        excsum = den.dot(exc[:,0])
 
         wv = vxc * grids.weights
         # *.5 for v+v.conj().T at the end
@@ -281,16 +437,10 @@ class NumInt(lib.StreamObject, numint.LibXCMixin):
         elif xctype == 'MGGA':
             wv[[0,4]] *= .5
 
-        kpts_band, input_band = _format_kpts_band(kpts_band, kpt), kpts_band
-        nband = len(kpts_band)
-        if is_zero(kpts_band):
-            vmat = cp.zeros((nband, nao, nao))
-        else:
-            vmat = cp.zeros((nband, nao, nao), dtype=np.complex128)
         v_hermi = 1  # the output matrix must be hermitian
         p0 = p1 = 0
-        for ao_ks, weight, coords \
-                in self.block_loop(cell, grids, ao_deriv, kpts_band=kpts_band):
+        for ao_ks, weight, coords in self.block_loop(cell, grids, ao_deriv,
+                                                     kpts_band=kpts_band):
             p0, p1 = p1, p1 + weight.size
             for k, ao in enumerate(ao_ks):
                 if xctype == 'LDA':
@@ -308,44 +458,102 @@ class NumInt(lib.StreamObject, numint.LibXCMixin):
             vmat = vmat + vmat.transpose(0, 2, 1).conj()
         if input_band is None:
             vmat = vmat[0]
+        if is_zero(kpts_band):
+            vmat = vmat.real
         return nelec, excsum, vmat
 
-    def nr_uks(self, cell, grids, xc_code, dms, relativity=0, hermi=1,
+    def nr_uks(self, cell, grids, xc_code, dm, relativity=0, hermi=1,
                kpt=None, kpts_band=None, max_memory=2000, verbose=None):
-        raise NotImplementedError
+        if kpt is None:
+            kpt = np.zeros(3)
+
+        dm = cp.asarray(dm)
+        dm_shape = dm.shape
+        nao = dm_shape[-1]
+        dm = dm.reshape(2, nao,nao)
+        ngrids = grids.size
+
+        kpts_band, input_band = _format_kpts_band(kpts_band, kpt[None]), kpts_band
+        nband = len(kpts_band)
+        if is_zero(kpts_band):
+            vmat = cp.zeros((2,nband,nao,nao))
+        else:
+            vmat = cp.zeros((2,nband,nao,nao), dtype=np.complex128)
+
+        xctype = self._xc_type(xc_code)
+        if xctype == 'LDA':
+            ao_deriv = 0
+            nvar = 1
+        elif xctype == 'GGA':
+            ao_deriv = 1
+            nvar = 4
+        elif xctype == 'MGGA':
+            ao_deriv = 1
+            nvar = 5
+        elif xctype == 'HF':
+            return 0, 0, vmat
+        else:
+            raise NotImplementedError(f'r_vxc for functional {xc_code}')
+
+        rho = cp.empty([2,nvar,ngrids])
+        p0 = p1 = 0
+        for ao, weight, coords in self.block_loop(cell, grids, ao_deriv, kpt):
+            p0, p1 = p1, p1 + weight.size
+            rho[0,:,p0:p1] = self.eval_rho(cell, ao, dm[0], xctype=xctype, hermi=hermi)
+            rho[1,:,p0:p1] = self.eval_rho(cell, ao, dm[1], xctype=xctype, hermi=hermi)
+
+        exc, vxc = self.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
+        den = rho[:,0] * grids.weights
+        nelec = den.sum(axis=1)
+        excsum = float(den.dot(exc[:,0]).sum())
+
+        wv = vxc * grids.weights
+        # *.5 for v+v.conj().T at the end
+        if xctype == 'GGA':
+            wv[:,0] *= .5
+        elif xctype == 'MGGA':
+            wv[:,[0,4]] *= .5
+
+        v_hermi = 1  # the output matrix must be hermitian
+        p0 = p1 = 0
+        for ao_ks, weight, coords in self.block_loop(cell, grids, ao_deriv,
+                                                     kpts_band=kpts_band):
+            p0, p1 = p1, p1 + weight.size
+            for k, ao in enumerate(ao_ks):
+                if xctype == 'LDA':
+                    aow = _scale_ao(ao, wv[0,0,p0:p1])
+                    vmat[0,k] += ao.conj().T.dot(aow)
+                    aow = _scale_ao(ao, wv[1,0,p0:p1])
+                    vmat[1,k] += ao.conj().T.dot(aow)
+                elif xctype == 'GGA':
+                    aow = _scale_ao(ao[:4], wv[0,:4,p0:p1])
+                    vmat[0,k] += ao[0].conj().T.dot(aow)
+                    aow = _scale_ao(ao[:4], wv[1,:4,p0:p1])
+                    vmat[1,k] += ao[0].conj().T.dot(aow)
+                elif xctype == 'MGGA':
+                    aow = _scale_ao(ao[:4], wv[0,:4,p0:p1])
+                    vmat[0,k] += ao[0].conj().T.dot(aow)
+                    aow = _scale_ao(ao[:4], wv[1,:4,p0:p1])
+                    vmat[1,k] += ao[0].conj().T.dot(aow)
+                    vmat[0,k] += _tau_dot(ao, ao, wv[0,4,p0:p1])
+                    vmat[1,k] += _tau_dot(ao, ao, wv[1,4,p0:p1])
+
+        if v_hermi and xctype != 'LDA':
+            vmat = vmat + vmat.conj().transpose(0, 1, 3, 2)
+
+        if input_band is None:
+            vmat = vmat[:,0]
+        if is_zero(kpts_band):
+            vmat = vmat.real
+        return nelec, excsum, vmat
 
     def block_loop(self, cell, grids, deriv=0, kpt=None, kpts_band=None):
-        '''Define this macro to loop over grids by blocks.
-        '''
-        nao = cell.nao
-        grids_coords = grids.coords
-        grids_weights = grids.weights
-        ngrids = grids_coords.shape[0]
-        comp = (deriv+1)*(deriv+2)*(deriv+3)//6
-
-        #cupy.get_default_memory_pool().free_all_blocks()
-        mem_avail = get_avail_mem()
-        blksize = int((mem_avail*.2/8/((comp+1)*nao))/ ALIGNED) * ALIGNED
-        blksize = min(blksize, MIN_BLK_SIZE)
-        if blksize < ALIGNED:
-            raise RuntimeError('Not enough GPU memory')
-
-        if kpts_band is None:
-            if kpt is None:
-                kpts = np.zeros((1, 3))
-            else:
-                kpts = np.reshape(kpt, (1, 3))
-        elif kpt is None:
-            kpts = np.reshape(kpts_band, (-1, 3))
+        if kpt is None:
+            yield from KNumInt.block_loop(self, cell, grids, deriv, kpts_band)
         else:
-            raise RuntimeError('Cannot produce AOs for kpt and kpts_band in the same run')
-
-        for ip0, ip1 in lib.prange(0, ngrids, blksize):
-            coords = grids_coords[ip0:ip1]
-            weight = grids_weights[ip0:ip1]
-            ao_ks = eval_ao_kpts(cell, coords, kpts, deriv=deriv)
-            yield ao_ks, weight, coords
-            ao_ks = None
+            for ao_ks, weight, coords in KNumInt.block_loop(
+                    self, cell, grids, deriv, kpt[None]):
+                yield ao_ks[0], weight, coords
 
     eval_xc_eff = numint.eval_xc_eff
     _init_xcfuns = numint.NumInt._init_xcfuns
@@ -385,7 +593,7 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
     make_mask = NotImplemented
 
     def eval_rho(self, cell, ao_kpts, dm_kpts, non0tab=None, xctype='LDA',
-                 hermi=0, with_lapl=True, verbose=None):
+                 hermi=0, with_lapl=False, verbose=None):
         '''Collocate the density (opt. gradients) on the real-space grid.
 
         Args:
@@ -409,14 +617,41 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
         rho *= 1./nkpts
         return rho
 
+    def block_loop(self, cell, grids, deriv=0, kpts=None):
+        '''Define this macro to loop over grids by blocks.
+        '''
+        nao = cell.nao
+        grids_coords = grids.coords
+        grids_weights = grids.weights
+        ngrids = grids_coords.shape[0]
+        comp = (deriv+1)*(deriv+2)*(deriv+3)//6
+
+        #cupy.get_default_memory_pool().free_all_blocks()
+        mem_avail = get_avail_mem()
+        blksize = int((mem_avail*.2/8/((comp+1)*nao))/ ALIGNED) * ALIGNED
+        blksize = min(blksize, MIN_BLK_SIZE)
+        if blksize < ALIGNED:
+            raise RuntimeError('Not enough GPU memory')
+
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+
+        for ip0, ip1 in lib.prange(0, ngrids, blksize):
+            coords = grids_coords[ip0:ip1]
+            weight = grids_weights[ip0:ip1]
+            ao_ks = eval_ao_kpts(cell, coords, kpts, deriv=deriv)
+            yield ao_ks, weight, coords
+            ao_ks = None
+
+    eval_xc_eff = numint.eval_xc_eff
+    _init_xcfuns = numint.NumInt._init_xcfuns
+
+    nr_rks = nr_rks
+    nr_uks = nr_uks
     get_vxc = nr_vxc = numint_cpu.KNumInt.nr_vxc
     eval_rho1 = NotImplemented
-    nr_rks = NotImplemented
-    nr_uks = NotImplemented
-
-    block_loop = NotImplemented
     eval_rho2 = NotImplemented
-    get_vxc = nr_vxc = numint_cpu.KNumInt.nr_vxc
+
     nr_rks_fxc = nr_rks_fxc
     nr_uks_fxc = nr_uks_fxc
     nr_rks_fxc_st = nr_rks_fxc_st

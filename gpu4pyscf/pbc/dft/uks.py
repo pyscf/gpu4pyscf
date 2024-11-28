@@ -107,15 +107,16 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
             vklr = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
             vklr *= (alpha - hyb)
             vk += vklr
-        vxc += vj[0] + vj[1]
+        vj = vj[0] + vj[1]
+        vxc += vj
         vxc -= vk
 
         if ground_state:
-            exc -=(cp.einsum('ij,ji', dm[0], vk[0]) +
-                   cp.einsum('ij,ji', dm[1], vk[1])).real * .5
+            exc -=(cp.einsum('ij,ji->', dm[0], vk[0]) +
+                   cp.einsum('ij,ji->', dm[1], vk[1])).real * .5
 
     if ground_state:
-        ecoul = cp.einsum('ij,ji', dm[0]+dm[1], vj).real * .5
+        ecoul = cp.einsum('nij,ji->', dm, vj).real * .5
     else:
         ecoul = None
 

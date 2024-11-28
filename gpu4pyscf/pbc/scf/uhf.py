@@ -58,7 +58,31 @@ class UHF(pbchf.SCF):
         vhf = vj[0] + vj[1] - vk
         return vhf
 
-    get_bands = NotImplemented
+    def get_bands(self, kpts_band, cell=None, dm=None, kpt=None):
+        if cell is None: cell = self.cell
+        if dm is None: dm = self.make_rdm1()
+        if kpt is None: kpt = self.kpt
+
+        kpts_band = np.asarray(kpts_band)
+        single_kpt_band = kpts_band.ndim == 1
+        kpts_band = kpts_band.reshape(-1,3)
+
+        fock = self.get_veff(cell, dm, kpt=kpt, kpts_band=kpts_band)
+        fock += self.get_hcore(cell, kpts_band)
+        s1e = self.get_ovlp(cell, kpts_band)
+        nkpts = len(kpts_band)
+        nao = fock.shape[-1]
+        mo_energy = cp.empty((2, nkpts, nao))
+        mo_coeff = cp.empty((2, nkpts, nao, nao), dtype=fock.dtype)
+        for k in range(nkpts):
+            e, c = self.eig(fock[:,k], s1e[k])
+            mo_energy[:,k] = e
+            mo_coeff[:,k] = c
+
+        if single_kpt_band:
+            mo_energy = mo_energy[:,0]
+            mo_coeff = mo_coeff[:,0]
+        return mo_energy, mo_coeff
 
     def get_init_guess(self, cell=None, key='minao', s1e=None):
         if cell is None:
@@ -67,8 +91,8 @@ class UHF(pbchf.SCF):
             s1e = self.get_ovlp(cell)
         dm = cp.asarray(mol_uhf.UHF.get_init_guess(self, cell, key))
         ne = cp.einsum('xij,ji->x', dm, s1e).real
-        nelec = self.nelec
-        if any(abs(ne - nelec) > 0.01):
+        nelec = cp.asarray(self.nelec)
+        if max(abs(ne - nelec) > 0.01):
             logger.debug(self, 'Big error detected in the electron number '
                          'of initial guess density matrix (Ne/cell = %s)!\n'
                          '  This can cause huge error in Fock matrix and '
@@ -78,8 +102,8 @@ class UHF(pbchf.SCF):
             dm *= (nelec / ne).reshape(2,1,1)
         return dm
 
-    init_guess_by_1e = mol_uhf.init_guess_by_1e
-    init_guess_by_chkfile = mol_uhf.init_guess_by_chkfile
+    init_guess_by_1e = mol_uhf.UHF.init_guess_by_1e
+    init_guess_by_chkfile = mol_uhf.UHF.init_guess_by_chkfile
     init_guess_by_minao = mol_uhf.UHF.init_guess_by_minao
     init_guess_by_atom = mol_uhf.UHF.init_guess_by_atom
     eig = mol_uhf.UHF.eig
@@ -96,7 +120,7 @@ class UHF(pbchf.SCF):
     mulliken_meta = NotImplemented
     mulliken_meta_spin = NotImplemented
     canonicalize = NotImplemented
-    spin_square = NotImplemented
+    spin_square = mol_uhf.UHF.spin_square
     stability = NotImplemented
 
     dip_moment = NotImplemented

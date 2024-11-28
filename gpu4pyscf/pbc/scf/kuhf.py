@@ -100,8 +100,8 @@ def get_fermi(mf, mo_energy_kpts=None, mo_occ_kpts=None):
     assert isinstance(mo_occ_kpts, cp.ndarray) and mo_occ_kpts.ndim == 3
 
     nocca, noccb = mf.nelec
-    fermi_a = cp.sort(mo_energy_kpts[0])[nocca-1]
-    fermi_b = cp.sort(mo_energy_kpts[1])[noccb-1]
+    fermi_a = cp.partition(mo_energy_kpts[0].ravel(), nocca-1)[nocca-1]
+    fermi_b = cp.partition(mo_energy_kpts[1].ravel(), noccb-1)[noccb-1]
 
     if mf.verbose >= logger.DEBUG:
         for k, mo_e in enumerate(mo_energy_kpts[0]):
@@ -127,23 +127,25 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
 
     nocc_a, nocc_b = mf.nelec
     nmo = mo_energy_kpts.shape[-1]
-    fermi_a = cp.sort(mo_energy_kpts[0])[nocc_a-1]
+    mo_energy_a = cp.sort(mo_energy_kpts[0].ravel())
+    fermi_a = mo_energy_a[nocc_a-1]
     mo_occ_kpts = cp.zeros_like(mo_energy_kpts)
     mo_occ_kpts[0] = (mo_energy_kpts[0] <= fermi_a).astype(np.float64)
     if nocc_b > 0:
-        fermi_b = cp.sort(mo_energy_kpts[1])[nocc_b-1]
+        mo_energy_b = cp.sort(mo_energy_kpts[1].ravel())
+        fermi_b = mo_energy_b[nocc_b-1]
         mo_occ_kpts[1] = (mo_energy_kpts[1] <= fermi_b).astype(np.float64)
 
     if mf.verbose >= logger.DEBUG:
         if nocc_a < nmo:
             logger.info(mf, 'alpha HOMO = %.12g  LUMO = %.12g',
-                        fermi_a, mo_energy_kpts[0,nocc_a])
+                        fermi_a, mo_energy_a[nocc_a])
         else:
             logger.info(mf, 'alpha HOMO = %.12g  (no LUMO because of small basis) ', fermi_a)
         if 0 < nocc_b < nmo:
             logger.info(mf, 'beta HOMO = %.12g  LUMO = %.12g',
-                        fermi_b, mo_energy_kpts[1,nocc_b])
-        else:
+                        fermi_b, mo_energy_b[nocc_b])
+        elif 0 < nocc_b:
             logger.info(mf, 'beta HOMO = %.12g  (no LUMO because of small basis) ', fermi_b)
     return mo_occ_kpts
 
@@ -222,7 +224,7 @@ class KUHF(khf.KSCF):
     get_occ = get_occ
     energy_elec = energy_elec
     get_rho = khf.get_rho
-    analyze = khf.analyze
+    analyze = NotImplemented
     canonicalize = canonicalize
 
     def get_init_guess(self, cell=None, key='minao', s1e=None):
@@ -235,7 +237,7 @@ class KUHF(khf.KSCF):
             # dm[spin,nao,nao] at gamma point -> dm_kpts[spin,nkpts,nao,nao]
             dm_kpts = cp.repeat(dm_kpts[:,None,:,:], nkpts, axis=1)
 
-        ne = lib.einsum('xkij,kji->x', dm_kpts, s1e).real
+        ne = cp.einsum('xkij,kji->x', dm_kpts, s1e).real
         nelec = cp.asarray(self.nelec)
         if any(abs(ne - nelec) > 0.01*nkpts):
             logger.debug(self, 'Big error detected in the electron number '
@@ -244,7 +246,7 @@ class KUHF(khf.KSCF):
                          'lead to instability in SCF for low-dimensional '
                          'systems.\n  DM is normalized wrt the number '
                          'of electrons %s', ne.mean()/nkpts, nelec/nkpts)
-            dm_kpts *= (nelec / ne).reshape(2,-1,1,1)
+            dm_kpts *= (nelec / ne).reshape(2,1,1,1)
         return dm_kpts
 
     def get_veff(self, cell=None, dm_kpts=None, dm_last=0, vhf_last=0, hermi=1,
@@ -289,11 +291,11 @@ class KUHF(khf.KSCF):
         if kpts is None: kpts = self.kpts
 
         kpts_band = np.asarray(kpts_band)
-        single_kpt_band = (kpts_band.ndim == 1)
+        single_kpt_band = kpts_band.ndim == 1
         kpts_band = kpts_band.reshape(-1,3)
 
-        fock = self.get_hcore(cell, kpts_band)
-        fock = fock + self.get_veff(cell, dm_kpts, kpts=kpts, kpts_band=kpts_band)
+        fock = self.get_veff(cell, dm_kpts, kpts=kpts, kpts_band=kpts_band)
+        fock += self.get_hcore(cell, kpts_band)
         s1e = self.get_ovlp(cell, kpts_band)
         e, c = self.eig(fock, s1e)
         if single_kpt_band:

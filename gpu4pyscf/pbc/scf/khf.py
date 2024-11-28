@@ -63,6 +63,31 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
                   for k, s in enumerate(s_kpts)]
     return cp.asarray(f_kpts)
 
+def get_fermi(mf, mo_energy_kpts=None, mo_occ_kpts=None):
+    '''Fermi level
+    '''
+    if mo_energy_kpts is None: mo_energy_kpts = mf.mo_energy
+    if mo_occ_kpts is None: mo_occ_kpts = mf.mo_occ
+    assert isinstance(mo_energy_kpts, cp.ndarray) and mo_energy_kpts.ndim == 3
+    assert isinstance(mo_occ_kpts, cp.ndarray) and mo_occ_kpts.ndim == 3
+
+    # mo_energy_kpts and mo_occ_kpts are k-point RHF quantities
+    assert (mo_energy_kpts[0].ndim == 1)
+    assert (mo_occ_kpts[0].ndim == 1)
+
+    nocc = mo_occ_kpts.sum() / 2
+    # nocc may not be perfect integer when smearing is enabled
+    nocc = int(nocc.round(3))
+    fermi = cp.partition(mo_energy_kpts.ravel(), nocc-1)[nocc-1]
+
+    if mf.verbose >= logger.DEBUG:
+        for k, mo_e in enumerate(mo_energy_kpts):
+            mo_occ = mo_occ_kpts[k]
+            if mo_occ[mo_e > fermi].sum() > 1.:
+                logger.warn(mf, 'Occupied band above Fermi level: \n'
+                            'k=%d, mo_e=%s, mo_occ=%s', k, mo_e, mo_occ)
+    return fermi
+
 def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
     '''Label the occupancies for each orbital for sampled k-points.
 
@@ -74,7 +99,7 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
     nocc = mf.cell.tot_electrons(nkpts) // 2
 
     if isinstance(mo_energy_kpts, cp.ndarray):
-        mo_energy = cp.sort(mo_energy_kpts)
+        mo_energy = cp.sort(mo_energy_kpts.ravel())
         fermi = mo_energy[nocc-1]
         mo_occ_kpts = (mo_energy_kpts <= fermi).astype(np.float64) * 2
     else:
@@ -164,7 +189,7 @@ def _cast_mol_init_guess(fn):
     def fn_init_guess(mf, cell=None, kpts=None):
         if cell is None: cell = mf.cell
         if kpts is None: kpts = mf.kpts
-        dm = fn(cell)
+        dm = fn(mf, cell)
         assert dm.ndim == 2
         nkpts = len(kpts)
         dm = cp.repeat(dm[None], nkpts, axis=0)
@@ -306,7 +331,7 @@ class KSCF(pbchf.SCF):
     init_direct_scf = NotImplemented
     get_ovlp = return_cupy_array(khf_cpu.get_ovlp)
     get_fock = get_fock
-    get_fermi = NotImplemented
+    get_fermi = get_fermi
     get_occ = get_occ
     energy_elec = energy_elec
     energy_nuc = pbchf.SCF.energy_nuc
@@ -351,12 +376,12 @@ class KSCF(pbchf.SCF):
 
 class KRHF(KSCF):
 
-    check_sanity = khf_cpu.KRHF.check_sanity
+    check_sanity = pbchf.SCF.check_sanity
 
     def get_init_guess(self, cell=None, key='minao', s1e=None):
         if s1e is None:
             s1e = self.get_ovlp(cell)
-        dm = cp.asarray(mol_hf.SCF.get_init_guess(self, cell, key))
+        dm = mol_hf.SCF.get_init_guess(self, cell, key)
         nkpts = len(self.kpts)
         if dm.ndim == 2:
             # dm[nao,nao] at gamma point -> dm_kpts[nkpts,nao,nao]

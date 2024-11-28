@@ -52,13 +52,13 @@ def get_bands(mf, kpts_band, cell=None, dm=None, kpt=None):
     fock = mf.get_veff(cell, dm, kpt=kpt, kpts_band=kpts_band)
     fock += mf.get_hcore(cell, kpts_band)
     s1e = mf.get_ovlp(cell, kpts_band)
-    nkpts = len(kpts_band)
-    mo_energy = []
-    mo_coeff = []
+    nkpts, nao = fock.shape[:2]
+    mo_energy = cp.empty((nkpts, nao))
+    mo_coeff = cp.empty((nkpts, nao, nao), dtype=fock.dtype)
     for k in range(nkpts):
         e, c = mf.eig(fock[k], s1e[k])
-        mo_energy.append(e)
-        mo_coeff.append(c)
+        mo_energy[k] = e
+        mo_coeff[k] = c
 
     if single_kpt_band:
         mo_energy = mo_energy[0]
@@ -123,7 +123,7 @@ class SCF(mol_hf.SCF):
             logger.warn(self, 'exxdiv %s is not supported in DF', self.exxdiv)
 
         if self.verbose >= logger.DEBUG:
-            mol_hf.SCF.check_sanity()
+            mol_hf.SCF.check_sanity(self)
         return self
 
     kpt = hf_cpu.SCF.kpt
@@ -172,6 +172,10 @@ class SCF(mol_hf.SCF):
         nao = dm.shape[-1]
         vj, vk = self.with_df.get_jk(dm.reshape(-1,nao,nao), hermi, kpt, kpts_band,
                                      with_j, with_k, omega, exxdiv=self.exxdiv)
+        if with_j:
+            vj = _format_jks(vj, dm, kpts_band)
+        if with_k:
+            vk = _format_jks(vk, dm, kpts_band)
         logger.timer(self, 'vj and vk', *cpu0)
         return vj, vk
 
@@ -243,6 +247,15 @@ class RHF(SCF):
         mf = hf_cpu.RHF(self.cell)
         utils.to_cpu(self, out=mf)
         return mf
+
+def _format_jks(vj, dm, kpts_band):
+    if kpts_band is None:
+        vj = vj.reshape(dm.shape)
+    elif kpts_band.ndim == 1:  # a single k-point on bands
+        vj = vj.reshape(dm.shape)
+    elif getattr(dm, "ndim", 0) == 2:
+        vj = vj[0]
+    return vj
 
 def normalize_dm_(mf, dm, s1e=None):
     '''

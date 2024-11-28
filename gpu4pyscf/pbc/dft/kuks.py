@@ -107,11 +107,11 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
         vxc -= vk
 
         if ground_state:
-            exc -= (cp.einsum('Kij,Kji', dm[0], vk[0]) +
-                    cp.einsum('Kij,Kji', dm[1], vk[1])).real * .5 * weight
+            exc -= (cp.einsum('Kij,Kji->', dm[0], vk[0]) +
+                    cp.einsum('Kij,Kji->', dm[1], vk[1])).real * .5 * weight
 
     if ground_state:
-        ecoul = cp.einsum('Kij,Kji', dm[0]+dm[1], vj) * .5 * weight
+        ecoul = cp.einsum('nKij,Kji->', dm, vj) * .5 * weight
     else:
         ecoul = None
 
