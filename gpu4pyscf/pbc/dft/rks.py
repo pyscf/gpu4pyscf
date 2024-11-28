@@ -142,7 +142,7 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
         self.nlc = ''
         self.nlcgrids = gen_grid.UniformGrids(self.cell)
         if isinstance(self, khf.KSCF):
-            self._numint = numint.KNumInt(self.kpts)
+            self._numint = numint.KNumInt()
         else:
             self._numint = numint.NumInt()
 
