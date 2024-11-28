@@ -23,7 +23,7 @@ from gpu4pyscf.properties import ir
 
 try:
     from pyscf.prop import infrared
-except:
+except Exception:
     infrared = None
 
 lib.num_threads(8)
@@ -124,4 +124,3 @@ class KnownValues(unittest.TestCase):
 if __name__ == "__main__":
     print("Full Tests for ir intensity")
     unittest.main()
-    

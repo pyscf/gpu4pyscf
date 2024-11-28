@@ -23,7 +23,7 @@ from gpu4pyscf.properties import shielding
 
 try:
     from pyscf.prop import nmr
-except:
+except Exception:
     nmr = None
 
 lib.num_threads(8)

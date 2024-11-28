@@ -23,7 +23,7 @@ from gpu4pyscf.properties import polarizability
 
 try:
     from pyscf.prop import polarizability as polar
-except:
+except Exception:
     polar = None
 
 lib.num_threads(8)
