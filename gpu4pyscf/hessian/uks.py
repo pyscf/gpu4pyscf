@@ -18,9 +18,7 @@ Non-relativistic UKS analytical Hessian
 '''
 
 
-import numpy
 import cupy
-import numpy as np
 import cupy as cp
 from pyscf import lib
 from gpu4pyscf.hessian import rhf as rhf_hess
@@ -95,7 +93,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
     natm = mol.natm
-    assert atmlst is None
+    assert atmlst is None or atmlst == range(natm)
     mo_a, mo_b = mo_coeff
     mocca = mo_a[:,mo_occ[0]>0]
     moccb = mo_b[:,mo_occ[1]>0]

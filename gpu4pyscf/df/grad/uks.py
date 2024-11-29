@@ -13,7 +13,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import numpy
 import cupy
 from pyscf import lib
 from gpu4pyscf.grad import uks as uks_grad

@@ -16,10 +16,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # modified by Xiaojie Wu (wxj6000@gmail.com)
-import numpy
 import cupy
-
-from pyscf import lib
 from pyscf.dft import rks
 
 from gpu4pyscf.lib import logger
@@ -237,8 +234,6 @@ class KohnShamDFT(rks.KohnShamDFT):
     to_rks = NotImplemented
     to_uks = NotImplemented
     to_gks = NotImplemented
-
-    _keys = rks.KohnShamDFT._keys
 
     def __init__(self, xc='LDA,VWN'):
         self.xc = xc

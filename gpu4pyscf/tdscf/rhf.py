@@ -22,7 +22,7 @@ import scipy.linalg
 from pyscf import gto
 from pyscf import lib
 from pyscf.tdscf import rhf as tdhf_cpu
-from pyscf.tdscf._lr_eig import eigh as lr_eigh, eig as lr_eig
+from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, eig as lr_eig, real_eig
 from gpu4pyscf import scf
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import utils
@@ -101,7 +101,15 @@ class TDBase(lib.StreamObject):
 
     gen_vind = NotImplemented
     get_ab = NotImplemented
-    get_precond = tdhf_cpu.TDBase.get_precond
+
+    def get_precond(self, hdiag):
+        def precond(x, e, *args):
+            if isinstance(e, np.ndarray):
+                e = e[0]
+            diagd = hdiag - (e-self.level_shift)
+            diagd[abs(diagd)<1e-8] = 1e-8
+            return x/diagd
+        return precond
 
     nuc_grad_method = NotImplemented
     as_scanner = tdhf_cpu.as_scanner
@@ -265,14 +273,14 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     orbo = mo_coeff[:,occidx]
 
     e_ia = hdiag = mo_energy[viridx] - mo_energy[occidx,None]
-    hdiag = cp.hstack((hdiag.ravel(), -hdiag.ravel())).get()
     vresp = mf.gen_response(singlet=singlet, hermi=0)
     nocc, nvir = e_ia.shape
 
-    def vind(xys):
-        xys = cp.asarray(xys).reshape(-1,2,nocc,nvir)
-        nz = len(xys)
-        xs, ys = xys.transpose(1,0,2,3)
+    def vind(zs):
+        nz = len(zs)
+        xs, ys = zs.reshape(nz,2,nocc,nvir).transpose(1,0,2,3)
+        xs = cp.asarray(xs).reshape(nz,nocc,nvir)
+        ys = cp.asarray(ys).reshape(nz,nocc,nvir)
         # *2 for double occupancy
         tmp = contract('xov,pv->xpo', xs, orbv*2)
         dms = contract('xpo,qo->xpq', tmp, orbo.conj())
@@ -285,10 +293,11 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
         v1_bot = contract('xoq,qv->xov', v1_bot, orbv)
         v1_top += xs * e_ia  # AX
         v1_bot += ys * e_ia  # (A*)Y
-        hx = cp.hstack((v1_top.reshape(nz,-1), -v1_bot.reshape(nz,-1)))
-        return hx.get()
+        return cp.hstack((v1_top.reshape(nz,nocc*nvir),
+                          -v1_bot.reshape(nz,nocc*nvir))).get()
 
-    return vind, hdiag
+    hdiag = cp.hstack([hdiag.ravel(), -hdiag.ravel()])
+    return vind, hdiag.get()
 
 
 class TDHF(TDBase):
@@ -301,6 +310,7 @@ class TDHF(TDBase):
         return gen_tdhf_operation(mf, singlet=self.singlet)
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
+        assert not return_symmetry
         x0 = TDA.init_guess(self, mf, nstates, wfnsym, return_symmetry)
         y0 = np.zeros_like(x0)
         return np.hstack([x0, y0])
@@ -320,29 +330,18 @@ class TDHF(TDBase):
 
         vind, hdiag = self.gen_vind(self._scf)
         precond = self.get_precond(hdiag)
+        pickeig = None
 
         # handle single kpt PBC SCF
         if getattr(self._scf, 'kpt', None) is not None:
             from pyscf.pbc.lib.kpts_helper import gamma_point
-            real_system = (gamma_point(self._scf.kpt) and
-                           self._scf.mo_coeff[0].dtype == np.double)
-        else:
-            real_system = True
-
-        # We only need positive eigenvalues
-        def pickeig(w, v, nroots, envs):
-            realidx = np.where((abs(w.imag) < REAL_EIG_THRESHOLD) &
-                                  (w.real > self.positive_eig_threshold))[0]
-            # If the complex eigenvalue has small imaginary part, both the
-            # real part and the imaginary part of the eigenvector can
-            # approximately be used as the "real" eigen solutions.
-            return lib.linalg_helper._eigs_cmplx2real(w, v, realidx, real_system)
+            assert gamma_point(self._scf.kpt)
 
         x0sym = None
         if x0 is None:
             x0 = self.init_guess()
 
-        self.converged, w, x1 = lr_eig(
+        self.converged, self.e, x1 = real_eig(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
             nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,
             max_memory=self.max_memory, verbose=log)
@@ -350,15 +349,16 @@ class TDHF(TDBase):
         nocc = mol.nelectron // 2
         nmo = self._scf.mo_occ.size
         nvir = nmo - nocc
-        self.e = w
         def norm_xy(z):
-            x, y = z.reshape(2,nocc,nvir)
+            x, y = z.reshape(2, -1)
             norm = lib.norm(x)**2 - lib.norm(y)**2
-            norm = np.sqrt(.5/norm)  # normalize to 0.5 for alpha spin
-            return x*norm, y*norm
+            if norm < 0:
+                log.warn('TDDFT amplitudes |X| smaller than |Y|')
+            norm = abs(.5/norm)**.5  # normalize to 0.5 for alpha spin
+            return x.reshape(nocc,nvir)*norm, y.reshape(nocc,nvir)*norm
         self.xy = [norm_xy(z) for z in x1]
 
-        log.timer('TDDFT', *cpu0)
+        log.timer('TDHF/TDDFT', *cpu0)
         self._finalize()
         return self.e, self.xy
 

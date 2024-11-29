@@ -264,7 +264,7 @@ class KnownValues(unittest.TestCase):
         nvir = nmo - nocc
         zs = np.random.rand(3,2,nocc,nvir)
         ref = mf.to_cpu().TDDFT().set(singlet=True).gen_vind()[0](zs)
-        dat = mf.TDDFT().set(singlet=True).gen_vind()[0](cp.asarray(zs))
+        dat = mf.TDDFT().set(singlet=True).gen_vind()[0](zs)
         self.assertAlmostEqual(abs(ref - dat).max(), 0, 9)
 
     def test_casida_tddft_vind(self):
@@ -273,8 +273,8 @@ class KnownValues(unittest.TestCase):
         nmo = mf.mo_energy.size
         nvir = nmo - nocc
         zs = np.random.rand(3,nocc,nvir)
-        ref = mf.to_cpu().CasidaTDDFT().set().gen_vind()[0](zs)
-        dat = mf.CasidaTDDFT().set().gen_vind()[0](cp.asarray(zs))
+        ref = mf.to_cpu().CasidaTDDFT().gen_vind()[0](zs)
+        dat = mf.CasidaTDDFT().gen_vind()[0](cp.asarray(zs))
         self.assertAlmostEqual(abs(ref - dat).max(), 0, 9)
 
 if __name__ == "__main__":

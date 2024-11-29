@@ -23,7 +23,6 @@ Non-relativistic RKS analytical Hessian
 
 import numpy
 import cupy
-import numpy as np
 from pyscf import lib
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.grad import rhf as rhf_grad
@@ -91,7 +90,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
     natm = mol.natm
-    assert atmlst is None
+    assert atmlst is None or atmlst == range(natm)
     nao = mo_coeff.shape[0]
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = numpy.dot(mocc, mocc.T) * 2
@@ -526,9 +525,9 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     v_ip = cupy.zeros((3,nao,nao))
     vmat = cupy.zeros((_sorted_mol.natm,3,nao,nocc))
     max_memory = max(2000, max_memory-vmat.size*8/1e6)
+    t1 = t0 = log.init_timer()
     if xctype == 'LDA':
         ao_deriv = 1
-        t1 = t0 = log.init_timer()
         for ao, mask, weight, coords \
                 in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
             ao = contract('nip,ij->njp', ao, coeff[mask])
@@ -555,7 +554,6 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             t1 = log.timer_debug2('integration', *t1)
     elif xctype == 'GGA':
         ao_deriv = 2
-        t1 = t0 = log.init_timer()
         for ao, mask, weight, coords \
                 in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
             ao = contract('nip,ij->njp', ao, coeff[mask])
@@ -584,7 +582,6 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         if grids.level < 5:
             log.warn('MGGA Hessian is sensitive to dft grids.')
         ao_deriv = 2
-        t1 = t0 = log.init_timer()
         for ao, mask, weight, coords \
                 in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
             ao = contract('nip,ij->njp', ao, coeff[mask])
@@ -609,6 +606,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
                 mow = [numint._scale_ao(mo[:4], wv[i,:4]) for i in range(3)]
                 vmat[ia] += rks_grad._d1_dot_(aow, mo[0].T)
                 vmat[ia] += rks_grad._d1_dot_(mow, ao[0].T).transpose([0,2,1])
+                
                 for j in range(1, 4):
                     aow = [numint._scale_ao(ao[j], wv[i,4]) for i in range(3)]
                     mow = [numint._scale_ao(mo[j], wv[i,4]) for i in range(3)]
@@ -616,9 +614,9 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
                     vmat[ia] += rks_grad._d1_dot_(mow, ao[j].T).transpose([0,2,1])
             ao_dm0 = aow = None
             t1 = log.timer_debug2('integration', *t1)
-
+    
     vmat = -contract("kxiq,ip->kxpq", vmat, mo_coeff)
-
+    t0 = log.timer_debug1('vxc_deriv1', *t0)
     for ia in range(_sorted_mol.natm):
         p0, p1 = aoslices[ia][2:]
         vmat_tmp = cupy.zeros([3,nao,nao])

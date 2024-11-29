@@ -26,6 +26,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
+from gpu4pyscf.__config__ import _streams, _num_devices
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
@@ -82,6 +83,54 @@ def get_avail_mem():
         mem_avail = cupy.cuda.runtime.memGetInfo()[0]
         return mem_avail + total_mem - used_mem
 
+def broadcast_to_devices():
+    ''' Broadcast cupy ndarray to all the devices, return a list of cupy ndarray
+    '''
+    raise NotImplementedError
+
+def reduce_to_device(array_list):
+    ''' Reduce a list of ndarray in different devices to device 0
+    TODO: reduce memory footprint, improve throughput
+    '''
+    assert len(array_list) == _num_devices
+    if _num_devices == 0:
+        return array_list[0]
+    
+    for s in _streams:
+        s.synchronize()
+    
+    for device_id in range(_num_devices):
+        cupy.cuda.Device(device_id).synchronize()
+    
+    results = [None] * _num_devices
+    # Asynchronously add each matrix from its device
+    for device_id, matrix in enumerate(array_list):
+        if device_id == 0:
+            results[device_id] = array_list[0]
+            continue
+        
+        mat_tmp = cupy.empty_like(matrix)
+        # Transfer from other devices using P2P access and streams
+        with cupy.cuda.Device(device_id), _streams[device_id] as s:
+            cupy.cuda.runtime.memcpyPeerAsync(
+                mat_tmp.data.ptr,
+                0,
+                matrix.data.ptr,
+                device_id,
+                matrix.nbytes,
+                stream=s.ptr,
+            )
+        results[device_id] = mat_tmp
+    for s in _streams:
+        s.synchronize()
+    
+    for device_id in range(_num_devices):
+        cupy.cuda.Device(device_id).synchronize()
+
+    for arr in results[1:]:
+        results[0] += arr
+    return results[0]
+    
 def device2host_2d(a_cpu, a_gpu, stream=None):
     if stream is None:
         stream = cupy.cuda.get_current_stream()
@@ -203,6 +252,7 @@ def add_sparse(a, b, indices):
     '''
     a[:,...,:np.ix_(indices, indices)] += b
     '''
+    assert a.device == b.device
     assert a.flags.c_contiguous
     assert b.flags.c_contiguous
     if len(indices) == 0: return a
@@ -214,6 +264,7 @@ def add_sparse(a, b, indices):
         count = 1
     else:
         raise RuntimeError('add_sparse only supports 2d or 3d tensor')
+    
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.add_sparse(
         ctypes.cast(stream.ptr, ctypes.c_void_p),

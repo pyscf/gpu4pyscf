@@ -25,6 +25,7 @@ from gpu4pyscf.df import int3c2e
 from gpu4pyscf.scf.int4c2e import BasisProdCache, libgint, libgvhf
 from gpu4pyscf.lib.cupy_helper import load_library, block_c2s_diag
 from gpu4pyscf.lib import logger
+from gpu4pyscf.__config__ import _num_devices, _streams
 
 from pyscf.data import radii
 modified_Bondi = radii.VDW.copy()
@@ -42,6 +43,7 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     if group_size is not None:
         uniq_l_ctr, l_ctr_counts = int3c2e._split_l_ctr_groups(
             uniq_l_ctr, l_ctr_counts, group_size)
+    intopt.l_ctr_counts = l_ctr_counts
 
     # sort fake mol
     fake_mol = int3c2e.make_fake_mol()
@@ -53,7 +55,8 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     if group_size_aux is not None:
         aux_uniq_l_ctr, aux_l_ctr_counts = int3c2e._split_l_ctr_groups(
             aux_uniq_l_ctr, aux_l_ctr_counts, group_size_aux)
-
+    intopt.aux_l_ctr_counts = aux_l_ctr_counts
+    
     tmp_mol = gto.mole.conc_mol(fake_mol, sorted_auxmol)
     tot_mol = gto.mole.conc_mol(sorted_mol, tmp_mol)
 
@@ -88,7 +91,6 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     ao_idx = np.array_split(np.arange(nao), cart_ao_loc[1:-1])
     intopt.cart_ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
     ncart = cart_ao_loc[-1]
-    intopt.cart2sph = block_c2s_diag(intopt.angular, l_ctr_counts)
 
     # pairing auxiliary basis with fake basis set
     fake_l_ctr_offsets = np.append(0, np.cumsum(fake_l_ctr_counts))
@@ -133,19 +135,25 @@ def _build_VHFOpt(intopt, cutoff=1e-14, group_size=None,
     ao_loc = tot_mol.ao_loc_nr(cart=True)
     ncptype = len(log_qs)
 
-    intopt.bpcache = ctypes.POINTER(BasisProdCache)()
-    scale_shellpair_diag = 1.
-    libgint.GINTinit_basis_prod(
-        ctypes.byref(intopt.bpcache), ctypes.c_double(scale_shellpair_diag),
-        ao_loc.ctypes.data_as(ctypes.c_void_p),
-        bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
-        bas_pairs_locs.ctypes.data_as(
-            ctypes.c_void_p), ctypes.c_int(ncptype),
-        tot_mol._atm.ctypes.data_as(
-            ctypes.c_void_p), ctypes.c_int(tot_mol.natm),
-        tot_mol._bas.ctypes.data_as(
-            ctypes.c_void_p), ctypes.c_int(tot_mol.nbas),
-        tot_mol._env.ctypes.data_as(ctypes.c_void_p))
+    intopt._bpcache = {}
+    for n in range(_num_devices):
+        with cupy.cuda.Device(n), _streams[n]:
+            bpcache = ctypes.POINTER(BasisProdCache)()
+            scale_shellpair_diag = 1.
+            
+            libgint.GINTinit_basis_prod(
+                ctypes.byref(bpcache), 
+                ctypes.c_double(scale_shellpair_diag),
+                ao_loc.ctypes.data_as(ctypes.c_void_p),
+                bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
+                bas_pairs_locs.ctypes.data_as(ctypes.c_void_p), 
+                ctypes.c_int(ncptype),
+                tot_mol._atm.ctypes.data_as(ctypes.c_void_p), 
+                ctypes.c_int(tot_mol.natm),
+                tot_mol._bas.ctypes.data_as(ctypes.c_void_p), 
+                ctypes.c_int(tot_mol.nbas),
+                tot_mol._env.ctypes.data_as(ctypes.c_void_p))
+            intopt._bpcache[n] = bpcache
     intopt.bas_pairs_locs = bas_pairs_locs
     ncptype = len(intopt.log_qs)
     if aosym:

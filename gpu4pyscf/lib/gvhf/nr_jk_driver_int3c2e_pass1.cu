@@ -30,7 +30,6 @@
 #include "gint/rys_roots.cu"
 #include "gint/g2e.cu"
 #include "g3c2e.cuh"
-#include "g3c2e_pass1_root1.cu"
 #include "g3c2e_pass1.cu"
 
 __host__

@@ -21,6 +21,7 @@ from pyscf import df, lib
 from gpu4pyscf import scf as gpu_scf
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.df.df import DF
+from gpu4pyscf.lib.cupy_helper import tag_array
 
 atom='''
 Ti 0.0 0.0 0.0
@@ -109,6 +110,41 @@ class KnownValues(unittest.TestCase):
         assert abs(vk - refk).max() < 1e-9
         assert abs(lib.fp(vj) - 455.864593801164).max() < 1e-9
         assert abs(lib.fp(vk) - 37.7022369618297).max() < 1e-9
+
+    def test_jk_mo(self):
+        dfobj = DF(mol, 'sto3g').build()
+        np.random.seed(3)
+        nao = mol.nao
+        mo_coeff = np.random.rand(nao, nao)
+        mo_occ = np.zeros([nao])
+        mo_occ[:3] = 2
+        dm = 2.0*mo_coeff[:,mo_occ>1].dot(mo_coeff[:,mo_occ>1].T)
+        refj, refk = dfobj.to_cpu().get_jk(dm)
+        dm = cupy.asarray(dm)
+        dm = tag_array(dm, mo_coeff=cupy.asarray(mo_coeff), mo_occ=cupy.asarray(mo_occ))
+        vj, vk = dfobj.get_jk(dm)
+        vj = vj.get()
+        vk = vk.get()
+        assert abs(vj - refj).max() < 1e-9
+        assert abs(vk - refk).max() < 1e-9
+
+    def test_jk_cpu(self):
+        dfobj = DF(mol, 'sto3g').build()
+        dfobj.use_gpu_memory = False
+        np.random.seed(3)
+        nao = mol.nao
+        mo_coeff = np.random.rand(nao, nao)
+        mo_occ = np.zeros([nao])
+        mo_occ[:3] = 2
+        dm = 2.0*mo_coeff[:,mo_occ>1].dot(mo_coeff[:,mo_occ>1].T)
+        refj, refk = dfobj.to_cpu().get_jk(dm)
+        dm = cupy.asarray(dm)
+        dm = tag_array(dm, mo_coeff=cupy.asarray(mo_coeff), mo_occ=cupy.asarray(mo_occ))
+        vj, vk = dfobj.get_jk(dm)
+        vj = vj.get()
+        vk = vk.get()
+        assert abs(vj - refj).max() < 1e-9
+        assert abs(vk - refk).max() < 1e-9
 
 if __name__ == "__main__":
     print("Full Tests for DF JK")

@@ -15,18 +15,16 @@
 
 
 import ctypes
-import copy
 import numpy as np
 import cupy
 from pyscf import gto, df, lib
 from pyscf.scf import _vhf
-from gpu4pyscf.scf.int4c2e import (BasisProdCache, _make_s_index_offsets,
-                                   libgvhf, libgint)
-from gpu4pyscf.lib.cupy_helper import (
-    block_c2s_diag, cart2sph, block_diag, contract, load_library, get_avail_mem,
-    print_mem_info, take_last2d, libcupy_helper)
+from gpu4pyscf.scf.int4c2e import BasisProdCache, libgvhf, libgint
+from gpu4pyscf.lib.cupy_helper import block_c2s_diag, cart2sph, contract, get_avail_mem
+
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import basis_seg_contraction
+from gpu4pyscf.__config__ import _num_devices, _streams
 
 LMAX_ON_GPU = 8
 FREE_CUPY_CACHE = True
@@ -77,15 +75,10 @@ class VHFOpt(_vhf.VHFOpt):
         self._qcondname = qcondname
         self._dmcondname = dmcondname
 
-        self.bpcache = None
-
         self.cart_ao_loc = []
         self.cart_aux_loc = []
         self.sph_ao_loc = []
         self.sph_aux_loc = []
-
-        self.cart2sph = None
-        self.aux_cart2sph = None
 
         self.angular = None
         self.aux_angular = None
@@ -100,8 +93,8 @@ class VHFOpt(_vhf.VHFOpt):
 
     def clear(self):
         _vhf.VHFOpt.__del__(self)
-        if self.bpcache is not None:
-            libgvhf.GINTdel_basis_prod(ctypes.byref(self.bpcache))
+        for n, bpcache in self._bpcache.items():
+            libgvhf.GINTdel_basis_prod(ctypes.byref(bpcache))
         return self
 
     def __del__(self):
@@ -130,6 +123,7 @@ class VHFOpt(_vhf.VHFOpt):
         if group_size is not None :
             uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size)
         self.nctr = len(uniq_l_ctr)
+        self.l_ctr_counts = l_ctr_counts
 
         # sort fake mol
         fake_mol = make_fake_mol()
@@ -139,7 +133,8 @@ class VHFOpt(_vhf.VHFOpt):
         _sorted_auxmol, sorted_aux_idx, aux_uniq_l_ctr, aux_l_ctr_counts = sort_mol(auxmol, log=log)
         if group_size_aux is not None:
             aux_uniq_l_ctr, aux_l_ctr_counts = _split_l_ctr_groups(aux_uniq_l_ctr, aux_l_ctr_counts, group_size_aux)
-        
+        self.aux_l_ctr_counts = aux_l_ctr_counts
+
         _tot_mol = _sorted_mol + fake_mol + _sorted_auxmol
         _tot_mol.cart = True
         self._tot_mol = _tot_mol
@@ -157,7 +152,7 @@ class VHFOpt(_vhf.VHFOpt):
             l_ctr_offsets, l_ctr_offsets, q_cond,
             diag_block_with_triu=diag_block_with_triu, aosym=aosym)
         self.log_qs = log_qs.copy()
-        cput1 = log.timer_debug1('Get pairing', *cput1)
+        cput1 = log.timer_debug1('Get AO pairing', *cput1)
 
         # contraction coefficient for ao basis
         cart_ao_loc = _sorted_mol.ao_loc_nr(cart=True)
@@ -170,10 +165,7 @@ class VHFOpt(_vhf.VHFOpt):
         ao_loc = mol.ao_loc_nr(cart=_mol.cart)
         ao_idx = np.array_split(np.arange(_mol.nao), ao_loc[1:-1])
         self._ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
-
-        # cartesian ao index
-        self.cart2sph = block_c2s_diag(self.angular, l_ctr_counts)
-        cput1 = log.timer_debug1('AO cart2sph coeff', *cput1)
+        cput1 = log.timer_debug1('AO indices', *cput1)
 
         # pairing auxiliary basis with fake basis set
         fake_l_ctr_offsets = np.append(0, np.cumsum(fake_l_ctr_counts))
@@ -189,25 +181,22 @@ class VHFOpt(_vhf.VHFOpt):
 
         aux_loc = _auxmol.ao_loc_nr(cart=_auxmol.cart)
         ao_idx = np.array_split(np.arange(_auxmol.nao), aux_loc[1:-1])
-        self._aux_ao_idx = np.hstack([ao_idx[i] for i in sorted_aux_idx])
-
-        # cartesian aux index
-        self.aux_cart2sph = block_c2s_diag(self.aux_angular, aux_l_ctr_counts)
-        aux_l_ctr_offsets += fake_l_ctr_offsets[-1]
-        cput1 = log.timer_debug1('aux cart2sph coeff', *cput1)
+        self._aux_ao_idx = np.hstack([ao_idx[i] for i in sorted_aux_idx])        
+        cput1 = log.timer_debug1('Aux AO indices', *cput1)
 
         ao_loc = _sorted_mol.ao_loc_nr(cart=_mol.cart)
         self.ao_pairs_row, self.ao_pairs_col = get_ao_pairs(pair2bra, pair2ket, ao_loc)
-        cderi_row = cupy.hstack(self.ao_pairs_row)
-        cderi_col = cupy.hstack(self.ao_pairs_col)
+        cderi_row = np.hstack(self.ao_pairs_row)
+        cderi_col = np.hstack(self.ao_pairs_col)
         self.cderi_row = cderi_row
         self.cderi_col = cderi_col
-        self.cderi_diag = cupy.argwhere(cderi_row == cderi_col)[:,0]
+        self.cderi_diag = np.argwhere(cderi_row == cderi_col)[:,0]
         cput1 = log.timer_debug1('Get AO pairs', *cput1)
 
         aux_pair2bra = []
         aux_pair2ket = []
         aux_log_qs = []
+        aux_l_ctr_offsets += fake_l_ctr_offsets[-1]
         for p0, p1 in zip(aux_l_ctr_offsets[:-1], aux_l_ctr_offsets[1:]):
             aux_pair2bra.append(np.arange(p0,p1,dtype=np.int32))
             aux_pair2ket.append(fake_l_ctr_offsets[0] * np.ones(p1-p0, dtype=np.int32))
@@ -235,16 +224,20 @@ class VHFOpt(_vhf.VHFOpt):
         ao_loc = _tot_mol.ao_loc_nr(cart=True)
         ncptype = len(log_qs)
 
-        self.bpcache = ctypes.POINTER(BasisProdCache)()
-        scale_shellpair_diag = 1.
-        libgint.GINTinit_basis_prod(
-            ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),
-            ao_loc.ctypes.data_as(ctypes.c_void_p),
-            bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
-            bas_pairs_locs.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ncptype),
-            _tot_mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_tot_mol.natm),
-            _tot_mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_tot_mol.nbas),
-            _tot_mol._env.ctypes.data_as(ctypes.c_void_p))
+        self._bpcache = {}
+        for n in range(_num_devices):
+            with cupy.cuda.Device(n), _streams[n]:
+                bpcache = ctypes.POINTER(BasisProdCache)()
+                scale_shellpair_diag = 1.
+                libgint.GINTinit_basis_prod(
+                    ctypes.byref(bpcache), ctypes.c_double(scale_shellpair_diag),
+                    ao_loc.ctypes.data_as(ctypes.c_void_p),
+                    bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
+                    bas_pairs_locs.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ncptype),
+                    _tot_mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_tot_mol.natm),
+                    _tot_mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_tot_mol.nbas),
+                    _tot_mol._env.ctypes.data_as(ctypes.c_void_p))
+                self._bpcache[n] = bpcache
 
         cput1 = log.timer_debug1('Initialize GPU cache', *cput1)
         self.bas_pairs_locs = bas_pairs_locs
@@ -267,6 +260,12 @@ class VHFOpt(_vhf.VHFOpt):
 
         self._sorted_mol = _sorted_mol
         self._sorted_auxmol = _sorted_auxmol
+    
+    @property
+    def bpcache(self):
+        device_id = cupy.cuda.Device().id
+        bpcache = self._bpcache[device_id]
+        return bpcache
 
     def sort_orbitals(self, mat, axis=[], aux_axis=[]):
         ''' Transform given axis of a matrix into sorted AO,
@@ -311,6 +310,14 @@ class VHFOpt(_vhf.VHFOpt):
         mat = cupy.empty_like(sorted_mat)
         mat[tuple(fancy_index)] = sorted_mat
         return mat
+    
+    @property
+    def cart2sph(self):
+        return block_c2s_diag(self.angular, self.l_ctr_counts)
+    
+    @property
+    def aux_cart2sph(self):
+        return block_c2s_diag(self.aux_angular, self.aux_l_ctr_counts)
     
     @property
     def coeff(self):
@@ -390,12 +397,14 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_k=True):
                 rhok_tmp.get(out=wk[k0:k1])
     return wj, wk
 
-def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None):
+def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None, stream=None):
     '''
     build jk with int3c2e slice (sliced in k dimension)
     '''
-    fn = getattr(libgvhf, 'GINTbuild_int3c2e_' + ip_type + '_jk')
     if omega is None: omega = 0.0
+    if stream is None: stream = cupy.cuda.get_current_stream()
+
+    fn = getattr(libgvhf, 'GINTbuild_int3c2e_' + ip_type + '_jk')
     nao = intopt._sorted_mol.nao
     n_dm = 1
 
@@ -430,6 +439,7 @@ def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None):
     ntasks_kl = len(log_q_kl)
     ncp_ij = len(intopt.log_qs)
     err = fn(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
         vj_ptr,
         vk_ptr,
@@ -449,7 +459,6 @@ def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None):
         raise RuntimeError(f'GINT_getjk_int2e_ip failed, err={err}')
 
     return vj, vk
-
 
 def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
     '''
@@ -1381,10 +1390,12 @@ def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, cart=False, aosym=None, out=N
     nbins = 1
     bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
     bins_locs_kl = np.array([0, len(log_q_kl)], dtype=np.int32)
-
-    i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
-    j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
-    k0, k1 = intopt.cart_aux_loc[cp_aux_id], intopt.cart_aux_loc[cp_aux_id+1]
+    
+    cart_ao_loc = intopt.cart_ao_loc
+    cart_aux_loc = intopt.cart_aux_loc
+    i0, i1 = cart_ao_loc[cpi], cart_ao_loc[cpi+1]
+    j0, j1 = cart_ao_loc[cpj], cart_ao_loc[cpj+1]
+    k0, k1 = cart_aux_loc[cp_aux_id], cart_aux_loc[cp_aux_id+1]
 
     ni = i1 - i0
     nj = j1 - j0
@@ -1421,10 +1432,13 @@ def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, cart=False, aosym=None, out=N
 
     if err != 0:
         raise RuntimeError('GINT_fill_int2e failed')
-
+    
     # move this operation to j2c?
     if lk > 1 and intopt.auxmol.cart == 0:
         int3c_blk = cart2sph(int3c_blk, axis=0, ang=lk, out=out)
+    
+    stream.synchronize()
+
     return int3c_blk
 
 def get_int3c2e(mol, auxmol=None, auxbasis='weigend+etb', direct_scf_tol=1e-13, aosym=True, omega=None):
