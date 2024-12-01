@@ -56,7 +56,7 @@ static void rys_jk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bound
     extern __shared__ double rw[];
     double *g = rw + nsq_per_block * nroots*2;
     double *Rpa_cicj = g + nsq_per_block * g_size*3;
-    double Rqc[3];
+    double Rqc[3], Rpq[3];
     double goutx[GWIDTH_IP1];
     double gouty[GWIDTH_IP1];
     double goutz[GWIDTH_IP1];
@@ -167,6 +167,9 @@ static void rys_jk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bound
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
+                Rpq[0] = xpq;
+                Rpq[1] = ypq;
+                Rpq[2] = zpq;
                 __syncthreads();
                 double aij = Rpa[10];
                 if (gout_id == 0) {
@@ -178,12 +181,23 @@ static void rys_jk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bound
                 double theta_rr = theta * rr;
                 if (omega == 0) {
                     rys_roots(nroots, theta_rr, rw);
-                } else {
+                } else if (omega > 0) {
                     double theta_fac = omega * omega / (omega * omega + theta);
                     rys_roots(nroots, theta_fac*theta_rr, rw);
                     __syncthreads();
                     double sqrt_theta_fac = sqrt(theta_fac);
-                    for (int irys = 0; irys < nroots; ++irys) {
+                    for (int irys = gout_id; irys < nroots; irys+=gout_stride) {
+                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
+                    }
+                } else {
+                    int _nroots = nroots/2;
+                    rys_roots(_nroots, theta_rr, rw+nroots*nsq_per_block);
+                    double theta_fac = omega * omega / (omega * omega + theta);
+                    rys_roots(_nroots, theta_fac*theta_rr, rw);
+                    __syncthreads();
+                    double sqrt_theta_fac = -sqrt(theta_fac);
+                    for (int irys = gout_id; irys < _nroots; irys+=gout_stride) {
                         rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
                         rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
@@ -207,10 +221,7 @@ static void rys_jk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bound
                     // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
                     for (int n = gout_id; n < 3; n += gout_stride) {
                         double *_gx = g + n * g_size * nsq_per_block;
-                        double xij = rij[n];
-                        double xkl = rk[n] + Rqc[n];
-                        double xpq = xij - xkl;
-                        double c0x = Rpa[n] - rt_aij * xpq;
+                        double c0x = Rpa[n] - rt_aij * Rpq[n];
                         s0x = _gx[sq_id];
                         s1x = c0x * s0x;
                         _gx[sq_id + nsq_per_block] = s1x;
@@ -229,10 +240,7 @@ static void rys_jk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bound
                             int i = n / 3; //for i in range(lij+1):
                             int _ix = n % 3;
                             double *_gx = g + (i + _ix * g_size) * nsq_per_block;
-                            double xij = rij[_ix];
-                            double xkl = rk[_ix] + Rqc[_ix];
-                            double xpq = xij - xkl;
-                            double cpx = Rqc[_ix] + rt_akl * xpq;
+                            double cpx = Rqc[_ix] + rt_akl * Rpq[_ix];
                             //for i in range(lij+1):
                             //    trr(i,1) = c0p * trr(i,0) + i*b00 * trr(i-1,0)
                             if (n < lij3) {
@@ -641,12 +649,23 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo boun
                 double theta_rr = theta * rr;
                 if (omega == 0) {
                     rys_roots(nroots, theta_rr, rw);
-                } else {
+                } else if (omega > 0) {
                     double theta_fac = omega * omega / (omega * omega + theta);
                     rys_roots(nroots, theta_fac*theta_rr, rw);
                     __syncthreads();
                     double sqrt_theta_fac = sqrt(theta_fac);
                     for (int irys = gout_id; irys < nroots; irys+=gout_stride) {
+                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
+                    }
+                } else {
+                    int _nroots = nroots/2;
+                    rys_roots(_nroots, theta_rr, rw+nroots*nsq_per_block);
+                    double theta_fac = omega * omega / (omega * omega + theta);
+                    rys_roots(_nroots, theta_fac*theta_rr, rw);
+                    __syncthreads();
+                    double sqrt_theta_fac = -sqrt(theta_fac);
+                    for (int irys = gout_id; irys < _nroots; irys+=gout_stride) {
                         rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
                         rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
@@ -858,7 +877,7 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo boun
                     }
                 }
             }
-            if (gout_id == 0) {
+            if (gout_id == 0 && task_id < ntasks) {
                 atomicAdd(vj+ia*3+0, reduce[sq_id+0 *threads]);
                 atomicAdd(vj+ia*3+1, reduce[sq_id+1 *threads]);
                 atomicAdd(vj+ia*3+2, reduce[sq_id+2 *threads]);
@@ -897,7 +916,7 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo boun
                     }
                 }
             }
-            if (gout_id == 0) {
+            if (gout_id == 0 && task_id < ntasks) {
                 atomicAdd(vk+ia*3+0, reduce[sq_id+0 *threads]);
                 atomicAdd(vk+ia*3+1, reduce[sq_id+1 *threads]);
                 atomicAdd(vk+ia*3+2, reduce[sq_id+2 *threads]);
