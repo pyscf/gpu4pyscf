@@ -41,7 +41,7 @@
 #define GSIZE4_INT3C_1E 240
 #define GSIZE5_INT3C_1E 450
 
-
+/*
 static void CINTcart_comp(int16_t *nx, int16_t *ny, int16_t *nz, int lmax)
 {
     int inc = 0;
@@ -55,6 +55,7 @@ static void CINTcart_comp(int16_t *nx, int16_t *ny, int16_t *nz, int lmax)
         }
     }
 }
+*/
 
 static int GINTfill_int3c1e_tasks(double* output, const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
                                   const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
@@ -188,7 +189,7 @@ int GINTfill_int3c1e(const cudaStream_t stream, const BasisProdCache* bpcache,
         fprintf(stderr, "nrys_roots = %d too high\n", nrys_roots);
         return 2;
     }
-
+    /*
     if (nrys_roots > 1) {
         int16_t cart_component[GPU_CART_MAX * 6] {0};
         CINTcart_comp(cart_component + 0 * GPU_CART_MAX, cart_component + 1 * GPU_CART_MAX, cart_component + 2 * GPU_CART_MAX, i_l);
@@ -196,7 +197,7 @@ int GINTfill_int3c1e(const cudaStream_t stream, const BasisProdCache* bpcache,
 
         checkCudaErrors(cudaMemcpyToSymbol(c_idx4c, cart_component, sizeof(int16_t) * GPU_CART_MAX * 6));
     }
-
+    */
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
@@ -246,7 +247,7 @@ int GINTfill_int3c1e_charge_contracted(const cudaStream_t stream, const BasisPro
         fprintf(stderr, "nrys_roots = %d too high\n", nrys_roots);
         return 2;
     }
-
+    /*
     if (nrys_roots > 1) {
         int16_t cart_component[GPU_CART_MAX * 6] {0};
         CINTcart_comp(cart_component + 0 * GPU_CART_MAX, cart_component + 1 * GPU_CART_MAX, cart_component + 2 * GPU_CART_MAX, i_l);
@@ -254,7 +255,7 @@ int GINTfill_int3c1e_charge_contracted(const cudaStream_t stream, const BasisPro
 
         checkCudaErrors(cudaMemcpyToSymbol(c_idx4c, cart_component, sizeof(int16_t) * GPU_CART_MAX * 6));
     }
-
+    */
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;

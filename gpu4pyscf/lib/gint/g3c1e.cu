@@ -28,12 +28,16 @@ static void GINTwrite_int3c1e(const double* g, double* output, const int ish, co
     const int j0 = ao_loc[jsh  ] - ao_offsets_j;
     const int j1 = ao_loc[jsh+1] - ao_offsets_j;
 
-    const int16_t* cart_component_ix = c_idx4c;
-    const int16_t* cart_component_iy = c_idx4c + GPU_CART_MAX;
-    const int16_t* cart_component_iz = c_idx4c + GPU_CART_MAX * 2;
-    const int16_t* cart_component_jx = c_idx4c + GPU_CART_MAX * 3;
-    const int16_t* cart_component_jy = c_idx4c + GPU_CART_MAX * 4;
-    const int16_t* cart_component_jz = c_idx4c + GPU_CART_MAX * 5;
+    //const int16_t* cart_component_ix = c_idx4c;
+    //const int16_t* cart_component_iy = c_idx4c + GPU_CART_MAX;
+    //const int16_t* cart_component_iz = c_idx4c + GPU_CART_MAX * 2;
+    //const int16_t* cart_component_jx = c_idx4c + GPU_CART_MAX * 3;
+    //const int16_t* cart_component_jy = c_idx4c + GPU_CART_MAX * 4;
+    //const int16_t* cart_component_jz = c_idx4c + GPU_CART_MAX * 5;
+
+    const int *idx = c_idx;
+    const int *idy = c_idx + TOT_NF;
+    const int *idz = c_idx + TOT_NF * 2;
 
     const int g_size = NROOTS * (i_l + 1) * (j_l + 1);
     const double* __restrict__ gx = g;
@@ -42,14 +46,25 @@ static void GINTwrite_int3c1e(const double* g, double* output, const int ish, co
 
     for (int j = j0; j < j1; j++) {
         for (int i = i0; i < i1; i++) {
-            const int ix = cart_component_ix[i - i0] + cart_component_jx[j - j0] * (i_l+1);
-            const int iy = cart_component_iy[i - i0] + cart_component_jy[j - j0] * (i_l+1);
-            const int iz = cart_component_iz[i - i0] + cart_component_jz[j - j0] * (i_l+1);
+            //const int ix = cart_component_ix[i - i0] + cart_component_jx[j - j0] * (i_l+1);
+            //const int iy = cart_component_iy[i - i0] + cart_component_jy[j - j0] * (i_l+1);
+            //const int iz = cart_component_iz[i - i0] + cart_component_jz[j - j0] * (i_l+1);
+
+            const int loc_j = c_l_locs[j_l] + (j-j0);
+            const int loc_i = c_l_locs[i_l] + (i-i0);
+
+            int ix = idx[loc_i] + idx[loc_j] * (i_l + 1);
+            int iy = idy[loc_i] + idy[loc_j] * (i_l + 1);
+            int iz = idz[loc_i] + idz[loc_j] * (i_l + 1);
+
+            ix = ix * NROOTS;
+            iy = iy * NROOTS + g_size;
+            iz = iz * NROOTS + g_size * 2;
 
             double eri = 0;
 #pragma unroll
             for (int i_root = 0; i_root < NROOTS; i_root++) {
-                eri += gx[ix * NROOTS + i_root] * gy[iy * NROOTS + i_root] * gz[iz * NROOTS + i_root];
+                eri += gx[ix + i_root] * gy[iy + i_root] * gz[iz + i_root];
             }
             output[i + j * stride_j + i_grid * stride_ij] += eri;
         }
@@ -92,12 +107,15 @@ template <int NROOTS>
 __device__
 static void GINTwrite_int3c1e_charge_contracted(const double* g, double* local_output, double prefactor, const int i_l, const int j_l)
 {
-    const int16_t* cart_component_ix = c_idx4c;
-    const int16_t* cart_component_iy = c_idx4c + GPU_CART_MAX;
-    const int16_t* cart_component_iz = c_idx4c + GPU_CART_MAX * 2;
-    const int16_t* cart_component_jx = c_idx4c + GPU_CART_MAX * 3;
-    const int16_t* cart_component_jy = c_idx4c + GPU_CART_MAX * 4;
-    const int16_t* cart_component_jz = c_idx4c + GPU_CART_MAX * 5;
+    //const int16_t* cart_component_ix = c_idx4c;
+    //const int16_t* cart_component_iy = c_idx4c + GPU_CART_MAX;
+    //const int16_t* cart_component_iz = c_idx4c + GPU_CART_MAX * 2;
+    //const int16_t* cart_component_jx = c_idx4c + GPU_CART_MAX * 3;
+    //const int16_t* cart_component_jy = c_idx4c + GPU_CART_MAX * 4;
+    //const int16_t* cart_component_jz = c_idx4c + GPU_CART_MAX * 5;
+    const int *idx = c_idx;
+    const int *idy = c_idx + TOT_NF;
+    const int *idz = c_idx + TOT_NF * 2;
 
     const int g_size = NROOTS * (i_l + 1) * (j_l + 1);
     const double* __restrict__ gx = g;
@@ -106,14 +124,24 @@ static void GINTwrite_int3c1e_charge_contracted(const double* g, double* local_o
 
     for (int j = 0; j < (j_l + 1) * (j_l + 2) / 2; j++) {
         for (int i = 0; i < (i_l + 1) * (i_l + 2) / 2; i++) {
-            const int ix = cart_component_ix[i] + cart_component_jx[j] * (i_l+1);
-            const int iy = cart_component_iy[i] + cart_component_jy[j] * (i_l+1);
-            const int iz = cart_component_iz[i] + cart_component_jz[j] * (i_l+1);
+            const int loc_j = c_l_locs[j_l] + j;
+            const int loc_i = c_l_locs[i_l] + i;
+
+            int ix = idx[loc_i] + idx[loc_j] * (i_l + 1);
+            int iy = idy[loc_i] + idy[loc_j] * (i_l + 1);
+            int iz = idz[loc_i] + idz[loc_j] * (i_l + 1);
+            
+            ix = ix * NROOTS;
+            iy = iy * NROOTS + g_size;
+            iz = iz * NROOTS + g_size * 2;
+            //const int ix = cart_component_ix[i] + cart_component_jx[j] * (i_l+1);
+            //const int iy = cart_component_iy[i] + cart_component_jy[j] * (i_l+1);
+            //const int iz = cart_component_iz[i] + cart_component_jz[j] * (i_l+1);
 
             double eri = 0;
 #pragma unroll
             for (int i_root = 0; i_root < NROOTS; i_root++) {
-                eri += gx[ix * NROOTS + i_root] * gy[iy * NROOTS + i_root] * gz[iz * NROOTS + i_root];
+                eri += gx[ix + i_root] * gy[iy + i_root] * gz[iz + i_root];
             }
             local_output[i + j * ((i_l + 1) * (i_l + 2) / 2)] += eri * prefactor;
         }
