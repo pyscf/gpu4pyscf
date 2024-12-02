@@ -976,7 +976,6 @@ def get_int3c2e_ipvip1_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None)
     '''
     # get hj and hk with int3c2e_ipvip1
     '''
-    log = logger.new_logger(intopt.mol)
     nao = dm0_tag.shape[0]
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     hj = cupy.zeros([nao,nao,9])
