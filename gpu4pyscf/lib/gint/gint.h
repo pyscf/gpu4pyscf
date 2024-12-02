@@ -250,6 +250,12 @@ typedef struct {
 } BasisProdOffsets;
 
 typedef struct {
+    int density_offset_of_angular_pair;
+    int pair_offset_of_angular_pair;
+    int n_pair_of_angular_pair;
+} HermiteDensityOffsets;
+
+typedef struct {
     int nbas;  // len(bas_coords)
     int ncptype;  // len(cptype)
     ContractionProdType *cptype;
@@ -271,7 +277,6 @@ typedef struct {
     double *a1;
     double *a2;
 } BasisProdCache;
-
 
 typedef struct {
         int stride_j;
