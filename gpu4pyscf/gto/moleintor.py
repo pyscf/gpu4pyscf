@@ -168,12 +168,9 @@ class VHFOpt(_vhf.VHFOpt):
 # end of class VHFOpt
 
 
-def get_int3c1e(mol, grids, direct_scf_tol):
+def get_int3c1e(mol, grids, intopt):
     omega = mol.omega
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
-
-    intopt = VHFOpt(mol)
-    intopt.build(direct_scf_tol)
 
     nao = mol.nao
     ngrids = grids.shape[0]
@@ -256,12 +253,9 @@ def get_int3c1e(mol, grids, direct_scf_tol):
 
     return int3c
 
-def get_int3c1e_charge_contracted(mol, grids, charges, direct_scf_tol):
+def get_int3c1e_charge_contracted(mol, grids, charges, intopt):
     omega = mol.omega
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
-
-    intopt = VHFOpt(mol)
-    intopt.build(direct_scf_tol)
 
     nao = mol.nao
 
@@ -332,18 +326,18 @@ def get_int3c1e_charge_contracted(mol, grids, charges, direct_scf_tol):
     ao_idx = np.argsort(intopt._ao_idx)
     int1e = int1e[np.ix_(ao_idx, ao_idx)]
 
-    return cp.asnumpy(int1e)
+    return int1e
 
-def get_int3c1e_density_contracted(mol, grids, dm, direct_scf_tol):
+def get_int3c1e_density_contracted(mol, grids, dm, intopt):
     omega = mol.omega
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
     dm = cp.asarray(dm)
+    if dm.ndim == 3:
+        dm = cp.einsum("ijk->jk", dm)
+
     assert dm.ndim == 2
     assert dm.shape[0] == dm.shape[1] and dm.shape[0] == mol.nao
-
-    intopt = VHFOpt(mol)
-    intopt.build(direct_scf_tol)
 
     nao_cart = intopt._sorted_mol.nao
     ngrids = grids.shape[0]
@@ -416,19 +410,28 @@ def get_int3c1e_density_contracted(mol, grids, dm, direct_scf_tol):
             if err != 0:
                 raise RuntimeError('GINTfill_int3c1e_density_contracted failed')
 
-    return cp.asnumpy(int3c_density_contracted)
+    return int3c_density_contracted
 
-def intor(mol, intor, grids, dm=None, charges=None, direct_scf_tol=1e-13):
-    assert intor == 'int1e_grids' and grids is not None
+def intor(mol, intor, grids, dm=None, charges=None, direct_scf_tol=1e-13, intopt=None):
+    assert intor == 'int1e_grids'
+    assert grids is not None
     assert dm is None or charges is None, \
         "Are you sure you want to contract the one electron integrals with both charge and density? " + \
         "If so, pass in density, obtain the result with n_charge and contract with the charges yourself."
 
+    if intopt is None:
+        intopt = VHFOpt(mol)
+        intopt.build(direct_scf_tol)
+    else:
+        assert isinstance(intopt, VHFOpt), \
+            f"Please make sure intopt is a {VHFOpt.__module__}.{VHFOpt.__name__} object."
+        assert hasattr(intopt, "density_offset"), "Please call build() function for VHFOpt object first."
+
     if dm is None and charges is None:
-        return get_int3c1e(mol, grids, direct_scf_tol)
+        return get_int3c1e(mol, grids, intopt)
     elif dm is not None:
-        return get_int3c1e_density_contracted(mol, grids, dm, direct_scf_tol)
+        return get_int3c1e_density_contracted(mol, grids, dm, intopt)
     elif charges is not None:
-        return get_int3c1e_charge_contracted(mol, grids, charges, direct_scf_tol)
+        return get_int3c1e_charge_contracted(mol, grids, charges, intopt)
     else:
         raise ValueError(f"Logic error in {__file__} {__name__}")
