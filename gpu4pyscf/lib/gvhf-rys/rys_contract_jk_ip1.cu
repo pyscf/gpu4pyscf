@@ -88,7 +88,7 @@ static void rys_jk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bound
         Rpa[0] = xpa;
         Rpa[1] = ypa;
         Rpa[2] = zpa;
-        double theta_ij = ai * aj / aij;
+        double theta_ij = ai * aj_aij;
         double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
         Rpa[3] = ci[ip] * cj[jp] * Kab;
         Rpa[4] = ri[0] + xpa;
@@ -591,7 +591,7 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo boun
             Rpa[sq_id+0*nsq_per_block] = xjxi * aj_aij;
             Rpa[sq_id+1*nsq_per_block] = yjyi * aj_aij;
             Rpa[sq_id+2*nsq_per_block] = zjzi * aj_aij;
-            double theta_ij = ai * aj / aij;
+            double theta_ij = ai * aj_aij;
             double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
             Rpa[sq_id+3*nsq_per_block] = fac_sym * ci[ip] * cj[jp] * Kab;
         }
