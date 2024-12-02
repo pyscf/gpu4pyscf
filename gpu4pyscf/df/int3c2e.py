@@ -517,8 +517,6 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
 
             ao_offsets = np.array([i0,j0,nao+1+k0,nao], dtype=np.int32)
             strides = np.array([1, ni, ni*nj, ni*nj*nk], dtype=np.int32)
-            log = logger.new_logger(intopt.mol)
-            t1 = log.init_timer()
             # Use GPU kernels for low-angular momentum
             if (li + lj + lk + order)//2 + 1 < NROOT_ON_GPU:
                 int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
@@ -545,15 +543,11 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
                 shls_slice = np.array([ishl0, ishl1, jshl0, jshl1, kshl0, kshl1], dtype=np.int64)
                 int3c_cpu = getints(intor, pmol._atm, pmol._bas, pmol._env, shls_slice, cintopt=opt).transpose([0,3,2,1])
                 int3c_blk = cupy.asarray(int3c_cpu)
-            #print(int3c_blk.shape, li, lj, lk)
-            #t1 = log.timer_debug1('integral', *t1)
             if not intopt.auxmol.cart:
                 int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
-            #t1 = log.timer_debug1('cart2sph0', *t1)
             if not intopt.mol.cart:
                 int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)
                 int3c_blk = cart2sph(int3c_blk, axis=3, ang=li)
-            #t1 = log.timer_debug1('cart2sph1', *t1)
             i0, i1 = ao_loc[cpi], ao_loc[cpi+1]
             j0, j1 = ao_loc[cpj], ao_loc[cpj+1]
             k0, k1 = aux_ao_loc[aux_id], aux_ao_loc[aux_id+1]
@@ -987,24 +981,16 @@ def get_int3c2e_ipvip1_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None)
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     hj = cupy.zeros([nao,nao,9])
     hk = None
-    t1 = log.init_timer()
     if with_k:
         hk = cupy.zeros([nao,nao,9])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipvip1', omega=omega):
-        #t1 = log.timer_debug1('GTO', *t1)
         tmp = contract('xpji,ij->xpij', int3c_blk, dm0_tag[i0:i1,j0:j1])
-        #t1 = log.timer_debug1('tmp', *t1)
         hj[i0:i1,j0:j1] += contract('xpij,p->ijx', tmp, rhoj[k0:k1])
-        #t1 = log.timer_debug1('hj', *t1)
         if with_k:
             rhok_tmp = contract('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
-            #t1 = log.timer_debug1('rhok1', *t1)
             rhok_tmp = contract('pio,jo->pji', rhok_tmp, orbo[j0:j1])
-            #t1 = log.timer_debug1('rhok2', *t1)
             hk[i0:i1,j0:j1] += contract('xpji,pji->ijx', int3c_blk, rhok_tmp)
-            #t1 = log.timer_debug1('hk', *t1)
     hj = hj.reshape([nao,nao,3,3])
-    #exit()
     if with_k:
         hk = hk.reshape([nao,nao,3,3])
     return hj, hk
