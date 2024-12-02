@@ -30,7 +30,7 @@ LMAX_ON_GPU = 8
 FREE_CUPY_CACHE = True
 STACK_SIZE_PER_THREAD = 8192 * 4
 BLKSIZE = 128
-NROOT_ON_GPU = 7
+NROOT_ON_GPU = 9
 
 def make_fake_mol():
     '''
@@ -495,7 +495,6 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
         opt = make_cintopt(pmol._atm, pmol._bas, pmol._env, intor)
 
     nbins = 1
-
     for aux_id, log_q_kl in enumerate(intopt.aux_log_qs):
         cp_kl_id = aux_id + len(intopt.log_qs)
         lk = intopt.aux_angular[aux_id]
@@ -518,7 +517,8 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
 
             ao_offsets = np.array([i0,j0,nao+1+k0,nao], dtype=np.int32)
             strides = np.array([1, ni, ni*nj, ni*nj*nk], dtype=np.int32)
-
+            log = logger.new_logger(intopt.mol)
+            t1 = log.init_timer()
             # Use GPU kernels for low-angular momentum
             if (li + lj + lk + order)//2 + 1 < NROOT_ON_GPU:
                 int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
@@ -545,13 +545,15 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
                 shls_slice = np.array([ishl0, ishl1, jshl0, jshl1, kshl0, kshl1], dtype=np.int64)
                 int3c_cpu = getints(intor, pmol._atm, pmol._bas, pmol._env, shls_slice, cintopt=opt).transpose([0,3,2,1])
                 int3c_blk = cupy.asarray(int3c_cpu)
-
+            #print(int3c_blk.shape, li, lj, lk)
+            #t1 = log.timer_debug1('integral', *t1)
             if not intopt.auxmol.cart:
                 int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
+            #t1 = log.timer_debug1('cart2sph0', *t1)
             if not intopt.mol.cart:
                 int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)
                 int3c_blk = cart2sph(int3c_blk, axis=3, ang=li)
-
+            #t1 = log.timer_debug1('cart2sph1', *t1)
             i0, i1 = ao_loc[cpi], ao_loc[cpi+1]
             j0, j1 = ao_loc[cpj], ao_loc[cpj+1]
             k0, k1 = aux_ao_loc[aux_id], aux_ao_loc[aux_id+1]
@@ -657,10 +659,12 @@ def get_aux2atom(intopt, auxslices):
         aux2atom[p0:p1,ia] = 1.0
     return intopt.sort_orbitals(aux2atom, aux_axis=[0])
 
-def get_j_int3c2e_pass1(intopt, dm0, sort_j=True):
+def get_j_int3c2e_pass1(intopt, dm0, sort_j=True, stream=None):
     '''
     get rhoj pass1 for int3c2e
     '''
+    if stream is None: stream = cupy.cuda.get_current_stream()
+    
     n_dm = 1
 
     naux = intopt._sorted_auxmol.nao
@@ -681,7 +685,9 @@ def get_j_int3c2e_pass1(intopt, dm0, sort_j=True):
     norb = dm_cart.shape[0]
     
     rhoj = cupy.zeros([naux])
+
     err = libgvhf.GINTbuild_j_int3c2e_pass1(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
         ctypes.cast(dm_cart.data.ptr, ctypes.c_void_p),
         ctypes.cast(rhoj.data.ptr, ctypes.c_void_p),
@@ -700,10 +706,12 @@ def get_j_int3c2e_pass1(intopt, dm0, sort_j=True):
         rhoj = cupy.dot(rhoj, aux_coeff)
     return rhoj
 
-def get_j_int3c2e_pass2(intopt, rhoj):
+def get_j_int3c2e_pass2(intopt, rhoj, stream=None):
     '''
     get vj pass2 for int3c2e
     '''
+    if stream is None: stream = cupy.cuda.get_current_stream()
+
     n_dm = 1
     norb = intopt._sorted_mol.nao
     naux = intopt._sorted_auxmol.nao
@@ -723,6 +731,7 @@ def get_j_int3c2e_pass2(intopt, rhoj):
         rhoj = intopt.aux_cart2sph @ rhoj
 
     err = libgvhf.GINTbuild_j_int3c2e_pass2(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
         ctypes.cast(vj.data.ptr, ctypes.c_void_p),
         ctypes.cast(rhoj.data.ptr, ctypes.c_void_p),
@@ -973,20 +982,29 @@ def get_int3c2e_ipvip1_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, omega=None)
     '''
     # get hj and hk with int3c2e_ipvip1
     '''
+    log = logger.new_logger(intopt.mol)
     nao = dm0_tag.shape[0]
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     hj = cupy.zeros([nao,nao,9])
     hk = None
+    t1 = log.init_timer()
     if with_k:
         hk = cupy.zeros([nao,nao,9])
     for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ipvip1', omega=omega):
+        #t1 = log.timer_debug1('GTO', *t1)
         tmp = contract('xpji,ij->xpij', int3c_blk, dm0_tag[i0:i1,j0:j1])
+        #t1 = log.timer_debug1('tmp', *t1)
         hj[i0:i1,j0:j1] += contract('xpij,p->ijx', tmp, rhoj[k0:k1])
+        #t1 = log.timer_debug1('hj', *t1)
         if with_k:
             rhok_tmp = contract('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
+            #t1 = log.timer_debug1('rhok1', *t1)
             rhok_tmp = contract('pio,jo->pji', rhok_tmp, orbo[j0:j1])
+            #t1 = log.timer_debug1('rhok2', *t1)
             hk[i0:i1,j0:j1] += contract('xpji,pji->ijx', int3c_blk, rhok_tmp)
+            #t1 = log.timer_debug1('hk', *t1)
     hj = hj.reshape([nao,nao,3,3])
+    #exit()
     if with_k:
         hk = hk.reshape([nao,nao,3,3])
     return hj, hk

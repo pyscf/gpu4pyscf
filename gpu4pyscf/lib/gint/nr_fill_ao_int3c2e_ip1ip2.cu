@@ -47,7 +47,7 @@ static int GINTfill_int3c2e_ip1ip2_tasks(ERITensor *eri, BasisProdOffsets *offse
     
     switch (type_ijk) {
         // li+lj+lk=0
-        case 0: GINTfill_int3c2e_ip1ip2_kernel<0,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 0: GINTfill_int3c2e_ip1ip2_kernel000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         // li+lj+lk=1
         case 1: GINTfill_int3c2e_ip1ip2_kernel<0,0,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 10: GINTfill_int3c2e_ip1ip2_kernel<0,1,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
@@ -150,7 +150,7 @@ int GINTfill_int3c2e_ip1ip2(cudaStream_t stream, BasisProdCache *bpcache, double
     if (envs.nrys_roots > 9) {
         return 2;
     }
-
+    /*
     // TODO: improve the efficiency by unrolling
     if (envs.nrys_roots > 1) {
         int16_t *idx4c = (int16_t *)malloc(sizeof(int16_t) * envs.nf * 3);
@@ -158,7 +158,7 @@ int GINTfill_int3c2e_ip1ip2(cudaStream_t stream, BasisProdCache *bpcache, double
         checkCudaErrors(cudaMemcpyToSymbol(c_idx4c, idx4c, sizeof(int16_t)*envs.nf*3));
         free(idx4c);
     }
-
+    */
     int kl_bin, ij_bin1;
 
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));

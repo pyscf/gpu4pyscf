@@ -47,7 +47,7 @@ static int GINTfill_int3c2e_ipip1_tasks(ERITensor *eri, BasisProdOffsets *offset
     
     switch (type_ijk) {
         // li+lj+lk=0
-        case 0: GINTfill_int3c2e_ipip1_kernel<0,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 0: GINTfill_int3c2e_ipip1_kernel000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         // li+lj+lk=1
         case 1: GINTfill_int3c2e_ipip1_kernel<0,0,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 10: GINTfill_int3c2e_ipip1_kernel<0,1,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
@@ -70,6 +70,7 @@ static int GINTfill_int3c2e_ipip1_tasks(ERITensor *eri, BasisProdOffsets *offset
         case 201: GINTfill_int3c2e_ipip1_kernel<2,0,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 210: GINTfill_int3c2e_ipip1_kernel<2,1,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 300: GINTfill_int3c2e_ipip1_kernel<3,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+#ifdef UNROLL_INT3C2E
         // li+lj+lk=4
         case 4: GINTfill_int3c2e_ipip1_kernel<0,0,4><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 13: GINTfill_int3c2e_ipip1_kernel<0,1,3><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
@@ -108,7 +109,7 @@ static int GINTfill_int3c2e_ipip1_tasks(ERITensor *eri, BasisProdOffsets *offset
         case 401: GINTfill_int3c2e_ipip1_kernel<4,0,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 410: GINTfill_int3c2e_ipip1_kernel<4,1,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 500: GINTfill_int3c2e_ipip1_kernel<5,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-
+#endif
         default: switch (nrys_roots) {
             case 2: GINTfill_int3c2e_ipip1_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
             case 3: GINTfill_int3c2e_ipip1_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
@@ -148,7 +149,7 @@ int GINTfill_int3c2e_ipip1(cudaStream_t stream, BasisProdCache *bpcache, double 
     if (envs.nrys_roots > 9) {
         return 2;
     }
-
+    /*
     // TODO: improve the efficiency by unrolling
     if (envs.nrys_roots > 1) {
         int16_t *idx4c = (int16_t *)malloc(sizeof(int16_t) * envs.nf * 3);
@@ -156,7 +157,7 @@ int GINTfill_int3c2e_ipip1(cudaStream_t stream, BasisProdCache *bpcache, double 
         checkCudaErrors(cudaMemcpyToSymbol(c_idx4c, idx4c, sizeof(int16_t)*envs.nf*3));
         free(idx4c);
     }
-
+    */
     int kl_bin, ij_bin1;
 
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));

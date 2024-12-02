@@ -149,7 +149,7 @@ int GINTfill_int2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, in
         fprintf(stderr, "GINTfill_int2e: unsupported rys order %d\n", envs.nrys_roots);
         return 2;
     }
-
+    /*
     if (envs.nrys_roots > 2) {
         int16_t *idx4c = (int16_t *)malloc(sizeof(int16_t) * envs.nf * 3);
         int *idx_ij = (int *)malloc(sizeof(int) * envs.nfi * envs.nfj * 3);
@@ -173,7 +173,7 @@ int GINTfill_int2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, in
         free(idx_ij);
         free(idx_kl);
     }
-
+    */
     // Data and buffers to be allocated on-device. Allocate them here to
     // reduce the calls to malloc
     int kl_bin, ij_bin1;

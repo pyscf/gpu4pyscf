@@ -75,10 +75,9 @@
 #define NF_MAX_INT3C    (GPU_AO_NF * GPU_AO_NF * GPU_AUX_NF)
 
 // threads for GPU
-#define THREADSX        16
-#define THREADSY        16
+#define THREADSX        8
+#define THREADSY        8
 #define THREADS         (THREADSX * THREADSY)
-#define MAX_STREAMS         16
 #define SHARED_MEM_NFIJ_MAX     18
 
 // sum of total l indices

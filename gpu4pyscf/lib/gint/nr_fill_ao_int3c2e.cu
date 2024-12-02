@@ -128,7 +128,7 @@ int GINTfill_int3c2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, 
     if (envs.nrys_roots > 9) {
         return 2;
     }
-
+    /*
     // TODO: improve the efficiency by unrolling
     if (envs.nrys_roots > 1) {
         int16_t *idx4c = (int16_t *)malloc(sizeof(int16_t) * envs.nf * 3);
@@ -136,7 +136,7 @@ int GINTfill_int3c2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, 
         checkCudaErrors(cudaMemcpyToSymbol(c_idx4c, idx4c, sizeof(int16_t)*envs.nf*3));
         free(idx4c);
     }
-
+    */
     int kl_bin, ij_bin1;
 
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
