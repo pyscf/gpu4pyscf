@@ -7,7 +7,6 @@
 #include "vhf.cuh"
 #include "rys_roots.cu"
 #include "create_tasks_ip1.cu"
-#include "create_tasks.cu"
 
 #define GWIDTH_IP1 18
 
@@ -456,7 +455,7 @@ void rys_jk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 }
 
 __device__
-static void rys_ejk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                 ShellQuartet *shl_quartet_idx, int ntasks)
 {
     // sq is short for shl_quartet
@@ -506,11 +505,10 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo boun
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
     double *env = envs.env;
-    double *vj = jk.vj;
-    double *vk = jk.vk;
-    double *dm = jk.dm;
-
     double omega = env[PTR_RANGE_OMEGA];
+    int do_j = jk.j_factor != NULL;
+    int do_k = jk.k_factor != NULL;
+    double *dm = jk.dm;
     extern __shared__ double rw[];
     double *g = rw + nsq_per_block * nroots*2;
     double *Rpa_cicj = g + nsq_per_block * g_size*3;
@@ -553,30 +551,18 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo boun
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double vj_ix = 0;
-        double vj_iy = 0;
-        double vj_iz = 0;
-        double vj_jx = 0;
-        double vj_jy = 0;
-        double vj_jz = 0;
-        double vj_kx = 0;
-        double vj_ky = 0;
-        double vj_kz = 0;
-        double vj_lx = 0;
-        double vj_ly = 0;
-        double vj_lz = 0;
-        double vk_ix = 0;
-        double vk_iy = 0;
-        double vk_iz = 0;
-        double vk_jx = 0;
-        double vk_jy = 0;
-        double vk_jz = 0;
-        double vk_kx = 0;
-        double vk_ky = 0;
-        double vk_kz = 0;
-        double vk_lx = 0;
-        double vk_ly = 0;
-        double vk_lz = 0;
+        double v_ix = 0;
+        double v_iy = 0;
+        double v_iz = 0;
+        double v_jx = 0;
+        double v_jy = 0;
+        double v_jz = 0;
+        double v_kx = 0;
+        double v_ky = 0;
+        double v_kz = 0;
+        double v_lx = 0;
+        double v_ly = 0;
+        double v_lz = 0;
         for (int ij = gout_id; ij < iprim*jprim; ij += gout_stride) {
             int ip = ij / jprim;
             int jp = ij % jprim;
@@ -808,41 +794,49 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo boun
                         int _j = j + j0;
                         int _k = k + k0;
                         int _l = l + l0;
-                        int _jl = _j*nao+_l;
-                        int _jk = _j*nao+_k;
-                        int _il = _i*nao+_l;
-                        int _ik = _i*nao+_k;
-                        int _ji = _j*nao+_i;
-                        int _lk = _l*nao+_k;
-                        double dd_jk = dm[_jk] * dm[_il];
-                        double dd_jl = dm[_jl] * dm[_ik];
-                        double dd_k = dd_jk + dd_jl;
-                        double dd_j = dm[_ji] * dm[_lk];
-                        if (jk.n_dm > 1) {
-                            int nao2 = nao * nao;
-                            double dd_jk = dm[nao2+_jk] * dm[nao2+_il];
-                            double dd_jl = dm[nao2+_jl] * dm[nao2+_ik];
-                            dd_k += dd_jk + dd_jl;
-                            dd_j = (dm[_ji] + dm[nao2+_ji]) * (dm[_lk] + dm[nao2+_lk]);
+                        double dd = 0.;
+                        if (do_k) {
+                            int _jl = _j*nao+_l;
+                            int _jk = _j*nao+_k;
+                            int _il = _i*nao+_l;
+                            int _ik = _i*nao+_k;
+                            dd  = dm[_jk] * dm[_il];
+                            dd += dm[_jl] * dm[_ik];
+                            if (jk.n_dm > 1) {
+                                int nao2 = nao * nao;
+                                dd += dm[nao2+_jk] * dm[nao2+_il];
+                                dd += dm[nao2+_jl] * dm[nao2+_ik];
+                            }
+                            dd *= jk.k_factor;
+                        }
+                        if (do_j) {
+                            int _ji = _j*nao+_i;
+                            int _lk = _l*nao+_k;
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[_ji] * dm[_lk];
+                            } else {
+                                int nao2 = nao * nao;
+                                dd = jk.j_factor * (dm[_ji] + dm[nao2+_ji]) * (dm[_lk] + dm[nao2+_lk]);
+                            }
                         }
                         int addrx = sq_id + (ix + jx*stride_j + kx*stride_k + lx*stride_l) * nsq_per_block;
                         int addry = sq_id + (iy + jy*stride_j + ky*stride_k + ly*stride_l) * nsq_per_block;
                         int addrz = sq_id + (iz + jz*stride_j + kz*stride_k + lz*stride_l) * nsq_per_block;
-                        double prod_xy = gx[addrx] * gy[addry];
-                        double prod_xz = gx[addrx] * gz[addrz];
-                        double prod_yz = gy[addry] * gz[addrz];
-                        double fix = ai2 * gx[addrx+i_1]; if (ix > 0) { fix -= ix * gx[addrx-i_1]; } fix *= prod_yz; vk_ix += fix * dd_k; vj_ix += fix * dd_j;
-                        double fiy = ai2 * gy[addry+i_1]; if (iy > 0) { fiy -= iy * gy[addry-i_1]; } fiy *= prod_xz; vk_iy += fiy * dd_k; vj_iy += fiy * dd_j;
-                        double fiz = ai2 * gz[addrz+i_1]; if (iz > 0) { fiz -= iz * gz[addrz-i_1]; } fiz *= prod_xy; vk_iz += fiz * dd_k; vj_iz += fiz * dd_j;
-                        double fjx = aj2 * gx[addrx+j_1]; if (jx > 0) { fjx -= jx * gx[addrx-j_1]; } fjx *= prod_yz; vk_jx += fjx * dd_k; vj_jx += fjx * dd_j;
-                        double fjy = aj2 * gy[addry+j_1]; if (jy > 0) { fjy -= jy * gy[addry-j_1]; } fjy *= prod_xz; vk_jy += fjy * dd_k; vj_jy += fjy * dd_j;
-                        double fjz = aj2 * gz[addrz+j_1]; if (jz > 0) { fjz -= jz * gz[addrz-j_1]; } fjz *= prod_xy; vk_jz += fjz * dd_k; vj_jz += fjz * dd_j;
-                        double fkx = ak2 * gx[addrx+k_1]; if (kx > 0) { fkx -= kx * gx[addrx-k_1]; } fkx *= prod_yz; vk_kx += fkx * dd_k; vj_kx += fkx * dd_j;
-                        double fky = ak2 * gy[addry+k_1]; if (ky > 0) { fky -= ky * gy[addry-k_1]; } fky *= prod_xz; vk_ky += fky * dd_k; vj_ky += fky * dd_j;
-                        double fkz = ak2 * gz[addrz+k_1]; if (kz > 0) { fkz -= kz * gz[addrz-k_1]; } fkz *= prod_xy; vk_kz += fkz * dd_k; vj_kz += fkz * dd_j;
-                        double flx = al2 * gx[addrx+l_1]; if (lx > 0) { flx -= lx * gx[addrx-l_1]; } flx *= prod_yz; vk_lx += flx * dd_k; vj_lx += flx * dd_j;
-                        double fly = al2 * gy[addry+l_1]; if (ly > 0) { fly -= ly * gy[addry-l_1]; } fly *= prod_xz; vk_ly += fly * dd_k; vj_ly += fly * dd_j;
-                        double flz = al2 * gz[addrz+l_1]; if (lz > 0) { flz -= lz * gz[addrz-l_1]; } flz *= prod_xy; vk_lz += flz * dd_k; vj_lz += flz * dd_j;
+                        double prod_xy = gx[addrx] * gy[addry] * dd;
+                        double prod_xz = gx[addrx] * gz[addrz] * dd;
+                        double prod_yz = gy[addry] * gz[addrz] * dd;
+                        double fix = ai2 * gx[addrx+i_1]; if (ix > 0) { fix -= ix * gx[addrx-i_1]; } v_ix += fix * prod_yz;
+                        double fiy = ai2 * gy[addry+i_1]; if (iy > 0) { fiy -= iy * gy[addry-i_1]; } v_iy += fiy * prod_xz;
+                        double fiz = ai2 * gz[addrz+i_1]; if (iz > 0) { fiz -= iz * gz[addrz-i_1]; } v_iz += fiz * prod_xy;
+                        double fjx = aj2 * gx[addrx+j_1]; if (jx > 0) { fjx -= jx * gx[addrx-j_1]; } v_jx += fjx * prod_yz;
+                        double fjy = aj2 * gy[addry+j_1]; if (jy > 0) { fjy -= jy * gy[addry-j_1]; } v_jy += fjy * prod_xz;
+                        double fjz = aj2 * gz[addrz+j_1]; if (jz > 0) { fjz -= jz * gz[addrz-j_1]; } v_jz += fjz * prod_xy;
+                        double fkx = ak2 * gx[addrx+k_1]; if (kx > 0) { fkx -= kx * gx[addrx-k_1]; } v_kx += fkx * prod_yz;
+                        double fky = ak2 * gy[addry+k_1]; if (ky > 0) { fky -= ky * gy[addry-k_1]; } v_ky += fky * prod_xz;
+                        double fkz = ak2 * gz[addrz+k_1]; if (kz > 0) { fkz -= kz * gz[addrz-k_1]; } v_kz += fkz * prod_xy;
+                        double flx = al2 * gx[addrx+l_1]; if (lx > 0) { flx -= lx * gx[addrx-l_1]; } v_lx += flx * prod_yz;
+                        double fly = al2 * gy[addry+l_1]; if (ly > 0) { fly -= ly * gy[addry-l_1]; } v_ly += fly * prod_xz;
+                        double flz = al2 * gz[addrz+l_1]; if (lz > 0) { flz -= lz * gz[addrz-l_1]; } v_lz += flz * prod_xy;
                     }
                 }
             }
@@ -853,89 +847,49 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo boun
         int la = bas[lsh*BAS_SLOTS+ATOM_OF];
         int t_id = sq_id + gout_id * nsq_per_block;
         int threads = nsq_per_block * gout_stride;
-        if (vj != NULL) {
+        double *reduce = rw;
+        __syncthreads();
+        reduce[t_id+0 *threads] = v_ix;
+        reduce[t_id+1 *threads] = v_iy;
+        reduce[t_id+2 *threads] = v_iz;
+        reduce[t_id+3 *threads] = v_jx;
+        reduce[t_id+4 *threads] = v_jy;
+        reduce[t_id+5 *threads] = v_jz;
+        reduce[t_id+6 *threads] = v_kx;
+        reduce[t_id+7 *threads] = v_ky;
+        reduce[t_id+8 *threads] = v_kz;
+        reduce[t_id+9 *threads] = v_lx;
+        reduce[t_id+10*threads] = v_ly;
+        reduce[t_id+11*threads] = v_lz;
+        for (int i = gout_stride/2; i > 0; i >>= 1) {
             __syncthreads();
-            double *reduce = rw;
-            reduce[t_id+0 *threads] = vj_ix;
-            reduce[t_id+1 *threads] = vj_iy;
-            reduce[t_id+2 *threads] = vj_iz;
-            reduce[t_id+3 *threads] = vj_jx;
-            reduce[t_id+4 *threads] = vj_jy;
-            reduce[t_id+5 *threads] = vj_jz;
-            reduce[t_id+6 *threads] = vj_kx;
-            reduce[t_id+7 *threads] = vj_ky;
-            reduce[t_id+8 *threads] = vj_kz;
-            reduce[t_id+9 *threads] = vj_lx;
-            reduce[t_id+10*threads] = vj_ly;
-            reduce[t_id+11*threads] = vj_lz;
-            for (int i = gout_stride/2; i > 0; i >>= 1) {
-                __syncthreads();
-                if (gout_id < i) {
+            if (gout_id < i) {
 #pragma unroll
-                    for (int n = 0; n < 12; ++n) {
-                        reduce[n*threads + t_id] += reduce[n*threads + t_id +i*nsq_per_block];
-                    }
+                for (int n = 0; n < 12; ++n) {
+                    reduce[n*threads + t_id] += reduce[n*threads + t_id +i*nsq_per_block];
                 }
-            }
-            if (gout_id == 0 && task_id < ntasks) {
-                atomicAdd(vj+ia*3+0, reduce[sq_id+0 *threads]);
-                atomicAdd(vj+ia*3+1, reduce[sq_id+1 *threads]);
-                atomicAdd(vj+ia*3+2, reduce[sq_id+2 *threads]);
-                atomicAdd(vj+ja*3+0, reduce[sq_id+3 *threads]);
-                atomicAdd(vj+ja*3+1, reduce[sq_id+4 *threads]);
-                atomicAdd(vj+ja*3+2, reduce[sq_id+5 *threads]);
-                atomicAdd(vj+ka*3+0, reduce[sq_id+6 *threads]);
-                atomicAdd(vj+ka*3+1, reduce[sq_id+7 *threads]);
-                atomicAdd(vj+ka*3+2, reduce[sq_id+8 *threads]);
-                atomicAdd(vj+la*3+0, reduce[sq_id+9 *threads]);
-                atomicAdd(vj+la*3+1, reduce[sq_id+10*threads]);
-                atomicAdd(vj+la*3+2, reduce[sq_id+11*threads]);
             }
         }
-        if (vk != NULL) {
-            __syncthreads();
-            double *reduce = rw;
-            reduce[t_id+0 *threads] = vk_ix;
-            reduce[t_id+1 *threads] = vk_iy;
-            reduce[t_id+2 *threads] = vk_iz;
-            reduce[t_id+3 *threads] = vk_jx;
-            reduce[t_id+4 *threads] = vk_jy;
-            reduce[t_id+5 *threads] = vk_jz;
-            reduce[t_id+6 *threads] = vk_kx;
-            reduce[t_id+7 *threads] = vk_ky;
-            reduce[t_id+8 *threads] = vk_kz;
-            reduce[t_id+9 *threads] = vk_lx;
-            reduce[t_id+10*threads] = vk_ly;
-            reduce[t_id+11*threads] = vk_lz;
-            for (int i = gout_stride/2; i > 0; i >>= 1) {
-                __syncthreads();
-                if (gout_id < i) {
-#pragma unroll
-                    for (int n = 0; n < 12; ++n) {
-                        reduce[n*threads + t_id] += reduce[n*threads + t_id +i*nsq_per_block];
-                    }
-                }
-            }
-            if (gout_id == 0 && task_id < ntasks) {
-                atomicAdd(vk+ia*3+0, reduce[sq_id+0 *threads]);
-                atomicAdd(vk+ia*3+1, reduce[sq_id+1 *threads]);
-                atomicAdd(vk+ia*3+2, reduce[sq_id+2 *threads]);
-                atomicAdd(vk+ja*3+0, reduce[sq_id+3 *threads]);
-                atomicAdd(vk+ja*3+1, reduce[sq_id+4 *threads]);
-                atomicAdd(vk+ja*3+2, reduce[sq_id+5 *threads]);
-                atomicAdd(vk+ka*3+0, reduce[sq_id+6 *threads]);
-                atomicAdd(vk+ka*3+1, reduce[sq_id+7 *threads]);
-                atomicAdd(vk+ka*3+2, reduce[sq_id+8 *threads]);
-                atomicAdd(vk+la*3+0, reduce[sq_id+9 *threads]);
-                atomicAdd(vk+la*3+1, reduce[sq_id+10*threads]);
-                atomicAdd(vk+la*3+2, reduce[sq_id+11*threads]);
-            }
+        if (gout_id == 0 && task_id < ntasks) {
+            double *ejk = jk.ejk;
+            atomicAdd(ejk+ia*3+0, reduce[sq_id+0 *threads]);
+            atomicAdd(ejk+ia*3+1, reduce[sq_id+1 *threads]);
+            atomicAdd(ejk+ia*3+2, reduce[sq_id+2 *threads]);
+            atomicAdd(ejk+ja*3+0, reduce[sq_id+3 *threads]);
+            atomicAdd(ejk+ja*3+1, reduce[sq_id+4 *threads]);
+            atomicAdd(ejk+ja*3+2, reduce[sq_id+5 *threads]);
+            atomicAdd(ejk+ka*3+0, reduce[sq_id+6 *threads]);
+            atomicAdd(ejk+ka*3+1, reduce[sq_id+7 *threads]);
+            atomicAdd(ejk+ka*3+2, reduce[sq_id+8 *threads]);
+            atomicAdd(ejk+la*3+0, reduce[sq_id+9 *threads]);
+            atomicAdd(ejk+la*3+1, reduce[sq_id+10*threads]);
+            atomicAdd(ejk+la*3+2, reduce[sq_id+11*threads]);
         }
     }
 }
 
 __global__
-void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                         ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;

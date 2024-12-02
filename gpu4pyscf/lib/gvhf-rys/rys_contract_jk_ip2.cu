@@ -581,7 +581,7 @@ void rys_ejk_ip2_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        int ntasks = _fill_ejk_tasks_tmp(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
         if (ntasks > 0) {
             rys_ejk_ip2_general(envs, jk, bounds, shl_quartet_idx, ntasks);

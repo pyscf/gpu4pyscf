@@ -2961,7 +2961,7 @@ void rys_ejk_ip2_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        int ntasks = _fill_ejk_tasks_tmp(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
@@ -7950,7 +7950,7 @@ void rys_ejk_ip2_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        int ntasks = _fill_ejk_tasks_tmp(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
@@ -19369,7 +19369,7 @@ void rys_ejk_ip2_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        int ntasks = _fill_ejk_tasks_tmp(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
@@ -30896,7 +30896,7 @@ void rys_ejk_ip2_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        int ntasks = _fill_ejk_tasks_tmp(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];

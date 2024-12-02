@@ -6,6 +6,7 @@
 
 #include "vhf.cuh"
 
+// 8-fold symmery
 __device__
 static int _fill_jk_tasks(ShellQuartet *shl_quartet_idx,
                           RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
@@ -168,6 +169,7 @@ static int _fill_jk_tasks(ShellQuartet *shl_quartet_idx,
     return ntasks;
 }
 
+// 8-fold symmery
 __device__
 static int _fill_sr_jk_tasks(ShellQuartet *shl_quartet_idx,
                              RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
