@@ -297,8 +297,16 @@ void rys_ejk_ip1_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
             int nbas_tiles = nbas / TILE;
@@ -719,8 +727,16 @@ void rys_ejk_ip1_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
             int nbas_tiles = nbas / TILE;
@@ -1460,8 +1476,16 @@ void rys_ejk_ip1_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
             int nbas_tiles = nbas / TILE;
@@ -3155,8 +3179,16 @@ void rys_ejk_ip1_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
             int nbas_tiles = nbas / TILE;
@@ -3904,8 +3936,16 @@ void rys_ejk_ip1_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
             int nbas_tiles = nbas / TILE;
@@ -5605,8 +5645,16 @@ void rys_ejk_ip1_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
             int nbas_tiles = nbas / TILE;
@@ -10168,8 +10216,16 @@ void rys_ejk_ip1_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
             int nbas_tiles = nbas / TILE;
@@ -10749,8 +10805,16 @@ void rys_ejk_ip1_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
             int nbas_tiles = nbas / TILE;
@@ -11961,8 +12025,16 @@ void rys_ejk_ip1_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
             int nbas_tiles = nbas / TILE;
@@ -15072,8 +15144,16 @@ void rys_ejk_ip1_2011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
             int nbas_tiles = nbas / TILE;
@@ -17223,8 +17303,16 @@ void rys_ejk_ip1_2020(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
             int nbas_tiles = nbas / TILE;
@@ -18443,8 +18531,16 @@ void rys_ejk_ip1_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
             int nbas_tiles = nbas / TILE;
@@ -21557,8 +21653,16 @@ void rys_ejk_ip1_2110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
             int nbas_tiles = nbas / TILE;
@@ -23734,8 +23838,16 @@ void rys_ejk_ip1_2200(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
             int nbas_tiles = nbas / TILE;

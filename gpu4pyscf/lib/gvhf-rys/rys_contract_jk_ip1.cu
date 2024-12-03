@@ -905,8 +905,16 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     while (batch_id < nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
-        int ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
                                      batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
         if (ntasks > 0) {
             rys_ejk_ip1_general(envs, jk, bounds, shl_quartet_idx, ntasks);
         }
