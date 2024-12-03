@@ -44,7 +44,7 @@ from gpu4pyscf import __config__
 from gpu4pyscf.df.grad.rhf import _gen_metric_solver
 
 LINEAR_DEP_THR = df.LINEAR_DEP_THR
-BLKSIZE = 256
+BLKSIZE = 128
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
 GB = 1024*1024*1024
 

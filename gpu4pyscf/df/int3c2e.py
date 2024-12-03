@@ -30,7 +30,7 @@ LMAX_ON_GPU = 8
 FREE_CUPY_CACHE = True
 STACK_SIZE_PER_THREAD = 8192 * 4
 BLKSIZE = 128
-NROOT_ON_GPU = 9
+NROOT_ON_GPU = 7
 
 def make_fake_mol():
     '''
