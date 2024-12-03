@@ -27,10 +27,9 @@ import numpy as np
 from pyscf.hessian import rhf as rhf_hess_cpu
 from pyscf import lib
 from pyscf.gto import ATOM_OF
+from pyscf.scf import cphf
 # import _response_functions to load gen_response methods in SCF class
 from gpu4pyscf.scf import _response_functions  # noqa
-from gpu4pyscf.gto.mole import sort_atoms
-from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib.cupy_helper import (
     contract, tag_array, sandwich_dot, transpose_sum, get_avail_mem, condense)
 from gpu4pyscf.__config__ import props as gpu_specs
@@ -53,14 +52,16 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     ''' Different from PySF, using h1mo instead of h1ao for saving memory
     '''
     log = logger.new_logger(hessobj, verbose)
-    time0 = t1 = (logger.process_clock(), logger.perf_counter())
-
+    time0 = t1 = log.init_timer()
     mol = hessobj.mol
     mf = hessobj.base
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
+    if atmlst is not None:
+        assert len(atmlst) == mol.natm
 
+    assert mo_coeff.dtype == cp.float64
     mo_energy = cupy.asarray(mo_energy)
     mo_occ = cupy.asarray(mo_occ)
     mo_coeff = cupy.asarray(mo_coeff)
@@ -75,38 +76,35 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                                        None, atmlst, max_memory, log)
         t1 = log.timer_debug1('solving MO1', *t1)
 
+    mo1 = cupy.asarray(mo1)
+    # *2 for double occupancy, *2 for +c.c.
+    de2 += contract('kxpi,lypi->klxy', cupy.asarray(h1mo), mo1) * 4
+    h1mo = None
+    mo1 = contract('kxai,pa->kxpi', mo1, mo_coeff)
+    mo_e1 = cupy.asarray(mo_e1)
+
     nao = mo_coeff.shape[0]
-    mocc = cupy.array(mo_coeff[:,mo_occ>0])
-    mo_energy = cupy.array(mo_energy)
+    mocc = mo_coeff[:,mo_occ>0]
+    mocc_e = mocc * mo_energy[mo_occ>0]
     s1a = -mol.intor('int1e_ipovlp', comp=3)
     s1a = cupy.asarray(s1a)
+
     aoslices = mol.aoslice_by_atom()
-    if atmlst is None:
-        atmlst = range(mol.natm)
-    for i0, ia in enumerate(atmlst):
-        shl0, shl1, p0, p1 = aoslices[ia]
+    for i0, (p0, p1) in enumerate(aoslices[:,2:]):
         s1ao = cupy.zeros((3,nao,nao))
         s1ao[:,p0:p1] += s1a[:,p0:p1]
         s1ao[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
 
         tmp = contract('xpq,pi->xiq', s1ao, mocc)
         s1oo = contract('xiq,qj->xij', tmp, mocc)
+        de2[i0] -= contract('xij,kyij->kxy', s1oo, mo_e1) * 2
 
-        s1mo = contract('xij,ip->xpj', s1ao, mo_coeff)
+        s1mo = contract('xpq,qi->xpi', s1ao, mocc_e)
+        de2[i0] -= contract('xpi,kypi->kxy', s1mo, mo1) * 4
 
-        for j0 in range(i0+1):
-            ja = atmlst[j0]
-            q0, q1 = aoslices[ja][2:]
-# *2 for double occupancy, *2 for +c.c.
-            de2[i0,j0] += contract('xpi,ypi->xy', h1mo[ia], mo1[ja]) * 4
-            dm1 = contract('ypi,qi->ypq', mo1[ja], mocc*mo_energy[mo_occ>0])
-            de2[i0,j0] -= contract('xpq,ypq->xy', s1mo, dm1) * 4
-            de2[i0,j0] -= contract('xpq,ypq->xy', s1oo, mo_e1[ja]) * 2
-        for j0 in range(i0):
-            de2[j0,i0] = de2[i0,j0].T
-
+    de2 = de2 + de2.transpose(1,0,3,2)
+    de2 *= .5
     log.timer('RHF hessian', *time0)
-
     return de2
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
@@ -505,61 +503,48 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     '''
     mol = mf.mol
     log = logger.new_logger(mf, verbose)
-    nao = mo_coeff.shape[0]
+
     mocc = mo_coeff[:,mo_occ>0]
+    nao, nmo = mo_coeff.shape
     nocc = mocc.shape[1]
 
     if fx is None:
         fx = gen_vind(mf, mo_coeff, mo_occ)
     s1a = -mol.intor('int1e_ipovlp', comp=3)
-    s1a = cupy.asarray(s1a)
-
-    def _ao2mo(mat):
-        tmp = contract('xij,jo->xio', mat, mocc)
-        return contract('xik,ip->xpk', tmp, mo_coeff)
+    s1a = cp.asarray(s1a)
     cupy.get_default_memory_pool().free_all_blocks()
 
     avail_mem = get_avail_mem()
-    blksize = int(avail_mem*0.4) // (8*3*nao*nao*4) // ALIGNED * ALIGNED
-    blksize = min(32, blksize)
+    max_memory = avail_mem*0.3e-6
+    # *4 for input dm, vj, vk, and vxc
+    blksize = (int(max_memory*1e6 / (8*3*nao*nao*4)) // ALIGNED**2) * ALIGNED**2
     log.debug(f'GPU memory {avail_mem/GB:.1f} GB available')
     log.debug(f'{blksize} atoms in each block CPHF equation')
 
-    # sort atoms to improve the convergence
-    sorted_idx = sort_atoms(mol)
-    atom_groups = []
-    for p0,p1 in lib.prange(0,mol.natm,blksize):
-        blk = sorted_idx[p0:p1]
-        atom_groups.append(blk)
-
-    mo1s = [None] * mol.natm
-    e1s = [None] * mol.natm
+    natm = mol.natm
+    mo1s = np.zeros(h1mo.shape)
+    e1s = np.zeros((natm, 3, nocc, nocc))
     aoslices = mol.aoslice_by_atom()
-
-    for group in atom_groups:
-        s1vo = []
-        h1vo = []
-        for ia in group:
-            shl0, shl1, p0, p1 = aoslices[ia]
-            s1ao = cupy.zeros((3,nao,nao))
+    for i0, i1 in lib.prange(0, natm, blksize):
+        h1vo = h1mo[i0:i1]
+        if isinstance(h1mo, cp.ndarray):
+            h1vo = h1vo.get()
+        s1vo = np.empty(h1vo.shape)
+        for k, (p0, p1) in enumerate(aoslices[i0:i1,2:]):
+            s1ao = cp.zeros((3,nao,nao))
             s1ao[:,p0:p1] += s1a[:,p0:p1]
             s1ao[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
-            s1vo.append(_ao2mo(s1ao))
-            h1vo.append(h1mo[ia])
+            tmp = contract('xij,jo->xio', s1ao, mocc)
+            s1vo[k] = contract('xio,ip->xpo', tmp, mo_coeff).get()
 
-        log.info(f'Solving CPHF equation for atoms {len(group)}/{mol.natm}')
-        h1vo = cupy.vstack(h1vo)
-        s1vo = cupy.vstack(s1vo)
+        log.info('Solving CPHF equation for atoms [%d:%d]', i0, i1)
         tol = mf.conv_tol_cpscf
-        mo1, e1 = cphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo,
-                             level_shift=level_shift, tol=tol, verbose=verbose)
-
-        mo1 = mo1.reshape(-1,3,nao,nocc)
-        e1 = e1.reshape(-1,3,nocc,nocc)
-
-        for k, ia in enumerate(group):
-            mo1s[ia] = mo1[k]
-            e1s[ia] = e1[k].reshape(3,nocc,nocc)
+        mo1, e1 = cphf.solve(
+            lambda mo1: fx(mo1).get(), mo_energy.get(), mo_occ.get(),
+            h1vo.reshape(-1,nmo,nocc), s1vo.reshape(-1,nmo,nocc),
+            level_shift=level_shift, tol=tol, verbose=verbose)
+        mo1s[i0:i1] = mo1.reshape(i1-i0,3,nmo,nocc)
+        e1s[i0:i1] = e1.reshape(i1-i0,3,nocc,nocc)
         mo1 = e1 = None
     return mo1s, e1s
 

@@ -121,3 +121,4 @@ class Hessian(rks_hess.Hessian):
     make_h1 = make_h1
     kernel = rhf_hess.kernel
     hess = kernel
+    solve_mo1 = df_rhf_hess.Hessian.solve_mo1

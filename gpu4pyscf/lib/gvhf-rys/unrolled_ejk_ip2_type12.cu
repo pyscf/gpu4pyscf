@@ -295,37 +295,6 @@ void _rys_ejk_ip2_type12_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                         v_jxy += g1x * g1y * Iz;
                         v_jxz += g1x * g1z * Iy;
                         v_jyz += g1y * g1z * Ix;
-                        }
-                        {
-                        double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
-                        double rt = rw[sq_id +  2*irys   *nsq_per_block];
-                        double rt_aa = rt / (aij + akl);
-                        if (do_k) {
-                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
-                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+0)*nao+k0+0];
-                            if (jk.n_dm > 1) {
-                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
-                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
-                            }
-                            dd *= jk.k_factor;
-                        } else {
-                            dd = 0.;
-                        }
-                        if (do_j) {
-                            if (jk.n_dm == 1) {
-                                dd += jk.j_factor * dm[(j0+0)*nao+i0+0] * dm[(l0+0)*nao+k0+0];
-                            } else {
-                                int ji = (j0+0)*nao+i0+0;
-                                int lk = (l0+0)*nao+k0+0;
-                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
-                            }
-                        }
-                        Ix = fac * dd;
-                        Iy = 1 * dd;
-                        Iz = wt * dd;
-                        prod_xy = fac * Iy;
-                        prod_xz = fac * Iz;
-                        prod_yz = 1 * Iz;
                         double rt_akl = rt_aa * aij;
                         double cpx = xqc + xpq*rt_akl;
                         double trr_01x = cpx * fac;
@@ -782,6 +751,67 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                         v_jxy += g1x * g1y * Iz;
                         v_jxz += g1x * g1z * Iy;
                         v_jyz += g1y * g1z * Ix;
+                        double rt_akl = rt_aa * aij;
+                        double cpx = xqc + xpq*rt_akl;
+                        double b00 = .5 * rt_aa;
+                        double trr_11x = cpx * trr_10x + 1*b00 * fac;
+                        double hrr_1001x = trr_11x - xlxk * trr_10x;
+                        g1x = al2 * hrr_1001x;
+                        double cpy = yqc + ypq*rt_akl;
+                        double trr_01y = cpy * 1;
+                        double hrr_0001y = trr_01y - ylyk * 1;
+                        g1y = al2 * hrr_0001y;
+                        double cpz = zqc + zpq*rt_akl;
+                        double trr_01z = cpz * wt;
+                        double hrr_0001z = trr_01z - zlzk * wt;
+                        g1z = al2 * hrr_0001z;
+                        g2x = ak2 * trr_11x;
+                        g2y = ak2 * trr_01y;
+                        g2z = ak2 * trr_01z;
+                        double b01 = .5/akl * (1 - rt_akl);
+                        double trr_01x = cpx * fac;
+                        double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
+                        double hrr_1011x = trr_12x - xlxk * trr_11x;
+                        g3x = ak2 * hrr_1011x;
+                        double trr_02y = cpy * trr_01y + 1*b01 * 1;
+                        double hrr_0011y = trr_02y - ylyk * trr_01y;
+                        g3y = ak2 * hrr_0011y;
+                        double trr_02z = cpz * trr_01z + 1*b01 * wt;
+                        double hrr_0011z = trr_02z - zlzk * trr_01z;
+                        g3z = ak2 * hrr_0011z;
+                        g3x *= al2;
+                        g3y *= al2;
+                        g3z *= al2;
+                        v2xx += g3x * prod_yz;
+                        v2yy += g3y * prod_xz;
+                        v2zz += g3z * prod_xy;
+                        v2xy += g2x * g1y * Iz;
+                        v2xz += g2x * g1z * Iy;
+                        v2yx += g2y * g1x * Iz;
+                        v2yz += g2y * g1z * Ix;
+                        v2zx += g2z * g1x * Iy;
+                        v2zy += g2z * g1y * Ix;
+                        g3x = ak2 * (ak2 * trr_12x - 1 * trr_10x);
+                        g3y = ak2 * (ak2 * trr_02y - 1 * 1);
+                        g3z = ak2 * (ak2 * trr_02z - 1 * wt);
+                        v_kxx += g3x * prod_yz;
+                        v_kyy += g3y * prod_xz;
+                        v_kzz += g3z * prod_xy;
+                        v_kxy += g2x * g2y * Iz;
+                        v_kxz += g2x * g2z * Iy;
+                        v_kyz += g2y * g2z * Ix;
+                        double hrr_1002x = hrr_1011x - xlxk * hrr_1001x;
+                        g3x = al2 * (al2 * hrr_1002x - 1 * trr_10x);
+                        double hrr_0002y = hrr_0011y - ylyk * hrr_0001y;
+                        g3y = al2 * (al2 * hrr_0002y - 1 * 1);
+                        double hrr_0002z = hrr_0011z - zlzk * hrr_0001z;
+                        g3z = al2 * (al2 * hrr_0002z - 1 * wt);
+                        v_lxx += g3x * prod_yz;
+                        v_lyy += g3y * prod_xz;
+                        v_lzz += g3z * prod_xy;
+                        v_lxy += g1x * g1y * Iz;
+                        v_lxz += g1x * g1z * Iy;
+                        v_lyz += g1y * g1z * Ix;
                         if (do_k) {
                             dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+1)*nao+l0+0];
                             dd += dm[(j0+0)*nao+l0+0] * dm[(i0+1)*nao+k0+0];
@@ -853,6 +883,54 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                         v_jxy += g1x * g1y * Iz;
                         v_jxz += g1x * g1z * Iy;
                         v_jyz += g1y * g1z * Ix;
+                        double hrr_0001x = trr_01x - xlxk * fac;
+                        g1x = al2 * hrr_0001x;
+                        double trr_11y = cpy * trr_10y + 1*b00 * 1;
+                        double hrr_1001y = trr_11y - ylyk * trr_10y;
+                        g1y = al2 * hrr_1001y;
+                        g1z = al2 * hrr_0001z;
+                        g2x = ak2 * trr_01x;
+                        g2y = ak2 * trr_11y;
+                        g2z = ak2 * trr_01z;
+                        double trr_02x = cpx * trr_01x + 1*b01 * fac;
+                        double hrr_0011x = trr_02x - xlxk * trr_01x;
+                        g3x = ak2 * hrr_0011x;
+                        double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
+                        double hrr_1011y = trr_12y - ylyk * trr_11y;
+                        g3y = ak2 * hrr_1011y;
+                        g3z = ak2 * hrr_0011z;
+                        g3x *= al2;
+                        g3y *= al2;
+                        g3z *= al2;
+                        v2xx += g3x * prod_yz;
+                        v2yy += g3y * prod_xz;
+                        v2zz += g3z * prod_xy;
+                        v2xy += g2x * g1y * Iz;
+                        v2xz += g2x * g1z * Iy;
+                        v2yx += g2y * g1x * Iz;
+                        v2yz += g2y * g1z * Ix;
+                        v2zx += g2z * g1x * Iy;
+                        v2zy += g2z * g1y * Ix;
+                        g3x = ak2 * (ak2 * trr_02x - 1 * fac);
+                        g3y = ak2 * (ak2 * trr_12y - 1 * trr_10y);
+                        g3z = ak2 * (ak2 * trr_02z - 1 * wt);
+                        v_kxx += g3x * prod_yz;
+                        v_kyy += g3y * prod_xz;
+                        v_kzz += g3z * prod_xy;
+                        v_kxy += g2x * g2y * Iz;
+                        v_kxz += g2x * g2z * Iy;
+                        v_kyz += g2y * g2z * Ix;
+                        double hrr_0002x = hrr_0011x - xlxk * hrr_0001x;
+                        g3x = al2 * (al2 * hrr_0002x - 1 * fac);
+                        double hrr_1002y = hrr_1011y - ylyk * hrr_1001y;
+                        g3y = al2 * (al2 * hrr_1002y - 1 * trr_10y);
+                        g3z = al2 * (al2 * hrr_0002z - 1 * wt);
+                        v_lxx += g3x * prod_yz;
+                        v_lyy += g3y * prod_xz;
+                        v_lzz += g3z * prod_xy;
+                        v_lxy += g1x * g1y * Iz;
+                        v_lxz += g1x * g1z * Iy;
+                        v_lyz += g1y * g1z * Ix;
                         if (do_k) {
                             dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+2)*nao+l0+0];
                             dd += dm[(j0+0)*nao+l0+0] * dm[(i0+2)*nao+k0+0];
@@ -923,205 +1001,6 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                         v_jxy += g1x * g1y * Iz;
                         v_jxz += g1x * g1z * Iy;
                         v_jyz += g1y * g1z * Ix;
-                        }
-                        {
-                        double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
-                        double rt = rw[sq_id +  2*irys   *nsq_per_block];
-                        double rt_aa = rt / (aij + akl);
-                        double rt_aij = rt_aa * akl;
-                        double c0x = Rpa[0*TILE2+sh_ij] - xpq*rt_aij;
-                        double trr_10x = c0x * fac;
-                        if (do_k) {
-                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
-                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+0)*nao+k0+0];
-                            if (jk.n_dm > 1) {
-                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
-                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
-                            }
-                            dd *= jk.k_factor;
-                        } else {
-                            dd = 0.;
-                        }
-                        if (do_j) {
-                            if (jk.n_dm == 1) {
-                                dd += jk.j_factor * dm[(j0+0)*nao+i0+0] * dm[(l0+0)*nao+k0+0];
-                            } else {
-                                int ji = (j0+0)*nao+i0+0;
-                                int lk = (l0+0)*nao+k0+0;
-                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
-                            }
-                        }
-                        Ix = trr_10x * dd;
-                        Iy = 1 * dd;
-                        Iz = wt * dd;
-                        prod_xy = trr_10x * Iy;
-                        prod_xz = trr_10x * Iz;
-                        prod_yz = 1 * Iz;
-                        double rt_akl = rt_aa * aij;
-                        double cpx = xqc + xpq*rt_akl;
-                        double b00 = .5 * rt_aa;
-                        double trr_11x = cpx * trr_10x + 1*b00 * fac;
-                        double hrr_1001x = trr_11x - xlxk * trr_10x;
-                        g1x = al2 * hrr_1001x;
-                        double cpy = yqc + ypq*rt_akl;
-                        double trr_01y = cpy * 1;
-                        double hrr_0001y = trr_01y - ylyk * 1;
-                        g1y = al2 * hrr_0001y;
-                        double cpz = zqc + zpq*rt_akl;
-                        double trr_01z = cpz * wt;
-                        double hrr_0001z = trr_01z - zlzk * wt;
-                        g1z = al2 * hrr_0001z;
-                        g2x = ak2 * trr_11x;
-                        g2y = ak2 * trr_01y;
-                        g2z = ak2 * trr_01z;
-                        double b01 = .5/akl * (1 - rt_akl);
-                        double trr_01x = cpx * fac;
-                        double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
-                        double hrr_1011x = trr_12x - xlxk * trr_11x;
-                        g3x = ak2 * hrr_1011x;
-                        double trr_02y = cpy * trr_01y + 1*b01 * 1;
-                        double hrr_0011y = trr_02y - ylyk * trr_01y;
-                        g3y = ak2 * hrr_0011y;
-                        double trr_02z = cpz * trr_01z + 1*b01 * wt;
-                        double hrr_0011z = trr_02z - zlzk * trr_01z;
-                        g3z = ak2 * hrr_0011z;
-                        g3x *= al2;
-                        g3y *= al2;
-                        g3z *= al2;
-                        v2xx += g3x * prod_yz;
-                        v2yy += g3y * prod_xz;
-                        v2zz += g3z * prod_xy;
-                        v2xy += g2x * g1y * Iz;
-                        v2xz += g2x * g1z * Iy;
-                        v2yx += g2y * g1x * Iz;
-                        v2yz += g2y * g1z * Ix;
-                        v2zx += g2z * g1x * Iy;
-                        v2zy += g2z * g1y * Ix;
-                        g3x = ak2 * (ak2 * trr_12x - 1 * trr_10x);
-                        g3y = ak2 * (ak2 * trr_02y - 1 * 1);
-                        g3z = ak2 * (ak2 * trr_02z - 1 * wt);
-                        v_kxx += g3x * prod_yz;
-                        v_kyy += g3y * prod_xz;
-                        v_kzz += g3z * prod_xy;
-                        v_kxy += g2x * g2y * Iz;
-                        v_kxz += g2x * g2z * Iy;
-                        v_kyz += g2y * g2z * Ix;
-                        double hrr_1002x = hrr_1011x - xlxk * hrr_1001x;
-                        g3x = al2 * (al2 * hrr_1002x - 1 * trr_10x);
-                        double hrr_0002y = hrr_0011y - ylyk * hrr_0001y;
-                        g3y = al2 * (al2 * hrr_0002y - 1 * 1);
-                        double hrr_0002z = hrr_0011z - zlzk * hrr_0001z;
-                        g3z = al2 * (al2 * hrr_0002z - 1 * wt);
-                        v_lxx += g3x * prod_yz;
-                        v_lyy += g3y * prod_xz;
-                        v_lzz += g3z * prod_xy;
-                        v_lxy += g1x * g1y * Iz;
-                        v_lxz += g1x * g1z * Iy;
-                        v_lyz += g1y * g1z * Ix;
-                        double c0y = Rpa[1*TILE2+sh_ij] - ypq*rt_aij;
-                        double trr_10y = c0y * 1;
-                        if (do_k) {
-                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+1)*nao+l0+0];
-                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+1)*nao+k0+0];
-                            if (jk.n_dm > 1) {
-                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
-                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
-                            }
-                            dd *= jk.k_factor;
-                        } else {
-                            dd = 0.;
-                        }
-                        if (do_j) {
-                            if (jk.n_dm == 1) {
-                                dd += jk.j_factor * dm[(j0+0)*nao+i0+1] * dm[(l0+0)*nao+k0+0];
-                            } else {
-                                int ji = (j0+0)*nao+i0+1;
-                                int lk = (l0+0)*nao+k0+0;
-                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
-                            }
-                        }
-                        Ix = fac * dd;
-                        Iy = trr_10y * dd;
-                        Iz = wt * dd;
-                        prod_xy = fac * Iy;
-                        prod_xz = fac * Iz;
-                        prod_yz = trr_10y * Iz;
-                        double hrr_0001x = trr_01x - xlxk * fac;
-                        g1x = al2 * hrr_0001x;
-                        double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                        double hrr_1001y = trr_11y - ylyk * trr_10y;
-                        g1y = al2 * hrr_1001y;
-                        g1z = al2 * hrr_0001z;
-                        g2x = ak2 * trr_01x;
-                        g2y = ak2 * trr_11y;
-                        g2z = ak2 * trr_01z;
-                        double trr_02x = cpx * trr_01x + 1*b01 * fac;
-                        double hrr_0011x = trr_02x - xlxk * trr_01x;
-                        g3x = ak2 * hrr_0011x;
-                        double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                        double hrr_1011y = trr_12y - ylyk * trr_11y;
-                        g3y = ak2 * hrr_1011y;
-                        g3z = ak2 * hrr_0011z;
-                        g3x *= al2;
-                        g3y *= al2;
-                        g3z *= al2;
-                        v2xx += g3x * prod_yz;
-                        v2yy += g3y * prod_xz;
-                        v2zz += g3z * prod_xy;
-                        v2xy += g2x * g1y * Iz;
-                        v2xz += g2x * g1z * Iy;
-                        v2yx += g2y * g1x * Iz;
-                        v2yz += g2y * g1z * Ix;
-                        v2zx += g2z * g1x * Iy;
-                        v2zy += g2z * g1y * Ix;
-                        g3x = ak2 * (ak2 * trr_02x - 1 * fac);
-                        g3y = ak2 * (ak2 * trr_12y - 1 * trr_10y);
-                        g3z = ak2 * (ak2 * trr_02z - 1 * wt);
-                        v_kxx += g3x * prod_yz;
-                        v_kyy += g3y * prod_xz;
-                        v_kzz += g3z * prod_xy;
-                        v_kxy += g2x * g2y * Iz;
-                        v_kxz += g2x * g2z * Iy;
-                        v_kyz += g2y * g2z * Ix;
-                        double hrr_0002x = hrr_0011x - xlxk * hrr_0001x;
-                        g3x = al2 * (al2 * hrr_0002x - 1 * fac);
-                        double hrr_1002y = hrr_1011y - ylyk * hrr_1001y;
-                        g3y = al2 * (al2 * hrr_1002y - 1 * trr_10y);
-                        g3z = al2 * (al2 * hrr_0002z - 1 * wt);
-                        v_lxx += g3x * prod_yz;
-                        v_lyy += g3y * prod_xz;
-                        v_lzz += g3z * prod_xy;
-                        v_lxy += g1x * g1y * Iz;
-                        v_lxz += g1x * g1z * Iy;
-                        v_lyz += g1y * g1z * Ix;
-                        double c0z = Rpa[2*TILE2+sh_ij] - zpq*rt_aij;
-                        double trr_10z = c0z * wt;
-                        if (do_k) {
-                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+2)*nao+l0+0];
-                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+2)*nao+k0+0];
-                            if (jk.n_dm > 1) {
-                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
-                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
-                            }
-                            dd *= jk.k_factor;
-                        } else {
-                            dd = 0.;
-                        }
-                        if (do_j) {
-                            if (jk.n_dm == 1) {
-                                dd += jk.j_factor * dm[(j0+0)*nao+i0+2] * dm[(l0+0)*nao+k0+0];
-                            } else {
-                                int ji = (j0+0)*nao+i0+2;
-                                int lk = (l0+0)*nao+k0+0;
-                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
-                            }
-                        }
-                        Ix = fac * dd;
-                        Iy = 1 * dd;
-                        Iz = trr_10z * dd;
-                        prod_xy = fac * Iy;
-                        prod_xz = fac * Iz;
-                        prod_yz = 1 * Iz;
                         g1x = al2 * hrr_0001x;
                         g1y = al2 * hrr_0001y;
                         double trr_11z = cpz * trr_10z + 1*b00 * wt;
