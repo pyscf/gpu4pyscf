@@ -149,34 +149,7 @@ int GINTfill_int2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, in
         fprintf(stderr, "GINTfill_int2e: unsupported rys order %d\n", envs.nrys_roots);
         return 2;
     }
-    /*
-    if (envs.nrys_roots > 2) {
-        int16_t *idx4c = (int16_t *)malloc(sizeof(int16_t) * envs.nf * 3);
-        int *idx_ij = (int *)malloc(sizeof(int) * envs.nfi * envs.nfj * 3);
-        int *idx_kl = (int *)malloc(sizeof(int) * envs.nfk * envs.nfl * 3);
-        GINTinit_2c_gidx(idx_ij, cp_ij->l_bra, cp_ij->l_ket);
-        GINTinit_2c_gidx(idx_kl, cp_kl->l_bra, cp_kl->l_ket);
-        GINTinit_4c_idx(idx4c, idx_ij, idx_kl, &envs);
 
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA Error of GINTfill_int2e_kernel: %s\n", cudaGetErrorString(err));
-            return 1;
-        }
-        if (envs.nf > NFffff) {
-            DEVICE_INIT(int16_t, d_idx4c, idx4c, envs.nf * 3);
-            envs.idx = d_idx4c;
-        } else {
-            checkCudaErrors(cudaMemcpyToSymbol(c_idx4c, idx4c, sizeof(int16_t)*envs.nf*3));
-        }
-        free(idx4c);
-        free(idx_ij);
-        free(idx_kl);
-    }
-    */
-    // Data and buffers to be allocated on-device. Allocate them here to
-    // reduce the calls to malloc
-    int kl_bin, ij_bin1;
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
@@ -193,7 +166,7 @@ int GINTfill_int2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, in
     BasisProdOffsets offsets;
     int *bas_pairs_locs = bpcache->bas_pairs_locs;
     int *primitive_pairs_locs = bpcache->primitive_pairs_locs;
-    for (kl_bin = 0; kl_bin < nbins_kl; kl_bin++) {
+    for (int kl_bin = 0; kl_bin < nbins_kl; kl_bin++) {
         int bas_kl0 = bins_locs_kl[kl_bin];
         int bas_kl1 = bins_locs_kl[kl_bin+1];
         int ntasks_kl = bas_kl1 - bas_kl0;
@@ -202,7 +175,7 @@ int GINTfill_int2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, in
         }
 
         // ij_bin1 is the index of first bin out of cutoff
-        ij_bin1 = 0;
+        int ij_bin1 = 0;
         double log_q_kl_bin, log_q_ij_bin;
         log_q_kl_bin = bins_floor_kl[kl_bin];
         for(int ij_bin = 0; ij_bin < nbins_ij; ij_bin++){
@@ -233,11 +206,6 @@ int GINTfill_int2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, in
         }
     }
 
-    if (envs.nrys_roots > 2) {
-        if (envs.nf > NFffff) {
-            FREE(envs.idx);
-        }
-    }
     return 0;
 }
 }
