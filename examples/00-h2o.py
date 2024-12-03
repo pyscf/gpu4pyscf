@@ -80,3 +80,5 @@ natm = mol.natm
 h_dft = h_dft.transpose([0,2,1,3]).reshape(3*natm,3*natm)
 h_diag = h_dft.sum(axis=0)
 h_dft -= np.diag(h_diag)
+
+print(np.linalg.norm(h_dft))

@@ -189,15 +189,7 @@ int GINTfill_int3c1e(const cudaStream_t stream, const BasisProdCache* bpcache,
         fprintf(stderr, "nrys_roots = %d too high\n", nrys_roots);
         return 2;
     }
-    /*
-    if (nrys_roots > 1) {
-        int16_t cart_component[GPU_CART_MAX * 6] {0};
-        CINTcart_comp(cart_component + 0 * GPU_CART_MAX, cart_component + 1 * GPU_CART_MAX, cart_component + 2 * GPU_CART_MAX, i_l);
-        CINTcart_comp(cart_component + 3 * GPU_CART_MAX, cart_component + 4 * GPU_CART_MAX, cart_component + 5 * GPU_CART_MAX, j_l);
 
-        checkCudaErrors(cudaMemcpyToSymbol(c_idx4c, cart_component, sizeof(int16_t) * GPU_CART_MAX * 6));
-    }
-    */
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
@@ -247,15 +239,7 @@ int GINTfill_int3c1e_charge_contracted(const cudaStream_t stream, const BasisPro
         fprintf(stderr, "nrys_roots = %d too high\n", nrys_roots);
         return 2;
     }
-    /*
-    if (nrys_roots > 1) {
-        int16_t cart_component[GPU_CART_MAX * 6] {0};
-        CINTcart_comp(cart_component + 0 * GPU_CART_MAX, cart_component + 1 * GPU_CART_MAX, cart_component + 2 * GPU_CART_MAX, i_l);
-        CINTcart_comp(cart_component + 3 * GPU_CART_MAX, cart_component + 4 * GPU_CART_MAX, cart_component + 5 * GPU_CART_MAX, j_l);
 
-        checkCudaErrors(cudaMemcpyToSymbol(c_idx4c, cart_component, sizeof(int16_t) * GPU_CART_MAX * 6));
-    }
-    */
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
