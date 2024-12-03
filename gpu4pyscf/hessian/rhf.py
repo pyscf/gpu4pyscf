@@ -40,7 +40,8 @@ from gpu4pyscf.scf.jk import (
     _make_tril_tile_mappings, _nearest_power2)
 from gpu4pyscf.grad import rhf as rhf_grad
 
-libvhf_rys.RYS_per_atom_jk_ip2.restype = ctypes.c_int
+libvhf_rys.RYS_per_atom_jk_ip2_type12.restype = ctypes.c_int
+libvhf_rys.RYS_per_atom_jk_ip2_type3.restype = ctypes.c_int
 libvhf_rys.RYS_build_jk_ip1.restype = ctypes.c_int
 
 GB = 1024*1024*1024
@@ -110,12 +111,13 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
-    e1, ej, ek = _partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
-                                   atmlst, max_memory, verbose, True)
-    return e1 + ej - ek
+    e1, ejk = _partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
+                                atmlst, max_memory, verbose)
+    return e1 + ejk
 
 def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
-                      atmlst=None, max_memory=4000, verbose=None, with_k=True):
+                      atmlst=None, max_memory=4000, verbose=None,
+                      j_factor=1., k_factor=1.):
     log = logger.new_logger(hessobj, verbose)
     time0 = t1 = (logger.process_clock(), logger.perf_counter())
     mol = hessobj.mol
@@ -129,7 +131,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = mocc.dot(mocc.T) * 2
     vhfopt = mf._opt_gpu.get(None, None)
-    ej, ek = _partial_ejk_ip2(mol, dm0, vhfopt, with_k, verbose=log)
+    ejk = _partial_ejk_ip2(mol, dm0, vhfopt, j_factor, k_factor, verbose=log)
     t1 = log.timer_debug1('hessian of 2e part', *t1)
 
     # Energy weighted density matrix
@@ -153,10 +155,12 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             e1[j0,i0] = e1[i0,j0].T
 
     log.timer('RHF partial hessian', *time0)
-    return e1, ej, ek
+    return e1, ejk
 
-def _partial_ejk_ip2(mol, dm, vhfopt=None, with_k=True, verbose=None):
-    assert mol.omega >= 0
+def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1, k_factor=1., verbose=None):
+    '''Compute the energy per atom for
+        j_factor * J_derivatives - k_factor * K_derivatives
+    '''
     log = logger.new_logger(mol, verbose)
     cput0 = t1 = log.init_timer()
     if vhfopt is None:
@@ -174,13 +178,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, with_k=True, verbose=None):
     assert n_dm <= 2
 
     natm = mol.natm
-    ej = cp.zeros((natm, natm, 3, 3))
-    ek = cp.zeros((natm, natm, 3, 3))
-    vj_ptr = ctypes.cast(ej.data.ptr, ctypes.c_void_p)
-    if with_k:
-        vk_ptr = ctypes.cast(ek.data.ptr, ctypes.c_void_p)
-    else:
-        vk_ptr = lib.c_null_ptr()
+    ejk = cp.zeros((natm, natm, 3, 3))
 
     init_constant(mol)
     ao_loc = mol.ao_loc
@@ -203,7 +201,8 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, with_k=True, verbose=None):
 
     timing_collection = {}
     kern_counts = 0
-    kern = libvhf_rys.RYS_per_atom_jk_ip2
+    kern1 = libvhf_rys.RYS_per_atom_jk_ip2_type12
+    kern2 = libvhf_rys.RYS_per_atom_jk_ip2_type3
 
     for i in range(n_groups):
         for j in range(i+1):
@@ -217,8 +216,10 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, with_k=True, verbose=None):
                                l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
                     tile_kl_mapping = tile_mappings[k,l]
                     scheme = _ip2_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
-                    err = kern(
-                        vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                    err1 = kern1(
+                        ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                        ctypes.c_double(j_factor), ctypes.c_double(k_factor),
+                        ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(n_dm), ctypes.c_int(nao),
                         vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
                         (ctypes.c_int*8)(*ij_shls, *kl_shls),
@@ -235,7 +236,27 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, with_k=True, verbose=None):
                         ctypes.c_int(workers),
                         mol._atm.ctypes, ctypes.c_int(mol.natm),
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                    if err != 0:
+                    err2 = kern2(
+                        ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                        ctypes.c_double(j_factor), ctypes.c_double(k_factor),
+                        ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(n_dm), ctypes.c_int(nao),
+                        vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
+                        (ctypes.c_int*8)(*ij_shls, *kl_shls),
+                        ctypes.c_int(tile_ij_mapping.size),
+                        ctypes.c_int(tile_kl_mapping.size),
+                        ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                        ctypes.c_float(log_cutoff),
+                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(info.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(workers),
+                        mol._atm.ctypes, ctypes.c_int(mol.natm),
+                        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+                    if err1 != 0 or err2 != 0:
                         raise RuntimeError(f'RYS_per_atom_jk_ip2 kernel for {llll} failed')
                     if log.verbose >= logger.DEBUG1:
                         t1, t1p = log.timer_debug1(f'processing {llll}, tasks = {info[1]}', *t1), t1
@@ -248,20 +269,9 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, with_k=True, verbose=None):
         log.debug1('kernel launches %d', kern_counts)
         for llll, t in timing_collection.items():
             log.debug1('%s wall time %.2f', llll, t)
-
-    # *8 for the symmetry (i,j) = (j,i), (k,l) = (l,k) and (ij,kl) = (kl,ij)
-    # The additional factor 1/2 is from the two-electron Coulomb operator
-    ej *= 4
-    if n_dm == 2:
-        # corresponding to the symmetry (i,j) = (j,i) and (k,l) = (l,k) for UHF
-        # density matrices. Including the additional factor 1/2 from operator,
-        # ek * 2 is required. For RHF, dm=2*dm_a, a factor of 4 has been
-        # included, which is cancelled by the contribution from dm_b (a
-        # factor of 2), the symmetry between i,j and k,l (a factor of 4), and
-        # the Coulomb operator (1/2). ek does not need to be scaled in RHF.
-        ek *= 2
+    ejk = ejk + ejk.transpose(1,0,3,2)
     log.timer_debug1('ejk_ip2', *cput0)
-    return ej, ek
+    return ejk
 
 def _ip2_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ls = l_ctr_pattern[:,0]
@@ -271,12 +281,11 @@ def _ip2_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nps = l_ctr_pattern[:,1]
     ij_prims = nps[0] * nps[1]
     nroots = (order + 2) // 2 + 1
-
+    if mol.omega < 0: # SR
+        nroots *= 2
     unit = nroots*2 + g_size*3 + ij_prims*4
     counts = shm_size // (unit*8)
-    n = THREADS // 16
-    while n >= counts:
-        n >>= 1
+    n = min(THREADS, _nearest_power2(counts))
     gout_stride = THREADS // n
     return n, gout_stride
 

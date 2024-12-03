@@ -40,10 +40,11 @@ __all__ = [
     'Grad'
 ]
 
-def _jk_energy_per_atom(mol, dm, vhfopt=None, with_j=True, with_k=True, verbose=None):
-    ''' Computes the first-order derivatives of the energy contributions from J and K per atom.
+def _jk_energy_per_atom(mol, dm, vhfopt=None,
+                        j_factor=1., k_factor=1., verbose=None):
+    ''' Computes the first-order derivatives of the energy per atom for
+        j_factor * J_derivatives - k_factor * K_derivatives
     '''
-    assert mol.omega >= 0
     log = logger.new_logger(mol, verbose)
     cput0 = t1 = log.init_timer()
     if vhfopt is None:
@@ -60,17 +61,7 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None, with_j=True, with_k=True, verbose=
     dms = cp.asarray(dms, order='C')
     assert n_dm <= 2
 
-    vj = vk = None
-    vj_ptr = vk_ptr = lib.c_null_ptr()
-
-    assert with_j or with_k
-    if with_k:
-        vk = cp.zeros((mol.natm, 3))
-        vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
-    if with_j:
-        vj = cp.zeros((mol.natm, 3))
-        vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
-
+    ejk = cp.zeros((mol.natm, 3))
     init_constant(mol)
     ao_loc = mol.ao_loc
     dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
@@ -107,7 +98,9 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None, with_j=True, with_k=True, verbose=
                     tile_kl_mapping = tile_mappings[k,l]
                     scheme = _ejk_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
                     err = kern(
-                        vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                        ctypes.c_double(j_factor), ctypes.c_double(k_factor),
+                        ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(n_dm), ctypes.c_int(nao),
                         vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
                         (ctypes.c_int*8)(*ij_shls, *kl_shls),
@@ -137,11 +130,8 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None, with_j=True, with_k=True, verbose=
         log.debug1('kernel launches %d', kern_counts)
         for llll, t in timing_collection.items():
             log.debug1('%s wall time %.2f', llll, t)
-
-    if with_j:
-        vj *= 2.
     log.timer_debug1('grad jk energy', *cput0)
-    return vj, vk
+    return ejk
 
 def _ejk_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ls = l_ctr_pattern[:,0]
@@ -151,7 +141,8 @@ def _ejk_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nps = l_ctr_pattern[:,1]
     ij_prims = nps[0] * nps[1]
     nroots = (order + 1) // 2 + 1
-
+    if mol.omega < 0: # SR
+        nroots *= 2
     unit = nroots*2 + g_size*3 + ij_prims*4
     counts = shm_size // (unit*8)
     n = min(THREADS, _nearest_power2(counts))
@@ -367,8 +358,7 @@ class Gradients(GradientsBase):
         if mol is None: mol = self.mol
         if dm is None: dm = self.base.make_rdm1()
         vhfopt = self.base._opt_gpu.get(None, None)
-        ej, ek = _jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
-        return ej - ek * .5
+        return _jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
 
 Grad = Gradients
 

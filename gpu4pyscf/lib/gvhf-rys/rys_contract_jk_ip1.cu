@@ -816,7 +816,7 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
                                 dd += jk.j_factor * dm[_ji] * dm[_lk];
                             } else {
                                 int nao2 = nao * nao;
-                                dd = jk.j_factor * (dm[_ji] + dm[nao2+_ji]) * (dm[_lk] + dm[nao2+_lk]);
+                                dd += jk.j_factor * (dm[_ji] + dm[nao2+_ji]) * (dm[_lk] + dm[nao2+_lk]);
                             }
                         }
                         int addrx = sq_id + (ix + jx*stride_j + kx*stride_k + lx*stride_l) * nsq_per_block;

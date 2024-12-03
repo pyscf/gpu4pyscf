@@ -121,12 +121,13 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
     '''Partial derivative
     '''
-    e1, ej, ek = _partial_hess_ejk(
+    e1, ejk = _partial_hess_ejk(
         hessobj, mo_energy, mo_coeff, mo_occ, atmlst, max_memory, verbose, True)
-    return e1 + ej - ek  # (A,B,dR_A,dR_B)
+    return e1 + ejk  # (A,B,dR_A,dR_B)
 
 def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
-                      atmlst=None, max_memory=4000, verbose=None, with_k=True):
+                      atmlst=None, max_memory=4000, verbose=None,
+                      j_factor=1., k_factor=1.):
     log = logger.new_logger(hessobj, verbose)
     time0 = t1 = (logger.process_clock(), logger.perf_counter())
 
@@ -144,7 +145,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     dm0b = moccb.dot(moccb.T)
     dm0 = cp.asarray((dm0a, dm0b))
     vhfopt = mf._opt_gpu.get(None, None)
-    ej, ek = rhf_hess_gpu._partial_ejk_ip2(mol, dm0, vhfopt, with_k, verbose=log)
+    ejk = rhf_hess_gpu._partial_ejk_ip2(mol, dm0, vhfopt, j_factor, k_factor,
+                                        verbose=log)
     t1 = log.timer_debug1('hessian of 2e part', *t1)
 
     # Energy weighted density matrix
@@ -170,7 +172,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             e1[j0,i0] = e1[i0,j0].T
 
     log.timer('UHF partial hessian', *time0)
-    return e1, ej, ek
+    return e1, ejk
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     assert atmlst is None

@@ -201,12 +201,11 @@ void _rys_ejk_ip2_type12_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 2; ++irys) {
                         rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= -sqrt_theta_fac;
+                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
-                __syncthreads();
                 if (task_id < ntasks) {
-                    for (int irys = 0; irys < 2; ++irys) {
+                    for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
                         double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
                         double rt = rw[sq_id +  2*irys   *nsq_per_block];
@@ -218,7 +217,7 @@ void _rys_ejk_ip2_type12_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -228,7 +227,7 @@ void _rys_ejk_ip2_type12_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -308,7 +307,7 @@ void _rys_ejk_ip2_type12_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -318,7 +317,7 @@ void _rys_ejk_ip2_type12_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -677,12 +676,11 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 2; ++irys) {
                         rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= -sqrt_theta_fac;
+                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
-                __syncthreads();
                 if (task_id < ntasks) {
-                    for (int irys = 0; irys < 2; ++irys) {
+                    for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
                         double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
                         double rt = rw[sq_id +  2*irys   *nsq_per_block];
@@ -697,7 +695,7 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -707,7 +705,7 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -783,7 +781,7 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -793,7 +791,7 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -854,7 +852,7 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -864,7 +862,7 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -932,7 +930,7 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -942,7 +940,7 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -1021,7 +1019,7 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -1031,7 +1029,7 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -1097,7 +1095,7 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -1107,7 +1105,7 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -1451,12 +1449,11 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
                         rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= -sqrt_theta_fac;
+                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
-                __syncthreads();
                 if (task_id < ntasks) {
-                    for (int irys = 0; irys < 3; ++irys) {
+                    for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
                         double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
                         double rt = rw[sq_id +  2*irys   *nsq_per_block];
@@ -1475,7 +1472,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -1485,7 +1482,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_11x * dd;
@@ -1564,7 +1561,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -1574,7 +1571,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -1635,7 +1632,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -1645,7 +1642,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -1707,7 +1704,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -1717,7 +1714,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -1783,7 +1780,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -1793,7 +1790,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -1854,7 +1851,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -1864,7 +1861,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -1923,7 +1920,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -1933,7 +1930,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -1995,7 +1992,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -2005,7 +2002,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -2062,7 +2059,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -2072,7 +2069,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -2144,7 +2141,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -2154,7 +2151,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_11x * dd;
@@ -2234,7 +2231,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -2244,7 +2241,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -2313,7 +2310,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -2323,7 +2320,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -2385,7 +2382,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -2395,7 +2392,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -2456,7 +2453,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -2466,7 +2463,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -2527,7 +2524,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -2537,7 +2534,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -2594,7 +2591,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -2604,7 +2601,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -2664,7 +2661,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -2674,7 +2671,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -2731,7 +2728,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -2741,7 +2738,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -3085,12 +3082,11 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
                         rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= -sqrt_theta_fac;
+                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
-                __syncthreads();
                 if (task_id < ntasks) {
-                    for (int irys = 0; irys < 3; ++irys) {
+                    for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
                         double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
                         double rt = rw[sq_id +  2*irys   *nsq_per_block];
@@ -3113,7 +3109,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -3123,7 +3119,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1011x * dd;
@@ -3207,7 +3203,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -3217,7 +3213,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0011x * dd;
@@ -3278,7 +3274,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -3288,7 +3284,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0011x * dd;
@@ -3351,7 +3347,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -3361,7 +3357,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1001x * dd;
@@ -3430,7 +3426,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -3440,7 +3436,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0001x * dd;
@@ -3501,7 +3497,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -3511,7 +3507,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0001x * dd;
@@ -3570,7 +3566,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -3580,7 +3576,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1001x * dd;
@@ -3642,7 +3638,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -3652,7 +3648,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0001x * dd;
@@ -3709,7 +3705,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -3719,7 +3715,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0001x * dd;
@@ -3780,7 +3776,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -3790,7 +3786,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+1)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_11x * dd;
@@ -3856,7 +3852,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -3866,7 +3862,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+1)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -3927,7 +3923,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -3937,7 +3933,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+1)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -3996,7 +3992,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4006,7 +4002,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+1)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -4074,7 +4070,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4084,7 +4080,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+1)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -4146,7 +4142,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4156,7 +4152,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+1)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -4213,7 +4209,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4223,7 +4219,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+1)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -4280,7 +4276,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4290,7 +4286,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+1)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -4347,7 +4343,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4357,7 +4353,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+1)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -4415,7 +4411,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4425,7 +4421,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+2)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_11x * dd;
@@ -4487,7 +4483,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4497,7 +4493,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+2)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -4554,7 +4550,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4564,7 +4560,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+2)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -4624,7 +4620,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4634,7 +4630,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+2)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -4691,7 +4687,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4701,7 +4697,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+2)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -4758,7 +4754,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4768,7 +4764,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+2)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -4827,7 +4823,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4837,7 +4833,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+2)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -4901,7 +4897,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4911,7 +4907,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+2)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -4968,7 +4964,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -4978,7 +4974,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+2)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -5055,7 +5051,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -5065,7 +5061,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1011x * dd;
@@ -5150,7 +5146,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -5160,7 +5156,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0011x * dd;
@@ -5234,7 +5230,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -5244,7 +5240,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0011x * dd;
@@ -5308,7 +5304,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -5318,7 +5314,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1001x * dd;
@@ -5381,7 +5377,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -5391,7 +5387,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0001x * dd;
@@ -5454,7 +5450,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -5464,7 +5460,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0001x * dd;
@@ -5523,7 +5519,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -5533,7 +5529,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1001x * dd;
@@ -5595,7 +5591,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -5605,7 +5601,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0001x * dd;
@@ -5664,7 +5660,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -5674,7 +5670,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0001x * dd;
@@ -5736,7 +5732,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -5746,7 +5742,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+1)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_11x * dd;
@@ -5806,7 +5802,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -5816,7 +5812,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+1)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -5876,7 +5872,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -5886,7 +5882,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+1)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -5945,7 +5941,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -5955,7 +5951,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+1)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -6018,7 +6014,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -6028,7 +6024,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+1)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -6091,7 +6087,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -6101,7 +6097,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+1)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -6160,7 +6156,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -6170,7 +6166,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+1)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -6229,7 +6225,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -6239,7 +6235,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+1)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -6298,7 +6294,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+1];
                                 dd += dm[(nao+j0+0)*nao+l0+1] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -6308,7 +6304,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+1)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -6367,7 +6363,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -6377,7 +6373,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+2)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_11x * dd;
@@ -6437,7 +6433,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -6447,7 +6443,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+2)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -6506,7 +6502,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -6516,7 +6512,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+2)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -6576,7 +6572,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -6586,7 +6582,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+2)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -6645,7 +6641,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -6655,7 +6651,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+2)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -6714,7 +6710,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -6724,7 +6720,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+2)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -6783,7 +6779,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -6793,7 +6789,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+2)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -6856,7 +6852,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -6866,7 +6862,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+2)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -6925,7 +6921,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+2];
                                 dd += dm[(nao+j0+0)*nao+l0+2] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -6935,7 +6931,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+2)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -7282,12 +7278,11 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
                         rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= -sqrt_theta_fac;
+                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
-                __syncthreads();
                 if (task_id < ntasks) {
-                    for (int irys = 0; irys < 3; ++irys) {
+                    for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
                         double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
                         double rt = rw[sq_id +  2*irys   *nsq_per_block];
@@ -7305,7 +7300,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -7315,7 +7310,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1100x * dd;
@@ -7395,7 +7390,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -7405,7 +7400,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -7468,7 +7463,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -7478,7 +7473,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -7540,7 +7535,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -7550,7 +7545,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -7610,7 +7605,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -7620,7 +7615,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -7683,7 +7678,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -7693,7 +7688,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -7752,7 +7747,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -7762,7 +7757,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -7822,7 +7817,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -7832,7 +7827,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -7891,7 +7886,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -7901,7 +7896,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -7975,7 +7970,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -7985,7 +7980,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1100x * dd;
@@ -8075,7 +8070,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -8085,7 +8080,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -8156,7 +8151,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -8166,7 +8161,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -8227,7 +8222,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -8237,7 +8232,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -8299,7 +8294,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -8309,7 +8304,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -8374,7 +8369,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -8384,7 +8379,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -8440,7 +8435,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -8450,7 +8445,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -8510,7 +8505,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -8520,7 +8515,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -8577,7 +8572,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -8587,7 +8582,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -8936,12 +8931,11 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
                         rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= -sqrt_theta_fac;
+                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
-                __syncthreads();
                 if (task_id < ntasks) {
-                    for (int irys = 0; irys < 3; ++irys) {
+                    for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
                         double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
                         double rt = rw[sq_id +  2*irys   *nsq_per_block];
@@ -8964,7 +8958,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -8974,7 +8968,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1110x * dd;
@@ -9057,7 +9051,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -9067,7 +9061,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0110x * dd;
@@ -9130,7 +9124,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -9140,7 +9134,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0110x * dd;
@@ -9202,7 +9196,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -9212,7 +9206,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_11x * dd;
@@ -9272,7 +9266,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -9282,7 +9276,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -9345,7 +9339,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -9355,7 +9349,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -9414,7 +9408,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -9424,7 +9418,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_11x * dd;
@@ -9484,7 +9478,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -9494,7 +9488,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -9553,7 +9547,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -9563,7 +9557,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -9629,7 +9623,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -9639,7 +9633,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1100x * dd;
@@ -9710,7 +9704,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -9720,7 +9714,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -9783,7 +9777,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -9793,7 +9787,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -9852,7 +9846,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -9862,7 +9856,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -9922,7 +9916,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -9932,7 +9926,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -9995,7 +9989,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -10005,7 +9999,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -10064,7 +10058,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -10074,7 +10068,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -10133,7 +10127,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -10143,7 +10137,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -10202,7 +10196,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -10212,7 +10206,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -10273,7 +10267,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -10283,7 +10277,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1100x * dd;
@@ -10347,7 +10341,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -10357,7 +10351,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -10416,7 +10410,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -10426,7 +10420,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -10488,7 +10482,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -10498,7 +10492,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -10557,7 +10551,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -10567,7 +10561,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -10626,7 +10620,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -10636,7 +10630,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -10695,7 +10689,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -10705,7 +10699,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -10765,7 +10759,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -10775,7 +10769,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -10834,7 +10828,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -10844,7 +10838,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -10923,7 +10917,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -10933,7 +10927,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1110x * dd;
@@ -11027,7 +11021,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -11037,7 +11031,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0110x * dd;
@@ -11113,7 +11107,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -11123,7 +11117,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0110x * dd;
@@ -11186,7 +11180,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -11196,7 +11190,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_11x * dd;
@@ -11260,7 +11254,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -11270,7 +11264,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -11337,7 +11331,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -11347,7 +11341,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -11405,7 +11399,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -11415,7 +11409,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_11x * dd;
@@ -11477,7 +11471,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -11487,7 +11481,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -11546,7 +11540,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -11556,7 +11550,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -11623,7 +11617,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -11633,7 +11627,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1100x * dd;
@@ -11696,7 +11690,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -11706,7 +11700,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -11768,7 +11762,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -11778,7 +11772,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -11835,7 +11829,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -11845,7 +11839,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -11905,7 +11899,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -11915,7 +11909,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -11978,7 +11972,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -11988,7 +11982,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -12045,7 +12039,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -12055,7 +12049,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -12112,7 +12106,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -12122,7 +12116,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -12179,7 +12173,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -12189,7 +12183,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -12246,7 +12240,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -12256,7 +12250,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1100x * dd;
@@ -12316,7 +12310,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -12326,7 +12320,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -12383,7 +12377,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -12393,7 +12387,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -12453,7 +12447,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -12463,7 +12457,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -12520,7 +12514,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -12530,7 +12524,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -12587,7 +12581,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -12597,7 +12591,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -12654,7 +12648,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -12664,7 +12658,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -12724,7 +12718,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -12734,7 +12728,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -12791,7 +12785,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -12801,7 +12795,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -13148,12 +13142,11 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
                         rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= -sqrt_theta_fac;
+                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
-                __syncthreads();
                 if (task_id < ntasks) {
-                    for (int irys = 0; irys < 3; ++irys) {
+                    for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
                         double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
                         double rt = rw[sq_id +  2*irys   *nsq_per_block];
@@ -13170,7 +13163,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -13180,7 +13173,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_20x * dd;
@@ -13256,7 +13249,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -13266,7 +13259,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -13330,7 +13323,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -13340,7 +13333,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -13402,7 +13395,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -13412,7 +13405,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -13474,7 +13467,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -13484,7 +13477,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -13543,7 +13536,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -13553,7 +13546,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -13624,7 +13617,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -13634,7 +13627,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_20x * dd;
@@ -13713,7 +13706,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -13723,7 +13716,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -13790,7 +13783,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -13800,7 +13793,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -13861,7 +13854,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -13871,7 +13864,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -13935,7 +13928,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -13945,7 +13938,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -14001,7 +13994,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -14011,7 +14004,7 @@ void _rys_ejk_ip2_type12_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -14355,12 +14348,11 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
                         rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= -sqrt_theta_fac;
+                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
-                __syncthreads();
                 if (task_id < ntasks) {
-                    for (int irys = 0; irys < 3; ++irys) {
+                    for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
                         double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
                         double rt = rw[sq_id +  2*irys   *nsq_per_block];
@@ -14381,7 +14373,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -14391,7 +14383,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_21x * dd;
@@ -14471,7 +14463,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -14481,7 +14473,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_11x * dd;
@@ -14545,7 +14537,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -14555,7 +14547,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_11x * dd;
@@ -14617,7 +14609,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -14627,7 +14619,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -14689,7 +14681,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -14699,7 +14691,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -14758,7 +14750,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -14768,7 +14760,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -14831,7 +14823,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -14841,7 +14833,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_20x * dd;
@@ -14908,7 +14900,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -14918,7 +14910,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -14982,7 +14974,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -14992,7 +14984,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -15051,7 +15043,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -15061,7 +15053,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -15123,7 +15115,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -15133,7 +15125,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -15192,7 +15184,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -15202,7 +15194,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -15262,7 +15254,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -15272,7 +15264,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_20x * dd;
@@ -15335,7 +15327,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -15345,7 +15337,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -15404,7 +15396,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -15414,7 +15406,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -15476,7 +15468,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -15486,7 +15478,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -15544,7 +15536,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -15554,7 +15546,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -15613,7 +15605,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -15623,7 +15615,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -15698,7 +15690,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -15708,7 +15700,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_21x * dd;
@@ -15789,7 +15781,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -15799,7 +15791,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_11x * dd;
@@ -15869,7 +15861,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -15879,7 +15871,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_11x * dd;
@@ -15942,7 +15934,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -15952,7 +15944,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -16019,7 +16011,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -16029,7 +16021,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -16087,7 +16079,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -16097,7 +16089,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_01x * dd;
@@ -16159,7 +16151,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -16169,7 +16161,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_20x * dd;
@@ -16230,7 +16222,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -16240,7 +16232,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -16301,7 +16293,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -16311,7 +16303,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -16368,7 +16360,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -16378,7 +16370,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -16439,7 +16431,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -16449,7 +16441,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -16506,7 +16498,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+1];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -16516,7 +16508,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+1;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -16573,7 +16565,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -16583,7 +16575,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_20x * dd;
@@ -16643,7 +16635,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -16653,7 +16645,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -16710,7 +16702,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -16720,7 +16712,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -16780,7 +16772,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -16790,7 +16782,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -16847,7 +16839,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -16857,7 +16849,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -16914,7 +16906,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+2];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -16924,7 +16916,7 @@ void _rys_ejk_ip2_type12_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+2;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -17268,12 +17260,11 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
                         rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= -sqrt_theta_fac;
+                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
-                __syncthreads();
                 if (task_id < ntasks) {
-                    for (int irys = 0; irys < 3; ++irys) {
+                    for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
                         double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
                         double rt = rw[sq_id +  2*irys   *nsq_per_block];
@@ -17292,7 +17283,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -17302,7 +17293,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_2100x * dd;
@@ -17384,7 +17375,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -17394,7 +17385,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1100x * dd;
@@ -17460,7 +17451,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -17470,7 +17461,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1100x * dd;
@@ -17534,7 +17525,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -17544,7 +17535,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -17608,7 +17599,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -17618,7 +17609,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -17679,7 +17670,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -17689,7 +17680,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -17752,7 +17743,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -17762,7 +17753,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_20x * dd;
@@ -17823,7 +17814,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -17833,7 +17824,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -17895,7 +17886,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -17905,7 +17896,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -17966,7 +17957,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -17976,7 +17967,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -18040,7 +18031,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -18050,7 +18041,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -18111,7 +18102,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -18121,7 +18112,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -18181,7 +18172,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -18191,7 +18182,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_20x * dd;
@@ -18252,7 +18243,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -18262,7 +18253,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -18323,7 +18314,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -18333,7 +18324,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -18395,7 +18386,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -18405,7 +18396,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -18465,7 +18456,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -18475,7 +18466,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -18536,7 +18527,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -18546,7 +18537,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -18622,7 +18613,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -18632,7 +18623,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_2100x * dd;
@@ -18722,7 +18713,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -18732,7 +18723,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1100x * dd;
@@ -18804,7 +18795,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -18814,7 +18805,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_1100x * dd;
@@ -18876,7 +18867,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -18886,7 +18877,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -18955,7 +18946,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -18965,7 +18956,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -19021,7 +19012,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -19031,7 +19022,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = hrr_0100x * dd;
@@ -19092,7 +19083,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -19102,7 +19093,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_20x * dd;
@@ -19163,7 +19154,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -19173,7 +19164,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -19233,7 +19224,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -19243,7 +19234,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -19300,7 +19291,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -19310,7 +19301,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -19375,7 +19366,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -19385,7 +19376,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -19440,7 +19431,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -19450,7 +19441,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+1)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -19506,7 +19497,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -19516,7 +19507,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_20x * dd;
@@ -19576,7 +19567,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -19586,7 +19577,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -19642,7 +19633,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -19652,7 +19643,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -19712,7 +19703,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -19722,7 +19713,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -19777,7 +19768,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -19787,7 +19778,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -19844,7 +19835,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -19854,7 +19845,7 @@ void _rys_ejk_ip2_type12_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+2)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -20203,12 +20194,11 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
                         rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= -sqrt_theta_fac;
+                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
-                __syncthreads();
                 if (task_id < ntasks) {
-                    for (int irys = 0; irys < 3; ++irys) {
+                    for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
                         double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
                         double rt = rw[sq_id +  2*irys   *nsq_per_block];
@@ -20226,7 +20216,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -20236,7 +20226,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_30x * dd;
@@ -20312,7 +20302,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -20322,7 +20312,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_20x * dd;
@@ -20387,7 +20377,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -20397,7 +20387,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_20x * dd;
@@ -20460,7 +20450,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -20470,7 +20460,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -20535,7 +20525,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -20545,7 +20535,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -20606,7 +20596,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -20616,7 +20606,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -20679,7 +20669,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+6)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+6)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -20689,7 +20679,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+6;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -20751,7 +20741,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+7)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+7)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -20761,7 +20751,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+7;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -20821,7 +20811,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+8)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+8)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -20831,7 +20821,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+8;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -20891,7 +20881,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+9)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+9)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -20901,7 +20891,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+9;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -20973,7 +20963,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -20983,7 +20973,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+0;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_30x * dd;
@@ -21062,7 +21052,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -21072,7 +21062,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+1;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_20x * dd;
@@ -21139,7 +21129,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -21149,7 +21139,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+2;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_20x * dd;
@@ -21210,7 +21200,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -21220,7 +21210,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+3;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -21285,7 +21275,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -21295,7 +21285,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+4;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -21351,7 +21341,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -21361,7 +21351,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+5;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = trr_10x * dd;
@@ -21422,7 +21412,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+6)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+6)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -21432,7 +21422,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+6;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -21496,7 +21486,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+7)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+7)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -21506,7 +21496,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+7;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -21561,7 +21551,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+8)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+8)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -21571,7 +21561,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+8;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -21627,7 +21617,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                                 dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+9)*nao+l0+0];
                                 dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+9)*nao+k0+0];
                             }
-                            dd *= jk.j_factor;
+                            dd *= jk.k_factor;
                         } else {
                             dd = 0.;
                         }
@@ -21637,7 +21627,7 @@ void _rys_ejk_ip2_type12_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             } else {
                                 int ji = (j0+0)*nao+i0+9;
                                 int lk = (l0+0)*nao+k0+0;
-                                dd = jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
                             }
                         }
                         Ix = fac * dd;
@@ -21793,7 +21783,7 @@ int rys_ejk_ip2_type12_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *b
     int lk = bounds->lk;
     int ll = bounds->ll;
     int threads = scheme[0] * scheme[1];
-    int nroots = (li + lj + lk + ll + 2) / 2 + 1;
+    int nroots = bounds->nroots;
     int iprim = bounds->iprim;
     int jprim = bounds->jprim;
     int ij_prims = iprim * jprim;
