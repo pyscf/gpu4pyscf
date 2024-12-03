@@ -192,7 +192,7 @@ def eval_rho(cell, ao, dm, non0tab=None, xctype='LDA', hermi=0, with_lapl=False,
 def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
            kpts=None, kpts_band=None, max_memory=2000, verbose=None):
     if kpts is None:
-        kpts = numpy.zeros((1,3))
+        kpts = np.zeros((1,3))
     elif isinstance(kpts, KPoints):
         kpts = kpts.kpts
 
@@ -272,7 +272,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
            kpts=None, kpts_band=None, max_memory=2000, verbose=None):
     if kpts is None:
-        kpts = numpy.zeros((1,3))
+        kpts = np.zeros((1,3))
     elif isinstance(kpts, KPoints):
         kpts = kpts.kpts
 
