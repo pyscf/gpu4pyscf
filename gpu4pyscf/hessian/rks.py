@@ -374,8 +374,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 vmat_dm[ia][:,:,mask] += contract('yjg,xjg->xyj', ao_mask[1:4], aow)
             ao_dm0 = aow = None
             t1 = log.timer_debug2('integration', *t1)
+        vmat_dm = opt.unsort_orbitals(vmat_dm, axis=[3])
         for ia in range(_sorted_mol.natm):
-            vmat_dm[ia][:,:,opt._ao_idx] = vmat_dm[ia]
             p0, p1 = aoslices[ia][2:]
             vmat_dm[ia] += contract('xypq,pq->xyp', ipip[:,:,:,p0:p1], dm0[:,p0:p1])
     elif xctype == 'GGA':
@@ -411,8 +411,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 vmat_dm[ia][:,:,mask] += vmat_dm_tmp
             ao_dm0 = aow = None
             t1 = log.timer_debug2('integration', *t1)
+        vmat_dm = opt.unsort_orbitals(vmat_dm, axis=[3])
         for ia in range(_sorted_mol.natm):
-            vmat_dm[ia][:,:,opt._ao_idx] = vmat_dm[ia]
             p0, p1 = aoslices[ia][2:]
             vmat_dm[ia] += contract('xypq,pq->xyp', ipip[:,:,:,p0:p1], dm0[:,p0:p1])
             vmat_dm[ia] += contract('yxqp,pq->xyp', ipip[:,:,p0:p1], dm0[:,p0:p1])
@@ -478,8 +478,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
 
                 vmat_dm[ia][:,:,mask] += vmat_dm_tmp
             t1 = log.timer_debug2('integration', *t1)
+        vmat_dm = opt.unsort_orbitals(vmat_dm, axis=[3])
         for ia in range(_sorted_mol.natm):
-            vmat_dm[ia][:,:,opt._ao_idx] = vmat_dm[ia]
             p0, p1 = aoslices[ia][2:]
             vmat_dm[ia] += contract('xypq,pq->xyp', ipip[:,:,:,p0:p1], dm0[:,p0:p1])
             vmat_dm[ia] += contract('yxqp,pq->xyp', ipip[:,:,p0:p1], dm0[:,p0:p1])
