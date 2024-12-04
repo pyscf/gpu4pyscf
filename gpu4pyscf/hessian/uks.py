@@ -446,10 +446,10 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 vmatb_dm[ia][:,:,mask] += contract('yjg,xjg->xyj', ao_mask[1:4], aow)
             ao_dm0a = ao_dm0b = aow = None
             t1 = log.timer_debug2('integration', *t1)
+        vmata_dm = opt.unsort_orbitals(vmata_dm, axis=[3])
+        vmatb_dm = opt.unsort_orbitals(vmatb_dm, axis=[3])
         for ia in range(_sorted_mol.natm):
             p0, p1 = aoslices[ia][2:]
-            vmata_dm[ia][:,:,opt._ao_idx] = vmata_dm[ia]
-            vmatb_dm[ia][:,:,opt._ao_idx] = vmatb_dm[ia]
             vmata_dm[ia] += contract('xypq,pq->xyp', ipipa[:,:,:,p0:p1], dm0a[:,p0:p1])
             vmatb_dm[ia] += contract('xypq,pq->xyp', ipipb[:,:,:,p0:p1], dm0b[:,p0:p1])
     elif xctype == 'GGA':
@@ -503,9 +503,9 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 vmatb_dm[ia][:,:,mask] += vmatb_dm_tmp
             ao_dm0a = ao_dm0b = aow = None
             t1 = log.timer_debug2('integration', *t1)
+        vmata_dm = opt.unsort_orbitals(vmata_dm, axis=[3])
+        vmatb_dm = opt.unsort_orbitals(vmatb_dm, axis=[3])
         for ia in range(_sorted_mol.natm):
-            vmata_dm[ia][:,:,opt._ao_idx] = vmata_dm[ia]
-            vmatb_dm[ia][:,:,opt._ao_idx] = vmatb_dm[ia]
             p0, p1 = aoslices[ia][2:]
             vmata_dm[ia] += contract('xypq,pq->xyp', ipipa[:,:,:,p0:p1], dm0a[:,p0:p1])
             vmata_dm[ia] += contract('yxqp,pq->xyp', ipipa[:,:,p0:p1], dm0a[:,p0:p1])
@@ -618,9 +618,9 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 vmata_dm[ia][:,:,mask] += vmata_dm_tmp
                 vmatb_dm[ia][:,:,mask] += vmatb_dm_tmp
             t1 = log.timer_debug2('integration', *t1)
+        vmata_dm = opt.unsort_orbitals(vmata_dm, axis=[3])
+        vmatb_dm = opt.unsort_orbitals(vmatb_dm, axis=[3])
         for ia in range(_sorted_mol.natm):
-            vmata_dm[ia][:,:,opt._ao_idx] = vmata_dm[ia]
-            vmatb_dm[ia][:,:,opt._ao_idx] = vmatb_dm[ia]
             p0, p1 = aoslices[ia][2:]
             vmata_dm[ia] += contract('xypq,pq->xyp', ipipa[:,:,:,p0:p1], dm0a[:,p0:p1])
             vmata_dm[ia] += contract('yxqp,pq->xyp', ipipa[:,:,p0:p1], dm0a[:,p0:p1])
