@@ -47,7 +47,7 @@ static int GINTfill_int3c2e_ipip2(ERITensor *eri, BasisProdOffsets *offsets, GIN
     
     switch (type_ijk) {
         // li+lj+lk=0
-        case 0: GINTfill_int3c2e_ipip2_kernel<0,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 0: GINTfill_int3c2e_ipip2_kernel000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         // li+lj+lk=1
         case 1: GINTfill_int3c2e_ipip2_kernel<0,0,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 10: GINTfill_int3c2e_ipip2_kernel<0,1,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
@@ -152,16 +152,6 @@ int GINTfill_int3c2e_ipip2(cudaStream_t stream, BasisProdCache *bpcache, double 
         return 2;
     }
 
-    // TODO: improve the efficiency by unrolling
-    if (envs.nrys_roots > 1) {
-        int16_t *idx4c = (int16_t *)malloc(sizeof(int16_t) * envs.nf * 3);
-        GINTg2e_index_xyz(idx4c, &envs);
-        checkCudaErrors(cudaMemcpyToSymbol(c_idx4c, idx4c, sizeof(int16_t)*envs.nf*3));
-        free(idx4c);
-    }
-
-    int kl_bin, ij_bin1;
-
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
@@ -180,7 +170,7 @@ int GINTfill_int3c2e_ipip2(cudaStream_t stream, BasisProdCache *bpcache, double 
 
     int *bas_pairs_locs = bpcache->bas_pairs_locs;
     int *primitive_pairs_locs = bpcache->primitive_pairs_locs;
-    for (kl_bin = 0; kl_bin < nbins; kl_bin++) {
+    for (int kl_bin = 0; kl_bin < nbins; kl_bin++) {
         int bas_kl0 = bins_locs_kl[kl_bin];
         int bas_kl1 = bins_locs_kl[kl_bin+1];
         int ntasks_kl = bas_kl1 - bas_kl0;
@@ -188,7 +178,7 @@ int GINTfill_int3c2e_ipip2(cudaStream_t stream, BasisProdCache *bpcache, double 
             continue;
         }
         // ij_bin + kl_bin < nbins <~> e_ij*e_kl < cutoff
-        ij_bin1 = nbins - kl_bin;
+        int ij_bin1 = nbins - kl_bin;
         int bas_ij0 = bins_locs_ij[0];
         int bas_ij1 = bins_locs_ij[ij_bin1];
         int ntasks_ij = bas_ij1 - bas_ij0;

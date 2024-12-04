@@ -38,7 +38,6 @@ void GINTint3c2e_pass2_j_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets 
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
-    int lsh = bas_pair2ket[bas_kl];
 
     double g[GSIZE];
     double norm = envs.fac;
@@ -46,26 +45,12 @@ void GINTint3c2e_pass2_j_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets 
         norm *= .5;
     }
 
-    int ij, kl;
-    int as_ish, as_jsh, as_ksh, as_lsh;
-    if (envs.ibase) {
-        as_ish = ish;
-        as_jsh = jsh;
-    } else {
-        as_ish = jsh;
-        as_jsh = ish;
-    }
-    if (envs.kbase) {
-        as_ksh = ksh;
-        as_lsh = lsh;
-    } else {
-        as_ksh = lsh;
-        as_lsh = ksh;
-    }
+    const int as_ish = envs.ibase ? ish: jsh; 
+    const int as_jsh = envs.ibase ? jsh: ish; 
 
-    for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-            GINTg0_int3c2e<NROOTS>(envs, g, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
+    for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+        for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+            GINTg0_int3c2e<NROOTS>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
             GINTkernel_int3c2e_getj_pass2<NROOTS>(envs, jk, g, ish, jsh, ksh);
     } }
 }
