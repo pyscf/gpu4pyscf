@@ -269,9 +269,9 @@ def scf(mf, dm0=None, **kwargs):
     mf.dump_flags()
     mf.build(mf.mol)
 
-    if dm0 is None and self.mo_coeff is not None and self.mo_occ is not None:
+    if dm0 is None and mf.mo_coeff is not None and mf.mo_occ is not None:
         # Initial guess from existing wavefunction
-        dm0 = self.make_rdm1()
+        dm0 = mf.make_rdm1()
 
     if mf.max_cycle > 0 or mf.mo_coeff is None:
         mf.converged, mf.e_tot, \
