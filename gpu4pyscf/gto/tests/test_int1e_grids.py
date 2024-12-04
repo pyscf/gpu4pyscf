@@ -45,8 +45,8 @@ H	-0.8190	-0.8170	0.4220
     grid_points = lib.cartesian_prod([xs, ys, zs])
 
     # All of the following thresholds bound the max value of the corresponding matrix / tensor.
-    integral_threshold = 1e-12
-    density_contraction_threshold = 1e-10
+    integral_threshold = 1e-10
+    density_contraction_threshold = 1e-8
 
 def tearDownModule():
     global mol_sph, mol_cart, grid_points

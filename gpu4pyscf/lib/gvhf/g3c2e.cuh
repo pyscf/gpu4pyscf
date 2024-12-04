@@ -957,10 +957,10 @@ static void write_int3c2e_ip1_jk(JKMatrix jk, double* j3, double* k3, int ish){
             for (int j = 0; j < 3; j++){
                 int ii = 3*(i-i0) + j;
                 sdata[tx][ty] = j3[ii]; __syncthreads();
-                if(ty<8) sdata[tx][ty] += sdata[tx][ty+8]; __syncthreads();
-                if(ty<4) sdata[tx][ty] += sdata[tx][ty+4]; __syncthreads();
-                if(ty<2) sdata[tx][ty] += sdata[tx][ty+2]; __syncthreads();
-                if(ty<1) sdata[tx][ty] += sdata[tx][ty+1]; __syncthreads();
+                if(THREADSY >= 16 && ty<8) sdata[tx][ty] += sdata[tx][ty+8]; __syncthreads();
+                if(THREADSY >= 8  && ty<4) sdata[tx][ty] += sdata[tx][ty+4]; __syncthreads();
+                if(THREADSY >= 4  && ty<2) sdata[tx][ty] += sdata[tx][ty+2]; __syncthreads();
+                if(THREADSY >= 2  && ty<1) sdata[tx][ty] += sdata[tx][ty+1]; __syncthreads();
                 if (ty == 0) atomicAdd(vj+i+j*nao, sdata[tx][0]);
             }
         }
@@ -971,10 +971,10 @@ static void write_int3c2e_ip1_jk(JKMatrix jk, double* j3, double* k3, int ish){
             for (int j = 0; j < 3; j++){
                 int ii = 3*(i-i0) + j;
                 sdata[tx][ty] = k3[ii]; __syncthreads();
-                if(ty<8) sdata[tx][ty] += sdata[tx][ty+8]; __syncthreads();
-                if(ty<4) sdata[tx][ty] += sdata[tx][ty+4]; __syncthreads();
-                if(ty<2) sdata[tx][ty] += sdata[tx][ty+2]; __syncthreads();
-                if(ty<1) sdata[tx][ty] += sdata[tx][ty+1]; __syncthreads();
+                if(THREADSY >= 16 && ty<8) sdata[tx][ty] += sdata[tx][ty+8]; __syncthreads();
+                if(THREADSY >= 8  && ty<4) sdata[tx][ty] += sdata[tx][ty+4]; __syncthreads();
+                if(THREADSY >= 4  && ty<2) sdata[tx][ty] += sdata[tx][ty+2]; __syncthreads();
+                if(THREADSY >= 2  && ty<1) sdata[tx][ty] += sdata[tx][ty+1]; __syncthreads();
                 if (ty == 0) atomicAdd(vk+i+j*nao, sdata[tx][0]);
             }
         }
@@ -999,10 +999,10 @@ static void write_int3c2e_ip2_jk(JKMatrix jk, double *j3, double* k3, int ksh){
             for (int j = 0; j < 3; j++){
                 int kk = 3*(k-k0) + j;
                 sdata[tx][ty] = j3[kk]; __syncthreads();
-                if(tx<8) sdata[tx][ty] += sdata[tx+8][ty]; __syncthreads();
-                if(tx<4) sdata[tx][ty] += sdata[tx+4][ty]; __syncthreads();
-                if(tx<2) sdata[tx][ty] += sdata[tx+2][ty]; __syncthreads();
-                if(tx<1) sdata[tx][ty] += sdata[tx+1][ty]; __syncthreads();
+                if(THREADSX >= 16 && tx<8) sdata[tx][ty] += sdata[tx+8][ty]; __syncthreads();
+                if(THREADSX >= 8  && tx<4) sdata[tx][ty] += sdata[tx+4][ty]; __syncthreads();
+                if(THREADSX >= 4  && tx<2) sdata[tx][ty] += sdata[tx+2][ty]; __syncthreads();
+                if(THREADSX >= 2  && tx<1) sdata[tx][ty] += sdata[tx+1][ty]; __syncthreads();
                 if (tx == 0) atomicAdd(vj+k+j*naux, sdata[0][ty]);
             }
         }
@@ -1012,10 +1012,10 @@ static void write_int3c2e_ip2_jk(JKMatrix jk, double *j3, double* k3, int ksh){
             for (int j = 0; j < 3; j++){
                 int kk = 3*(k-k0) + j;
                 sdata[tx][ty] = k3[kk]; __syncthreads();
-                if(tx<8) sdata[tx][ty] += sdata[tx+8][ty]; __syncthreads();
-                if(tx<4) sdata[tx][ty] += sdata[tx+4][ty]; __syncthreads();
-                if(tx<2) sdata[tx][ty] += sdata[tx+2][ty]; __syncthreads();
-                if(tx<1) sdata[tx][ty] += sdata[tx+1][ty]; __syncthreads();
+                if(THREADSX >= 16 && tx<8) sdata[tx][ty] += sdata[tx+8][ty]; __syncthreads();
+                if(THREADSX >= 8  && tx<4) sdata[tx][ty] += sdata[tx+4][ty]; __syncthreads();
+                if(THREADSX >= 4  && tx<2) sdata[tx][ty] += sdata[tx+2][ty]; __syncthreads();
+                if(THREADSX >= 2  && tx<1) sdata[tx][ty] += sdata[tx+1][ty]; __syncthreads();
                 if (tx == 0) atomicAdd(vk+k+j*naux, sdata[0][ty]);
             }
         }
