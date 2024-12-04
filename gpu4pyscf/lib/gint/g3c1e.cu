@@ -60,7 +60,7 @@ template <int NROOTS, int GSIZE_INT3C_1E>
 __global__
 void GINTfill_int3c1e_kernel_general(double* output, const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
                                      const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
-                                     const double omega, const double* grid_points)
+                                     const double omega, const double* grid_points, const double* charge_exponents)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
@@ -78,11 +78,12 @@ void GINTfill_int3c1e_kernel_general(double* output, const BasisProdOffsets offs
     const int jsh = bas_pair2ket[bas_ij];
 
     const double* grid_point = grid_points + task_grid * 3;
+    const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
 
     double g[GSIZE_INT3C_1E];
 
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        GINTg1e<NROOTS>(g, grid_point, ish, jsh, ij, i_l, j_l, omega);
+        GINTg1e<NROOTS>(g, grid_point, ish, jsh, ij, i_l, j_l, charge_exponent, omega);
         GINTwrite_int3c1e<NROOTS>(g, output, ish, jsh, task_grid, i_l, j_l, stride_j, stride_ij, ao_offsets_i, ao_offsets_j);
     }
 }
@@ -124,7 +125,7 @@ template <int NROOTS, int GSIZE_INT3C_1E>
 __global__
 void GINTfill_int3c1e_charge_contracted_kernel_general(double* output, const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
                                                        const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
-                                                       const double omega, const double* grid_points)
+                                                       const double omega, const double* grid_points, const double* charges, const double* charge_exponents)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
@@ -147,13 +148,14 @@ void GINTfill_int3c1e_charge_contracted_kernel_general(double* output, const Bas
                         * (l_j_max_density_elements + 1) * (l_j_max_density_elements + 2) / 2] { 0.0 };
 
     for (int task_grid = blockIdx.y * blockDim.y + threadIdx.y; task_grid < ngrids; task_grid += gridDim.y * blockDim.y) {
-        const double* grid_point = grid_points + task_grid * 4;
-        const double charge = grid_point[3];
+        const double* grid_point = grid_points + task_grid * 3;
+        const double charge = charges[task_grid];
+        const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
 
         double g[GSIZE_INT3C_1E];
 
         for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-            GINTg1e<NROOTS>(g, grid_point, ish, jsh, ij, i_l, j_l, omega);
+            GINTg1e<NROOTS>(g, grid_point, ish, jsh, ij, i_l, j_l, charge_exponent, omega);
             GINTwrite_int3c1e_charge_contracted<NROOTS>(g, output_cache, charge, i_l, j_l);
         }
     }
@@ -174,7 +176,7 @@ template <int NROOTS>
 __global__
 void GINT_int3c1e_density_contracted_kernel_general(double* output, const double* density, const HermiteDensityOffsets hermite_density_offsets,
                                                     const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
-                                                    const double omega, const double* grid_points)
+                                                    const double omega, const double* grid_points, const double* charge_exponents)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
@@ -187,6 +189,7 @@ void GINT_int3c1e_density_contracted_kernel_general(double* output, const double
     const double Cx = grid_point[0];
     const double Cy = grid_point[1];
     const double Cz = grid_point[2];
+    const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
 
     double eri_with_density_pair_sum = 0.0;
     for (int task_ij = blockIdx.x * blockDim.x + threadIdx.x; task_ij < ntasks_ij; task_ij += gridDim.x * blockDim.x) {
@@ -207,7 +210,7 @@ void GINT_int3c1e_density_contracted_kernel_general(double* output, const double
         double eri_with_density_per_pair = 0.0;
         for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
             double g[NROOTS * (l_max + 1) * 3];
-            GINT_g1e_without_hrr<NROOTS>(g, Cx, Cy, Cz, ish, ij, l, omega);
+            GINT_g1e_without_hrr<NROOTS>(g, Cx, Cy, Cz, ish, ij, l, charge_exponent, omega);
 
             double eri_with_density_per_primitive = 0.0;
             for (int i_x = 0, i_t = 0; i_x <= l; i_x++) {

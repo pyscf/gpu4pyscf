@@ -19,6 +19,7 @@ import numpy as np
 
 from pyscf.scf import _vhf
 from pyscf.gto import ATOM_OF
+from pyscf.lib import c_null_ptr
 from gpu4pyscf.lib.cupy_helper import load_library, cart2sph, block_c2s_diag, get_avail_mem
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.int4c2e import BasisProdCache
@@ -168,7 +169,7 @@ class VHFOpt(_vhf.VHFOpt):
 # end of class VHFOpt
 
 
-def get_int3c1e(mol, grids, intopt):
+def get_int3c1e(mol, grids, charge_exponents, intopt):
     omega = mol.omega
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
@@ -190,6 +191,8 @@ def get_int3c1e(mol, grids, intopt):
     # int3c = np.zeros([ngrids, nao, nao], order='C') # Using unpinned (pageable) memory, each memcpy is much slower, but there's no initialization time
 
     grids = cp.asarray(grids, order='C')
+    if charge_exponents is not None:
+        charge_exponents = cp.asarray(charge_exponents, order='C')
 
     for i_grid_split in range(0, ngrids, ngrids_per_split):
         ngrids_of_split = np.min([ngrids_per_split, ngrids - i_grid_split])
@@ -218,10 +221,15 @@ def get_int3c1e(mol, grids, intopt):
 
             int3c_angular_slice = cp.zeros([ngrids_of_split, j1-j0, i1-i0], order='C')
 
+            charge_exponents_pointer = c_null_ptr()
+            if charge_exponents is not None:
+                charge_exponents_pointer = charge_exponents[i_grid_split : i_grid_split + ngrids_of_split].data.ptr
+
             err = libgint.GINTfill_int3c1e(
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(grids[i_grid_split : i_grid_split + ngrids_of_split, :].data.ptr, ctypes.c_void_p),
+                ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
                 ctypes.c_int(ngrids_of_split),
                 ctypes.cast(int3c_angular_slice.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(nao_cart),
@@ -253,7 +261,7 @@ def get_int3c1e(mol, grids, intopt):
 
     return int3c
 
-def get_int3c1e_charge_contracted(mol, grids, charges, intopt):
+def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt):
     omega = mol.omega
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
@@ -262,8 +270,9 @@ def get_int3c1e_charge_contracted(mol, grids, charges, intopt):
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
 
     grids = cp.asarray(grids, order='C')
-    charges = cp.asarray(charges).reshape([-1, 1], order='C')
-    grids = cp.concatenate([grids, charges], axis=1)
+    charges = cp.asarray(charges)
+    if charge_exponents is not None:
+        charge_exponents = cp.asarray(charge_exponents, order='C')
 
     int1e = cp.zeros([mol.nao, mol.nao], order='C')
     for cp_ij_id, _ in enumerate(intopt.log_qs):
@@ -288,6 +297,10 @@ def get_int3c1e_charge_contracted(mol, grids, charges, intopt):
         ao_offsets = np.array([i0, j0], dtype=np.int32)
         strides = np.array([ni, ni*nj], dtype=np.int32)
 
+        charge_exponents_pointer = c_null_ptr()
+        if charge_exponents is not None:
+            charge_exponents_pointer = charge_exponents.data.ptr
+
         ngrids = grids.shape[0]
         # n_charge_sum_per_thread = 1 # means every thread processes one pair and one grid
         # n_charge_sum_per_thread = ngrids # or larger number gaurantees one thread processes one pair and all grid points
@@ -299,6 +312,8 @@ def get_int3c1e_charge_contracted(mol, grids, charges, intopt):
             ctypes.cast(stream.ptr, ctypes.c_void_p),
             intopt.bpcache,
             ctypes.cast(grids.data.ptr, ctypes.c_void_p),
+            ctypes.cast(charges.data.ptr, ctypes.c_void_p),
+            ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.cast(int1e_angular_slice.data.ptr, ctypes.c_void_p),
             ctypes.c_int(nao_cart),
@@ -328,7 +343,7 @@ def get_int3c1e_charge_contracted(mol, grids, charges, intopt):
 
     return int1e
 
-def get_int3c1e_density_contracted(mol, grids, dm, intopt):
+def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
     omega = mol.omega
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
@@ -368,8 +383,6 @@ def get_int3c1e_density_contracted(mol, grids, dm, intopt):
                                               bas_coords.ctypes.data_as(ctypes.c_void_p))
 
     dm_pair_ordered = cp.asarray(dm_pair_ordered)
-    grids = cp.asarray(grids, order='C')
-    int3c_density_contracted = cp.zeros(ngrids)
 
     n_threads_per_block_1d = 16
     n_max_blocks_per_grid_1d = 65535
@@ -378,6 +391,12 @@ def get_int3c1e_density_contracted(mol, grids, dm, intopt):
     if (n_grid_split > 100):
         print(f"Grid dimension = {ngrids} is too large, more than 100 kernels for one electron integral will be launched.")
     ngrids_per_split = (ngrids + n_grid_split - 1) // n_grid_split
+
+    grids = cp.asarray(grids, order='C')
+    if charge_exponents is not None:
+        charge_exponents = cp.asarray(charge_exponents, order='C')
+
+    int3c_density_contracted = cp.zeros(ngrids)
 
     for i_grid_split in range(0, ngrids, ngrids_per_split):
         ngrids_of_split = np.min([ngrids_per_split, ngrids - i_grid_split])
@@ -389,6 +408,10 @@ def get_int3c1e_density_contracted(mol, grids, dm, intopt):
             nbins = 1
             bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
 
+            charge_exponents_pointer = c_null_ptr()
+            if charge_exponents is not None:
+                charge_exponents_pointer = charge_exponents[i_grid_split : i_grid_split + ngrids_of_split].data.ptr
+
             # n_pair_sum_per_thread = 1 # means every thread processes one pair and one grid
             # n_pair_sum_per_thread = nao_cart # or larger number gaurantees one thread processes one grid and all pairs of the same type
             n_pair_sum_per_thread = nao_cart
@@ -397,6 +420,7 @@ def get_int3c1e_density_contracted(mol, grids, dm, intopt):
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(grids[i_grid_split : i_grid_split + ngrids_of_split, :].data.ptr, ctypes.c_void_p),
+                ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
                 ctypes.c_int(ngrids_of_split),
                 ctypes.cast(dm_pair_ordered.data.ptr, ctypes.c_void_p),
                 intopt.density_offset.ctypes.data_as(ctypes.c_void_p),
@@ -412,7 +436,7 @@ def get_int3c1e_density_contracted(mol, grids, dm, intopt):
 
     return int3c_density_contracted
 
-def intor(mol, intor, grids, dm=None, charges=None, direct_scf_tol=1e-13, intopt=None):
+def intor(mol, intor, grids, charge_exponents=None, dm=None, charges=None, direct_scf_tol=1e-13, intopt=None):
     assert intor == 'int1e_grids'
     assert grids is not None
     assert dm is None or charges is None, \
@@ -428,10 +452,10 @@ def intor(mol, intor, grids, dm=None, charges=None, direct_scf_tol=1e-13, intopt
         assert hasattr(intopt, "density_offset"), "Please call build() function for VHFOpt object first."
 
     if dm is None and charges is None:
-        return get_int3c1e(mol, grids, intopt)
+        return get_int3c1e(mol, grids, charge_exponents, intopt)
     elif dm is not None:
-        return get_int3c1e_density_contracted(mol, grids, dm, intopt)
+        return get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt)
     elif charges is not None:
-        return get_int3c1e_charge_contracted(mol, grids, charges, intopt)
+        return get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
     else:
         raise ValueError(f"Logic error in {__file__} {__name__}")
