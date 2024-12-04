@@ -156,6 +156,23 @@ class VHFOpt(_vhf.VHFOpt):
         else:
             self.ao_loc = self.sph_ao_loc
 
+    def sort_orbitals(self, mat, axis=[]):
+        ''' Transform given axis of a matrix into sorted AO,
+        and transform given auxiliary axis of a matrix into sorted auxiliary AO
+        '''
+        idx = self._ao_idx
+        shape_ones = (1,) * mat.ndim
+        fancy_index = []
+        for dim, n in enumerate(mat.shape):
+            if dim in axis:
+                assert n == len(idx)
+                indices = idx
+            else:
+                indices = np.arange(n)
+            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
+            fancy_index.append(indices.reshape(idx_shape))
+        return mat[tuple(fancy_index)]
+
     @property
     def bpcache(self):
         device_id = cp.cuda.Device().id
@@ -334,6 +351,10 @@ def get_int3c1e_density_contracted(mol, grids, dm, intopt):
 
     dm = cp.asarray(dm)
     if dm.ndim == 3:
+        if dm.shape[0] > 2:
+            print("Warning: There are more than two density matrices to contract with one electron integrals, "
+                  "it's not from an unrestricted calculation, and we're unsure about your purpose. "
+                  "We sum the density matrices up, please check if that's expected.")
         dm = cp.einsum("ijk->jk", dm)
 
     assert dm.ndim == 2
@@ -342,7 +363,7 @@ def get_int3c1e_density_contracted(mol, grids, dm, intopt):
     nao_cart = intopt._sorted_mol.nao
     ngrids = grids.shape[0]
 
-    dm = dm[np.ix_(intopt._ao_idx, intopt._ao_idx)] # intopt.ao_idx is in spherical basis
+    dm = intopt.sort_orbitals(dm, [0,1])
     if not mol.cart:
         cart2sph_transformation_matrix = intopt.cart2sph
         # TODO: This part is inefficient (O(N^3)), should be changed to the O(N^2) algorithm
