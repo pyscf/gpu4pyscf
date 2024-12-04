@@ -75,7 +75,7 @@ static int GINTrun_tasks_int3c2e_pass2_j(JKMatrix *jk, BasisProdOffsets *offsets
 
 
 extern "C" { __host__
-int GINTbuild_j_int3c2e_pass2(BasisProdCache *bpcache,
+int GINTbuild_j_int3c2e_pass2(cudaStream_t stream, BasisProdCache *bpcache,
                  double *vj, double *rhoj,
                  int nao, int naux, int n_dm,
                  int *bins_locs_ij, int *bins_locs_kl,
@@ -83,7 +83,6 @@ int GINTbuild_j_int3c2e_pass2(BasisProdCache *bpcache,
 {
     // move bpcache to constant memory
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
-    int n = 0;
     int ng[4] = {0,0,0,0};
 
     JKMatrix jk;
@@ -99,22 +98,9 @@ int GINTbuild_j_int3c2e_pass2(BasisProdCache *bpcache,
 
     int *bas_pairs_locs = bpcache->bas_pairs_locs;
     int *primitive_pairs_locs = bpcache->primitive_pairs_locs;
-    cudaStream_t streams[MAX_STREAMS];
-    for (n = 0; n < MAX_STREAMS; n++){
-        checkCudaErrors(cudaStreamCreate(&streams[n]));
-    }
-
-    int *idx = (int *)malloc(sizeof(int) * TOT_NF * 3);
-    int *l_locs = (int *)malloc(sizeof(int) * (GPU_LMAX + 2));
-    GINTinit_index1d_xyz(idx, l_locs);
-    checkCudaErrors(cudaMemcpyToSymbol(c_idx, idx, sizeof(int) * TOT_NF*3));
-    checkCudaErrors(cudaMemcpyToSymbol(c_l_locs, l_locs, sizeof(int) * (GPU_LMAX + 2)));
-    free(idx);
-    free(l_locs);
 
     for (int cp_ij_id = 0; cp_ij_id < ncp_ij; cp_ij_id++){
-        for (int k = 0; k < ncp_kl; k++, n++){
-            int n_stream = n % MAX_STREAMS;
+        for (int k = 0; k < ncp_kl; k++){
             int cp_kl_id = k + ncp_ij;
             ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
             ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
@@ -137,18 +123,12 @@ int GINTbuild_j_int3c2e_pass2(BasisProdCache *bpcache,
             offsets.bas_kl = bas_pairs_locs[cp_kl_id];
             offsets.primitive_ij = primitive_pairs_locs[cp_ij_id];
             offsets.primitive_kl = primitive_pairs_locs[cp_kl_id];
-            int err = GINTrun_tasks_int3c2e_pass2_j(&jk, &offsets, &envs, streams[n_stream]);
+            int err = GINTrun_tasks_int3c2e_pass2_j(&jk, &offsets, &envs, stream);
             if (err != 0) {
                 return err;
             }
         }
     }
-
-    for (n = 0; n < MAX_STREAMS; n++){
-        checkCudaErrors(cudaStreamSynchronize(streams[n]));
-        checkCudaErrors(cudaStreamDestroy(streams[n]));
-    }
-
     return 0;
 }
 

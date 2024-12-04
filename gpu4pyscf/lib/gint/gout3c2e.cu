@@ -26,77 +26,122 @@
 template <int NROOTS> __device__
 static void GINTgout3c2e_ip(GINTEnvVars envs, double* __restrict__ gout, double* __restrict__ f, double* __restrict__ g)
 {
-   if (NROOTS < 8) {
-        int nf = envs.nf;
-        int16_t *idx = c_idx4c;
-        int16_t *idy = idx + nf;
-        int16_t *idz = idx + nf * 2;
-        int i, n, ix, iy, iz;
+    int *idx = c_idx;
+    int *idy = c_idx + TOT_NF;
+    int *idz = c_idx + TOT_NF * 2;
 
-        for (i = 0; i < nf; i++) {
-            ix = idx[i];
-            iy = idy[i];
-            iz = idz[i];
+    const int di = envs.stride_i;
+    const int dj = envs.stride_j;
+    const int dk = envs.stride_k;
+    const int g_size = envs.g_size;
 
-            double sx = gout[3*i + 0];
-            double sy = gout[3*i + 1];
-            double sz = gout[3*i + 2];
+    const int li = envs.i_l;
+    const int lj = envs.j_l;
+    const int lk = envs.k_l;
+
+    const int nfi = (li+1)*(li+2)/2;
+    const int nfj = (lj+1)*(lj+2)/2;
+    const int nfk = (lk+1)*(lk+2)/2;
+
+    for (int ik = 0, i = 0; ik < nfk; ik++){
+    for (int ij = 0; ij < nfj; ij++){
+    for (int ii = 0; ii < nfi; ii++, i++){
+        const int loc_k = c_l_locs[lk] + ik;
+        const int loc_j = c_l_locs[lj] + ij;
+        const int loc_i = c_l_locs[li] + ii;
+
+        int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+        int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+        int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
+        double sx = gout[3*i + 0];
+        double sy = gout[3*i + 1];
+        double sz = gout[3*i + 2];
 #pragma unroll
-            for (n = 0; n < NROOTS; ++n) {
-                sx += f[ix+n] * g[iy+n] * g[iz+n];
-                sy += g[ix+n] * f[iy+n] * g[iz+n];
-                sz += g[ix+n] * g[iy+n] * f[iz+n];
-            }
-            gout[3*i + 0] = sx;
-            gout[3*i + 1] = sy;
-            gout[3*i + 2] = sz;
+        for (int n = 0; n < NROOTS; ++n) {
+            sx += f[ix+n] * g[iy+n] * g[iz+n];
+            sy += g[ix+n] * f[iy+n] * g[iz+n];
+            sz += g[ix+n] * g[iy+n] * f[iz+n];
         }
-   }
-   else {
-        int nf = envs.nf;
-        int16_t *idx = c_idx4c;
-        if (nf > NFhgg) {
-            idx = envs.idx;
-        }
-        int16_t *idy = idx + nf;
-        int16_t *idz = idx + nf * 2;
-        double sx, sy, sz;
-        int i, n, ix, iy, iz;
+        gout[3*i + 0] = sx;
+        gout[3*i + 1] = sy;
+        gout[3*i + 2] = sz;
+    }}}
+}
 
-        for (i = 0; i < nf; i++) {
-            ix = idx[i];
-            iy = idy[i];
-            iz = idz[i];
-            sx = gout[3*i + 0];
-            sy = gout[3*i + 1];
-            sz = gout[3*i + 2];
+
+template <int LI, int LJ, int LK, int NROOTS> __device__
+static void GINTgout3c2e_ip(GINTEnvVars envs, double* __restrict__ gout, double* __restrict__ f, double* __restrict__ g)
+{
+    int *idx = c_idx;
+    int *idy = c_idx + TOT_NF;
+    int *idz = c_idx + TOT_NF * 2;
+
+    const int di = envs.stride_i;
+    const int dj = envs.stride_j;
+    const int dk = envs.stride_k;
+    const int g_size = envs.g_size;
+
+    constexpr int nfi = (LI+1)*(LI+2)/2;
+    constexpr int nfj = (LJ+1)*(LJ+2)/2;
+    constexpr int nfk = (LK+1)*(LK+2)/2;
+
+    for (int ik = 0, i = 0; ik < nfk; ik++){
+    for (int ij = 0; ij < nfj; ij++){
+    for (int ii = 0; ii < nfi; ii++, i++){
+        const int loc_k = c_l_locs[LK] + ik;
+        const int loc_j = c_l_locs[LJ] + ij;
+        const int loc_i = c_l_locs[LI] + ii;
+
+        int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+        int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+        int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
+        double sx = gout[3*i + 0];
+        double sy = gout[3*i + 1];
+        double sz = gout[3*i + 2];
 #pragma unroll
-            for (n = 0; n < NROOTS; ++n) {
-                sx += f[ix+n] * g[iy+n] * g[iz+n];
-                sy += g[ix+n] * f[iy+n] * g[iz+n];
-                sz += g[ix+n] * g[iy+n] * f[iz+n];
-            }
-            gout[3*i + 0] = sx;
-            gout[3*i + 1] = sy;
-            gout[3*i + 2] = sz;
+        for (int n = 0; n < NROOTS; ++n) {
+            sx += f[ix+n] * g[iy+n] * g[iz+n];
+            sy += g[ix+n] * f[iy+n] * g[iz+n];
+            sz += g[ix+n] * g[iy+n] * f[iz+n];
         }
-    }
+        gout[3*i + 0] = sx;
+        gout[3*i + 1] = sy;
+        gout[3*i + 2] = sz;
+    }}}
 }
 
 template <int NROOTS> __device__
-static void GINTgout3c2e_ipip(GINTEnvVars envs, double* __restrict__ gout, double* __restrict__ g0, double* __restrict__ g1, double* __restrict__ g2,
-double* __restrict__ g3)
+static void GINTgout3c2e_ipip(GINTEnvVars envs, double* __restrict__ gout, 
+    double* __restrict__ g0, double* __restrict__ g1, double* __restrict__ g2, double* __restrict__ g3)
 {
-    int nf = envs.nf;
-    int16_t *idx = c_idx4c;
-    int16_t *idy = idx + nf;
-    int16_t *idz = idx + nf * 2;
-    int i, n, ix, iy, iz;
+    int * __restrict__ c_idy = c_idx + TOT_NF;
+    int * __restrict__ c_idz = c_idx + TOT_NF * 2;
 
-    for (i = 0; i < nf; i++) {
-        ix = idx[i];
-        iy = idy[i];
-        iz = idz[i];
+    const int di = envs.stride_i;
+    const int dj = envs.stride_j;
+    const int dk = envs.stride_k;
+    const int g_size = envs.g_size;
+
+    const int li = envs.i_l;
+    const int lj = envs.j_l;
+    const int lk = envs.k_l;
+
+    const int nfi = (li+1)*(li+2)/2;
+    const int nfj = (lj+1)*(lj+2)/2;
+    const int nfk = (lk+1)*(lk+2)/2;
+
+    for (int ik = 0, i = 0; ik < nfk; ik++){
+    for (int ij = 0; ij < nfj; ij++){
+    for (int ii = 0; ii < nfi; ii++, i++){
+        const int loc_k = c_l_locs[lk] + ik;
+        const int loc_j = c_l_locs[lj] + ij;
+        const int loc_i = c_l_locs[li] + ii;
+
+        int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * c_idx[loc_i];
+        int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
+        int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * c_idz[loc_i] + g_size * 2;
 
         double sxx = gout[9*i + 0];
         double sxy = gout[9*i + 1];
@@ -108,16 +153,16 @@ double* __restrict__ g3)
         double szy = gout[9*i + 7];
         double szz = gout[9*i + 8];
 #pragma unroll
-        for (n = 0; n < NROOTS; ++n) {
-            sxx += g3[ix+n] * g0[iy+n] * g0[iz+n];
-            sxy += g2[ix+n] * g1[iy+n] * g0[iz+n];
-            sxz += g2[ix+n] * g0[iy+n] * g1[iz+n];
-            syx += g1[ix+n] * g2[iy+n] * g0[iz+n];
-            syy += g0[ix+n] * g3[iy+n] * g0[iz+n];
-            syz += g0[ix+n] * g2[iy+n] * g1[iz+n];
-            szx += g1[ix+n] * g0[iy+n] * g2[iz+n];
-            szy += g0[ix+n] * g1[iy+n] * g2[iz+n];
-            szz += g0[ix+n] * g0[iy+n] * g3[iz+n];
+        for (int n = 0; n < NROOTS; ++n, ++ix, ++iy, ++iz) {
+            sxx += g3[ix] * g0[iy] * g0[iz];
+            sxy += g2[ix] * g1[iy] * g0[iz];
+            sxz += g2[ix] * g0[iy] * g1[iz];
+            syx += g1[ix] * g2[iy] * g0[iz];
+            syy += g0[ix] * g3[iy] * g0[iz];
+            syz += g0[ix] * g2[iy] * g1[iz];
+            szx += g1[ix] * g0[iy] * g2[iz];
+            szy += g0[ix] * g1[iy] * g2[iz];
+            szz += g0[ix] * g0[iy] * g3[iz];
         }
         gout[9*i + 0] = sxx;
         gout[9*i + 1] = sxy;
@@ -128,69 +173,124 @@ double* __restrict__ g3)
         gout[9*i + 6] = szx;
         gout[9*i + 7] = szy;
         gout[9*i + 8] = szz;
-    }
+    }}}
+}
+
+
+template <int LI, int LJ, int LK, int NROOTS> __device__
+static void GINTgout3c2e_ipip(GINTEnvVars envs, double* __restrict__ gout, double* __restrict__ g0, double* __restrict__ g1, double* __restrict__ g2,
+double* __restrict__ g3)
+{
+    int * __restrict__ c_idy = c_idx + TOT_NF;
+    int * __restrict__ c_idz = c_idx + TOT_NF * 2;
+
+    const int di = envs.stride_i;
+    const int dj = envs.stride_j;
+    const int dk = envs.stride_k;
+    const int g_size = envs.g_size;
+
+    const int nfi = (LI+1)*(LI+2)/2;
+    const int nfj = (LJ+1)*(LJ+2)/2;
+    const int nfk = (LK+1)*(LK+2)/2;
+
+    for (int ik = 0, i = 0; ik < nfk; ik++){
+    for (int ij = 0; ij < nfj; ij++){
+    for (int ii = 0; ii < nfi; ii++, i++){
+        const int loc_k = c_l_locs[LK] + ik;
+        const int loc_j = c_l_locs[LJ] + ij;
+        const int loc_i = c_l_locs[LI] + ii;
+
+        int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * c_idx[loc_i];
+        int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
+        int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * c_idz[loc_i] + g_size * 2;
+
+        double sxx = gout[9*i + 0];
+        double sxy = gout[9*i + 1];
+        double sxz = gout[9*i + 2];
+        double syx = gout[9*i + 3];
+        double syy = gout[9*i + 4];
+        double syz = gout[9*i + 5];
+        double szx = gout[9*i + 6];
+        double szy = gout[9*i + 7];
+        double szz = gout[9*i + 8];
+#pragma unroll
+        for (int n = 0; n < NROOTS; ++n, ++ix, ++iy, ++iz) {
+            sxx += g3[ix] * g0[iy] * g0[iz];
+            sxy += g2[ix] * g1[iy] * g0[iz];
+            sxz += g2[ix] * g0[iy] * g1[iz];
+            syx += g1[ix] * g2[iy] * g0[iz];
+            syy += g0[ix] * g3[iy] * g0[iz];
+            syz += g0[ix] * g2[iy] * g1[iz];
+            szx += g1[ix] * g0[iy] * g2[iz];
+            szy += g0[ix] * g1[iy] * g2[iz];
+            szz += g0[ix] * g0[iy] * g3[iz];
+        }
+        gout[9*i + 0] = sxx;
+        gout[9*i + 1] = sxy;
+        gout[9*i + 2] = sxz;
+        gout[9*i + 3] = syx;
+        gout[9*i + 4] = syy;
+        gout[9*i + 5] = syz;
+        gout[9*i + 6] = szx;
+        gout[9*i + 7] = szy;
+        gout[9*i + 8] = szz;
+    }}}
 }
 
 template <int NROOTS> __device__
 static void GINTgout3c2e(GINTEnvVars envs, double* __restrict__ gout, double* __restrict__ g)
 {
-    if (NROOTS < 8) {
-        int nf = envs.nf;
-        int16_t *idx = c_idx4c;
-        int16_t *idy = idx + nf;
-        int16_t *idz = idx + nf * 2;
-        double s;
-        int i, n, ix, iy, iz;
+    int * __restrict__ c_idy = c_idx + TOT_NF;
+    int * __restrict__ c_idz = c_idx + TOT_NF * 2;
 
-        for (i = 0; i < nf; i++) {
-            ix = idx[i];
-            iy = idy[i];
-            iz = idz[i];
-            s = gout[i];
-#pragma unroll
-            for (n = 0; n < NROOTS; ++n) {
-                s += g[ix+n] * g[iy+n] * g[iz+n];
-            }
-            gout[i] = s;
-        }
-    } else {
-        int nf = envs.nf;
-        int16_t *idx = c_idx4c;
-        if (nf > NFffff) {
-            idx = envs.idx;
-        }
-        int16_t *idy = idx + nf;
-        int16_t *idz = idx + nf * 2;
-        double s;
-        int i, n, ix, iy, iz;
+    const int di = envs.stride_i;
+    const int dj = envs.stride_j;
+    const int dk = envs.stride_k;
+    const int g_size = envs.g_size;
 
-        for (i = 0; i < nf; i++) {
-            ix = idx[i];
-            iy = idy[i];
-            iz = idz[i];
-            s = gout[i];
+    const int li = envs.i_l;
+    const int lj = envs.j_l;
+    const int lk = envs.k_l;
+
+    const int nfi = (li+1)*(li+2)/2;
+    const int nfj = (lj+1)*(lj+2)/2;
+    const int nfk = (lk+1)*(lk+2)/2;
+
+    for (int ik = 0, i = 0; ik < nfk; ik++){
+    for (int ij = 0; ij < nfj; ij++){
+    for (int ii = 0; ii < nfi; ii++, i++){
+        const int loc_k = c_l_locs[lk] + ik;
+        const int loc_j = c_l_locs[lj] + ij;
+        const int loc_i = c_l_locs[li] + ii;
+
+        int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * c_idx[loc_i];
+        int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
+        int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * c_idz[loc_i] + g_size * 2;
+
+        double s = gout[i];
 #pragma unroll
-            for (n = 0; n < NROOTS; ++n) {
-                s += g[ix+n] * g[iy+n] * g[iz+n];
-            }
-            gout[i] = s;
+        for (int n = 0; n < NROOTS; ++n) {
+            s += g[ix+n] * g[iy+n] * g[iz+n];
         }
-    }
+        gout[i] = s;
+    }}}
 }
 
 template <int NROOTS> __device__
-static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, double* g0, double* g1, double* g2, double* g3, int ish, int jsh, int ksh)
+static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, 
+    double* __restrict__ g0, double* __restrict__ g1, double* __restrict__ g2, double* __restrict__ g3, 
+    const int ish, const int jsh, const int ksh)
 {
     int *ao_loc = c_bpcache.ao_loc;
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
-    int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
-    int i1 = ao_loc[ish+1] - eri.ao_offsets_i;
-    int j0 = ao_loc[jsh  ] - eri.ao_offsets_j;
-    int j1 = ao_loc[jsh+1] - eri.ao_offsets_j;
-    int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
-    int k1 = ao_loc[ksh+1] - eri.ao_offsets_k;
+    const size_t jstride = eri.stride_j;
+    const size_t kstride = eri.stride_k;
+    const size_t lstride = eri.stride_l;
+    const int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
+    const int i1 = ao_loc[ish+1] - eri.ao_offsets_i;
+    const int j0 = ao_loc[jsh  ] - eri.ao_offsets_j;
+    const int j1 = ao_loc[jsh+1] - eri.ao_offsets_j;
+    const int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
+    const int k1 = ao_loc[ksh+1] - eri.ao_offsets_k;
 
     double* __restrict__ pxx_eri;
     double* __restrict__ pxy_eri;
@@ -202,10 +302,17 @@ static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, doubl
     double* __restrict__ pzy_eri;
     double* __restrict__ pzz_eri;
 
-    int nf = envs.nf;
-    int16_t *idx = c_idx4c;
-    int16_t *idy = idx + nf;
-    int16_t *idz = idx + nf * 2;
+    int * __restrict__ c_idy = c_idx + TOT_NF;
+    int * __restrict__ c_idz = c_idx + TOT_NF * 2;
+
+    const int di = envs.stride_i;
+    const int dj = envs.stride_j;
+    const int dk = envs.stride_k;
+    const int g_size = envs.g_size;
+
+    const int li = envs.i_l;
+    const int lj = envs.j_l;
+    const int lk = envs.k_l;
 
     for (int n = 0, k = k0; k < k1; ++k) {
         pxx_eri = eri.data + 0 * lstride + k * kstride;
@@ -220,9 +327,13 @@ static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, doubl
 
         for (int j = j0; j < j1; ++j) {
             for (int i = i0; i < i1; ++i, ++n) {
-                int ix = idx[n];
-                int iy = idy[n];
-                int iz = idz[n];
+                const int loc_k = c_l_locs[lk] + (k-k0);
+                const int loc_j = c_l_locs[lj] + (j-j0);
+                const int loc_i = c_l_locs[li] + (i-i0);
+
+                int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * c_idx[loc_i];
+                int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
+                int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * c_idz[loc_i] + g_size * 2;
 
                 double eri_xx = 0;
                 double eri_xy = 0;
@@ -233,19 +344,19 @@ static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, doubl
                 double eri_zx = 0;
                 double eri_zy = 0;
                 double eri_zz = 0;
-                for (int ir = 0; ir < NROOTS; ++ir){
-                    double g0_x = g0[ix + ir];
-                    double g0_y = g0[iy + ir];
-                    double g0_z = g0[iz + ir];
-                    eri_xx += g3[ix + ir] * g0_y        * g0_z       ;
-                    eri_xy += g2[ix + ir] * g1[iy + ir] * g0_z       ;
-                    eri_xz += g2[ix + ir] * g0_y        * g1[iz + ir];
-                    eri_yx += g1[ix + ir] * g2[iy + ir] * g0_z       ;
-                    eri_yy += g0_x        * g3[iy + ir] * g0_z       ;
-                    eri_yz += g0_x        * g2[iy + ir] * g1[iz + ir];
-                    eri_zx += g1[ix + ir] * g0_y        * g2[iz + ir];
-                    eri_zy += g0_x        * g1[iy + ir] * g2[iz + ir];
-                    eri_zz += g0_x        * g0_y        * g3[iz + ir];
+                for (int ir = 0; ir < NROOTS; ++ir, ++ix, ++iy, ++iz){
+                    double g0_x = g0[ix];
+                    double g0_y = g0[iy];
+                    double g0_z = g0[iz];
+                    eri_xx += g3[ix] * g0_y   * g0_z  ;
+                    eri_xy += g2[ix] * g1[iy] * g0_z  ;
+                    eri_xz += g2[ix] * g0_y   * g1[iz];
+                    eri_yx += g1[ix] * g2[iy] * g0_z  ;
+                    eri_yy += g0_x   * g3[iy] * g0_z  ;
+                    eri_yz += g0_x   * g2[iy] * g1[iz];
+                    eri_zx += g1[ix] * g0_y   * g2[iz];
+                    eri_zy += g0_x   * g1[iy] * g2[iz];
+                    eri_zz += g0_x   * g0_y   * g3[iz];
                 }
                 int off = i+jstride*j;
                 pxx_eri[off] += eri_xx;
@@ -263,16 +374,18 @@ static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, doubl
 }
 
 template <int LI, int LJ, int LK> __device__
-static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, double* g0, double* g1, double* g2, double* g3, int ish, int jsh, int ksh)
+static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, 
+    double* __restrict__ g0, double* __restrict__ g1, double* __restrict__ g2, double* __restrict__ g3, 
+    const int ish, const int jsh, const int ksh)
 {
     int *ao_loc = c_bpcache.ao_loc;
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    const size_t jstride = eri.stride_j;
+    const size_t kstride = eri.stride_k;
+    const size_t lstride = eri.stride_l;
     
-    int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
-    int j0 = ao_loc[jsh  ] - eri.ao_offsets_j;
-    int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
+    const int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
+    const int j0 = ao_loc[jsh  ] - eri.ao_offsets_j;
+    const int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
     
     double* __restrict__ pxx_eri;
     double* __restrict__ pxy_eri;
@@ -284,17 +397,20 @@ static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, doubl
     double* __restrict__ pzy_eri;
     double* __restrict__ pzz_eri;
 
-    int nf = envs.nf;
-    int16_t *idx = c_idx4c;
-    int16_t *idy = idx + nf;
-    int16_t *idz = idx + nf * 2;
+    int * __restrict__ c_idy = c_idx + TOT_NF;
+    int * __restrict__ c_idz = c_idx + TOT_NF * 2;
 
     constexpr int NROOTS = (LI+LJ+LK+2)/2 + 1;
     constexpr int nfi = (LI+1)*(LI+2)/2;
     constexpr int nfj = (LJ+1)*(LJ+2)/2;
     constexpr int nfk = (LK+1)*(LK+2)/2;
 
-    for (int ik = 0, n = 0; ik < nfk; ++ik) {
+    const int di = envs.stride_i;
+    const int dj = envs.stride_j;
+    const int dk = envs.stride_k;
+    const int g_size = envs.g_size;
+
+    for (int ik = 0; ik < nfk; ++ik) {
         int k = k0 + ik;
         pxx_eri = eri.data + 0 * lstride + k * kstride;
         pxy_eri = eri.data + 1 * lstride + k * kstride;
@@ -307,10 +423,14 @@ static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, doubl
         pzz_eri = eri.data + 8 * lstride + k * kstride;
 
         for (int ij = 0; ij < nfj; ++ij) {
-            for (int ii = 0; ii < nfi; ++ii, ++n) {
-                int ix = idx[n];
-                int iy = idy[n];
-                int iz = idz[n];
+            for (int ii = 0; ii < nfi; ++ii) {
+                const int loc_k = c_l_locs[LK] + ik;
+                const int loc_j = c_l_locs[LJ] + ij;
+                const int loc_i = c_l_locs[LI] + ii;
+
+                int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * c_idx[loc_i];
+                int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
+                int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * c_idz[loc_i] + g_size * 2;
 
                 double eri_xx = 0;
                 double eri_xy = 0;
@@ -321,21 +441,22 @@ static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, doubl
                 double eri_zx = 0;
                 double eri_zy = 0;
                 double eri_zz = 0;
-                for (int ir = 0; ir < NROOTS; ++ir){
-                    double g0_x = g0[ix + ir];
-                    double g0_y = g0[iy + ir];
-                    double g0_z = g0[iz + ir];
-                    eri_xx += g3[ix + ir] * g0_y        * g0_z       ;
-                    eri_xy += g2[ix + ir] * g1[iy + ir] * g0_z       ;
-                    eri_xz += g2[ix + ir] * g0_y        * g1[iz + ir];
-                    eri_yx += g1[ix + ir] * g2[iy + ir] * g0_z       ;
-                    eri_yy += g0_x        * g3[iy + ir] * g0_z       ;
-                    eri_yz += g0_x        * g2[iy + ir] * g1[iz + ir];
-                    eri_zx += g1[ix + ir] * g0_y        * g2[iz + ir];
-                    eri_zy += g0_x        * g1[iy + ir] * g2[iz + ir];
-                    eri_zz += g0_x        * g0_y        * g3[iz + ir];
+#pragma unroll
+                for (int ir = 0; ir < NROOTS; ++ir, ++ix, ++iy, ++iz){
+                    double g0_x = g0[ix];
+                    double g0_y = g0[iy];
+                    double g0_z = g0[iz];
+                    eri_xx += g3[ix] * g0_y   * g0_z  ;
+                    eri_xy += g2[ix] * g1[iy] * g0_z  ;
+                    eri_xz += g2[ix] * g0_y   * g1[iz];
+                    eri_yx += g1[ix] * g2[iy] * g0_z  ;
+                    eri_yy += g0_x   * g3[iy] * g0_z  ;
+                    eri_yz += g0_x   * g2[iy] * g1[iz];
+                    eri_zx += g1[ix] * g0_y   * g2[iz];
+                    eri_zy += g0_x   * g1[iy] * g2[iz];
+                    eri_zz += g0_x   * g0_y   * g3[iz];
                 }
-                int off = (ii+i0)+jstride*(ij+j0);
+                const int off = (ii+i0)+jstride*(ij+j0);
                 pxx_eri[off] += eri_xx;
                 pxy_eri[off] += eri_xy;
                 pxz_eri[off] += eri_xz;
@@ -355,22 +476,25 @@ template <int LI, int LJ, int LK> __device__
 static void GINTwrite_int3c2e_ip_direct(GINTEnvVars envs, ERITensor eri, double* f, double* g, int ish, int jsh, int ksh)
 {
     int *ao_loc = c_bpcache.ao_loc;
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
+    const size_t jstride = eri.stride_j;
+    const size_t kstride = eri.stride_k;
+    const size_t lstride = eri.stride_l;
 
-    int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
-    int j0 = ao_loc[jsh  ] - eri.ao_offsets_j;
-    int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
+    const int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
+    const int j0 = ao_loc[jsh  ] - eri.ao_offsets_j;
+    const int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
 
     double* __restrict__ px_eri;
     double* __restrict__ py_eri;
     double* __restrict__ pz_eri;
 
-    int nf = envs.nf;
-    int16_t *idx = c_idx4c;
-    int16_t *idy = idx + nf;
-    int16_t *idz = idx + nf * 2;
+    int * __restrict__ c_idy = c_idx + TOT_NF;
+    int * __restrict__ c_idz = c_idx + TOT_NF * 2;
+
+    const int di = envs.stride_i;
+    const int dj = envs.stride_j;
+    const int dk = envs.stride_k;
+    const int g_size = envs.g_size;
 
     constexpr int NROOTS = (LI+LJ+LK+1)/2 + 1;
     constexpr int nfi = (LI+1)*(LI+2)/2;
@@ -385,18 +509,22 @@ static void GINTwrite_int3c2e_ip_direct(GINTEnvVars envs, ERITensor eri, double*
 
         for (int ij = 0; ij < nfj; ++ij) {
             for (int ii = 0; ii < nfi; ++ii, ++n) {
-                int ix = idx[n];
-                int iy = idy[n];
-                int iz = idz[n];
+                const int loc_k = c_l_locs[LK] + ik;
+                const int loc_j = c_l_locs[LJ] + ij;
+                const int loc_i = c_l_locs[LI] + ii;
+
+                int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * c_idx[loc_i];
+                int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
+                int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * c_idz[loc_i] + g_size * 2;
 
                 double eri_x = 0;
                 double eri_y = 0;
                 double eri_z = 0;
 #pragma unroll
-                for (int ir = 0; ir < NROOTS; ++ir){
-                    eri_x += f[ix + ir] * g[iy + ir] * g[iz + ir];
-                    eri_y += g[ix + ir] * f[iy + ir] * g[iz + ir];
-                    eri_z += g[ix + ir] * g[iy + ir] * f[iz + ir];
+                for (int ir = 0; ir < NROOTS; ++ir, ++ix, ++iy, ++iz){
+                    eri_x += f[ix] * g[iy] * g[iz];
+                    eri_y += g[ix] * f[iy] * g[iz];
+                    eri_z += g[ix] * g[iy] * f[iz];
                 }
                 int off = (ii+i0)+jstride*(ij+j0);
                 px_eri[off] += eri_x;
@@ -411,24 +539,31 @@ template <int NROOTS> __device__
 static void GINTwrite_int3c2e_ip_direct(GINTEnvVars envs, ERITensor eri, double* f, double* g, int ish, int jsh, int ksh)
 {
     int *ao_loc = c_bpcache.ao_loc;
-    size_t jstride = eri.stride_j;
-    size_t kstride = eri.stride_k;
-    size_t lstride = eri.stride_l;
-    int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
-    int i1 = ao_loc[ish+1] - eri.ao_offsets_i;
-    int j0 = ao_loc[jsh  ] - eri.ao_offsets_j;
-    int j1 = ao_loc[jsh+1] - eri.ao_offsets_j;
-    int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
-    int k1 = ao_loc[ksh+1] - eri.ao_offsets_k;
+    const size_t jstride = eri.stride_j;
+    const size_t kstride = eri.stride_k;
+    const size_t lstride = eri.stride_l;
+    const int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
+    const int i1 = ao_loc[ish+1] - eri.ao_offsets_i;
+    const int j0 = ao_loc[jsh  ] - eri.ao_offsets_j;
+    const int j1 = ao_loc[jsh+1] - eri.ao_offsets_j;
+    const int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
+    const int k1 = ao_loc[ksh+1] - eri.ao_offsets_k;
     
     double* __restrict__ px_eri;
     double* __restrict__ py_eri;
     double* __restrict__ pz_eri;
 
-    int nf = envs.nf;
-    int16_t *idx = c_idx4c;
-    int16_t *idy = idx + nf;
-    int16_t *idz = idx + nf * 2;
+    int * __restrict__ c_idy = c_idx + TOT_NF;
+    int * __restrict__ c_idz = c_idx + TOT_NF * 2;
+    
+    const int di = envs.stride_i;
+    const int dj = envs.stride_j;
+    const int dk = envs.stride_k;
+    const int g_size = envs.g_size;
+
+    const int li = envs.i_l;
+    const int lj = envs.j_l;
+    const int lk = envs.k_l;
 
     for (int n = 0, k = k0; k < k1; ++k) {
         px_eri = eri.data + 0 * lstride + k * kstride;
@@ -437,18 +572,22 @@ static void GINTwrite_int3c2e_ip_direct(GINTEnvVars envs, ERITensor eri, double*
 
         for (int j = j0; j < j1; ++j) {
             for (int i = i0; i < i1; ++i, ++n) {
-                int ix = idx[n];
-                int iy = idy[n];
-                int iz = idz[n];
+                const int loc_k = c_l_locs[lk] + (k-k0);
+                const int loc_j = c_l_locs[lj] + (j-j0);
+                const int loc_i = c_l_locs[li] + (i-i0);
+
+                int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * c_idx[loc_i];
+                int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
+                int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * c_idz[loc_i] + g_size * 2;
 
                 double eri_x = 0;
                 double eri_y = 0;
                 double eri_z = 0;
 #pragma unroll
-                for (int ir = 0; ir < NROOTS; ++ir){
-                    eri_x += f[ix + ir] * g[iy + ir] * g[iz + ir];
-                    eri_y += g[ix + ir] * f[iy + ir] * g[iz + ir];
-                    eri_z += g[ix + ir] * g[iy + ir] * f[iz + ir];
+                for (int ir = 0; ir < NROOTS; ++ir, ++ix, ++iy, ++iz){
+                    eri_x += f[ix] * g[iy] * g[iz];
+                    eri_y += g[ix] * f[iy] * g[iz];
+                    eri_z += g[ix] * g[iy] * f[iz];
                 }
                 int off = i+jstride*j;
                 px_eri[off] += eri_x;
@@ -500,19 +639,31 @@ static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, double* g,
 
     double* __restrict__ p_eri;
 
-    int nf = envs.nf;
-    int16_t *idx = c_idx4c;
-    int16_t *idy = idx + nf;
-    int16_t *idz = idx + nf * 2;
+    int *idx = c_idx;
+    int *idy = c_idx + TOT_NF;
+    int *idz = c_idx + TOT_NF * 2;
+
+    int di = envs.stride_i;
+    int dj = envs.stride_j;
+    int dk = envs.stride_k;
+    const int g_size = envs.g_size;
+
+    const int li = envs.i_l;
+    const int lj = envs.j_l;
+    const int lk = envs.k_l;
 
     for (int n = 0, k = k0; k < k1; ++k) {
         p_eri = eri.data + k * kstride;
 
         for (int j = j0; j < j1; ++j) {
             for (int i = i0; i < i1; ++i, ++n) {
-                int ix = idx[n];
-                int iy = idy[n];
-                int iz = idz[n];
+                const int loc_k = c_l_locs[lk] + (k-k0);
+                const int loc_j = c_l_locs[lj] + (j-j0);
+                const int loc_i = c_l_locs[li] + (i-i0);
+
+                int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+                int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+                int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
 
                 double eri = 0;
 #pragma unroll

@@ -495,7 +495,6 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
         opt = make_cintopt(pmol._atm, pmol._bas, pmol._env, intor)
 
     nbins = 1
-
     for aux_id, log_q_kl in enumerate(intopt.aux_log_qs):
         cp_kl_id = aux_id + len(intopt.log_qs)
         lk = intopt.aux_angular[aux_id]
@@ -518,7 +517,6 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
 
             ao_offsets = np.array([i0,j0,nao+1+k0,nao], dtype=np.int32)
             strides = np.array([1, ni, ni*nj, ni*nj*nk], dtype=np.int32)
-
             # Use GPU kernels for low-angular momentum
             if (li + lj + lk + order)//2 + 1 < NROOT_ON_GPU:
                 int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
@@ -545,13 +543,11 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
                 shls_slice = np.array([ishl0, ishl1, jshl0, jshl1, kshl0, kshl1], dtype=np.int64)
                 int3c_cpu = getints(intor, pmol._atm, pmol._bas, pmol._env, shls_slice, cintopt=opt).transpose([0,3,2,1])
                 int3c_blk = cupy.asarray(int3c_cpu)
-
             if not intopt.auxmol.cart:
                 int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
             if not intopt.mol.cart:
                 int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)
                 int3c_blk = cart2sph(int3c_blk, axis=3, ang=li)
-
             i0, i1 = ao_loc[cpi], ao_loc[cpi+1]
             j0, j1 = ao_loc[cpj], ao_loc[cpj+1]
             k0, k1 = aux_ao_loc[aux_id], aux_ao_loc[aux_id+1]
@@ -657,10 +653,12 @@ def get_aux2atom(intopt, auxslices):
         aux2atom[p0:p1,ia] = 1.0
     return intopt.sort_orbitals(aux2atom, aux_axis=[0])
 
-def get_j_int3c2e_pass1(intopt, dm0, sort_j=True):
+def get_j_int3c2e_pass1(intopt, dm0, sort_j=True, stream=None):
     '''
     get rhoj pass1 for int3c2e
     '''
+    if stream is None: stream = cupy.cuda.get_current_stream()
+    
     n_dm = 1
 
     naux = intopt._sorted_auxmol.nao
@@ -681,7 +679,9 @@ def get_j_int3c2e_pass1(intopt, dm0, sort_j=True):
     norb = dm_cart.shape[0]
     
     rhoj = cupy.zeros([naux])
+
     err = libgvhf.GINTbuild_j_int3c2e_pass1(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
         ctypes.cast(dm_cart.data.ptr, ctypes.c_void_p),
         ctypes.cast(rhoj.data.ptr, ctypes.c_void_p),
@@ -700,10 +700,12 @@ def get_j_int3c2e_pass1(intopt, dm0, sort_j=True):
         rhoj = cupy.dot(rhoj, aux_coeff)
     return rhoj
 
-def get_j_int3c2e_pass2(intopt, rhoj):
+def get_j_int3c2e_pass2(intopt, rhoj, stream=None):
     '''
     get vj pass2 for int3c2e
     '''
+    if stream is None: stream = cupy.cuda.get_current_stream()
+
     n_dm = 1
     norb = intopt._sorted_mol.nao
     naux = intopt._sorted_auxmol.nao
@@ -723,6 +725,7 @@ def get_j_int3c2e_pass2(intopt, rhoj):
         rhoj = intopt.aux_cart2sph @ rhoj
 
     err = libgvhf.GINTbuild_j_int3c2e_pass2(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
         ctypes.cast(vj.data.ptr, ctypes.c_void_p),
         ctypes.cast(rhoj.data.ptr, ctypes.c_void_p),

@@ -240,6 +240,7 @@ class KnownValues(unittest.TestCase):
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
+        print(np.linalg.norm(h))
         _check_dft_hessian(mf, h, ix=0,iy=0)
 
     def test_hessian_rks_D4(self):
