@@ -15,12 +15,13 @@
 
 import unittest
 import numpy as np
+import cupy as cp
 import pyscf
 from pyscf import lib
 from gpu4pyscf.gto.moleintor import intor
 
 def setUpModule():
-    global mol_sph, mol_cart, grid_points, integral_threshold, density_contraction_threshold
+    global mol_sph, mol_cart, grid_points, integral_threshold, density_contraction_threshold, charge_contraction_threshold
     atom = '''
 O	0.0000	0.7375	-0.0528
 O	0.0000	-0.7375	-0.0528
@@ -45,8 +46,9 @@ H	-0.8190	-0.8170	0.4220
     grid_points = lib.cartesian_prod([xs, ys, zs])
 
     # All of the following thresholds bound the max value of the corresponding matrix / tensor.
-    integral_threshold = 1e-10
-    density_contraction_threshold = 1e-8
+    integral_threshold = 1e-12
+    density_contraction_threshold = 1e-10
+    charge_contraction_threshold = 1e-12
 
 def tearDownModule():
     global mol_sph, mol_cart, grid_points
@@ -56,17 +58,17 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     '''
-    known values are obtained by Q-Chem
+    Values are compared to PySCF CPU intor() function
     '''
     def test_int1e_grids_full_tensor_cart(self):
         ref_int1e = mol_cart.intor('int1e_grids', grids=grid_points)
         test_int1e = intor(mol_cart, 'int1e_grids', grid_points)
-        assert np.abs(ref_int1e - test_int1e).max() < integral_threshold
+        np.testing.assert_allclose(ref_int1e, test_int1e, atol = integral_threshold)
 
     def test_int1e_grids_full_tensor_sph(self):
         ref_int1e = mol_sph.intor('int1e_grids', grids=grid_points)
         test_int1e = intor(mol_sph, 'int1e_grids', grid_points)
-        assert np.abs(ref_int1e - test_int1e).max() < integral_threshold
+        np.testing.assert_allclose(ref_int1e, test_int1e, atol = integral_threshold)
 
     def test_int1e_grids_density_contracted_cart_symmetric(self):
         np.random.seed(12345)
@@ -74,7 +76,8 @@ class KnownValues(unittest.TestCase):
         dm = 0.5 * (dm + dm.T)
         ref_int1e_dot_D = np.einsum('pij,ij->p', mol_cart.intor('int1e_grids', grids=grid_points), dm)
         test_int1e_dot_D = intor(mol_cart, 'int1e_grids', grid_points, dm = dm)
-        assert np.abs(ref_int1e_dot_D - test_int1e_dot_D).max() < density_contraction_threshold
+        assert isinstance(test_int1e_dot_D, cp.ndarray)
+        cp.testing.assert_allclose(ref_int1e_dot_D, test_int1e_dot_D, atol = density_contraction_threshold)
 
     def test_int1e_grids_density_contracted_sph_symmetric(self):
         np.random.seed(12346)
@@ -82,35 +85,42 @@ class KnownValues(unittest.TestCase):
         dm = 0.5 * (dm + dm.T)
         ref_int1e_dot_D = np.einsum('pij,ij->p', mol_sph.intor('int1e_grids', grids=grid_points), dm)
         test_int1e_dot_D = intor(mol_sph, 'int1e_grids', grid_points, dm = dm)
-        assert np.abs(ref_int1e_dot_D - test_int1e_dot_D).max() < density_contraction_threshold
+        assert isinstance(test_int1e_dot_D, cp.ndarray)
+        cp.testing.assert_allclose(ref_int1e_dot_D, test_int1e_dot_D, atol = density_contraction_threshold)
 
     def test_int1e_grids_density_contracted_cart_asymmetric(self):
         np.random.seed(12347)
         dm = np.random.uniform(-2.0, 2.0, (mol_cart.nao, mol_cart.nao))
         ref_int1e_dot_D = np.einsum('pij,ij->p', mol_cart.intor('int1e_grids', grids=grid_points), dm)
         test_int1e_dot_D = intor(mol_cart, 'int1e_grids', grid_points, dm = dm)
-        assert np.abs(ref_int1e_dot_D - test_int1e_dot_D).max() < density_contraction_threshold
+        assert isinstance(test_int1e_dot_D, cp.ndarray)
+        cp.testing.assert_allclose(ref_int1e_dot_D, test_int1e_dot_D, atol = density_contraction_threshold)
 
     def test_int1e_grids_density_contracted_sph_asymmetric(self):
         np.random.seed(12348)
         dm = np.random.uniform(-2.0, 2.0, (mol_sph.nao, mol_sph.nao))
         ref_int1e_dot_D = np.einsum('pij,ij->p', mol_sph.intor('int1e_grids', grids=grid_points), dm)
         test_int1e_dot_D = intor(mol_sph, 'int1e_grids', grid_points, dm = dm)
-        assert np.abs(ref_int1e_dot_D - test_int1e_dot_D).max() < density_contraction_threshold
+        assert isinstance(test_int1e_dot_D, cp.ndarray)
+        cp.testing.assert_allclose(ref_int1e_dot_D, test_int1e_dot_D, atol = density_contraction_threshold)
 
     def test_int1e_grids_charge_contracted_cart(self):
         np.random.seed(12347)
         charges = np.random.uniform(-2.0, 2.0, grid_points.shape[0])
         ref_int1e_dot_q = np.einsum('pij,p->ij', mol_cart.intor('int1e_grids', grids=grid_points), charges)
         test_int1e_dot_q = intor(mol_cart, 'int1e_grids', grid_points, charges = charges)
-        assert np.abs(ref_int1e_dot_q - test_int1e_dot_q).max() < density_contraction_threshold
+        assert isinstance(test_int1e_dot_q, cp.ndarray)
+        cp.testing.assert_allclose(ref_int1e_dot_q, test_int1e_dot_q, atol = charge_contraction_threshold)
 
     def test_int1e_grids_charge_contracted_sph(self):
         np.random.seed(12348)
         charges = np.random.uniform(-2.0, 2.0, grid_points.shape[0])
         ref_int1e_dot_q = np.einsum('pij,p->ij', mol_sph.intor('int1e_grids', grids=grid_points), charges)
         test_int1e_dot_q = intor(mol_sph, 'int1e_grids', grid_points, charges = charges)
-        assert np.abs(ref_int1e_dot_q - test_int1e_dot_q).max() < density_contraction_threshold
+        assert isinstance(test_int1e_dot_q, cp.ndarray)
+        cp.testing.assert_allclose(ref_int1e_dot_q, test_int1e_dot_q, atol = charge_contraction_threshold)
+
+    # Range separated integrals
 
     def test_int1e_grids_full_tensor_omega(self):
         omega = 0.8
@@ -119,7 +129,7 @@ class KnownValues(unittest.TestCase):
 
         ref_int1e = mol_sph_omega.intor('int1e_grids', grids=grid_points)
         test_int1e = intor(mol_sph_omega, 'int1e_grids', grid_points)
-        assert np.abs(ref_int1e - test_int1e).max() < integral_threshold
+        np.testing.assert_allclose(ref_int1e, test_int1e, atol = integral_threshold)
 
     def test_int1e_grids_density_contracted_omega(self):
         np.random.seed(12349)
@@ -131,7 +141,8 @@ class KnownValues(unittest.TestCase):
 
         ref_int1e_dot_D = np.einsum('pij,ij->p', mol_sph_omega.intor('int1e_grids', grids=grid_points), dm)
         test_int1e_dot_D = intor(mol_sph_omega, 'int1e_grids', grid_points, dm = dm)
-        assert np.abs(ref_int1e_dot_D - test_int1e_dot_D).max() < integral_threshold
+        assert isinstance(test_int1e_dot_D, cp.ndarray)
+        cp.testing.assert_allclose(ref_int1e_dot_D, test_int1e_dot_D, atol = density_contraction_threshold)
 
     def test_int1e_grids_charge_contracted_omega(self):
         np.random.seed(12349)
@@ -143,7 +154,8 @@ class KnownValues(unittest.TestCase):
 
         ref_int1e_dot_q = np.einsum('pij,p->ij', mol_sph_omega.intor('int1e_grids', grids=grid_points), charges)
         test_int1e_dot_q = intor(mol_sph_omega, 'int1e_grids', grid_points, charges = charges)
-        assert np.abs(ref_int1e_dot_q - test_int1e_dot_q).max() < integral_threshold
+        assert isinstance(test_int1e_dot_q, cp.ndarray)
+        cp.testing.assert_allclose(ref_int1e_dot_q, test_int1e_dot_q, atol = charge_contraction_threshold)
 
 if __name__ == "__main__":
     print("Full Tests for One Electron Coulomb Integrals")
