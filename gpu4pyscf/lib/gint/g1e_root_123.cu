@@ -87,7 +87,7 @@ static void GINTfill_int3c1e_kernel00(double* output, const BasisProdOffsets off
 __global__
 static void GINTfill_int3c1e_charge_contracted_kernel00(double* output, const BasisProdOffsets offsets, const int nprim_ij,
                                                         const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
-                                                        const double omega, const double* grid_points, const double* charges, const double* charge_exponents)
+                                                        const double omega, const double* grid_points, const double* charge_exponents)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
@@ -111,7 +111,7 @@ static void GINTfill_int3c1e_charge_contracted_kernel00(double* output, const Ba
 
     double eri_grid_sum = 0.0;
     for (int task_grid = blockIdx.y * blockDim.y + threadIdx.y; task_grid < ngrids; task_grid += gridDim.y * blockDim.y) {
-        const double* grid_point = grid_points + task_grid * 3;
+        const double* grid_point = grid_points + task_grid * 4;
         const double Cx = grid_point[0];
         const double Cy = grid_point[1];
         const double Cz = grid_point[2];
@@ -146,7 +146,7 @@ static void GINTfill_int3c1e_charge_contracted_kernel00(double* output, const Ba
             eri_per_grid += eri_per_primitive;
         }
 
-        const double charge = charges[task_grid];
+        const double charge = grid_point[3];
         eri_grid_sum += eri_per_grid * charge;
     }
 
@@ -318,7 +318,7 @@ static void GINTfill_int3c1e_kernel10(double* output, const BasisProdOffsets off
 __global__
 static void GINTfill_int3c1e_charge_contracted_kernel10(double* output, const BasisProdOffsets offsets, const int nprim_ij,
                                                         const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
-                                                        const double omega, const double* grid_points, const double* charges, const double* charge_exponents)
+                                                        const double omega, const double* grid_points, const double* charge_exponents)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
@@ -352,7 +352,7 @@ static void GINTfill_int3c1e_charge_contracted_kernel10(double* output, const Ba
     double eri_grid_sum_y = 0;
     double eri_grid_sum_z = 0;
     for (int task_grid = blockIdx.y * blockDim.y + threadIdx.y; task_grid < ngrids; task_grid += gridDim.y * blockDim.y) {
-        const double* grid_point = grid_points + task_grid * 3;
+        const double* grid_point = grid_points + task_grid * 4;
         const double Cx = grid_point[0];
         const double Cy = grid_point[1];
         const double Cz = grid_point[2];
@@ -400,7 +400,7 @@ static void GINTfill_int3c1e_charge_contracted_kernel10(double* output, const Ba
             eri_per_grid_z += eri_per_primitive_z;
         }
 
-        const double charge = charges[task_grid];
+        const double charge = grid_point[3];
         eri_grid_sum_x += eri_per_grid_x * charge;
         eri_grid_sum_y += eri_per_grid_y * charge;
         eri_grid_sum_z += eri_per_grid_z * charge;

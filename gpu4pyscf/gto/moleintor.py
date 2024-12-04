@@ -287,7 +287,8 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
 
     grids = cp.asarray(grids, order='C')
-    charges = cp.asarray(charges)
+    charges = cp.asarray(charges).reshape([-1, 1], order='C')
+    grids = cp.concatenate([grids, charges], axis=1)
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
 
@@ -329,7 +330,6 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
             ctypes.cast(stream.ptr, ctypes.c_void_p),
             intopt.bpcache,
             ctypes.cast(grids.data.ptr, ctypes.c_void_p),
-            ctypes.cast(charges.data.ptr, ctypes.c_void_p),
             ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.cast(int1e_angular_slice.data.ptr, ctypes.c_void_p),

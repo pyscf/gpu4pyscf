@@ -133,7 +133,7 @@ template <int NROOTS, int GSIZE_INT3C_1E>
 __global__
 void GINTfill_int3c1e_charge_contracted_kernel_general(double* output, const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
                                                        const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
-                                                       const double omega, const double* grid_points, const double* charges, const double* charge_exponents)
+                                                       const double omega, const double* grid_points, const double* charge_exponents)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
@@ -156,8 +156,8 @@ void GINTfill_int3c1e_charge_contracted_kernel_general(double* output, const Bas
                         * (l_j_max_density_elements + 1) * (l_j_max_density_elements + 2) / 2] { 0.0 };
 
     for (int task_grid = blockIdx.y * blockDim.y + threadIdx.y; task_grid < ngrids; task_grid += gridDim.y * blockDim.y) {
-        const double* grid_point = grid_points + task_grid * 3;
-        const double charge = charges[task_grid];
+        const double* grid_point = grid_points + task_grid * 4;
+        const double charge = grid_point[3];
         const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
 
         double g[GSIZE_INT3C_1E];
@@ -182,9 +182,9 @@ void GINTfill_int3c1e_charge_contracted_kernel_general(double* output, const Bas
 
 template <int NROOTS>
 __global__
-void GINT_int3c1e_density_contracted_kernel_general(double* output, const double* density, const HermiteDensityOffsets hermite_density_offsets,
-                                                    const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
-                                                    const double omega, const double* grid_points, const double* charge_exponents)
+void GINTfill_int3c1e_density_contracted_kernel_general(double* output, const double* density, const HermiteDensityOffsets hermite_density_offsets,
+                                                        const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
+                                                        const double omega, const double* grid_points, const double* charge_exponents)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
