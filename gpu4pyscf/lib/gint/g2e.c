@@ -73,8 +73,8 @@ void GINTinit_EnvVars(GINTEnvVars *envs,
         envs->nrys_roots = nroots;
         envs->fac = fac;
 
-        int ibase = 1;//i_l >= j_l; //li_ceil >= lj_ceil;
-        int kbase = 1;//k_l >= l_l; //lk_ceil >= ll_ceil;
+        int ibase = 1;//li_ceil >= lj_ceil;
+        int kbase = 1;//lk_ceil >= ll_ceil;
         envs->ibase = ibase;
         envs->kbase = kbase;
 

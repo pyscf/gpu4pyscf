@@ -249,7 +249,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             hk_aux_diag = .5*hk
         hj = hk = None
         t1 = log.timer_debug1('intermediate variables with int3c2e_ipip2', *t1)
-
+    
     # int2c contributions
     if hessobj.auxbasis_response > 1:
         if omega and omega > 1e-10:

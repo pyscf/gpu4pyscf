@@ -635,6 +635,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 t1 = log.timer_debug2('integration', *t1)
         vmat = -contract("kxiq,ip->kxpq", vmat, mo_coeff)
         t0 = log.timer_debug1(f'vxc_deriv1 on Device {device_id}', *t0)
+
         for ia in range(_sorted_mol.natm):
             p0, p1 = aoslices[ia][2:]
             vmat_tmp = cupy.zeros([3,nao,nao])

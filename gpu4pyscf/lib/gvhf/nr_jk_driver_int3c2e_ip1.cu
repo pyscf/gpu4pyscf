@@ -163,14 +163,6 @@ int GINTbuild_int3c2e_ip1_jk(cudaStream_t stream, BasisProdCache *bpcache,
     int *bas_pairs_locs = bpcache->bas_pairs_locs;
     int *primitive_pairs_locs = bpcache->primitive_pairs_locs;
 
-    int *idx = (int *)malloc(sizeof(int) * TOT_NF * 3);
-    int *l_locs = (int *)malloc(sizeof(int) * (GPU_LMAX + 2));
-    GINTinit_index1d_xyz(idx, l_locs);
-    checkCudaErrors(cudaMemcpyToSymbol(c_idx, idx, sizeof(int) * TOT_NF*3));
-    checkCudaErrors(cudaMemcpyToSymbol(c_l_locs, l_locs, sizeof(int) * (GPU_LMAX + 2)));
-    free(idx);
-    free(l_locs);
-
     for (int cp_ij_id = 0; cp_ij_id < ncp_ij; cp_ij_id++){
         GINTEnvVars envs;
         ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;

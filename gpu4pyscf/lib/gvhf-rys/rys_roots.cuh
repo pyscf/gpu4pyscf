@@ -416,11 +416,6 @@ __device__ static double ROOT_LARGEX_W_DATA[] = {
 5.2158612689910977e-01,
 };
 
-#define MAX_ORDER       9
-#define DEGREE          13
-#define DEGREE1         (DEGREE+1)
-#define INTERVAL        2.5
-#define INTERVALS       40
 __device__ static double ROOT_RW_DATA[] = {
 // nroots = 1
 // root 0

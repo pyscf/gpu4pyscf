@@ -666,10 +666,12 @@ def get_aux2atom(intopt, auxslices):
         aux2atom[p0:p1,ia] = 1.0
     return intopt.sort_orbitals(aux2atom, aux_axis=[0])
 
-def get_j_int3c2e_pass1(intopt, dm0, sort_j=True):
+def get_j_int3c2e_pass1(intopt, dm0, sort_j=True, stream=None):
     '''
     get rhoj pass1 for int3c2e
     '''
+    if stream is None: stream = cupy.cuda.get_current_stream()
+    
     n_dm = 1
 
     naux = intopt._sorted_auxmol.nao
@@ -690,7 +692,9 @@ def get_j_int3c2e_pass1(intopt, dm0, sort_j=True):
     norb = dm_cart.shape[0]
     
     rhoj = cupy.zeros([naux])
+
     err = libgvhf.GINTbuild_j_int3c2e_pass1(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
         ctypes.cast(dm_cart.data.ptr, ctypes.c_void_p),
         ctypes.cast(rhoj.data.ptr, ctypes.c_void_p),
@@ -709,10 +713,12 @@ def get_j_int3c2e_pass1(intopt, dm0, sort_j=True):
         rhoj = cupy.dot(rhoj, aux_coeff)
     return rhoj
 
-def get_j_int3c2e_pass2(intopt, rhoj):
+def get_j_int3c2e_pass2(intopt, rhoj, stream=None):
     '''
     get vj pass2 for int3c2e
     '''
+    if stream is None: stream = cupy.cuda.get_current_stream()
+
     n_dm = 1
     norb = intopt._sorted_mol.nao
     naux = intopt._sorted_auxmol.nao
@@ -732,6 +738,7 @@ def get_j_int3c2e_pass2(intopt, rhoj):
         rhoj = intopt.aux_cart2sph @ rhoj
 
     err = libgvhf.GINTbuild_j_int3c2e_pass2(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
         ctypes.cast(vj.data.ptr, ctypes.c_void_p),
         ctypes.cast(rhoj.data.ptr, ctypes.c_void_p),
