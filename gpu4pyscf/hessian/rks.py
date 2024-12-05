@@ -503,6 +503,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
         opt = ni.gdftopt
 
     futures = []
+    cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
             future = executor.submit(
@@ -668,6 +669,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         opt = ni.gdftopt
 
     futures = []
+    cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
             future = executor.submit(

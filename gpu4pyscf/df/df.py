@@ -177,10 +177,10 @@ class DF(lib.StreamObject):
             yield buf2, buf.T
             if isinstance(cderi_sparse, np.ndarray):
                 cupy.cuda.Device().synchronize()
-            #cupy.cuda.get_current_stream().synchronize()
+            
             if buf_prefetch is not None:
                 buf = buf_prefetch
-
+            
     def reset(self, mol=None):
         '''Reset mol and clean up relevant attributes for scanner mode'''
         if mol is not None:
@@ -245,9 +245,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     cd_low_f = cupy.array(cd_low, order='F', copy=False)
     cd_low_f = tag_array(cd_low_f, tag=cd_low.tag)
 
-    for gpu_id in range(_num_devices):
-        cupy.cuda.Device(gpu_id).synchronize()
-
+    cupy.cuda.get_current_stream().synchronize()
     futures = []
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
@@ -259,9 +257,6 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     for future in futures:
         future.result()
     
-    for device_id in range(_num_devices):
-        cupy.cuda.Device(device_id).synchronize()
-
     if not use_gpu_memory:
         cupy.cuda.Device().synchronize()
     

@@ -298,8 +298,7 @@ def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ,
                         rhok = rhok.reshape([-1,nao])
                         vk[i] += cupy.dot(rhok.T, rhok)
                     rhok = None
-                cupy.cuda.get_current_stream().synchronize()
-                
+
             if with_j:
                 vj = cupy.zeros(dms_shape)
                 vj[:,rows,cols] = vj_packed
@@ -444,6 +443,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
     intopt = dfobj.intopt
     dms = intopt.sort_orbitals(dms, axis=[1,2])
 
+    cupy.cuda.get_current_stream().synchronize()
     if getattr(dms_tag, 'mo_coeff', None) is not None:
         mo_occ = dms_tag.mo_occ
         mo_coeff = dms_tag.mo_coeff

@@ -128,7 +128,7 @@ def reduce_to_device(array_list, inplace=False):
     out_shape = array_list[0].shape
     for s in _streams:
         s.synchronize()
-    
+        
     if inplace:
         result = array_list[0]
     else:

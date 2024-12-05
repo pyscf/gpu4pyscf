@@ -518,7 +518,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
 
     release_gpu_stack()
-
+    cupy.cuda.get_current_stream().synchronize()
     futures = []
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
@@ -906,7 +906,7 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
 
     release_gpu_stack()
-
+    cupy.cuda.get_current_stream().synchronize()
     futures = []
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
@@ -1095,12 +1095,13 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     dms = opt.sort_orbitals(dms.reshape(-1,nao,nao), axis=[1,2])
 
     futures = []
+    cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
             future = executor.submit(
                 _nr_rks_fxc_task,
                 ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
-                verbose=verbose, device_id=device_id)
+                verbose=verbose, hermi=hermi, device_id=device_id)
             futures.append(future)
     vmat_dist = []
     for future in futures:

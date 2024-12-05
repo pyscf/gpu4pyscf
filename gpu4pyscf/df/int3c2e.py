@@ -862,6 +862,7 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_k=True, omeg
     for device_id in range(_num_devices):
         task_list.append(tasks[device_id::_num_devices])
     
+    cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
             future = executor.submit(
@@ -944,6 +945,7 @@ def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices, with_k=True, ome
     for device_id in range(_num_devices):
         task_list.append(tasks[device_id::_num_devices])
     
+    cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
             future = executor.submit(
@@ -1007,6 +1009,7 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
         mem = cupy.cuda.alloc_pinned_memory(nao*naux*nocc*3*8)
         wk = np.ndarray([naux,nao,nocc,3], dtype=np.float64, order='C', buffer=mem)
 
+    cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
             future = executor.submit(
@@ -1048,6 +1051,7 @@ def get_int3c2e_ip2_wjk(intopt, dm0_tag, with_k=True, omega=None):
     for device_id in range(_num_devices):
         task_list.append(tasks[device_id::_num_devices])
     
+    cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
             future = executor.submit(
@@ -1184,6 +1188,7 @@ def get_int3c2e_hjk(intopt, task_type, rhoj, rhok, dm0_tag, with_k=True, omega=N
     for device_id in range(_num_devices):
         task_list.append(tasks[device_id::_num_devices])
     
+    cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
             future = executor.submit(

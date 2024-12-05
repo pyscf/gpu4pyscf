@@ -58,6 +58,7 @@ def get_rhoj_rhok(with_df, dm, orbo, with_j=True, with_k=True):
     ''' Calculate rhoj and rhok on Multi-GPU system
     '''
     futures = []
+    cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
             future = executor.submit(
