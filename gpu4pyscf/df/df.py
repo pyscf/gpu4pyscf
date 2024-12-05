@@ -21,7 +21,7 @@ import numpy as np
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from pyscf.df import df, addons, incore
-from gpu4pyscf.lib.cupy_helper import cholesky, tag_array, get_avail_mem, cart2sph
+from gpu4pyscf.lib.cupy_helper import cholesky, tag_array, get_avail_mem, cart2sph, p2p_transfer
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
@@ -175,8 +175,8 @@ class DF(lib.StreamObject):
             else:
                 buf2 = None
             yield buf2, buf.T
-            if isinstance(cderi_sparse, np.ndarray):
-                cupy.cuda.Device().synchronize()
+            #if isinstance(cderi_sparse, np.ndarray):
+            #    cupy.cuda.Device().synchronize()
 
             if buf_prefetch is not None:
                 buf = buf_prefetch
@@ -208,13 +208,14 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     npairs = len(intopt.cderi_row)
     log = logger.new_logger(mol, mol.verbose)
 
-    # if the matrix exceeds the limit, store CDERI in CPU memory
-    # TODO: better estimate of memory consumption for each device
+    # Available memory on Device 0.
     avail_mem = get_avail_mem()
     
     if use_gpu_memory:
-        # If GPU memory is not enough
-        use_gpu_memory = naux * npairs * 8 < 0.4 * avail_mem
+        # CDERI will be equally distributed to the devices
+        # Other devices usually have more memory available than Device 0
+        # CDERI will use up to 40% of the available memory
+        use_gpu_memory = naux * npairs * 8 < 0.4 * avail_mem * _num_devices
     
     if use_gpu_memory:
         log.debug("Saving CDERI on GPU")
@@ -344,14 +345,14 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, omega=None, sr_only=False, de
             # if CDERI is saved on CPU
             ij0 = pairs_loc[cp_ij_id]
             ij1 = pairs_loc[cp_ij_id+1]
-            if isinstance(_cderi, np.ndarray):
+            if isinstance(_cderi[0], np.ndarray):
                 for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
                     for i in range(p0,p1):
-                        cderi_block[i].get(out=_cderi[slice_id][i,ij0:ij1])
+                        cderi_block[i].get(out=_cderi[slice_id][i-p0,ij0:ij1])
             else:
                 # Copy data to other Devices
                 for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
-                    _cderi[slice_id][:,ij0:ij1] = cderi_block[p0:p1]
-            
+                    #_cderi[slice_id][:,ij0:ij1] = cderi_block[p0:p1]
+                    p2p_transfer(_cderi[slice_id][:,ij0:ij1], cderi_block[p0:p1])
             t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)
     return

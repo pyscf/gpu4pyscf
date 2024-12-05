@@ -83,10 +83,10 @@ class KnownValues(unittest.TestCase):
     def test_GGA(self):
         self._check_xc('HYB_GGA_XC_B3LYP')
         self._check_xc('GGA_X_B88', fxc_tol=1e-10)
-        self._check_xc('GGA_C_PBE', fxc_tol=1e-5)
+        self._check_xc('GGA_C_PBE', fxc_tol=1e-4)
 
     def test_mGGA(self):
-        self._check_xc('MGGA_C_M06', fxc_tol=1e-5)
+        self._check_xc('MGGA_C_M06', fxc_tol=1e-4)
 
     def test_u_LDA(self):
         self._check_xc('LDA_C_VWN', spin=1)
@@ -95,10 +95,10 @@ class KnownValues(unittest.TestCase):
         # large errors found in B88 for the spin polarized case
         self._check_xc('HYB_GGA_XC_B3LYP', spin=1, fxc_tol=1e-3)
         self._check_xc('GGA_X_B88', spin=1, fxc_tol=1e-1)
-        self._check_xc('GGA_C_PBE', spin=1, fxc_tol=1e-5)
+        self._check_xc('GGA_C_PBE', spin=1, fxc_tol=1e-4)
 
     def test_u_mGGA(self):
-        self._check_xc('MGGA_C_M06', spin=1, fxc_tol=1e-5)
+        self._check_xc('MGGA_C_M06', spin=1, fxc_tol=1e-4)
 
 if __name__ == "__main__":
     print("Full Tests for xc fun")

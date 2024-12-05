@@ -498,13 +498,13 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
     vj = vk = None
     if with_j:
         vj = [future.result()[0] for future in futures]
-        vj = reduce_to_device(vj)
+        vj = reduce_to_device(vj, inplace=True)
         vj = intopt.unsort_orbitals(vj, axis=[1,2])
         vj = vj.reshape(out_shape)
     
     if with_k:
         vk = [future.result()[1] for future in futures]
-        vk = reduce_to_device(vk)
+        vk = reduce_to_device(vk, inplace=True)
         vk = intopt.unsort_orbitals(vk, axis=[1,2])
         vk = vk.reshape(out_shape)
 

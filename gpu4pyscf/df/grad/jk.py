@@ -15,7 +15,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 import cupy
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, concatenate
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, _num_devices
 
@@ -74,8 +74,8 @@ def get_rhoj_rhok(with_df, dm, orbo, with_j=True, with_k=True):
         
     rhoj = rhok = None
     if with_j:
-        rhoj = cupy.concatenate(rhoj_total)
+        rhoj = concatenate(rhoj_total)
     if with_k:
-        rhok = cupy.concatenate(rhok_total)
+        rhok = concatenate(rhok_total)
     
     return rhoj, rhok
