@@ -175,8 +175,8 @@ class DF(lib.StreamObject):
             else:
                 buf2 = None
             yield buf2, buf.T
-            #if isinstance(cderi_sparse, np.ndarray):
-            #    cupy.cuda.Device().synchronize()
+            if isinstance(cderi_sparse, np.ndarray):
+                cupy.cuda.Device().synchronize()
 
             if buf_prefetch is not None:
                 buf = buf_prefetch
