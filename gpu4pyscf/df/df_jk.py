@@ -390,13 +390,12 @@ def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0)
             else:
                 dm_sparse *= 2
             dm_sparse[:, intopt.cderi_diag] *= .5
-        
+            vj_sparse = cupy.zeros_like(dm_sparse)
+
         if with_k:
             vk = cupy.zeros_like(dms)
 
         nset = dms.shape[0]
-        if with_j:
-            vj_sparse = cupy.zeros_like(dm_sparse)
         blksize = dfobj.get_blksize()
         for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
             if with_j:
@@ -406,7 +405,7 @@ def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0)
                 for k in range(nset):
                     rhok = contract('Lij,jk->Lki', cderi, dms[k]).reshape([-1,nao])
                     #vk[k] += contract('Lki,Lkj->ij', rhok, cderi)
-                    vk[k] += cupy.dot(rhok.T, cderi.reshape([-1,nao]))
+                    vk[k] += cupy.dot(rhok.T, cderi.reshape([-1,nao]))            
         if with_j:
             vj = cupy.zeros(dms_shape)
             vj[:,rows,cols] = vj_sparse
@@ -501,7 +500,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
         vj = reduce_to_device(vj, inplace=True)
         vj = intopt.unsort_orbitals(vj, axis=[1,2])
         vj = vj.reshape(out_shape)
-    
+
     if with_k:
         vk = [future.result()[1] for future in futures]
         vk = reduce_to_device(vk, inplace=True)

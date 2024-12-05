@@ -1106,7 +1106,6 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     for future in futures:
         vmat_dist.append(future.result())
     vmat = reduce_to_device(vmat_dist, inplace=True)
-
     vmat = opt.unsort_orbitals(vmat, axis=[1,2])
     if xctype != 'LDA':
         transpose_sum(vmat)
@@ -1386,7 +1385,7 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
             t1 = log.timer_debug2('eval rho in fxc', *t1)
         #rho = (cupy.hstack(rhoa), cupy.hstack(rhob))
         rho = cupy.stack([cupy.hstack(rhoa), cupy.hstack(rhob)], axis=0)
-        t0 = log.timer_debug1('eval rho in fxc', *t0)
+        t0 = log.timer_debug1('eval rho in fxc', *t0)    
     vxc, fxc = ni.eval_xc_eff(xc_code, rho, deriv=2, xctype=xctype)[1:3]
     t0 = log.timer_debug1('eval fxc', *t0)
     return rho, vxc, fxc
@@ -1617,7 +1616,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 gdftopt=opt,
                 transpose=False
             )
-
+            
             if pad > 0:
                 if deriv == 0:
                     ao_mask[-pad:,:] = 0.0
