@@ -65,6 +65,14 @@ typedef struct {
 } JKMatrix;
 
 typedef struct {
+    double *ejk;
+    double *dm;
+    double j_factor;
+    double k_factor;
+    uint16_t n_dm;
+} JKEnergy;
+
+typedef struct {
     uint8_t li;
     uint8_t lj;
     uint8_t lk;

@@ -133,8 +133,4 @@ class Hessian(uks_hess.Hessian):
     hess_elec = uhf_hess.hess_elec
     kernel = rhf_hess.kernel
     hess = kernel
-
-    def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
-                  fx=None, atmlst=None, max_memory=4000, verbose=None):
-        return uhf_hess.solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1ao_or_chkfile,
-                         fx, atmlst, max_memory, verbose)
+    solve_mo1 = df_uhf_hess.Hessian.solve_mo1

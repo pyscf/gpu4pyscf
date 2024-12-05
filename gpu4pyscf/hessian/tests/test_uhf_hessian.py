@@ -54,15 +54,15 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
         hobj = mf.Hessian()
         e1_cpu, ej_cpu, ek_cpu = uhf_cpu._partial_hess_ejk(hobj)
+        e2_cpu = ej_cpu - ek_cpu
 
         mf = mf.to_gpu()
         mf.kernel()
         hobj = mf.Hessian()
-        e1_gpu, ej_gpu, ek_gpu = uhf_gpu._partial_hess_ejk(hobj)
+        e1_gpu, e2_gpu = uhf_gpu._partial_hess_ejk(hobj)
 
         assert numpy.linalg.norm(e1_cpu - e1_gpu.get()) < 1e-5
-        assert numpy.linalg.norm(ej_cpu - ej_gpu.get()) < 1e-5
-        assert numpy.linalg.norm(ek_cpu - ek_gpu.get()) < 1e-5
+        assert numpy.linalg.norm(e2_cpu - e2_gpu.get()) < 1e-5
 
     def test_hessian_uhf_D3(self):
         print('----- testing UHF with D3BJ ------')
