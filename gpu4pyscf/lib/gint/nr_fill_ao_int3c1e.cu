@@ -41,25 +41,9 @@
 #define GSIZE4_INT3C_1E 240
 #define GSIZE5_INT3C_1E 450
 
-/*
-static void CINTcart_comp(int16_t *nx, int16_t *ny, int16_t *nz, int lmax)
-{
-    int inc = 0;
-    for (int16_t lx = lmax; lx >= 0; lx--) {
-        for (int16_t ly = lmax - lx; ly >= 0; ly--) {
-            int16_t lz = lmax - lx - ly;
-            nx[inc] = lx;
-            ny[inc] = ly;
-            nz[inc] = lz;
-            inc++;
-        }
-    }
-}
-*/
-
 static int GINTfill_int3c1e_tasks(double* output, const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
                                   const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
-                                  const double omega, const double* grid_points, const cudaStream_t stream)
+                                  const double omega, const double* grid_points, const double* charge_exponents, const cudaStream_t stream)
 {
     const int nrys_roots = (i_l + j_l) / 2 + 1;
     const int ntasks_ij = offsets.ntasks_ij;
@@ -72,16 +56,16 @@ static int GINTfill_int3c1e_tasks(double* output, const BasisProdOffsets offsets
     case 1:
         type_ijkl = (i_l << 2) | j_l;
         switch (type_ijkl) {
-        case (0<<2)|0: GINTfill_int3c1e_kernel00<<<blocks, threads, 0, stream>>>(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
-        case (1<<2)|0: GINTfill_int3c1e_kernel10<<<blocks, threads, 0, stream>>>(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
+        case (0<<2)|0: GINTfill_int3c1e_kernel00<<<blocks, threads, 0, stream>>>(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+        case (1<<2)|0: GINTfill_int3c1e_kernel10<<<blocks, threads, 0, stream>>>(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
         default:
             fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
         }
         break;
-    case 2: GINTfill_int3c1e_kernel_general<2, GSIZE2_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
-    case 3: GINTfill_int3c1e_kernel_general<3, GSIZE3_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
-    case 4: GINTfill_int3c1e_kernel_general<4, GSIZE4_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
-    case 5: GINTfill_int3c1e_kernel_general<5, GSIZE5_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
+    case 2: GINTfill_int3c1e_kernel_general<2, GSIZE2_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+    case 3: GINTfill_int3c1e_kernel_general<3, GSIZE3_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+    case 4: GINTfill_int3c1e_kernel_general<4, GSIZE4_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+    case 5: GINTfill_int3c1e_kernel_general<5, GSIZE5_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
     default:
         fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
@@ -97,7 +81,8 @@ static int GINTfill_int3c1e_tasks(double* output, const BasisProdOffsets offsets
 
 static int GINTfill_int3c1e_charge_contracted_tasks(double* output, const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
                                                     const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
-                                                    const double omega, const double* grid_points, const cudaStream_t stream, const int n_charge_sum_per_thread)
+                                                    const double omega, const double* grid_points, const double* charge_exponents,
+                                                    const int n_charge_sum_per_thread, const cudaStream_t stream)
 {
     const int nrys_roots = (i_l + j_l) / 2 + 1;
     const int ntasks_ij = offsets.ntasks_ij;
@@ -110,16 +95,16 @@ static int GINTfill_int3c1e_charge_contracted_tasks(double* output, const BasisP
     case 1:
         type_ijkl = (i_l << 2) | j_l;
         switch (type_ijkl) {
-        case (0<<2)|0: GINTfill_int3c1e_charge_contracted_kernel00<<<blocks, threads, 0, stream>>>(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
-        case (1<<2)|0: GINTfill_int3c1e_charge_contracted_kernel10<<<blocks, threads, 0, stream>>>(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
+        case (0<<2)|0: GINTfill_int3c1e_charge_contracted_kernel00<<<blocks, threads, 0, stream>>>(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+        case (1<<2)|0: GINTfill_int3c1e_charge_contracted_kernel10<<<blocks, threads, 0, stream>>>(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
         default:
             fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
         }
         break;
-    case 2: GINTfill_int3c1e_charge_contracted_kernel_general<2, GSIZE2_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
-    case 3: GINTfill_int3c1e_charge_contracted_kernel_general<3, GSIZE3_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
-    case 4: GINTfill_int3c1e_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
-    case 5: GINTfill_int3c1e_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points); break;
+    case 2: GINTfill_int3c1e_charge_contracted_kernel_general<2, GSIZE2_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+    case 3: GINTfill_int3c1e_charge_contracted_kernel_general<3, GSIZE3_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+    case 4: GINTfill_int3c1e_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+    case 5: GINTfill_int3c1e_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
     default:
         fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
@@ -135,7 +120,8 @@ static int GINTfill_int3c1e_charge_contracted_tasks(double* output, const BasisP
 
 static int GINTfill_int3c1e_density_contracted_tasks(double* output, const double* density, const HermiteDensityOffsets hermite_density_offsets,
                                                      const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
-                                                     const double omega, const double* grid_points, const int n_pair_sum_per_thread, const cudaStream_t stream)
+                                                     const double omega, const double* grid_points, const double* charge_exponents,
+                                                     const int n_pair_sum_per_thread, const cudaStream_t stream)
 {
     const int nrys_roots = (i_l + j_l) / 2 + 1;
     const int ntasks_ij = (offsets.ntasks_ij + n_pair_sum_per_thread - 1) / n_pair_sum_per_thread;
@@ -148,16 +134,16 @@ static int GINTfill_int3c1e_density_contracted_tasks(double* output, const doubl
     case 1:
         type_ijkl = (i_l << 2) | j_l;
         switch (type_ijkl) {
-        case (0<<2)|0: GINTfill_int3c1e_density_contracted_kernel00<<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points); break;
-        case (1<<2)|0: GINTfill_int3c1e_density_contracted_kernel10<<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points); break;
+        case (0<<2)|0: GINTfill_int3c1e_density_contracted_kernel00<<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
+        case (1<<2)|0: GINTfill_int3c1e_density_contracted_kernel10<<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
         default:
             fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
         }
         break;
-    case 2: GINT_int3c1e_density_contracted_kernel_general<2> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points); break;
-    case 3: GINT_int3c1e_density_contracted_kernel_general<3> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points); break;
-    case 4: GINT_int3c1e_density_contracted_kernel_general<4> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points); break;
-    case 5: GINT_int3c1e_density_contracted_kernel_general<5> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points); break;
+    case 2: GINTfill_int3c1e_density_contracted_kernel_general<2> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points, charge_exponents); break;
+    case 3: GINTfill_int3c1e_density_contracted_kernel_general<3> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points, charge_exponents); break;
+    case 4: GINTfill_int3c1e_density_contracted_kernel_general<4> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points, charge_exponents); break;
+    case 5: GINTfill_int3c1e_density_contracted_kernel_general<5> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points, charge_exponents); break;
     default:
         fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
@@ -173,7 +159,7 @@ static int GINTfill_int3c1e_density_contracted_tasks(double* output, const doubl
 
 extern "C" {
 int GINTfill_int3c1e(const cudaStream_t stream, const BasisProdCache* bpcache,
-                     const double* grid_points, const int ngrids,
+                     const double* grid_points, const double* charge_exponents, const int ngrids,
                      double* integrals, const int nao,
                      const int* strides, const int* ao_offsets,
                      const int* bins_locs_ij, int nbins,
@@ -212,7 +198,7 @@ int GINTfill_int3c1e(const cudaStream_t stream, const BasisProdCache* bpcache,
 
         const int err = GINTfill_int3c1e_tasks(integrals, offsets, i_l, j_l, nprim_ij,
                                                strides[0], strides[1], ao_offsets[0], ao_offsets[1],
-                                               omega, grid_points, stream);
+                                               omega, grid_points, charge_exponents, stream);
 
         if (err != 0) {
             return err;
@@ -223,7 +209,7 @@ int GINTfill_int3c1e(const cudaStream_t stream, const BasisProdCache* bpcache,
 }
 
 int GINTfill_int3c1e_charge_contracted(const cudaStream_t stream, const BasisProdCache* bpcache,
-                                       const double* grid_points, const int ngrids,
+                                       const double* grid_points, const double* charge_exponents, const int ngrids,
                                        double* integral_charge_contracted, const int nao,
                                        const int* strides, const int* ao_offsets,
                                        const int* bins_locs_ij, int nbins,
@@ -262,7 +248,7 @@ int GINTfill_int3c1e_charge_contracted(const cudaStream_t stream, const BasisPro
 
         const int err = GINTfill_int3c1e_charge_contracted_tasks(integral_charge_contracted, offsets, i_l, j_l, nprim_ij,
                                                                  strides[0], strides[1], ao_offsets[0], ao_offsets[1],
-                                                                 omega, grid_points, stream, n_charge_sum_per_thread);
+                                                                 omega, grid_points, charge_exponents, n_charge_sum_per_thread, stream);
 
         if (err != 0) {
             return err;
@@ -273,7 +259,7 @@ int GINTfill_int3c1e_charge_contracted(const cudaStream_t stream, const BasisPro
 }
 
 int GINTfill_int3c1e_density_contracted(const cudaStream_t stream, const BasisProdCache* bpcache,
-                                        const double* grid_points, const int ngrids,
+                                        const double* grid_points, const double* charge_exponents, const int ngrids,
                                         const double* dm_pair_ordered, const int* density_offset,
                                         double* integral_density_contracted,
                                         const int* bins_locs_ij, int nbins,
@@ -317,7 +303,7 @@ int GINTfill_int3c1e_density_contracted(const cudaStream_t stream, const BasisPr
 
         const int err = GINTfill_int3c1e_density_contracted_tasks(integral_density_contracted, dm_pair_ordered, hermite_density_offsets,
                                                                   offsets, i_l, j_l, nprim_ij,
-                                                                  omega, grid_points, n_pair_sum_per_thread, stream);
+                                                                  omega, grid_points, charge_exponents, n_pair_sum_per_thread, stream);
 
         if (err != 0) {
             return err;
