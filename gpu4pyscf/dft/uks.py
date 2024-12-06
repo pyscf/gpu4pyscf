@@ -16,12 +16,13 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import cupy
-from pyscf.dft import uks
+from pyscf.dft import uks as uks_cpu
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid, rks
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf.lib import utils
 
 
 def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
@@ -30,8 +31,9 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     '''
     if mol is None: mol = ks.mol
     if dm is None: dm = ks.make_rdm1()
+    assert dm.ndim == 3
     t0 = logger.init_timer(ks)
-    rks.initialize_grids(ks, mol, dm)
+    rks.initialize_grids(ks, mol, cupy.asarray(dm[0]+dm[1]))
 
     if hasattr(ks, 'screen_tol') and ks.screen_tol is not None:
         ks.direct_scf_tol = ks.screen_tol
@@ -42,7 +44,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         n, exc, vxc = (0,0), 0, 0
     else:
         max_memory = ks.max_memory - lib.current_memory()[0]
-        n, exc, vxc = ni.nr_uks(mol, ks.grids, ks.xc, dm, max_memory=max_memory)
+        n, exc, vxc = ni.nr_uks(mol, ks.grids, ks.xc, dm.view(cupy.ndarray), max_memory=max_memory)
         logger.debug(ks, 'nelec by numeric integration = %s', n)
         if ks.do_nlc():
             if ni.libxc.is_nlc(ks.xc):
@@ -61,7 +63,10 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         vk = None
         if (ks._eri is None and ks.direct_scf and
             getattr(vhf_last, 'vj', None) is not None):
-            ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
+            dm_last = cupy.asarray(dm_last)
+            dm = cupy.asarray(dm)
+            assert dm_last.ndim == 0 or dm_last.ndim == dm.ndim
+            ddm = dm - dm_last
             vj = ks.get_j(mol, ddm[0]+ddm[1], hermi)
             vj += vhf_last.vj
         else:
@@ -71,7 +76,10 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
         if (ks._eri is None and ks.direct_scf and
             getattr(vhf_last, 'vk', None) is not None):
-            ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
+            dm_last = cupy.asarray(dm_last)
+            dm = cupy.asarray(dm)
+            assert dm_last.ndim == 0 or dm_last.ndim == dm.ndim
+            ddm = dm - dm_last
             vj, vk = ks.get_jk(mol, ddm, hermi)
             vk *= hyb
             if abs(omega) > 1e-10:  # For range separated Coulomb operator
@@ -113,19 +121,15 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
 
 
 class UKS(rks.KohnShamDFT, uhf.UHF):
-    from gpu4pyscf.lib.utils import to_gpu, device
-    _keys = {'disp', 'screen_tol'}
-
-    def __init__(self, mol, xc='LDA,VWN', disp=None):
+    def __init__(self, mol, xc='LDA,VWN'):
         uhf.UHF.__init__(self, mol)
         rks.KohnShamDFT.__init__(self, xc)
-        self.disp = disp
 
     get_veff = get_veff
-    get_vasp = uks.get_vsap
+    get_vasp = uks_cpu.get_vsap
     energy_elec = energy_elec
     energy_tot = hf.RHF.energy_tot
-    init_guess_by_vsap = uks.UKS.init_guess_by_vsap
+    init_guess_by_vsap = uks_cpu.UKS.init_guess_by_vsap
 
     to_hf = NotImplemented
 
@@ -141,9 +145,10 @@ class UKS(rks.KohnShamDFT, uhf.UHF):
         from gpu4pyscf.grad import uks as uks_grad
         return uks_grad.Gradients(self)
 
+    to_gpu = utils.to_gpu
+    device = utils.device
+
     def to_cpu(self):
-        from gpu4pyscf.lib import utils
-        mf = uks.UKS(self.mol, xc=self.xc)
-        mf.disp = self.disp
+        mf = uks_cpu.UKS(self.mol, xc=self.xc)
         utils.to_cpu(self, mf)
         return mf
