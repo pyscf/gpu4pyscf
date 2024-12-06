@@ -655,8 +655,10 @@ def _e_hcore_generator(hessobj, dm):
 
     assert dm.dtype == np.float64
     mol = hessobj.mol
-    de_nuc_elec = hess_nuc_elec(mol, dm).get()
-
+    log = logger.new_logger(mol)
+    t1 = log.init_timer()
+    de_nuc_elec = hess_nuc_elec(mol, dm)
+    t1 = log.timer_debug1('hess_nuc_elec', *t1)
     dm = dm.get()
     with_ecp = mol.has_ecp()
     if with_ecp:
@@ -666,9 +668,14 @@ def _e_hcore_generator(hessobj, dm):
     aoslices = mol.aoslice_by_atom()
     nbas = mol.nbas
     nao = mol.nao_nr()
-    h1aa, h1ab = hessobj.get_hcore(mol)
-    hcore = np.empty((3,3,nao,nao))
 
+    # Move data to GPU, get_hcore is slow on CPU
+    h1aa, h1ab = hessobj.get_hcore(mol)
+    h1aa = cupy.asarray(h1aa)
+    h1ab = cupy.asarray(h1ab)
+    
+    hcore = cupy.empty((3,3,nao,nao))
+    t1 = log.timer_debug1('get_hcore', *t1)
     def get_hcore(iatm, jatm):
         nonlocal hcore
         ish0, ish1, i0, i1 = aoslices[iatm]
@@ -681,6 +688,8 @@ def _e_hcore_generator(hessobj, dm):
                 if with_ecp and iatm in ecp_atoms:
                     rinv2aa = -mol.intor('ECPscalar_ipiprinv', comp=9)
                     rinv2ab = -mol.intor('ECPscalar_iprinvip', comp=9)
+                    rinv2aa = cupy.asarray(rinv2aa)
+                    rinv2ab = cupy.asarray(rinv2ab)
                     rinv2aa = rinv2aa.reshape(3,3,nao,nao)
                     rinv2ab = rinv2ab.reshape(3,3,nao,nao)
             hcore[:] = 0.
@@ -700,6 +709,8 @@ def _e_hcore_generator(hessobj, dm):
                     shls_slice = (jsh0, jsh1, 0, nbas)
                     rinv2aa = -mol.intor('ECPscalar_ipiprinv', comp=9, shls_slice=shls_slice)
                     rinv2ab = -mol.intor('ECPscalar_iprinvip', comp=9, shls_slice=shls_slice)
+                    rinv2aa = cupy.asarray(rinv2aa)
+                    rinv2ab = cupy.asarray(rinv2ab)
                     hcore[:,:,j0:j1] += rinv2aa.reshape(3,3,j1-j0,nao)
                     hcore[:,:,j0:j1] += rinv2ab.reshape(3,3,j1-j0,nao).transpose(1,0,2,3)
             with mol.with_rinv_at_nucleus(jatm):
@@ -707,10 +718,12 @@ def _e_hcore_generator(hessobj, dm):
                     shls_slice = (ish0, ish1, 0, nbas)
                     rinv2aa = -mol.intor('ECPscalar_ipiprinv', comp=9, shls_slice=shls_slice)
                     rinv2ab = -mol.intor('ECPscalar_iprinvip', comp=9, shls_slice=shls_slice)
+                    rinv2aa = cupy.asarray(rinv2aa)
+                    rinv2ab = cupy.asarray(rinv2ab)
                     hcore[:,:,i0:i1] += rinv2aa.reshape(3,3,i1-i0,nao)
                     hcore[:,:,i0:i1] += rinv2ab.reshape(3,3,i1-i0,nao)
-        de = np.einsum('xypq,pq->xy', hcore, dm)
-        de += np.einsum('xyqp,pq->xy', hcore, dm)
+        de = cupy.einsum('xypq,pq->xy', hcore, dm)
+        de += cupy.einsum('xyqp,pq->xy', hcore, dm)
         return cp.asarray(de + de_nuc_elec[:,:,iatm,jatm])
     return get_hcore
 

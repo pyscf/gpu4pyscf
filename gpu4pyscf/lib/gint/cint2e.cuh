@@ -23,10 +23,7 @@
 
 //extern __constant__ GINTEnvVars c_envs;
 extern __constant__ BasisProdCache c_bpcache;
-extern __constant__ int16_t c_idx4c[NFffff*3];
+//extern __constant__ int16_t c_idx4c[NFffff*3];
 
-/*
-__constant__ GINTEnvVars c_envs;
-__constant__ BasisProdCache c_bpcache;
-__constant__ int16_t c_idx4c[NFffff*3];
-*/
+extern __constant__ int c_idx[TOT_NF*3];
+extern __constant__ int c_l_locs[GPU_LMAX+2];

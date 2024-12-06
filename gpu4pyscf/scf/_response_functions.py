@@ -16,7 +16,7 @@
 import cupy
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.scf import hf, uhf
+from gpu4pyscf.scf import hf, uhf, rohf
 
 def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                       singlet=None, hermi=0, grids=None, max_memory=None):
@@ -133,7 +133,7 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
     '''Generate a function to compute the product of UHF response function and
     UHF density matrices.
     '''
-    assert isinstance(mf, uhf.UHF)
+    assert isinstance(mf, (uhf.UHF, rohf.ROHF))
     if mo_coeff is None: mo_coeff = mf.mo_coeff
     if mo_occ is None: mo_occ = mf.mo_occ
     mol = mf.mol
@@ -194,3 +194,4 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
 
 hf.RHF.gen_response = _gen_rhf_response
 uhf.UHF.gen_response = _gen_uhf_response
+rohf.ROHF.gen_response = _gen_uhf_response

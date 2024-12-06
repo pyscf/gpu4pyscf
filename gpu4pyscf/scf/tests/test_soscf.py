@@ -131,7 +131,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(hop(dm1).get() - hop_ref(dm1.get())).max(), 0, 9)
 
     def test_nr_roks(self):
-        mf = dft.RKS(h2o_z1)
+        mf = dft.ROKS(h2o_z1)
         mf.xc = 'b3lyp'
         eref = mf.kernel()
 

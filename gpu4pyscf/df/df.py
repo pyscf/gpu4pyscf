@@ -21,7 +21,7 @@ import numpy as np
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from pyscf.df import df, addons, incore
-from gpu4pyscf.lib.cupy_helper import cholesky, tag_array, get_avail_mem, cart2sph
+from gpu4pyscf.lib.cupy_helper import cholesky, tag_array, get_avail_mem, cart2sph, p2p_transfer
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
@@ -123,7 +123,7 @@ class DF(lib.StreamObject):
         if key in self._rsh_df:
             rsh_df = self._rsh_df[key]
         else:
-            rsh_df = self._rsh_df[key] = copy.copy(self).reset()
+            rsh_df = self._rsh_df[key] = self.copy().reset()
             logger.info(self, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
 
         return df_jk.get_jk(rsh_df, dm, hermi, with_j, with_k, direct_scf_tol, omega=omega)
@@ -177,10 +177,10 @@ class DF(lib.StreamObject):
             yield buf2, buf.T
             if isinstance(cderi_sparse, np.ndarray):
                 cupy.cuda.Device().synchronize()
-
+            
             if buf_prefetch is not None:
                 buf = buf_prefetch
-
+            
     def reset(self, mol=None):
         '''Reset mol and clean up relevant attributes for scanner mode'''
         if mol is not None:
@@ -208,13 +208,14 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     npairs = len(intopt.cderi_row)
     log = logger.new_logger(mol, mol.verbose)
 
-    # if the matrix exceeds the limit, store CDERI in CPU memory
-    # TODO: better estimate of memory consumption for each device
+    # Available memory on Device 0.
     avail_mem = get_avail_mem()
     
     if use_gpu_memory:
-        # If GPU memory is not enough
-        use_gpu_memory = naux * npairs * 8 < 0.4 * avail_mem
+        # CDERI will be equally distributed to the devices
+        # Other devices usually have more memory available than Device 0
+        # CDERI will use up to 40% of the available memory
+        use_gpu_memory = naux * npairs * 8 < 0.4 * avail_mem * _num_devices
     
     if use_gpu_memory:
         log.debug("Saving CDERI on GPU")
@@ -244,9 +245,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     cd_low_f = cupy.array(cd_low, order='F', copy=False)
     cd_low_f = tag_array(cd_low_f, tag=cd_low.tag)
 
-    for gpu_id in range(_num_devices):
-        cupy.cuda.Device(gpu_id).synchronize()
-
+    cupy.cuda.get_current_stream().synchronize()
     futures = []
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
@@ -258,9 +257,6 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     for future in futures:
         future.result()
     
-    for device_id in range(_num_devices):
-        cupy.cuda.Device(device_id).synchronize()
-
     if not use_gpu_memory:
         cupy.cuda.Device().synchronize()
     
@@ -344,14 +340,14 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, omega=None, sr_only=False, de
             # if CDERI is saved on CPU
             ij0 = pairs_loc[cp_ij_id]
             ij1 = pairs_loc[cp_ij_id+1]
-            if isinstance(_cderi, np.ndarray):
+            if isinstance(_cderi[0], np.ndarray):
                 for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
                     for i in range(p0,p1):
-                        cderi_block[i].get(out=_cderi[slice_id][i,ij0:ij1])
+                        cderi_block[i].get(out=_cderi[slice_id][i-p0,ij0:ij1])
             else:
                 # Copy data to other Devices
                 for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
-                    _cderi[slice_id][:,ij0:ij1] = cderi_block[p0:p1]
-            
+                    #_cderi[slice_id][:,ij0:ij1] = cderi_block[p0:p1]
+                    p2p_transfer(_cderi[slice_id][:,ij0:ij1], cderi_block[p0:p1])
             t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)
     return

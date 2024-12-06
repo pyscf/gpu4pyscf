@@ -81,7 +81,8 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(coords - coords_qchem) < 1e-4
 
     def test_uks_geomopt(self):
-        mf = uks.UKS(mol, xc=xc, disp=disp)
+        mf = uks.UKS(mol, xc=xc)
+        mf.disp = disp
         mf.grids.level = grids_level
         mf.kernel()
         mol_eq = optimize(mf, maxsteps=20)

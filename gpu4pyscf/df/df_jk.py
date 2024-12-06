@@ -47,7 +47,7 @@ def init_workflow(mf, dm0=None):
             if key in mf.with_df._rsh_df:
                 rsh_df = mf.with_df._rsh_df[key]
             else:
-                rsh_df = mf.with_df._rsh_df[key] = copy.copy(mf.with_df).reset()
+                rsh_df = mf.with_df._rsh_df[key] = mf.with_df.copy().reset()
             rsh_df.build(omega=omega)
         return
 
@@ -101,7 +101,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
             mf.with_df = with_df
         elif getattr(mf.with_df, 'auxbasis', None) != auxbasis:
             #logger.warn(mf, 'DF might have been initialized twice.')
-            mf = copy.copy(mf)
+            mf = mf.copy()
             mf.with_df = with_df
             mf.only_dfj = only_dfj
         return mf
@@ -298,8 +298,7 @@ def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ,
                         rhok = rhok.reshape([-1,nao])
                         vk[i] += cupy.dot(rhok.T, rhok)
                     rhok = None
-                cupy.cuda.get_current_stream().synchronize()
-                
+
             if with_j:
                 vj = cupy.zeros(dms_shape)
                 vj[:,rows,cols] = vj_packed
@@ -390,13 +389,12 @@ def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0)
             else:
                 dm_sparse *= 2
             dm_sparse[:, intopt.cderi_diag] *= .5
-        
+            vj_sparse = cupy.zeros_like(dm_sparse)
+
         if with_k:
             vk = cupy.zeros_like(dms)
 
         nset = dms.shape[0]
-        if with_j:
-            vj_sparse = cupy.zeros_like(dm_sparse)
         blksize = dfobj.get_blksize()
         for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
             if with_j:
@@ -406,7 +404,7 @@ def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0)
                 for k in range(nset):
                     rhok = contract('Lij,jk->Lki', cderi, dms[k]).reshape([-1,nao])
                     #vk[k] += contract('Lki,Lkj->ij', rhok, cderi)
-                    vk[k] += cupy.dot(rhok.T, cderi.reshape([-1,nao]))
+                    vk[k] += cupy.dot(rhok.T, cderi.reshape([-1,nao]))            
         if with_j:
             vj = cupy.zeros(dms_shape)
             vj[:,rows,cols] = vj_sparse
@@ -445,6 +443,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
     intopt = dfobj.intopt
     dms = intopt.sort_orbitals(dms, axis=[1,2])
 
+    cupy.cuda.get_current_stream().synchronize()
     if getattr(dms_tag, 'mo_coeff', None) is not None:
         mo_occ = dms_tag.mo_occ
         mo_coeff = dms_tag.mo_coeff
@@ -498,13 +497,13 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
     vj = vk = None
     if with_j:
         vj = [future.result()[0] for future in futures]
-        vj = reduce_to_device(vj)
+        vj = reduce_to_device(vj, inplace=True)
         vj = intopt.unsort_orbitals(vj, axis=[1,2])
         vj = vj.reshape(out_shape)
-    
+
     if with_k:
         vk = [future.result()[1] for future in futures]
-        vk = reduce_to_device(vk)
+        vk = reduce_to_device(vk, inplace=True)
         vk = intopt.unsort_orbitals(vk, axis=[1,2])
         vk = vk.reshape(out_shape)
 
@@ -529,7 +528,7 @@ def _get_jk(dfobj, dm, hermi=1, with_j=True, with_k=True,
     if key in dfobj._rsh_df:
         rsh_df = dfobj._rsh_df[key]
     else:
-        rsh_df = dfobj._rsh_df[key] = copy.copy(dfobj).reset()
+        rsh_df = dfobj._rsh_df[key] = dfobj.copy().reset()
         logger.info(dfobj, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
 
     with rsh_df.mol.with_range_coulomb(omega):

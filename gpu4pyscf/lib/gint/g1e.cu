@@ -20,8 +20,9 @@
 // This function assumes i_l >= j_l
 template <int NROOTS>
 __device__
-static void GINTg1e(double* __restrict__ g, const double* __restrict__ grid_point, const int ish, const int jsh, const int prim_ij,
-                    const int i_l, const int j_l, const double omega)
+static void GINTg1e(double* __restrict__ g, const double* __restrict__ grid_point,
+                    const int ish, const int jsh, const int prim_ij,
+                    const int i_l, const int j_l, const double charge_exponent, const double omega)
 {
     const double* __restrict__ a12 = c_bpcache.a12;
     const double* __restrict__ e12 = c_bpcache.e12;
@@ -40,12 +41,16 @@ static void GINTg1e(double* __restrict__ g, const double* __restrict__ grid_poin
     const double PCx = Px - Cx;
     const double PCy = Py - Cy;
     const double PCz = Pz - Cz;
+
     double a0 = aij;
-    const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
-    const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
+    const double q_over_p_plus_q = charge_exponent > 0.0 ? charge_exponent / (aij + charge_exponent) : 1.0;
+    const double sqrt_q_over_p_plus_q = charge_exponent > 0.0 ? sqrt(q_over_p_plus_q) : 1.0;
+    a0 *= q_over_p_plus_q;
+    const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+    const double sqrt_theta = omega > 0.0 ? sqrt(theta) : 1.0;
     a0 *= theta;
 
-    const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta;
+    const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
     const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
     double uw[NROOTS * 2];
     GINTrys_root<NROOTS>(boys_input, uw);
@@ -76,11 +81,11 @@ static void GINTg1e(double* __restrict__ g, const double* __restrict__ grid_poin
         gz[i_root] = w[i_root];
 
         const double u2 = a0 * u[i_root];
-        const double t2 = u2 / (u2 + aij);
-        const double b10 = 0.5 / aij * (1.0 - t2);
-        const double c00x = PAx - t2 * PCx;
-        const double c00y = PAy - t2 * PCy;
-        const double c00z = PAz - t2 * PCz;
+        const double qt2_over_p_plus_q = u2 / (u2 + aij * q_over_p_plus_q) * q_over_p_plus_q;
+        const double b10 = 0.5 / aij * (1.0 - qt2_over_p_plus_q);
+        const double c00x = PAx - qt2_over_p_plus_q * PCx;
+        const double c00y = PAy - qt2_over_p_plus_q * PCy;
+        const double c00z = PAz - qt2_over_p_plus_q * PCz;
 
         if (i_l + j_l > 0) {
             double s0x = gx[i_root]; // i - 1
@@ -132,7 +137,7 @@ static void GINTg1e(double* __restrict__ g, const double* __restrict__ grid_poin
 template <int NROOTS>
 __device__
 static void GINT_g1e_without_hrr(double* __restrict__ g, const double grid_x, const double grid_y, const double grid_z,
-                                 const int ish, const int prim_ij, const int l, const double omega)
+                                 const int ish, const int prim_ij, const int l, const double charge_exponent, const double omega)
 {
     const double* __restrict__ a12 = c_bpcache.a12;
     const double* __restrict__ e12 = c_bpcache.e12;
@@ -148,12 +153,16 @@ static void GINT_g1e_without_hrr(double* __restrict__ g, const double grid_x, co
     const double PCx = Px - grid_x;
     const double PCy = Py - grid_y;
     const double PCz = Pz - grid_z;
+
     double a0 = aij;
-    const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
-    const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
+    const double q_over_p_plus_q = charge_exponent > 0.0 ? charge_exponent / (aij + charge_exponent) : 1.0;
+    const double sqrt_q_over_p_plus_q = charge_exponent > 0.0 ? sqrt(q_over_p_plus_q) : 1.0;
+    a0 *= q_over_p_plus_q;
+    const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+    const double sqrt_theta = omega > 0.0 ? sqrt(theta) : 1.0;
     a0 *= theta;
 
-    const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta;
+    const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
     const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
     double uw[NROOTS * 2];
     GINTrys_root<NROOTS>(boys_input, uw);
@@ -184,11 +193,11 @@ static void GINT_g1e_without_hrr(double* __restrict__ g, const double grid_x, co
         gz[i_root] = w[i_root];
 
         const double u2 = a0 * u[i_root];
-        const double t2 = u2 / (u2 + aij);
-        const double b10 = 0.5 / aij * (1.0 - t2);
-        const double c00x = PAx - t2 * PCx;
-        const double c00y = PAy - t2 * PCy;
-        const double c00z = PAz - t2 * PCz;
+        const double qt2_over_p_plus_q = u2 / (u2 + aij * q_over_p_plus_q) * q_over_p_plus_q;
+        const double b10 = 0.5 / aij * (1.0 - qt2_over_p_plus_q);
+        const double c00x = PAx - qt2_over_p_plus_q * PCx;
+        const double c00y = PAy - qt2_over_p_plus_q * PCy;
+        const double c00z = PAz - qt2_over_p_plus_q * PCz;
 
         if (l > 0) {
             double s0x = gx[i_root]; // i - 1
