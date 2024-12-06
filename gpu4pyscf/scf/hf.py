@@ -22,7 +22,7 @@ import scipy.linalg
 from functools import reduce
 from pyscf import gto
 from pyscf import lib as pyscf_lib
-from pyscf.scf import hf
+from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
 from gpu4pyscf import lib
 from gpu4pyscf.lib import utils
@@ -234,9 +234,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         if(e_diff < conv_tol and norm_gorb < conv_tol_grad):
             scf_conv = True
             break
-
-    if (cycle + 1 == mf.max_cycle):
-        assert not scf_conv
+    else:
         logger.warn(mf, "SCF failed to converge")
 
     return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
@@ -352,27 +350,27 @@ class SCF_Scanner(pyscf_lib.SinglePointScanner):
 class SCF(pyscf_lib.StreamObject):
 
     # attributes
-    conv_tol            = hf.SCF.conv_tol
-    conv_tol_grad       = hf.SCF.conv_tol_grad
-    max_cycle           = hf.SCF.max_cycle
-    init_guess          = hf.SCF.init_guess
+    conv_tol            = hf_cpu.SCF.conv_tol
+    conv_tol_grad       = hf_cpu.SCF.conv_tol_grad
+    max_cycle           = hf_cpu.SCF.max_cycle
+    init_guess          = hf_cpu.SCF.init_guess
     conv_tol_cpscf      = 1e-4
 
     disp                = None
     DIIS                = diis.SCF_DIIS
-    diis                = hf.SCF.diis
-    diis_space          = hf.SCF.diis_space
-    diis_damp           = hf.SCF.diis_damp
-    diis_start_cycle    = hf.SCF.diis_start_cycle
-    diis_file           = hf.SCF.diis_file
-    diis_space_rollback = hf.SCF.diis_space_rollback
-    damp                = hf.SCF.damp
-    level_shift         = hf.SCF.level_shift
-    direct_scf          = hf.SCF.direct_scf
-    direct_scf_tol      = hf.SCF.direct_scf_tol
-    conv_check          = hf.SCF.conv_check
-    callback            = hf.SCF.callback
-    _keys               = hf.SCF._keys
+    diis                = hf_cpu.SCF.diis
+    diis_space          = hf_cpu.SCF.diis_space
+    diis_damp           = hf_cpu.SCF.diis_damp
+    diis_start_cycle    = hf_cpu.SCF.diis_start_cycle
+    diis_file           = hf_cpu.SCF.diis_file
+    diis_space_rollback = hf_cpu.SCF.diis_space_rollback
+    damp                = hf_cpu.SCF.damp
+    level_shift         = hf_cpu.SCF.level_shift
+    direct_scf          = hf_cpu.SCF.direct_scf
+    direct_scf_tol      = hf_cpu.SCF.direct_scf_tol
+    conv_check          = hf_cpu.SCF.conv_check
+    callback            = hf_cpu.SCF.callback
+    _keys               = hf_cpu.SCF._keys
 
     # methods
     def __init__(self, mol):
@@ -410,42 +408,42 @@ class SCF(pyscf_lib.StreamObject):
                         'SCF may be inaccurate and hard to converge.', cupy.max(c))
         return super().check_sanity()
 
-    build                    = hf.SCF.build
+    build                    = hf_cpu.SCF.build
     opt                      = NotImplemented
-    dump_flags               = hf.SCF.dump_flags
-    get_hcore                = return_cupy_array(hf.SCF.get_hcore)
-    get_ovlp                 = return_cupy_array(hf.SCF.get_ovlp)
+    dump_flags               = hf_cpu.SCF.dump_flags
+    get_hcore                = return_cupy_array(hf_cpu.SCF.get_hcore)
+    get_ovlp                 = return_cupy_array(hf_cpu.SCF.get_ovlp)
     get_fock                 = get_fock
     get_occ                  = get_occ
     get_grad                 = staticmethod(get_grad)
-    init_guess_by_minao      = hf.SCF.init_guess_by_minao
-    init_guess_by_atom       = hf.SCF.init_guess_by_atom
-    init_guess_by_huckel     = hf.SCF.init_guess_by_huckel
-    init_guess_by_mod_huckel = hf.SCF.init_guess_by_mod_huckel
-    init_guess_by_1e         = hf.SCF.init_guess_by_1e
-    init_guess_by_chkfile    = hf.SCF.init_guess_by_chkfile
-    from_chk                 = hf.SCF.from_chk
-    get_init_guess           = return_cupy_array(hf.SCF.get_init_guess)
+    init_guess_by_minao      = hf_cpu.SCF.init_guess_by_minao
+    init_guess_by_atom       = hf_cpu.SCF.init_guess_by_atom
+    init_guess_by_huckel     = hf_cpu.SCF.init_guess_by_huckel
+    init_guess_by_mod_huckel = hf_cpu.SCF.init_guess_by_mod_huckel
+    init_guess_by_1e         = hf_cpu.SCF.init_guess_by_1e
+    init_guess_by_chkfile    = hf_cpu.SCF.init_guess_by_chkfile
+    from_chk                 = hf_cpu.SCF.from_chk
+    get_init_guess           = return_cupy_array(hf_cpu.SCF.get_init_guess)
     make_rdm1                = make_rdm1
     make_rdm2                = NotImplemented
     energy_elec              = energy_elec
     energy_tot               = energy_tot
-    energy_nuc               = hf.SCF.energy_nuc
+    energy_nuc               = hf_cpu.SCF.energy_nuc
     check_convergence        = None
     _eigh                    = staticmethod(eigh)
-    eig                      = hf.SCF.eig
-    do_disp                  = hf.SCF.do_disp
-    get_dispersion           = hf.SCF.get_dispersion
+    eig                      = hf_cpu.SCF.eig
+    do_disp                  = hf_cpu.SCF.do_disp
+    get_dispersion           = hf_cpu.SCF.get_dispersion
     kernel = scf             = scf
-    as_scanner               = hf.SCF.as_scanner
-    _finalize                = hf.SCF._finalize
-    init_direct_scf          = hf.SCF.init_direct_scf
+    as_scanner               = hf_cpu.SCF.as_scanner
+    _finalize                = hf_cpu.SCF._finalize
+    init_direct_scf          = hf_cpu.SCF.init_direct_scf
     get_jk                   = _get_jk
-    get_j                    = hf.SCF.get_j
-    get_k                    = hf.SCF.get_k
+    get_j                    = hf_cpu.SCF.get_j
+    get_k                    = hf_cpu.SCF.get_k
     get_veff                 = NotImplemented
-    mulliken_meta            = hf.SCF.mulliken_meta
-    pop                      = hf.SCF.pop
+    mulliken_meta            = hf_cpu.SCF.mulliken_meta
+    pop                      = hf_cpu.SCF.pop
     _is_mem_enough           = NotImplemented
     density_fit              = NotImplemented
     newton                   = NotImplemented
@@ -454,7 +452,7 @@ class SCF(pyscf_lib.StreamObject):
     nuc_grad_method          = NotImplemented
     update_                  = NotImplemented
     canonicalize             = NotImplemented
-    istype                   = hf.SCF.istype
+    istype                   = hf_cpu.SCF.istype
     to_rhf                   = NotImplemented
     to_uhf                   = NotImplemented
     to_ghf                   = NotImplemented
@@ -470,13 +468,13 @@ class SCF(pyscf_lib.StreamObject):
                    verbose=logger.NOTE):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
-        return hf.dip_moment(mol, dm.get(), unit, origin, verbose)
+        return hf_cpu.dip_moment(mol, dm.get(), unit, origin, verbose)
 
     def quad_moment(self, mol=None, dm=None, unit='DebyeAngstrom', origin=None,
                     verbose=logger.NOTE):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
-        return hf.quad_moment(mol, dm.get(), unit, origin, verbose)
+        return hf_cpu.quad_moment(mol, dm.get(), unit, origin, verbose)
 
     def remove_soscf(self):
         lib.logger.warn('remove_soscf has no effect in current version')
@@ -535,6 +533,6 @@ class RHF(SCF):
         return newton(self)
 
     def to_cpu(self):
-        mf = hf.RHF(self.mol)
+        mf = hf_cpu.RHF(self.mol)
         utils.to_cpu(self, out=mf)
         return mf

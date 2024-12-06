@@ -34,7 +34,7 @@ class KnownValues(unittest.TestCase):
         mol.symmetry = True
         cls.mol = mol.build()
         cls.mf = mf = scf.RHF(mol).to_gpu().run()
-        cls.df_mf = mf.density_fit().run()
+        cls.df_mf = scf.RHF(mol).to_gpu().density_fit().run()
         cls.nstates = 5 # make sure first 3 states are converged
 
     @classmethod
