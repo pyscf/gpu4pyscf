@@ -92,7 +92,7 @@ def p2p_transfer(a, b):
         a[:] = b
     else:
         with cupy.cuda.Device(a.device):
-            a[:] = cupy.asarray(b.get())
+            a[:].set(b.get())
 
 def concatenate(array_list):
     ''' Concatenate axis=0 only
@@ -108,7 +108,7 @@ def concatenate(array_list):
         p0 = p1 = 0
         for a in array_list_cpu:
             p1 = p0 + a.shape[0]
-            out[p0:p1] = cupy.asarray(a)
+            out[p0:p1].set(a)
             p0 = p1
         return out
 
