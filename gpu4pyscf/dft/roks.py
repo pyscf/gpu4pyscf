@@ -24,7 +24,6 @@ from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf.lib import utils
 
 class ROKS(rks.KohnShamDFT, ROHF):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     def __init__(self, mol, xc='LDA,VWN'):
         ROHF.__init__(self, mol)
