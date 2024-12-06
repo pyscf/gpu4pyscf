@@ -205,6 +205,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
 
     futures = []
+    cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
             future = executor.submit(

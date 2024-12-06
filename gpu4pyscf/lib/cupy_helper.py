@@ -26,7 +26,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
-from gpu4pyscf.__config__ import _streams, _num_devices
+from gpu4pyscf.__config__ import _streams, _num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
@@ -83,53 +83,69 @@ def get_avail_mem():
         mem_avail = cupy.cuda.runtime.memGetInfo()[0]
         return mem_avail + total_mem - used_mem
 
+def p2p_transfer(a, b):
+    ''' If the direct P2P data transfer is not available, transfer data via CPU memory
+    '''
+    if a.device == b.device:
+        a[:] = b
+    elif _p2p_access:
+        a[:] = b
+    else:
+        with cupy.cuda.Device(a.device):
+            a[:].set(b.get())
+
+def concatenate(array_list):
+    ''' Concatenate axis=0 only
+    '''
+    if _p2p_access:
+        return cupy.concatenate(array_list)
+    else:
+        array_list_cpu = [a.get() for a in array_list]
+        n = sum([a.shape[0] for a in array_list_cpu])
+        a0_shape = list(array_list_cpu[0].shape)
+        out_shape = tuple([n] + a0_shape[1:])
+        out = cupy.empty(out_shape)
+        p0 = p1 = 0
+        for a in array_list_cpu:
+            p1 = p0 + a.shape[0]
+            out[p0:p1].set(a)
+            p0 = p1
+        return out
+
 def broadcast_to_devices():
     ''' Broadcast cupy ndarray to all the devices, return a list of cupy ndarray
     '''
     raise NotImplementedError
 
-def reduce_to_device(array_list):
+def reduce_to_device(array_list, inplace=False):
     ''' Reduce a list of ndarray in different devices to device 0
     TODO: reduce memory footprint, improve throughput
     '''
     assert len(array_list) == _num_devices
-    if _num_devices == 0:
+    if _num_devices == 1:
         return array_list[0]
     
+    out_shape = array_list[0].shape
     for s in _streams:
         s.synchronize()
-    
-    for device_id in range(_num_devices):
-        cupy.cuda.Device(device_id).synchronize()
-    
-    results = [None] * _num_devices
+        
+    if inplace:
+        result = array_list[0]
+    else:
+        result = array_list[0].copy()
+    result = result.reshape(-1)
     # Asynchronously add each matrix from its device
     for device_id, matrix in enumerate(array_list):
         if device_id == 0:
-            results[device_id] = array_list[0]
             continue
         
-        mat_tmp = cupy.empty_like(matrix)
-        # Transfer from other devices using P2P access and streams
-        with cupy.cuda.Device(device_id), _streams[device_id] as s:
-            cupy.cuda.runtime.memcpyPeerAsync(
-                mat_tmp.data.ptr,
-                0,
-                matrix.data.ptr,
-                device_id,
-                matrix.nbytes,
-                stream=s.ptr,
-            )
-        results[device_id] = mat_tmp
-    for s in _streams:
-        s.synchronize()
+        assert matrix.device.id == device_id
+        matrix = matrix.reshape(-1)
+        blksize = 1024*1024*128 # 1GB
+        for p0, p1 in lib.prange(0,len(matrix), blksize):
+            result[p0:p1] += cupy.asarray(matrix[p0:p1])
     
-    for device_id in range(_num_devices):
-        cupy.cuda.Device(device_id).synchronize()
-
-    for arr in results[1:]:
-        results[0] += arr
-    return results[0]
+    return result.reshape(out_shape)
     
 def device2host_2d(a_cpu, a_gpu, stream=None):
     if stream is None:
