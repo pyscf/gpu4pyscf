@@ -19,6 +19,10 @@
 Hartree-Fock for periodic systems at a single k-point
 '''
 
+__all__ = [
+    'RHF'
+]
+
 import numpy as np
 import cupy as cp
 from pyscf import lib
@@ -27,10 +31,6 @@ from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc import df
-
-__all__ = [
-    'RHF', 'SCF'
-]
 
 def get_bands(mf, kpts_band, cell=None, dm=None, kpt=None):
     '''Get energy bands at the given (arbitrary) 'band' k-points.
@@ -52,19 +52,21 @@ def get_bands(mf, kpts_band, cell=None, dm=None, kpt=None):
     fock = mf.get_veff(cell, dm, kpt=kpt, kpts_band=kpts_band)
     fock += mf.get_hcore(cell, kpts_band)
     s1e = mf.get_ovlp(cell, kpts_band)
-    nkpts = len(kpts_band)
-    mo_energy = []
-    mo_coeff = []
+    nkpts, nao = fock.shape[:2]
+    mo_energy = cp.empty((nkpts, nao))
+    mo_coeff = cp.empty((nkpts, nao, nao), dtype=fock.dtype)
     for k in range(nkpts):
         e, c = mf.eig(fock[k], s1e[k])
-        mo_energy.append(e)
-        mo_coeff.append(c)
+        mo_energy[k] = e
+        mo_coeff[k] = c
 
     if single_kpt_band:
         mo_energy = mo_energy[0]
         mo_coeff = mo_coeff[0]
     return mo_energy, mo_coeff
 
+damping = mol_hf.damping
+level_shift = mol_hf.level_shift
 get_fock = mol_hf.get_fock
 get_occ = mol_hf.get_occ
 get_grad = mol_hf.get_grad
@@ -107,17 +109,13 @@ class SCF(mol_hf.SCF):
     _keys = hf_cpu.SCF._keys
 
     def __init__(self, cell, kpt=np.zeros(3), exxdiv='ewald'):
-        if not cell._built:
-            cell.build()
         mol_hf.SCF.__init__(self, cell)
         self.with_df = df.FFTDF(cell)
         # Range separation JK builder
         self.rsjk = None
         self.exxdiv = exxdiv
         self.kpt = kpt
-        self.conv_tol = 1e-8
-        if cell.precision:
-            self.conv_tol = max(cell.precision * 10, 1e-8)
+        self.conv_tol = max(cell.precision * 10, 1e-8)
 
     def check_sanity(self):
         if (isinstance(self.exxdiv, str) and self.exxdiv.lower() != 'ewald' and
@@ -125,7 +123,7 @@ class SCF(mol_hf.SCF):
             logger.warn(self, 'exxdiv %s is not supported in DF', self.exxdiv)
 
         if self.verbose >= logger.DEBUG:
-            super().check_sanity()
+            mol_hf.SCF.check_sanity(self)
         return self
 
     kpt = hf_cpu.SCF.kpt
@@ -214,7 +212,6 @@ class SCF(mol_hf.SCF):
     init_guess_by_1e = hf_cpu.SCF.init_guess_by_1e
     init_guess_by_chkfile = hf_cpu.SCF.init_guess_by_chkfile
     from_chk = hf_cpu.SCF.from_chk
-    dump_chk = hf_cpu.SCF.dump_chk
     analyze = NotImplemented
     mulliken_pop = NotImplemented
     density_fit = NotImplemented
@@ -222,6 +219,13 @@ class SCF(mol_hf.SCF):
     x2c = x2c1e = sfx2c1e = NotImplemented
     spin_square = NotImplemented
     dip_moment = NotImplemented
+
+    def dump_chk(self, envs):
+        mol_hf.SCF.dump_chk(self, envs)
+        if self.chkfile:
+            with lib.H5FileWrap(self.chkfile, 'a') as fh5:
+                fh5['scf/kpt'] = self.kpt
+        return self
 
 
 class KohnShamDFT:

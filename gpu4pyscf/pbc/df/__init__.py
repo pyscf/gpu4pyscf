@@ -16,10 +16,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from . import fft
-#from . import aft
-#from . import df
+from . import aft
+from . import df
 from .fft import FFTDF
-#from .df import DF, GDF
-#from .aft import AFTDF
-
-class DF: pass # Just a placeholder
+from .df import GDF
+from .aft import AFTDF

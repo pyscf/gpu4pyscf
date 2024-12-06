@@ -19,19 +19,19 @@
 JK with GPW
 '''
 
-import numpy as np
-import cupy as cp
-from pyscf import lib
-from pyscf.pbc.lib.kpts_helper import is_zero, member
-from pyscf.pbc.df.df_jk import _format_dms, _format_kpts_band, _format_jks
-from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.pbc import tools
-
 __all__ = [
     'get_j_kpts', 'get_k_kpts', 'get_jk', 'get_j', 'get_k',
     'get_j_e1_kpts', 'get_k_e1_kpts'
 ]
+
+import numpy as np
+import cupy as cp
+from pyscf import lib
+from pyscf.pbc.lib.kpts_helper import is_zero, member
+from pyscf.pbc.df.df_jk import _format_kpts_band
+from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.pbc import tools
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.
@@ -68,7 +68,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
         vR = cp.zeros((nset,ngrids))
         ao_ks = ni.eval_ao(cell, mydf.grids.coords, kpts)
         for i in range(nset):
-            rhoR = ni.eval_rho(cell, ao_ks, dm_kpts[i], hermi=hermi).real
+            rhoR = ni.eval_rho(cell, ao_ks, dms[i], hermi=hermi).real
             rhoG = tools.fft(rhoR, mesh)
             vG = coulG * rhoG
             vR[i] = tools.ifft(vG, mesh).real
@@ -76,7 +76,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
         vR = cp.zeros((nset,ngrids), dtype=np.complex128)
         ao_ks = ni.eval_ao(cell, mydf.grids.coords, kpts)
         for i in range(nset):
-            rhoR = ni.eval_rho(cell, ao_ks, dm_kpts[i], hermi=hermi)
+            rhoR = ni.eval_rho(cell, ao_ks, dms[i], hermi=hermi)
             rhoG = tools.fft(rhoR, mesh)
             vG = coulG * rhoG
             vR[i] = tools.ifft(vG, mesh)
@@ -344,3 +344,35 @@ def _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band=None):
                 for i,dm in enumerate(dms):
                     vk[i,kp] += m * s[k].dot(dm[k]).dot(s[k])
     return vk
+
+def _format_dms(dm_kpts, kpts):
+    nkpts = len(kpts)
+    nao = dm_kpts.shape[-1]
+    dms = dm_kpts.reshape(-1,nkpts,nao,nao)
+    assert dms.dtype in (np.double, np.complex128)
+    return cp.asarray(dms, order='C')
+
+def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
+    if kpts_band is kpts or kpts_band is None:
+        return v_kpts.reshape(dm_kpts.shape)
+    else:
+        assert v_kpts.ndim == 4 # (Ndm,Nk,Nao,Nao)
+        # dm_kpts.shape     kpts.shape     nset
+        # (Nao,Nao)         (1 ,3)         None
+        # (Ndm,Nao,Nao)     (1 ,3)         Ndm
+        # (Nk,Nao,Nao)      (Nk,3)         None
+        # (Ndm,Nk,Nao,Nao)  (Nk,3)         Ndm
+        if kpts_band.ndim == 1:
+            assert dm_kpts.ndim <= 3
+            v_kpts = v_kpts[:,0]
+            if dm_kpts.ndim < 3: # RHF dm
+                v_kpts = v_kpts[0]
+        else:
+            assert kpts.ndim == 2
+            assert dm_kpts.ndim >= 3
+            if dm_kpts.ndim == 3: # KRHF dms
+                assert len(dm_kpts) == len(kpts)
+                v_kpts = v_kpts[0]
+            else:  # KUHF dms
+                assert v_kpts.shape[1] == len(kpts_band)
+        return v_kpts

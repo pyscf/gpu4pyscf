@@ -210,7 +210,7 @@ class XCfun:
             output = _check_arrays(output, output_labels[3:4], xc_func_sizes, npoints, do_kxc)
             output = _check_arrays(output, output_labels[4:5], xc_func_sizes, npoints, do_lxc)
 
-            args.extend([   inp[x] for x in  input_labels])
+            args.extend([   inp[x].ravel() for x in  input_labels])
             args.extend([output[x] for x in output_labels])
 
             out_params = xc_lda_out_params()

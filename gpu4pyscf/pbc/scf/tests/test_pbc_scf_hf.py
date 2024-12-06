@@ -50,16 +50,15 @@ class KnownValues(unittest.TestCase):
         mf = scf.RHF(cell, exxdiv='ewald').run()
         self.assertAlmostEqual(mf.e_tot, -4.3511582284698633, 7)
         self.assertTrue(mf.mo_coeff.dtype == np.double)
-        #kmf = scf.KRHF(cell, [[0,0,0]], exxdiv='ewald').run()
-        #self.assertAlmostEqual(mf.e_tot, kmf.e_tot, 8)
+        kmf = scf.KRHF(cell, [[0,0,0]], exxdiv='ewald').run()
+        self.assertAlmostEqual(mf.e_tot, kmf.e_tot, 8)
 
         # test bands
         np.random.seed(1)
         kpts_band = np.random.random((2,3))
         e1, c1 = mf.get_bands(kpts_band)
-        #e0, c0 = kmf.get_bands(kpts_band)
-        #self.assertAlmostEqual(abs(e0[0]-e1[0]).max(), 0, 7)
-        #self.assertAlmostEqual(abs(e0[1]-e1[1]).max(), 0, 7)
+        e0, c0 = kmf.get_bands(kpts_band)
+        self.assertAlmostEqual(abs(e0-e1).get().max(), 0, 7)
         self.assertAlmostEqual(lib.fp(e1[0].get()), -6.2986775452228283, 6)
         self.assertAlmostEqual(lib.fp(e1[1].get()), -7.6616273746782362, 6)
 
@@ -72,16 +71,16 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(e1, -4.2048655827967139, 7)
         self.assertTrue(mf.mo_coeff.dtype == np.complex128)
 
-        #kmf = scf.KRHF(cell, k, exxdiv='ewald')
-        #e0 = kmf.kernel()
-        #self.assertTrue(np.allclose(e0,e1))
+        kmf = scf.KRHF(cell, k, exxdiv='ewald')
+        e0 = kmf.kernel()
+        self.assertAlmostEqual(e0, e1, 7)
 
         # test bands
         np.random.seed(1)
         kpt_band = np.random.random(3)
         e1, c1 = mf.get_bands(kpt_band)
-        #e0, c0 = kmf.get_bands(kpt_band)
-        #self.assertAlmostEqual(abs(e0-e1).max(), 0, 7)
+        e0, c0 = kmf.get_bands(kpt_band)
+        self.assertAlmostEqual(abs(e0-e1).get().max(), 0, 7)
         self.assertAlmostEqual(lib.fp(e1.get()), -6.8312867098806249, 6)
 
     def test_rhf_exx_None(self):
@@ -91,9 +90,9 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(e1, -2.9325094887283196, 7)
         self.assertTrue(mf.mo_coeff.dtype == np.double)
 
-        #mf = scf.KRHF(cell, [[0,0,0]], exxdiv=None)
-        #e0 = mf.kernel()
-        #self.assertTrue(np.allclose(e0,e1))
+        kmf = scf.KRHF(cell, [[0,0,0]], exxdiv=None)
+        e0 = kmf.kernel()
+        self.assertAlmostEqual(e0, e1, 7)
 
         np.random.seed(1)
         k = np.random.random(3)
@@ -103,10 +102,10 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(e1, -2.7862168430230341, 7)
         self.assertTrue(mf.mo_coeff.dtype == np.complex128)
 
-        #mf = scf.KRHF(cell, k, exxdiv=None)
-        #mf.init_guess = 'hcore'
-        #e0 = mf.kernel()
-        #self.assertTrue(np.allclose(e0,e1))
+        kmf = scf.KRHF(cell, k[None,:], exxdiv=None)
+        kmf.init_guess = 'hcore'
+        e0 = kmf.kernel()
+        self.assertAlmostEqual(e0, e1, 7)
 
     def test_jk(self):
         cell = self.cell
@@ -121,6 +120,20 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(vj.get() - ref[0]).max(), 0, 9)
         self.assertAlmostEqual(abs(vk.get() - ref[1]).max(), 0, 9)
 
+    def test_krhf_bands(self):
+        nk = [2, 2, 1]
+        cell = self.cell
+        kpts = cell.make_kpts(nk, wrap_around=True)
+        kmf = scf.KRHF(cell, kpts=kpts).run(conv_tol=1e-9)
+        kmf_cpu = kmf.to_cpu().run()
+        self.assertAlmostEqual(kmf.e_tot, kmf_cpu.e_tot, 8)
+        self.assertAlmostEqual(kmf.e_tot, -4.1828127052055395, 8)
+
+        np.random.seed(1)
+        kpts_bands = np.random.random((1,3))
+        e = kmf.get_bands(kpts_bands)[0]
+        e_ref = kmf_cpu.get_bands(kpts_bands)[0]
+        self.assertAlmostEqual(abs(e.get()-e_ref).max(), 0, 7)
 
 if __name__ == '__main__':
     print("Full Tests for pbc.scf.hf")

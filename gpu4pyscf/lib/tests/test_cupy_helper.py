@@ -16,6 +16,7 @@
 import unittest
 import numpy
 import cupy
+from gpu4pyscf.lib import cupy_helper
 from gpu4pyscf.lib.cupy_helper import (
     take_last2d, transpose_sum, krylov, unpack_sparse,
     add_sparse, takebak, empty_mapped, dist_matrix,
@@ -201,6 +202,19 @@ class KnownValues(unittest.TestCase):
         a_sph1 = cart2sph(a_cart, axis=1, ang=7)
         assert cupy.linalg.norm(a_sph0 - a_sph1) < 1e-8
         '''
+
+    def test_unpack_tril(self):
+        d = 10
+        n = 515
+        npair = n * (n+1) // 2
+        atril = cupy.random.rand(d, npair) + cupy.random.rand(d, npair)*1j
+        a = cupy_helper.unpack_tril(atril)
+        idx, idy = cupy.tril_indices(n)
+        ref = cupy.empty((d, n, n), dtype=atril.dtype)
+        ref[:,idy,idx] = atril.conj()
+        ref[:,idx,idy] = atril
+        assert abs(a - ref).max() < 1e-12
+
 if __name__ == "__main__":
     print("Full tests for cupy helper module")
     unittest.main()

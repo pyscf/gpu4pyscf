@@ -21,7 +21,6 @@
 DIIS
 """
 
-from functools import reduce
 import numpy
 import cupy
 import scipy.linalg
@@ -29,8 +28,7 @@ import scipy.optimize
 import pyscf.scf.diis as cpu_diis
 import gpu4pyscf.lib as lib
 from gpu4pyscf.lib import logger
-
-DEBUG = False
+from gpu4pyscf.lib.cupy_helper import contract
 
 # J. Mol. Struct. 114, 31-34 (1984); DOI:10.1016/S0022-2860(84)87198-7
 # PCCP, 4, 11 (2002); DOI:10.1039/B108658H
@@ -48,7 +46,6 @@ class CDIIS(lib.diis.DIIS):
 
     def update(self, s, d, f, *args, **kwargs):
         errvec = get_err_vec(s, d, f)
-        logger.debug1(self, 'diis-norm(errvec)=%g', numpy.linalg.norm(errvec))
         xnew = lib.diis.DIIS.update(self, f, xerr=errvec)
         if self.rollback > 0 and len(self._bookkeep) == self.space:
             self._bookkeep = self._bookkeep[-self.rollback:]
@@ -64,13 +61,32 @@ SCFDIIS = SCF_DIIS = DIIS = CDIIS
 
 def get_err_vec(s, d, f):
     '''error vector = SDF - FDS'''
-    if isinstance(f, cupy.ndarray) and f.ndim == 2:
-        sdf = reduce(cupy.dot, (s,d,f))
-        errvec = (sdf.conj().T - sdf).ravel()
-    elif f.ndim == s.ndim+1 and f.shape[0] == 2:  # for UHF
-        errvec = cupy.hstack([
-            get_err_vec(s, d[0], f[0]).ravel(),
-            get_err_vec(s, d[1], f[1]).ravel()])
-    else:
-        raise RuntimeError('Unknown SCF DIIS type')
-    return errvec
+    if f.ndim == s.ndim+1: # UHF
+        assert len(f) == 2
+        if s.ndim == 2: # molecular SCF or single k-point
+            sdf = cupy.stack([s.dot(d[0]).dot(f[0]),
+                              s.dot(d[1]).dot(f[1])])
+            errvec = sdf - sdf.conj().transpose(0,2,1)
+        else: # k-points
+            nkpts = len(f)
+            sdf = cupy.empty_like(f)
+            for k in range(nkpts):
+                sdf[0,k] = s[k].dot(d[0,k]).dot(f[0,k])
+                sdf[1,k] = s[k].dot(d[1,k]).dot(f[1,k])
+            sdf = sdf - sdf.conj().transpose(0,1,3,2)
+            df0 = contract('Kij,Kjk->Kik', d[0], f[0])
+            df1 = contract('Kij,Kjk->Kik', d[1], f[1])
+            sdf = cupy.stack([contract('Kij,Kjk->Kik', s, df0),
+                              contract('Kij,Kjk->Kik', s, df1)])
+            errvec = sdf - sdf.conj().transpose(0,1,3,2)
+    else: # RHF
+        assert f.ndim == s.ndim
+        if f.ndim == 2: # molecular SCF or single k-point
+            sdf = s.dot(d).dot(f)
+            errvec = sdf - sdf.conj().T
+        else: # k-points
+            nkpts = len(f)
+            sd = contract('Kij,Kjk->Kik', s, d)
+            sdf = contract('Kij,Kjk->Kik', sd, f)
+            errvec = sdf - sdf.conj().transpose(0,2,1)
+    return errvec.ravel()
