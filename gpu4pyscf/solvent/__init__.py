@@ -53,6 +53,6 @@ def SMD(method_or_mol, solvent_obj=None, dm=None):
     if isinstance(method_or_mol, gto.mole.Mole):
         return smd.SMD(method_or_mol)
     elif isinstance(method_or_mol, scf.hf.SCF):
-        return pcm.pcm_for_scf(method_or_mol, solvent_obj, dm)
+        return smd.smd_for_scf(method_or_mol, solvent_obj, dm)
     else:
         raise NotImplementedError('SMD model only support SCF')
