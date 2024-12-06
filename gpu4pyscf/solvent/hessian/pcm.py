@@ -83,6 +83,7 @@ def hess_nuc(pcmobj):
     return de
 
 def hess_qv(pcmobj, dm, verbose=None):
+    raise NotImplementedError("PCM analytical hessian is not tested")
     if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
         pcmobj._get_vind(dm)
     gridslice    = pcmobj.surface['gslice_by_atom']
