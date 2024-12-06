@@ -178,7 +178,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         vxc += vj - vk * .5
         if ground_state:
             exc -= cupy.einsum('ij,ji', dm, vk).real * .5 * .5
-
+    
     if ground_state:
         ecoul = cupy.einsum('ij,ji', dm, vj).real * .5
     else:

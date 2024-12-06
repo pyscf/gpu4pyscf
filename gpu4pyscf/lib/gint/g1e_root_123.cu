@@ -20,7 +20,7 @@
 __global__
 static void GINTfill_int3c1e_kernel00(double* output, const BasisProdOffsets offsets, const int nprim_ij,
                                       const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
-                                      const double omega, const double* grid_points)
+                                      const double omega, const double* grid_points, const double* charge_exponents)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
@@ -47,6 +47,7 @@ static void GINTfill_int3c1e_kernel00(double* output, const BasisProdOffsets off
     const double Cx = grid_point[0];
     const double Cy = grid_point[1];
     const double Cz = grid_point[2];
+    const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
 
     double eri = 0;
     for (int ij = prim_ij; ij < prim_ij + nprim_ij; ij++) {
@@ -59,11 +60,14 @@ static void GINTfill_int3c1e_kernel00(double* output, const BasisProdOffsets off
         const double PCy = Py - Cy;
         const double PCz = Pz - Cz;
         double a0 = aij;
-        const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
-        const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
+        const double q_over_p_plus_q = charge_exponent > 0.0 ? charge_exponent / (aij + charge_exponent) : 1.0;
+        const double sqrt_q_over_p_plus_q = charge_exponent > 0.0 ? sqrt(q_over_p_plus_q) : 1.0;
+        a0 *= q_over_p_plus_q;
+        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        const double sqrt_theta = omega > 0.0 ? sqrt(theta) : 1.0;
         a0 *= theta;
 
-        const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta;
+        const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
         const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
         double eri_per_primitive = prefactor;
         if (boys_input > 3.e-7) {
@@ -83,7 +87,7 @@ static void GINTfill_int3c1e_kernel00(double* output, const BasisProdOffsets off
 __global__
 static void GINTfill_int3c1e_charge_contracted_kernel00(double* output, const BasisProdOffsets offsets, const int nprim_ij,
                                                         const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
-                                                        const double omega, const double* grid_points)
+                                                        const double omega, const double* grid_points, const double* charge_exponents)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
@@ -111,6 +115,7 @@ static void GINTfill_int3c1e_charge_contracted_kernel00(double* output, const Ba
         const double Cx = grid_point[0];
         const double Cy = grid_point[1];
         const double Cz = grid_point[2];
+        const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
 
         double eri_per_grid = 0;
         for (int ij = prim_ij; ij < prim_ij + nprim_ij; ij++) {
@@ -123,11 +128,14 @@ static void GINTfill_int3c1e_charge_contracted_kernel00(double* output, const Ba
             const double PCy = Py - Cy;
             const double PCz = Pz - Cz;
             double a0 = aij;
-            const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
-            const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
+            const double q_over_p_plus_q = charge_exponent > 0.0 ? charge_exponent / (aij + charge_exponent) : 1.0;
+            const double sqrt_q_over_p_plus_q = charge_exponent > 0.0 ? sqrt(q_over_p_plus_q) : 1.0;
+            a0 *= q_over_p_plus_q;
+            const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+            const double sqrt_theta = omega > 0.0 ? sqrt(theta) : 1.0;
             a0 *= theta;
 
-            const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta;
+            const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
             const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
             double eri_per_primitive = prefactor;
             if (boys_input > 3.e-7) {
@@ -152,7 +160,7 @@ static void GINTfill_int3c1e_charge_contracted_kernel00(double* output, const Ba
 __global__
 static void GINTfill_int3c1e_density_contracted_kernel00(double* output, const double* density, const HermiteDensityOffsets hermite_density_offsets,
                                                          const BasisProdOffsets offsets, const int nprim_ij,
-                                                         const double omega, const double* grid_points)
+                                                         const double omega, const double* grid_points, const double* charge_exponents)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
@@ -165,6 +173,7 @@ static void GINTfill_int3c1e_density_contracted_kernel00(double* output, const d
     const double Cx = grid_point[0];
     const double Cy = grid_point[1];
     const double Cz = grid_point[2];
+    const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
 
     double eri_pair_sum = 0.0;
     for (int task_ij = blockIdx.x * blockDim.x + threadIdx.x; task_ij < ntasks_ij; task_ij += gridDim.x * blockDim.x) {
@@ -192,11 +201,14 @@ static void GINTfill_int3c1e_density_contracted_kernel00(double* output, const d
             const double PCy = Py - Cy;
             const double PCz = Pz - Cz;
             double a0 = aij;
-            const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
-            const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
+            const double q_over_p_plus_q = charge_exponent > 0.0 ? charge_exponent / (aij + charge_exponent) : 1.0;
+            const double sqrt_q_over_p_plus_q = charge_exponent > 0.0 ? sqrt(q_over_p_plus_q) : 1.0;
+            a0 *= q_over_p_plus_q;
+            const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+            const double sqrt_theta = omega > 0.0 ? sqrt(theta) : 1.0;
             a0 *= theta;
 
-            const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta;
+            const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
             const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
             double eri_per_primitive = prefactor;
             if (boys_input > 3.e-7) {
@@ -216,7 +228,7 @@ static void GINTfill_int3c1e_density_contracted_kernel00(double* output, const d
 __global__
 static void GINTfill_int3c1e_kernel10(double* output, const BasisProdOffsets offsets, const int nprim_ij,
                                       const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
-                                      const double omega, const double* grid_points)
+                                      const double omega, const double* grid_points, const double* charge_exponents)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
@@ -251,6 +263,7 @@ static void GINTfill_int3c1e_kernel10(double* output, const BasisProdOffsets off
     const double Cx = grid_point[0];
     const double Cy = grid_point[1];
     const double Cz = grid_point[2];
+    const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
 
     double eri_x = 0;
     double eri_y = 0;
@@ -267,13 +280,16 @@ static void GINTfill_int3c1e_kernel10(double* output, const BasisProdOffsets off
         const double PAx = Px - Ax;
         const double PAy = Py - Ay;
         const double PAz = Pz - Az;
-        double a0 = aij;
         const double one_over_two_p = 0.5 / aij;
-        const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
-        const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
+        double a0 = aij;
+        const double q_over_p_plus_q = charge_exponent > 0.0 ? charge_exponent / (aij + charge_exponent) : 1.0;
+        const double sqrt_q_over_p_plus_q = charge_exponent > 0.0 ? sqrt(q_over_p_plus_q) : 1.0;
+        a0 *= q_over_p_plus_q;
+        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        const double sqrt_theta = omega > 0.0 ? sqrt(theta) : 1.0;
         a0 *= theta;
 
-        const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta;
+        const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
         const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
         double eri_per_primitive_x = prefactor;
         double eri_per_primitive_y = prefactor;
@@ -302,7 +318,7 @@ static void GINTfill_int3c1e_kernel10(double* output, const BasisProdOffsets off
 __global__
 static void GINTfill_int3c1e_charge_contracted_kernel10(double* output, const BasisProdOffsets offsets, const int nprim_ij,
                                                         const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
-                                                        const double omega, const double* grid_points)
+                                                        const double omega, const double* grid_points, const double* charge_exponents)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
@@ -340,6 +356,7 @@ static void GINTfill_int3c1e_charge_contracted_kernel10(double* output, const Ba
         const double Cx = grid_point[0];
         const double Cy = grid_point[1];
         const double Cz = grid_point[2];
+        const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
 
         double eri_per_grid_x = 0;
         double eri_per_grid_y = 0;
@@ -356,13 +373,16 @@ static void GINTfill_int3c1e_charge_contracted_kernel10(double* output, const Ba
             const double PAx = Px - Ax;
             const double PAy = Py - Ay;
             const double PAz = Pz - Az;
-            double a0 = aij;
             const double one_over_two_p = 0.5 / aij;
-            const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
-            const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
+            double a0 = aij;
+            const double q_over_p_plus_q = charge_exponent > 0.0 ? charge_exponent / (aij + charge_exponent) : 1.0;
+            const double sqrt_q_over_p_plus_q = charge_exponent > 0.0 ? sqrt(q_over_p_plus_q) : 1.0;
+            a0 *= q_over_p_plus_q;
+            const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+            const double sqrt_theta = omega > 0.0 ? sqrt(theta) : 1.0;
             a0 *= theta;
 
-            const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta;
+            const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
             const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
             double eri_per_primitive_x = prefactor;
             double eri_per_primitive_y = prefactor;
@@ -397,7 +417,7 @@ static void GINTfill_int3c1e_charge_contracted_kernel10(double* output, const Ba
 __global__
 static void GINTfill_int3c1e_density_contracted_kernel10(double* output, const double* density, const HermiteDensityOffsets hermite_density_offsets,
                                                          const BasisProdOffsets offsets, const int nprim_ij,
-                                                         const double omega, const double* grid_points)
+                                                         const double omega, const double* grid_points, const double* charge_exponents)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
@@ -410,6 +430,7 @@ static void GINTfill_int3c1e_density_contracted_kernel10(double* output, const d
     const double Cx = grid_point[0];
     const double Cy = grid_point[1];
     const double Cz = grid_point[2];
+    const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
 
     double eri_pair_sum = 0.0;
     for (int task_ij = blockIdx.x * blockDim.x + threadIdx.x; task_ij < ntasks_ij; task_ij += gridDim.x * blockDim.x) {
@@ -449,13 +470,16 @@ static void GINTfill_int3c1e_density_contracted_kernel10(double* output, const d
             const double PAx = Px - Ax;
             const double PAy = Py - Ay;
             const double PAz = Pz - Az;
-            double a0 = aij;
             const double one_over_two_p = 0.5 / aij;
-            const double theta = omega > 0.0 ? omega * omega / (omega * omega + aij) : 1.0;
-            const double sqrt_theta = omega > 0.0 ? omega / sqrt(omega * omega + aij) : 1.0;
+            double a0 = aij;
+            const double q_over_p_plus_q = charge_exponent > 0.0 ? charge_exponent / (aij + charge_exponent) : 1.0;
+            const double sqrt_q_over_p_plus_q = charge_exponent > 0.0 ? sqrt(q_over_p_plus_q) : 1.0;
+            a0 *= q_over_p_plus_q;
+            const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+            const double sqrt_theta = omega > 0.0 ? sqrt(theta) : 1.0;
             a0 *= theta;
 
-            const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta;
+            const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
             const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
             double eri_per_primitive_x = prefactor;
             double eri_per_primitive_y = prefactor;

@@ -76,6 +76,7 @@ class ROHF(hf.RHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     nelec = rohf_cpu.ROHF.nelec
+    check_sanity = hf.SCF.check_sanity
     get_jk = hf._get_jk
     _eigh = staticmethod(hf.eigh)
     scf = kernel = hf.RHF.kernel
@@ -84,6 +85,12 @@ class ROHF(hf.RHF):
     get_hcore = hf.RHF.get_hcore
     get_ovlp = hf.RHF.get_ovlp
     get_init_guess = uhf.UHF.get_init_guess
+    init_guess_by_minao      = rohf_cpu.ROHF.init_guess_by_minao
+    init_guess_by_atom       = rohf_cpu.ROHF.init_guess_by_atom
+    init_guess_by_huckel     = rohf_cpu.ROHF.init_guess_by_huckel
+    init_guess_by_mod_huckel = rohf_cpu.ROHF.init_guess_by_mod_huckel
+    init_guess_by_1e         = rohf_cpu.ROHF.init_guess_by_1e
+    init_guess_by_chkfile    = rohf_cpu.ROHF.init_guess_by_chkfile
     make_rdm2 = NotImplemented
     x2c = x2c1e = sfx2c1e = NotImplemented
     to_rhf = NotImplemented
@@ -101,9 +108,11 @@ class ROHF(hf.RHF):
 
     canonicalize = canonicalize
 
-    def make_rdm1(self, mo_coeff, mo_occ, **kwargs):
+    def make_rdm1(self, mo_coeff=None, mo_occ=None, **kwargs):
         '''One-particle density matrix.  mo_occ is a 1D array, with occupancy 1 or 2.
         '''
+        if mo_coeff is None: mo_coeff = self.mo_coeff
+        if mo_occ is None: mo_occ = self.mo_occ
         if isinstance(mo_occ, cupy.ndarray) and mo_occ.ndim == 1:
             mo_occa = (mo_occ > 0).astype(np.double)
             mo_occb = (mo_occ ==2).astype(np.double)
@@ -138,7 +147,7 @@ class ROHF(hf.RHF):
         if vhf is None: vhf = self.get_veff(self.mol, dm)
         if dm is None: dm = self.make_rdm1()
         if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
-            dm = [dm*.5, dm*.5]
+            dm = cupy.repeat(dm[None]*.5, 2, axis=0)
 # To Get orbital energy in get_occ, we saved alpha and beta fock, because
 # Roothaan effective Fock cannot provide correct orbital energy with `eig`
 # TODO, check other treatment  J. Chem. Phys. 133, 141102

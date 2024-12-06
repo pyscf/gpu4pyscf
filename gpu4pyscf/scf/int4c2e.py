@@ -682,7 +682,7 @@ def basis_seg_contraction(mol, allow_replica=False):
         _bas.append(bas_of_ia)
         contr_coeff.extend(coeff)
 
-    pmol = copy.copy(mol)
+    pmol = mol.copy()
     pmol.cart = True
     pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
     pmol._env = _env
