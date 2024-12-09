@@ -5077,9 +5077,4 @@ void set_md_j_unrolled_shm_size()
     cudaFuncSetAttribute(md_j_3_0, cudaFuncAttributeMaxDynamicSharedMemorySize, 8448*sizeof(double));
     cudaFuncSetAttribute(md_j_3_1, cudaFuncAttributeMaxDynamicSharedMemorySize, 7424*sizeof(double));
     cudaFuncSetAttribute(md_j_4_0, cudaFuncAttributeMaxDynamicSharedMemorySize, 7808*sizeof(double));
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in set_md_j_unrolled_shm_size:  %s\n", cudaGetErrorString(err));
-    }
 }
