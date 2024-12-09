@@ -5018,20 +5018,6 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     dim3 threads(16, 16);
     dim3 blocks;
     int ijkl = lij*9 + lkl;
-    printf("%d %d %d %d %d\n", ijkl, li, lj, lk, ll);
-    cudaFuncAttributes funcAttributes;
-    // Query the max dynamic shared memory size attribute
-    cudaError_t err = cudaFuncGetAttributes(
-        &funcAttributes,
-        md_j_2_0
-    );
-
-    if (err != cudaSuccess) {
-        printf("Error querying function attribute: %s\n", cudaGetErrorString(err));
-        return -1;
-    }
-
-    printf("Max Dynamic Shared Memory Size: %d bytes\n", funcAttributes.cudaFuncAttributeMaxDynamicSharedMemorySize);
 
     switch (ijkl) {
     case 0: // lij=0, lkl=0
