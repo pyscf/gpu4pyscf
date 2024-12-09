@@ -96,6 +96,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
         pair_loc_on_gpu.data.ptr,
     )
 
+    libvhf_md.init_mdj_constant(ctypes.c_int(SHM_SIZE))
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
     l_ctr_bas_loc = vhfopt.l_ctr_offsets
