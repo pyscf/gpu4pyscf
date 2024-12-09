@@ -124,7 +124,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
     timing_collection = {}
     kern_counts = 0
     kern = libvhf_md.MD_build_j
-    libvhf_md.init_mdj_constant(ctypes.c_int(SHM_SIZE))
+
     for i in range(n_groups):
         for j in range(i+1):
             ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],

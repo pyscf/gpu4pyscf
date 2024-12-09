@@ -44,7 +44,3 @@ def test_j_engine():
     assert abs(lib.fp(vj1) - -2327.4715195591784) < 1e-9
     assert abs(vj1 - ref).max() < 1e-9
 
-
-if __name__ == "__main__":
-    print("Full Tests for J engine")
-    test_j_engine()
