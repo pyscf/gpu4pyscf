@@ -105,6 +105,8 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
     n_groups = len(uniq_l_ctr)
     tile_mappings = {}
     workers = gpu_specs['multiProcessorCount']
+    print(gpu_specs)
+    exit()
     info = cp.empty(2, dtype=np.uint32)
 
     for i in range(n_groups):
@@ -125,7 +127,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
     timing_collection = {}
     kern_counts = 0
     kern = libvhf_md.MD_build_j
-
+    libvhf_md.init_mdj_constant(ctypes.c_int(SHM_SIZE))
     for i in range(n_groups):
         for j in range(i+1):
             ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
@@ -158,7 +160,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
                         mol._atm.ctypes, ctypes.c_int(mol.natm),
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), _env.ctypes)
                     if err != 0:
-                        raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                        raise RuntimeError(f'MD_build_j kernel for {llll} failed')
                     if log.verbose >= logger.DEBUG1:
                         ntasks = tile_ij_mapping.size * tile_kl_mapping.size
                         t1, t1p = log.timer_debug1(f'processing {llll}, tasks ~= {ntasks}', *t1), t1

@@ -1,3 +1,5 @@
+#include <stdio.h>
+#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/gamma_inc_unrolled.cu"
 
@@ -5016,6 +5018,21 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     dim3 threads(16, 16);
     dim3 blocks;
     int ijkl = lij*9 + lkl;
+    printf("%d %d %d %d %d\n", ijkl, li, lj, lk, ll);
+    cudaFuncAttributes funcAttributes;
+    // Query the max dynamic shared memory size attribute
+    cudaError_t err = cudaFuncGetAttributes(
+        &funcAttributes,
+        md_j_2_0
+    );
+
+    if (err != cudaSuccess) {
+        printf("Error querying function attribute: %s\n", cudaGetErrorString(err));
+        return -1;
+    }
+
+    printf("Max Dynamic Shared Memory Size: %d bytes\n", funcAttributes.cudaFuncAttributeMaxDynamicSharedMemorySize);
+
     switch (ijkl) {
     case 0: // lij=0, lkl=0
         blocks.x = (bounds->npairs_ij + 255) / 256;
@@ -5074,4 +5091,9 @@ void set_md_j_unrolled_shm_size()
     cudaFuncSetAttribute(md_j_3_0, cudaFuncAttributeMaxDynamicSharedMemorySize, 8448*sizeof(double));
     cudaFuncSetAttribute(md_j_3_1, cudaFuncAttributeMaxDynamicSharedMemorySize, 7424*sizeof(double));
     cudaFuncSetAttribute(md_j_4_0, cudaFuncAttributeMaxDynamicSharedMemorySize, 7808*sizeof(double));
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in set_md_j_unrolled_shm_size:  %s\n", cudaGetErrorString(err));
+    }
 }
