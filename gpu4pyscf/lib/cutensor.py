@@ -81,8 +81,8 @@ def contraction(
     mode_c = list(str_c)
 
     dtype = np.result_type(a.dtype, b.dtype)
-    a = cp.asarray(a, dtype=dtype)
-    b = cp.asarray(b, dtype=dtype)
+    a = cupy.asarray(a, dtype=dtype)
+    b = cupy.asarray(b, dtype=dtype)
     if out is None:
         out = cupy.empty([shape[k] for k in str_c], order='C', dtype=dtype)
     c = out
