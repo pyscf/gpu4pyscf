@@ -82,7 +82,7 @@ def basis_seg_contraction(mol, allow_replica=False):
             bas_templates[key] = bas_of_ia
         _bas.append(bas_of_ia)
 
-    pmol = copy.copy(mol)
+    pmol = mol.copy()
     pmol.output = mol.output
     pmol.verbose = mol.verbose
     pmol.stdout = mol.stdout

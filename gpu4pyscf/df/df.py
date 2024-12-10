@@ -123,7 +123,7 @@ class DF(lib.StreamObject):
         if key in self._rsh_df:
             rsh_df = self._rsh_df[key]
         else:
-            rsh_df = self._rsh_df[key] = copy.copy(self).reset()
+            rsh_df = self._rsh_df[key] = self.copy().reset()
             logger.info(self, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
 
         return df_jk.get_jk(rsh_df, dm, hermi, with_j, with_k, direct_scf_tol, omega=omega)

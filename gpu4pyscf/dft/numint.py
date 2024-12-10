@@ -998,7 +998,7 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
     return rho
 
 def _nr_rks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
-                     verbose=None, hermi=0, device_id=0):
+                     verbose=None, hermi=1, device_id=0):
     with cupy.cuda.Device(device_id), _streams[device_id]:
         if dms is not None: dms = cupy.asarray(dms)
         if mo1 is not None: mo1 = cupy.asarray(mo1)

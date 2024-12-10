@@ -47,7 +47,7 @@ def init_workflow(mf, dm0=None):
             if key in mf.with_df._rsh_df:
                 rsh_df = mf.with_df._rsh_df[key]
             else:
-                rsh_df = mf.with_df._rsh_df[key] = copy.copy(mf.with_df).reset()
+                rsh_df = mf.with_df._rsh_df[key] = mf.with_df.copy().reset()
             rsh_df.build(omega=omega)
         return
 
@@ -101,7 +101,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
             mf.with_df = with_df
         elif getattr(mf.with_df, 'auxbasis', None) != auxbasis:
             #logger.warn(mf, 'DF might have been initialized twice.')
-            mf = copy.copy(mf)
+            mf = mf.copy()
             mf.with_df = with_df
             mf.only_dfj = only_dfj
         return mf
@@ -528,7 +528,7 @@ def _get_jk(dfobj, dm, hermi=1, with_j=True, with_k=True,
     if key in dfobj._rsh_df:
         rsh_df = dfobj._rsh_df[key]
     else:
-        rsh_df = dfobj._rsh_df[key] = copy.copy(dfobj).reset()
+        rsh_df = dfobj._rsh_df[key] = dfobj.copy().reset()
         logger.info(dfobj, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
 
     with rsh_df.mol.with_range_coulomb(omega):
