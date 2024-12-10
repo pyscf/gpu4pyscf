@@ -47,7 +47,6 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
 from gpu4pyscf.df.grad.rhf import _gen_metric_solver
 from gpu4pyscf.gto.mole import sort_atoms
-from gpu4pyscf.scf import ucphf
 
 LINEAR_DEP_THR = df.LINEAR_DEP_THR
 BLKSIZE = 256
@@ -711,84 +710,3 @@ class Hessian(uhf_hess.Hessian):
     make_h1 = make_h1
     kernel = rhf_hess.kernel
     hess = kernel
-
-    def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1mo,
-                  fx=None, atmlst=None, max_memory=4000, verbose=None):
-        '''Solve the first order equation
-        Kwargs:
-            fx : function(dm_mo) => v1_mo
-                A function to generate the induced potential.
-                See also the function gen_vind.
-        '''
-        max_cycle = self.max_cycle
-        level_shift = self.level_shift
-        mf = self.base
-        mol = mf.mol
-        log = logger.new_logger(mf, verbose)
-
-        nao, nmo = mo_coeff[0].shape
-        mocca = mo_coeff[0][:,mo_occ[0]>0]
-        moccb = mo_coeff[1][:,mo_occ[1]>0]
-        nocca = mocca.shape[1]
-        noccb = moccb.shape[1]
-        if fx is None:
-            fx = uhf_hess.gen_vind(mf, mo_coeff, mo_occ)
-        s1a = -mol.intor('int1e_ipovlp', comp=3)
-        s1a = cupy.asarray(s1a)
-
-        def _ao2mo(mat, mo, mocc):
-            tmp = contract('xij,jo->xio', mat, mocc)
-            return contract('xik,ip->xpk', tmp, mo)
-        cupy.get_default_memory_pool().free_all_blocks()
-
-        avail_mem = get_avail_mem()
-        blksize = int(avail_mem*0.4) // (8*3*nao*nao*4) // ALIGNED * ALIGNED
-        blksize = min(8, blksize)
-        log.debug(f'GPU memory {avail_mem/GB:.1f} GB available')
-        log.debug(f'{blksize} atoms in each block CPHF equation')
-
-        # sort atoms to improve the convergence
-        sorted_idx = sort_atoms(mol)
-        atom_groups = []
-        for p0,p1 in lib.prange(0,mol.natm,blksize):
-            blk = sorted_idx[p0:p1]
-            atom_groups.append(blk)
-
-        mo1sa = [None] * mol.natm
-        mo1sb = [None] * mol.natm
-        e1sa = [None] * mol.natm
-        e1sb = [None] * mol.natm
-        aoslices = mol.aoslice_by_atom()
-        for group in atom_groups:
-            s1voa = []
-            s1vob = []
-            h1voa = []
-            h1vob = []
-            for ia in group:
-                shl0, shl1, p0, p1 = aoslices[ia]
-                s1ao = cupy.zeros((3,nao,nao))
-                s1ao[:,p0:p1] += s1a[:,p0:p1]
-                s1ao[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
-                s1voa.append(_ao2mo(s1ao, mo_coeff[0], mocca))
-                s1vob.append(_ao2mo(s1ao, mo_coeff[1], moccb))
-                h1voa.append(h1mo[0][ia])
-                h1vob.append(h1mo[1][ia])
-
-            log.info(f'Solving CPHF equation for atoms {len(group)}/{mol.natm}')
-            h1vo = (cupy.vstack(h1voa), cupy.vstack(h1vob))
-            s1vo = (cupy.vstack(s1voa), cupy.vstack(s1vob))
-            tol = mf.conv_tol_cpscf
-            mo1, e1 = ucphf.solve(fx, mo_energy, mo_occ, h1vo, s1vo,
-                                  max_cycle=max_cycle, level_shift=level_shift, tol=tol, verbose=verbose)
-
-            mo1a = mo1[0].reshape(-1,3,nao,nocca)
-            mo1b = mo1[1].reshape(-1,3,nao,noccb)
-            e1a = e1[0].reshape(-1,3,nocca,nocca)
-            e1b = e1[1].reshape(-1,3,noccb,noccb)
-            for k, ia in enumerate(group):
-                mo1sa[ia] = mo1a[k]
-                mo1sb[ia] = mo1b[k]
-                e1sa[ia] = e1a[k].reshape(3,nocca,nocca)
-                e1sb[ia] = e1b[k].reshape(3,noccb,noccb)
-            mo1 = e1 = None
-        return (mo1sa, mo1sb), (e1sa, e1sb)

@@ -24,6 +24,7 @@ Restricted coupled pertubed Hartree-Fock solver
 import numpy
 import cupy
 from pyscf import lib
+from gpu4pyscf.lib.cupy_helper import krylov
 from gpu4pyscf.lib import logger
 
 def solve(fvind, mo_energy, mo_occ, h1, s1=None,
@@ -61,15 +62,13 @@ def solve_nos1(fvind, mo_energy, mo_occ, h1,
     nvir, nocc = e_ai.shape
 
     def vind_vo(mo1):
-        v = fvind(cupy.asarray(mo1).reshape(-1,nvir,nocc)).reshape(-1,nvir,nocc)
+        v = fvind(mo1.reshape(-1,nvir,nocc)).reshape(-1,nvir,nocc)
         if level_shift != 0:
             v -= mo1 * level_shift
         v *= e_ai
-        return v.reshape(-1,nvir*nocc).get()
-    max_memory = nvir*nocc * 8 * 300 * 1e-6#?
-    mo1 = lib.krylov(vind_vo, mo1base.reshape(-1,nvir*nocc).get(),
-                     tol=tol, max_cycle=max_cycle, hermi=hermi,
-                     max_memory=max_memory, verbose=log)
+        return v.reshape(-1,nvir*nocc)
+    mo1 = krylov(vind_vo, mo1base.reshape(-1,nvir*nocc),
+                     tol=tol, max_cycle=max_cycle, hermi=hermi, verbose=log)
     log.timer('krylov solver in CPHF', *t0)
     return mo1.reshape(h1.shape), None
 
@@ -114,7 +113,7 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
         v[:,viridx,:] *= e_ai
         v[:,occidx,:] = 0
         return v.reshape(-1,nmo*nocc)
-
+    
     mo1 = krylov(vind_vo, mo1base.reshape(-1,nmo*nocc),
                      tol=tol, max_cycle=max_cycle, hermi=hermi, verbose=log)
     mo1 = mo1.reshape(mo1base.shape)

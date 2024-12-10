@@ -115,7 +115,7 @@ class KnownValues(unittest.TestCase):
     def test_hessian_hybrid(self):
         print('-----testing B3LYP Hessian----')
         mf = mol.UKS(xc='b3lyp').run()
-        _vs_cpu(mf)
+        _vs_cpu(mf, tol=1e-6)
 
     def test_hessian_mgga(self):
         print('-----testing M06 Hessian----')

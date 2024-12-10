@@ -165,7 +165,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
                 h1moa[ia,ix] += mo_a.T.dot(veffa[i,ix].dot(mocca))
                 h1mob[ia,ix] += mo_b.T.dot(veffb[i,ix].dot(moccb))
         veffa = veffb = None
-    return h1moa, h1mob
+    return h1moa.get(), h1mob.get()
 
 XX, XY, XZ = 4, 5, 6
 YX, YY, YZ = 5, 7, 8

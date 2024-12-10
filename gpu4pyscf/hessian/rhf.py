@@ -27,11 +27,12 @@ import numpy as np
 from pyscf.hessian import rhf as rhf_hess_cpu
 from pyscf import lib
 from pyscf.gto import ATOM_OF
-from pyscf.scf import cphf
 # import _response_functions to load gen_response methods in SCF class
 from gpu4pyscf.scf import _response_functions  # noqa
+from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib.cupy_helper import (
-    contract, tag_array, sandwich_dot, transpose_sum, get_avail_mem, condense)
+    contract, tag_array, sandwich_dot, transpose_sum, get_avail_mem, condense,
+    krylov)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.jk import (
@@ -288,6 +289,11 @@ def _ip2_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     return n, gout_stride
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
+    '''Compute the first order Fock matrix (the force term of the CPHF
+    equation). Returns of this function are different to the PySCF CPU version.
+    This function returns matrices in the MO-occupied_orb basis, while the CPU
+    version returns matrices in MO basis.
+    '''
     assert atmlst is None
     mol = hessobj.mol
     natm = mol.natm
@@ -310,7 +316,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
             for ix in range(3):
                 h1mo[ia,ix] += mo_coeff.T.dot(vhf[i,ix].dot(mocc))
         vj = vk = vhf = None
-    return h1mo
+    return h1mo.get()
 
 def _get_jk(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=None):
     r'''
@@ -495,7 +501,13 @@ def get_ovlp(mol):
 def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
               fx=None, atmlst=None, max_memory=4000, verbose=None,
               max_cycle=50, level_shift=0):
-    '''Solve the first order equation
+    '''Solve the CPHF equation for the first orbitals.
+    Note: These orbitals are represented in MO basis. This is different to the
+    solve_mo1 function in the PySCF CPU version, which transforms the mo1 to AO
+    basis. Additionally, the return format is also different to the CPU version.
+    This function returns orbitals in a single tensor while the CPU version
+    returns a list of mo1 orbitals.
+
     Kwargs:
         fx : function(dm_mo) => v1_mo
             A function to generate the induced potential.
@@ -503,49 +515,84 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     '''
     mol = mf.mol
     log = logger.new_logger(mf, verbose)
+    t0 = log.init_timer()
 
-    mocc = mo_coeff[:,mo_occ>0]
+    occidx = mo_occ > 0
+    viridx = mo_occ == 0
+    e_a = mo_energy[viridx]
+    e_i = mo_energy[occidx]
+    e_ai = 1 / (e_a[:,None] + level_shift - e_i)
+    nvir, nocc = e_ai.shape
+
+    mocc = mo_coeff[:,occidx]
     nao, nmo = mo_coeff.shape
-    nocc = mocc.shape[1]
+    natm = mol.natm
 
     if fx is None:
         fx = gen_vind(mf, mo_coeff, mo_occ)
-    s1a = -mol.intor('int1e_ipovlp', comp=3)
-    s1a = cp.asarray(s1a)
-    cupy.get_default_memory_pool().free_all_blocks()
+
+    def fvind_vo(mo1):
+        mo1 = mo1.reshape(-1,nmo, nocc)
+        v = fx(mo1).reshape(-1,nmo, nocc)
+        if level_shift != 0:
+            v -= mo1 * level_shift
+        v[:,viridx,:] *= e_ai
+        v[:,occidx,:] = 0
+        return v.reshape(-1,nmo*nocc)
+
+    ipovlp = -mol.intor('int1e_ipovlp', comp=3)
+    ipovlp = cp.asarray(ipovlp)
+    cp.get_default_memory_pool().free_all_blocks()
 
     avail_mem = get_avail_mem()
-    max_memory = avail_mem*0.3e-6
     # *4 for input dm, vj, vk, and vxc
-    blksize = (int(max_memory*1e6 / (8*3*nao*nao*4)) // ALIGNED**2) * ALIGNED**2
+    blksize = int(min(avail_mem*.3 / (8*3*nao*nao*4),
+                      avail_mem*.6 / (8*nmo*nocc*natm*3*5)))
+    if blksize < ALIGNED**2:
+        raise RuntimeError('GPU memory insufficient')
+
+    blksize = (blksize // ALIGNED**2) * ALIGNED**2
     log.debug(f'GPU memory {avail_mem/GB:.1f} GB available')
     log.debug(f'{blksize} atoms in each block CPHF equation')
 
-    natm = mol.natm
     mo1s = np.zeros(h1mo.shape)
     e1s = np.zeros((natm, 3, nocc, nocc))
     aoslices = mol.aoslice_by_atom()
     for i0, i1 in lib.prange(0, natm, blksize):
-        h1vo = h1mo[i0:i1]
-        if isinstance(h1mo, cp.ndarray):
-            h1vo = h1vo.get()
-        s1vo = np.empty(h1vo.shape)
+        log.info('Solving CPHF equation for atoms [%d:%d]', i0, i1)
+
+        h1mo_blk = h1mo[i0:i1]
+        if not isinstance(h1mo, cp.ndarray):
+            h1mo_blk = cp.asarray(h1mo_blk)
+        s1mo_blk = cp.empty_like(h1mo_blk)
         for k, (p0, p1) in enumerate(aoslices[i0:i1,2:]):
             s1ao = cp.zeros((3,nao,nao))
-            s1ao[:,p0:p1] += s1a[:,p0:p1]
-            s1ao[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
+            s1ao[:,p0:p1] += ipovlp[:,p0:p1]
+            s1ao[:,:,p0:p1] += ipovlp[:,p0:p1].transpose(0,2,1)
             tmp = contract('xij,jo->xio', s1ao, mocc)
-            s1vo[k] = contract('xio,ip->xpo', tmp, mo_coeff).get()
+            s1mo_blk[k] = contract('xio,ip->xpo', tmp, mo_coeff)
 
-        log.info('Solving CPHF equation for atoms [%d:%d]', i0, i1)
-        tol = mf.conv_tol_cpscf
-        mo1, e1 = cphf.solve(
-            lambda mo1: fx(mo1).get(), mo_energy.get(), mo_occ.get(),
-            h1vo.reshape(-1,nmo,nocc), s1vo.reshape(-1,nmo,nocc),
-            level_shift=level_shift, tol=tol, verbose=verbose)
-        mo1s[i0:i1] = mo1.reshape(i1-i0,3,nmo,nocc)
-        e1s[i0:i1] = e1.reshape(i1-i0,3,nocc,nocc)
-        mo1 = e1 = None
+        mo1 = hs = h1mo_blk - s1mo_blk * e_i
+        mo_e1  = hs[:,:,occidx]
+        mo1_oo = -s1mo_blk[:,:,occidx] * .5
+        mo1[:,:,viridx] *= -e_ai
+        mo1[:,:,occidx] = mo1_oo
+        hs = s1mo_blk = h1mo_blk = None
+
+        tol = mf.conv_tol_cpscf * (i1 - i0)
+        mo1 = krylov(fvind_vo, mo1.reshape(-1,nmo*nocc),
+                     tol=tol, max_cycle=max_cycle, verbose=log)
+        mo1 = mo1.reshape(i1-i0,3,nmo,nocc)
+
+        # The occ-occ block of mo1 is non-canonical
+        mo1[:,:,occidx] = mo1_oo
+
+        mo_e1 += fx(mo1).reshape(i1-i0,3,nmo,nocc)[:,:,occidx]
+        mo_e1 += mo1_oo * (e_i[:,None] - e_i)
+
+        mo1s[i0:i1] = mo1.get()
+        e1s[i0:i1] = mo_e1.get()
+        mo1 = mo_e1 = None
     return mo1s, e1s
 
 def gen_vind(mf, mo_coeff, mo_occ):
@@ -557,7 +604,10 @@ def gen_vind(mf, mo_coeff, mo_occ):
     nocc = mocc.shape[1]
     mocc_2 = mocc * 2
     grids = getattr(mf, 'cphf_grids', None)
-    vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1, grids=grids)
+    if grids is not None:
+        logger.info(mf, 'Secondary grids defined for CPHF in Hessian')
+    vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1)#, grids=grids)
+    vresp_cpu = mf.to_cpu().gen_response(mo_coeff.get(), mo_occ.get(), hermi=1)
 
     def fx(mo1):
         mo1 = cupy.asarray(mo1)
