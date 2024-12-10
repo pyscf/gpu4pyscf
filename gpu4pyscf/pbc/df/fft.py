@@ -41,7 +41,7 @@ def get_nuc(mydf, kpts=None):
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
     mesh = mydf.mesh
-    charge = cp.asarray(-cell.atom_charges())
+    charge = cp.asarray(-cell.atom_charges(), dtype=np.float64)
     Gv = cell.get_Gv(mesh)
     SI = get_SI(cell, mesh=mesh)
     rhoG = charge.dot(SI)

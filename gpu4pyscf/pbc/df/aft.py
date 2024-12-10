@@ -66,9 +66,9 @@ def _get_pp_loc_part1(mydf, kpts=None, with_pseudo=True):
     else:
         fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
         aoaux = cp.asarray(ft_ao.ft_ao(fakenuc, Gv))
-        charges = cell.atom_charges()
+        charges = cp.asarray(cell.atom_charges(), dtype=np.float64)
         coulG = get_coulG(cell, kpt_allow, mesh=mesh, Gv=Gv)
-        vpplocG = contract('i,xi->x', -cp.asarray(charges), aoaux)
+        vpplocG = contract('i,xi->x', -charges, aoaux)
         vpplocG *= coulG
 
     vpplocG *= cp.asarray(kws)
