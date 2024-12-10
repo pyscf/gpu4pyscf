@@ -15,11 +15,7 @@ static int _fill_ejk_tasks(ShellQuartet *shl_quartet_idx,
     int *tile_ij_mapping = bounds.tile_ij_mapping;
     int *tile_kl_mapping = bounds.tile_kl_mapping;
     float *q_cond = bounds.q_cond;
-#if TILE == 1
-    float *tile_q_cond = q_cond;
-#else
-    float *tile_q_cond = q_cond + nbas*nbas;
-#endif
+    float *tile_q_cond = bounds.tile_q_cond;
     float *dm_cond = bounds.dm_cond;
     float cutoff = bounds.cutoff;
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;

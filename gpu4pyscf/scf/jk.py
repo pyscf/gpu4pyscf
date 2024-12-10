@@ -24,13 +24,17 @@ import math
 import numpy as np
 import cupy as cp
 import scipy.linalg
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
                        PTR_EXP, gto_norm)
 from pyscf import lib
 from pyscf.scf import _vhf
 from pyscf import __config__
-from gpu4pyscf.lib.cupy_helper import load_library, condense, sandwich_dot, transpose_sum
+from gpu4pyscf.lib.cupy_helper import (load_library, condense, sandwich_dot, transpose_sum,
+                                       reduce_to_device)
 from gpu4pyscf.__config__ import props as gpu_specs
+from gpu4pyscf.__config__ import _streams, _num_devices
 from gpu4pyscf.lib import logger
 
 __all__ = [
@@ -59,6 +63,87 @@ THREADS = 256
 # TODO: test different size for L2 cache efficiency
 NAO_IN_GROUP = 1500
 
+def _jk_task(mol, dms, vhfopt, task_list, 
+             device_id=0, with_j=True, with_k=True, verbose=0):
+    n_dm = dms.shape[0]
+    nao, _ = vhfopt.coeff.shape
+    uniq_l_ctr = vhfopt.uniq_l_ctr
+    uniq_l = uniq_l_ctr[:,0]
+    l_ctr_bas_loc = vhfopt.l_ctr_offsets
+    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
+    kern = libvhf_rys.RYS_build_jk
+
+    timing_counter = Counter()
+    kern_counts = 0
+    with cp.cuda.Device(device_id), _streams[device_id]:
+        log = logger.new_logger(mol, verbose)
+        cput0 = log.init_timer()
+        dms = cp.asarray(dms)
+
+        tile_q_ptr = ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p)
+        q_ptr = ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p)
+        s_ptr = lib.c_null_ptr()
+        if mol.omega < 0:
+            s_ptr = ctypes.cast(vhfopt.s_estimator.data.ptr, ctypes.c_void_p)
+        
+        vj = vk = None
+        vj_ptr = vk_ptr = lib.c_null_ptr()
+        assert with_j or with_k
+        if with_k:
+            vk = cp.zeros(dms.shape)
+            vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
+        if with_j:
+            vj = cp.zeros(dms.shape)
+            vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
+        
+        ao_loc = mol.ao_loc
+        dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
+        log_max_dm = dm_cond.max()
+        log_cutoff = math.log(vhfopt.direct_scf_tol)
+        tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
+                                                 log_cutoff-log_max_dm)
+        workers = gpu_specs['multiProcessorCount']
+        pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
+        info = cp.empty(2, dtype=np.uint32)
+        t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
+
+        for i, j in task_list:
+            ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
+                       l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
+            tile_ij_mapping = tile_mappings[i,j]
+            for k in range(i+1):
+                for l in range(k+1):
+                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                    kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
+                                l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
+                    tile_kl_mapping = tile_mappings[k,l]
+                    scheme = quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
+                    err = kern(
+                        vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(n_dm), ctypes.c_int(nao),
+                        vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
+                        (ctypes.c_int*8)(*ij_shls, *kl_shls),
+                        ctypes.c_int(tile_ij_mapping.size),
+                        ctypes.c_int(tile_kl_mapping.size),
+                        ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
+                        tile_q_ptr, q_ptr, s_ptr,
+                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                        ctypes.c_float(log_cutoff),
+                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(info.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(workers),
+                        mol._atm.ctypes, ctypes.c_int(mol.natm),
+                        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+                    if err != 0:
+                        raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                    if log.verbose >= logger.DEBUG1:
+                        msg = f'processing {llll}, tasks = {info[1].get()} on Device {device_id}'
+                        t1, t1p = log.timer_debug1(msg, *t1), t1
+                        timing_counter[llll] += t1[1] - t1p[1]
+                        kern_counts += 1
+    return vj, vk, kern_counts, timing_counter
+
 def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None):
     '''Compute J, K matrices
     '''
@@ -81,84 +166,54 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
         dms = cp.vstack([dms, dms.transpose(0,2,1)])
     n_dm = dms.shape[0]
 
-    vj = vk = None
-    vj_ptr = vk_ptr = lib.c_null_ptr()
-
     assert with_j or with_k
-    if with_k:
-        vk = cp.zeros(dms.shape)
-        vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
-    if with_j:
-        vj = cp.zeros(dms.shape)
-        vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
 
     init_constant(mol)
-    ao_loc = mol.ao_loc
-    dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-    log_max_dm = dm_cond.max()
-    log_cutoff = math.log(vhfopt.direct_scf_tol)
 
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
-    l_ctr_bas_loc = vhfopt.l_ctr_offsets
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     n_groups = np.count_nonzero(uniq_l <= LMAX)
-    tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
-                                             log_cutoff-log_max_dm)
-    workers = gpu_specs['multiProcessorCount']
-    pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
-    info = cp.empty(2, dtype=np.uint32)
-    t1 = log.timer_debug1('q_cond and dm_cond', *cput0)
 
-    timing_collection = {}
+    tasks = [(i,j) for i in range(n_groups) for j in range(i+1)]
+    tasks = np.array(tasks)
+    task_list = []
+    for device_id in range(_num_devices):
+        task_list.append(tasks[device_id::_num_devices])
+
+    cp.cuda.get_current_stream().synchronize()
+    futures = []
+    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
+        for device_id in range(_num_devices):
+            future = executor.submit(
+                _jk_task,
+                mol, dms, vhfopt, task_list[device_id],
+                with_j=with_j, with_k=with_k, verbose=verbose, 
+                device_id=device_id)
+            futures.append(future)
+
     kern_counts = 0
-    kern = libvhf_rys.RYS_build_jk
-
-    for i in range(n_groups):
-        for j in range(i+1):
-            ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
-                       l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
-            tile_ij_mapping = tile_mappings[i,j]
-            for k in range(i+1):
-                for l in range(k+1):
-                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                    kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
-                               l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
-                    tile_kl_mapping = tile_mappings[k,l]
-                    scheme = quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
-                    err = kern(
-                        vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(n_dm), ctypes.c_int(nao),
-                        vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
-                        (ctypes.c_int*8)(*ij_shls, *kl_shls),
-                        ctypes.c_int(tile_ij_mapping.size),
-                        ctypes.c_int(tile_kl_mapping.size),
-                        ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.c_float(log_cutoff),
-                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(info.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(workers),
-                        mol._atm.ctypes, ctypes.c_int(mol.natm),
-                        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                    if err != 0:
-                        raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
-                    if log.verbose >= logger.DEBUG1:
-                        t1, t1p = log.timer_debug1(f'processing {llll}, tasks = {info[1]}', *t1), t1
-                        if llll not in timing_collection:
-                            timing_collection[llll] = 0
-                        timing_collection[llll] += t1[1] - t1p[1]
-                        kern_counts += 1
+    timing_collection = Counter()
+    vj_dist = []
+    vk_dist = []
+    for future in futures:
+        vj, vk, counts, counter = future.result()
+        kern_counts += counts
+        timing_collection += counter
+        vj_dist.append(vj)
+        vk_dist.append(vk)
 
     if log.verbose >= logger.DEBUG1:
         log.debug1('kernel launches %d', kern_counts)
         for llll, t in timing_collection.items():
             log.debug1('%s wall time %.2f', llll, t)
-
+    
+    for s in _streams:
+        s.synchronize()
+    cp.cuda.get_current_stream().synchronize()
+    vj = vk = None
     if with_k:
+        vk = reduce_to_device(vk_dist, inplace=True)
         if hermi == 1:
             vk = transpose_sum(vk)
         else:
@@ -167,7 +222,9 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
         #:vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
         vk = sandwich_dot(vk, vhfopt.coeff)
         vk = vk.reshape(dm.shape)
+
     if with_j:
+        vj = reduce_to_device(vj_dist, inplace=True)
         if hermi == 1:
             vj *= 2.
         else:
@@ -217,7 +274,7 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
             for i, v in enumerate(vk1):
                 vk[i] += coeff.T.dot(cp.asarray(v)).dot(coeff)
         log.timer_debug1('get_jk pass 2 for h functions on cpu', *cput1)
-
+    
     log.timer('vj and vk', *cput0)
     return vj, vk
 
@@ -324,6 +381,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
                         ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
                         ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p),
                         ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p),
+                        lib.c_null_ptr(),
                         ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                         ctypes.c_float(log_cutoff),
                         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
@@ -384,8 +442,8 @@ class _VHFOpt:
         self.direct_scf_tol = cutoff
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
-        self.q_cond = None
-        self.tile_q_cond = None
+        #self.q_cond = None
+        #self.tile_q_cond = None
         self.h_shls = None
         self.tile = TILE
 
@@ -466,13 +524,12 @@ class _VHFOpt:
             self.h_shls = []
 
         nbas = mol.nbas
-        buf_size = nbas**2
+        #buf_size = nbas**2
         if tile > 1:
             ntiles = nbas // tile
-            buf_size += ntiles**2
-        if mol.omega < 0:
-            buf_size += nbas**2
-        buf = cp.empty(buf_size, dtype=np.float32)
+            #buf_size += ntiles**2
+        #if mol.omega < 0:
+            #buf_size += nbas**2
 
         ao_loc = mol.ao_loc
         q_cond = np.empty((nbas,nbas))
@@ -482,15 +539,13 @@ class _VHFOpt:
             q_cond.ctypes, ao_loc.ctypes,
             mol._atm.ctypes, ctypes.c_int(mol.natm),
             mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-        self.q_cond = buf[:nbas**2].reshape(nbas, nbas)
-        self.q_cond.set(np.log(q_cond + 1e-300).astype(np.float32))
-        offset = nbas**2
+        q_cond = np.log(q_cond + 1e-300).astype(np.float32)
+        self.q_cond_cpu = q_cond
+
         if tile > 1:
-            self.tile_q_cond = buf[offset:offset+ntiles**2].reshape(ntiles, ntiles)
-            self.tile_q_cond[:] = self.q_cond.reshape(ntiles,tile,ntiles,tile).max(axis=(1,3))
-            offset += ntiles**2
+            self._tile_q_cond_cpu = q_cond.reshape(ntiles,tile,ntiles,tile).max(axis=(1,3))
         else:
-            self.tile_q_cond = self.q_cond
+            self._tile_q_cond_cpu = q_cond
 
         if mol.omega < 0:
             # CVHFnr_sr_int2e_q_cond in pyscf has bugs in upper bound estimator.
@@ -500,21 +555,62 @@ class _VHFOpt:
                 s_estimator.ctypes, ctypes.c_float(mol.omega),
                 mol._atm.ctypes, ctypes.c_int(mol.natm),
                 mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-            self.s_estimator = buf[offset:offset+nbas**2].reshape(nbas, nbas)
-            self.s_estimator.set(s_estimator)
+            self.s_estimator_cpu = s_estimator
         log.timer('Initialize q_cond', *cput0)
-
-        _atm = cp.array(mol._atm)
-        _bas = cp.array(mol._bas)
-        _env = cp.array(_scale_sp_ctr_coeff(mol))
-        ao_loc = cp.array(ao_loc)
-        self._mol_gpu = (_atm, _bas, _env, ao_loc)
-        self.rys_envs = RysIntEnvVars(
-            mol.natm, mol.nbas,
-            _atm.data.ptr, _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr,
-        )
+        
+        # Hold cache on GPU devices
+        self._rys_envs = {}
+        self._mol_gpu = {}
+        self._q_cond = {}
+        self._tile_q_cond = {}
+        self._s_estimator = {}
         return self
-
+    
+    @property
+    def q_cond(self):
+        device_id = cp.cuda.Device().id
+        if device_id not in self._q_cond:
+            with cp.cuda.Device(device_id), _streams[device_id]: 
+                self._q_cond[device_id] = cp.asarray(self.q_cond_cpu)
+        return self._q_cond[device_id]
+    
+    @property
+    def tile_q_cond(self):
+        device_id = cp.cuda.Device().id
+        if device_id not in self._tile_q_cond:
+            with cp.cuda.Device(device_id), _streams[device_id]: 
+                q_cpu = self._tile_q_cond_cpu
+                self._tile_q_cond[device_id] = cp.asarray(q_cpu)
+        return self._tile_q_cond[device_id]
+    
+    @property
+    def s_estimator(self):
+        if not self.mol.omega < 0:
+            return None
+        device_id = cp.cuda.Device().id
+        if device_id not in self._rys_envs:
+            with cp.cuda.Device(device_id), _streams[device_id]: 
+                s_cpu = self.s_estimator_cpu
+                self._s_estimator[device_id] = cp.asarray(s_cpu)
+        return self._s_estimator[device_id]
+    
+    @property
+    def rys_envs(self):
+        device_id = cp.cuda.Device().id
+        if device_id not in self._rys_envs:
+            with cp.cuda.Device(device_id), _streams[device_id]:
+                mol = self.mol
+                _atm = cp.array(mol._atm)
+                _bas = cp.array(mol._bas)
+                _env = cp.array(_scale_sp_ctr_coeff(mol))
+                ao_loc = cp.array(mol.ao_loc)
+                self._mol_gpu[device_id] = (_atm, _bas, _env, ao_loc)
+                self._rys_envs[device_id] = RysIntEnvVars(
+                    mol.natm, mol.nbas,
+                    _atm.data.ptr, _bas.data.ptr, _env.data.ptr, 
+                    ao_loc.data.ptr)
+        return self._rys_envs[device_id]
+    
 def basis_seg_contraction(mol, allow_replica=1):
     '''transform generally contracted basis to segment contracted basis
     Kwargs:
@@ -664,9 +760,11 @@ def g_pair_idx(ij_inc=None):
 
 def init_constant(mol):
     g_idx, offsets = g_pair_idx()
-    libvhf_rys.RYS_init_constant(
-        g_idx.ctypes, offsets.ctypes, mol._env.ctypes, ctypes.c_int(mol._env.size),
-        ctypes.c_int(SHM_SIZE))
+    for device_id in range(_num_devices):
+        with cp.cuda.Device(device_id), _streams[device_id]: 
+            libvhf_rys.RYS_init_constant(
+                g_idx.ctypes, offsets.ctypes, mol._env.ctypes, 
+                ctypes.c_int(mol._env.size), ctypes.c_int(SHM_SIZE))
 
 def _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond, cutoff, tile=TILE):
     n_groups = len(l_ctr_bas_loc) - 1
