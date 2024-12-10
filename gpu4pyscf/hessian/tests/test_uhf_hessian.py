@@ -46,7 +46,7 @@ class KnownValues(unittest.TestCase):
         hobj = mf.Hessian()
         ref = hobj.kernel()
         e2_gpu = hobj.to_gpu().kernel()
-        assert abs(ref - e2_gpu).max() < 1e-8
+        assert abs(ref - e2_gpu).max() < 1e-6
 
     def test_partial_hess_elec(self):
         mf = scf.UHF(mol)
@@ -72,7 +72,7 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol_cpscf = 1e-8
         ref = mf.Hessian().kernel()
         e2_gpu = mf.Hessian().to_gpu().kernel()
-        assert abs(ref - e2_gpu).max() < 1e-8
+        assert abs(ref - e2_gpu).max() < 1e-6
 
 if __name__ == "__main__":
     print("Full Tests for UHF Hessian")

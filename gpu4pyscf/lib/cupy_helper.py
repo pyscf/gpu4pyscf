@@ -629,6 +629,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     else:
         raise RuntimeError('Krylov solver failed to converge')
 
+    log.info(f'krylov space size {len(xs)}')
     xs = cupy.asarray(xs)
     ax = cupy.asarray(ax)
     nd = xs.shape[0]

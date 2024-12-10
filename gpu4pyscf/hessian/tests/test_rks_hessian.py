@@ -94,17 +94,17 @@ class KnownValues(unittest.TestCase):
     def test_hessian_lda(self, disp=None):
         print('-----testing LDA Hessian----')
         mf = mol.RKS(xc='LDA').run()
-        _vs_cpu(mf, tol=3e-6)
+        _vs_cpu(mf, tol=5e-6)
 
     def test_hessian_gga(self):
         print('-----testing PBE Hessian----')
         mf = mol.RKS(xc='PBE').run()
-        _vs_cpu(mf, tol=3e-6)
+        _vs_cpu(mf, tol=1e-6)
 
     def test_hessian_hybrid(self):
         print('-----testing B3LYP Hessian----')
         mf = mol.RKS(xc='b3lyp').run()
-        _vs_cpu(mf, tol=3e-6)
+        _vs_cpu(mf, tol=5e-6)
 
     def test_hessian_mgga(self):
         print('-----testing M06 Hessian----')

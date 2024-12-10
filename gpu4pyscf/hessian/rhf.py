@@ -573,26 +573,25 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
             s1mo_blk[k] = contract('xio,ip->xpo', tmp, mo_coeff)
 
         mo1 = hs = h1mo_blk - s1mo_blk * e_i
-        mo_e1  = hs[:,:,occidx]
-        mo1_oo = -s1mo_blk[:,:,occidx] * .5
+        mo_e1 = hs[:,:,occidx]
         mo1[:,:,viridx] *= -e_ai
-        mo1[:,:,occidx] = mo1_oo
+        mo1[:,:,occidx] = -s1mo_blk[:,:,occidx] * .5
         hs = s1mo_blk = h1mo_blk = None
 
         tol = mf.conv_tol_cpscf * (i1 - i0)
-        mo1 = krylov(fvind_vo, mo1.reshape(-1,nmo*nocc),
-                     tol=tol, max_cycle=max_cycle, verbose=log)
-        mo1 = mo1.reshape(i1-i0,3,nmo,nocc)
+        raw_mo1 = krylov(fvind_vo, mo1.reshape(-1,nmo*nocc),
+                         tol=tol, max_cycle=max_cycle, verbose=log)
+        raw_mo1 = raw_mo1.reshape(i1-i0,3,nmo,nocc)
+        raw_mo1[:,:,occidx] = mo1[:,:,occidx]
 
-        # The occ-occ block of mo1 is non-canonical
-        mo1[:,:,occidx] = mo1_oo
-
-        mo_e1 += fx(mo1).reshape(i1-i0,3,nmo,nocc)[:,:,occidx]
-        mo_e1 += mo1_oo * (e_i[:,None] - e_i)
+        v1 = fx(raw_mo1).reshape(i1-i0,3,nmo,nocc)
+        mo1[:,:,viridx] -= v1[:,:,viridx] * e_ai
+        mo_e1 += v1[:,:,occidx]
+        mo_e1 += mo1[:,:,occidx] * (e_i[:,None] - e_i)
 
         mo1s[i0:i1] = mo1.get()
         e1s[i0:i1] = mo_e1.get()
-        mo1 = mo_e1 = None
+        mo1 = raw_mo1 = mo_e1 = v1 = None
     log.timer('CPHF solver', *t0)
     return mo1s, e1s
 
@@ -607,7 +606,7 @@ def gen_vind(mf, mo_coeff, mo_occ):
     grids = getattr(mf, 'cphf_grids', None)
     if grids is not None:
         logger.info(mf, 'Secondary grids defined for CPHF in Hessian')
-    vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1)#, grids=grids)
+    vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1, grids=grids)
 
     def fx(mo1):
         mo1 = cupy.asarray(mo1)

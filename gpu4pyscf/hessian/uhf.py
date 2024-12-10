@@ -328,37 +328,41 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         mo1b = hs_b = h1b_blk - s1b_blk * ei_b
         mo_e1a = hs_a[:,:,occidxa]
         mo_e1b = hs_b[:,:,occidxb]
-        mo1a_oo = -s1a_blk[:,:,occidxa] * .5
-        mo1b_oo = -s1b_blk[:,:,occidxb] * .5
         mo1a[:,:,viridxa] *= -eai_a
         mo1b[:,:,viridxb] *= -eai_b
-        mo1a[:,:,occidxa] = mo1a_oo
-        mo1b[:,:,occidxb] = mo1b_oo
+        mo1a[:,:,occidxa] = -s1a_blk[:,:,occidxa] * .5
+        mo1b[:,:,occidxb] = -s1b_blk[:,:,occidxb] * .5
         nset = (i1 - i0) * 3
         mo1 = cp.hstack((mo1a.reshape(nset,-1), mo1b.reshape(nset,-1)))
-        hs_a = hs_b = h1a_blk = h1b_blk = s1a_blk = s1b_blk = mo1a = mo1b = None
+        hs_a = hs_b = h1a_blk = h1b_blk = s1a_blk = s1b_blk = None
 
         tol = mf.conv_tol_cpscf * (i1 - i0)
-        mo1 = krylov(fvind_vo, mo1.reshape(-1,nmo*nocc),
-                     tol=tol, max_cycle=max_cycle, verbose=log)
-        mo1a = mo1[:,:nmo*nocca].reshape(i1-i0,3,nmo,nocca)
-        mo1b = mo1[:,nmo*nocca:].reshape(i1-i0,3,nmo,noccb)
+        raw_mo1 = krylov(fvind_vo, mo1.reshape(-1,nmo*nocc),
+                         tol=tol, max_cycle=max_cycle, verbose=log)
+        raw_mo1a = mo1[:,:nmo*nocca].reshape(i1-i0,3,nmo,nocca)
+        raw_mo1b = mo1[:,nmo*nocca:].reshape(i1-i0,3,nmo,noccb)
 
         # The occ-occ block of mo1 is non-canonical
-        mo1a[:,:,occidxa] = mo1a_oo
-        mo1b[:,:,occidxb] = mo1b_oo
+        raw_mo1a[:,:,occidxa] = mo1a[:,:,occidxa]
+        raw_mo1b[:,:,occidxb] = mo1b[:,:,occidxb]
 
-        v1mo = fx(mo1)
-        mo_e1a += v1mo[:,:nmo*nocca].reshape(i1-i0,3,nmo,nocca)[:,:,occidxa]
-        mo_e1b += v1mo[:,nmo*nocca:].reshape(i1-i0,3,nmo,noccb)[:,:,occidxb]
-        mo_e1a += mo1a_oo * (ei_a[:,None] - ei_a)
-        mo_e1b += mo1b_oo * (ei_b[:,None] - ei_b)
+        v1 = fx(raw_mo1)
+        v1a = v1[:,:nmo*nocca].reshape(i1-i0,3,nmo,nocca)
+        v1b = v1[:,nmo*nocca:].reshape(i1-i0,3,nmo,noccb)
+        mo1a[:,:,viridxa] -= v1a[:,:,viridxa] * eai_a
+        mo1b[:,:,viridxb] -= v1b[:,:,viridxb] * eai_b
+        mo_e1a += v1a[:,:,occidxa]
+        mo_e1b += v1b[:,:,occidxb]
+        mo_e1a += mo1a[:,:,occidxa] * (ei_a[:,None] - ei_a)
+        mo_e1b += mo1b[:,:,occidxb] * (ei_b[:,None] - ei_b)
 
         mo1sa[i0:i1] = mo1a.get()
         mo1sb[i0:i1] = mo1b.get()
         e1sa[i0:i1] = mo_e1a.get()
         e1sb[i0:i1] = mo_e1b.get()
         mo1a = mo1b = mo1 = mo_e1a = mo_e1b = None
+        raw_mo1a = raw_mo1b = raw_mo1 = None
+        v1a = v1b = v1 = None
     log.timer('CPHF solver', *t0)
     return (mo1sa, mo1sb), (e1sa, e1sb)
 
