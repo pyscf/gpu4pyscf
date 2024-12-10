@@ -245,6 +245,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     '''
     mol = mf.mol
     log = logger.new_logger(mf, verbose)
+    t0 = log.init_timer()
 
     occidxa = mo_occ[0] > 0
     occidxb = mo_occ[1] > 0
@@ -358,6 +359,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         e1sa[i0:i1] = mo_e1a.get()
         e1sb[i0:i1] = mo_e1b.get()
         mo1a = mo1b = mo1 = mo_e1a = mo_e1b = None
+    log.timer('CPHF solver', *t0)
     return (mo1sa, mo1sb), (e1sa, e1sb)
 
 def gen_vind(mf, mo_coeff, mo_occ):

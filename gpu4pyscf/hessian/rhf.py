@@ -593,6 +593,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         mo1s[i0:i1] = mo1.get()
         e1s[i0:i1] = mo_e1.get()
         mo1 = mo_e1 = None
+    log.timer('CPHF solver', *t0)
     return mo1s, e1s
 
 def gen_vind(mf, mo_coeff, mo_occ):
@@ -607,7 +608,6 @@ def gen_vind(mf, mo_coeff, mo_occ):
     if grids is not None:
         logger.info(mf, 'Secondary grids defined for CPHF in Hessian')
     vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1)#, grids=grids)
-    vresp_cpu = mf.to_cpu().gen_response(mo_coeff.get(), mo_occ.get(), hermi=1)
 
     def fx(mo1):
         mo1 = cupy.asarray(mo1)
