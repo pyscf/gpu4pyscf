@@ -21,6 +21,7 @@
 #include <cuda_runtime.h>
 
 #include "gint.h"
+#include "gint1e.h"
 #include "cuda_alloc.cuh"
 #include "cint2e.cuh"
 
@@ -28,18 +29,6 @@
 #include "g1e.cu"
 #include "g1e_root_123.cu"
 #include "g3c1e.cu"
-
-// 1 roots upto (p|s)  6    = 3*1*(2*1)
-// 2 roots upto (d|p)  36   = 3*2*(3*2)
-// 3 roots upto (f|d)  108  = 3*3*(4*3)
-// 4 roots upto (g|f)  240  = 3*4*(5*4)
-// 5 roots upto (h|g)  450  = 3*5*(6*5)
-
-#define GSIZE1_INT3C_1E 6
-#define GSIZE2_INT3C_1E 36
-#define GSIZE3_INT3C_1E 108
-#define GSIZE4_INT3C_1E 240
-#define GSIZE5_INT3C_1E 450
 
 static int GINTfill_int3c1e_tasks(double* output, const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
                                   const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
@@ -171,7 +160,7 @@ int GINTfill_int3c1e(const cudaStream_t stream, const BasisProdCache* bpcache,
     const int nrys_roots = (i_l + j_l) / 2 + 1;
     const int nprim_ij = cp_ij->nprim_12;
 
-    if (nrys_roots > 5) {
+    if (nrys_roots > MAX_NROOTS_INT3C_1E) {
         fprintf(stderr, "nrys_roots = %d too high\n", nrys_roots);
         return 2;
     }
@@ -221,7 +210,7 @@ int GINTfill_int3c1e_charge_contracted(const cudaStream_t stream, const BasisPro
     const int nrys_roots = (i_l + j_l) / 2 + 1;
     const int nprim_ij = cp_ij->nprim_12;
 
-    if (nrys_roots > 5) {
+    if (nrys_roots > MAX_NROOTS_INT3C_1E) {
         fprintf(stderr, "nrys_roots = %d too high\n", nrys_roots);
         return 2;
     }
@@ -271,7 +260,7 @@ int GINTfill_int3c1e_density_contracted(const cudaStream_t stream, const BasisPr
     const int nrys_roots = (i_l + j_l) / 2 + 1;
     const int nprim_ij = cp_ij->nprim_12;
 
-    if (nrys_roots > 5) {
+    if (nrys_roots > MAX_NROOTS_INT3C_1E) {
         fprintf(stderr, "nrys_roots = %d too high\n", nrys_roots);
         return 2;
     }
