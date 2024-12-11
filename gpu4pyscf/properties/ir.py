@@ -21,6 +21,7 @@ from pyscf.data import elements, nist
 from scipy.constants import physical_constants
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.scf.hf import RHF
 
 LINDEP_THRESHOLD = 1e-7
 
@@ -36,6 +37,7 @@ def eval_ir_freq_intensity(mf, hessian_obj):
         polarizability (numpy.array): polarizability
     """
     log = logger.new_logger(hessian_obj, mf.mol.verbose)
+    assert isinstance(mf, RHF)
     hessian = hessian_obj.kernel()
     hartree_kj = nist.HARTREE2J*1e3
     unit2cm = ((hartree_kj * nist.AVOGADRO)**.5 / (nist.BOHR*1e-10)
@@ -93,7 +95,8 @@ def eval_ir_freq_intensity(mf, hessian_obj):
     # ! Different from PySCF, mo1 is all in mo!
     mo1, mo_e1 = hessian_obj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1ao,
                                        None, atmlst, hessian_obj.max_memory, log)  
-
+    mo1 = cupy.asarray(mo1)
+    mo_e1 = cupy.asarray(mo_e1)
     
     tmp = cupy.empty((3, 3, natm))  # dipole moment, x,y,z
     aoslices = mf.mol.aoslice_by_atom()

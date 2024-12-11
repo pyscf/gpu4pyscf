@@ -1528,7 +1528,6 @@ def _sparse_index(mol, coords, l_ctr_offsets):
     ctr_offsets_slice = cumsum[glob_ctr_offsets-1]
     ctr_offsets_slice[0] = 0
 
-    from pyscf import gto
     gto_type = 'cart' if mol.cart else 'sph'
     non0shl_idx = non0shl_idx == 1
     ao_loc_slice = gto.moleintor.make_loc(mol._bas[non0shl_idx,:], gto_type)
