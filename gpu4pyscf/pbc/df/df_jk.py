@@ -30,7 +30,7 @@ from gpu4pyscf.lib.cupy_helper import contract, unpack_tril
 from gpu4pyscf.pbc.df.fft_jk import _ewald_exxdiv_for_G0, _format_dms, _format_jks
 
 def density_fit(mf, auxbasis=None, mesh=None, with_df=None):
-    '''Generte density-fitting SCF object
+    '''Generate density-fitting SCF object
 
     Args:
         auxbasis : str or basis dict
