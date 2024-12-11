@@ -74,7 +74,10 @@ class KnownValues(unittest.TestCase):
     def test_int3c2e(self):
         get_int3c = _int3c_wrapper(mol, auxmol, 'int3c2e', 's1')
         int3c_pyscf = get_int3c((0, mol.nbas, 0, mol.nbas, 0, auxmol.nbas))
-        int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym='s1').get()
+        int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym=True).get()
+        assert np.linalg.norm(int3c_gpu - int3c_pyscf) < 1e-8
+        
+        int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym=False).get()
         assert np.linalg.norm(int3c_gpu - int3c_pyscf) < 1e-8
 
     def test_int3c2e_omega(self):

@@ -49,6 +49,7 @@ static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GIN
         switch (type_ijkl) {
         case 0b0000: GINTfill_int3c2e_kernel0000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 0b0010: GINTfill_int3c2e_kernel0010<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 0b0100: GINTfill_int3c2e_kernel0100<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 0b1000: GINTfill_int3c2e_kernel1000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         default:
             fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
