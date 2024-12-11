@@ -364,6 +364,8 @@ class PCM(lib.StreamObject):
         dms = dms.reshape(-1,nao,nao)
         if dms.shape[0] == 2:
             dms = (dms[0] + dms[1]).reshape(-1,nao,nao)
+        if not isinstance(dms, cupy.ndarray):
+            dms = cupy.asarray(dms)
         K = self._intermediates['K']
         R = self._intermediates['R']
         v_grids_e = self._get_v(dms)

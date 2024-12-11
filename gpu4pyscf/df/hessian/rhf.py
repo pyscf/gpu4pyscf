@@ -432,7 +432,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
     natm = mol.natm
-    nocc = cupy.count_nonzero(mo_occ > 0)
+    nocc = int(cupy.count_nonzero(mo_occ > 0))
     nmo = len(mo_occ)
     h1ao = cupy.empty((natm, 3, nmo, nocc))
     for ia, h1, vj1, vk1 in _gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
