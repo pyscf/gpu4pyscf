@@ -27,7 +27,7 @@
 
 #include "rys_roots.cu"
 #include "g1e.cu"
-#include "g1e_root_123.cu"
+#include "g1e_root_1.cu"
 #include "g3c1e.cu"
 
 static int GINTfill_int3c1e_tasks(double* output, const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,

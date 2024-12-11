@@ -27,7 +27,7 @@
 
 #include "rys_roots.cu"
 #include "g1e.cu"
-// #include "g1e_root_123.cu"
+#include "g1e_ip_root_1.cu"
 #include "g3c1e_ip.cu"
 
 static int GINTfill_int3c1e_ip_tasks(double* output, const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
@@ -42,16 +42,14 @@ static int GINTfill_int3c1e_ip_tasks(double* output, const BasisProdOffsets offs
     const dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ngrids+THREADSY-1)/THREADSY);
     int type_ijkl;
     switch (nrys_roots) {
-    // case 1:
-    //     type_ijkl = (i_l << 2) | j_l;
-    //     switch (type_ijkl) {
-    //     case (0<<2)|0: GINTfill_int3c1e_kernel00<<<blocks, threads, 0, stream>>>(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
-    //     case (1<<2)|0: GINTfill_int3c1e_kernel10<<<blocks, threads, 0, stream>>>(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
-    //     default:
-    //         fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
-    //     }
-    //     break;
-    case 1: GINTfill_int3c1e_ip_kernel_general<1, GSIZE1_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+    case 1:
+        type_ijkl = (i_l + 1) * 10 + j_l;
+        switch (type_ijkl) {
+        case 10: GINTfill_int3c1e_ip_kernel00<<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+        default:
+            fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
+        }
+        break;
     case 2: GINTfill_int3c1e_ip_kernel_general<2, GSIZE2_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
     case 3: GINTfill_int3c1e_ip_kernel_general<3, GSIZE3_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
     case 4: GINTfill_int3c1e_ip_kernel_general<4, GSIZE4_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
