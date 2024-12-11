@@ -6,7 +6,7 @@ add_library(gvhf_rys SHARED
   rys_contract_j.cu cart2xyz.c unrolled_rys_j.cu
   count_tasks.cu
   rys_contract_jk_ip1.cu unrolled_rys_ip1.cu unrolled_ejk_ip1.cu
-  rys_contract_jk_ip2.cu unrolled_ejk_ip2.cu
+  rys_contract_jk_ip2.cu unrolled_ejk_ip2_type12.cu unrolled_ejk_ip2_type3.cu
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)

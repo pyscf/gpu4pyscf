@@ -104,7 +104,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
 
 class Gradients(rhf_grad.GradientsBase):
-    
+
     to_cpu = utils.to_cpu
     to_gpu = utils.to_gpu
     device = utils.device
@@ -120,8 +120,8 @@ class Gradients(rhf_grad.GradientsBase):
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         '''
         vhfopt = self.base._opt_gpu.get(None, None)
-        ej, ek = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
-        return ej - ek
+        ejk = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
+        return ejk
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         if mo_energy is None: mo_energy = self.base.mo_energy

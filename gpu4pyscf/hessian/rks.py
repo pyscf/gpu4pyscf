@@ -50,19 +50,38 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     if mf.do_nlc():
         raise NotImplementedError
+
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
-    de2, ej, ek = rhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
-                                             atmlst, max_memory, verbose,
-                                             with_k=with_k)
-    de2 += ej  # (A,B,dR_A,dR_B)
+    j_factor = 1.
+    k_factor = 0.
     if with_k:
-        de2 -= hyb * ek
-    if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
+        if omega == 0:
+            k_factor = hyb
+        elif alpha == 0: # LR=0, only SR exchange
+            pass
+        elif hyb == 0: # SR=0, only LR exchange
+            k_factor = alpha
+        else: # SR and LR exchange with different ratios
+            k_factor = alpha
+    de2, ejk = rhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
+                                          atmlst, max_memory, verbose,
+                                          j_factor, k_factor)
+    de2 += ejk  # (A,B,dR_A,dR_B)
+    if with_k and omega != 0:
+        j_factor = 0.
+        omega = -omega # Prefer computing the SR part
+        if alpha == 0: # LR=0, only SR exchange
+            k_factor = hyb
+        elif hyb == 0: # SR=0, only LR exchange
+            # full range exchange was computed in the previous step
+            k_factor = -alpha
+        else: # SR and LR exchange with different ratios
+            k_factor = hyb - alpha # =beta
         vhfopt = mf._opt_gpu.get(omega, None)
         with mol.with_range_coulomb(omega):
-            ek_lr = rhf_hess._partial_ejk_ip2(mol, dm0, vhfopt, verbose=verbose)[1]
-        de2 -= (alpha-hyb) * ek_lr
+            de2 += rhf_hess._partial_ejk_ip2(
+                mol, dm0, vhfopt, j_factor, k_factor, verbose=verbose)
 
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, mf.max_memory*.9-mem_now)
@@ -123,7 +142,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
             for ix in range(3):
                 h1mo[ia,ix] += mo_coeff.T.dot(veff[i,ix].dot(mocc))
         vj = vk = vk_lr = veff = None
-    return h1mo
+    return h1mo.get()
 
 XX, XY, XZ = 4, 5, 6
 YX, YY, YZ = 5, 7, 8
