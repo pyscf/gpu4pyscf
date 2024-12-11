@@ -208,5 +208,5 @@ class KnownValues(unittest.TestCase):
         assert abs(vk.get() - kref).max() < 1e-12
 
 if __name__ == '__main__':
-    print("Full Tests for df")
+    print("Full Tests for PBC DF")
     unittest.main()
