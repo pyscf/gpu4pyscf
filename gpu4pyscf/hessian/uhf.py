@@ -63,6 +63,9 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     t1 = log.timer_debug1('hess elec', *t1)
     if h1mo is None:
         h1mo = hessobj.make_h1(mo_coeff, mo_occ, None, atmlst, log)
+        if h1mo[0].size * 8 * 10 > get_avail_mem():
+            # Reduce GPU memory footprint
+            h1mo = (h1mo[0].get(), h1mo[1].get())
         t1 = log.timer_debug1('making H1', *t1)
     if mo1 is None or mo_e1 is None:
         mo1, mo_e1 = hessobj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1mo,
@@ -206,7 +209,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
                 h1moa[ia,ix] += mo_a.T.dot(vhfa[i,ix].dot(mocca))
                 h1mob[ia,ix] += mo_b.T.dot(vhfb[i,ix].dot(moccb))
         vj = vja = vjb = vka = vkb = vhfa = vhfb = None
-    return h1moa.get(), h1mob.get()
+    return h1moa, h1mob
 
 def get_hcore(mol):
     '''Part of the second derivatives of core Hamiltonian'''

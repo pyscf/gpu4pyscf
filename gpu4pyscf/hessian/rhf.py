@@ -71,6 +71,9 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     t1 = log.timer_debug1('hess elec', *t1)
     if h1mo is None:
         h1mo = hessobj.make_h1(mo_coeff, mo_occ, None, atmlst, log)
+        if h1mo.size * 8 * 5 > get_avail_mem():
+            # Reduce GPU memory footprint
+            h1mo = h1mo.get()
         t1 = log.timer_debug1('making H1', *t1)
     if mo1 is None or mo_e1 is None:
         mo1, mo_e1 = hessobj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1mo,
@@ -80,7 +83,6 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     mo1 = cupy.asarray(mo1)
     # *2 for double occupancy, *2 for +c.c.
     de2 += contract('kxpi,lypi->klxy', cupy.asarray(h1mo), mo1) * 4
-    h1mo = None
     mo1 = contract('kxai,pa->kxpi', mo1, mo_coeff)
     mo_e1 = cupy.asarray(mo_e1)
 
@@ -316,7 +318,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
             for ix in range(3):
                 h1mo[ia,ix] += mo_coeff.T.dot(vhf[i,ix].dot(mocc))
         vj = vk = vhf = None
-    return h1mo.get()
+    return h1mo
 
 def _get_jk(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=None):
     r'''

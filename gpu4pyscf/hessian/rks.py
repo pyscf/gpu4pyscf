@@ -142,7 +142,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
             for ix in range(3):
                 h1mo[ia,ix] += mo_coeff.T.dot(veff[i,ix].dot(mocc))
         vj = vk = vk_lr = veff = None
-    return h1mo.get()
+    return h1mo
 
 XX, XY, XZ = 4, 5, 6
 YX, YY, YZ = 5, 7, 8
