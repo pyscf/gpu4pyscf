@@ -17,6 +17,10 @@
 
 '''GPW method'''
 
+__all__ = [
+    'get_nuc', 'get_pp', 'get_SI', 'FFTDF'
+]
+
 import numpy as np
 import cupy as cp
 from pyscf import gto
@@ -30,10 +34,6 @@ from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.df import fft_jk
 
-__all__ = [
-    'get_nuc', 'get_pp', 'get_SI', 'FFTDF'
-]
-
 def get_nuc(mydf, kpts=None):
     from gpu4pyscf.pbc.dft import numint
     kpts, is_single_kpt = _check_kpts(mydf, kpts)
@@ -41,7 +41,7 @@ def get_nuc(mydf, kpts=None):
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
     mesh = mydf.mesh
-    charge = cp.asarray(-cell.atom_charges())
+    charge = cp.asarray(-cell.atom_charges(), dtype=np.float64)
     Gv = cell.get_Gv(mesh)
     SI = get_SI(cell, mesh=mesh)
     rhoG = charge.dot(SI)
@@ -266,7 +266,4 @@ class FFTDF(lib.StreamObject):
 
     to_gpu = utils.to_gpu
     device = utils.device
-
-    def to_cpu(self):
-        obj = utils.to_cpu(self)
-        return obj.reset()
+    to_cpu = utils.to_cpu

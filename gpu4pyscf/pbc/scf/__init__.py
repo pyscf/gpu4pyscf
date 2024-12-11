@@ -19,14 +19,14 @@
 '''
 
 from .import hf
-#from . import uhf
-#from . import khf
-#from . import kuhf
+from . import uhf
+from . import khf
+from . import kuhf
 
 rhf = hf
-#krhf = khf
+krhf = khf
 
-#UHF = uhf.UHF
+UHF = uhf.UHF
 RHF = rhf.RHF
-#KRHF = krhf.KRHF
-#KUHF = kuhf.KRHF
+KRHF = krhf.KRHF
+KUHF = kuhf.KUHF

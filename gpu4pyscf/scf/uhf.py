@@ -278,7 +278,7 @@ class UHF(hf.SCF):
     def eig(self, fock, s):
         e_a, c_a = self._eigh(fock[0], s)
         e_b, c_b = self._eigh(fock[1], s)
-        return cupy.array((e_a,e_b)), cupy.array((c_a,c_b))
+        return cupy.stack((e_a,e_b)), cupy.stack((c_a,c_b))
 
     def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         if mol is None: mol = self.mol
