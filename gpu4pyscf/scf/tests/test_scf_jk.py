@@ -46,11 +46,11 @@ def test_jk_hermi1():
     assert abs(vk1 - ref[1]).max() < 1e-9
     assert abs(lib.fp(vj1) - -2327.4715195591784) < 5e-10
     assert abs(lib.fp(vk1) - -4069.3170008260583) < 5e-10
-
+    
     vj = jk.get_j(mol, dm, hermi=1).get()
     assert abs(vj - ref[0]).max() < 1e-9
     assert abs(lib.fp(vj) - -2327.4715195591784) < 5e-10
-
+    
     mol.omega = 0.2
     vj, vk = jk.get_jk(mol, dm, hermi=1)
     vj2 = vj.get()
@@ -73,7 +73,7 @@ def test_jk_hermi1():
 
     assert abs(vj2+vj3 - vj1).max() < 1e-9
     assert abs(vk2+vk3 - vk1).max() < 1e-9
-
+    
 def test_jk_hermi0():
     mol = pyscf.M(
         atom = '''
@@ -99,11 +99,11 @@ def test_jk_hermi0():
     assert abs(vk1 - ref[1]).max() < 5e-10
     assert abs(lib.fp(vj1) - -53.489298042359046) < 5e-10
     assert abs(lib.fp(vk1) - -115.11792498085259) < 5e-10
-
+    
     vj = jk.get_j(mol, dm, hermi=0).get()
     assert abs(vj - ref[0]).max() < 1e-9
     assert abs(lib.fp(vj) - -53.489298042359046) < 5e-10
-
+    
     mol.omega = 0.2
     vj, vk = jk.get_jk(mol, dm, hermi=0)
     vj2 = vj.get()
@@ -126,3 +126,4 @@ def test_jk_hermi0():
 
     assert abs(vj2+vj3 - vj1).max() < 1e-9
     assert abs(vk2+vk3 - vk1).max() < 1e-9
+    

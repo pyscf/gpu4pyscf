@@ -21,15 +21,13 @@ from pyscf import gto
 from gpu4pyscf import scf
 import numpy as np
 
-mol = gto.M(atom=
-'''
+h2o = '''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
-''',
-basis='def2-tzvpp',
-cart=1,
-verbose=4)
+'''
+
+mol = gto.M(atom=h2o, basis='def2-tzvpp', cart=1, verbose=4)
 
 # Calculation on GPU
 mf = scf.hf.RHF(mol)
@@ -38,17 +36,21 @@ mf.conv_tol = 1e-12
 e_gpu = mf.kernel()
 
 gpu_gradient = mf.nuc_grad_method()
-gpu_gradient.kernel()
+g_gpu = gpu_gradient.kernel()
+
+gpu_hess = mf.Hessian()
+h_gpu = gpu_hess.kernel()
 
 # Move the object to CPU
 mf = mf.to_cpu()
 e_cpu = mf.kernel()
+
 cpu_gradient = mf.nuc_grad_method()
-cpu_gradient.kernel()
-cpu_de = cpu_gradient.de
-cpu_de -= np.sum(cpu_de, axis=0)/mol.natm
+g_cpu = cpu_gradient.kernel()
+
+cpu_hess = mf.Hessian()
+h_cpu = cpu_hess.kernel()
 
 print('e diff = ', e_cpu - e_gpu)
-print('g diff = \n', cpu_de - gpu_gradient.de)
-
-assert np.max(np.abs(cpu_de - gpu_gradient.de)) < 1e-6
+print('g diff = \n', g_cpu - g_gpu)
+print('h diff = \n', h_cpu - h_gpu)

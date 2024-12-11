@@ -1022,7 +1022,6 @@ void _rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout8;
     double val;
     double *dm, *vj, *vk;
-
     for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
         __syncthreads();
         int task_id = task0 + sq_id;

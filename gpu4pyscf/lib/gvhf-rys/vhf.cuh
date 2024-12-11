@@ -86,6 +86,8 @@ typedef struct {
     int *tile_ij_mapping;
     int *tile_kl_mapping;
     float *q_cond;
+    float *tile_q_cond;
+    float *s_estimator;
     float *dm_cond;
     float cutoff;
 } BoundsInfo;
