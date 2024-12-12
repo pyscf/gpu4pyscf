@@ -46,6 +46,7 @@ from gpu4pyscf.df import int3c2e, df
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
 from gpu4pyscf.df.grad.rhf import _gen_metric_solver
+from gpu4pyscf.gto.mole import sort_atoms
 
 LINEAR_DEP_THR = df.LINEAR_DEP_THR
 BLKSIZE = 256
@@ -221,9 +222,9 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     cupy.get_default_memory_pool().free_all_blocks()
     #  int3c_ipip1 contributions
-    fn = int3c2e.get_int3c2e_ipip1_hjk
-    hja_ao_diag, hka_ao_diag = fn(intopt, rhoj0_P, rhok0a_P__, dm0a_tag, omega=omega, with_k=with_k)
-    hjb_ao_diag, hkb_ao_diag = fn(intopt, rhoj0_P, rhok0b_P__, dm0b_tag, omega=omega, with_k=with_k)
+    fn = int3c2e.get_int3c2e_hjk
+    hja_ao_diag, hka_ao_diag = fn(intopt, 'ipip1', rhoj0_P, rhok0a_P__, dm0a_tag, omega=omega, with_k=with_k)
+    hjb_ao_diag, hkb_ao_diag = fn(intopt, 'ipip1', rhoj0_P, rhok0b_P__, dm0b_tag, omega=omega, with_k=with_k)
     hj_ao_diag = 2.0 * (hja_ao_diag + hjb_ao_diag)
     if with_k:
         hk_ao_diag = 2.0 * (hka_ao_diag + hkb_ao_diag)
@@ -231,9 +232,9 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     #  int3c_ipvip1 contributions
     # (11|0), (0|00) without response of RI basis
-    fn = int3c2e.get_int3c2e_ipvip1_hjk
-    hja, hka = fn(intopt, rhoj0_P, rhok0a_P__, dm0a_tag, omega=omega, with_k=with_k)
-    hjb, hkb = fn(intopt, rhoj0_P, rhok0b_P__, dm0b_tag, omega=omega, with_k=with_k)
+    fn = int3c2e.get_int3c2e_hjk
+    hja, hka = fn(intopt, 'ipvip1', rhoj0_P, rhok0a_P__, dm0a_tag, omega=omega, with_k=with_k)
+    hjb, hkb = fn(intopt, 'ipvip1', rhoj0_P, rhok0b_P__, dm0b_tag, omega=omega, with_k=with_k)
     hj_ao_ao += 2.0*(hja + hjb)
     if with_k:
         hk_ao_ao += (hka + hkb)
@@ -243,9 +244,9 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     #  int3c_ip1ip2 contributions
     # (10|1), (0|0)(0|00)
     if hessobj.auxbasis_response:
-        fn = int3c2e.get_int3c2e_ip1ip2_hjk
-        hja, hka = fn(intopt, rhoj0_P, rhok0a_P__, dm0a_tag, omega=omega, with_k=with_k)
-        hjb, hkb = fn(intopt, rhoj0_P, rhok0b_P__, dm0b_tag, omega=omega, with_k=with_k)
+        fn = int3c2e.get_int3c2e_hjk
+        hja, hka = fn(intopt, 'ip1ip2', rhoj0_P, rhok0a_P__, dm0a_tag, omega=omega, with_k=with_k)
+        hjb, hkb = fn(intopt, 'ip1ip2', rhoj0_P, rhok0b_P__, dm0b_tag, omega=omega, with_k=with_k)
         hj_ao_aux += hja + hjb
         if with_k:
             hk_ao_aux += hka + hkb
@@ -255,9 +256,9 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     #  int3c_ipip2 contributions
     if hessobj.auxbasis_response > 1:
         # (00|2), (0|0)(0|00)
-        fn = int3c2e.get_int3c2e_ipip2_hjk
-        hja, hka = fn(intopt, rhoj0_P, rhok0a_P__, dm0a_tag, omega=omega, with_k=with_k)
-        hjb, hkb = fn(intopt, rhoj0_P, rhok0b_P__, dm0b_tag, omega=omega, with_k=with_k)
+        fn = int3c2e.get_int3c2e_hjk
+        hja, hka = fn(intopt, 'ipip2', rhoj0_P, rhok0a_P__, dm0a_tag, omega=omega, with_k=with_k)
+        hjb, hkb = fn(intopt, 'ipip2', rhoj0_P, rhok0b_P__, dm0b_tag, omega=omega, with_k=with_k)
         hj_aux_diag = hja + hjb
         if with_k:
             hk_aux_diag = (hka + hkb)
@@ -452,11 +453,14 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
+    natm = mol.natm
     if atmlst is None:
-        atmlst = range(mol.natm)
+        atmlst = range(natm)
 
-    h1aoa = [None] * mol.natm
-    h1aob = [None] * mol.natm
+    nocca, noccb = hessobj.base.nelec
+    nmo = len(mo_occ[0])
+    h1aoa = cupy.empty((natm, 3, nmo, nocca))
+    h1aob = cupy.empty((natm, 3, nmo, noccb))
     for ia, h1, vj1, vk1 in _gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
                                     atmlst, verbose, True):
         h1a, h1b = h1

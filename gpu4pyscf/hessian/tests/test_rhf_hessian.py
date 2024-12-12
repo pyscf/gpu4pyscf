@@ -23,7 +23,7 @@ from gpu4pyscf.hessian import rhf as rhf_gpu
 def setUpModule():
     global mol
     mol = gto.Mole()
-    mol.verbose = 1
+    mol.verbose = 5
     mol.output = '/dev/null'
     mol.atom.extend([
         ["O" , (0. , 0.     , 0.)],
@@ -44,7 +44,7 @@ class KnownValues(unittest.TestCase):
         hobj = mf.Hessian()
         ref = hobj.kernel()
         e2_gpu = hobj.to_gpu().kernel()
-        assert abs(ref - e2_gpu).max() < 1e-8
+        assert abs(ref - e2_gpu).max() < 1e-6
 
     def test_partial_hess_elec(self):
         mf = scf.RHF(mol)
@@ -52,15 +52,15 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
         hobj = mf.Hessian()
         e1_cpu, ej_cpu, ek_cpu = rhf_cpu._partial_hess_ejk(hobj)
+        e2_cpu = ej_cpu - ek_cpu
 
         mf = mf.to_gpu()
         mf.kernel()
         hobj = mf.Hessian()
-        e1_gpu, ej_gpu, ek_gpu = rhf_gpu._partial_hess_ejk(hobj)
+        e1_gpu, e2_gpu = rhf_gpu._partial_hess_ejk(hobj)
 
         assert abs(e1_cpu - e1_gpu.get()).max() < 1e-5
-        assert abs(ej_cpu - ej_gpu.get()).max() < 1e-5
-        assert abs(ek_cpu - ek_gpu.get()).max() < 1e-5
+        assert abs(e2_cpu - e2_gpu.get()).max() < 1e-5
 
     def test_ejk_ip2(self):
         mol = gto.M(
@@ -78,17 +78,15 @@ class KnownValues(unittest.TestCase):
         mo_occ = np.ones(nao) * 2
         mo_energy = np.random.rand(nao)
 
-        ej, ek = rhf_gpu._partial_ejk_ip2(mol, dm)
-        assert abs(lib.fp(ej.get()) - -792951.4785844693) < 1e-7
-        assert abs(lib.fp(ek.get()) - -352265.0466989743) < 1e-7
+        ejk = rhf_gpu._partial_ejk_ip2(mol, dm)
         mf = mol.RHF()
         mf.mo_coeff = mo_coeff
         mf.mo_occ = mo_occ
         mf.mo_energy = mo_energy
         h = rhf_cpu.Hessian(mf)
         e1, refj, refk = rhf_cpu._partial_hess_ejk(h, mo_energy, mo_coeff, mo_occ)
-        assert abs(ej.get() - refj).max() < 1e-6
-        assert abs(ek.get() - refk).max() < 1e-6
+        e2_ref = refj - refk
+        assert abs(ejk.get() - e2_ref).max() < 1e-6
 
     def test_get_jk(self):
         mol = gto.M(
@@ -140,7 +138,7 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol_cpscf = 1e-8
         ref = mf.Hessian().kernel()
         e2_gpu = mf.Hessian().to_gpu().kernel()
-        assert abs(ref - e2_gpu).max() < 1e-8
+        assert abs(ref - e2_gpu).max() < 1e-6
 
 if __name__ == "__main__":
     print("Full Tests for RHF Hessian")

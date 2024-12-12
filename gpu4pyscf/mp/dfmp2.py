@@ -48,10 +48,11 @@ def _dfmp2_tasks(mp, mo_coeff, mo_energy, device_id=0):
 def get_occ_blk(Lov_dist, i, nocc, nvir):
     occ_blk_dist = [None] * _num_devices
     for device_id in range(_num_devices):
-        Lov = Lov_dist[device_id]
-        mat = cupy.dot(Lov[:,i*nvir:(i+1)*nvir].T,
-                        Lov).reshape(nvir,nocc,nvir)
-        occ_blk_dist[device_id] = mat
+        with cupy.cuda.Device(device_id), _streams[device_id]:
+            Lov = Lov_dist[device_id]
+            mat = cupy.dot(Lov[:,i*nvir:(i+1)*nvir].T,
+                            Lov).reshape(nvir,nocc,nvir)
+            occ_blk_dist[device_id] = mat
     occ_blk = reduce_to_device(occ_blk_dist)
     return occ_blk
 

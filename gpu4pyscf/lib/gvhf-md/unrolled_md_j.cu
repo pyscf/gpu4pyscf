@@ -1,3 +1,5 @@
+#include <stdio.h>
+#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/gamma_inc_unrolled.cu"
 
@@ -5016,6 +5018,7 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     dim3 threads(16, 16);
     dim3 blocks;
     int ijkl = lij*9 + lkl;
+
     switch (ijkl) {
     case 0: // lij=0, lkl=0
         blocks.x = (bounds->npairs_ij + 255) / 256;

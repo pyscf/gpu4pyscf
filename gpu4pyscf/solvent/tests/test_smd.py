@@ -282,9 +282,9 @@ H -0.595 -0.476 -0.824
     '''
         _check_smd(atom, 2.1279, solvent='water')
         _check_smd(atom, -0.9778, solvent='toluene')
-
-    # TODO: SMD18 updated radii for Br
     """
+    # TODO: SMD18 updated radii for Br
+    
     def test_Br(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -324,6 +324,7 @@ H -0.646 -0.464 -0.804
         mf = mf.to_cpu()
         e_cpu = mf.kernel()
         assert abs(e_cpu - e_gpu) < 1e-8
+
 if __name__ == "__main__":
     print("Full Tests for SMDs")
     unittest.main()

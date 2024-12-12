@@ -36,12 +36,12 @@ mol = pyscf.M(
     atom=atom,                         # water molecule
     basis='def2-tzvpp',                # basis set
     output='./pyscf.log',              # save log file
-    verbose=6                          # control the level of print info
+    verbose=6                         # control the level of print info
     )
 
 mf_GPU = rks.RKS(                      # restricted Kohn-Sham DFT
     mol,                               # pyscf.gto.object
-    xc='b3lyp'                         # xc funtionals, such as pbe0, wb97m-v, tpss,
+    xc='b3lyp'                        # xc funtionals, such as pbe0, wb97m-v, tpss,
     ).density_fit()                    # density fitting
 
 mf_GPU.grids.atom_grid = (99,590)      # (99,590) lebedev grids, (75,302) is often enough
