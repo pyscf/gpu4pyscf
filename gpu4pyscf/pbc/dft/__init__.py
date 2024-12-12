@@ -20,12 +20,12 @@
 
 from .gen_grid import UniformGrids, BeckeGrids
 from . import rks
-#from . import uks
-#from . import krks
-#from . import kuks
+from . import uks
+from . import krks
+from . import kuks
 from .rks import KohnShamDFT
 
 RKS = rks.RKS
-#UKS = uks.UKS
-#KRKS = krks.KRKS
-#KUKS = kuks.KUKS
+UKS = uks.UKS
+KRKS = krks.KRKS
+KUKS = kuks.KUKS

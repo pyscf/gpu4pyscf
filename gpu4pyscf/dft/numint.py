@@ -455,10 +455,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         excsum = cupy.zeros(nset)
         wv = []
         for i in range(nset):
-            if xctype == 'LDA':
-                exc, vxc = ni.eval_xc_eff(xc_code, rho_tot[i][0], deriv=1, xctype=xctype)[:2]
-            else:
-                exc, vxc = ni.eval_xc_eff(xc_code, rho_tot[i], deriv=1, xctype=xctype)[:2]
+            exc, vxc = ni.eval_xc_eff(xc_code, rho_tot[i], deriv=1, xctype=xctype)[:2]
             vxc = cupy.asarray(vxc, order='C')
             exc = cupy.asarray(exc, order='C')
             den = rho_tot[i][0] * weights
@@ -1401,18 +1398,15 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None
     '''
     Different from PySCF, this function employ cuda version libxc
     '''
-    if xctype == 'LDA':
-        spin_polarized = rho.ndim >= 2
-    else:
-        spin_polarized = rho.ndim == 3
-
     if omega is None: omega = ni.omega
     if xctype is None: xctype = ni._xc_type(xc_code)
 
+    spin_polarized = rho.ndim >= 2 and rho.shape[0] == 2
     xcfuns = ni._init_xcfuns(xc_code, spin_polarized)
 
     inp = {}
     if not spin_polarized:
+        assert rho.dtype == np.float64
         if xctype == 'LDA':
             inp['rho'] = rho
         if xctype == 'GGA':
@@ -1423,8 +1417,9 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None
             inp['sigma'] = batch_square(rho[1:4])
             inp['tau'] = rho[-1]     # can be 4 (without laplacian) or 5 (with laplacian)
     else:
+        assert rho[0].dtype == np.float64
         if xctype == 'LDA':
-            inp['rho'] = cupy.stack([rho[0], rho[1]], axis=1)
+            inp['rho'] = cupy.stack([rho[0].ravel(), rho[1].ravel()], axis=1)
         if xctype == 'GGA':
             inp['rho'] = cupy.stack([rho[0,0], rho[1,0]], axis=1)
             sigma0 = batch_square(rho[0,1:4])
@@ -1535,7 +1530,6 @@ def _sparse_index(mol, coords, l_ctr_offsets):
     ctr_offsets_slice = cumsum[glob_ctr_offsets-1]
     ctr_offsets_slice[0] = 0
 
-    from pyscf import gto
     gto_type = 'cart' if mol.cart else 'sph'
     non0shl_idx = non0shl_idx == 1
     ao_loc_slice = gto.moleintor.make_loc(mol._bas[non0shl_idx,:], gto_type)

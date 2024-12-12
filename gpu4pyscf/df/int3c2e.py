@@ -1620,7 +1620,6 @@ def get_int3c2e(mol, auxmol=None, auxbasis='weigend+etb', direct_scf_tol=1e-13, 
     '''
     if auxmol is None:
         auxmol = df.addons.make_auxmol(mol, auxbasis)
-    assert(aosym)
 
     nao = mol.nao
     naux = auxmol.nao
@@ -1645,8 +1644,9 @@ def get_int3c2e(mol, auxmol=None, auxbasis='weigend+etb', direct_scf_tol=1e-13, 
             int3c_slice = cart2sph(int3c_slice, axis=1, ang=lj)
             int3c_slice = cart2sph(int3c_slice, axis=2, ang=li)
         int3c[:, j0:j1, i0:i1] = int3c_slice
-    row, col = np.tril_indices(nao)
-    int3c[:, row, col] = int3c[:, col, row]
+    if aosym:
+        row, col = np.tril_indices(nao)
+        int3c[:, row, col] = int3c[:, col, row]
     int3c = intopt.unsort_orbitals(int3c, aux_axis=[0], axis=[1,2])
     return int3c.transpose([2,1,0])
 

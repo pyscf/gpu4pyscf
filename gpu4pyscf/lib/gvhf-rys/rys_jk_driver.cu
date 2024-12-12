@@ -25,9 +25,11 @@ extern __global__ void rys_sr_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsI
                                      ShellQuartet *pool, uint32_t *batch_head);
 extern __global__ void rys_jk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                          ShellQuartet *pool, uint32_t *batch_head);
-extern __global__ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+extern __global__ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                           ShellQuartet *pool, uint32_t *batch_head);
-extern __global__ void rys_ejk_ip2_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+extern __global__ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+                                          ShellQuartet *pool, uint32_t *batch_head);
+extern __global__ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                           ShellQuartet *pool, uint32_t *batch_head);
 extern int rys_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head,
@@ -41,11 +43,13 @@ extern int rys_sr_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bou
 extern int os_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head,
                     int *scheme, int workers, double omega);
-extern int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
 extern int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
-extern int rys_ejk_ip2_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
+extern int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
+                    ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
+extern int rys_ejk_ip2_type12_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
+                    ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
+extern int rys_ejk_ip2_type3_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
 
 extern "C" {
@@ -247,13 +251,14 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in RYS_build_jk: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in RYS_build_jk_ip1: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
 }
 
-int RYS_per_atom_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao,
+int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
+                        double *dm, int n_dm, int nao,
                         RysIntEnvVars envs, int *scheme, int *shls_slice,
                         int ntile_ij_pairs, int ntile_kl_pairs,
                         int *tile_ij_mapping, int *tile_kl_mapping, float *tile_q_cond,
@@ -294,7 +299,12 @@ int RYS_per_atom_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao,
         ntile_ij_pairs, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
         q_cond, tile_q_cond, s_estimator, dm_cond, cutoff};
 
-    JKMatrix jk = {vj, vk, dm, (uint16_t)n_dm};
+    if (n_dm == 1) { // RHF
+        k_factor *= .5;
+    }
+    // *4 for the symmetry (i,j) = (j,i), (k,l) = (l,k) in J contraction
+    // Additional factor 1/2 from the two-electron Coulomb operator
+    JKEnergy jk = {ejk, dm, 2.*j_factor, -k_factor, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(int));
 
     if (!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
@@ -303,17 +313,19 @@ int RYS_per_atom_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao,
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;
+        buflen = MAX(buflen, 9*gout_stride*quartets_per_block);
         rys_ejk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in RYS_build_jk: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in RYS_ejk_ip1: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
 }
 
-int RYS_per_atom_jk_ip2(double *vj, double *vk, double *dm, int n_dm, int nao,
+int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
+                        double *dm, int n_dm, int nao,
                         RysIntEnvVars envs, int *scheme, int *shls_slice,
                         int ntile_ij_pairs, int ntile_kl_pairs,
                         int *tile_ij_mapping, int *tile_kl_mapping, float *tile_q_cond,
@@ -354,20 +366,92 @@ int RYS_per_atom_jk_ip2(double *vj, double *vk, double *dm, int n_dm, int nao,
         ntile_ij_pairs, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
         q_cond, tile_q_cond, s_estimator, dm_cond, cutoff};
 
-    JKMatrix jk = {vj, vk, dm, (uint16_t)n_dm};
+    if (n_dm > 1) { // UHF
+        k_factor *= 2.;
+    }
+    // *4 for the symmetry (i,j) = (j,i), (k,l) = (l,k) in J contraction
+    // Additional factor 1/2 from the two-electron Coulomb operator
+    JKEnergy jk = {ejk, dm, 4.*j_factor, -k_factor, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(int));
 
-    if (!rys_ejk_ip2_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
+    if (!rys_ejk_ip2_type12_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;
-        rys_ejk_ip2_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+        rys_ejk_ip2_type12_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in RYS_build_jk: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in RYS_ejk_ip2_type12: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
+                        double *dm, int n_dm, int nao,
+                        RysIntEnvVars envs, int *scheme, int *shls_slice,
+                        int ntile_ij_pairs, int ntile_kl_pairs,
+                        int *tile_ij_mapping, int *tile_kl_mapping, float *tile_q_cond,
+                        float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
+                        ShellQuartet *pool, uint32_t *batch_head, int workers,
+                        int *atm, int natm, int *bas, int nbas, double *env)
+{
+    uint16_t ish0 = shls_slice[0];
+    uint16_t jsh0 = shls_slice[2];
+    uint16_t ksh0 = shls_slice[4];
+    uint16_t lsh0 = shls_slice[6];
+    uint8_t li = bas[ANG_OF + ish0*BAS_SLOTS];
+    uint8_t lj = bas[ANG_OF + jsh0*BAS_SLOTS];
+    uint8_t lk = bas[ANG_OF + ksh0*BAS_SLOTS];
+    uint8_t ll = bas[ANG_OF + lsh0*BAS_SLOTS];
+    uint8_t iprim = bas[NPRIM_OF + ish0*BAS_SLOTS];
+    uint8_t jprim = bas[NPRIM_OF + jsh0*BAS_SLOTS];
+    uint8_t kprim = bas[NPRIM_OF + ksh0*BAS_SLOTS];
+    uint8_t lprim = bas[NPRIM_OF + lsh0*BAS_SLOTS];
+    uint8_t nfi = (li+1)*(li+2)/2;
+    uint8_t nfj = (lj+1)*(lj+2)/2;
+    uint8_t nfk = (lk+1)*(lk+2)/2;
+    uint8_t nfl = (ll+1)*(ll+2)/2;
+    uint8_t nfij = nfi * nfj;
+    uint8_t nfkl = nfk * nfl;
+    uint8_t order = li + lj + lk + ll;
+    uint8_t nroots = (order + 2) / 2 + 1;
+    double omega = env[PTR_RANGE_OMEGA];
+    if (omega < 0) { // SR ERIs
+        nroots *= 2;
+    }
+    uint8_t stride_j = li + 2;
+    uint8_t stride_k = stride_j * (lj + 2);
+    uint8_t stride_l = stride_k * (lk + 2);
+    int g_size = stride_l * (uint16_t)(ll + 2);
+    BoundsInfo bounds = {li, lj, lk, ll, nfi, nfk, nfij, nfkl,
+        nroots, stride_j, stride_k, stride_l, iprim, jprim, kprim, lprim,
+        ntile_ij_pairs, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
+        q_cond, tile_q_cond, s_estimator, dm_cond, cutoff};
+
+    if (n_dm > 1) { // UHF
+        k_factor *= 2.;
+    }
+    // *4 for the symmetry (i,j) = (j,i), (k,l) = (l,k) in J contraction
+    // Additional factor 1/2 from the two-electron Coulomb operator
+    JKEnergy jk = {ejk, dm, 4.*j_factor, -k_factor, (uint16_t)n_dm};
+    cudaMemset(batch_head, 0, 2*sizeof(int));
+
+    if (!rys_ejk_ip2_type3_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
+        int quartets_per_block = scheme[0];
+        int gout_stride = scheme[1];
+        int ij_prims = iprim * jprim;
+        dim3 threads(quartets_per_block, gout_stride);
+        int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;
+        buflen = MAX(buflen, 9*gout_stride*quartets_per_block);
+        rys_ejk_ip2_type3_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+    }
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in RYS_ejk_ip2_type3: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
@@ -384,7 +468,8 @@ void RYS_init_constant(int *g_pair_idx, int *offsets,
     cudaFuncSetAttribute(rys_sr_jk_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_jk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaFuncSetAttribute(rys_ejk_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(rys_ejk_ip2_type12_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(rys_ejk_ip2_type3_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
 }
 
 void RYS_init_rysj_constant(int shm_size)

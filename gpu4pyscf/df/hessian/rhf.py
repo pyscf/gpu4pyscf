@@ -42,6 +42,7 @@ from gpu4pyscf.df import int3c2e, df
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
 from gpu4pyscf.df.grad.rhf import _gen_metric_solver
+from gpu4pyscf.gto.mole import sort_atoms
 
 LINEAR_DEP_THR = df.LINEAR_DEP_THR
 BLKSIZE = 128
@@ -430,7 +431,10 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
-    h1ao = [None] * mol.natm
+    natm = mol.natm
+    nocc = int(cupy.count_nonzero(mo_occ > 0))
+    nmo = len(mo_occ)
+    h1ao = cupy.empty((natm, 3, nmo, nocc))
     for ia, h1, vj1, vk1 in _gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
                                     atmlst, verbose, True):
         h1 += vj1 - vk1 * .5
