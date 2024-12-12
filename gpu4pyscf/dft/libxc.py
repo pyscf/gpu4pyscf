@@ -29,6 +29,8 @@ from gpu4pyscf.dft import libxc_structs
 
 import site
 path_list = [os.path.abspath(os.path.join(__file__, '..', '..', '..'))] + site.getsitepackages()
+path_list.append(site.USER_SITE)    # Search for the directory where user-specific packages are installed
+
 __version__ = '6.1' # hard coded
 
 # CPU routines
