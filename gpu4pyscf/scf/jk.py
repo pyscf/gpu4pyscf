@@ -442,10 +442,15 @@ class _VHFOpt:
         self.direct_scf_tol = cutoff
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
-        #self.q_cond = None
-        #self.tile_q_cond = None
         self.h_shls = None
         self.tile = TILE
+
+        # Hold cache on GPU devices
+        self._rys_envs = {}
+        self._mol_gpu = {}
+        self._q_cond = {}
+        self._tile_q_cond = {}
+        self._s_estimator = {}
 
     def build(self, group_size=None, verbose=None):
         mol = self.mol
@@ -524,12 +529,8 @@ class _VHFOpt:
             self.h_shls = []
 
         nbas = mol.nbas
-        #buf_size = nbas**2
         if tile > 1:
             ntiles = nbas // tile
-            #buf_size += ntiles**2
-        #if mol.omega < 0:
-            #buf_size += nbas**2
 
         ao_loc = mol.ao_loc
         q_cond = np.empty((nbas,nbas))
@@ -558,12 +559,6 @@ class _VHFOpt:
             self.s_estimator_cpu = s_estimator
         log.timer('Initialize q_cond', *cput0)
         
-        # Hold cache on GPU devices
-        self._rys_envs = {}
-        self._mol_gpu = {}
-        self._q_cond = {}
-        self._tile_q_cond = {}
-        self._s_estimator = {}
         return self
     
     @property

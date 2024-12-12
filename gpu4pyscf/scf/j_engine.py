@@ -194,10 +194,15 @@ class _VHFOpt(jk._VHFOpt):
         self.direct_scf_tol = cutoff
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
-        #self.q_cond = None
-        #self.tile_q_cond = None
         self.tile = 1
 
+        # Hold cache on GPU devices
+        self._rys_envs = {}
+        self._mol_gpu = {}
+        self._q_cond = {}
+        self._tile_q_cond = {}
+        self._s_estimator = {}
+        
 def _md_j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ls = l_ctr_pattern[:,0]
     li, lj, lk, ll = ls
