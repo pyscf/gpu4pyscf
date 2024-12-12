@@ -18,15 +18,13 @@
 from functools import reduce
 import numpy as np
 import cupy
-from pyscf.scf import uhf
-from pyscf import lib as pyscf_lib
+from pyscf.scf import uhf as uhf_cpu
 from pyscf import __config__
 
 from gpu4pyscf.scf.hf import eigh, damping, level_shift
 from gpu4pyscf.scf import hf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import tag_array
-from gpu4pyscf.scf import diis
 
 def make_rdm1(mo_coeff, mo_occ, **kwargs):
     '''One-particle density matrix in AO representation
@@ -205,6 +203,7 @@ class UHF(hf.SCF):
     @property
     def nelectron_alpha(self):
         return self.nelec[0]
+    
     @nelectron_alpha.setter
     def nelectron_alpha(self, x):
         logger.warn(self, 'WARN: Attribute .nelectron_alpha is deprecated. '
@@ -215,10 +214,8 @@ class UHF(hf.SCF):
     def dump_flags(self, verbose=None):
         return
 
-    get_jk = hf._get_jk
-    _eigh = staticmethod(eigh)
     get_fock = get_fock
-    get_occ = uhf.get_occ
+    get_occ = uhf_cpu.get_occ
 
     def get_grad(self, mo_coeff, mo_occ, fock=None):
         if fock is None:
@@ -226,47 +223,29 @@ class UHF(hf.SCF):
             fock = self.get_hcore(self.mol) + self.get_veff(self.mol, dm1)
         return get_grad(mo_coeff, mo_occ, fock)
 
-    make_asym_dm       = NotImplemented
+    make_asym_dm             = NotImplemented
     make_rdm2                = NotImplemented
     energy_elec              = energy_elec
-    get_init_guess           = hf.return_cupy_array(uhf.UHF.get_init_guess)
-    init_guess_by_minao      = uhf.UHF.init_guess_by_minao
-    init_guess_by_atom       = uhf.UHF.init_guess_by_atom
-    init_guess_by_huckel     = uhf.UHF.init_guess_by_huckel
-    init_guess_by_mod_huckel = uhf.UHF.init_guess_by_mod_huckel
-    init_guess_by_1e         = uhf.UHF.init_guess_by_1e
-    init_guess_by_chkfile    = uhf.UHF.init_guess_by_chkfile
-    _finalize          = uhf.UHF._finalize
+    canonicalize             = canonicalize
+    
+    get_init_guess           = hf.return_cupy_array(uhf_cpu.UHF.get_init_guess)
+    init_guess_by_minao      = uhf_cpu.UHF.init_guess_by_minao
+    init_guess_by_atom       = uhf_cpu.UHF.init_guess_by_atom
+    init_guess_by_huckel     = uhf_cpu.UHF.init_guess_by_huckel
+    init_guess_by_mod_huckel = uhf_cpu.UHF.init_guess_by_mod_huckel
+    init_guess_by_1e         = uhf_cpu.UHF.init_guess_by_1e
+    init_guess_by_chkfile    = uhf_cpu.UHF.init_guess_by_chkfile
+    _finalize                = uhf_cpu.UHF._finalize
 
-    conv_tol_cpscf = 1e-4
-    DIIS = diis.SCF_DIIS
-    #get_jk = _get_jk
-
-    get_hcore = hf.RHF.get_hcore
-    get_ovlp = hf.RHF.get_ovlp
-    get_init_guess = hf.return_cupy_array(uhf.UHF.get_init_guess)
-    density_fit = hf.RHF.density_fit
-    energy_tot = hf.RHF.energy_tot
-    energy_elec = energy_elec
-    canonicalize = canonicalize
-
-    make_rdm2 = NotImplemented
-    x2c = x2c1e = sfx2c1e = NotImplemented
-    to_rhf = NotImplemented
-    to_uhf = NotImplemented
-    to_ghf = NotImplemented
-    to_rks = NotImplemented
-    to_uks = NotImplemented
-    to_gks = NotImplemented
-    to_ks = NotImplemented
     # TODO: Enable followings after testing
-    analyze = NotImplemented
-    stability = NotImplemented
-    mulliken_pop = NotImplemented
-    mulliken_spin_pop = NotImplemented
-    mulliken_meta = NotImplemented
-    mulliken_meta_spin = NotImplemented
-    det_ovlp = NotImplemented
+    analyze                 = NotImplemented
+    stability               = NotImplemented
+    mulliken_spin_pop       = NotImplemented
+    mulliken_meta_spin      = NotImplemented
+    det_ovlp                = NotImplemented
+
+    density_fit             = hf.RHF.density_fit
+    newton                  = hf.RHF.newton
 
     def make_rdm1(self, mo_coeff=None, mo_occ=None, **kwargs):
         if mo_coeff is None:
@@ -297,9 +276,6 @@ class UHF(hf.SCF):
             vhf += cupy.asarray(vhf_last)
         return vhf
 
-    scf = hf.scf
-    kernel = pyscf_lib.alias(scf, alias_name='kernel')
-
     def spin_square(self, mo_coeff=None, s=None):
         if mo_coeff is None:
             mo_coeff = (self.mo_coeff[0][:,self.mo_occ[0]>0],
@@ -312,12 +288,8 @@ class UHF(hf.SCF):
         from gpu4pyscf.grad import uhf
         return uhf.Gradients(self)
 
-    def newton(self):
-        from gpu4pyscf.scf.soscf import newton
-        return newton(self)
-
     def to_cpu(self):
         from gpu4pyscf.lib import utils
-        mf = uhf.UHF(self.mol)
+        mf = uhf_cpu.UHF(self.mol)
         utils.to_cpu(self, mf)
         return mf
