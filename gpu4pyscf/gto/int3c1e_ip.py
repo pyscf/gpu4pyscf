@@ -126,8 +126,6 @@ def get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, int
     omega = mol.omega
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
-    nao = mol.nao
-
     charges = cp.asarray(charges).reshape([-1, 1], order='C')
     grids = cp.concatenate([grids, charges], axis=1)
 
