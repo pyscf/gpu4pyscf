@@ -92,10 +92,9 @@ static void GINTfill_int3c1e_kernel_general(double* output, const BasisProdOffse
     }
 }
 
-
 template <int NROOTS>
 __device__
-static void GINTwrite_int3c1e_charge_contracted(const double* g, double* local_output, double prefactor, const int i_l, const int j_l)
+static void GINTwrite_int3c1e_charge_contracted(const double* g, double* local_output, const double prefactor, const int i_l, const int j_l)
 {
     const int *idx = c_idx;
     const int *idy = c_idx + TOT_NF;
@@ -170,8 +169,8 @@ static void GINTfill_int3c1e_charge_contracted_kernel_general(double* output, co
 
     const int* ao_loc = c_bpcache.ao_loc;
 
-    const int i0 = ao_loc[ish  ] - ao_offsets_i;
-    const int j0 = ao_loc[jsh  ] - ao_offsets_j;
+    const int i0 = ao_loc[ish] - ao_offsets_i;
+    const int j0 = ao_loc[jsh] - ao_offsets_j;
     for (int j = 0; j < (j_l + 1) * (j_l + 2) / 2; j++) {
         for (int i = 0; i < (i_l + 1) * (i_l + 2) / 2; i++) {
             const double eri_grid_sum = output_cache[i + j * ((i_l + 1) * (i_l + 2) / 2)];

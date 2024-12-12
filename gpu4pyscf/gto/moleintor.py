@@ -18,7 +18,7 @@ import cupy as cp
 import numpy as np
 
 from gpu4pyscf.gto.int3c1e import VHFOpt, get_int3c1e, get_int3c1e_density_contracted, get_int3c1e_charge_contracted
-from gpu4pyscf.gto.int3c1e_ip import get_int3c1e_ip
+from gpu4pyscf.gto.int3c1e_ip import get_int3c1e_ip, get_int3c1e_ip_contracted
 
 def intor(mol, intor, grids, charge_exponents=None, dm=None, charges=None, direct_scf_tol=1e-13, intopt=None):
     assert grids is not None
@@ -52,6 +52,8 @@ def intor(mol, intor, grids, charge_exponents=None, dm=None, charges=None, direc
         if dm is None and charges is None:
             return get_int3c1e_ip(mol, grids, charge_exponents, intopt)
         else:
-            raise NotImplementedError()
+            assert dm is not None
+            assert charges is not None
+            return get_int3c1e_ip_contracted(mol, grids, charge_exponents, dm, charges, intopt)
     else:
         raise NotImplementedError(f"GPU intor {intor} is not implemented.")

@@ -29,7 +29,6 @@ from gpu4pyscf.__config__ import _num_devices, _streams
 
 BLKSIZE = 128
 
-libgvhf = load_library('libgvhf')
 libgint = load_library('libgint')
 
 class VHFOpt(_vhf.VHFOpt):
@@ -58,7 +57,7 @@ class VHFOpt(_vhf.VHFOpt):
     def clear(self):
         _vhf.VHFOpt.__del__(self)
         for n, bpcache in self._bpcache.items():
-            libgvhf.GINTdel_basis_prod(ctypes.byref(bpcache))
+            libgint.GINTdel_basis_prod(ctypes.byref(bpcache))
         return self
 
     def __del__(self):
@@ -296,7 +295,7 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
 
-    int1e = cp.zeros([mol.nao, mol.nao], order='C')
+    int1e_charge_contracted = cp.zeros([mol.nao, mol.nao], order='C')
     for cp_ij_id, _ in enumerate(intopt.log_qs):
         cpi = intopt.cp_idx[cp_ij_id]
         cpj = intopt.cp_jdx[cp_ij_id]
@@ -355,14 +354,14 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
             int1e_angular_slice = cart2sph(int1e_angular_slice, axis=0, ang=lj)
             int1e_angular_slice = cart2sph(int1e_angular_slice, axis=1, ang=li)
 
-        int1e[j0:j1, i0:i1] = int1e_angular_slice
+        int1e_charge_contracted[j0:j1, i0:i1] = int1e_angular_slice
 
     row, col = np.tril_indices(nao)
-    int1e[row, col] = int1e[col, row]
+    int1e_charge_contracted[row, col] = int1e_charge_contracted[col, row]
     ao_idx = np.argsort(intopt._ao_idx)
-    int1e = int1e[np.ix_(ao_idx, ao_idx)]
+    int1e_charge_contracted = int1e_charge_contracted[np.ix_(ao_idx, ao_idx)]
 
-    return int1e
+    return int1e_charge_contracted
 
 def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
     omega = mol.omega
@@ -397,7 +396,7 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
 
     n_total_hermite_density = intopt.density_offset[-1]
     dm_pair_ordered = np.zeros(n_total_hermite_density)
-    libgvhf.GINTinit_J_density_rys_preprocess(dm.ctypes.data_as(ctypes.c_void_p),
+    libgint.GINTinit_J_density_rys_preprocess(dm.ctypes.data_as(ctypes.c_void_p),
                                               dm_pair_ordered.ctypes.data_as(ctypes.c_void_p),
                                               ctypes.c_int(1), ctypes.c_int(nao_cart), ctypes.c_int(len(intopt.bas_pairs_locs) - 1),
                                               intopt.bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
@@ -405,7 +404,8 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
                                               l_ij.ctypes.data_as(ctypes.c_void_p),
                                               intopt.density_offset.ctypes.data_as(ctypes.c_void_p),
                                               ao_loc_sorted_order.ctypes.data_as(ctypes.c_void_p),
-                                              bas_coords.ctypes.data_as(ctypes.c_void_p))
+                                              bas_coords.ctypes.data_as(ctypes.c_void_p),
+                                              ctypes.c_bool(True))
 
     dm_pair_ordered = cp.asarray(dm_pair_ordered)
 
