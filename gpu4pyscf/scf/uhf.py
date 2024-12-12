@@ -226,6 +226,8 @@ class UHF(hf.SCF):
     make_asym_dm             = NotImplemented
     make_rdm2                = NotImplemented
     energy_elec              = energy_elec
+    canonicalize             = canonicalize
+    
     get_init_guess           = hf.return_cupy_array(uhf_cpu.UHF.get_init_guess)
     init_guess_by_minao      = uhf_cpu.UHF.init_guess_by_minao
     init_guess_by_atom       = uhf_cpu.UHF.init_guess_by_atom

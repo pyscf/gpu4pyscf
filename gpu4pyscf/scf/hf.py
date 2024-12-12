@@ -449,7 +449,6 @@ class SCF(pyscf_lib.StreamObject):
     stability                = NotImplemented
     nuc_grad_method          = NotImplemented
     update_                  = NotImplemented
-    canonicalize             = NotImplemented
     istype                   = hf_cpu.SCF.istype
     to_rhf                   = NotImplemented
     to_uhf                   = NotImplemented
