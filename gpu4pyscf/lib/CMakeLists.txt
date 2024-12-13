@@ -149,6 +149,7 @@ endif()
 
 add_subdirectory(gvhf-rys)
 add_subdirectory(gvhf-md)
+add_subdirectory(pbc)
 
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
