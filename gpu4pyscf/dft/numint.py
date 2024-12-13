@@ -398,7 +398,7 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     return exc,vxc
 
 def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, 
-                 verbose=None, with_lapl=False, grid_range=(), device_id=0):
+                 verbose=None, with_lapl=False, grid_range=(), device_id=0, hermi=1):
     ''' nr_rks task on given device
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -441,8 +441,9 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             for i in range(nset):
                 if mo_coeff is None:
                     rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms[i][idx[:,None],idx], 
-                                                xctype=xctype, hermi=1, with_lapl=with_lapl)
+                                                xctype=xctype, hermi=hermi, with_lapl=with_lapl)
                 else:
+                    assert hermi == 1
                     mo_coeff_mask = mo_coeff[idx,:]
                     rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, 
                                                 None, xctype, with_lapl)
@@ -522,7 +523,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             future = executor.submit(
                 _nr_rks_task,
                 ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
-                verbose=verbose, device_id=device_id)
+                verbose=verbose, device_id=device_id, hermi=hermi)
             futures.append(future)
     vmat_dist = []
     nelec_dist = []
@@ -692,6 +693,7 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     _sorted_mol, ao_mask, dms[i][idx[:,None],idx], 
                     xctype=xctype, hermi=1)
             else:
+                assert hermi == 1
                 mo_coeff_mask = mo_coeff[idx,:]
                 rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, 
                                                mo_occ, None, xctype)
@@ -787,7 +789,7 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     return nelec, excsum, vmat
 
 def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
-                verbose=None, with_lapl=False, grid_range=(), device_id=0):
+                verbose=None, with_lapl=False, grid_range=(), device_id=0, hermi=1):
     ''' nr_uks task on one device
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -827,8 +829,8 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             for i in range(nset):
                 t0 = log.init_timer()
                 if mo_coeff is None:
-                    rho_a = eval_rho(_sorted_mol, ao_mask, dma[i][idx[:,None],idx], xctype=xctype, hermi=1)
-                    rho_b = eval_rho(_sorted_mol, ao_mask, dmb[i][idx[:,None],idx], xctype=xctype, hermi=1)
+                    rho_a = eval_rho(_sorted_mol, ao_mask, dma[i][idx[:,None],idx], xctype=xctype, hermi=hermi)
+                    rho_b = eval_rho(_sorted_mol, ao_mask, dmb[i][idx[:,None],idx], xctype=xctype, hermi=hermi)
                 else:
                     mo_coeff_mask = mo_coeff[:, idx,:]
                     rho_a = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype)
@@ -910,7 +912,7 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             future = executor.submit(
                 _nr_uks_task,
                 ni, mol, grids, xc_code, (dma,dmb), mo_coeff, mo_occ,
-                verbose=verbose, device_id=device_id)
+                verbose=verbose, device_id=device_id, hermi=hermi)
             futures.append(future)
 
     vmata_dist = []

@@ -20,12 +20,15 @@ import numpy as np
 import cupy as cp
 import cupy
 import numpy
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pyscf import lib, gto
 from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.hf import KohnShamDFT
-from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, sandwich_dot
+from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, sandwich_dot, reduce_to_device
 from gpu4pyscf.__config__ import props as gpu_specs
+from gpu4pyscf.__config__ import _streams, _num_devices
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.jk import (
@@ -40,53 +43,44 @@ __all__ = [
     'Grad'
 ]
 
-def _jk_energy_per_atom(mol, dm, vhfopt=None,
-                        j_factor=1., k_factor=1., verbose=None):
-    ''' Computes the first-order derivatives of the energy per atom for
-        j_factor * J_derivatives - k_factor * K_derivatives
-    '''
-    log = logger.new_logger(mol, verbose)
-    cput0 = t1 = log.init_timer()
-    if vhfopt is None:
-        vhfopt = _VHFOpt(mol).build()
-
-    mol = vhfopt.mol
-    nao, nao_orig = vhfopt.coeff.shape
-
-    dm = cp.asarray(dm, order='C')
-    dms = dm.reshape(-1,nao_orig,nao_orig)
+def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
+                 device_id=0, verbose=0):
     n_dm = dms.shape[0]
-    #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = sandwich_dot(dms, vhfopt.coeff.T)
-    dms = cp.asarray(dms, order='C')
     assert n_dm <= 2
-
-    ejk = cp.zeros((mol.natm, 3))
-    init_constant(mol)
-    ao_loc = mol.ao_loc
-    dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-    log_max_dm = dm_cond.max()
-    log_cutoff = math.log(vhfopt.direct_scf_tol)
-
+    nao, _ = vhfopt.coeff.shape
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
-    assert uniq_l.max() <= LMAX
     l_ctr_bas_loc = vhfopt.l_ctr_offsets
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
-    n_groups = len(uniq_l_ctr)
-    tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
-                                             log_cutoff-log_max_dm)
-    workers = gpu_specs['multiProcessorCount']
-    pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
-    info = cp.empty(2, dtype=np.uint32)
-    t1 = log.timer_debug1('dm_cond', *t1)
-
-    timing_collection = {}
-    kern_counts = 0
     kern = libvhf_rys.RYS_per_atom_jk_ip1
 
-    for i in range(n_groups):
-        for j in range(i+1):
+    timing_counter = Counter()
+    kern_counts = 0
+    with cp.cuda.Device(device_id), _streams[device_id]:
+        log = logger.new_logger(mol, verbose)
+        cput0 = log.init_timer()
+        dms = cp.asarray(dms)
+
+        tile_q_ptr = ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p)
+        q_ptr = ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p)
+        s_ptr = lib.c_null_ptr()
+        if mol.omega < 0:
+            s_ptr = ctypes.cast(vhfopt.s_estimator.data.ptr, ctypes.c_void_p)
+
+        ejk = cp.zeros((mol.natm, 3))
+
+        ao_loc = mol.ao_loc
+        dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
+        log_max_dm = dm_cond.max()
+        log_cutoff = math.log(vhfopt.direct_scf_tol)
+        tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
+                                                 log_cutoff-log_max_dm)
+        workers = gpu_specs['multiProcessorCount']
+        pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
+        info = cp.empty(2, dtype=np.uint32)
+        t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
+
+        for i, j in task_list:
             ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
                        l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
             tile_ij_mapping = tile_mappings[i,j]
@@ -108,8 +102,7 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
                         ctypes.c_int(tile_kl_mapping.size),
                         ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
                         ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p),
+                        tile_q_ptr, q_ptr, s_ptr,
                         ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                         ctypes.c_float(log_cutoff),
                         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
@@ -120,16 +113,72 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
                     if err != 0:
                         raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
                     if log.verbose >= logger.DEBUG1:
-                        t1, t1p = log.timer_debug1(f'processing {llll}, tasks = {info[1]}', *t1), t1
-                        if llll not in timing_collection:
-                            timing_collection[llll] = 0
-                        timing_collection[llll] += t1[1] - t1p[1]
+                        msg = f'processing {llll}, tasks = {info[1].get()} on Device {device_id}'
+                        t1, t1p = log.timer_debug1(msg, *t1), t1
+                        timing_counter[llll] += t1[1] - t1p[1]
                         kern_counts += 1
+    return ejk, kern_counts, timing_counter
+
+def _jk_energy_per_atom(mol, dm, vhfopt=None, 
+                        j_factor=1., k_factor=1., verbose=None):
+    ''' Computes the first-order derivatives of the energy per atom for
+        j_factor * J_derivatives - k_factor * K_derivatives
+    '''
+    log = logger.new_logger(mol, verbose)
+    cput0 = log.init_timer()
+    if vhfopt is None:
+        vhfopt = _VHFOpt(mol).build()
+
+    mol = vhfopt.mol
+    nao, nao_orig = vhfopt.coeff.shape
+
+    dm = cp.asarray(dm, order='C')
+    dms = dm.reshape(-1,nao_orig,nao_orig)
+
+    #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
+    dms = sandwich_dot(dms, vhfopt.coeff.T)
+    dms = cp.asarray(dms, order='C')
+
+    init_constant(mol)
+
+    uniq_l_ctr = vhfopt.uniq_l_ctr
+    uniq_l = uniq_l_ctr[:,0]
+    assert uniq_l.max() <= LMAX
+
+    n_groups = len(uniq_l_ctr)
+    tasks = [(i,j) for i in range(n_groups) for j in range(i+1)]
+    tasks = np.array(tasks)
+    task_list = []
+    for device_id in range(_num_devices):
+        task_list.append(tasks[device_id::_num_devices])
+
+    cp.cuda.get_current_stream().synchronize()
+    futures = []
+    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
+        for device_id in range(_num_devices):
+            future = executor.submit(
+                _ejk_ip1_task,
+                mol, dms, vhfopt, task_list[device_id],
+                j_factor=j_factor, k_factor=k_factor, verbose=verbose, 
+                device_id=device_id)
+            futures.append(future)
+
+    kern_counts = 0
+    timing_collection = Counter()
+    ejk_dist = []
+    for future in futures:
+        ejk, counts, counter = future.result()
+        kern_counts += counts
+        timing_collection += counter
+        ejk_dist.append(ejk)
 
     if log.verbose >= logger.DEBUG1:
         log.debug1('kernel launches %d', kern_counts)
         for llll, t in timing_collection.items():
             log.debug1('%s wall time %.2f', llll, t)
+
+    ejk = reduce_to_device(ejk_dist, inplace=True)
+
     log.timer_debug1('grad jk energy', *cput0)
     return ejk
 
