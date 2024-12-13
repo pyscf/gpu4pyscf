@@ -90,6 +90,11 @@ def p2p_transfer(a, b):
         a[:] = b
     elif _p2p_access:
         a[:] = b
+    elif a.strides == b.strides and a.flags.c_contiguous and a.dtype == b.dtype:
+        # cupy supports a direct copy from different devices without p2p. See also
+        # https://github.com/cupy/cupy/blob/v13.3.0/cupy/_core/_routines_indexing.pyx#L48
+        # https://github.com/cupy/cupy/blob/v13.3.0/cupy/_core/_routines_indexing.pyx#L1015
+        a[:] = b
     else:
         with cupy.cuda.Device(a.device):
             # TODO: reduce memory copy, a can be non-contiguous array
