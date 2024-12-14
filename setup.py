@@ -140,7 +140,7 @@ setup(
     install_requires=[
         'pyscf~=2.7.0',
         'pyscf-dispersion',
-        f'cupy-cuda{CUDA_VERSION}',
+        f'cupy-cuda{CUDA_VERSION}>=13.0', # Due to expm in cupyx.scipy.linalg and cutensor 2.0
         'geometric',
         f'gpu4pyscf-libxc-cuda{CUDA_VERSION}>=0.5',
     ]

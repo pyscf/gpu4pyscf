@@ -165,12 +165,11 @@ static void GINTfill_int3c2e_ip1ip2_kernel000(GINTEnvVars envs, ERITensor eri, B
     double gzx = 0;
     double gzy = 0;
     double gzz = 0;
+    
     const double xi = bas_x[ish];
     const double yi = bas_y[ish];
     const double zi = bas_z[ish];
-    const double xk = bas_x[ksh];
-    const double yk = bas_y[ksh];
-    const double zk = bas_z[ksh];
+
     const int prim_ij0 = prim_ij;
     const int prim_ij1 = prim_ij + nprim_ij;
     const int prim_kl0 = prim_kl;
@@ -217,9 +216,9 @@ static void GINTfill_int3c2e_ip1ip2_kernel000(GINTEnvVars envs, ERITensor eri, B
             const double c00y = yij - yi - tmp2 * yijykl;
             const double c00z = zij - zi - tmp2 * zijzkl;
             const double tmp3 = tmp1 * aij;
-            const double c0px = xkl - xk + tmp3 * xijxkl;
-            const double c0py = ykl - yk + tmp3 * yijykl;
-            const double c0pz = zkl - zk + tmp3 * zijzkl;
+            const double c0px = tmp3 * xijxkl;
+            const double c0py = tmp3 * yijykl;
+            const double c0pz = tmp3 * zijzkl;
             const double g_0 = 1;
             const double g_1 = c00x;
             const double g_2 = c0px;
