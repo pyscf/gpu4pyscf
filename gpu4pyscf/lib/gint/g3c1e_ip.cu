@@ -136,6 +136,123 @@ static void GINTfill_int3c1e_ip_kernel_general(double* output, const BasisProdOf
     }
 }
 
+template <int LI, int LJ>
+__device__
+static void GINTwrite_int3c1e_ip1_charge_contracted(const double* g, double* local_output, const double minus_two_a, const double prefactor)
+{
+    constexpr int NROOTS = (LI + LJ + 1) / 2 + 1;
+
+    const int *idx = c_idx;
+    const int *idy = c_idx + TOT_NF;
+    const int *idz = c_idx + TOT_NF * 2;
+
+    const int g_size = NROOTS * (LI + 1 + 1) * (LJ + 1);
+    const double* __restrict__ gx = g;
+    const double* __restrict__ gy = g + g_size;
+    const double* __restrict__ gz = g + g_size * 2;
+
+    constexpr int n_density_elements_i = (LI + 1) * (LI + 2) / 2;
+    constexpr int n_density_elements_j = (LJ + 1) * (LJ + 2) / 2;
+    constexpr int n_density_elements_ij = n_density_elements_i * n_density_elements_j;
+#pragma unroll
+    for (int j = 0; j < n_density_elements_j; j++) {
+#pragma unroll
+        for (int i = 0; i < n_density_elements_i; i++) {
+            const int loc_j = c_l_locs[LJ] + j;
+            const int loc_i = c_l_locs[LI] + i;
+            const int ix = idx[loc_i];
+            const int iy = idy[loc_i];
+            const int iz = idz[loc_i];
+            const int jx = idx[loc_j];
+            const int jy = idy[loc_j];
+            const int jz = idz[loc_j];
+            const int gx_offset = ix + jx * (LI + 1 + 1);
+            const int gy_offset = iy + jy * (LI + 1 + 1);
+            const int gz_offset = iz + jz * (LI + 1 + 1);
+
+            double deri_dAx = 0;
+            double deri_dAy = 0;
+            double deri_dAz = 0;
+#pragma unroll
+            for (int i_root = 0; i_root < NROOTS; i_root++) {
+                const double gx_0 = gx[gx_offset * NROOTS + i_root];
+                const double gy_0 = gy[gy_offset * NROOTS + i_root];
+                const double gz_0 = gz[gz_offset * NROOTS + i_root];
+                const double dgx_dAx = (ix > 0 ? ix * gx[(gx_offset - 1) * NROOTS + i_root] : 0) + minus_two_a * gx[(gx_offset + 1) * NROOTS + i_root];
+                const double dgy_dAy = (iy > 0 ? iy * gy[(gy_offset - 1) * NROOTS + i_root] : 0) + minus_two_a * gy[(gy_offset + 1) * NROOTS + i_root];
+                const double dgz_dAz = (iz > 0 ? iz * gz[(gz_offset - 1) * NROOTS + i_root] : 0) + minus_two_a * gz[(gz_offset + 1) * NROOTS + i_root];
+                deri_dAx += dgx_dAx * gy_0 * gz_0;
+                deri_dAy += gx_0 * dgy_dAy * gz_0;
+                deri_dAz += gx_0 * gy_0 * dgz_dAz;
+            }
+            local_output[i + j * n_density_elements_i + 0 * n_density_elements_ij] += deri_dAx * prefactor;
+            local_output[i + j * n_density_elements_i + 1 * n_density_elements_ij] += deri_dAy * prefactor;
+            local_output[i + j * n_density_elements_i + 2 * n_density_elements_ij] += deri_dAz * prefactor;
+        }
+    }
+}
+
+template <int LI, int LJ>
+__global__
+static void GINTfill_int3c1e_ip1_charge_contracted_kernel_expanded(double* output, const BasisProdOffsets offsets, const int nprim_ij,
+                                                                  const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
+                                                                  const double omega, const double* grid_points, const double* charge_exponents)
+{
+    constexpr int L_SUM = LI + LJ;
+    constexpr int NROOTS = (L_SUM + 1) / 2 + 1;
+
+    const int ntasks_ij = offsets.ntasks_ij;
+    const int ngrids = offsets.ntasks_kl;
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    if (task_ij >= ntasks_ij) {
+        return;
+    }
+
+    const int bas_ij = offsets.bas_ij + task_ij;
+    const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
+    const int* bas_pair2bra = c_bpcache.bas_pair2bra;
+    const int* bas_pair2ket = c_bpcache.bas_pair2ket;
+    const int ish = bas_pair2bra[bas_ij];
+    const int jsh = bas_pair2ket[bas_ij];
+    const double* __restrict__ a_exponents = c_bpcache.a1;
+
+    constexpr int n_density_elements_i = (LI + 1) * (LI + 2) / 2;
+    constexpr int n_density_elements_j = (LJ + 1) * (LJ + 2) / 2;
+    double output_cache[n_density_elements_i * n_density_elements_j * 3] { 0.0 };
+
+    for (int task_grid = blockIdx.y * blockDim.y + threadIdx.y; task_grid < ngrids; task_grid += gridDim.y * blockDim.y) {
+        const double* grid_point = grid_points + task_grid * 4;
+        const double charge = grid_point[3];
+        const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
+
+        double g[3 * NROOTS * (LI + 1 + 1) * (LJ + 1)];
+
+        for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+            GINT_g1e<NROOTS>(g, grid_point, ish, jsh, ij, LI + 1, LJ, charge_exponent, omega);
+            const double minus_two_a = -2.0 * a_exponents[ij];
+            GINTwrite_int3c1e_ip1_charge_contracted<LI, LJ>(g, output_cache, minus_two_a, charge);
+        }
+    }
+
+    const int* ao_loc = c_bpcache.ao_loc;
+
+    const int i0 = ao_loc[ish] - ao_offsets_i;
+    const int j0 = ao_loc[jsh] - ao_offsets_j;
+    constexpr int n_density_elements_ij = n_density_elements_i * n_density_elements_j;
+#pragma unroll
+    for (int j = 0; j < n_density_elements_j; j++) {
+#pragma unroll
+        for (int i = 0; i < n_density_elements_i; i++) {
+            const double deri_dAx = output_cache[i + j * n_density_elements_i + 0 * n_density_elements_ij];
+            const double deri_dAy = output_cache[i + j * n_density_elements_i + 1 * n_density_elements_ij];
+            const double deri_dAz = output_cache[i + j * n_density_elements_i + 2 * n_density_elements_ij];
+            atomicAdd(output + ((i + i0) + (j + j0) * stride_j + 0 * stride_ij), deri_dAx);
+            atomicAdd(output + ((i + i0) + (j + j0) * stride_j + 1 * stride_ij), deri_dAy);
+            atomicAdd(output + ((i + i0) + (j + j0) * stride_j + 2 * stride_ij), deri_dAz);
+        }
+    }
+}
+
 template <int NROOTS>
 __device__
 static void GINTwrite_int3c1e_ip1_charge_contracted(const double* g, double* local_output, const double minus_two_a, const double prefactor, const int i_l, const int j_l)

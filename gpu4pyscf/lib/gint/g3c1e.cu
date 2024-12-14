@@ -92,6 +92,98 @@ static void GINTfill_int3c1e_kernel_general(double* output, const BasisProdOffse
     }
 }
 
+template <int LI, int LJ>
+__device__
+static void GINTwrite_int3c1e_charge_contracted(const double* g, double* local_output, const double prefactor)
+{
+    constexpr int NROOTS = (LI + LJ) / 2 + 1;
+
+    const int *idx = c_idx;
+    const int *idy = c_idx + TOT_NF;
+    const int *idz = c_idx + TOT_NF * 2;
+
+    const int g_size = NROOTS * (LI + 1) * (LJ + 1);
+    const double* __restrict__ gx = g;
+    const double* __restrict__ gy = g + g_size;
+    const double* __restrict__ gz = g + g_size * 2;
+
+    constexpr int n_density_elements_i = (LI + 1) * (LI + 2) / 2;
+    constexpr int n_density_elements_j = (LJ + 1) * (LJ + 2) / 2;
+#pragma unroll
+    for (int j = 0; j < n_density_elements_j; j++) {
+#pragma unroll
+        for (int i = 0; i < n_density_elements_i; i++) {
+            const int loc_j = c_l_locs[LJ] + j;
+            const int loc_i = c_l_locs[LI] + i;
+
+            const int ix = (idx[loc_i] + idx[loc_j] * (LI + 1)) * NROOTS;
+            const int iy = (idy[loc_i] + idy[loc_j] * (LI + 1)) * NROOTS;
+            const int iz = (idz[loc_i] + idz[loc_j] * (LI + 1)) * NROOTS;
+
+            double eri = 0;
+#pragma unroll
+            for (int i_root = 0; i_root < NROOTS; i_root++) {
+                eri += gx[ix + i_root] * gy[iy + i_root] * gz[iz + i_root];
+            }
+            local_output[i + j * n_density_elements_i] += eri * prefactor;
+        }
+    }
+}
+
+template <int LI, int LJ>
+__global__
+static void GINTfill_int3c1e_charge_contracted_kernel_expanded(double* output, const BasisProdOffsets offsets, const int nprim_ij,
+                                                              const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
+                                                              const double omega, const double* grid_points, const double* charge_exponents)
+{
+    constexpr int L_SUM = LI + LJ;
+    constexpr int NROOTS = L_SUM / 2 + 1;
+
+    const int ntasks_ij = offsets.ntasks_ij;
+    const int ngrids = offsets.ntasks_kl;
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    if (task_ij >= ntasks_ij) {
+        return;
+    }
+
+    const int bas_ij = offsets.bas_ij + task_ij;
+    const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
+    const int* bas_pair2bra = c_bpcache.bas_pair2bra;
+    const int* bas_pair2ket = c_bpcache.bas_pair2ket;
+    const int ish = bas_pair2bra[bas_ij];
+    const int jsh = bas_pair2ket[bas_ij];
+
+    constexpr int n_density_elements_i = (LI + 1) * (LI + 2) / 2;
+    constexpr int n_density_elements_j = (LJ + 1) * (LJ + 2) / 2;
+    double output_cache[n_density_elements_i * n_density_elements_j] { 0.0 };
+
+    for (int task_grid = blockIdx.y * blockDim.y + threadIdx.y; task_grid < ngrids; task_grid += gridDim.y * blockDim.y) {
+        const double* grid_point = grid_points + task_grid * 4;
+        const double charge = grid_point[3];
+        const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
+
+        double g[3 * NROOTS * (LI + 1) * (LJ + 1)];
+
+        for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+            GINT_g1e<NROOTS>(g, grid_point, ish, jsh, ij, LI, LJ, charge_exponent, omega);
+            GINTwrite_int3c1e_charge_contracted<LI, LJ>(g, output_cache, charge);
+        }
+    }
+
+    const int* ao_loc = c_bpcache.ao_loc;
+
+    const int i0 = ao_loc[ish] - ao_offsets_i;
+    const int j0 = ao_loc[jsh] - ao_offsets_j;
+#pragma unroll
+    for (int j = 0; j < n_density_elements_j; j++) {
+#pragma unroll
+        for (int i = 0; i < n_density_elements_i; i++) {
+            const double eri_grid_sum = output_cache[i + j * n_density_elements_i];
+            atomicAdd(output + ((i + i0) + (j + j0) * stride_j), eri_grid_sum);
+        }
+    }
+}
+
 template <int NROOTS>
 __device__
 static void GINTwrite_int3c1e_charge_contracted(const double* g, double* local_output, const double prefactor, const int i_l, const int j_l)
@@ -110,13 +202,9 @@ static void GINTwrite_int3c1e_charge_contracted(const double* g, double* local_o
             const int loc_j = c_l_locs[j_l] + j;
             const int loc_i = c_l_locs[i_l] + i;
 
-            int ix = idx[loc_i] + idx[loc_j] * (i_l + 1);
-            int iy = idy[loc_i] + idy[loc_j] * (i_l + 1);
-            int iz = idz[loc_i] + idz[loc_j] * (i_l + 1);
-            
-            ix = ix * NROOTS;
-            iy = iy * NROOTS;
-            iz = iz * NROOTS;
+            const int ix = (idx[loc_i] + idx[loc_j] * (i_l + 1)) * NROOTS;
+            const int iy = (idy[loc_i] + idy[loc_j] * (i_l + 1)) * NROOTS;
+            const int iz = (idz[loc_i] + idz[loc_j] * (i_l + 1)) * NROOTS;
 
             double eri = 0;
 #pragma unroll
