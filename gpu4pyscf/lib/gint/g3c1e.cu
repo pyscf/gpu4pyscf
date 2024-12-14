@@ -179,12 +179,14 @@ static void GINTfill_int3c1e_charge_contracted_kernel_general(double* output, co
     }
 }
 
-template <int NROOTS>
+template <int L_SUM>
 __global__
 static void GINTfill_int3c1e_density_contracted_kernel_general(double* output, const double* density, const HermiteDensityOffsets hermite_density_offsets,
-                                                               const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
+                                                               const BasisProdOffsets offsets, const int nprim_ij,
                                                                const double omega, const double* grid_points, const double* charge_exponents)
 {
+    constexpr int NROOTS = L_SUM / 2 + 1;
+
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
@@ -207,30 +209,34 @@ static void GINTfill_int3c1e_density_contracted_kernel_general(double* output, c
         const int ish = bas_pair2bra[bas_ij];
         // const int jsh = bas_pair2ket[bas_ij];
 
-        constexpr int l_max = (NROOTS - 1) * 2 + 1;
-        double D_hermite[(l_max + 1) * (l_max + 2) * (l_max + 3) / 6];
-        const int l = i_l + j_l;
-        for (int i_t = 0; i_t < (l + 1) * (l + 2) * (l + 3) / 6; i_t++) {
+        double D_hermite[(L_SUM + 1) * (L_SUM + 2) * (L_SUM + 3) / 6];
+#pragma unroll
+        for (int i_t = 0; i_t < (L_SUM + 1) * (L_SUM + 2) * (L_SUM + 3) / 6; i_t++) {
             D_hermite[i_t] = density[bas_ij - hermite_density_offsets.pair_offset_of_angular_pair + hermite_density_offsets.density_offset_of_angular_pair + i_t * hermite_density_offsets.n_pair_of_angular_pair];
         }
 
         double eri_with_density_per_pair = 0.0;
         for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-            double g[NROOTS * (l_max + 1) * 3];
-            GINT_g1e_without_hrr<NROOTS>(g, Cx, Cy, Cz, ish, ij, l, charge_exponent, omega);
+            double g[NROOTS * (L_SUM + 1) * 3];
+            GINT_g1e_without_hrr<L_SUM>(g, Cx, Cy, Cz, ish, ij, charge_exponent, omega);
 
             double eri_with_density_per_primitive = 0.0;
-            for (int i_x = 0, i_t = 0; i_x <= l; i_x++) {
-                for (int i_y = 0; i_x + i_y <= l; i_y++) {
-                    for (int i_z = 0; i_x + i_y + i_z <= l; i_z++, i_t++) {
-                        const double D_t = D_hermite[i_t];
+#pragma unroll
+            for (int i_x = 0, i_t = 0; i_x <= L_SUM; i_x++) {
+#pragma unroll
+                for (int i_y = 0; i_x + i_y <= L_SUM; i_y++) {
+#pragma unroll
+                    for (int i_z = 0; i_x + i_y + i_z <= L_SUM; i_z++, i_t++) {
+                        double eri_per_hermite = 0.0;
 #pragma unroll
                         for (int i_root = 0; i_root < NROOTS; i_root++) {
                             const double gx = g[i_root + NROOTS * i_x];
-                            const double gy = g[i_root + NROOTS * i_y + NROOTS * (l + 1)];
-                            const double gz = g[i_root + NROOTS * i_z + NROOTS * (l + 1) * 2];
-                            eri_with_density_per_primitive += gx * gy * gz * D_t;
+                            const double gy = g[i_root + NROOTS * i_y + NROOTS * (L_SUM + 1)];
+                            const double gz = g[i_root + NROOTS * i_z + NROOTS * (L_SUM + 1) * 2];
+                            eri_per_hermite += gx * gy * gz;
                         }
+                        const double D_t = D_hermite[i_t];
+                        eri_with_density_per_primitive += eri_per_hermite * D_t;
                     }
                 }
             }

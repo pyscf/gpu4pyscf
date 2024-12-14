@@ -112,29 +112,25 @@ static int GINTfill_int3c1e_density_contracted_tasks(double* output, const doubl
                                                      const double omega, const double* grid_points, const double* charge_exponents,
                                                      const int n_pair_sum_per_thread, const cudaStream_t stream)
 {
-    const int nrys_roots = (i_l + j_l) / 2 + 1;
     const int ntasks_ij = (offsets.ntasks_ij + n_pair_sum_per_thread - 1) / n_pair_sum_per_thread;
     const int ngrids = offsets.ntasks_kl;
 
     const dim3 threads(THREADSX, THREADSY);
     const dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ngrids+THREADSY-1)/THREADSY);
-    int type_ijkl;
-    switch (nrys_roots) {
-    case 1:
-        type_ijkl = (i_l << 2) | j_l;
-        switch (type_ijkl) {
-        case (0<<2)|0: GINTfill_int3c1e_density_contracted_kernel00<<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
-        case (1<<2)|0: GINTfill_int3c1e_density_contracted_kernel10<<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
-        default:
-            fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
-        }
-        break;
-    case 2: GINTfill_int3c1e_density_contracted_kernel_general<2> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points, charge_exponents); break;
-    case 3: GINTfill_int3c1e_density_contracted_kernel_general<3> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points, charge_exponents); break;
-    case 4: GINTfill_int3c1e_density_contracted_kernel_general<4> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points, charge_exponents); break;
-    case 5: GINTfill_int3c1e_density_contracted_kernel_general<5> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, i_l, j_l, nprim_ij, omega, grid_points, charge_exponents); break;
+    switch (i_l + j_l) {
+    case  0: GINTfill_int3c1e_density_contracted_kernel00<<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
+    case  1: GINTfill_int3c1e_density_contracted_kernel10<<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
+    case  2: GINTfill_int3c1e_density_contracted_kernel_general< 2> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
+    case  3: GINTfill_int3c1e_density_contracted_kernel_general< 3> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
+    case  4: GINTfill_int3c1e_density_contracted_kernel_general< 4> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
+    case  5: GINTfill_int3c1e_density_contracted_kernel_general< 5> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
+    case  6: GINTfill_int3c1e_density_contracted_kernel_general< 6> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
+    case  7: GINTfill_int3c1e_density_contracted_kernel_general< 7> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
+    case  8: GINTfill_int3c1e_density_contracted_kernel_general< 8> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
+    case  9: GINTfill_int3c1e_density_contracted_kernel_general< 9> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
+    case 10: GINTfill_int3c1e_density_contracted_kernel_general<10> <<<blocks, threads, 0, stream>>>(output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); break;
     default:
-        fprintf(stderr, "rys roots %d\n", nrys_roots);
+        fprintf(stderr, "i_l + j_l = %d out of range\n", i_l + j_l);
         return 1;
     }
 

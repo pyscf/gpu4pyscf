@@ -149,8 +149,11 @@ static void GINTwrite_int3c1e_ip1_charge_contracted(const double* g, double* loc
     const double* __restrict__ gy = g + g_size;
     const double* __restrict__ gz = g + g_size * 2;
 
-    for (int j = 0; j < (j_l + 1) * (j_l + 2) / 2; j++) {
-        for (int i = 0; i < (i_l + 1) * (i_l + 2) / 2; i++) {
+    const int n_density_elements_i = (i_l + 1) * (i_l + 2) / 2;
+    const int n_density_elements_j = (j_l + 1) * (j_l + 2) / 2;
+    const int n_density_elements_ij = n_density_elements_i * n_density_elements_j;
+    for (int j = 0; j < n_density_elements_j; j++) {
+        for (int i = 0; i < n_density_elements_i; i++) {
             const int loc_j = c_l_locs[j_l] + j;
             const int loc_i = c_l_locs[i_l] + i;
             const int ix = idx[loc_i];
@@ -178,9 +181,6 @@ static void GINTwrite_int3c1e_ip1_charge_contracted(const double* g, double* loc
                 deri_dAy += gx_0 * dgy_dAy * gz_0;
                 deri_dAz += gx_0 * gy_0 * dgz_dAz;
             }
-            const int n_density_elements_i = (i_l + 1) * (i_l + 2) / 2;
-            const int n_density_elements_j = (j_l + 1) * (j_l + 2) / 2;
-            const int n_density_elements_ij = n_density_elements_i * n_density_elements_j;
             local_output[i + j * n_density_elements_i + 0 * n_density_elements_ij] += deri_dAx * prefactor;
             local_output[i + j * n_density_elements_i + 1 * n_density_elements_ij] += deri_dAy * prefactor;
             local_output[i + j * n_density_elements_i + 2 * n_density_elements_ij] += deri_dAz * prefactor;
@@ -249,12 +249,14 @@ static void GINTfill_int3c1e_ip1_charge_contracted_kernel_general(double* output
     }
 }
 
-template <int NROOTS>
+template <int L_SUM>
 __global__
 static void GINTfill_int3c1e_ip2_density_contracted_kernel_general(double* output, const double* density, const HermiteDensityOffsets hermite_density_offsets,
-                                                                   const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
+                                                                   const BasisProdOffsets offsets, const int nprim_ij,
                                                                    const double omega, const double* grid_points, const double* charge_exponents)
 {
+    constexpr int NROOTS = (L_SUM + 1) / 2 + 1;
+
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
@@ -286,10 +288,9 @@ static void GINTfill_int3c1e_ip2_density_contracted_kernel_general(double* outpu
         const double Ay = bas_y[ish];
         const double Az = bas_z[ish];
 
-        constexpr int l_max = (NROOTS - 1) * 2 + 1;
-        double D_hermite[(l_max + 1) * (l_max + 2) * (l_max + 3) / 6];
-        const int l = i_l + j_l;
-        for (int i_t = 0; i_t < (l + 1) * (l + 2) * (l + 3) / 6; i_t++) {
+        double D_hermite[(L_SUM + 1) * (L_SUM + 2) * (L_SUM + 3) / 6];
+#pragma unroll
+        for (int i_t = 0; i_t < (L_SUM + 1) * (L_SUM + 2) * (L_SUM + 3) / 6; i_t++) {
             D_hermite[i_t] = density[bas_ij - hermite_density_offsets.pair_offset_of_angular_pair + hermite_density_offsets.density_offset_of_angular_pair + i_t * hermite_density_offsets.n_pair_of_angular_pair];
         }
 
@@ -297,18 +298,23 @@ static void GINTfill_int3c1e_ip2_density_contracted_kernel_general(double* outpu
         double deri_dCy_per_pair = 0.0;
         double deri_dCz_per_pair = 0.0;
         for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-            double g[NROOTS * (l_max + 1) * 3];
+            double g[NROOTS * (L_SUM + 1 + 1) * 3];
             double u2[NROOTS];
-            GINT_g1e_without_hrr_save_u2<NROOTS>(g, u2, Cx, Cy, Cz, ish, ij, l + 1, charge_exponent, omega);
+            GINT_g1e_without_hrr_save_u2<L_SUM + 1>(g, u2, Cx, Cy, Cz, ish, ij, charge_exponent, omega);
 
             const double* __restrict__ gx = g;
-            const double* __restrict__ gy = g + NROOTS * (l + 1 + 1);
-            const double* __restrict__ gz = g + NROOTS * (l + 1 + 1) * 2;
+            const double* __restrict__ gy = g + NROOTS * (L_SUM + 1 + 1);
+            const double* __restrict__ gz = g + NROOTS * (L_SUM + 1 + 1) * 2;
 
-            for (int i_x = 0, i_t = 0; i_x <= l; i_x++) {
-                for (int i_y = 0; i_x + i_y <= l; i_y++) {
-                    for (int i_z = 0; i_x + i_y + i_z <= l; i_z++, i_t++) {
-                        const double D_t = D_hermite[i_t];
+#pragma unroll
+            for (int i_x = 0, i_t = 0; i_x <= L_SUM; i_x++) {
+#pragma unroll
+                for (int i_y = 0; i_x + i_y <= L_SUM; i_y++) {
+#pragma unroll
+                    for (int i_z = 0; i_x + i_y + i_z <= L_SUM; i_z++, i_t++) {
+                        double deri_dCx_per_hermite = 0.0;
+                        double deri_dCy_per_hermite = 0.0;
+                        double deri_dCz_per_hermite = 0.0;
 #pragma unroll
                         for (int i_root = 0; i_root < NROOTS; i_root++) {
                             const double gx_0 = gx[i_root + NROOTS * i_x];
@@ -321,10 +327,14 @@ static void GINTfill_int3c1e_ip2_density_contracted_kernel_general(double* outpu
                             const double dgx_dCx = minus_two_u2 * (gx_1 + (Ax - Cx) * gx_0);
                             const double dgy_dCy = minus_two_u2 * (gy_1 + (Ay - Cy) * gy_0);
                             const double dgz_dCz = minus_two_u2 * (gz_1 + (Az - Cz) * gz_0);
-                            deri_dCx_per_pair += dgx_dCx * gy_0 * gz_0 * D_t;
-                            deri_dCy_per_pair += gx_0 * dgy_dCy * gz_0 * D_t;
-                            deri_dCz_per_pair += gx_0 * gy_0 * dgz_dCz * D_t;
+                            deri_dCx_per_hermite += dgx_dCx * gy_0 * gz_0;
+                            deri_dCy_per_hermite += gx_0 * dgy_dCy * gz_0;
+                            deri_dCz_per_hermite += gx_0 * gy_0 * dgz_dCz;
                         }
+                        const double D_t = D_hermite[i_t];
+                        deri_dCx_per_pair += deri_dCx_per_hermite * D_t;
+                        deri_dCy_per_pair += deri_dCy_per_hermite * D_t;
+                        deri_dCz_per_pair += deri_dCz_per_hermite * D_t;
                     }
                 }
             }

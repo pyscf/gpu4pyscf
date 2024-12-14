@@ -252,11 +252,13 @@ static void GINT_g1e_save_u2(double* __restrict__ g, double* __restrict__ u2_sav
     }
 }
 
-template <int NROOTS>
+template <int L_SUM>
 __device__
 static void GINT_g1e_without_hrr(double* __restrict__ g, const double grid_x, const double grid_y, const double grid_z,
-                                 const int ish, const int prim_ij, const int l, const double charge_exponent, const double omega)
+                                 const int ish, const int prim_ij, const double charge_exponent, const double omega)
 {
+    constexpr int NROOTS = L_SUM / 2 + 1;
+
     const double* __restrict__ a12 = c_bpcache.a12;
     const double* __restrict__ e12 = c_bpcache.e12;
     const double* __restrict__ x12 = c_bpcache.x12;
@@ -288,7 +290,7 @@ static void GINT_g1e_without_hrr(double* __restrict__ g, const double grid_x, co
 
     const double* __restrict__ u = uw;
     const double* __restrict__ w = u + NROOTS;
-    const int g_size = NROOTS * (l + 1);
+    constexpr int g_size = NROOTS * (L_SUM + 1);
     double* __restrict__ gx = g;
     double* __restrict__ gy = g + g_size;
     double* __restrict__ gz = g + g_size * 2;
@@ -317,7 +319,7 @@ static void GINT_g1e_without_hrr(double* __restrict__ g, const double grid_x, co
         const double c00y = PAy - qt2_over_p_plus_q * PCy;
         const double c00z = PAz - qt2_over_p_plus_q * PCz;
 
-        if (l > 0) {
+        if constexpr (L_SUM > 0) {
             double s0x = gx[i_root]; // i - 1
             double s0y = gy[i_root];
             double s0z = gz[i_root];
@@ -327,7 +329,8 @@ static void GINT_g1e_without_hrr(double* __restrict__ g, const double grid_x, co
             gx[i_root + 1 * NROOTS] = s1x;
             gy[i_root + 1 * NROOTS] = s1y;
             gz[i_root + 1 * NROOTS] = s1z;
-            for (int i_rys = 1; i_rys < l; i_rys++) {
+#pragma unroll
+            for (int i_rys = 1; i_rys < L_SUM; i_rys++) {
                 const double s2x = c00x * s1x + i_rys * b10 * s0x; // i + 1
                 const double s2y = c00y * s1y + i_rys * b10 * s0y;
                 const double s2z = c00z * s1z + i_rys * b10 * s0z;
@@ -346,11 +349,13 @@ static void GINT_g1e_without_hrr(double* __restrict__ g, const double grid_x, co
 
 }
 
-template <int NROOTS>
+template <int L_SUM>
 __device__
 static void GINT_g1e_without_hrr_save_u2(double* __restrict__ g, double* __restrict__ u2_save, const double grid_x, const double grid_y, const double grid_z,
-                                         const int ish, const int prim_ij, const int l, const double charge_exponent, const double omega)
+                                         const int ish, const int prim_ij, const double charge_exponent, const double omega)
 {
+    constexpr int NROOTS = L_SUM / 2 + 1;
+
     const double* __restrict__ a12 = c_bpcache.a12;
     const double* __restrict__ e12 = c_bpcache.e12;
     const double* __restrict__ x12 = c_bpcache.x12;
@@ -382,7 +387,7 @@ static void GINT_g1e_without_hrr_save_u2(double* __restrict__ g, double* __restr
 
     const double* __restrict__ u = uw;
     const double* __restrict__ w = u + NROOTS;
-    const int g_size = NROOTS * (l + 1);
+    constexpr int g_size = NROOTS * (L_SUM + 1);
     double* __restrict__ gx = g;
     double* __restrict__ gy = g + g_size;
     double* __restrict__ gz = g + g_size * 2;
@@ -412,7 +417,7 @@ static void GINT_g1e_without_hrr_save_u2(double* __restrict__ g, double* __restr
         const double c00y = PAy - qt2_over_p_plus_q * PCy;
         const double c00z = PAz - qt2_over_p_plus_q * PCz;
 
-        if (l > 0) {
+        if constexpr (L_SUM > 0) {
             double s0x = gx[i_root]; // i - 1
             double s0y = gy[i_root];
             double s0z = gz[i_root];
@@ -422,7 +427,8 @@ static void GINT_g1e_without_hrr_save_u2(double* __restrict__ g, double* __restr
             gx[i_root + 1 * NROOTS] = s1x;
             gy[i_root + 1 * NROOTS] = s1y;
             gz[i_root + 1 * NROOTS] = s1z;
-            for (int i_rys = 1; i_rys < l; i_rys++) {
+#pragma unroll
+            for (int i_rys = 1; i_rys < L_SUM; i_rys++) {
                 const double s2x = c00x * s1x + i_rys * b10 * s0x; // i + 1
                 const double s2y = c00y * s1y + i_rys * b10 * s0y;
                 const double s2z = c00z * s1z + i_rys * b10 * s0z;
