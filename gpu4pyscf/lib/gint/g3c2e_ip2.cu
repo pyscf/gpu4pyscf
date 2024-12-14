@@ -138,17 +138,10 @@ static void GINTfill_int3c2e_ip2_kernel000(GINTEnvVars envs, ERITensor eri, Basi
     double* __restrict__ z12 = c_bpcache.z12;
     double* __restrict__ a1 = c_bpcache.a1;
 
-    const int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
-    double* __restrict__ bas_y = bas_x + nbas;
-    double* __restrict__ bas_z = bas_y + nbas;
-
     double gout0 = 0;
     double gout1 = 0;
     double gout2 = 0;
-    const double xk = bas_x[ksh];
-    const double yk = bas_y[ksh];
-    const double zk = bas_z[ksh];
+
     const int prim_ij0 = prim_ij;
     const int prim_ij1 = prim_ij + nprim_ij;
     const int prim_kl0 = prim_kl;
@@ -191,13 +184,11 @@ static void GINTfill_int3c2e_ip2_kernel000(GINTEnvVars envs, ERITensor eri, Basi
         }
         root0 /= root0 + 1 - root0 * theta;
         const double u2 = a0 * root0;
-        const double tmp4 = .5 / (u2 * aijkl + a1);
-        const double b00 = u2 * tmp4;
-        const double tmp1 = 2 * b00;
+        const double tmp1 = u2 / (u2 * aijkl + a1);
         const double tmp3 = tmp1 * aij;
-        const double c0px = xkl - xk + tmp3 * xijxkl;
-        const double c0py = ykl - yk + tmp3 * yijykl;
-        const double c0pz = zkl - zk + tmp3 * zijzkl;
+        const double c0px = tmp3 * xijxkl;
+        const double c0py = tmp3 * yijykl;
+        const double c0pz = tmp3 * zijzkl;
         const double g_0 = 1;
         const double g_1 = c0px;
         const double g_2 = 1;
