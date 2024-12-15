@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   single-gpu:
-    runs-on: [self-hosted, v100]
+    runs-on: [self-hosted, Linux, X64, v100]
     steps:
     - uses: actions/checkout@v3
     - name: Install dependencies
@@ -41,7 +41,7 @@ jobs:
         pytest -m "not smoke" --cov=$GITHUB_WORKSPACE
 
   multi-gpu:
-    runs-on: [self-hosted, 2T4]
+    runs-on: [self-hosted, Linux, X64, 2T4]
         steps:
     - uses: actions/checkout@v3
     - name: Install dependencies
