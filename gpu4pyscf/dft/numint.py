@@ -91,7 +91,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
     coords = cupy.asarray(coords.T, order='C')
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     stream = cupy.cuda.get_current_stream()
-    
+
     # ao must be set to zero due to implementation
     if deriv > 1:
         if out is None:
@@ -123,7 +123,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
 
     if transpose:
         out = out.transpose(0,2,1)
-    
+
     if deriv == 0:
         out = out[0]
     return out
@@ -397,7 +397,7 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     vxc[1,threshind] = 1.5*W*dW0dG
     return exc,vxc
 
-def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, 
+def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                  verbose=None, with_lapl=False, grid_range=(), device_id=0, hermi=1):
     ''' nr_rks task on given device
     '''
@@ -405,8 +405,8 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         if dms is not None: dms = cupy.asarray(dms)
         if mo_coeff is not None: mo_coeff = cupy.asarray(mo_coeff)
         if mo_occ is not None: mo_occ = cupy.asarray(mo_occ)
-
-        log = logger.new_logger(mol)
+        assert isinstance(verbose, int)
+        log = logger.new_logger(mol, verbose)
         t0 = log.init_timer()
         xctype = ni._xc_type(xc_code)
         nao = mol.nao
@@ -417,13 +417,13 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             ao_deriv = 0
         else:
             ao_deriv = 1
-        
+
         ngrids_glob = grids.coords.shape[0]
         ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
         grid_start = device_id * ngrids_per_device
         grid_end = (device_id + 1) * ngrids_per_device
         ngrids_local = grid_end - grid_start
-        
+
         weights = cupy.empty([ngrids_local])
         if xctype == 'LDA':
             rho_tot = cupy.empty([nset,1,ngrids_local])
@@ -434,22 +434,22 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
 
         p0 = p1 = 0
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
-                                                     max_memory=None, 
+                                                     max_memory=None,
                                                      grid_range=(grid_start, grid_end)):
             p1 = p0 + weight.size
             weights[p0:p1] = weight
             for i in range(nset):
                 if mo_coeff is None:
-                    rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms[i][idx[:,None],idx], 
+                    rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms[i][idx[:,None],idx],
                                                 xctype=xctype, hermi=hermi, with_lapl=with_lapl)
                 else:
                     assert hermi == 1
                     mo_coeff_mask = mo_coeff[idx,:]
-                    rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, 
+                    rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ,
                                                 None, xctype, with_lapl)
             p0 = p1
         t0 = log.timer_debug1(f'eval rho on Device {device_id}', *t0)
-        
+
         # libxc calls are still running on default stream
         nelec = cupy.zeros(nset)
         excsum = cupy.zeros(nset)
@@ -471,7 +471,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         vmat = cupy.zeros((nset, nao, nao))
         p0 = p1 = 0
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
-                                                     max_memory=None, 
+                                                     max_memory=None,
                                                      grid_range=(grid_start, grid_end)):
             p1 = p0 + weight.size
             for i in range(nset):
@@ -523,7 +523,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             future = executor.submit(
                 _nr_rks_task,
                 ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
-                verbose=verbose, device_id=device_id, hermi=hermi)
+                verbose=log.verbose, device_id=device_id, hermi=hermi)
             futures.append(future)
     vmat_dist = []
     nelec_dist = []
@@ -552,7 +552,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     t0 = log.timer_debug1('nr_rks', *t0)
     return nelec, excsum, vmat
 
-def eval_rho_group(mol, ao_group, mo_coeff_group, mo_occ, 
+def eval_rho_group(mol, ao_group, mo_coeff_group, mo_occ,
                    non0tab=None, xctype='LDA',
                    with_lapl=False, verbose=None, out=None):
     groups = len(ao_group)
@@ -684,18 +684,18 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         rho_tot = cupy.empty([nset,5,ngrids])
     p0 = p1 = 0
     t1 = t0 = log.init_timer()
-    for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, 
+    for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                  max_memory=max_memory):
         p1 = p0 + weight.size
         for i in range(nset):
             if mo_coeff is None:
                 rho_tot[i,:,p0:p1] = eval_rho(
-                    _sorted_mol, ao_mask, dms[i][idx[:,None],idx], 
+                    _sorted_mol, ao_mask, dms[i][idx[:,None],idx],
                     xctype=xctype, hermi=1)
             else:
                 assert hermi == 1
                 mo_coeff_mask = mo_coeff[idx,:]
-                rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, 
+                rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask,
                                                mo_occ, None, xctype)
         p0 = p1
         t1 = log.timer_debug2('eval rho slice', *t1)
@@ -794,19 +794,19 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
         if dms is not None:
-            dma, dmb = dms 
+            dma, dmb = dms
             dma = cupy.asarray(dma)
             dmb = cupy.asarray(dmb)
         if mo_coeff is not None: mo_coeff = cupy.asarray(mo_coeff)
         if mo_occ is not None: mo_occ = cupy.asarray(mo_occ)
-        
-        log = logger.new_logger(mol)
+        assert isinstance(verbose, int)
+        log = logger.new_logger(mol, verbose)
         t0 = log.init_timer()
         xctype = ni._xc_type(xc_code)
         nao = mol.nao
         opt = ni.gdftopt
         _sorted_mol = opt._sorted_mol
-        
+
         nset = dma.shape[0]
         nelec = np.zeros((2,nset))
         excsum = np.zeros(nset)
@@ -824,7 +824,7 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         grid_end = (device_id + 1) * ngrids_per_device
 
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
-                                                     max_memory=None, 
+                                                     max_memory=None,
                                                      grid_range=(grid_start, grid_end)):
             for i in range(nset):
                 t0 = log.init_timer()
@@ -879,11 +879,13 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 excsum[i] += cupy.dot(den_a, exc[:,0])
                 excsum[i] += cupy.dot(den_b, exc[:,0])
                 t1 = log.timer_debug1('integration', *t1)
-    
+
     return nelec, excsum, (vmata, vmatb)
 
 def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
            max_memory=2000, verbose=None):
+    log = logger.new_logger(mol, verbose)
+    t0 = log.init_timer()
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
@@ -912,7 +914,7 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             future = executor.submit(
                 _nr_uks_task,
                 ni, mol, grids, xc_code, (dma,dmb), mo_coeff, mo_occ,
-                verbose=verbose, device_id=device_id, hermi=hermi)
+                verbose=log.verbose, device_id=device_id, hermi=hermi)
             futures.append(future)
 
     vmata_dist = []
@@ -925,12 +927,12 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         vmatb_dist.append(v[1])
         nelec_dist.append(n)
         excsum_dist.append(e)
-        
+
     vmata = reduce_to_device(vmata_dist, inplace=True)
     vmatb = reduce_to_device(vmatb_dist, inplace=True)
     vmata = opt.unsort_orbitals(vmata, axis=[1,2])
     vmatb = opt.unsort_orbitals(vmatb, axis=[1,2])
-    
+
     nelec = np.sum(nelec_dist, axis=0)
     excsum = np.sum(excsum_dist, axis=0)
 
@@ -949,6 +951,7 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         vmata = vmata[0]
         vmatb = vmatb[0]
     vmat = cupy.asarray([vmata, vmatb])
+    t0 = log.timer_debug1('nr_uks', *t0)
     return nelec, excsum, vmat
 
 
@@ -1001,7 +1004,7 @@ def _nr_rks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
         if mo1 is not None: mo1 = cupy.asarray(mo1)
         if occ_coeff is not None: occ_coeff = cupy.asarray(occ_coeff)
         if fxc is not None: fxc = cupy.asarray(fxc)
-
+        assert isinstance(verbose, int)
         log = logger.new_logger(mol, verbose)
         xctype = ni._xc_type(xc_code)
         opt = getattr(ni, 'gdftopt', None)
@@ -1074,6 +1077,8 @@ def _nr_rks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
 
 def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=0,
                rho0=None, vxc=None, fxc=None, max_memory=2000, verbose=None):
+    log = logger.new_logger(mol, verbose)
+    t0 = log.init_timer()
     if fxc is None:
         raise RuntimeError('fxc was not initialized')
     xctype = ni._xc_type(xc_code)
@@ -1100,7 +1105,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
             future = executor.submit(
                 _nr_rks_fxc_task,
                 ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
-                verbose=verbose, hermi=hermi, device_id=device_id)
+                verbose=log.verbose, hermi=hermi, device_id=device_id)
             futures.append(future)
     vmat_dist = []
     for future in futures:
@@ -1116,7 +1121,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
 
     if len(dm_shape) == 2:
         vmat = vmat[0]
-
+    t0 = log.timer_debug1('nr_rks_fxc', *t0)
     return cupy.asarray(vmat)
 
 def nr_rks_fxc_st(ni, mol, grids, xc_code, dm0=None, dms_alpha=None,
@@ -1281,7 +1286,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao, nao0 = opt.coeff.shape
     mol = None
     _sorted_mol = opt._sorted_mol
-    
+
     dms = dms.reshape(-1,nao0,nao0)
     assert len(dms) == 1
     dms = opt.sort_orbitals(dms, axis=[1,2])
@@ -1385,7 +1390,7 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
             t1 = log.timer_debug2('eval rho in fxc', *t1)
         #rho = (cupy.hstack(rhoa), cupy.hstack(rhob))
         rho = cupy.stack([cupy.hstack(rhoa), cupy.hstack(rhob)], axis=0)
-        t0 = log.timer_debug1('eval rho in fxc', *t0)    
+        t0 = log.timer_debug1('eval rho in fxc', *t0)
     vxc, fxc = ni.eval_xc_eff(xc_code, rho, deriv=2, xctype=xctype)[1:3]
     t0 = log.timer_debug1('eval fxc', *t0)
     return rho, vxc, fxc
@@ -1512,7 +1517,7 @@ def _sparse_index(mol, coords, l_ctr_offsets):
     ao_loc = mol.ao_loc_nr()
     non0shl_idx = cupy.zeros(len(ao_loc)-1, dtype=np.int32)
     coords = cupy.asarray(coords)
-    
+
     libgdft.GDFTscreen_index(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(non0shl_idx.data.ptr, ctypes.c_void_p),
@@ -1564,7 +1569,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         grids.build(with_non0tab=False, sort_grids=True)
     if nao is None:
         nao = mol.nao
-    
+
     if grid_range is None:
         grid_start, grid_end = 0, grids.coords.shape[0]
     else:
@@ -1573,7 +1578,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
 
     device_id = cupy.cuda.Device().id
     log.debug(f'{grid_start} - {grid_end} grids are calculated on Device {device_id}.')
-    
+
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     if blksize is None:
         #cupy.get_default_memory_pool().free_all_blocks()
@@ -1602,7 +1607,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             lookup_key = (device_id, block_id, blksize, ngrids)
             if lookup_key not in ni.non0ao_idx:
                 ni.non0ao_idx[lookup_key] = _sparse_index(_sorted_mol, coords, opt.l_ctr_offsets)
-            
+
             pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[lookup_key]
             ao_mask = eval_ao(
                 _sorted_mol, coords, deriv,
@@ -1613,7 +1618,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 gdftopt=opt,
                 transpose=False
             )
-            
+
             if pad > 0:
                 if deriv == 0:
                     ao_mask[-pad:,:] = 0.0
