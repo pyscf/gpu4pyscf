@@ -23,6 +23,7 @@ from pyscf import gto
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import block_c2s_diag, cart2sph, block_diag, contract, load_library, c2s_l
 from gpu4pyscf.lib import logger
+from gpu4pyscf.gto.mole import basis_seg_contraction
 
 LMAX_ON_GPU = 4
 FREE_CUPY_CACHE = True
@@ -619,78 +620,6 @@ class _VHFOpt:
 
 class BasisProdCache(ctypes.Structure):
     pass
-
-def basis_seg_contraction(mol, allow_replica=False):
-    '''transform generally contracted basis to segment contracted basis
-    Kwargs:
-        allow_replica:
-            transform the generally contracted basis to replicated
-            segment-contracted basis
-    '''
-    bas_templates = {}
-    _bas = []
-    _env = mol._env.copy()
-    contr_coeff = []
-    aoslices = mol.aoslice_by_atom()
-    for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
-        key = tuple(mol._bas[ib0:ib1,gto.PTR_EXP])
-        if key in bas_templates:
-            bas_of_ia, coeff = bas_templates[key]
-            bas_of_ia = bas_of_ia.copy()
-            bas_of_ia[:,gto.ATOM_OF] = ia
-        else:
-            # Generate the template for decontracted basis
-            coeff = []
-            bas_of_ia = []
-            for shell in mol._bas[ib0:ib1]:
-                l = shell[gto.ANG_OF]
-                nf = (l + 1) * (l + 2) // 2
-                nctr = shell[gto.NCTR_OF]
-                if nctr == 1:
-                    bas_of_ia.append(shell)
-                    coeff.append(np.eye(nf))
-                    continue
-                # Only basis with nctr > 1 needs to be decontracted
-                nprim = shell[gto.NPRIM_OF]
-                pcoeff = shell[gto.PTR_COEFF]
-                if allow_replica:
-                    coeff.extend([np.eye(nf)] * nctr)
-                    bs = np.repeat(shell[np.newaxis], nctr, axis=0)
-                    bs[:,gto.NCTR_OF] = 1
-                    bs[:,gto.PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr, nprim)
-                    bas_of_ia.append(bs)
-                else:
-                    pexp = shell[gto.PTR_EXP]
-                    exps = _env[pexp:pexp+nprim]
-                    norm = gto.gto_norm(l, exps)
-                    # remove normalization from contraction coefficients
-                    c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
-                    c = np.einsum('ip,p,ef->iepf', c, 1/norm, np.eye(nf))
-                    coeff.append(c.reshape(nf*nctr, nf*nprim).T)
-
-                    _env[pcoeff:pcoeff+nprim] = norm
-                    bs = np.repeat(shell[np.newaxis], nprim, axis=0)
-                    bs[:,gto.NPRIM_OF] = 1
-                    bs[:,gto.NCTR_OF] = 1
-                    bs[:,gto.PTR_EXP] = np.arange(pexp, pexp+nprim)
-                    bs[:,gto.PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim)
-                    bas_of_ia.append(bs)
-
-            bas_of_ia = np.vstack(bas_of_ia)
-            bas_templates[key] = (bas_of_ia, coeff)
-
-        _bas.append(bas_of_ia)
-        contr_coeff.extend(coeff)
-
-    pmol = mol.copy()
-    pmol.cart = True
-    pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
-    pmol._env = _env
-    contr_coeff = scipy.linalg.block_diag(*contr_coeff)
-
-    if not mol.cart:
-        contr_coeff = contr_coeff.dot(mol.cart2sph_coeff())
-    return pmol, contr_coeff
 
 def _make_s_index_offsets(log_q, nbins=10, cutoff=1e-12):
     '''Divides the shell pairs to "nbins" collections down to "cutoff"'''

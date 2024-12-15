@@ -33,7 +33,7 @@ void ft_pair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     int nbas = envs.nbas;
     int ish = bounds.ish_in_pair[sp_id];
     int jsh = bounds.jsh_in_pair[sp_id];
-    int *sp_img_offsets = envs.shl_pair_img_offsets;
+    int *sp_img_offsets = envs.img_offsets;
     int bas_ij = ish * nbas + jsh;
     int img0 = sp_img_offsets[bas_ij];
     int img1 = sp_img_offsets[bas_ij+1];
@@ -61,7 +61,7 @@ void ft_pair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
     double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
     double *img_coords = envs.img_coords;
-    int16_t *img_idx = envs.img_idx;
+    int *img_idx = envs.img_idx;
 
     int nGv = bounds.ngrids;
     double *Gv = bounds.grids + Gv_block_id * nGv_per_block;

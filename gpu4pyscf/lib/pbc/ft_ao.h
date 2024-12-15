@@ -12,8 +12,8 @@ typedef struct {
     double *env;
     int *ao_loc; // in bvk-cell
     double *img_coords; // vectors in lattice sum
-    int16_t *img_idx; // indices of img_coords in each shell-pair
-    int *shl_pair_img_offsets; // offset AFTIntEnvVars.img_idx for each shell-pair
+    int *img_idx; // indices of img_coords in each shell-pair
+    int *img_offsets; // offset AFTIntEnvVars.img_idx for each shell-pair
 } AFTIntEnvVars;
 
 typedef struct {
@@ -26,8 +26,8 @@ typedef struct {
     uint8_t iprim;
     uint8_t jprim;
     int npairs_ij;
-    uint16_t *ish_in_pair;
-    uint16_t *jsh_in_pair;
+    int *ish_in_pair;
+    int *jsh_in_pair;
     int ngrids;
     int ngrids_in_batch;
     double *grids;

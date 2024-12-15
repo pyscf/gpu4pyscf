@@ -16,7 +16,7 @@ void ft_pair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds);
 extern "C" {
 int PBC_build_ft_ao(double *out, AFTIntEnvVars envs,
                     int *scheme, int *shls_slice,
-                    int npairs_ij, uint16_t *ish_in_pair, uint16_t *jsh_in_pair,
+                    int npairs_ij, int *ish_in_pair, int *jsh_in_pair,
                     int ngrids, int ngrids_in_batch, double *grids,
                     int *atm, int natm, int *bas, int nbas, double *env)
 {
