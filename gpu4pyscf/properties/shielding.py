@@ -16,10 +16,10 @@
 import numpy as np
 import cupy
 from pyscf.data import nist
-from pyscf.scf import _vhf, jk
+from pyscf.scf import _vhf
 from gpu4pyscf.dft import numint
 from gpu4pyscf.lib.cupy_helper import contract, sandwich_dot, add_sparse
-from gpu4pyscf.scf import cphf
+from gpu4pyscf.scf import cphf, jk
 
 def gen_vind(mf, mo_coeff, mo_occ):
     """get the induced potential. This is the same as contract the mo1 with the kernel.
@@ -38,8 +38,7 @@ def gen_vind(mf, mo_coeff, mo_occ):
     nocc = mocc.shape[1]
     nvir = nmo - nocc
     omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mf.mol.spin)
-    # FIXME: check if hybrid
-    # FIXME: handle rsh
+    assert omega == 0, "The module of NMR shielding does not support range-separated functional yet."
 
     def fx(mo1):
         mo1 = mo1.reshape(-1, nvir, nocc)  # * the saving pattern
@@ -49,7 +48,8 @@ def gen_vind(mf, mo_coeff, mo_occ):
         if hasattr(mf,'with_df'):
             vk = mf.get_jk(mf.mol, dm1, hermi=2, with_j=False)[1]
         else:
-            vk = cupy.array(jk.get_jk(mf.mol, dm1.get(), ['ijkl,jk->il']*3))
+            #vk = cupy.array(jk.get_jk(mf.mol, dm1.get(), ['ijkl,jk->il']*3))
+            vk = jk.get_jk(mf.mol, dm1, with_j=False)[1]
         v1 = -.5*hyb * vk
         tmp = contract('nuv,vi->nui', v1, mocc)
         v1vo = contract('nui,ua->nai', tmp, mvir.conj())
@@ -161,8 +161,7 @@ def get_vxc(mf, dm0):
         vxc += vj
     else:
         omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mf.mol.spin)
-        # FIXME: check if hybrid
-        # FIXME: handle rsh
+        assert omega == 0, "The module of NMR shielding does not support range-separated functional yet."
         vxc += vj - vk*hyb*0.5
     return vxc
 
@@ -180,7 +179,15 @@ def get_h1ao(mf):
 
 
 def eval_shielding(mf):
+    ''' Main driver of NMR shielding
 
+    Args:
+        mf: mean field object
+
+    Returns:
+        dia-magnetic of NMR shielding: in PPM
+        para-magnetic of NMR shielding: in PPM
+    '''
     mo_coeff = mf.mo_coeff
     mo_occ = mf.mo_occ
     mo_energy = mf.mo_energy
@@ -210,13 +217,13 @@ def eval_shielding(mf):
     s1jkdm1 = contract('nui,vi->nuv', tmp, mocc.conj())*2
     s1jkdm1 = s1jkdm1 - s1jkdm1.transpose(0, 2, 1)
     omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mf.mol.spin)
-    # FIXME: check if hybrid
-    # FIXME: handle rsh
+    assert omega == 0.0, "The module of NMR shielding does not support range-separated functional yet."
 
     if hasattr(mf,'with_df'):
         vk = mf.get_jk(mf.mol, s1jkdm1, hermi=2, with_j=False)[1]
     else:
-        vk = cupy.array(jk.get_jk(mf.mol, s1jkdm1.get(), ['ijkl,jk->il']*3))
+        #vk = cupy.array(jk.get_jk(mf.mol, s1jkdm1.get(), ['ijkl,jk->il']*3))
+        vk = jk.get_jk(mf.mol, s1jkdm1, with_j=False)[1]
     vk2 = -.5*hyb * vk
     h1ao += vk2
     tmp = contract('xuv,ua->xav', h1ao, mvir)
