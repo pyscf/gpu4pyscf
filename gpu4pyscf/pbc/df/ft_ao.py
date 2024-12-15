@@ -24,14 +24,16 @@ import math
 import numpy as np
 import cupy as cp
 import scipy.linalg
-from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
-                       PTR_EXP, gto_norm)
 from pyscf import lib
+from pyscf.gto.mole import ANG_OF, ATOM_OF
 from pyscf.scf import _vhf
-from pyscf import __config__
-from gpu4pyscf.lib.cupy_helper import load_library, condense, sandwich_dot, transpose_sum
+from pyscf.pbc import tools as pbctools
+from pyscf.pbc.gto.cell import _extract_pgto_params
+from pyscf.pbc.lib import k2gamma
+from gpu4pyscf.lib.cupy_helper import load_library, contract
+from gpu4pyscf.gto.mole import group_basis
 from gpu4pyscf.scf.jk import (
-    g_pair_idx, _nearest_power2, _split_l_ctr_groups, basis_seg_contraction)
+    g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 
@@ -50,8 +52,6 @@ LMAX = 4
 #UNROLL_J_LMAX = ctypes.c_int.in_dll(libpbc, 'rys_j_unrolled_lmax').value
 #UNROLL_J_MAX_ORDER = ctypes.c_int.in_dll(libpbc, 'rys_j_unrolled_max_order').value
 GOUT_WIDTH = 19 # 15?
-SHM_SIZE = getattr(__config__, 'GPU_SHM_SIZE',
-                   int(gpu_specs['sharedMemPerBlockOptin']//9)*8)
 THREADS = 256
 
 def ft_aopair(cell, Gv, shls_slice=None, aosym='s1',
@@ -71,9 +71,46 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
           gxyz=None, Gvbase=None, kpt=np.zeros(3), verbose=None):
     pass
 
-def _overlap_mask(cell1, cell2):
-    mask = []
-    mask
+def _bas_overlap_mask(cell, bvkmesh_Ls, Ls, cutoff=None):
+    '''integral screening mask for basis product between cell and supmol'''
+    # consider only the most diffused component of a basis
+    exps, cs = _extract_pgto_params(cell, 'min')
+    ls = cell._bas[:,ANG_OF]
+    bas_coords = cp.asarray(cell.atom_coords()[cell._bas[:,ATOM_OF]])
+
+    vol = cell.vol
+    if cutoff is None:
+        theta_ij = exps.min() / 2
+        lattice_sum_factor = max(2*np.pi*cell.rcut/(vol*theta_ij), 1)
+        cutoff = cell.precision/lattice_sum_factor * .1
+        logger.debug(cell, 'Set ft_ao cutoff to %g', cutoff)
+
+    ls = cp.asarray(ls)
+    exps = cp.asarray(exps)
+    norm = cp.asarray(cs * ((2*ls+1)/(4*np.pi))**.5)
+    aij = exps[:,None] + exps
+    theta = exps[:,None] * exps / aij
+
+    Ls = cp.asarray(Ls)
+    # rj is in the order of (bvk_cell_id, bas_id, lattice_img_id)
+    rj = bvkmesh_Ls[:,None,None,:] + bas_coords[:,None,:] + Ls
+    rirj = bas_coords[:,None,None,None,:] - rj
+
+    dr = cp.linalg.norm(rirj, axis=4)
+
+    dri = exps[None,None,None,:]/aij[:,None,None,:] * dr
+    drj = exps[:,None,None,None]/aij[:,None,None,:] * dr
+    li = ls[:,None,None,None]
+    lj = ls[None,None,None,:]
+    fac_dri = ((li-1) * .5/aij[:,None,None,:] + dri**2) ** (li//2)
+    fac_drj = ((lj-1) * .5/aij[:,None,None,:] + drj**2) ** (lj//2)
+    odd_l = ls % 2 == 1
+    fac_dri[odd_l,:,:,:] *= dri
+    fac_drj[:,:,:,odd_l] *= drj
+    fl = 2*np.pi/vol * (dr/theta[:,None,None,:]) + 1.
+    ovlp = (norm[:,None]*norm * np.pi**1.5 * aij[:,None,None,:]**-1.5 *
+            cp.exp(-theta[:,None,None,:]*dr**2) * fac_dri * fac_drj * fl)
+    return ovlp > cutoff
 
 def gen_ft_kernel(cell, kpts=None, verbose=None):
     r'''
@@ -84,162 +121,111 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
     log = logger.new_logger(cell, verbose)
     cput0 = log.init_timer()
 
-    sorted_cell, coeff = basis_seg_contraction(cell)
-
-    # Sort basis according to angular momentum and contraction patterns so
-    # as to group the basis functions to blocks in GPU kernel.
-    l_ctrs = sorted_cell._bas[:,[ANG_OF, NPRIM_OF]]
-    # Ensure the more contracted Gaussians being accessed first
-    l_ctrs_descend = l_ctrs.copy()
-    l_ctrs_descend[:,1] = -l_ctrs[:,1]
-    uniq_l_ctr, where, inv_idx, l_ctr_counts = np.unique(
-        l_ctrs_descend, return_index=True, return_inverse=True, return_counts=True, axis=0)
-    uniq_l_ctr[:,1] = -uniq_l_ctr[:,1]
+    cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
     l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
-    if cell.verbose >= logger.DEBUG1:
-        log.debug1('Number of shells for each [l, nprim] group')
-        for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
-            log.debug1('    %s : %s', l_ctr, n)
+    coeff = cp.asarray(coeff)
 
-    nao_orig = coeff.shape[1]
-    ao_loc = sorted_cell.ao_loc
-    coeff = np.split(coeff, ao_loc[1:-1], axis=0)
-
-    pad_inv_idx = []
-    pad_bas = []
-    inv_idx = np.hstack([inv_idx.ravel(), pad_inv_idx])
-    sorted_idx = np.argsort(inv_idx, kind='stable').astype(np.int32)
-    coeff = cp.asarray(np.vstack([coeff[i] for i in sorted_idx]))
-    assert coeff.shape[0] < 32768
-
-    max_nprims = uniq_l_ctr[:,1].max()
-    sorted_cell._env = np.append(sorted_cell._env, np.zeros(max_nprims))
-    if pad_bas:
-        sorted_cell._bas = np.vstack([sorted_cell._bas, pad_bas])[sorted_idx]
-    else:
-        sorted_cell._bas = sorted_cell._bas[sorted_idx]
-    assert sorted_cell._bas.dtype == np.int32
-
-    # PTR_BAS_COORD is required by CUDA kernels
-    sorted_cell._bas[:,PTR_BAS_COORD] = sorted_cell._atm[sorted_cell._bas[:,ATOM_OF],PTR_COORD]
-
-    # very high angular momentum basis are processed on CPU
-    lmax = uniq_l_ctr[:,0].max()
-    assert lmax <= LMAX
-
+    # create BVK super-cell
     if kpts is None:
-        bvk_cell = sorted_cell
+        bvkmesh_Ls = cp.zeros(3)
+        bvkcell = cell
     else:
-        bvk_cell = supercell??
+        kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
+        bvkmesh_Ls = cp.asarray(k2gamma.translation_vectors_for_kmesh(cell, kmesh, True))
+        bvkcell = pbctools.super_cell(cell, kmesh, wrap_around=True)
+    Ls = bvkcell.get_lattice_Ls()
+    Ls = Ls[np.linalg.norm(Ls-.5, axis=1).argsort()]
 
-    _atm = cp.array(bvk_cell._atm)
-    _bas = cp.array(bvk_cell._bas)
-    _env = cp.array(_scale_sp_ctr_coeff(bvk_cell))
-    ao_loc = cp.array(bvk_cell.ao_loc)
-    bvk_cell._env_on_gpu = (_atm, _bas, _env, ao_loc)
+    # Generate img_idx based on the overlap between shells in cell and super-mol
+    ovlp_mask = _bas_overlap_mask(cell, bvkmesh_Ls, Ls)
+    bvk_ncells, nbas, nimgs = ovlp_mask.shape[1:]
+    # Number of images for each pair of (bas_i_in_cell0, bas_j_in_bvkcell)
+    img_counts = cp.count_nonzero(ovlp_mask, axis=3)
+    img_offsets = cp.append(0, cp.cumsum(img_counts.ravel())).astype(np.int32)
+    # The image Ids for each pair of (bas_i_in_cell0, bas_j_in_bvkcell)
+    img_idx = cp.nonzero(ovlp_mask.reshape(-1, nimgs))[1].astype(np.int32)
+
+    bvk_ovlp_mask = ovlp_mask.any(axis=3)
+    #if permutation symmetry?
+    #ix, iy = cp.triu(nbas, -1)
+    #bvk_ovlp_mask[ix,:,iy] = False
+
+    _atm = cp.array(bvkcell._atm)
+    _bas = cp.array(bvkcell._bas)
+    _env = cp.array(_scale_sp_ctr_coeff(bvkcell))
+    ao_loc = cp.array(bvkcell.ao_loc)
+    bvkcell._env_on_gpu = (_atm, _bas, _env, ao_loc, Ls, img_idx, img_offsets)
     aft_envs = AFTIntEnvVars(
-        bvk_cell.natm, bvk_cell.nbas,
+        bvkcell.natm, bvkcell.nbas,
         _atm.data.ptr, _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr,
-        img_coords, img_idx, shl_pair_img_offsets,
+        Ls.data.ptr, img_idx.data.ptr, img_offsets.data.ptr,
     )
 
-    # create bvk_cell
-    # ovlp_mask
-    # generate img_idx
+    nao = coeff.shape[0]
+    ao_loc = bvkcell.ao_loc
+    uniq_l = uniq_l_ctr[:,0]
+    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
+    n_groups = np.count_nonzero(uniq_l <= LMAX)
+    aosym = 's1'
 
-    nbasp = rs_cell.ref_cell.nbas
-    cell0_ao_loc = rs_cell.ref_cell.ao_loc
-    bvk_ncells, rs_nbas, nimgs = supmol.bas_mask.shape
-
-    ovlp_mask = supmol.get_ovlp_mask()
-
-    img_count = cp.count_nonzero(ovlp_mask, axis=1)
-    img_offsets = cp.append(0, cp.cumsum(img_count))
-    img_idx = cp.nonzero(ovlp_mask)[1]
-
-
-    bvk_ovlp_mask = lib.condense('np.any', ovlp_mask, rs_cell.sh_loc, supmol.sh_loc)
-    cell0_ovlp_mask = bvk_ovlp_mask.reshape(nbasp, bvk_ncells, nbasp).any(axis=1)
-    ovlp_mask = ovlp_mask.astype(np.int8)
-    cell0_ovlp_mask = cell0_ovlp_mask.astype(np.int8)
-    log.timer_debug1('initialize ft_kern', *cput0)
-
+    init_constant(cell)
     kern = libpbc.PBC_build_ft_ao
-    log.timer_debug1('ft_ao kernel initialization', *cput0)
+    log.timer_debug1('initialize ft_kern', *cput0)
 
     def ft_kernel(Gv, q=np.zeros(3), kptjs=None, aosym=aosym, out=None):
         '''
         Analytical FT for orbital products. The output tensor has the shape [nGv, nao, nao]
         '''
-        cput0 = log.init_timer()
+        t1 = log.init_timer()
         assert q.ndim == 1
-        assert shls_slice is None:
         nGv = len(Gv)
         assert nGv > 0
         GvT = cp.asarray(Gv.T, order='C')
-
-        nao, nao_orig = vhfopt.coeff.shape
-
-        out = cp.zeros((nao_cell0, nao_bvk, nGv))
-        out_ptr = ctypes.cast(out.data.ptr, ctypes.c_void_p)
-
-        init_constant(cell)
-        ao_loc = cell.ao_loc
-
-        uniq_l_ctr = vhfopt.uniq_l_ctr
-        uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = vhfopt.l_ctr_offsets
-        l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
-        n_groups = np.count_nonzero(uniq_l <= LMAX)
+        out = cp.zeros((nao, nao, bvk_ncells, nGv), dtype=np.complex128)
 
         timing_collection = {}
         kern_counts = 0
-        kern = libpbc.PBC_build_ft_ao
-
-        #if aosym == 's1hermi':
-        #    # Gamma point only
-        #    assert is_zero(q) and is_zero(kptjs) and ni == nj
-        #    # Theoretically, hermitian symmetry can be also found for kpti == kptj != 0:
-        #    #       f_ji(G) = \int f_ji exp(-iGr) = \int f_ij^* exp(-iGr) = [f_ij(-G)]^*
-        #    # hermi operation needs to reorder axis-0.  It is inefficient.
-
-        out = cp.zeros((nao, nao, bvk_ncells, nGv), dtype=np.complex128)
 
         for i in range(n_groups):
             for j in range(i+1):
-                llll = f'{l_symb[i]}{l_symb[j]}'
-                ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
-                jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
-                mask = ovlp_mask > cutoff
-                if i == j:
-                    mask = cp.tril(mask)
-                t_ij = (cp.arange(i0, i1, dtype=np.int32)[:,None] * ntiles +
-                        cp.arange(j0, j1, dtype=np.int32))
-                idx = cp.argsort(sub_tile_q[mask])[::-1]
-                pair_mapping = t_ij[mask][idx]
-                pair_mapping = sort(pair_mapping, img_counts[i,j])
+                ll_pattern = f'{l_symb[i]}{l_symb[j]}'
+                ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+                jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+                mask = bvk_ovlp_mask[ish0:ish1,:,jsh0:jsh1]
+                sub_img_counts = img_counts[ish0:ish1,:,jsh0:jsh1]
+                # Sort according to the number of images. In the CUDA kernel,
+                # shell-pairs that have closed number of images are processed on
+                # the same SM processor, ensuring the best parallel execution.
+                idx = cp.argsort(sub_img_counts[mask])[::-1]
+                i_in_pair, j_in_pair = cp.nonzero(mask.reshape(ish1-ish0, -1))
+                i_in_pair = i_in_pair.astype(np.int32)[idx]
+                j_in_pair = j_in_pair.astype(np.int32)[idx]
 
                 scheme = ft_ao_scheme(cell, uniq_l_ctr[[i, j]], nGv)
                 err = kern(
-                    out_ptr, ctypes.c_int(nao),
-                    vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
+                    ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                    aft_envs, (ctypes.c_int*2)(*scheme),
                     (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
-                    ctypes.c_int(tile_ij_mapping.size),
+                    ctypes.c_int(i_in_pair.size),
+                    ctypes.cast(i_in_pair.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(j_in_pair.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(nGv), ctypes.c_int(nGv),
+                    ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                     cell._atm.ctypes, ctypes.c_int(cell.natm),
                     cell._bas.ctypes, ctypes.c_int(cell.nbas), cell._env.ctypes)
                 if err != 0:
-                    raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                    raise RuntimeError(f'PBC_build_ft_ao kernel for {ll_pattern} failed')
                 if log.verbose >= logger.DEBUG1:
-                    t1, t1p = log.timer_debug1(f'processing {llll}, tasks = {info[1]}', *t1), t1
-                    if llll not in timing_collection:
-                        timing_collection[llll] = 0
-                    timing_collection[llll] += t1[1] - t1p[1]
+                    t1, t1p = log.timer_debug1(f'processing {ll_pattern}', *t1), t1
+                    if ll_pattern not in timing_collection:
+                        timing_collection[ll_pattern] = 0
+                    timing_collection[ll_pattern] += t1[1] - t1p[1]
                     kern_counts += 1
 
         if log.verbose >= logger.DEBUG1:
             log.debug1('kernel launches %d', kern_counts)
-            for llll, t in timing_collection.items():
-                log.debug1('%s wall time %.2f', llll, t)
+            for ll_pattern, t in timing_collection.items():
+                log.debug1('%s wall time %.2f', ll_pattern, t)
 
         #:out = einsum('pqLG,pi,qj->LGij', out, coeff, coeff)
         out = contract('pqLG,pi->qLGi', out, coeff)
@@ -249,10 +235,16 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
             expLk = cp.exp(1j*cp.dot(bvkmesh_Ls, kptjs.T))
             out = contract('Lk,LGij->kGij', expLk, out)
 
-        #??? symmetrize?
-        if aosym == 's1hermi':
-            for i in range(1, ni):
-                out[:,:,:i,i] = out[:,:,i,:i]
+        #TODO:
+        #if aosym == 's1hermi':
+        #    # Gamma point only
+        #    assert is_zero(q) and is_zero(kptjs) and ni == nj
+        #    # Theoretically, hermitian symmetry can be also found for kpti == kptj != 0:
+        #    #       f_ji(G) = \int f_ji exp(-iGr) = \int f_ij^* exp(-iGr) = [f_ij(-G)]^*
+        #    # hermi operation needs to reorder axis-0.  It is inefficient.
+        #if aosym == 's1hermi':
+        #    for i in range(1, ni):
+        #        out[:,:,:i,i] = out[:,:,i,:i]
 
         log.timer('ft_aopair', *cput0)
         return out
@@ -269,12 +261,12 @@ class AFTIntEnvVars(ctypes.Structure):
         ('ao_loc', ctypes.c_void_p),
         ('img_coords', ctypes.c_void_p),
         ('img_idx', ctypes.c_void_p),
-        ('shl_pair_img_offsets', ctypes.c_void_p),
+        ('img_offsets', ctypes.c_void_p),
     ]
 
 def init_constant(cell):
     g_idx, offsets = g_pair_idx()
-    libvhf_pbc.PBC_FT_init_constant(
+    libpbc.PBC_FT_init_constant(
         g_idx.ctypes, offsets.ctypes, cell._env.ctypes, ctypes.c_int(cell._env.size),
         ctypes.c_int(SHM_SIZE))
 
@@ -292,17 +284,16 @@ def ft_ao_scheme(cell, l_ctr_pattern, nGv, shm_size=SHM_SIZE):
 #        return 256, 1
 
     g_size = (li+1)*(lj+1)
-    nps = l_ctr_pattern[:,1]
     unit = g_size*3
     counts = shm_size // (unit*16)
     counts = _nearest_power2(counts)
-    FIXME
-    if counts < nGv:
-        n = min(THREADS, counts)
-    else:
-        n = _nearest_power2(nGv*2-1)
-    gout_stride = THREADS // n
-    while gout_stride < 16 and gout_size / (gout_stride*GOUT_WIDTH) > 1:
-        n //= 2
-        gout_stride *= 2
-    return n, gout_stride
+    raise
+#    if counts < nGv:
+#        n = min(THREADS, counts)
+#    else:
+#        n = _nearest_power2(nGv*2-1)
+#    gout_stride = THREADS // n
+#    while gout_stride < 16 and gout_size / (gout_stride*GOUT_WIDTH) > 1:
+#        n //= 2
+#        gout_stride *= 2
+#    return n, gout_stride
