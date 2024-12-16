@@ -119,7 +119,7 @@ def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
                         kern_counts += 1
     return ejk, kern_counts, timing_counter
 
-def _jk_energy_per_atom(mol, dm, vhfopt=None, 
+def _jk_energy_per_atom(mol, dm, vhfopt=None,
                         j_factor=1., k_factor=1., verbose=None):
     ''' Computes the first-order derivatives of the energy per atom for
         j_factor * J_derivatives - k_factor * K_derivatives
@@ -159,7 +159,7 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
             future = executor.submit(
                 _ejk_ip1_task,
                 mol, dms, vhfopt, task_list[device_id],
-                j_factor=j_factor, k_factor=k_factor, verbose=verbose, 
+                j_factor=j_factor, k_factor=k_factor, verbose=log.verbose,
                 device_id=device_id)
             futures.append(future)
 

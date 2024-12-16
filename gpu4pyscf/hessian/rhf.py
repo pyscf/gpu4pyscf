@@ -165,12 +165,13 @@ def _ejk_ip2_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
                   device_id=0, verbose=0):
     n_dm = dms.shape[0]
     assert n_dm <= 2
+    assert isinstance(verbose, int)
     nao, _ = vhfopt.coeff.shape
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
     l_ctr_bas_loc = vhfopt.l_ctr_offsets
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
-    
+
     kern1 = libvhf_rys.RYS_per_atom_jk_ip2_type12
     kern2 = libvhf_rys.RYS_per_atom_jk_ip2_type3
 
@@ -299,7 +300,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
             future = executor.submit(
                 _ejk_ip2_task,
                 mol, dms, vhfopt, task_list[device_id],
-                j_factor=j_factor, k_factor=k_factor, verbose=verbose, 
+                j_factor=j_factor, k_factor=k_factor, verbose=log.verbose,
                 device_id=device_id)
             futures.append(future)
 
@@ -318,7 +319,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
             log.debug1('%s wall time %.2f', llll, t)
 
     ejk = reduce_to_device(ejk_dist, inplace=True)
-    
+
     timing_collection = {}
     kern_counts = 0
 
@@ -379,6 +380,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
 
 def _build_jk_ip1_task(mol, dms, vhfopt, task_list, atoms_slice,
                        device_id=0, with_j=True, with_k=True, verbose=0):
+    assert isinstance(verbose, int)
     nao, _ = vhfopt.coeff.shape
     natm = mol.natm
     nbas = mol.nbas
@@ -418,7 +420,7 @@ def _build_jk_ip1_task(mol, dms, vhfopt, task_list, atoms_slice,
         tril_tile_mappings = _make_tril_tile_mappings(
             l_ctr_bas_loc, vhfopt.tile_q_cond, log_cutoff-log_max_dm, 1)
         workers = gpu_specs['multiProcessorCount']
-        QUEUE_DEPTH = 65536 
+        QUEUE_DEPTH = 65536
         pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
         info = cp.empty(2, dtype=np.uint32)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
@@ -504,14 +506,14 @@ def _get_jk(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=None):
     atom0, atom1 = atoms_slice
 
     init_constant(mol)
- 
+
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
     assert uniq_l.max() <= LMAX
 
     nbas = mol.nbas
     assert vhfopt.tile_q_cond.shape == (nbas, nbas)
-    
+
     n_groups = len(uniq_l_ctr)
     tasks = [(i,j) for i in range(n_groups) for j in range(n_groups)]
     tasks = np.array(tasks)
@@ -526,7 +528,7 @@ def _get_jk(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=None):
             future = executor.submit(
                 _build_jk_ip1_task,
                 mol, dms, vhfopt, task_list[device_id], atoms_slice,
-                with_j=with_j, with_k=with_k, verbose=verbose, 
+                with_j=with_j, with_k=with_k, verbose=log.verbose,
                 device_id=device_id)
             futures.append(future)
 
@@ -831,7 +833,7 @@ def _e_hcore_generator(hessobj, dm):
     h1aa, h1ab = hessobj.get_hcore(mol)
     h1aa = cupy.asarray(h1aa)
     h1ab = cupy.asarray(h1ab)
-    
+
     hcore = cupy.empty((3,3,nao,nao))
     t1 = log.timer_debug1('get_hcore', *t1)
     def get_hcore(iatm, jatm):
