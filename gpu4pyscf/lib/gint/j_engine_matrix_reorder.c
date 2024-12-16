@@ -16,6 +16,8 @@
 
 #include "gint.h"
 
+#include <stdbool.h>
+
 // void GINTinit_J_density_reorder(const double* D_matrix, double* D_pair_ordered, const int n_dm, const int n_ao, const int n_pair_type,
 //                                 const int* bas_pair2shls, const int* bas_pairs_locs, const int* density_offset, const int* ao_loc)
 // {
@@ -102,7 +104,7 @@ int hermite_xyz_to_t_index(const int x, const int y, const int z, const int l)
 
 void GINTinit_J_density_rys_preprocess(const double* D_matrix, double* D_pair_ordered, const int n_dm, const int n_ao, const int n_pair_type,
                                        const int* bas_pair2shls, const int* bas_pairs_locs, const int* l_ij, const int* density_offset, const int* ao_loc,
-                                       const double* bas_coords)
+                                       const double* bas_coords, const bool symmetric)
 {
     const int n_bas_pairs = bas_pairs_locs[n_pair_type];
     const int n_total_hermite_density = density_offset[n_pair_type];
@@ -139,7 +141,7 @@ void GINTinit_J_density_rys_preprocess(const double* D_matrix, double* D_pair_or
                             for (int i_y_j = lj - i_x_j; i_y_j >= 0; i_y_j--, i_density_j++) {
                                 const int i_z_j = lj - i_x_j - i_y_j;
 
-                                const double D_cartesian = (i0 == j0) ?
+                                const double D_cartesian = ((!symmetric) || i0 == j0) ?
                                                             D_matrix[(i0 + i_density_i) + (j0 + i_density_j) * n_ao + i_dm * n_ao * n_ao] :
                                                             D_matrix[(i0 + i_density_i) + (j0 + i_density_j) * n_ao + i_dm * n_ao * n_ao] + D_matrix[(j0 + i_density_j) + (i0 + i_density_i) * n_ao + i_dm * n_ao * n_ao];
 
