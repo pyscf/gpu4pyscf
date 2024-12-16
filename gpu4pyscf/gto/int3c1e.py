@@ -370,9 +370,8 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
     dm = cp.asarray(dm)
     if dm.ndim == 3:
         if dm.shape[0] > 2:
-            print("Warning: There are more than two density matrices to contract with one electron integrals, "
-                  "it's not from an unrestricted calculation, and we're unsure about your purpose. "
-                  "We sum the density matrices up, please check if that's expected.")
+            print("Warning: more than two density matrices are found for int3c1e kernel. "
+                  "They will be summed up to one density matrix.")
         dm = cp.einsum("ijk->jk", dm)
 
     assert dm.ndim == 2
