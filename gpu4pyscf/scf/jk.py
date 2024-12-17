@@ -39,6 +39,8 @@ __all__ = [
 
 libvhf_rys = load_library('libgvhf_rys')
 libvhf_rys.RYS_build_jk.restype = ctypes.c_int
+libvhf_rys.RYS_init_constant.restype = ctypes.c_int
+libvhf_rys.RYS_init_rysj_constant.restype = ctypes.c_int
 libvhf_rys.cuda_version.restype = ctypes.c_int
 CUDA_VERSION = libvhf_rys.cuda_version()
 
@@ -261,7 +263,9 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
         pair_loc_on_gpu.data.ptr,
     )
 
-    libvhf_rys.RYS_init_rysj_constant(ctypes.c_int(SHM_SIZE))
+    err = libvhf_rys.RYS_init_rysj_constant(ctypes.c_int(SHM_SIZE))
+    if err != 0:
+        raise RuntimeError('CUDA kernel initialization')
 
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
@@ -448,6 +452,7 @@ class _VHFOpt:
         _bas = cp.array(mol._bas)
         _env = cp.array(_scale_sp_ctr_coeff(mol))
         ao_loc = cp.array(ao_loc)
+        # Keep a reference to these local arrays, ensuring not recycling them.
         self._mol_gpu = (_atm, _bas, _env, ao_loc)
         self.rys_envs = RysIntEnvVars(
             mol.natm, mol.nbas,
@@ -498,9 +503,11 @@ def g_pair_idx(ij_inc=None):
 
 def init_constant(mol):
     g_idx, offsets = g_pair_idx()
-    libvhf_rys.RYS_init_constant(
+    err = libvhf_rys.RYS_init_constant(
         g_idx.ctypes, offsets.ctypes, mol._env.ctypes, ctypes.c_int(mol._env.size),
         ctypes.c_int(SHM_SIZE))
+    if err != 0:
+        raise RuntimeError('CUDA kernel initialization')
 
 def _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond, cutoff, tile=TILE):
     n_groups = len(l_ctr_bas_loc) - 1
@@ -598,11 +605,16 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
         gout_stride *= 2
     return n, gout_stride, with_gout
 
-def _nearest_power2(n):
-    '''nearest 2**x that is smaller than n'''
+def _nearest_power2(n, return_leq=True):
+    '''nearest 2**x that is leq or geq than n.
+
+    Kwargs:
+        return_leq specifies that the return is less or equal than n.
+        Otherwise, the return is greater or equal than n.
+    '''
     n = int(n)
-    t = 0
-    while n > 1:
-        n >>= 1
-        t += 1
-    return 2**t
+    assert n > 0
+    if return_leq:
+        return 1 << (n.bit_length() - 1)
+    else:
+        return 1 << ((n-1).bit_length())

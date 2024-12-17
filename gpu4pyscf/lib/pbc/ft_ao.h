@@ -29,7 +29,6 @@ typedef struct {
     int *ish_in_pair;
     int *jsh_in_pair;
     int ngrids;
-    int ngrids_in_batch;
     double *grids;
 } AFTBoundsInfo;
 #endif

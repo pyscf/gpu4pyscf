@@ -16,8 +16,8 @@ void ft_pair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds);
 extern "C" {
 int PBC_build_ft_ao(double *out, AFTIntEnvVars envs,
                     int *scheme, int *shls_slice,
-                    int npairs_ij, int *ish_in_pair, int *jsh_in_pair,
-                    int ngrids, int ngrids_in_batch, double *grids,
+                    int npairs_ij, int ngrids,
+                    int *ish_in_pair, int *jsh_in_pair, double *grids,
                     int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
@@ -35,7 +35,7 @@ int PBC_build_ft_ao(double *out, AFTIntEnvVars envs,
     uint8_t g_size = stride_j * (uint16_t)(lj + 1);
     AFTBoundsInfo bounds = {li, lj, nfij, g_size,
         stride_i, stride_j, iprim, jprim,
-        npairs_ij, ish_in_pair, jsh_in_pair, ngrids, ngrids_in_batch, grids};
+        npairs_ij, ish_in_pair, jsh_in_pair, ngrids, grids};
 
     if (1) {
         int nGv_per_block = scheme[0];
@@ -43,9 +43,10 @@ int PBC_build_ft_ao(double *out, AFTIntEnvVars envs,
         int nsp_per_block = scheme[2];
         dim3 threads(nGv_per_block, gout_stride, nsp_per_block);
         int sp_blocks = (npairs_ij + nsp_per_block - 1) / nsp_per_block;
-        int Gv_batches = (ngrids_in_batch + nGv_per_block - 1) / nGv_per_block;
+        int Gv_batches = (ngrids + nGv_per_block - 1) / nGv_per_block;
         dim3 workers(sp_blocks, Gv_batches);
         int buflen = g_size*3 * nGv_per_block * nsp_per_block;
+        printf("B.pair %d\n", bounds.npairs_ij);
         ft_pair_kernel<<<workers, threads, buflen*sizeof(double)>>>(out, envs, bounds);
     }
     cudaError_t err = cudaGetLastError();
@@ -56,11 +57,18 @@ int PBC_build_ft_ao(double *out, AFTIntEnvVars envs,
     return 0;
 }
 
-void PBC_FT_init_constant(int *g_pair_idx, int *offsets,
-                          double *env, int env_size, int shm_size)
+int PBC_FT_init_constant(int *g_pair_idx, int *offsets,
+                         double *env, int env_size, int shm_size)
 {
     cudaMemcpyToSymbol(c_g_pair_idx, g_pair_idx, 3675*sizeof(int));
     cudaMemcpyToSymbol(c_g_pair_offsets, offsets, sizeof(int) * LMAX1*LMAX1);
     cudaFuncSetAttribute(ft_pair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,
+                cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
 }
 }

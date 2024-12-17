@@ -45,6 +45,7 @@ THREADS = 256
 
 libvhf_md = load_library('libgvhf_md')
 libvhf_md.MD_build_j.restype = ctypes.c_int
+libvhf_md.init_mdj_constant.restype = ctypes.c_int
 
 def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
     '''Compute J matrix
@@ -96,7 +97,9 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
         pair_loc_on_gpu.data.ptr,
     )
 
-    libvhf_md.init_mdj_constant(ctypes.c_int(SHM_SIZE))
+    err = libvhf_md.init_mdj_constant(ctypes.c_int(SHM_SIZE))
+    if err != 0:
+        raise RuntimeError('CUDA kernel initialization')
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
     l_ctr_bas_loc = vhfopt.l_ctr_offsets

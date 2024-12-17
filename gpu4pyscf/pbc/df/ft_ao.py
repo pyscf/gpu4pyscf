@@ -29,7 +29,7 @@ from pyscf.gto.mole import ANG_OF, ATOM_OF
 from pyscf.scf import _vhf
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.gto.cell import _extract_pgto_params
-from pyscf.pbc.lib import k2gamma
+from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib.cupy_helper import load_library, contract
 from gpu4pyscf.gto.mole import group_basis
 from gpu4pyscf.scf.jk import (
@@ -43,33 +43,34 @@ __all__ = [
 
 libpbc = load_library('libpbc')
 libpbc.PBC_build_ft_ao.restype = ctypes.c_int
+libpbc.PBC_FT_init_constant.restype = ctypes.c_int
 
 PTR_BAS_COORD = 7
 LMAX = 4
-#UNROLL_ORDER = ctypes.c_int.in_dll(libpbc, 'rys_jk_unrolled_max_order').value
-#UNROLL_LMAX = ctypes.c_int.in_dll(libpbc, 'rys_jk_unrolled_lmax').value
-#UNROLL_NFMAX = ctypes.c_int.in_dll(libpbc, 'rys_jk_unrolled_max_nf').value
-#UNROLL_J_LMAX = ctypes.c_int.in_dll(libpbc, 'rys_j_unrolled_lmax').value
-#UNROLL_J_MAX_ORDER = ctypes.c_int.in_dll(libpbc, 'rys_j_unrolled_max_order').value
 GOUT_WIDTH = 19 # 15?
 THREADS = 256
 
-def ft_aopair(cell, Gv, shls_slice=None, aosym='s1',
-              b=None, gxyz=None, Gvbase=None, kpti_kptj=np.zeros((2,3)),
-              q=None, intor='GTO_ft_ovlp', comp=1, verbose=None):
-    pass
+def ft_aopair(cell, Gv, kpti_kptj=None, q=None):
+    if kpti_kptj is None:
+        kptj = np.zeros((1, 3))
+    else:
+        kpti, kptj = kpti_kptj
+        q = kptj - kpti
+    return ft_aopair_kpts(cell, Gv, q, kptj.reshape(1,3))
 
-
-def ft_aopair_kpts(cell, Gv, shls_slice=None, aosym='s1',
-                   b=None, gxyz=None, Gvbase=None, q=np.zeros(3),
-                   kptjs=np.zeros((1,3)), intor='GTO_ft_ovlp', comp=1,
-                   bvk_kmesh=None, out=None):
-    pass
-
+def ft_aopair_kpts(cell, Gv, q=None, kptjs=None, bvk_kmesh=None):
+    if q is None:
+        q = np.zeros(3)
+    if bvk_kmesh is None and kptjs is not None:
+        bvk_kmesh = k2gamma.kpts_to_kmesh(cell, kptjs)
+    ft_kernel = gen_ft_kernel(cell, bvk_kmesh)
+    return ft_kernel(Gv, q, kptjs)
 
 def ft_ao(cell, Gv, shls_slice=None, b=None,
           gxyz=None, Gvbase=None, kpt=np.zeros(3), verbose=None):
-    pass
+    from pyscf.pbc.df.ft_ao import ft_ao
+    out = ft_ao(cell, Gv, shls_slice, b, gxyz, Gvbase, kpt, verbose)
+    return cp.asarray(out)
 
 def _bas_overlap_mask(cell, bvkmesh_Ls, Ls, cutoff=None):
     '''integral screening mask for basis product between cell and supmol'''
@@ -87,7 +88,7 @@ def _bas_overlap_mask(cell, bvkmesh_Ls, Ls, cutoff=None):
 
     ls = cp.asarray(ls)
     exps = cp.asarray(exps)
-    norm = cp.asarray(cs * ((2*ls+1)/(4*np.pi))**.5)
+    norm = cp.asarray(cs) * ((2*ls+1)/(4*np.pi))**.5
     aij = exps[:,None] + exps
     theta = exps[:,None] * exps / aij
 
@@ -98,25 +99,34 @@ def _bas_overlap_mask(cell, bvkmesh_Ls, Ls, cutoff=None):
 
     dr = cp.linalg.norm(rirj, axis=4)
 
-    dri = exps[None,None,None,:]/aij[:,None,None,:] * dr
-    drj = exps[:,None,None,None]/aij[:,None,None,:] * dr
+    dri = exps[None,None,:,None]/aij[:,None,:,None] * dr
+    drj = exps[:,None,None,None]/aij[:,None,:,None] * dr
     li = ls[:,None,None,None]
-    lj = ls[None,None,None,:]
-    fac_dri = ((li-1) * .5/aij[:,None,None,:] + dri**2) ** (li//2)
-    fac_drj = ((lj-1) * .5/aij[:,None,None,:] + drj**2) ** (lj//2)
+    lj = ls[None,None,:,None]
     odd_l = ls % 2 == 1
-    fac_dri[odd_l,:,:,:] *= dri
-    fac_drj[:,:,:,odd_l] *= drj
-    fl = 2*np.pi/vol * (dr/theta[:,None,None,:]) + 1.
-    ovlp = (norm[:,None]*norm * np.pi**1.5 * aij[:,None,None,:]**-1.5 *
-            cp.exp(-theta[:,None,None,:]*dr**2) * fac_dri * fac_drj * fl)
+    # li is even: ((li-1) * .5/aij[:,None,None,:] + dri**2) ** (li//2)
+    # li is odd : (li * .5/aij[:,None,None,:] + dri**2) ** ((li+1)//2) * dri
+    fac_dri = ((li-1) * .5/aij[:,None,:,None] + dri**2) ** (li//2)
+    fac_drj = ((lj-1) * .5/aij[:,None,:,None] + drj**2) ** (lj//2)
+    li_odd = li[odd_l,:,:,:]
+    lj_odd = lj[:,:,odd_l,:]
+    dri_odd = dri[odd_l,:,:,:]
+    drj_odd = drj[:,:,odd_l,:]
+    fac_dri[odd_l,:,:,:] = (li_odd*.5/aij[odd_l,None,:,None] + dri_odd**2)**((li_odd-1)//2) * dri_odd
+    fac_drj[:,:,odd_l,:] = (lj_odd*.5/aij[:,None,odd_l,None] + drj_odd**2)**((lj_odd-1)//2) * drj_odd
+    fl = 2*np.pi/vol * (dr/theta[:,None,:,None]) + 1.
+    fac_norm = norm[:,None]*norm * (np.pi/aij)**1.5
+    ovlp = fac_norm[:,None,:,None] * cp.exp(-theta[:,None,:,None]*dr**2) * fac_dri * fac_drj * fl
     return ovlp > cutoff
 
-def gen_ft_kernel(cell, kpts=None, verbose=None):
+def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
     r'''
     Generate the analytical fourier transform kernel for AO products
 
     \sum_T exp(-i k_j * T) \int exp(-i(G+q)r) i(r) j(r-T) dr^3
+
+    The output tensor is saved in the shape [nGv, nao, nao] for single k-point
+    case and [nkpts, nGv, nao, nao] for multiple k-points
     '''
     log = logger.new_logger(cell, verbose)
     cput0 = log.init_timer()
@@ -126,15 +136,15 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
     coeff = cp.asarray(coeff)
 
     # create BVK super-cell
-    if kpts is None:
+    if bvk_kmesh is None:
         bvkmesh_Ls = cp.zeros(3)
         bvkcell = cell
     else:
-        kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
-        bvkmesh_Ls = cp.asarray(k2gamma.translation_vectors_for_kmesh(cell, kmesh, True))
-        bvkcell = pbctools.super_cell(cell, kmesh, wrap_around=True)
-    Ls = bvkcell.get_lattice_Ls()
-    Ls = Ls[np.linalg.norm(Ls-.5, axis=1).argsort()]
+        bvkmesh_Ls = cp.asarray(
+                k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True))
+        bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)
+    Ls = cp.asarray(bvkcell.get_lattice_Ls())
+    Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
 
     # Generate img_idx based on the overlap between shells in cell and super-mol
     ovlp_mask = _bas_overlap_mask(cell, bvkmesh_Ls, Ls)
@@ -146,7 +156,7 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
     img_idx = cp.nonzero(ovlp_mask.reshape(-1, nimgs))[1].astype(np.int32)
 
     bvk_ovlp_mask = ovlp_mask.any(axis=3)
-    #if permutation symmetry?
+    #TODO: symmetry between ish and jsh?
     #ix, iy = cp.triu(nbas, -1)
     #bvk_ovlp_mask[ix,:,iy] = False
 
@@ -154,12 +164,13 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
     _bas = cp.array(bvkcell._bas)
     _env = cp.array(_scale_sp_ctr_coeff(bvkcell))
     ao_loc = cp.array(bvkcell.ao_loc)
-    bvkcell._env_on_gpu = (_atm, _bas, _env, ao_loc, Ls, img_idx, img_offsets)
     aft_envs = AFTIntEnvVars(
         bvkcell.natm, bvkcell.nbas,
         _atm.data.ptr, _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr,
         Ls.data.ptr, img_idx.data.ptr, img_offsets.data.ptr,
     )
+    # Keep a reference to these arrays, prevent releasing them upon returning the closure
+    aft_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls, img_idx, img_offsets)
 
     nao = coeff.shape[0]
     ao_loc = bvkcell.ao_loc
@@ -172,7 +183,7 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
     kern = libpbc.PBC_build_ft_ao
     log.timer_debug1('initialize ft_kern', *cput0)
 
-    def ft_kernel(Gv, q=np.zeros(3), kptjs=None, aosym=aosym, out=None):
+    def ft_kernel(Gv, q=np.zeros(3), kptjs=None, aosym=aosym):
         '''
         Analytical FT for orbital products. The output tensor has the shape [nGv, nao, nao]
         '''
@@ -180,7 +191,8 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
         assert q.ndim == 1
         nGv = len(Gv)
         assert nGv > 0
-        GvT = cp.asarray(Gv.T, order='C')
+        # Padding zeros, allowing idle threads to access these data
+        GvT = cp.append(Gv.T.ravel(), cp.zeros(THREADS))
         out = cp.zeros((nao, nao, bvk_ncells, nGv), dtype=np.complex128)
 
         timing_collection = {}
@@ -188,6 +200,8 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
 
         for i in range(n_groups):
             for j in range(i+1):
+                li = uniq_l[i]
+                lj = uniq_l[j]
                 ll_pattern = f'{l_symb[i]}{l_symb[j]}'
                 ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
                 jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
@@ -201,15 +215,15 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
                 i_in_pair = i_in_pair.astype(np.int32)[idx]
                 j_in_pair = j_in_pair.astype(np.int32)[idx]
 
-                scheme = ft_ao_scheme(cell, uniq_l_ctr[[i, j]], nGv)
+                scheme = ft_ao_scheme(cell, li, lj, nGv)
+                log.debug2('ft_ao_scheme %s', scheme)
                 err = kern(
                     ctypes.cast(out.data.ptr, ctypes.c_void_p),
-                    aft_envs, (ctypes.c_int*2)(*scheme),
+                    aft_envs, (ctypes.c_int*3)(*scheme),
                     (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
-                    ctypes.c_int(i_in_pair.size),
+                    ctypes.c_int(i_in_pair.size), ctypes.c_int(nGv),
                     ctypes.cast(i_in_pair.data.ptr, ctypes.c_void_p),
                     ctypes.cast(j_in_pair.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(nGv), ctypes.c_int(nGv),
                     ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                     cell._atm.ctypes, ctypes.c_int(cell.natm),
                     cell._bas.ctypes, ctypes.c_int(cell.nbas), cell._env.ctypes)
@@ -230,7 +244,9 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
         #:out = einsum('pqLG,pi,qj->LGij', out, coeff, coeff)
         out = contract('pqLG,pi->qLGi', out, coeff)
         out = contract('qLGi,qj->LGij', out, coeff)
-        if kptjs is not None:
+        if kptjs is None:
+            out = out.sum(axis=0)
+        else:
             kptjs = cp.asarray(kptjs, order='C').reshape(-1,3)
             expLk = cp.exp(1j*cp.dot(bvkmesh_Ls, kptjs.T))
             out = contract('Lk,LGij->kGij', expLk, out)
@@ -266,34 +282,34 @@ class AFTIntEnvVars(ctypes.Structure):
 
 def init_constant(cell):
     g_idx, offsets = g_pair_idx()
-    libpbc.PBC_FT_init_constant(
+    err = libpbc.PBC_FT_init_constant(
         g_idx.ctypes, offsets.ctypes, cell._env.ctypes, ctypes.c_int(cell._env.size),
         ctypes.c_int(SHM_SIZE))
+    if err != 0:
+        raise RuntimeError('CUDA kernel initialization')
 
-def ft_ao_scheme(cell, l_ctr_pattern, nGv, shm_size=SHM_SIZE):
-    ls = l_ctr_pattern[:,0]
-    li, lj = ls
+def ft_ao_scheme(cell, li, lj, nGv, shm_size=SHM_SIZE):
     order = li + lj
     nfi = (li + 1) * (li + 2) // 2
     nfj = (lj + 1) * (lj + 2) // 2
     gout_size = nfi * nfj
-#    if (gout_size <= UNROLL_NFMAX or order <= UNROLL_ORDER) and all(ls <= UNROLL_LMAX):
-#        if (CUDA_VERSION >= 12040 and
-#            order <= 3 and (li,lj,lk,ll) != (1,1,1,0) and (li,lj,lk,ll) != (1,0,1,1)):
-#            return 512, 1
-#        return 256, 1
+    gout_stride = (gout_size + GOUT_WIDTH-1) // GOUT_WIDTH
+    # Round up to the next 2^n
+    gout_stride = _nearest_power2(gout_stride, return_leq=False)
 
     g_size = (li+1)*(lj+1)
     unit = g_size*3
-    counts = shm_size // (unit*16)
-    counts = _nearest_power2(counts)
-    raise
-#    if counts < nGv:
-#        n = min(THREADS, counts)
-#    else:
-#        n = _nearest_power2(nGv*2-1)
-#    gout_stride = THREADS // n
-#    while gout_stride < 16 and gout_size / (gout_stride*GOUT_WIDTH) > 1:
-#        n //= 2
-#        gout_stride *= 2
-#    return n, gout_stride
+    nGv_max = min(shm_size//(unit*16), THREADS//gout_stride)
+
+    # Test nGv_per_block in 8..nGv_max, find the case of minimal idle threads
+    idle_min = nGv_max
+    nGv_test = nGv_per_block = 8
+    while nGv_test <= nGv_max:
+        idle = (-nGv) % nGv_test
+        if idle <= idle_min:
+            idle_min = idle
+            nGv_per_block = nGv_test
+        nGv_test *= 2
+
+    sp_blocks = THREADS // (gout_stride * nGv_per_block)
+    return nGv_per_block, gout_stride, sp_blocks

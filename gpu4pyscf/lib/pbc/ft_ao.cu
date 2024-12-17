@@ -25,14 +25,15 @@ void ft_pair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     int gout_id = threadIdx.y;
     int sp_id = threadIdx.z;
     int npairs_ij = bounds.npairs_ij;
+    int pair_ij_idx = sp_block_id * nsp_per_block + sp_id;
 
-    if (sp_block_id * nsp_per_block + sp_id >= npairs_ij) {
+    if (pair_ij_idx >= npairs_ij) {
         return;
     }
 
     int nbas = envs.nbas;
-    int ish = bounds.ish_in_pair[sp_id];
-    int jsh = bounds.jsh_in_pair[sp_id];
+    int ish = bounds.ish_in_pair[pair_ij_idx];
+    int jsh = bounds.jsh_in_pair[pair_ij_idx];
     int *sp_img_offsets = envs.img_offsets;
     int bas_ij = ish * nbas + jsh;
     int img0 = sp_img_offsets[bas_ij];
@@ -198,21 +199,20 @@ void ft_pair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
         }
     }
 
-    int nGv_in_batch = bounds.ngrids_in_batch;
-    if (Gv_block_id * nGv_per_block + Gv_id < nGv_in_batch) {
+    if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
         int nfi = (li + 1) * (li + 2) / 2;
         int *ao_loc = envs.ao_loc;
         int nao = ao_loc[nbas];
         int i0 = ao_loc[ish];
         int j0 = ao_loc[jsh];
-        double *aft_tensor = out + ((i0*nao+j0)*nGv_in_batch
-                                    + Gv_block_id*nGv_per_block) * OF_COMPLEX;
+        double *aft_tensor = out + 
+                ((i0*nao+j0)*nGv + Gv_block_id*nGv_per_block) * OF_COMPLEX;
         for (int n = 0; n < GOUT_WIDTH; ++n) {
             int ij = n*gout_stride + gout_id;
             if (ij >= nfij) continue;
             int i = ij % nfi;
             int j = ij / nfi;
-            int addr = (i*nao+j)*nGv_in_batch + Gv_id;
+            int addr = (i*nao+j)*nGv + Gv_id;
             aft_tensor[addr*2  ] = goutR[n];
             aft_tensor[addr*2+1] = goutI[n];
         }
