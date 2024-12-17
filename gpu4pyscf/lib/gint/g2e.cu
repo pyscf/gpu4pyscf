@@ -479,15 +479,9 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
     const double xi = bas_x[ish];
     const double yi = bas_y[ish];
     const double zi = bas_z[ish];
-    const double xk = bas_x[ksh];
-    const double yk = bas_y[ksh];
-    const double zk = bas_z[ksh];
     const double xijxi = xij - xi;
     const double yijyi = yij - yi;
     const double zijzi = zij - zi;
-    const double xklxk = xkl - xk;
-    const double yklyk = ykl - yk;
-    const double zklzk = zkl - zk;
 
     int nmax = envs.li_ceil + envs.lj_ceil;
     int mmax = envs.lk_ceil + envs.ll_ceil;
@@ -563,9 +557,9 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
             //}
             const double tmp3 = tmp1 * aij;
             const double b01 = b00 + tmp4 * aij;
-            const double c0px = xklxk + tmp3 * xijxkl;
-            const double c0py = yklyk + tmp3 * yijykl;
-            const double c0pz = zklzk + tmp3 * zijzkl;
+            const double c0px = tmp3 * xijxkl;
+            const double c0py = tmp3 * yijykl;
+            const double c0pz = tmp3 * zijzkl;
             double s0x = gx[i];
             double s0y = gy[i];
             double s0z = gz[i];

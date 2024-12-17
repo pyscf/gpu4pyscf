@@ -6,6 +6,7 @@
 
 #include "vhf.cuh"
 
+// 8-fold symmery
 __device__
 static int _fill_jk_tasks(ShellQuartet *shl_quartet_idx,
                           RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
@@ -15,11 +16,7 @@ static int _fill_jk_tasks(ShellQuartet *shl_quartet_idx,
     int *tile_ij_mapping = bounds.tile_ij_mapping;
     int *tile_kl_mapping = bounds.tile_kl_mapping;
     float *q_cond = bounds.q_cond;
-#if TILE == 1
-    float *tile_q_cond = q_cond;
-#else
-    float *tile_q_cond = q_cond + nbas*nbas;
-#endif
+    float *tile_q_cond = bounds.tile_q_cond;
     float *dm_cond = bounds.dm_cond;
     float cutoff = bounds.cutoff;
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
@@ -168,6 +165,7 @@ static int _fill_jk_tasks(ShellQuartet *shl_quartet_idx,
     return ntasks;
 }
 
+// 8-fold symmery
 __device__
 static int _fill_sr_jk_tasks(ShellQuartet *shl_quartet_idx,
                              RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
@@ -177,14 +175,10 @@ static int _fill_sr_jk_tasks(ShellQuartet *shl_quartet_idx,
     int *tile_ij_mapping = bounds.tile_ij_mapping;
     int *tile_kl_mapping = bounds.tile_kl_mapping;
     float *q_cond = bounds.q_cond;
-#if TILE == 1
-    float *tile_q_cond = q_cond;
-#else
-    float *tile_q_cond = q_cond + nbas*nbas;
-#endif
+    float *tile_q_cond = bounds.tile_q_cond;
     int nbas_tiles = nbas / TILE;
     // TODO: implement q_ijij_cond
-    float *s_estimator = tile_q_cond + nbas_tiles*nbas_tiles;
+    float *s_estimator = bounds.s_estimator;
     float *dm_cond = bounds.dm_cond;
     float cutoff = bounds.cutoff;
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;

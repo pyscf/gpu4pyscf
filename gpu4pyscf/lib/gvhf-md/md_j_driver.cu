@@ -355,7 +355,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
                 RysIntEnvVars envs, int *scheme, int *shls_slice,
                 int ntile_ij_pairs, int ntile_kl_pairs,
                 int *tile_ij_mapping, int *tile_kl_mapping, float *tile_q_cond,
-                float *q_cond, float *dm_cond, float cutoff,
+                float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
                 uint32_t *batch_head, int workers, double omega,
                 int *atm, int natm, int *bas, int nbas, double *env)
 {
@@ -371,7 +371,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
     BoundsInfo bounds = {li, lj, lk, ll,
         0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0 , 0,
         ntile_ij_pairs, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
-        q_cond, dm_cond, cutoff};
+        q_cond, tile_q_cond, s_estimator, dm_cond, cutoff};
 
     JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
 

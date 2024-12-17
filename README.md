@@ -53,7 +53,8 @@ Features
 - MP2/DF-MP2 and CCSD (experimental);
 - Polarizability, IR, and NMR shielding (experimental);
 - QM/MM with PBC;
-- CHELPG, ESP, and RESP atomic charge
+- CHELPG, ESP, and RESP atomic charge;
+- Multi-GPU for density fitting (experimental)
 
 Limitations
 --------
@@ -134,22 +135,22 @@ References
 ---------
 ```
 @misc{li2024introducting,
-      title={Introducing GPU-acceleration into the Python-based Simulations of Chemistry Framework}, 
+      title={Introducing GPU-acceleration into the Python-based Simulations of Chemistry Framework},
       author={Rui Li and Qiming Sun and Xing Zhang and Garnet Kin-Lic Chan},
       year={2024},
       eprint={2407.09700},
       archivePrefix={arXiv},
       primaryClass={physics.comp-ph},
-      url={https://arxiv.org/abs/2407.09700}, 
+      url={https://arxiv.org/abs/2407.09700},
 }
 
 @misc{wu2024enhancing,
-      title={Enhancing GPU-acceleration in the Python-based Simulations of Chemistry Framework}, 
+      title={Enhancing GPU-acceleration in the Python-based Simulations of Chemistry Framework},
       author={Xiaojie Wu and Qiming Sun and Zhichen Pu and Tianze Zheng and Wenzhi Ma and Wen Yan and Xia Yu and Zhengxiao Wu and Mian Huo and Xiang Li and Weiluo Ren and Sheng Gong and Yumin Zhang and Weihao Gao},
       year={2024},
       eprint={2404.09452},
       archivePrefix={arXiv},
       primaryClass={physics.comp-ph},
-      url={https://arxiv.org/abs/2404.09452}, 
+      url={https://arxiv.org/abs/2404.09452},
 }
 ```

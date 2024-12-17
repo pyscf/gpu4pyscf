@@ -128,6 +128,35 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 7)
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
 
+    def test_kpts_lda_fft(self):
+        nk = [2, 1, 1]
+        kpts = cell.make_kpts(nk)
+        kmf = pbcdft.KRKS(cell, xc='lda,vwn', kpts=kpts).run(conv_tol=1e-10)
+        mf_ref = kmf.to_cpu().run()
+        self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
+
+        # test bands
+        np.random.seed(1)
+        kpts_band = np.random.random((2,3))
+        e0, c0 = mf_ref.get_bands(kpts_band)
+        e1, c1 = kmf.get_bands(kpts_band)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 7)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
+
+    def test_kpts_gga_fft(self):
+        nk = [2, 1, 1]
+        kpts = cell.make_kpts(nk)
+        kmf = pbcdft.KRKS(cell, xc='pbe0', kpts=kpts).run(conv_tol=1e-10)
+        mf_ref = kmf.to_cpu().run()
+        self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
+
+    def test_kpts_rsh_fft(self):
+        nk = [2, 1, 1]
+        kpts = cell.make_kpts(nk)
+        kmf = pbcdft.KRKS(cell, xc='camb3lyp', kpts=kpts).run(conv_tol=1e-9)
+        mf_ref = kmf.to_cpu().run()
+        self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
+
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.rks")
     unittest.main()

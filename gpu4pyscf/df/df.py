@@ -86,7 +86,7 @@ class DF(lib.StreamObject):
         j2c = cupy.asarray(j2c_cpu, order='C')
         t0 = log.timer_debug1('2c2e', *t0)
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-        intopt.build(direct_scf_tol, diag_block_with_triu=False, aosym=True, 
+        intopt.build(direct_scf_tol, diag_block_with_triu=False, aosym=True,
                      group_size=GROUP_SIZE, group_size_aux=GROUP_SIZE)
         log.timer_debug1('prepare intopt', *t0)
         self.j2c = j2c.copy()
@@ -105,7 +105,7 @@ class DF(lib.StreamObject):
         naux = self.naux = self.cd_low.shape[1]
         log.debug('size of aux basis %d', naux)
 
-        self._cderi = cholesky_eri_gpu(intopt, mol, auxmol, self.cd_low, 
+        self._cderi = cholesky_eri_gpu(intopt, mol, auxmol, self.cd_low,
                                        omega=omega, use_gpu_memory=self.use_gpu_memory)
         log.timer_debug1('cholesky_eri', *t0)
         self.intopt = intopt
@@ -123,7 +123,7 @@ class DF(lib.StreamObject):
         if key in self._rsh_df:
             rsh_df = self._rsh_df[key]
         else:
-            rsh_df = self._rsh_df[key] = copy.copy(self).reset()
+            rsh_df = self._rsh_df[key] = self.copy().reset()
             logger.info(self, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
 
         return df_jk.get_jk(rsh_df, dm, hermi, with_j, with_k, direct_scf_tol, omega=omega)
@@ -144,8 +144,8 @@ class DF(lib.StreamObject):
         return blksize
 
     def loop(self, blksize=None, unpack=True):
-        ''' loop over cderi for the current device 
-            and unpack the CDERI in (Lij) format 
+        ''' loop over cderi for the current device
+            and unpack the CDERI in (Lij) format
         '''
         device_id = cupy.cuda.Device().id
         cderi_sparse = self._cderi[device_id]
@@ -177,10 +177,10 @@ class DF(lib.StreamObject):
             yield buf2, buf.T
             if isinstance(cderi_sparse, np.ndarray):
                 cupy.cuda.Device().synchronize()
-            
+
             if buf_prefetch is not None:
                 buf = buf_prefetch
-            
+
     def reset(self, mol=None):
         '''Reset mol and clean up relevant attributes for scanner mode'''
         if mol is not None:
@@ -198,7 +198,7 @@ class DF(lib.StreamObject):
     get_ao_eri = get_eri = NotImplemented
     get_mo_eri = ao2mo = NotImplemented
 
-def cholesky_eri_gpu(intopt, mol, auxmol, cd_low, 
+def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
                      omega=None, sr_only=False, use_gpu_memory=True):
     '''
     Returns:
@@ -210,13 +210,13 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
 
     # Available memory on Device 0.
     avail_mem = get_avail_mem()
-    
+
     if use_gpu_memory:
         # CDERI will be equally distributed to the devices
         # Other devices usually have more memory available than Device 0
         # CDERI will use up to 40% of the available memory
         use_gpu_memory = naux * npairs * 8 < 0.4 * avail_mem * _num_devices
-    
+
     if use_gpu_memory:
         log.debug("Saving CDERI on GPU")
     else:
@@ -235,7 +235,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
             _cderi[device_id] = cderi_blk
 
     npairs_per_ctr = [len(intopt.ao_pairs_row[cp_ij_id]) for cp_ij_id in range(len(intopt.log_qs))]
-    
+
     npairs_per_ctr = np.array(npairs_per_ctr)
     total_task_list = np.argsort(npairs_per_ctr)
     task_list_per_device = []
@@ -253,13 +253,13 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
             future = executor.submit(_cderi_task, intopt, cd_low_f, task_list, _cderi,
                                      omega=omega, sr_only=sr_only, device_id=device_id)
             futures.append(future)
-    
+
     for future in futures:
         future.result()
-    
+
     if not use_gpu_memory:
         cupy.cuda.Device().synchronize()
-    
+
     return _cderi
 
 def _cderi_task(intopt, cd_low, task_list, _cderi, omega=None, sr_only=False, device_id=0):
@@ -273,6 +273,7 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, omega=None, sr_only=False, de
     pairs_loc = np.append(0, np.cumsum(npairs))
     blksize = (naux + _num_devices - 1) // _num_devices
     with cupy.cuda.Device(device_id), _streams[device_id]:
+        assert isinstance(mol.verbose, int)
         log = logger.new_logger(mol, mol.verbose)
         t1 = log.init_timer()
         cd_low_tag = cd_low.tag
@@ -320,7 +321,7 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, omega=None, sr_only=False, de
 
             row = intopt.ao_pairs_row[cp_ij_id] - i0
             col = intopt.ao_pairs_col[cp_ij_id] - j0
-            
+
             ints_slices_f= cupy.empty([naoaux,len(row)], order='F')
             ints_slices_f[:] = ints_slices[:,col,row]
             ints_slices = None
@@ -330,12 +331,12 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, omega=None, sr_only=False, de
             elif cd_low_tag == 'cd':
                 cderi_block = solve_triangular(cd_low, ints_slices_f, lower=True, overwrite_b=True)
             else:
-                RuntimeError('Tag is not found in lower triangular matrix.')
+                raise RuntimeError('Tag is not found in lower triangular matrix.')
             t1 = log.timer_debug1(f'solve {cp_ij_id} / {nq} on Device {device_id}', *t1)
 
-            # TODO: 
+            # TODO:
             # 1) async data transfer
-            # 2) auxiliary basis in the last dimension 
+            # 2) auxiliary basis in the last dimension
 
             # if CDERI is saved on CPU
             ij0 = pairs_loc[cp_ij_id]

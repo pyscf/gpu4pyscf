@@ -29,6 +29,8 @@ from gpu4pyscf.dft import libxc_structs
 
 import site
 path_list = [os.path.abspath(os.path.join(__file__, '..', '..', '..'))] + site.getsitepackages()
+path_list.append(site.USER_SITE)    # Search for the directory where user-specific packages are installed
+
 __version__ = '6.1' # hard coded
 
 # CPU routines
@@ -210,7 +212,7 @@ class XCfun:
             output = _check_arrays(output, output_labels[3:4], xc_func_sizes, npoints, do_kxc)
             output = _check_arrays(output, output_labels[4:5], xc_func_sizes, npoints, do_lxc)
 
-            args.extend([   inp[x] for x in  input_labels])
+            args.extend([   inp[x].ravel() for x in  input_labels])
             args.extend([output[x] for x in output_labels])
 
             out_params = xc_lda_out_params()

@@ -104,23 +104,37 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     exc1_per_atom = [exc1_per_atom[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
     exc1_per_atom = cupy.asarray(exc1_per_atom)
 
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
     vhfopt = mf._opt_gpu.get(None, None)
-    if not ni.libxc.is_hybrid_xc(mf.xc):
-        ej = rhf_grad._jk_energy_per_atom(
-            mol, dm[0]+dm[1], vhfopt, with_k=False, verbose=verbose)[0]
-        exc1_per_atom += ej
-    else:
-        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
-        ej, ek = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
-        ek *= hyb
-        if omega != 0:
-            vhfopt = mf._opt_gpu.get(omega, None)
-            with mol.with_range_coulomb(omega):
-                ek_lr = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, with_j=False,
-                                                     verbose=verbose)[1]
-            ek += ek_lr * (alpha - hyb)
-
-        exc1_per_atom += ej - ek
+    j_factor = 1.
+    k_factor = 0.
+    if with_k:
+        if omega == 0:
+            k_factor = hyb
+        elif alpha == 0: # LR=0, only SR exchange
+            pass
+        elif hyb == 0: # SR=0, only LR exchange
+            k_factor = alpha
+        else: # SR and LR exchange with different ratios
+            k_factor = alpha
+    ejk = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor, k_factor,
+                                      verbose=verbose)
+    exc1_per_atom += ejk
+    if with_k and omega != 0:
+        j_factor = 0.
+        omega = -omega # Prefer computing the SR part
+        if alpha == 0: # LR=0, only SR exchange
+            k_factor = hyb
+        elif hyb == 0: # SR=0, only LR exchange
+            # full range exchange was computed in the previous step
+            k_factor = -alpha
+        else: # SR and LR exchange with different ratios
+            k_factor = hyb - alpha # =beta
+        vhfopt = mf._opt_gpu.get(omega, None)
+        with mol.with_range_coulomb(omega):
+            exc1_per_atom += rhf_grad._jk_energy_per_atom(
+                mol, dm, vhfopt, j_factor, k_factor, verbose=verbose)
 
     return tag_array(exc1_per_atom, exc1_grid=exc)
 
