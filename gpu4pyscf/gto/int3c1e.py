@@ -224,7 +224,6 @@ def get_int3c1e(mol, grids, charge_exponents, intopt):
             lj = intopt.angular[cpj]
 
             stream = cp.cuda.get_current_stream()
-            nao_cart = intopt._sorted_mol.nao
 
             log_q_ij = intopt.log_qs[cp_ij_id]
 
@@ -252,7 +251,6 @@ def get_int3c1e(mol, grids, charge_exponents, intopt):
                 ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
                 ctypes.c_int(ngrids_of_split),
                 ctypes.cast(int3c_angular_slice.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(nao_cart),
                 strides.ctypes.data_as(ctypes.c_void_p),
                 ao_offsets.ctypes.data_as(ctypes.c_void_p),
                 bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
@@ -303,7 +301,6 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
         lj = intopt.angular[cpj]
 
         stream = cp.cuda.get_current_stream()
-        nao_cart = intopt._sorted_mol.nao
 
         log_q_ij = intopt.log_qs[cp_ij_id]
 
@@ -336,7 +333,6 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
             ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.cast(int1e_angular_slice.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(nao_cart),
             strides.ctypes.data_as(ctypes.c_void_p),
             ao_offsets.ctypes.data_as(ctypes.c_void_p),
             bins_locs_ij.ctypes.data_as(ctypes.c_void_p),

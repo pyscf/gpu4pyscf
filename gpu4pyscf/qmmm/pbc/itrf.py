@@ -26,10 +26,9 @@ from pyscf.lib import logger
 import cupy as cp
 from gpu4pyscf import scf
 from gpu4pyscf.qmmm.pbc import mm_mole
-from gpu4pyscf.df import int3c2e
-from gpu4pyscf.df.df import ALIGNED, MIN_BLK_SIZE
 from gpu4pyscf.lib import cupy_helper
 from gpu4pyscf.qmmm.pbc.tools import get_multipole_tensors_pp, get_multipole_tensors_pg
+from gpu4pyscf.gto.moleintor import intor as gpu_intor
 
 contract = cupy_helper.contract
 
@@ -210,14 +209,7 @@ class QMMMSCF(QMMM):
         logger.note(self, '%d MM charges see directly QM density'%charges.shape[0])
         if mm_mol.charge_model == 'gaussian' and len(coords) != 0:
             expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
-            # FIXME slice mm coords when memory not enough
-            fakemol = gto.fakemol_for_charges(coords.get(), expnts.get())
-
-            intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
-            intopt.build(self.direct_scf_tol, diag_block_with_triu=False, aosym=True, 
-                         group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
-            h1e += int3c2e.get_j_int3c2e_pass2(intopt, -charges)
-            intopt = None
+            h1e += gpu_intor(mol, "int1e_grids", coords, charges = -charges, charge_exponents = expnts)
         elif mm_mol.charge_model != 'point' and len(coords) != 0:
             # TODO test this block
             raise RuntimeError("Not tested yet")
@@ -1017,18 +1009,9 @@ class QMMMGrad:
             nao = mol.nao
             if mm_mol.charge_model == 'gaussian' and len(coords) != 0:
                 expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
-                fakemol = gto.fakemol_for_charges(coords.get(), expnts.get())
-
-                intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
-                intopt.build(self.base.direct_scf_tol, diag_block_with_triu=True, aosym=False, 
-                             group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
-
-                v = cp.zeros_like(g_qm)
-                for i0,i1,j0,j1,k0,k1,j3c in int3c2e.loop_int3c2e_general(intopt, ip_type='ip1'):
-                    v[:,i0:i1,j0:j1] += contract('xkji,k->xij', j3c, charges[k0:k1])
-                v = intopt.unsort_orbitals(v, axis=[1,2])
-                g_qm += v #cupy_helper.take_last2d(v, intopt.rev_ao_idx)
+                g_qm += gpu_intor(mol, "int1e_grids_ip1", coords, charges = charges, charge_exponents = expnts).transpose(0,2,1)
             elif mm_mol.charge_model == 'point' and len(coords) != 0:
+                raise RuntimeError("Not tested yet")
                 max_memory = self.max_memory - lib.current_memory()[0]
                 blksize = int(min(max_memory*1e6/8/nao**2/3, 200))
                 blksize = max(blksize, 1)
@@ -1072,19 +1055,8 @@ class QMMMGrad:
 
         g = cp.zeros_like(all_coords)
         if len(coords) != 0:
-            g_ = cp.zeros_like(coords)
             expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
-            fakemol = gto.fakemol_for_charges(coords.get(), expnts.get())
-
-            intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
-            intopt.build(self.base.direct_scf_tol, diag_block_with_triu=True, aosym=False, 
-                         group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
-
-            dm_ = intopt.sort_orbitals(dm, axis=[0,1])
-            for i0,i1,j0,j1,k0,k1,j3c in int3c2e.loop_int3c2e_general(intopt, ip_type='ip2'):
-                j3c = contract('xkji,k->xkji', j3c, charges[k0:k1])
-                g_[k0:k1] += contract('xkji,ij->kx', j3c, dm_[i0:i1,j0:j1])
-            g[mask] = g_
+            g[mask] = gpu_intor(mol, "int1e_grids_ip2", coords, dm = dm, charges = charges, charge_exponents = expnts).T
         g = g.reshape(len(Ls), -1, 3)
         g = np.sum(g, axis=0)
 

@@ -60,7 +60,6 @@ def get_int3c1e_ip(mol, grids, charge_exponents, intopt):
             lj = intopt.angular[cpj]
 
             stream = cp.cuda.get_current_stream()
-            nao_cart = intopt._sorted_mol.nao
 
             log_q_ij = intopt.log_qs[cp_ij_id]
 
@@ -88,7 +87,6 @@ def get_int3c1e_ip(mol, grids, charge_exponents, intopt):
                 ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
                 ctypes.c_int(ngrids_of_split),
                 ctypes.cast(int3c_angular_slice.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(nao_cart),
                 strides.ctypes.data_as(ctypes.c_void_p),
                 ao_offsets.ctypes.data_as(ctypes.c_void_p),
                 bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
@@ -126,7 +124,14 @@ def get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, int
     omega = mol.omega
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
-    charges = cp.asarray(charges).reshape([-1, 1], order='C')
+    grids = cp.asarray(grids, order='C')
+    if charge_exponents is not None:
+        charge_exponents = cp.asarray(charge_exponents, order='C')
+
+    assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
+    charges = cp.asarray(charges)
+
+    charges = charges.reshape([-1, 1], order='C')
     grids = cp.concatenate([grids, charges], axis=1)
 
     int1e_charge_contracted = cp.zeros([3, mol.nao, mol.nao], order='C')
@@ -137,7 +142,6 @@ def get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, int
         lj = intopt.angular[cpj]
 
         stream = cp.cuda.get_current_stream()
-        nao_cart = intopt._sorted_mol.nao
 
         log_q_ij = intopt.log_qs[cp_ij_id]
 
@@ -170,7 +174,6 @@ def get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, int
             ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.cast(int1e_angular_slice.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(nao_cart),
             strides.ctypes.data_as(ctypes.c_void_p),
             ao_offsets.ctypes.data_as(ctypes.c_void_p),
             bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
@@ -279,7 +282,7 @@ def get_int3c1e_ip2_density_contracted(mol, grids, charge_exponents, dm, intopt)
 
     return int3c_density_contracted
 
-def get_int3c1e_ip_contracted(mol, grids, charge_exponents, dm, charges, intopt):
+def get_int3c1e_ip_contracted(mol, grids, charge_exponents, dm, charges, intopt, if_ip1, if_ip2):
     dm = cp.asarray(dm)
     if dm.ndim == 3:
         if dm.shape[0] > 2:
@@ -297,10 +300,16 @@ def get_int3c1e_ip_contracted(mol, grids, charge_exponents, dm, charges, intopt)
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
     charges = cp.asarray(charges)
 
-    int3c_ip2 = get_int3c1e_ip2_density_contracted(mol, grids, charge_exponents, dm, intopt)
-    int3c_ip2 = int3c_ip2 * charges
+    if if_ip1:
+        int3c_ip1 = get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, intopt)
+        int3c_ip1 = cp.einsum('xji,ij->xi', int3c_ip1, dm)
+        if not if_ip2:
+            return int3c_ip1
 
-    int3c_ip1 = get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, intopt)
-    int3c_ip1 = cp.einsum('xji,ij->xi', int3c_ip1, dm)
+    if if_ip2:
+        int3c_ip2 = get_int3c1e_ip2_density_contracted(mol, grids, charge_exponents, dm, intopt)
+        int3c_ip2 = int3c_ip2 * charges
+        if not if_ip1:
+            return int3c_ip2
 
     return int3c_ip1, int3c_ip2

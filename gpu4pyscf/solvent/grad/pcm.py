@@ -27,8 +27,8 @@ from pyscf import gto
 from pyscf.grad import rhf as rhf_grad
 
 from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent
-from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.cupy_helper import contract, load_library
+from gpu4pyscf.gto.moleintor import intor
+from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from pyscf import lib as pyscf_lib
 
@@ -240,24 +240,11 @@ def grad_qv(pcmobj, dm):
     grid_coords = pcmobj.surface['grid_coords']
     q_sym       = pcmobj._intermediates['q_sym']
 
-    auxmol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
-    intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
-    coeff = intopt.coeff
-    dm_cart = coeff @ dm @ coeff.T
+    dvj, dq = intor(mol, "int1e_grids_ip", grid_coords, dm = dm, charges = q_sym, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
 
-    dvj, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip1', q_sym, None, dm_cart)
-    dq, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip2', q_sym, None, dm_cart)
-    
-    _sorted_mol = intopt._sorted_mol
-    nao_cart = _sorted_mol.nao
-    natm = _sorted_mol.natm
-    ao2atom = numpy.zeros([nao_cart, natm])
-    ao_loc = _sorted_mol.ao_loc
-    for ibas, iatm in enumerate(_sorted_mol._bas[:,gto.ATOM_OF]):
-        ao2atom[ao_loc[ibas]:ao_loc[ibas+1],iatm] = 1
-    ao2atom = cupy.asarray(ao2atom)
-    dvj = 2.0 * ao2atom.T @ dvj.T
+    aoslice = mol.aoslice_by_atom()
+    aoslice = cupy.array(aoslice)
+    dvj = 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
     de = dq + dvj
     t1 = log.timer_debug1('grad qv', *t1)
