@@ -102,22 +102,37 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     exc1_per_atom = [exc1_per_atom[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
     exc1_per_atom = cupy.asarray(exc1_per_atom)
 
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
     vhfopt = mf._opt_gpu.get(None, None)
-    if not ni.libxc.is_hybrid_xc(mf.xc):
-        ej = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, with_k=False,
-                                          verbose=verbose)[0]
-        exc1_per_atom += ej
-    else:
-        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
-        ej, ek = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
-        ek *= hyb
-        if abs(omega) > 1e-10:  # For range separated Coulomb operator
-            vhfopt = mf._opt_gpu.get(omega, None)
-            with mol.with_range_coulomb(omega):
-                ek_lr = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, with_j=False,
-                                                     verbose=verbose)[1]
-            ek += ek_lr * (alpha - hyb)
-        exc1_per_atom += ej - ek * .5
+    j_factor = 1.
+    k_factor = 0.
+    if with_k:
+        if omega == 0:
+            k_factor = hyb
+        elif alpha == 0: # LR=0, only SR exchange
+            pass
+        elif hyb == 0: # SR=0, only LR exchange
+            k_factor = alpha
+        else: # SR and LR exchange with different ratios
+            k_factor = alpha
+    ejk = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor, k_factor,
+                                      verbose=verbose)
+    exc1_per_atom += ejk
+    if with_k and omega != 0:
+        j_factor = 0.
+        omega = -omega # Prefer computing the SR part
+        if alpha == 0: # LR=0, only SR exchange
+            k_factor = hyb
+        elif hyb == 0: # SR=0, only LR exchange
+            # full range exchange was computed in the previous step
+            k_factor = -alpha
+        else: # SR and LR exchange with different ratios
+            k_factor = hyb - alpha # =beta
+        vhfopt = mf._opt_gpu.get(omega, None)
+        with mol.with_range_coulomb(omega):
+            exc1_per_atom += rhf_grad._jk_energy_per_atom(
+                mol, dm, vhfopt, j_factor, k_factor, verbose=verbose)
     return tag_array(exc1_per_atom, exc1_grid=exc)
 
 def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
@@ -129,7 +144,7 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         if mo_coeff is not None: mo_coeff = cupy.asarray(mo_coeff)
         if mo_occ is not None: mo_occ = cupy.asarray(mo_occ)
 
-        log = logger.new_logger(mol)
+        log = logger.new_logger(mol, verbose)
         t0 = log.init_timer()
         xctype = ni._xc_type(xc_code)
         nao = mol.nao
@@ -140,13 +155,13 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
         grid_start = device_id * ngrids_per_device
         grid_end = (device_id + 1) * ngrids_per_device
-        
+
         nset = len(dms)
         assert nset == 1
         vmat = cupy.zeros((nset,3,nao,nao))
         if xctype == 'LDA':
             ao_deriv = 1
-            for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None, 
+            for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
                 for idm in range(nset):
                     mo_coeff_mask = mo_coeff[idx,:]
@@ -190,11 +205,13 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
 
 def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             max_memory=2000, verbose=None):
+    log = logger.new_logger(mol, verbose)
+    t0 = log.init_timer()
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
-    
+
     mo_occ = cupy.asarray(dms.mo_occ)
     mo_coeff = cupy.asarray(dms.mo_coeff)
     nao = mol.nao
@@ -210,7 +227,7 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             future = executor.submit(
                 _get_vxc_task,
                 ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
-                verbose=verbose, device_id=device_id)
+                verbose=log.verbose, device_id=device_id)
             futures.append(future)
     vmat_dist = [future.result() for future in futures]
     vmat = reduce_to_device(vmat_dist)
@@ -218,12 +235,14 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     exc = None
     if nset == 1:
         vmat = vmat[0]
-
+    log.timer_debug1('grad vxc', *t0)
     # - sign because nabla_X = -nabla_x
     return exc, -vmat
 
 def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 max_memory=2000, verbose=None):
+    log = logger.new_logger(mol, verbose)
+    t0 = log.init_timer()
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
@@ -233,7 +252,6 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     mo_occ = cupy.asarray(dms.mo_occ)
     mo_coeff = cupy.asarray(dms.mo_coeff)
 
-    mol = None
     _sorted_mol = opt._sorted_mol
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
@@ -274,6 +292,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     vmat = opt.unsort_orbitals(vmat, axis=[1,2])
     exc = None
     # - sign because nabla_X = -nabla_x
+    log.timer_debug1('grad nlc vxc', *t0)
     return exc, -vmat
 
 def _make_dR_dao_w(ao, wv):

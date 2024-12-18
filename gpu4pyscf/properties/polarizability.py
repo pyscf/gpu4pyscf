@@ -39,7 +39,7 @@ def gen_vind(mf, mo_coeff, mo_occ):
     def fx(mo1):
         mo1 = mo1.reshape(-1, nvir, nocc)  # * the saving pattern
         mo1_mo_real = contract('nai,ua->nui', mo1, mvir)
-        dm1 = 2*contract('nui,vi->nuv', mo1_mo_real, mocc.conj()) 
+        dm1 = 2*contract('nui,vi->nuv', mo1_mo_real, mocc.conj())
         dm1+= dm1.transpose(0,2,1)
 
         v1 = vresp(dm1)  # (nset, nao, nao)
@@ -50,15 +50,14 @@ def gen_vind(mf, mo_coeff, mo_occ):
     return fx
 
 
-def eval_polarizability(mf, unit='au'):
+def eval_polarizability(mf):
     """main function to calculate the polarizability
 
     Args:
         mf: mean field object
-        unit (str, optional): the unit of the polarizability. Defaults to 'au'.
 
     Returns:
-        polarizability (numpy.array): polarizability
+        polarizability (numpy.array): polarizability in au
     """
 
     polarizability = np.empty((3, 3))

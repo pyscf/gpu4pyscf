@@ -24,6 +24,7 @@ def _jk_task(with_df, dm, orbo, with_j=True, with_k=True, device_id=0):
     rhoj = rhok = None
     with cupy.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(with_df.mol, with_df.verbose)
+        assert isinstance(with_df.verbose, int)
         t0 = log.init_timer()
         dm = cupy.asarray(dm)
         orbo = cupy.asarray(orbo)
@@ -33,7 +34,7 @@ def _jk_task(with_df, dm, orbo, with_j=True, with_k=True, device_id=0):
         cols = with_df.intopt.cderi_col
         dm_sparse = dm[rows, cols]
         dm_sparse[with_df.intopt.cderi_diag] *= .5
-        
+
         blksize = with_df.get_blksize()
         if with_j:
             rhoj = cupy.empty([naux_slice])
@@ -64,18 +65,18 @@ def get_rhoj_rhok(with_df, dm, orbo, with_j=True, with_k=True):
                 _jk_task, with_df, dm, orbo,
                 with_j=with_j, with_k=with_k, device_id=device_id)
             futures.append(future)
-    
+
     rhoj_total = []
     rhok_total = []
     for future in futures:
         rhoj, rhok = future.result()
         rhoj_total.append(rhoj)
         rhok_total.append(rhok)
-        
+
     rhoj = rhok = None
     if with_j:
         rhoj = concatenate(rhoj_total)
     if with_k:
         rhok = concatenate(rhok_total)
-    
+
     return rhoj, rhok

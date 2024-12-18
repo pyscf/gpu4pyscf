@@ -111,6 +111,7 @@ class KnownValues(unittest.TestCase):
         mf = rks.RKS(mol, xc='b3lyp')
         mf.grids.atom_grid = (99,590)
         mf.conv_tol = 1e-12
+        mf.conv_tol_cpscf = 1e-8
         mf.disp = 'd3bj'
         e_dft = mf.kernel()
         assert np.abs(e_dft - -685.0325611822375) < 1e-7
@@ -127,6 +128,7 @@ class KnownValues(unittest.TestCase):
         mf = uks.UKS(mol, xc='b3lyp')
         mf.grids.atom_grid = (99,590)
         mf.conv_tol = 1e-12
+        mf.conv_tol_cpscf = 1e-8
         mf.disp = 'd3bj'
         e_dft = mf.kernel()
         assert np.abs(e_dft - -685.0325611822375) < 1e-7

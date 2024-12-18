@@ -13,9 +13,7 @@
 # limitations under the License.
 
 import h5py
-import numpy as np
 import cupy
-import scipy.linalg
 from functools import reduce
 from pyscf import gto
 from pyscf import lib as pyscf_lib
@@ -351,7 +349,7 @@ class SCF(pyscf_lib.StreamObject):
     conv_tol_grad       = hf_cpu.SCF.conv_tol_grad
     max_cycle           = hf_cpu.SCF.max_cycle
     init_guess          = hf_cpu.SCF.init_guess
-    conv_tol_cpscf      = 1e-4
+    conv_tol_cpscf      = 1e-6   # TODO: reuse the default value in PySCF
 
     disp                = None
     DIIS                = diis.SCF_DIIS
@@ -448,7 +446,6 @@ class SCF(pyscf_lib.StreamObject):
     stability                = NotImplemented
     nuc_grad_method          = NotImplemented
     update_                  = NotImplemented
-    canonicalize             = NotImplemented
     istype                   = hf_cpu.SCF.istype
     to_rhf                   = NotImplemented
     to_uhf                   = NotImplemented

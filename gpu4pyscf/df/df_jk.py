@@ -247,6 +247,7 @@ def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ,
     ''' Calculate J and K matrices on single GPU
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
+        assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
         dms = cupy.asarray(dms)
@@ -311,6 +312,7 @@ def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs,
     '''
     vj = vk = None
     with cupy.cuda.Device(device_id), _streams[device_id]:
+        assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
         dms = cupy.asarray(dms)
@@ -371,6 +373,7 @@ def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0)
     ''' Calculate J and K matrices with density matrix
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
+        assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
         dms = cupy.asarray(dms)
@@ -402,7 +405,7 @@ def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0)
                 for k in range(nset):
                     rhok = contract('Lij,jk->Lki', cderi, dms[k]).reshape([-1,nao])
                     #vk[k] += contract('Lki,Lkj->ij', rhok, cderi)
-                    vk[k] += cupy.dot(rhok.T, cderi.reshape([-1,nao]))            
+                    vk[k] += cupy.dot(rhok.T, cderi.reshape([-1,nao]))
         if with_j:
             vj = cupy.zeros(dms_shape)
             vj[:,rows,cols] = vj_sparse
@@ -435,7 +438,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
 
     assert nao == dfobj.nao
     intopt = dfobj.intopt
-    
+
     nao = dms_tag.shape[-1]
     dms = dms_tag.reshape([-1,nao,nao])
     intopt = dfobj.intopt
@@ -454,7 +457,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
         with ThreadPoolExecutor(max_workers=_num_devices) as executor:
             for device_id in range(_num_devices):
                 future = executor.submit(
-                    _jk_task_with_mo, 
+                    _jk_task_with_mo,
                     dfobj, dms, mo_coeff, mo_occ,
                     hermi=hermi, device_id=device_id,
                     with_j=with_j, with_k=with_k)
@@ -475,7 +478,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
         with ThreadPoolExecutor(max_workers=_num_devices) as executor:
             for device_id in range(_num_devices):
                 future = executor.submit(
-                    _jk_task_with_mo1, 
+                    _jk_task_with_mo1,
                     dfobj, dms, mo1s, occ_coeffs,
                     hermi=hermi, device_id=device_id,
                     with_j=with_j, with_k=with_k)

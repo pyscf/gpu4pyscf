@@ -20,21 +20,24 @@ from pyscf.data import elements, nist
 from scipy.constants import physical_constants
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.scf.hf import RHF
 
 LINDEP_THRESHOLD = 1e-7
 
 
 def eval_ir_freq_intensity(mf, hessian_obj):
-    """main function to calculate the polarizability
+    '''Main driver of infrared spectra intensity
 
     Args:
         mf: mean field object
-        unit (str, optional): the unit of the polarizability. Defaults to 'au'.
+        hessian_obj: hessian object
 
     Returns:
-        polarizability (numpy.array): polarizability
-    """
+        frequency mode: in cm^-1
+        infrared spectra intensity: in km/mol
+    '''
     log = logger.new_logger(hessian_obj, mf.mol.verbose)
+    assert isinstance(mf, RHF)
     hessian = hessian_obj.kernel()
     hartree_kj = nist.HARTREE2J*1e3
     unit2cm = ((hartree_kj * nist.AVOGADRO)**.5 / (nist.BOHR*1e-10)
@@ -53,7 +56,7 @@ def eval_ir_freq_intensity(mf, hessian_obj):
     TR = thermo._get_TR(mass.get(), mf.mol.atom_coords())
     TRspace = []
     TRspace.append(TR[:3])
-    
+
     rot_const = thermo.rotation_const(mass.get(), mf.mol.atom_coords())
     rotor_type = thermo._get_rotor_type(rot_const)
     if rotor_type == 'ATOM':
@@ -72,7 +75,7 @@ def eval_ir_freq_intensity(mf, hessian_obj):
         h = reduce(cupy.dot, (bvec.T, hessian_mass.transpose(0,2,1,3).reshape(3*natm,3*natm), bvec))
         e, mode = cupy.linalg.eigh(h)
         mode = bvec.dot(mode)
-    
+
     c = contract('ixn,i->ixn', mode.reshape(natm, 3, -1),
                   1/np.sqrt(mass)).reshape(3*natm, -1)
     freq = cupy.sign(e)*cupy.sqrt(cupy.abs(e))*unit2cm
@@ -91,9 +94,10 @@ def eval_ir_freq_intensity(mf, hessian_obj):
     # TODO: compact with hessian method, which can save one time cphf solve.
     # ! Different from PySCF, mo1 is all in mo!
     mo1, mo_e1 = hessian_obj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1ao,
-                                       None, atmlst, hessian_obj.max_memory, log)  
+                                       None, atmlst, hessian_obj.max_memory, log)
+    mo1 = cupy.asarray(mo1)
+    mo_e1 = cupy.asarray(mo_e1)
 
-    
     tmp = cupy.empty((3, 3, natm))  # dipole moment, x,y,z
     aoslices = mf.mol.aoslice_by_atom()
     with mf.mol.with_common_orig((0, 0, 0)):
