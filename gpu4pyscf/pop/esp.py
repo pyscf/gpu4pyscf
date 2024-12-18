@@ -23,7 +23,7 @@ from scipy.spatial import distance_matrix
 import cupy
 from pyscf import gto
 from pyscf.data import radii
-from gpu4pyscf.gto.moleintor import intor
+from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.lib.cupy_helper import dist_matrix
 
 #modified_Bondi = radii.VDW.copy()
@@ -137,7 +137,7 @@ def build_ab(mol, dm,
     A[:natm, :natm] = rinv.dot(rinv.T)
     
     # For right hand side B
-    v_grids_e = intor(mol, 'int1e_grids', surface_points, dm=dm, direct_scf_tol=1e-14)
+    v_grids_e = int1e_grids(mol, surface_points, dm=dm, direct_scf_tol=1e-14)
     v_grids_n = cupy.dot(charges, rinv)
     
     B = cupy.empty([dim])

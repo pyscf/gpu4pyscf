@@ -27,7 +27,7 @@ from pyscf import gto
 from pyscf.grad import rhf as rhf_grad
 
 from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent
-from gpu4pyscf.gto.moleintor import intor
+from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from pyscf import lib as pyscf_lib
@@ -240,7 +240,8 @@ def grad_qv(pcmobj, dm):
     grid_coords = pcmobj.surface['grid_coords']
     q_sym       = pcmobj._intermediates['q_sym']
 
-    dvj, dq = intor(mol, "int1e_grids_ip", grid_coords, dm = dm, charges = q_sym, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
+    dvj = int1e_grids_ip1(mol, grid_coords, dm = dm, charges = q_sym, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
+    dq  = int1e_grids_ip2(mol, grid_coords, dm = dm, charges = q_sym, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
 
     aoslice = mol.aoslice_by_atom()
     aoslice = cupy.array(aoslice)

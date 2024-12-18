@@ -28,7 +28,7 @@ from pyscf.data import radii
 from pyscf.solvent import ddcosmo
 from gpu4pyscf.solvent import _attach_solvent
 from gpu4pyscf.gto import int3c1e
-from gpu4pyscf.gto.moleintor import intor
+from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import dist_matrix, load_library
 
@@ -399,7 +399,7 @@ class PCM(lib.StreamObject):
         ngrids = grid_coords.shape[0]
         v_grids_e = cupy.empty([nset, ngrids])
         for i in range(nset):
-            v_grids_e[i] = intor(self.mol, "int1e_grids", grid_coords, dm = dms[i], charge_exponents = charge_exp**2, intopt = self.intopt)
+            v_grids_e[i] = int1e_grids(self.mol, grid_coords, dm = dms[i], charge_exponents = charge_exp**2, intopt = self.intopt)
         return v_grids_e
 
     def _get_vmat(self, q):
@@ -410,7 +410,7 @@ class PCM(lib.StreamObject):
         grid_coords = self.surface['grid_coords']
         vmat = cupy.empty([nset, nao, nao])
         for i in range(nset):
-            vmat[i] = -intor(self.mol, "int1e_grids", grid_coords, charges = q[i], charge_exponents = charge_exp**2, intopt = self.intopt)
+            vmat[i] = -int1e_grids(self.mol, grid_coords, charges = q[i], charge_exponents = charge_exp**2, intopt = self.intopt)
         return vmat
 
     def nuc_grad_method(self, grad_method):

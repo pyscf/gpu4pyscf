@@ -28,7 +28,8 @@ from gpu4pyscf import scf
 from gpu4pyscf.qmmm.pbc import mm_mole
 from gpu4pyscf.lib import cupy_helper
 from gpu4pyscf.qmmm.pbc.tools import get_multipole_tensors_pp, get_multipole_tensors_pg
-from gpu4pyscf.gto.moleintor import intor as gpu_intor
+from gpu4pyscf.gto.int3c1e import int1e_grids
+from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
 
 contract = cupy_helper.contract
 
@@ -209,7 +210,7 @@ class QMMMSCF(QMMM):
         logger.note(self, '%d MM charges see directly QM density'%charges.shape[0])
         if mm_mol.charge_model == 'gaussian' and len(coords) != 0:
             expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
-            h1e += gpu_intor(mol, "int1e_grids", coords, charges = -charges, charge_exponents = expnts)
+            h1e += int1e_grids(mol, coords, charges = -charges, charge_exponents = expnts)
         elif mm_mol.charge_model != 'point' and len(coords) != 0:
             # TODO test this block
             raise RuntimeError("Not tested yet")
@@ -1009,7 +1010,7 @@ class QMMMGrad:
             nao = mol.nao
             if mm_mol.charge_model == 'gaussian' and len(coords) != 0:
                 expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
-                g_qm += gpu_intor(mol, "int1e_grids_ip1", coords, charges = charges, charge_exponents = expnts).transpose(0,2,1)
+                g_qm += int1e_grids_ip1(mol, coords, charges = charges, charge_exponents = expnts).transpose(0,2,1)
             elif mm_mol.charge_model == 'point' and len(coords) != 0:
                 raise RuntimeError("Not tested yet")
                 max_memory = self.max_memory - lib.current_memory()[0]
@@ -1056,7 +1057,7 @@ class QMMMGrad:
         g = cp.zeros_like(all_coords)
         if len(coords) != 0:
             expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
-            g[mask] = gpu_intor(mol, "int1e_grids_ip2", coords, dm = dm, charges = charges, charge_exponents = expnts).T
+            g[mask] = int1e_grids_ip2(mol, coords, dm = dm, charges = charges, charge_exponents = expnts).T
         g = g.reshape(len(Ls), -1, 3)
         g = np.sum(g, axis=0)
 

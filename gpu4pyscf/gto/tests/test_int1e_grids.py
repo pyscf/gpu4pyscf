@@ -18,7 +18,7 @@ import numpy as np
 import cupy as cp
 import pyscf
 from pyscf import lib, gto, df
-from gpu4pyscf.gto.moleintor import intor
+from gpu4pyscf.gto.int3c1e import int1e_grids
 
 def setUpModule():
     global mol_sph, mol_cart, grid_points, integral_threshold, density_contraction_threshold, charge_contraction_threshold
@@ -62,12 +62,12 @@ class KnownValues(unittest.TestCase):
     '''
     def test_int1e_grids_full_tensor_cart(self):
         ref_int1e = mol_cart.intor('int1e_grids', grids=grid_points)
-        test_int1e = intor(mol_cart, 'int1e_grids', grid_points)
+        test_int1e = int1e_grids(mol_cart, grid_points)
         np.testing.assert_allclose(ref_int1e, test_int1e, atol = integral_threshold)
 
     def test_int1e_grids_full_tensor_sph(self):
         ref_int1e = mol_sph.intor('int1e_grids', grids=grid_points)
-        test_int1e = intor(mol_sph, 'int1e_grids', grid_points)
+        test_int1e = int1e_grids(mol_sph, grid_points)
         np.testing.assert_allclose(ref_int1e, test_int1e, atol = integral_threshold)
 
     def test_int1e_grids_density_contracted_cart_symmetric(self):
@@ -75,7 +75,7 @@ class KnownValues(unittest.TestCase):
         dm = np.random.uniform(-2.0, 2.0, (mol_cart.nao, mol_cart.nao))
         dm = 0.5 * (dm + dm.T)
         ref_int1e_dot_D = np.einsum('pij,ij->p', mol_cart.intor('int1e_grids', grids=grid_points), dm)
-        test_int1e_dot_D = intor(mol_cart, 'int1e_grids', grid_points, dm = dm)
+        test_int1e_dot_D = int1e_grids(mol_cart, grid_points, dm = dm)
         assert isinstance(test_int1e_dot_D, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dot_D, test_int1e_dot_D, atol = density_contraction_threshold)
 
@@ -84,7 +84,7 @@ class KnownValues(unittest.TestCase):
         dm = np.random.uniform(-2.0, 2.0, (mol_sph.nao, mol_sph.nao))
         dm = 0.5 * (dm + dm.T)
         ref_int1e_dot_D = np.einsum('pij,ij->p', mol_sph.intor('int1e_grids', grids=grid_points), dm)
-        test_int1e_dot_D = intor(mol_sph, 'int1e_grids', grid_points, dm = dm)
+        test_int1e_dot_D = int1e_grids(mol_sph, grid_points, dm = dm)
         assert isinstance(test_int1e_dot_D, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dot_D, test_int1e_dot_D, atol = density_contraction_threshold)
 
@@ -92,7 +92,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(12347)
         dm = np.random.uniform(-2.0, 2.0, (mol_cart.nao, mol_cart.nao))
         ref_int1e_dot_D = np.einsum('pij,ij->p', mol_cart.intor('int1e_grids', grids=grid_points), dm)
-        test_int1e_dot_D = intor(mol_cart, 'int1e_grids', grid_points, dm = dm)
+        test_int1e_dot_D = int1e_grids(mol_cart, grid_points, dm = dm)
         assert isinstance(test_int1e_dot_D, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dot_D, test_int1e_dot_D, atol = density_contraction_threshold)
 
@@ -100,7 +100,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(12348)
         dm = np.random.uniform(-2.0, 2.0, (mol_sph.nao, mol_sph.nao))
         ref_int1e_dot_D = np.einsum('pij,ij->p', mol_sph.intor('int1e_grids', grids=grid_points), dm)
-        test_int1e_dot_D = intor(mol_sph, 'int1e_grids', grid_points, dm = dm)
+        test_int1e_dot_D = int1e_grids(mol_sph, grid_points, dm = dm)
         assert isinstance(test_int1e_dot_D, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dot_D, test_int1e_dot_D, atol = density_contraction_threshold)
 
@@ -108,7 +108,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(12347)
         charges = np.random.uniform(-2.0, 2.0, grid_points.shape[0])
         ref_int1e_dot_q = np.einsum('pij,p->ij', mol_cart.intor('int1e_grids', grids=grid_points), charges)
-        test_int1e_dot_q = intor(mol_cart, 'int1e_grids', grid_points, charges = charges)
+        test_int1e_dot_q = int1e_grids(mol_cart, grid_points, charges = charges)
         assert isinstance(test_int1e_dot_q, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dot_q, test_int1e_dot_q, atol = charge_contraction_threshold)
 
@@ -116,7 +116,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(12348)
         charges = np.random.uniform(-2.0, 2.0, grid_points.shape[0])
         ref_int1e_dot_q = np.einsum('pij,p->ij', mol_sph.intor('int1e_grids', grids=grid_points), charges)
-        test_int1e_dot_q = intor(mol_sph, 'int1e_grids', grid_points, charges = charges)
+        test_int1e_dot_q = int1e_grids(mol_sph, grid_points, charges = charges)
         assert isinstance(test_int1e_dot_q, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dot_q, test_int1e_dot_q, atol = charge_contraction_threshold)
 
@@ -128,7 +128,7 @@ class KnownValues(unittest.TestCase):
         mol_sph_omega.set_range_coulomb(omega)
 
         ref_int1e = mol_sph_omega.intor('int1e_grids', grids=grid_points)
-        test_int1e = intor(mol_sph_omega, 'int1e_grids', grid_points)
+        test_int1e = int1e_grids(mol_sph_omega, grid_points)
         np.testing.assert_allclose(ref_int1e, test_int1e, atol = integral_threshold)
 
     def test_int1e_grids_density_contracted_omega(self):
@@ -140,7 +140,7 @@ class KnownValues(unittest.TestCase):
         mol_sph_omega.set_range_coulomb(omega)
 
         ref_int1e_dot_D = np.einsum('pij,ij->p', mol_sph_omega.intor('int1e_grids', grids=grid_points), dm)
-        test_int1e_dot_D = intor(mol_sph_omega, 'int1e_grids', grid_points, dm = dm)
+        test_int1e_dot_D = int1e_grids(mol_sph_omega, grid_points, dm = dm)
         assert isinstance(test_int1e_dot_D, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dot_D, test_int1e_dot_D, atol = density_contraction_threshold)
 
@@ -153,7 +153,7 @@ class KnownValues(unittest.TestCase):
         mol_sph_omega.set_range_coulomb(omega)
 
         ref_int1e_dot_q = np.einsum('pij,p->ij', mol_sph_omega.intor('int1e_grids', grids=grid_points), charges)
-        test_int1e_dot_q = intor(mol_sph_omega, 'int1e_grids', grid_points, charges = charges)
+        test_int1e_dot_q = int1e_grids(mol_sph_omega, grid_points, charges = charges)
         assert isinstance(test_int1e_dot_q, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dot_q, test_int1e_dot_q, atol = charge_contraction_threshold)
 
@@ -169,7 +169,7 @@ class KnownValues(unittest.TestCase):
         ref_int1e = df.incore.aux_e2(mol_sph, fakemol, intor=int3c2e, aosym='s1', cintopt=cintopt)
         ref_int1e = ref_int1e.transpose((2,0,1))
 
-        test_int1e = intor(mol_sph, 'int1e_grids', grid_points, charge_exponents = charge_exponents)
+        test_int1e = int1e_grids(mol_sph, grid_points, charge_exponents = charge_exponents)
         np.testing.assert_allclose(ref_int1e, test_int1e, atol = integral_threshold)
 
     def test_int1e_grids_density_contracted_guassian_charge(self):
@@ -184,7 +184,7 @@ class KnownValues(unittest.TestCase):
         ref_int1e = ref_int1e.transpose((2,0,1))
 
         ref_int1e_dot_D = np.einsum('pij,ij->p', ref_int1e, dm)
-        test_int1e_dot_D = intor(mol_sph, 'int1e_grids', grid_points, dm = dm, charge_exponents = charge_exponents)
+        test_int1e_dot_D = int1e_grids(mol_sph, grid_points, dm = dm, charge_exponents = charge_exponents)
         assert isinstance(test_int1e_dot_D, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dot_D, test_int1e_dot_D, atol = density_contraction_threshold)
 
@@ -200,7 +200,7 @@ class KnownValues(unittest.TestCase):
         ref_int1e = ref_int1e.transpose((2,0,1))
 
         ref_int1e_dot_q = np.einsum('pij,p->ij', ref_int1e, charges)
-        test_int1e_dot_q = intor(mol_sph, 'int1e_grids', grid_points, charges = charges, charge_exponents = charge_exponents)
+        test_int1e_dot_q = int1e_grids(mol_sph, grid_points, charges = charges, charge_exponents = charge_exponents)
         assert isinstance(test_int1e_dot_q, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dot_q, test_int1e_dot_q, atol = charge_contraction_threshold)
 
@@ -218,7 +218,7 @@ class KnownValues(unittest.TestCase):
         ref_int1e = df.incore.aux_e2(mol_sph_omega, fakemol, intor=int3c2e, aosym='s1', cintopt=cintopt)
         ref_int1e = ref_int1e.transpose((2,0,1))
 
-        test_int1e = intor(mol_sph_omega, 'int1e_grids', grid_points, charge_exponents = charge_exponents)
+        test_int1e = int1e_grids(mol_sph_omega, grid_points, charge_exponents = charge_exponents)
         np.testing.assert_allclose(ref_int1e, test_int1e, atol = integral_threshold)
 
     def test_int1e_grids_density_contracted_guassian_charge_omega(self):
@@ -237,7 +237,7 @@ class KnownValues(unittest.TestCase):
         ref_int1e = ref_int1e.transpose((2,0,1))
 
         ref_int1e_dot_D = np.einsum('pij,ij->p', ref_int1e, dm)
-        test_int1e_dot_D = intor(mol_sph_omega, 'int1e_grids', grid_points, dm = dm, charge_exponents = charge_exponents)
+        test_int1e_dot_D = int1e_grids(mol_sph_omega, grid_points, dm = dm, charge_exponents = charge_exponents)
         assert isinstance(test_int1e_dot_D, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dot_D, test_int1e_dot_D, atol = density_contraction_threshold)
 
@@ -257,7 +257,7 @@ class KnownValues(unittest.TestCase):
         ref_int1e = ref_int1e.transpose((2,0,1))
 
         ref_int1e_dot_q = np.einsum('pij,p->ij', ref_int1e, charges)
-        test_int1e_dot_q = intor(mol_sph_omega, 'int1e_grids', grid_points, charges = charges, charge_exponents = charge_exponents)
+        test_int1e_dot_q = int1e_grids(mol_sph_omega, grid_points, charges = charges, charge_exponents = charge_exponents)
         assert isinstance(test_int1e_dot_q, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dot_q, test_int1e_dot_q, atol = charge_contraction_threshold)
 
