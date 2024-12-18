@@ -13,7 +13,7 @@
 #define OF_COMPLEX      2
 
 __global__
-void ft_pair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
+void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
 {
     // sp is short for shl_pair
     int sp_block_id = blockIdx.x;
@@ -49,18 +49,22 @@ void ft_pair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     int jprim = bounds.jprim;
     int lij = li + lj;
     int stride_j = bounds.stride_j;
-    int g_size = stride_j * (lj + 1);
+    int g_size = bounds.g_size;
+    int gx_len = g_size * nGv_per_block * nsp_per_block;
     int *idx_ij = c_g_pair_idx + c_g_pair_offsets[li*LMAX1+lj];
     int *idy_ij = idx_ij + nfij;
     int *idz_ij = idy_ij + nfij;
+    int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;
     double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
     double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    int ia = bas[ish*BAS_SLOTS+ATOM_OF];
+    int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
+    double *ri = env + atm[ia*ATM_SLOTS+PTR_COORD];
+    double *rj = env + atm[ja*ATM_SLOTS+PTR_COORD];
     double *img_coords = envs.img_coords;
     int *img_idx = envs.img_idx;
 
@@ -72,12 +76,12 @@ void ft_pair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     double kk = kx * kx + ky * ky + kz * kz;
 
     extern __shared__ double g[];
-    double *gxR = g;
-    double *gxI = gxR + g_size * nGv_per_block;
-    double *gyR = gxI + g_size * nGv_per_block;
-    double *gyI = gyR + g_size * nGv_per_block;
-    double *gzR = gyI + g_size * nGv_per_block;
-    double *gzI = gzR + g_size * nGv_per_block;
+    double *gxR = g + g_size * nGv_per_block * sp_id + Gv_id;
+    double *gxI = gxR + gx_len;
+    double *gyR = gxI + gx_len;
+    double *gyI = gyR + gx_len;
+    double *gzR = gyI + gx_len;
+    double *gzI = gzR + gx_len;
     double rjri[3];
     double goutR[GOUT_WIDTH];
     double goutI[GOUT_WIDTH];
@@ -119,37 +123,37 @@ void ft_pair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
                 double kR = kx * xij + ky * yij + kz * zij;
                 double theta_rr = theta_ij*rr + .5*a2*kk;
                 double Kab = exp(-theta_rr);
-                sincos(-kR, &gzI[Gv_id], &gzR[Gv_id]);
+                sincos(-kR, gzI, gzR);
                 double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
-                gxR[Gv_id] = fac;
-                gxI[Gv_id] = 0.;
-                gyR[Gv_id] = 1.;
-                gyI[Gv_id] = 0.;
+                gxR[0] = fac;
+                gxI[0] = 0.;
+                gyR[0] = 1.;
+                gyI[0] = 0.;
                 // exp(-theta_rr-kR*1j)
-                gzR[Gv_id] *= Kab;
-                gzI[Gv_id] *= Kab;
+                gzR[0] *= Kab;
+                gzI[0] *= Kab;
             }
 
             if (lij > 0) {
                 // gx[i+1] = ia2 * gx[i-1] + (rijrx[0] - kx[n]*a2*_Complex_I) * gx[i];
                 __syncthreads();
                 for (int n = gout_id; n < 3; n += gout_stride) {
-                    double *_gxR = g + n * g_size * nGv_per_block * OF_COMPLEX;
-                    double *_gxI = _gxR + g_size * nGv_per_block;
+                    double *_gxR = gxR + n * gx_len * OF_COMPLEX;
+                    double *_gxI = _gxR + gx_len;
                     double RpaR = rjri[n] * aj_aij; // Rp - Ra
                     double RpaI = -a2 * Gv[Gv_id+nGv*n];
-                    s0xR = _gxR[Gv_id];
-                    s0xI = _gxI[Gv_id];
+                    s0xR = _gxR[0];
+                    s0xI = _gxI[0];
                     s1xR = RpaR * s0xR - RpaI * s0xI;
                     s1xI = RpaR * s0xI + RpaI * s0xR;
-                    _gxR[Gv_id + nGv_per_block] = s1xR;
-                    _gxI[Gv_id + nGv_per_block] = s1xI;
+                    _gxR[nGv_per_block] = s1xR;
+                    _gxI[nGv_per_block] = s1xI;
                     for (int i = 1; i < lij; i++) {
                         double ia2 = i * a2;
                         s2xR = ia2 * s0xR + RpaR * s1xR - RpaI * s1xI;
                         s2xI = ia2 * s0xI + RpaR * s1xI + RpaI * s1xR;
-                        _gxR[Gv_id + (i+1)*nGv_per_block] = s2xR;
-                        _gxI[Gv_id + (i+1)*nGv_per_block] = s2xI;
+                        _gxR[(i+1)*nGv_per_block] = s2xR;
+                        _gxI[(i+1)*nGv_per_block] = s2xI;
                         s0xR = s1xR;
                         s0xI = s1xI;
                         s1xR = s2xR;
@@ -161,16 +165,16 @@ void ft_pair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
             // hrr
             if (lj > 0) {
                 for (int n = gout_id; n < 3*OF_COMPLEX; n += gout_stride) {
-                    double *_gx = g + n * g_size * nGv_per_block;
+                    double *_gx = gxR + n * gx_len;
                     // The real and imaginary parts call the same expression
                     int _ix = n / 2;
                     double xjxi = rjri[_ix];
                     for (int j = 0; j < lj; ++j) {
                         int ij = (lij-j) + j*stride_j;
-                        s1xR = _gx[Gv_id + ij*nGv_per_block];
+                        s1xR = _gx[ij*nGv_per_block];
                         for (--ij; ij >= j*stride_j; --ij) {
-                            s0xR = _gx[sp_id + ij*nGv_per_block];
-                            _gx[Gv_id + (ij+stride_j)*nGv_per_block] = s1xR - xjxi * s0xR;
+                            s0xR = _gx[ij*nGv_per_block];
+                            _gx[(ij+stride_j)*nGv_per_block] = s1xR - xjxi * s0xR;
                             s1xR = s0xR;
                         }
                     }
@@ -182,9 +186,9 @@ void ft_pair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
             for (int n = 0; n < GOUT_WIDTH; ++n) {
                 int ij = n*gout_stride + gout_id;
                 if (ij >= nfij) continue;
-                int addrx = Gv_id + idx_ij[ij] * nGv_per_block;
-                int addry = Gv_id + idy_ij[ij] * nGv_per_block;
-                int addrz = Gv_id + idz_ij[ij] * nGv_per_block;
+                int addrx = idx_ij[ij] * nGv_per_block;
+                int addry = idy_ij[ij] * nGv_per_block;
+                int addrz = idz_ij[ij] * nGv_per_block;
                 double xR = gxR[addrx];
                 double xI = gxI[addrx];
                 double yR = gyR[addry];
@@ -202,19 +206,45 @@ void ft_pair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
         int nfi = (li + 1) * (li + 2) / 2;
         int *ao_loc = envs.ao_loc;
-        int nao = ao_loc[nbas];
+        int nbasp = envs.cell0_nbas;
+        int ncells = nbas / nbasp;
+        int nao = ao_loc[nbasp];
+        int cell_id = jsh / nbasp;
+        int cell0_jsh = jsh % nbasp;
         int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
+        int j0 = ao_loc[cell0_jsh];
+        size_t ncells_nGv = ncells * nGv;
         double *aft_tensor = out + 
-                ((i0*nao+j0)*nGv + Gv_block_id*nGv_per_block) * OF_COMPLEX;
+                ((i0*nao+j0) * ncells_nGv + cell_id * nGv
+                 + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
         for (int n = 0; n < GOUT_WIDTH; ++n) {
             int ij = n*gout_stride + gout_id;
             if (ij >= nfij) continue;
             int i = ij % nfi;
             int j = ij / nfi;
-            int addr = (i*nao+j)*nGv + Gv_id;
+            int addr = (i*nao+j)*ncells_nGv;
             aft_tensor[addr*2  ] = goutR[n];
             aft_tensor[addr*2+1] = goutI[n];
         }
+    }
+}
+
+__global__
+void ft_aopair_fill_triu(double *out, int *conj_mapping, int bvk_ncells, int nGv)
+{
+    int j = blockIdx.x;
+    int i = blockIdx.y;
+    size_t ncells_nGv = bvk_ncells * nGv;
+    if (i <= j) {
+        return;
+    }
+    int nao = gridDim.x;
+    int ij = (i * nao + j) * ncells_nGv;
+    int ji = (j * nao + i) * ncells_nGv;
+    for (int n = threadIdx.x; n < ncells_nGv; n += blockDim.x) {
+        int Gv_id = n % nGv;
+        int k = n / nGv;
+        int ck = conj_mapping[k];
+        out[ji + ck*nGv+Gv_id] = out[ij + n];
     }
 }

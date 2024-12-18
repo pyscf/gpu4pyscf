@@ -1,22 +1,19 @@
-#!/usr/bin/env python
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# Copyright 2024 The PySCF Developers. All Rights Reserved.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 '''
-Compute analytical Fourier transform
+Analytical Fourier transform for orbital-products
 '''
 
 import ctypes
@@ -25,17 +22,18 @@ import numpy as np
 import cupy as cp
 import scipy.linalg
 from pyscf import lib
-from pyscf.gto.mole import ANG_OF, ATOM_OF
+from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD
 from pyscf.scf import _vhf
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.gto.cell import _extract_pgto_params
 from pyscf.pbc.tools import k2gamma
+from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import load_library, contract
-from gpu4pyscf.gto.mole import group_basis
+from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import (
     g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.lib import logger
 
 __all__ = [
     'ft_aopair', 'ft_aopair_kpts', 'ft_ao'
@@ -45,7 +43,6 @@ libpbc = load_library('libpbc')
 libpbc.PBC_build_ft_ao.restype = ctypes.c_int
 libpbc.PBC_FT_init_constant.restype = ctypes.c_int
 
-PTR_BAS_COORD = 7
 LMAX = 4
 GOUT_WIDTH = 19 # 15?
 THREADS = 256
@@ -56,7 +53,7 @@ def ft_aopair(cell, Gv, kpti_kptj=None, q=None):
     else:
         kpti, kptj = kpti_kptj
         q = kptj - kpti
-    return ft_aopair_kpts(cell, Gv, q, kptj.reshape(1,3))
+    return ft_aopair_kpts(cell, Gv, q, kptj.reshape(1,3))[0]
 
 def ft_aopair_kpts(cell, Gv, q=None, kptjs=None, bvk_kmesh=None):
     if q is None:
@@ -93,7 +90,7 @@ def _bas_overlap_mask(cell, bvkmesh_Ls, Ls, cutoff=None):
     theta = exps[:,None] * exps / aij
 
     Ls = cp.asarray(Ls)
-    # rj is in the order of (bvk_cell_id, bas_id, lattice_img_id)
+    # rj format: (bvk_cell_id, bas_id, lattice_img_id)
     rj = bvkmesh_Ls[:,None,None,:] + bas_coords[:,None,:] + Ls
     rirj = bas_coords[:,None,None,None,:] - rj
 
@@ -103,17 +100,8 @@ def _bas_overlap_mask(cell, bvkmesh_Ls, Ls, cutoff=None):
     drj = exps[:,None,None,None]/aij[:,None,:,None] * dr
     li = ls[:,None,None,None]
     lj = ls[None,None,:,None]
-    odd_l = ls % 2 == 1
-    # li is even: ((li-1) * .5/aij[:,None,None,:] + dri**2) ** (li//2)
-    # li is odd : (li * .5/aij[:,None,None,:] + dri**2) ** ((li+1)//2) * dri
-    fac_dri = ((li-1) * .5/aij[:,None,:,None] + dri**2) ** (li//2)
-    fac_drj = ((lj-1) * .5/aij[:,None,:,None] + drj**2) ** (lj//2)
-    li_odd = li[odd_l,:,:,:]
-    lj_odd = lj[:,:,odd_l,:]
-    dri_odd = dri[odd_l,:,:,:]
-    drj_odd = drj[:,:,odd_l,:]
-    fac_dri[odd_l,:,:,:] = (li_odd*.5/aij[odd_l,None,:,None] + dri_odd**2)**((li_odd-1)//2) * dri_odd
-    fac_drj[:,:,odd_l,:] = (lj_odd*.5/aij[:,None,odd_l,None] + drj_odd**2)**((lj_odd-1)//2) * drj_odd
+    fac_dri = (li * .5/aij[:,None,:,None] + dri**2) ** (li*.5)
+    fac_drj = (lj * .5/aij[:,None,:,None] + drj**2) ** (lj*.5)
     fl = 2*np.pi/vol * (dr/theta[:,None,:,None]) + 1.
     fac_norm = norm[:,None]*norm * (np.pi/aij)**1.5
     ovlp = fac_norm[:,None,:,None] * cp.exp(-theta[:,None,:,None]*dr**2) * fac_dri * fac_drj * fl
@@ -140,9 +128,12 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
         bvkmesh_Ls = cp.zeros(3)
         bvkcell = cell
     else:
+        log.debug('bvk_kmesh = %s', bvk_kmesh)
         bvkmesh_Ls = cp.asarray(
                 k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True))
         bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)
+        # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
+        bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
     Ls = cp.asarray(bvkcell.get_lattice_Ls())
     Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
 
@@ -156,9 +147,10 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
     img_idx = cp.nonzero(ovlp_mask.reshape(-1, nimgs))[1].astype(np.int32)
 
     bvk_ovlp_mask = ovlp_mask.any(axis=3)
-    #TODO: symmetry between ish and jsh?
-    #ix, iy = cp.triu(nbas, -1)
-    #bvk_ovlp_mask[ix,:,iy] = False
+    # symmetry between ish and jsh can be utilized. The triu part is excluded
+    # from computation.
+    ix, iy = cp.triu_indices(nbas, 1)
+    bvk_ovlp_mask[ix,:,iy] = False
 
     _atm = cp.array(bvkcell._atm)
     _bas = cp.array(bvkcell._bas)
@@ -167,7 +159,7 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
     aft_envs = AFTIntEnvVars(
         bvkcell.natm, bvkcell.nbas,
         _atm.data.ptr, _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr,
-        Ls.data.ptr, img_idx.data.ptr, img_offsets.data.ptr,
+        Ls.data.ptr, img_idx.data.ptr, img_offsets.data.ptr, nbas
     )
     # Keep a reference to these arrays, prevent releasing them upon returning the closure
     aft_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls, img_idx, img_offsets)
@@ -178,6 +170,11 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     n_groups = np.count_nonzero(uniq_l <= LMAX)
     aosym = 's1'
+
+    if bvk_kmesh is None:
+        conj_mapping = cp.zeros(1, dtype=np.int32)
+    else:
+        conj_mapping = cp.asarray(conj_images_in_bvk_cell(bvk_kmesh), dtype=np.int32)
 
     init_constant(cell)
     kern = libpbc.PBC_build_ft_ao
@@ -192,7 +189,7 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
         nGv = len(Gv)
         assert nGv > 0
         # Padding zeros, allowing idle threads to access these data
-        GvT = cp.append(Gv.T.ravel(), cp.zeros(THREADS))
+        GvT = cp.append((Gv.T + q[:,None]).ravel(), cp.zeros(THREADS))
         out = cp.zeros((nao, nao, bvk_ncells, nGv), dtype=np.complex128)
 
         timing_collection = {}
@@ -211,9 +208,9 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
                 # shell-pairs that have closed number of images are processed on
                 # the same SM processor, ensuring the best parallel execution.
                 idx = cp.argsort(sub_img_counts[mask])[::-1]
-                i_in_pair, j_in_pair = cp.nonzero(mask.reshape(ish1-ish0, -1))
-                i_in_pair = i_in_pair.astype(np.int32)[idx]
-                j_in_pair = j_in_pair.astype(np.int32)[idx]
+                i_in_pair, bvk_id, j_in_pair = cp.nonzero(mask)
+                i_in_pair = (i_in_pair + ish0).astype(np.int32)[idx]
+                j_in_pair = (j_in_pair + jsh0 + bvk_id*nbas).astype(np.int32)[idx]
 
                 scheme = ft_ao_scheme(cell, li, lj, nGv)
                 log.debug2('ft_ao_scheme %s', scheme)
@@ -241,7 +238,19 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
             for ll_pattern, t in timing_collection.items():
                 log.debug1('%s wall time %.2f', ll_pattern, t)
 
-        #:out = einsum('pqLG,pi,qj->LGij', out, coeff, coeff)
+        # For i<j, the real orbital product in BvK cell <i|j+L> is identical to <j|i-L>
+        # conj_imgs stores the image indices of the corresponding +L and -L
+        #ix, iy = cp.tril_indices(nao, -1)
+        #for k, ck in enumerate(conj_mapping):
+        #    out[iy,ix,ck] = out[ix,iy,k]
+        err = libpbc.PBC_ft_aopair_fill_triu(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nao), ctypes.c_int(bvk_ncells), ctypes.c_int(nGv))
+        if err != 0:
+            raise RuntimeError(f'PBC_ft_aopair_fill_triu kernel failed')
+
+        #:out = einsum('pLqG,pi,qj->LGij', out, coeff, coeff)
         out = contract('pqLG,pi->qLGi', out, coeff)
         out = contract('qLGi,qj->LGij', out, coeff)
         if kptjs is None:
@@ -250,17 +259,6 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
             kptjs = cp.asarray(kptjs, order='C').reshape(-1,3)
             expLk = cp.exp(1j*cp.dot(bvkmesh_Ls, kptjs.T))
             out = contract('Lk,LGij->kGij', expLk, out)
-
-        #TODO:
-        #if aosym == 's1hermi':
-        #    # Gamma point only
-        #    assert is_zero(q) and is_zero(kptjs) and ni == nj
-        #    # Theoretically, hermitian symmetry can be also found for kpti == kptj != 0:
-        #    #       f_ji(G) = \int f_ji exp(-iGr) = \int f_ij^* exp(-iGr) = [f_ij(-G)]^*
-        #    # hermi operation needs to reorder axis-0.  It is inefficient.
-        #if aosym == 's1hermi':
-        #    for i in range(1, ni):
-        #        out[:,:,:i,i] = out[:,:,i,:i]
 
         log.timer('ft_aopair', *cput0)
         return out
@@ -278,6 +276,7 @@ class AFTIntEnvVars(ctypes.Structure):
         ('img_coords', ctypes.c_void_p),
         ('img_idx', ctypes.c_void_p),
         ('img_offsets', ctypes.c_void_p),
+        ('cell0_nbas', ctypes.c_int),
     ]
 
 def init_constant(cell):

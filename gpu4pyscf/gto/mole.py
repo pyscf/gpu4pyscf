@@ -163,7 +163,7 @@ def sort_atoms(mol):
 
 def group_basis(mol, tile=1, group_size=None):
     '''Group basis functions according to their [l, nprim] patterns'''
-    sorted_mol, coeff = basis_seg_contraction(mol)
+    mol, coeff = basis_seg_contraction(mol)
     # Sort basis according to angular momentum and contraction patterns so
     # as to group the basis functions to blocks in GPU kernel.
     l_ctrs = mol._bas[:,[ANG_OF, NPRIM_OF]]
@@ -229,7 +229,7 @@ def group_basis(mol, tile=1, group_size=None):
 
     # PTR_BAS_COORD is required by various CUDA kernels
     mol._bas[:,PTR_BAS_COORD] = mol._atm[mol._bas[:,ATOM_OF],PTR_COORD]
-    return sorted_mol, coeff, uniq_l_ctr, l_ctr_counts
+    return mol, coeff, uniq_l_ctr, l_ctr_counts
 
 def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size, align=1):
     '''Splits l_ctr patterns into small groups with group_size the maximum
