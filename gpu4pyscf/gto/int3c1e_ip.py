@@ -130,7 +130,7 @@ def get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, int
         charge_exponents = cp.asarray(charge_exponents, order='C')
 
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
-    charges = cp.asarray(charges)
+    charges = cp.asarray(charges).astype(np.float64)
 
     charges = charges.reshape([-1, 1], order='C')
     grids = cp.concatenate([grids, charges], axis=1)
@@ -314,7 +314,7 @@ def get_int3c1e_ip1_charge_and_density_contracted(mol, grids, charge_exponents, 
 
 def get_int3c1e_ip2_charge_and_density_contracted(mol, grids, charge_exponents, dm, charges, intopt):
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
-    charges = cp.asarray(charges)
+    charges = cp.asarray(charges).astype(np.float64)
 
     int3c_ip2 = get_int3c1e_ip2_density_contracted(mol, grids, charge_exponents, dm, intopt)
     int3c_ip2 = int3c_ip2 * charges
