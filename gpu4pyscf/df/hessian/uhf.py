@@ -349,7 +349,9 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     hk_ao_ao *= 2.0
     e1 = cupy.zeros([len(atmlst),len(atmlst),3,3])
     ej = hj_ipip
-    ek = hk_ipip
+    ek = None
+    if with_k:
+        ek = hk_ipip
     for i0, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = aoslices[ia]
         e1[i0,i0] -= cupy.sum(h1aa[p0:p1], axis=0)
@@ -401,7 +403,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         for j0 in range(i0):
             e1[j0,i0] = e1[i0,j0].T
             ej[j0,i0] = ej[i0,j0].T
-            ek[j0,i0] = ek[i0,j0].T
+            if with_k:
+                ek[j0,i0] = ek[i0,j0].T
     t1 = log.timer_debug1('hcore contribution', *t1)
     log.timer('UHF partial hessian', *time0)
     return e1, ej, ek

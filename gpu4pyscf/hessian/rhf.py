@@ -25,7 +25,7 @@ import numpy as np
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pyscf.hessian import rhf as rhf_hess_cpu
-from pyscf import lib
+from pyscf import lib, gto
 from pyscf.gto import ATOM_OF
 # import _response_functions to load gen_response methods in SCF class
 from gpu4pyscf.scf import _response_functions  # noqa
@@ -728,45 +728,49 @@ def hess_nuc_elec(mol, dm):
     '''
     calculate hessian contribution due to (nuc, elec) pair
     '''
-
-    '''
-    nao = mol.nao
-    aoslices = mol.aoslice_by_atom()
-    natm = mol.natm
-    hcore = numpy.zeros([3,3,natm,natm])
-    # CPU version
-    for ia in range(mol.natm):
-        ish0, ish1, i0, i1 = aoslices[ia]
-        zi = mol.atom_charge(ia)
-        with mol.with_rinv_at_nucleus(ia):
-            rinv2aa = mol.intor('int1e_ipiprinv', comp=9).reshape([3,3,nao,nao])
-            rinv2ab = mol.intor('int1e_iprinvip', comp=9).reshape([3,3,nao,nao])
-            rinv2aa *= zi
-            rinv2ab *= zi
-
-            hcore[:,:,ia,ia] -= numpy.einsum('xypq,pq->xy', rinv2aa+rinv2ab, dm)
-
-            haa = numpy.einsum('xypq,pq->xyp', rinv2aa, dm)
-            hab = numpy.einsum('xypq,pq->xyp', rinv2ab, dm)
-
-            haa = [haa[:,:,p0:p1].sum(axis=2) for p0,p1 in aoslices[:,2:]]
-            hab = [hab[:,:,p0:p1].sum(axis=2) for p0,p1 in aoslices[:,2:]]
-
-            haa = numpy.stack(haa, axis=2)
-            hab = numpy.stack(hab, axis=2)
-
-            hcore[:,:,ia] += haa
-            hcore[:,:,ia] += hab.transpose([1,0,2])
-
-            hcore[:,:,:,ia] += haa.transpose([1,0,2])
-            hcore[:,:,:,ia] += hab
-
-    hcore = cupy.asarray(hcore)
-    '''
     from gpu4pyscf.df import int3c2e
-    hcore = int3c2e.get_hess_nuc_elec(mol, dm)
-    return hcore * 2.0
+    coords = mol.atom_coords()
+    charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
 
+    fakemol = gto.fakemol_for_charges(coords)
+    fakemol.output = mol.output
+    fakemol.verbose = mol.verbose
+    fakemol.stdout = mol.stdout
+    intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
+    intopt.build(1e-14, diag_block_with_triu=True, aosym=False, 
+                 group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
+    dm = intopt.sort_orbitals(cupy.asarray(dm), axis=[0,1])
+
+    natm = mol.natm
+    nao = mol.nao
+    hcore_diag = cupy.zeros([9,natm])
+    hcore_aa = cupy.zeros([9,natm,nao])
+    for i0,i1,j0,j1,k0,k1,int3c_blk in int3c2e.loop_int3c2e_general(intopt, ip_type='ipip1'):
+        haa = contract('xpji,ij->xpi', int3c_blk, dm[i0:i1,j0:j1])
+        hcore_aa[:,k0:k1,i0:i1] += haa
+        hcore_diag[:,k0:k1] -= contract('xpji,ij->xp', int3c_blk, dm[i0:i1,j0:j1])
+
+    hcore_ab = cupy.zeros([9,natm,nao])
+    for i0,i1,j0,j1,k0,k1,int3c_blk in int3c2e.loop_int3c2e_general(intopt, ip_type='ipvip1'):
+        hab = contract('xpji,ij->xpi', int3c_blk, dm[i0:i1,j0:j1])
+        hcore_ab[:,k0:k1,i0:i1] += hab
+        hcore_diag[:,k0:k1] -= contract('xpji,ij->xp', int3c_blk, dm[i0:i1,j0:j1])
+
+    hcore_diag = contract('xp,p->xp', hcore_diag, charges)
+    hcore_aa = contract('xpj,p->xpj', hcore_aa, charges)
+    hcore_ab = contract('xpj,p->xpj', hcore_ab, charges)
+
+    aoslices = mol.aoslice_by_atom()
+    ao2atom = int3c2e.get_ao2atom(intopt, aoslices)
+
+    hcore_aa = contract('xpj,jq->xpq', hcore_aa, ao2atom).reshape([3,3,natm,natm])
+    hcore_ab = contract('xpj,jq->xpq', hcore_ab, ao2atom).reshape([3,3,natm,natm])
+    hcore = hcore_aa + hcore_aa.transpose([1,0,3,2])
+    hcore+= hcore_ab.transpose([1,0,2,3]) + hcore_ab.transpose([0,1,3,2])
+    hcore_diag = hcore_diag.reshape([3,3,natm])
+    idx = np.arange(natm)
+    hcore[:,:,idx,idx] += hcore_diag
+    return hcore * 2.0
 
 def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     cput0 = (logger.process_clock(), logger.perf_counter())

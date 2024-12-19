@@ -265,8 +265,8 @@ def get_jk(mol, dm, mo_coeff, mocc, hermi=0, vhfopt=None,
         if isinstance(mocc, tuple):
             mocca, moccb = mocc
             moa, mob = mo_coeff
-            nmoa, nmob = moa.shape[1], mob.shape[1]
-            nocca, noccb = mocca.shape[1], moccb.shape[1]
+            nmoa = moa.shape[1]
+            nocca = mocca.shape[1]
             n_dm_2 = n_dm//2
             if with_j:
                 vjab = vj1[:n_dm_2] + vj1[n_dm_2:]
@@ -280,17 +280,10 @@ def get_jk(mol, dm, mo_coeff, mocc, hermi=0, vhfopt=None,
             if with_j:
                 vj1[:,idy,idx] = vj1[:,idx,idy]
                 vj += _ao2mo(cp.asarray(vj1), mocc, mo_coeff)
-                #for i, v in enumerate(vj1):
-                #    vj[i] += coeff.T.dot(cp.asarray(v)).dot(coeff)
             if with_k:
                 if hermi:
                     vk1[:,idy,idx] = vk1[:,idx,idy]
                 vk += _ao2mo(cp.asarray(vk1), mocc, mo_coeff)
-                #for i, v in enumerate(vk1):
-                #    vk[i] += coeff.T.dot(cp.asarray(v)).dot(coeff)
-
-        # TODO: convert vj and vk into MO
         log.timer_debug1('get_jk pass 2 for h functions on cpu', *cput1)
-    
     log.timer('vj and vk', *cput0)
     return vj, vk
