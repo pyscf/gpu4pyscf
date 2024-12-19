@@ -27,6 +27,7 @@ from pyscf.scf import _vhf
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.gto.cell import _extract_pgto_params
 from pyscf.pbc.tools import k2gamma
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import load_library, contract, get_avail_mem
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
@@ -60,7 +61,7 @@ def ft_aopair_kpts(cell, Gv, q=None, kptjs=None, bvk_kmesh=None):
     if q is None:
         q = np.zeros(3)
     if bvk_kmesh is None and kptjs is not None:
-        bvk_kmesh = k2gamma.kpts_to_kmesh(cell, kptjs)
+        bvk_kmesh = kpts_to_kmesh(cell, kptjs)
     ft_kernel = gen_ft_kernel(cell, bvk_kmesh)
     return ft_kernel(Gv, q, kptjs)
 
@@ -274,11 +275,16 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
             GvT = cp.append((Gv.T + q[:,None]).ravel(), cp.zeros(THREADS))
             return _ft_sub(GvT, nGv, kptjs)
         elif out_size < avail_mem * .8:
-            Gv_block = int((avail_mem * .95 - out_size) / (2*nao**2*bvk_ncells*16))
+            if kptjs is None:
+                nkpts = 1
+            else:
+                kptjs = kptjs.reshape(-1, 3)
+                nkpts = len(kptjs)
+            out = cp.empty((nkpts, nGv, nao_orig, nao_orig), dtype=np.complex128)
+            Gv_block = int((avail_mem * .95 - out.size) / (2*nao**2*bvk_ncells*16))
             Gv_block &= 0xfffffc
             if Gv_block >= 4:
                 logger.debug1(cell, 'Processing ft_kernel in sub-blocks, Gv_block = %d', Gv_block)
-                out = cp.empty((bvk_ncells, nGv, nao_orig, nao_orig), dtype=np.complex128)
                 for p0, p1 in lib.prange(0, nGv, Gv_block):
                     GvT = cp.append((Gv[p0:p1].T + q[:,None]).ravel(), cp.zeros(THREADS))
                     out[:,p0:p1] = _ft_sub(GvT, p1-p0, kptjs)

@@ -6,8 +6,6 @@
 #include "ft_ao.h"
 #define OVERLAP_FAC     5.56832799683170787
 #define OF_COMPLEX      2
-int ft_ao_unrolled_lmax = 2;
-int ft_ao_unrolled_max_order = 4;
 
 
 #if CUDA_VERSION >= 12040
@@ -94,9 +92,8 @@ void ft_ao_unrolled_00(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
             vrr_0zR *= Kab;
             vrr_0zI *= Kab;
             xyR = fac * 1;
-            xyI = 0 * 1;
-            gout0R += xyR * vrr_0zR - xyI * vrr_0zI;
-            gout0I += xyR * vrr_0zI + xyI * vrr_0zR;
+            gout0R += xyR * vrr_0zR;
+            gout0I += xyR * vrr_0zI;
         }
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
@@ -227,9 +224,8 @@ void ft_ao_unrolled_10(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
             double vrr_1zR = zpaR * vrr_0zR - zpaI * vrr_0zI;
             double vrr_1zI = zpaR * vrr_0zI + zpaI * vrr_0zR;
             xyR = fac * 1;
-            xyI = 0 * 1;
-            gout2R += xyR * vrr_1zR - xyI * vrr_1zI;
-            gout2I += xyR * vrr_1zI + xyI * vrr_1zR;
+            gout2R += xyR * vrr_1zR;
+            gout2I += xyR * vrr_1zI;
         }
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
@@ -420,9 +416,8 @@ void ft_ao_unrolled_11(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
             double vrr_2zI = 1*a2 * vrr_0zI + zpaR * vrr_1zI + zpaI * vrr_1zR;
             double hrr_11zI = vrr_2zI - zjzi * vrr_1zI;
             xyR = fac * 1;
-            xyI = 0 * 1;
-            gout8R += xyR * hrr_11zR - xyI * hrr_11zI;
-            gout8I += xyR * hrr_11zI + xyI * hrr_11zR;
+            gout8R += xyR * hrr_11zR;
+            gout8I += xyR * hrr_11zI;
         }
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
@@ -601,9 +596,8 @@ void ft_ao_unrolled_20(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
             double vrr_2zR = 1*a2 * vrr_0zR + zpaR * vrr_1zR - zpaI * vrr_1zI;
             double vrr_2zI = 1*a2 * vrr_0zI + zpaR * vrr_1zI + zpaI * vrr_1zR;
             xyR = fac * 1;
-            xyI = 0 * 1;
-            gout5R += xyR * vrr_2zR - xyI * vrr_2zI;
-            gout5I += xyR * vrr_2zI + xyI * vrr_2zR;
+            gout5R += xyR * vrr_2zR;
+            gout5I += xyR * vrr_2zI;
         }
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
@@ -865,9 +859,8 @@ void ft_ao_unrolled_21(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
             double vrr_3zI = 2*a2 * vrr_1zI + zpaR * vrr_2zI + zpaI * vrr_2zR;
             double hrr_21zI = vrr_3zI - zjzi * vrr_2zI;
             xyR = fac * 1;
-            xyI = 0 * 1;
-            gout17R += xyR * hrr_21zR - xyI * hrr_21zI;
-            gout17I += xyR * hrr_21zI + xyI * hrr_21zR;
+            gout17R += xyR * hrr_21zR;
+            gout17I += xyR * hrr_21zI;
         }
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
@@ -1303,9 +1296,8 @@ void ft_ao_unrolled_22(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
             double hrr_31zI = vrr_4zI - zjzi * vrr_3zI;
             double hrr_22zI = hrr_31zI - zjzi * hrr_21zI;
             xyR = fac * 1;
-            xyI = 0 * 1;
-            gout35R += xyR * hrr_22zR - xyI * hrr_22zI;
-            gout35I += xyR * hrr_22zI + xyI * hrr_22zR;
+            gout35R += xyR * hrr_22zR;
+            gout35I += xyR * hrr_22zI;
         }
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
