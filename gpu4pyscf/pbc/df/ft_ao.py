@@ -28,7 +28,7 @@ from pyscf.pbc import tools as pbctools
 from pyscf.pbc.gto.cell import _extract_pgto_params
 from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import load_library, contract
+from gpu4pyscf.lib.cupy_helper import load_library, contract, get_avail_mem
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import (
     g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
@@ -44,7 +44,7 @@ libpbc.PBC_build_ft_ao.restype = ctypes.c_int
 libpbc.PBC_FT_init_constant.restype = ctypes.c_int
 
 LMAX = 4
-GOUT_WIDTH = 19 # 15?
+GOUT_WIDTH = 19
 THREADS = 256
 
 def ft_aopair(cell, Gv, kpti_kptj=None, q=None):
@@ -52,7 +52,8 @@ def ft_aopair(cell, Gv, kpti_kptj=None, q=None):
         kptj = np.zeros((1, 3))
     else:
         kpti, kptj = kpti_kptj
-        q = kptj - kpti
+        if q is None:
+            q = kptj - kpti
     return ft_aopair_kpts(cell, Gv, q, kptj.reshape(1,3))[0]
 
 def ft_aopair_kpts(cell, Gv, q=None, kptjs=None, bvk_kmesh=None):
@@ -121,7 +122,7 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
 
     cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
     l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
-    coeff = cp.asarray(coeff)
+    coeff = cp.asarray(coeff, dtype=np.complex128)
 
     # create BVK super-cell
     if bvk_kmesh is None:
@@ -140,6 +141,7 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
     # Generate img_idx based on the overlap between shells in cell and super-mol
     ovlp_mask = _bas_overlap_mask(cell, bvkmesh_Ls, Ls)
     bvk_ncells, nbas, nimgs = ovlp_mask.shape[1:]
+    log.debug('bvk_ncells=%d, nbas=%d, nimgs=%d', bvk_ncells, nbas, nimgs)
     # Number of images for each pair of (bas_i_in_cell0, bas_j_in_bvkcell)
     img_counts = cp.count_nonzero(ovlp_mask, axis=3)
     img_offsets = cp.append(0, cp.cumsum(img_counts.ravel())).astype(np.int32)
@@ -164,12 +166,11 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
     # Keep a reference to these arrays, prevent releasing them upon returning the closure
     aft_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls, img_idx, img_offsets)
 
-    nao = coeff.shape[0]
+    nao, nao_orig = coeff.shape
     ao_loc = bvkcell.ao_loc
     uniq_l = uniq_l_ctr[:,0]
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     n_groups = np.count_nonzero(uniq_l <= LMAX)
-    aosym = 's1'
 
     if bvk_kmesh is None:
         conj_mapping = cp.zeros(1, dtype=np.int32)
@@ -178,22 +179,14 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
 
     init_constant(cell)
     kern = libpbc.PBC_build_ft_ao
+    cp.cuda.Stream.null.synchronize()
     log.timer_debug1('initialize ft_kern', *cput0)
 
-    def ft_kernel(Gv, q=np.zeros(3), kptjs=None, aosym=aosym):
-        '''
-        Analytical FT for orbital products. The output tensor has the shape [nGv, nao, nao]
-        '''
+    def _ft_sub(GvT, nGv, kptjs):
         t1 = log.init_timer()
-        assert q.ndim == 1
-        nGv = len(Gv)
-        assert nGv > 0
-        # Padding zeros, allowing idle threads to access these data
-        GvT = cp.append((Gv.T + q[:,None]).ravel(), cp.zeros(THREADS))
-        out = cp.zeros((nao, nao, bvk_ncells, nGv), dtype=np.complex128)
-
         timing_collection = {}
         kern_counts = 0
+        out = cp.zeros((nao, nao, bvk_ncells, nGv), dtype=np.complex128)
 
         for i in range(n_groups):
             for j in range(i+1):
@@ -213,10 +206,10 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
                 j_in_pair = (j_in_pair + jsh0 + bvk_id*nbas).astype(np.int32)[idx]
 
                 scheme = ft_ao_scheme(cell, li, lj, nGv)
-                log.debug2('ft_ao_scheme %s', scheme)
+                log.debug2('ft_ao_scheme for %s: %s', ll_pattern, scheme)
                 err = kern(
                     ctypes.cast(out.data.ptr, ctypes.c_void_p),
-                    aft_envs, (ctypes.c_int*3)(*scheme),
+                    ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
                     (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
                     ctypes.c_int(i_in_pair.size), ctypes.c_int(nGv),
                     ctypes.cast(i_in_pair.data.ptr, ctypes.c_void_p),
@@ -238,6 +231,7 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
             for ll_pattern, t in timing_collection.items():
                 log.debug1('%s wall time %.2f', ll_pattern, t)
 
+        log.debug1('symmetrize output')
         # For i<j, the real orbital product in BvK cell <i|j+L> is identical to <j|i-L>
         # conj_imgs stores the image indices of the corresponding +L and -L
         #ix, iy = cp.tril_indices(nao, -1)
@@ -250,18 +244,48 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
         if err != 0:
             raise RuntimeError(f'PBC_ft_aopair_fill_triu kernel failed')
 
+        log.debug1('transform basis')
         #:out = einsum('pLqG,pi,qj->LGij', out, coeff, coeff)
-        out = contract('pqLG,pi->qLGi', out, coeff)
-        out = contract('qLGi,qj->LGij', out, coeff)
+        out = out.reshape(nao, -1).T.dot(coeff)
+        out = out.reshape(nao, -1).T.dot(coeff)
+        log.debug1('transform BvK-cell to k-points')
         if kptjs is None:
             out = out.sum(axis=0)
         else:
             kptjs = cp.asarray(kptjs, order='C').reshape(-1,3)
             expLk = cp.exp(1j*cp.dot(bvkmesh_Ls, kptjs.T))
-            out = contract('Lk,LGij->kGij', expLk, out)
-
+            #out = contract('Lk,LGij->kGij', expLk, out)
+            out = expLk.T.dot(out.reshape(bvk_ncells, -1))
+            out = out.reshape(len(kptjs), nGv, nao_orig, nao_orig)
         log.timer('ft_aopair', *cput0)
         return out
+
+    def ft_kernel(Gv, q=np.zeros(3), kptjs=None):
+        '''
+        Analytical FT for orbital products. The output tensor has the shape [nGv, nao, nao]
+        '''
+        assert q.ndim == 1
+        nGv = len(Gv)
+        assert nGv > 0
+        out_size = nao**2 * bvk_ncells*nGv * 16
+        avail_mem = get_avail_mem()
+        if 2*out_size < avail_mem * .8:
+            # Padding zeros, allowing idle threads to access these data
+            GvT = cp.append((Gv.T + q[:,None]).ravel(), cp.zeros(THREADS))
+            return _ft_sub(GvT, nGv, kptjs)
+        elif out_size < avail_mem * .8:
+            Gv_block = int((avail_mem * .95 - out_size) / (2*nao**2*bvk_ncells*16))
+            Gv_block &= 0xfffffc
+            if Gv_block >= 4:
+                logger.debug1(cell, 'Processing ft_kernel in sub-blocks, Gv_block = %d', Gv_block)
+                out = cp.empty((bvk_ncells, nGv, nao_orig, nao_orig), dtype=np.complex128)
+                for p0, p1 in lib.prange(0, nGv, Gv_block):
+                    GvT = cp.append((Gv[p0:p1].T + q[:,None]).ravel(), cp.zeros(THREADS))
+                    out[:,p0:p1] = _ft_sub(GvT, p1-p0, kptjs)
+                return out
+        raise RuntimeError('Not enough GPU memory. '
+                           f'Available: {avail_mem*1e-9:.2f} GB. '
+                           f'Required: {out_size*1.2e-9:.2f} GB')
 
     return ft_kernel
 
@@ -298,11 +322,16 @@ def ft_ao_scheme(cell, li, lj, nGv, shm_size=SHM_SIZE):
 
     g_size = (li+1)*(lj+1)
     unit = g_size*3
-    nGv_max = min(shm_size//(unit*16), THREADS//gout_stride)
+    nGv_nsp_max = shm_size//(unit*16)
+    nGv_nsp_max = _nearest_power2(nGv_nsp_max)
+    nGv_max = min(nGv_nsp_max, THREADS//gout_stride)
 
-    # Test nGv_per_block in 8..nGv_max, find the case of minimal idle threads
+    # gout_stride*nGv_per_block >= 32 is a must due to syncthreads in CUDA kernel
+    nGv_per_block = max(32//gout_stride, 1)
+
+    # Test nGv_per_block in 1..nGv_max, find the case of minimal idle threads
     idle_min = nGv_max
-    nGv_test = nGv_per_block = 8
+    nGv_test = nGv_per_block
     while nGv_test <= nGv_max:
         idle = (-nGv) % nGv_test
         if idle <= idle_min:
@@ -311,4 +340,7 @@ def ft_ao_scheme(cell, li, lj, nGv, shm_size=SHM_SIZE):
         nGv_test *= 2
 
     sp_blocks = THREADS // (gout_stride * nGv_per_block)
+    # the nGv * sp_blocks restrictrions due to shared memory size
+    sp_blocks = min(sp_blocks, nGv_nsp_max // nGv_per_block)
+    gout_stride = THREADS // (nGv_per_block * sp_blocks)
     return nGv_per_block, gout_stride, sp_blocks

@@ -6,7 +6,6 @@
 #include "gvhf-rys/vhf.cuh"
 #include "ft_ao.h"
 
-// TODO: test kernel-15 and kernel-19 for different cases
 #define GOUT_WIDTH      19
 // pi^1.5
 #define OVERLAP_FAC     5.56832799683170787
@@ -47,6 +46,7 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
+    int ijprim = iprim * jprim;
     int lij = li + lj;
     int stride_j = bounds.stride_j;
     int g_size = bounds.g_size;
@@ -74,6 +74,7 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     double ky = Gv[Gv_id + nGv];
     double kz = Gv[Gv_id + nGv * 2];
     double kk = kx * kx + ky * ky + kz * kz;
+    double rjri[3];
 
     extern __shared__ double g[];
     double *gxR = g + g_size * nGv_per_block * sp_id + Gv_id;
@@ -82,7 +83,7 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     double *gyI = gyR + gx_len;
     double *gzR = gyI + gx_len;
     double *gzI = gzR + gx_len;
-    double rjri[3];
+
     double goutR[GOUT_WIDTH];
     double goutI[GOUT_WIDTH];
 #pragma unroll
@@ -90,41 +91,42 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
         goutR[n] = 0.;
         goutI[n] = 0.;
     }
+    double s0xR, s1xR, s2xR;
+    double s0xI, s1xI, s2xI;
 
-    for (int img = img0; img < img1; img++) {
-        int img_id = img_idx[img];
-        double Lx = img_coords[img_id*3+0];
-        double Ly = img_coords[img_id*3+1];
-        double Lz = img_coords[img_id*3+2];
-        double xjxi = rj[0] + Lx - ri[0];
-        double yjyi = rj[1] + Ly - ri[1];
-        double zjzi = rj[2] + Lz - ri[2];
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
+    for (int ijp = 0; ijp < ijprim; ++ijp) {
+        int ip = ijp / jprim;
+        int jp = ijp % jprim;
+        double ai = expi[ip];
+        double aj = expj[jp];
+        double aij = ai + aj;
+        double aj_aij = aj / aij;
+        double a2 = .5 / aij;
+        double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
 
-        for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double aij = ai + aj;
-            double aj_aij = aj / aij;
-            double a2 = .5 / aij;
-            double s0xR, s1xR, s2xR;
-            double s0xI, s1xI, s2xI;
+        for (int img = img0; img < img1; img++) {
+            int img_id = img_idx[img];
+            double Lx = img_coords[img_id*3+0];
+            double Ly = img_coords[img_id*3+1];
+            double Lz = img_coords[img_id*3+2];
+            double xjxi = rj[0] + Lx - ri[0];
+            double yjyi = rj[1] + Ly - ri[1];
+            double zjzi = rj[2] + Lz - ri[2];
+            rjri[0] = xjxi;
+            rjri[1] = yjyi;
+            rjri[2] = zjzi;
+
             __syncthreads();
             if (gout_id == 0) {
-                double xij = rjri[0] * aj_aij + ri[0];
-                double yij = rjri[1] * aj_aij + ri[1];
-                double zij = rjri[2] * aj_aij + ri[2];
+                double xij = xjxi * aj_aij + ri[0];
+                double yij = yjyi * aj_aij + ri[1];
+                double zij = zjzi * aj_aij + ri[2];
+                double kR = kx * xij + ky * yij + kz * zij;
+                sincos(-kR, gzI, gzR);
                 double theta_ij = ai * aj_aij;
                 double rr = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double kR = kx * xij + ky * yij + kz * zij;
                 double theta_rr = theta_ij*rr + .5*a2*kk;
                 double Kab = exp(-theta_rr);
-                sincos(-kR, gzI, gzR);
-                double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
                 gxR[0] = fac;
                 gxI[0] = 0.;
                 gyR[0] = 1.;
@@ -164,6 +166,7 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
 
             // hrr
             if (lj > 0) {
+                __syncthreads();
                 for (int n = gout_id; n < 3*OF_COMPLEX; n += gout_stride) {
                     double *_gx = gxR + n * gx_len;
                     // The real and imaginary parts call the same expression

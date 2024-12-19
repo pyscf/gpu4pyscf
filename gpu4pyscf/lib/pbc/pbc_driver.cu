@@ -15,10 +15,11 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds);
 extern __global__
 void ft_aopair_fill_triu(double *out, int *conj_mapping, int bvk_ncells, int nGv);
 
+int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds, int *scheme);
+
 extern "C" {
-int PBC_build_ft_ao(double *out, AFTIntEnvVars envs,
-                    int *scheme, int *shls_slice,
-                    int npairs_ij, int ngrids,
+int PBC_build_ft_ao(double *out, AFTIntEnvVars *envs,
+                    int *scheme, int *shls_slice, int npairs_ij, int ngrids,
                     int *ish_in_pair, int *jsh_in_pair, double *grids,
                     int *atm, int natm, int *bas, int nbas, double *env)
 {
@@ -39,16 +40,16 @@ int PBC_build_ft_ao(double *out, AFTIntEnvVars envs,
         stride_i, stride_j, iprim, jprim,
         npairs_ij, ish_in_pair, jsh_in_pair, ngrids, grids};
 
-    if (1) {
+    if (!ft_ao_unrolled(out, envs, &bounds, scheme)) {
         int nGv_per_block = scheme[0];
         int gout_stride = scheme[1];
         int nsp_per_block = scheme[2];
         dim3 threads(nGv_per_block, gout_stride, nsp_per_block);
         int sp_blocks = (npairs_ij + nsp_per_block - 1) / nsp_per_block;
         int Gv_batches = (ngrids + nGv_per_block - 1) / nGv_per_block;
-        dim3 workers(sp_blocks, Gv_batches);
+        dim3 blocks(sp_blocks, Gv_batches);
         int buflen = g_size*6 * nGv_per_block * nsp_per_block;
-        ft_aopair_kernel<<<workers, threads, buflen*sizeof(double)>>>(out, envs, bounds);
+        ft_aopair_kernel<<<blocks, threads, buflen*sizeof(double)>>>(out, *envs, bounds);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
