@@ -1,18 +1,16 @@
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# Copyright 2024 The GPU4PySCF Developers. All Rights Reserved.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # Author: Qiming Sun <osirpt.sun@gmail.com>
 # Modified by Xiaojie Wu <wxj6000@gmail.com>
@@ -249,6 +247,7 @@ def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ,
     ''' Calculate J and K matrices on single GPU
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
+        assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
         dms = cupy.asarray(dms)
@@ -313,6 +312,7 @@ def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs,
     '''
     vj = vk = None
     with cupy.cuda.Device(device_id), _streams[device_id]:
+        assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
         dms = cupy.asarray(dms)
@@ -373,6 +373,7 @@ def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0)
     ''' Calculate J and K matrices with density matrix
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
+        assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
         dms = cupy.asarray(dms)
@@ -404,7 +405,7 @@ def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0)
                 for k in range(nset):
                     rhok = contract('Lij,jk->Lki', cderi, dms[k]).reshape([-1,nao])
                     #vk[k] += contract('Lki,Lkj->ij', rhok, cderi)
-                    vk[k] += cupy.dot(rhok.T, cderi.reshape([-1,nao]))            
+                    vk[k] += cupy.dot(rhok.T, cderi.reshape([-1,nao]))
         if with_j:
             vj = cupy.zeros(dms_shape)
             vj[:,rows,cols] = vj_sparse
@@ -437,7 +438,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
 
     assert nao == dfobj.nao
     intopt = dfobj.intopt
-    
+
     nao = dms_tag.shape[-1]
     dms = dms_tag.reshape([-1,nao,nao])
     intopt = dfobj.intopt
@@ -456,7 +457,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
         with ThreadPoolExecutor(max_workers=_num_devices) as executor:
             for device_id in range(_num_devices):
                 future = executor.submit(
-                    _jk_task_with_mo, 
+                    _jk_task_with_mo,
                     dfobj, dms, mo_coeff, mo_occ,
                     hermi=hermi, device_id=device_id,
                     with_j=with_j, with_k=with_k)
@@ -477,7 +478,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
         with ThreadPoolExecutor(max_workers=_num_devices) as executor:
             for device_id in range(_num_devices):
                 future = executor.submit(
-                    _jk_task_with_mo1, 
+                    _jk_task_with_mo1,
                     dfobj, dms, mo1s, occ_coeffs,
                     hermi=hermi, device_id=device_id,
                     with_j=with_j, with_k=with_k)

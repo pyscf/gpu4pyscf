@@ -1,17 +1,17 @@
-/* Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
+/*
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 // Unrolled version
@@ -147,11 +147,6 @@ static void GINTfill_int3c2e_ipip2_kernel000(GINTEnvVars envs, ERITensor eri, Ba
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
-    
-    const int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
-    double* __restrict__ bas_y = bas_x + nbas;
-    double* __restrict__ bas_z = bas_y + nbas;
 
     double gxx = 0;
     double gxy = 0;
@@ -162,9 +157,7 @@ static void GINTfill_int3c2e_ipip2_kernel000(GINTEnvVars envs, ERITensor eri, Ba
     double gzx = 0;
     double gzy = 0;
     double gzz = 0;
-    double xk = bas_x[ksh];
-    double yk = bas_y[ksh];
-    double zk = bas_z[ksh];
+
     const int prim_ij0 = prim_ij;
     const int prim_ij1 = prim_ij + nprim_ij;
     const int prim_kl0 = prim_kl;
@@ -208,9 +201,9 @@ static void GINTfill_int3c2e_ipip2_kernel000(GINTEnvVars envs, ERITensor eri, Ba
             const double tmp1 = 2 * b00;
             const double tmp3 = tmp1 * aij;
             const double b01 = b00 + tmp4 * aij;
-            const double c0px = xkl - xk + tmp3 * xijxkl;
-            const double c0py = ykl - yk + tmp3 * yijykl;
-            const double c0pz = zkl - zk + tmp3 * zijzkl;
+            const double c0px = tmp3 * xijxkl;
+            const double c0py = tmp3 * yijykl;
+            const double c0pz = tmp3 * zijzkl;
             const double g_0 = 1;
             const double g_1 = c0px;
             const double g_2 = c0px * c0px + b01;

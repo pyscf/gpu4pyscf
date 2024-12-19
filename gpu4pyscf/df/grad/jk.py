@@ -1,17 +1,16 @@
-# Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 from concurrent.futures import ThreadPoolExecutor
 import cupy
@@ -25,6 +24,7 @@ def _jk_task(with_df, dm, orbo, with_j=True, with_k=True, device_id=0):
     rhoj = rhok = None
     with cupy.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(with_df.mol, with_df.verbose)
+        assert isinstance(with_df.verbose, int)
         t0 = log.init_timer()
         dm = cupy.asarray(dm)
         orbo = cupy.asarray(orbo)
@@ -34,7 +34,7 @@ def _jk_task(with_df, dm, orbo, with_j=True, with_k=True, device_id=0):
         cols = with_df.intopt.cderi_col
         dm_sparse = dm[rows, cols]
         dm_sparse[with_df.intopt.cderi_diag] *= .5
-        
+
         blksize = with_df.get_blksize()
         if with_j:
             rhoj = cupy.empty([naux_slice])
@@ -65,18 +65,18 @@ def get_rhoj_rhok(with_df, dm, orbo, with_j=True, with_k=True):
                 _jk_task, with_df, dm, orbo,
                 with_j=with_j, with_k=with_k, device_id=device_id)
             futures.append(future)
-    
+
     rhoj_total = []
     rhok_total = []
     for future in futures:
         rhoj, rhok = future.result()
         rhoj_total.append(rhoj)
         rhok_total.append(rhok)
-        
+
     rhoj = rhok = None
     if with_j:
         rhoj = concatenate(rhoj_total)
     if with_k:
         rhok = concatenate(rhok_total)
-    
+
     return rhoj, rhok

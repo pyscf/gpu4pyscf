@@ -1,3 +1,19 @@
+/*
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -16,11 +32,7 @@ static int _fill_jk_tasks(ShellQuartet *shl_quartet_idx,
     int *tile_ij_mapping = bounds.tile_ij_mapping;
     int *tile_kl_mapping = bounds.tile_kl_mapping;
     float *q_cond = bounds.q_cond;
-#if TILE == 1
-    float *tile_q_cond = q_cond;
-#else
-    float *tile_q_cond = q_cond + nbas*nbas;
-#endif
+    float *tile_q_cond = bounds.tile_q_cond;
     float *dm_cond = bounds.dm_cond;
     float cutoff = bounds.cutoff;
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
@@ -179,14 +191,10 @@ static int _fill_sr_jk_tasks(ShellQuartet *shl_quartet_idx,
     int *tile_ij_mapping = bounds.tile_ij_mapping;
     int *tile_kl_mapping = bounds.tile_kl_mapping;
     float *q_cond = bounds.q_cond;
-#if TILE == 1
-    float *tile_q_cond = q_cond;
-#else
-    float *tile_q_cond = q_cond + nbas*nbas;
-#endif
+    float *tile_q_cond = bounds.tile_q_cond;
     int nbas_tiles = nbas / TILE;
     // TODO: implement q_ijij_cond
-    float *s_estimator = tile_q_cond + nbas_tiles*nbas_tiles;
+    float *s_estimator = bounds.s_estimator;
     float *dm_cond = bounds.dm_cond;
     float cutoff = bounds.cutoff;
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;

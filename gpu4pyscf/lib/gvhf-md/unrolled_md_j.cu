@@ -5036,6 +5036,9 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
         blocks.x = (bounds->npairs_ij + 255) / 256;
         blocks.y = (bounds->npairs_kl + 127) / 128;
         md_j_1_2<<<blocks, threads, 7424*sizeof(double)>>>(*envs, *jk, *bounds); break;
+    // TODO: dynamically select kernels based on max shared memory size
+    // >64KB shared memory is needed for the kernels below
+    /*
     case 18: // lij=2, lkl=0
         blocks.x = (bounds->npairs_ij + 255) / 256;
         blocks.y = (bounds->npairs_kl + 255) / 256;
@@ -5060,6 +5063,7 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
         blocks.x = (bounds->npairs_ij + 63) / 64;
         blocks.y = (bounds->npairs_kl + 255) / 256;
         md_j_4_0<<<blocks, threads, 7808*sizeof(double)>>>(*envs, *jk, *bounds); break;
+    */
     default: return 0;
     }
     return 1;

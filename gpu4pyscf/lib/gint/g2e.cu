@@ -1,20 +1,17 @@
 /*
- * gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
  *
- * Copyright (C) 2022 Qiming Sun
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #include <stdio.h>
@@ -479,15 +476,9 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
     const double xi = bas_x[ish];
     const double yi = bas_y[ish];
     const double zi = bas_z[ish];
-    const double xk = bas_x[ksh];
-    const double yk = bas_y[ksh];
-    const double zk = bas_z[ksh];
     const double xijxi = xij - xi;
     const double yijyi = yij - yi;
     const double zijzi = zij - zi;
-    const double xklxk = xkl - xk;
-    const double yklyk = ykl - yk;
-    const double zklzk = zkl - zk;
 
     int nmax = envs.li_ceil + envs.lj_ceil;
     int mmax = envs.lk_ceil + envs.ll_ceil;
@@ -563,9 +554,9 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
             //}
             const double tmp3 = tmp1 * aij;
             const double b01 = b00 + tmp4 * aij;
-            const double c0px = xklxk + tmp3 * xijxkl;
-            const double c0py = yklyk + tmp3 * yijykl;
-            const double c0pz = zklzk + tmp3 * zijzkl;
+            const double c0px = tmp3 * xijxkl;
+            const double c0py = tmp3 * yijykl;
+            const double c0pz = tmp3 * zijzkl;
             double s0x = gx[i];
             double s0y = gy[i];
             double s0z = gz[i];

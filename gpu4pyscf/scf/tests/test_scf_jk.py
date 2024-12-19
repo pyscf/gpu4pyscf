@@ -1,17 +1,16 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import unittest
 import numpy as np
@@ -46,11 +45,11 @@ def test_jk_hermi1():
     assert abs(vk1 - ref[1]).max() < 1e-9
     assert abs(lib.fp(vj1) - -2327.4715195591784) < 5e-10
     assert abs(lib.fp(vk1) - -4069.3170008260583) < 5e-10
-
+    
     vj = jk.get_j(mol, dm, hermi=1).get()
     assert abs(vj - ref[0]).max() < 1e-9
     assert abs(lib.fp(vj) - -2327.4715195591784) < 5e-10
-
+    
     mol.omega = 0.2
     vj, vk = jk.get_jk(mol, dm, hermi=1)
     vj2 = vj.get()
@@ -73,7 +72,7 @@ def test_jk_hermi1():
 
     assert abs(vj2+vj3 - vj1).max() < 1e-9
     assert abs(vk2+vk3 - vk1).max() < 1e-9
-
+    
 def test_jk_hermi0():
     mol = pyscf.M(
         atom = '''
@@ -99,11 +98,11 @@ def test_jk_hermi0():
     assert abs(vk1 - ref[1]).max() < 5e-10
     assert abs(lib.fp(vj1) - -53.489298042359046) < 5e-10
     assert abs(lib.fp(vk1) - -115.11792498085259) < 5e-10
-
+    
     vj = jk.get_j(mol, dm, hermi=0).get()
     assert abs(vj - ref[0]).max() < 1e-9
     assert abs(lib.fp(vj) - -53.489298042359046) < 5e-10
-
+    
     mol.omega = 0.2
     vj, vk = jk.get_jk(mol, dm, hermi=0)
     vj2 = vj.get()
@@ -126,3 +125,4 @@ def test_jk_hermi0():
 
     assert abs(vj2+vj3 - vj1).max() < 1e-9
     assert abs(vk2+vk3 - vk1).max() < 1e-9
+    

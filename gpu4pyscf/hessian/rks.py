@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-# Copyright 2014-2019 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -329,13 +328,13 @@ def _d1d2_dot_(vmat, mol, ao1, ao2, mask, ao_loc, dR1_on_bra=True):
                                                  shls_slice, ao_loc)
         #vmat += contract('yig,xjg->xyij', ao1, ao2)
 
-def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id=0):
+def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id=0, verbose=0):
     mol = hessobj.mol
     mf = hessobj.base
     ni = mf._numint
     nao = mol.nao
     opt = ni.gdftopt
-    
+
     _sorted_mol = opt._sorted_mol
     xctype = ni._xc_type(mf.xc)
     aoslices = mol.aoslice_by_atom()
@@ -346,16 +345,15 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
     grid_start = device_id * ngrids_per_device
     grid_end = (device_id + 1) * ngrids_per_device
-    
+
     with cupy.cuda.Device(device_id), _streams[device_id]:
-        log = logger.new_logger(mol, mol.verbose)
+        log = logger.new_logger(mol, verbose)
+        t1 = t0 = log.init_timer()
         mo_occ = cupy.asarray(mo_occ)
         mo_coeff = cupy.asarray(mo_coeff)
         dm0 = mf.make_rdm1(mo_coeff, mo_occ)
         dm0_sorted = opt.sort_orbitals(dm0, axis=[0,1])
         coeff = cupy.asarray(opt.coeff)
-        log = logger.new_logger(mol, mol.verbose)
-        t1 = t0 = log.init_timer()
         vmat_dm = cupy.zeros((_sorted_mol.natm,3,3,nao))
         ipip = cupy.zeros((3,3,nao,nao))
         if xctype == 'LDA':
@@ -389,7 +387,7 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                     vmat_dm[ia][:,:,mask] += contract('yjg,xjg->xyj', ao_mask[1:4], aow)
                 ao_dm0 = aow = None
                 t1 = log.timer_debug2('integration', *t1)
-            
+
             vmat_dm = opt.unsort_orbitals(vmat_dm, axis=[3])
             for ia in range(_sorted_mol.natm):
                 p0, p1 = aoslices[ia][2:]
@@ -528,7 +526,7 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             future = executor.submit(
                 _get_vxc_deriv2_task,
                 hessobj, grids, mo_coeff, mo_occ, max_memory,
-                device_id=device_id)
+                device_id=device_id, verbose=mol.verbose)
             futures.append(future)
     vmat_dm_dist = [future.result() for future in futures]
     vmat_dm = reduce_to_device(vmat_dm_dist, inplace=True)
@@ -540,7 +538,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     ni = mf._numint
     nao = mol.nao
     opt = ni.gdftopt
-    
+
     _sorted_mol = opt._sorted_mol
     xctype = ni._xc_type(mf.xc)
     aoslices = mol.aoslice_by_atom()
@@ -551,7 +549,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
     grid_start = device_id * ngrids_per_device
     grid_end = (device_id + 1) * ngrids_per_device
-    
+
     with cupy.cuda.Device(device_id), _streams[device_id]:
         mo_occ = cupy.asarray(mo_occ)
         mo_coeff = cupy.asarray(mo_coeff)
@@ -567,7 +565,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
         t1 = t0 = log.init_timer()
         if xctype == 'LDA':
             ao_deriv = 1
-            for ao, mask, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None, 
+            for ao, mask, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                      grid_range=(grid_start, grid_end)):
                 ao = contract('nip,ij->njp', ao, coeff[mask])
                 rho = numint.eval_rho2(_sorted_mol, ao[0], mo_coeff, mo_occ, mask, xctype)
@@ -645,7 +643,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                     mow = [numint._scale_ao(mo[:4], wv[i,:4]) for i in range(3)]
                     vmat[ia] += rks_grad._d1_dot_(aow, mo[0].T)
                     vmat[ia] += rks_grad._d1_dot_(mow, ao[0].T).transpose([0,2,1])
-                    
+
                     for j in range(1, 4):
                         aow = [numint._scale_ao(ao[j], wv[i,4]) for i in range(3)]
                         mow = [numint._scale_ao(mo[j], wv[i,4]) for i in range(3)]

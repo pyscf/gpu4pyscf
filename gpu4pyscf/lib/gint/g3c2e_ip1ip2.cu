@@ -1,17 +1,17 @@
-/* Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
+/*
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 // Unrolled version
@@ -165,12 +165,11 @@ static void GINTfill_int3c2e_ip1ip2_kernel000(GINTEnvVars envs, ERITensor eri, B
     double gzx = 0;
     double gzy = 0;
     double gzz = 0;
+    
     const double xi = bas_x[ish];
     const double yi = bas_y[ish];
     const double zi = bas_z[ish];
-    const double xk = bas_x[ksh];
-    const double yk = bas_y[ksh];
-    const double zk = bas_z[ksh];
+
     const int prim_ij0 = prim_ij;
     const int prim_ij1 = prim_ij + nprim_ij;
     const int prim_kl0 = prim_kl;
@@ -217,9 +216,9 @@ static void GINTfill_int3c2e_ip1ip2_kernel000(GINTEnvVars envs, ERITensor eri, B
             const double c00y = yij - yi - tmp2 * yijykl;
             const double c00z = zij - zi - tmp2 * zijzkl;
             const double tmp3 = tmp1 * aij;
-            const double c0px = xkl - xk + tmp3 * xijxkl;
-            const double c0py = ykl - yk + tmp3 * yijykl;
-            const double c0pz = zkl - zk + tmp3 * zijzkl;
+            const double c0px = tmp3 * xijxkl;
+            const double c0py = tmp3 * yijykl;
+            const double c0pz = tmp3 * zijzkl;
             const double g_0 = 1;
             const double g_1 = c00x;
             const double g_2 = c0px;
