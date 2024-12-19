@@ -1,20 +1,22 @@
-/* Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
+/*
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #include "gint.h"
+
+#include <stdbool.h>
 
 // void GINTinit_J_density_reorder(const double* D_matrix, double* D_pair_ordered, const int n_dm, const int n_ao, const int n_pair_type,
 //                                 const int* bas_pair2shls, const int* bas_pairs_locs, const int* density_offset, const int* ao_loc)
@@ -102,7 +104,7 @@ int hermite_xyz_to_t_index(const int x, const int y, const int z, const int l)
 
 void GINTinit_J_density_rys_preprocess(const double* D_matrix, double* D_pair_ordered, const int n_dm, const int n_ao, const int n_pair_type,
                                        const int* bas_pair2shls, const int* bas_pairs_locs, const int* l_ij, const int* density_offset, const int* ao_loc,
-                                       const double* bas_coords)
+                                       const double* bas_coords, const bool symmetric)
 {
     const int n_bas_pairs = bas_pairs_locs[n_pair_type];
     const int n_total_hermite_density = density_offset[n_pair_type];
@@ -139,7 +141,7 @@ void GINTinit_J_density_rys_preprocess(const double* D_matrix, double* D_pair_or
                             for (int i_y_j = lj - i_x_j; i_y_j >= 0; i_y_j--, i_density_j++) {
                                 const int i_z_j = lj - i_x_j - i_y_j;
 
-                                const double D_cartesian = (i0 == j0) ?
+                                const double D_cartesian = ((!symmetric) || i0 == j0) ?
                                                             D_matrix[(i0 + i_density_i) + (j0 + i_density_j) * n_ao + i_dm * n_ao * n_ao] :
                                                             D_matrix[(i0 + i_density_i) + (j0 + i_density_j) * n_ao + i_dm * n_ao * n_ao] + D_matrix[(j0 + i_density_j) + (i0 + i_density_i) * n_ao + i_dm * n_ao * n_ao];
 
