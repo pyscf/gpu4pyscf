@@ -261,6 +261,30 @@ class KnownValues(unittest.TestCase):
         assert isinstance(test_int1e_dot_q, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dot_q, test_int1e_dot_q, atol = charge_contraction_threshold)
 
+    # Multiple inputs
+
+    def test_int1e_grids_density_contracted_sph_asymmetric(self):
+        np.random.seed(12348)
+        n_dm = 4
+        dm = np.random.uniform(-2.0, 2.0, (n_dm, mol_sph.nao, mol_sph.nao))
+        ref_int1e_dot_D = np.zeros((n_dm, grid_points.shape[0]))
+        for i_dm in range(n_dm):
+            ref_int1e_dot_D[i_dm] = np.einsum('pij,ij->p', mol_sph.intor('int1e_grids', grids=grid_points), dm[i_dm])
+        test_int1e_dot_D = int1e_grids(mol_sph, grid_points, dm = dm)
+        assert isinstance(test_int1e_dot_D, cp.ndarray)
+        cp.testing.assert_allclose(ref_int1e_dot_D, test_int1e_dot_D, atol = density_contraction_threshold)
+
+    def test_int1e_grids_charge_contracted_sph(self):
+        np.random.seed(12348)
+        n_charges = 4
+        charges = np.random.uniform(-2.0, 2.0, (n_charges, grid_points.shape[0]))
+        ref_int1e_dot_q = np.zeros((n_charges, mol_sph.nao, mol_sph.nao))
+        for i_charge in range(n_charges):
+            ref_int1e_dot_q[i_charge] = np.einsum('pij,p->ij', mol_sph.intor('int1e_grids', grids=grid_points), charges[i_charge])
+        test_int1e_dot_q = int1e_grids(mol_sph, grid_points, charges = charges)
+        assert isinstance(test_int1e_dot_q, cp.ndarray)
+        cp.testing.assert_allclose(ref_int1e_dot_q, test_int1e_dot_q, atol = charge_contraction_threshold)
+
 if __name__ == "__main__":
     print("Full Tests for One Electron Coulomb Integrals")
     unittest.main()

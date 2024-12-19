@@ -104,6 +104,9 @@ def eval_chelpg_layer_gpu(mf, deltaR=0.3, Rhead=2.8, ifqchem=True, Rvdw=modified
     r_pX_potential = 1/r_pX
     potential_real = cupy.dot(cupy.array(mf.mol.atom_charges()), r_pX_potential)
 
+    if dm.ndim == 3: # Unrestricted
+        assert dm.shape[0] == 2
+        dm = dm[0] + dm[1]
     potential_real -= int1e_grids(mf.mol, gridcoords, dm=dm, direct_scf_tol=1e-14)
 
     w = cupy.array(w)

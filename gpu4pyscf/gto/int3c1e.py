@@ -366,12 +366,6 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
     dm = cp.asarray(dm)
-    if dm.ndim == 3:
-        if dm.shape[0] > 2:
-            print("Warning: more than two density matrices are found for int3c1e kernel. "
-                  "They will be summed up to one density matrix.")
-        dm = cp.einsum("ijk->jk", dm)
-
     assert dm.ndim == 2
     assert dm.shape[0] == dm.shape[1] and dm.shape[0] == mol.nao
 
@@ -488,8 +482,30 @@ def int1e_grids(mol, grids, charge_exponents=None, dm=None, charges=None, direct
     if dm is None and charges is None:
         return get_int3c1e(mol, grids, charge_exponents, intopt)
     elif dm is not None:
-        return get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt)
+        if dm.ndim == 2:
+            return get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt)
+        else:
+            assert dm.ndim == 3
+            n_dm = dm.shape[0]
+            ngrids = grids.shape[0]
+            if n_dm == 1:
+                return get_int3c1e_density_contracted(mol, grids, charge_exponents, dm[0], intopt).reshape(1, ngrids)
+            int3c_density_contracted = cp.empty((n_dm, ngrids))
+            for i_dm in range(n_dm):
+                int3c_density_contracted[i_dm] = get_int3c1e_density_contracted(mol, grids, charge_exponents, dm[i_dm], intopt)
+            return int3c_density_contracted
     elif charges is not None:
-        return get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
+        if charges.ndim == 1:
+            return get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
+        else:
+            assert charges.ndim == 2
+            n_charges = charges.shape[0]
+            nao = mol.nao
+            if n_charges == 1:
+                return get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges[0], intopt).reshape(1, nao, nao)
+            int3c_charge_contracted = cp.empty((n_charges, nao, nao))
+            for i_charge in range(n_charges):
+                int3c_charge_contracted[i_charge] = get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges[i_charge], intopt)
+            return int3c_charge_contracted
     else:
         raise ValueError(f"Logic error in {__file__} {__name__}")

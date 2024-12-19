@@ -393,24 +393,16 @@ class PCM(lib.StreamObject):
         '''
         return electrostatic potential on surface
         '''
-        nset = dms.shape[0]
         charge_exp  = self.surface['charge_exp']
         grid_coords = self.surface['grid_coords']
-        ngrids = grid_coords.shape[0]
-        v_grids_e = cupy.empty([nset, ngrids])
-        for i in range(nset):
-            v_grids_e[i] = int1e_grids(self.mol, grid_coords, dm = dms[i], charge_exponents = charge_exp**2, intopt = self.intopt)
+        v_grids_e = int1e_grids(self.mol, grid_coords, dm = dms, charge_exponents = charge_exp**2, intopt = self.intopt)
         return v_grids_e
 
     def _get_vmat(self, q):
         assert q.ndim == 2
-        nset = q.shape[0]
-        nao = self.mol.nao
         charge_exp  = self.surface['charge_exp']
         grid_coords = self.surface['grid_coords']
-        vmat = cupy.empty([nset, nao, nao])
-        for i in range(nset):
-            vmat[i] = -int1e_grids(self.mol, grid_coords, charges = q[i], charge_exponents = charge_exp**2, intopt = self.intopt)
+        vmat = -int1e_grids(self.mol, grid_coords, charges = q, charge_exponents = charge_exp**2, intopt = self.intopt)
         return vmat
 
     def nuc_grad_method(self, grad_method):

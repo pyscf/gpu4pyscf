@@ -212,12 +212,6 @@ def get_int3c1e_ip2_density_contracted(mol, grids, charge_exponents, dm, intopt)
         charge_exponents = cp.asarray(charge_exponents, order='C')
 
     dm = cp.asarray(dm)
-    if dm.ndim == 3:
-        if dm.shape[0] > 2:
-            print("Warning: more than two density matrices are found for int3c1e kernel. "
-                  "They will be summed up to one density matrix.")
-        dm = cp.einsum("ijk->jk", dm)
-
     assert dm.ndim == 2
     assert dm.shape[0] == dm.shape[1] and dm.shape[0] == mol.nao
 
