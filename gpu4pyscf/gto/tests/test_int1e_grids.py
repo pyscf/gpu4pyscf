@@ -263,7 +263,7 @@ class KnownValues(unittest.TestCase):
 
     # Multiple inputs
 
-    def test_int1e_grids_density_contracted_sph_asymmetric(self):
+    def test_int1e_grids_multiple_density_contracted(self):
         np.random.seed(12348)
         n_dm = 4
         dm = np.random.uniform(-2.0, 2.0, (n_dm, mol_sph.nao, mol_sph.nao))
@@ -274,7 +274,7 @@ class KnownValues(unittest.TestCase):
         assert isinstance(test_int1e_dot_D, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dot_D, test_int1e_dot_D, atol = density_contraction_threshold)
 
-    def test_int1e_grids_charge_contracted_sph(self):
+    def test_int1e_grids_multiple_charge_contracted(self):
         np.random.seed(12348)
         n_charges = 4
         charges = np.random.uniform(-2.0, 2.0, (n_charges, grid_points.shape[0]))

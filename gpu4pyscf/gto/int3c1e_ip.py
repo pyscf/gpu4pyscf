@@ -315,7 +315,7 @@ def get_int3c1e_ip2_charge_and_density_contracted(mol, grids, charge_exponents, 
     return int3c_ip2
 
 def int1e_grids_ip1(mol, grids, charge_exponents=None, dm=None, charges=None, direct_scf_tol=1e-13, intopt=None):
-    '''
+    r'''
     This function computes
     $$\left(\frac{\partial}{\partial \vec{A}} \mu \middle| \frac{1}{|\vec{r} - \vec{C}|} \middle| \nu\right)$$
     where $\mu(\vec{r})$ centers at $\vec{A}$ and $\nu(\vec{r})$ centers at $\vec{B}$.
@@ -325,7 +325,8 @@ def int1e_grids_ip1(mol, grids, charge_exponents=None, dm=None, charges=None, di
     where $q_C$ is the charge centered at $\vec{C}$.
 
     If charges is not None and dm is not None, the function computes the following contraction:
-    $$\sum_\nu^{n_{ao}} D_{\mu\nu} \sum_{C}^{n_{charge}} q_C \left(\frac{\partial}{\partial \vec{A}} \mu \middle| \frac{1}{|\vec{r} - \vec{C}|} \middle| \nu\right)$$
+    $$\sum_\nu^{n_{ao}} D_{\mu\nu} \sum_{C}^{n_{charge}} q_C
+        \left(\frac{\partial}{\partial \vec{A}} \mu \middle| \frac{1}{|\vec{r} - \vec{C}|} \middle| \nu\right)$$
     '''
     assert grids is not None
 
@@ -348,7 +349,7 @@ def int1e_grids_ip1(mol, grids, charge_exponents=None, dm=None, charges=None, di
             return get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, intopt)
 
 def int1e_grids_ip2(mol, grids, charge_exponents=None, dm=None, charges=None, direct_scf_tol=1e-13, intopt=None):
-    '''
+    r'''
     This function computes
     $$\left(\mu \middle| \frac{\partial}{\partial \vec{C}} \frac{1}{|\vec{r} - \vec{C}|} \middle| \nu\right)$$
     where $\mu(\vec{r})$ centers at $\vec{A}$ and $\nu(\vec{r})$ centers at $\vec{B}$.

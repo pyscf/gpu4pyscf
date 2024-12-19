@@ -99,7 +99,6 @@ def eval_chelpg_layer_gpu(mf, deltaR=0.3, Rhead=2.8, ifqchem=True, Rvdw=modified
     r_pX = np.delete(r_pX, idx, axis=1)
     gridcoords = np.delete(gridcoords, idx, axis=0)
 
-    ngrids = gridcoords.shape[0]
     r_pX = cupy.array(r_pX)
     r_pX_potential = 1/r_pX
     potential_real = cupy.dot(cupy.array(mf.mol.atom_charges()), r_pX_potential)

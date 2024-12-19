@@ -453,7 +453,7 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
     return int3c_density_contracted
 
 def int1e_grids(mol, grids, charge_exponents=None, dm=None, charges=None, direct_scf_tol=1e-13, intopt=None):
-    '''
+    r'''
     This function computes
     $$\left(\mu \middle| \frac{1}{|\vec{r} - \vec{C}|} \middle| \nu\right)$$
 
