@@ -147,7 +147,7 @@ static int GINTfill_int3c1e_density_contracted_tasks(double* output, const doubl
 extern "C" {
 int GINTfill_int3c1e(const cudaStream_t stream, const BasisProdCache* bpcache,
                      const double* grid_points, const double* charge_exponents, const int ngrids,
-                     double* integrals, const int nao,
+                     double* integrals,
                      const int* strides, const int* ao_offsets,
                      const int* bins_locs_ij, int nbins,
                      const int cp_ij_id, const double omega)
@@ -197,7 +197,7 @@ int GINTfill_int3c1e(const cudaStream_t stream, const BasisProdCache* bpcache,
 
 int GINTfill_int3c1e_charge_contracted(const cudaStream_t stream, const BasisProdCache* bpcache,
                                        const double* grid_points, const double* charge_exponents, const int ngrids,
-                                       double* integral_charge_contracted, const int nao,
+                                       double* integral_charge_contracted,
                                        const int* strides, const int* ao_offsets,
                                        const int* bins_locs_ij, int nbins,
                                        const int cp_ij_id, const double omega, const int n_charge_sum_per_thread)
