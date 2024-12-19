@@ -119,11 +119,7 @@ class Hessian(uks_hess.Hessian):
     '''Non-relativistic RKS hessian'''
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    __init__ = uks_hess.Hessian.__init__
     auxbasis_response = 1
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
-    hess_elec = uhf_hess.hess_elec
-    kernel = rhf_hess.kernel
-    hess = kernel
     get_jk_mo = df_uhf_hess._get_jk_mo

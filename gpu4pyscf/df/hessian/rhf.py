@@ -614,10 +614,7 @@ class Hessian(rhf_hess.Hessian):
 
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    #__init__ = rhf_hess.Hessian.__init__
     auxbasis_response = 1
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
-    #kernel = rhf_hess.kernel
-    #hess = kernel
     get_jk_mo = _get_jk_mo
