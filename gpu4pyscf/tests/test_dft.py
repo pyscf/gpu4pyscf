@@ -72,7 +72,7 @@ class KnownValues(unittest.TestCase):
 
         h = mf.Hessian().kernel()
         assert np.abs(cupy.linalg.norm(h) - 3.7684319231335377) < 1e-4
-
+    
     @pytest.mark.smoke
     def test_b3lyp_d3bj(self):
         print('-------- DFRKS with D3(BJ) -------')

@@ -16,7 +16,7 @@
 import unittest
 import numpy as np
 import pyscf
-from pyscf import lib
+from pyscf import lib, gto
 from gpu4pyscf.scf import jk
 from pyscf.scf.hf import get_jk
 
@@ -127,3 +127,25 @@ def test_jk_hermi0():
     assert abs(vj2+vj3 - vj1).max() < 1e-9
     assert abs(vk2+vk3 - vk1).max() < 1e-9
     
+def test_jk_qz():
+    basis = {
+        'H': gto.basis.parse('''
+H H
+      1.0240000              1.0000000
+                             ''')
+    }
+    mol = pyscf.M(
+        atom = '''
+        H  -0.757    0.   0.0
+        H   0.757    0.   0.0
+        ''',
+        basis=basis,
+        unit='B',)
+    nao = mol.nao
+    dm = np.random.rand(nao, nao)
+    vj_gpu, vk_gpu = jk.get_jk(mol, dm)
+
+    vj, vk = get_jk(mol, dm)
+
+    assert np.linalg.norm(vj_gpu.get() - vj) < 1e-9
+    assert np.linalg.norm(vk_gpu.get() - vk) < 1e-9 

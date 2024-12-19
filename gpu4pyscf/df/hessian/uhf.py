@@ -43,13 +43,14 @@ from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.lib.cupy_helper import (
     contract, tag_array, get_avail_mem, release_gpu_stack, pinv)
 from gpu4pyscf.df import int3c2e, df
+from gpu4pyscf.df.hessian import rhf as df_rhf_hess
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
 from gpu4pyscf.df.grad.rhf import _gen_metric_solver
-from gpu4pyscf.gto.mole import sort_atoms
+from gpu4pyscf.df.hessian import jk
 
 LINEAR_DEP_THR = df.LINEAR_DEP_THR
-BLKSIZE = 256
+BLKSIZE = 128
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
 GB = 1024*1024*1024
 
@@ -221,49 +222,16 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     t1 = log.timer_debug1('intermediate variables with int3c2e_ip1', *t1)
 
     cupy.get_default_memory_pool().free_all_blocks()
-    #  int3c_ipip1 contributions
-    fn = int3c2e.get_int3c2e_hjk
-    hja_ao_diag, hka_ao_diag = fn(intopt, 'ipip1', rhoj0_P, rhok0a_P__, dm0a_tag, omega=omega, with_k=with_k)
-    hjb_ao_diag, hkb_ao_diag = fn(intopt, 'ipip1', rhoj0_P, rhok0b_P__, dm0b_tag, omega=omega, with_k=with_k)
-    hj_ao_diag = 2.0 * (hja_ao_diag + hjb_ao_diag)
+    hja_ipip, hka_ipip = jk.get_int3c2e_hjk(intopt, rhoj0_P, rhok0a_P__, dm0a_tag,
+                                          with_k=with_k, omega=omega, 
+                                          auxbasis_response=hessobj.auxbasis_response)
+    hjb_ipip, hkb_ipip = jk.get_int3c2e_hjk(intopt, rhoj0_P, rhok0b_P__, dm0b_tag,
+                                          with_k=with_k, omega=omega, 
+                                          auxbasis_response=hessobj.auxbasis_response)
+    hj_ipip = hja_ipip + hjb_ipip
     if with_k:
-        hk_ao_diag = 2.0 * (hka_ao_diag + hkb_ao_diag)
-    t1 = log.timer_debug1('intermediate variables with int3c2e_ipip1', *t1)
-
-    #  int3c_ipvip1 contributions
-    # (11|0), (0|00) without response of RI basis
-    fn = int3c2e.get_int3c2e_hjk
-    hja, hka = fn(intopt, 'ipvip1', rhoj0_P, rhok0a_P__, dm0a_tag, omega=omega, with_k=with_k)
-    hjb, hkb = fn(intopt, 'ipvip1', rhoj0_P, rhok0b_P__, dm0b_tag, omega=omega, with_k=with_k)
-    hj_ao_ao += 2.0*(hja + hjb)
-    if with_k:
-        hk_ao_ao += (hka + hkb)
-    hja = hjb = hka = hkb = None
-    t1 = log.timer_debug1('intermediate variables with int3c2e_ipvip1', *t1)
-
-    #  int3c_ip1ip2 contributions
-    # (10|1), (0|0)(0|00)
-    if hessobj.auxbasis_response:
-        fn = int3c2e.get_int3c2e_hjk
-        hja, hka = fn(intopt, 'ip1ip2', rhoj0_P, rhok0a_P__, dm0a_tag, omega=omega, with_k=with_k)
-        hjb, hkb = fn(intopt, 'ip1ip2', rhoj0_P, rhok0b_P__, dm0b_tag, omega=omega, with_k=with_k)
-        hj_ao_aux += hja + hjb
-        if with_k:
-            hk_ao_aux += hka + hkb
-        hja = hjb = hka = hkb = None
-        t1 = log.timer_debug1('intermediate variables with int3c2e_ip1ip2', *t1)
-
-    #  int3c_ipip2 contributions
-    if hessobj.auxbasis_response > 1:
-        # (00|2), (0|0)(0|00)
-        fn = int3c2e.get_int3c2e_hjk
-        hja, hka = fn(intopt, 'ipip2', rhoj0_P, rhok0a_P__, dm0a_tag, omega=omega, with_k=with_k)
-        hjb, hkb = fn(intopt, 'ipip2', rhoj0_P, rhok0b_P__, dm0b_tag, omega=omega, with_k=with_k)
-        hj_aux_diag = hja + hjb
-        if with_k:
-            hk_aux_diag = (hka + hkb)
-        hja = hjb = hka = hkb = None
-        t1 = log.timer_debug1('intermediate variables with int3c2e_ipip2', *t1)
+        hk_ipip = 2.0*(hka_ipip + hkb_ipip)
+    t1 = log.timer_debug1('intermediate variables with int3c2e_ipip', *t1)
 
     # int2c contributions
     if hessobj.auxbasis_response > 1:
@@ -277,11 +245,11 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         rhoj2c_P = contract('xpq,q->xp', int2c_ipip1, rhoj0_P)
         # (00|0)(2|0)(0|00)
         # p,xp->px
-        hj_aux_diag -= (rhoj0_P*rhoj2c_P).T.reshape(-1,3,3)
+        hj_aux_diag = -(rhoj0_P*rhoj2c_P).T.reshape(-1,3,3)
         if with_k:
             rho2c_0 = contract('pij,qji->pq', rhok0a_P__, rhok0a_P__)
             rho2c_0+= contract('pij,qji->pq', rhok0b_P__, rhok0b_P__)
-            hk_aux_diag -= contract('pq,xpq->px', rho2c_0, int2c_ipip1).reshape(-1,3,3)
+            hk_aux_diag = -contract('pq,xpq->px', rho2c_0, int2c_ipip1).reshape(-1,3,3)
         int2c_ipip1 = None
 
         if omega and omega > 1e-10:
@@ -350,7 +318,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             rho2c_10= int2c_ip1_inv = None
     t1 = log.timer_debug1('contract int2c_*', *t1)
 
-    hj_ao_diag = intopt.unsort_orbitals(hj_ao_diag, axis=[0])
     hj_ao_ao = intopt.unsort_orbitals(hj_ao_ao, axis=[0,1])
     if hessobj.auxbasis_response:
         hj_ao_aux = intopt.unsort_orbitals(hj_ao_aux, axis=[0], aux_axis=[1])
@@ -358,7 +325,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         hj_aux_diag = intopt.unsort_orbitals(hj_aux_diag, aux_axis=[0])
         hj_aux_aux = intopt.unsort_orbitals(hj_aux_aux, aux_axis=[0,1])
     if with_k:
-        hk_ao_diag = intopt.unsort_orbitals(hk_ao_diag, axis=[0])
         hk_ao_ao = intopt.unsort_orbitals(hk_ao_ao, axis=[0,1])
         if hessobj.auxbasis_response:
             hk_ao_aux = intopt.unsort_orbitals(hk_ao_aux, axis=[0], aux_axis=[1])
@@ -389,14 +355,11 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     # -----------------------------------------
     hk_ao_ao *= 2.0
     e1 = cupy.zeros([len(atmlst),len(atmlst),3,3])
-    ej = cupy.zeros([len(atmlst),len(atmlst),3,3])
-    ek = cupy.zeros([len(atmlst),len(atmlst),3,3])
+    ej = hj_ipip
+    ek = hk_ipip
     for i0, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = aoslices[ia]
         e1[i0,i0] -= cupy.sum(h1aa[p0:p1], axis=0)
-        ej[i0,i0] += cupy.sum(hj_ao_diag[p0:p1,:,:], axis=0)
-        if with_k:
-            ek[i0,i0] += cupy.sum(hk_ao_diag[p0:p1,:,:], axis=0)
         for j0, ja in enumerate(atmlst[:i0+1]):
             q0, q1 = aoslices[ja][2:]
             ej[i0,j0] += cupy.sum(hj_ao_ao[p0:p1,q0:q1], axis=[0,1])
@@ -702,6 +665,8 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             vk1b = vk1b_int3c[ia] + _ao2mo(vk1b_ao, moccb, mo_coeff[1])
         yield ia, (h1a, h1b), (vj1a, vj1b), (vk1a, vk1b)
 
+_get_jk_mo = df_rhf_hess._get_jk_mo
+
 class Hessian(uhf_hess.Hessian):
     '''Non-relativistic restricted Hartree-Fock hessian'''
 
@@ -713,3 +678,4 @@ class Hessian(uhf_hess.Hessian):
     make_h1 = make_h1
     kernel = rhf_hess.kernel
     hess = kernel
+    get_jk_mo = _get_jk_mo

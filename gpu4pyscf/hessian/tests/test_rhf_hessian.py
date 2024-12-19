@@ -104,7 +104,7 @@ class KnownValues(unittest.TestCase):
         mo_coeff = np.random.rand(nao, nao)
         dm = mo_coeff.dot(mo_coeff.T) * 2
 
-        vj, vk = rhf_gpu._get_jk(mol, dm)
+        vj, vk = rhf_gpu._get_jk_ip1(mol, dm)
         assert abs(lib.fp(vj.get()) -  87674.69061160382) < 1e-7
         assert abs(lib.fp(vk.get()) - -9.317650662101629) < 1e-7
 

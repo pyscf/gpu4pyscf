@@ -258,6 +258,7 @@ H -0.646 -0.464 -0.804
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
+        print(numpy.linalg.norm(hess_cpu - hess_gpu))
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
 
 if __name__ == "__main__":

@@ -27,8 +27,10 @@ from gpu4pyscf.grad import rhf as rhf_grad
 # import pyscf.grad.rks to activate nuc_grad_method method
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
-from gpu4pyscf.lib.cupy_helper import contract, add_sparse, take_last2d, get_avail_mem
+from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem, 
+                                       transpose_sum, tag_array)
 from gpu4pyscf.lib import logger
+from gpu4pyscf.hessian import jk
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -133,8 +135,8 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     avail_mem -= 8 * (h1moa.size + h1mob.size)
     slice_size = int(avail_mem*0.5) // (8*3*nao*nao)
     for atoms_slice in lib.prange(0, natm, slice_size):
-        vja, vka = rhf_hess._get_jk(mol, dm0a, with_k=with_k, atoms_slice=atoms_slice, verbose=verbose)
-        vjb, vkb = rhf_hess._get_jk(mol, dm0b, with_k=with_k, atoms_slice=atoms_slice, verbose=verbose)
+        vja, vka = rhf_hess._get_jk_ip1(mol, dm0a, with_k=with_k, atoms_slice=atoms_slice, verbose=verbose)
+        vjb, vkb = rhf_hess._get_jk_ip1(mol, dm0b, with_k=with_k, atoms_slice=atoms_slice, verbose=verbose)
         vj = vja + vjb
         if with_k:
             #:veffa = vja + vjb - hyb * vka
@@ -151,8 +153,8 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
         vj = vja = vjb = vka = vkb = None
         if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
             with mol.with_range_coulomb(omega):
-                vka_lr = rhf_hess._get_jk(mol, dm0a, with_j=False, verbose=verbose)[1]
-                vkb_lr = rhf_hess._get_jk(mol, dm0b, with_j=False, verbose=verbose)[1]
+                vka_lr = rhf_hess._get_jk_ip1(mol, dm0a, with_j=False, verbose=verbose)[1]
+                vkb_lr = rhf_hess._get_jk_ip1(mol, dm0b, with_j=False, verbose=verbose)[1]
                 vka_lr *= (alpha-hyb)
                 vkb_lr *= (alpha-hyb)
                 veffa -= vka_lr
@@ -843,6 +845,55 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         vmatb[ia] -= vmat_tmp
     return vmata, vmatb
 
+def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
+    mol = hessobj.mol
+    mf = hessobj.base
+    grids = getattr(mf, 'cphf_grids', None)
+    if grids is not None:
+        logger.info(mf, 'Secondary grids defined for CPHF in Hessian')
+    else:
+        # If cphf_grids is not defined, e.g object defined from CPU
+        grids = getattr(mf, 'grids', None)
+        logger.info(mf, 'Primary grids is used for CPHF in Hessian')
+    
+    if grids and grids.coords is None:
+        grids.build(mol=mol, with_non0tab=False, sort_grids=True)
+
+    nao, nmoa = mo_coeff[0].shape
+    nao, nmob = mo_coeff[1].shape
+    mocca = mo_coeff[0][:,mo_occ[0]>0]
+    moccb = mo_coeff[1][:,mo_occ[1]>0]
+    nocca = mocca.shape[1]
+    noccb = moccb.shape[1]
+    
+    ni = mf._numint
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+    hybrid = ni.libxc.is_hybrid_xc(mf.xc)
+    assert not mf.do_nlc()
+    hermi = 1
+
+    rho0, vxc, fxc = ni.cache_xc_kernel(mol, grids, mf.xc,
+                                        mo_coeff, mo_occ, 1)
+    v1 = ni.nr_uks_fxc(mol, grids, mf.xc, None, dms, 0, hermi,
+                        rho0, vxc, fxc, max_memory=None)
+    nset = dms.shape[1]
+    v1vo = cupy.empty([nset, nmoa*nocca+nmob*noccb])
+    v1vo[:,:nmoa*nocca] = jk._ao2mo(v1[0], mocca, mo_coeff[0]).reshape(-1,nmoa*nocca)
+    v1vo[:,nmoa*nocca:] = jk._ao2mo(v1[1], moccb, mo_coeff[1]).reshape(-1,nmob*noccb)
+    if hybrid:
+        vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, (mocca, moccb), hermi=1)
+        vk *= hyb
+        if omega > 1e-10:
+            _, vk_lr = hessobj.get_jk_mo(mol, dms, mo_coeff, (mocca, moccb), 
+                                         hermi, with_j=False, omega=omega) 
+            vk_lr *= (alpha-hyb)
+            vk += vk_lr
+        v1vo += vj - vk
+    else:
+        v1vo += hessobj.get_jk_mo(mol, dms, mo_coeff, (mocca, moccb), 
+                                  hermi=1, with_k=False)[0]
+    return v1vo
+
 
 class Hessian(rhf_hess.HessianBase):
     '''Non-relativistic UKS hessian'''
@@ -857,6 +908,9 @@ class Hessian(rhf_hess.HessianBase):
     solve_mo1 = uhf_hess.Hessian.solve_mo1
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
+    gen_vind = uhf_hess.gen_vind
+    get_jk_mo = rhf_hess._get_jk_mo
+    get_veff_resp_mo = get_veff_resp_mo
 
 from gpu4pyscf import dft
 dft.uks.UKS.Hessian = lib.class_as_method(Hessian)

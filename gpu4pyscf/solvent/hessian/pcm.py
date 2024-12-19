@@ -27,6 +27,7 @@ from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_solver, grad_nuc
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
+from gpu4pyscf.hessian.jk import _ao2mo
 
 def hess_nuc(pcmobj):
     if not pcmobj._intermediates:
@@ -291,6 +292,30 @@ class WithSolventHess:
             return h1aoa, h1aob
         else:
             raise NotImplementedError('Base object is not supported')
+        
+    def get_veff_resp_mo(self, mol, dms, mo_coeff, mo_occ, hermi=1):
+        v1vo = super().get_veff_resp_mo(mol, dms, mo_coeff, mo_occ, hermi=hermi)
+        if not self.base.with_solvent.equilibrium_solvation:
+            return v1vo
+        v_solvent = self.base.with_solvent._B_dot_x(dms)
+        if isinstance(self.base, scf.uhf.UHF):
+            n_dm = dms.shape[1]
+            mocca = mo_coeff[0][:,mo_occ[0]>0]
+            moccb = mo_coeff[1][:,mo_occ[1]>0]
+            moa, mob = mo_coeff
+            nmoa = moa.shape[1]
+            nocca = mocca.shape[1]
+            v1vo_sol = v_solvent[0] + v_solvent[1]
+            v1vo[:,:nmoa*nocca] += _ao2mo(v1vo_sol, mocca, moa).reshape(n_dm,-1)
+            v1vo[:,nmoa*nocca:] += _ao2mo(v1vo_sol, moccb, mob).reshape(n_dm,-1)
+        elif isinstance(self.base, scf.hf.RHF):
+            n_dm = dms.shape[0]
+            mocc = mo_coeff[:,mo_occ>0]
+            v1vo += _ao2mo(v_solvent, mocc, mo_coeff).reshape(n_dm,-1)
+        else:
+            raise NotImplementedError('Base object is not supported')
+        return v1vo
+    
     def _finalize(self):
         # disable _finalize. It is called in grad_method.kernel method
         # where self.de was not yet initialized.

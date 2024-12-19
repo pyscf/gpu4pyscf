@@ -133,3 +133,4 @@ class Hessian(uks_hess.Hessian):
     hess_elec = uhf_hess.hess_elec
     kernel = rhf_hess.kernel
     hess = kernel
+    get_jk_mo = df_uhf_hess._get_jk_mo
