@@ -185,7 +185,7 @@ class KnownValues(unittest.TestCase):
         mo_coeff = cupy.random.rand(nao, nao)
         mocc = mo_coeff[:,:3]
         dm = mocc.dot(mocc.T) * 2
-        vj_mo, vk_mo = jk.get_jk(mol1, dm, mo_coeff, mocc)
+        vj_mo, vk_mo = jk.get_jk(mol1, dm, mo_coeff, mocc, hermi=1)
         
         mf = scf.RHF(mol1)
         vj, vk = mf.get_jk(mol1, dm, hermi=1)
