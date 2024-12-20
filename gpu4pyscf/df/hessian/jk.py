@@ -345,7 +345,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
             hj_ipip2[k0:k1] += contract('xp,p->px', tmp, rhoj[k0:k1])
             if with_k:
                 hk_ipip2[k0:k1] += contract('xpji,pij->px', int3c_blk, rhok_tmp)
-        
+
         auxslices = intopt.auxmol.aoslice_by_atom()
         aoslices = intopt.mol.aoslice_by_atom()
         ao2atom = int3c2e.get_ao2atom(intopt, aoslices)

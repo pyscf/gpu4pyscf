@@ -226,17 +226,15 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
         vk = reduce_to_device(vk_dist, inplace=True)
         #:vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
         vk = sandwich_dot(vk, vhfopt.coeff)
-        vk = vk.reshape(dm.shape)
-
+        
     if with_j:
         vj = reduce_to_device(vj_dist, inplace=True)
         vj = transpose_sum(vj)
         #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vj, vhfopt.coeff)
         vj = sandwich_dot(vj, vhfopt.coeff)
-        vj = vj.reshape(dm.shape)
 
     h_shls = vhfopt.h_shls
-    assert len(h_shls) == 0
+
     if h_shls:
         cput1 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
         log.debug3('Integrals for %s functions on CPU', l_symb[LMAX+1])
@@ -276,6 +274,11 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
                 vk[i] += coeff.T.dot(cp.asarray(v)).dot(coeff)
         log.timer_debug1('get_jk pass 2 for h functions on cpu', *cput1)
     
+    if with_j:
+        vj = vj.reshape(dm.shape)
+    if with_k:
+        vk = vk.reshape(dm.shape)
+
     log.timer('vj and vk', *cput0)
     return vj, vk
 

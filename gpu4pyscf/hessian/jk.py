@@ -157,7 +157,7 @@ def get_jk(mol, dm, mo_coeff, mocc, hermi=0, vhfopt=None,
     '''
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
-
+    assert hermi == 1
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
 
@@ -233,7 +233,6 @@ def get_jk(mol, dm, mo_coeff, mocc, hermi=0, vhfopt=None,
         vj = reduce_to_device(vj_dist, inplace=True)
 
     h_shls = vhfopt.h_shls
-    assert len(h_shls) == 0
     if h_shls:
         cput1 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
         log.debug3('Integrals for %s functions on CPU', l_symb[LMAX+1])
@@ -246,12 +245,8 @@ def get_jk(mol, dm, mo_coeff, mocc, hermi=0, vhfopt=None,
             else:
                 scripts.append('jk->s1il')
         shls_excludes = [0, h_shls[0]] * 4
-        if hermi == 1:
-            dms = dms.get()
-        else:
-            dms = dms[:n_dm//2].get()
         vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
-                                 dms, 1, mol._atm, mol._bas, mol._env,
+                                 dms.get(), 1, mol._atm, mol._bas, mol._env,
                                  shls_excludes=shls_excludes)
         if with_j and with_k:
             vj1 = vs_h[0]
@@ -260,8 +255,14 @@ def get_jk(mol, dm, mo_coeff, mocc, hermi=0, vhfopt=None,
             vj1 = vs_h[0]
         else:
             vk1 = vs_h[0]
-        coeff = vhfopt.coeff
+
         idx, idy = np.tril_indices(nao, -1)
+        if hermi == 1:
+            if with_j:
+                vj1[:,idy,idx] = vj1[:,idx,idy]
+            if with_k:
+                vk1[:,idy,idx] = vk1[:,idx,idy]
+
         if isinstance(mocc, tuple):
             mocca, moccb = mocc
             moa, mob = mo_coeff
@@ -273,17 +274,14 @@ def get_jk(mol, dm, mo_coeff, mocc, hermi=0, vhfopt=None,
                 vj[:,:nmoa*nocca] += _ao2mo(vjab, mocca, moa).reshape(n_dm_2,-1)
                 vj[:,nmoa*nocca:] += _ao2mo(vjab, moccb, mob).reshape(n_dm_2,-1)
             if with_k:
-                vka, vkb = vk[:n_dm_2], vk[n_dm_2:]
+                vka, vkb = vk1[:n_dm_2], vk1[n_dm_2:]
                 vk[:,:nmoa*nocca] += _ao2mo(vka, mocca, moa).reshape(n_dm_2,-1)
                 vk[:,nmoa*nocca:] += _ao2mo(vkb, moccb, mob).reshape(n_dm_2,-1)
         else:
             if with_j:
-                vj1[:,idy,idx] = vj1[:,idx,idy]
-                vj += _ao2mo(cp.asarray(vj1), mocc, mo_coeff)
+                vj += _ao2mo(cp.asarray(vj1), mocc, mo_coeff).reshape(n_dm,-1)
             if with_k:
-                if hermi:
-                    vk1[:,idy,idx] = vk1[:,idx,idy]
-                vk += _ao2mo(cp.asarray(vk1), mocc, mo_coeff)
+                vk += _ao2mo(cp.asarray(vk1), mocc, mo_coeff).reshape(n_dm,-1)
         log.timer_debug1('get_jk pass 2 for h functions on cpu', *cput1)
     log.timer('vj and vk', *cput0)
     return vj, vk
