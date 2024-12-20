@@ -255,7 +255,7 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
                 ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(nao), ctypes.c_int(bvk_ncells), ctypes.c_int(nGv))
             if err != 0:
-                raise RuntimeError(f'PBC_ft_aopair_fill_triu kernel failed')
+                raise RuntimeError('PBC_ft_aopair_fill_triu kernel failed')
 
         log.debug1('transform basis')
         #:out = einsum('pLqG,pi,qj->LGij', out, coeff, coeff)
@@ -327,7 +327,6 @@ def init_constant(cell):
         raise RuntimeError('CUDA kernel initialization')
 
 def ft_ao_scheme(cell, li, lj, nGv, shm_size=SHM_SIZE):
-    order = li + lj
     nfi = (li + 1) * (li + 2) // 2
     nfj = (lj + 1) * (lj + 2) // 2
     gout_size = nfi * nfj
