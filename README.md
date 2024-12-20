@@ -41,7 +41,7 @@ The package also provides multiple dockerfiles in ```dockerfiles```. One can use
 Features
 --------
 - Density fitting scheme and direct SCF scheme;
-- SCF, analytical Gradient, and analytical Hessian calculations for Hartree-Fock and DFT;
+- SCF, analytical gradient, and analytical Hessian calculations for Hartree-Fock and DFT;
 - LDA, GGA, mGGA, hybrid, and range-separated functionals via [libXC](https://gitlab.com/libxc/libxc/-/tree/master/);
 - Spin-conserved and spin-flip TDA and TDDFT for excitated states
 - Geometry optimization and transition state search via [geomeTRIC](https://geometric.readthedocs.io/en/latest/);
@@ -49,12 +49,13 @@ Features
 - Nonlocal functional correction (vv10) for SCF and gradient;
 - ECP is supported and calculated on CPU;
 - PCM models, SMD model, their analytical gradients, and semi-analytical Hessian matrix;
-- Unrestricted Hartree-Fock and Unrestricted DFT, gradient, and Hessian;
+- Unrestricted Hartree-Fock and unrestricted DFT, gradient, and Hessian;
 - MP2/DF-MP2 and CCSD (experimental);
 - Polarizability, IR, and NMR shielding (experimental);
 - QM/MM with PBC;
 - CHELPG, ESP, and RESP atomic charge;
-- Multi-GPU for density fitting (experimental)
+- Multi-GPU for both direct SCF and density fitting (experimental)
+- SCF and DFT with periodic boundary condition (experimental)
 
 Limitations
 --------
