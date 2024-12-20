@@ -121,6 +121,339 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
+void ft_ao_unrolled_01(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
+{
+    int sp_block_id = blockIdx.x;
+    int Gv_block_id = blockIdx.y;
+    int nGv_per_block = blockDim.x;
+    int nsp_per_block = blockDim.y;
+    int Gv_id = threadIdx.x;
+    int sp_id = threadIdx.y;
+    int npairs_ij = bounds.npairs_ij;
+    int pair_ij_idx = sp_block_id * nsp_per_block + sp_id;
+    if (pair_ij_idx >= npairs_ij) {
+        return;
+    }
+    int nbas = envs.nbas;
+    int ish = bounds.ish_in_pair[pair_ij_idx];
+    int jsh = bounds.jsh_in_pair[pair_ij_idx];
+    int *sp_img_offsets = envs.img_offsets;
+    int bas_ij = ish * nbas + jsh;
+    int img0 = sp_img_offsets[bas_ij];
+    int img1 = sp_img_offsets[bas_ij+1];
+    if (img0 >= img1) {
+        return;
+    }
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    int ijprim = iprim * jprim;
+    int *atm = envs.atm;
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    int ia = bas[ish*BAS_SLOTS+ATOM_OF];
+    int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
+    double *ri = env + atm[ia*ATM_SLOTS+PTR_COORD];
+    double *rj = env + atm[ja*ATM_SLOTS+PTR_COORD];
+    double *img_coords = envs.img_coords;
+    int *img_idx = envs.img_idx;
+    int nGv = bounds.ngrids;
+    double *Gv = bounds.grids + Gv_block_id * nGv_per_block;
+    double kx = Gv[Gv_id];
+    double ky = Gv[Gv_id + nGv];
+    double kz = Gv[Gv_id + nGv * 2];
+    double kk = kx * kx + ky * ky + kz * kz;
+    double gout0R = 0;
+    double gout0I = 0;
+    double gout1R = 0;
+    double gout1I = 0;
+    double gout2R = 0;
+    double gout2I = 0;
+    double xyR, xyI;
+    for (int ijp = 0; ijp < ijprim; ++ijp) {
+        int ip = ijp / jprim;
+        int jp = ijp % jprim;
+        double ai = expi[ip];
+        double aj = expj[jp];
+        double aij = ai + aj;
+        double aj_aij = aj / aij;
+        double a2 = .5 / aij;
+        double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
+        for (int img = img0; img < img1; img++) {
+            int img_id = img_idx[img];
+            double Lx = img_coords[img_id*3+0];
+            double Ly = img_coords[img_id*3+1];
+            double Lz = img_coords[img_id*3+2];
+            double xjxi = rj[0] + Lx - ri[0];
+            double yjyi = rj[1] + Ly - ri[1];
+            double zjzi = rj[2] + Lz - ri[2];
+            double xij = xjxi * aj_aij + ri[0];
+            double yij = yjyi * aj_aij + ri[1];
+            double zij = zjzi * aj_aij + ri[2];
+            double kR = kx * xij + ky * yij + kz * zij;
+            double vrr_0zR;
+            double vrr_0zI;
+            sincos(-kR, &vrr_0zI, &vrr_0zR);
+            double theta_ij = ai * aj_aij;
+            double rr = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double theta_rr = theta_ij*rr + .5*a2*kk;
+            double Kab = exp(-theta_rr);
+            vrr_0zR *= Kab;
+            vrr_0zI *= Kab;
+            double xpaR = xjxi * aj_aij;
+            double vrr_1xR = xpaR * fac;
+            double hrr_01xR = vrr_1xR - xjxi * fac;
+            double xpaI = -a2 * Gv[Gv_id+nGv*0];
+            double vrr_1xI = xpaI * fac;
+            double hrr_01xI = vrr_1xI - xjxi * 0;
+            xyR = hrr_01xR * 1;
+            xyI = hrr_01xI * 1;
+            gout0R += xyR * vrr_0zR - xyI * vrr_0zI;
+            gout0I += xyR * vrr_0zI + xyI * vrr_0zR;
+            double ypaR = yjyi * aj_aij;
+            double vrr_1yR = ypaR * 1;
+            double hrr_01yR = vrr_1yR - yjyi * 1;
+            double ypaI = -a2 * Gv[Gv_id+nGv*1];
+            double vrr_1yI = ypaI * 1;
+            double hrr_01yI = vrr_1yI - yjyi * 0;
+            xyR = fac * hrr_01yR;
+            xyI = fac * hrr_01yI;
+            gout1R += xyR * vrr_0zR - xyI * vrr_0zI;
+            gout1I += xyR * vrr_0zI + xyI * vrr_0zR;
+            double zpaR = zjzi * aj_aij;
+            double zpaI = -a2 * Gv[Gv_id+nGv*2];
+            double vrr_1zR = zpaR * vrr_0zR - zpaI * vrr_0zI;
+            double hrr_01zR = vrr_1zR - zjzi * vrr_0zR;
+            double vrr_1zI = zpaR * vrr_0zI + zpaI * vrr_0zR;
+            double hrr_01zI = vrr_1zI - zjzi * vrr_0zI;
+            xyR = fac * 1;
+            gout2R += xyR * hrr_01zR;
+            gout2I += xyR * hrr_01zI;
+        }
+    }
+    if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
+        int *ao_loc = envs.ao_loc;
+        int nbasp = envs.cell0_nbas;
+        int ncells = nbas / nbasp;
+        int nao = ao_loc[nbasp];
+        int cell_id = jsh / nbasp;
+        int cell0_jsh = jsh % nbasp;
+        int i0 = ao_loc[ish];
+        int j0 = ao_loc[cell0_jsh];
+        int addr;
+        size_t ncells_nGv = ncells * nGv;
+        double *aft_tensor = out + 
+                ((i0*nao+j0) * ncells_nGv + cell_id * nGv
+                 + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
+        addr = (0*nao+0)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout0R;
+        aft_tensor[addr*2+1] = gout0I;
+        addr = (0*nao+1)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout1R;
+        aft_tensor[addr*2+1] = gout1I;
+        addr = (0*nao+2)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout2R;
+        aft_tensor[addr*2+1] = gout2I;
+    }
+}
+
+#if CUDA_VERSION >= 12040
+__global__ __maxnreg__(128) static
+#else
+__global__ static
+#endif
+void ft_ao_unrolled_02(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
+{
+    int sp_block_id = blockIdx.x;
+    int Gv_block_id = blockIdx.y;
+    int nGv_per_block = blockDim.x;
+    int nsp_per_block = blockDim.y;
+    int Gv_id = threadIdx.x;
+    int sp_id = threadIdx.y;
+    int npairs_ij = bounds.npairs_ij;
+    int pair_ij_idx = sp_block_id * nsp_per_block + sp_id;
+    if (pair_ij_idx >= npairs_ij) {
+        return;
+    }
+    int nbas = envs.nbas;
+    int ish = bounds.ish_in_pair[pair_ij_idx];
+    int jsh = bounds.jsh_in_pair[pair_ij_idx];
+    int *sp_img_offsets = envs.img_offsets;
+    int bas_ij = ish * nbas + jsh;
+    int img0 = sp_img_offsets[bas_ij];
+    int img1 = sp_img_offsets[bas_ij+1];
+    if (img0 >= img1) {
+        return;
+    }
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    int ijprim = iprim * jprim;
+    int *atm = envs.atm;
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    int ia = bas[ish*BAS_SLOTS+ATOM_OF];
+    int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
+    double *ri = env + atm[ia*ATM_SLOTS+PTR_COORD];
+    double *rj = env + atm[ja*ATM_SLOTS+PTR_COORD];
+    double *img_coords = envs.img_coords;
+    int *img_idx = envs.img_idx;
+    int nGv = bounds.ngrids;
+    double *Gv = bounds.grids + Gv_block_id * nGv_per_block;
+    double kx = Gv[Gv_id];
+    double ky = Gv[Gv_id + nGv];
+    double kz = Gv[Gv_id + nGv * 2];
+    double kk = kx * kx + ky * ky + kz * kz;
+    double gout0R = 0;
+    double gout0I = 0;
+    double gout1R = 0;
+    double gout1I = 0;
+    double gout2R = 0;
+    double gout2I = 0;
+    double gout3R = 0;
+    double gout3I = 0;
+    double gout4R = 0;
+    double gout4I = 0;
+    double gout5R = 0;
+    double gout5I = 0;
+    double xyR, xyI;
+    for (int ijp = 0; ijp < ijprim; ++ijp) {
+        int ip = ijp / jprim;
+        int jp = ijp % jprim;
+        double ai = expi[ip];
+        double aj = expj[jp];
+        double aij = ai + aj;
+        double aj_aij = aj / aij;
+        double a2 = .5 / aij;
+        double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
+        for (int img = img0; img < img1; img++) {
+            int img_id = img_idx[img];
+            double Lx = img_coords[img_id*3+0];
+            double Ly = img_coords[img_id*3+1];
+            double Lz = img_coords[img_id*3+2];
+            double xjxi = rj[0] + Lx - ri[0];
+            double yjyi = rj[1] + Ly - ri[1];
+            double zjzi = rj[2] + Lz - ri[2];
+            double xij = xjxi * aj_aij + ri[0];
+            double yij = yjyi * aj_aij + ri[1];
+            double zij = zjzi * aj_aij + ri[2];
+            double kR = kx * xij + ky * yij + kz * zij;
+            double vrr_0zR;
+            double vrr_0zI;
+            sincos(-kR, &vrr_0zI, &vrr_0zR);
+            double theta_ij = ai * aj_aij;
+            double rr = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double theta_rr = theta_ij*rr + .5*a2*kk;
+            double Kab = exp(-theta_rr);
+            vrr_0zR *= Kab;
+            vrr_0zI *= Kab;
+            double xpaR = xjxi * aj_aij;
+            double vrr_1xR = xpaR * fac;
+            double xpaI = -a2 * Gv[Gv_id+nGv*0];
+            double vrr_1xI = xpaI * fac;
+            double vrr_2xR = 1*a2 * fac + xpaR * vrr_1xR - xpaI * vrr_1xI;
+            double hrr_11xR = vrr_2xR - xjxi * vrr_1xR;
+            double hrr_01xR = vrr_1xR - xjxi * fac;
+            double hrr_02xR = hrr_11xR - xjxi * hrr_01xR;
+            double vrr_2xI = 1*a2 * 0 + xpaR * vrr_1xI + xpaI * vrr_1xR;
+            double hrr_11xI = vrr_2xI - xjxi * vrr_1xI;
+            double hrr_01xI = vrr_1xI - xjxi * 0;
+            double hrr_02xI = hrr_11xI - xjxi * hrr_01xI;
+            xyR = hrr_02xR * 1;
+            xyI = hrr_02xI * 1;
+            gout0R += xyR * vrr_0zR - xyI * vrr_0zI;
+            gout0I += xyR * vrr_0zI + xyI * vrr_0zR;
+            double ypaR = yjyi * aj_aij;
+            double vrr_1yR = ypaR * 1;
+            double hrr_01yR = vrr_1yR - yjyi * 1;
+            double ypaI = -a2 * Gv[Gv_id+nGv*1];
+            double vrr_1yI = ypaI * 1;
+            double hrr_01yI = vrr_1yI - yjyi * 0;
+            xyR = hrr_01xR * hrr_01yR - hrr_01xI * hrr_01yI;
+            xyI = hrr_01xR * hrr_01yI + hrr_01xI * hrr_01yR;
+            gout1R += xyR * vrr_0zR - xyI * vrr_0zI;
+            gout1I += xyR * vrr_0zI + xyI * vrr_0zR;
+            double zpaR = zjzi * aj_aij;
+            double zpaI = -a2 * Gv[Gv_id+nGv*2];
+            double vrr_1zR = zpaR * vrr_0zR - zpaI * vrr_0zI;
+            double hrr_01zR = vrr_1zR - zjzi * vrr_0zR;
+            double vrr_1zI = zpaR * vrr_0zI + zpaI * vrr_0zR;
+            double hrr_01zI = vrr_1zI - zjzi * vrr_0zI;
+            xyR = hrr_01xR * 1;
+            xyI = hrr_01xI * 1;
+            gout2R += xyR * hrr_01zR - xyI * hrr_01zI;
+            gout2I += xyR * hrr_01zI + xyI * hrr_01zR;
+            double vrr_2yR = 1*a2 * 1 + ypaR * vrr_1yR - ypaI * vrr_1yI;
+            double hrr_11yR = vrr_2yR - yjyi * vrr_1yR;
+            double hrr_02yR = hrr_11yR - yjyi * hrr_01yR;
+            double vrr_2yI = 1*a2 * 0 + ypaR * vrr_1yI + ypaI * vrr_1yR;
+            double hrr_11yI = vrr_2yI - yjyi * vrr_1yI;
+            double hrr_02yI = hrr_11yI - yjyi * hrr_01yI;
+            xyR = fac * hrr_02yR;
+            xyI = fac * hrr_02yI;
+            gout3R += xyR * vrr_0zR - xyI * vrr_0zI;
+            gout3I += xyR * vrr_0zI + xyI * vrr_0zR;
+            xyR = fac * hrr_01yR;
+            xyI = fac * hrr_01yI;
+            gout4R += xyR * hrr_01zR - xyI * hrr_01zI;
+            gout4I += xyR * hrr_01zI + xyI * hrr_01zR;
+            double vrr_2zR = 1*a2 * vrr_0zR + zpaR * vrr_1zR - zpaI * vrr_1zI;
+            double hrr_11zR = vrr_2zR - zjzi * vrr_1zR;
+            double hrr_02zR = hrr_11zR - zjzi * hrr_01zR;
+            double vrr_2zI = 1*a2 * vrr_0zI + zpaR * vrr_1zI + zpaI * vrr_1zR;
+            double hrr_11zI = vrr_2zI - zjzi * vrr_1zI;
+            double hrr_02zI = hrr_11zI - zjzi * hrr_01zI;
+            xyR = fac * 1;
+            gout5R += xyR * hrr_02zR;
+            gout5I += xyR * hrr_02zI;
+        }
+    }
+    if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
+        int *ao_loc = envs.ao_loc;
+        int nbasp = envs.cell0_nbas;
+        int ncells = nbas / nbasp;
+        int nao = ao_loc[nbasp];
+        int cell_id = jsh / nbasp;
+        int cell0_jsh = jsh % nbasp;
+        int i0 = ao_loc[ish];
+        int j0 = ao_loc[cell0_jsh];
+        int addr;
+        size_t ncells_nGv = ncells * nGv;
+        double *aft_tensor = out + 
+                ((i0*nao+j0) * ncells_nGv + cell_id * nGv
+                 + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
+        addr = (0*nao+0)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout0R;
+        aft_tensor[addr*2+1] = gout0I;
+        addr = (0*nao+1)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout1R;
+        aft_tensor[addr*2+1] = gout1I;
+        addr = (0*nao+2)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout2R;
+        aft_tensor[addr*2+1] = gout2I;
+        addr = (0*nao+3)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout3R;
+        aft_tensor[addr*2+1] = gout3I;
+        addr = (0*nao+4)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout4R;
+        aft_tensor[addr*2+1] = gout4I;
+        addr = (0*nao+5)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout5R;
+        aft_tensor[addr*2+1] = gout5I;
+    }
+}
+
+#if CUDA_VERSION >= 12040
+__global__ __maxnreg__(128) static
+#else
+__global__ static
+#endif
 void ft_ao_unrolled_10(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
 {
     int sp_block_id = blockIdx.x;
@@ -461,6 +794,317 @@ void ft_ao_unrolled_11(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
         addr = (2*nao+2)*ncells_nGv;
         aft_tensor[addr*2  ] = gout8R;
         aft_tensor[addr*2+1] = gout8I;
+    }
+}
+
+__global__ static
+void ft_ao_unrolled_12(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
+{
+    int sp_block_id = blockIdx.x;
+    int Gv_block_id = blockIdx.y;
+    int nGv_per_block = blockDim.x;
+    int nsp_per_block = blockDim.y;
+    int Gv_id = threadIdx.x;
+    int sp_id = threadIdx.y;
+    int npairs_ij = bounds.npairs_ij;
+    int pair_ij_idx = sp_block_id * nsp_per_block + sp_id;
+    if (pair_ij_idx >= npairs_ij) {
+        return;
+    }
+    int nbas = envs.nbas;
+    int ish = bounds.ish_in_pair[pair_ij_idx];
+    int jsh = bounds.jsh_in_pair[pair_ij_idx];
+    int *sp_img_offsets = envs.img_offsets;
+    int bas_ij = ish * nbas + jsh;
+    int img0 = sp_img_offsets[bas_ij];
+    int img1 = sp_img_offsets[bas_ij+1];
+    if (img0 >= img1) {
+        return;
+    }
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    int ijprim = iprim * jprim;
+    int *atm = envs.atm;
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    int ia = bas[ish*BAS_SLOTS+ATOM_OF];
+    int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
+    double *ri = env + atm[ia*ATM_SLOTS+PTR_COORD];
+    double *rj = env + atm[ja*ATM_SLOTS+PTR_COORD];
+    double *img_coords = envs.img_coords;
+    int *img_idx = envs.img_idx;
+    int nGv = bounds.ngrids;
+    double *Gv = bounds.grids + Gv_block_id * nGv_per_block;
+    double kx = Gv[Gv_id];
+    double ky = Gv[Gv_id + nGv];
+    double kz = Gv[Gv_id + nGv * 2];
+    double kk = kx * kx + ky * ky + kz * kz;
+    double gout0R = 0;
+    double gout0I = 0;
+    double gout1R = 0;
+    double gout1I = 0;
+    double gout2R = 0;
+    double gout2I = 0;
+    double gout3R = 0;
+    double gout3I = 0;
+    double gout4R = 0;
+    double gout4I = 0;
+    double gout5R = 0;
+    double gout5I = 0;
+    double gout6R = 0;
+    double gout6I = 0;
+    double gout7R = 0;
+    double gout7I = 0;
+    double gout8R = 0;
+    double gout8I = 0;
+    double gout9R = 0;
+    double gout9I = 0;
+    double gout10R = 0;
+    double gout10I = 0;
+    double gout11R = 0;
+    double gout11I = 0;
+    double gout12R = 0;
+    double gout12I = 0;
+    double gout13R = 0;
+    double gout13I = 0;
+    double gout14R = 0;
+    double gout14I = 0;
+    double gout15R = 0;
+    double gout15I = 0;
+    double gout16R = 0;
+    double gout16I = 0;
+    double gout17R = 0;
+    double gout17I = 0;
+    double xyR, xyI;
+    for (int ijp = 0; ijp < ijprim; ++ijp) {
+        int ip = ijp / jprim;
+        int jp = ijp % jprim;
+        double ai = expi[ip];
+        double aj = expj[jp];
+        double aij = ai + aj;
+        double aj_aij = aj / aij;
+        double a2 = .5 / aij;
+        double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
+        for (int img = img0; img < img1; img++) {
+            int img_id = img_idx[img];
+            double Lx = img_coords[img_id*3+0];
+            double Ly = img_coords[img_id*3+1];
+            double Lz = img_coords[img_id*3+2];
+            double xjxi = rj[0] + Lx - ri[0];
+            double yjyi = rj[1] + Ly - ri[1];
+            double zjzi = rj[2] + Lz - ri[2];
+            double xij = xjxi * aj_aij + ri[0];
+            double yij = yjyi * aj_aij + ri[1];
+            double zij = zjzi * aj_aij + ri[2];
+            double kR = kx * xij + ky * yij + kz * zij;
+            double vrr_0zR;
+            double vrr_0zI;
+            sincos(-kR, &vrr_0zI, &vrr_0zR);
+            double theta_ij = ai * aj_aij;
+            double rr = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double theta_rr = theta_ij*rr + .5*a2*kk;
+            double Kab = exp(-theta_rr);
+            vrr_0zR *= Kab;
+            vrr_0zI *= Kab;
+            double xpaR = xjxi * aj_aij;
+            double vrr_1xR = xpaR * fac;
+            double xpaI = -a2 * Gv[Gv_id+nGv*0];
+            double vrr_1xI = xpaI * fac;
+            double vrr_2xR = 1*a2 * fac + xpaR * vrr_1xR - xpaI * vrr_1xI;
+            double vrr_2xI = 1*a2 * 0 + xpaR * vrr_1xI + xpaI * vrr_1xR;
+            double vrr_3xR = 2*a2 * vrr_1xR + xpaR * vrr_2xR - xpaI * vrr_2xI;
+            double hrr_21xR = vrr_3xR - xjxi * vrr_2xR;
+            double hrr_11xR = vrr_2xR - xjxi * vrr_1xR;
+            double hrr_12xR = hrr_21xR - xjxi * hrr_11xR;
+            double vrr_3xI = 2*a2 * vrr_1xI + xpaR * vrr_2xI + xpaI * vrr_2xR;
+            double hrr_21xI = vrr_3xI - xjxi * vrr_2xI;
+            double hrr_11xI = vrr_2xI - xjxi * vrr_1xI;
+            double hrr_12xI = hrr_21xI - xjxi * hrr_11xI;
+            xyR = hrr_12xR * 1;
+            xyI = hrr_12xI * 1;
+            gout0R += xyR * vrr_0zR - xyI * vrr_0zI;
+            gout0I += xyR * vrr_0zI + xyI * vrr_0zR;
+            double hrr_01xR = vrr_1xR - xjxi * fac;
+            double hrr_02xR = hrr_11xR - xjxi * hrr_01xR;
+            double hrr_01xI = vrr_1xI - xjxi * 0;
+            double hrr_02xI = hrr_11xI - xjxi * hrr_01xI;
+            double ypaR = yjyi * aj_aij;
+            double vrr_1yR = ypaR * 1;
+            double ypaI = -a2 * Gv[Gv_id+nGv*1];
+            double vrr_1yI = ypaI * 1;
+            xyR = hrr_02xR * vrr_1yR - hrr_02xI * vrr_1yI;
+            xyI = hrr_02xR * vrr_1yI + hrr_02xI * vrr_1yR;
+            gout1R += xyR * vrr_0zR - xyI * vrr_0zI;
+            gout1I += xyR * vrr_0zI + xyI * vrr_0zR;
+            double zpaR = zjzi * aj_aij;
+            double zpaI = -a2 * Gv[Gv_id+nGv*2];
+            double vrr_1zR = zpaR * vrr_0zR - zpaI * vrr_0zI;
+            double vrr_1zI = zpaR * vrr_0zI + zpaI * vrr_0zR;
+            xyR = hrr_02xR * 1;
+            xyI = hrr_02xI * 1;
+            gout2R += xyR * vrr_1zR - xyI * vrr_1zI;
+            gout2I += xyR * vrr_1zI + xyI * vrr_1zR;
+            double hrr_01yR = vrr_1yR - yjyi * 1;
+            double hrr_01yI = vrr_1yI - yjyi * 0;
+            xyR = hrr_11xR * hrr_01yR - hrr_11xI * hrr_01yI;
+            xyI = hrr_11xR * hrr_01yI + hrr_11xI * hrr_01yR;
+            gout3R += xyR * vrr_0zR - xyI * vrr_0zI;
+            gout3I += xyR * vrr_0zI + xyI * vrr_0zR;
+            double vrr_2yR = 1*a2 * 1 + ypaR * vrr_1yR - ypaI * vrr_1yI;
+            double hrr_11yR = vrr_2yR - yjyi * vrr_1yR;
+            double vrr_2yI = 1*a2 * 0 + ypaR * vrr_1yI + ypaI * vrr_1yR;
+            double hrr_11yI = vrr_2yI - yjyi * vrr_1yI;
+            xyR = hrr_01xR * hrr_11yR - hrr_01xI * hrr_11yI;
+            xyI = hrr_01xR * hrr_11yI + hrr_01xI * hrr_11yR;
+            gout4R += xyR * vrr_0zR - xyI * vrr_0zI;
+            gout4I += xyR * vrr_0zI + xyI * vrr_0zR;
+            xyR = hrr_01xR * hrr_01yR - hrr_01xI * hrr_01yI;
+            xyI = hrr_01xR * hrr_01yI + hrr_01xI * hrr_01yR;
+            gout5R += xyR * vrr_1zR - xyI * vrr_1zI;
+            gout5I += xyR * vrr_1zI + xyI * vrr_1zR;
+            double hrr_01zR = vrr_1zR - zjzi * vrr_0zR;
+            double hrr_01zI = vrr_1zI - zjzi * vrr_0zI;
+            xyR = hrr_11xR * 1;
+            xyI = hrr_11xI * 1;
+            gout6R += xyR * hrr_01zR - xyI * hrr_01zI;
+            gout6I += xyR * hrr_01zI + xyI * hrr_01zR;
+            xyR = hrr_01xR * vrr_1yR - hrr_01xI * vrr_1yI;
+            xyI = hrr_01xR * vrr_1yI + hrr_01xI * vrr_1yR;
+            gout7R += xyR * hrr_01zR - xyI * hrr_01zI;
+            gout7I += xyR * hrr_01zI + xyI * hrr_01zR;
+            double vrr_2zR = 1*a2 * vrr_0zR + zpaR * vrr_1zR - zpaI * vrr_1zI;
+            double hrr_11zR = vrr_2zR - zjzi * vrr_1zR;
+            double vrr_2zI = 1*a2 * vrr_0zI + zpaR * vrr_1zI + zpaI * vrr_1zR;
+            double hrr_11zI = vrr_2zI - zjzi * vrr_1zI;
+            xyR = hrr_01xR * 1;
+            xyI = hrr_01xI * 1;
+            gout8R += xyR * hrr_11zR - xyI * hrr_11zI;
+            gout8I += xyR * hrr_11zI + xyI * hrr_11zR;
+            double hrr_02yR = hrr_11yR - yjyi * hrr_01yR;
+            double hrr_02yI = hrr_11yI - yjyi * hrr_01yI;
+            xyR = vrr_1xR * hrr_02yR - vrr_1xI * hrr_02yI;
+            xyI = vrr_1xR * hrr_02yI + vrr_1xI * hrr_02yR;
+            gout9R += xyR * vrr_0zR - xyI * vrr_0zI;
+            gout9I += xyR * vrr_0zI + xyI * vrr_0zR;
+            double vrr_3yR = 2*a2 * vrr_1yR + ypaR * vrr_2yR - ypaI * vrr_2yI;
+            double hrr_21yR = vrr_3yR - yjyi * vrr_2yR;
+            double hrr_12yR = hrr_21yR - yjyi * hrr_11yR;
+            double vrr_3yI = 2*a2 * vrr_1yI + ypaR * vrr_2yI + ypaI * vrr_2yR;
+            double hrr_21yI = vrr_3yI - yjyi * vrr_2yI;
+            double hrr_12yI = hrr_21yI - yjyi * hrr_11yI;
+            xyR = fac * hrr_12yR;
+            xyI = fac * hrr_12yI;
+            gout10R += xyR * vrr_0zR - xyI * vrr_0zI;
+            gout10I += xyR * vrr_0zI + xyI * vrr_0zR;
+            xyR = fac * hrr_02yR;
+            xyI = fac * hrr_02yI;
+            gout11R += xyR * vrr_1zR - xyI * vrr_1zI;
+            gout11I += xyR * vrr_1zI + xyI * vrr_1zR;
+            xyR = vrr_1xR * hrr_01yR - vrr_1xI * hrr_01yI;
+            xyI = vrr_1xR * hrr_01yI + vrr_1xI * hrr_01yR;
+            gout12R += xyR * hrr_01zR - xyI * hrr_01zI;
+            gout12I += xyR * hrr_01zI + xyI * hrr_01zR;
+            xyR = fac * hrr_11yR;
+            xyI = fac * hrr_11yI;
+            gout13R += xyR * hrr_01zR - xyI * hrr_01zI;
+            gout13I += xyR * hrr_01zI + xyI * hrr_01zR;
+            xyR = fac * hrr_01yR;
+            xyI = fac * hrr_01yI;
+            gout14R += xyR * hrr_11zR - xyI * hrr_11zI;
+            gout14I += xyR * hrr_11zI + xyI * hrr_11zR;
+            double hrr_02zR = hrr_11zR - zjzi * hrr_01zR;
+            double hrr_02zI = hrr_11zI - zjzi * hrr_01zI;
+            xyR = vrr_1xR * 1;
+            xyI = vrr_1xI * 1;
+            gout15R += xyR * hrr_02zR - xyI * hrr_02zI;
+            gout15I += xyR * hrr_02zI + xyI * hrr_02zR;
+            xyR = fac * vrr_1yR;
+            xyI = fac * vrr_1yI;
+            gout16R += xyR * hrr_02zR - xyI * hrr_02zI;
+            gout16I += xyR * hrr_02zI + xyI * hrr_02zR;
+            double vrr_3zR = 2*a2 * vrr_1zR + zpaR * vrr_2zR - zpaI * vrr_2zI;
+            double hrr_21zR = vrr_3zR - zjzi * vrr_2zR;
+            double hrr_12zR = hrr_21zR - zjzi * hrr_11zR;
+            double vrr_3zI = 2*a2 * vrr_1zI + zpaR * vrr_2zI + zpaI * vrr_2zR;
+            double hrr_21zI = vrr_3zI - zjzi * vrr_2zI;
+            double hrr_12zI = hrr_21zI - zjzi * hrr_11zI;
+            xyR = fac * 1;
+            gout17R += xyR * hrr_12zR;
+            gout17I += xyR * hrr_12zI;
+        }
+    }
+    if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
+        int *ao_loc = envs.ao_loc;
+        int nbasp = envs.cell0_nbas;
+        int ncells = nbas / nbasp;
+        int nao = ao_loc[nbasp];
+        int cell_id = jsh / nbasp;
+        int cell0_jsh = jsh % nbasp;
+        int i0 = ao_loc[ish];
+        int j0 = ao_loc[cell0_jsh];
+        int addr;
+        size_t ncells_nGv = ncells * nGv;
+        double *aft_tensor = out + 
+                ((i0*nao+j0) * ncells_nGv + cell_id * nGv
+                 + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
+        addr = (0*nao+0)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout0R;
+        aft_tensor[addr*2+1] = gout0I;
+        addr = (0*nao+1)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout3R;
+        aft_tensor[addr*2+1] = gout3I;
+        addr = (0*nao+2)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout6R;
+        aft_tensor[addr*2+1] = gout6I;
+        addr = (0*nao+3)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout9R;
+        aft_tensor[addr*2+1] = gout9I;
+        addr = (0*nao+4)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout12R;
+        aft_tensor[addr*2+1] = gout12I;
+        addr = (0*nao+5)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout15R;
+        aft_tensor[addr*2+1] = gout15I;
+        addr = (1*nao+0)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout1R;
+        aft_tensor[addr*2+1] = gout1I;
+        addr = (1*nao+1)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout4R;
+        aft_tensor[addr*2+1] = gout4I;
+        addr = (1*nao+2)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout7R;
+        aft_tensor[addr*2+1] = gout7I;
+        addr = (1*nao+3)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout10R;
+        aft_tensor[addr*2+1] = gout10I;
+        addr = (1*nao+4)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout13R;
+        aft_tensor[addr*2+1] = gout13I;
+        addr = (1*nao+5)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout16R;
+        aft_tensor[addr*2+1] = gout16I;
+        addr = (2*nao+0)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout2R;
+        aft_tensor[addr*2+1] = gout2I;
+        addr = (2*nao+1)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout5R;
+        aft_tensor[addr*2+1] = gout5I;
+        addr = (2*nao+2)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout8R;
+        aft_tensor[addr*2+1] = gout8I;
+        addr = (2*nao+3)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout11R;
+        aft_tensor[addr*2+1] = gout11I;
+        addr = (2*nao+4)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout14R;
+        aft_tensor[addr*2+1] = gout14I;
+        addr = (2*nao+5)*ncells_nGv;
+        aft_tensor[addr*2  ] = gout17R;
+        aft_tensor[addr*2+1] = gout17I;
     }
 }
 
@@ -1434,6 +2078,8 @@ int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds, int 
 #if CUDA_VERSION >= 12040
     switch (li*5 + lj) {
     case 0: nsp_per_block *= 4; break;
+    case 1: nsp_per_block *= 2; break;
+    case 2: nsp_per_block *= 2; break;
     case 5: nsp_per_block *= 2; break;
     case 6: nsp_per_block *= 2; break;
     case 10: nsp_per_block *= 2; break;
@@ -1447,8 +2093,11 @@ int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds, int 
     dim3 blocks(sp_blocks, Gv_batches);
     switch (li*5 + lj) {
     case 0: ft_ao_unrolled_00<<<blocks, threads>>>(out, *envs, *bounds); break;
+    case 1: ft_ao_unrolled_01<<<blocks, threads>>>(out, *envs, *bounds); break;
+    case 2: ft_ao_unrolled_02<<<blocks, threads>>>(out, *envs, *bounds); break;
     case 5: ft_ao_unrolled_10<<<blocks, threads>>>(out, *envs, *bounds); break;
     case 6: ft_ao_unrolled_11<<<blocks, threads>>>(out, *envs, *bounds); break;
+    case 7: ft_ao_unrolled_12<<<blocks, threads>>>(out, *envs, *bounds); break;
     case 10: ft_ao_unrolled_20<<<blocks, threads>>>(out, *envs, *bounds); break;
     case 11: ft_ao_unrolled_21<<<blocks, threads>>>(out, *envs, *bounds); break;
     case 12: ft_ao_unrolled_22<<<blocks, threads>>>(out, *envs, *bounds); break;

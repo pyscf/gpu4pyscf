@@ -18,6 +18,7 @@ Analytical Fourier transform for orbital-products
 
 import ctypes
 import math
+import itertools
 import numpy as np
 import cupy as cp
 import scipy.linalg
@@ -27,6 +28,7 @@ from pyscf.scf import _vhf
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.gto.cell import _extract_pgto_params
 from pyscf.pbc.tools import k2gamma
+from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import load_library, contract, get_avail_mem
@@ -148,12 +150,7 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
     img_offsets = cp.append(0, cp.cumsum(img_counts.ravel())).astype(np.int32)
     # The image Ids for each pair of (bas_i_in_cell0, bas_j_in_bvkcell)
     img_idx = cp.nonzero(ovlp_mask.reshape(-1, nimgs))[1].astype(np.int32)
-
     bvk_ovlp_mask = ovlp_mask.any(axis=3)
-    # symmetry between ish and jsh can be utilized. The triu part is excluded
-    # from computation.
-    ix, iy = cp.triu_indices(nbas, 1)
-    bvk_ovlp_mask[ix,:,iy] = False
 
     _atm = cp.array(bvkcell._atm)
     _bas = cp.array(bvkcell._bas)
@@ -183,67 +180,82 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
     cp.cuda.Stream.null.synchronize()
     log.timer_debug1('initialize ft_kern', *cput0)
 
-    def _ft_sub(GvT, nGv, kptjs):
+    def _ft_sub(Gv, q, kptjs):
         t1 = log.init_timer()
         timing_collection = {}
         kern_counts = 0
+        nGv = len(Gv)
+        # Padding zeros, allowing idle threads to access these data
+        GvT = cp.append((Gv.T + q[:,None]).ravel(), cp.zeros(THREADS))
         out = cp.zeros((nao, nao, bvk_ncells, nGv), dtype=np.complex128)
 
-        for i in range(n_groups):
-            for j in range(i+1):
-                li = uniq_l[i]
-                lj = uniq_l[j]
-                ll_pattern = f'{l_symb[i]}{l_symb[j]}'
-                ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-                jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-                mask = bvk_ovlp_mask[ish0:ish1,:,jsh0:jsh1]
-                sub_img_counts = img_counts[ish0:ish1,:,jsh0:jsh1]
-                # Sort according to the number of images. In the CUDA kernel,
-                # shell-pairs that have closed number of images are processed on
-                # the same SM processor, ensuring the best parallel execution.
-                idx = cp.argsort(sub_img_counts[mask])[::-1]
-                i_in_pair, bvk_id, j_in_pair = cp.nonzero(mask)
-                i_in_pair = (i_in_pair + ish0).astype(np.int32)[idx]
-                j_in_pair = (j_in_pair + jsh0 + bvk_id*nbas).astype(np.int32)[idx]
+        permutation_ao_symmetry = is_zero(q)
+        if permutation_ao_symmetry:
+            # symmetry between ish and jsh can be utilized. The triu part is excluded
+            # from computation.
+            ix, iy = cp.triu_indices(nbas, 1)
+            _bvk_ovlp_mask = bvk_ovlp_mask.copy()
+            _bvk_ovlp_mask[ix,:,iy] = False
+            ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
+        else:
+            _bvk_ovlp_mask = bvk_ovlp_mask
+            ij_tasks = itertools.product(range(n_groups), range(n_groups))
 
-                scheme = ft_ao_scheme(cell, li, lj, nGv)
-                log.debug2('ft_ao_scheme for %s: %s', ll_pattern, scheme)
-                err = kern(
-                    ctypes.cast(out.data.ptr, ctypes.c_void_p),
-                    ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
-                    (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
-                    ctypes.c_int(i_in_pair.size), ctypes.c_int(nGv),
-                    ctypes.cast(i_in_pair.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(j_in_pair.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-                    cell._atm.ctypes, ctypes.c_int(cell.natm),
-                    cell._bas.ctypes, ctypes.c_int(cell.nbas), cell._env.ctypes)
-                if err != 0:
-                    raise RuntimeError(f'PBC_build_ft_ao kernel for {ll_pattern} failed')
-                if log.verbose >= logger.DEBUG1:
-                    t1, t1p = log.timer_debug1(f'processing {ll_pattern}', *t1), t1
-                    if ll_pattern not in timing_collection:
-                        timing_collection[ll_pattern] = 0
-                    timing_collection[ll_pattern] += t1[1] - t1p[1]
-                    kern_counts += 1
+        for i, j in ij_tasks:
+            li = uniq_l[i]
+            lj = uniq_l[j]
+            ll_pattern = f'{l_symb[i]}{l_symb[j]}'
+            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+            mask = _bvk_ovlp_mask[ish0:ish1,:,jsh0:jsh1]
+            sub_img_counts = img_counts[ish0:ish1,:,jsh0:jsh1]
+            # Sort according to the number of images. In the CUDA kernel,
+            # shell-pairs that have closed number of images are processed on
+            # the same SM processor, ensuring the best parallel execution.
+            idx = cp.argsort(sub_img_counts[mask])[::-1]
+            i_in_pair, bvk_id, j_in_pair = cp.nonzero(mask)
+            i_in_pair = (i_in_pair + ish0).astype(np.int32)[idx]
+            j_in_pair = (j_in_pair + jsh0 + bvk_id*nbas).astype(np.int32)[idx]
+
+            scheme = ft_ao_scheme(cell, li, lj, nGv)
+            log.debug2('ft_ao_scheme for %s: %s', ll_pattern, scheme)
+            err = kern(
+                ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
+                (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                ctypes.c_int(i_in_pair.size), ctypes.c_int(nGv),
+                ctypes.cast(i_in_pair.data.ptr, ctypes.c_void_p),
+                ctypes.cast(j_in_pair.data.ptr, ctypes.c_void_p),
+                ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+                cell._atm.ctypes, ctypes.c_int(cell.natm),
+                cell._bas.ctypes, ctypes.c_int(cell.nbas), cell._env.ctypes)
+            if err != 0:
+                raise RuntimeError(f'PBC_build_ft_ao kernel for {ll_pattern} failed')
+            if log.verbose >= logger.DEBUG1:
+                t1, t1p = log.timer_debug1(f'processing {ll_pattern}', *t1), t1
+                if ll_pattern not in timing_collection:
+                    timing_collection[ll_pattern] = 0
+                timing_collection[ll_pattern] += t1[1] - t1p[1]
+                kern_counts += 1
 
         if log.verbose >= logger.DEBUG1:
             log.debug1('kernel launches %d', kern_counts)
             for ll_pattern, t in timing_collection.items():
                 log.debug1('%s wall time %.2f', ll_pattern, t)
 
-        log.debug1('symmetrize output')
-        # For i<j, the real orbital product in BvK cell <i|j+L> is identical to <j|i-L>
-        # conj_imgs stores the image indices of the corresponding +L and -L
-        #ix, iy = cp.tril_indices(nao, -1)
-        #for k, ck in enumerate(conj_mapping):
-        #    out[iy,ix,ck] = out[ix,iy,k]
-        err = libpbc.PBC_ft_aopair_fill_triu(
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(nao), ctypes.c_int(bvk_ncells), ctypes.c_int(nGv))
-        if err != 0:
-            raise RuntimeError(f'PBC_ft_aopair_fill_triu kernel failed')
+        if permutation_ao_symmetry:
+            log.debug1('symmetrize output')
+            # For i<j, the real orbital product in BvK cell <i|j+L> is identical to <j|i-L>
+            # conj_imgs stores the image indices of the corresponding +L and -L
+            #ix, iy = cp.tril_indices(nao, -1)
+            #for k, ck in enumerate(conj_mapping):
+            #    out[iy,ix,ck] = out[ix,iy,k]
+            err = libpbc.PBC_ft_aopair_fill_triu(
+                ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(nao), ctypes.c_int(bvk_ncells), ctypes.c_int(nGv))
+            if err != 0:
+                raise RuntimeError(f'PBC_ft_aopair_fill_triu kernel failed')
 
         log.debug1('transform basis')
         #:out = einsum('pLqG,pi,qj->LGij', out, coeff, coeff)
@@ -271,9 +283,7 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
         out_size = nao**2 * bvk_ncells*nGv * 16
         avail_mem = get_avail_mem()
         if 2*out_size < avail_mem * .8:
-            # Padding zeros, allowing idle threads to access these data
-            GvT = cp.append((Gv.T + q[:,None]).ravel(), cp.zeros(THREADS))
-            return _ft_sub(GvT, nGv, kptjs)
+            return _ft_sub(Gv, q, kptjs)
         elif out_size < avail_mem * .8:
             if kptjs is None:
                 nkpts = 1
@@ -286,13 +296,12 @@ def gen_ft_kernel(cell, bvk_kmesh=None, verbose=None):
             if Gv_block >= 4:
                 logger.debug1(cell, 'Processing ft_kernel in sub-blocks, Gv_block = %d', Gv_block)
                 for p0, p1 in lib.prange(0, nGv, Gv_block):
-                    GvT = cp.append((Gv[p0:p1].T + q[:,None]).ravel(), cp.zeros(THREADS))
-                    out[:,p0:p1] = _ft_sub(GvT, p1-p0, kptjs)
+                    out[:,p0:p1] = _ft_sub(Gv[p0:p1], q, kptjs)
                 return out
+        print(ovlp_mask.shape, nao, nao_orig, bvk_ncells, nGv)
         raise RuntimeError('Not enough GPU memory. '
                            f'Available: {avail_mem*1e-9:.2f} GB. '
                            f'Required: {out_size*1.2e-9:.2f} GB')
-
     return ft_kernel
 
 class AFTIntEnvVars(ctypes.Structure):

@@ -4,8 +4,8 @@ import itertools
 import numpy as np
 from pyscf.lib import logger
 
-# This modified version of kpts_to_kmesh will be available in PySCF-2.8
-def kpts_to_kmesh(cell, kpts, precision=None, max_images=30000):
+# This version of kpts_to_kmesh will be available in PySCF-2.8
+def kpts_to_kmesh(cell, kpts, precision=None, max_images=10000):
     '''Find the minimal k-points mesh to include all input kpts'''
     scaled_kpts = cell.get_scaled_kpts(kpts)
     logger.debug3(cell, '    scaled_kpts kpts %s', scaled_kpts)

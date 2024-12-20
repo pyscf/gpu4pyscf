@@ -45,6 +45,12 @@ class KnownValues(unittest.TestCase):
         ref = ft_ao.ft_aopair(cell, Gv, kpti_kptj=(kpti,kptj))
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
+        np.random.seed(1)
+        kpti = kptj = np.random.random(3)
+        dat = ft_aopair(cell, Gv, kpti_kptj=(kpti,kptj)).get()
+        ref = ft_ao.ft_aopair(cell, Gv, kpti_kptj=(kpti,kptj))
+        self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
+
     def test_ft_aopair_kpts(self):
         kpts = cell.make_kpts([3,4,3])
         Gv = cell.get_Gv([7,3,3])
@@ -57,13 +63,20 @@ class KnownValues(unittest.TestCase):
         ref = ft_ao.ft_aopair_kpts(cell, Gv, kptjs=kpts)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
-    @unittest.skip('permutation symmetry for random kpts')
-    def test_ft_aoao_with_kpt1(self):
+    def test_ft_aopair_kpt_no_aosym(self):
         np.random.seed(1)
         kpti, kptj = kpti_kptj = np.random.random((2,3))
-        Gv = cell.get_Gv([11]*3)
+        Gv = cell.get_Gv([3]*3)
         dat = ft_aopair(cell, Gv, kpti_kptj=kpti_kptj).get()
         ref = ft_ao.ft_aopair(cell, Gv, kpti_kptj=kpti_kptj)
+        self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
+
+    def test_ft_aopair_kpts_nosym(self):
+        np.random.seed(2)
+        kpts = np.random.random((4,3))
+        Gv = cell.get_Gv([3]*3)
+        dat = ft_aopair_kpts(cell, Gv, kptjs=kpts).get()
+        ref = ft_ao.ft_aopair_kpts(cell, Gv, kptjs=kpts)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
 if __name__ == '__main__':
