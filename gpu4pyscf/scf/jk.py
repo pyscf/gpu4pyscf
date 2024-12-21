@@ -60,9 +60,8 @@ THREADS = 256
 # TODO: test different size for L2 cache efficiency
 NAO_IN_GROUP = 1500
 
-def _jk_task(mol, dms, vhfopt, task_list, 
+def _jk_task(mol, dms, vhfopt, task_list, hermi=0,
              device_id=0, with_j=True, with_k=True, verbose=0):
-    n_dm = dms.shape[0]
     nao, _ = vhfopt.coeff.shape
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
@@ -77,6 +76,10 @@ def _jk_task(mol, dms, vhfopt, task_list,
         cput0 = log.init_timer()
         dms = cp.asarray(dms)
 
+        if hermi == 0:
+            # Contract the tril and triu parts separately
+            dms = cp.vstack([dms, dms.transpose(0,2,1)])
+        n_dm = dms.shape[0]
         tile_q_ptr = ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p)
         q_ptr = ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p)
         s_ptr = lib.c_null_ptr()
@@ -139,6 +142,18 @@ def _jk_task(mol, dms, vhfopt, task_list,
                         t1, t1p = log.timer_debug1(msg, *t1), t1
                         timing_counter[llll] += t1[1] - t1p[1]
                         kern_counts += 1
+        if with_j:
+            if hermi == 1:
+                vj *= 2.
+            else:
+                vj, vjT = vj[:n_dm//2], vj[n_dm//2:]
+                vj += vjT.transpose(0,2,1)
+        if with_k:
+            if hermi == 1:
+                vk = transpose_sum(vk)
+            else:
+                vk, vkT = vk[:n_dm//2], vk[n_dm//2:]
+                vk += vkT.transpose(0,2,1)
     return vj, vk, kern_counts, timing_counter
 
 def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None):
@@ -158,9 +173,7 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = sandwich_dot(dms, vhfopt.coeff.T)
     dms = cp.asarray(dms, order='C')
-    if hermi == 0:
-        # Contract the tril and triu parts separately
-        dms = cp.vstack([dms, dms.transpose(0,2,1)])
+
     n_dm = dms.shape[0]
 
     assert with_j or with_k
@@ -184,7 +197,7 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
         for device_id in range(_num_devices):
             future = executor.submit(
                 _jk_task,
-                mol, dms, vhfopt, task_list[device_id],
+                mol, dms, vhfopt, task_list[device_id], hermi=hermi,
                 with_j=with_j, with_k=with_k, verbose=verbose, 
                 device_id=device_id)
             futures.append(future)
@@ -211,28 +224,17 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     vj = vk = None
     if with_k:
         vk = reduce_to_device(vk_dist, inplace=True)
-        if hermi == 1:
-            vk = transpose_sum(vk)
-        else:
-            vk, vkT = vk[:n_dm//2], vk[n_dm//2:]
-            vk += vkT.transpose(0,2,1)
         #:vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
         vk = sandwich_dot(vk, vhfopt.coeff)
-        vk = vk.reshape(dm.shape)
-
+        
     if with_j:
         vj = reduce_to_device(vj_dist, inplace=True)
-        if hermi == 1:
-            vj *= 2.
-        else:
-            vj, vjT = vj[:n_dm//2], vj[n_dm//2:]
-            vj += vjT.transpose(0,2,1)
         vj = transpose_sum(vj)
         #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vj, vhfopt.coeff)
         vj = sandwich_dot(vj, vhfopt.coeff)
-        vj = vj.reshape(dm.shape)
 
     h_shls = vhfopt.h_shls
+
     if h_shls:
         cput1 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
         log.debug3('Integrals for %s functions on CPU', l_symb[LMAX+1])
@@ -272,6 +274,11 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
                 vk[i] += coeff.T.dot(cp.asarray(v)).dot(coeff)
         log.timer_debug1('get_jk pass 2 for h functions on cpu', *cput1)
     
+    if with_j:
+        vj = vj.reshape(dm.shape)
+    if with_k:
+        vk = vk.reshape(dm.shape)
+
     log.timer('vj and vk', *cput0)
     return vj, vk
 
