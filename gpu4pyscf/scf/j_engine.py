@@ -55,7 +55,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
     if omega is None:
         omega = mol.omega
 
-    mol = vhfopt.mol
+    mol = vhfopt.sorted_mol
     nbas = mol.nbas
     nao, nao_orig = vhfopt.coeff.shape
     dm = cp.asarray(dm, order='C')
@@ -190,19 +190,9 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
 
 class _VHFOpt(jk._VHFOpt):
     def __init__(self, mol, cutoff=1e-13):
-        self.mol, self.coeff = mol.decontract_basis(to_cart=True, aggregate=True)
-        self.direct_scf_tol = cutoff
-        self.uniq_l_ctr = None
-        self.l_ctr_offsets = None
+        super().__init__(mol, cutoff)
         self.tile = 1
 
-        # Hold cache on GPU devices
-        self._rys_envs = {}
-        self._mol_gpu = {}
-        self._q_cond = {}
-        self._tile_q_cond = {}
-        self._s_estimator = {}
-        
 def _md_j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ls = l_ctr_pattern[:,0]
     li, lj, lk, ll = ls

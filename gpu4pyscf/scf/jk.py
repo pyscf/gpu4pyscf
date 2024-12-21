@@ -149,7 +149,7 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
 
-    mol = vhfopt.mol
+    mol = vhfopt.sorted_mol
     nao, nao_orig = vhfopt.coeff.shape
 
     dm = cp.asarray(dm, order='C')
@@ -282,7 +282,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
 
-    mol = vhfopt.mol
+    mol = vhfopt.sorted_mol
     nao, nao_orig = vhfopt.coeff.shape
 
     dm = cp.asarray(dm, order='C')
@@ -436,7 +436,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
 
 class _VHFOpt:
     def __init__(self, mol, cutoff=1e-13):
-        self.orig_mol = mol
+        self.mol = mol
         self.direct_scf_tol = cutoff
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
@@ -455,7 +455,7 @@ class _VHFOpt:
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
         mol, coeff, uniq_l_ctr, l_ctr_counts = group_basis(mol, self.tile, group_size)
-        self.mol = mol
+        self.sorted_mol = mol
         self.coeff = cp.asarray(coeff)
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
@@ -533,7 +533,7 @@ class _VHFOpt:
         device_id = cp.cuda.Device().id
         if device_id not in self._rys_envs:
             with cp.cuda.Device(device_id), _streams[device_id]:
-                mol = self.mol
+                mol = self.sorted_mol
                 _atm = cp.array(mol._atm)
                 _bas = cp.array(mol._bas)
                 _env = cp.array(_scale_sp_ctr_coeff(mol))
