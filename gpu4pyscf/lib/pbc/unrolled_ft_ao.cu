@@ -98,19 +98,18 @@ void ft_ao_unrolled_00(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
         int *ao_loc = envs.ao_loc;
-        int nbasp = envs.cell0_nbas;
-        int ncells = nbas / nbasp;
-        int nao = ao_loc[nbasp];
-        int cell_id = jsh / nbasp;
+        int ncells = envs.bvk_ncells;
+        int nbasp = nbas / ncells;
+        size_t nao = ao_loc[nbasp];
+        size_t cell_id = jsh / nbasp;
         int cell0_jsh = jsh % nbasp;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[cell0_jsh];
-        int addr;
-        size_t ncells_nGv = ncells * nGv;
+        size_t i0 = ao_loc[ish];
+        size_t j0 = ao_loc[cell0_jsh];
+        size_t addr;
         double *aft_tensor = out + 
-                ((i0*nao+j0) * ncells_nGv + cell_id * nGv
+                (cell_id * nao*nao*nGv + (i0*nao+j0) * nGv
                  + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
-        addr = (0*nao+0)*ncells_nGv;
+        addr = (0*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout0R;
         aft_tensor[addr*2+1] = gout0I;
     }
@@ -236,25 +235,24 @@ void ft_ao_unrolled_01(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
         int *ao_loc = envs.ao_loc;
-        int nbasp = envs.cell0_nbas;
-        int ncells = nbas / nbasp;
-        int nao = ao_loc[nbasp];
-        int cell_id = jsh / nbasp;
+        int ncells = envs.bvk_ncells;
+        int nbasp = nbas / ncells;
+        size_t nao = ao_loc[nbasp];
+        size_t cell_id = jsh / nbasp;
         int cell0_jsh = jsh % nbasp;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[cell0_jsh];
-        int addr;
-        size_t ncells_nGv = ncells * nGv;
+        size_t i0 = ao_loc[ish];
+        size_t j0 = ao_loc[cell0_jsh];
+        size_t addr;
         double *aft_tensor = out + 
-                ((i0*nao+j0) * ncells_nGv + cell_id * nGv
+                (cell_id * nao*nao*nGv + (i0*nao+j0) * nGv
                  + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
-        addr = (0*nao+0)*ncells_nGv;
+        addr = (0*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout0R;
         aft_tensor[addr*2+1] = gout0I;
-        addr = (0*nao+1)*ncells_nGv;
+        addr = (0*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout1R;
         aft_tensor[addr*2+1] = gout1I;
-        addr = (0*nao+2)*ncells_nGv;
+        addr = (0*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout2R;
         aft_tensor[addr*2+1] = gout2I;
     }
@@ -416,34 +414,33 @@ void ft_ao_unrolled_02(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
         int *ao_loc = envs.ao_loc;
-        int nbasp = envs.cell0_nbas;
-        int ncells = nbas / nbasp;
-        int nao = ao_loc[nbasp];
-        int cell_id = jsh / nbasp;
+        int ncells = envs.bvk_ncells;
+        int nbasp = nbas / ncells;
+        size_t nao = ao_loc[nbasp];
+        size_t cell_id = jsh / nbasp;
         int cell0_jsh = jsh % nbasp;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[cell0_jsh];
-        int addr;
-        size_t ncells_nGv = ncells * nGv;
+        size_t i0 = ao_loc[ish];
+        size_t j0 = ao_loc[cell0_jsh];
+        size_t addr;
         double *aft_tensor = out + 
-                ((i0*nao+j0) * ncells_nGv + cell_id * nGv
+                (cell_id * nao*nao*nGv + (i0*nao+j0) * nGv
                  + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
-        addr = (0*nao+0)*ncells_nGv;
+        addr = (0*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout0R;
         aft_tensor[addr*2+1] = gout0I;
-        addr = (0*nao+1)*ncells_nGv;
+        addr = (0*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout1R;
         aft_tensor[addr*2+1] = gout1I;
-        addr = (0*nao+2)*ncells_nGv;
+        addr = (0*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout2R;
         aft_tensor[addr*2+1] = gout2I;
-        addr = (0*nao+3)*ncells_nGv;
+        addr = (0*nao+3)*nGv;
         aft_tensor[addr*2  ] = gout3R;
         aft_tensor[addr*2+1] = gout3I;
-        addr = (0*nao+4)*ncells_nGv;
+        addr = (0*nao+4)*nGv;
         aft_tensor[addr*2  ] = gout4R;
         aft_tensor[addr*2+1] = gout4I;
-        addr = (0*nao+5)*ncells_nGv;
+        addr = (0*nao+5)*nGv;
         aft_tensor[addr*2  ] = gout5R;
         aft_tensor[addr*2+1] = gout5I;
     }
@@ -563,25 +560,24 @@ void ft_ao_unrolled_10(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
         int *ao_loc = envs.ao_loc;
-        int nbasp = envs.cell0_nbas;
-        int ncells = nbas / nbasp;
-        int nao = ao_loc[nbasp];
-        int cell_id = jsh / nbasp;
+        int ncells = envs.bvk_ncells;
+        int nbasp = nbas / ncells;
+        size_t nao = ao_loc[nbasp];
+        size_t cell_id = jsh / nbasp;
         int cell0_jsh = jsh % nbasp;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[cell0_jsh];
-        int addr;
-        size_t ncells_nGv = ncells * nGv;
+        size_t i0 = ao_loc[ish];
+        size_t j0 = ao_loc[cell0_jsh];
+        size_t addr;
         double *aft_tensor = out + 
-                ((i0*nao+j0) * ncells_nGv + cell_id * nGv
+                (cell_id * nao*nao*nGv + (i0*nao+j0) * nGv
                  + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
-        addr = (0*nao+0)*ncells_nGv;
+        addr = (0*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout0R;
         aft_tensor[addr*2+1] = gout0I;
-        addr = (1*nao+0)*ncells_nGv;
+        addr = (1*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout1R;
         aft_tensor[addr*2+1] = gout1I;
-        addr = (2*nao+0)*ncells_nGv;
+        addr = (2*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout2R;
         aft_tensor[addr*2+1] = gout2I;
     }
@@ -755,43 +751,42 @@ void ft_ao_unrolled_11(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
         int *ao_loc = envs.ao_loc;
-        int nbasp = envs.cell0_nbas;
-        int ncells = nbas / nbasp;
-        int nao = ao_loc[nbasp];
-        int cell_id = jsh / nbasp;
+        int ncells = envs.bvk_ncells;
+        int nbasp = nbas / ncells;
+        size_t nao = ao_loc[nbasp];
+        size_t cell_id = jsh / nbasp;
         int cell0_jsh = jsh % nbasp;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[cell0_jsh];
-        int addr;
-        size_t ncells_nGv = ncells * nGv;
+        size_t i0 = ao_loc[ish];
+        size_t j0 = ao_loc[cell0_jsh];
+        size_t addr;
         double *aft_tensor = out + 
-                ((i0*nao+j0) * ncells_nGv + cell_id * nGv
+                (cell_id * nao*nao*nGv + (i0*nao+j0) * nGv
                  + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
-        addr = (0*nao+0)*ncells_nGv;
+        addr = (0*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout0R;
         aft_tensor[addr*2+1] = gout0I;
-        addr = (0*nao+1)*ncells_nGv;
+        addr = (0*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout3R;
         aft_tensor[addr*2+1] = gout3I;
-        addr = (0*nao+2)*ncells_nGv;
+        addr = (0*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout6R;
         aft_tensor[addr*2+1] = gout6I;
-        addr = (1*nao+0)*ncells_nGv;
+        addr = (1*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout1R;
         aft_tensor[addr*2+1] = gout1I;
-        addr = (1*nao+1)*ncells_nGv;
+        addr = (1*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout4R;
         aft_tensor[addr*2+1] = gout4I;
-        addr = (1*nao+2)*ncells_nGv;
+        addr = (1*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout7R;
         aft_tensor[addr*2+1] = gout7I;
-        addr = (2*nao+0)*ncells_nGv;
+        addr = (2*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout2R;
         aft_tensor[addr*2+1] = gout2I;
-        addr = (2*nao+1)*ncells_nGv;
+        addr = (2*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout5R;
         aft_tensor[addr*2+1] = gout5I;
-        addr = (2*nao+2)*ncells_nGv;
+        addr = (2*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout8R;
         aft_tensor[addr*2+1] = gout8I;
     }
@@ -1039,70 +1034,69 @@ void ft_ao_unrolled_12(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
         int *ao_loc = envs.ao_loc;
-        int nbasp = envs.cell0_nbas;
-        int ncells = nbas / nbasp;
-        int nao = ao_loc[nbasp];
-        int cell_id = jsh / nbasp;
+        int ncells = envs.bvk_ncells;
+        int nbasp = nbas / ncells;
+        size_t nao = ao_loc[nbasp];
+        size_t cell_id = jsh / nbasp;
         int cell0_jsh = jsh % nbasp;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[cell0_jsh];
-        int addr;
-        size_t ncells_nGv = ncells * nGv;
+        size_t i0 = ao_loc[ish];
+        size_t j0 = ao_loc[cell0_jsh];
+        size_t addr;
         double *aft_tensor = out + 
-                ((i0*nao+j0) * ncells_nGv + cell_id * nGv
+                (cell_id * nao*nao*nGv + (i0*nao+j0) * nGv
                  + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
-        addr = (0*nao+0)*ncells_nGv;
+        addr = (0*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout0R;
         aft_tensor[addr*2+1] = gout0I;
-        addr = (0*nao+1)*ncells_nGv;
+        addr = (0*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout3R;
         aft_tensor[addr*2+1] = gout3I;
-        addr = (0*nao+2)*ncells_nGv;
+        addr = (0*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout6R;
         aft_tensor[addr*2+1] = gout6I;
-        addr = (0*nao+3)*ncells_nGv;
+        addr = (0*nao+3)*nGv;
         aft_tensor[addr*2  ] = gout9R;
         aft_tensor[addr*2+1] = gout9I;
-        addr = (0*nao+4)*ncells_nGv;
+        addr = (0*nao+4)*nGv;
         aft_tensor[addr*2  ] = gout12R;
         aft_tensor[addr*2+1] = gout12I;
-        addr = (0*nao+5)*ncells_nGv;
+        addr = (0*nao+5)*nGv;
         aft_tensor[addr*2  ] = gout15R;
         aft_tensor[addr*2+1] = gout15I;
-        addr = (1*nao+0)*ncells_nGv;
+        addr = (1*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout1R;
         aft_tensor[addr*2+1] = gout1I;
-        addr = (1*nao+1)*ncells_nGv;
+        addr = (1*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout4R;
         aft_tensor[addr*2+1] = gout4I;
-        addr = (1*nao+2)*ncells_nGv;
+        addr = (1*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout7R;
         aft_tensor[addr*2+1] = gout7I;
-        addr = (1*nao+3)*ncells_nGv;
+        addr = (1*nao+3)*nGv;
         aft_tensor[addr*2  ] = gout10R;
         aft_tensor[addr*2+1] = gout10I;
-        addr = (1*nao+4)*ncells_nGv;
+        addr = (1*nao+4)*nGv;
         aft_tensor[addr*2  ] = gout13R;
         aft_tensor[addr*2+1] = gout13I;
-        addr = (1*nao+5)*ncells_nGv;
+        addr = (1*nao+5)*nGv;
         aft_tensor[addr*2  ] = gout16R;
         aft_tensor[addr*2+1] = gout16I;
-        addr = (2*nao+0)*ncells_nGv;
+        addr = (2*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout2R;
         aft_tensor[addr*2+1] = gout2I;
-        addr = (2*nao+1)*ncells_nGv;
+        addr = (2*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout5R;
         aft_tensor[addr*2+1] = gout5I;
-        addr = (2*nao+2)*ncells_nGv;
+        addr = (2*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout8R;
         aft_tensor[addr*2+1] = gout8I;
-        addr = (2*nao+3)*ncells_nGv;
+        addr = (2*nao+3)*nGv;
         aft_tensor[addr*2  ] = gout11R;
         aft_tensor[addr*2+1] = gout11I;
-        addr = (2*nao+4)*ncells_nGv;
+        addr = (2*nao+4)*nGv;
         aft_tensor[addr*2  ] = gout14R;
         aft_tensor[addr*2+1] = gout14I;
-        addr = (2*nao+5)*ncells_nGv;
+        addr = (2*nao+5)*nGv;
         aft_tensor[addr*2  ] = gout17R;
         aft_tensor[addr*2+1] = gout17I;
     }
@@ -1246,34 +1240,33 @@ void ft_ao_unrolled_20(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
         int *ao_loc = envs.ao_loc;
-        int nbasp = envs.cell0_nbas;
-        int ncells = nbas / nbasp;
-        int nao = ao_loc[nbasp];
-        int cell_id = jsh / nbasp;
+        int ncells = envs.bvk_ncells;
+        int nbasp = nbas / ncells;
+        size_t nao = ao_loc[nbasp];
+        size_t cell_id = jsh / nbasp;
         int cell0_jsh = jsh % nbasp;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[cell0_jsh];
-        int addr;
-        size_t ncells_nGv = ncells * nGv;
+        size_t i0 = ao_loc[ish];
+        size_t j0 = ao_loc[cell0_jsh];
+        size_t addr;
         double *aft_tensor = out + 
-                ((i0*nao+j0) * ncells_nGv + cell_id * nGv
+                (cell_id * nao*nao*nGv + (i0*nao+j0) * nGv
                  + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
-        addr = (0*nao+0)*ncells_nGv;
+        addr = (0*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout0R;
         aft_tensor[addr*2+1] = gout0I;
-        addr = (1*nao+0)*ncells_nGv;
+        addr = (1*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout1R;
         aft_tensor[addr*2+1] = gout1I;
-        addr = (2*nao+0)*ncells_nGv;
+        addr = (2*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout2R;
         aft_tensor[addr*2+1] = gout2I;
-        addr = (3*nao+0)*ncells_nGv;
+        addr = (3*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout3R;
         aft_tensor[addr*2+1] = gout3I;
-        addr = (4*nao+0)*ncells_nGv;
+        addr = (4*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout4R;
         aft_tensor[addr*2+1] = gout4I;
-        addr = (5*nao+0)*ncells_nGv;
+        addr = (5*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout5R;
         aft_tensor[addr*2+1] = gout5I;
     }
@@ -1509,70 +1502,69 @@ void ft_ao_unrolled_21(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
         int *ao_loc = envs.ao_loc;
-        int nbasp = envs.cell0_nbas;
-        int ncells = nbas / nbasp;
-        int nao = ao_loc[nbasp];
-        int cell_id = jsh / nbasp;
+        int ncells = envs.bvk_ncells;
+        int nbasp = nbas / ncells;
+        size_t nao = ao_loc[nbasp];
+        size_t cell_id = jsh / nbasp;
         int cell0_jsh = jsh % nbasp;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[cell0_jsh];
-        int addr;
-        size_t ncells_nGv = ncells * nGv;
+        size_t i0 = ao_loc[ish];
+        size_t j0 = ao_loc[cell0_jsh];
+        size_t addr;
         double *aft_tensor = out + 
-                ((i0*nao+j0) * ncells_nGv + cell_id * nGv
+                (cell_id * nao*nao*nGv + (i0*nao+j0) * nGv
                  + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
-        addr = (0*nao+0)*ncells_nGv;
+        addr = (0*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout0R;
         aft_tensor[addr*2+1] = gout0I;
-        addr = (0*nao+1)*ncells_nGv;
+        addr = (0*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout6R;
         aft_tensor[addr*2+1] = gout6I;
-        addr = (0*nao+2)*ncells_nGv;
+        addr = (0*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout12R;
         aft_tensor[addr*2+1] = gout12I;
-        addr = (1*nao+0)*ncells_nGv;
+        addr = (1*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout1R;
         aft_tensor[addr*2+1] = gout1I;
-        addr = (1*nao+1)*ncells_nGv;
+        addr = (1*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout7R;
         aft_tensor[addr*2+1] = gout7I;
-        addr = (1*nao+2)*ncells_nGv;
+        addr = (1*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout13R;
         aft_tensor[addr*2+1] = gout13I;
-        addr = (2*nao+0)*ncells_nGv;
+        addr = (2*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout2R;
         aft_tensor[addr*2+1] = gout2I;
-        addr = (2*nao+1)*ncells_nGv;
+        addr = (2*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout8R;
         aft_tensor[addr*2+1] = gout8I;
-        addr = (2*nao+2)*ncells_nGv;
+        addr = (2*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout14R;
         aft_tensor[addr*2+1] = gout14I;
-        addr = (3*nao+0)*ncells_nGv;
+        addr = (3*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout3R;
         aft_tensor[addr*2+1] = gout3I;
-        addr = (3*nao+1)*ncells_nGv;
+        addr = (3*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout9R;
         aft_tensor[addr*2+1] = gout9I;
-        addr = (3*nao+2)*ncells_nGv;
+        addr = (3*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout15R;
         aft_tensor[addr*2+1] = gout15I;
-        addr = (4*nao+0)*ncells_nGv;
+        addr = (4*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout4R;
         aft_tensor[addr*2+1] = gout4I;
-        addr = (4*nao+1)*ncells_nGv;
+        addr = (4*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout10R;
         aft_tensor[addr*2+1] = gout10I;
-        addr = (4*nao+2)*ncells_nGv;
+        addr = (4*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout16R;
         aft_tensor[addr*2+1] = gout16I;
-        addr = (5*nao+0)*ncells_nGv;
+        addr = (5*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout5R;
         aft_tensor[addr*2+1] = gout5I;
-        addr = (5*nao+1)*ncells_nGv;
+        addr = (5*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout11R;
         aft_tensor[addr*2+1] = gout11I;
-        addr = (5*nao+2)*ncells_nGv;
+        addr = (5*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout17R;
         aft_tensor[addr*2+1] = gout17I;
     }
@@ -1946,124 +1938,123 @@ void ft_ao_unrolled_22(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     }
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
         int *ao_loc = envs.ao_loc;
-        int nbasp = envs.cell0_nbas;
-        int ncells = nbas / nbasp;
-        int nao = ao_loc[nbasp];
-        int cell_id = jsh / nbasp;
+        int ncells = envs.bvk_ncells;
+        int nbasp = nbas / ncells;
+        size_t nao = ao_loc[nbasp];
+        size_t cell_id = jsh / nbasp;
         int cell0_jsh = jsh % nbasp;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[cell0_jsh];
-        int addr;
-        size_t ncells_nGv = ncells * nGv;
+        size_t i0 = ao_loc[ish];
+        size_t j0 = ao_loc[cell0_jsh];
+        size_t addr;
         double *aft_tensor = out + 
-                ((i0*nao+j0) * ncells_nGv + cell_id * nGv
+                (cell_id * nao*nao*nGv + (i0*nao+j0) * nGv
                  + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
-        addr = (0*nao+0)*ncells_nGv;
+        addr = (0*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout0R;
         aft_tensor[addr*2+1] = gout0I;
-        addr = (0*nao+1)*ncells_nGv;
+        addr = (0*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout6R;
         aft_tensor[addr*2+1] = gout6I;
-        addr = (0*nao+2)*ncells_nGv;
+        addr = (0*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout12R;
         aft_tensor[addr*2+1] = gout12I;
-        addr = (0*nao+3)*ncells_nGv;
+        addr = (0*nao+3)*nGv;
         aft_tensor[addr*2  ] = gout18R;
         aft_tensor[addr*2+1] = gout18I;
-        addr = (0*nao+4)*ncells_nGv;
+        addr = (0*nao+4)*nGv;
         aft_tensor[addr*2  ] = gout24R;
         aft_tensor[addr*2+1] = gout24I;
-        addr = (0*nao+5)*ncells_nGv;
+        addr = (0*nao+5)*nGv;
         aft_tensor[addr*2  ] = gout30R;
         aft_tensor[addr*2+1] = gout30I;
-        addr = (1*nao+0)*ncells_nGv;
+        addr = (1*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout1R;
         aft_tensor[addr*2+1] = gout1I;
-        addr = (1*nao+1)*ncells_nGv;
+        addr = (1*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout7R;
         aft_tensor[addr*2+1] = gout7I;
-        addr = (1*nao+2)*ncells_nGv;
+        addr = (1*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout13R;
         aft_tensor[addr*2+1] = gout13I;
-        addr = (1*nao+3)*ncells_nGv;
+        addr = (1*nao+3)*nGv;
         aft_tensor[addr*2  ] = gout19R;
         aft_tensor[addr*2+1] = gout19I;
-        addr = (1*nao+4)*ncells_nGv;
+        addr = (1*nao+4)*nGv;
         aft_tensor[addr*2  ] = gout25R;
         aft_tensor[addr*2+1] = gout25I;
-        addr = (1*nao+5)*ncells_nGv;
+        addr = (1*nao+5)*nGv;
         aft_tensor[addr*2  ] = gout31R;
         aft_tensor[addr*2+1] = gout31I;
-        addr = (2*nao+0)*ncells_nGv;
+        addr = (2*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout2R;
         aft_tensor[addr*2+1] = gout2I;
-        addr = (2*nao+1)*ncells_nGv;
+        addr = (2*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout8R;
         aft_tensor[addr*2+1] = gout8I;
-        addr = (2*nao+2)*ncells_nGv;
+        addr = (2*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout14R;
         aft_tensor[addr*2+1] = gout14I;
-        addr = (2*nao+3)*ncells_nGv;
+        addr = (2*nao+3)*nGv;
         aft_tensor[addr*2  ] = gout20R;
         aft_tensor[addr*2+1] = gout20I;
-        addr = (2*nao+4)*ncells_nGv;
+        addr = (2*nao+4)*nGv;
         aft_tensor[addr*2  ] = gout26R;
         aft_tensor[addr*2+1] = gout26I;
-        addr = (2*nao+5)*ncells_nGv;
+        addr = (2*nao+5)*nGv;
         aft_tensor[addr*2  ] = gout32R;
         aft_tensor[addr*2+1] = gout32I;
-        addr = (3*nao+0)*ncells_nGv;
+        addr = (3*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout3R;
         aft_tensor[addr*2+1] = gout3I;
-        addr = (3*nao+1)*ncells_nGv;
+        addr = (3*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout9R;
         aft_tensor[addr*2+1] = gout9I;
-        addr = (3*nao+2)*ncells_nGv;
+        addr = (3*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout15R;
         aft_tensor[addr*2+1] = gout15I;
-        addr = (3*nao+3)*ncells_nGv;
+        addr = (3*nao+3)*nGv;
         aft_tensor[addr*2  ] = gout21R;
         aft_tensor[addr*2+1] = gout21I;
-        addr = (3*nao+4)*ncells_nGv;
+        addr = (3*nao+4)*nGv;
         aft_tensor[addr*2  ] = gout27R;
         aft_tensor[addr*2+1] = gout27I;
-        addr = (3*nao+5)*ncells_nGv;
+        addr = (3*nao+5)*nGv;
         aft_tensor[addr*2  ] = gout33R;
         aft_tensor[addr*2+1] = gout33I;
-        addr = (4*nao+0)*ncells_nGv;
+        addr = (4*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout4R;
         aft_tensor[addr*2+1] = gout4I;
-        addr = (4*nao+1)*ncells_nGv;
+        addr = (4*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout10R;
         aft_tensor[addr*2+1] = gout10I;
-        addr = (4*nao+2)*ncells_nGv;
+        addr = (4*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout16R;
         aft_tensor[addr*2+1] = gout16I;
-        addr = (4*nao+3)*ncells_nGv;
+        addr = (4*nao+3)*nGv;
         aft_tensor[addr*2  ] = gout22R;
         aft_tensor[addr*2+1] = gout22I;
-        addr = (4*nao+4)*ncells_nGv;
+        addr = (4*nao+4)*nGv;
         aft_tensor[addr*2  ] = gout28R;
         aft_tensor[addr*2+1] = gout28I;
-        addr = (4*nao+5)*ncells_nGv;
+        addr = (4*nao+5)*nGv;
         aft_tensor[addr*2  ] = gout34R;
         aft_tensor[addr*2+1] = gout34I;
-        addr = (5*nao+0)*ncells_nGv;
+        addr = (5*nao+0)*nGv;
         aft_tensor[addr*2  ] = gout5R;
         aft_tensor[addr*2+1] = gout5I;
-        addr = (5*nao+1)*ncells_nGv;
+        addr = (5*nao+1)*nGv;
         aft_tensor[addr*2  ] = gout11R;
         aft_tensor[addr*2+1] = gout11I;
-        addr = (5*nao+2)*ncells_nGv;
+        addr = (5*nao+2)*nGv;
         aft_tensor[addr*2  ] = gout17R;
         aft_tensor[addr*2+1] = gout17I;
-        addr = (5*nao+3)*ncells_nGv;
+        addr = (5*nao+3)*nGv;
         aft_tensor[addr*2  ] = gout23R;
         aft_tensor[addr*2+1] = gout23I;
-        addr = (5*nao+4)*ncells_nGv;
+        addr = (5*nao+4)*nGv;
         aft_tensor[addr*2  ] = gout29R;
         aft_tensor[addr*2+1] = gout29I;
-        addr = (5*nao+5)*ncells_nGv;
+        addr = (5*nao+5)*nGv;
         aft_tensor[addr*2  ] = gout35R;
         aft_tensor[addr*2+1] = gout35I;
     }

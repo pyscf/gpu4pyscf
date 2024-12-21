@@ -7,6 +7,8 @@
 typedef struct {
     uint16_t natm; // in bvk-cell
     uint16_t nbas; // in bvk-cell
+    uint16_t bvk_ncells; // number of images in the BvK cell
+    uint16_t padding;
     int *atm;
     int *bas;
     double *env;
@@ -14,7 +16,6 @@ typedef struct {
     double *img_coords; // vectors in lattice sum
     int *img_idx; // indices of img_coords in each shell-pair
     int *img_offsets; // offset AFTIntEnvVars.img_idx for each shell-pair
-    int cell0_nbas; // nbas for the first image in BvK cell
 } AFTIntEnvVars;
 
 typedef struct {

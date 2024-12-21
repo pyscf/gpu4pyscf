@@ -209,23 +209,22 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
         int nfi = (li + 1) * (li + 2) / 2;
         int *ao_loc = envs.ao_loc;
-        int nbasp = envs.cell0_nbas;
-        int ncells = nbas / nbasp;
-        int nao = ao_loc[nbasp];
-        int cell_id = jsh / nbasp;
+        int ncells = envs.bvk_ncells;
+        int nbasp = nbas / ncells;
+        size_t nao = ao_loc[nbasp];
+        size_t cell_id = jsh / nbasp;
         int cell0_jsh = jsh % nbasp;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[cell0_jsh];
-        size_t ncells_nGv = ncells * nGv;
+        size_t i0 = ao_loc[ish];
+        size_t j0 = ao_loc[cell0_jsh];
         double *aft_tensor = out + 
-                ((i0*nao+j0) * ncells_nGv + cell_id * nGv
+                (cell_id * nao*nao*nGv + (i0*nao+j0) * nGv
                  + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
         for (int n = 0; n < GOUT_WIDTH; ++n) {
             int ij = n*gout_stride + gout_id;
             if (ij >= nfij) continue;
-            int i = ij % nfi;
-            int j = ij / nfi;
-            int addr = (i*nao+j)*ncells_nGv;
+            size_t i = ij % nfi;
+            size_t j = ij / nfi;
+            size_t addr = (i*nao+j)*nGv;
             aft_tensor[addr*2  ] = goutR[n];
             aft_tensor[addr*2+1] = goutI[n];
         }
@@ -237,17 +236,17 @@ void ft_aopair_fill_triu(double *out, int *conj_mapping, int bvk_ncells, int nGv
 {
     int j = blockIdx.x;
     int i = blockIdx.y;
-    size_t ncells_nGv = bvk_ncells * nGv;
     if (i <= j) {
         return;
     }
-    int nao = gridDim.x;
-    int ij = (i * nao + j) * ncells_nGv;
-    int ji = (j * nao + i) * ncells_nGv;
-    for (int n = threadIdx.x; n < ncells_nGv; n += blockDim.x) {
+    size_t nao = gridDim.x;
+    size_t nao2_nGv = nao * nao * nGv;
+    size_t ij = (i * nao + j) * nGv;
+    size_t ji = (j * nao + i) * nGv;
+    for (int n = threadIdx.x; n < bvk_ncells*nGv; n += blockDim.x) {
         int Gv_id = n % nGv;
         int k = n / nGv;
         int ck = conj_mapping[k];
-        out[ji + ck*nGv+Gv_id] = out[ij + n];
+        out[ji + ck*nao2_nGv+Gv_id] = out[ij + k*nao2_nGv+Gv_id];
     }
 }
