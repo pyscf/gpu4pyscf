@@ -15,7 +15,7 @@
 import cupy
 import numpy as np
 import scipy
-from gpu4pyscf.gto.moleintor import intor, VHFOpt
+from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.lib import logger
 
 from pyscf.data import radii
@@ -98,20 +98,14 @@ def eval_chelpg_layer_gpu(mf, deltaR=0.3, Rhead=2.8, ifqchem=True, Rvdw=modified
     r_pX = np.delete(r_pX, idx, axis=1)
     gridcoords = np.delete(gridcoords, idx, axis=0)
 
-    ngrids = gridcoords.shape[0]
     r_pX = cupy.array(r_pX)
     r_pX_potential = 1/r_pX
-    potential_real = cupy.dot(cupy.array(
-        mf.mol.atom_charges()), r_pX_potential)
-    nbatch = 256*256
+    potential_real = cupy.dot(cupy.array(mf.mol.atom_charges()), r_pX_potential)
 
-    # assert nbatch < ngrids
-    intopt = VHFOpt(mf.mol)
-    intopt.build(cutoff=1e-14)
-    for ibatch in range(0, ngrids, nbatch):
-        max_grid = min(ibatch+nbatch, ngrids)
-        potential_real[ibatch:max_grid] -= \
-            intor(mf.mol, 'int1e_grids', gridcoords[ibatch:max_grid], dm=dm, intopt=intopt)
+    if dm.ndim == 3: # Unrestricted
+        assert dm.shape[0] == 2
+        dm = dm[0] + dm[1]
+    potential_real -= int1e_grids(mf.mol, gridcoords, dm=dm, direct_scf_tol=1e-14)
 
     w = cupy.array(w)
     r_pX_potential_omega = r_pX_potential*w

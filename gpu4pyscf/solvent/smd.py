@@ -23,7 +23,7 @@ from pyscf.data import radii
 from pyscf.dft import gen_grid
 from gpu4pyscf.solvent import pcm, _attach_solvent
 from gpu4pyscf.lib import logger
-from gpu4pyscf.df import int3c2e
+from gpu4pyscf.gto import int3c1e
 
 @lib.with_doc(_attach_solvent._for_scf.__doc__)
 def smd_for_scf(mf, solvent_obj=None, dm=None):
@@ -397,14 +397,14 @@ class SMD(pcm.PCM):
         atom_charges = mol.atom_charges()
 
         # Move this to GPU
-        auxmol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
-        intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-        intopt.build(1e-14, diag_block_with_triu=False, aosym=True, group_size=256)
+        intopt = int3c1e.VHFOpt(mol)
+        intopt.build(1e-14)
         self.intopt = intopt
 
         int2c2e = mol._add_suffix('int2c2e')
+        fakemol_charge = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
         fakemol_nuc = gto.fakemol_for_charges(atom_coords)
-        v_ng = gto.mole.intor_cross(int2c2e, fakemol_nuc, auxmol)
+        v_ng = gto.mole.intor_cross(int2c2e, fakemol_nuc, fakemol_charge)
         v_grids_n = np.dot(atom_charges, v_ng)
         self.v_grids_n = cupy.asarray(v_grids_n)
 

@@ -26,7 +26,8 @@ from pyscf.dft import gen_grid
 from pyscf.data import radii
 from pyscf.solvent import ddcosmo
 from gpu4pyscf.solvent import _attach_solvent
-from gpu4pyscf.df import int3c2e
+from gpu4pyscf.gto import int3c1e
+from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import dist_matrix, load_library
 
@@ -345,14 +346,14 @@ class PCM(lib.StreamObject):
         atom_coords = mol.atom_coords(unit='B')
         atom_charges = mol.atom_charges()
 
-        auxmol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
-        intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-        intopt.build(1e-14, diag_block_with_triu=False, aosym=True, group_size=256)
+        intopt = int3c1e.VHFOpt(mol)
+        intopt.build(1e-14)
         self.intopt = intopt
 
         int2c2e = mol._add_suffix('int2c2e')
+        fakemol_charge = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
         fakemol_nuc = gto.fakemol_for_charges(atom_coords)
-        v_ng = gto.mole.intor_cross(int2c2e, fakemol_nuc, auxmol)
+        v_ng = gto.mole.intor_cross(int2c2e, fakemol_nuc, fakemol_charge)
         v_grids_n = numpy.dot(atom_charges, v_ng)
         self.v_grids_n = cupy.asarray(v_grids_n)
 
@@ -391,20 +392,16 @@ class PCM(lib.StreamObject):
         '''
         return electrostatic potential on surface
         '''
-        nset = dms.shape[0]
-        ngrids = self.surface['grid_coords'].shape[0]
-        v_grids_e = cupy.empty([nset, ngrids])
-        for i in range(nset):
-            v_grids_e[i] = 2.0*int3c2e.get_j_int3c2e_pass1(self.intopt, dms[i])
+        charge_exp  = self.surface['charge_exp']
+        grid_coords = self.surface['grid_coords']
+        v_grids_e = int1e_grids(self.mol, grid_coords, dm = dms, charge_exponents = charge_exp**2, intopt = self.intopt)
         return v_grids_e
 
     def _get_vmat(self, q):
         assert q.ndim == 2
-        nset = q.shape[0]
-        nao = self.mol.nao
-        vmat = cupy.empty([nset, nao, nao])
-        for i in range(nset):
-            vmat[i] = -int3c2e.get_j_int3c2e_pass2(self.intopt, q[i])
+        charge_exp  = self.surface['charge_exp']
+        grid_coords = self.surface['grid_coords']
+        vmat = -int1e_grids(self.mol, grid_coords, charges = q, charge_exponents = charge_exp**2, intopt = self.intopt)
         return vmat
 
     def nuc_grad_method(self, grad_method):
