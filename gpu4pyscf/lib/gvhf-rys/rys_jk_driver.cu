@@ -473,8 +473,8 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
     return 0;
 }
 
-void RYS_init_constant(int *g_pair_idx, int *offsets,
-                       double *env, int env_size, int shm_size)
+int RYS_init_constant(int *g_pair_idx, int *offsets,
+                      double *env, int env_size, int shm_size)
 {
     // TODO: test whether the constant memory c_env can improve performance
     //cudaMemcpyToSymbol(c_env, env, sizeof(double)*env_size);
@@ -486,9 +486,16 @@ void RYS_init_constant(int *g_pair_idx, int *offsets,
     cudaFuncSetAttribute(rys_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_ejk_ip2_type12_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_ejk_ip2_type3_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,
+                cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
 }
 
-void RYS_init_rysj_constant(int shm_size)
+int RYS_init_rysj_constant(int shm_size)
 {
     Fold2Index i_in_fold2idx[165];
     Fold3Index i_in_fold3idx[495];
@@ -512,6 +519,13 @@ void RYS_init_rysj_constant(int shm_size)
     cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
     cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_j_with_gout_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,
+                cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
 }
 
 int cuda_version()

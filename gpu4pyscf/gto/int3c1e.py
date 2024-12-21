@@ -67,7 +67,7 @@ class VHFOpt(_vhf.VHFOpt):
 
     def build(self, cutoff=1e-13, group_size=BLKSIZE, diag_block_with_triu=False, aosym=True):
         original_mol = self.mol
-        mol = basis_seg_contraction(original_mol, allow_replica=True)
+        mol = basis_seg_contraction(original_mol, allow_replica=True)[0]
 
         log = logger.new_logger(original_mol, original_mol.verbose)
         cput0 = log.init_timer()

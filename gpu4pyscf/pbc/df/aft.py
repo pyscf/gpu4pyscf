@@ -31,8 +31,10 @@ from pyscf.pbc.df.aft import _check_kpts
 from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.df import aft_jk
+from gpu4pyscf.pbc.df.ft_ao import FTOpt
 from gpu4pyscf.lib import logger, utils
-from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract, unpack_tril
+from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
+                                       get_avail_mem)
 
 KE_SCALING = aft_cpu.KE_SCALING
 
@@ -41,9 +43,6 @@ def _get_pp_loc_part1(mydf, kpts=None, with_pseudo=True):
     log = logger.new_logger(mydf)
     cell = mydf.cell
     mesh = np.asarray(mydf.mesh)
-    nkpts = len(kpts)
-    nao = cell.nao_nr()
-    nao_pair = nao * (nao+1) // 2
 
     kpt_allow = np.zeros(3)
     if cell.dimension > 0:
@@ -55,6 +54,7 @@ def _get_pp_loc_part1(mydf, kpts=None, with_pseudo=True):
                         mesh, cell.precision, mesh_guess)
     log.debug1('aft.get_pp_loc_part1 mesh = %s', mesh)
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+    assert len(Gv) > 0
 
     if with_pseudo:
         vpplocG = pp_int.get_gth_vlocG_part1(cell, Gv)
@@ -69,16 +69,15 @@ def _get_pp_loc_part1(mydf, kpts=None, with_pseudo=True):
         vpplocG *= coulG
 
     vpplocG *= cp.asarray(kws)
-    vj = cp.zeros((nkpts, nao_pair), dtype=np.complex128)
-    for Gpq, p0, p1 in mydf.ft_loop(mesh, kpt_allow, kpts, aosym='s2'):
-        vj += contract('kGx,G->kx', Gpq, vpplocG[p0:p1].conj())
+    vj = 0.
+    for Gpq, p0, p1 in mydf.ft_loop(mesh, kpt_allow, kpts):
+        vj += contract('kGpq,G->kpq', Gpq, vpplocG[p0:p1].conj())
 
-    vj_kpts = unpack_tril(vj)
     if is_zero(kpts):
-        vj_kpts = vj_kpts.real
+        vj = vj.real
     if is_single_kpt:
-        vj_kpts = vj_kpts[0]
-    return vj_kpts
+        vj = vj[0]
+    return vj
 
 def get_pp(mydf, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
@@ -112,50 +111,44 @@ class AFTDFMixin:
     weighted_coulG = return_cupy_array(aft_cpu.weighted_coulG)
     pw_loop = NotImplemented
 
-    def ft_loop(self, mesh=None, q=np.zeros(3), kpts=None, shls_slice=None,
-                max_memory=4000, aosym='s1', intor='GTO_ft_ovlp', comp=1,
-                bvk_kmesh=None, return_complex=True):
+    def ft_loop(self, mesh=None, q=np.zeros(3), kpts=None, bvk_kmesh=None,
+                max_memory=None, transform_ao=True, **kwargs):
         '''
         Fourier transform iterator for all kpti which satisfy
             2pi*N = (kpts - kpti - q)*a,  N = -1, 0, 1
         The tensors returned by this function is different to the one in PySCF CPU version
         '''
-        assert return_complex
         cell = self.cell
         if mesh is None:
             mesh = self.mesh
         if kpts is None:
-            assert (is_zero(q))
+            assert is_zero(q)
             kpts = self.kpts
-        kpts = np.asarray(kpts)
-        nkpts = len(kpts)
 
-        nao = cell.nao
-        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-        gxyz = lib.cartesian_prod([np.arange(len(x)) for x in Gvbase])
-        ngrids = gxyz.shape[0]
+        ft_opt = FTOpt(cell, kpts, bvk_kmesh)
+        ft_kern = ft_opt.gen_ft_kernel()
 
-        assert shls_slice is None
-        if aosym == 's2':
-            nij = nao * (nao+1) // 2
+        if ft_opt.bvk_kmesh is None:
+            bvk_ncells = 1
         else:
-            nij = nao * nao
+            bvk_ncells = np.prod(ft_opt.bvk_kmesh)
 
-        if bvk_kmesh is None:
-            bvk_kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
+        nao = ft_opt.sorted_cell.nao
+        Gv = cell.get_Gv(mesh)
+        ngrids = len(Gv)
 
-        rcut = ft_ao.estimate_rcut(cell)
-        supmol = ft_ao.ExtendedMole.from_cell(cell, bvk_kmesh, rcut.max())
-        supmol = supmol.strip_basis(rcut)
-        ft_kern = supmol.gen_ft_kernel(aosym, intor=intor, comp=comp,
-                                       return_complex=True)
-
-        blksize = max(16, int(max_memory*.9e6/(nij*nkpts*16*comp)))
+        if max_memory is None:
+            avail_mem = get_avail_mem() * .8
+        else:
+            avail_mem = max_memory * 1e6
+        # the memory estimation is determined by the size of the intermediates
+        # in the ft_kern
+        blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2)))
         blksize = min(blksize, ngrids, 16384)
 
         for p0, p1 in lib.prange(0, ngrids, blksize):
-            dat = ft_kern(Gv[p0:p1], gxyz[p0:p1], Gvbase, q, kpts, shls_slice)
-            yield cp.asarray(dat), p0, p1
+            dat = ft_kern(Gv[p0:p1], q, kpts, transform_ao)
+            yield dat, p0, p1
 
     range_coulomb = aft_cpu.AFTDFMixin.range_coulomb
 

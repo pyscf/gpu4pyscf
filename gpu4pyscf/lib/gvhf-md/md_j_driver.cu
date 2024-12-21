@@ -420,7 +420,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
     return 0;
 }
 
-void init_mdj_constant(int shm_size)
+int init_mdj_constant(int shm_size)
 {
     Fold2Index i_in_fold2idx[165];
     Fold3Index i_in_fold3idx[495];
@@ -446,5 +446,12 @@ void init_mdj_constant(int shm_size)
     cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
     cudaFuncSetAttribute(md_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     set_md_j_unrolled_shm_size();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,
+                cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
 }
 }

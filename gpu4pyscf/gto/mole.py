@@ -13,12 +13,15 @@
 # limitations under the License.
 
 
-import os
-import numpy as np
-import cupy
 import functools
-import copy
+import numpy as np
+import scipy.linalg
 from pyscf import gto
+from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
+                       PTR_EXP)
+from gpu4pyscf.lib import logger
+
+PTR_BAS_COORD = 7
 
 @functools.lru_cache(20)
 def get_cart2sph(lmax=12):
@@ -28,67 +31,90 @@ def get_cart2sph(lmax=12):
         cart2sph.append(np.asarray(c2s, order='C'))
     return cart2sph
 
-def basis_seg_contraction(mol, allow_replica=False):
+def basis_seg_contraction(mol, allow_replica=1):
     '''transform generally contracted basis to segment contracted basis
     Kwargs:
         allow_replica:
-            transform the generally contracted basis to replicated
-            segment-contracted basis
+            when angular momentum lower than (or equal to) this value, transform
+            the generally contracted basis to replicated segment-contracted basis.
+            By default, high angular momentum functions (d, f shells) are fully
+            uncontracted.
     '''
+    # Ensure backward compatibility. When allow_replica is True, decontraction
+    # to primitive functions is disabled. When allow_replica is False, all
+    # general contraction are decontracted.
+    if allow_replica is True:
+        allow_replica = 8
+    elif allow_replica is False:
+        allow_replica = -1
+
     bas_templates = {}
     _bas = []
     _env = mol._env.copy()
-
+    contr_coeff = []
     aoslices = mol.aoslice_by_atom()
     for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
-        key = tuple(mol._bas[ib0:ib1,gto.PTR_EXP])
+        key = tuple(mol._bas[ib0:ib1,PTR_COEFF])
         if key in bas_templates:
-            bas_of_ia = bas_templates[key]
+            bas_of_ia, coeff = bas_templates[key]
             bas_of_ia = bas_of_ia.copy()
-            bas_of_ia[:,gto.ATOM_OF] = ia
+            bas_of_ia[:,ATOM_OF] = ia
         else:
             # Generate the template for decontracted basis
+            coeff = []
             bas_of_ia = []
             for shell in mol._bas[ib0:ib1]:
-                l = shell[gto.ANG_OF]
-                nctr = shell[gto.NCTR_OF]
+                l = shell[ANG_OF]
+                nf = (l + 1) * (l + 2) // 2
+                nctr = shell[NCTR_OF]
                 if nctr == 1:
                     bas_of_ia.append(shell)
+                    coeff.append(np.eye(nf))
                     continue
-
                 # Only basis with nctr > 1 needs to be decontracted
-                nprim = shell[gto.NPRIM_OF]
-                pcoeff = shell[gto.PTR_COEFF]
-                if allow_replica:
+                nprim = shell[NPRIM_OF]
+                pcoeff = shell[PTR_COEFF]
+                if l <= allow_replica:
+                    coeff.extend([np.eye(nf)] * nctr)
                     bs = np.repeat(shell[np.newaxis], nctr, axis=0)
-                    bs[:,gto.NCTR_OF] = 1
-                    bs[:,gto.PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr, nprim)
+                    bs[:,NCTR_OF] = 1
+                    bs[:,PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr, nprim)
                     bas_of_ia.append(bs)
-                else:
-                    pexp = shell[gto.PTR_EXP]
+                else: # To avoid recomputation, decontract to primitive functions
+                    pexp = shell[PTR_EXP]
                     exps = _env[pexp:pexp+nprim]
                     norm = gto.gto_norm(l, exps)
                     # remove normalization from contraction coefficients
+                    c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
+                    c = np.einsum('ip,p,ef->iepf', c, 1/norm, np.eye(nf))
+                    coeff.append(c.reshape(nf*nctr, nf*nprim).T)
+
                     _env[pcoeff:pcoeff+nprim] = norm
                     bs = np.repeat(shell[np.newaxis], nprim, axis=0)
-                    bs[:,gto.NPRIM_OF] = 1
-                    bs[:,gto.NCTR_OF] = 1
-                    bs[:,gto.PTR_EXP] = np.arange(pexp, pexp+nprim)
-                    bs[:,gto.PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim)
+                    bs[:,NPRIM_OF] = 1
+                    bs[:,NCTR_OF] = 1
+                    bs[:,PTR_EXP] = np.arange(pexp, pexp+nprim)
+                    bs[:,PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim)
                     bas_of_ia.append(bs)
 
-            bas_of_ia = np.vstack(bas_of_ia)
-            bas_templates[key] = bas_of_ia
+            if len(bas_of_ia) > 0:
+                bas_of_ia = np.vstack(bas_of_ia)
+                bas_templates[key] = (bas_of_ia, coeff)
+            else:
+                continue
+
         _bas.append(bas_of_ia)
+        contr_coeff.extend(coeff)
 
     pmol = mol.copy()
-    pmol.output = mol.output
-    pmol.verbose = mol.verbose
-    pmol.stdout = mol.stdout
-    pmol.cart = True #mol.cart
+    pmol.cart = True
     pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
     pmol._env = _env
-    return pmol
+    contr_coeff = scipy.linalg.block_diag(*contr_coeff)
+
+    if not mol.cart:
+        contr_coeff = contr_coeff.dot(mol.cart2sph_coeff())
+    return pmol, contr_coeff
 
 def sort_atoms(mol):
     """
@@ -133,3 +159,101 @@ def sort_atoms(mol):
             full_path[heavy_idx].append(hydrogen_atoms[i])
 
     return [x for heavy_list in full_path for x in heavy_list]
+
+def group_basis(mol, tile=1, group_size=None):
+    '''Group basis functions according to their [l, nprim] patterns'''
+    mol, coeff = basis_seg_contraction(mol)
+    # Sort basis according to angular momentum and contraction patterns so
+    # as to group the basis functions to blocks in GPU kernel.
+    l_ctrs = mol._bas[:,[ANG_OF, NPRIM_OF]]
+    # Ensure the more contracted Gaussians being accessed first
+    l_ctrs_descend = l_ctrs.copy()
+    l_ctrs_descend[:,1] = -l_ctrs[:,1]
+    uniq_l_ctr, where, inv_idx, l_ctr_counts = np.unique(
+        l_ctrs_descend, return_index=True, return_inverse=True, return_counts=True, axis=0)
+    uniq_l_ctr[:,1] = -uniq_l_ctr[:,1]
+
+    nao_orig = coeff.shape[1]
+    ao_loc = mol.ao_loc
+    coeff = np.split(coeff, ao_loc[1:-1], axis=0)
+
+    pad_bas = []
+    if tile > 1:
+        l_ctr_counts_orig = l_ctr_counts.copy()
+        pad_inv_idx = []
+        env_ptr = mol._env.size
+        # for each pattern, padding basis to the end of mol._bas, ensure alignment to tile
+        for n, (l_ctr, m, counts) in enumerate(zip(uniq_l_ctr, where, l_ctr_counts)):
+            if counts % tile == 0: continue
+            n_alined = (counts+tile-1) & (0x100000-tile)
+            padding = n_alined - counts
+            l_ctr_counts[n] = n_alined
+
+            bas = mol._bas[m].copy()
+            bas[PTR_COEFF] = env_ptr
+            pad_bas.extend([bas] * padding)
+            pad_inv_idx.extend([n] * padding)
+
+            l = l_ctr[0]
+            nf = (l + 1) * (l + 2) // 2
+            coeff.extend([np.zeros((nf, nao_orig))] * padding)
+
+        inv_idx = np.hstack([inv_idx.ravel(), pad_inv_idx])
+
+    sorted_idx = np.argsort(inv_idx.ravel(), kind='stable').astype(np.int32)
+    coeff = np.vstack([coeff[i] for i in sorted_idx])
+    assert coeff.shape[0] < 32768
+
+    max_nprims = uniq_l_ctr[:,1].max()
+    mol._env = np.append(mol._env, np.zeros(max_nprims))
+    if pad_bas:
+        mol._bas = np.vstack([mol._bas, pad_bas])[sorted_idx]
+    else:
+        mol._bas = mol._bas[sorted_idx]
+    assert mol._bas.dtype == np.int32
+
+    ## Limit the number of AOs in each group
+    if group_size is not None:
+        uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(
+            uniq_l_ctr, l_ctr_counts, group_size, tile)
+
+    if mol.verbose >= logger.DEBUG1:
+        logger.debug1(mol, 'Number of shells for each [l, nprim] group')
+        if tile > 1:
+            for l_ctr, n, n8 in zip(uniq_l_ctr, l_ctr_counts_orig, l_ctr_counts):
+                logger.debug1(mol, '    %s : %s -> %s', l_ctr, n, n8)
+        else:
+            for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
+                logger.debug1(mol, '    %s : %s', l_ctr, n)
+
+    # PTR_BAS_COORD is required by various CUDA kernels
+    mol._bas[:,PTR_BAS_COORD] = mol._atm[mol._bas[:,ATOM_OF],PTR_COORD]
+    return mol, coeff, uniq_l_ctr, l_ctr_counts
+
+def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size, align=1):
+    '''Splits l_ctr patterns into small groups with group_size the maximum
+    number of AOs in each group
+    '''
+    l = uniq_l_ctr[:,0]
+    nf = l * (l + 1) // 2
+    _l_ctrs = []
+    _l_ctr_counts = []
+    for l_ctr, counts in zip(uniq_l_ctr, l_ctr_counts):
+        l = l_ctr[0]
+        nf = (l + 1) * (l + 2) // 2
+        max_shells = max(group_size//nf-align+1, align, 2)
+        max_shells = (max_shells + align - 1) & (0x100000-align)
+        if counts <= max_shells:
+            _l_ctrs.append(l_ctr)
+            _l_ctr_counts.append(counts)
+            continue
+
+        nsubs, remaining = counts.__divmod__(max_shells)
+        _l_ctrs.extend([l_ctr] * nsubs)
+        _l_ctr_counts.extend([max_shells] * nsubs)
+        if remaining > 0:
+            _l_ctrs.append(l_ctr)
+            _l_ctr_counts.append(remaining)
+    uniq_l_ctr = np.vstack(_l_ctrs)
+    l_ctr_counts = np.hstack(_l_ctr_counts)
+    return uniq_l_ctr, l_ctr_counts

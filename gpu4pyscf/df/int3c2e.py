@@ -113,8 +113,8 @@ class VHFOpt(_vhf.VHFOpt):
         _mol = self.mol
         _auxmol = self.auxmol
 
-        mol = basis_seg_contraction(_mol,allow_replica=True)
-        auxmol = basis_seg_contraction(_auxmol, allow_replica=True)
+        mol = basis_seg_contraction(_mol, allow_replica=True)[0]
+        auxmol = basis_seg_contraction(_auxmol, allow_replica=True)[0]
         
         log = logger.new_logger(_mol, _mol.verbose)
         cput0 = log.init_timer()

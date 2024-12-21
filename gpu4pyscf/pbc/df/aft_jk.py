@@ -24,13 +24,14 @@ import ctypes
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.pbc.df import ft_ao
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import (is_zero, group_by_conj_pairs,
                                        kk_adapted_iter)
 from pyscf.pbc.tools import k2gamma
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.df.ft_ao import FTOpt
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks, _ewald_exxdiv_for_G0
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem
 from gpu4pyscf.lib import logger
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
@@ -118,12 +119,6 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
          (cell.dimension == 2 and cell.low_dim_ft_type == 'inf_vacuum'))):
         _ewald_exxdiv_for_G0(cell, kpts, dms, vk_kpts, kpts)
 
-    aosym = 's1'
-    bvk_kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
-    rcut = ft_ao.estimate_rcut(cell)
-    supmol = ft_ao.ExtendedMole.from_cell(cell, bvk_kmesh, rcut.max())
-    supmol = supmol.strip_basis(rcut)
-
     t_rev_pairs = group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
     try:
         t_rev_pairs = np.asarray(t_rev_pairs, dtype=np.int32, order='F')
@@ -146,6 +141,10 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
         k_to_compute[t_rev_pairs[:,0]] = 1
     else:
         k_to_compute = np.ones(nkpts, dtype=np.int8)
+
+    bvk_kmesh = kpts_to_kmesh(cell, kpts)
+    log.debug('bvk_kmesh = %s', bvk_kmesh)
+    bvk_ncells = np.prod(bvk_kmesh)
 
     if mo_coeff is None:
         update_vk = _update_vk_
@@ -170,23 +169,20 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
             dm_factor = dm_factor[None]
         dms, dm_factor = dm_factor, None
 
-        bvk_ncells, rs_nbas, nimgs = supmol.bas_mask.shape
-        s_nao = supmol.nao
         log.debug2('time_reversal_symmetry = %s bvk_ncells = %d '
-                   's_nao = %d nocc = %d n_dm = %d',
-                   time_reversal_symmetry, bvk_ncells, s_nao, nocc, n_dm)
+                   'cell0_nao = %d nocc = %d n_dm = %d',
+                   time_reversal_symmetry, bvk_ncells, nao, nocc, n_dm)
         update_vk = _update_vk_dmf
     log.debug2('set update_vk to %s', update_vk)
 
-    ft_kern = supmol.gen_ft_kernel(aosym, return_complex=True,
-                                   kpts=kpts, verbose=log)
+    # TODO: apply ft_opt.coeff to the dms; skip the AO ordering transformation
+    # in ft_kern.
+    ft_opt = FTOpt(cell, bvk_kmesh=bvk_kmesh)
+    ft_kern = ft_opt.gen_ft_kernel(verbose=log)
 
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-    Gv = np.asarray(Gv, order='F')
-    gxyz = lib.cartesian_prod([np.arange(len(x)) for x in Gvbase])
-    # FIXME
-    max_memory = mydf.max_memory
-    Gblksize = max(24, int(max_memory*1e6/16/nao**2/(nkpts+3))//8*8)
+    avail_mem = get_avail_mem() * .8
+    Gblksize = max(16, int(avail_mem/(2*16*nao**2*bvk_ncells))//8*8)
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('Gblksize = %d', Gblksize)
 
@@ -195,7 +191,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
         vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             log.debug3('update_vk [%s:%s]', p0, p1)
-            Gpq = cp.asarray(ft_kern(Gv[p0:p1], gxyz[p0:p1], Gvbase, kpt))
+            Gpq = ft_kern(Gv[p0:p1], kpt, kpts)
             update_vk(vk_kpts, Gpq, dms, vkcoulG[p0:p1] * weight, ki_idx, kj_idx,
                       not self_conj, k_to_compute, t_rev_pairs)
             Gpq = None
@@ -304,28 +300,23 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
         vkcoulG = mydf.weighted_coulG(kpt_allow, exxdiv, mesh)
         vk = cp.zeros((nset,nao,nao), dtype=np.complex128)
 
-    aosym = 's1'
-    bvk_kmesh = k2gamma.kpts_to_kmesh(cell, kptii)
-    rcut = ft_ao.estimate_rcut(cell)
-    supmol = ft_ao.ExtendedMole.from_cell(cell, bvk_kmesh, rcut.max())
-    supmol = supmol.strip_basis(rcut)
-    ft_kern = supmol.gen_ft_kernel(aosym, return_complex=True, verbose=log)
+    # TODO: apply ft_opt.coeff to the dms; skip the AO ordering transformation
+    # in ft_kern.
+    bvk_kmesh = kpts_to_kmesh(cell, kptii)
+    ft_opt = FTOpt(cell, bvk_kmesh=bvk_kmesh)
+    ft_kern = ft_opt.gen_ft_kernel(verbose=log)
 
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     ngrids = len(Gv)
-    Gv = np.asarray(Gv, order='F')
-    gxyz = lib.cartesian_prod([np.arange(len(x)) for x in Gvbase])
-    max_memory = mydf.max_memory
-    Gblksize = max(24, int(max_memory*1e6/16/nao**2/3)//8*8)
+    avail_mem = get_avail_mem() * .8
+    Gblksize = max(16, int(avail_mem/(16*nao**2*2)//8*8))
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('Gblksize = %d', Gblksize)
 
     for p0, p1 in lib.prange(0, ngrids, Gblksize):
-        Gpq = ft_kern(Gv[p0:p1], gxyz[p0:p1], Gvbase, kpt_allow,
-                      kpt.reshape(1, 3))
-        Gpq = cp.asarray(Gpq[0])
+        Gpq = ft_kern(Gv[p0:p1], kpt_allow, kpt.reshape(1, 3))[0]
         if with_j:
-            rho = contract('npq,Gpq->nG', dms, Gpq.conj())
+            rho = contract('npq,Gpq->nG', dms.conj(), Gpq).conj()
             rho *= vjcoulG[p0:p1]
             vj += contract('nG,Gpq->npq', rho, Gpq)
         if with_k:
