@@ -451,7 +451,7 @@ class _VHFOpt:
         self._s_estimator = {}
 
     def build(self, group_size=None, verbose=None):
-        mol = self.orig_mol
+        mol = self.mol
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
         mol, coeff, uniq_l_ctr, l_ctr_counts = group_basis(mol, self.tile, group_size)

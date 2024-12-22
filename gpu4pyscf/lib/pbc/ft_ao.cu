@@ -101,6 +101,7 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
         double aj = expj[jp];
         double aij = ai + aj;
         double aj_aij = aj / aij;
+        double theta_ij = ai * aj_aij;
         double a2 = .5 / aij;
         double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
 
@@ -123,7 +124,6 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
                 double zij = zjzi * aj_aij + ri[2];
                 double kR = kx * xij + ky * yij + kz * zij;
                 sincos(-kR, gzI, gzR);
-                double theta_ij = ai * aj_aij;
                 double rr = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
                 double theta_rr = theta_ij*rr + .5*a2*kk;
                 double Kab = exp(-theta_rr);
