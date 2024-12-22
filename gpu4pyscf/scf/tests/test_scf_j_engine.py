@@ -42,4 +42,3 @@ def test_j_engine():
     ref = get_jk(mol, dm, with_k=False)[0]
     assert abs(lib.fp(vj1) - -2327.4715195591784) < 1e-9
     assert abs(vj1 - ref).max() < 1e-9
-

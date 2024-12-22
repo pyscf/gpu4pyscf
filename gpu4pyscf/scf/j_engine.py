@@ -193,6 +193,14 @@ class _VHFOpt(jk._VHFOpt):
         super().__init__(mol, cutoff)
         self.tile = 1
 
+    def build(self, group_size=None, verbose=None):
+        orig_mol = self.mol
+        self.mol, coeff = orig_mol.decontract_basis(to_cart=True, aggregate=True)
+        jk._VHFOpt.build(self, group_size, verbose)
+        self.mol = orig_mol
+        self.coeff = self.coeff.dot(cp.asarray(coeff))
+        return self
+
 def _md_j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ls = l_ctr_pattern[:,0]
     li, lj, lk, ll = ls
