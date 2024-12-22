@@ -69,6 +69,7 @@ def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
         ejk = cp.zeros((mol.natm, 3))
 
         ao_loc = mol.ao_loc
+        print(dms.shape)
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
         log_max_dm = dm_cond.max()
         log_cutoff = math.log(vhfopt.direct_scf_tol)
@@ -128,7 +129,7 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
 
-    mol = vhfopt.mol
+    mol = vhfopt.sorted_mol
     nao, nao_orig = vhfopt.coeff.shape
 
     dm = cp.asarray(dm, order='C')
