@@ -195,24 +195,13 @@ def _get_int3c2e_ipip_slice(ip_type, intopt, cp_ij_id, aux_id, omega=None, strea
 
     if omega is None: omega = 0.0
     if stream is None: stream = cupy.cuda.get_current_stream()
-
+    
     fn = getattr(libgint, 'GINTfill_int3c2e_' + ip_type)
-
     nao = intopt._sorted_mol.nao
     naux = intopt._sorted_auxmol.nao
     norb = nao + naux + 1
     comp = 9
     order = 2
-
-    lmax = intopt._sorted_mol._bas[:gto.ANG_OF].max()
-    aux_lmax = intopt._sorted_auxmol._bas[:gto.ANG_OF].max()
-    nroots = (lmax + aux_lmax + order)//2 + 1
-    if nroots > NROOT_ON_GPU:
-        from pyscf.gto.moleintor import getints, make_cintopt
-        pmol = intopt._tot_mol
-        intor = pmol._add_suffix('int3c2e_' + ip_type)
-        opt = make_cintopt(pmol._atm, pmol._bas, pmol._env, intor)
-
     nbins = 1
 
     cp_kl_id = aux_id + len(intopt.log_qs)
@@ -258,6 +247,11 @@ def _get_int3c2e_ipip_slice(ip_type, intopt, cp_ij_id, aux_id, omega=None, strea
         if err != 0:
             raise RuntimeError(f'GINT_fill_int3c2e general failed, err={err}')
     else:
+        from pyscf.gto.moleintor import getints, make_cintopt
+        pmol = intopt._tot_mol
+        intor = pmol._add_suffix('int3c2e_' + ip_type)
+        opt = make_cintopt(pmol._atm, pmol._bas, pmol._env, intor)
+    
         # TODO: sph2cart in CPU?
         ishl0, ishl1 = intopt.l_ctr_offsets[cpi], intopt.l_ctr_offsets[cpi+1]
         jshl0, jshl1 = intopt.l_ctr_offsets[cpj], intopt.l_ctr_offsets[cpj+1]
@@ -291,16 +285,17 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
         dm0 = cupy.asarray(dm0)
         nao = dm0.shape[0]
 
-        hj_ipip1 = cupy.zeros([nao,9])
-        hj_ipip2 = cupy.zeros([naux,9])
-        hj_ip1ip2 = cupy.zeros([nao,naux,9])
-        hj_ipvip1 = cupy.zeros([nao,nao,9])
+        hj_ipip1 = cupy.zeros([9,nao])
+        hj_ipip2 = cupy.zeros([9,naux])
+        hj_ip1ip2 = cupy.zeros([9,nao,naux])
+        hj_ipvip1 = cupy.zeros([9,nao,nao])
         if with_k:
-            hk_ipip1 = cupy.zeros([nao,9])
-            hk_ipip2 = cupy.zeros([naux,9])
-            hk_ip1ip2 = cupy.zeros([nao,naux,9])
-            hk_ipvip1 = cupy.zeros([nao,nao,9])
+            hk_ipip1 = cupy.zeros([9,nao])
+            hk_ipip2 = cupy.zeros([9,naux])
+            hk_ip1ip2 = cupy.zeros([9,nao,naux])
+            hk_ipvip1 = cupy.zeros([9,nao,nao])
 
+        cupy.get_default_memory_pool().free_all_blocks()
         for aux_id, cp_ij_id in task_list:
             cpi = intopt.cp_idx[cp_ij_id]
             cpj = intopt.cp_jdx[cp_ij_id]
@@ -309,22 +304,22 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
             k0, k1 = aux_ao_loc[aux_id], aux_ao_loc[aux_id+1]
             
             if with_k:
-                rhok_tmp = contract('por,ir->pio', rhok[k0:k1], orbo[i0:i1])
-                rhok_tmp = contract('pio,jo->pij', rhok_tmp, orbo[j0:j1])
+                rhok_tmp = contract('por,ir->poi', rhok[k0:k1], orbo[i0:i1])
+                rhok_tmp = contract('poi,jo->pji', rhok_tmp, orbo[j0:j1])
 
             # (20|0), (0|0)(0|00)
             int3c_blk = _get_int3c2e_ipip_slice('ipip1', intopt, cp_ij_id, aux_id, omega=omega)
             tmp = contract('xpji,ij->xpi', int3c_blk, dm0[i0:i1,j0:j1])
-            hj_ipip1[i0:i1] += contract('xpi,p->ix', tmp, rhoj[k0:k1])
+            hj_ipip1[:,i0:i1] += contract('xpi,p->xi', tmp, rhoj[k0:k1])
             if with_k:
-                hk_ipip1[i0:i1] += contract('xpji,pij->ix', int3c_blk, rhok_tmp)
+                hk_ipip1[:,i0:i1] += contract('xpji,pji->xi', int3c_blk, rhok_tmp)
 
             # (11|0), (0|0)(0|00) without response of RI basis
             int3c_blk = _get_int3c2e_ipip_slice('ipvip1', intopt, cp_ij_id, aux_id, omega=omega)
             tmp = contract('xpji,ij->xpij', int3c_blk, dm0[i0:i1,j0:j1])
-            hj_ipvip1[i0:i1,j0:j1] += contract('xpij,p->ijx', tmp, rhoj[k0:k1])
+            hj_ipvip1[:,i0:i1,j0:j1] += contract('xpij,p->xij', tmp, rhoj[k0:k1])
             if with_k:
-                hk_ipvip1[i0:i1,j0:j1] += contract('xpji,pij->ijx', int3c_blk, rhok_tmp)
+                hk_ipvip1[:,i0:i1,j0:j1] += contract('xpji,pji->xij', int3c_blk, rhok_tmp)
 
             if auxbasis_response < 1:
                 continue
@@ -332,9 +327,9 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
             # (10|1), (0|0)(0|00)
             int3c_blk = _get_int3c2e_ipip_slice('ip1ip2', intopt, cp_ij_id, aux_id, omega=omega)
             tmp = contract('xpji,ij->xpi', int3c_blk, dm0[i0:i1,j0:j1])
-            hj_ip1ip2[i0:i1,k0:k1] += contract('xpi,p->ipx', tmp, rhoj[k0:k1])
+            hj_ip1ip2[:,i0:i1,k0:k1] += contract('xpi,p->xip', tmp, rhoj[k0:k1])
             if with_k:
-                hk_ip1ip2[i0:i1,k0:k1] += contract('xpji,pij->ipx', int3c_blk, rhok_tmp)
+                hk_ip1ip2[:,i0:i1,k0:k1] += contract('xpji,pji->xip', int3c_blk, rhok_tmp)
             
             if auxbasis_response < 2:
                 continue
@@ -342,44 +337,44 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
             # (00|2), (0|0)(0|00)
             int3c_blk = _get_int3c2e_ipip_slice('ipip2', intopt, cp_ij_id, aux_id, omega=omega)
             tmp = contract('xpji,ij->xp', int3c_blk, dm0[i0:i1,j0:j1])
-            hj_ipip2[k0:k1] += contract('xp,p->px', tmp, rhoj[k0:k1])
+            hj_ipip2[:,k0:k1] += contract('xp,p->xp', tmp, rhoj[k0:k1])
             if with_k:
-                hk_ipip2[k0:k1] += contract('xpji,pij->px', int3c_blk, rhok_tmp)
-
+                hk_ipip2[:,k0:k1] += contract('xpji,pji->xp', int3c_blk, rhok_tmp)
+            
         auxslices = intopt.auxmol.aoslice_by_atom()
         aoslices = intopt.mol.aoslice_by_atom()
         ao2atom = int3c2e.get_ao2atom(intopt, aoslices)
         aux2atom = int3c2e.get_aux2atom(intopt, auxslices)
 
-        hj_ipvip1 = hj_ipvip1.reshape([nao,nao,3,3])
-        tmp = contract('ia,ijxy->ajxy', ao2atom, hj_ipvip1)
+        hj_ipvip1 = hj_ipvip1.reshape([3,3,nao,nao])
+        tmp = contract('ia,xyij->ajxy', ao2atom, hj_ipvip1)
         hj = 2.0 * contract('jb,ajxy->abxy', ao2atom, tmp)
 
-        hj_ipip1 = hj_ipip1.reshape([nao,3,3])
-        tmp = contract('ia,ixy->axy', ao2atom, hj_ipip1)
+        hj_ipip1 = hj_ipip1.reshape([3,3,nao])
+        tmp = contract('ia,xyi->axy', ao2atom, hj_ipip1)
         hj[range(natm), range(natm)] += 2.0 * tmp
 
         hk = None
         if with_k:
-            hk_ipvip1 = hk_ipvip1.reshape([nao,nao,3,3])
-            tmp = contract('ia,ijxy->ajxy', ao2atom, hk_ipvip1)
+            hk_ipvip1 = hk_ipvip1.reshape([3,3,nao,nao])
+            tmp = contract('ia,xyij->ajxy', ao2atom, hk_ipvip1)
             hk = contract('jb,ajxy->abxy', ao2atom, tmp)
 
-            hk_ipip1 = hk_ipip1.reshape([nao,3,3])
-            tmp = contract('ia,ixy->axy', ao2atom, hk_ipip1)
+            hk_ipip1 = hk_ipip1.reshape([3,3,nao])
+            tmp = contract('ia,xyi->axy', ao2atom, hk_ipip1)
             hk[range(natm), range(natm)] += tmp
         
         if auxbasis_response > 0:
-            hj_ip1ip2 = hj_ip1ip2.reshape([nao,naux,3,3])
-            tmp = contract('ia,ijxy->ajxy', ao2atom, hj_ip1ip2)
+            hj_ip1ip2 = hj_ip1ip2.reshape([3,3,nao,naux])
+            tmp = contract('ia,xyij->ajxy', ao2atom, hj_ip1ip2)
             tmp = contract('jb,ajxy->abxy',aux2atom, tmp)
             tmp = tmp + tmp.transpose([1,0,3,2])
             hj += tmp
             if auxbasis_response > 1:
                 hj += tmp
             if with_k:
-                hk_ip1ip2 = hk_ip1ip2.reshape([nao,naux,3,3])
-                tmp = contract('ia,ijxy->ajxy', ao2atom, hk_ip1ip2)
+                hk_ip1ip2 = hk_ip1ip2.reshape([3,3,nao,naux])
+                tmp = contract('ia,xyij->ajxy', ao2atom, hk_ip1ip2)
                 tmp = contract('jb,ajxy->abxy', aux2atom, tmp)
                 tmp = 0.5 * (tmp + tmp.transpose([1,0,3,2]))
                 hk += tmp
@@ -387,12 +382,12 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
                     hk += tmp
         
         if auxbasis_response > 1:
-            hj_ipip2 = hj_ipip2.reshape([naux,3,3])
-            tmp = contract('ia,ixy->axy', aux2atom, hj_ipip2)
+            hj_ipip2 = hj_ipip2.reshape([3,3,naux])
+            tmp = contract('ia,xyi->axy', aux2atom, hj_ipip2)
             hj[range(natm), range(natm)] += tmp
             if with_k:
-                hk_ipip2 = hk_ipip2.reshape([naux,3,3])
-                tmp = contract('ia,ixy->axy', aux2atom, hk_ipip2)
+                hk_ipip2 = hk_ipip2.reshape([3,3,naux])
+                tmp = contract('ia,xyi->axy', aux2atom, hk_ipip2)
                 hk[range(natm), range(natm)] += .5 * tmp
         t0 = log.timer_debug1(f'int3c2e_ipip on Device {device_id}', *t0)
     return hj, hk

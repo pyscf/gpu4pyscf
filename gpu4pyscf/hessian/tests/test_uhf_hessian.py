@@ -119,10 +119,13 @@ class KnownValues(unittest.TestCase):
         mo_coeff = cupy.random.rand(2, nao, nao)
         mocca = mo_coeff[0,:,:3]
         moccb = mo_coeff[1,:,:2]
+        mo_occ = cupy.zeros([2,nao])
+        mo_occ[0,:3] = 1
+        mo_occ[1,:2] = 1
         dm = cupy.empty([2,nao,nao])
         dm[0] = mocca.dot(mocca.T)
         dm[1] = moccb.dot(moccb.T)
-        vj_mo, vk_mo = jk.get_jk(mol1, dm, mo_coeff, (mocca,moccb), hermi=1)
+        vj_mo, vk_mo = jk.get_jk(mol1, dm, mo_coeff, mo_occ, hermi=1)
         
         mf = scf.UHF(mol1)
         vj, vk = mf.get_jk(mol1, dm, hermi=1)

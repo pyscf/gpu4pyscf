@@ -1035,8 +1035,8 @@ def _int3c2e_ip2_wjk(intopt, task_list, dm0, orbo, with_k=True, omega=None, devi
         for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, task_list=task_list,
                                                                 ip_type='ip2', omega=omega):
             wj[k0:k1] += contract('xpji,ji->px', int3c_blk, dm0[j0:j1,i0:i1])
-            tmp = contract('xpji,jo->piox', int3c_blk, orbo[j0:j1])
             if with_k:
+                tmp = contract('xpji,jo->piox', int3c_blk, orbo[j0:j1])
                 wk[k0:k1] += contract('piox,ir->prox', tmp, orbo[i0:i1])
     return wj, wk
 
@@ -1229,15 +1229,6 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
 
-    lmax = mol._bas[:gto.ANG_OF].max()
-    aux_lmax = auxmol._bas[:gto.ANG_OF].max()
-    nroots = (lmax + aux_lmax + order)//2 + 1
-    if nroots > NROOT_ON_GPU:
-        from pyscf.gto.moleintor import getints, make_cintopt
-        pmol = intopt._tot_mol
-        intor = pmol._add_suffix('int3c2e_' + ip_type)
-        opt = make_cintopt(pmol._atm, pmol._bas, pmol._env, intor)
-
     nao_cart = intopt._sorted_mol.nao
     naux_cart = intopt._sorted_auxmol.nao
     norb_cart = nao_cart + naux_cart + 1
@@ -1287,6 +1278,11 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
                 if err != 0:
                     raise RuntimeError("int3c2e failed\n")
             else:
+                from pyscf.gto.moleintor import getints, make_cintopt
+                pmol = intopt._tot_mol
+                intor = pmol._add_suffix('int3c2e_' + ip_type)
+                opt = make_cintopt(pmol._atm, pmol._bas, pmol._env, intor)
+
                 # TODO: sph2cart in CPU?
                 ishl0, ishl1 = intopt.l_ctr_offsets[cpi], intopt.l_ctr_offsets[cpi+1]
                 jshl0, jshl1 = intopt.l_ctr_offsets[cpj], intopt.l_ctr_offsets[cpj+1]

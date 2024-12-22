@@ -23,6 +23,7 @@ Non-relativistic RKS analytical Hessian
 import numpy
 import cupy
 from pyscf import lib
+from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.hessian import rks as rks_hess
 from gpu4pyscf.df.hessian import rhf as df_rhf_hess
@@ -90,18 +91,23 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, mf.max_memory*.9-mem_now)
-    h1mo = rks_hess._get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
+    
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
-
-    for ia, h1, vj1, vk1 in df_rhf_hess._gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
-                                                atmlst, verbose, with_k):
-        h1mo[ia] += h1 + vj1
-        if with_k:
-            h1mo[ia] -= .5 * hyb * vk1
+    vj1, vk1 = df_rhf_hess._get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile,
+                                                atmlst, verbose, with_k)
+    h1mo = vj1
+    if with_k:
+        h1mo -= .5 * hyb * vk1
+    vj1 = vk1 = None
+    
     if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
-        for ia, h1, vj1_lr, vk1_lr in df_rhf_hess._gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
-                                                atmlst, verbose, True, omega=omega):
-            h1mo[ia] -= .5 * (alpha - hyb) * vk1_lr
+        _, vk1_lr = df_rhf_hess._gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
+                                             atmlst, verbose, True, omega=omega)
+        h1mo -= .5 * (alpha - hyb) * vk1_lr
+        vk1_lr = None
+
+    h1mo += rhf_grad.get_grad_hcore(hessobj.base.nuc_grad_method())
+    h1mo += rks_hess._get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
     return h1mo
 
 class Hessian(rks_hess.Hessian):

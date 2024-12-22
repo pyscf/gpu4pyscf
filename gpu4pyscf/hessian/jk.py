@@ -41,7 +41,7 @@ def _ao2mo(v_ao, mocc, mo_coeff):
     v_ao = contract('nij,jo->nio', v_ao, mocc)
     return contract('nio,ip->npo', v_ao, mo_coeff)
 
-def _jk_task(mol, dms, mo_coeff, mocc, vhfopt, task_list, hermi=0,
+def _jk_task(mol, dms, mo_coeff, mo_occ, vhfopt, task_list, hermi=0,
              device_id=0, with_j=True, with_k=True, verbose=0):
     nao, _ = vhfopt.coeff.shape
     uniq_l_ctr = vhfopt.uniq_l_ctr
@@ -56,6 +56,12 @@ def _jk_task(mol, dms, mo_coeff, mocc, vhfopt, task_list, hermi=0,
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
         dms = cp.asarray(dms)
+        coeff = cp.asarray(vhfopt.coeff)
+
+        # Transform MO coeffcients and DM into sorted, cartesian AO basis
+        #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
+        dms = sandwich_dot(dms, coeff.T)
+        dms = cp.asarray(dms, order='C')
 
         n_dm = dms.shape[0]
         tile_q_ptr = ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p)
@@ -126,11 +132,16 @@ def _jk_task(mol, dms, mo_coeff, mocc, vhfopt, task_list, hermi=0,
         if with_k:
             vk = transpose_sum(vk)
 
-        if isinstance(mocc, tuple):
+        assert mo_coeff.ndim == 2 or mo_coeff.ndim == 3
+        if mo_coeff.ndim == 3:
             # Unrestricted case
-            mocca, moccb = mocc
-            moa, mob = mo_coeff
+            mo_coeff = cp.asarray(mo_coeff)
+            mo_occ = cp.asarray(mo_occ)
+            moa = coeff.dot(mo_coeff[0]) 
+            mob = coeff.dot(mo_coeff[1])
             nmoa, nmob = moa.shape[1], mob.shape[1]
+            mocca = moa[:,mo_occ[0] > 0.5]
+            moccb = mob[:,mo_occ[1] > 0.5]
             nocca, noccb = mocca.shape[1], moccb.shape[1]
             n_dm_2 = n_dm//2
             if with_j:
@@ -144,6 +155,10 @@ def _jk_task(mol, dms, mo_coeff, mocc, vhfopt, task_list, hermi=0,
                 vk[:,:nmoa*nocca] = _ao2mo(vka, mocca, moa).reshape(n_dm_2,-1)
                 vk[:,nmoa*nocca:] = _ao2mo(vkb, moccb, mob).reshape(n_dm_2,-1)
         else:
+            mo_coeff = cp.asarray(mo_coeff)
+            mo_occ = cp.asarray(mo_occ)
+            mo_coeff = coeff.dot(mo_coeff)
+            mocc = mo_coeff[:,mo_occ>0.5]
             if with_j:
                 vj = _ao2mo(vj, mocc, mo_coeff).reshape(n_dm,-1)
             if with_k:
@@ -151,7 +166,7 @@ def _jk_task(mol, dms, mo_coeff, mocc, vhfopt, task_list, hermi=0,
         
     return vj, vk, kern_counts, timing_counter
 
-def get_jk(mol, dm, mo_coeff, mocc, hermi=0, vhfopt=None, 
+def get_jk(mol, dm, mo_coeff, mo_occ, hermi=0, vhfopt=None, 
            with_j=True, with_k=True, verbose=None):
     '''Compute J, K matrices in MO
     '''
@@ -166,18 +181,6 @@ def get_jk(mol, dm, mo_coeff, mocc, hermi=0, vhfopt=None,
 
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
-
-    # Transform MO coeffcients and DM into sorted, cartesian AO basis
-    #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = sandwich_dot(dms, vhfopt.coeff.T)
-    dms = cp.asarray(dms, order='C')
-    coeff = vhfopt.coeff
-    if isinstance(mocc, tuple):
-        mocc = (coeff.dot(mocc[0]), coeff.dot(mocc[1]))
-        mo_coeff = (coeff.dot(mo_coeff[0]), coeff.dot(mo_coeff[1]))
-    else:
-        mocc = coeff.dot(mocc)
-        mo_coeff = coeff.dot(mo_coeff)
     n_dm = dms.shape[0]
 
     assert with_j or with_k
@@ -201,7 +204,7 @@ def get_jk(mol, dm, mo_coeff, mocc, hermi=0, vhfopt=None,
         for device_id in range(_num_devices):
             future = executor.submit(
                 _jk_task,
-                mol, dms, mo_coeff, mocc, vhfopt, task_list[device_id], hermi=hermi,
+                mol, dms, mo_coeff, mo_occ, vhfopt, task_list[device_id], hermi=hermi,
                 with_j=with_j, with_k=with_k, verbose=verbose, 
                 device_id=device_id)
             futures.append(future)
@@ -244,6 +247,10 @@ def get_jk(mol, dm, mo_coeff, mocc, hermi=0, vhfopt=None,
                 scripts.append('jk->s2il')
             else:
                 scripts.append('jk->s1il')
+        # Transform MO coeffcients and DM into sorted, cartesian AO basis
+        #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
+        dms = sandwich_dot(dms, vhfopt.coeff.T)
+        dms = cp.asarray(dms, order='C')
         shls_excludes = [0, h_shls[0]] * 4
         vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
                                  dms.get(), 1, mol._atm, mol._bas, mol._env,
@@ -263,9 +270,11 @@ def get_jk(mol, dm, mo_coeff, mocc, hermi=0, vhfopt=None,
             if with_k:
                 vk1[:,idy,idx] = vk1[:,idx,idy]
 
-        if isinstance(mocc, tuple):
-            mocca, moccb = mocc
-            moa, mob = mo_coeff
+        if mo_coeff.ndim == 3:
+            moa = vhfopt.coeff.dot(mo_coeff[0])
+            mob = vhfopt.coeff.dot(mo_coeff[1])
+            mocca = moa[:,mo_occ[0]>0.5]
+            moccb = mob[:,mo_occ[1]>0.5]
             nmoa = moa.shape[1]
             nocca = mocca.shape[1]
             n_dm_2 = n_dm//2
@@ -278,6 +287,8 @@ def get_jk(mol, dm, mo_coeff, mocc, hermi=0, vhfopt=None,
                 vk[:,:nmoa*nocca] += _ao2mo(vka, mocca, moa).reshape(n_dm_2,-1)
                 vk[:,nmoa*nocca:] += _ao2mo(vkb, moccb, mob).reshape(n_dm_2,-1)
         else:
+            mo_coeff = vhfopt.coeff.dot(mo_coeff)
+            mocc = mo_coeff[:,mo_occ>0.5]
             if with_j:
                 vj += _ao2mo(cp.asarray(vj1), mocc, mo_coeff).reshape(n_dm,-1)
             if with_k:

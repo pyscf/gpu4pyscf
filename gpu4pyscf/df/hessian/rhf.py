@@ -56,10 +56,9 @@ def _hk_ip1_ip1(rhok1_Pko, dm0, mocc_2):
     hk_ao_ao = cupy.zeros([nao,nao,3,3])
     cupy.get_default_memory_pool().free_all_blocks()
     mem_avail = get_avail_mem()
-    blksize = int((mem_avail*0.2/(nao*nao*3*8)/ALIGNED))*ALIGNED
+    blksize = int((mem_avail*0.4/(nao*nao*3*8)/ALIGNED))*ALIGNED
     for k0, k1 in lib.prange(0,nnz,blksize):
         rhok1_Pko_kslice = cupy.asarray(rhok1_Pko[k0:k1])
-
         # (10|0)(0|10) without response of RI basis
         vk2_ip1_ip1 = contract('piox,pkoy->ikxy', rhok1_Pko_kslice, rhok1_Pko_kslice)
         hk_ao_ao += contract('ikxy,ik->ikxy', vk2_ip1_ip1, dm0)
@@ -68,7 +67,7 @@ def _hk_ip1_ip1(rhok1_Pko, dm0, mocc_2):
         # (10|0)(0|01) without response of RI basis
         rhok1_Pkl_kslice = contract('piox,ko->pikx', rhok1_Pko_kslice, mocc_2)
         hk_ao_ao += contract('pikx,pkiy->ikxy', rhok1_Pkl_kslice, rhok1_Pkl_kslice)
-        rhok1_Pkl_kslice = None
+        rhok1_Pkl_kslice = rhok1_Pko_kslice = None
     return hk_ao_ao
 
 def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
@@ -397,21 +396,18 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
-    mol = hessobj.mol
-    natm = mol.natm
-    nocc = int(cupy.count_nonzero(mo_occ > 0))
-    nmo = len(mo_occ)
-    h1ao = cupy.empty((natm, 3, nmo, nocc))
-    for ia, h1, vj1, vk1 in _gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
-                                    atmlst, verbose, True):
-        h1 += vj1 - vk1 * .5
-        h1ao[ia] = h1
-    return h1ao
+    vj, vk = _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile, atmlst, verbose, True)
+    # h1mo = h1 + vj - 0.5 * vk
+    h1mo = vk
+    h1mo *= -.5
+    h1mo += vj
+    h1mo += rhf_grad.get_grad_hcore(hessobj.base.nuc_grad_method())
+    return h1mo
 
-def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
+def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             verbose=None, with_k=True, omega=None):
     '''
-    A generator to produce the derivatives of Hcore, J, K matrices in MO bases
+    Derivatives of J, K matrices in MO bases
     '''
     log = logger.new_logger(hessobj, verbose)
     t0 = log.init_timer()
@@ -568,9 +564,7 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         vk1_int3c = vk1_int3c_ip1 + vk1_int3c_ip2
         vk1_int3c_ip1 = vk1_int3c_ip2 = None
 
-    grad_hcore = rhf_grad.get_grad_hcore(hessobj.base.nuc_grad_method())
     cupy.get_default_memory_pool().free_all_blocks()
-    vk1 = None
     for i0, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = aoslices[ia]
         vj1_ao = cupy.zeros([3,nao,nao])
@@ -582,11 +576,10 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             vk1_ao[:,p0:p1,:] -= vk1_buf[:,p0:p1,:]
             vk1_ao[:,:,p0:p1] -= vk1_buf[:,p0:p1,:].transpose(0,2,1)
 
-        h1 =  grad_hcore[i0]
-        vj1 = vj1_int3c[ia] + _ao2mo(vj1_ao)
+        vj1_int3c[ia] += _ao2mo(vj1_ao)
         if with_k:
-            vk1 = vk1_int3c[ia] + _ao2mo(vk1_ao)
-        yield ia, h1, vj1, vk1
+            vk1_int3c[ia] += _ao2mo(vk1_ao)
+    return vj1_int3c, vk1_int3c
 
 def _get_jk_mo(hessobj, mol, dms, mo_coeff, mocc, 
            hermi=1, with_j=True, with_k=True, omega=None):

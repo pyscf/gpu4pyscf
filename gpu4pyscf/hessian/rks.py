@@ -731,16 +731,16 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
     v1 = jk._ao2mo(v1, mocc, mo_coeff).reshape(-1,nmo*nocc)
 
     if hybrid:
-        vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mocc, hermi=1)
+        vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1)
         vk *= hyb
         if omega > 1e-10:  # For range separated Coulomb
-            _, vk_lr = hessobj.get_jk_mo(mol, dms, mo_coeff, mocc, hermi, 
+            _, vk_lr = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi, 
                                         with_j=False, omega=omega) 
             vk_lr *= (alpha-hyb)
             vk += vk_lr
         v1 += vj - .5 * vk
     else:
-        v1 += hessobj.get_jk_mo(mol, dms, mo_coeff, mocc, hermi=1, 
+        v1 += hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1, 
                                 with_k=False)[0]
     
     return v1

@@ -180,6 +180,11 @@ def _ejk_ip2_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
         dms = cp.asarray(dms)
+        coeff = cp.asarray(vhfopt.coeff)
+        
+        #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
+        dms = sandwich_dot(dms, coeff.T)
+        dms = cp.asarray(dms, order='C')
 
         tile_q_ptr = ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p)
         q_ptr = ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p)
@@ -275,9 +280,6 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
 
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
-    #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = sandwich_dot(dms, vhfopt.coeff.T)
-    dms = cp.asarray(dms, order='C')
 
     init_constant(mol)
 
@@ -656,10 +658,11 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
 
     avail_mem = get_avail_mem()
     # *4 for input dm, vj, vk, and vxc
-    blksize = int(min(avail_mem*.3 / (8*3*nao*nao*4),
-                      avail_mem*.6 / (8*nmo*nocc*natm*3*5)))
+    blksize = int(min(avail_mem*.3 / (8*3*nao*nocc*4), # in MO
+                      avail_mem*.6 / (8*nmo*nocc*3*5), 
+                      avail_mem*.3 / (8*nmo*nmo*3*3))) # vj, vk, dm 
     if blksize < ALIGNED**2:
-        raise RuntimeError('GPU memory insufficient')
+        raise RuntimeError('GPU memory insufficient for solving CPHF equations')
 
     blksize = (blksize // ALIGNED**2) * ALIGNED**2
     log.debug(f'GPU memory {avail_mem/GB:.1f} GB available')
@@ -884,7 +887,7 @@ def _e_hcore_generator(hessobj, dm):
 def hcore_generator(hessobj, mol=None):
     raise NotImplementedError
 
-def _get_jk_mo(hessobj, mol, dms, mo_coeff, mocc, 
+def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ, 
             hermi=1, with_j=True, with_k=True, omega=None):
     ''' Compute J/K matrices in MO for multiple DMs
     '''
@@ -894,12 +897,11 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mocc,
         with mol.with_range_coulomb(omega):
             vhfopt = mf._opt_gpu[omega] = _VHFOpt(mol, mf.direct_scf_tol).build()
     with mol.with_range_coulomb(omega):
-        vj, vk = jk.get_jk(mol, dms, mo_coeff, mocc, hermi, vhfopt, with_j, with_k)
+        vj, vk = jk.get_jk(mol, dms, mo_coeff, mo_occ, hermi, vhfopt, with_j, with_k)
     return vj, vk
 
 def _get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
-    mocc = mo_coeff[:,mo_occ>0]
-    vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mocc, 
+    vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, 
                      hermi=hermi, with_j=True, with_k=True, omega=omega)
     return vj - 0.5 * vk
 

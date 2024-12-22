@@ -106,7 +106,6 @@ class KnownValues(unittest.TestCase):
         nao = mol.nao
         mo_coeff = np.random.rand(nao, nao)
         dm = mo_coeff.dot(mo_coeff.T) * 2
-
         vj, vk = rhf_gpu._get_jk_ip1(mol, dm)
         assert abs(lib.fp(vj.get()) -  87674.69061160382) < 1e-7
         assert abs(lib.fp(vk.get()) - -9.317650662101629) < 1e-7
@@ -183,9 +182,11 @@ class KnownValues(unittest.TestCase):
         )
         nao = mol1.nao
         mo_coeff = cupy.random.rand(nao, nao)
+        mo_occ = cupy.zeros([nao])
+        mo_occ[:3] = 2
         mocc = mo_coeff[:,:3]
         dm = mocc.dot(mocc.T) * 2
-        vj_mo, vk_mo = jk.get_jk(mol1, dm, mo_coeff, mocc, hermi=1)
+        vj_mo, vk_mo = jk.get_jk(mol1, dm, mo_coeff, mo_occ, hermi=1)
         
         mf = scf.RHF(mol1)
         vj, vk = mf.get_jk(mol1, dm, hermi=1)

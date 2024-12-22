@@ -880,16 +880,16 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
     v1vo[:,:nmoa*nocca] = jk._ao2mo(v1[0], mocca, mo_coeff[0]).reshape(-1,nmoa*nocca)
     v1vo[:,nmoa*nocca:] = jk._ao2mo(v1[1], moccb, mo_coeff[1]).reshape(-1,nmob*noccb)
     if hybrid:
-        vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, (mocca, moccb), hermi=1)
+        vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1)
         vk *= hyb
         if omega > 1e-10:
-            _, vk_lr = hessobj.get_jk_mo(mol, dms, mo_coeff, (mocca, moccb), 
+            _, vk_lr = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, 
                                          hermi, with_j=False, omega=omega) 
             vk_lr *= (alpha-hyb)
             vk += vk_lr
         v1vo += vj - vk
     else:
-        v1vo += hessobj.get_jk_mo(mol, dms, mo_coeff, (mocca, moccb), 
+        v1vo += hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, 
                                   hermi=1, with_k=False)[0]
     return v1vo
 

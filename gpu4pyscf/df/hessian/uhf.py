@@ -416,21 +416,21 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     if atmlst is None:
         atmlst = range(natm)
 
-    nocca, noccb = hessobj.base.nelec
-    nmo = len(mo_occ[0])
-    h1aoa = cupy.empty((natm, 3, nmo, nocca))
-    h1aob = cupy.empty((natm, 3, nmo, noccb))
-    for ia, h1, vj1, vk1 in _gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
-                                    atmlst, verbose, True):
-        h1a, h1b = h1
-        vj1a, vj1b = vj1
-        vk1a, vk1b = vk1
+    vj1, vk1 = _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile, atmlst, verbose, True)
+    vj1a, vj1b = vj1
+    vk1a, vk1b = vk1
+    h1moa = vj1a
+    h1moa-= vk1a
+    h1mob = vj1b
+    h1mob-= vk1b
+    vj1 = vk1 = vj1a = vj1b = vk1a = vk1b = None
 
-        h1aoa[ia] = h1a + vj1a - vk1a
-        h1aob[ia] = h1b + vj1b - vk1b
-    return (h1aoa, h1aob)
+    gobj = hessobj.base.nuc_grad_method()
+    h1moa += rhf_grad.get_grad_hcore(gobj, mo_coeff[0], mo_occ[0])
+    h1mob += rhf_grad.get_grad_hcore(gobj, mo_coeff[1], mo_occ[1])
+    return (h1moa, h1mob)
 
-def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
+def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             verbose=None, with_k=True, omega=None):
     '''
     A generator to produce the derivatives of Hcore, J, K matrices in MO bases
@@ -632,12 +632,8 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         tmp = contract('xij,jo->xio', mat, mocc)
         return contract('xik,ip->xpk', tmp, mo)
 
-    gobj = hessobj.base.nuc_grad_method()
-    grad_hcore_a = rhf_grad.get_grad_hcore(gobj, mo_coeff[0], mo_occ[0])
-    grad_hcore_b = rhf_grad.get_grad_hcore(gobj, mo_coeff[1], mo_occ[1])
     cupy.get_default_memory_pool().free_all_blocks()
-
-    vk1a = vk1b = None
+    
     for i0, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = aoslices[ia]
         vj1_ao = cupy.zeros([3,nao,nao])
@@ -652,14 +648,12 @@ def _gen_jk(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             vk1b_ao[:,p0:p1,:] -= vk1b_buf[:,p0:p1,:]
             vk1b_ao[:,:,p0:p1] -= vk1b_buf[:,p0:p1,:].transpose(0,2,1)
 
-        h1a = grad_hcore_a[i0]
-        h1b = grad_hcore_b[i0]
-        vj1a = vj1a_int3c[ia] + _ao2mo(vj1_ao, mocca, mo_coeff[0])
-        vj1b = vj1b_int3c[ia] + _ao2mo(vj1_ao, moccb, mo_coeff[1])
+        vj1a_int3c[ia] += _ao2mo(vj1_ao, mocca, mo_coeff[0])
+        vj1b_int3c[ia] += _ao2mo(vj1_ao, moccb, mo_coeff[1])
         if with_k:
-            vk1a = vk1a_int3c[ia] + _ao2mo(vk1a_ao, mocca, mo_coeff[0])
-            vk1b = vk1b_int3c[ia] + _ao2mo(vk1b_ao, moccb, mo_coeff[1])
-        yield ia, (h1a, h1b), (vj1a, vj1b), (vk1a, vk1b)
+            vk1a_int3c[ia] += _ao2mo(vk1a_ao, mocca, mo_coeff[0])
+            vk1b_int3c[ia] += _ao2mo(vk1b_ao, moccb, mo_coeff[1])
+    return (vj1a_int3c, vj1b_int3c), (vk1a_int3c, vk1b_int3c)
 
 _get_jk_mo = df_rhf_hess._get_jk_mo
 

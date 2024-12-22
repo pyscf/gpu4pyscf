@@ -404,9 +404,7 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
     return fx
 
 def _get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
-    mocca = mo_coeff[0][:,mo_occ[0]>0]
-    moccb = mo_coeff[1][:,mo_occ[1]>0]
-    vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, (mocca, moccb), 
+    vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, 
                                hermi=hermi, with_j=True, with_k=True)
     return vj - vk
 
