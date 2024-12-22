@@ -396,6 +396,9 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
+    mol = hessobj.mol
+    natm = mol.natm
+    assert atmlst is None or atmlst ==range(natm)
     vj, vk = _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile, atmlst, verbose, True)
     # h1mo = h1 + vj - 0.5 * vk
     h1mo = vk

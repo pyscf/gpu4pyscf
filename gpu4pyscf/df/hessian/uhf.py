@@ -413,6 +413,9 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
     natm = mol.natm
+    mol = hessobj.mol
+    natm = mol.natm
+    assert atmlst is None or atmlst ==range(natm)
     if atmlst is None:
         atmlst = range(natm)
 
@@ -633,7 +636,7 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         return contract('xik,ip->xpk', tmp, mo)
 
     cupy.get_default_memory_pool().free_all_blocks()
-    
+
     for i0, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = aoslices[ia]
         vj1_ao = cupy.zeros([3,nao,nao])

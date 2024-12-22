@@ -357,14 +357,16 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     assert atmlst is None
     mol = hessobj.mol
     natm = mol.natm
-    nao = mo_coeff.shape[0]
     mo_coeff = cp.asarray(mo_coeff)
     mocc = cp.asarray(mo_coeff[:,mo_occ>0])
     dm0 = mocc.dot(mocc.T) * 2
     h1mo = rhf_grad.get_grad_hcore(hessobj.base.Gradients())
 
+    # Estimate the size of intermediate variables
+    # dm, vj, and vk in [natm,3,nao_cart,nao_cart]
+    nao_cart = mol.nao_cart()
     avail_mem = get_avail_mem()
-    slice_size = int(avail_mem*0.6) // (8*3*nao*nao)
+    slice_size = int(avail_mem*0.5) // (8*3*nao_cart*nao_cart*3)
     for atoms_slice in lib.prange(0, natm, slice_size):
         vj, vk = _get_jk_ip1(mol, dm0, atoms_slice=atoms_slice, verbose=verbose)
         #:vhf = vj - vk * .5

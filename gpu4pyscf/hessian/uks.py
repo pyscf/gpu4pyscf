@@ -116,7 +116,6 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mo_a, mo_b = mo_coeff
     mocca = mo_a[:,mo_occ[0]>0]
     moccb = mo_b[:,mo_occ[1]>0]
-    nao = mo_a.shape[0]
     dm0a = mocca.dot(mocca.T)
     dm0b = moccb.dot(moccb.T)
     avail_mem = get_avail_mem()
@@ -131,8 +130,11 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
+    # Estimate the size of intermediate variables
+    # dm, vj, and vk in [natm,3,nao_cart,nao_cart]
+    nao_cart = mol.nao_cart()
     avail_mem -= 8 * (h1moa.size + h1mob.size)
-    slice_size = int(avail_mem*0.5) // (8*3*nao*nao)
+    slice_size = int(avail_mem*0.5) // (8*3*nao_cart*nao_cart*6)
     for atoms_slice in lib.prange(0, natm, slice_size):
         vja, vka = rhf_hess._get_jk_ip1(mol, dm0a, with_k=with_k, atoms_slice=atoms_slice, verbose=verbose)
         vjb, vkb = rhf_hess._get_jk_ip1(mol, dm0b, with_k=with_k, atoms_slice=atoms_slice, verbose=verbose)

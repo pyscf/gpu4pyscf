@@ -183,15 +183,17 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mo_a, mo_b = mo_coeff
     mocca = mo_a[:,mo_occ[0]>0]
     moccb = mo_b[:,mo_occ[1]>0]
-    nao = mo_a.shape[0]
     dm0a = mocca.dot(mocca.T)
     dm0b = moccb.dot(moccb.T)
     grad_obj = hessobj.base.Gradients()
     h1moa = rhf_grad.get_grad_hcore(grad_obj, mo_a, mo_occ[0])
     h1mob = rhf_grad.get_grad_hcore(grad_obj, mo_b, mo_occ[1])
 
+    # Estimate the size of intermediate variables
+    # dm, vj, and vk in [natm,3,nao_cart,nao_cart]
+    nao_cart = mol.nao_cart()
     avail_mem = get_avail_mem()
-    slice_size = int(avail_mem*0.6) // (8*3*nao*nao*2)
+    slice_size = int(avail_mem*0.5) // (8*3*nao_cart*nao_cart*6)
     for atoms_slice in lib.prange(0, natm, slice_size):
         vja, vka = rhf_hess_gpu._get_jk_ip1(mol, dm0a, atoms_slice=atoms_slice, verbose=verbose)
         vjb, vkb = rhf_hess_gpu._get_jk_ip1(mol, dm0b, atoms_slice=atoms_slice, verbose=verbose)

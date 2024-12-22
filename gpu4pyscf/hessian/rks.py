@@ -111,7 +111,6 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
     natm = mol.natm
     assert atmlst is None or atmlst == range(natm)
-    nao = mo_coeff.shape[0]
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = numpy.dot(mocc, mocc.T) * 2
     avail_mem = get_avail_mem()
@@ -124,8 +123,11 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
+    # Estimate the size of intermediate variables
+    # dm, vj, and vk in [natm,3,nao_cart,nao_cart]
+    nao_cart = mol.nao_cart()
     avail_mem -= 8 * h1mo.size
-    slice_size = int(avail_mem*0.5) // (8*3*nao*nao)
+    slice_size = int(avail_mem*0.5) // (8*3*nao_cart*nao_cart*3)
     for atoms_slice in lib.prange(0, natm, slice_size):
         vj, vk = rhf_hess._get_jk_ip1(mol, dm0, with_k=with_k,
                                       atoms_slice=atoms_slice, verbose=verbose)
@@ -133,6 +135,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
         if with_k:
             vk *= .5 * hyb
             veff -= vk
+        vj = vk = None
         if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
             with mol.with_range_coulomb(omega):
                 vk_lr = rhf_hess._get_jk_ip1(mol, dm0, with_j=False, verbose=verbose)[1]
@@ -142,7 +145,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
         for i, ia in enumerate(range(atom0, atom1)):
             for ix in range(3):
                 h1mo[ia,ix] += mo_coeff.T.dot(veff[i,ix].dot(mocc))
-        vj = vk = vk_lr = veff = None
+        vk_lr = veff = None
     return h1mo
 
 XX, XY, XZ = 4, 5, 6

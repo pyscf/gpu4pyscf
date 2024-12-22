@@ -85,6 +85,8 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
+    natm = mol.natm
+    assert atmlst is None or atmlst ==range(natm)
     mf = hessobj.base
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
@@ -101,7 +103,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     vj1 = vk1 = None
     
     if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
-        _, vk1_lr = df_rhf_hess._gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
+        _, vk1_lr = df_rhf_hess._get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile,
                                              atmlst, verbose, True, omega=omega)
         h1mo -= .5 * (alpha - hyb) * vk1_lr
         vk1_lr = None
