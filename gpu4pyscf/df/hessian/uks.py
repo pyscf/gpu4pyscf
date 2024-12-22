@@ -114,7 +114,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     vj1 = vk1 = vj1a = vj1b = vk1a = vk1b = None
     
     if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
-        _, vk1_lr = df_uhf_hess._gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
+        _, vk1_lr = df_uhf_hess._get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile,
                                              atmlst, verbose, True, omega=omega)
         vk1a, vk1b = vk1_lr
         h1moa -= (alpha - hyb) * vk1a
