@@ -69,7 +69,6 @@ def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
         ejk = cp.zeros((mol.natm, 3))
 
         ao_loc = mol.ao_loc
-        print(dms.shape)
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
         log_max_dm = dm_cond.max()
         log_cutoff = math.log(vhfopt.direct_scf_tol)
