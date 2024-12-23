@@ -815,7 +815,7 @@ def get_int3c2e_jk(mol, auxmol, dm0_tag, with_k=True, omega=None):
             rhok[k0:k1] = rhok_tmp
     return rhoj, rhok
 
-def _int3c2e_ip1_vjk_task(intopt, task_list, rhoj, rhok, dm0, orbo, device_id=0,
+def _int3c2e_ip1_vjk_task(intopt, task_k_list, rhoj, rhok, dm0, orbo, device_id=0,
                           with_j=True, with_k=True, omega=None):
     natom = intopt.mol.natm
     nao = intopt.mol.nao
@@ -835,7 +835,7 @@ def _int3c2e_ip1_vjk_task(intopt, task_list, rhoj, rhok, dm0, orbo, device_id=0,
             vk1 = cupy.zeros([natom,3,nao,nocc])
         aux_ao_loc = intopt.aux_ao_loc
         ncp_ij = len(intopt.log_qs)
-        for cp_k in task_list:
+        for cp_k in task_k_list:
             task_list = [(cp_k, cp_ij) for cp_ij in range(ncp_ij)]
             k0, k1 = aux_ao_loc[cp_k], aux_ao_loc[cp_k+1]
             rhok_tmp = cupy.asarray(rhok[k0:k1])
