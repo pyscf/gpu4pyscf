@@ -23,11 +23,9 @@ from pyscf import lib
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.hessian import uhf as uhf_hess
 from gpu4pyscf.grad import rhf as rhf_grad
-# import pyscf.grad.rks to activate nuc_grad_method method
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
-from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem, 
-                                       transpose_sum, tag_array)
+from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.hessian import jk
 
@@ -856,7 +854,7 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
         # If cphf_grids is not defined, e.g object defined from CPU
         grids = getattr(mf, 'grids', None)
         logger.info(mf, 'Primary grids is used for CPHF in Hessian')
-    
+
     if grids and grids.coords is None:
         grids.build(mol=mol, with_non0tab=False, sort_grids=True)
 
@@ -866,7 +864,7 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
     moccb = mo_coeff[1][:,mo_occ[1]>0]
     nocca = mocca.shape[1]
     noccb = moccb.shape[1]
-    
+
     ni = mf._numint
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     hybrid = ni.libxc.is_hybrid_xc(mf.xc)
@@ -885,13 +883,13 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
         vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1)
         vk *= hyb
         if omega > 1e-10:
-            _, vk_lr = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, 
-                                         hermi, with_j=False, omega=omega) 
+            _, vk_lr = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ,
+                                         hermi, with_j=False, omega=omega)
             vk_lr *= (alpha-hyb)
             vk += vk_lr
         v1vo += vj - vk
     else:
-        v1vo += hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, 
+        v1vo += hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ,
                                   hermi=1, with_k=False)[0]
     return v1vo
 

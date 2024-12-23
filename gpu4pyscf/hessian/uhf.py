@@ -21,15 +21,12 @@
 Non-relativistic UHF analytical Hessian
 '''
 
-from functools import reduce
 import numpy as np
 import cupy
 import cupy as cp
 from pyscf import lib
 from pyscf.scf import ucphf
-# import _response_functions to load gen_response methods in SCF class
-from gpu4pyscf.scf import _response_functions  # noqa
-from gpu4pyscf.lib.cupy_helper import (contract, transpose_sum, get_avail_mem, 
+from gpu4pyscf.lib.cupy_helper import (contract, transpose_sum, get_avail_mem,
                                        krylov, tag_array)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
@@ -406,7 +403,7 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
     return fx
 
 def _get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
-    vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, 
+    vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ,
                                hermi=hermi, with_j=True, with_k=True)
     return vj - vk
 
@@ -422,7 +419,7 @@ class Hessian(rhf_hess_gpu.HessianBase):
     gen_vind = gen_vind
     get_jk_mo = rhf_hess_gpu._get_jk_mo
     get_veff_resp_mo = _get_veff_resp_mo
-    
+
     def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1mo,
                   fx=None, atmlst=None, max_memory=4000, verbose=None):
         return solve_mo1(self.base, mo_energy, mo_coeff, mo_occ, h1mo,

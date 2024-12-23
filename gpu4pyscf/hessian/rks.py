@@ -25,11 +25,10 @@ import cupy
 from pyscf import lib
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.grad import rhf as rhf_grad
-# import pyscf.grad.rks to activate nuc_grad_method method
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
-from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem, 
-                                       reduce_to_device, transpose_sum, tag_array)
+from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem,
+                                       reduce_to_device)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, _num_devices
 from gpu4pyscf.hessian import jk
@@ -737,15 +736,15 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
         vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1)
         vk *= hyb
         if omega > 1e-10:  # For range separated Coulomb
-            _, vk_lr = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi, 
-                                        with_j=False, omega=omega) 
+            _, vk_lr = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi,
+                                        with_j=False, omega=omega)
             vk_lr *= (alpha-hyb)
             vk += vk_lr
         v1 += vj - .5 * vk
     else:
-        v1 += hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1, 
+        v1 += hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1,
                                 with_k=False)[0]
-    
+
     return v1
 
 

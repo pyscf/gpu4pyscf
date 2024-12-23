@@ -18,7 +18,6 @@ import itertools
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 import cupy
-from pyscf import gto
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.scf.int4c2e import libgint
 from gpu4pyscf.hessian.jk import _ao2mo
@@ -79,7 +78,7 @@ def _jk_task_with_mo1(dfobj, dms, mo_coeff, mo1s, occ_coeffs,
                         rhok1 = contract('Lij,jo->Loi', cderi, mo1[i])
                         rhok1 = rhok1.reshape([-1,nao])
                         vk[i] += cupy.dot(rhok1.T, rhok_oo)
-                        
+
                         rhok1 = rhok1.reshape([-1,nocc,nao])
                         rhok1 = contract('Loi,ip->Lop', rhok1, occ_coeff)
                         rhok1 = rhok1.reshape([-1,nocc])
@@ -91,7 +90,7 @@ def _jk_task_with_mo1(dfobj, dms, mo_coeff, mo1s, occ_coeffs,
             vj = cupy.zeros(dms_shape)
             vj[:,rows,cols] = vj_sparse
             vj[:,cols,rows] = vj_sparse
-        
+
         vj_mo = vk_mo = None
         if len(occ_coeffs) == 1:
             # Restricted case
@@ -127,7 +126,7 @@ def _jk_task_with_mo1(dfobj, dms, mo_coeff, mo1s, occ_coeffs,
         t0 = log.timer_debug1(f'vj and vk on Device {device_id}', *t0)
     return vj_mo, vk_mo
 
-def get_jk(dfobj, dms_tag, mo_coeff, mocc, hermi=0, 
+def get_jk(dfobj, dms_tag, mo_coeff, mocc, hermi=0,
            with_j=True, with_k=True, direct_scf_tol=1e-14, omega=None):
     ''' Compute J/K in MO with density fitting
     '''
@@ -195,7 +194,7 @@ def _get_int3c2e_ipip_slice(ip_type, intopt, cp_ij_id, aux_id, omega=None, strea
 
     if omega is None: omega = 0.0
     if stream is None: stream = cupy.cuda.get_current_stream()
-    
+
     fn = getattr(libgint, 'GINTfill_int3c2e_' + ip_type)
     nao = intopt._sorted_mol.nao
     naux = intopt._sorted_auxmol.nao
@@ -206,7 +205,7 @@ def _get_int3c2e_ipip_slice(ip_type, intopt, cp_ij_id, aux_id, omega=None, strea
 
     cp_kl_id = aux_id + len(intopt.log_qs)
     lk = intopt.aux_angular[aux_id]
-    
+
     cpi = intopt.cp_idx[cp_ij_id]
     cpj = intopt.cp_jdx[cp_ij_id]
     li = intopt.angular[cpi]
@@ -251,7 +250,7 @@ def _get_int3c2e_ipip_slice(ip_type, intopt, cp_ij_id, aux_id, omega=None, strea
         pmol = intopt._tot_mol
         intor = pmol._add_suffix('int3c2e_' + ip_type)
         opt = make_cintopt(pmol._atm, pmol._bas, pmol._env, intor)
-    
+
         # TODO: sph2cart in CPU?
         ishl0, ishl1 = intopt.l_ctr_offsets[cpi], intopt.l_ctr_offsets[cpi+1]
         jshl0, jshl1 = intopt.l_ctr_offsets[cpj], intopt.l_ctr_offsets[cpj+1]
@@ -270,26 +269,29 @@ def _get_int3c2e_ipip_slice(ip_type, intopt, cp_ij_id, aux_id, omega=None, strea
 
 
 def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
-                        device_id=0, with_k=True, omega=None, auxbasis_response=1):
+                        device_id=0, with_j=True, with_k=True, omega=None,
+                        auxbasis_response=1):
     natm = intopt.mol.natm
     nao = dm0.shape[0]
-    naux = rhok.shape[0]
+    assert with_j or with_k
     ao_loc = intopt.ao_loc
     aux_ao_loc = intopt.aux_ao_loc
     with cupy.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(intopt.mol, intopt.mol.verbose)
         t0 = log.init_timer()
-        rhoj = cupy.asarray(rhoj)
-        rhok = cupy.asarray(rhok)
         orbo = cupy.asarray(orbo)
         dm0 = cupy.asarray(dm0)
         nao = dm0.shape[0]
-
-        hj_ipip1 = cupy.zeros([9,nao])
-        hj_ipip2 = cupy.zeros([9,naux])
-        hj_ip1ip2 = cupy.zeros([9,nao,naux])
-        hj_ipvip1 = cupy.zeros([9,nao,nao])
+        if with_j:
+            naux = rhoj.shape[0]
+            rhoj = cupy.asarray(rhoj)
+            hj_ipip1 = cupy.zeros([9,nao])
+            hj_ipip2 = cupy.zeros([9,naux])
+            hj_ip1ip2 = cupy.zeros([9,nao,naux])
+            hj_ipvip1 = cupy.zeros([9,nao,nao])
         if with_k:
+            naux = rhok.shape[0]
+            rhok = cupy.asarray(rhok)
             hk_ipip1 = cupy.zeros([9,nao])
             hk_ipip2 = cupy.zeros([9,naux])
             hk_ip1ip2 = cupy.zeros([9,nao,naux])
@@ -302,57 +304,63 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
             i0, i1 = ao_loc[cpi], ao_loc[cpi+1]
             j0, j1 = ao_loc[cpj], ao_loc[cpj+1]
             k0, k1 = aux_ao_loc[aux_id], aux_ao_loc[aux_id+1]
-            
+
             if with_k:
                 rhok_tmp = contract('por,ir->poi', rhok[k0:k1], orbo[i0:i1])
                 rhok_tmp = contract('poi,jo->pji', rhok_tmp, orbo[j0:j1])
 
             # (20|0), (0|0)(0|00)
             int3c_blk = _get_int3c2e_ipip_slice('ipip1', intopt, cp_ij_id, aux_id, omega=omega)
-            tmp = contract('xpji,ij->xpi', int3c_blk, dm0[i0:i1,j0:j1])
-            hj_ipip1[:,i0:i1] += contract('xpi,p->xi', tmp, rhoj[k0:k1])
+            if with_j:
+                tmp = contract('xpji,ij->xpi', int3c_blk, dm0[i0:i1,j0:j1])
+                hj_ipip1[:,i0:i1] += contract('xpi,p->xi', tmp, rhoj[k0:k1])
             if with_k:
                 hk_ipip1[:,i0:i1] += contract('xpji,pji->xi', int3c_blk, rhok_tmp)
 
             # (11|0), (0|0)(0|00) without response of RI basis
             int3c_blk = _get_int3c2e_ipip_slice('ipvip1', intopt, cp_ij_id, aux_id, omega=omega)
-            tmp = contract('xpji,ij->xpij', int3c_blk, dm0[i0:i1,j0:j1])
-            hj_ipvip1[:,i0:i1,j0:j1] += contract('xpij,p->xij', tmp, rhoj[k0:k1])
+            if with_j:
+                tmp = contract('xpji,ij->xpij', int3c_blk, dm0[i0:i1,j0:j1])
+                hj_ipvip1[:,i0:i1,j0:j1] += contract('xpij,p->xij', tmp, rhoj[k0:k1])
             if with_k:
                 hk_ipvip1[:,i0:i1,j0:j1] += contract('xpji,pji->xij', int3c_blk, rhok_tmp)
 
             if auxbasis_response < 1:
                 continue
-            
+
             # (10|1), (0|0)(0|00)
             int3c_blk = _get_int3c2e_ipip_slice('ip1ip2', intopt, cp_ij_id, aux_id, omega=omega)
-            tmp = contract('xpji,ij->xpi', int3c_blk, dm0[i0:i1,j0:j1])
-            hj_ip1ip2[:,i0:i1,k0:k1] += contract('xpi,p->xip', tmp, rhoj[k0:k1])
+            if with_j:
+                tmp = contract('xpji,ij->xpi', int3c_blk, dm0[i0:i1,j0:j1])
+                hj_ip1ip2[:,i0:i1,k0:k1] += contract('xpi,p->xip', tmp, rhoj[k0:k1])
             if with_k:
                 hk_ip1ip2[:,i0:i1,k0:k1] += contract('xpji,pji->xip', int3c_blk, rhok_tmp)
-            
+
             if auxbasis_response < 2:
                 continue
-            
+
             # (00|2), (0|0)(0|00)
             int3c_blk = _get_int3c2e_ipip_slice('ipip2', intopt, cp_ij_id, aux_id, omega=omega)
-            tmp = contract('xpji,ij->xp', int3c_blk, dm0[i0:i1,j0:j1])
-            hj_ipip2[:,k0:k1] += contract('xp,p->xp', tmp, rhoj[k0:k1])
+            if with_j:
+                tmp = contract('xpji,ij->xp', int3c_blk, dm0[i0:i1,j0:j1])
+                hj_ipip2[:,k0:k1] += contract('xp,p->xp', tmp, rhoj[k0:k1])
             if with_k:
                 hk_ipip2[:,k0:k1] += contract('xpji,pji->xp', int3c_blk, rhok_tmp)
-            
+
         auxslices = intopt.auxmol.aoslice_by_atom()
         aoslices = intopt.mol.aoslice_by_atom()
         ao2atom = int3c2e.get_ao2atom(intopt, aoslices)
         aux2atom = int3c2e.get_aux2atom(intopt, auxslices)
 
-        hj_ipvip1 = hj_ipvip1.reshape([3,3,nao,nao])
-        tmp = contract('ia,xyij->ajxy', ao2atom, hj_ipvip1)
-        hj = 2.0 * contract('jb,ajxy->abxy', ao2atom, tmp)
+        hj = None
+        if with_j:
+            hj_ipvip1 = hj_ipvip1.reshape([3,3,nao,nao])
+            tmp = contract('ia,xyij->ajxy', ao2atom, hj_ipvip1)
+            hj = 2.0 * contract('jb,ajxy->abxy', ao2atom, tmp)
 
-        hj_ipip1 = hj_ipip1.reshape([3,3,nao])
-        tmp = contract('ia,xyi->axy', ao2atom, hj_ipip1)
-        hj[range(natm), range(natm)] += 2.0 * tmp
+            hj_ipip1 = hj_ipip1.reshape([3,3,nao])
+            tmp = contract('ia,xyi->axy', ao2atom, hj_ipip1)
+            hj[range(natm), range(natm)] += 2.0 * tmp
 
         hk = None
         if with_k:
@@ -363,15 +371,16 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
             hk_ipip1 = hk_ipip1.reshape([3,3,nao])
             tmp = contract('ia,xyi->axy', ao2atom, hk_ipip1)
             hk[range(natm), range(natm)] += tmp
-        
+
         if auxbasis_response > 0:
-            hj_ip1ip2 = hj_ip1ip2.reshape([3,3,nao,naux])
-            tmp = contract('ia,xyij->ajxy', ao2atom, hj_ip1ip2)
-            tmp = contract('jb,ajxy->abxy',aux2atom, tmp)
-            tmp = tmp + tmp.transpose([1,0,3,2])
-            hj += tmp
-            if auxbasis_response > 1:
+            if with_j:
+                hj_ip1ip2 = hj_ip1ip2.reshape([3,3,nao,naux])
+                tmp = contract('ia,xyij->ajxy', ao2atom, hj_ip1ip2)
+                tmp = contract('jb,ajxy->abxy',aux2atom, tmp)
+                tmp = tmp + tmp.transpose([1,0,3,2])
                 hj += tmp
+                if auxbasis_response > 1:
+                    hj += tmp
             if with_k:
                 hk_ip1ip2 = hk_ip1ip2.reshape([3,3,nao,naux])
                 tmp = contract('ia,xyij->ajxy', ao2atom, hk_ip1ip2)
@@ -380,11 +389,12 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
                 hk += tmp
                 if auxbasis_response > 1:
                     hk += tmp
-        
+
         if auxbasis_response > 1:
-            hj_ipip2 = hj_ipip2.reshape([3,3,naux])
-            tmp = contract('ia,xyi->axy', aux2atom, hj_ipip2)
-            hj[range(natm), range(natm)] += tmp
+            if with_j:
+                hj_ipip2 = hj_ipip2.reshape([3,3,naux])
+                tmp = contract('ia,xyi->axy', aux2atom, hj_ipip2)
+                hj[range(natm), range(natm)] += tmp
             if with_k:
                 hk_ipip2 = hk_ipip2.reshape([3,3,naux])
                 tmp = contract('ia,xyi->axy', aux2atom, hk_ipip2)
@@ -392,7 +402,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
         t0 = log.timer_debug1(f'int3c2e_ipip on Device {device_id}', *t0)
     return hj, hk
 
-def get_int3c2e_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True, 
+def get_int3c2e_hjk(intopt, rhoj, rhok, dm0_tag, with_j=True, with_k=True,
                     omega=None, auxbasis_response=1):
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     futures = []
@@ -402,26 +412,27 @@ def get_int3c2e_hjk(intopt, rhoj, rhok, dm0_tag, with_k=True,
     task_list = []
     for device_id in range(_num_devices):
         task_list.append(tasks[device_id::_num_devices])
-    
+
     cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
             future = executor.submit(
-                _int3c2e_ipip_tasks, intopt, task_list[device_id], 
-                rhoj, rhok, dm0_tag, orbo, with_k=with_k, 
-                device_id=device_id, omega=omega, 
+                _int3c2e_ipip_tasks, intopt, task_list[device_id],
+                rhoj, rhok, dm0_tag, orbo, with_j=with_j, with_k=with_k,
+                device_id=device_id, omega=omega,
                 auxbasis_response=auxbasis_response)
             futures.append(future)
-    
+
     hj_total = []
     hk_total = []
     for future in futures:
         hj, hk = future.result()
         hj_total.append(hj)
         hk_total.append(hk)
-        
+
     hj = hk = None
-    hj = reduce_to_device(hj_total, inplace=True)
+    if with_j:
+        hj = reduce_to_device(hj_total, inplace=True)
     if with_k:
         hk = reduce_to_device(hk_total, inplace=True)
     return hj, hk

@@ -28,6 +28,7 @@ from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.hessian import uhf as uhf_hess
 from gpu4pyscf.hessian import uks as uks_hess
 from gpu4pyscf.df.hessian import uhf as df_uhf_hess
+from gpu4pyscf.df.hessian.uhf import _partial_hess_ejk, _get_jk_ip
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 
@@ -52,17 +53,17 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = mf._numint.libxc.is_hybrid_xc(mf.xc)
-    de2, ej, ek = df_uhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
-                                                atmlst, max_memory, verbose,
-                                                with_k=with_k)
+    de2, ej, ek = _partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
+                                    atmlst, max_memory, verbose,
+                                    with_j=True, with_k=with_k)
     de2 += ej  # (A,B,dR_A,dR_B)
     if with_k:
         de2 -= hyb * ek
 
     if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
-        ek_lr = df_uhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
-                                            atmlst, max_memory, verbose,
-                                            True, omega=omega)[2]
+        ek_lr = _partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
+                                  atmlst, max_memory, verbose,
+                                  with_j=False, with_k=True, omega=omega)[2]
         de2 -= (alpha - hyb) * ek_lr
 
     max_memory = None
@@ -98,11 +99,11 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, mf.max_memory*.9-mem_now)
-    
+
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
-    vj1, vk1 = df_uhf_hess._get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile,
-                                       atmlst, verbose, with_k)
+    vj1, vk1 = _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile,
+                          atmlst, verbose, with_j=True, with_k=True)
     vj1a, vj1b = vj1
     h1moa = vj1a
     h1mob = vj1b
@@ -112,10 +113,10 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
         h1moa -= hyb * vk1a
         h1mob -= hyb * vk1b
     vj1 = vk1 = vj1a = vj1b = vk1a = vk1b = None
-    
+
     if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
-        _, vk1_lr = df_uhf_hess._get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile,
-                                             atmlst, verbose, True, omega=omega)
+        _, vk1_lr = _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile,
+                               atmlst, verbose, with_j=False, with_k=True, omega=omega)
         vk1a, vk1b = vk1_lr
         h1moa -= (alpha - hyb) * vk1a
         h1mob -= (alpha - hyb) * vk1b

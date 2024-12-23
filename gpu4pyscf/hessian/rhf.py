@@ -27,8 +27,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pyscf.hessian import rhf as rhf_hess_cpu
 from pyscf import lib, gto
 from pyscf.gto import ATOM_OF
-# import _response_functions to load gen_response methods in SCF class
-from gpu4pyscf.scf import _response_functions  # noqa
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib.cupy_helper import (reduce_to_device,
     contract, tag_array, sandwich_dot, transpose_sum, get_avail_mem, condense,
@@ -181,7 +179,7 @@ def _ejk_ip2_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
         cput0 = log.init_timer()
         dms = cp.asarray(dms)
         coeff = cp.asarray(vhfopt.coeff)
-        
+
         #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
         dms = sandwich_dot(dms, coeff.T)
         dms = cp.asarray(dms, order='C')
@@ -661,8 +659,8 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     avail_mem = get_avail_mem()
     # *4 for input dm, vj, vk, and vxc
     blksize = int(min(avail_mem*.3 / (8*3*nao*nocc*4), # in MO
-                      avail_mem*.6 / (8*nmo*nocc*3*5), 
-                      avail_mem*.3 / (8*nmo*nmo*3*3))) # vj, vk, dm 
+                      avail_mem*.6 / (8*nmo*nocc*3*5),
+                      avail_mem*.3 / (8*nmo*nmo*3*3))) # vj, vk, dm
     if blksize < ALIGNED**2:
         raise RuntimeError('GPU memory insufficient for solving CPHF equations')
 
@@ -692,7 +690,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         mo1[:,:,viridx] *= -e_ai
         mo1[:,:,occidx] = -s1mo_blk[:,:,occidx] * .5
         hs = s1mo_blk = h1mo_blk = None
-        
+
         tol = mf.conv_tol_cpscf * (i1 - i0)
         raw_mo1 = krylov(fvind_vo, mo1.reshape(-1,nmo*nocc),
                          tol=tol, max_cycle=max_cycle, verbose=log)
@@ -742,7 +740,7 @@ def hess_nuc_elec(mol, dm):
     fakemol.verbose = mol.verbose
     fakemol.stdout = mol.stdout
     intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
-    intopt.build(1e-14, diag_block_with_triu=True, aosym=False, 
+    intopt.build(1e-14, diag_block_with_triu=True, aosym=False,
                  group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
     dm = intopt.sort_orbitals(cupy.asarray(dm), axis=[0,1])
 
@@ -889,7 +887,7 @@ def _e_hcore_generator(hessobj, dm):
 def hcore_generator(hessobj, mol=None):
     raise NotImplementedError
 
-def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ, 
+def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
             hermi=1, with_j=True, with_k=True, omega=None):
     ''' Compute J/K matrices in MO for multiple DMs
     '''
@@ -903,7 +901,7 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
     return vj, vk
 
 def _get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
-    vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, 
+    vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ,
                      hermi=hermi, with_j=True, with_k=True, omega=omega)
     return vj - 0.5 * vk
 
@@ -921,7 +919,7 @@ class HessianBase(lib.StreamObject):
     gen_vind        = NotImplemented
     get_jk          = NotImplemented
     kernel = hess = kernel
-    
+
     def get_hcore(self, mol=None):
         if mol is None: mol = self.mol
         return get_hcore(mol)
