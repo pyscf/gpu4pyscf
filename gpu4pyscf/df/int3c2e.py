@@ -821,6 +821,7 @@ def _int3c2e_ip1_vjk_task(intopt, task_k_list, rhoj, rhok, dm0, orbo, device_id=
     nao = intopt.mol.nao
     aoslices = intopt.mol.aoslice_by_atom()
     vj1_buf = vk1_buf = vj1 = vk1 = None
+
     with cupy.cuda.Device(device_id), _streams[device_id]:
         ao2atom = get_ao2atom(intopt, aoslices)
         dm0 = cupy.asarray(dm0)
@@ -856,19 +857,20 @@ def _int3c2e_ip1_vjk_task(intopt, task_k_list, rhoj, rhok, dm0, orbo, device_id=
 
                     vk1_ao = contract('xpji,poi->xijo', int3c_blk, rhok0[:,:,i0:i1])
                     vk1[:,:,j0:j1] += contract('xijo,ia->axjo', vk1_ao, ao2atom[i0:i1])
-
-                    int3c_occ = contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])
-                    rhok0_slice = contract('pJr,ir->pJi', rhok_tmp, orbo[i0:i1])
-
-                    vk1_ao = contract('xpio,pJi->xiJo', int3c_occ, rhok0_slice)
-                    vk1 += contract('xiJo,ia->axJo', vk1_ao, ao2atom[i0:i1])
-                    vk1_ao = int3c_occ = None
             if with_j:
                 rhoj0_atom = contract('xpi,ia->xpa', rhoj0, 2.0*ao2atom)
                 vj1 += contract('pJo,xpa->axJo', rhok_tmp, rhoj0_atom)
                 rhoj0_atom = None
             if with_k:
                 vk1_buf += contract('xpio,plo->xil', int3c_ip1_occ, rhok_tmp)
+                mem_avail = get_avail_mem()
+                blksize = min(int(mem_avail * 0.2 / ((k1-k0) * nao) * 8),
+                              int(mem_avail * 0.2 / (nocc * nao * 3 * 8)))
+                for p0, p1, in lib.prange(0, nao, blksize):
+                    rhok0_slice = contract('pJr,ir->pJi', rhok_tmp[:,p0:p1], orbo)
+                    vk1_ao = contract('xpio,pJi->xiJo', int3c_ip1_occ, rhok0_slice)
+                    vk1[:,:,p0:p1] += contract('xiJo,ia->axJo', vk1_ao, ao2atom)
+
     # TODO: absorbe vj1_buf and vk1_buf into vj1 and vk1
     return vj1_buf, vk1_buf, vj1, vk1
 
