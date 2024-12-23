@@ -659,8 +659,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     avail_mem = get_avail_mem()
     # *4 for input dm, vj, vk, and vxc
     blksize = int(min(avail_mem*.3 / (8*3*nao*nocc*4), # in MO
-                      avail_mem*.6 / (8*nmo*nocc*3*5),
-                      avail_mem*.3 / (8*nmo*nmo*3*3))) # vj, vk, dm
+                      avail_mem*.3 / (8*nmo*nmo*3*3))) # vj, vk, dm in AO
     if blksize < ALIGNED**2:
         raise RuntimeError('GPU memory insufficient for solving CPHF equations')
 
