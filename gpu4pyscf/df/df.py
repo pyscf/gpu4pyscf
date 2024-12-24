@@ -54,6 +54,9 @@ class DF(lib.StreamObject):
         self._cderi = None
         self._rsh_df = {}
 
+    __getstate__, __setstate__ = lib.generate_pickle_methods(
+        excludes=('_cderi', 'cd_low', 'intopt'))
+
     @property
     def auxbasis(self):
         return self._auxbasis

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+import pickle
 import numpy as np
 import pyscf
 from pyscf import scf as cpu_scf
@@ -48,11 +49,15 @@ class KnownValues(unittest.TestCase):
     '''
     def test_rhf(self):
         print('------- RHF -----------------')
-        mf = gpu_scf.RHF(mol_sph).density_fit(auxbasis='def2-tzvpp-jkfit')
+        mf = mol_sph.RHF().density_fit(auxbasis='def2-tzvpp-jkfit').to_gpu()
         e_tot = mf.kernel()
         e_qchem = -76.0624582299
         print(f'diff from qchem {e_tot - e_qchem}')
         assert np.abs(e_tot - e_qchem) < 1e-5
+
+        # test serialization
+        mf1 = pickle.loads(pickle.dumps(mf)))
+        assert mf1.e_tot == e_tot
 
     def test_cart(self):
         print('------- RHF Cart -----------------')
