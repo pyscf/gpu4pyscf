@@ -52,7 +52,7 @@ if mf_df._numint.libxc.is_nlc(mf_df.xc):
 mf_df.direct_scf_tol = 1e-14
 mf_df.conv_tol = 1e-10
 mf_df.chkfile = None
-mf_df.conv_tol_cpscf = 1e-3
+mf_df.conv_tol_cpscf = 1e-6
 e_tot = mf_df.kernel()
 scf_time = time.time() - start_time
 print(f'compute time for energy: {scf_time:.3f} s')

@@ -23,9 +23,11 @@ Non-relativistic RKS analytical Hessian
 import numpy
 import cupy
 from pyscf import lib
+from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.hessian import rks as rks_hess
 from gpu4pyscf.df.hessian import rhf as df_rhf_hess
+from gpu4pyscf.df.hessian.rhf import _get_jk_ip, _partial_hess_ejk
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 
@@ -49,17 +51,17 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = mf._numint.libxc.is_hybrid_xc(mf.xc)
-    de2, ej, ek = df_rhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
-                                                atmlst, max_memory, verbose,
-                                                with_k=with_k)
+    de2, ej, ek = _partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
+                                    atmlst, max_memory, verbose,
+                                    with_j=True, with_k=with_k)
     de2 += ej  # (A,B,dR_A,dR_B)
     if with_k:
         de2 -= hyb * ek
 
     if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
-        ek_lr = df_rhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
-                                            atmlst, max_memory, verbose,
-                                            True, omega=omega)[2]
+        ek_lr = _partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
+                                  atmlst, max_memory, verbose,
+                                  with_j=False, with_k=True, omega=omega)[2]
         de2 -= (alpha - hyb) * ek_lr
 
     max_memory = None
@@ -84,33 +86,38 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
+    natm = mol.natm
+    assert atmlst is None or atmlst ==range(natm)
     mf = hessobj.base
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, mf.max_memory*.9-mem_now)
-    h1mo = rks_hess._get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
-    with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
-    for ia, h1, vj1, vk1 in df_rhf_hess._gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
-                                                atmlst, verbose, with_k):
-        h1mo[ia] += h1 + vj1
-        if with_k:
-            h1mo[ia] -= .5 * hyb * vk1
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
+    vj1, vk1 = _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile,
+                          atmlst, verbose, with_j=True, with_k=with_k)
+    h1mo = vj1
+    if with_k:
+        h1mo -= .5 * hyb * vk1
+    vj1 = vk1 = None
+
     if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
-        for ia, h1, vj1_lr, vk1_lr in df_rhf_hess._gen_jk(hessobj, mo_coeff, mo_occ, chkfile,
-                                                atmlst, verbose, True, omega=omega):
-            h1mo[ia] -= .5 * (alpha - hyb) * vk1_lr
+        _, vk1_lr = _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile, atmlst,
+                               verbose, with_j=False, with_k=True, omega=omega)
+        h1mo -= .5 * (alpha - hyb) * vk1_lr
+        vk1_lr = None
+
+    h1mo += rhf_grad.get_grad_hcore(hessobj.base.nuc_grad_method())
+    h1mo += rks_hess._get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
     return h1mo
 
 class Hessian(rks_hess.Hessian):
     '''Non-relativistic RKS hessian'''
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    __init__ = rks_hess.Hessian.__init__
     auxbasis_response = 1
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
-    kernel = rhf_hess.kernel
-    hess = kernel
+    get_jk_mo = df_rhf_hess._get_jk_mo

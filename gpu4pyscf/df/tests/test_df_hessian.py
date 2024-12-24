@@ -135,7 +135,7 @@ class KnownValues(unittest.TestCase):
         h = hobj.kernel()
         _check_rhf_hessian(mf, h, ix=0, iy=0)
         _check_rhf_hessian(mf, h, ix=0, iy=1)
-
+    
     def test_hessian_lda(self, disp=None):
         print('-----testing DF LDA Hessian----')
         mf = _make_rks(mol_sph, 'LDA')
@@ -239,7 +239,6 @@ class KnownValues(unittest.TestCase):
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
-        print(np.linalg.norm(h))
         _check_dft_hessian(mf, h, ix=0,iy=0)
 
     def test_hessian_rks_D4(self):

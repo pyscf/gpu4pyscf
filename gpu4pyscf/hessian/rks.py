@@ -25,12 +25,13 @@ import cupy
 from pyscf import lib
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.grad import rhf as rhf_grad
-# import pyscf.grad.rks to activate nuc_grad_method method
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
-from gpu4pyscf.lib.cupy_helper import contract, add_sparse, get_avail_mem, reduce_to_device
+from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem,
+                                       reduce_to_device)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, _num_devices
+from gpu4pyscf.hessian import jk
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -109,7 +110,6 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
     natm = mol.natm
     assert atmlst is None or atmlst == range(natm)
-    nao = mo_coeff.shape[0]
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = numpy.dot(mocc, mocc.T) * 2
     avail_mem = get_avail_mem()
@@ -122,25 +122,29 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
+    # Estimate the size of intermediate variables
+    # dm, vj, and vk in [natm,3,nao_cart,nao_cart]
+    nao_cart = mol.nao_cart()
     avail_mem -= 8 * h1mo.size
-    slice_size = int(avail_mem*0.5) // (8*3*nao*nao)
+    slice_size = int(avail_mem*0.5) // (8*3*nao_cart*nao_cart*3)
     for atoms_slice in lib.prange(0, natm, slice_size):
-        vj, vk = rhf_hess._get_jk(mol, dm0, with_k=with_k,
-                                  atoms_slice=atoms_slice, verbose=verbose)
+        vj, vk = rhf_hess._get_jk_ip1(mol, dm0, with_k=with_k,
+                                      atoms_slice=atoms_slice, verbose=verbose)
         veff = vj
         if with_k:
             vk *= .5 * hyb
             veff -= vk
+        vj = vk = None
         if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
             with mol.with_range_coulomb(omega):
-                vk_lr = rhf_hess._get_jk(mol, dm0, with_j=False, verbose=verbose)[1]
+                vk_lr = rhf_hess._get_jk_ip1(mol, dm0, with_j=False, verbose=verbose)[1]
                 vk_lr *= (alpha-hyb) * .5
                 veff -= vk_lr
         atom0, atom1 = atoms_slice
         for i, ia in enumerate(range(atom0, atom1)):
             for ix in range(3):
                 h1mo[ia,ix] += mo_coeff.T.dot(veff[i,ix].dot(mocc))
-        vj = vk = vk_lr = veff = None
+        vk_lr = veff = None
     return h1mo
 
 XX, XY, XZ = 4, 5, 6
@@ -698,6 +702,51 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     vmat = reduce_to_device(vmat_dist, inplace=True)
     return vmat
 
+def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
+    mol = hessobj.mol
+    mf = hessobj.base
+    grids = getattr(mf, 'cphf_grids', None)
+    if grids is not None:
+        logger.info(mf, 'Secondary grids defined for CPHF in Hessian')
+    else:
+        # If cphf_grids is not defined, e.g object defined from CPU
+        grids = getattr(mf, 'grids', None)
+        logger.info(mf, 'Primary grids is used for CPHF in Hessian')
+
+    if grids and grids.coords is None:
+        grids.build(mol=mol, with_non0tab=False, sort_grids=True)
+
+    ni = mf._numint
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+    hybrid = ni.libxc.is_hybrid_xc(mf.xc)
+    assert not mf.do_nlc()
+    hermi = 1
+
+    mocc = mo_coeff[:,mo_occ>0]
+    nocc = mocc.shape[1]
+    nao, nmo = mo_coeff.shape
+    # TODO: evaluate v1 in MO
+    rho0, vxc, fxc = ni.cache_xc_kernel(mol, grids, mf.xc,
+                                        mo_coeff, mo_occ, 0)
+    v1 = ni.nr_rks_fxc(mol, grids, mf.xc, None, dms, 0, hermi,
+                                    rho0, vxc, fxc, max_memory=None)
+    v1 = jk._ao2mo(v1, mocc, mo_coeff).reshape(-1,nmo*nocc)
+
+    if hybrid:
+        vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1)
+        vk *= hyb
+        if omega > 1e-10:  # For range separated Coulomb
+            _, vk_lr = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi,
+                                        with_j=False, omega=omega)
+            vk_lr *= (alpha-hyb)
+            vk += vk_lr
+        v1 += vj - .5 * vk
+    else:
+        v1 += hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1,
+                                with_k=False)[0]
+
+    return v1
+
 
 class Hessian(rhf_hess.HessianBase):
     '''Non-relativistic RKS hessian'''
@@ -714,6 +763,9 @@ class Hessian(rhf_hess.HessianBase):
     partial_hess_elec = partial_hess_elec
     hess_elec = rhf_hess.hess_elec
     make_h1 = make_h1
+    gen_vind = rhf_hess.gen_vind
+    get_jk_mo = rhf_hess._get_jk_mo
+    get_veff_resp_mo = get_veff_resp_mo
 
 from gpu4pyscf import dft
 dft.rks.RKS.Hessian = lib.class_as_method(Hessian)
