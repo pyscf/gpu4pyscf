@@ -269,7 +269,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
 
-    mol = vhfopt.mol
+    mol = vhfopt.sorted_mol
     nao, nao_orig = vhfopt.coeff.shape
 
     dm = cp.asarray(dm, order='C')
@@ -487,7 +487,7 @@ def _get_jk(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=None):
     vhfopt.tile = 1
     vhfopt.build()
 
-    mol = vhfopt.mol
+    mol = vhfopt.sorted_mol
     nao, nao_orig = vhfopt.coeff.shape
 
     dm = cp.asarray(dm, order='C')

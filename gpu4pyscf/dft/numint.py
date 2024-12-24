@@ -1999,7 +1999,7 @@ class _GDFTOpt:
         if hasattr(mol, '_decontracted') and mol._decontracted:
             raise RuntimeError('mol object is already decontracted')
 
-        pmol = basis_seg_contraction(mol, allow_replica=True)
+        pmol = basis_seg_contraction(mol, allow_replica=True)[0]
         pmol.cart = mol.cart
         coeff = cupy.eye(mol.nao)      # without cart2sph transformation
         # Sort basis according to angular momentum and contraction patterns so
