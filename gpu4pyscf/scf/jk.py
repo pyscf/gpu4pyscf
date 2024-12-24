@@ -59,7 +59,7 @@ SHM_SIZE = getattr(__config__, 'GPU_SHM_SIZE',
                    int(gpu_specs['sharedMemPerBlockOptin']//9)*8)
 THREADS = 256
 
-def _jk_task(mol, dms, vhfopt, task_list,
+def _jk_task(mol, dms, vhfopt, task_list, hermi=0,
              device_id=0, with_j=True, with_k=True, verbose=None):
     n_dm = dms.shape[0]
     nao, _ = vhfopt.coeff.shape
