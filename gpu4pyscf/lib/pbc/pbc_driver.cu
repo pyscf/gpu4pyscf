@@ -5,15 +5,19 @@
 #include <cuda_runtime.h>
 
 #include "gvhf-rys/vhf.cuh"
-#include "ft_ao.h"
+#include "int3c2e.cuh"
+#include "ft_ao.cuh"
 
-__constant__ int c_g_pair_idx[3675];
+__constant__ int c_g_pair_idx[3675]; // corresponding to LMAX=4
 __constant__ int c_g_pair_offsets[LMAX1*LMAX1];
+__constant__ int c_g_cart_idx[252]; // corresponding to LMAX=6
 
 extern __global__
 void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds);
 extern __global__
 void ft_aopair_fill_triu(double *out, int *conj_mapping, int bvk_ncells, int nGv);
+extern __global__
+void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds);
 
 int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds, int *scheme);
 
@@ -73,11 +77,92 @@ int PBC_ft_aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_nce
     return 0;
 }
 
-int PBC_FT_init_constant(int *g_pair_idx, int *offsets,
-                         double *env, int env_size, int shm_size)
+int PBC_fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
+                     int *scheme, int *shls_slice, int npairs_ij, int img_pairs,
+                     uint16_t nrow, uint16_t ncol, uint16_t naux,
+                     int *ish_in_pair, int *jsh_in_pair,
+                     int *img_idx, int *img_offsets,
+                     int *atm, int natm, int *bas, int nbas, double *env)
+{
+    uint16_t ish0 = shls_slice[0];
+    uint16_t ish1 = shls_slice[1];
+    uint16_t jsh0 = shls_slice[2];
+    uint16_t jsh1 = shls_slice[3];
+    uint16_t ksh0 = shls_slice[4];
+    uint16_t ksh1 = shls_slice[5];
+    uint16_t nksh = ksh1 - ksh0;
+    uint8_t li = bas[ANG_OF + ish0*BAS_SLOTS];
+    uint8_t lj = bas[ANG_OF + jsh0*BAS_SLOTS];
+    uint8_t lk = bas[ANG_OF + ksh0*BAS_SLOTS];
+    uint8_t iprim = bas[NPRIM_OF + ish0*BAS_SLOTS];
+    uint8_t jprim = bas[NPRIM_OF + jsh0*BAS_SLOTS];
+    uint8_t kprim = bas[NPRIM_OF + ksh0*BAS_SLOTS];
+    uint8_t nfi = (li+1)*(li+2)/2;
+    uint8_t nfj = (lj+1)*(lj+2)/2;
+    uint8_t nfk = (lk+1)*(lk+2)/2;
+    uint8_t nfij = nfi * nfj;
+    uint8_t order = li + lj + lk;
+    uint8_t nroots = order / 2 + 1;
+    double omega = env[PTR_RANGE_OMEGA];
+    if (omega < 0) { // SR ERIs
+        nroots *= 2;
+    }
+    uint8_t stride_i = 1;
+    uint8_t stride_j = li + 1;
+    uint8_t stride_k = stride_j * (lj + 1);
+    // up to (gg|i)
+    uint8_t g_size = stride_k * (lk + 1);
+    PBCInt3c2eBounds bounds = {li, lj, lk, nroots, nfi, nfij, nfk,
+        iprim, jprim, kprim, stride_i, stride_j, stride_k, g_size,
+        nrow, ncol, naux, nksh, ish0, jsh0, ksh0,
+        npairs_ij, ish_in_pair, jsh_in_pair, img_idx, img_offsets};
+
+    if (1) {
+        int nksh_per_block = scheme[0];
+        int gout_stride = scheme[1];
+        int nsp_per_block = scheme[2];
+        dim3 threads(nksh_per_block, gout_stride, nsp_per_block);
+        int sp_blocks = (npairs_ij + SPTAKS_PER_BLOCK*nsp_per_block - 1) /
+            (SPTAKS_PER_BLOCK*nsp_per_block);
+        int ksh_blocks = (nksh + nksh_per_block - 1) / nksh_per_block;
+        dim3 blocks(sp_blocks, ksh_blocks);
+        int buflen = g_size*3 * nksh_per_block * nsp_per_block * sizeof(double) +
+            nksh_per_block*3 * sizeof(float) + img_pairs * sizeof(int8_t);
+        pbc_int3c2e_kernel<<<blocks, threads, buflen>>>(out, *envs, bounds);
+    }
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in PBC_fill_int3c2e: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int PBC_init_constant(int *g_pair_idx, int *offsets,
+                      double *env, int env_size, int shm_size)
 {
     cudaMemcpyToSymbol(c_g_pair_idx, g_pair_idx, 3675*sizeof(int));
     cudaMemcpyToSymbol(c_g_pair_offsets, offsets, sizeof(int) * LMAX1*LMAX1);
+
+    int *g_cart_idx = (int *)malloc(252*sizeof(int));
+    int *idx, *idy, *idz;
+    idx = g_cart_idx;
+    for (int l = 0; l <= L_AUX_MAX; ++l) {
+        int nf = (l + 1) * (l + 2) / 2;
+        idy = idx + nf;
+        idz = idy + nf;
+        for (int i = 0, ix = l; ix >= 0; --ix) {
+        for (int iy = l - ix; iy >= 0; --iy, ++i) {
+            int iz = l - ix - iy;
+            idx[i] = ix;
+            idy[i] = iy;
+            idz[i] = iz;
+        } }
+        idx += nf * 3;
+    }
+    cudaMemcpyToSymbol(c_g_cart_idx, g_cart_idx, 252*sizeof(int));
+    free(g_cart_idx);
+
     cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

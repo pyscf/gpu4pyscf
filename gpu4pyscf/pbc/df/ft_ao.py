@@ -44,7 +44,7 @@ __all__ = [
 
 libpbc = load_library('libpbc')
 libpbc.PBC_build_ft_ao.restype = ctypes.c_int
-libpbc.PBC_FT_init_constant.restype = ctypes.c_int
+libpbc.PBC_init_constant.restype = ctypes.c_int
 
 LMAX = 4
 GOUT_WIDTH = 19
@@ -169,7 +169,7 @@ class FTOpt:
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
 
         if bvk_kmesh is None:
-            bvkmesh_Ls = cp.zeros(3)
+            bvkmesh_Ls = cp.zeros((1, 3))
         else:
             bvkmesh_Ls = cp.asarray(
                 k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True))
@@ -365,7 +365,7 @@ class AFTIntEnvVars(ctypes.Structure):
 
 def init_constant(cell):
     g_idx, offsets = g_pair_idx()
-    err = libpbc.PBC_FT_init_constant(
+    err = libpbc.PBC_init_constant(
         g_idx.ctypes, offsets.ctypes, cell._env.ctypes, ctypes.c_int(cell._env.size),
         ctypes.c_int(SHM_SIZE))
     if err != 0:
