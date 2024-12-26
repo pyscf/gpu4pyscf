@@ -20,6 +20,10 @@ from pyscf import scf as cpu_scf
 from pyscf.df import df_jk as cpu_df_jk
 from gpu4pyscf.df import df_jk as gpu_df_jk
 from gpu4pyscf import scf as gpu_scf
+try:
+    import cloudpickle
+except ImportError:
+    cloudpickle = None
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -56,8 +60,9 @@ class KnownValues(unittest.TestCase):
         assert np.abs(e_tot - e_qchem) < 1e-5
 
         # test serialization
-        mf1 = pickle.loads(pickle.dumps(mf))
-        assert mf1.e_tot == e_tot
+        if cloudpickle is not None:
+            mf1 = pickle.loads(cloudpickle.dumps(mf))
+            assert mf1.e_tot == e_tot
 
     def test_cart(self):
         print('------- RHF Cart -----------------')
