@@ -56,7 +56,7 @@ class KnownValues(unittest.TestCase):
         assert np.abs(e_tot - e_qchem) < 1e-5
 
         # test serialization
-        mf1 = pickle.loads(pickle.dumps(mf)))
+        mf1 = pickle.loads(pickle.dumps(mf))
         assert mf1.e_tot == e_tot
 
     def test_cart(self):
