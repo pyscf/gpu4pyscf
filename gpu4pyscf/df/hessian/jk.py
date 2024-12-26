@@ -316,6 +316,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
                 hj_ipip1[:,i0:i1] += contract('xpi,p->xi', tmp, rhoj[k0:k1])
             if with_k:
                 hk_ipip1[:,i0:i1] += contract('xpji,pji->xi', int3c_blk, rhok_tmp)
+            int3c_blk = None
 
             # (11|0), (0|0)(0|00) without response of RI basis
             int3c_blk = _get_int3c2e_ipip_slice('ipvip1', intopt, cp_ij_id, aux_id, omega=omega)
@@ -324,6 +325,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
                 hj_ipvip1[:,i0:i1,j0:j1] += contract('xpij,p->xij', tmp, rhoj[k0:k1])
             if with_k:
                 hk_ipvip1[:,i0:i1,j0:j1] += contract('xpji,pji->xij', int3c_blk, rhok_tmp)
+            int3c_blk = None
 
             if auxbasis_response < 1:
                 continue
@@ -335,6 +337,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
                 hj_ip1ip2[:,i0:i1,k0:k1] += contract('xpi,p->xip', tmp, rhoj[k0:k1])
             if with_k:
                 hk_ip1ip2[:,i0:i1,k0:k1] += contract('xpji,pji->xip', int3c_blk, rhok_tmp)
+            int3c_blk = None
 
             if auxbasis_response < 2:
                 continue
@@ -346,7 +349,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
                 hj_ipip2[:,k0:k1] += contract('xp,p->xp', tmp, rhoj[k0:k1])
             if with_k:
                 hk_ipip2[:,k0:k1] += contract('xpji,pji->xp', int3c_blk, rhok_tmp)
-
+            int3c_blk = None
         auxslices = intopt.auxmol.aoslice_by_atom()
         aoslices = intopt.mol.aoslice_by_atom()
         ao2atom = int3c2e.get_ao2atom(intopt, aoslices)
