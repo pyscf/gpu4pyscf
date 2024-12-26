@@ -32,6 +32,7 @@ def _jk_task_with_mo1(dfobj, dms, mo_coeff, mo1s, occ_coeffs,
     ''' Calculate J and K matrices with mo response
         For CP-HF
     '''
+    assert hermi == 1
     with cupy.cuda.Device(device_id), _streams[device_id]:
         assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
