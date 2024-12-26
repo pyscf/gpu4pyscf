@@ -19,6 +19,7 @@ import numpy as np
 from pyscf.gto import ATOM_OF
 from pyscf.lib import c_null_ptr
 from gpu4pyscf.lib.cupy_helper import load_library, cart2sph, get_avail_mem
+from gpu4pyscf.gto.int3c1e import VHFOpt
 
 libgint = load_library('libgint')
 
@@ -59,7 +60,6 @@ def get_int3c1e_ip(mol, grids, charge_exponents, intopt):
             lj = intopt.angular[cpj]
 
             stream = cp.cuda.get_current_stream()
-            nao_cart = intopt._sorted_mol.nao
 
             log_q_ij = intopt.log_qs[cp_ij_id]
 
@@ -87,7 +87,6 @@ def get_int3c1e_ip(mol, grids, charge_exponents, intopt):
                 ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
                 ctypes.c_int(ngrids_of_split),
                 ctypes.cast(int3c_angular_slice.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(nao_cart),
                 strides.ctypes.data_as(ctypes.c_void_p),
                 ao_offsets.ctypes.data_as(ctypes.c_void_p),
                 bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
@@ -125,7 +124,14 @@ def get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, int
     omega = mol.omega
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
-    charges = cp.asarray(charges).reshape([-1, 1], order='C')
+    grids = cp.asarray(grids, order='C')
+    if charge_exponents is not None:
+        charge_exponents = cp.asarray(charge_exponents, order='C')
+
+    assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
+    charges = cp.asarray(charges).astype(np.float64)
+
+    charges = charges.reshape([-1, 1], order='C')
     grids = cp.concatenate([grids, charges], axis=1)
 
     int1e_charge_contracted = cp.zeros([3, mol.nao, mol.nao], order='C')
@@ -136,7 +142,6 @@ def get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, int
         lj = intopt.angular[cpj]
 
         stream = cp.cuda.get_current_stream()
-        nao_cart = intopt._sorted_mol.nao
 
         log_q_ij = intopt.log_qs[cp_ij_id]
 
@@ -169,7 +174,6 @@ def get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, int
             ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.cast(int1e_angular_slice.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(nao_cart),
             strides.ctypes.data_as(ctypes.c_void_p),
             ao_offsets.ctypes.data_as(ctypes.c_void_p),
             bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
@@ -201,6 +205,14 @@ def get_int3c1e_ip2_density_contracted(mol, grids, charge_exponents, dm, intopt)
 
     nao_cart = intopt._sorted_mol.nao
     ngrids = grids.shape[0]
+
+    grids = cp.asarray(grids, order='C')
+    if charge_exponents is not None:
+        charge_exponents = cp.asarray(charge_exponents, order='C')
+
+    dm = cp.asarray(dm)
+    assert dm.ndim == 2
+    assert dm.shape[0] == dm.shape[1] and dm.shape[0] == mol.nao
 
     dm = intopt.sort_orbitals(dm, [0,1])
     if not mol.cart:
@@ -278,7 +290,7 @@ def get_int3c1e_ip2_density_contracted(mol, grids, charge_exponents, dm, intopt)
 
     return int3c_density_contracted
 
-def get_int3c1e_ip_contracted(mol, grids, charge_exponents, dm, charges, intopt):
+def get_int3c1e_ip1_charge_and_density_contracted(mol, grids, charge_exponents, dm, charges, intopt):
     dm = cp.asarray(dm)
     if dm.ndim == 3:
         if dm.shape[0] > 2:
@@ -289,17 +301,81 @@ def get_int3c1e_ip_contracted(mol, grids, charge_exponents, dm, charges, intopt)
     assert dm.ndim == 2
     assert dm.shape[0] == dm.shape[1] and dm.shape[0] == mol.nao
 
-    grids = cp.asarray(grids, order='C')
-    if charge_exponents is not None:
-        charge_exponents = cp.asarray(charge_exponents, order='C')
+    int3c_ip1 = get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, intopt)
+    int3c_ip1 = cp.einsum('xji,ij->xi', int3c_ip1, dm)
+    return int3c_ip1
 
+def get_int3c1e_ip2_charge_and_density_contracted(mol, grids, charge_exponents, dm, charges, intopt):
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
-    charges = cp.asarray(charges)
+    charges = cp.asarray(charges).astype(np.float64)
 
     int3c_ip2 = get_int3c1e_ip2_density_contracted(mol, grids, charge_exponents, dm, intopt)
     int3c_ip2 = int3c_ip2 * charges
+    return int3c_ip2
 
-    int3c_ip1 = get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, intopt)
-    int3c_ip1 = cp.einsum('xji,ij->xi', int3c_ip1, dm)
+def int1e_grids_ip1(mol, grids, charge_exponents=None, dm=None, charges=None, direct_scf_tol=1e-13, intopt=None):
+    r'''
+    This function computes
+    $$\left(\frac{\partial}{\partial \vec{A}} \mu \middle| \frac{1}{|\vec{r} - \vec{C}|} \middle| \nu\right)$$
+    where $\mu(\vec{r})$ centers at $\vec{A}$ and $\nu(\vec{r})$ centers at $\vec{B}$.
 
-    return int3c_ip1, int3c_ip2
+    If charges is not None, the function computes the following contraction:
+    $$\sum_{C}^{n_{charge}} q_C \left(\frac{\partial}{\partial \vec{A}} \mu \middle| \frac{1}{|\vec{r} - \vec{C}|} \middle| \nu\right)$$
+    where $q_C$ is the charge centered at $\vec{C}$.
+
+    If charges is not None and dm is not None, the function computes the following contraction:
+    $$\sum_\nu^{n_{ao}} D_{\mu\nu} \sum_{C}^{n_{charge}} q_C
+        \left(\frac{\partial}{\partial \vec{A}} \mu \middle| \frac{1}{|\vec{r} - \vec{C}|} \middle| \nu\right)$$
+    '''
+    assert grids is not None
+
+    if intopt is None:
+        intopt = VHFOpt(mol)
+        intopt.build(direct_scf_tol, aosym=False)
+    else:
+        assert isinstance(intopt, VHFOpt), \
+            f"Please make sure intopt is a {VHFOpt.__module__}.{VHFOpt.__name__} object."
+        assert hasattr(intopt, "density_offset"), "Please call build() function for VHFOpt object first."
+        assert not intopt.aosym
+
+    if dm is None and charges is None:
+        return get_int3c1e_ip(mol, grids, charge_exponents, intopt)[0]
+    else:
+        assert charges is not None
+        if dm is not None:
+            return get_int3c1e_ip1_charge_and_density_contracted(mol, grids, charge_exponents, dm, charges, intopt)
+        else:
+            return get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, intopt)
+
+def int1e_grids_ip2(mol, grids, charge_exponents=None, dm=None, charges=None, direct_scf_tol=1e-13, intopt=None):
+    r'''
+    This function computes
+    $$\left(\mu \middle| \frac{\partial}{\partial \vec{C}} \frac{1}{|\vec{r} - \vec{C}|} \middle| \nu\right)$$
+    where $\mu(\vec{r})$ centers at $\vec{A}$ and $\nu(\vec{r})$ centers at $\vec{B}$.
+
+    If dm is not None, the function computes the following contraction:
+    $$\sum_{\mu, \nu}^{n_{ao}} D_{\mu\nu} \left(\mu \middle| \frac{\partial}{\partial \vec{C}} \frac{1}{|\vec{r} - \vec{C}|} \middle| \nu\right)$$
+
+    If dm is not None and charges is not None, the function computes the following contraction:
+    $$q_C \sum_{\mu, \nu}^{n_{ao}} D_{\mu\nu} \left(\mu \middle| \frac{\partial}{\partial \vec{C}} \frac{1}{|\vec{r} - \vec{C}|} \middle| \nu\right)$$
+    where $q_C$ is the charge centered at $\vec{C}$.
+    '''
+    assert grids is not None
+
+    if intopt is None:
+        intopt = VHFOpt(mol)
+        intopt.build(direct_scf_tol, aosym=False)
+    else:
+        assert isinstance(intopt, VHFOpt), \
+            f"Please make sure intopt is a {VHFOpt.__module__}.{VHFOpt.__name__} object."
+        assert hasattr(intopt, "density_offset"), "Please call build() function for VHFOpt object first."
+        assert not intopt.aosym
+
+    if dm is None and charges is None:
+        return get_int3c1e_ip(mol, grids, charge_exponents, intopt)[1]
+    else:
+        assert dm is not None
+        if charges is not None:
+            return get_int3c1e_ip2_charge_and_density_contracted(mol, grids, charge_exponents, dm, charges, intopt)
+        else:
+            return get_int3c1e_ip2_density_contracted(mol, grids, charge_exponents, dm, intopt)

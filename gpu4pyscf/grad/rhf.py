@@ -128,7 +128,7 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
 
-    mol = vhfopt.mol
+    mol = vhfopt.sorted_mol
     nao, nao_orig = vhfopt.coeff.shape
 
     dm = cp.asarray(dm, order='C')

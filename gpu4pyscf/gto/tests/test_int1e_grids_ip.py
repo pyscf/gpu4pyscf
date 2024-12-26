@@ -18,7 +18,7 @@ import numpy as np
 import cupy as cp
 import pyscf
 from pyscf import lib, gto, df
-from gpu4pyscf.gto.moleintor import intor
+from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
 
 def setUpModule():
     global mol_sph, mol_cart, grid_points, integral_threshold, density_contraction_threshold, charge_contraction_threshold
@@ -60,7 +60,7 @@ class KnownValues(unittest.TestCase):
     '''
     Values are compared to PySCF CPU intor() function
     '''
-    def test_int1e_grids_ip1_full_tensor_cart(self):
+    def test_int1e_grids_ip_full_tensor_cart(self):
         mol = mol_cart
         fakemol = gto.fakemol_for_charges(grid_points)
 
@@ -72,14 +72,15 @@ class KnownValues(unittest.TestCase):
         cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e_ip2)
         ref_int1e_dC = df.incore.aux_e2(mol, fakemol, intor=int3c2e_ip2, aosym='s1', cintopt=cintopt)
 
-        test_int1e_dA, test_int1e_dC = intor(mol, 'int1e_grids_ip', grid_points)
+        test_int1e_dA = int1e_grids_ip1(mol, grid_points)
+        test_int1e_dC = int1e_grids_ip2(mol, grid_points)
         test_int1e_dA = test_int1e_dA.transpose(0, 3, 2, 1)
         test_int1e_dC = test_int1e_dC.transpose(0, 3, 2, 1)
 
         np.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         np.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
 
-    def test_int1e_grids_ip1_full_tensor_sph(self):
+    def test_int1e_grids_ip_full_tensor_sph(self):
         mol = mol_sph
         fakemol = gto.fakemol_for_charges(grid_points)
 
@@ -91,14 +92,15 @@ class KnownValues(unittest.TestCase):
         cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e_ip2)
         ref_int1e_dC = df.incore.aux_e2(mol, fakemol, intor=int3c2e_ip2, aosym='s1', cintopt=cintopt)
 
-        test_int1e_dA, test_int1e_dC = intor(mol, 'int1e_grids_ip', grid_points)
+        test_int1e_dA = int1e_grids_ip1(mol, grid_points)
+        test_int1e_dC = int1e_grids_ip2(mol, grid_points)
         test_int1e_dA = test_int1e_dA.transpose(0, 3, 2, 1)
         test_int1e_dC = test_int1e_dC.transpose(0, 3, 2, 1)
 
         np.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         np.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
 
-    def test_int1e_grids_ip1_full_tensor_gaussian_charge(self):
+    def test_int1e_grids_ip_full_tensor_gaussian_charge(self):
         np.random.seed(12345)
         charge_exponents = np.random.uniform(0.5, 1.0, grid_points.shape[0])
 
@@ -113,14 +115,15 @@ class KnownValues(unittest.TestCase):
         cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e_ip2)
         ref_int1e_dC = df.incore.aux_e2(mol, fakemol, intor=int3c2e_ip2, aosym='s1', cintopt=cintopt)
 
-        test_int1e_dA, test_int1e_dC = intor(mol, 'int1e_grids_ip', grid_points, charge_exponents = charge_exponents)
+        test_int1e_dA = int1e_grids_ip1(mol, grid_points, charge_exponents = charge_exponents)
+        test_int1e_dC = int1e_grids_ip2(mol, grid_points, charge_exponents = charge_exponents)
         test_int1e_dA = test_int1e_dA.transpose(0, 3, 2, 1)
         test_int1e_dC = test_int1e_dC.transpose(0, 3, 2, 1)
 
         np.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         np.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
 
-    def test_int1e_grids_ip1_full_tensor_omega(self):
+    def test_int1e_grids_ip_full_tensor_omega(self):
         omega = 1.2
         mol_sph_omega = mol_sph.copy()
         mol_sph_omega.set_range_coulomb(omega)
@@ -136,14 +139,15 @@ class KnownValues(unittest.TestCase):
         cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e_ip2)
         ref_int1e_dC = df.incore.aux_e2(mol, fakemol, intor=int3c2e_ip2, aosym='s1', cintopt=cintopt)
 
-        test_int1e_dA, test_int1e_dC = intor(mol, 'int1e_grids_ip', grid_points)
+        test_int1e_dA = int1e_grids_ip1(mol, grid_points)
+        test_int1e_dC = int1e_grids_ip2(mol, grid_points)
         test_int1e_dA = test_int1e_dA.transpose(0, 3, 2, 1)
         test_int1e_dC = test_int1e_dC.transpose(0, 3, 2, 1)
 
         np.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         np.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
 
-    def test_int1e_grids_ip1_full_tensor_gaussian_charge_omega(self):
+    def test_int1e_grids_ip_full_tensor_gaussian_charge_omega(self):
         omega = 0.8
         mol_sph_omega = mol_sph.copy()
         mol_sph_omega.set_range_coulomb(omega)
@@ -162,14 +166,15 @@ class KnownValues(unittest.TestCase):
         cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e_ip2)
         ref_int1e_dC = df.incore.aux_e2(mol, fakemol, intor=int3c2e_ip2, aosym='s1', cintopt=cintopt)
 
-        test_int1e_dA, test_int1e_dC = intor(mol, 'int1e_grids_ip', grid_points, charge_exponents = charge_exponents)
+        test_int1e_dA = int1e_grids_ip1(mol, grid_points, charge_exponents = charge_exponents)
+        test_int1e_dC = int1e_grids_ip2(mol, grid_points, charge_exponents = charge_exponents)
         test_int1e_dA = test_int1e_dA.transpose(0, 3, 2, 1)
         test_int1e_dC = test_int1e_dC.transpose(0, 3, 2, 1)
 
         np.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         np.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
 
-    def test_int1e_grids_ip1_contracted_cart(self):
+    def test_int1e_grids_ip_contracted_cart(self):
         np.random.seed(12346)
         dm = np.random.uniform(-2.0, 2.0, (mol_cart.nao, mol_cart.nao))
         charges = np.random.uniform(-2.0, 2.0, grid_points.shape[0])
@@ -187,14 +192,15 @@ class KnownValues(unittest.TestCase):
         q_nj = df.incore.aux_e2(mol, fakemol, intor=int3c2e_ip2, aosym='s1', cintopt=cintopt)
         ref_int1e_dC = np.einsum('xijk,ij,k->xk', q_nj, dm, charges)
 
-        test_int1e_dA, test_int1e_dC = intor(mol, 'int1e_grids_ip', grid_points, dm = dm, charges = charges)
+        test_int1e_dA = int1e_grids_ip1(mol, grid_points, dm = dm, charges = charges)
+        test_int1e_dC = int1e_grids_ip2(mol, grid_points, dm = dm, charges = charges)
 
         assert isinstance(test_int1e_dA, cp.ndarray)
         assert isinstance(test_int1e_dC, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         cp.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
 
-    def test_int1e_grids_ip1_contracted_sph(self):
+    def test_int1e_grids_ip_contracted_sph(self):
         np.random.seed(12346)
         dm = np.random.uniform(-2.0, 2.0, (mol_sph.nao, mol_sph.nao))
         charges = np.random.uniform(-2.0, 2.0, grid_points.shape[0])
@@ -212,14 +218,15 @@ class KnownValues(unittest.TestCase):
         q_nj = df.incore.aux_e2(mol, fakemol, intor=int3c2e_ip2, aosym='s1', cintopt=cintopt)
         ref_int1e_dC = np.einsum('xijk,ij,k->xk', q_nj, dm, charges)
 
-        test_int1e_dA, test_int1e_dC = intor(mol, 'int1e_grids_ip', grid_points, dm = dm, charges = charges)
+        test_int1e_dA = int1e_grids_ip1(mol, grid_points, dm = dm, charges = charges)
+        test_int1e_dC = int1e_grids_ip2(mol, grid_points, dm = dm, charges = charges)
 
         assert isinstance(test_int1e_dA, cp.ndarray)
         assert isinstance(test_int1e_dC, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         cp.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
 
-    def test_int1e_grids_ip1_contracted_gaussian_charge(self):
+    def test_int1e_grids_ip_contracted_gaussian_charge(self):
         np.random.seed(12347)
         dm = np.random.uniform(-2.0, 2.0, (mol_sph.nao, mol_sph.nao))
         charges = np.random.uniform(-2.0, 2.0, grid_points.shape[0])
@@ -238,14 +245,15 @@ class KnownValues(unittest.TestCase):
         q_nj = df.incore.aux_e2(mol, fakemol, intor=int3c2e_ip2, aosym='s1', cintopt=cintopt)
         ref_int1e_dC = np.einsum('xijk,ij,k->xk', q_nj, dm, charges)
 
-        test_int1e_dA, test_int1e_dC = intor(mol, 'int1e_grids_ip', grid_points, dm = dm, charges = charges, charge_exponents = charge_exponents)
+        test_int1e_dA = int1e_grids_ip1(mol, grid_points, dm = dm, charges = charges, charge_exponents = charge_exponents)
+        test_int1e_dC = int1e_grids_ip2(mol, grid_points, dm = dm, charges = charges, charge_exponents = charge_exponents)
 
         assert isinstance(test_int1e_dA, cp.ndarray)
         assert isinstance(test_int1e_dC, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         cp.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
 
-    def test_int1e_grids_ip1_contracted_omega(self):
+    def test_int1e_grids_ip_contracted_omega(self):
         np.random.seed(12348)
         dm = np.random.uniform(-2.0, 2.0, (mol_sph.nao, mol_sph.nao))
         charges = np.random.uniform(-2.0, 2.0, grid_points.shape[0])
@@ -267,14 +275,15 @@ class KnownValues(unittest.TestCase):
         q_nj = df.incore.aux_e2(mol, fakemol, intor=int3c2e_ip2, aosym='s1', cintopt=cintopt)
         ref_int1e_dC = np.einsum('xijk,ij,k->xk', q_nj, dm, charges)
 
-        test_int1e_dA, test_int1e_dC = intor(mol, 'int1e_grids_ip', grid_points, dm = dm, charges = charges)
+        test_int1e_dA = int1e_grids_ip1(mol, grid_points, dm = dm, charges = charges)
+        test_int1e_dC = int1e_grids_ip2(mol, grid_points, dm = dm, charges = charges)
 
         assert isinstance(test_int1e_dA, cp.ndarray)
         assert isinstance(test_int1e_dC, cp.ndarray)
         cp.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         cp.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
 
-    def test_int1e_grids_ip1_contracted_gaussian_charge_omega(self):
+    def test_int1e_grids_ip_contracted_gaussian_charge_omega(self):
         np.random.seed(12349)
         dm = np.random.uniform(-2.0, 2.0, (mol_sph.nao, mol_sph.nao))
         charges = np.random.uniform(-2.0, 2.0, grid_points.shape[0])
@@ -297,7 +306,8 @@ class KnownValues(unittest.TestCase):
         q_nj = df.incore.aux_e2(mol, fakemol, intor=int3c2e_ip2, aosym='s1', cintopt=cintopt)
         ref_int1e_dC = np.einsum('xijk,ij,k->xk', q_nj, dm, charges)
 
-        test_int1e_dA, test_int1e_dC = intor(mol, 'int1e_grids_ip', grid_points, dm = dm, charges = charges, charge_exponents = charge_exponents)
+        test_int1e_dA = int1e_grids_ip1(mol, grid_points, dm = dm, charges = charges, charge_exponents = charge_exponents)
+        test_int1e_dC = int1e_grids_ip2(mol, grid_points, dm = dm, charges = charges, charge_exponents = charge_exponents)
 
         assert isinstance(test_int1e_dA, cp.ndarray)
         assert isinstance(test_int1e_dC, cp.ndarray)

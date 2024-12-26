@@ -67,7 +67,7 @@ class VHFOpt(_vhf.VHFOpt):
 
     def build(self, cutoff=1e-13, group_size=BLKSIZE, diag_block_with_triu=False, aosym=True):
         original_mol = self.mol
-        mol = basis_seg_contraction(original_mol, allow_replica=True)
+        mol = basis_seg_contraction(original_mol, allow_replica=True)[0]
 
         log = logger.new_logger(original_mol, original_mol.verbose)
         cput0 = log.init_timer()
@@ -223,7 +223,6 @@ def get_int3c1e(mol, grids, charge_exponents, intopt):
             lj = intopt.angular[cpj]
 
             stream = cp.cuda.get_current_stream()
-            nao_cart = intopt._sorted_mol.nao
 
             log_q_ij = intopt.log_qs[cp_ij_id]
 
@@ -251,7 +250,6 @@ def get_int3c1e(mol, grids, charge_exponents, intopt):
                 ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
                 ctypes.c_int(ngrids_of_split),
                 ctypes.cast(int3c_angular_slice.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(nao_cart),
                 strides.ctypes.data_as(ctypes.c_void_p),
                 ao_offsets.ctypes.data_as(ctypes.c_void_p),
                 bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
@@ -289,7 +287,9 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
 
     grids = cp.asarray(grids, order='C')
-    charges = cp.asarray(charges).reshape([-1, 1], order='C')
+    charges = cp.asarray(charges).astype(np.float64)
+
+    charges = charges.reshape([-1, 1], order='C')
     grids = cp.concatenate([grids, charges], axis=1)
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
@@ -302,7 +302,6 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
         lj = intopt.angular[cpj]
 
         stream = cp.cuda.get_current_stream()
-        nao_cart = intopt._sorted_mol.nao
 
         log_q_ij = intopt.log_qs[cp_ij_id]
 
@@ -335,7 +334,6 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
             ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.cast(int1e_angular_slice.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(nao_cart),
             strides.ctypes.data_as(ctypes.c_void_p),
             ao_offsets.ctypes.data_as(ctypes.c_void_p),
             bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
@@ -367,12 +365,6 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
     dm = cp.asarray(dm)
-    if dm.ndim == 3:
-        if dm.shape[0] > 2:
-            print("Warning: more than two density matrices are found for int3c1e kernel. "
-                  "They will be summed up to one density matrix.")
-        dm = cp.einsum("ijk->jk", dm)
-
     assert dm.ndim == 2
     assert dm.shape[0] == dm.shape[1] and dm.shape[0] == mol.nao
 
@@ -458,3 +450,61 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
                 raise RuntimeError('GINTfill_int3c1e_density_contracted failed')
 
     return int3c_density_contracted
+
+def int1e_grids(mol, grids, charge_exponents=None, dm=None, charges=None, direct_scf_tol=1e-13, intopt=None):
+    r'''
+    This function computes
+    $$\left(\mu \middle| \frac{1}{|\vec{r} - \vec{C}|} \middle| \nu\right)$$
+
+    If charges is not None, the function computes the following contraction:
+    $$\sum_{C}^{n_{charge}} q_C \left(\mu \middle| \frac{1}{|\vec{r} - \vec{C}|} \middle| \nu\right)$$
+    where $q_C$ is the charge centered at $\vec{C}$.
+
+    If dm is not None, the function computes the following contraction:
+    $$\sum_{\mu, \nu}^{n_{ao}} D_{\mu\nu} \left(\frac{\partial}{\partial \vec{A}} \mu \middle| \frac{1}{|\vec{r} - \vec{C}|} \middle| \nu\right)$$
+    '''
+    assert grids is not None
+
+    if intopt is None:
+        intopt = VHFOpt(mol)
+        intopt.build(direct_scf_tol, aosym=True)
+    else:
+        assert isinstance(intopt, VHFOpt), \
+            f"Please make sure intopt is a {VHFOpt.__module__}.{VHFOpt.__name__} object."
+        assert hasattr(intopt, "density_offset"), "Please call build() function for VHFOpt object first."
+        assert intopt.aosym
+
+    assert dm is None or charges is None, \
+        "Are you sure you want to contract the one electron integrals with both charge and density? " + \
+        "If so, pass in density, obtain the result with n_charge and contract with the charges yourself."
+
+    if dm is None and charges is None:
+        return get_int3c1e(mol, grids, charge_exponents, intopt)
+    elif dm is not None:
+        if dm.ndim == 2:
+            return get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt)
+        else:
+            assert dm.ndim == 3
+            n_dm = dm.shape[0]
+            ngrids = grids.shape[0]
+            if n_dm == 1:
+                return get_int3c1e_density_contracted(mol, grids, charge_exponents, dm[0], intopt).reshape(1, ngrids)
+            int3c_density_contracted = cp.empty((n_dm, ngrids))
+            for i_dm in range(n_dm):
+                int3c_density_contracted[i_dm] = get_int3c1e_density_contracted(mol, grids, charge_exponents, dm[i_dm], intopt)
+            return int3c_density_contracted
+    elif charges is not None:
+        if charges.ndim == 1:
+            return get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
+        else:
+            assert charges.ndim == 2
+            n_charges = charges.shape[0]
+            nao = mol.nao
+            if n_charges == 1:
+                return get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges[0], intopt).reshape(1, nao, nao)
+            int3c_charge_contracted = cp.empty((n_charges, nao, nao))
+            for i_charge in range(n_charges):
+                int3c_charge_contracted[i_charge] = get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges[i_charge], intopt)
+            return int3c_charge_contracted
+    else:
+        raise ValueError(f"Logic error in {__file__} {__name__}")
