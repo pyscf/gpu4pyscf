@@ -204,62 +204,60 @@ def _ejk_ip2_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
         info = cp.empty(2, dtype=np.uint32)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
-        for i, j in task_list:
+        for i, j, k, l in task_list:
             ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
                        l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
             tile_ij_mapping = tile_mappings[i,j]
-            for k in range(i+1):
-                for l in range(k+1):
-                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                    kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
-                               l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
-                    tile_kl_mapping = tile_mappings[k,l]
-                    scheme = _ip2_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
-                    err1 = kern1(
-                        ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
-                        ctypes.c_double(j_factor), ctypes.c_double(k_factor),
-                        ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(n_dm), ctypes.c_int(nao),
-                        vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
-                        (ctypes.c_int*8)(*ij_shls, *kl_shls),
-                        ctypes.c_int(tile_ij_mapping.size),
-                        ctypes.c_int(tile_kl_mapping.size),
-                        ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
-                        tile_q_ptr, q_ptr, s_ptr,
-                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.c_float(log_cutoff),
-                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(info.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(workers),
-                        mol._atm.ctypes, ctypes.c_int(mol.natm),
-                        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                    err2 = kern2(
-                        ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
-                        ctypes.c_double(j_factor), ctypes.c_double(k_factor),
-                        ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(n_dm), ctypes.c_int(nao),
-                        vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
-                        (ctypes.c_int*8)(*ij_shls, *kl_shls),
-                        ctypes.c_int(tile_ij_mapping.size),
-                        ctypes.c_int(tile_kl_mapping.size),
-                        ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
-                        tile_q_ptr, q_ptr, s_ptr,
-                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.c_float(log_cutoff),
-                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(info.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(workers),
-                        mol._atm.ctypes, ctypes.c_int(mol.natm),
-                        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                    if err1 != 0 or err2 != 0:
-                        raise RuntimeError(f'RYS_per_atom_jk_ip2 kernel for {llll} failed')
-                    if log.verbose >= logger.DEBUG1:
-                        msg = f'processing {llll}, tasks = {info[1].get()} on Device {device_id}'
-                        t1, t1p = log.timer_debug1(msg, *t1), t1
-                        timing_counter[llll] += t1[1] - t1p[1]
-                        kern_counts += 1
+            llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+            kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
+                        l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
+            tile_kl_mapping = tile_mappings[k,l]
+            scheme = _ip2_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
+            err1 = kern1(
+                ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                ctypes.c_double(j_factor), ctypes.c_double(k_factor),
+                ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_dm), ctypes.c_int(nao),
+                vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
+                (ctypes.c_int*8)(*ij_shls, *kl_shls),
+                ctypes.c_int(tile_ij_mapping.size),
+                ctypes.c_int(tile_kl_mapping.size),
+                ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
+                tile_q_ptr, q_ptr, s_ptr,
+                ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff),
+                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(info.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(workers),
+                mol._atm.ctypes, ctypes.c_int(mol.natm),
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+            err2 = kern2(
+                ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                ctypes.c_double(j_factor), ctypes.c_double(k_factor),
+                ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_dm), ctypes.c_int(nao),
+                vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
+                (ctypes.c_int*8)(*ij_shls, *kl_shls),
+                ctypes.c_int(tile_ij_mapping.size),
+                ctypes.c_int(tile_kl_mapping.size),
+                ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
+                tile_q_ptr, q_ptr, s_ptr,
+                ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff),
+                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(info.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(workers),
+                mol._atm.ctypes, ctypes.c_int(mol.natm),
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+            if err1 != 0 or err2 != 0:
+                raise RuntimeError(f'RYS_per_atom_jk_ip2 kernel for {llll} failed')
+            if log.verbose >= logger.DEBUG1:
+                msg = f'processing {llll}, tasks = {info[1].get()} on Device {device_id}'
+                t1, t1p = log.timer_debug1(msg, *t1), t1
+                timing_counter[llll] += t1[1] - t1p[1]
+                kern_counts += 1
 
         ejk = ejk + ejk.transpose(1,0,3,2)
     return ejk, kern_counts, timing_counter
@@ -273,7 +271,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
 
-    mol = vhfopt.mol
+    mol = vhfopt.sorted_mol
     nao, nao_orig = vhfopt.coeff.shape
 
     dm = cp.asarray(dm, order='C')
@@ -286,7 +284,12 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
     assert uniq_l.max() <= LMAX
 
     n_groups = len(uniq_l_ctr)
-    tasks = [(i,j) for i in range(n_groups) for j in range(i+1)]
+    tasks = []
+    for i in range(n_groups):
+        for j in range(i+1):
+            for k in range(i+1):
+                for l in range(k+1):
+                    tasks.append((i,j,k,l))
     tasks = np.array(tasks)
     task_list = []
     for device_id in range(_num_devices):
@@ -394,7 +397,6 @@ def _build_jk_ip1_task(mol, dms, vhfopt, task_list, atoms_slice,
     uniq_l = uniq_l_ctr[:,0]
     l_ctr_bas_loc = vhfopt.l_ctr_offsets
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
-    n_groups = len(uniq_l_ctr)
     kern = libvhf_rys.RYS_build_jk_ip1
 
     timing_counter = Counter()
@@ -426,7 +428,7 @@ def _build_jk_ip1_task(mol, dms, vhfopt, task_list, atoms_slice,
         info = cp.empty(2, dtype=np.uint32)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
-        for i, j in task_list:
+        for i, j, k, l in task_list:
             ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
                        l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
             ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
@@ -441,39 +443,37 @@ def _build_jk_ip1_task(mol, dms, vhfopt, task_list, atoms_slice,
                     cp.arange(jsh0, jsh1, dtype=np.int32))
             idx = cp.argsort(sub_tile_q[mask])[::-1]
             tile_ij_mapping = t_ij[mask][idx]
-            for k in range(n_groups):
-                for l in range(k+1):
-                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                    kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
-                               l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
-                    tile_kl_mapping = tril_tile_mappings[k,l]
-                    scheme = _ip1_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
-                    err = kern(
-                        vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(n_dm), ctypes.c_int(nao), ctypes.c_int(atom0),
-                        vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
-                        (ctypes.c_int*8)(*ij_shls, *kl_shls),
-                        ctypes.c_int(tile_ij_mapping.size),
-                        ctypes.c_int(tile_kl_mapping.size),
-                        ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p),
-                        lib.c_null_ptr(),
-                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.c_float(log_cutoff),
-                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(info.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(workers),
-                        mol._atm.ctypes, ctypes.c_int(mol.natm),
-                        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                    if err != 0:
-                        raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
-                    if log.verbose >= logger.DEBUG1:
-                        msg = f'processing {llll}, tasks = {info[1].get()} on Device {device_id}'
-                        t1, t1p = log.timer_debug1(msg, *t1), t1
-                        timing_counter[llll] += t1[1] - t1p[1]
-                        kern_counts += 1
+            llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+            kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
+                        l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
+            tile_kl_mapping = tril_tile_mappings[k,l]
+            scheme = _ip1_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
+            err = kern(
+                vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_dm), ctypes.c_int(nao), ctypes.c_int(atom0),
+                vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
+                (ctypes.c_int*8)(*ij_shls, *kl_shls),
+                ctypes.c_int(tile_ij_mapping.size),
+                ctypes.c_int(tile_kl_mapping.size),
+                ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p),
+                ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p),
+                lib.c_null_ptr(),
+                ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff),
+                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(info.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(workers),
+                mol._atm.ctypes, ctypes.c_int(mol.natm),
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+            if err != 0:
+                raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+            if log.verbose >= logger.DEBUG1:
+                msg = f'processing {llll}, tasks = {info[1].get()} on Device {device_id}'
+                t1, t1p = log.timer_debug1(msg, *t1), t1
+                timing_counter[llll] += t1[1] - t1p[1]
+                kern_counts += 1
     return vj, vk, kern_counts, timing_counter
 
 def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=None):
@@ -490,7 +490,7 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
     vhfopt.tile = 1
     vhfopt.build()
 
-    mol = vhfopt.mol
+    mol = vhfopt.sorted_mol
     nao, nao_orig = vhfopt.coeff.shape
 
     dm = cp.asarray(dm, order='C')
@@ -516,7 +516,12 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
     assert vhfopt.tile_q_cond.shape == (nbas, nbas)
 
     n_groups = len(uniq_l_ctr)
-    tasks = [(i,j) for i in range(n_groups) for j in range(n_groups)]
+    tasks = []
+    for i in range(n_groups):
+        for j in range(n_groups):
+            for k in range(n_groups):
+                for l in range(k+1):
+                    tasks.append((i,j,k,l))
     tasks = np.array(tasks)
     task_list = []
     for device_id in range(_num_devices):
@@ -659,7 +664,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     avail_mem = get_avail_mem()
     # *4 for input dm, vj, vk, and vxc
     blksize = int(min(avail_mem*.3 / (8*3*nao*nocc*4), # in MO
-                      avail_mem*.3 / (8*nmo*nmo*3*3))) # vj, vk, dm in AO
+                      avail_mem*.3 / (8*nao*nao*3*3))) # vj, vk, dm in AO
     if blksize < ALIGNED**2:
         raise RuntimeError('GPU memory insufficient for solving CPHF equations')
 
