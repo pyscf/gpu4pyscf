@@ -39,7 +39,7 @@ jobs:
       run: |
         echo $GITHUB_WORKSPACE
         export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-        pytest -m "not smoke" --benchmark-disable -s --cov=$GITHUB_WORKSPACE
+        pytest -m "not benchmark" --cov=$GITHUB_WORKSPACE
 
   multi-gpu:
     runs-on: [self-hosted, Linux, X64, 2T4]
@@ -67,4 +67,4 @@ jobs:
       run: |
         echo $GITHUB_WORKSPACE
         export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-        pytest -m "not smoke" --benchmark-disable -s --cov=$GITHUB_WORKSPACE
+        pytest -m "not benchmark" --cov=$GITHUB_WORKSPACE

@@ -83,146 +83,177 @@ def run_rb3lyp_hessian(atom, basis, with_df, with_solvent, disp=None):
     return h
 
 # DF
+@pytest.mark.benchmark
 def test_df_rb3lyp(benchmark):
     e = benchmark(run_rb3lyp, small_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp')
     assert np.isclose(np.linalg.norm(e), 684.9998712035579, atol=1e-7)
+@pytest.mark.benchmark
 def test_df_rb3lyp_grad(benchmark):
     g = benchmark(run_rb3lyp_grad, small_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp grad')
     assert np.isclose(np.linalg.norm(g), 0.17435941081837686, atol=1e-5)
 @pytest.mark.slow
+@pytest.mark.benchmark
 def test_df_rb3lyp_hessian(benchmark):
     h = benchmark(run_rb3lyp_hessian, small_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp hessian')
     assert np.isclose(np.linalg.norm(h), 3.7668761221997764, atol=1e-4)
 
 # Direct SCF
+@pytest.mark.benchmark
 def test_rb3lyp(benchmark):
     e = benchmark(run_rb3lyp, small_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp')
     assert np.isclose(np.linalg.norm(e), 684.999735850967, atol=1e-7)
+@pytest.mark.benchmark
 def test_rb3lyp_grad(benchmark):
     g = benchmark(run_rb3lyp_grad, small_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp grad')
     assert np.isclose(np.linalg.norm(g), 0.1744127474130983, atol=1e-5)
+@pytest.mark.benchmark
 def test_rb3lyp_hessian(benchmark):
     h = benchmark(run_rb3lyp_hessian, small_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp hessian')
     assert np.isclose(np.linalg.norm(h), 3.7588443634477833, atol=1e-4)
 
 # median molecule
+@pytest.mark.benchmark
 def test_df_rb3lyp_median(benchmark):
     e = benchmark(run_rb3lyp, median_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp median')
     assert np.isclose(np.linalg.norm(e), 1138.371390377773, atol=1e-7)
+@pytest.mark.benchmark
 def test_df_rb3lyp_grad_median(benchmark):
     g = benchmark(run_rb3lyp_grad, median_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp grad median')
     assert np.isclose(np.linalg.norm(g), 0.26010545073602614, atol=1e-4)
+@pytest.mark.benchmark
 def test_df_rb3lyp_hessian_median(benchmark):
     h = benchmark(run_rb3lyp_hessian, median_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp hessian median')
     assert np.isclose(np.linalg.norm(h), 6.32514169232998, atol=1e-4)
 
+@pytest.mark.benchmark
 def test_rb3lyp_median(benchmark):
     e = benchmark(run_rb3lyp, median_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp median')
     assert np.isclose(np.linalg.norm(e), 1138.3710752128077, atol=1e-7)
+@pytest.mark.benchmark
 def test_rb3lyp_grad_median(benchmark):
     g = benchmark(run_rb3lyp_grad, median_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp grad median')
     assert np.isclose(np.linalg.norm(g), 0.2601443836937988, atol=1e-5)
 @pytest.mark.high_memory
 @pytest.mark.slow
+@pytest.mark.benchmark
 def test_rb3lyp_hessian_median(benchmark):
     h = benchmark(run_rb3lyp_hessian, median_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp hessian median')
     assert np.isclose(np.linalg.norm(h))
 
 # large molecule
+@pytest.mark.benchmark
 def test_df_rb3lyp_large(benchmark):
     e = benchmark(run_rb3lyp, large_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp large')
     assert np.isclose(np.linalg.norm(e), 2564.198712152175, atol=1e-7)
+@pytest.mark.benchmark
 def test_df_rb3lyp_grad_large(benchmark):
     g = benchmark(run_rb3lyp_grad, large_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp grad large')
     assert np.isclose(np.linalg.norm(g), 0.3784358687859323, atol=1e-5)
 @pytest.mark.high_memory
 @pytest.mark.slow
+@pytest.mark.benchmark
 def test_df_rb3lyp_hessian_large(benchmark):
     h = benchmark(run_rb3lyp_hessian, large_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp hessian large')
     assert np.isclose(np.linalg.norm(h), 7.583208736873523, atol=1e-4)
 @pytest.mark.slow
+@pytest.mark.benchmark
 def test_rb3lyp_large(benchmark):
     e = benchmark(run_rb3lyp, large_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp large')
     assert np.isclose(np.linalg.norm(e), 2564.198099576358, atol=1e-7)
 @pytest.mark.slow
+@pytest.mark.benchmark
 def test_rb3lyp_grad_large(benchmark):
     g = benchmark(run_rb3lyp_grad, large_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp grad large')
     assert np.isclose(np.linalg.norm(g), 0.3784664384209763, atol=1e-5)
 @pytest.mark.slow
+@pytest.mark.benchmark
 def test_rb3lyp_hessian_large(benchmark):
     h = benchmark(run_rb3lyp_hessian, large_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp hessian large')
     print(np.linalg.norm(h))
 
 # small basis set
+@pytest.mark.benchmark
 def test_df_rb3lyp_631gs(benchmark):
     e = benchmark(run_rb3lyp, small_mol, '6-31gs', True, False)
     print('testing df rb3lyp 631gs')
     assert np.isclose(np.linalg.norm(e), 684.6646008642876, atol=1e-7)
+
+@pytest.mark.benchmark
 def test_df_rb3lyp_631gs_grad(benchmark):
     g = benchmark(run_rb3lyp_grad, small_mol, '6-31gs', True, False)
     print('testing df rb3lyp 631gs grad')
     assert np.isclose(np.linalg.norm(g), 0.17530687343398219, atol=1e-5)
+@pytest.mark.benchmark
 def test_df_rb3lyp_631gs_hessian(benchmark):
     h = benchmark(run_rb3lyp_hessian, small_mol, '6-31gs', True, False)
     print('testing df rb3lyp 631gs hessian')
     assert np.isclose(np.linalg.norm(h), 3.908874851569459, atol=1e-4)
 
 # small basis set for large molecule
+@pytest.mark.benchmark
 def test_rb3lyp_631gs_large(benchmark):
     e = benchmark(run_rb3lyp, large_mol, '6-31gs', False, False)
     print('testing rb3lyp 631gs large')
     assert np.isclose(np.linalg.norm(e), 2563.1171191823423, atol=1e-7)
+@pytest.mark.benchmark
 def test_rb3lyp_631gs_grad_large(benchmark):
     g = benchmark(run_rb3lyp_grad, large_mol, '6-31gs', False, False)
     print('testing df rb3lyp 631gs grad large')
     assert np.isclose(np.linalg.norm(g), 0.37778228700247984, atol=1e-5)
 @pytest.mark.slow
+@pytest.mark.benchmark
 def test_rb3lyp_631gs_hessian_large(benchmark):
     h = benchmark(run_rb3lyp_hessian, large_mol, '6-31gs', False, False)
     print('testing df rb3lyp 631gs hessian large')
     assert np.isclose(np.linalg.norm(h), 7.920764634100053, atol=1e-4)
 
 #solvent model
+@pytest.mark.benchmark
 def test_df_rb3lyp_631gs_solvent(benchmark):
     e = benchmark(run_rb3lyp, small_mol, '6-31gs', True, True)
     print('testing df rb3lyp 631gs solvent')
     assert np.isclose(np.linalg.norm(e), 684.6985561053816, atol=1e-7)
+@pytest.mark.benchmark
 def test_df_rb3lyp_631gs_solvent_grad(benchmark):
     g = benchmark(run_rb3lyp_grad, small_mol, '6-31gs', True, True)
     print('testing df rb3lyp 631gs solvent grad')
     assert np.isclose(np.linalg.norm(g), 0.16956999476137297, atol=1e-5)
+@pytest.mark.benchmark
 def test_df_rb3lyp_631gs_solvent_hessian(benchmark):
     h = benchmark(run_rb3lyp_hessian, small_mol, '6-31gs', True, True)
     print('testing df rb3lyp 631gs solvent hessian')
     assert np.isclose(np.linalg.norm(h), 3.9008165041707294, atol=1e-4)
 
 # b3lyp d3bj
+@pytest.mark.benchmark
 def test_df_rb3lyp_631gs_d3bj(benchmark):
     e = benchmark(run_rb3lyp, small_mol, '6-31gs', True, True, 'd3bj')
     print('testing df rb3lyp 631gs solvent')
     assert np.isclose(np.linalg.norm(e), 684.7313814096565, atol=1e-7)
+@pytest.mark.benchmark
 def test_df_rb3lyp_631gs_d3bj_grad(benchmark):
     g = benchmark(run_rb3lyp_grad, small_mol, '6-31gs', True, True, 'd3bj')
     print('testing df rb3lyp 631gs solvent grad')
     assert np.isclose(np.linalg.norm(g), 0.17010044498887264, atol=1e-5)
+@pytest.mark.benchmark
 def test_df_rb3lyp_631gs_d3bj_hessian(benchmark):
     h = benchmark(run_rb3lyp_hessian, small_mol, '6-31gs', True, True, 'd3bj')
     print('testing df rb3lyp 631gs solvent hessian')
