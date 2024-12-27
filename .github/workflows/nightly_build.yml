@@ -14,7 +14,7 @@ permissions:
 jobs:
   build:
 
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux, X64, v100]
 
     steps:
     - uses: actions/checkout@v3
@@ -23,6 +23,7 @@ jobs:
         pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
         python3 -m pip install --upgrade pip
         pip3 install flake8 pytest coverage pytest-cov pyscf-dispersion
+        pip3 install pytest-benchmark
         pip3 install pyscf --upgrade
         pip3 install numpy --upgrade
         pip3 install scipy --upgrade
@@ -39,4 +40,4 @@ jobs:
       run: |
         echo $GITHUB_WORKSPACE
         export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-        pytest --durations=0
+        pytest tests/ -v -m "not slow"
