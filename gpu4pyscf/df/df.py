@@ -147,7 +147,6 @@ class DF(lib.StreamObject):
             and unpack the CDERI in (Lij) format
         '''
         device_id = cupy.cuda.Device().id
-        print(self._cderi.keys(), device_id)
         cderi_sparse = self._cderi[device_id]
         if blksize is None:
             blksize = self.get_blksize()
