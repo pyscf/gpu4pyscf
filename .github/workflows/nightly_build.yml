@@ -40,4 +40,4 @@ jobs:
       run: |
         echo $GITHUB_WORKSPACE
         export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-        pytest tests/ -v -m "not slow"
+        pytest gpu4pyscf/tests/ -v -m "not slow"
