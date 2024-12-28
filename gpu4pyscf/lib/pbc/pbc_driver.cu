@@ -84,15 +84,15 @@ int ft_aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_ncells,
 }
 
 int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
-                 int *scheme, int *shls_slice, int npairs_ij,
-                 uint16_t nrow, uint16_t ncol, uint16_t naux,
+                 int *scheme, int *shls_slice, int bvk_ncells,
+                 int nrow, int ncol, int naux, int npairs_ij,
                  int *bas_ij_idx, int *img_idx, int *img_offsets,
                  int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
     uint16_t jsh0 = shls_slice[2];
-    uint16_t ksh0 = shls_slice[4];
-    uint16_t ksh1 = shls_slice[5];
+    uint16_t ksh0 = shls_slice[4] + nbas;
+    uint16_t ksh1 = shls_slice[5] + nbas;
     uint16_t nksh = ksh1 - ksh0;
     uint8_t li = bas[ANG_OF + ish0*BAS_SLOTS];
     uint8_t lj = bas[ANG_OF + jsh0*BAS_SLOTS];
@@ -115,9 +115,11 @@ int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
     uint8_t stride_k = stride_j * (lj + 1);
     // up to (gg|i)
     uint8_t g_size = stride_k * (lk + 1);
+    uint16_t nk_nrow = nrow * bvk_ncells;
+    uint16_t nk_ncol = ncol * bvk_ncells;
     PBCInt3c2eBounds bounds = {li, lj, lk, nroots, nfi, nfij, nfk,
         iprim, jprim, kprim, stride_i, stride_j, stride_k, g_size,
-        nrow, ncol, naux, nksh, ish0, jsh0, ksh0,
+        nk_nrow, nk_ncol, (uint16_t)naux, nksh, ish0, jsh0, ksh0,
         npairs_ij, bas_ij_idx, img_idx, img_offsets};
 
     if (1) {

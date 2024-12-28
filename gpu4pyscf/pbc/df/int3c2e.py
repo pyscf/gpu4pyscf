@@ -36,7 +36,7 @@ from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
 from gpu4pyscf.pbc.df.ft_ao import libpbc, init_constant
 
 __all__ = [
-    'aux_e2',
+    'sr_aux_e2',
 ]
 
 libpbc.fill_int3c2e.restype = ctypes.c_int
@@ -51,8 +51,49 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None):
     Short-range 3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
     '''
-    kern = Int3c2eOpt(cell, auxcell, omega, kpts, bvk_kmesh).gen_int3c2e_kernel()
-    return kern()
+    int3c2e_opt = Int3c2eOpt(cell, auxcell, omega, kpts, bvk_kmesh)
+    nao, nao_orig = int3c2e_opt.coeff.shape
+    naux = int3c2e_opt.aux_coeff.shape[0]
+
+    if kpts is None:
+        out = cp.zeros((nao, nao, naux))
+    else:
+        nkpts = len(kpts)
+        out = cp.zeros((nkpts, nao, nkpts, nao, naux), dtype=np.complex128)
+        kmesh = int3c2e_opt.bvk_kmesh
+        assert kmesh is not None
+        kpts = cp.asarray(kpts, order='C').reshape(-1,3)
+        bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
+        expLk = cp.exp(1j*cp.dot(cp.asarray(bvkmesh_Ls), kpts.T))
+
+    ao_loc = int3c2e_opt.sorted_cell.ao_loc
+    aux_loc = int3c2e_opt.sorted_auxcell.ao_loc
+
+    for shls_slice, eri3c in int3c2e_opt.int3c2e_kernel():
+        i0, i1, j0, j1 = ao_loc[list(shls_slice[:4])]
+        k0, k1 = aux_loc[list(shls_slice[4:])]
+        if kpts is None:
+            out[i0:i1,j0:j1,k0:k1] = tmp = eri3c.sum(axis=(0,2))
+            if i0 != j0:
+                out[j0:j1,i0:i1,k0:k1] = tmp.transpose(1,0,2)
+        else:
+            tmp = contract('Lk,LpMqr->kpMqr', expLk.conj(), eri3c)
+            tmp = contract('Ml,kpMqr->kplqr', expLk, tmp)
+            out[:,i0:i1,:,j0:j1,k0:k1] = tmp
+            if i0 != j0:
+                out[:,j0:j1,:,i0:i1,k0:k1] = tmp.transpose(2,3,0,1,4).conj()
+        tmp = None
+
+    if kpts is None:
+        out = contract('pqr,rk->pqk', out, int3c2e_opt.aux_coeff)
+        out = contract('pqk,qj->pjk', out, int3c2e_opt.coeff)
+        out = contract('pjk,pi->ijk', out, int3c2e_opt.coeff)
+    else:
+        #:out = einsum('MpNqr,pi,qj,rk->MiNjk', out, coeff, coeff, auxcoeff)
+        out = contract('MpNqr,rk->MpNqk', out, int3c2e_opt.aux_coeff)
+        out = contract('MpNqk,qj->MpNjk', out, int3c2e_opt.coeff)
+        out = contract('MpNjk,pi->MiNjk', out, int3c2e_opt.coeff)
+    return out
 
 def create_img_idx(cell, bvkcell, Ls, int3c2e_envs):
     '''integral screening'''
@@ -141,164 +182,12 @@ class Int3c2eOpt:
         self.kpts = kpts
         self.omega = omega
 
-    def gen_int3c2e_kernel(self, cutoff=None, verbose=None):
+    def int3c2e_kernel(self, cutoff=None, verbose=None):
         cell = self.sorted_cell
         auxcell = self.sorted_auxcell
-        coeff = self.coeff
         uniq_l_ctr = self.uniq_l_ctr
         l_ctr_offsets = self.l_ctr_offsets
-        bvk_kmesh = self.bvk_kmesh
         bvkcell = self.bvkcell
-        kpts = self.kpts
-
-        log = logger.new_logger(cell, verbose)
-        cput0 = log.init_timer()
-        rcut = estimate_rcut(cell, auxcell, self.omega)
-        Ls = cp.asarray(bvkcell.get_lattice_Ls(rcut=rcut))
-        Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
-        log.debug('rcut = %g, nimgs = %d', rcut, len(Ls))
-
-        if bvk_kmesh is None:
-            bvkmesh_Ls = cp.zeros((1, 3))
-        else:
-            bvkmesh_Ls = cp.asarray(
-                k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True))
-
-        if cutoff is None:
-            omega = cell.omega
-            aux_exp = np.hstack(auxcell.bas_exps()).min()
-            cell_exp = np.hstack(cell.bas_exps()).min()
-            if omega == 0:
-                theta = 1./(1./cell_exp + 1./aux_exp)
-            else:
-                theta = 1./(1./cell_exp + 1./aux_exp + omega**-2)
-            lattice_sum_factor = max(2*np.pi*cell.rcut/(cell.vol*theta), 1)
-            cutoff = cell.precision / lattice_sum_factor * .1
-            log.debug1('int3c_kernel integral omega=%g theta=%g cutoff=%g',
-                       omega, theta, cutoff)
-
-        _atm_cpu, _bas_cpu, _env_cpu = conc_env(
-            bvkcell._atm, bvkcell._bas, _scale_sp_ctr_coeff(bvkcell),
-            auxcell._atm, auxcell._bas, _scale_sp_ctr_coeff(auxcell))
-        bvk_ao_loc = bvkcell.ao_loc
-        aux_loc = auxcell.ao_loc
-        bvk_nbas = bvkcell.nbas
-
-        _atm = cp.array(_atm_cpu, dtype=np.int32)
-        _bas = cp.array(_bas_cpu, dtype=np.int32)
-        _env = cp.array(_env_cpu, dtype=np.float64)
-        ao_loc = _conc_locs(bvk_ao_loc, aux_loc)
-        bvk_ncells = len(bvkmesh_Ls)
-        nimgs = len(Ls)
-        int3c2e_envs = Int3c2eEnvVars(
-            bvkcell.natm, bvk_nbas, bvk_ncells, nimgs,
-            _atm.data.ptr, _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr,
-            Ls.data.ptr, math.log(cutoff),
-        )
-        # Keep a reference to these arrays, prevent releasing them upon returning the closure
-        int3c2e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
-
-        gen_img_idx = create_img_idx(cell, bvkcell, Ls, int3c2e_envs)
-
-        nbas = cell.nbas
-        nao, nao_orig = coeff.shape
-        ao_loc = bvkcell.ao_loc
-        uniq_l = uniq_l_ctr[:,0]
-        n_groups = np.count_nonzero(uniq_l <= LMAX)
-
-        init_constant(cell)
-        kern = libpbc.fill_int3c2e
-        cp.cuda.Stream.null.synchronize()
-        log.timer_debug1('initialize int3c2e_kernel', *cput0)
-
-        def int3c2e_kernel(kpts=kpts, j_only=False, shls_slice=None, transform_ao=True):
-            '''
-            FT tensor is first computed in the basis of sorted_cell, which
-            transform_ao requires to transform AOs to their original order
-            '''
-            t1 = log.init_timer()
-            timing_collection = {}
-            kern_counts = 0
-            if kpts is None:
-                kpts = np.zeros((1, 3))
-            nkpts = len(kpts)
-
-            if j_only:
-                out = np.zeros((nkpts, nao, nao, auxcell.nao), dtype=np.complex128)
-            else:
-                out = np.zeros((nkpts, nao, nkpts, nao, auxcell.nao), dtype=np.complex128)
-
-            ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
-            for i, j in ij_tasks:
-                li = uniq_l[i]
-                lj = uniq_l[j]
-                ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-                jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-                nrow = ao_loc[ish1] - ao_loc[ish0]
-                ncol = ao_loc[jsh1] - ao_loc[jsh0]
-                img_idx, img_offsets, bas_ij_idx = gen_img_idx(ish0, ish1, jsh0, jsh1)
-
-                for k, lk in enumerate(self.uniq_l_ctr_aux[:,0]):
-                    ksh0, ksh1 = self.l_ctr_aux_offsets[k:k+2]
-                    naux = aux_loc[ksh1] - aux_loc[ksh0]
-                    eri3c = cp.zeros((bvk_ncells,nrow, bvk_ncells, ncol,naux))
-                    lll = f'({ANGULAR[li]}{ANGULAR[lj]}|{ANGULAR[lk]})'
-                    scheme = int3c2e_scheme(cell, li, lj, lk)
-                    log.debug2('int3c2e_scheme for %s: %s', lll, scheme)
-                    err = kern(
-                        ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
-                        ctypes.byref(int3c2e_envs), (ctypes.c_int*3)(*scheme),
-                        (ctypes.c_int*6)(ish0, ish1, jsh0, jsh1,
-                                         bvk_nbas+ksh0, bvk_nbas+ksh1),
-                        ctypes.c_int(bas_ij_idx.size),
-                        ctypes.c_uint16(nrow), ctypes.c_uint16(ncol),
-                        ctypes.c_uint16(naux),
-                        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
-                        _atm_cpu.ctypes, ctypes.c_int(bvkcell.natm),
-                        _bas_cpu.ctypes, ctypes.c_int(bvkcell.nbas), _env_cpu.ctypes)
-                    if err != 0:
-                        raise RuntimeError(f'fill_int3c2e kernel for {lll} failed')
-
-                    if log.verbose >= logger.DEBUG1:
-                        t1, t1p = log.timer_debug1(f'processing {lll}', *t1), t1
-                        if lll not in timing_collection:
-                            timing_collection[lll] = 0
-                        timing_collection[lll] += t1[1] - t1p[1]
-                        kern_counts += 1
-
-                log.debug1('transform BvK-cell to k-points')
-                #TODO:if kptjs is not None:
-                #TODO:    kptjs = cp.asarray(kptjs, order='C').reshape(-1,3)
-                #TODO:    expLk = cp.exp(1j*cp.dot(bvkmesh_Ls, kptjs.T))
-                #TODO:    out = contract('Lk,LpqG->kGpq', expLk, out)
-                #TODO:eri[:,i0:i1,:,j0:j1,k0:k1] = out
-
-            if log.verbose >= logger.DEBUG1:
-                log.debug1('kernel launches %d', kern_counts)
-                for lll, t in timing_collection.items():
-                    log.debug1('%s wall time %.2f', lll, t)
-
-            #if transform_ao:
-            #    log.debug1('transform basis')
-            #    #:out = einsum('pqLG,pi,qj->LGij', out, coeff, coeff)
-            #    out = contract('kGpq,qj->kGpj', out, coeff)
-            #    out = contract('kGpj,pi->kGij', out, coeff)
-
-            log.timer('int3c2e', *cput0)
-            return out
-        return int3c2e_kernel
-
-    def int3c2e_kernel_iterator(self, cutoff=None, verbose=None):
-        cell = self.sorted_cell
-        auxcell = self.sorted_auxcell
-        coeff = self.coeff
-        uniq_l_ctr = self.uniq_l_ctr
-        l_ctr_offsets = self.l_ctr_offsets
-        bvk_kmesh = self.bvk_kmesh
-        bvkcell = self.bvkcell
-        kpts = self.kpts
 
         log = logger.new_logger(cell, verbose)
         cput0 = log.init_timer()
@@ -326,7 +215,6 @@ class Int3c2eOpt:
             auxcell._atm, auxcell._bas, _scale_sp_ctr_coeff(auxcell))
         bvk_ao_loc = bvkcell.ao_loc
         aux_loc = auxcell.ao_loc
-        bvk_nbas = bvkcell.nbas
 
         _atm = cp.array(_atm_cpu, dtype=np.int32)
         _bas = cp.array(_bas_cpu, dtype=np.int32)
@@ -334,7 +222,7 @@ class Int3c2eOpt:
         ao_loc = _conc_locs(bvk_ao_loc, aux_loc)
         bvk_ncells = bvkcell.nbas // cell.nbas
         int3c2e_envs = Int3c2eEnvVars(
-            bvkcell.natm, bvk_nbas, bvk_ncells, nimgs,
+            bvkcell.natm, bvkcell.nbas, bvk_ncells, nimgs,
             _atm.data.ptr, _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr,
             Ls.data.ptr, math.log(cutoff),
         )
@@ -343,14 +231,14 @@ class Int3c2eOpt:
 
         gen_img_idx = create_img_idx(cell, bvkcell, Ls, int3c2e_envs)
 
-        ao_loc = bvkcell.ao_loc
         uniq_l = uniq_l_ctr[:,0]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
-
         init_constant(cell)
         kern = libpbc.fill_int3c2e
         cp.cuda.Stream.null.synchronize()
-        log.timer_debug1('initialize int3c2e_kernel', *cput0)
+        t1 = log.timer_debug1('initialize int3c2e_kernel', *cput0)
+        timing_collection = {}
+        kern_counts = 0
 
         ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
         for i, j in ij_tasks:
@@ -358,30 +246,31 @@ class Int3c2eOpt:
             lj = uniq_l[j]
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
             jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            nrow = ao_loc[ish1] - ao_loc[ish0]
-            ncol = ao_loc[jsh1] - ao_loc[jsh0]
+            nrow = bvk_ao_loc[ish1] - bvk_ao_loc[ish0]
+            ncol = bvk_ao_loc[jsh1] - bvk_ao_loc[jsh0]
             img_idx, img_offsets, bas_ij_idx = gen_img_idx(ish0, ish1, jsh0, jsh1)
 
             for k, lk in enumerate(self.uniq_l_ctr_aux[:,0]):
                 ksh0, ksh1 = self.l_ctr_aux_offsets[k:k+2]
                 naux = aux_loc[ksh1] - aux_loc[ksh0]
-                eri3c = cp.zeros((bvk_ncells,nrow, bvk_ncells, ncol,naux))
+                shls_slice = ish0, ish1, jsh0, jsh1, ksh0, ksh1
+                eri3c = cp.zeros((bvk_ncells, nrow, bvk_ncells, ncol, naux))
                 lll = f'({ANGULAR[li]}{ANGULAR[lj]}|{ANGULAR[lk]})'
                 scheme = int3c2e_scheme(cell, li, lj, lk)
                 log.debug2('int3c2e_scheme for %s: %s', lll, scheme)
                 err = kern(
                     ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
                     ctypes.byref(int3c2e_envs), (ctypes.c_int*3)(*scheme),
-                    (ctypes.c_int*6)(ish0, ish1, jsh0, jsh1,
-                                     bvk_nbas+ksh0, bvk_nbas+ksh1),
+                    (ctypes.c_int*6)(*shls_slice),
+                    ctypes.c_int(bvk_ncells), ctypes.c_int(nrow),
+                    ctypes.c_int(ncol), ctypes.c_int(naux),
                     ctypes.c_int(bas_ij_idx.size),
-                    ctypes.c_uint16(nrow), ctypes.c_uint16(ncol),
-                    ctypes.c_uint16(naux),
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
                     _atm_cpu.ctypes, ctypes.c_int(bvkcell.natm),
                     _bas_cpu.ctypes, ctypes.c_int(bvkcell.nbas), _env_cpu.ctypes)
+                print(eri3c.tolist())
                 if err != 0:
                     raise RuntimeError(f'fill_int3c2e kernel for {lll} failed')
                 if log.verbose >= logger.DEBUG1:
@@ -390,24 +279,13 @@ class Int3c2eOpt:
                         timing_collection[lll] = 0
                     timing_collection[lll] += t1[1] - t1p[1]
                     kern_counts += 1
-                yield eri3c
+                yield shls_slice, eri3c
 
         if log.verbose >= logger.DEBUG1:
+            log.timer('int3c2e', *cput0)
             log.debug1('kernel launches %d', kern_counts)
             for lll, t in timing_collection.items():
                 log.debug1('%s wall time %.2f', lll, t)
-
-    def fill_int3c2e(self, cutoff=None, verbose=None):
-        raise NotImplementedError
-
-    def contract_k_kernel(self, kpts=kpts, transform_ao=True):
-        raise NotImplementedError
-
-    def contract_j_kernel(self, kpts=kpts, transform_ao=True):
-        raise NotImplementedError
-
-    def contract_j_aux_kernel(self, kpts=kpts, transform_ao=True):
-        raise NotImplementedError
 
 class Int3c2eEnvVars(ctypes.Structure):
     _fields_ = [
@@ -436,13 +314,16 @@ def int3c2e_scheme(cell, li, lj, lk, shm_size=SHM_SIZE):
     # Round up to the next 2^n
     gout_stride = _nearest_power2(gout_stride, return_leq=False)
     # Align nksh*gout_stride to warp size
-    nksh_min = 32 // gout_stride
+    if gout_stride <= 32:
+        nksh_min = 32 // gout_stride
+    else:
+        nksh_min = THREADS // gout_stride
 
     g_size = (li+1)*(lj+1)*(lk+1)
     unit = g_size*3
-    nksh_nsp_max = shm_size//(unit*8)
-    nksh_nsp_max = _nearest_power2(nksh_nsp_max)
-    if nksh_nsp_max < nksh_min:
+    nksp_max = shm_size//(unit*8)
+    nksp_max = _nearest_power2(nksp_max)
+    if nksp_max < nksh_min:
         raise RuntimeError('GOUT_WIDTH too small or not enough shared memory')
 
     nksh_per_block = nksh_min

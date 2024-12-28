@@ -28,7 +28,7 @@
 typedef struct {
     uint16_t natm; // in bvk-cell
     uint16_t nbas; // in bvk-cell
-    uint16_t bvk_ncells; // number of images in the BvK cell
+    uint16_t cell0_nbas; // in the reference cell
     uint16_t nimgs; // number of images in lattice sum
     int *atm;
     int *bas;

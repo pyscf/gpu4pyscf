@@ -98,10 +98,9 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
         int ijk_idx = task_id + ksp_id;
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1;
+        int img1 = 0;
         if (pair_ij_idx >= bounds.npairs_ij) {
             pair_ij_idx = sp0_this_block;
-            img1 = 0;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
@@ -151,7 +150,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                     int img_id = img0 + img;
                     __syncthreads();
                     if (img_id > img1) {
-                        // ensure threads in the warp processing the same number of images
+                        // ensure the same number of images processed in the same warp
                         img_id = img0;
                         if (gout_id == 0) {
                             gy[0] = 0.;
@@ -190,7 +189,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                     }
                     __syncthreads();
                     float Kab_f32 = Kab;
-                    if (gout_id == 0 && img+img0 < img1 && Kab_f32-5.f*lij < log_cutoff) {
+                    if (gout_id == 0 && img0+img < img1 && 5.f+2.f*lij-Kab_f32 > log_cutoff) {
                         // check any not vanished integrals
                         float ai_f32 = ai;
                         float aj_f32 = aj;
@@ -356,9 +355,8 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
             int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
             if (pair_ij_idx < bounds.npairs_ij) {
                 int *ao_loc = envs.ao_loc;
-                int ncells = envs.bvk_ncells;
-                int nbasp = envs.nbas / ncells;
-                size_t ncol = bounds.ncol * ncells;
+                int nbasp = envs.cell0_nbas;
+                size_t ncol = bounds.ncol;
                 size_t naux = bounds.naux;
                 int cell_i = ish / nbasp;
                 int cell0_ish = ish % nbasp;
@@ -379,6 +377,178 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                     eri_tensor[addr] = gout[n];
                 }
             }
+        }
+    }
+}
+
+__global__
+void sr_q_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars envs,
+                      float *exps, float *log_coeff, int ish0, int jsh0)
+{
+    int ish = blockIdx.x + ish0;
+    int jsh = blockIdx.y + jsh0;
+    int njsh = gridDim.y;
+    int thread_id = threadIdx.x;
+    int threads = blockDim.x;
+    int nbasp = envs.cell0_nbas;
+    int cell0_ish = ish % nbasp;
+    int cell0_jsh = jsh % nbasp;
+    int nimgs = envs.nimgs;
+    int nimgs2 = nimgs * nimgs;
+    int ncells = envs.nbas / nbasp;
+    int cell0_natm = envs.natm / ncells;
+    int *atm = envs.atm;
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double *img_coords = envs.img_coords;
+    extern __shared__ float x_cache[];
+    float *y_cache = x_cache + cell0_natm;
+    float *z_cache = y_cache + cell0_natm;
+    for (int k = thread_id; k < cell0_natm; k += threads) {
+        double *rk = env + atm[k*ATM_SLOTS+PTR_COORD];
+        x_cache[k] = rk[0];
+        y_cache[k] = rk[1];
+        z_cache[k] = rk[2];
+    }
+    __syncthreads();
+
+    int li = bas[ANG_OF + ish0*BAS_SLOTS];
+    int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
+    float ai = exps[cell0_ish];
+    float aj = exps[cell0_jsh];
+    float log_ci = log_coeff[cell0_ish];
+    float log_cj = log_coeff[cell0_jsh];
+    float aij = ai + aj;
+    float u = .5f / aij;
+    float fi = ai / aij;
+    float fj = aj / aij;
+    float theta_ij = ai * aj / aij;
+    float omega = env[PTR_RANGE_OMEGA];
+    if (omega == 0) {
+        omega = 0.1f;
+    }
+    float omega2 = omega * omega;
+    // exp(- 1/(1/aij+1/ak+1/omega^2) * r_guess^2) < 1e-9
+    // => ~ exp(- omega^2 * r_guess^2) < 1e-9
+    // => r_guess > 5/omega
+    // 1/(1/aij+1/ak+1/omega^2)*r_guess/aij in Eq 64 of arXiv:2302.11307
+    //     ~ omega^2*r_guess/aij ~ omega/aij * 5.f
+    float r_omega_aij = fabs(omega)/aij * 7.;
+    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    float xi = ri[0];
+    float yi = ri[1];
+    float zi = ri[2];
+    float xj = rj[0];
+    float yj = rj[1];
+    float zj = rj[2];
+    float log_cutoff = envs.log_cutoff;
+
+    float fac_guess = .5f - logf(omega2)/4; // ~ log(sqrt(2.x/(omega*sqrt(pi))))
+    float log_fac = log_ci + log_cj + 1.5f*logf(3.1416f/aij) + fac_guess;
+
+    int count = 0;
+    for (int ijL = thread_id; ijL < nimgs2; ijL += threads) {
+        int iL = ijL / nimgs;
+        int jL = ijL % nimgs;
+        float xiL = xi + img_coords[iL*3+0];
+        float yiL = yi + img_coords[iL*3+1];
+        float ziL = zi + img_coords[iL*3+2];
+        float xjL = xj + img_coords[jL*3+0];
+        float yjL = yj + img_coords[jL*3+1];
+        float zjL = zj + img_coords[jL*3+2];
+        float xjxi = xjL - xiL;
+        float yjyi = yjL - yiL;
+        float zjzi = zjL - ziL;
+        float xij = xjxi * fj + xiL;
+        float yij = yjyi * fj + yiL;
+        float zij = zjzi * fj + ziL;
+        float rr_min = 1e9;
+        for (int k = 0; k < cell0_natm; ++k) {
+            float dx = xij - x_cache[k];
+            float dy = yij - y_cache[k];
+            float dz = zij - z_cache[k];
+            float rr = dx * dx + dy * dy + dz * dz;
+            rr_min = MIN(rr, rr_min);
+        }
+        float rr_ij = xjxi * xjxi + yjyi * yjyi + zjzi * zjzi;
+        float dr = sqrtf(rr_ij);
+
+        float dri = fj * dr + r_omega_aij;
+        float drj = fi * dr + r_omega_aij;
+        float dri_fac = .5f*li * logf(dri*dri + li*u);
+        float drj_fac = .5f*lj * logf(drj*drj + lj*u);
+        float theta = (omega2 * aij) / (omega2 + aij);
+        float estimator = log_fac + dri_fac + drj_fac - theta_ij*rr_ij - theta*rr_min;
+        if (estimator > log_cutoff) {
+            mask[(ish*njsh+jsh)*nimgs2 + ijL] = 1;
+            count += 1;
+        }
+    }
+
+    extern __shared__ int counts[];
+    counts[thread_id] = count;
+    __syncthreads();
+    for (int stride = threads / 2; stride > 0; stride /= 2) {
+        if (thread_id < stride) {
+            counts[thread_id] += counts[thread_id + stride];
+        }
+        __syncthreads();
+    }
+    if (thread_id == 0) {
+        img_counts[ish*njsh+jsh] = counts[0];
+    }
+}
+
+__global__
+void int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int8_t *mask,
+                            int *bas_ij_idx, int nimgs)
+{
+    int thread_id = threadIdx.x;
+    int threads = blockDim.x;
+    int row_id = blockIdx.x;
+    int bas_ij = bas_ij_idx[row_id];
+    int nimgs2 = nimgs * nimgs;
+    int bacth_size = (nimgs2 + threads - 1) / threads;
+    int ij0 = thread_id * bacth_size;
+    int ij1 = MIN(ij0 + bacth_size, nimgs2);
+    int count = 0;
+    for (int ijL = ij0; ijL < ij1; ++ijL) {
+        if (mask[bas_ij*nimgs2+ijL]) {
+            count += 1;
+        }
+    }
+
+    // https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda
+    __shared__ int thread_offsets[1024];
+    thread_offsets[thread_id] = count;
+    // Up-sweep phase
+    for (int stride = 1; stride < threads; stride *= 2) {
+        __syncthreads();
+        int index = (thread_id + 1) * stride * 2 - 1;
+        if (index < threads) {
+            thread_offsets[index] += thread_offsets[index-stride];
+        }
+    }
+    __syncthreads();
+    if (thread_id == threads-1) { thread_offsets[threads-1] = 0; }
+    // Down-sweep phase
+    for (int stride = threads/2; stride > 0; stride /= 2) {
+        __syncthreads();
+        int index = (thread_id + 1) * stride * 2 - 1;
+        if (index < threads) {
+            int temp = thread_offsets[index - stride];
+            thread_offsets[index - stride] = thread_offsets[index];
+            thread_offsets[index] += temp;
+        }
+    }
+    __syncthreads();
+
+    int offset = img_offsets[row_id] + thread_offsets[thread_id];
+    for (int ijL = ij0; ijL < ij1; ++ijL) {
+        if (mask[bas_ij*nimgs2+ijL]) {
+            img_idx[offset] = ijL;
+            ++offset;
         }
     }
 }
