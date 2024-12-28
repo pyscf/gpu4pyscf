@@ -112,15 +112,17 @@ def create_img_idx(cell, bvkcell, Ls, int3c2e_envs):
         njsh = jsh1 - jsh0
         ij_pairs = nk * nish * nk * njsh
         mask = cp.zeros((ij_pairs, nimgs**2), dtype=np.int8)
-        img_counts = cp.empty(ij_pairs, dtype=np.int32)
-        libpbc.int3c2e_q_mask(
+        img_counts = cp.zeros(ij_pairs, dtype=np.int32)
+        err = libpbc.int3c2e_q_mask(
             ctypes.cast(mask.data.ptr, ctypes.c_void_p),
             ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
             ctypes.byref(int3c2e_envs),
             (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
             ctypes.cast(exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_cs.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(cell.natm))
+            ctypes.c_int(nk))
+        if err != 0:
+            raise RuntimeError(f'int3c2e_q_mask failed')
 
         img_counts_mask = img_counts > 0
         img_counts = img_counts[img_counts_mask]
@@ -130,12 +132,14 @@ def create_img_idx(cell, bvkcell, Ls, int3c2e_envs):
         img_offsets[0] = 0
 
         img_idx = cp.empty(int(img_offsets[-1]), dtype=np.int32)
-        libpbc.int3c2e_img_idx(
+        err = libpbc.int3c2e_img_idx(
             ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(mask.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_idx.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ij_pairs), ctypes.c_int(nimgs))
+        if err != 0:
+            raise RuntimeError(f'int3c2e_img_idx failed')
 
         #TODO: only tril part when i == j
         K = cp.arange(nk)
@@ -160,8 +164,8 @@ class Int3c2eOpt:
         self.sorted_cell.omega = omega
 
         self.auxcell = auxcell
-        cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(auxcell, tile=1)
-        self.sorted_auxcell = cell
+        auxcell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(auxcell, tile=1)
+        self.sorted_auxcell = auxcell
         self.uniq_l_ctr_aux = uniq_l_ctr
         self.l_ctr_aux_offsets = np.append(0, np.cumsum(l_ctr_counts))
         self.aux_coeff = cp.asarray(coeff, dtype=np.complex128)
@@ -191,7 +195,7 @@ class Int3c2eOpt:
 
         log = logger.new_logger(cell, verbose)
         cput0 = log.init_timer()
-        rcut = estimate_rcut(cell, auxcell, self.omega)
+        rcut = estimate_rcut(cell, auxcell, self.omega).max()
         Ls = cp.asarray(bvkcell.get_lattice_Ls(rcut=rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
@@ -222,7 +226,7 @@ class Int3c2eOpt:
         ao_loc = _conc_locs(bvk_ao_loc, aux_loc)
         bvk_ncells = bvkcell.nbas // cell.nbas
         int3c2e_envs = Int3c2eEnvVars(
-            bvkcell.natm, bvkcell.nbas, bvk_ncells, nimgs,
+            cell.natm, cell.nbas, bvk_ncells, nimgs,
             _atm.data.ptr, _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr,
             Ls.data.ptr, math.log(cutoff),
         )
@@ -270,7 +274,6 @@ class Int3c2eOpt:
                     ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
                     _atm_cpu.ctypes, ctypes.c_int(bvkcell.natm),
                     _bas_cpu.ctypes, ctypes.c_int(bvkcell.nbas), _env_cpu.ctypes)
-                print(eri3c.tolist())
                 if err != 0:
                     raise RuntimeError(f'fill_int3c2e kernel for {lll} failed')
                 if log.verbose >= logger.DEBUG1:
@@ -289,8 +292,8 @@ class Int3c2eOpt:
 
 class Int3c2eEnvVars(ctypes.Structure):
     _fields_ = [
-        ('natm', ctypes.c_uint16),
-        ('nbas', ctypes.c_uint16),
+        ('cell0_natm', ctypes.c_uint16),
+        ('cell0_nbas', ctypes.c_uint16),
         ('bvk_ncells', ctypes.c_uint16),
         ('nimgs', ctypes.c_uint16),
         ('atm', ctypes.c_void_p),
@@ -309,6 +312,8 @@ def int3c2e_scheme(cell, li, lj, lk, shm_size=SHM_SIZE):
     nfi = (li + 1) * (li + 2) // 2
     nfj = (lj + 1) * (lj + 2) // 2
     nfk = (lk + 1) * (lk + 2) // 2
+    order = li + lj + lk
+    nroots = (order//2 + 1) * 2
     gout_size = nfi * nfj * nfk
     gout_stride = (gout_size + GOUT_WIDTH-1) // GOUT_WIDTH
     # Round up to the next 2^n
@@ -320,12 +325,14 @@ def int3c2e_scheme(cell, li, lj, lk, shm_size=SHM_SIZE):
         nksh_min = THREADS // gout_stride
 
     g_size = (li+1)*(lj+1)*(lk+1)
-    unit = g_size*3
+    unit = g_size*3 + nroots*2
     nksp_max = shm_size//(unit*8)
     nksp_max = _nearest_power2(nksp_max)
     if nksp_max < nksh_min:
         raise RuntimeError('GOUT_WIDTH too small or not enough shared memory')
 
     nksh_per_block = nksh_min
-    nsp_per_block = THREADS // (nksh_per_block*gout_stride)
+    nsp_per_block = min(THREADS // (nksh_per_block*gout_stride),
+                        nksp_max // nksh_per_block)
+    gout_stride = THREADS // (nksh_per_block*nsp_per_block)
     return nksh_per_block, gout_stride, nsp_per_block

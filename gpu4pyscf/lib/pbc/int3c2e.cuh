@@ -26,9 +26,9 @@
 #ifndef HAVE_DEFINED_PBCINT3CENVVAS_H
 #define HAVE_DEFINED_PBCINT3CENVVAS_H
 typedef struct {
-    uint16_t natm; // in bvk-cell
-    uint16_t nbas; // in bvk-cell
+    uint16_t cell0_natm; // in the reference cell
     uint16_t cell0_nbas; // in the reference cell
+    uint16_t bvk_ncells; // in bvk-cell
     uint16_t nimgs; // number of images in lattice sum
     int *atm;
     int *bas;

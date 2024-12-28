@@ -98,14 +98,15 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
         int ijk_idx = task_id + ksp_id;
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        int img1 = 1;
+        int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.npairs_ij) {
-            pair_ij_idx = sp0_this_block;
+            pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
-        int bas_ij = bounds.bas_ij_idx[pair_ij_idx];
-        int img0 = sp_img_offsets[pair_ij_idx];
+        int bas_ij = bounds.bas_ij_idx[pair_ij];
+        int img0 = sp_img_offsets[pair_ij];
         if (thread_id < WARPS) {
             img_counts_in_warp[thread_id] = 0;
         }
@@ -114,8 +115,9 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
         __syncthreads();
         int img_counts = img_counts_in_warp[warp_id];
 
-        int ish = bas_ij / envs.nbas;
-        int jsh = bas_ij % envs.nbas;
+        int nbas = envs.cell0_nbas * envs.bvk_ncells;
+        int ish = bas_ij / nbas;
+        int jsh = bas_ij % nbas;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -149,7 +151,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                 for (int img = 0; img < img_counts; ++img) {
                     int img_id = img0 + img;
                     __syncthreads();
-                    if (img_id > img1) {
+                    if (img_id >= img1) {
                         // ensure the same number of images processed in the same warp
                         img_id = img0;
                         if (gout_id == 0) {
@@ -351,21 +353,23 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                 }
             }
 
-            int ijk_idx = task_id + ksp_id;
-            int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
             if (pair_ij_idx < bounds.npairs_ij) {
                 int *ao_loc = envs.ao_loc;
                 int nbasp = envs.cell0_nbas;
-                size_t ncol = bounds.ncol;
-                size_t naux = bounds.naux;
+                int ncells = envs.bvk_ncells;
                 int cell_i = ish / nbasp;
                 int cell0_ish = ish % nbasp;
                 int cell_j = jsh / nbasp;
                 int cell0_jsh = jsh % nbasp;
-                size_t i0 = cell_i * (ao_loc[cell0_ish] - ao_loc[bounds.ish0]);
-                size_t j0 = cell_j * (ao_loc[cell0_jsh] - ao_loc[bounds.jsh0]);
-                size_t k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-                double *eri_tensor = out + (i0*ncol+j0) * naux + k0;
+                int nrow = bounds.nrow;
+                int ncol = bounds.ncol;
+                size_t naux = bounds.naux;
+                int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
+                int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+                int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
+                double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
+                                              cell_j) * ncol + j0) * naux + k0;
+                int nKj = ncells * ncol;
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                     int ijk = n*gout_stride + gout_id;
                     size_t k  = ijk / nfij;
@@ -373,7 +377,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                     if (k >= nfk) break;
                     size_t i = ij % nfi;
                     size_t j = ij / nfi;
-                    size_t addr = (i*ncol+j)*naux + k;
+                    size_t addr = (i*nKj+j)*naux + k;
                     eri_tensor[addr] = gout[n];
                 }
             }
@@ -383,20 +387,25 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
 
 __global__
 void sr_q_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars envs,
-                      float *exps, float *log_coeff, int ish0, int jsh0)
+                      float *exps, float *log_coeff,
+                      int ish0, int jsh0, int nish, int njsh)
 {
-    int ish = blockIdx.x + ish0;
-    int jsh = blockIdx.y + jsh0;
-    int njsh = gridDim.y;
+    int Ki = blockIdx.x;
+    int Kj = blockIdx.y;
+    int cell_i = Ki / nish;
+    int cell_j = Kj / njsh;
+    int cell0_ish = Ki % nish + ish0;
+    int cell0_jsh = Kj % njsh + jsh0;
+    int nbasp = envs.cell0_nbas;
+    int ish = cell_i * nbasp + cell0_ish;
+    int jsh = cell_j * nbasp + cell0_jsh;
+    int ncells = envs.bvk_ncells;
+    int nKj = ncells * njsh;
     int thread_id = threadIdx.x;
     int threads = blockDim.x;
-    int nbasp = envs.cell0_nbas;
-    int cell0_ish = ish % nbasp;
-    int cell0_jsh = jsh % nbasp;
     int nimgs = envs.nimgs;
     int nimgs2 = nimgs * nimgs;
-    int ncells = envs.nbas / nbasp;
-    int cell0_natm = envs.natm / ncells;
+    int cell0_natm = envs.cell0_natm;
     int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -481,7 +490,7 @@ void sr_q_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars envs,
         float theta = (omega2 * aij) / (omega2 + aij);
         float estimator = log_fac + dri_fac + drj_fac - theta_ij*rr_ij - theta*rr_min;
         if (estimator > log_cutoff) {
-            mask[(ish*njsh+jsh)*nimgs2 + ijL] = 1;
+            mask[(Ki*nKj+Kj)*nimgs2 + ijL] = 1;
             count += 1;
         }
     }
@@ -496,7 +505,7 @@ void sr_q_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars envs,
         __syncthreads();
     }
     if (thread_id == 0) {
-        img_counts[ish*njsh+jsh] = counts[0];
+        img_counts[Ki*nKj+Kj] = counts[0];
     }
 }
 
