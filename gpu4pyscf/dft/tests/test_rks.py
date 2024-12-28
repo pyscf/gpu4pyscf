@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pickle
 import numpy as np
 import unittest
 import pyscf
@@ -64,10 +65,17 @@ class KnownValues(unittest.TestCase):
     '''
     def test_rks_lda(self):
         print('------- LDA ----------------')
-        e_tot = run_dft("LDA, vwn5", mol_sph)
+        mf = mol_sph.RKS(xc='LDA,vwn5').to_gpu()
+        mf.grids.level = grids_level
+        mf.nlcgrids.level = nlcgrids_level
+        e_tot = mf.kernel()
         e_ref = -75.9046410402
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5
+
+        # test serialization
+        mf1 = pickle.loads(pickle.dumps(mf))
+        assert mf1.e_tot == e_tot
 
     def test_rks_pbe(self):
         print('------- PBE ----------------')

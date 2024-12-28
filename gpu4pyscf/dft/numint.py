@@ -1792,6 +1792,9 @@ class NumInt(lib.StreamObject, LibXCMixin):
     screen_index = None
     xcfuns       = None        # can be multiple xc functionals
 
+    __getstate__, __setstate__ = lib.generate_pickle_methods(
+        excludes=('gdftopt',))
+
     def build(self, mol, coords):
         self.gdftopt = _GDFTOpt.from_mol(mol)
         self.grid_blksize = None

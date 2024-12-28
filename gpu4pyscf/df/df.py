@@ -36,7 +36,7 @@ GROUP_SIZE = 256
 class DF(lib.StreamObject):
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    _keys = {'intopt', 'mol', 'auxmol', 'use_gpu_memory'}
+    _keys = {'intopt', 'nao', 'naux', 'cd_low', 'mol', 'auxmol', 'use_gpu_memory'}
 
     def __init__(self, mol, auxbasis=None):
         self.mol = mol
@@ -52,7 +52,11 @@ class DF(lib.StreamObject):
         self.naux = None
         self.cd_low = None
         self._cderi = None
+        self._vjopt = None
         self._rsh_df = {}
+
+    __getstate__, __setstate__ = lib.generate_pickle_methods(
+        excludes=('cd_low', 'intopt', '_cderi', '_vjopt'))
 
     @property
     def auxbasis(self):
