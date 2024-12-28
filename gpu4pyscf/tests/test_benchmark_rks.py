@@ -144,12 +144,13 @@ def test_rb3lyp_grad_median(benchmark):
     g = benchmark(run_rb3lyp_grad, median_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp grad median')
     assert np.isclose(np.linalg.norm(g), 0.2601443836937988, atol=1e-5)
-@pytest.mark.high_memory
+
 @pytest.mark.slow
 @pytest.mark.benchmark
 def test_rb3lyp_hessian_median(benchmark):
     h = benchmark(run_rb3lyp_hessian, median_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp hessian median')
+    print(np.linalg.norm(h))
     assert np.isclose(np.linalg.norm(h))
 
 # large molecule
@@ -182,13 +183,16 @@ def test_rb3lyp_grad_large(benchmark):
     g = benchmark(run_rb3lyp_grad, large_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp grad large')
     assert np.isclose(np.linalg.norm(g), 0.3784664384209763, atol=1e-5)
+
+# Hessian for large molecule with large basis set is too slow
+'''
 @pytest.mark.slow
 @pytest.mark.benchmark
 def test_rb3lyp_hessian_large(benchmark):
     h = benchmark(run_rb3lyp_hessian, large_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp hessian large')
     print(np.linalg.norm(h))
-
+'''
 # small basis set
 @pytest.mark.benchmark
 def test_df_rb3lyp_631gs(benchmark):

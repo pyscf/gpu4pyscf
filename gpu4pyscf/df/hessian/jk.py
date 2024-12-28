@@ -54,7 +54,8 @@ def _jk_task_with_mo1(dfobj, dms, mo_coeff, mo1s, occ_coeffs,
             else:
                 dm_sparse *= 2
             dm_sparse[:, intopt.cderi_diag] *= .5
-
+        dms = None
+        
         if with_k:
             vks = [cupy.zeros_like(mo1) for mo1 in mo1s]
 
