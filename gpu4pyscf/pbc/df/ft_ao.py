@@ -43,8 +43,8 @@ __all__ = [
 ]
 
 libpbc = load_library('libpbc')
-libpbc.PBC_build_ft_ao.restype = ctypes.c_int
-libpbc.PBC_init_constant.restype = ctypes.c_int
+libpbc.build_ft_ao.restype = ctypes.c_int
+libpbc.init_constant.restype = ctypes.c_int
 
 LMAX = 4
 GOUT_WIDTH = 19
@@ -209,7 +209,7 @@ class FTOpt:
             conj_mapping = cp.asarray(conj_images_in_bvk_cell(bvk_kmesh), dtype=np.int32)
 
         init_constant(cell)
-        kern = libpbc.PBC_build_ft_ao
+        kern = libpbc.build_ft_ao
         cp.cuda.Stream.null.synchronize()
         log.timer_debug1('initialize ft_kern', *cput0)
 
@@ -270,7 +270,7 @@ class FTOpt:
                     cell._atm.ctypes, ctypes.c_int(cell.natm),
                     cell._bas.ctypes, ctypes.c_int(cell.nbas), cell._env.ctypes)
                 if err != 0:
-                    raise RuntimeError(f'PBC_build_ft_ao kernel for {ll_pattern} failed')
+                    raise RuntimeError(f'build_ft_ao kernel for {ll_pattern} failed')
                 if log.verbose >= logger.DEBUG1:
                     t1, t1p = log.timer_debug1(f'processing {ll_pattern}', *t1), t1
                     if ll_pattern not in timing_collection:
@@ -290,12 +290,12 @@ class FTOpt:
                 #ix, iy = cp.tril_indices(nao, -1)
                 #for k, ck in enumerate(conj_mapping):
                 #    out[iy,ix,ck] = out[ix,iy,k]
-                err = libpbc.PBC_ft_aopair_fill_triu(
+                err = libpbc.ft_aopair_fill_triu(
                     ctypes.cast(out.data.ptr, ctypes.c_void_p),
                     ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(nao), ctypes.c_int(bvk_ncells), ctypes.c_int(nGv))
                 if err != 0:
-                    raise RuntimeError('PBC_ft_aopair_fill_triu kernel failed')
+                    raise RuntimeError('ft_aopair_fill_triu kernel failed')
 
             log.debug1('transform BvK-cell to k-points')
             if kptjs is not None:
@@ -365,7 +365,7 @@ class AFTIntEnvVars(ctypes.Structure):
 
 def init_constant(cell):
     g_idx, offsets = g_pair_idx()
-    err = libpbc.PBC_init_constant(
+    err = libpbc.init_constant(
         g_idx.ctypes, offsets.ctypes, cell._env.ctypes, ctypes.c_int(cell._env.size),
         ctypes.c_int(SHM_SIZE))
     if err != 0:

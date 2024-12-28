@@ -18,14 +18,20 @@ extern __global__
 void ft_aopair_fill_triu(double *out, int *conj_mapping, int bvk_ncells, int nGv);
 extern __global__
 void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds);
+extern __global__
+void sr_q_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars envs,
+                      float *exps, float *log_cs, int ish0, int jsh0);
+extern __global__
+void int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int8_t *mask,
+                            int *bas_ij_idx, int nimgs);
 
 int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds, int *scheme);
 
 extern "C" {
-int PBC_build_ft_ao(double *out, AFTIntEnvVars *envs,
-                    int *scheme, int *shls_slice, int npairs_ij, int ngrids,
-                    int *ish_in_pair, int *jsh_in_pair, double *grids,
-                    int *atm, int natm, int *bas, int nbas, double *env)
+int build_ft_ao(double *out, AFTIntEnvVars *envs,
+                int *scheme, int *shls_slice, int npairs_ij, int ngrids,
+                int *ish_in_pair, int *jsh_in_pair, double *grids,
+                int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
     uint16_t jsh0 = shls_slice[2];
@@ -57,13 +63,13 @@ int PBC_build_ft_ao(double *out, AFTIntEnvVars *envs,
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in PBC_build_ft_ao: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in build_ft_ao: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
 }
 
-int PBC_ft_aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_ncells, int nGv)
+int ft_aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_ncells, int nGv)
 {
     int nGv2 = nGv * 2; // *2 for complex number
     int threads = 1024;
@@ -71,23 +77,20 @@ int PBC_ft_aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_nce
     ft_aopair_fill_triu<<<blocks, threads>>>(out, conj_mapping, bvk_ncells, nGv2);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in PBC_ft_aopair_fill_triu: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in ft_aopair_fill_triu: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
 }
 
-int PBC_fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
-                     int *scheme, int *shls_slice, int npairs_ij, int img_pairs,
-                     uint16_t nrow, uint16_t ncol, uint16_t naux,
-                     int *ish_in_pair, int *jsh_in_pair,
-                     int *img_idx, int *img_offsets,
-                     int *atm, int natm, int *bas, int nbas, double *env)
+int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
+                 int *scheme, int *shls_slice, int npairs_ij,
+                 uint16_t nrow, uint16_t ncol, uint16_t naux,
+                 int *bas_ij_idx, int *img_idx, int *img_offsets,
+                 int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
-    uint16_t ish1 = shls_slice[1];
     uint16_t jsh0 = shls_slice[2];
-    uint16_t jsh1 = shls_slice[3];
     uint16_t ksh0 = shls_slice[4];
     uint16_t ksh1 = shls_slice[5];
     uint16_t nksh = ksh1 - ksh0;
@@ -115,7 +118,7 @@ int PBC_fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
     PBCInt3c2eBounds bounds = {li, lj, lk, nroots, nfi, nfij, nfk,
         iprim, jprim, kprim, stride_i, stride_j, stride_k, g_size,
         nrow, ncol, naux, nksh, ish0, jsh0, ksh0,
-        npairs_ij, ish_in_pair, jsh_in_pair, img_idx, img_offsets};
+        npairs_ij, bas_ij_idx, img_idx, img_offsets};
 
     if (1) {
         int nksh_per_block = scheme[0];
@@ -126,20 +129,54 @@ int PBC_fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
             (SPTAKS_PER_BLOCK*nsp_per_block);
         int ksh_blocks = (nksh + nksh_per_block - 1) / nksh_per_block;
         dim3 blocks(sp_blocks, ksh_blocks);
-        int buflen = g_size*3 * nksh_per_block * nsp_per_block * sizeof(double) +
-            nksh_per_block*3 * sizeof(float) + img_pairs * sizeof(int8_t);
+        int buflen = (nroots*2+g_size*3) * (nksh_per_block * nsp_per_block) * sizeof(double);
+        buflen += WARPS * sizeof(int);
         pbc_int3c2e_kernel<<<blocks, threads, buflen>>>(out, *envs, bounds);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in PBC_fill_int3c2e: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
 }
 
-int PBC_init_constant(int *g_pair_idx, int *offsets,
-                      double *env, int env_size, int shm_size)
+int int3c2e_q_mask(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars *envs,
+                   int *shls_slice, float *exps, float *log_cs, int cell0_natm)
+{
+    int ish0 = shls_slice[0];
+    int ish1 = shls_slice[1];
+    int jsh0 = shls_slice[2];
+    int jsh1 = shls_slice[3];
+    int nish = ish1 - ish0;
+    int njsh = jsh1 - jsh0;
+    dim3 blocks(nish, njsh);
+    int buflen = cell0_natm * 3 * sizeof(float);
+    buflen = MAX(buflen, 512*sizeof(int));
+    sr_q_mask_kernel<<<blocks, 512, buflen>>>(mask, img_counts, *envs, exps,
+                                              log_cs, ish0, jsh0);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in int3c2e_q_mask: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int int3c2e_img_idx(int *img_idx, int *img_offsets, int8_t *mask,
+                    int *bas_ij_idx, int nrow, int nimgs)
+{
+    int3c2e_img_idx_kernel<<<nrow, 1024>>>(img_idx, img_offsets, mask, bas_ij_idx, nimgs);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in int3c2e_img_idx: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int init_constant(int *g_pair_idx, int *offsets,
+                  double *env, int env_size, int shm_size)
 {
     cudaMemcpyToSymbol(c_g_pair_idx, g_pair_idx, 3675*sizeof(int));
     cudaMemcpyToSymbol(c_g_pair_offsets, offsets, sizeof(int) * LMAX1*LMAX1);

@@ -16,6 +16,10 @@
 
 #include <stdint.h>
 
+#define WARP_SIZE       32
+// corresponding to 256 threads
+#define WARPS           8
+#define IMG_MASK_SLOTS  1024
 #define L_AUX_MAX       6
 #define SPTAKS_PER_BLOCK        32
 
@@ -57,8 +61,7 @@ typedef struct {
     uint16_t jsh0;
     uint16_t ksh0;
     int npairs_ij;
-    int *ish_in_pair;
-    int *jsh_in_pair;
+    int *bas_ij_idx;
     int *img_idx; // indices of img_coords in each shell-pair
     int *img_offsets; // offset img_idx for each shell-pair
 } PBCInt3c2eBounds;

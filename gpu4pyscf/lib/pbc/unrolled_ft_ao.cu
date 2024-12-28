@@ -19,7 +19,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
-#include "ft_ao.h"
+#include "ft_ao.cuh"
 #define OVERLAP_FAC     5.56832799683170787
 #define OF_COMPLEX      2
 
