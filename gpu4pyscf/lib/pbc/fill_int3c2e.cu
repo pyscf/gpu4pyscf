@@ -78,17 +78,15 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    float log_cutoff = envs.log_cutoff;
 
     int gx_len = g_size * nksp_per_block;
-    extern __shared__ int img_counts_in_warp[];
-    double *rw = (double *)(img_counts_in_warp + WARPS);
-    rw += ksp_id;
+    extern __shared__ double rw_buffer[];
+    double *rw = rw_buffer + ksp_id;
     double *g = rw + nksp_per_block * nroots*2;
     double *gx = g;
     double *gy = gx + gx_len;
     double *gz = gy + gx_len;
-    int8_t *img_mask = (int8_t *)(img_counts_in_warp + WARPS);
+    __shared__ int img_counts_in_warp[WARPS];
     double rjri[3], Rpq[3];
     double gout[GOUT_WIDTH];
 
@@ -107,13 +105,11 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
         int img0 = sp_img_offsets[pair_ij];
-        if (thread_id < WARPS) {
-            img_counts_in_warp[thread_id] = 0;
+        int thread_id_in_warp = thread_id % WARP_SIZE;
+        if (thread_id_in_warp == 0) {
+            img_counts_in_warp[warp_id] = 0;
         }
-        __syncthreads();
         atomicMax(&img_counts_in_warp[warp_id], img1-img0);
-        __syncthreads();
-        int img_counts = img_counts_in_warp[warp_id];
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
@@ -148,6 +144,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                     double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
                     gy[0] = fac;
                 }
+                int img_counts = img_counts_in_warp[warp_id];
                 for (int img = 0; img < img_counts; ++img) {
                     int img_id = img0 + img;
                     __syncthreads();
@@ -185,13 +182,21 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                     double theta = aij * ak / (aij + ak);
                     double omega2 = omega * omega;
                     double theta_fac = omega2 / (omega2 + theta);
-#if 1
-                    if (thread_id < WARP_SIZE == 0) {
+                    double theta_rr = theta * rr;
+// Somehow, this screening test does not filter out many integrals.
+// More benchmarks should be performed
+#if 0
+                    __shared__ int8_t img_mask[WARPS];
+                    if (thread_id_in_warp == 0) {
                         img_mask[warp_id] = 0;
                     }
-                    __syncthreads();
                     float Kab_f32 = Kab;
-                    if (gout_id == 0 && img0+img < img1 && 5.f+2.f*lij-Kab_f32 > log_cutoff) {
+                    // IMPORTANT: run the screening test on thread_id_in_warp == 0.
+                    // When gout_stride>32, gout is stored across warps.
+                    // If this test is skipped for gout_id > 0, the g[xyz]
+                    // vectors and gout on these warps will never be evaluated.
+                    if ((gout_id == 0 || thread_id_in_warp == 0) &&
+                        img0+img < img1 && 5.f+2.f*lij-Kab_f32 > envs.log_cutoff) {
                         // check any not vanished integrals
                         float ai_f32 = ai;
                         float aj_f32 = aj;
@@ -201,18 +206,19 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                         float fj = aj_f32 / aij_f32;
                         // fac_guess = log(sqrt(2.x/(omega*sqrt(pi))) * ((2*li+1)*(2*lj+1)*(2*lk+1))**.5/(4*pi)**1.5)
                         //           ~ between [0, 2]
-                        float fac_guess = 1.3f;
+                        float fac_guess = 1.f;
                         // fac in Eq 63 of arXiv:2302.11307 ~ log(ci*cj*ck * (pi^2/(aij*ak))**1.5)
-                        float log_fac = logf(cijk) + 1.5f*logf(9.87f/(aij_f32*ak_f32)) + fac_guess;
-                        float theta_fac_rr = (float)theta_fac * (float)rr;
-                        float rt_rpq = sqrtf((float)rr) * ak_f32/(aij_f32+ak_f32);
-                        float u = .5f / aij_f32;
+                        float log_fac = logf(cijk) + 3.434f - 1.5f*logf(aij_f32*ak_f32) + fac_guess;
+                        float theta_fac_rr = (float)theta_fac * (float)theta_rr;
+                        float rt_aa = sqrtf((float)rr) / (aij_f32+ak_f32) + 1e-9f;
+                        float rt_aij = rt_aa * ak_f32;
+                        float rt_akl = rt_aa * aij_f32;
                         float r = sqrtf((float)rr_ij);
-                        float ti = fj * r + rt_rpq;
-                        float tj = fi * r + rt_rpq;
-                        float ti_fac = .5f*li * logf(ti*ti + li*u + 1.f);
-                        float tj_fac = .5f*lj * logf(tj*tj + lj*u + 1.f);
-                        float tk_fac = .5f*lk * logf(rt_rpq*rt_rpq + lk*.5f/ak_f32 + 1.f);
+                        float ti = fj * r + rt_aij;
+                        float tj = fi * r + rt_aij;
+                        float ti_fac = .5f*li * logf(ti*ti + .5f*li/aij_f32);
+                        float tj_fac = .5f*lj * logf(tj*tj + .5f*lj/aij_f32);
+                        float tk_fac = .5f*lk * logf(rt_akl*rt_akl + .5f*lk/ak_f32);
                         float estimator = log_fac + ti_fac + tj_fac + tk_fac - Kab_f32 - theta_fac_rr;
                         if (estimator > log_cutoff) {
                             img_mask[warp_id] = 1;
@@ -230,7 +236,6 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                     Rpq[1] = ypq;
                     Rpq[2] = zpq;
                     int _nroots = nroots/2;
-                    double theta_rr = theta * rr;
                     gx[0] = exp(-Kab);
                     rys_roots(_nroots, theta_rr, rw+nroots*nksp_per_block,
                               nksp_per_block, gout_id, gout_stride);
@@ -257,7 +262,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                             double b10 = .5/aij * (1 - rt_aij);
                             // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
                             for (int n = gout_id; n < 3; n += gout_stride) {
-                                double *_gx = gx + n * g_size * nksp_per_block;
+                                double *_gx = gx + n * gx_len;
                                 double xpa = rjri[n] * aj_aij;
                                 //double c0x = Rpa[ir] - rt_aij * Rpq[n];
                                 double c0x = xpa - rt_aij * Rpq[n];
@@ -386,9 +391,9 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
 }
 
 __global__
-void sr_q_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars envs,
-                      float *exps, float *log_coeff,
-                      int ish0, int jsh0, int nish, int njsh)
+void sr_int3c2e_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars envs,
+                            float *exps, float *log_coeff, float *aux_exps,
+                            int ish0, int jsh0, int nish, int njsh)
 {
     int Ki = blockIdx.x;
     int Kj = blockIdx.y;
@@ -437,12 +442,6 @@ void sr_q_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars envs,
         omega = 0.1f;
     }
     float omega2 = omega * omega;
-    // exp(- 1/(1/aij+1/ak+1/omega^2) * r_guess^2) < 1e-9
-    // => ~ exp(- omega^2 * r_guess^2) < 1e-9
-    // => r_guess > 5/omega
-    // 1/(1/aij+1/ak+1/omega^2)*r_guess/aij in Eq 64 of arXiv:2302.11307
-    //     ~ omega^2*r_guess/aij ~ omega/aij * 5.f
-    float r_omega_aij = fabs(omega)/aij * 7.;
     double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
     double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
     float xi = ri[0];
@@ -453,8 +452,10 @@ void sr_q_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars envs,
     float zj = rj[2];
     float log_cutoff = envs.log_cutoff;
 
-    float fac_guess = .5f - logf(omega2)/4; // ~ log(sqrt(2.x/(omega*sqrt(pi))))
-    float log_fac = log_ci + log_cj + 1.5f*logf(3.1416f/aij) + fac_guess;
+    // fac_guess = log(sqrt(2.x/(omega*sqrt(pi))) * ((2*li+1)*(2*lj+1)*(2*lk+1))**.5/(4*pi)**1.5)
+    //           ~ between [0, 2]
+    float fac_guess = .5f - logf(omega2)/4;
+    float log_fac = log_ci + log_cj + 1.717f - 1.5f*logf(aij) + fac_guess;
 
     int count = 0;
     for (int ijL = thread_id; ijL < nimgs2; ijL += threads) {
@@ -472,23 +473,37 @@ void sr_q_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars envs,
         float xij = xjxi * fj + xiL;
         float yij = yjyi * fj + yiL;
         float zij = zjzi * fj + ziL;
-        float rr_min = 1e9;
+        float theta = (omega2 * aij) / (omega2 + aij);
+        float rr_min = 1e3f;
+        float theta_rr_min = 1e6f;
         for (int k = 0; k < cell0_natm; ++k) {
             float dx = xij - x_cache[k];
             float dy = yij - y_cache[k];
             float dz = zij - z_cache[k];
             float rr = dx * dx + dy * dy + dz * dz;
-            rr_min = MIN(rr, rr_min);
+            float ak = aux_exps[k];
+            float theta_k = theta * ak / (theta + ak);
+            float theta_rr = theta_k * rr;
+            if (theta_rr < theta_rr_min) {
+                theta_rr_min = theta_rr;
+                rr_min = rr;
+            }
         }
+
+        // exp(- 1/(1/aij+1/ak+1/omega^2) * r_guess^2) < 1e-9
+        // => ~ exp(- omega^2 * r_guess^2) < 1e-9
+        // => r_guess > 5/omega
+        // 1/(1/aij+1/ak+1/omega^2)*r_guess/aij in Eq 64 of arXiv:2302.11307
+        //     ~ omega^2*r_guess/aij ~ omega/aij * 5.f
+        //float rt_aij = fabs(omega)/aij * 5.;
+        float rt_aij = omega2 * sqrtf(rr_min) / aij + 1e-9f;
         float rr_ij = xjxi * xjxi + yjyi * yjyi + zjzi * zjzi;
         float dr = sqrtf(rr_ij);
-
-        float dri = fj * dr + r_omega_aij;
-        float drj = fi * dr + r_omega_aij;
+        float dri = fj * dr + rt_aij;
+        float drj = fi * dr + rt_aij;
         float dri_fac = .5f*li * logf(dri*dri + li*u);
         float drj_fac = .5f*lj * logf(drj*drj + lj*u);
-        float theta = (omega2 * aij) / (omega2 + aij);
-        float estimator = log_fac + dri_fac + drj_fac - theta_ij*rr_ij - theta*rr_min;
+        float estimator = log_fac + dri_fac + drj_fac - theta_ij*rr_ij - theta_rr_min;
         if (estimator > log_cutoff) {
             mask[(Ki*nKj+Kj)*nimgs2 + ijL] = 1;
             count += 1;

@@ -95,7 +95,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None):
         out = contract('MpNjk,pi->MiNjk', out, int3c2e_opt.coeff)
     return out
 
-def create_img_idx(cell, bvkcell, Ls, int3c2e_envs):
+def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
     '''integral screening'''
     # consider only the most diffused component of a basis
     exps, cs = _extract_pgto_params(cell, 'min')
@@ -106,6 +106,16 @@ def create_img_idx(cell, bvkcell, Ls, int3c2e_envs):
     nbas = cell.nbas
     nk = bvkcell.nbas // nbas
     nimgs = len(Ls)
+
+    # Search the most diffused functions on each atom
+    atoms = auxcell._bas[:,ATOM_OF]
+    atom_splits = np.where(atoms[1:] != atoms[:-1])[0] + 1
+    atom_offsets = np.hstack([0, atom_splits, auxcell.nbas])
+    aux_exps = auxcell.bas_exps()
+    atom_aux_exps = []
+    for i0, i1 in zip(atom_offsets[:1], atom_offsets[1:]):
+        atom_aux_exps.append(np.hstack(aux_exps[i0:i1]).min())
+    aux_exps = cp.array(atom_aux_exps, dtype=np.float32)
 
     def gen_img_idx(ish0, ish1, jsh0, jsh1):
         nish = ish1 - ish0
@@ -120,9 +130,10 @@ def create_img_idx(cell, bvkcell, Ls, int3c2e_envs):
             (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
             ctypes.cast(exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_cs.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(nk))
+            ctypes.cast(aux_exps.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nk), ctypes.c_int(cell.natm))
         if err != 0:
-            raise RuntimeError(f'int3c2e_q_mask failed')
+            raise RuntimeError('int3c2e_q_mask failed')
 
         img_counts_mask = img_counts > 0
         img_counts = img_counts[img_counts_mask]
@@ -139,7 +150,7 @@ def create_img_idx(cell, bvkcell, Ls, int3c2e_envs):
             ctypes.cast(bas_idx.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ij_pairs), ctypes.c_int(nimgs))
         if err != 0:
-            raise RuntimeError(f'int3c2e_img_idx failed')
+            raise RuntimeError('int3c2e_img_idx failed')
 
         #TODO: only tril part when i == j
         K = cp.arange(nk)
@@ -233,7 +244,7 @@ class Int3c2eOpt:
         # Keep a reference to these arrays, prevent releasing them upon returning the closure
         int3c2e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
 
-        gen_img_idx = create_img_idx(cell, bvkcell, Ls, int3c2e_envs)
+        gen_img_idx = create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs)
 
         uniq_l = uniq_l_ctr[:,0]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
@@ -309,30 +320,31 @@ def _conc_locs(ao_loc1, ao_loc2):
     return cp.array(comp_loc, dtype=np.int32)
 
 def int3c2e_scheme(cell, li, lj, lk, shm_size=SHM_SIZE):
-    nfi = (li + 1) * (li + 2) // 2
-    nfj = (lj + 1) * (lj + 2) // 2
-    nfk = (lk + 1) * (lk + 2) // 2
     order = li + lj + lk
     nroots = (order//2 + 1) * 2
-    gout_size = nfi * nfj * nfk
-    gout_stride = (gout_size + GOUT_WIDTH-1) // GOUT_WIDTH
-    # Round up to the next 2^n
-    gout_stride = _nearest_power2(gout_stride, return_leq=False)
-    # Align nksh*gout_stride to warp size
-    if gout_stride <= 32:
-        nksh_min = 32 // gout_stride
-    else:
-        nksh_min = THREADS // gout_stride
 
     g_size = (li+1)*(lj+1)*(lk+1)
     unit = g_size*3 + nroots*2
     nksp_max = shm_size//(unit*8)
     nksp_max = _nearest_power2(nksp_max)
-    if nksp_max < nksh_min:
+
+    nfi = (li + 1) * (li + 2) // 2
+    nfj = (lj + 1) * (lj + 2) // 2
+    nfk = (lk + 1) * (lk + 2) // 2
+    gout_size = nfi * nfj * nfk
+    gout_stride = (gout_size + GOUT_WIDTH-1) // GOUT_WIDTH
+    # Round up to the next 2^n
+    gout_stride = _nearest_power2(gout_stride, return_leq=False)
+
+    # Align nksh*gout_stride to warp size
+    if gout_stride < 32:
+        nksh_per_block = 32 // gout_stride
+        nsp_per_block = min(THREADS // 32, nksp_max // nksh_per_block)
+    else:
+        nksh_per_block = THREADS // gout_stride
+        nsp_per_block = 1
+    if nksp_max < nksh_per_block:
         raise RuntimeError('GOUT_WIDTH too small or not enough shared memory')
 
-    nksh_per_block = nksh_min
-    nsp_per_block = min(THREADS // (nksh_per_block*gout_stride),
-                        nksp_max // nksh_per_block)
     gout_stride = THREADS // (nksh_per_block*nsp_per_block)
     return nksh_per_block, gout_stride, nsp_per_block

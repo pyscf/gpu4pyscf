@@ -19,9 +19,9 @@ void ft_aopair_fill_triu(double *out, int *conj_mapping, int bvk_ncells, int nGv
 extern __global__
 void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds);
 extern __global__
-void sr_q_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars envs,
-                      float *exps, float *log_coeff,
-                      int ish0, int jsh0, int nish, int njsh);
+void sr_int3c2e_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars envs,
+                            float *exps, float *log_coeff, float *aux_exps,
+                            int ish0, int jsh0, int nish, int njsh);
 extern __global__
 void int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int8_t *mask,
                             int *bas_ij_idx, int nimgs);
@@ -131,7 +131,6 @@ int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
         int ksh_blocks = (nksh + nksh_per_block - 1) / nksh_per_block;
         dim3 blocks(sp_blocks, ksh_blocks);
         int buflen = (nroots*2+g_size*3) * (nksh_per_block * nsp_per_block) * sizeof(double);
-        buflen += WARPS * sizeof(int);
         pbc_int3c2e_kernel<<<blocks, threads, buflen>>>(out, *envs, bounds);
     }
     cudaError_t err = cudaGetLastError();
@@ -143,7 +142,8 @@ int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
 }
 
 int int3c2e_q_mask(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars *envs,
-                   int *shls_slice, float *exps, float *log_cs, int bvk_ncells)
+                   int *shls_slice, float *exps, float *log_cs, float *aux_exps,
+                   int bvk_ncells, int cell0_natm)
 {
     int ish0 = shls_slice[0];
     int ish1 = shls_slice[1];
@@ -155,8 +155,8 @@ int int3c2e_q_mask(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars *envs,
     int buflen = cell0_natm * 3 * sizeof(float);
     int threads = 512;
     buflen = MAX(buflen, threads*sizeof(int));
-    sr_q_mask_kernel<<<blocks, threads, buflen>>>(mask, img_counts, *envs, exps,
-                                                  log_cs, ish0, jsh0, nish, njsh);
+    sr_int3c2e_mask_kernel<<<blocks, threads, buflen>>>(
+            mask, img_counts, *envs, exps, log_cs, aux_exps, ish0, jsh0, nish, njsh);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int3c2e_q_mask: %s\n", cudaGetErrorString(err));
