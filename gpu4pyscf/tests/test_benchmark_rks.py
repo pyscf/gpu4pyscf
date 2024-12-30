@@ -150,8 +150,7 @@ def test_rb3lyp_grad_median(benchmark):
 def test_rb3lyp_hessian_median(benchmark):
     h = benchmark(run_rb3lyp_hessian, median_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp hessian median')
-    print(np.linalg.norm(h))
-    assert np.isclose(np.linalg.norm(h))
+    assert np.isclose(np.linalg.norm(h), 6.312714778020796, atol=1e-4)
 
 # large molecule
 @pytest.mark.benchmark

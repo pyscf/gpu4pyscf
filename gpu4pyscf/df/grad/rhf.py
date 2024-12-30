@@ -44,6 +44,7 @@ def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=LINEAR_DEP_THRESHOLD):
     mask = w > lindep
     v1 = v[:,mask]
     j2c = cupy.dot(v1/w[mask], v1.conj().T)
+    w = v = v1 = mask = None
     def j2c_solver(b): # noqa: F811
         return j2c.dot(b.reshape(j2c.shape[0],-1)).reshape(b.shape)
     return j2c_solver

@@ -222,8 +222,8 @@ def get_int3c1e(mol, grids, charge_exponents, intopt):
                         "which requires {total_double_number * 8 / 1e9 : .1f} GB of memory")
     ngrids_per_split = (ngrids + n_grid_split - 1) // n_grid_split
 
-    buf_size = ngrids * nao * nao * 8
-    int3c_pinned_buf = cp.cuda.alloc_pinned_memory(buf_size)
+    buf_size = ngrids * nao * nao
+    int3c_pinned_buf = cp.cuda.alloc_pinned_memory(buf_size * 8)
     int3c = np.frombuffer(int3c_pinned_buf, np.float64, buf_size).reshape([ngrids, nao, nao], order='C')
     # int3c = np.zeros([ngrids, nao, nao], order='C') # Using unpinned (pageable) memory, each memcpy is much slower, but there's no initialization time
 

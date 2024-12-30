@@ -23,6 +23,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
+from gpu4pyscf.lib.memcpy import copy_array  #NOQA
 from gpu4pyscf.__config__ import _streams, _num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
@@ -93,10 +94,16 @@ def p2p_transfer(a, b):
         # https://github.com/cupy/cupy/blob/v13.3.0/cupy/_core/_routines_indexing.pyx#L1015
         a[:] = b
     else:
+        #copy_array(b, a)
         with cupy.cuda.Device(a.device):
             # TODO: reduce memory copy, a can be non-contiguous array
-            a[:] = cupy.asarray(b.get())
-
+            #a[:] = cupy.asarray(b.get())
+            copy_array(b, a)
+            if np.linalg.norm(a.get() - b.get()) > 1e-3:
+                print(a[:5], a.device, a.strides, a.shape)
+                print(b[:5], b.device, b.strides, b.shape)
+                print(a.shape, b.shape)
+                exit()
 def concatenate(array_list):
     ''' Concatenate axis=0 only
     '''

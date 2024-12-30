@@ -21,7 +21,7 @@ from pyscf import gto, df, lib
 from pyscf.scf import _vhf
 from gpu4pyscf.scf.int4c2e import BasisProdCache, libgvhf, libgint
 from gpu4pyscf.lib.cupy_helper import (block_c2s_diag, cart2sph, contract, get_avail_mem,
-                                       reduce_to_device)
+                                       reduce_to_device, copy_array)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import basis_seg_contraction
 from gpu4pyscf.__config__ import _num_devices, _streams
@@ -839,7 +839,8 @@ def _int3c2e_ip1_vjk_task(intopt, task_k_list, rhoj, rhok, dm0, orbo, device_id=
         for cp_k in task_k_list:
             task_list = [(cp_k, cp_ij) for cp_ij in range(ncp_ij)]
             k0, k1 = aux_ao_loc[cp_k], aux_ao_loc[cp_k+1]
-            rhok_tmp = cupy.asarray(rhok[k0:k1])
+            #rhok_tmp = cupy.asarray(rhok[k0:k1])
+            rhok_tmp = copy_array(rhok[k0:k1])
             if with_k:
                 rhok0 = contract('pio,ir->pro', rhok_tmp, orbo)
                 rhok0 = contract('pro,Jo->prJ', rhok0, orbo)
@@ -857,11 +858,13 @@ def _int3c2e_ip1_vjk_task(intopt, task_k_list, rhoj, rhok, dm0, orbo, device_id=
 
                     vk1_ao = contract('xpji,poi->xijo', int3c_blk, rhok0[:,:,i0:i1])
                     vk1[:,:,j0:j1] += contract('xijo,ia->axjo', vk1_ao, ao2atom[i0:i1])
+                    vk1_ao = int3c_blk = None
             if with_j:
                 rhoj0_atom = contract('xpi,ia->xpa', rhoj0, 2.0*ao2atom)
                 vj1 += contract('pJo,xpa->axJo', rhok_tmp, rhoj0_atom)
-                rhoj0_atom = None
+                rhoj0_atom = rhoj0 = None
             if with_k:
+                rhok0 = None
                 vk1_buf += contract('xpio,plo->xil', int3c_ip1_occ, rhok_tmp)
                 mem_avail = get_avail_mem()
                 blksize = min(int(mem_avail * 0.2 / ((k1-k0) * nao) * 8),
@@ -870,6 +873,8 @@ def _int3c2e_ip1_vjk_task(intopt, task_k_list, rhoj, rhok, dm0, orbo, device_id=
                     rhok0_slice = contract('pJr,ir->pJi', rhok_tmp[:,p0:p1], orbo)
                     vk1_ao = contract('xpio,pJi->xiJo', int3c_ip1_occ, rhok0_slice)
                     vk1[:,:,p0:p1] += contract('xiJo,ia->axJo', vk1_ao, ao2atom)
+                    rhok0_slice = vk1_ao = None
+            rhok_tmp = int3c_ip1_occ = None
 
     # TODO: absorbe vj1_buf and vk1_buf into vj1 and vk1
     return vj1_buf, vk1_buf, vj1, vk1
@@ -946,15 +951,16 @@ def _int3c2e_ip2_vjk_task(intopt, task_list, rhoj, rhok, dm0, orbo,
                     wj2 += contract('xpji,ji->xp', int3c_blk, dm0[j0:j1,i0:i1])
 
                 wk2_P__[:,:,i0:i1] += contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])
-            rhok_tmp = cupy.asarray(rhok[k0:k1])
+                int3c_blk = None
+            #rhok_tmp = cupy.asarray(rhok[k0:k1])
+            rhok_tmp = copy_array(rhok[k0:k1])
             if with_j:
                 vj1_tmp = -contract('pio,xp->xpio', rhok_tmp, wj2)
                 vj1_tmp -= contract('xpio,p->xpio', wk2_P__, rhoj[k0:k1])
 
                 vj1 += contract('xpio,pa->axio', vj1_tmp, aux2atom[k0:k1])
+                vj1_tmp = wj2 = None
             if with_k:
-                #rhok0_slice = contract('pio,jo->pij', rhok_tmp, orbo)
-                #vk1_tmp = -contract('xpjo,pij->xpio', wk2_P__, rhok0_slice)
                 rhok0_slice = contract('xpjo,jr->xpro', wk2_P__, orbo)
                 vk1_tmp = -contract('xpro,pir->xpio', rhok0_slice, rhok_tmp)
 
@@ -962,8 +968,8 @@ def _int3c2e_ip2_vjk_task(intopt, task_list, rhoj, rhok, dm0, orbo,
                 vk1_tmp -= contract('xpio,pro->xpir', wk2_P__, rhok0_oo)
 
                 vk1 += contract('xpir,pa->axir', vk1_tmp, aux2atom[k0:k1])
-            wj2 = wk2_P__ = rhok0_slice = rhok0_oo = None
-            rhok_tmp = vk1_tmp = None
+                vk1_tmp = rhok0_oo = rhok0_slice = None
+            rhok_tmp = wk2_P__ = None
     return vj1, vk1
 
 def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices,
@@ -1022,8 +1028,11 @@ def _int3c2e_ip1_wjk_task(intopt, task_list, dm0, orbo, wk, device_id=0, with_k=
                 wj[k0:k1,i0:i1] += contract('xpji,ij->pix', int3c_blk, dm0[i0:i1,j0:j1])
                 if with_k:
                     wk_tmp[:,i0:i1] += contract('xpji,jo->piox', int3c_blk, orbo[j0:j1])
+                int3c_blk = None
             if with_k:
-                wk_tmp.get(out=wk[k0:k1])
+                #wk_tmp.get(out=wk[k0:k1])
+                copy_array(wk_tmp, wk[k0:k1])
+            wk_tmp = None
     return wj
 
 def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
@@ -1075,6 +1084,8 @@ def _int3c2e_ip2_wjk(intopt, task_list, dm0, orbo, with_k=True, omega=None, devi
             if with_k:
                 tmp = contract('xpji,jo->piox', int3c_blk, orbo[j0:j1])
                 wk[k0:k1] += contract('piox,ir->prox', tmp, orbo[i0:i1])
+                tmp = None
+            int3c_blk = None
     return wj, wk
 
 def get_int3c2e_ip2_wjk(intopt, dm0_tag, with_k=True, omega=None):

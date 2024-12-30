@@ -34,7 +34,7 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import uhf as uhf_hess
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.lib.cupy_helper import (
-    contract, tag_array, get_avail_mem, release_gpu_stack, pinv)
+    contract, tag_array, get_avail_mem, release_gpu_stack, pinv, copy_array)
 from gpu4pyscf.df import int3c2e, df
 from gpu4pyscf.df.hessian import rhf as df_rhf_hess
 from gpu4pyscf.lib import logger
@@ -174,15 +174,19 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             raise RuntimeError('Not enough memory for intermediate variables')
 
         for i0, i1 in lib.prange(0,nao,blksize):
-            wk1a_Pko_islice = cupy.asarray(wk1a_Pko[:,i0:i1])
-            wk1b_Pko_islice = cupy.asarray(wk1b_Pko[:,i0:i1])
+            #wk1a_Pko_islice = cupy.asarray(wk1a_Pko[:,i0:i1])
+            #wk1b_Pko_islice = cupy.asarray(wk1b_Pko[:,i0:i1])
+            wk1a_Pko_islice = copy_array(wk1a_Pko[:,i0:i1])
+            wk1b_Pko_islice = copy_array(wk1b_Pko[:,i0:i1])
             rhok1a_Pko = solve_j2c(wk1a_Pko_islice)
             rhok1b_Pko = solve_j2c(wk1b_Pko_islice)
             wk1a_Pko_islice = wk1b_Pko_islice = None
             for k0, k1 in lib.prange(0,nao,blksize):
-                wk1a_Pko_kslice = cupy.asarray(wk1a_Pko[:,k0:k1])
-                wk1b_Pko_kslice = cupy.asarray(wk1b_Pko[:,k0:k1])
-
+                #wk1a_Pko_kslice = cupy.asarray(wk1a_Pko[:,k0:k1])
+                #wk1b_Pko_kslice = cupy.asarray(wk1b_Pko[:,k0:k1])
+                wk1a_Pko_kslice = copy_array(wk1a_Pko[:,k0:k1])
+                wk1b_Pko_kslice = copy_array(wk1b_Pko[:,k0:k1])
+                
                 # (10|0)(0|10) without response of RI basis
                 vk2_ip1_ip1 = contract('piox,pkoy->ikxy', rhok1a_Pko, wk1a_Pko_kslice)
                 hk_ao_ao[i0:i1,k0:k1] += contract('ikxy,ik->ikxy', vk2_ip1_ip1, dm0a[i0:i1,k0:k1])
@@ -521,8 +525,11 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     else:
         rhok0a_Pl_ = np.empty_like(wka_Pl_)
         for p0, p1 in lib.prange(0,nao,64):
-            wk_tmp = cupy.asarray(wka_Pl_[:,p0:p1])
-            rhok0a_Pl_[:,p0:p1] = solve_j2c(wk_tmp).get()
+            # wk_tmp = cupy.asarray(wka_Pl_[:,p0:p1])
+            # rhok0a_Pl_[:,p0:p1] = solve_j2c(wk_tmp).get()
+            wk_tmp = copy_array(wka_Pl_[:,p0:p1])
+            wk_tmp = solve_j2c(wk_tmp)
+            copy_array(wk_tmp, rhok0a_Pl_[:,p0:p1])
         wk_tmp = None
 
     if isinstance(wkb_Pl_, cupy.ndarray):
@@ -530,8 +537,11 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     else:
         rhok0b_Pl_ = np.empty_like(wkb_Pl_)
         for p0, p1 in lib.prange(0,nao,64):
-            wk_tmp = cupy.asarray(wkb_Pl_[:,p0:p1])
-            rhok0b_Pl_[:,p0:p1] = solve_j2c(wk_tmp).get()
+            #wk_tmp = cupy.asarray(wkb_Pl_[:,p0:p1])
+            #rhok0b_Pl_[:,p0:p1] = solve_j2c(wk_tmp).get()
+            wk_tmp = copy_array(wkb_Pl_[:,p0:p1])
+            wk_tmp = solve_j2c(wk_tmp)
+            copy_array(wk_tmp, rhok0b_Pl_[:,p0:p1])
         wk_tmp = None
     wka_Pl_ = wkb_Pl_ = None
     vj1a_int3c = vj1b_int3c = vk1a_int3c = vk1b_int3c = None
@@ -566,7 +576,8 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
                 nocc = mocca.shape[1]
                 rhok0a_P__ = cupy.empty([naux,nocc,nocc])
                 for p0, p1 in lib.prange(0,naux,64):
-                    rhok0_Pl_tmp = cupy.asarray(rhok0a_Pl_[p0:p1])
+                    #rhok0_Pl_tmp = cupy.asarray(rhok0a_Pl_[p0:p1])
+                    rhok0_Pl_tmp = copy_array(rhok0a_Pl_[p0:p1])
                     rhok0a_P__[p0:p1] = contract('pio,ir->pro', rhok0_Pl_tmp, mocca)
                 rhok0_Pl_tmp = None
 
@@ -578,7 +589,8 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
                 nocc = moccb.shape[1]
                 rhok0b_P__ = cupy.empty([naux,nocc,nocc])
                 for p0, p1 in lib.prange(0,naux,64):
-                    rhok0_Pl_tmp = cupy.asarray(rhok0b_Pl_[p0:p1])
+                    #rhok0_Pl_tmp = cupy.asarray(rhok0b_Pl_[p0:p1])
+                    rhok0_Pl_tmp = copy_array(rhok0b_Pl_[p0:p1])
                     rhok0b_P__[p0:p1] = contract('pio,ir->pro', rhok0_Pl_tmp, moccb)
                 rhok0_Pl_tmp = None
         if with_j:
@@ -596,8 +608,10 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             raise RuntimeError('Not enough memory to compute int3c2e_ip2')
 
         for p0, p1 in lib.prange(0,nao,blksize):
-            rhoka_tmp = cupy.asarray(rhok0a_Pl_[:,p0:p1])
-            rhokb_tmp = cupy.asarray(rhok0b_Pl_[:,p0:p1])
+            #rhoka_tmp = cupy.asarray(rhok0a_Pl_[:,p0:p1])
+            #rhokb_tmp = cupy.asarray(rhok0b_Pl_[:,p0:p1])
+            rhoka_tmp = copy_array(rhok0a_Pl_[:,p0:p1])
+            rhokb_tmp = copy_array(rhok0b_Pl_[:,p0:p1])
             wk0a_10_Pl_ = contract('xqp,pio->xqio', int2c_ip1, rhoka_tmp)
             wk0b_10_Pl_ = contract('xqp,pio->xqio', int2c_ip1, rhokb_tmp)
             if with_j:
