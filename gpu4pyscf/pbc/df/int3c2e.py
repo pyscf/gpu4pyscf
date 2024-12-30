@@ -171,7 +171,7 @@ class Int3c2eOpt:
         self.sorted_cell = cell
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
-        self.coeff = cp.asarray(coeff, dtype=np.complex128)
+        self.coeff = cp.asarray(coeff)
         self.sorted_cell.omega = omega
 
         self.auxcell = auxcell
@@ -179,7 +179,7 @@ class Int3c2eOpt:
         self.sorted_auxcell = auxcell
         self.uniq_l_ctr_aux = uniq_l_ctr
         self.l_ctr_aux_offsets = np.append(0, np.cumsum(l_ctr_counts))
-        self.aux_coeff = cp.asarray(coeff, dtype=np.complex128)
+        self.aux_coeff = cp.asarray(coeff)
         self.sorted_auxcell.omega = omega
 
         if kpts is not None and bvk_kmesh is None:

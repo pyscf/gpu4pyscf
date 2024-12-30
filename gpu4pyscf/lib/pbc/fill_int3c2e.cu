@@ -24,8 +24,8 @@
 #include "int3c2e.cuh"
 
 #define THREADS         (WARP_SIZE*WARPS)
-// TODO: benchmark performance for 32, 40, 45, 54
-#define GOUT_WIDTH      40
+// TODO: benchmark performance for 32, 38, 40, 45, 54
+#define GOUT_WIDTH      45
 
 __global__
 void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
@@ -185,17 +185,19 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                     double theta_rr = theta * rr;
 // Somehow, this screening test does not filter out many integrals.
 // More benchmarks should be performed
-#if 0
+#if 1
                     __shared__ int8_t img_mask[WARPS];
                     if (thread_id_in_warp == 0) {
                         img_mask[warp_id] = 0;
                     }
                     float Kab_f32 = Kab;
-                    // IMPORTANT: run the screening test on thread_id_in_warp == 0.
-                    // When gout_stride>32, gout is stored across warps.
-                    // If this test is skipped for gout_id > 0, the g[xyz]
-                    // vectors and gout on these warps will never be evaluated.
-                    if ((gout_id == 0 || thread_id_in_warp == 0) &&
+                    // IMPORTANT: run the screening test on each warp.
+                    // When nksh_per_block*gout_stride>32, gout is evaluated across warps.
+                    // If tests are skipped for some warps, g[xyz] vectors and
+                    // gout on these warps will never be evaluated. These warps
+                    // may proceeed to a wrong __syncthreads() barrier and
+                    // produce wrong g[xyz].
+                    if ((thread_id_in_warp / nksh_per_block == 0) &&
                         img0+img < img1 && 5.f+2.f*lij-Kab_f32 > envs.log_cutoff) {
                         // check any not vanished integrals
                         float ai_f32 = ai;
@@ -208,7 +210,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                         //           ~ between [0, 2]
                         float fac_guess = 1.f;
                         // fac in Eq 63 of arXiv:2302.11307 ~ log(ci*cj*ck * (pi^2/(aij*ak))**1.5)
-                        float log_fac = logf(cijk) + 3.434f - 1.5f*logf(aij_f32*ak_f32) + fac_guess;
+                        float log_fac = logf(fabs(cijk)) + 3.434f - 1.5f*logf(aij_f32*ak_f32) + fac_guess;
                         float theta_fac_rr = (float)theta_fac * (float)theta_rr;
                         float rt_aa = sqrtf((float)rr) / (aij_f32+ak_f32) + 1e-9f;
                         float rt_aij = rt_aa * ak_f32;
@@ -220,7 +222,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                         float tj_fac = .5f*lj * logf(tj*tj + .5f*lj/aij_f32);
                         float tk_fac = .5f*lk * logf(rt_akl*rt_akl + .5f*lk/ak_f32);
                         float estimator = log_fac + ti_fac + tj_fac + tk_fac - Kab_f32 - theta_fac_rr;
-                        if (estimator > log_cutoff) {
+                        if (estimator > envs.log_cutoff) {
                             img_mask[warp_id] = 1;
                         }
                     }
@@ -345,7 +347,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                         __syncthreads();
 #pragma unroll
                         for (int n = 0; n < GOUT_WIDTH; ++n) {
-                            int ijk = (gout_start + n*gout_stride+gout_id);
+                            int ijk = gout_start + n*gout_stride+gout_id;
                             int k  = ijk / nfij;
                             int ij = ijk % nfij;
                             if (k >= nfk) break;
@@ -376,7 +378,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                                               cell_j) * ncol + j0) * naux + k0;
                 int nKj = ncells * ncol;
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
-                    int ijk = n*gout_stride + gout_id;
+                    int ijk = gout_start + n*gout_stride+gout_id;
                     size_t k  = ijk / nfij;
                     size_t ij = ijk % nfij;
                     if (k >= nfk) break;

@@ -39,9 +39,9 @@ mem_fraction = 0.9
 cupy.get_default_memory_pool().set_limit(fraction=mem_fraction)
 
 if props['sharedMemPerBlockOptin'] > 65536:
-    shm_size = props['sharedMemPerBlockOptin'] - 8192
+    shm_size = props['sharedMemPerBlockOptin']
 else:
-    shm_size = props['sharedMemPerBlock'] - 1024
+    shm_size = props['sharedMemPerBlock']
 
 # Check P2P data transfer is available
 _p2p_access = True
