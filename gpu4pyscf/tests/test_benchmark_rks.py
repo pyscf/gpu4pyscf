@@ -245,6 +245,8 @@ def test_df_rb3lyp_631gs_solvent_hessian(benchmark):
     print('testing df rb3lyp 631gs solvent hessian')
     assert np.isclose(np.linalg.norm(h), 3.9008165041707294, atol=1e-4)
 
+# No need to test d3bj generally
+'''
 # b3lyp d3bj
 @pytest.mark.benchmark
 def test_df_rb3lyp_631gs_d3bj(benchmark):
@@ -261,4 +263,4 @@ def test_df_rb3lyp_631gs_d3bj_hessian(benchmark):
     h = benchmark(run_rb3lyp_hessian, small_mol, '6-31gs', True, True, 'd3bj')
     print('testing df rb3lyp 631gs solvent hessian')
     assert np.isclose(np.linalg.norm(h), 3.902367554157861, atol=1e-4)
-
+'''

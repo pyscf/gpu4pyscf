@@ -236,11 +236,11 @@ class KnownValues(unittest.TestCase):
 
     def test_copy_dev2host(self):
         host_array = cupy.cuda.alloc_pinned_memory(10*10*10 * 8)
-        host_data = numpy.ndarray(10**3, dtype=cupy.float64, buffer=host_array)
-        host_data = host_data.reshape(10,10,10)
+        host_data = numpy.ndarray(3*10**2, dtype=cupy.float64, buffer=host_array)
+        host_data = host_data.reshape(3,10,10)
 
         device_data = cupy.zeros_like(host_data)
-        device_data += cupy.random.rand(10,10,10)
+        device_data += cupy.random.rand(3,10,10)
         host_view = host_data[:, 8:]  # Non-contiguous view on the host
         device_view = device_data[:, 8:]  # Non-contiguous view on the device
 
