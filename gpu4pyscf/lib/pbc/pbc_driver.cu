@@ -1,3 +1,19 @@
+/*
+ * Copyright 2024 The PySCF Developers. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -27,6 +43,7 @@ void int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int8_t *mask,
                             int *bas_ij_idx, int nimgs);
 
 int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds, int *scheme);
+int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bounds, int *scheme);
 
 extern "C" {
 int build_ft_ao(double *out, AFTIntEnvVars *envs,
@@ -121,7 +138,7 @@ int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
         (uint16_t)nrow, (uint16_t)ncol, (uint16_t)naux, nksh, ish0, jsh0, ksh0,
         npairs_ij, bas_ij_idx, img_idx, img_offsets};
 
-    if (1) {
+    if (!int3c2e_unrolled(out, envs, &bounds, scheme)) {
         int nksh_per_block = scheme[0];
         int gout_stride = scheme[1];
         int nsp_per_block = scheme[2];
