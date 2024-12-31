@@ -1,4 +1,4 @@
-v1.2.1 (2025-01-02)
+v1.2.2 (2025-01-02)
 -------------------
 * New Features
   - PBC analytical Fourier transform on GPU
@@ -11,10 +11,10 @@ v1.2.1 (2024-12-20)
 -------------------
 * New Features
   - Change the license from GPL v3.0 to Apache 2.0
-  - Support direct SCF algorithms with multi-GPU
-  - Change the default conv_tol_cpscf = 1e-3 / batch of atoms to conv_tol_cpscf = 1e-6 / atom
+  - Multi-GPU support for SCF, Gradients, and Hessian computation using AO-direct algorithm
   - Add PBC HF and DFT with k-points, UHF/UKS, and density fitting
 * Improvements
+  - Change the default conv_tol_cpscf = 1e-3 / batch of atoms to conv_tol_cpscf = 1e-6 / atom
   - Fix numerical instability in complex-valued TDHF diagonalization
   - Improve PCM and QMMM with int1e_grids kernel
   - Support non-symmetric int3c2e integral
@@ -32,7 +32,7 @@ v1.2.0 (2024-12-09)
   - Spin-conserved TDA and TDDFT methods
   - Spin-flip TDA method.
   - J-engine using McMuchie-Davidson integral algorithm
-  - Support Multi-GPU density fitting energy, gradients and Hessian computation.
+  - Support multi-GPU density fitting energy, gradients and Hessian computation.
   - Second order SCF solver
 * Improvements
   - Support non-hermitian density matrix in J/K builder
