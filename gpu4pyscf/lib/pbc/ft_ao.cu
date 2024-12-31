@@ -20,7 +20,7 @@
 #include <cuda_runtime.h>
 
 #include "gvhf-rys/vhf.cuh"
-#include "ft_ao.h"
+#include "ft_ao.cuh"
 
 #define GOUT_WIDTH      19
 // pi^1.5
@@ -204,7 +204,7 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
 #pragma unroll
             for (int n = 0; n < GOUT_WIDTH; ++n) {
                 int ij = n*gout_stride + gout_id;
-                if (ij >= nfij) continue;
+                if (ij >= nfij) break;
                 int addrx = idx_ij[ij] * nGv_per_block;
                 int addry = idy_ij[ij] * nGv_per_block;
                 int addrz = idz_ij[ij] * nGv_per_block;
@@ -237,7 +237,7 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
                  + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
         for (int n = 0; n < GOUT_WIDTH; ++n) {
             int ij = n*gout_stride + gout_id;
-            if (ij >= nfij) continue;
+            if (ij >= nfij) break;
             size_t i = ij % nfi;
             size_t j = ij / nfi;
             size_t addr = (i*nao+j)*nGv;
