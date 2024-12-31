@@ -314,8 +314,10 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
             # (20|0), (0|0)(0|00)
             int3c_blk = _get_int3c2e_ipip_slice('ipip1', intopt, cp_ij_id, aux_id, omega=omega)
             if with_j:
-                tmp = contract('xpji,ij->xpi', int3c_blk, dm0[i0:i1,j0:j1])
-                hj_ipip1[:,i0:i1] += contract('xpi,p->xi', tmp, rhoj[k0:k1])
+                #tmp = contract('xpji,ij->xpi', int3c_blk, dm0[i0:i1,j0:j1])
+                #hj_ipip1[:,i0:i1] += contract('xpi,p->xi', tmp, rhoj[k0:k1])
+                tmp = contract('xpji,p->xji', int3c_blk, rhoj[k0:k1])
+                hj_ipip1[:,i0:i1] += contract('xji,ij->xi', tmp, dm0[i0:i1,j0:j1])
             if with_k:
                 hk_ipip1[:,i0:i1] += contract('xpji,pji->xi', int3c_blk, rhok_tmp)
             int3c_blk = None
@@ -323,8 +325,10 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
             # (11|0), (0|0)(0|00) without response of RI basis
             int3c_blk = _get_int3c2e_ipip_slice('ipvip1', intopt, cp_ij_id, aux_id, omega=omega)
             if with_j:
-                tmp = contract('xpji,ij->xpij', int3c_blk, dm0[i0:i1,j0:j1])
-                hj_ipvip1[:,i0:i1,j0:j1] += contract('xpij,p->xij', tmp, rhoj[k0:k1])
+                #tmp = contract('xpji,ij->xpij', int3c_blk, dm0[i0:i1,j0:j1])
+                #hj_ipvip1[:,i0:i1,j0:j1] += contract('xpij,p->xij', tmp, rhoj[k0:k1])
+                tmp = contract('xpji,p->xji', int3c_blk, rhoj[k0:k1])
+                hj_ipvip1[:,i0:i1,j0:j1] += contract('xji,ij->xij', tmp, dm0[i0:i1,j0:j1])
             if with_k:
                 hk_ipvip1[:,i0:i1,j0:j1] += contract('xpji,pji->xij', int3c_blk, rhok_tmp)
             int3c_blk = None

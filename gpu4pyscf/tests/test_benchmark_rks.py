@@ -32,7 +32,7 @@ from gpu4pyscf.dft import rks, uks
 
 current_folder = os.path.dirname(os.path.abspath(__file__))
 small_mol = os.path.join(current_folder, '020_Vitamin_C.xyz')
-median_mol = os.path.join(current_folder, '057_Tamoxifen.xyz')
+medium_mol = os.path.join(current_folder, '057_Tamoxifen.xyz')
 large_mol = os.path.join(current_folder, '095_Azadirachtin.xyz')
 
 def run_rb3lyp(atom, basis, with_df, with_solvent, disp=None):
@@ -117,39 +117,39 @@ def test_rb3lyp_hessian(benchmark):
     print('testing rb3lyp hessian')
     assert np.isclose(np.linalg.norm(h), 3.7588443634477833, atol=1e-4)
 
-# median molecule
+# medium molecule
 @pytest.mark.benchmark
-def test_df_rb3lyp_median(benchmark):
-    e = benchmark(run_rb3lyp, median_mol, 'def2-tzvpp', True, False)
-    print('testing df rb3lyp median')
+def test_df_rb3lyp_medium(benchmark):
+    e = benchmark(run_rb3lyp, medium_mol, 'def2-tzvpp', True, False)
+    print('testing df rb3lyp medium')
     assert np.isclose(np.linalg.norm(e), 1138.371390377773, atol=1e-7)
 @pytest.mark.benchmark
-def test_df_rb3lyp_grad_median(benchmark):
-    g = benchmark(run_rb3lyp_grad, median_mol, 'def2-tzvpp', True, False)
-    print('testing df rb3lyp grad median')
+def test_df_rb3lyp_grad_medium(benchmark):
+    g = benchmark(run_rb3lyp_grad, medium_mol, 'def2-tzvpp', True, False)
+    print('testing df rb3lyp grad medium')
     assert np.isclose(np.linalg.norm(g), 0.26010545073602614, atol=1e-4)
 @pytest.mark.benchmark
-def test_df_rb3lyp_hessian_median(benchmark):
-    h = benchmark(run_rb3lyp_hessian, median_mol, 'def2-tzvpp', True, False)
-    print('testing df rb3lyp hessian median')
+def test_df_rb3lyp_hessian_medium(benchmark):
+    h = benchmark(run_rb3lyp_hessian, medium_mol, 'def2-tzvpp', True, False)
+    print('testing df rb3lyp hessian medium')
     assert np.isclose(np.linalg.norm(h), 6.32514169232998, atol=1e-4)
 
 @pytest.mark.benchmark
-def test_rb3lyp_median(benchmark):
-    e = benchmark(run_rb3lyp, median_mol, 'def2-tzvpp', False, False)
-    print('testing rb3lyp median')
+def test_rb3lyp_medium(benchmark):
+    e = benchmark(run_rb3lyp, medium_mol, 'def2-tzvpp', False, False)
+    print('testing rb3lyp medium')
     assert np.isclose(np.linalg.norm(e), 1138.3710752128077, atol=1e-7)
 @pytest.mark.benchmark
-def test_rb3lyp_grad_median(benchmark):
-    g = benchmark(run_rb3lyp_grad, median_mol, 'def2-tzvpp', False, False)
-    print('testing rb3lyp grad median')
+def test_rb3lyp_grad_medium(benchmark):
+    g = benchmark(run_rb3lyp_grad, medium_mol, 'def2-tzvpp', False, False)
+    print('testing rb3lyp grad medium')
     assert np.isclose(np.linalg.norm(g), 0.2601443836937988, atol=1e-5)
 
 @pytest.mark.slow
 @pytest.mark.benchmark
-def test_rb3lyp_hessian_median(benchmark):
-    h = benchmark(run_rb3lyp_hessian, median_mol, 'def2-tzvpp', False, False)
-    print('testing rb3lyp hessian median')
+def test_rb3lyp_hessian_medium(benchmark):
+    h = benchmark(run_rb3lyp_hessian, medium_mol, 'def2-tzvpp', False, False)
+    print('testing rb3lyp hessian medium')
     assert np.isclose(np.linalg.norm(h), 6.312714778020796, atol=1e-4)
 
 # large molecule

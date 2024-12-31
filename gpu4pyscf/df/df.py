@@ -347,14 +347,15 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, omega=None, sr_only=False, de
             ij1 = pairs_loc[cp_ij_id+1]
             if isinstance(_cderi[0], np.ndarray):
                 for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
-                    for i in range(p0,p1):
-                        #cderi_block[i].get(out=_cderi[slice_id][i-p0,ij0:ij1])
-                        copy_array(cderi_block[i], _cderi[slice_id][i-p0,ij0:ij1])
+                    #for i in range(p0,p1):
+                    #    cderi_block[i].get(out=_cderi[slice_id][i-p0,ij0:ij1])
+                    tmp = cupy.array(cderi_block[p0:p1], order='C', copy=True)
+                    copy_array(tmp, _cderi[slice_id][:p1-p0,ij0:ij1])
             else:
                 # Copy data to other Devices
                 for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
                     #_cderi[slice_id][:,ij0:ij1] = cderi_block[p0:p1]
                     tmp = cupy.array(cderi_block[p0:p1], order='C', copy=True)
                     p2p_transfer(_cderi[slice_id][:,ij0:ij1], tmp)
-            t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)
+            t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)    
     return

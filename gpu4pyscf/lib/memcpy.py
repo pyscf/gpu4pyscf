@@ -47,7 +47,9 @@ def _copy_array(src_view, dst_view):
     ''' Copy data from cupy/numpy array to another cupy/numpy array
     Check memory layout, then copy memory chunks by cupy.cuda.runtime.memcpy
     '''
-
+    if src_view.nbytes == 0:
+        return dst_view
+    
     shape = src_view.shape
     itemsize = src_view.itemsize
     strides_src = [stride // itemsize for stride in src_view.strides]
@@ -75,6 +77,12 @@ def _copy_array(src_view, dst_view):
     else:
         raise NotImplementedError
     
+
+    if len(chunk_shape) == 0:
+        print('here')
+        print(src_view.nbytes, dst_view.nbytes)
+        print(shape, strides_src, strides_dst)
+        
     assert len(chunk_shape) > 0
 
     # Transfer data chunk-by-chunk

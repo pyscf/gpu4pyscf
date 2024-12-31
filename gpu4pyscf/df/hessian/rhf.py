@@ -200,7 +200,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
                 hk_ao_aux[i0:i1] -= contract('qoi,qioxy->iqxy', rhok0_P_I, wk1_I)
                 wk1_I = rhok0_P_I = None
         rhok1_Pko = None
-        t1 = log.timer_debug1('contractions with int3c2e_ip1', *t1)
+        t1 = log.timer_debug1('contract int3c2e_ip1 with int2c_ip1', *t1)
         
         w, v = cupy.linalg.eigh(int2c)
         idx = w > LINEAR_DEP_THR
@@ -215,13 +215,14 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
             if isinstance(rhok1_Pko, cupy.ndarray):
                 rhok1_Pko[:,i0:i1] = contract('qp,qiox->piox', cd_low, wk1_tmp)
             else:
-                rhok1_Pko[:,i0:i1] = contract('qp,qiox->piox', cd_low, wk1_tmp).get()
+                #rhok1_Pko[:,i0:i1] = contract('qp,qiox->piox', cd_low, wk1_tmp).get()
+                wk1_tmp = contract('qp,qiox->piox', cd_low, wk1_tmp)
+                copy_array(wk1_tmp, rhok1_Pko[:,i0:i1])
             wk1_tmp = None
         cd_low = None
-        t1 = log.timer_debug1('data transfer', *t1)
         hk_ao_ao += _hk_ip1_ip1(rhok1_Pko, dm0, mocc_2)
     wk1_Pko = rhok1_Pko = None
-    t1 = log.timer_debug1('contractions with int3c2e_ip1', *t1)
+    t1 = log.timer_debug1('contract int3c2e_ip1 with int3c2e_ip1', *t1)
 
     hj_ipip, hk_ipip = jk.get_int3c2e_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag,
                                           with_j=with_j, with_k=with_k, omega=omega,
@@ -344,7 +345,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
     # -----------------------------------------
     #        collecting all
     # -----------------------------------------
-    e1 = cupy.zeros([len(atmlst),len(atmlst),3,3])
+    natm = len(atmlst)
+    e1 = cupy.zeros([natm,natm,3,3])
     ej = hj_ipip
     ek = hk_ipip
 
@@ -394,6 +396,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
                     _ek = cupy.sum(hk_aux_aux[p0:p1,q0:q1], axis=[0,1])
                     ek[i0,j0] += _ek * .5
                     ek[j0,i0] += _ek.T * .5
+    
     for i0, ia in enumerate(atmlst):
         for j0 in range(i0):
             e1[j0,i0] = e1[i0,j0].T

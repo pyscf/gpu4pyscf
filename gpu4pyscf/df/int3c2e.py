@@ -405,7 +405,8 @@ def get_int3c2e_wjk(mol, auxmol, dm0_tag, thred=1e-12, omega=None, with_j=True, 
             if isinstance(wk, cupy.ndarray):
                 wk[k0:k1] = rhok_tmp
             else:
-                rhok_tmp.get(out=wk[k0:k1])
+                #rhok_tmp.get(out=wk[k0:k1])
+                copy_array(rhok_tmp, wk[k0:k1])
     return wj, wk
 
 def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None, stream=None):
@@ -770,6 +771,48 @@ def get_j_int3c2e_pass2(intopt, rhoj, stream=None):
     vj = vj + vj.T
     return vj
 
+def _int3c2e_jk_task(intopt, task_list, dm0, mocc, device_id=0, omega=None):
+    with cupy.cuda.Device(device_id), _streams[device_id]:
+        log = logger.new_logger(intopt.mol, intopt.mol.verbose)
+        t0 = log.init_timer()
+        mocc = cupy.asarray(mocc)
+        dm0 = cupy.asarray(dm0)
+        naux = intopt.auxmol.nao
+        nocc = mocc.shape[1]
+        rhoj = cupy.zeros([naux])
+        rhok = cupy.zeros([naux,nocc,nocc])
+        for cp_kl_id in task_list:
+            k0 = intopt.aux_ao_loc[cp_kl_id]
+            k1 = intopt.aux_ao_loc[cp_kl_id+1]
+            rhoj_tmp = cupy.zeros([k1-k0], order='C')
+            rhok_tmp = cupy.zeros([k1-k0, nocc, nocc], order='C')
+            for cp_ij_id, _ in enumerate(intopt.log_qs):
+                cpi = intopt.cp_idx[cp_ij_id]
+                cpj = intopt.cp_jdx[cp_ij_id]
+                li = intopt.angular[cpi]
+                lj = intopt.angular[cpj]
+                int3c_blk = get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, omega=omega)
+                if not intopt.mol.cart:
+                    int3c_blk = cart2sph(int3c_blk, axis=1, ang=lj)
+                    int3c_blk = cart2sph(int3c_blk, axis=2, ang=li)
+                i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
+                j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
+                if cpi == cpj and intopt.aosym:
+                    int3c_blk *= 0.5
+
+                rhoj_tmp += contract('pji,ij->p', int3c_blk, dm0[i0:i1,j0:j1])
+                ints_o = contract('pji,jo->poi', int3c_blk, mocc[j0:j1])
+                rhok_tmp += contract('poi,ir->por', ints_o, mocc[i0:i1])
+
+            if intopt.aosym:
+                rhoj[k0:k1] = 2.0 * rhoj_tmp
+                rhok[k0:k1] = rhok_tmp + rhok_tmp.transpose([0,2,1])
+            else:
+                rhoj[k0:k1] = rhoj_tmp
+                rhok[k0:k1] = rhok_tmp
+        t0 = log.timer_debug1(f'int3c2e_vjk on Device {device_id}', *t0)
+    return rhoj, rhok
+
 def get_int3c2e_jk(mol, auxmol, dm0_tag, with_k=True, omega=None):
     '''
     get rhoj and rhok for int3c2e
@@ -777,43 +820,45 @@ def get_int3c2e_jk(mol, auxmol, dm0_tag, with_k=True, omega=None):
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=True, group_size=BLKSIZE, group_size_aux=BLKSIZE)
 
-    if omega is None: omega = 0.0
-    naux = auxmol.nao
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
-    nocc = orbo.shape[1]
-    rhoj = cupy.empty([naux])
-    rhok = cupy.empty([naux,nocc,nocc])
+    futures = []
+    aux_ao_loc = np.array(intopt.aux_ao_loc)
+    loads = aux_ao_loc[1:] - aux_ao_loc[:-1]
+    task_list = _split_tasks(loads, _num_devices)
 
-    for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-        k0 = intopt.aux_ao_loc[cp_kl_id]
-        k1 = intopt.aux_ao_loc[cp_kl_id+1]
-        rhoj_tmp = cupy.zeros([k1-k0], order='C')
-        rhok_tmp = cupy.zeros([k1-k0, nocc, nocc], order='C')
-        for cp_ij_id, _ in enumerate(intopt.log_qs):
-            cpi = intopt.cp_idx[cp_ij_id]
-            cpj = intopt.cp_jdx[cp_ij_id]
-            li = intopt.angular[cpi]
-            lj = intopt.angular[cpj]
-            int3c_blk = get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, omega=omega)
-            if not intopt.mol.cart:
-                int3c_blk = cart2sph(int3c_blk, axis=1, ang=lj)
-                int3c_blk = cart2sph(int3c_blk, axis=2, ang=li)
-            i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
-            j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
-            if cpi == cpj and intopt.aosym:
-                int3c_blk *= 0.5
+    cupy.cuda.get_current_stream().synchronize()
+    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
+        for device_id in range(_num_devices):
+            future = executor.submit(
+                _int3c2e_jk_task, intopt, task_list[device_id],
+                dm0_tag, orbo, device_id=device_id, omega=omega)
+            futures.append(future)
 
-            rhoj_tmp += contract('pji,ij->p', int3c_blk, dm0_tag[i0:i1,j0:j1])
-            ints_o = contract('pji,jo->poi', int3c_blk, orbo[j0:j1])
-            rhok_tmp += contract('poi,ir->por', ints_o, orbo[i0:i1])
+    rhoj_total = []
+    rhok_total = []
+    for future in futures:
+        rhoj, rhok = future.result()
+        rhoj_total.append(rhoj)
+        rhok_total.append(rhok)
 
-        if intopt.aosym:
-            rhoj[k0:k1] = 2.0 * rhoj_tmp
-            rhok[k0:k1] = rhok_tmp + rhok_tmp.transpose([0,2,1])
-        else:
-            rhoj[k0:k1] = rhoj_tmp
-            rhok[k0:k1] = rhok_tmp
+    rhoj = rhok = None
+    rhoj = reduce_to_device(rhoj_total, inplace=True)
+    if with_k:
+        rhok = reduce_to_device(rhok_total, inplace=True)
     return rhoj, rhok
+
+def _split_tasks(loads, ngroups):
+    ''' Split a list of numbers into sublists with sums as close as possible
+    '''
+    if ngroups == 1:
+        return [range(len(loads))]
+    groups = [[] for _ in range(ngroups)]
+    sums = [0] * 4
+    for i, load in enumerate(loads):
+        min_index = sums.index(min(sums))
+        groups[min_index].append(i)
+        sums[min_index] += load
+    return groups
 
 def _int3c2e_ip1_vjk_task(intopt, task_k_list, rhoj, rhok, dm0, orbo, device_id=0,
                           with_j=True, with_k=True, omega=None):
@@ -823,6 +868,8 @@ def _int3c2e_ip1_vjk_task(intopt, task_k_list, rhoj, rhok, dm0, orbo, device_id=
     vj1_buf = vk1_buf = vj1 = vk1 = None
 
     with cupy.cuda.Device(device_id), _streams[device_id]:
+        log = logger.new_logger(intopt.mol, intopt.mol.verbose)
+        t0 = log.init_timer()
         ao2atom = get_ao2atom(intopt, aoslices)
         dm0 = cupy.asarray(dm0)
         orbo = cupy.asarray(orbo)
@@ -875,7 +922,7 @@ def _int3c2e_ip1_vjk_task(intopt, task_k_list, rhoj, rhok, dm0, orbo, device_id=
                     vk1[:,:,p0:p1] += contract('xiJo,ia->axJo', vk1_ao, ao2atom)
                     rhok0_slice = vk1_ao = None
             rhok_tmp = int3c_ip1_occ = None
-
+        t0 = log.timer_debug1(f'int3c2e_ip1 on Device {device_id}', *t0)
     # TODO: absorbe vj1_buf and vk1_buf into vj1 and vk1
     return vj1_buf, vk1_buf, vj1, vk1
 
@@ -883,11 +930,10 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_j=True,
                         with_k=True, omega=None):
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     futures = []
-    ncp_k = len(intopt.aux_log_qs)
-    tasks = np.array(list(range(ncp_k)))
-    task_list = []
-    for device_id in range(_num_devices):
-        task_list.append(tasks[device_id::_num_devices])
+
+    aux_ao_loc = np.array(intopt.aux_ao_loc)
+    loads = aux_ao_loc[1:] - aux_ao_loc[:-1]
+    task_list = _split_tasks(loads, _num_devices)
 
     cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
@@ -926,6 +972,8 @@ def _int3c2e_ip2_vjk_task(intopt, task_list, rhoj, rhok, dm0, orbo,
     auxslices = intopt.auxmol.aoslice_by_atom()
     vj1 = vk1 = None
     with cupy.cuda.Device(device_id), _streams[device_id]:
+        log = logger.new_logger(intopt.mol, intopt.mol.verbose)
+        t0 = log.init_timer()
         aux2atom = get_aux2atom(intopt, auxslices)
         dm0 = cupy.asarray(dm0)
         orbo = cupy.asarray(orbo)
@@ -970,6 +1018,7 @@ def _int3c2e_ip2_vjk_task(intopt, task_list, rhoj, rhok, dm0, orbo,
                 vk1 += contract('xpir,pa->axir', vk1_tmp, aux2atom[k0:k1])
                 vk1_tmp = rhok0_oo = rhok0_slice = None
             rhok_tmp = wk2_P__ = None
+        t0 = log.timer_debug1(f'int3c2e_ip2 on Device {device_id}', *t0)
     return vj1, vk1
 
 def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices,
@@ -979,11 +1028,10 @@ def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices,
     '''
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     futures = []
-    ncp_k = len(intopt.aux_log_qs)
-    tasks = np.array(list(range(ncp_k)))
-    task_list = []
-    for device_id in range(_num_devices):
-        task_list.append(tasks[device_id::_num_devices])
+
+    aux_ao_loc = np.array(intopt.aux_ao_loc)
+    loads = aux_ao_loc[1:] - aux_ao_loc[:-1]
+    task_list = _split_tasks(loads, _num_devices)
 
     cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
@@ -1013,6 +1061,8 @@ def _int3c2e_ip1_wjk_task(intopt, task_list, dm0, orbo, wk, device_id=0, with_k=
     naux = intopt.auxmol.nao
     aux_ao_loc = intopt.aux_ao_loc
     with cupy.cuda.Device(device_id), _streams[device_id]:
+        log = logger.new_logger(intopt.mol, intopt.mol.verbose)
+        t0 = log.init_timer()
         ncp_ij = len(intopt.log_qs)
         nocc = orbo.shape[1]
         wj = cupy.zeros([naux,nao,3])
@@ -1033,6 +1083,7 @@ def _int3c2e_ip1_wjk_task(intopt, task_list, dm0, orbo, wk, device_id=0, with_k=
                 #wk_tmp.get(out=wk[k0:k1])
                 copy_array(wk_tmp, wk[k0:k1])
             wk_tmp = None
+        t0 = log.timer_debug1(f'int3c2e_ip1_wjk on Device {device_id}', *t0)
     return wj
 
 def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
@@ -1040,11 +1091,10 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
     '''
     orbo = cupy.asarray(dm0_tag.occ_coeff, order='C')
     futures = []
-    ncp_k = len(intopt.aux_log_qs)
-    tasks = np.array(list(range(ncp_k)))
-    task_list = []
-    for device_id in range(_num_devices):
-        task_list.append(tasks[device_id::_num_devices])
+
+    aux_ao_loc = np.array(intopt.aux_ao_loc)
+    loads = aux_ao_loc[1:] - aux_ao_loc[:-1]
+    task_list = _split_tasks(loads, _num_devices)
 
     nao = intopt.mol.nao
     naux = intopt.auxmol.nao
@@ -1070,6 +1120,8 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
 
 def _int3c2e_ip2_wjk(intopt, task_list, dm0, orbo, with_k=True, omega=None, device_id=0):
     with cupy.cuda.Device(device_id), _streams[device_id]:
+        log = logger.new_logger(intopt.mol, intopt.mol.verbose)
+        t0 = log.init_timer()
         dm0 = cupy.asarray(dm0)
         orbo = cupy.asarray(orbo)
         naux = intopt.auxmol.nao
@@ -1086,6 +1138,7 @@ def _int3c2e_ip2_wjk(intopt, task_list, dm0, orbo, with_k=True, omega=None, devi
                 wk[k0:k1] += contract('piox,ir->prox', tmp, orbo[i0:i1])
                 tmp = None
             int3c_blk = None
+        t0 = log.timer_debug1(f'int3c2e_ip2_wjk on Device {device_id}', *t0)
     return wj, wk
 
 def get_int3c2e_ip2_wjk(intopt, dm0_tag, with_k=True, omega=None):
