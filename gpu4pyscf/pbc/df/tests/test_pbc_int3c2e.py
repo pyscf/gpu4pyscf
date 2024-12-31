@@ -52,7 +52,6 @@ C    D
     }
     auxcell.build()
     omega = -0.2
-    cell.verbose = 6
     dat = sr_aux_e2(cell, auxcell, omega).get()
 
     cell.precision=1e-12
@@ -60,7 +59,7 @@ C    D
     df = rsdf_builder._RSGDFBuilder(cell, auxcell).build(omega=abs(omega))
     int3c = df.gen_int3c_kernel('int3c2e', aosym='s1', return_complex=True)
     ref = int3c().reshape(dat.shape)
-    assert abs(dat - ref).max() < 3e-8
+    assert abs(dat - ref).max() < 1e-8
 
 def test_int3c2e_kpoints():
     cell = pyscf.M(
@@ -116,7 +115,7 @@ C    D
     df = rsdf_builder._RSGDFBuilder(cell, auxcell).build(omega=abs(omega))
     int3c = df.gen_int3c_kernel('int3c2e', aosym='s1', return_complex=True)
     ref = int3c().reshape(dat.shape)
-    assert abs(dat - ref).max() < 3e-8
+    assert abs(dat - ref).max() < 1e-8
 
 def test_ignorable_diffused_basis():
     cell = pyscf.M(

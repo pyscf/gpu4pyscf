@@ -215,14 +215,15 @@ class SRInt3c2eOpt:
 
         if cutoff is None:
             omega = cell.omega
-            aux_exp = np.hstack(auxcell.bas_exps()).min()
-            cell_exp = np.hstack(cell.bas_exps()).min()
+            aux_exp, _, aux_l = most_diffused_pgto(auxcell)
+            cell_exp, _, cell_l = most_diffused_pgto(cell)
             if omega == 0:
                 theta = 1./(1./cell_exp + 1./aux_exp)
             else:
                 theta = 1./(1./cell_exp + 1./aux_exp + omega**-2)
-            lattice_sum_factor = max(2*np.pi*cell.rcut/(cell.vol*theta), 1)
-            cutoff = cell.precision / lattice_sum_factor * .1
+            lsum = cell_l * 2 + aux_l + 1
+            lattice_sum_factor = max(2*np.pi*cell.rcut*lsum/(cell.vol*theta), 1)
+            cutoff = cell.precision / lattice_sum_factor**2 * .1
             log.debug1('int3c_kernel integral omega=%g theta=%g cutoff=%g',
                        omega, theta, cutoff)
 
@@ -350,6 +351,13 @@ def int3c2e_scheme(cell, li, lj, lk, shm_size=SHM_SIZE):
     gout_stride = THREADS // (nksh_per_block*nsp_per_block)
     return nksh_per_block, gout_stride, nsp_per_block
 
+def most_diffused_pgto(cell):
+    exps, cs = _extract_pgto_params(cell, 'diffused')
+    ls = cell._bas[:,ANG_OF]
+    r2 = np.log(cs**2 / cell.precision * 10**ls) / exps
+    idx = r2.argmax()
+    return exps[idx], cs[idx], ls[idx]
+
 # This modified rcut estimation function will be available in pyscf-2.8 or newer
 def estimate_rcut(cell, auxcell, omega, precision=None):
     '''Estimate rcut for 3c2e SR-integrals'''
@@ -365,14 +373,7 @@ def estimate_rcut(cell, auxcell, omega, precision=None):
         assert cell.dimension == 0
         return np.zeros(1)
 
-    # Search for the most diffused auxiliary basis function
-    aux_exps, aux_cs = _extract_pgto_params(auxcell, 'diffused')
-    aux_ls = auxcell._bas[:,ANG_OF]
-    r2_aux = np.log(aux_cs**2 / precision * 10**aux_ls) / aux_exps
-    ak_idx = r2_aux.argmax()
-    lk = aux_ls[ak_idx]
-    ak = aux_exps[ak_idx]
-    ck = aux_cs[ak_idx]
+    ak, ck, lk = most_diffused_pgto(auxcell)
 
     # the most diffused orbital basis
     cell_exps, cs = _extract_pgto_params(cell, 'diffused')
@@ -395,7 +396,7 @@ def estimate_rcut(cell, auxcell, omega, precision=None):
     sfac = aij*aj/(aij*aj + ai*theta)
     fl = 2
     fac = 2**li*np.pi**2.5*c1 * theta**(l3-.5)
-    fac *= 2*np.pi/cell.vol/theta
+    fac *= 2*np.pi/(cell.vol*theta) * (l3+1)
     fac /= aij**(li+1.5) * ak**(lk+1.5) * aj**lj
     fac *= fl / precision
 
