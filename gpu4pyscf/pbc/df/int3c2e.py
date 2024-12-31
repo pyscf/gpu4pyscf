@@ -77,10 +77,10 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None):
                 out[j0:j1,i0:i1,k0:k1] = tmp.transpose(1,0,2)
         else:
             tmp = contract('Lk,LpMqr->kpMqr', expLk.conj(), eri3c)
-            tmp = contract('Ml,kpMqr->kplqr', expLk, tmp)
-            out[:,i0:i1,:,j0:j1,k0:k1] = tmp
+            tmp = contract('Ml,kpMqr->klpqr', expLk, tmp)
+            out[:,:,i0:i1,j0:j1,k0:k1] = tmp
             if i0 != j0:
-                out[:,j0:j1,:,i0:i1,k0:k1] = tmp.transpose(2,3,0,1,4).conj()
+                out[:,:,j0:j1,i0:i1,k0:k1] = tmp.transpose(1,0,3,2,4).conj()
         tmp = None
 
     if kpts is None:
@@ -89,9 +89,10 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None):
         out = contract('pjk,pi->ijk', out, int3c2e_opt.coeff)
     else:
         #:out = einsum('MpNqr,pi,qj,rk->MiNjk', out, coeff, coeff, auxcoeff)
-        out = contract('MpNqr,rk->MpNqk', out, int3c2e_opt.aux_coeff)
-        out = contract('MpNqk,qj->MpNjk', out, int3c2e_opt.coeff)
-        out = contract('MpNjk,pi->MiNjk', out, int3c2e_opt.coeff)
+        out = contract('MNpqr,rk->MNpqk', out, int3c2e_opt.aux_coeff)
+        coeff = int3c2e_opt.coeff.astype(np.complex128)
+        out = contract('MNpqk,qj->MNpjk', out, coeff)
+        out = contract('MNpjk,pi->MNijk', out, coeff)
     return out
 
 def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
@@ -121,6 +122,7 @@ def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
     def gen_img_idx(ish0, ish1, jsh0, jsh1):
         nish = ish1 - ish0
         njsh = jsh1 - jsh0
+        #TODO: only tril part when i == j
         ij_pairs = nk * nish * nk * njsh
         mask = cp.zeros((ij_pairs, nimgs**2), dtype=np.int8)
         img_counts = cp.zeros(ij_pairs, dtype=np.int32)
@@ -136,11 +138,12 @@ def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
         if err != 0:
             raise RuntimeError('int3c2e_q_mask failed')
 
-        img_counts_mask = img_counts > 0
-        img_counts = img_counts[img_counts_mask]
-        bas_idx = cp.asarray(cp.argsort(img_counts)[::-1], dtype=np.int32, order='C')
-        img_offsets = cp.empty(bas_idx.size+1, dtype=np.int32)
-        cp.cumsum(img_counts[bas_idx], out=img_offsets[1:])
+        remaining_idx = np.nonzero(img_counts > 0)[0]
+        remaining_idx = remaining_idx[img_counts[remaining_idx].argsort()[::-1]]
+        remaining_idx = cp.asarray(remaining_idx, dtype=np.int32, order='C')
+        ij_pairs = remaining_idx.size
+        img_offsets = cp.empty(ij_pairs+1, dtype=np.int32)
+        cp.cumsum(img_counts[remaining_idx], out=img_offsets[1:])
         img_offsets[0] = 0
 
         img_idx = cp.empty(int(img_offsets[-1]), dtype=np.int32)
@@ -148,19 +151,17 @@ def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
             ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(mask.data.ptr, ctypes.c_void_p),
-            ctypes.cast(bas_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(remaining_idx.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ij_pairs), ctypes.c_int(nimgs))
         if err != 0:
             raise RuntimeError('int3c2e_img_idx failed')
 
-        #TODO: only tril part when i == j
-        K = cp.arange(nk)
-        Ki = (K[:,None] * nbas + cp.arange(ish0, ish1)).astype(np.int32)
-        Kj = (K[:,None] * nbas + cp.arange(jsh0, jsh1)).astype(np.int32)
-        bvk_nbas = nk * nbas
-        bas_ij = Ki.reshape(-1,1) * bvk_nbas + Kj.ravel()
-        bas_ij = bas_ij.ravel()[img_counts_mask]
-        bas_ij = cp.asarray(bas_ij[bas_idx], dtype=np.int32)
+        Ki, i, Kj, j = cp.unravel_index(remaining_idx, (nk, nish, nk, njsh))
+        i += ish0
+        j += jsh0
+        # one-dimensional indices corresponding to [Ki,i,Kj,j]
+        bas_ij = cp.ravel_multi_index((Ki, i, Kj, j), (nk, nbas, nk, nbas))
+        bas_ij = cp.asarray(bas_ij, dtype=np.int32)
         return img_idx, img_offsets, bas_ij
     return gen_img_idx
 
@@ -362,8 +363,7 @@ def most_diffused_pgto(cell):
 def estimate_rcut(cell, auxcell, omega, precision=None):
     '''Estimate rcut for 3c2e SR-integrals'''
     if precision is None:
-        # Adjust precision a little bit as errors are found slightly larger than cell.precision.
-        precision = cell.precision * 1e-1
+        precision = cell.precision
 
     if cell.nbas == 0 or auxcell.nbas == 0:
         return np.zeros(1)

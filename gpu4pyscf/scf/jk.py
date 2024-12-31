@@ -26,10 +26,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
 from pyscf import lib
 from pyscf.scf import _vhf
-from pyscf import __config__
 from gpu4pyscf.lib.cupy_helper import (load_library, condense, sandwich_dot, transpose_sum,
                                        reduce_to_device)
-from gpu4pyscf.__config__ import _streams, _num_devices, gpu_specs, shm_size
+from gpu4pyscf.__config__ import _streams, _num_devices, shm_size
+from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import group_basis
 

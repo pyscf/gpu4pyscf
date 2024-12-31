@@ -528,12 +528,12 @@ void sr_int3c2e_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars env
 
 __global__
 void int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int8_t *mask,
-                            int *bas_ij_idx, int nimgs)
+                            int *bas_mapping, int nimgs)
 {
     int thread_id = threadIdx.x;
     int threads = blockDim.x;
     int row_id = blockIdx.x;
-    int bas_ij = bas_ij_idx[row_id];
+    int bas_ij = bas_mapping[row_id];
     int nimgs2 = nimgs * nimgs;
     int bacth_size = (nimgs2 + threads - 1) / threads;
     int ij0 = thread_id * bacth_size;

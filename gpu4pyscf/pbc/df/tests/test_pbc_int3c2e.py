@@ -68,7 +68,7 @@ def test_int3c2e_kpoints():
         ''',
         basis='ccpvdz',
         precision = 1e-8,
-        a=np.diag([2.5, 1.9, 2.2])*3)
+        a=np.diag([2.5, 1.9, 2.2])*4)
     auxcell = cell.copy()
     auxcell.basis = [[0, [3.5, 1.]],
                      [0, [1.1, 1.]],

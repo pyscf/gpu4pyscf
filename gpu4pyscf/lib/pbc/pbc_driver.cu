@@ -166,9 +166,9 @@ int int3c2e_q_mask(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars *envs,
 }
 
 int int3c2e_img_idx(int *img_idx, int *img_offsets, int8_t *mask,
-                    int *bas_ij_idx, int nrow, int nimgs)
+                    int *bas_mapping, int nrow, int nimgs)
 {
-    int3c2e_img_idx_kernel<<<nrow, 1024>>>(img_idx, img_offsets, mask, bas_ij_idx, nimgs);
+    int3c2e_img_idx_kernel<<<nrow, 1024>>>(img_idx, img_offsets, mask, bas_mapping, nimgs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int3c2e_img_idx: %s\n", cudaGetErrorString(err));
