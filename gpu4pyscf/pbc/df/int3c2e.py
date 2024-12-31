@@ -13,7 +13,7 @@
 # limitations under the License.
 
 '''
-3-center 2-electron integrals with perodicity
+Perodic 3-center 2-electron short-range Coulomb integral helper functions
 '''
 
 import ctypes
@@ -24,8 +24,6 @@ from pyscf import lib
 from pyscf.lib.parameters import ANGULAR
 from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD, conc_env
 from pyscf.pbc import tools as pbctools
-from pyscf.pbc.gto.cell import _extract_pgto_params
-from pyscf.pbc.df.rsdf_builder import estimate_rcut
 from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
@@ -33,6 +31,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
+from gpu4pyscf.pbc.gto.cell import _extract_pgto_params
 from gpu4pyscf.pbc.df.ft_ao import libpbc, init_constant
 
 __all__ = [
@@ -51,7 +50,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None):
     Short-range 3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
     '''
-    int3c2e_opt = Int3c2eOpt(cell, auxcell, omega, kpts, bvk_kmesh)
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, kpts, bvk_kmesh)
     nao, nao_orig = int3c2e_opt.coeff.shape
     naux = int3c2e_opt.aux_coeff.shape[0]
 
@@ -98,7 +97,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None):
 def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
     '''integral screening'''
     # consider only the most diffused component of a basis
-    exps, cs = _extract_pgto_params(cell, 'min')
+    exps, cs = _extract_pgto_params(cell, 'diffused')
     ls = cell._bas[:,ANG_OF]
     exps = cp.asarray(exps, dtype=np.float32)
     log_cs = np.log(np.abs(cs * ((2*ls+1)/(4*np.pi))**.5))
@@ -108,13 +107,15 @@ def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
     nimgs = len(Ls)
 
     # Search the most diffused functions on each atom
+    aux_exps, aux_cs = _extract_pgto_params(auxcell, 'diffused')
+    aux_ls = auxcell._bas[:,ANG_OF]
+    r2_aux = np.log(aux_cs**2 / cell.precision * 10**aux_ls) / aux_exps
     atoms = auxcell._bas[:,ATOM_OF]
     atom_splits = np.where(atoms[1:] != atoms[:-1])[0] + 1
     atom_offsets = np.hstack([0, atom_splits, auxcell.nbas])
-    aux_exps = auxcell.bas_exps()
     atom_aux_exps = []
     for i0, i1 in zip(atom_offsets[:1], atom_offsets[1:]):
-        atom_aux_exps.append(np.hstack(aux_exps[i0:i1]).min())
+        atom_aux_exps.append(aux_exps[i0+r2_aux[i0:i1].argmax()])
     aux_exps = cp.array(atom_aux_exps, dtype=np.float32)
 
     def gen_img_idx(ish0, ish1, jsh0, jsh1):
@@ -163,7 +164,7 @@ def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
         return img_idx, img_offsets, bas_ij
     return gen_img_idx
 
-class Int3c2eOpt:
+class SRInt3c2eOpt:
     def __init__(self, cell, auxcell, omega, kpts=None, bvk_kmesh=None):
         assert omega < 0
         self.cell = cell
@@ -348,3 +349,58 @@ def int3c2e_scheme(cell, li, lj, lk, shm_size=SHM_SIZE):
 
     gout_stride = THREADS // (nksh_per_block*nsp_per_block)
     return nksh_per_block, gout_stride, nsp_per_block
+
+# This modified rcut estimation function will be available in pyscf-2.8 or newer
+def estimate_rcut(cell, auxcell, omega, precision=None):
+    '''Estimate rcut for 3c2e SR-integrals'''
+    if precision is None:
+        # Adjust precision a little bit as errors are found slightly larger than cell.precision.
+        precision = cell.precision * 1e-1
+
+    if cell.nbas == 0 or auxcell.nbas == 0:
+        return np.zeros(1)
+
+    if omega == 0:
+        # No SR integrals in int3c2e if omega=0
+        assert cell.dimension == 0
+        return np.zeros(1)
+
+    # Search for the most diffused auxiliary basis function
+    aux_exps, aux_cs = _extract_pgto_params(auxcell, 'diffused')
+    aux_ls = auxcell._bas[:,ANG_OF]
+    r2_aux = np.log(aux_cs**2 / precision * 10**aux_ls) / aux_exps
+    ak_idx = r2_aux.argmax()
+    lk = aux_ls[ak_idx]
+    ak = aux_exps[ak_idx]
+    ck = aux_cs[ak_idx]
+
+    # the most diffused orbital basis
+    cell_exps, cs = _extract_pgto_params(cell, 'diffused')
+    ls = cell._bas[:,ANG_OF]
+    r2_cell = np.log(cs**2 / precision * 10**ls) / cell_exps
+    ai_idx = r2_cell.argmax()
+    ai = cell_exps[ai_idx]
+    aj = cell_exps
+    li = ls[ai_idx]
+    lj = ls
+    ci = cs[ai_idx]
+    cj = cs
+
+    aij = ai + aj
+    lij = li + lj
+    l3 = lij + lk
+    theta = 1./(omega**-2 + 1./aij + 1./ak)
+    norm_ang = ((2*li+1)*(2*lj+1))**.5/(4*np.pi)
+    c1 = ci * cj * ck * norm_ang
+    sfac = aij*aj/(aij*aj + ai*theta)
+    fl = 2
+    fac = 2**li*np.pi**2.5*c1 * theta**(l3-.5)
+    fac *= 2*np.pi/cell.vol/theta
+    fac /= aij**(li+1.5) * ak**(lk+1.5) * aj**lj
+    fac *= fl / precision
+
+    r0 = cell.rcut  # initial guess
+    r0 = (np.log(fac * r0 * (sfac*r0)**(l3-1) + 1.) / (sfac*theta))**.5
+    r0 = (np.log(fac * r0 * (sfac*r0)**(l3-1) + 1.) / (sfac*theta))**.5
+    rcut = r0
+    return rcut
