@@ -88,22 +88,16 @@ def p2p_transfer(a, b):
         a[:] = b
     elif _p2p_access:
         a[:] = b
+        '''
     elif a.strides == b.strides and a.flags.c_contiguous and a.dtype == b.dtype:
         # cupy supports a direct copy from different devices without p2p. See also
         # https://github.com/cupy/cupy/blob/v13.3.0/cupy/_core/_routines_indexing.pyx#L48
         # https://github.com/cupy/cupy/blob/v13.3.0/cupy/_core/_routines_indexing.pyx#L1015
         a[:] = b
+        '''
     else:
-        #copy_array(b, a)
-        with cupy.cuda.Device(a.device):
-            # TODO: reduce memory copy, a can be non-contiguous array
-            #a[:] = cupy.asarray(b.get())
-            copy_array(b, a)
-            if np.linalg.norm(a.get() - b.get()) > 1e-3:
-                print(a[:5], a.device, a.strides, a.shape)
-                print(b[:5], b.device, b.strides, b.shape)
-                print(a.shape, b.shape)
-                exit()
+        copy_array(b, a)
+
 def concatenate(array_list):
     ''' Concatenate axis=0 only
     '''
@@ -118,7 +112,8 @@ def concatenate(array_list):
         p0 = p1 = 0
         for a in array_list_cpu:
             p1 = p0 + a.shape[0]
-            out[p0:p1].set(a)
+            #out[p0:p1].set(a)
+            copy_array(a, out[p0:p1])
             p0 = p1
         return out
 
@@ -153,8 +148,8 @@ def reduce_to_device(array_list, inplace=False):
         matrix = matrix.reshape(-1)
         blksize = 1024*1024*128 # 1GB
         for p0, p1 in lib.prange(0,len(matrix), blksize):
-            result[p0:p1] += cupy.asarray(matrix[p0:p1])
-    
+            result[p0:p1] += copy_array(matrix[p0:p1])#cupy.asarray(matrix[p0:p1]) 
+            #result[p0:p1] += cupy.asarray(matrix[p0:p1]) 
     return result.reshape(out_shape)
     
 def device2host_2d(a_cpu, a_gpu, stream=None):

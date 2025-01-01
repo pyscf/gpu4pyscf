@@ -37,52 +37,54 @@ device_view = big_device_data[:, 128:]  # Non-contiguous view on the device
 
 print("Host View Shape:", host_view.shape)
 print("Device View Shape:", device_view.shape)
-'''
+
 print("------ Benchmark device to host transfer ----------")
 size = host_view.nbytes
-perf_custom = profiler.benchmark(copy_array, (host_view, device_view), n_repeat=100, n_warmup=3)
+perf_custom = profiler.benchmark(copy_array, (host_view, device_view), n_repeat=20, n_warmup=3)
 t_kernel = perf_custom.gpu_times.mean()
 bandwidth = size / t_kernel / 1e9
-print('using custom function', t_kernel)
-print(f"Effective PCIe Bandwidth: {bandwidth:.2f} GB/s")
+print('Using custom function', t_kernel)
+print(f"Effective Bandwidth: {bandwidth:.2f} GB/s")
 
 def cupy_copy(c, out):
     out[:] = cp.asarray(c)
     return out
-perf_cupy = profiler.benchmark(cupy_copy, (host_view, device_view), n_repeat=100, n_warmup=3)
+perf_cupy = profiler.benchmark(cupy_copy, (host_view, device_view), n_repeat=20, n_warmup=3)
 t_kernel = perf_cupy.gpu_times.mean()
 bandwidth = size / t_kernel / 1e9
-print('using cupy function', t_kernel)
-print(f"Effective PCIe Bandwidth: {bandwidth:.2f} GB/s")
+print('Using cupy function', t_kernel)
+print(f"Effective Bandwidth: {bandwidth:.2f} GB/s")
 
 print("------- Benchmark host to device transfer ---------")
 size = host_view.nbytes
-perf_custom = profiler.benchmark(copy_array, (device_view, host_view), n_repeat=100, n_warmup=3)
+perf_custom = profiler.benchmark(copy_array, (device_view, host_view), n_repeat=20, n_warmup=3)
 t_kernel = perf_custom.gpu_times.mean()
 bandwidth = size / t_kernel / 1e9
-print('using custom function', t_kernel)
-print(f"Effective PCIe Bandwidth: {bandwidth:.2f} GB/s")
+print('Using custom function', t_kernel)
+print(f"Effective Bandwidth: {bandwidth:.2f} GB/s")
 
 def cupy_copy(c, out):
     out[:] = c.get()
     return out
-perf_cupy = profiler.benchmark(cupy_copy, (device_view, host_view), n_repeat=100, n_warmup=3)
+perf_cupy = profiler.benchmark(cupy_copy, (device_view, host_view), n_repeat=20, n_warmup=3)
 t_kernel = perf_cupy.gpu_times.mean()
 bandwidth = size / t_kernel / 1e9
-print('using cupy function', t_kernel)
-print(f"Effective PCIe Bandwidth: {bandwidth:.2f} GB/s")
-'''
+print('Using cupy function', t_kernel)
+print(f"Effective Bandwidth: {bandwidth:.2f} GB/s")
+
+print("-------- Benchmark device to device transfer (non-contiguous) ---------")
+
 with cp.cuda.Device(0):
     a = cp.random.rand(512,512,512)
-    device0_view = a[:,128:, 128:]
+    device0_view = a[:,128:]
 with cp.cuda.Device(1):
     b = cp.random.rand(512,512,512)
-    device1_view = b[:,128:, 128:]
-perf_cupy = profiler.benchmark(copy_array, (device0_view, device1_view), n_repeat=100, n_warmup=3)
+    device1_view = b[:,128:]
+perf_cupy = profiler.benchmark(copy_array, (device0_view, device1_view), n_repeat=20, n_warmup=3)
 t_kernel = perf_cupy.gpu_times.mean()
 bandwidth = device0_view.nbytes / t_kernel / 1e9
-print('using custom function', t_kernel)
-print(f"Effective PCIe Bandwidth: {bandwidth:.2f} GB/s")
+print('Using custom function', t_kernel)
+print(f"Effective Bandwidth: {bandwidth:.2f} GB/s")
 
 assert np.linalg.norm(device0_view.get() - device1_view.get()) < 1e-10
 
@@ -90,8 +92,33 @@ def cupy_copy(c, out):
     with cp.cuda.Device(out.device):
         out[:] = cp.asarray(c.get())
     return out
-perf_cupy = profiler.benchmark(cupy_copy, (device0_view, device1_view), n_repeat=100, n_warmup=3)
+perf_cupy = profiler.benchmark(cupy_copy, (device0_view, device1_view), n_repeat=20, n_warmup=3)
 t_kernel = perf_cupy.gpu_times.mean()
 bandwidth = device0_view.nbytes / t_kernel / 1e9
-print('using cupy function', t_kernel)
-print(f"Effective PCIe Bandwidth: {bandwidth:.2f} GB/s")
+print('Using cupy function', t_kernel)
+print(f"Effective Bandwidth: {bandwidth:.2f} GB/s")
+
+print("-------- Benchmark device to device transfer (contiguous) ---------")
+perf_cupy = profiler.benchmark(copy_array, (a, b), n_repeat=20, n_warmup=3)
+t_kernel = perf_cupy.gpu_times.mean()
+bandwidth = device0_view.nbytes / t_kernel / 1e9
+print('Using custom function', t_kernel)
+print(f"Effective Bandwidth: {bandwidth:.2f} GB/s")
+
+def cupy_copy_contiguous(a, b):
+    b[:] = a
+perf_cupy = profiler.benchmark(cupy_copy, (a, b), n_repeat=20, n_warmup=3)
+t_kernel = perf_cupy.gpu_times.mean()
+bandwidth = device0_view.nbytes / t_kernel / 1e9
+print('Cupy copy contiguous array', t_kernel)
+print(f"Effective Bandwidth: {bandwidth:.2f} GB/s")
+
+def cupy_set_contiguous(a, b):
+    b.set(a)
+perf_cupy = profiler.benchmark(cupy_copy, (a, b), n_repeat=20, n_warmup=3)
+t_kernel = perf_cupy.gpu_times.mean()
+bandwidth = device0_view.nbytes / t_kernel / 1e9
+print('Cupy set contiguous array', t_kernel)
+print(f"Effective Bandwidth: {bandwidth:.2f} GB/s")
+
+assert np.linalg.norm(a.get() - b.get()) < 1e-10

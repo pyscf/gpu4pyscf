@@ -145,11 +145,11 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
 
     # int3c_ip2 contributions
     wj_ip2, wk_ip2_P__ = int3c2e.get_int3c2e_ip2_wjk(intopt, dm0_tag, omega=omega)
-    t1 = log.timer_debug1('interdeidate variables with int3c2e_ip2', *t1)
+    t1 = log.timer_debug1('interdediate variables with int3c2e_ip2', *t1)
 
     #  int3c_ip1 contributions
     wj1_P, wk1_Pko = int3c2e.get_int3c2e_ip1_wjk(intopt, dm0_tag, omega=omega)
-    t1 = log.timer_debug1('interdeidate variables with int3c2e_ip1', *t1)
+    t1 = log.timer_debug1('interdediate variables with int3c2e_ip1', *t1)
 
     #rhoj1_P = contract('pq,pix->qix', int2c_inv, wj1_P)
     if with_j:
@@ -332,6 +332,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
     # pi,qi,i->pq
     dme0 = cupy.dot(mocc, (mocc * mo_energy[mo_occ>0] * 2).T)
     de_hcore = rhf_hess._e_hcore_generator(hessobj, dm0)
+    t1 = log.timer_debug1('hcore generate', *t1)
 
     # ------------------------------------
     #      overlap matrix contributions
@@ -396,7 +397,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
                     _ek = cupy.sum(hk_aux_aux[p0:p1,q0:q1], axis=[0,1])
                     ek[i0,j0] += _ek * .5
                     ek[j0,i0] += _ek.T * .5
-    
     for i0, ia in enumerate(atmlst):
         for j0 in range(i0):
             e1[j0,i0] = e1[i0,j0].T
@@ -404,7 +404,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
                 ej[j0,i0] = ej[i0,j0].T
             if with_k:
                 ek[j0,i0] = ek[i0,j0].T
-
     t1 = log.timer_debug1('hcore contribution', *t1)
 
     aux2atom = int3c2e.get_aux2atom(intopt, auxslices)

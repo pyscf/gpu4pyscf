@@ -771,7 +771,7 @@ def get_j_int3c2e_pass2(intopt, rhoj, stream=None):
     vj = vj + vj.T
     return vj
 
-def _int3c2e_jk_task(intopt, task_list, dm0, mocc, device_id=0, omega=None):
+def _int3c2e_jk_task(intopt, task_k_list, dm0, mocc, device_id=0, omega=None):
     with cupy.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(intopt.mol, intopt.mol.verbose)
         t0 = log.init_timer()
@@ -781,7 +781,7 @@ def _int3c2e_jk_task(intopt, task_list, dm0, mocc, device_id=0, omega=None):
         nocc = mocc.shape[1]
         rhoj = cupy.zeros([naux])
         rhok = cupy.zeros([naux,nocc,nocc])
-        for cp_kl_id in task_list:
+        for cp_kl_id in task_k_list:
             k0 = intopt.aux_ao_loc[cp_kl_id]
             k1 = intopt.aux_ao_loc[cp_kl_id+1]
             rhoj_tmp = cupy.zeros([k1-k0], order='C')
@@ -803,7 +803,7 @@ def _int3c2e_jk_task(intopt, task_list, dm0, mocc, device_id=0, omega=None):
                 rhoj_tmp += contract('pji,ij->p', int3c_blk, dm0[i0:i1,j0:j1])
                 ints_o = contract('pji,jo->poi', int3c_blk, mocc[j0:j1])
                 rhok_tmp += contract('poi,ir->por', ints_o, mocc[i0:i1])
-
+                int3c_blk = ints_o = None
             if intopt.aosym:
                 rhoj[k0:k1] = 2.0 * rhoj_tmp
                 rhok[k0:k1] = rhok_tmp + rhok_tmp.transpose([0,2,1])
@@ -853,7 +853,7 @@ def _split_tasks(loads, ngroups):
     if ngroups == 1:
         return [range(len(loads))]
     groups = [[] for _ in range(ngroups)]
-    sums = [0] * 4
+    sums = [0] * ngroups
     for i, load in enumerate(loads):
         min_index = sums.index(min(sums))
         groups[min_index].append(i)
@@ -965,7 +965,7 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_j=True,
     return vj1_buf, vk1_buf, vj1, vk1
 
 
-def _int3c2e_ip2_vjk_task(intopt, task_list, rhoj, rhok, dm0, orbo,
+def _int3c2e_ip2_vjk_task(intopt, task_k_list, rhoj, rhok, dm0, orbo,
                           device_id=0, with_j=True, with_k=True, omega=None):
     natom = intopt.mol.natm
     nao = intopt.mol.nao
@@ -985,7 +985,7 @@ def _int3c2e_ip2_vjk_task(intopt, task_list, rhoj, rhok, dm0, orbo,
             vk1 = cupy.zeros([natom,3,nao,nocc])
         aux_ao_loc = intopt.aux_ao_loc
         ncp_ij = len(intopt.log_qs)
-        for cp_k in task_list:
+        for cp_k in task_k_list:
             task_list = [(cp_k, cp_ij) for cp_ij in range(ncp_ij)]
             k0, k1 = aux_ao_loc[cp_k], aux_ao_loc[cp_k+1]
             if with_j:
