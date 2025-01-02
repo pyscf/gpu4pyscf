@@ -64,35 +64,36 @@ def run_ub3lyp_hessian(atom, basis, with_df, with_solvent):
     h = mf.Hessian().kernel()
     return h
 
-
+##########
 # UKS
+##########
 @pytest.mark.benchmark
 def test_df_ub3lyp(benchmark):
     e = benchmark(run_ub3lyp, small_mol, 'def2-tzvpp', True, False)
     print('testing df ub3lyp')
-    assert np.isclose(np.linalg.norm(e), 684.9998712035856, atol=1e-7)
+    assert np.isclose(np.linalg.norm(e), 684.9998712035856, atol=1e-7, rtol=1e-16)
 @pytest.mark.benchmark
 def test_df_ub3lyp_grad(benchmark):
     g = benchmark(run_ub3lyp_grad, small_mol, 'def2-tzvpp', True, False)
     print('testing df ub3lyp grad')
-    assert np.isclose(np.linalg.norm(g), 0.17435842214665462, atol=1e-5)
+    assert np.isclose(np.linalg.norm(g), 0.17435842214665462, atol=1e-5, rtol=1e-16)
 @pytest.mark.benchmark
 def test_df_ub3lyp_hessian(benchmark):
     h = benchmark(run_ub3lyp_hessian, small_mol, 'def2-tzvpp', True, False)
     print('testing df ub3lyp hessian')
-    assert np.isclose(np.linalg.norm(h), 3.7669464279078064, atol=1e-4)
+    assert np.isclose(np.linalg.norm(h), 3.7669464279078064, atol=1e-4, rtol=1e-16)
 @pytest.mark.benchmark
 def test_ub3lyp(benchmark):
     e = benchmark(run_ub3lyp, small_mol, 'def2-tzvpp', False, False)
     print('testing ub3lyp')
-    assert np.isclose(np.linalg.norm(e), 684.9997358509884, atol=1e-7)
+    assert np.isclose(np.linalg.norm(e), 684.9997358509884, atol=1e-7, rtol=1e-16)
 @pytest.mark.benchmark
 def test_ub3lyp_grad(benchmark):
     g = benchmark(run_ub3lyp_grad, small_mol, 'def2-tzvpp', False, False)
     print('testing ub3lyp grad')
-    assert np.isclose(np.linalg.norm(g), 0.17441176110160253, atol=1e-5)
+    assert np.isclose(np.linalg.norm(g), 0.17441176110160253, atol=1e-5, rtol=1e-16)
 @pytest.mark.benchmark
 def test_ub3lyp_hessian(benchmark):
     h = benchmark(run_ub3lyp_hessian, small_mol, 'def2-tzvpp', False, False)
     print('testing ub3lyp hessian')
-    assert np.isclose(np.linalg.norm(h), 3.758916526520172, atol=1e-4)
+    assert np.isclose(np.linalg.norm(h), 3.758916526520172, atol=1e-4, rtol=1e-16)
