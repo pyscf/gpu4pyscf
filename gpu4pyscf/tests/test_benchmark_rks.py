@@ -25,10 +25,18 @@ from gpu4pyscf.dft import rks, uks
 # How to run
 # 1. run test only
 # pytest test_benchmark_rks.py --benchmark-disable -s -v -m "not slow" --durations=20
+
 # 2. benchmark less expensive tasks
 # pytest test_benchmark_rks.py -v -m "not slow"
+
 # 3. benchmark all the tests
 # pytest test_benchmark_rks.py -v
+
+# 4. save benchmark results
+# pytest test_benchmark_rks.py -s -v -m "not slow and not high_memory" --benchmark-save=v100
+
+# 5. compare benchmark results, fail if performance regresses by more than 10%
+# pytest test_benchmark_rks.py -s -v -m "not slow" --benchmark-compare=v100 --benchmark-compare-fail=10%
 
 current_folder = os.path.dirname(os.path.abspath(__file__))
 small_mol = os.path.join(current_folder, '020_Vitamin_C.xyz')
@@ -81,8 +89,9 @@ def run_rb3lyp_hessian(atom, basis, with_df, with_solvent, disp=None):
     mf.kernel()
     h = mf.Hessian().kernel()
     return h
-
+#######
 # DF
+#######
 @pytest.mark.benchmark
 def test_df_rb3lyp(benchmark):
     e = benchmark(run_rb3lyp, small_mol, 'def2-tzvpp', True, False)
@@ -100,7 +109,9 @@ def test_df_rb3lyp_hessian(benchmark):
     print('testing df rb3lyp hessian')
     assert np.isclose(np.linalg.norm(h), 3.7668761221997764, atol=1e-4)
 
+################
 # Direct SCF
+################
 @pytest.mark.benchmark
 def test_rb3lyp(benchmark):
     e = benchmark(run_rb3lyp, small_mol, 'def2-tzvpp', False, False)
@@ -117,7 +128,9 @@ def test_rb3lyp_hessian(benchmark):
     print('testing rb3lyp hessian')
     assert np.isclose(np.linalg.norm(h), 3.7588443634477833, atol=1e-4)
 
-# medium molecule
+####################
+# Medium molecule
+####################
 @pytest.mark.benchmark
 def test_df_rb3lyp_medium(benchmark):
     e = benchmark(run_rb3lyp, medium_mol, 'def2-tzvpp', True, False)
@@ -144,7 +157,6 @@ def test_rb3lyp_grad_medium(benchmark):
     g = benchmark(run_rb3lyp_grad, medium_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp grad medium')
     assert np.isclose(np.linalg.norm(g), 0.2601443836937988, atol=1e-5)
-
 @pytest.mark.slow
 @pytest.mark.benchmark
 def test_rb3lyp_hessian_medium(benchmark):
@@ -152,12 +164,16 @@ def test_rb3lyp_hessian_medium(benchmark):
     print('testing rb3lyp hessian medium')
     assert np.isclose(np.linalg.norm(h), 6.312714778020796, atol=1e-4)
 
+####################
 # large molecule
+####################
+@pytest.mark.high_memory
 @pytest.mark.benchmark
 def test_df_rb3lyp_large(benchmark):
     e = benchmark(run_rb3lyp, large_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp large')
     assert np.isclose(np.linalg.norm(e), 2564.198712152175, atol=1e-7)
+@pytest.mark.high_memory
 @pytest.mark.benchmark
 def test_df_rb3lyp_grad_large(benchmark):
     g = benchmark(run_rb3lyp_grad, large_mol, 'def2-tzvpp', True, False)
@@ -192,13 +208,15 @@ def test_rb3lyp_hessian_large(benchmark):
     print('testing rb3lyp hessian large')
     print(np.linalg.norm(h))
 '''
-# small basis set
+
+#####################
+# Small basis set
+#####################
 @pytest.mark.benchmark
 def test_df_rb3lyp_631gs(benchmark):
     e = benchmark(run_rb3lyp, small_mol, '6-31gs', True, False)
     print('testing df rb3lyp 631gs')
     assert np.isclose(np.linalg.norm(e), 684.6646008642876, atol=1e-7)
-
 @pytest.mark.benchmark
 def test_df_rb3lyp_631gs_grad(benchmark):
     g = benchmark(run_rb3lyp_grad, small_mol, '6-31gs', True, False)
@@ -210,7 +228,9 @@ def test_df_rb3lyp_631gs_hessian(benchmark):
     print('testing df rb3lyp 631gs hessian')
     assert np.isclose(np.linalg.norm(h), 3.908874851569459, atol=1e-4)
 
-# small basis set for large molecule
+#########################################
+# Small basis set for large molecule
+#########################################
 @pytest.mark.benchmark
 def test_rb3lyp_631gs_large(benchmark):
     e = benchmark(run_rb3lyp, large_mol, '6-31gs', False, False)
@@ -228,7 +248,9 @@ def test_rb3lyp_631gs_hessian_large(benchmark):
     print('testing df rb3lyp 631gs hessian large')
     assert np.isclose(np.linalg.norm(h), 7.920764634100053, atol=1e-4)
 
-#solvent model
+###################
+# Solvent model
+###################
 @pytest.mark.benchmark
 def test_df_rb3lyp_631gs_solvent(benchmark):
     e = benchmark(run_rb3lyp, small_mol, '6-31gs', True, True)
