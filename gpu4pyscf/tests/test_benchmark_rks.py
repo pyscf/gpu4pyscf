@@ -87,10 +87,10 @@ def run_rb3lyp_hessian(atom, basis, with_df, with_solvent, disp=None):
     mf.conv_tol = 1e-10
     mf.conv_tol_cpscf = 1e-6
     mf.kernel()
-    h = mf.Hessian()
+    hobj = mf.Hessian()
     if with_df:
-        h.auxbasis_response = 2
-    h.kernel()
+        hobj.auxbasis_response = 2
+    h = hobj.kernel()
     return h
 
 #######
@@ -130,6 +130,7 @@ def test_rb3lyp_grad(benchmark):
 def test_rb3lyp_hessian(benchmark):
     h = benchmark(run_rb3lyp_hessian, small_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp hessian')
+    print(np.linalg.norm(h) - 3.7588443634477833)
     assert np.isclose(np.linalg.norm(h), 3.7588443634477833, atol=1e-4, rtol=1e-16)
 
 ####################
