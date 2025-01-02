@@ -361,6 +361,6 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
                         tmp = copy_array(tmp)
                         _cderi[dev_id][:,ij0:ij1] = tmp
             else:
-                _cderi[slice_id][:,ij0:ij1] = cderi_block[p0:p1]
+                _cderi[0][:,ij0:ij1] = cderi_block
             t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)    
     return
