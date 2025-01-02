@@ -107,15 +107,16 @@ print(f"Effective Bandwidth: {bandwidth:.2f} GB/s")
 
 def cupy_copy_contiguous(a, b):
     b[:] = a
-perf_cupy = profiler.benchmark(cupy_copy, (a, b), n_repeat=20, n_warmup=3)
+perf_cupy = profiler.benchmark(cupy_copy_contiguous, (a, b), n_repeat=20, n_warmup=3)
 t_kernel = perf_cupy.gpu_times.mean()
 bandwidth = device0_view.nbytes / t_kernel / 1e9
 print('Cupy copy contiguous array', t_kernel)
 print(f"Effective Bandwidth: {bandwidth:.2f} GB/s")
 
-def cupy_set_contiguous(a, b):
-    b.set(a)
-perf_cupy = profiler.benchmark(cupy_copy, (a, b), n_repeat=20, n_warmup=3)
+def cupy_asarray_contiguous(a, b):
+    with cp.cuda.Device(b.device):
+        b = cp.asarray(a) 
+perf_cupy = profiler.benchmark(cupy_asarray_contiguous, (a, b), n_repeat=20, n_warmup=3)
 t_kernel = perf_cupy.gpu_times.mean()
 bandwidth = device0_view.nbytes / t_kernel / 1e9
 print('Cupy set contiguous array', t_kernel)

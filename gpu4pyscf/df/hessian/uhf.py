@@ -96,7 +96,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     # ================================ sorted AO begin ===============================================
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
+    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, verbose=0,
+                 group_size=BLKSIZE, group_size_aux=BLKSIZE)
 
     mocca = intopt.sort_orbitals(mocca, axis=[0])
     moccb = intopt.sort_orbitals(moccb, axis=[0])
@@ -495,7 +496,7 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
     intopt.build(mf.direct_scf_tol,
                  diag_block_with_triu=True,
-                 aosym=False,
+                 aosym=False, verbose=0,
                  group_size_aux=BLKSIZE,
                  group_size=BLKSIZE)
 

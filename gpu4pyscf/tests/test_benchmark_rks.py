@@ -24,11 +24,11 @@ from gpu4pyscf.dft import rks, uks
 
 # How to run
 # 1. run test only
-# pytest test_rks.py --benchmark-disable -s -v -m "not slow" --durations=20
+# pytest test_benchmark_rks.py --benchmark-disable -s -v -m "not slow" --durations=20
 # 2. benchmark less expensive tasks
-# pytest test_rks.py -v -m "not slow"
+# pytest test_benchmark_rks.py -v -m "not slow"
 # 3. benchmark all the tests
-# pytest test_rks.py -v
+# pytest test_benchmark_rks.py -v
 
 current_folder = os.path.dirname(os.path.abspath(__file__))
 small_mol = os.path.join(current_folder, '020_Vitamin_C.xyz')

@@ -18,11 +18,11 @@ import copy
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import scf, gto
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.cupy_helper import tag_array, contract, load_library
+from gpu4pyscf.lib.cupy_helper import tag_array, contract
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
-from gpu4pyscf.df.grad.jk import get_rhoj_rhok
+from gpu4pyscf.df.grad.jk import get_rhojk, get_grad_vjk
 
 FREE_CUPY_CACHE = True
 BINSIZE = 128
@@ -80,39 +80,9 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
 
     # (L|ij) -> rhoj: (L), rhok: (L|oo)
     low = with_df.cd_low
-    rhoj, rhok = get_rhoj_rhok(with_df, dm, orbo, with_j=with_j, with_k=with_k)
+    rhoj, rhok = get_rhojk(with_df, dm, orbo, with_j=with_j, with_k=with_k)
     if dm2 is not None:
-        rhoj2, _   = get_rhoj_rhok(with_df, dm2_tmp, orbo, with_j=with_j, with_k=False)
-    '''
-    rows = with_df.intopt.cderi_row
-    cols = with_df.intopt.cderi_col
-    dm_sparse = dm[rows, cols]
-    dm_sparse[with_df.intopt.cderi_diag] *= .5
-    if dm2 is not None:
-        dm2_sparse = dm2_tmp[rows, cols]
-        dm2_sparse[with_df.intopt.cderi_diag] *= .5
-
-    blksize = with_df.get_blksize()
-    if with_j:
-        rhoj = cupy.empty([naux])
-        if dm2 is not None:
-            rhoj2 = cupy.empty([naux])
-    if with_k:
-        rhok = cupy.empty([naux, nocc, nocc], order='C')
-    p0 = p1 = 0
-
-    for cderi, cderi_sparse in with_df.loop(blksize=blksize):
-        p1 = p0 + cderi.shape[0]
-        if with_j:
-            rhoj[p0:p1] = 2.0*dm_sparse.dot(cderi_sparse)
-            if dm2 is not None:
-                rhoj2[p0:p1] = 2.0*dm2_sparse.dot(cderi_sparse)
-        if with_k:
-            tmp = contract('Lij,jk->Lki', cderi, orbo)
-            contract('Lki,il->Lkl', tmp, orbo, out=rhok[p0:p1])
-        p0 = p1
-    tmp = dm_sparse = cderi_sparse = cderi = None
-    '''
+        rhoj2, _   = get_rhojk(with_df, dm2_tmp, orbo, with_j=with_j, with_k=False)
 
     # (d/dX P|Q) contributions
     if omega and omega > 1e-10:
@@ -120,7 +90,9 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
             int2c_e1 = auxmol.intor('int2c2e_ip1')
     else:
         int2c_e1 = auxmol.intor('int2c2e_ip1')
+
     int2c_e1 = cupy.asarray(int2c_e1)
+    rhoj_cart = rhok_cart = None
     auxslices = auxmol.aoslice_by_atom()
     aux_cart2sph = intopt.aux_cart2sph
     low_t = low.T.copy()
@@ -154,6 +126,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
             rhok = contract('pq,qij->pij', low_t.T, rhok)
         elif low.tag == 'cd':
             rhok = solve_triangular(low_t, rhok.reshape(naux, -1), lower=False, overwrite_b=True).reshape(naux, nocc, nocc)
+            rhok = rhok.copy(order='C')
         tmp = contract('pij,qij->pq', rhok, rhok)
         tmp = intopt.unsort_orbitals(tmp, aux_axis=[0,1])
         vkaux = -contract('xpq,pq->xp', int2c_e1, tmp)
@@ -192,6 +165,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
         orbo_cart = orbo
     dm = orbo = None
 
+    """
     vj = vk = rhoj_tmp = rhok_tmp = None
     vjaux = vkaux = None
 
@@ -243,7 +217,10 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
 
         rhoj_tmp = rhok_tmp = vj_tmp = vk_tmp = None
         t1 = log.timer_debug1(f'calculate {cp_kl_id:3d} / {len(intopt.aux_log_qs):3d}, {k1-k0:3d} slices', *t1)
-
+    """
+    vj, vk, vjaux, vkaux = get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbo_cart,
+                                        with_j=with_j, with_k=with_k, omega=omega)
+    
     # NOTE: vj and vk are still in cartesian
     _sorted_mol = intopt._sorted_mol
     natm = _sorted_mol.natm
@@ -260,6 +237,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
 
     _sorted_auxmol = intopt._sorted_auxmol
     natm = _sorted_auxmol.natm
+    naux_cart = _sorted_auxmol.nao
     aux2atom = np.zeros([naux_cart, natm])
     ao_loc = _sorted_auxmol.ao_loc
     for ibas, iatm in enumerate(_sorted_auxmol._bas[:,gto.ATOM_OF]):

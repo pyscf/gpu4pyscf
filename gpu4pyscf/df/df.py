@@ -138,13 +138,12 @@ class DF(lib.StreamObject):
         '''
         if nao is None: nao = self.nao
         mem_avail = get_avail_mem()
-        blksize = int(mem_avail*0.2/8/(nao*nao + extra) / ALIGNED) * ALIGNED
+        blksize = int(mem_avail*0.4/8/(nao*nao + extra) / ALIGNED) * ALIGNED
         blksize = min(blksize, MIN_BLK_SIZE)
         log = logger.new_logger(self.mol, self.mol.verbose)
         device_id = cupy.cuda.Device().id
         log.debug(f"{mem_avail/1e9:.3f} GB memory available on Device {device_id}, block size = {blksize}")
-        if blksize < ALIGNED:
-            raise RuntimeError("Not enough GPU memory")
+        assert blksize > 0
         return blksize
 
     def loop(self, blksize=None, unpack=True):
@@ -227,12 +226,16 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
         log.debug("Saving CDERI on CPU")
 
     _cderi = {}
-    blksize = (naux + _num_devices - 1) // _num_devices
-    for device_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
+    aux_blksize = (naux + _num_devices - 1) // _num_devices
+    aux_blksize = (aux_blksize + ALIGNED - 1) // ALIGNED * ALIGNED
+    for device_id in range(_num_devices):
+        p0 = min(aux_blksize*device_id, naux)
+        p1 = min(aux_blksize*(device_id+1), naux)
+        #for device_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
         if use_gpu_memory:
             with cupy.cuda.Device(device_id), _streams[device_id]:
                 _cderi[device_id] = cupy.empty([p1-p0, npairs])
-            log.debug(f"CDERI size {_cderi[device_id].nbytes/GB:.3f} on Device {device_id}")
+            log.debug(f"CDERI size {_cderi[device_id].nbytes/GB:.3f} GB on Device {device_id}")
         else:
             mem = cupy.cuda.alloc_pinned_memory((p1-p0) * npairs * 8)
             cderi_blk = np.ndarray([p1-p0, npairs], dtype=np.float64, order='C', buffer=mem)
@@ -254,7 +257,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     with ThreadPoolExecutor(max_workers=_num_devices) as executor:
         for device_id in range(_num_devices):
             task_list = task_list_per_device[device_id]
-            future = executor.submit(_cderi_task, intopt, cd_low_f, task_list, _cderi,
+            future = executor.submit(_cderi_task, intopt, cd_low_f, task_list, _cderi, aux_blksize,
                                      omega=omega, sr_only=sr_only, device_id=device_id)
             futures.append(future)
 
@@ -266,7 +269,8 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
 
     return _cderi
 
-def _cderi_task(intopt, cd_low, task_list, _cderi, omega=None, sr_only=False, device_id=0):
+def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize, 
+                omega=None, sr_only=False, device_id=0):
     ''' Execute CDERI tasks on one device
     '''
     nq = len(intopt.log_qs)
@@ -275,7 +279,6 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, omega=None, sr_only=False, de
     naoaux = cd_low.shape[0]
     npairs = [len(intopt.ao_pairs_row[cp_ij]) for cp_ij in range(len(intopt.log_qs))]
     pairs_loc = np.append(0, np.cumsum(npairs))
-    blksize = (naux + _num_devices - 1) // _num_devices
     with cupy.cuda.Device(device_id), _streams[device_id]:
         assert isinstance(mol.verbose, int)
         log = logger.new_logger(mol, mol.verbose)
@@ -346,16 +349,18 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, omega=None, sr_only=False, de
             ij0 = pairs_loc[cp_ij_id]
             ij1 = pairs_loc[cp_ij_id+1]
             if isinstance(_cderi[0], np.ndarray):
-                for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
-                    #for i in range(p0,p1):
-                    #    cderi_block[i].get(out=_cderi[slice_id][i-p0,ij0:ij1])
+                for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
                     tmp = cupy.array(cderi_block[p0:p1], order='C', copy=True)
                     copy_array(tmp, _cderi[slice_id][:p1-p0,ij0:ij1])
-            else:
-                # Copy data to other Devices
-                for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
-                    #_cderi[slice_id][:,ij0:ij1] = cderi_block[p0:p1]
+            elif _num_devices > 1:
+                # Multi-GPU case, copy data to other Devices
+                for dev_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
+                    # Making a copy for contiguous data transfer
                     tmp = cupy.array(cderi_block[p0:p1], order='C', copy=True)
-                    p2p_transfer(_cderi[slice_id][:,ij0:ij1], tmp)
+                    with cupy.cuda.Device(dev_id):
+                        tmp = copy_array(tmp)
+                        _cderi[dev_id][:,ij0:ij1] = tmp
+            else:
+                _cderi[slice_id][:,ij0:ij1] = cderi_block[p0:p1]
             t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)    
     return

@@ -38,7 +38,7 @@ from gpu4pyscf.df.grad.rhf import _gen_metric_solver
 from gpu4pyscf.df.hessian import jk
 
 LINEAR_DEP_THR = df.LINEAR_DEP_THR
-BLKSIZE = 128
+BLKSIZE = 256
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
 GB = 1024*1024*1024
 
@@ -111,7 +111,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
 
     # ================================ sorted AO begin ===============================================
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
+    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, verbose=0,
+                 group_size=BLKSIZE, group_size_aux=BLKSIZE)
     naux = auxmol.nao
     mocc_2 = intopt.sort_orbitals(mocc_2, axis=[0])
     dm0 = intopt.sort_orbitals(dm0, axis=[0,1])
@@ -135,21 +136,23 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
 
     #  int3c contributions
     wj, wk_P__ = int3c2e.get_int3c2e_jk(mol, auxmol, dm0_tag, omega=omega)
-    t1 = log.timer_debug1('intermediate variables with int3c2e', *t1)
     rhoj0_P = rhok0_P__ = None
+    
     if with_j:
         rhoj0_P = solve_j2c(wj)
+        wj = None
     if with_k:
         rhok0_P__ = solve_j2c(wk_P__)
-    wj = wk_P__ = None
+        wk_P__ = None
+    t1 = log.timer_debug1('intermediate variables with int3c2e', *t1)
 
     # int3c_ip2 contributions
     wj_ip2, wk_ip2_P__ = int3c2e.get_int3c2e_ip2_wjk(intopt, dm0_tag, omega=omega)
-    t1 = log.timer_debug1('interdediate variables with int3c2e_ip2', *t1)
+    t1 = log.timer_debug1('intermediate variables with int3c2e_ip2', *t1)
 
     #  int3c_ip1 contributions
     wj1_P, wk1_Pko = int3c2e.get_int3c2e_ip1_wjk(intopt, dm0_tag, omega=omega)
-    t1 = log.timer_debug1('interdediate variables with int3c2e_ip1', *t1)
+    t1 = log.timer_debug1('intermediate variables with int3c2e_ip1', *t1)
 
     #rhoj1_P = contract('pq,pix->qix', int2c_inv, wj1_P)
     if with_j:
@@ -473,7 +476,7 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
 
     intopt.build(mf.direct_scf_tol,
                  diag_block_with_triu=True,
-                 aosym=False,
+                 aosym=False, verbose=0,
                  group_size_aux=BLKSIZE,
                  group_size=BLKSIZE)
     naux = auxmol.nao

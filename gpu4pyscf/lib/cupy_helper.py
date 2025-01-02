@@ -104,13 +104,13 @@ def concatenate(array_list):
     if _p2p_access:
         return cupy.concatenate(array_list)
     else:
-        array_list_cpu = [a.get() for a in array_list]
-        n = sum([a.shape[0] for a in array_list_cpu])
-        a0_shape = list(array_list_cpu[0].shape)
+        #array_list_cpu = [a.get() for a in array_list]
+        n = sum([a.shape[0] for a in array_list])
+        a0_shape = list(array_list[0].shape)
         out_shape = tuple([n] + a0_shape[1:])
         out = cupy.empty(out_shape)
         p0 = p1 = 0
-        for a in array_list_cpu:
+        for a in array_list:
             p1 = p0 + a.shape[0]
             #out[p0:p1].set(a)
             copy_array(a, out[p0:p1])
@@ -138,15 +138,16 @@ def reduce_to_device(array_list, inplace=False):
         result = array_list[0]
     else:
         result = array_list[0].copy()
+    
+    # Transfer data chunk by chunk, reduce memory footprint,
     result = result.reshape(-1)
-    # Asynchronously add each matrix from its device
     for device_id, matrix in enumerate(array_list):
         if device_id == 0:
             continue
         
         assert matrix.device.id == device_id
         matrix = matrix.reshape(-1)
-        blksize = 1024*1024*128 # 1GB
+        blksize = 1024*1024*1024 // matrix.itemsize # 1GB
         for p0, p1 in lib.prange(0,len(matrix), blksize):
             result[p0:p1] += copy_array(matrix[p0:p1])#cupy.asarray(matrix[p0:p1]) 
             #result[p0:p1] += cupy.asarray(matrix[p0:p1]) 
