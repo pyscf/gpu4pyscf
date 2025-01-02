@@ -36,7 +36,7 @@ from gpu4pyscf.dft import rks, uks
 # pytest test_benchmark_rks.py -s -v -m "not slow and not high_memory" --benchmark-save=v100
 
 # 5. compare benchmark results, fail if performance regresses by more than 10%
-# pytest test_benchmark_rks.py -s -v -m "not slow" --benchmark-compare=v100 --benchmark-compare-fail=10%
+# pytest test_benchmark_rks.py -s -v -m "not slow and not high_memory" --benchmark-compare=v100 --benchmark-compare-fail=10%
 
 current_folder = os.path.dirname(os.path.abspath(__file__))
 small_mol = os.path.join(current_folder, '020_Vitamin_C.xyz')
@@ -106,12 +106,11 @@ def test_df_rb3lyp_grad(benchmark):
     g = benchmark(run_rb3lyp_grad, small_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp grad')
     assert np.isclose(np.linalg.norm(g), 0.17435941081837686, atol=1e-5, rtol=1e-16)
-@pytest.mark.slow
 @pytest.mark.benchmark
 def test_df_rb3lyp_hessian(benchmark):
     h = benchmark(run_rb3lyp_hessian, small_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp hessian')
-    assert np.isclose(np.linalg.norm(h), 3.7668761221997764, atol=1e-4, rtol=1e-16)
+    assert np.isclose(np.linalg.norm(h), 3.7587394873290885, atol=1e-4, rtol=1e-16)
 
 ################
 # Direct SCF
@@ -130,7 +129,6 @@ def test_rb3lyp_grad(benchmark):
 def test_rb3lyp_hessian(benchmark):
     h = benchmark(run_rb3lyp_hessian, small_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp hessian')
-    print(np.linalg.norm(h) - 3.7588443634477833)
     assert np.isclose(np.linalg.norm(h), 3.7588443634477833, atol=1e-4, rtol=1e-16)
 
 ####################
@@ -150,8 +148,7 @@ def test_df_rb3lyp_grad_medium(benchmark):
 def test_df_rb3lyp_hessian_medium(benchmark):
     h = benchmark(run_rb3lyp_hessian, medium_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp hessian medium')
-    print(np.linalg.norm(h) - 6.32514169232998)
-    assert np.isclose(np.linalg.norm(h), 6.32514169232998, atol=1e-4, rtol=1e-16)
+    assert np.isclose(np.linalg.norm(h), 6.31265424196621, atol=1e-4, rtol=1e-16)
 
 @pytest.mark.benchmark
 def test_rb3lyp_medium(benchmark):
@@ -232,7 +229,7 @@ def test_df_rb3lyp_631gs_grad(benchmark):
 def test_df_rb3lyp_631gs_hessian(benchmark):
     h = benchmark(run_rb3lyp_hessian, small_mol, '6-31gs', True, False)
     print('testing df rb3lyp 631gs hessian')
-    assert np.isclose(np.linalg.norm(h), 3.908874851569459, atol=1e-4, rtol=1e-16)
+    assert np.isclose(np.linalg.norm(h), 3.9071846157996553, atol=1e-4, rtol=1e-16)
 
 #########################################
 # Small basis set for large molecule
@@ -271,7 +268,7 @@ def test_df_rb3lyp_631gs_solvent_grad(benchmark):
 def test_df_rb3lyp_631gs_solvent_hessian(benchmark):
     h = benchmark(run_rb3lyp_hessian, small_mol, '6-31gs', True, True)
     print('testing df rb3lyp 631gs solvent hessian')
-    assert np.isclose(np.linalg.norm(h), 3.9008165041707294, atol=1e-4, rtol=1e-16)
+    assert np.isclose(np.linalg.norm(h), 3.8991230592666737, atol=1e-4, rtol=1e-16)
 
 # No need to test d3bj generally
 '''

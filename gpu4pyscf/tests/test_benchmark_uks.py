@@ -61,7 +61,10 @@ def run_ub3lyp_hessian(atom, basis, with_df, with_solvent):
     mf.conv_tol = 1e-10
     mf.conv_tol_cpscf = 1e-6
     mf.kernel()
-    h = mf.Hessian().kernel()
+    hobj = mf.Hessian()
+    if with_df:
+        hobj.auxbasis_response = 2
+    h = hobj.kernel()
     return h
 
 ##########
