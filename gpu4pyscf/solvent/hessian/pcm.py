@@ -22,11 +22,13 @@ import cupy
 from pyscf import lib, gto
 from gpu4pyscf import scf
 from gpu4pyscf.solvent.pcm import PI
-from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_solver, grad_nuc
+from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_solver, grad_nuc, get_dD_dS, get_dF_dA, get_dSii
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from gpu4pyscf.hessian.jk import _ao2mo
+from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
+from gpu4pyscf.gto.int3c1e import int1e_grids
 
 def hess_nuc(pcmobj):
     if not pcmobj._intermediates:
@@ -191,35 +193,124 @@ def fd_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
     pcmobj.reset(pmol)
     return vmat
 
-"""
-def analytic_grad_vmat(pcmobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
+def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
     '''
     dv_solv / da
-    slow version with finite difference
     '''
+    if not pcmobj._intermediates:
+        pcmobj.build()
+    dm_cache = pcmobj._intermediates.get('dm', None)
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
+        pass
+    else:
+        pcmobj._get_vind(dm)
+    mol = pcmobj.mol
     log = logger.new_logger(pcmobj, verbose)
     t1 = log.init_timer()
-    pmol = pcmobj.mol.copy()
-    mol = pmol.copy()
-    if atmlst is None:
-        atmlst = range(mol.natm)
+
     nao, nmo = mo_coeff.shape
     mocc = mo_coeff[:,mo_occ>0]
     nocc = mocc.shape[1]
-    dm = cupy.dot(mocc, mocc.T) * 2
-    coords = mol.atom_coords(unit='Bohr')
 
-    # TODO: add those contributions
-    # contribution due to _get_v
-    # contribution due to linear solver
-    # contribution due to _get_vmat
+    gridslice    = pcmobj.surface['gslice_by_atom']
+    charge_exp   = pcmobj.surface['charge_exp']
+    grid_coords  = pcmobj.surface['grid_coords']
+    v_grids      = pcmobj._intermediates['v_grids']
+    A            = pcmobj._intermediates['A']
+    D            = pcmobj._intermediates['D']
+    S            = pcmobj._intermediates['S']
+    K            = pcmobj._intermediates['K']
+    R            = pcmobj._intermediates['R']
+    q            = pcmobj._intermediates['q']
+    q_sym        = pcmobj._intermediates['q_sym']
 
-    vmat = cupy.zeros([len(atmlst), 3, nao, nocc])
+    ngrids = q.shape[0]
+
+    dIdx = cupy.zeros([len(atmlst), 3, nao, nao])
+    dIdA = int1e_grids_ip1(mol, grid_coords, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2).transpose(0,1,3,2)
+    dIdC = int1e_grids_ip2(mol, grid_coords, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2).transpose(0,1,3,2)
+    dIdA = cupy.array(dIdA)
+    dIdC = cupy.array(dIdC)
+
+    dIdA = cupy.einsum('dqij,q->dij', dIdA, q_sym)
+    aoslice = mol.aoslice_by_atom()
+    aoslice = numpy.array(aoslice)
+    for i_atom in atmlst:
+        p0,p1 = aoslice[i_atom, 2:]
+        dIdx[i_atom, :, p0:p1, :] += dIdA[:, p0:p1, :]
+        dIdx[i_atom, :, :, p0:p1] += dIdA[:, p0:p1, :].transpose(0, 2, 1)
+    for i_atom in atmlst:
+        g0,g1 = gridslice[i_atom]
+        dIdx[i_atom, :, :, :] += cupy.einsum('dqij,q->dij', dIdC[:, g0:g1, :, :], q_sym[g0:g1])
+
+    dV_on_molecule_dx = dIdx
+
+    if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
+        _, dSdA = get_dD_dS(pcmobj.surface, with_D=False, with_S=True)
+        dF, _ = get_dF_dA(pcmobj.surface)
+        dSiidA = get_dSii(pcmobj.surface, dF)
+
+        # dR = 0, dK = dS
+        dSdx_dot_q = cupy.zeros((len(atmlst), 3, ngrids))
+        for i_atom in atmlst:
+            g0,g1 = gridslice[i_atom]
+            dSdx_dot_q[i_atom, :, g0:g1] += cupy.einsum('dij,j->di', dSdA[:,g0:g1,:], q_sym)
+            dSdx_dot_q[i_atom, :, :] -= cupy.einsum('dij,j->di', dSdA[:,:,g0:g1], q_sym[g0:g1])
+        dSdx_dot_q += cupy.einsum('diA,i->Adi', dSiidA[:,:,atmlst], q_sym)
+
+        inverse_S = cupy.linalg.inv(S)
+        dqdx = cupy.einsum('ij,Adj->Adi', inverse_S, dSdx_dot_q)
+
+        for i_atom in atmlst:
+            for i_xyz in range(3):
+                dV_on_molecule_dx[i_atom, i_xyz, :, :] += int1e_grids(mol, grid_coords, charges = dqdx[i_atom, i_xyz, :], direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
+
+    elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE', 'SMD']:
+        raise RuntimeError(f"Hessian for implicit solvent model {pcmobj.method} not supported yet")
+    else:
+        raise RuntimeError(f"Unknown implicit solvent model: {pcmobj.method}")
+
+    atom_coords = mol.atom_coords(unit='B')
+    atom_charges = numpy.asarray(mol.atom_charges(), dtype=numpy.float64)
+    atom_coords = atom_coords[atmlst]
+    atom_charges = atom_charges[atmlst]
+    fakemol_nuc = gto.fakemol_for_charges(atom_coords)
+    fakemol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
+    int2c2e_ip1 = mol._add_suffix('int2c2e_ip1')
+    v_ng_ip1 = gto.mole.intor_cross(int2c2e_ip1, fakemol_nuc, fakemol)
+    v_ng_ip1 = cupy.array(v_ng_ip1)
+    dV_on_charge_dx = cupy.einsum('dAq,A->Adq', v_ng_ip1, atom_charges)
+
+    v_ng_ip2 = gto.mole.intor_cross(int2c2e_ip1, fakemol, fakemol_nuc)
+    v_ng_ip2 = cupy.array(v_ng_ip2)
+    for i_atom in atmlst:
+        g0,g1 = gridslice[i_atom]
+        dV_on_charge_dx[i_atom,:,g0:g1] += cupy.einsum('dqA,A->dq', v_ng_ip2[:,g0:g1,:], atom_charges)
+
+    dIdA = int1e_grids_ip1(mol, grid_coords, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2).transpose(0,1,3,2)
+    dIdC = int1e_grids_ip2(mol, grid_coords, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2).transpose(0,1,3,2)
+    dIdA = cupy.array(dIdA)
+    dIdC = cupy.array(dIdC)
+
+    dIdA = cupy.einsum('dqij,ij->dqi', dIdA, dm + dm.T)
+    for i_atom in atmlst:
+        p0,p1 = aoslice[i_atom, 2:]
+        dV_on_charge_dx[i_atom,:,:] -= cupy.einsum('dqi->dq', dIdA[:,:,p0:p1])
+    dIdC = cupy.einsum('dqij,ij->dq', dIdC, dm)
+    for i_atom in atmlst:
+        g0,g1 = gridslice[i_atom]
+        dV_on_charge_dx[i_atom,:,g0:g1] -= dIdC[:,g0:g1]
+
+    for i_atom in atmlst:
+        for i_xyz in range(3):
+            R_dV_on_charge_dx = R @ dV_on_charge_dx[i_atom, i_xyz, :]
+            invK_R_dV_on_charge_dx = cupy.linalg.solve(K, R_dV_on_charge_dx)
+            dV_on_molecule_dx[i_atom, i_xyz, :, :] += int1e_grids(mol, grid_coords, charges = invK_R_dV_on_charge_dx, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
+
+    dV_on_molecule_dx_mo = cupy.einsum('ip,Adpq,qj->Adij', mo_coeff.T, dV_on_molecule_dx, mocc)
 
     t1 = log.timer_debug1('computing solvent grad veff', *t1)
-    pcmobj.reset(pmol)
-    return vmat
-"""
+    return dV_on_molecule_dx_mo
 
 def make_hess_object(hess_method):
     if hess_method.base.with_solvent.frozen:
@@ -274,7 +365,7 @@ class WithSolventHess:
         h1ao = super().make_h1(mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
         if isinstance(self.base, scf.hf.RHF):
             dm = self.base.make_rdm1(ao_repr=True)
-            dv = fd_grad_vmat(self.base.with_solvent, dm, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
+            dv = analytic_grad_vmat(self.base.with_solvent, dm, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
             for i0, ia in enumerate(atmlst):
                 h1ao[i0] += dv[i0]
             return h1ao
