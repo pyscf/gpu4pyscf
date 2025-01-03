@@ -281,14 +281,14 @@ def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
             for i_xyz in range(3):
                 dV_on_molecule_dx[i_atom, i_xyz, :, :] += int1e_grids(mol, grid_coords, charges = dqdx[i_atom, i_xyz, :], direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
 
-    elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE', 'SMD']:
+    elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SMD']:
         dF, dA = get_dF_dA(pcmobj.surface)
         dSii = get_dSii(pcmobj.surface, dF)
         dF = None
 
         dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
 
-        # dR = f_eps/(2*pi) * (dD*A + D*dA),
+        # dR = f_eps/(2*pi) * (dD*A + D*dA)
         # dK = dS - f_eps/(2*pi) * (dD*A*S + D*dA*S + D*A*dS)
         f_eps_over_2pi = f_epsilon/(2.0*PI)
 
