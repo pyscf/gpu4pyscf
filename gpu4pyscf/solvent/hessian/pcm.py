@@ -288,7 +288,6 @@ def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
 
         dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
 
-        # IEF-PCM and SS(V)PE formally are the same in gradient calculation
         # dR = f_eps/(2*pi) * (dD*A + D*dA),
         # dK = dS - f_eps/(2*pi) * (dD*A*S + D*dA*S + D*A*dS)
         f_eps_over_2pi = f_epsilon/(2.0*PI)
@@ -348,6 +347,77 @@ def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
             for i_xyz in range(3):
                 dV_on_molecule_dx[i_atom, i_xyz, :, :] += int1e_grids(mol, grid_coords, charges = dqdx[i_atom, i_xyz, :], direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
 
+    elif pcmobj.method.upper() in ['SS(V)PE']:
+        dF, dA = get_dF_dA(pcmobj.surface)
+        dSii = get_dSii(pcmobj.surface, dF)
+        dF = None
+
+        dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
+
+        f_eps_over_4pi = f_epsilon/(4.0*PI)
+
+        def dK_dot_q(q):
+            dSdx_dot_q = cupy.zeros((len(atmlst), 3, ngrids))
+            append_dS_dot_q(dS, dSii, q, dSdx_dot_q, atmlst, gridslice)
+
+            DA = D*A
+            dKdx_dot_q = dSdx_dot_q - f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', DA, dSdx_dot_q)
+
+            dAdx_dot_Sq = cupy.zeros((len(atmlst), 3, ngrids))
+            append_dA_dot_q(dA, S @ q, dAdx_dot_Sq, atmlst, gridslice)
+            dKdx_dot_q -= f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', D, dAdx_dot_Sq)
+
+            AS = (A * S.T).T # It's just diag(A) @ S
+            dDdx_dot_ASq = cupy.zeros((len(atmlst), 3, ngrids))
+            append_dD_dot_q(dD, AS @ q, dDdx_dot_ASq, atmlst, gridslice)
+            dKdx_dot_q -= f_eps_over_4pi * dDdx_dot_ASq
+
+            dDdxT_dot_q = cupy.zeros((len(atmlst), 3, ngrids))
+            append_dDT_dot_q(dD, q, dDdxT_dot_q, atmlst, gridslice)
+            dKdx_dot_q -= f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', AS.T, dDdxT_dot_q)
+
+            dAdxT_dot_DT_q = cupy.zeros((len(atmlst), 3, ngrids))
+            append_dA_dot_q(dA, D.T @ q, dAdxT_dot_DT_q, atmlst, gridslice)
+            dKdx_dot_q -= f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', S.T, dAdxT_dot_DT_q)
+
+            dSdxT_dot_AT_DT_q = cupy.zeros((len(atmlst), 3, ngrids))
+            append_dST_dot_q(dS, dSii, DA.T @ q, dSdxT_dot_AT_DT_q, atmlst, gridslice)
+            dKdx_dot_q -= f_eps_over_4pi * dSdxT_dot_AT_DT_q
+
+            return dKdx_dot_q
+
+        f_eps_over_2pi = f_epsilon/(2.0*PI)
+
+        q = inverse_K @ R @ v_grids
+        dKdx_dot_q = dK_dot_q(q)
+        dqdx = -cupy.einsum('ij,Adj->Adi', inverse_K, dKdx_dot_q)
+
+        dAdx_dot_V = cupy.zeros((len(atmlst), 3, ngrids))
+        append_dA_dot_q(dA, v_grids, dAdx_dot_V, atmlst, gridslice)
+
+        dDdx_dot_AV = cupy.zeros((len(atmlst), 3, ngrids))
+        append_dD_dot_q(dD, A * v_grids, dDdx_dot_AV, atmlst, gridslice)
+
+        dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + cupy.einsum('ij,Adj->Adi', D, dAdx_dot_V))
+        dqdx += cupy.einsum('ij,Adj->Adi', inverse_K, dRdx_dot_V)
+
+        invKT_V = inverse_K.T @ v_grids
+        dDdxT_dot_invKT_V = cupy.zeros((len(atmlst), 3, ngrids))
+        append_dDT_dot_q(dD, invKT_V, dDdxT_dot_invKT_V, atmlst, gridslice)
+
+        DT_invKT_V = D.T @ invKT_V
+        dAdxT_dot_DT_invKT_V = cupy.zeros((len(atmlst), 3, ngrids))
+        append_dA_dot_q(dA, DT_invKT_V, dAdxT_dot_DT_invKT_V, atmlst, gridslice)
+        dqdx += f_eps_over_2pi * (cupy.einsum('i,Adi->Adi', A, dDdxT_dot_invKT_V) + dAdxT_dot_DT_invKT_V)
+
+        dKdx_dot_invKT_V = dK_dot_q(invKT_V)
+        dqdx += -cupy.einsum('ij,Adj->Adi', R.T @ inverse_K.T, dKdx_dot_invKT_V)
+
+        dqdx *= -0.5
+
+        for i_atom in atmlst:
+            for i_xyz in range(3):
+                dV_on_molecule_dx[i_atom, i_xyz, :, :] += int1e_grids(mol, grid_coords, charges = dqdx[i_atom, i_xyz, :], direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
     else:
         raise RuntimeError(f"Unknown implicit solvent model: {pcmobj.method}")
 
