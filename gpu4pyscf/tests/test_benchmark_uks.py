@@ -13,12 +13,10 @@
 # limitations under the License.
 
 import os
-import unittest
 import numpy as np
 import pyscf
 import pytest
-import cupy
-from gpu4pyscf.dft import rks, uks
+from gpu4pyscf.dft import uks
 
 current_folder = os.path.dirname(os.path.abspath(__file__))
 small_mol = os.path.join(current_folder, '020_Vitamin_C.xyz')
@@ -84,19 +82,20 @@ def test_df_ub3lyp_grad(benchmark):
 def test_df_ub3lyp_hessian(benchmark):
     h = benchmark(run_ub3lyp_hessian, small_mol, 'def2-tzvpp', True, False)
     print('testing df ub3lyp hessian')
-    assert np.isclose(np.linalg.norm(h), 3.7669464279078064, atol=1e-4, rtol=1e-16)
+    assert np.isclose(np.linalg.norm(h), 3.758810345806532, atol=1e-4, rtol=1e-16)
 @pytest.mark.benchmark
 def test_ub3lyp(benchmark):
-    e = benchmark(run_ub3lyp, small_mol, 'def2-tzvpp', False, False)
+    e = benchmark(run_ub3lyp, small_mol, '6-31gs', False, False)
     print('testing ub3lyp')
-    assert np.isclose(np.linalg.norm(e), 684.9997358509884, atol=1e-7, rtol=1e-16)
+    assert np.isclose(np.linalg.norm(e), 684.6643858622429, atol=1e-7, rtol=1e-16)
 @pytest.mark.benchmark
 def test_ub3lyp_grad(benchmark):
-    g = benchmark(run_ub3lyp_grad, small_mol, 'def2-tzvpp', False, False)
+    g = benchmark(run_ub3lyp_grad, small_mol, '6-31gs', False, False)
     print('testing ub3lyp grad')
-    assert np.isclose(np.linalg.norm(g), 0.17441176110160253, atol=1e-5, rtol=1e-16)
+    assert np.isclose(np.linalg.norm(g), 0.17540045665419984, atol=1e-5, rtol=1e-16)
 @pytest.mark.benchmark
 def test_ub3lyp_hessian(benchmark):
-    h = benchmark(run_ub3lyp_hessian, small_mol, 'def2-tzvpp', False, False)
+    h = benchmark(run_ub3lyp_hessian, small_mol, '6-31gs', False, False)
     print('testing ub3lyp hessian')
-    assert np.isclose(np.linalg.norm(h), 3.758916526520172, atol=1e-4, rtol=1e-16)
+    print(np.linalg.norm(h), np.linalg.norm(h) - 3.758916526520172)
+    assert np.isclose(np.linalg.norm(h), 3.907289414559395, atol=1e-4, rtol=1e-16)

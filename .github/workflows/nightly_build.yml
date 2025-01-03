@@ -36,8 +36,13 @@ jobs:
         export PATH=${CUDA_HOME}/bin:${PATH}
         export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
         sh build.sh
-    - name: Smoke Test
+    - name: Test RKS
       run: |
         echo $GITHUB_WORKSPACE
         export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-        pytest gpu4pyscf/tests/ -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_1v100 --benchmark-storage=gpu4pyscf/tests/
+        pytest gpu4pyscf/tests/test_benchmark_rks.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/
+    - name: Test UKS
+      run: |
+        echo $GITHUB_WORKSPACE
+        export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+        pytest gpu4pyscf/tests/test_benchmark_uks.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/
