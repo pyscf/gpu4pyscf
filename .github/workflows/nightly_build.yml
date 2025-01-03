@@ -40,4 +40,4 @@ jobs:
       run: |
         echo $GITHUB_WORKSPACE
         export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-        pytest gpu4pyscf/tests/ -v -m "not slow"
+        pytest gpu4pyscf/tests/ -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_1v100 --benchmark-storage=gpu4pyscf/tests/

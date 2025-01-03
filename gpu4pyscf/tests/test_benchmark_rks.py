@@ -33,10 +33,10 @@ from gpu4pyscf.dft import rks, uks
 # pytest test_benchmark_rks.py -v
 
 # 4. save benchmark results
-# pytest test_benchmark_rks.py -s -v -m "not slow and not high_memory" --benchmark-save=v100
+# pytest test_benchmark_rks.py -s -v -m "not slow and not high_memory" --benchmark-save=1v100
 
 # 5. compare benchmark results, fail if performance regresses by more than 10%
-# pytest test_benchmark_rks.py -s -v -m "not slow and not high_memory" --benchmark-compare=v100 --benchmark-compare-fail=10%
+# pytest test_benchmark_rks.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=1v100 --benchmark-storage=./benchmark_results/
 
 current_folder = os.path.dirname(os.path.abspath(__file__))
 small_mol = os.path.join(current_folder, '020_Vitamin_C.xyz')
