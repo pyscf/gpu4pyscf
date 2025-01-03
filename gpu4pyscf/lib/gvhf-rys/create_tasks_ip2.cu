@@ -95,13 +95,13 @@ static int _fill_ejk_ip2_type2_tasks(ShellQuartet *shl_quartet_idx,
         }
     }
     __syncthreads();
-    __shared__ int ntasks;
+    int *ntasks = thread_offsets + threads;
     if (t_id == threads-1) {
-        ntasks = thread_offsets[threads-1] + count;
+        *ntasks = thread_offsets[threads-1] + count;
     }
     __syncthreads();
-    if (ntasks == 0) {
-        return ntasks;
+    if (*ntasks == 0) {
+        return *ntasks;
     }
 
     int offset = thread_offsets[t_id];
@@ -145,7 +145,7 @@ static int _fill_ejk_ip2_type2_tasks(ShellQuartet *shl_quartet_idx,
             }
         }
     }
-    return ntasks;
+    return *ntasks;
 }
 
 __device__
@@ -242,13 +242,13 @@ static int _fill_ejk_ip2_type3_tasks(ShellQuartet *shl_quartet_idx,
         }
     }
     __syncthreads();
-    __shared__ int ntasks;
+    int *ntasks = thread_offsets + threads;
     if (t_id == threads-1) {
-        ntasks = thread_offsets[threads-1] + count;
+        *ntasks = thread_offsets[threads-1] + count;
     }
     __syncthreads();
-    if (ntasks == 0) {
-        return ntasks;
+    if (*ntasks == 0) {
+        return *ntasks;
     }
 
     int offset = thread_offsets[t_id];
@@ -297,5 +297,5 @@ static int _fill_ejk_ip2_type3_tasks(ShellQuartet *shl_quartet_idx,
             }
         }
     }
-    return ntasks;
+    return *ntasks;
 }

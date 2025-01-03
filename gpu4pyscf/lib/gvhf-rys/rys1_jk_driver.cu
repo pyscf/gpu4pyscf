@@ -26,6 +26,12 @@
 extern __global__
 void rys1_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                    ShellQuartet *pool, double *hrr_pool, uint32_t *batch_head);
+extern __global__
+void rys_jk_fppp(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                   ShellQuartet *pool, uint32_t *batch_head);
+extern __global__
+void rys_jk_3111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                ShellQuartet *pool, uint32_t *batch_head);
 
 extern "C" {
 int RYS1_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,

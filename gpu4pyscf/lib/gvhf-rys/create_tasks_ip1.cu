@@ -117,13 +117,13 @@ static int _fill_ejk_tasks(ShellQuartet *shl_quartet_idx,
         }
     }
     __syncthreads();
-    __shared__ int ntasks;
+    int *ntasks = thread_offsets + threads;
     if (t_id == threads-1) {
-        ntasks = thread_offsets[threads-1] + count;
+        *ntasks = thread_offsets[threads-1] + count;
     }
     __syncthreads();
-    if (ntasks == 0) {
-        return ntasks;
+    if (*ntasks == 0) {
+        return *ntasks;
     }
 
     int offset = thread_offsets[t_id];
@@ -172,7 +172,7 @@ static int _fill_ejk_tasks(ShellQuartet *shl_quartet_idx,
             }
         }
     }
-    return ntasks;
+    return *ntasks;
 }
 
 __device__
@@ -341,13 +341,13 @@ static int _fill_sr_ejk_tasks(ShellQuartet *shl_quartet_idx,
         }
     }
     __syncthreads();
-    __shared__ int ntasks;
+    int *ntasks = thread_offsets + threads;
     if (t_id == threads-1) {
-        ntasks = thread_offsets[threads-1] + count;
+        *ntasks = thread_offsets[threads-1] + count;
     }
     __syncthreads();
-    if (ntasks == 0) {
-        return ntasks;
+    if (*ntasks == 0) {
+        return *ntasks;
     }
 
     int offset = thread_offsets[t_id];
@@ -457,7 +457,7 @@ static int _fill_sr_ejk_tasks(ShellQuartet *shl_quartet_idx,
             }
         }
     }
-    return ntasks;
+    return *ntasks;
 }
 
 __device__
@@ -528,13 +528,13 @@ static int _fill_jk_tasks_s2kl(ShellQuartet *shl_quartet_idx,
         }
     }
     __syncthreads();
-    __shared__ int ntasks;
+    int *ntasks = thread_offsets + threads;
     if (t_id == threads-1) {
-        ntasks = thread_offsets[threads-1] + count;
+        *ntasks = thread_offsets[threads-1] + count;
     }
     __syncthreads();
-    if (ntasks == 0) {
-        return ntasks;
+    if (*ntasks == 0) {
+        return *ntasks;
     }
 
     int offset = thread_offsets[t_id];
@@ -560,7 +560,7 @@ static int _fill_jk_tasks_s2kl(ShellQuartet *shl_quartet_idx,
             ++offset;
         }
     }
-    return ntasks;
+    return *ntasks;
 }
 
 __device__
@@ -657,13 +657,13 @@ static int _fill_ejk_tasks_tmp(ShellQuartet *shl_quartet_idx,
         }
     }
     __syncthreads();
-    __shared__ int ntasks;
+    int *ntasks = thread_offsets + threads;
     if (t_id == threads-1) {
-        ntasks = thread_offsets[threads-1] + count;
+        *ntasks = thread_offsets[threads-1] + count;
     }
     __syncthreads();
-    if (ntasks == 0) {
-        return ntasks;
+    if (*ntasks == 0) {
+        return *ntasks;
     }
 
     int offset = thread_offsets[t_id];
@@ -712,6 +712,6 @@ static int _fill_ejk_tasks_tmp(ShellQuartet *shl_quartet_idx,
             }
         }
     }
-    return ntasks;
+    return *ntasks;
 }
 
