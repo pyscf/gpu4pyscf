@@ -835,14 +835,14 @@ def _e_hcore_generator(hessobj, dm):
     h1aa = cupy.asarray(h1aa)
     h1ab = cupy.asarray(h1ab)
 
-    hcore = cupy.empty((3,3,nao,nao))
     t1 = log.timer_debug1('get_hcore', *t1)
     def get_hcore(iatm, jatm):
-        nonlocal hcore
         ish0, ish1, i0, i1 = aoslices[iatm]
         jsh0, jsh1, j0, j1 = aoslices[jatm]
         rinv2aa = rinv2ab = None
         if iatm == jatm:
+            de = contract('xypq,pq->xy', h1aa[:,:,i0:i1], dm[i0:i1])
+            de+= contract('xypq,pq->xy', h1ab[:,:,i0:i1,i0:i1], dm[i0:i1,i0:i1])
             with mol.with_rinv_at_nucleus(iatm):
                 # The remaining integrals like int1e_ipiprinv are computed in
                 # hess_nuc_elec(mol, dm)
@@ -853,18 +853,16 @@ def _e_hcore_generator(hessobj, dm):
                     rinv2ab = cupy.asarray(rinv2ab)
                     rinv2aa = rinv2aa.reshape(3,3,nao,nao)
                     rinv2ab = rinv2ab.reshape(3,3,nao,nao)
-            hcore[:] = 0.
-            hcore[:,:,i0:i1] += h1aa[:,:,i0:i1]
-            hcore[:,:,i0:i1,i0:i1] += h1ab[:,:,i0:i1,i0:i1]
+            
             if rinv2aa is not None or rinv2ab is not None:
-                hcore -= rinv2aa + rinv2ab
+                hcore = -(rinv2aa + rinv2ab)
                 hcore[:,:,i0:i1] += rinv2aa[:,:,i0:i1]
                 hcore[:,:,i0:i1] += rinv2ab[:,:,i0:i1]
                 hcore[:,:,:,i0:i1] += rinv2aa[:,:,i0:i1].transpose(0,1,3,2)
                 hcore[:,:,:,i0:i1] += rinv2ab[:,:,:,i0:i1]
+                de += cupy.einsum('xypq,pq->xy', hcore, dm)
         else:
-            hcore[:] = 0.
-            hcore[:,:,i0:i1,j0:j1] += h1ab[:,:,i0:i1,j0:j1]
+            de = contract('xypq,pq->xy',h1ab[:,:,i0:i1,j0:j1],dm[i0:i1,j0:j1])
             with mol.with_rinv_at_nucleus(iatm):
                 if with_ecp and iatm in ecp_atoms:
                     shls_slice = (jsh0, jsh1, 0, nbas)
@@ -872,8 +870,9 @@ def _e_hcore_generator(hessobj, dm):
                     rinv2ab = -mol.intor('ECPscalar_iprinvip', comp=9, shls_slice=shls_slice)
                     rinv2aa = cupy.asarray(rinv2aa)
                     rinv2ab = cupy.asarray(rinv2ab)
-                    hcore[:,:,j0:j1] += rinv2aa.reshape(3,3,j1-j0,nao)
-                    hcore[:,:,j0:j1] += rinv2ab.reshape(3,3,j1-j0,nao).transpose(1,0,2,3)
+                    hcore = rinv2aa.reshape(3,3,j1-j0,nao)
+                    hcore+= rinv2ab.reshape(3,3,j1-j0,nao).transpose(1,0,2,3)
+                    de += contract('xypq,pq->xy', hcore, dm[j0:j1])
             with mol.with_rinv_at_nucleus(jatm):
                 if with_ecp and jatm in ecp_atoms:
                     shls_slice = (ish0, ish1, 0, nbas)
@@ -881,11 +880,11 @@ def _e_hcore_generator(hessobj, dm):
                     rinv2ab = -mol.intor('ECPscalar_iprinvip', comp=9, shls_slice=shls_slice)
                     rinv2aa = cupy.asarray(rinv2aa)
                     rinv2ab = cupy.asarray(rinv2ab)
-                    hcore[:,:,i0:i1] += rinv2aa.reshape(3,3,i1-i0,nao)
-                    hcore[:,:,i0:i1] += rinv2ab.reshape(3,3,i1-i0,nao)
-        de = cupy.einsum('xypq,pq->xy', hcore, dm)
-        de += cupy.einsum('xyqp,pq->xy', hcore, dm)
-        return cp.asarray(de + de_nuc_elec[:,:,iatm,jatm])
+                    hcore = rinv2aa.reshape(3,3,i1-i0,nao)
+                    hcore+= rinv2ab.reshape(3,3,i1-i0,nao)
+                    de += contract('xypq,pq->xy', hcore, dm[i0:i1])
+        # 2.0* due to the symmetry
+        return cp.asarray(2.0*de + de_nuc_elec[:,:,iatm,jatm])
     return get_hcore
 
 def hcore_generator(hessobj, mol=None):

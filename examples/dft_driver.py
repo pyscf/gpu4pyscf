@@ -27,7 +27,6 @@ parser.add_argument("--xc",           type=str,  default='B3LYP')
 parser.add_argument("--solvent",      type=str,  default='')
 args = parser.parse_args()
 
-lib.num_threads(16)
 start_time = time.time()
 bas = args.basis
 mol = pyscf.M(

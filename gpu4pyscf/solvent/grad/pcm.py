@@ -24,7 +24,7 @@ from cupyx import scipy
 from pyscf import lib
 from pyscf import gto
 from pyscf.grad import rhf as rhf_grad
-
+from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent
 from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
 from gpu4pyscf.lib.cupy_helper import contract
@@ -239,11 +239,16 @@ def grad_qv(pcmobj, dm):
     grid_coords = pcmobj.surface['grid_coords']
     q_sym       = pcmobj._intermediates['q_sym']
 
-    dvj = int1e_grids_ip1(mol, grid_coords, dm = dm, charges = q_sym, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
-    dq  = int1e_grids_ip2(mol, grid_coords, dm = dm, charges = q_sym, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
+    intopt = int3c1e.VHFOpt(mol)
+    intopt.build(1e-14, aosym=False)
+    dvj = int1e_grids_ip1(mol, grid_coords, dm = dm, charges = q_sym, 
+                          direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
+                          intopt=intopt)
+    dq  = int1e_grids_ip2(mol, grid_coords, dm = dm, charges = q_sym, 
+                          direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
+                          intopt=intopt)
 
     aoslice = mol.aoslice_by_atom()
-    aoslice = cupy.array(aoslice)
     dvj = 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
     de = dq + dvj

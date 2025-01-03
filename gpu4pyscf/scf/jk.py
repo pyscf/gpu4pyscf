@@ -58,6 +58,7 @@ GOUT_WIDTH = 42
 SHM_SIZE = getattr(__config__, 'GPU_SHM_SIZE',
                    int(gpu_specs['sharedMemPerBlockOptin']//9)*8)
 THREADS = 256
+GROUP_SIZE = 256
 
 def _jk_task(mol, dms, vhfopt, task_list, hermi=0,
              device_id=0, with_j=True, with_k=True, verbose=None):
@@ -461,7 +462,7 @@ class _VHFOpt:
         self._tile_q_cond = {}
         self._s_estimator = {}
 
-    def build(self, group_size=None, verbose=None):
+    def build(self, group_size=GROUP_SIZE, verbose=None):
         mol = self.mol
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
