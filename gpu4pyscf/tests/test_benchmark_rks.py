@@ -13,12 +13,10 @@
 # limitations under the License.
 
 import os
-import unittest
 import numpy as np
 import pyscf
 import pytest
-import cupy
-from gpu4pyscf.dft import rks, uks
+from gpu4pyscf.dft import rks
 
 # Any task taking more than 1000s will be marked as 'slow'
 
