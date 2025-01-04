@@ -767,7 +767,7 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
 
             t1 = log.timer_debug2('integration', *t1)
             ao = rho1 = None
-        t0 = log.timer_debug1('vxc', *t0)
+        t0 = log.timer_debug1(f'vxc on Device {device_id} ', *t0)
         if xctype != 'LDA':
             transpose_sum(vmat)
         vmat = jk._ao2mo(vmat, mocc, mo_coeff)

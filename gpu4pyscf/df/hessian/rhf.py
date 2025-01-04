@@ -122,22 +122,10 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
     int2c = intopt.sort_orbitals(int2c, aux_axis=[0,1])
     solve_j2c = _gen_metric_solver(int2c)
 
-    int2c_ip1 = cupy.asarray(int2c_ip1, order='C')
-    int2c_ip1 = intopt.sort_orbitals(int2c_ip1, aux_axis=[1,2])
-    if with_j:
-        hj_ao_ao = cupy.zeros([nao,nao,3,3])
-    if with_k:
-        hk_ao_ao = cupy.zeros([nao,nao,3,3])
-    if hessobj.auxbasis_response:
-        if with_j:
-            hj_ao_aux = cupy.zeros([nao,naux,3,3])
-        if with_k:
-            hk_ao_aux = cupy.zeros([nao,naux,3,3])
-
     #  int3c contributions
     wj, wk_P__ = int3c2e.get_int3c2e_jk(mol, auxmol, dm0_tag, omega=omega)
     rhoj0_P = rhok0_P__ = None
-    
+
     if with_j:
         rhoj0_P = solve_j2c(wj)
         wj = None
@@ -146,6 +134,11 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
         wk_P__ = None
     t1 = log.timer_debug1('intermediate variables with int3c2e', *t1)
 
+    hj_ipip, hk_ipip = jk.get_int3c2e_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag,
+                                          with_j=with_j, with_k=with_k, omega=omega,
+                                          auxbasis_response=hessobj.auxbasis_response)
+    t1 = log.timer_debug1('intermediate variables with int3c2e_ipip', *t1)
+
     # int3c_ip2 contributions
     wj_ip2, wk_ip2_P__ = int3c2e.get_int3c2e_ip2_wjk(intopt, dm0_tag, omega=omega)
     t1 = log.timer_debug1('intermediate variables with int3c2e_ip2', *t1)
@@ -153,17 +146,22 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
     #  int3c_ip1 contributions
     wj1_P, wk1_Pko = int3c2e.get_int3c2e_ip1_wjk(intopt, dm0_tag, omega=omega)
     t1 = log.timer_debug1('intermediate variables with int3c2e_ip1', *t1)
+    
+    cupy.get_default_memory_pool().free_all_blocks()
+    release_gpu_stack()
 
     #rhoj1_P = contract('pq,pix->qix', int2c_inv, wj1_P)
+    int2c_ip1 = cupy.asarray(int2c_ip1, order='C')
+    int2c_ip1 = intopt.sort_orbitals(int2c_ip1, aux_axis=[1,2])
+
     if with_j:
         rhoj1_P = solve_j2c(wj1_P)
-
-        hj_ao_ao += 4.0*contract('pix,pjy->ijxy', rhoj1_P, wj1_P)   # (10|0)(0|0)(0|01)
+        hj_ao_ao = 4.0*contract('pix,pjy->ijxy', rhoj1_P, wj1_P)   # (10|0)(0|0)(0|01)
         wj1_P = None
         if hessobj.auxbasis_response:
             wj0_01 = contract('ypq,q->yp', int2c_ip1, rhoj0_P)
             wj1_01 = contract('yqp,pix->iqxy', int2c_ip1, rhoj1_P)
-            hj_ao_aux += contract('pix,py->ipxy', rhoj1_P, wj_ip2)   # (10|0)(1|00)
+            hj_ao_aux = contract('pix,py->ipxy', rhoj1_P, wj_ip2)   # (10|0)(1|00)
             hj_ao_aux -= contract('pix,yp->ipxy', rhoj1_P, wj0_01)   # (10|0)(1|0)(0|00)
             hj_ao_aux -= contract('q,iqxy->iqxy', rhoj0_P, wj1_01)   # (10|0)(0|1)(0|00)
             wj1_01 = None
@@ -174,11 +172,12 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
         mem_avail = get_avail_mem()
         nocc = mocc.shape[1]
         slice_size = naux*nocc*9   # largest slice of intermediate variables
-        blksize = int(mem_avail*0.2/8/slice_size/ALIGNED) * ALIGNED
+        blksize = int(mem_avail*0.4/8/slice_size/ALIGNED) * ALIGNED
         log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, {blksize} aux AOs per block')
         if blksize < ALIGNED:
             raise RuntimeError('Not enough memory for intermediate variables')
-
+        if hessobj.auxbasis_response:
+            hk_ao_aux = cupy.zeros([nao,naux,3,3])
         for i0, i1 in lib.prange(0,nao,blksize):
             #wk1_Pko_islice = cupy.asarray(wk1_Pko[:,i0:i1])
             wk1_Pko_islice = copy_array(wk1_Pko[:,i0:i1])
@@ -187,6 +186,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
             rhok1_Pko = solve_j2c(wk1_Pko_islice)
             wk1_Pko_islice = None
             if hessobj.auxbasis_response:
+                hk_ao_aux = cupy.zeros([nao,naux,3,3])
                 # (10|0)(1|00)
                 wk_ip2_Ipo = contract('porx,io->pirx', wk_ip2_P__, mocc_2[i0:i1])
                 hk_ao_aux[i0:i1] += contract('piox,pioy->ipxy', rhok1_Pko, wk_ip2_Ipo)
@@ -205,6 +205,11 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
         rhok1_Pko = None
         t1 = log.timer_debug1('contract int3c2e_ip1 with int2c_ip1', *t1)
         
+        rho2c_0 = contract('pij,qji->pq', rhok0_P__, rhok0_P__)
+        rho2c_10 = contract('rijx,qij->rqx', wk_ip2_P__, rhok0_P__)
+        rho2c_11 = contract('pijx,qijy->pqxy', wk_ip2_P__, wk_ip2_P__)
+        rhok0_P__ = wk_ip2_P__ = None
+
         w, v = cupy.linalg.eigh(int2c)
         idx = w > LINEAR_DEP_THR
         cd_low = (v[:,idx] / cupy.sqrt(w[idx]))
@@ -223,17 +228,14 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
                 copy_array(wk1_tmp, rhok1_Pko[:,i0:i1])
             wk1_tmp = None
         cd_low = None
-        hk_ao_ao += _hk_ip1_ip1(rhok1_Pko, dm0, mocc_2)
+        hk_ao_ao = _hk_ip1_ip1(rhok1_Pko, dm0, mocc_2)
     wk1_Pko = rhok1_Pko = None
+    solve_j2c = None
     t1 = log.timer_debug1('contract int3c2e_ip1 with int3c2e_ip1', *t1)
-
-    hj_ipip, hk_ipip = jk.get_int3c2e_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag,
-                                          with_j=with_j, with_k=with_k, omega=omega,
-                                          auxbasis_response=hessobj.auxbasis_response)
-    t1 = log.timer_debug1('intermediate variables with int3c2e_ipip', *t1)
 
     # int2c contributions
     if hessobj.auxbasis_response > 1:
+        cupy.get_default_memory_pool().free_all_blocks()
         if omega and omega > 1e-10:
             with auxmol.with_range_coulomb(omega):
                 int2c_ipip1 = auxmol.intor('int2c2e_ipip1', aosym='s1')
@@ -248,7 +250,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
             rhoj2c_P = contract('xpq,q->xp', int2c_ipip1, rhoj0_P)
             hj_aux_diag = -(rhoj0_P*rhoj2c_P).T.reshape(-1,3,3)
         if with_k:
-            rho2c_0 = contract('pij,qji->pq', rhok0_P__, rhok0_P__)
             hk_aux_diag = -.5 * contract('pq,xpq->px', rho2c_0, int2c_ipip1).reshape(-1,3,3)
         int2c_ipip1 = None
 
@@ -266,10 +267,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
         t1 = log.timer_debug1('intermediate variables with int2c_*', *t1)
         int2c_ip1ip2 = None
 
-    cupy.get_default_memory_pool().free_all_blocks()
-    release_gpu_stack()
-    # aux-aux pair
-    if hessobj.auxbasis_response > 1:
+        # aux-aux pair
         int2c_inv = pinv(int2c, lindep=LINEAR_DEP_THR)
         int2c_ip1_inv = contract('yqp,pr->yqr', int2c_ip1, int2c_inv)
         if with_j:
@@ -290,11 +288,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
             wj0_01 = rhoj0_01 = None
 
         if with_k:
-            rho2c_10 = contract('rijx,qij->rqx', wk_ip2_P__, rhok0_P__)
-            rhok0_P__ = None
-
-            rho2c_11 = contract('pijx,qijy->pqxy', wk_ip2_P__, wk_ip2_P__)
-            wk_ip2_P__ = None
             hk_aux_aux += .5 * contract('pqxy,pq->pqxy', rho2c_11, int2c_inv)      # (00|1)(1|00)
             rho2c_11 = None
 

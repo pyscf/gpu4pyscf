@@ -831,7 +831,7 @@ def get_int3c2e_jk(mol, auxmol, dm0_tag, with_k=True, omega=None):
         for device_id in range(_num_devices):
             future = executor.submit(
                 _int3c2e_jk_task, intopt, task_list[device_id],
-                dm0_tag.get(), orbo.get(), device_id=device_id, omega=omega)
+                dm0_tag, orbo, device_id=device_id, omega=omega)
             futures.append(future)
 
     rhoj_total = []

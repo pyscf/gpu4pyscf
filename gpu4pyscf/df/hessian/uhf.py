@@ -116,16 +116,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     int2c_ip1 = cupy.asarray(int2c_ip1, order='C')
     int2c_ip1 = intopt.sort_orbitals(int2c_ip1, aux_axis=[1,2])
 
-    if with_j:
-        hj_ao_ao = cupy.zeros([nao,nao,3,3])
-    if with_k:
-        hk_ao_ao = cupy.zeros([nao,nao,3,3])
-    if hessobj.auxbasis_response:
-        if with_j:
-            hj_ao_aux = cupy.zeros([nao,naux,3,3])
-        if with_k:
-            hk_ao_aux = cupy.zeros([nao,naux,3,3])
-
     #  int3c contributions
     wja, wka_P__ = int3c2e.get_int3c2e_jk(mol, auxmol, dm0a_tag, omega=omega)
     wjb, wkb_P__ = int3c2e.get_int3c2e_jk(mol, auxmol, dm0b_tag, omega=omega)
@@ -153,12 +143,12 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     if with_j:
         wj1_P = wj1a_P + wj1b_P
         rhoj1_P = solve_j2c(wj1_P)
-        hj_ao_ao += 4.0*contract('pix,pjy->ijxy', rhoj1_P, wj1_P)   # (10|0)(0|0)(0|01)
+        hj_ao_ao = 4.0*contract('pix,pjy->ijxy', rhoj1_P, wj1_P)   # (10|0)(0|0)(0|01)
         wj1_P = None
         if hessobj.auxbasis_response:
             wj0_01 = contract('ypq,q->yp', int2c_ip1, rhoj0_P)
             wj1_01 = contract('yqp,pix->iqxy', int2c_ip1, rhoj1_P)
-            hj_ao_aux += contract('pix,py->ipxy', rhoj1_P, wj_ip2)   # (10|0)(1|00)
+            hj_ao_aux = contract('pix,py->ipxy', rhoj1_P, wj_ip2)   # (10|0)(1|00)
             hj_ao_aux -= contract('pix,yp->ipxy', rhoj1_P, wj0_01)   # (10|0)(1|0)(0|00)
             hj_ao_aux -= contract('q,iqxy->iqxy', rhoj0_P, wj1_01)   # (10|0)(0|1)(0|00)
             wj1_01 = None
@@ -173,7 +163,9 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
         if blksize < ALIGNED:
             raise RuntimeError('Not enough memory for intermediate variables')
-
+        hk_ao_ao = cupy.zeros([nao,nao,3,3])
+        if hessobj.auxbasis_response:
+            hk_ao_aux = cupy.zeros([nao,naux,3,3])
         for i0, i1 in lib.prange(0,nao,blksize):
             #wk1a_Pko_islice = cupy.asarray(wk1a_Pko[:,i0:i1])
             #wk1b_Pko_islice = cupy.asarray(wk1b_Pko[:,i0:i1])
@@ -244,6 +236,19 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         hk_ipip = 2.0*(hka_ipip + hkb_ipip)
     t1 = log.timer_debug1('intermediate variables with int3c2e_ipip', *t1)
 
+    if hessobj.auxbasis_response > 1:
+        if with_k:
+            rho2c_0 = contract('pij,qji->pq', rhok0a_P__, rhok0a_P__)
+            rho2c_0+= contract('pij,qji->pq', rhok0b_P__, rhok0b_P__)
+        
+            rho2c_10 = contract('rijx,qij->rqx', wka_ip2_P__, rhok0a_P__)
+            rho2c_10+= contract('rijx,qij->rqx', wkb_ip2_P__, rhok0b_P__)
+            rhok0a_P__ = rhok0b_P__ = None
+
+            rho2c_11 = contract('pijx,qijy->pqxy', wka_ip2_P__, wka_ip2_P__)
+            rho2c_11+= contract('pijx,qijy->pqxy', wkb_ip2_P__, wkb_ip2_P__)
+            wka_ip2_P__ = wkb_ip2_P__ = None
+
     # int2c contributions
     if hessobj.auxbasis_response > 1:
         if omega and omega > 1e-10:
@@ -259,8 +264,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             # p,xp->px
             hj_aux_diag = -(rhoj0_P*rhoj2c_P).T.reshape(-1,3,3)
         if with_k:
-            rho2c_0 = contract('pij,qji->pq', rhok0a_P__, rhok0a_P__)
-            rho2c_0+= contract('pij,qji->pq', rhok0b_P__, rhok0b_P__)
             hk_aux_diag = -contract('pq,xpq->px', rho2c_0, int2c_ipip1).reshape(-1,3,3)
         int2c_ipip1 = None
 
@@ -301,14 +304,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             wj0_01 = rhoj0_01 = None
 
         if with_k:
-            rho2c_10 = contract('rijx,qij->rqx', wka_ip2_P__, rhok0a_P__)
-            rho2c_10+= contract('rijx,qij->rqx', wkb_ip2_P__, rhok0b_P__)
-            rhok0a_P__ = rhok0b_P__ = None
-
-
-            rho2c_11 = contract('pijx,qijy->pqxy', wka_ip2_P__, wka_ip2_P__)
-            rho2c_11+= contract('pijx,qijy->pqxy', wkb_ip2_P__, wkb_ip2_P__)
-            wka_ip2_P__ = wkb_ip2_P__ = None
             hk_aux_aux += .5 * contract('pqxy,pq->pqxy', rho2c_11, int2c_inv)      # (00|1)(1|00)
             rho2c_11 = None
 

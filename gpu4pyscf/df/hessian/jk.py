@@ -22,7 +22,7 @@ from gpu4pyscf.df import int3c2e
 from gpu4pyscf.scf.int4c2e import libgint
 from gpu4pyscf.hessian.jk import _ao2mo
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, cart2sph, reduce_to_device
+from gpu4pyscf.lib.cupy_helper import contract, cart2sph, reduce_to_device, get_avail_mem, release_gpu_stack
 from gpu4pyscf.__config__ import _streams, _num_devices
 
 NROOT_ON_GPU = 7
@@ -310,7 +310,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
             if with_k:
                 rhok_tmp = contract('por,ir->poi', rhok[k0:k1], orbo[i0:i1])
                 rhok_tmp = contract('poi,jo->pji', rhok_tmp, orbo[j0:j1])
-
+            
             # (20|0), (0|0)(0|00)
             int3c_blk = _get_int3c2e_ipip_slice('ipip1', intopt, cp_ij_id, aux_id, omega=omega)
             if with_j:
@@ -320,7 +320,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
                 hj_ipip1[:,i0:i1] += contract('xji,ij->xi', tmp, dm0[i0:i1,j0:j1])
             if with_k:
                 hk_ipip1[:,i0:i1] += contract('xpji,pji->xi', int3c_blk, rhok_tmp)
-            int3c_blk = None
+            int3c_blk = tmp = None
 
             # (11|0), (0|0)(0|00) without response of RI basis
             int3c_blk = _get_int3c2e_ipip_slice('ipvip1', intopt, cp_ij_id, aux_id, omega=omega)
@@ -331,7 +331,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
                 hj_ipvip1[:,i0:i1,j0:j1] += contract('xji,ij->xij', tmp, dm0[i0:i1,j0:j1])
             if with_k:
                 hk_ipvip1[:,i0:i1,j0:j1] += contract('xpji,pji->xij', int3c_blk, rhok_tmp)
-            int3c_blk = None
+            int3c_blk = tmp = None
 
             if auxbasis_response < 1:
                 continue
@@ -343,7 +343,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
                 hj_ip1ip2[:,i0:i1,k0:k1] += contract('xpi,p->xip', tmp, rhoj[k0:k1])
             if with_k:
                 hk_ip1ip2[:,i0:i1,k0:k1] += contract('xpji,pji->xip', int3c_blk, rhok_tmp)
-            int3c_blk = None
+            int3c_blk = tmp = None
 
             if auxbasis_response < 2:
                 continue
@@ -355,7 +355,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
                 hj_ipip2[:,k0:k1] += contract('xp,p->xp', tmp, rhoj[k0:k1])
             if with_k:
                 hk_ipip2[:,k0:k1] += contract('xpji,pji->xp', int3c_blk, rhok_tmp)
-            int3c_blk = None
+            int3c_blk = tmp = None
         auxslices = intopt.auxmol.aoslice_by_atom()
         aoslices = intopt.mol.aoslice_by_atom()
         ao2atom = int3c2e.get_ao2atom(intopt, aoslices)
