@@ -188,26 +188,15 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
     JKMatrix jk = {vj, vk, dm, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(uint32_t));
 
-    if (omega >= 0) {
-        if (order <= 0) {
-            os_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega);
-//        } else if (!rys_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
-    } else if (!rys_jk_unrolled_v1(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
-            int quartets_per_block = scheme[0];
-            int gout_stride = scheme[1];
-            int ij_prims = iprim * jprim;
-            dim3 threads(quartets_per_block, gout_stride);
-            int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;// + ij_prims*4*TILE2;
-            rys_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
-//}
-        }
-//    } else if (!rys_sr_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
-//        int quartets_per_block = scheme[0];
-//        int gout_stride = scheme[1];
-//        int ij_prims = iprim * jprim;
-//        dim3 threads(quartets_per_block, gout_stride);
-//        int buflen = (nroots*4 + g_size*3 + ij_prims*4) * quartets_per_block;// + ij_prims*4*TILE2;
-//        rys_sr_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+    if (order <= 0) {
+        os_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega);
+    } else if (!rys_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
+        int quartets_per_block = scheme[0];
+        int gout_stride = scheme[1];
+        int ij_prims = iprim * jprim;
+        dim3 threads(quartets_per_block, gout_stride);
+        int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;// + ij_prims*4*TILE2;
+        rys_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
