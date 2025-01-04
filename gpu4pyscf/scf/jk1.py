@@ -35,7 +35,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import group_basis
 
 __all__ = [
-    'get_jk', 'get_j',
+    'get_jk',
 ]
 
 libvhf_rys = load_library('libgvhf_rys')
@@ -515,38 +515,3 @@ def _nearest_power2(n, return_leq=True):
         return 1 << (n.bit_length() - 1)
     else:
         return 1 << ((n-1).bit_length())
-
-if __name__ == '__main__':
-    import pyscf
-    from gpu4pyscf.scf.jk import get_jk as get_jk_ref
-    mol = pyscf.M(
-        atom = '''
-        O   0.000   -0.    0.1174
-        #H  -0.757    4.   -0.4696
-        #H   0.757    4.   -0.4696
-        #C   1.      1.    0.
-        #H1  4.      0.    3.
-        #H2  0.      1.    .6
-        ''',
-        #basis='def2-tzvp',
-        basis=[[3, [1., 1.]],
-               #[1, [1., 1.], [.5, 1.]],
-               [1, [1., 1.]]
-              ],
-        cart=True,
-        unit='B',)
-
-    np.random.seed(9)
-    nao = mol.nao
-    dm = np.random.rand(nao, nao)
-    dm = dm.dot(dm.T)
-
-    #mol.verbose=6
-    vj1, vk1 = get_jk(mol, dm, hermi=1)
-    ref = get_jk_ref(mol, dm, hermi=1)
-    print()
-    #print(vj1.ravel())
-    #print(vk1)
-    #print(ref[0].ravel())
-    print(abs(vj1 - ref[0]).max())
-    print(abs(vk1 - ref[1]).max())

@@ -53,6 +53,9 @@ extern int rys_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
 extern int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head,
                     int *scheme, int workers, double omega);
+extern int rys_jk_unrolled_v1(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
+                    ShellQuartet *pool, uint32_t *batch_head,
+                    int *scheme, int workers, double omega);
 extern int rys_sr_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head,
                     int *scheme, int workers, double omega);
@@ -188,21 +191,23 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
     if (omega >= 0) {
         if (order <= 0) {
             os_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega);
-        } else if (!rys_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
+//        } else if (!rys_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
+    } else if (!rys_jk_unrolled_v1(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
             int quartets_per_block = scheme[0];
             int gout_stride = scheme[1];
             int ij_prims = iprim * jprim;
             dim3 threads(quartets_per_block, gout_stride);
             int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;// + ij_prims*4*TILE2;
             rys_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+//}
         }
-    } else if (!rys_sr_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
-        int quartets_per_block = scheme[0];
-        int gout_stride = scheme[1];
-        int ij_prims = iprim * jprim;
-        dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*4 + g_size*3 + ij_prims*4) * quartets_per_block;// + ij_prims*4*TILE2;
-        rys_sr_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+//    } else if (!rys_sr_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
+//        int quartets_per_block = scheme[0];
+//        int gout_stride = scheme[1];
+//        int ij_prims = iprim * jprim;
+//        dim3 threads(quartets_per_block, gout_stride);
+//        int buflen = (nroots*4 + g_size*3 + ij_prims*4) * quartets_per_block;// + ij_prims*4*TILE2;
+//        rys_sr_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
