@@ -185,7 +185,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
             rhok1_Pko = solve_j2c(wk1_Pko_islice)
             wk1_Pko_islice = None
             if hessobj.auxbasis_response:
-                hk_ao_aux = cupy.zeros([nao,naux,3,3])
                 # (10|0)(1|00)
                 wk_ip2_Ipo = contract('porx,io->pirx', wk_ip2_P__, mocc_2[i0:i1])
                 hk_ao_aux[i0:i1] += contract('piox,pioy->ipxy', rhok1_Pko, wk_ip2_Ipo)

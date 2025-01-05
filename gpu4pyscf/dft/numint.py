@@ -436,7 +436,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             weights[p0:p1] = weight
             for i in range(nset):
                 # If AO is sparse enough, use density matrix to calculate rho
-                if mo_coeff is None or len(idx) < mo_occ.sum():
+                if mo_coeff is None:
                     dms_mask = dms[i][idx[:,None],idx]
                     rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms_mask,
                                                 xctype=xctype, hermi=hermi, with_lapl=with_lapl)

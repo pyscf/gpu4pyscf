@@ -68,34 +68,33 @@ def run_ub3lyp_hessian(atom, basis, with_df, with_solvent):
 ##########
 # UKS
 ##########
-@pytest.mark.benchmark
+@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=6)
 def test_df_ub3lyp(benchmark):
     e = benchmark(run_ub3lyp, small_mol, 'def2-tzvpp', True, False)
     print('testing df ub3lyp')
     assert np.isclose(np.linalg.norm(e), 684.9998712035856, atol=1e-7, rtol=1e-16)
-@pytest.mark.benchmark
+@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=6)
 def test_df_ub3lyp_grad(benchmark):
     g = benchmark(run_ub3lyp_grad, small_mol, 'def2-tzvpp', True, False)
     print('testing df ub3lyp grad')
     assert np.isclose(np.linalg.norm(g), 0.17435842214665462, atol=1e-5, rtol=1e-16)
-@pytest.mark.benchmark
+@pytest.mark.benchmark(warmup=False, min_rounds=1)
 def test_df_ub3lyp_hessian(benchmark):
     h = benchmark(run_ub3lyp_hessian, small_mol, 'def2-tzvpp', True, False)
     print('testing df ub3lyp hessian')
     assert np.isclose(np.linalg.norm(h), 3.758810345806532, atol=1e-4, rtol=1e-16)
-@pytest.mark.benchmark
+@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=6)
 def test_ub3lyp(benchmark):
     e = benchmark(run_ub3lyp, small_mol, '6-31gs', False, False)
     print('testing ub3lyp')
     assert np.isclose(np.linalg.norm(e), 684.6643858622429, atol=1e-7, rtol=1e-16)
-@pytest.mark.benchmark
+@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=6)
 def test_ub3lyp_grad(benchmark):
     g = benchmark(run_ub3lyp_grad, small_mol, '6-31gs', False, False)
     print('testing ub3lyp grad')
     assert np.isclose(np.linalg.norm(g), 0.17540045665419984, atol=1e-5, rtol=1e-16)
-@pytest.mark.benchmark
+@pytest.mark.benchmark(warmup=False, min_rounds=1)
 def test_ub3lyp_hessian(benchmark):
     h = benchmark(run_ub3lyp_hessian, small_mol, '6-31gs', False, False)
     print('testing ub3lyp hessian')
-    print(np.linalg.norm(h), np.linalg.norm(h) - 3.758916526520172)
     assert np.isclose(np.linalg.norm(h), 3.907289414559395, atol=1e-4, rtol=1e-16)
