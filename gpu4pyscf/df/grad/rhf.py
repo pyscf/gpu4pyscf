@@ -151,7 +151,8 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         cart2sph = intopt.cart2sph
         orbo_cart = cart2sph @ orbo
         dm_cart = cart2sph @ dm @ cart2sph.T
-    
+        
+    with_df._cderi = None # release GPU memory
     vj, vk, vjaux, vkaux = get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbo_cart,
                                         with_j=with_j, with_k=with_k, omega=omega)
     # NOTE: vj and vk are still in cartesian

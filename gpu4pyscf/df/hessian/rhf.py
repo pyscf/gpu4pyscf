@@ -121,7 +121,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
     int2c = cupy.asarray(int2c, order='C')
     int2c = intopt.sort_orbitals(int2c, aux_axis=[0,1])
     solve_j2c = _gen_metric_solver(int2c)
-
+    
     #  int3c contributions
     wj, wk_P__ = int3c2e.get_int3c2e_jk(mol, auxmol, dm0_tag, omega=omega)
     rhoj0_P = rhok0_P__ = None
@@ -172,10 +172,9 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
         mem_avail = get_avail_mem()
         nocc = mocc.shape[1]
         slice_size = naux*nocc*9   # largest slice of intermediate variables
-        blksize = int(mem_avail*0.4/8/slice_size/ALIGNED) * ALIGNED
+        blksize = int(mem_avail*0.2/8/slice_size)
         log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, {blksize} aux AOs per block')
-        if blksize < ALIGNED:
-            raise RuntimeError('Not enough memory for intermediate variables')
+        assert blksize > 0
         if hessobj.auxbasis_response:
             hk_ao_aux = cupy.zeros([nao,naux,3,3])
         for i0, i1 in lib.prange(0,nao,blksize):

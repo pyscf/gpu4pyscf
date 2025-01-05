@@ -414,9 +414,11 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
 
         ngrids_glob = grids.coords.shape[0]
         ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
+        ngrids_per_device = (ngrids_per_device + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE * MIN_BLK_SIZE
         grid_start = device_id * ngrids_per_device
-        grid_end = (device_id + 1) * ngrids_per_device
+        grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
         ngrids_local = grid_end - grid_start
+        log.debug(f"{ngrids_local} on Device {device_id}")
 
         weights = cupy.empty([ngrids_local])
         if xctype == 'LDA':
@@ -425,7 +427,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             rho_tot = cupy.empty([nset,4,ngrids_local])
         else:
             rho_tot = cupy.empty([nset,5,ngrids_local])
-
+        
         p0 = p1 = 0
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                      max_memory=None,
@@ -433,8 +435,10 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             p1 = p0 + weight.size
             weights[p0:p1] = weight
             for i in range(nset):
-                if mo_coeff is None:
-                    rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms[i][idx[:,None],idx],
+                # If AO is sparse enough, use density matrix to calculate rho
+                if mo_coeff is None or len(idx) < mo_occ.sum():
+                    dms_mask = dms[i][idx[:,None],idx]
+                    rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms_mask,
                                                 xctype=xctype, hermi=hermi, with_lapl=with_lapl)
                 else:
                     assert hermi == 1
@@ -443,7 +447,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                                                 None, xctype, with_lapl)
             p0 = p1
         t0 = log.timer_debug1(f'eval rho on Device {device_id}', *t0)
-
+        
         # libxc calls are still running on default stream
         nelec = cupy.zeros(nset)
         excsum = cupy.zeros(nset)
@@ -814,8 +818,11 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
 
         ngrids_glob = grids.coords.shape[0]
         ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
+        ngrids_per_device = (ngrids_per_device + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE * MIN_BLK_SIZE
         grid_start = device_id * ngrids_per_device
-        grid_end = (device_id + 1) * ngrids_per_device
+        grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
+        ngrids_local = grid_end - grid_start
+        log.debug(f"{ngrids_local} on Device {device_id}")
 
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                      max_memory=None,
@@ -1016,8 +1023,11 @@ def _nr_rks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
 
         ngrids_glob = grids.coords.shape[0]
         ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
+        ngrids_per_device = (ngrids_per_device + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE * MIN_BLK_SIZE
         grid_start = device_id * ngrids_per_device
-        grid_end = (device_id + 1) * ngrids_per_device
+        grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
+        ngrids_local = grid_end - grid_start
+        log.debug(f"{ngrids_local} on Device {device_id}")
 
         p0 = p1 = grid_start
         t1 = t0 = log.init_timer()
@@ -1165,8 +1175,11 @@ def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
 
         ngrids_glob = grids.coords.shape[0]
         ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
+        ngrids_per_device = (ngrids_per_device + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE * MIN_BLK_SIZE
         grid_start = device_id * ngrids_per_device
-        grid_end = (device_id + 1) * ngrids_per_device
+        grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
+        ngrids_local = grid_end - grid_start
+        log.debug(f"{ngrids_local} on Device {device_id}")
 
         p0 = p1 = grid_start
         t1 = t0 = log.init_timer()

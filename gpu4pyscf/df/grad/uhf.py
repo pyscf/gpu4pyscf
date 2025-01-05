@@ -165,59 +165,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
         orbo_cart = orbo
     dm = orbo = None
 
-    """
-    vj = vk = rhoj_tmp = rhok_tmp = None
-    vjaux = vkaux = None
-
-    naux_cart = intopt._sorted_auxmol.nao
-    if with_j:
-        vj = cupy.zeros((3,nao_cart), order='C')
-        vjaux = cupy.zeros((3,naux_cart))
-    if with_k:
-        vk = cupy.zeros((3,nao_cart), order='C')
-        vkaux = cupy.zeros((3,naux_cart))
-    cupy.get_default_memory_pool().free_all_blocks()
-    t1 = log.init_timer()
-    for cp_kl_id in range(len(intopt.aux_log_qs)):
-        k0, k1 = intopt.cart_aux_loc[cp_kl_id], intopt.cart_aux_loc[cp_kl_id+1]
-        assert k1-k0 <= block_size
-        if with_j:
-            rhoj_tmp = rhoj_cart[k0:k1]
-        if with_k:
-            rhok_tmp = contract('por,ir->pio', rhok_cart[k0:k1], orbo_cart)
-            rhok_tmp = contract('pio,jo->pji', rhok_tmp, orbo_cart)
-        '''
-        if(rhoj_tmp.flags['C_CONTIGUOUS'] == False):
-            rhoj_tmp = rhoj_tmp.astype(cupy.float64, order='C')
-
-        if(rhok_tmp.flags['C_CONTIGUOUS'] == False):
-            rhok_tmp = rhok_tmp.astype(cupy.float64, order='C')
-        '''
-        '''
-        # outcore implementation
-        int3c2e.get_int3c2e_ip_slice(intopt, cp_kl_id, 1, out=buf)
-        size = 3*(k1-k0)*nao_cart*nao_cart
-        int3c_ip = buf[:size].reshape([3,k1-k0,nao_cart,nao_cart], order='C')
-        rhoj_tmp = contract('xpji,ij->xip', int3c_ip, dm_cart)
-        vj += contract('xip,p->xi', rhoj_tmp, rhoj_cart[k0:k1])
-        vk += contract('pji,xpji->xi', rhok_tmp, int3c_ip)
-
-        int3c2e.get_int3c2e_ip_slice(intopt, cp_kl_id, 2, out=buf)
-        rhoj_tmp = contract('xpji,ji->xp', int3c_ip, dm_cart)
-        vjaux[:, k0:k1] = contract('xp,p->xp', rhoj_tmp, rhoj_cart[k0:k1])
-        vkaux[:, k0:k1] = contract('xpji,pji->xp', int3c_ip, rhok_tmp)
-        '''
-        vj_tmp, vk_tmp = int3c2e.get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip1', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
-        if with_j: vj += vj_tmp
-        if with_k: vk += vk_tmp
-
-        vj_tmp, vk_tmp = int3c2e.get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip2', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
-        if with_j: vjaux[:, k0:k1] = vj_tmp
-        if with_k: vkaux[:, k0:k1] = vk_tmp
-
-        rhoj_tmp = rhok_tmp = vj_tmp = vk_tmp = None
-        t1 = log.timer_debug1(f'calculate {cp_kl_id:3d} / {len(intopt.aux_log_qs):3d}, {k1-k0:3d} slices', *t1)
-    """
+    with_df._cderi = None  # release GPU memory
     vj, vk, vjaux, vkaux = get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbo_cart,
                                         with_j=with_j, with_k=with_k, omega=omega)
     

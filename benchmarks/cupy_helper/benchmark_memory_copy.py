@@ -123,3 +123,19 @@ print('Cupy set contiguous array', t_kernel)
 print(f"Effective Bandwidth: {bandwidth:.2f} GB/s")
 
 assert np.linalg.norm(a.get() - b.get()) < 1e-10
+
+
+print('----------- Benchmark reduction across devices ------ ')
+from gpu4pyscf.lib.cupy_helper import reduce_to_device
+_num_devices = cp.cuda.runtime.getDeviceCount()
+a_dist = []
+for device_id in range(_num_devices):
+    with cp.cuda.Device(device_id):
+        a = cp.random.rand(512,512,512)
+        a_dist.append(a)
+
+perf_cupy = profiler.benchmark(reduce_to_device, (a_dist,), n_repeat=20, n_warmup=3)
+t_kernel = perf_cupy.gpu_times.mean()
+bandwidth = a_dist[0].nbytes * _num_devices / t_kernel / 1e9
+print('Cupy set contiguous array', t_kernel)
+print(f"Effective Bandwidth: {bandwidth:.2f} GB/s")
