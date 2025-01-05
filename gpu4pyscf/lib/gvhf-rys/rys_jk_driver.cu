@@ -37,8 +37,6 @@ extern __global__ void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, B
                                     ShellQuartet *pool, uint32_t *batch_head);
 extern __global__ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                      ShellQuartet *pool, uint32_t *batch_head);
-extern __global__ void rys_sr_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                                     ShellQuartet *pool, uint32_t *batch_head);
 extern __global__ void rys_jk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                          ShellQuartet *pool, uint32_t *batch_head);
 extern __global__ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
@@ -475,7 +473,6 @@ int RYS_init_constant(int *g_pair_idx, int *offsets,
     cudaMemcpyToSymbol(c_g_pair_idx, g_pair_idx, 3675*sizeof(int));
     cudaMemcpyToSymbol(c_g_pair_offsets, offsets, sizeof(int) * LMAX1*LMAX1);
     cudaFuncSetAttribute(rys_jk_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaFuncSetAttribute(rys_sr_jk_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_jk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_ejk_ip2_type12_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
