@@ -73,7 +73,7 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *gx = g;
     double *gy = g + nsq_per_block * g_size;
     double *gz = g + nsq_per_block * g_size*2;
-    double *Rpa_cicj = rw_cache + nsq_per_block * (g_size*3+nroots*2);
+    double *Rpa_cicj = rw_cache + nsq_per_block * (nroots*2+g_size*3);
     double Rqc[3], Rpq[3];
     double gout[GOUT_WIDTH];
 
@@ -184,10 +184,10 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double theta = aij * akl / (aij + akl);
                 double theta_rr = theta * rr;
                 if (omega == 0) {
-                    rys_roots(nroots, theta_rr, rw_cache);
+                    rys_roots(nroots, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
                 } else {
                     double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(nroots, theta_fac*theta_rr, rw_cache);
+                    rys_roots(nroots, theta_fac*theta_rr, rw, nsq_per_block, gout_id, gout_stride);
                     __syncthreads();
                     double sqrt_theta_fac = sqrt(theta_fac);
                     for (int irys = gout_id; irys < nroots; irys+=gout_stride) {
@@ -538,9 +538,10 @@ static void rys_sr_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds
                 double theta = aij * akl / (aij + akl);
                 double theta_rr = theta * rr;
                 int _nroots = nroots/2;
-                rys_roots(_nroots, theta_rr, rw_cache+nroots*nsq_per_block);
+                double *rw1 = rw + nroots*nsq_per_block;
+                rys_roots(_nroots, theta_rr, rw1, nsq_per_block, gout_id, gout_stride);
                 double theta_fac = omega * omega / (omega * omega + theta);
-                rys_roots(_nroots, theta_fac*theta_rr, rw_cache);
+                rys_roots(_nroots, theta_fac*theta_rr, rw, nsq_per_block, gout_id, gout_stride);
                 __syncthreads();
                 double sqrt_theta_fac = -sqrt(theta_fac);
                 for (int irys = gout_id; irys < _nroots; irys+=gout_stride) {

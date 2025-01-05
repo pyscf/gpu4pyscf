@@ -1,7 +1,7 @@
 #include "vhf.cuh"
-#include "rys_roots_unrolled.cu"
+#include "rys_roots.cu"
 #include "create_tasks_ip1.cu"
-int rys_ejk_ip2_type3_unrolled_lmax = 1;
+int rys_ejk_ip2_type3_unrolled_lmax = 3;
 int rys_ejk_ip2_type3_unrolled_max_order = 3;
 
 
@@ -25,7 +25,7 @@ void _rys_ejk_ip2_type3_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int do_k = jk.k_factor != 0.;
     double *dm = jk.dm;
     extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4;
+    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -185,29 +185,30 @@ void _rys_ejk_ip2_type3_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 double theta_rr = theta * rr;
                 if (omega == 0) {
-                    rys_roots(2, theta_rr, rw);
+                    rys_roots(2, theta_rr, rw, nsq_per_block, 0, 1);
                 } else if (omega > 0) {
                     double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(2, theta_fac*theta_rr, rw);
+                    rys_roots(2, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
                     fac *= sqrt(theta_fac);
                     for (int irys = 0; irys < 2; ++irys) {
-                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[irys*2   *nsq_per_block] *= theta_fac;
                     }
                 } else {
-                    rys_roots(2, theta_rr, rw+4*nsq_per_block);
+                    double *rw1 = rw + 4*nsq_per_block;
+                    rys_roots(2, theta_rr, rw1, nsq_per_block, 0, 1);
                     double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(2, theta_fac*theta_rr, rw);
+                    rys_roots(2, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 2; ++irys) {
-                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
+                        rw[ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
                 if (task_id < ntasks) {
                     for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
-                        double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
-                        double rt = rw[sq_id +  2*irys   *nsq_per_block];
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
                         double rt_aa = rt / (aij + akl);
                         if (do_k) {
                             dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
@@ -469,7 +470,7 @@ void _rys_ejk_ip2_type3_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int do_k = jk.k_factor != 0.;
     double *dm = jk.dm;
     extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4;
+    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -629,29 +630,30 @@ void _rys_ejk_ip2_type3_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 double theta_rr = theta * rr;
                 if (omega == 0) {
-                    rys_roots(2, theta_rr, rw);
+                    rys_roots(2, theta_rr, rw, nsq_per_block, 0, 1);
                 } else if (omega > 0) {
                     double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(2, theta_fac*theta_rr, rw);
+                    rys_roots(2, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
                     fac *= sqrt(theta_fac);
                     for (int irys = 0; irys < 2; ++irys) {
-                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[irys*2   *nsq_per_block] *= theta_fac;
                     }
                 } else {
-                    rys_roots(2, theta_rr, rw+4*nsq_per_block);
+                    double *rw1 = rw + 4*nsq_per_block;
+                    rys_roots(2, theta_rr, rw1, nsq_per_block, 0, 1);
                     double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(2, theta_fac*theta_rr, rw);
+                    rys_roots(2, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 2; ++irys) {
-                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
+                        rw[ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
                 if (task_id < ntasks) {
                     for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
-                        double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
-                        double rt = rw[sq_id +  2*irys   *nsq_per_block];
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
                         double rt_aa = rt / (aij + akl);
                         double rt_aij = rt_aa * akl;
                         double c0x = Rpa[0*TILE2+sh_ij] - xpq*rt_aij;
@@ -1164,7 +1166,7 @@ void _rys_ejk_ip2_type3_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int do_k = jk.k_factor != 0.;
     double *dm = jk.dm;
     extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4;
+    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -1324,29 +1326,30 @@ void _rys_ejk_ip2_type3_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 double theta_rr = theta * rr;
                 if (omega == 0) {
-                    rys_roots(3, theta_rr, rw);
+                    rys_roots(3, theta_rr, rw, nsq_per_block, 0, 1);
                 } else if (omega > 0) {
                     double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
                     fac *= sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
-                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[irys*2   *nsq_per_block] *= theta_fac;
                     }
                 } else {
-                    rys_roots(3, theta_rr, rw+6*nsq_per_block);
+                    double *rw1 = rw + 6*nsq_per_block;
+                    rys_roots(3, theta_rr, rw1, nsq_per_block, 0, 1);
                     double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
-                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
+                        rw[ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
                 if (task_id < ntasks) {
                     for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
-                        double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
-                        double rt = rw[sq_id +  2*irys   *nsq_per_block];
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
                         double rt_aa = rt / (aij + akl);
                         double rt_akl = rt_aa * aij;
                         double cpx = xqc + xpq*rt_akl;
@@ -2069,8 +2072,8 @@ void _rys_ejk_ip2_type3_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                         v_jzkz += gjkz * prod_xy;
                         }
                         {
-                        double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
-                        double rt = rw[sq_id +  2*irys   *nsq_per_block];
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
                         double rt_aa = rt / (aij + akl);
                         double rt_akl = rt_aa * aij;
                         double cpx = xqc + xpq*rt_akl;
@@ -2896,7 +2899,7 @@ void _rys_ejk_ip2_type3_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int do_k = jk.k_factor != 0.;
     double *dm = jk.dm;
     extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4;
+    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -3056,29 +3059,30 @@ void _rys_ejk_ip2_type3_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 double theta_rr = theta * rr;
                 if (omega == 0) {
-                    rys_roots(3, theta_rr, rw);
+                    rys_roots(3, theta_rr, rw, nsq_per_block, 0, 1);
                 } else if (omega > 0) {
                     double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
                     fac *= sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
-                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[irys*2   *nsq_per_block] *= theta_fac;
                     }
                 } else {
-                    rys_roots(3, theta_rr, rw+6*nsq_per_block);
+                    double *rw1 = rw + 6*nsq_per_block;
+                    rys_roots(3, theta_rr, rw1, nsq_per_block, 0, 1);
                     double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
-                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
+                        rw[ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
                 if (task_id < ntasks) {
                     for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
-                        double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
-                        double rt = rw[sq_id +  2*irys   *nsq_per_block];
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
                         double rt_aa = rt / (aij + akl);
                         double rt_akl = rt_aa * aij;
                         double cpx = xqc + xpq*rt_akl;
@@ -5187,8 +5191,8 @@ void _rys_ejk_ip2_type3_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                         v_jzkz += gjkz * prod_xy;
                         }
                         {
-                        double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
-                        double rt = rw[sq_id +  2*irys   *nsq_per_block];
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
                         double rt_aa = rt / (aij + akl);
                         double rt_akl = rt_aa * aij;
                         double cpx = xqc + xpq*rt_akl;
@@ -7430,7 +7434,7 @@ void _rys_ejk_ip2_type3_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int do_k = jk.k_factor != 0.;
     double *dm = jk.dm;
     extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4;
+    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -7590,29 +7594,30 @@ void _rys_ejk_ip2_type3_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 double theta_rr = theta * rr;
                 if (omega == 0) {
-                    rys_roots(3, theta_rr, rw);
+                    rys_roots(3, theta_rr, rw, nsq_per_block, 0, 1);
                 } else if (omega > 0) {
                     double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
                     fac *= sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
-                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[irys*2   *nsq_per_block] *= theta_fac;
                     }
                 } else {
-                    rys_roots(3, theta_rr, rw+6*nsq_per_block);
+                    double *rw1 = rw + 6*nsq_per_block;
+                    rys_roots(3, theta_rr, rw1, nsq_per_block, 0, 1);
                     double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
-                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
+                        rw[ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
                 if (task_id < ntasks) {
                     for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
-                        double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
-                        double rt = rw[sq_id +  2*irys   *nsq_per_block];
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
                         double rt_aa = rt / (aij + akl);
                         double rt_aij = rt_aa * akl;
                         double c0x = Rpa[0*TILE2+sh_ij] - xpq*rt_aij;
@@ -8325,8 +8330,8 @@ void _rys_ejk_ip2_type3_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                         v_jzkz += gjkz * prod_xy;
                         }
                         {
-                        double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
-                        double rt = rw[sq_id +  2*irys   *nsq_per_block];
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
                         double rt_aa = rt / (aij + akl);
                         double rt_aij = rt_aa * akl;
                         double c0x = Rpa[0*TILE2+sh_ij] - xpq*rt_aij;
@@ -9166,7 +9171,7 @@ void _rys_ejk_ip2_type3_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int do_k = jk.k_factor != 0.;
     double *dm = jk.dm;
     extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4;
+    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -9326,29 +9331,30 @@ void _rys_ejk_ip2_type3_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 double theta_rr = theta * rr;
                 if (omega == 0) {
-                    rys_roots(3, theta_rr, rw);
+                    rys_roots(3, theta_rr, rw, nsq_per_block, 0, 1);
                 } else if (omega > 0) {
                     double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
                     fac *= sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
-                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[irys*2   *nsq_per_block] *= theta_fac;
                     }
                 } else {
-                    rys_roots(3, theta_rr, rw+6*nsq_per_block);
+                    double *rw1 = rw + 6*nsq_per_block;
+                    rys_roots(3, theta_rr, rw1, nsq_per_block, 0, 1);
                     double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
                     double sqrt_theta_fac = -sqrt(theta_fac);
                     for (int irys = 0; irys < 3; ++irys) {
-                        rw[sq_id+ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[sq_id+(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
+                        rw[ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
                     }
                 }
                 if (task_id < ntasks) {
                     for (int irys = 0; irys < bounds.nroots; ++irys) {
                         {
-                        double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
-                        double rt = rw[sq_id +  2*irys   *nsq_per_block];
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
                         double rt_aa = rt / (aij + akl);
                         double rt_akl = rt_aa * aij;
                         double cpx = xqc + xpq*rt_akl;
@@ -11493,8 +11499,8 @@ void _rys_ejk_ip2_type3_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                         v_jzkz += gjkz * prod_xy;
                         }
                         {
-                        double wt = rw[sq_id + (2*irys+1)*nsq_per_block];
-                        double rt = rw[sq_id +  2*irys   *nsq_per_block];
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
                         double rt_aa = rt / (aij + akl);
                         double rt_akl = rt_aa * aij;
                         double cpx = xqc + xpq*rt_akl;
@@ -13665,6 +13671,9369 @@ void rys_ejk_ip2_type3_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     }
 }
 
+__device__ static
+void _rys_ejk_ip2_type3_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+{
+    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
+    int nsq_per_block = blockDim.x * blockDim.y;
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    int kprim = bounds.kprim;
+    int lprim = bounds.lprim;
+    int *ao_loc = envs.ao_loc;
+    int nbas = envs.nbas;
+    int nao = ao_loc[nbas];
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double omega = env[PTR_RANGE_OMEGA];
+    int do_j = jk.j_factor != 0.;
+    int do_k = jk.k_factor != 0.;
+    double *dm = jk.dm;
+    extern __shared__ double Rpa_cicj[];
+    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
+        int ijp = n / TILE2;
+        int sh_ij = n % TILE2;
+        int ish = ish0 + sh_ij / TILE;
+        int jsh = jsh0 + sh_ij % TILE;
+        int ip = ijp / jprim;
+        int jp = ijp % jprim;
+        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double ai = expi[ip];
+        double aj = expj[jp];
+        double aij = ai + aj;
+        double aj_aij = aj / aij;
+        double xjxi = rj[0] - ri[0];
+        double yjyi = rj[1] - ri[1];
+        double zjzi = rj[2] - ri[2];
+        double *Rpa = Rpa_cicj + ijp * TILE2*4;
+        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
+        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
+        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
+        double theta_ij = ai * aj_aij;
+        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
+        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+    }
+
+    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+        __syncthreads();
+        int task_id = task0 + sq_id;
+        double fac_sym = PI_FAC;
+        ShellQuartet sq;
+        if (task_id >= ntasks) {
+            // To avoid __syncthreads blocking blocking idle warps, all remaining
+            // threads compute a valid shell quartet with zero normalization factor
+            sq = shl_quartet_idx[0];
+            fac_sym = 0.;
+        } else {
+            sq = shl_quartet_idx[task_id];
+        }
+        int ish = sq.i;
+        int jsh = sq.j;
+        int ksh = sq.k;
+        int lsh = sq.l;
+        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
+        if (ish == jsh) fac_sym *= .5;
+        if (ksh == lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        int i0 = ao_loc[ish];
+        int j0 = ao_loc[jsh];
+        int k0 = ao_loc[ksh];
+        int l0 = ao_loc[lsh];
+        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
+        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
+        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double dd;
+        double Ix, Iy, Iz, prod_xy, prod_xz, prod_yz;
+        double gix, giy, giz;
+        double gjx, gjy, gjz;
+        double gkx, gky, gkz;
+        double glx, gly, glz;
+        double gikx, giky, gikz;
+        double gjkx, gjky, gjkz;
+        double gilx, gily, gilz;
+        double gjlx, gjly, gjlz;
+        double v_ixkx = 0;
+        double v_ixky = 0;
+        double v_ixkz = 0;
+        double v_iykx = 0;
+        double v_iyky = 0;
+        double v_iykz = 0;
+        double v_izkx = 0;
+        double v_izky = 0;
+        double v_izkz = 0;
+        double v_jxkx = 0;
+        double v_jxky = 0;
+        double v_jxkz = 0;
+        double v_jykx = 0;
+        double v_jyky = 0;
+        double v_jykz = 0;
+        double v_jzkx = 0;
+        double v_jzky = 0;
+        double v_jzkz = 0;
+        double v_ixlx = 0;
+        double v_ixly = 0;
+        double v_ixlz = 0;
+        double v_iylx = 0;
+        double v_iyly = 0;
+        double v_iylz = 0;
+        double v_izlx = 0;
+        double v_izly = 0;
+        double v_izlz = 0;
+        double v_jxlx = 0;
+        double v_jxly = 0;
+        double v_jxlz = 0;
+        double v_jylx = 0;
+        double v_jyly = 0;
+        double v_jylz = 0;
+        double v_jzlx = 0;
+        double v_jzly = 0;
+        double v_jzlz = 0;
+        
+        for (int klp = 0; klp < kprim*lprim; ++klp) {
+            int kp = klp / lprim;
+            int lp = klp % lprim;
+            double ak = expk[kp];
+            double al = expl[lp];
+            double ak2 = ak * 2;
+            double al2 = al * 2;
+            double akl = ak + al;
+            double al_akl = al / akl;
+            double xlxk = rl[0] - rk[0];
+            double ylyk = rl[1] - rk[1];
+            double zlzk = rl[2] - rk[2];
+            double theta_kl = ak * al_akl;
+            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            double xqc = xlxk * al_akl;
+            double yqc = ylyk * al_akl;
+            double zqc = zlzk * al_akl;
+            double xkl = rk[0] + xqc;
+            double ykl = rk[1] + yqc;
+            double zkl = rk[2] + zqc;
+            for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double ai2 = ai * 2;
+                double aj2 = aj * 2;
+                double aij = ai + aj;
+                double *Rpa = Rpa_cicj + ijp * TILE2*4;
+                double cicj = Rpa[sh_ij+3*TILE2];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                double xpa = Rpa[sh_ij+0*TILE2];
+                double ypa = Rpa[sh_ij+1*TILE2];
+                double zpa = Rpa[sh_ij+2*TILE2];
+                double xij = ri[0] + xpa; // (ai*xi+aj*xj)/aij
+                double yij = ri[1] + ypa;
+                double zij = ri[2] + zpa;
+                double xjxi = rj[0] - ri[0];
+                double yjyi = rj[1] - ri[1];
+                double zjzi = rj[2] - ri[2];
+                double xpq = xij - xkl;
+                double ypq = yij - ykl;
+                double zpq = zij - zkl;
+                double theta = aij * akl / (aij + akl);
+                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+                double theta_rr = theta * rr;
+                if (omega == 0) {
+                    rys_roots(3, theta_rr, rw, nsq_per_block, 0, 1);
+                } else if (omega > 0) {
+                    double theta_fac = omega * omega / (omega * omega + theta);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
+                    fac *= sqrt(theta_fac);
+                    for (int irys = 0; irys < 3; ++irys) {
+                        rw[irys*2   *nsq_per_block] *= theta_fac;
+                    }
+                } else {
+                    double *rw1 = rw + 6*nsq_per_block;
+                    rys_roots(3, theta_rr, rw1, nsq_per_block, 0, 1);
+                    double theta_fac = omega * omega / (omega * omega + theta);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
+                    double sqrt_theta_fac = -sqrt(theta_fac);
+                    for (int irys = 0; irys < 3; ++irys) {
+                        rw[ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
+                    }
+                }
+                if (task_id < ntasks) {
+                    for (int irys = 0; irys < bounds.nroots; ++irys) {
+                        {
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
+                        double rt_aa = rt / (aij + akl);
+                        double rt_aij = rt_aa * akl;
+                        double c0x = Rpa[0*TILE2+sh_ij] - xpq*rt_aij;
+                        double trr_10x = c0x * fac;
+                        double b10 = .5/aij * (1 - rt_aij);
+                        double trr_20x = c0x * trr_10x + 1*b10 * fac;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+0)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+0] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_20x * dd;
+                        Iy = 1 * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_20x * Iy;
+                        prod_xz = trr_20x * Iz;
+                        prod_yz = 1 * Iz;
+                        double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
+                        gix = ai2 * trr_30x;
+                        double c0y = Rpa[1*TILE2+sh_ij] - ypq*rt_aij;
+                        double trr_10y = c0y * 1;
+                        giy = ai2 * trr_10y;
+                        double c0z = Rpa[2*TILE2+sh_ij] - zpq*rt_aij;
+                        double trr_10z = c0z * wt;
+                        giz = ai2 * trr_10z;
+                        gix -= 2 * trr_10x;
+                        double rt_akl = rt_aa * aij;
+                        double cpx = xqc + xpq*rt_akl;
+                        double b00 = .5 * rt_aa;
+                        double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
+                        gkx = ak2 * trr_21x;
+                        double cpy = yqc + ypq*rt_akl;
+                        double trr_01y = cpy * 1;
+                        gky = ak2 * trr_01y;
+                        double cpz = zqc + zpq*rt_akl;
+                        double trr_01z = cpz * wt;
+                        gkz = ak2 * trr_01z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
+                        gikx = ai2 * trr_31x;
+                        double trr_11y = cpy * trr_10y + 1*b00 * 1;
+                        giky = ai2 * trr_11y;
+                        double trr_11z = cpz * trr_10z + 1*b00 * wt;
+                        gikz = ai2 * trr_11z;
+                        double trr_11x = cpx * trr_10x + 1*b00 * fac;
+                        gikx -= 2 * trr_11x;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        double hrr_2100x = trr_30x - xjxi * trr_20x;
+                        gjx = aj2 * hrr_2100x;
+                        double hrr_0100y = trr_10y - yjyi * 1;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_0100z = trr_10z - zjzi * wt;
+                        gjz = aj2 * hrr_0100z;
+                        gkx = ak2 * trr_21x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_01z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        double hrr_2110x = trr_31x - xjxi * trr_21x;
+                        gjkx = aj2 * hrr_2110x;
+                        double hrr_0110y = trr_11y - yjyi * trr_01y;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_0110z = trr_11z - zjzi * trr_01z;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+1)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+1] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_20x;
+                        double trr_20y = c0y * trr_10y + 1*b10 * 1;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_10z;
+                        gix -= 1 * fac;
+                        giy -= 1 * 1;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_01z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_21x;
+                        double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
+                        giky = ai2 * trr_21y;
+                        gikz = ai2 * trr_11z;
+                        double trr_01x = cpx * fac;
+                        gikx -= 1 * trr_01x;
+                        giky -= 1 * trr_01y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        double hrr_1100x = trr_20x - xjxi * trr_10x;
+                        gjx = aj2 * hrr_1100x;
+                        double hrr_1100y = trr_20y - yjyi * trr_10y;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_0100z;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_01z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        double hrr_1110x = trr_21x - xjxi * trr_11x;
+                        gjkx = aj2 * hrr_1110x;
+                        double hrr_1110y = trr_21y - yjyi * trr_11y;
+                        gjky = aj2 * hrr_1110y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+2)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+2] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_10y;
+                        double trr_20z = c0z * trr_10z + 1*b10 * wt;
+                        giz = ai2 * trr_20z;
+                        gix -= 1 * fac;
+                        giz -= 1 * wt;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_11z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_21x;
+                        giky = ai2 * trr_11y;
+                        double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
+                        gikz = ai2 * trr_21z;
+                        gikx -= 1 * trr_01x;
+                        gikz -= 1 * trr_01z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_1100z = trr_20z - zjzi * trr_10z;
+                        gjz = aj2 * hrr_1100z;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_11z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_1110x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_1110z = trr_21z - zjzi * trr_11z;
+                        gjkz = aj2 * hrr_1110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+3)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+3] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_20y * dd;
+                        Iz = wt * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_20y * Iz;
+                        gix = ai2 * trr_10x;
+                        double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
+                        giy = ai2 * trr_30y;
+                        giz = ai2 * trr_10z;
+                        giy -= 2 * trr_10y;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_21y;
+                        gkz = ak2 * trr_01z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
+                        giky = ai2 * trr_31y;
+                        gikz = ai2 * trr_11z;
+                        giky -= 2 * trr_11y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        double hrr_0100x = trr_10x - xjxi * fac;
+                        gjx = aj2 * hrr_0100x;
+                        double hrr_2100y = trr_30y - yjyi * trr_20y;
+                        gjy = aj2 * hrr_2100y;
+                        gjz = aj2 * hrr_0100z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_21y;
+                        gkz = ak2 * trr_01z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        double hrr_0110x = trr_11x - xjxi * trr_01x;
+                        gjkx = aj2 * hrr_0110x;
+                        double hrr_2110y = trr_31y - yjyi * trr_21y;
+                        gjky = aj2 * hrr_2110y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+4)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+4] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_10y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_20z;
+                        giy -= 1 * 1;
+                        giz -= 1 * wt;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_11z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * trr_21y;
+                        gikz = ai2 * trr_21z;
+                        giky -= 1 * trr_01y;
+                        gikz -= 1 * trr_01z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_1100z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_11z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_1110y;
+                        gjkz = aj2 * hrr_1110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+5)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+5] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_20z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_10y;
+                        double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
+                        giz = ai2 * trr_30z;
+                        giz -= 2 * trr_10z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_21z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * trr_11y;
+                        double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
+                        gikz = ai2 * trr_31z;
+                        gikz -= 2 * trr_11z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_2100z = trr_30z - zjzi * trr_20z;
+                        gjz = aj2 * hrr_2100z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_21z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_2110z = trr_31z - zjzi * trr_21z;
+                        gjkz = aj2 * hrr_2110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        }
+                        {
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
+                        double rt_aa = rt / (aij + akl);
+                        double rt_aij = rt_aa * akl;
+                        double c0x = Rpa[0*TILE2+sh_ij] - xpq*rt_aij;
+                        double trr_10x = c0x * fac;
+                        double b10 = .5/aij * (1 - rt_aij);
+                        double trr_20x = c0x * trr_10x + 1*b10 * fac;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+0)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+0] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_20x * dd;
+                        Iy = 1 * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_20x * Iy;
+                        prod_xz = trr_20x * Iz;
+                        prod_yz = 1 * Iz;
+                        double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
+                        gix = ai2 * trr_30x;
+                        double c0y = Rpa[1*TILE2+sh_ij] - ypq*rt_aij;
+                        double trr_10y = c0y * 1;
+                        giy = ai2 * trr_10y;
+                        double c0z = Rpa[2*TILE2+sh_ij] - zpq*rt_aij;
+                        double trr_10z = c0z * wt;
+                        giz = ai2 * trr_10z;
+                        gix -= 2 * trr_10x;
+                        double rt_akl = rt_aa * aij;
+                        double cpx = xqc + xpq*rt_akl;
+                        double b00 = .5 * rt_aa;
+                        double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
+                        double hrr_2001x = trr_21x - xlxk * trr_20x;
+                        glx = al2 * hrr_2001x;
+                        double cpy = yqc + ypq*rt_akl;
+                        double trr_01y = cpy * 1;
+                        double hrr_0001y = trr_01y - ylyk * 1;
+                        gly = al2 * hrr_0001y;
+                        double cpz = zqc + zpq*rt_akl;
+                        double trr_01z = cpz * wt;
+                        double hrr_0001z = trr_01z - zlzk * wt;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
+                        double hrr_3001x = trr_31x - xlxk * trr_30x;
+                        gilx = ai2 * hrr_3001x;
+                        double trr_11y = cpy * trr_10y + 1*b00 * 1;
+                        double hrr_1001y = trr_11y - ylyk * trr_10y;
+                        gily = ai2 * hrr_1001y;
+                        double trr_11z = cpz * trr_10z + 1*b00 * wt;
+                        double hrr_1001z = trr_11z - zlzk * trr_10z;
+                        gilz = ai2 * hrr_1001z;
+                        double trr_11x = cpx * trr_10x + 1*b00 * fac;
+                        double hrr_1001x = trr_11x - xlxk * trr_10x;
+                        gilx -= 2 * hrr_1001x;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_2100x = trr_30x - xjxi * trr_20x;
+                        gjx = aj2 * hrr_2100x;
+                        double hrr_0100y = trr_10y - yjyi * 1;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_0100z = trr_10z - zjzi * wt;
+                        gjz = aj2 * hrr_0100z;
+                        glx = al2 * hrr_2001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_2101x = hrr_3001x - xjxi * hrr_2001x;
+                        gjlx = aj2 * hrr_2101x;
+                        double hrr_0101y = hrr_1001y - yjyi * hrr_0001y;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_0101z = hrr_1001z - zjzi * hrr_0001z;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+1)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+1] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_20x;
+                        double trr_20y = c0y * trr_10y + 1*b10 * 1;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_10z;
+                        gix -= 1 * fac;
+                        giy -= 1 * 1;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2001x;
+                        double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
+                        double hrr_2001y = trr_21y - ylyk * trr_20y;
+                        gily = ai2 * hrr_2001y;
+                        gilz = ai2 * hrr_1001z;
+                        double trr_01x = cpx * fac;
+                        double hrr_0001x = trr_01x - xlxk * fac;
+                        gilx -= 1 * hrr_0001x;
+                        gily -= 1 * hrr_0001y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_1100x = trr_20x - xjxi * trr_10x;
+                        gjx = aj2 * hrr_1100x;
+                        double hrr_1100y = trr_20y - yjyi * trr_10y;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_0100z;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_1101x = hrr_2001x - xjxi * hrr_1001x;
+                        gjlx = aj2 * hrr_1101x;
+                        double hrr_1101y = hrr_2001y - yjyi * hrr_1001y;
+                        gjly = aj2 * hrr_1101y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+2)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+2] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_10y;
+                        double trr_20z = c0z * trr_10z + 1*b10 * wt;
+                        giz = ai2 * trr_20z;
+                        gix -= 1 * fac;
+                        giz -= 1 * wt;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_1001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2001x;
+                        gily = ai2 * hrr_1001y;
+                        double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
+                        double hrr_2001z = trr_21z - zlzk * trr_20z;
+                        gilz = ai2 * hrr_2001z;
+                        gilx -= 1 * hrr_0001x;
+                        gilz -= 1 * hrr_0001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_1100z = trr_20z - zjzi * trr_10z;
+                        gjz = aj2 * hrr_1100z;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_1001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_1101x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_1101z = hrr_2001z - zjzi * hrr_1001z;
+                        gjlz = aj2 * hrr_1101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+3)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+3] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_20y * dd;
+                        Iz = wt * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_20y * Iz;
+                        gix = ai2 * trr_10x;
+                        double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
+                        giy = ai2 * trr_30y;
+                        giz = ai2 * trr_10z;
+                        giy -= 2 * trr_10y;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_2001y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
+                        double hrr_3001y = trr_31y - ylyk * trr_30y;
+                        gily = ai2 * hrr_3001y;
+                        gilz = ai2 * hrr_1001z;
+                        gily -= 2 * hrr_1001y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_0100x = trr_10x - xjxi * fac;
+                        gjx = aj2 * hrr_0100x;
+                        double hrr_2100y = trr_30y - yjyi * trr_20y;
+                        gjy = aj2 * hrr_2100y;
+                        gjz = aj2 * hrr_0100z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_2001y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_0101x = hrr_1001x - xjxi * hrr_0001x;
+                        gjlx = aj2 * hrr_0101x;
+                        double hrr_2101y = hrr_3001y - yjyi * hrr_2001y;
+                        gjly = aj2 * hrr_2101y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+4)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+4] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_10y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_20z;
+                        giy -= 1 * 1;
+                        giz -= 1 * wt;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_1001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_2001y;
+                        gilz = ai2 * hrr_2001z;
+                        gily -= 1 * hrr_0001y;
+                        gilz -= 1 * hrr_0001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_1100z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_1001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_1101y;
+                        gjlz = aj2 * hrr_1101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+5)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+5] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_20z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_10y;
+                        double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
+                        giz = ai2 * trr_30z;
+                        giz -= 2 * trr_10z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_2001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_1001y;
+                        double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
+                        double hrr_3001z = trr_31z - zlzk * trr_30z;
+                        gilz = ai2 * hrr_3001z;
+                        gilz -= 2 * hrr_1001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_2100z = trr_30z - zjzi * trr_20z;
+                        gjz = aj2 * hrr_2100z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_2001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_2101z = hrr_3001z - zjzi * hrr_2001z;
+                        gjlz = aj2 * hrr_2101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        }
+                    }
+                }
+            }
+        }
+        if (task_id >= ntasks) {
+            continue;
+        }
+        int ia = bas[ish*BAS_SLOTS+ATOM_OF];
+        int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
+        int ka = bas[ksh*BAS_SLOTS+ATOM_OF];
+        int la = bas[lsh*BAS_SLOTS+ATOM_OF];
+        int natm = envs.natm;
+        double *ejk = jk.ejk;
+        atomicAdd(ejk + (ia*natm+ka)*9 + 0, v_ixkx);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 1, v_ixky);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 2, v_ixkz);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 3, v_iykx);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 4, v_iyky);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 5, v_iykz);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 6, v_izkx);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 7, v_izky);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 8, v_izkz);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 0, v_jxkx);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 1, v_jxky);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 2, v_jxkz);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 3, v_jykx);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 4, v_jyky);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 5, v_jykz);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 6, v_jzkx);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 7, v_jzky);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 8, v_jzkz);
+        atomicAdd(ejk + (ia*natm+la)*9 + 0, v_ixlx);
+        atomicAdd(ejk + (ia*natm+la)*9 + 1, v_ixly);
+        atomicAdd(ejk + (ia*natm+la)*9 + 2, v_ixlz);
+        atomicAdd(ejk + (ia*natm+la)*9 + 3, v_iylx);
+        atomicAdd(ejk + (ia*natm+la)*9 + 4, v_iyly);
+        atomicAdd(ejk + (ia*natm+la)*9 + 5, v_iylz);
+        atomicAdd(ejk + (ia*natm+la)*9 + 6, v_izlx);
+        atomicAdd(ejk + (ia*natm+la)*9 + 7, v_izly);
+        atomicAdd(ejk + (ia*natm+la)*9 + 8, v_izlz);
+        atomicAdd(ejk + (ja*natm+la)*9 + 0, v_jxlx);
+        atomicAdd(ejk + (ja*natm+la)*9 + 1, v_jxly);
+        atomicAdd(ejk + (ja*natm+la)*9 + 2, v_jxlz);
+        atomicAdd(ejk + (ja*natm+la)*9 + 3, v_jylx);
+        atomicAdd(ejk + (ja*natm+la)*9 + 4, v_jyly);
+        atomicAdd(ejk + (ja*natm+la)*9 + 5, v_jylz);
+        atomicAdd(ejk + (ja*natm+la)*9 + 6, v_jzlx);
+        atomicAdd(ejk + (ja*natm+la)*9 + 7, v_jzly);
+        atomicAdd(ejk + (ja*natm+la)*9 + 8, v_jzlz);
+    }
+}
+__global__
+void rys_ejk_ip2_type3_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+                ShellQuartet *pool, uint32_t *batch_head)
+{
+    int b_id = blockIdx.x;
+    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
+    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
+    __shared__ int batch_id;
+    if (t_id == 0) {
+        batch_id = atomicAdd(batch_head, 1);
+    }
+    __syncthreads();
+    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
+    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
+    while (batch_id < nbatches) {
+        int batch_ij = batch_id / nbatches_kl;
+        int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                     batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
+        if (ntasks > 0) {
+            int tile_ij = bounds.tile_ij_mapping[batch_ij];
+            int nbas_tiles = nbas / TILE;
+            int tile_i = tile_ij / nbas_tiles;
+            int tile_j = tile_ij % nbas_tiles;
+            int ish0 = tile_i * TILE;
+            int jsh0 = tile_j * TILE;
+            _rys_ejk_ip2_type3_2000(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+        }
+        if (t_id == 0) {
+            batch_id = atomicAdd(batch_head, 1);
+            atomicAdd(batch_head+1, ntasks);
+        }
+        __syncthreads();
+    }
+}
+
+__device__ static
+void _rys_ejk_ip2_type3_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+{
+    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
+    int nsq_per_block = blockDim.x * blockDim.y;
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    int kprim = bounds.kprim;
+    int lprim = bounds.lprim;
+    int *ao_loc = envs.ao_loc;
+    int nbas = envs.nbas;
+    int nao = ao_loc[nbas];
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double omega = env[PTR_RANGE_OMEGA];
+    int do_j = jk.j_factor != 0.;
+    int do_k = jk.k_factor != 0.;
+    double *dm = jk.dm;
+    extern __shared__ double Rpa_cicj[];
+    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
+        int ijp = n / TILE2;
+        int sh_ij = n % TILE2;
+        int ish = ish0 + sh_ij / TILE;
+        int jsh = jsh0 + sh_ij % TILE;
+        int ip = ijp / jprim;
+        int jp = ijp % jprim;
+        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double ai = expi[ip];
+        double aj = expj[jp];
+        double aij = ai + aj;
+        double aj_aij = aj / aij;
+        double xjxi = rj[0] - ri[0];
+        double yjyi = rj[1] - ri[1];
+        double zjzi = rj[2] - ri[2];
+        double *Rpa = Rpa_cicj + ijp * TILE2*4;
+        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
+        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
+        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
+        double theta_ij = ai * aj_aij;
+        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
+        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+    }
+
+    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+        __syncthreads();
+        int task_id = task0 + sq_id;
+        double fac_sym = PI_FAC;
+        ShellQuartet sq;
+        if (task_id >= ntasks) {
+            // To avoid __syncthreads blocking blocking idle warps, all remaining
+            // threads compute a valid shell quartet with zero normalization factor
+            sq = shl_quartet_idx[0];
+            fac_sym = 0.;
+        } else {
+            sq = shl_quartet_idx[task_id];
+        }
+        int ish = sq.i;
+        int jsh = sq.j;
+        int ksh = sq.k;
+        int lsh = sq.l;
+        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
+        if (ish == jsh) fac_sym *= .5;
+        if (ksh == lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        int i0 = ao_loc[ish];
+        int j0 = ao_loc[jsh];
+        int k0 = ao_loc[ksh];
+        int l0 = ao_loc[lsh];
+        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
+        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
+        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double dd;
+        double Ix, Iy, Iz, prod_xy, prod_xz, prod_yz;
+        double gix, giy, giz;
+        double gjx, gjy, gjz;
+        double gkx, gky, gkz;
+        double glx, gly, glz;
+        double gikx, giky, gikz;
+        double gjkx, gjky, gjkz;
+        double gilx, gily, gilz;
+        double gjlx, gjly, gjlz;
+        double v_ixkx = 0;
+        double v_ixky = 0;
+        double v_ixkz = 0;
+        double v_iykx = 0;
+        double v_iyky = 0;
+        double v_iykz = 0;
+        double v_izkx = 0;
+        double v_izky = 0;
+        double v_izkz = 0;
+        double v_jxkx = 0;
+        double v_jxky = 0;
+        double v_jxkz = 0;
+        double v_jykx = 0;
+        double v_jyky = 0;
+        double v_jykz = 0;
+        double v_jzkx = 0;
+        double v_jzky = 0;
+        double v_jzkz = 0;
+        double v_ixlx = 0;
+        double v_ixly = 0;
+        double v_ixlz = 0;
+        double v_iylx = 0;
+        double v_iyly = 0;
+        double v_iylz = 0;
+        double v_izlx = 0;
+        double v_izly = 0;
+        double v_izlz = 0;
+        double v_jxlx = 0;
+        double v_jxly = 0;
+        double v_jxlz = 0;
+        double v_jylx = 0;
+        double v_jyly = 0;
+        double v_jylz = 0;
+        double v_jzlx = 0;
+        double v_jzly = 0;
+        double v_jzlz = 0;
+        
+        for (int klp = 0; klp < kprim*lprim; ++klp) {
+            int kp = klp / lprim;
+            int lp = klp % lprim;
+            double ak = expk[kp];
+            double al = expl[lp];
+            double ak2 = ak * 2;
+            double al2 = al * 2;
+            double akl = ak + al;
+            double al_akl = al / akl;
+            double xlxk = rl[0] - rk[0];
+            double ylyk = rl[1] - rk[1];
+            double zlzk = rl[2] - rk[2];
+            double theta_kl = ak * al_akl;
+            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            double xqc = xlxk * al_akl;
+            double yqc = ylyk * al_akl;
+            double zqc = zlzk * al_akl;
+            double xkl = rk[0] + xqc;
+            double ykl = rk[1] + yqc;
+            double zkl = rk[2] + zqc;
+            for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double ai2 = ai * 2;
+                double aj2 = aj * 2;
+                double aij = ai + aj;
+                double *Rpa = Rpa_cicj + ijp * TILE2*4;
+                double cicj = Rpa[sh_ij+3*TILE2];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                double xpa = Rpa[sh_ij+0*TILE2];
+                double ypa = Rpa[sh_ij+1*TILE2];
+                double zpa = Rpa[sh_ij+2*TILE2];
+                double xij = ri[0] + xpa; // (ai*xi+aj*xj)/aij
+                double yij = ri[1] + ypa;
+                double zij = ri[2] + zpa;
+                double xjxi = rj[0] - ri[0];
+                double yjyi = rj[1] - ri[1];
+                double zjzi = rj[2] - ri[2];
+                double xpq = xij - xkl;
+                double ypq = yij - ykl;
+                double zpq = zij - zkl;
+                double theta = aij * akl / (aij + akl);
+                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+                double theta_rr = theta * rr;
+                if (omega == 0) {
+                    rys_roots(3, theta_rr, rw, nsq_per_block, 0, 1);
+                } else if (omega > 0) {
+                    double theta_fac = omega * omega / (omega * omega + theta);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
+                    fac *= sqrt(theta_fac);
+                    for (int irys = 0; irys < 3; ++irys) {
+                        rw[irys*2   *nsq_per_block] *= theta_fac;
+                    }
+                } else {
+                    double *rw1 = rw + 6*nsq_per_block;
+                    rys_roots(3, theta_rr, rw1, nsq_per_block, 0, 1);
+                    double theta_fac = omega * omega / (omega * omega + theta);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
+                    double sqrt_theta_fac = -sqrt(theta_fac);
+                    for (int irys = 0; irys < 3; ++irys) {
+                        rw[ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
+                    }
+                }
+                if (task_id < ntasks) {
+                    for (int irys = 0; irys < bounds.nroots; ++irys) {
+                        {
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
+                        double rt_aa = rt / (aij + akl);
+                        double rt_akl = rt_aa * aij;
+                        double cpx = xqc + xpq*rt_akl;
+                        double rt_aij = rt_aa * akl;
+                        double c0x = Rpa[0*TILE2+sh_ij] - xpq*rt_aij;
+                        double trr_10x = c0x * fac;
+                        double b10 = .5/aij * (1 - rt_aij);
+                        double trr_20x = c0x * trr_10x + 1*b10 * fac;
+                        double b00 = .5 * rt_aa;
+                        double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+0)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+0] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_21x * dd;
+                        Iy = 1 * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_21x * Iy;
+                        prod_xz = trr_21x * Iz;
+                        prod_yz = 1 * Iz;
+                        double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
+                        double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
+                        gix = ai2 * trr_31x;
+                        double c0y = Rpa[1*TILE2+sh_ij] - ypq*rt_aij;
+                        double trr_10y = c0y * 1;
+                        giy = ai2 * trr_10y;
+                        double c0z = Rpa[2*TILE2+sh_ij] - zpq*rt_aij;
+                        double trr_10z = c0z * wt;
+                        giz = ai2 * trr_10z;
+                        double trr_11x = cpx * trr_10x + 1*b00 * fac;
+                        gix -= 2 * trr_11x;
+                        double b01 = .5/akl * (1 - rt_akl);
+                        double trr_22x = cpx * trr_21x + 1*b01 * trr_20x + 2*b00 * trr_11x;
+                        gkx = ak2 * trr_22x;
+                        double cpy = yqc + ypq*rt_akl;
+                        double trr_01y = cpy * 1;
+                        gky = ak2 * trr_01y;
+                        double cpz = zqc + zpq*rt_akl;
+                        double trr_01z = cpz * wt;
+                        gkz = ak2 * trr_01z;
+                        gkx -= 1 * trr_20x;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        double trr_32x = cpx * trr_31x + 1*b01 * trr_30x + 3*b00 * trr_21x;
+                        gikx = ai2 * trr_32x;
+                        double trr_11y = cpy * trr_10y + 1*b00 * 1;
+                        giky = ai2 * trr_11y;
+                        double trr_11z = cpz * trr_10z + 1*b00 * wt;
+                        gikz = ai2 * trr_11z;
+                        double trr_01x = cpx * fac;
+                        double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
+                        gikx -= 2 * trr_12x;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        gikx -= 1 * (ai2 * trr_30x - 2 * trr_10x);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        double hrr_2110x = trr_31x - xjxi * trr_21x;
+                        gjx = aj2 * hrr_2110x;
+                        double hrr_0100y = trr_10y - yjyi * 1;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_0100z = trr_10z - zjzi * wt;
+                        gjz = aj2 * hrr_0100z;
+                        gkx = ak2 * trr_22x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_01z;
+                        gkx -= 1 * trr_20x;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        double hrr_2120x = trr_32x - xjxi * trr_22x;
+                        gjkx = aj2 * hrr_2120x;
+                        double hrr_0110y = trr_11y - yjyi * trr_01y;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_0110z = trr_11z - zjzi * trr_01z;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        double hrr_2100x = trr_30x - xjxi * trr_20x;
+                        gjkx -= 1 * (aj2 * hrr_2100x);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+1)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+1] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_11x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_11x * Iy;
+                        prod_xz = trr_11x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_21x;
+                        double trr_20y = c0y * trr_10y + 1*b10 * 1;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_10z;
+                        gix -= 1 * trr_01x;
+                        giy -= 1 * 1;
+                        gkx = ak2 * trr_12x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_01z;
+                        gkx -= 1 * trr_10x;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_22x;
+                        double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
+                        giky = ai2 * trr_21y;
+                        gikz = ai2 * trr_11z;
+                        double trr_02x = cpx * trr_01x + 1*b01 * fac;
+                        gikx -= 1 * trr_02x;
+                        giky -= 1 * trr_01y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        gikx -= 1 * (ai2 * trr_20x - 1 * fac);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        double hrr_1110x = trr_21x - xjxi * trr_11x;
+                        gjx = aj2 * hrr_1110x;
+                        double hrr_1100y = trr_20y - yjyi * trr_10y;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_0100z;
+                        gkx = ak2 * trr_12x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_01z;
+                        gkx -= 1 * trr_10x;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        double hrr_1120x = trr_22x - xjxi * trr_12x;
+                        gjkx = aj2 * hrr_1120x;
+                        double hrr_1110y = trr_21y - yjyi * trr_11y;
+                        gjky = aj2 * hrr_1110y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        double hrr_1100x = trr_20x - xjxi * trr_10x;
+                        gjkx -= 1 * (aj2 * hrr_1100x);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+2)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+2] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_11x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = trr_11x * Iy;
+                        prod_xz = trr_11x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_21x;
+                        giy = ai2 * trr_10y;
+                        double trr_20z = c0z * trr_10z + 1*b10 * wt;
+                        giz = ai2 * trr_20z;
+                        gix -= 1 * trr_01x;
+                        giz -= 1 * wt;
+                        gkx = ak2 * trr_12x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_11z;
+                        gkx -= 1 * trr_10x;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_22x;
+                        giky = ai2 * trr_11y;
+                        double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
+                        gikz = ai2 * trr_21z;
+                        gikx -= 1 * trr_02x;
+                        gikz -= 1 * trr_01z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        gikx -= 1 * (ai2 * trr_20x - 1 * fac);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_1110x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_1100z = trr_20z - zjzi * trr_10z;
+                        gjz = aj2 * hrr_1100z;
+                        gkx = ak2 * trr_12x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_11z;
+                        gkx -= 1 * trr_10x;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_1120x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_1110z = trr_21z - zjzi * trr_11z;
+                        gjkz = aj2 * hrr_1110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjkx -= 1 * (aj2 * hrr_1100x);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+3)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+3] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_01x * dd;
+                        Iy = trr_20y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_01x * Iy;
+                        prod_xz = trr_01x * Iz;
+                        prod_yz = trr_20y * Iz;
+                        gix = ai2 * trr_11x;
+                        double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
+                        giy = ai2 * trr_30y;
+                        giz = ai2 * trr_10z;
+                        giy -= 2 * trr_10y;
+                        gkx = ak2 * trr_02x;
+                        gky = ak2 * trr_21y;
+                        gkz = ak2 * trr_01z;
+                        gkx -= 1 * fac;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_12x;
+                        double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
+                        giky = ai2 * trr_31y;
+                        gikz = ai2 * trr_11z;
+                        giky -= 2 * trr_11y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        gikx -= 1 * (ai2 * trr_10x);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        double hrr_0110x = trr_11x - xjxi * trr_01x;
+                        gjx = aj2 * hrr_0110x;
+                        double hrr_2100y = trr_30y - yjyi * trr_20y;
+                        gjy = aj2 * hrr_2100y;
+                        gjz = aj2 * hrr_0100z;
+                        gkx = ak2 * trr_02x;
+                        gky = ak2 * trr_21y;
+                        gkz = ak2 * trr_01z;
+                        gkx -= 1 * fac;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        double hrr_0120x = trr_12x - xjxi * trr_02x;
+                        gjkx = aj2 * hrr_0120x;
+                        double hrr_2110y = trr_31y - yjyi * trr_21y;
+                        gjky = aj2 * hrr_2110y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        double hrr_0100x = trr_10x - xjxi * fac;
+                        gjkx -= 1 * (aj2 * hrr_0100x);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+4)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+4] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_01x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = trr_01x * Iy;
+                        prod_xz = trr_01x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_11x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_20z;
+                        giy -= 1 * 1;
+                        giz -= 1 * wt;
+                        gkx = ak2 * trr_02x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_11z;
+                        gkx -= 1 * fac;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_12x;
+                        giky = ai2 * trr_21y;
+                        gikz = ai2 * trr_21z;
+                        giky -= 1 * trr_01y;
+                        gikz -= 1 * trr_01z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        gikx -= 1 * (ai2 * trr_10x);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0110x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_1100z;
+                        gkx = ak2 * trr_02x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_11z;
+                        gkx -= 1 * fac;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0120x;
+                        gjky = aj2 * hrr_1110y;
+                        gjkz = aj2 * hrr_1110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjkx -= 1 * (aj2 * hrr_0100x);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+5)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+5] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_01x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_20z * dd;
+                        prod_xy = trr_01x * Iy;
+                        prod_xz = trr_01x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_11x;
+                        giy = ai2 * trr_10y;
+                        double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
+                        giz = ai2 * trr_30z;
+                        giz -= 2 * trr_10z;
+                        gkx = ak2 * trr_02x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_21z;
+                        gkx -= 1 * fac;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_12x;
+                        giky = ai2 * trr_11y;
+                        double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
+                        gikz = ai2 * trr_31z;
+                        gikz -= 2 * trr_11z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        gikx -= 1 * (ai2 * trr_10x);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0110x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_2100z = trr_30z - zjzi * trr_20z;
+                        gjz = aj2 * hrr_2100z;
+                        gkx = ak2 * trr_02x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_21z;
+                        gkx -= 1 * fac;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0120x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_2110z = trr_31z - zjzi * trr_21z;
+                        gjkz = aj2 * hrr_2110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjkx -= 1 * (aj2 * hrr_0100x);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+1] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+0)*nao+k0+1];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+1];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+0] * dm[(l0+0)*nao+k0+1];
+                            } else {
+                                int ji = (j0+0)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+1;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_20x * dd;
+                        Iy = trr_01y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_20x * Iy;
+                        prod_xz = trr_20x * Iz;
+                        prod_yz = trr_01y * Iz;
+                        gix = ai2 * trr_30x;
+                        giy = ai2 * trr_11y;
+                        giz = ai2 * trr_10z;
+                        gix -= 2 * trr_10x;
+                        gkx = ak2 * trr_21x;
+                        double trr_02y = cpy * trr_01y + 1*b01 * 1;
+                        gky = ak2 * trr_02y;
+                        gkz = ak2 * trr_01z;
+                        gky -= 1 * 1;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_31x;
+                        double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
+                        giky = ai2 * trr_12y;
+                        gikz = ai2 * trr_11z;
+                        gikx -= 2 * trr_11x;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        giky -= 1 * (ai2 * trr_10y);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_2100x;
+                        gjy = aj2 * hrr_0110y;
+                        gjz = aj2 * hrr_0100z;
+                        gkx = ak2 * trr_21x;
+                        gky = ak2 * trr_02y;
+                        gkz = ak2 * trr_01z;
+                        gky -= 1 * 1;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_2110x;
+                        double hrr_0120y = trr_12y - yjyi * trr_02y;
+                        gjky = aj2 * hrr_0120y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjky -= 1 * (aj2 * hrr_0100y);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+1] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+1)*nao+k0+1];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+1];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+1] * dm[(l0+0)*nao+k0+1];
+                            } else {
+                                int ji = (j0+0)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+1;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = trr_11y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = trr_11y * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_21y;
+                        giz = ai2 * trr_10z;
+                        gix -= 1 * fac;
+                        giy -= 1 * trr_01y;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_12y;
+                        gkz = ak2 * trr_01z;
+                        gky -= 1 * trr_10y;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_21x;
+                        double trr_22y = cpy * trr_21y + 1*b01 * trr_20y + 2*b00 * trr_11y;
+                        giky = ai2 * trr_22y;
+                        gikz = ai2 * trr_11z;
+                        gikx -= 1 * trr_01x;
+                        giky -= 1 * trr_02y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        giky -= 1 * (ai2 * trr_20y - 1 * 1);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_1110y;
+                        gjz = aj2 * hrr_0100z;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_12y;
+                        gkz = ak2 * trr_01z;
+                        gky -= 1 * trr_10y;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_1110x;
+                        double hrr_1120y = trr_22y - yjyi * trr_12y;
+                        gjky = aj2 * hrr_1120y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjky -= 1 * (aj2 * hrr_1100y);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+1] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+2)*nao+k0+1];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+1];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+2] * dm[(l0+0)*nao+k0+1];
+                            } else {
+                                int ji = (j0+0)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+1;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = trr_01y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = trr_01y * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_11y;
+                        giz = ai2 * trr_20z;
+                        gix -= 1 * fac;
+                        giz -= 1 * wt;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_02y;
+                        gkz = ak2 * trr_11z;
+                        gky -= 1 * 1;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_21x;
+                        giky = ai2 * trr_12y;
+                        gikz = ai2 * trr_21z;
+                        gikx -= 1 * trr_01x;
+                        gikz -= 1 * trr_01z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        giky -= 1 * (ai2 * trr_10y);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_0110y;
+                        gjz = aj2 * hrr_1100z;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_02y;
+                        gkz = ak2 * trr_11z;
+                        gky -= 1 * 1;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_1110x;
+                        gjky = aj2 * hrr_0120y;
+                        gjkz = aj2 * hrr_1110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjky -= 1 * (aj2 * hrr_0100y);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+1] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+3)*nao+k0+1];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+1];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+3] * dm[(l0+0)*nao+k0+1];
+                            } else {
+                                int ji = (j0+0)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+1;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_21y * dd;
+                        Iz = wt * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_21y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_31y;
+                        giz = ai2 * trr_10z;
+                        giy -= 2 * trr_11y;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_22y;
+                        gkz = ak2 * trr_01z;
+                        gky -= 1 * trr_20y;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        double trr_32y = cpy * trr_31y + 1*b01 * trr_30y + 3*b00 * trr_21y;
+                        giky = ai2 * trr_32y;
+                        gikz = ai2 * trr_11z;
+                        giky -= 2 * trr_12y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        giky -= 1 * (ai2 * trr_30y - 2 * trr_10y);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_2110y;
+                        gjz = aj2 * hrr_0100z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_22y;
+                        gkz = ak2 * trr_01z;
+                        gky -= 1 * trr_20y;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        double hrr_2120y = trr_32y - yjyi * trr_22y;
+                        gjky = aj2 * hrr_2120y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjky -= 1 * (aj2 * hrr_2100y);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+1] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+4)*nao+k0+1];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+1];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+4] * dm[(l0+0)*nao+k0+1];
+                            } else {
+                                int ji = (j0+0)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+1;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_11y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_11y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_21y;
+                        giz = ai2 * trr_20z;
+                        giy -= 1 * trr_01y;
+                        giz -= 1 * wt;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_12y;
+                        gkz = ak2 * trr_11z;
+                        gky -= 1 * trr_10y;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * trr_22y;
+                        gikz = ai2 * trr_21z;
+                        giky -= 1 * trr_02y;
+                        gikz -= 1 * trr_01z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        giky -= 1 * (ai2 * trr_20y - 1 * 1);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_1110y;
+                        gjz = aj2 * hrr_1100z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_12y;
+                        gkz = ak2 * trr_11z;
+                        gky -= 1 * trr_10y;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_1120y;
+                        gjkz = aj2 * hrr_1110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjky -= 1 * (aj2 * hrr_1100y);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+1] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+5)*nao+k0+1];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+1];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+5] * dm[(l0+0)*nao+k0+1];
+                            } else {
+                                int ji = (j0+0)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+1;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_01y * dd;
+                        Iz = trr_20z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_01y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_11y;
+                        giz = ai2 * trr_30z;
+                        giz -= 2 * trr_10z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_02y;
+                        gkz = ak2 * trr_21z;
+                        gky -= 1 * 1;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * trr_12y;
+                        gikz = ai2 * trr_31z;
+                        gikz -= 2 * trr_11z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        giky -= 1 * (ai2 * trr_10y);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_0110y;
+                        gjz = aj2 * hrr_2100z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_02y;
+                        gkz = ak2 * trr_21z;
+                        gky -= 1 * 1;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_0120y;
+                        gjkz = aj2 * hrr_2110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjky -= 1 * (aj2 * hrr_0100y);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+2] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+0)*nao+k0+2];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+2];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+0] * dm[(l0+0)*nao+k0+2];
+                            } else {
+                                int ji = (j0+0)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+2;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_20x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_01z * dd;
+                        prod_xy = trr_20x * Iy;
+                        prod_xz = trr_20x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_30x;
+                        giy = ai2 * trr_10y;
+                        giz = ai2 * trr_11z;
+                        gix -= 2 * trr_10x;
+                        gkx = ak2 * trr_21x;
+                        gky = ak2 * trr_01y;
+                        double trr_02z = cpz * trr_01z + 1*b01 * wt;
+                        gkz = ak2 * trr_02z;
+                        gkz -= 1 * wt;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_31x;
+                        giky = ai2 * trr_11y;
+                        double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
+                        gikz = ai2 * trr_12z;
+                        gikx -= 2 * trr_11x;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        gikz -= 1 * (ai2 * trr_10z);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_2100x;
+                        gjy = aj2 * hrr_0100y;
+                        gjz = aj2 * hrr_0110z;
+                        gkx = ak2 * trr_21x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_02z;
+                        gkz -= 1 * wt;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_2110x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_0120z = trr_12z - zjzi * trr_02z;
+                        gjkz = aj2 * hrr_0120z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjkz -= 1 * (aj2 * hrr_0100z);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+2] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+1)*nao+k0+2];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+2];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+1] * dm[(l0+0)*nao+k0+2];
+                            } else {
+                                int ji = (j0+0)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+2;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = trr_01z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_11z;
+                        gix -= 1 * fac;
+                        giy -= 1 * 1;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_02z;
+                        gkz -= 1 * wt;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_21x;
+                        giky = ai2 * trr_21y;
+                        gikz = ai2 * trr_12z;
+                        gikx -= 1 * trr_01x;
+                        giky -= 1 * trr_01y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        gikz -= 1 * (ai2 * trr_10z);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_0110z;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_02z;
+                        gkz -= 1 * wt;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_1110x;
+                        gjky = aj2 * hrr_1110y;
+                        gjkz = aj2 * hrr_0120z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjkz -= 1 * (aj2 * hrr_0100z);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+2] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+2)*nao+k0+2];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+2];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+2] * dm[(l0+0)*nao+k0+2];
+                            } else {
+                                int ji = (j0+0)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+2;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_11z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_10y;
+                        giz = ai2 * trr_21z;
+                        gix -= 1 * fac;
+                        giz -= 1 * trr_01z;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_12z;
+                        gkz -= 1 * trr_10z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_21x;
+                        giky = ai2 * trr_11y;
+                        double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
+                        gikz = ai2 * trr_22z;
+                        gikx -= 1 * trr_01x;
+                        gikz -= 1 * trr_02z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        gikz -= 1 * (ai2 * trr_20z - 1 * wt);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_0100y;
+                        gjz = aj2 * hrr_1110z;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_12z;
+                        gkz -= 1 * trr_10z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_1110x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_1120z = trr_22z - zjzi * trr_12z;
+                        gjkz = aj2 * hrr_1120z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjkz -= 1 * (aj2 * hrr_1100z);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+2] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+3)*nao+k0+2];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+2];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+3] * dm[(l0+0)*nao+k0+2];
+                            } else {
+                                int ji = (j0+0)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+2;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_20y * dd;
+                        Iz = trr_01z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_20y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_30y;
+                        giz = ai2 * trr_11z;
+                        giy -= 2 * trr_10y;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_21y;
+                        gkz = ak2 * trr_02z;
+                        gkz -= 1 * wt;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * trr_31y;
+                        gikz = ai2 * trr_12z;
+                        giky -= 2 * trr_11y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        gikz -= 1 * (ai2 * trr_10z);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_2100y;
+                        gjz = aj2 * hrr_0110z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_21y;
+                        gkz = ak2 * trr_02z;
+                        gkz -= 1 * wt;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_2110y;
+                        gjkz = aj2 * hrr_0120z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjkz -= 1 * (aj2 * hrr_0100z);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+2] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+4)*nao+k0+2];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+2];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+4] * dm[(l0+0)*nao+k0+2];
+                            } else {
+                                int ji = (j0+0)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+2;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_10y * dd;
+                        Iz = trr_11z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_21z;
+                        giy -= 1 * 1;
+                        giz -= 1 * trr_01z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_12z;
+                        gkz -= 1 * trr_10z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * trr_21y;
+                        gikz = ai2 * trr_22z;
+                        giky -= 1 * trr_01y;
+                        gikz -= 1 * trr_02z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        gikz -= 1 * (ai2 * trr_20z - 1 * wt);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_1110z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_12z;
+                        gkz -= 1 * trr_10z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_1110y;
+                        gjkz = aj2 * hrr_1120z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjkz -= 1 * (aj2 * hrr_1100z);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+2] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+5)*nao+k0+2];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+2];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+5] * dm[(l0+0)*nao+k0+2];
+                            } else {
+                                int ji = (j0+0)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+2;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_21z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_10y;
+                        giz = ai2 * trr_31z;
+                        giz -= 2 * trr_11z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_22z;
+                        gkz -= 1 * trr_20z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * trr_11y;
+                        double trr_32z = cpz * trr_31z + 1*b01 * trr_30z + 3*b00 * trr_21z;
+                        gikz = ai2 * trr_32z;
+                        gikz -= 2 * trr_12z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        gikz -= 1 * (ai2 * trr_30z - 2 * trr_10z);
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_0100y;
+                        gjz = aj2 * hrr_2110z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_22z;
+                        gkz -= 1 * trr_20z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_2120z = trr_32z - zjzi * trr_22z;
+                        gjkz = aj2 * hrr_2120z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        gjkz -= 1 * (aj2 * hrr_2100z);
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        }
+                        {
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
+                        double rt_aa = rt / (aij + akl);
+                        double rt_akl = rt_aa * aij;
+                        double cpx = xqc + xpq*rt_akl;
+                        double rt_aij = rt_aa * akl;
+                        double c0x = Rpa[0*TILE2+sh_ij] - xpq*rt_aij;
+                        double trr_10x = c0x * fac;
+                        double b10 = .5/aij * (1 - rt_aij);
+                        double trr_20x = c0x * trr_10x + 1*b10 * fac;
+                        double b00 = .5 * rt_aa;
+                        double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+0)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+0] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_21x * dd;
+                        Iy = 1 * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_21x * Iy;
+                        prod_xz = trr_21x * Iz;
+                        prod_yz = 1 * Iz;
+                        double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
+                        double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
+                        gix = ai2 * trr_31x;
+                        double c0y = Rpa[1*TILE2+sh_ij] - ypq*rt_aij;
+                        double trr_10y = c0y * 1;
+                        giy = ai2 * trr_10y;
+                        double c0z = Rpa[2*TILE2+sh_ij] - zpq*rt_aij;
+                        double trr_10z = c0z * wt;
+                        giz = ai2 * trr_10z;
+                        double trr_11x = cpx * trr_10x + 1*b00 * fac;
+                        gix -= 2 * trr_11x;
+                        double b01 = .5/akl * (1 - rt_akl);
+                        double trr_22x = cpx * trr_21x + 1*b01 * trr_20x + 2*b00 * trr_11x;
+                        double hrr_2011x = trr_22x - xlxk * trr_21x;
+                        glx = al2 * hrr_2011x;
+                        double cpy = yqc + ypq*rt_akl;
+                        double trr_01y = cpy * 1;
+                        double hrr_0001y = trr_01y - ylyk * 1;
+                        gly = al2 * hrr_0001y;
+                        double cpz = zqc + zpq*rt_akl;
+                        double trr_01z = cpz * wt;
+                        double hrr_0001z = trr_01z - zlzk * wt;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        double trr_32x = cpx * trr_31x + 1*b01 * trr_30x + 3*b00 * trr_21x;
+                        double hrr_3011x = trr_32x - xlxk * trr_31x;
+                        gilx = ai2 * hrr_3011x;
+                        double trr_11y = cpy * trr_10y + 1*b00 * 1;
+                        double hrr_1001y = trr_11y - ylyk * trr_10y;
+                        gily = ai2 * hrr_1001y;
+                        double trr_11z = cpz * trr_10z + 1*b00 * wt;
+                        double hrr_1001z = trr_11z - zlzk * trr_10z;
+                        gilz = ai2 * hrr_1001z;
+                        double trr_01x = cpx * fac;
+                        double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
+                        double hrr_1011x = trr_12x - xlxk * trr_11x;
+                        gilx -= 2 * hrr_1011x;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_2110x = trr_31x - xjxi * trr_21x;
+                        gjx = aj2 * hrr_2110x;
+                        double hrr_0100y = trr_10y - yjyi * 1;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_0100z = trr_10z - zjzi * wt;
+                        gjz = aj2 * hrr_0100z;
+                        glx = al2 * hrr_2011x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_2111x = hrr_3011x - xjxi * hrr_2011x;
+                        gjlx = aj2 * hrr_2111x;
+                        double hrr_0101y = hrr_1001y - yjyi * hrr_0001y;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_0101z = hrr_1001z - zjzi * hrr_0001z;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+1)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+1] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_11x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_11x * Iy;
+                        prod_xz = trr_11x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_21x;
+                        double trr_20y = c0y * trr_10y + 1*b10 * 1;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_10z;
+                        gix -= 1 * trr_01x;
+                        giy -= 1 * 1;
+                        glx = al2 * hrr_1011x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2011x;
+                        double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
+                        double hrr_2001y = trr_21y - ylyk * trr_20y;
+                        gily = ai2 * hrr_2001y;
+                        gilz = ai2 * hrr_1001z;
+                        double trr_02x = cpx * trr_01x + 1*b01 * fac;
+                        double hrr_0011x = trr_02x - xlxk * trr_01x;
+                        gilx -= 1 * hrr_0011x;
+                        gily -= 1 * hrr_0001y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_1110x = trr_21x - xjxi * trr_11x;
+                        gjx = aj2 * hrr_1110x;
+                        double hrr_1100y = trr_20y - yjyi * trr_10y;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_0100z;
+                        glx = al2 * hrr_1011x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_1111x = hrr_2011x - xjxi * hrr_1011x;
+                        gjlx = aj2 * hrr_1111x;
+                        double hrr_1101y = hrr_2001y - yjyi * hrr_1001y;
+                        gjly = aj2 * hrr_1101y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+2)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+2] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_11x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = trr_11x * Iy;
+                        prod_xz = trr_11x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_21x;
+                        giy = ai2 * trr_10y;
+                        double trr_20z = c0z * trr_10z + 1*b10 * wt;
+                        giz = ai2 * trr_20z;
+                        gix -= 1 * trr_01x;
+                        giz -= 1 * wt;
+                        glx = al2 * hrr_1011x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_1001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2011x;
+                        gily = ai2 * hrr_1001y;
+                        double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
+                        double hrr_2001z = trr_21z - zlzk * trr_20z;
+                        gilz = ai2 * hrr_2001z;
+                        gilx -= 1 * hrr_0011x;
+                        gilz -= 1 * hrr_0001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_1110x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_1100z = trr_20z - zjzi * trr_10z;
+                        gjz = aj2 * hrr_1100z;
+                        glx = al2 * hrr_1011x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_1001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_1111x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_1101z = hrr_2001z - zjzi * hrr_1001z;
+                        gjlz = aj2 * hrr_1101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+3)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+3] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_01x * dd;
+                        Iy = trr_20y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_01x * Iy;
+                        prod_xz = trr_01x * Iz;
+                        prod_yz = trr_20y * Iz;
+                        gix = ai2 * trr_11x;
+                        double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
+                        giy = ai2 * trr_30y;
+                        giz = ai2 * trr_10z;
+                        giy -= 2 * trr_10y;
+                        glx = al2 * hrr_0011x;
+                        gly = al2 * hrr_2001y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1011x;
+                        double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
+                        double hrr_3001y = trr_31y - ylyk * trr_30y;
+                        gily = ai2 * hrr_3001y;
+                        gilz = ai2 * hrr_1001z;
+                        gily -= 2 * hrr_1001y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_0110x = trr_11x - xjxi * trr_01x;
+                        gjx = aj2 * hrr_0110x;
+                        double hrr_2100y = trr_30y - yjyi * trr_20y;
+                        gjy = aj2 * hrr_2100y;
+                        gjz = aj2 * hrr_0100z;
+                        glx = al2 * hrr_0011x;
+                        gly = al2 * hrr_2001y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_0111x = hrr_1011x - xjxi * hrr_0011x;
+                        gjlx = aj2 * hrr_0111x;
+                        double hrr_2101y = hrr_3001y - yjyi * hrr_2001y;
+                        gjly = aj2 * hrr_2101y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+4)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+4] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_01x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = trr_01x * Iy;
+                        prod_xz = trr_01x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_11x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_20z;
+                        giy -= 1 * 1;
+                        giz -= 1 * wt;
+                        glx = al2 * hrr_0011x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_1001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1011x;
+                        gily = ai2 * hrr_2001y;
+                        gilz = ai2 * hrr_2001z;
+                        gily -= 1 * hrr_0001y;
+                        gilz -= 1 * hrr_0001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0110x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_1100z;
+                        glx = al2 * hrr_0011x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_1001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0111x;
+                        gjly = aj2 * hrr_1101y;
+                        gjlz = aj2 * hrr_1101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+5)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+5] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_01x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_20z * dd;
+                        prod_xy = trr_01x * Iy;
+                        prod_xz = trr_01x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_11x;
+                        giy = ai2 * trr_10y;
+                        double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
+                        giz = ai2 * trr_30z;
+                        giz -= 2 * trr_10z;
+                        glx = al2 * hrr_0011x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_2001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1011x;
+                        gily = ai2 * hrr_1001y;
+                        double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
+                        double hrr_3001z = trr_31z - zlzk * trr_30z;
+                        gilz = ai2 * hrr_3001z;
+                        gilz -= 2 * hrr_1001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0110x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_2100z = trr_30z - zjzi * trr_20z;
+                        gjz = aj2 * hrr_2100z;
+                        glx = al2 * hrr_0011x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_2001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0111x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_2101z = hrr_3001z - zjzi * hrr_2001z;
+                        gjlz = aj2 * hrr_2101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+1] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+0)*nao+k0+1];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+1];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+0] * dm[(l0+0)*nao+k0+1];
+                            } else {
+                                int ji = (j0+0)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+1;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_20x * dd;
+                        Iy = trr_01y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_20x * Iy;
+                        prod_xz = trr_20x * Iz;
+                        prod_yz = trr_01y * Iz;
+                        gix = ai2 * trr_30x;
+                        giy = ai2 * trr_11y;
+                        giz = ai2 * trr_10z;
+                        gix -= 2 * trr_10x;
+                        double hrr_2001x = trr_21x - xlxk * trr_20x;
+                        glx = al2 * hrr_2001x;
+                        double trr_02y = cpy * trr_01y + 1*b01 * 1;
+                        double hrr_0011y = trr_02y - ylyk * trr_01y;
+                        gly = al2 * hrr_0011y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        double hrr_3001x = trr_31x - xlxk * trr_30x;
+                        gilx = ai2 * hrr_3001x;
+                        double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
+                        double hrr_1011y = trr_12y - ylyk * trr_11y;
+                        gily = ai2 * hrr_1011y;
+                        gilz = ai2 * hrr_1001z;
+                        double hrr_1001x = trr_11x - xlxk * trr_10x;
+                        gilx -= 2 * hrr_1001x;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_2100x = trr_30x - xjxi * trr_20x;
+                        gjx = aj2 * hrr_2100x;
+                        double hrr_0110y = trr_11y - yjyi * trr_01y;
+                        gjy = aj2 * hrr_0110y;
+                        gjz = aj2 * hrr_0100z;
+                        glx = al2 * hrr_2001x;
+                        gly = al2 * hrr_0011y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_2101x = hrr_3001x - xjxi * hrr_2001x;
+                        gjlx = aj2 * hrr_2101x;
+                        double hrr_0111y = hrr_1011y - yjyi * hrr_0011y;
+                        gjly = aj2 * hrr_0111y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+1] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+1)*nao+k0+1];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+1];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+1] * dm[(l0+0)*nao+k0+1];
+                            } else {
+                                int ji = (j0+0)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+1;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = trr_11y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = trr_11y * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_21y;
+                        giz = ai2 * trr_10z;
+                        gix -= 1 * fac;
+                        giy -= 1 * trr_01y;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_1011y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2001x;
+                        double trr_22y = cpy * trr_21y + 1*b01 * trr_20y + 2*b00 * trr_11y;
+                        double hrr_2011y = trr_22y - ylyk * trr_21y;
+                        gily = ai2 * hrr_2011y;
+                        gilz = ai2 * hrr_1001z;
+                        double hrr_0001x = trr_01x - xlxk * fac;
+                        gilx -= 1 * hrr_0001x;
+                        gily -= 1 * hrr_0011y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_1100x = trr_20x - xjxi * trr_10x;
+                        gjx = aj2 * hrr_1100x;
+                        double hrr_1110y = trr_21y - yjyi * trr_11y;
+                        gjy = aj2 * hrr_1110y;
+                        gjz = aj2 * hrr_0100z;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_1011y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_1101x = hrr_2001x - xjxi * hrr_1001x;
+                        gjlx = aj2 * hrr_1101x;
+                        double hrr_1111y = hrr_2011y - yjyi * hrr_1011y;
+                        gjly = aj2 * hrr_1111y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+1] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+2)*nao+k0+1];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+1];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+2] * dm[(l0+0)*nao+k0+1];
+                            } else {
+                                int ji = (j0+0)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+1;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = trr_01y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = trr_01y * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_11y;
+                        giz = ai2 * trr_20z;
+                        gix -= 1 * fac;
+                        giz -= 1 * wt;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_0011y;
+                        glz = al2 * hrr_1001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2001x;
+                        gily = ai2 * hrr_1011y;
+                        gilz = ai2 * hrr_2001z;
+                        gilx -= 1 * hrr_0001x;
+                        gilz -= 1 * hrr_0001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_0110y;
+                        gjz = aj2 * hrr_1100z;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_0011y;
+                        glz = al2 * hrr_1001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_1101x;
+                        gjly = aj2 * hrr_0111y;
+                        gjlz = aj2 * hrr_1101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+1] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+3)*nao+k0+1];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+1];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+3] * dm[(l0+0)*nao+k0+1];
+                            } else {
+                                int ji = (j0+0)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+1;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_21y * dd;
+                        Iz = wt * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_21y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_31y;
+                        giz = ai2 * trr_10z;
+                        giy -= 2 * trr_11y;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_2011y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        double trr_32y = cpy * trr_31y + 1*b01 * trr_30y + 3*b00 * trr_21y;
+                        double hrr_3011y = trr_32y - ylyk * trr_31y;
+                        gily = ai2 * hrr_3011y;
+                        gilz = ai2 * hrr_1001z;
+                        gily -= 2 * hrr_1011y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_0100x = trr_10x - xjxi * fac;
+                        gjx = aj2 * hrr_0100x;
+                        double hrr_2110y = trr_31y - yjyi * trr_21y;
+                        gjy = aj2 * hrr_2110y;
+                        gjz = aj2 * hrr_0100z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_2011y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_0101x = hrr_1001x - xjxi * hrr_0001x;
+                        gjlx = aj2 * hrr_0101x;
+                        double hrr_2111y = hrr_3011y - yjyi * hrr_2011y;
+                        gjly = aj2 * hrr_2111y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+1] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+4)*nao+k0+1];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+1];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+4] * dm[(l0+0)*nao+k0+1];
+                            } else {
+                                int ji = (j0+0)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+1;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_11y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_11y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_21y;
+                        giz = ai2 * trr_20z;
+                        giy -= 1 * trr_01y;
+                        giz -= 1 * wt;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_1011y;
+                        glz = al2 * hrr_1001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_2011y;
+                        gilz = ai2 * hrr_2001z;
+                        gily -= 1 * hrr_0011y;
+                        gilz -= 1 * hrr_0001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_1110y;
+                        gjz = aj2 * hrr_1100z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_1011y;
+                        glz = al2 * hrr_1001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_1111y;
+                        gjlz = aj2 * hrr_1101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+1] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+5)*nao+k0+1];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+1] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+1];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+5] * dm[(l0+0)*nao+k0+1];
+                            } else {
+                                int ji = (j0+0)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+1;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_01y * dd;
+                        Iz = trr_20z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_01y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_11y;
+                        giz = ai2 * trr_30z;
+                        giz -= 2 * trr_10z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_0011y;
+                        glz = al2 * hrr_2001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_1011y;
+                        gilz = ai2 * hrr_3001z;
+                        gilz -= 2 * hrr_1001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_0110y;
+                        gjz = aj2 * hrr_2100z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_0011y;
+                        glz = al2 * hrr_2001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_0111y;
+                        gjlz = aj2 * hrr_2101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+2] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+0)*nao+k0+2];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+2];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+0] * dm[(l0+0)*nao+k0+2];
+                            } else {
+                                int ji = (j0+0)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+2;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_20x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_01z * dd;
+                        prod_xy = trr_20x * Iy;
+                        prod_xz = trr_20x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_30x;
+                        giy = ai2 * trr_10y;
+                        giz = ai2 * trr_11z;
+                        gix -= 2 * trr_10x;
+                        glx = al2 * hrr_2001x;
+                        gly = al2 * hrr_0001y;
+                        double trr_02z = cpz * trr_01z + 1*b01 * wt;
+                        double hrr_0011z = trr_02z - zlzk * trr_01z;
+                        glz = al2 * hrr_0011z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_3001x;
+                        gily = ai2 * hrr_1001y;
+                        double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
+                        double hrr_1011z = trr_12z - zlzk * trr_11z;
+                        gilz = ai2 * hrr_1011z;
+                        gilx -= 2 * hrr_1001x;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_2100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_0110z = trr_11z - zjzi * trr_01z;
+                        gjz = aj2 * hrr_0110z;
+                        glx = al2 * hrr_2001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_0011z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_2101x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_0111z = hrr_1011z - zjzi * hrr_0011z;
+                        gjlz = aj2 * hrr_0111z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+2] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+1)*nao+k0+2];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+2];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+1] * dm[(l0+0)*nao+k0+2];
+                            } else {
+                                int ji = (j0+0)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+2;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = trr_01z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_11z;
+                        gix -= 1 * fac;
+                        giy -= 1 * 1;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_0011z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2001x;
+                        gily = ai2 * hrr_2001y;
+                        gilz = ai2 * hrr_1011z;
+                        gilx -= 1 * hrr_0001x;
+                        gily -= 1 * hrr_0001y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_0110z;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_0011z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_1101x;
+                        gjly = aj2 * hrr_1101y;
+                        gjlz = aj2 * hrr_0111z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+2] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+2)*nao+k0+2];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+2];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+2] * dm[(l0+0)*nao+k0+2];
+                            } else {
+                                int ji = (j0+0)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+2;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_11z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_10y;
+                        giz = ai2 * trr_21z;
+                        gix -= 1 * fac;
+                        giz -= 1 * trr_01z;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_1011z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2001x;
+                        gily = ai2 * hrr_1001y;
+                        double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
+                        double hrr_2011z = trr_22z - zlzk * trr_21z;
+                        gilz = ai2 * hrr_2011z;
+                        gilx -= 1 * hrr_0001x;
+                        gilz -= 1 * hrr_0011z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_1110z = trr_21z - zjzi * trr_11z;
+                        gjz = aj2 * hrr_1110z;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_1011z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_1101x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_1111z = hrr_2011z - zjzi * hrr_1011z;
+                        gjlz = aj2 * hrr_1111z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+2] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+3)*nao+k0+2];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+2];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+3] * dm[(l0+0)*nao+k0+2];
+                            } else {
+                                int ji = (j0+0)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+2;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_20y * dd;
+                        Iz = trr_01z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_20y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_30y;
+                        giz = ai2 * trr_11z;
+                        giy -= 2 * trr_10y;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_2001y;
+                        glz = al2 * hrr_0011z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_3001y;
+                        gilz = ai2 * hrr_1011z;
+                        gily -= 2 * hrr_1001y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_2100y;
+                        gjz = aj2 * hrr_0110z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_2001y;
+                        glz = al2 * hrr_0011z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_2101y;
+                        gjlz = aj2 * hrr_0111z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+2] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+4)*nao+k0+2];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+2];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+4] * dm[(l0+0)*nao+k0+2];
+                            } else {
+                                int ji = (j0+0)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+2;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_10y * dd;
+                        Iz = trr_11z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_21z;
+                        giy -= 1 * 1;
+                        giz -= 1 * trr_01z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_1011z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_2001y;
+                        gilz = ai2 * hrr_2011z;
+                        gily -= 1 * hrr_0001y;
+                        gilz -= 1 * hrr_0011z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_1110z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_1011z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_1101y;
+                        gjlz = aj2 * hrr_1111z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+2] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+5)*nao+k0+2];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+2] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+2];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+5] * dm[(l0+0)*nao+k0+2];
+                            } else {
+                                int ji = (j0+0)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+2;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_21z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_10y;
+                        giz = ai2 * trr_31z;
+                        giz -= 2 * trr_11z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_2011z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_1001y;
+                        double trr_32z = cpz * trr_31z + 1*b01 * trr_30z + 3*b00 * trr_21z;
+                        double hrr_3011z = trr_32z - zlzk * trr_31z;
+                        gilz = ai2 * hrr_3011z;
+                        gilz -= 2 * hrr_1011z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_2110z = trr_31z - zjzi * trr_21z;
+                        gjz = aj2 * hrr_2110z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_2011z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_2111z = hrr_3011z - zjzi * hrr_2011z;
+                        gjlz = aj2 * hrr_2111z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        }
+                    }
+                }
+            }
+        }
+        if (task_id >= ntasks) {
+            continue;
+        }
+        int ia = bas[ish*BAS_SLOTS+ATOM_OF];
+        int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
+        int ka = bas[ksh*BAS_SLOTS+ATOM_OF];
+        int la = bas[lsh*BAS_SLOTS+ATOM_OF];
+        int natm = envs.natm;
+        double *ejk = jk.ejk;
+        atomicAdd(ejk + (ia*natm+ka)*9 + 0, v_ixkx);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 1, v_ixky);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 2, v_ixkz);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 3, v_iykx);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 4, v_iyky);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 5, v_iykz);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 6, v_izkx);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 7, v_izky);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 8, v_izkz);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 0, v_jxkx);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 1, v_jxky);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 2, v_jxkz);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 3, v_jykx);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 4, v_jyky);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 5, v_jykz);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 6, v_jzkx);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 7, v_jzky);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 8, v_jzkz);
+        atomicAdd(ejk + (ia*natm+la)*9 + 0, v_ixlx);
+        atomicAdd(ejk + (ia*natm+la)*9 + 1, v_ixly);
+        atomicAdd(ejk + (ia*natm+la)*9 + 2, v_ixlz);
+        atomicAdd(ejk + (ia*natm+la)*9 + 3, v_iylx);
+        atomicAdd(ejk + (ia*natm+la)*9 + 4, v_iyly);
+        atomicAdd(ejk + (ia*natm+la)*9 + 5, v_iylz);
+        atomicAdd(ejk + (ia*natm+la)*9 + 6, v_izlx);
+        atomicAdd(ejk + (ia*natm+la)*9 + 7, v_izly);
+        atomicAdd(ejk + (ia*natm+la)*9 + 8, v_izlz);
+        atomicAdd(ejk + (ja*natm+la)*9 + 0, v_jxlx);
+        atomicAdd(ejk + (ja*natm+la)*9 + 1, v_jxly);
+        atomicAdd(ejk + (ja*natm+la)*9 + 2, v_jxlz);
+        atomicAdd(ejk + (ja*natm+la)*9 + 3, v_jylx);
+        atomicAdd(ejk + (ja*natm+la)*9 + 4, v_jyly);
+        atomicAdd(ejk + (ja*natm+la)*9 + 5, v_jylz);
+        atomicAdd(ejk + (ja*natm+la)*9 + 6, v_jzlx);
+        atomicAdd(ejk + (ja*natm+la)*9 + 7, v_jzly);
+        atomicAdd(ejk + (ja*natm+la)*9 + 8, v_jzlz);
+    }
+}
+__global__
+void rys_ejk_ip2_type3_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+                ShellQuartet *pool, uint32_t *batch_head)
+{
+    int b_id = blockIdx.x;
+    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
+    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
+    __shared__ int batch_id;
+    if (t_id == 0) {
+        batch_id = atomicAdd(batch_head, 1);
+    }
+    __syncthreads();
+    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
+    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
+    while (batch_id < nbatches) {
+        int batch_ij = batch_id / nbatches_kl;
+        int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                     batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
+        if (ntasks > 0) {
+            int tile_ij = bounds.tile_ij_mapping[batch_ij];
+            int nbas_tiles = nbas / TILE;
+            int tile_i = tile_ij / nbas_tiles;
+            int tile_j = tile_ij % nbas_tiles;
+            int ish0 = tile_i * TILE;
+            int jsh0 = tile_j * TILE;
+            _rys_ejk_ip2_type3_2010(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+        }
+        if (t_id == 0) {
+            batch_id = atomicAdd(batch_head, 1);
+            atomicAdd(batch_head+1, ntasks);
+        }
+        __syncthreads();
+    }
+}
+
+__device__ static
+void _rys_ejk_ip2_type3_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+{
+    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
+    int nsq_per_block = blockDim.x * blockDim.y;
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    int kprim = bounds.kprim;
+    int lprim = bounds.lprim;
+    int *ao_loc = envs.ao_loc;
+    int nbas = envs.nbas;
+    int nao = ao_loc[nbas];
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double omega = env[PTR_RANGE_OMEGA];
+    int do_j = jk.j_factor != 0.;
+    int do_k = jk.k_factor != 0.;
+    double *dm = jk.dm;
+    extern __shared__ double Rpa_cicj[];
+    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
+        int ijp = n / TILE2;
+        int sh_ij = n % TILE2;
+        int ish = ish0 + sh_ij / TILE;
+        int jsh = jsh0 + sh_ij % TILE;
+        int ip = ijp / jprim;
+        int jp = ijp % jprim;
+        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double ai = expi[ip];
+        double aj = expj[jp];
+        double aij = ai + aj;
+        double aj_aij = aj / aij;
+        double xjxi = rj[0] - ri[0];
+        double yjyi = rj[1] - ri[1];
+        double zjzi = rj[2] - ri[2];
+        double *Rpa = Rpa_cicj + ijp * TILE2*4;
+        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
+        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
+        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
+        double theta_ij = ai * aj_aij;
+        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
+        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+    }
+
+    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+        __syncthreads();
+        int task_id = task0 + sq_id;
+        double fac_sym = PI_FAC;
+        ShellQuartet sq;
+        if (task_id >= ntasks) {
+            // To avoid __syncthreads blocking blocking idle warps, all remaining
+            // threads compute a valid shell quartet with zero normalization factor
+            sq = shl_quartet_idx[0];
+            fac_sym = 0.;
+        } else {
+            sq = shl_quartet_idx[task_id];
+        }
+        int ish = sq.i;
+        int jsh = sq.j;
+        int ksh = sq.k;
+        int lsh = sq.l;
+        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
+        if (ish == jsh) fac_sym *= .5;
+        if (ksh == lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        int i0 = ao_loc[ish];
+        int j0 = ao_loc[jsh];
+        int k0 = ao_loc[ksh];
+        int l0 = ao_loc[lsh];
+        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
+        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
+        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double dd;
+        double Ix, Iy, Iz, prod_xy, prod_xz, prod_yz;
+        double gix, giy, giz;
+        double gjx, gjy, gjz;
+        double gkx, gky, gkz;
+        double glx, gly, glz;
+        double gikx, giky, gikz;
+        double gjkx, gjky, gjkz;
+        double gilx, gily, gilz;
+        double gjlx, gjly, gjlz;
+        double v_ixkx = 0;
+        double v_ixky = 0;
+        double v_ixkz = 0;
+        double v_iykx = 0;
+        double v_iyky = 0;
+        double v_iykz = 0;
+        double v_izkx = 0;
+        double v_izky = 0;
+        double v_izkz = 0;
+        double v_jxkx = 0;
+        double v_jxky = 0;
+        double v_jxkz = 0;
+        double v_jykx = 0;
+        double v_jyky = 0;
+        double v_jykz = 0;
+        double v_jzkx = 0;
+        double v_jzky = 0;
+        double v_jzkz = 0;
+        double v_ixlx = 0;
+        double v_ixly = 0;
+        double v_ixlz = 0;
+        double v_iylx = 0;
+        double v_iyly = 0;
+        double v_iylz = 0;
+        double v_izlx = 0;
+        double v_izly = 0;
+        double v_izlz = 0;
+        double v_jxlx = 0;
+        double v_jxly = 0;
+        double v_jxlz = 0;
+        double v_jylx = 0;
+        double v_jyly = 0;
+        double v_jylz = 0;
+        double v_jzlx = 0;
+        double v_jzly = 0;
+        double v_jzlz = 0;
+        
+        for (int klp = 0; klp < kprim*lprim; ++klp) {
+            int kp = klp / lprim;
+            int lp = klp % lprim;
+            double ak = expk[kp];
+            double al = expl[lp];
+            double ak2 = ak * 2;
+            double al2 = al * 2;
+            double akl = ak + al;
+            double al_akl = al / akl;
+            double xlxk = rl[0] - rk[0];
+            double ylyk = rl[1] - rk[1];
+            double zlzk = rl[2] - rk[2];
+            double theta_kl = ak * al_akl;
+            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            double xqc = xlxk * al_akl;
+            double yqc = ylyk * al_akl;
+            double zqc = zlzk * al_akl;
+            double xkl = rk[0] + xqc;
+            double ykl = rk[1] + yqc;
+            double zkl = rk[2] + zqc;
+            for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double ai2 = ai * 2;
+                double aj2 = aj * 2;
+                double aij = ai + aj;
+                double *Rpa = Rpa_cicj + ijp * TILE2*4;
+                double cicj = Rpa[sh_ij+3*TILE2];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                double xpa = Rpa[sh_ij+0*TILE2];
+                double ypa = Rpa[sh_ij+1*TILE2];
+                double zpa = Rpa[sh_ij+2*TILE2];
+                double xij = ri[0] + xpa; // (ai*xi+aj*xj)/aij
+                double yij = ri[1] + ypa;
+                double zij = ri[2] + zpa;
+                double xjxi = rj[0] - ri[0];
+                double yjyi = rj[1] - ri[1];
+                double zjzi = rj[2] - ri[2];
+                double xpq = xij - xkl;
+                double ypq = yij - ykl;
+                double zpq = zij - zkl;
+                double theta = aij * akl / (aij + akl);
+                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+                double theta_rr = theta * rr;
+                if (omega == 0) {
+                    rys_roots(3, theta_rr, rw, nsq_per_block, 0, 1);
+                } else if (omega > 0) {
+                    double theta_fac = omega * omega / (omega * omega + theta);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
+                    fac *= sqrt(theta_fac);
+                    for (int irys = 0; irys < 3; ++irys) {
+                        rw[irys*2   *nsq_per_block] *= theta_fac;
+                    }
+                } else {
+                    double *rw1 = rw + 6*nsq_per_block;
+                    rys_roots(3, theta_rr, rw1, nsq_per_block, 0, 1);
+                    double theta_fac = omega * omega / (omega * omega + theta);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
+                    double sqrt_theta_fac = -sqrt(theta_fac);
+                    for (int irys = 0; irys < 3; ++irys) {
+                        rw[ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
+                    }
+                }
+                if (task_id < ntasks) {
+                    for (int irys = 0; irys < bounds.nroots; ++irys) {
+                        {
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
+                        double rt_aa = rt / (aij + akl);
+                        double rt_aij = rt_aa * akl;
+                        double c0x = Rpa[0*TILE2+sh_ij] - xpq*rt_aij;
+                        double trr_10x = c0x * fac;
+                        double b10 = .5/aij * (1 - rt_aij);
+                        double trr_20x = c0x * trr_10x + 1*b10 * fac;
+                        double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
+                        double hrr_2100x = trr_30x - xjxi * trr_20x;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+0)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+0] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = hrr_2100x * dd;
+                        Iy = 1 * dd;
+                        Iz = wt * dd;
+                        prod_xy = hrr_2100x * Iy;
+                        prod_xz = hrr_2100x * Iz;
+                        prod_yz = 1 * Iz;
+                        double trr_40x = c0x * trr_30x + 3*b10 * trr_20x;
+                        double hrr_3100x = trr_40x - xjxi * trr_30x;
+                        gix = ai2 * hrr_3100x;
+                        double c0y = Rpa[1*TILE2+sh_ij] - ypq*rt_aij;
+                        double trr_10y = c0y * 1;
+                        giy = ai2 * trr_10y;
+                        double c0z = Rpa[2*TILE2+sh_ij] - zpq*rt_aij;
+                        double trr_10z = c0z * wt;
+                        giz = ai2 * trr_10z;
+                        double hrr_1100x = trr_20x - xjxi * trr_10x;
+                        gix -= 2 * hrr_1100x;
+                        double rt_akl = rt_aa * aij;
+                        double cpx = xqc + xpq*rt_akl;
+                        double b00 = .5 * rt_aa;
+                        double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
+                        double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
+                        double hrr_2110x = trr_31x - xjxi * trr_21x;
+                        gkx = ak2 * hrr_2110x;
+                        double cpy = yqc + ypq*rt_akl;
+                        double trr_01y = cpy * 1;
+                        gky = ak2 * trr_01y;
+                        double cpz = zqc + zpq*rt_akl;
+                        double trr_01z = cpz * wt;
+                        gkz = ak2 * trr_01z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        double trr_41x = cpx * trr_40x + 4*b00 * trr_30x;
+                        double hrr_3110x = trr_41x - xjxi * trr_31x;
+                        gikx = ai2 * hrr_3110x;
+                        double trr_11y = cpy * trr_10y + 1*b00 * 1;
+                        giky = ai2 * trr_11y;
+                        double trr_11z = cpz * trr_10z + 1*b00 * wt;
+                        gikz = ai2 * trr_11z;
+                        double trr_11x = cpx * trr_10x + 1*b00 * fac;
+                        double hrr_1110x = trr_21x - xjxi * trr_11x;
+                        gikx -= 2 * hrr_1110x;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        double hrr_2200x = hrr_3100x - xjxi * hrr_2100x;
+                        gjx = aj2 * hrr_2200x;
+                        double hrr_0100y = trr_10y - yjyi * 1;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_0100z = trr_10z - zjzi * wt;
+                        gjz = aj2 * hrr_0100z;
+                        gjx -= 1 * trr_20x;
+                        gkx = ak2 * hrr_2110x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_01z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        double hrr_2210x = hrr_3110x - xjxi * hrr_2110x;
+                        gjkx = aj2 * hrr_2210x;
+                        double hrr_0110y = trr_11y - yjyi * trr_01y;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_0110z = trr_11z - zjzi * trr_01z;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx -= 1 * trr_21x;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+1)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+1] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = hrr_1100x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = wt * dd;
+                        prod_xy = hrr_1100x * Iy;
+                        prod_xz = hrr_1100x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * hrr_2100x;
+                        double trr_20y = c0y * trr_10y + 1*b10 * 1;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_10z;
+                        double hrr_0100x = trr_10x - xjxi * fac;
+                        gix -= 1 * hrr_0100x;
+                        giy -= 1 * 1;
+                        gkx = ak2 * hrr_1110x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_01z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * hrr_2110x;
+                        double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
+                        giky = ai2 * trr_21y;
+                        gikz = ai2 * trr_11z;
+                        double trr_01x = cpx * fac;
+                        double hrr_0110x = trr_11x - xjxi * trr_01x;
+                        gikx -= 1 * hrr_0110x;
+                        giky -= 1 * trr_01y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        double hrr_1200x = hrr_2100x - xjxi * hrr_1100x;
+                        gjx = aj2 * hrr_1200x;
+                        double hrr_1100y = trr_20y - yjyi * trr_10y;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_0100z;
+                        gjx -= 1 * trr_10x;
+                        gkx = ak2 * hrr_1110x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_01z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        double hrr_1210x = hrr_2110x - xjxi * hrr_1110x;
+                        gjkx = aj2 * hrr_1210x;
+                        double hrr_1110y = trr_21y - yjyi * trr_11y;
+                        gjky = aj2 * hrr_1110y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx -= 1 * trr_11x;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+2)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+2] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = hrr_1100x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = hrr_1100x * Iy;
+                        prod_xz = hrr_1100x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * hrr_2100x;
+                        giy = ai2 * trr_10y;
+                        double trr_20z = c0z * trr_10z + 1*b10 * wt;
+                        giz = ai2 * trr_20z;
+                        gix -= 1 * hrr_0100x;
+                        giz -= 1 * wt;
+                        gkx = ak2 * hrr_1110x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_11z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * hrr_2110x;
+                        giky = ai2 * trr_11y;
+                        double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
+                        gikz = ai2 * trr_21z;
+                        gikx -= 1 * hrr_0110x;
+                        gikz -= 1 * trr_01z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_1200x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_1100z = trr_20z - zjzi * trr_10z;
+                        gjz = aj2 * hrr_1100z;
+                        gjx -= 1 * trr_10x;
+                        gkx = ak2 * hrr_1110x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_11z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_1210x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_1110z = trr_21z - zjzi * trr_11z;
+                        gjkz = aj2 * hrr_1110z;
+                        gjkx -= 1 * trr_11x;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+3)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+3] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = hrr_0100x * dd;
+                        Iy = trr_20y * dd;
+                        Iz = wt * dd;
+                        prod_xy = hrr_0100x * Iy;
+                        prod_xz = hrr_0100x * Iz;
+                        prod_yz = trr_20y * Iz;
+                        gix = ai2 * hrr_1100x;
+                        double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
+                        giy = ai2 * trr_30y;
+                        giz = ai2 * trr_10z;
+                        giy -= 2 * trr_10y;
+                        gkx = ak2 * hrr_0110x;
+                        gky = ak2 * trr_21y;
+                        gkz = ak2 * trr_01z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * hrr_1110x;
+                        double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
+                        giky = ai2 * trr_31y;
+                        gikz = ai2 * trr_11z;
+                        giky -= 2 * trr_11y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        double hrr_0200x = hrr_1100x - xjxi * hrr_0100x;
+                        gjx = aj2 * hrr_0200x;
+                        double hrr_2100y = trr_30y - yjyi * trr_20y;
+                        gjy = aj2 * hrr_2100y;
+                        gjz = aj2 * hrr_0100z;
+                        gjx -= 1 * fac;
+                        gkx = ak2 * hrr_0110x;
+                        gky = ak2 * trr_21y;
+                        gkz = ak2 * trr_01z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        double hrr_0210x = hrr_1110x - xjxi * hrr_0110x;
+                        gjkx = aj2 * hrr_0210x;
+                        double hrr_2110y = trr_31y - yjyi * trr_21y;
+                        gjky = aj2 * hrr_2110y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx -= 1 * trr_01x;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+4)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+4] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = hrr_0100x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = hrr_0100x * Iy;
+                        prod_xz = hrr_0100x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * hrr_1100x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_20z;
+                        giy -= 1 * 1;
+                        giz -= 1 * wt;
+                        gkx = ak2 * hrr_0110x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_11z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * hrr_1110x;
+                        giky = ai2 * trr_21y;
+                        gikz = ai2 * trr_21z;
+                        giky -= 1 * trr_01y;
+                        gikz -= 1 * trr_01z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0200x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_1100z;
+                        gjx -= 1 * fac;
+                        gkx = ak2 * hrr_0110x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_11z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0210x;
+                        gjky = aj2 * hrr_1110y;
+                        gjkz = aj2 * hrr_1110z;
+                        gjkx -= 1 * trr_01x;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+5)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+5] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = hrr_0100x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_20z * dd;
+                        prod_xy = hrr_0100x * Iy;
+                        prod_xz = hrr_0100x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * hrr_1100x;
+                        giy = ai2 * trr_10y;
+                        double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
+                        giz = ai2 * trr_30z;
+                        giz -= 2 * trr_10z;
+                        gkx = ak2 * hrr_0110x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_21z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * hrr_1110x;
+                        giky = ai2 * trr_11y;
+                        double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
+                        gikz = ai2 * trr_31z;
+                        gikz -= 2 * trr_11z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0200x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_2100z = trr_30z - zjzi * trr_20z;
+                        gjz = aj2 * hrr_2100z;
+                        gjx -= 1 * fac;
+                        gkx = ak2 * hrr_0110x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_21z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0210x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_2110z = trr_31z - zjzi * trr_21z;
+                        gjkz = aj2 * hrr_2110z;
+                        gjkx -= 1 * trr_01x;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+1)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+1)*nao+l0+0] * dm[(i0+0)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+1)*nao+i0+0] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+1)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_20x * dd;
+                        Iy = hrr_0100y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_20x * Iy;
+                        prod_xz = trr_20x * Iz;
+                        prod_yz = hrr_0100y * Iz;
+                        gix = ai2 * trr_30x;
+                        giy = ai2 * hrr_1100y;
+                        giz = ai2 * trr_10z;
+                        gix -= 2 * trr_10x;
+                        gkx = ak2 * trr_21x;
+                        gky = ak2 * hrr_0110y;
+                        gkz = ak2 * trr_01z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_31x;
+                        giky = ai2 * hrr_1110y;
+                        gikz = ai2 * trr_11z;
+                        gikx -= 2 * trr_11x;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_2100x;
+                        double hrr_0200y = hrr_1100y - yjyi * hrr_0100y;
+                        gjy = aj2 * hrr_0200y;
+                        gjz = aj2 * hrr_0100z;
+                        gjy -= 1 * 1;
+                        gkx = ak2 * trr_21x;
+                        gky = ak2 * hrr_0110y;
+                        gkz = ak2 * trr_01z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_2110x;
+                        double hrr_0210y = hrr_1110y - yjyi * hrr_0110y;
+                        gjky = aj2 * hrr_0210y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjky -= 1 * trr_01y;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+1)*nao+k0+0] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+1)*nao+l0+0] * dm[(i0+1)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+1)*nao+i0+1] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+1)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = hrr_1100y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = hrr_1100y * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * hrr_2100y;
+                        giz = ai2 * trr_10z;
+                        gix -= 1 * fac;
+                        giy -= 1 * hrr_0100y;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * hrr_1110y;
+                        gkz = ak2 * trr_01z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_21x;
+                        giky = ai2 * hrr_2110y;
+                        gikz = ai2 * trr_11z;
+                        gikx -= 1 * trr_01x;
+                        giky -= 1 * hrr_0110y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        double hrr_1200y = hrr_2100y - yjyi * hrr_1100y;
+                        gjy = aj2 * hrr_1200y;
+                        gjz = aj2 * hrr_0100z;
+                        gjy -= 1 * trr_10y;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * hrr_1110y;
+                        gkz = ak2 * trr_01z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_1110x;
+                        double hrr_1210y = hrr_2110y - yjyi * hrr_1110y;
+                        gjky = aj2 * hrr_1210y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjky -= 1 * trr_11y;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+1)*nao+k0+0] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+1)*nao+l0+0] * dm[(i0+2)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+1)*nao+i0+2] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+1)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = hrr_0100y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = hrr_0100y * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * hrr_1100y;
+                        giz = ai2 * trr_20z;
+                        gix -= 1 * fac;
+                        giz -= 1 * wt;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * hrr_0110y;
+                        gkz = ak2 * trr_11z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_21x;
+                        giky = ai2 * hrr_1110y;
+                        gikz = ai2 * trr_21z;
+                        gikx -= 1 * trr_01x;
+                        gikz -= 1 * trr_01z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_0200y;
+                        gjz = aj2 * hrr_1100z;
+                        gjy -= 1 * 1;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * hrr_0110y;
+                        gkz = ak2 * trr_11z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_1110x;
+                        gjky = aj2 * hrr_0210y;
+                        gjkz = aj2 * hrr_1110z;
+                        gjky -= 1 * trr_01y;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+1)*nao+k0+0] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+1)*nao+l0+0] * dm[(i0+3)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+1)*nao+i0+3] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+1)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = hrr_2100y * dd;
+                        Iz = wt * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = hrr_2100y * Iz;
+                        gix = ai2 * trr_10x;
+                        double trr_40y = c0y * trr_30y + 3*b10 * trr_20y;
+                        double hrr_3100y = trr_40y - yjyi * trr_30y;
+                        giy = ai2 * hrr_3100y;
+                        giz = ai2 * trr_10z;
+                        giy -= 2 * hrr_1100y;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * hrr_2110y;
+                        gkz = ak2 * trr_01z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        double trr_41y = cpy * trr_40y + 4*b00 * trr_30y;
+                        double hrr_3110y = trr_41y - yjyi * trr_31y;
+                        giky = ai2 * hrr_3110y;
+                        gikz = ai2 * trr_11z;
+                        giky -= 2 * hrr_1110y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        double hrr_2200y = hrr_3100y - yjyi * hrr_2100y;
+                        gjy = aj2 * hrr_2200y;
+                        gjz = aj2 * hrr_0100z;
+                        gjy -= 1 * trr_20y;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * hrr_2110y;
+                        gkz = ak2 * trr_01z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        double hrr_2210y = hrr_3110y - yjyi * hrr_2110y;
+                        gjky = aj2 * hrr_2210y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjky -= 1 * trr_21y;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+1)*nao+k0+0] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+1)*nao+l0+0] * dm[(i0+4)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+1)*nao+i0+4] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+1)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = hrr_1100y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = hrr_1100y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * hrr_2100y;
+                        giz = ai2 * trr_20z;
+                        giy -= 1 * hrr_0100y;
+                        giz -= 1 * wt;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * hrr_1110y;
+                        gkz = ak2 * trr_11z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * hrr_2110y;
+                        gikz = ai2 * trr_21z;
+                        giky -= 1 * hrr_0110y;
+                        gikz -= 1 * trr_01z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_1200y;
+                        gjz = aj2 * hrr_1100z;
+                        gjy -= 1 * trr_10y;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * hrr_1110y;
+                        gkz = ak2 * trr_11z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_1210y;
+                        gjkz = aj2 * hrr_1110z;
+                        gjky -= 1 * trr_11y;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+1)*nao+k0+0] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+1)*nao+l0+0] * dm[(i0+5)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+1)*nao+i0+5] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+1)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = hrr_0100y * dd;
+                        Iz = trr_20z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = hrr_0100y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * hrr_1100y;
+                        giz = ai2 * trr_30z;
+                        giz -= 2 * trr_10z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * hrr_0110y;
+                        gkz = ak2 * trr_21z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * hrr_1110y;
+                        gikz = ai2 * trr_31z;
+                        gikz -= 2 * trr_11z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_0200y;
+                        gjz = aj2 * hrr_2100z;
+                        gjy -= 1 * 1;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * hrr_0110y;
+                        gkz = ak2 * trr_21z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_0210y;
+                        gjkz = aj2 * hrr_2110z;
+                        gjky -= 1 * trr_01y;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+2)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+2)*nao+l0+0] * dm[(i0+0)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+2)*nao+i0+0] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+2)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_20x * dd;
+                        Iy = 1 * dd;
+                        Iz = hrr_0100z * dd;
+                        prod_xy = trr_20x * Iy;
+                        prod_xz = trr_20x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_30x;
+                        giy = ai2 * trr_10y;
+                        giz = ai2 * hrr_1100z;
+                        gix -= 2 * trr_10x;
+                        gkx = ak2 * trr_21x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * hrr_0110z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_31x;
+                        giky = ai2 * trr_11y;
+                        gikz = ai2 * hrr_1110z;
+                        gikx -= 2 * trr_11x;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_2100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_0200z = hrr_1100z - zjzi * hrr_0100z;
+                        gjz = aj2 * hrr_0200z;
+                        gjz -= 1 * wt;
+                        gkx = ak2 * trr_21x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * hrr_0110z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_2110x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_0210z = hrr_1110z - zjzi * hrr_0110z;
+                        gjkz = aj2 * hrr_0210z;
+                        gjkz -= 1 * trr_01z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+2)*nao+k0+0] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+2)*nao+l0+0] * dm[(i0+1)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+2)*nao+i0+1] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+2)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = hrr_0100z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * hrr_1100z;
+                        gix -= 1 * fac;
+                        giy -= 1 * 1;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * hrr_0110z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_21x;
+                        giky = ai2 * trr_21y;
+                        gikz = ai2 * hrr_1110z;
+                        gikx -= 1 * trr_01x;
+                        giky -= 1 * trr_01y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_0200z;
+                        gjz -= 1 * wt;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * hrr_0110z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_1110x;
+                        gjky = aj2 * hrr_1110y;
+                        gjkz = aj2 * hrr_0210z;
+                        gjkz -= 1 * trr_01z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+2)*nao+k0+0] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+2)*nao+l0+0] * dm[(i0+2)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+2)*nao+i0+2] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+2)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = 1 * dd;
+                        Iz = hrr_1100z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_10y;
+                        giz = ai2 * hrr_2100z;
+                        gix -= 1 * fac;
+                        giz -= 1 * hrr_0100z;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * hrr_1110z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_21x;
+                        giky = ai2 * trr_11y;
+                        gikz = ai2 * hrr_2110z;
+                        gikx -= 1 * trr_01x;
+                        gikz -= 1 * hrr_0110z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_1200z = hrr_2100z - zjzi * hrr_1100z;
+                        gjz = aj2 * hrr_1200z;
+                        gjz -= 1 * trr_10z;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * hrr_1110z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_1110x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_1210z = hrr_2110z - zjzi * hrr_1110z;
+                        gjkz = aj2 * hrr_1210z;
+                        gjkz -= 1 * trr_11z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+2)*nao+k0+0] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+2)*nao+l0+0] * dm[(i0+3)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+2)*nao+i0+3] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+2)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_20y * dd;
+                        Iz = hrr_0100z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_20y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_30y;
+                        giz = ai2 * hrr_1100z;
+                        giy -= 2 * trr_10y;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_21y;
+                        gkz = ak2 * hrr_0110z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * trr_31y;
+                        gikz = ai2 * hrr_1110z;
+                        giky -= 2 * trr_11y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_2100y;
+                        gjz = aj2 * hrr_0200z;
+                        gjz -= 1 * wt;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_21y;
+                        gkz = ak2 * hrr_0110z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_2110y;
+                        gjkz = aj2 * hrr_0210z;
+                        gjkz -= 1 * trr_01z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+2)*nao+k0+0] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+2)*nao+l0+0] * dm[(i0+4)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+2)*nao+i0+4] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+2)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_10y * dd;
+                        Iz = hrr_1100z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * hrr_2100z;
+                        giy -= 1 * 1;
+                        giz -= 1 * hrr_0100z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * hrr_1110z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * trr_21y;
+                        gikz = ai2 * hrr_2110z;
+                        giky -= 1 * trr_01y;
+                        gikz -= 1 * hrr_0110z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_1200z;
+                        gjz -= 1 * trr_10z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * hrr_1110z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_1110y;
+                        gjkz = aj2 * hrr_1210z;
+                        gjkz -= 1 * trr_11z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+2)*nao+k0+0] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+2)*nao+l0+0] * dm[(i0+5)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+2)*nao+i0+5] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+2)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = 1 * dd;
+                        Iz = hrr_2100z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_10y;
+                        double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
+                        double hrr_3100z = trr_40z - zjzi * trr_30z;
+                        giz = ai2 * hrr_3100z;
+                        giz -= 2 * hrr_1100z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * hrr_2110z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * trr_11y;
+                        double trr_41z = cpz * trr_40z + 4*b00 * trr_30z;
+                        double hrr_3110z = trr_41z - zjzi * trr_31z;
+                        gikz = ai2 * hrr_3110z;
+                        gikz -= 2 * hrr_1110z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_2200z = hrr_3100z - zjzi * hrr_2100z;
+                        gjz = aj2 * hrr_2200z;
+                        gjz -= 1 * trr_20z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * hrr_2110z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_2210z = hrr_3110z - zjzi * hrr_2110z;
+                        gjkz = aj2 * hrr_2210z;
+                        gjkz -= 1 * trr_21z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        }
+                        {
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
+                        double rt_aa = rt / (aij + akl);
+                        double rt_aij = rt_aa * akl;
+                        double c0x = Rpa[0*TILE2+sh_ij] - xpq*rt_aij;
+                        double trr_10x = c0x * fac;
+                        double b10 = .5/aij * (1 - rt_aij);
+                        double trr_20x = c0x * trr_10x + 1*b10 * fac;
+                        double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
+                        double hrr_2100x = trr_30x - xjxi * trr_20x;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+0)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+0] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = hrr_2100x * dd;
+                        Iy = 1 * dd;
+                        Iz = wt * dd;
+                        prod_xy = hrr_2100x * Iy;
+                        prod_xz = hrr_2100x * Iz;
+                        prod_yz = 1 * Iz;
+                        double trr_40x = c0x * trr_30x + 3*b10 * trr_20x;
+                        double hrr_3100x = trr_40x - xjxi * trr_30x;
+                        gix = ai2 * hrr_3100x;
+                        double c0y = Rpa[1*TILE2+sh_ij] - ypq*rt_aij;
+                        double trr_10y = c0y * 1;
+                        giy = ai2 * trr_10y;
+                        double c0z = Rpa[2*TILE2+sh_ij] - zpq*rt_aij;
+                        double trr_10z = c0z * wt;
+                        giz = ai2 * trr_10z;
+                        double hrr_1100x = trr_20x - xjxi * trr_10x;
+                        gix -= 2 * hrr_1100x;
+                        double rt_akl = rt_aa * aij;
+                        double cpx = xqc + xpq*rt_akl;
+                        double b00 = .5 * rt_aa;
+                        double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
+                        double hrr_3001x = trr_31x - xlxk * trr_30x;
+                        double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
+                        double hrr_2001x = trr_21x - xlxk * trr_20x;
+                        double hrr_2101x = hrr_3001x - xjxi * hrr_2001x;
+                        glx = al2 * hrr_2101x;
+                        double cpy = yqc + ypq*rt_akl;
+                        double trr_01y = cpy * 1;
+                        double hrr_0001y = trr_01y - ylyk * 1;
+                        gly = al2 * hrr_0001y;
+                        double cpz = zqc + zpq*rt_akl;
+                        double trr_01z = cpz * wt;
+                        double hrr_0001z = trr_01z - zlzk * wt;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        double trr_41x = cpx * trr_40x + 4*b00 * trr_30x;
+                        double hrr_4001x = trr_41x - xlxk * trr_40x;
+                        double hrr_3101x = hrr_4001x - xjxi * hrr_3001x;
+                        gilx = ai2 * hrr_3101x;
+                        double trr_11y = cpy * trr_10y + 1*b00 * 1;
+                        double hrr_1001y = trr_11y - ylyk * trr_10y;
+                        gily = ai2 * hrr_1001y;
+                        double trr_11z = cpz * trr_10z + 1*b00 * wt;
+                        double hrr_1001z = trr_11z - zlzk * trr_10z;
+                        gilz = ai2 * hrr_1001z;
+                        double trr_11x = cpx * trr_10x + 1*b00 * fac;
+                        double hrr_1001x = trr_11x - xlxk * trr_10x;
+                        double hrr_1101x = hrr_2001x - xjxi * hrr_1001x;
+                        gilx -= 2 * hrr_1101x;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_2200x = hrr_3100x - xjxi * hrr_2100x;
+                        gjx = aj2 * hrr_2200x;
+                        double hrr_0100y = trr_10y - yjyi * 1;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_0100z = trr_10z - zjzi * wt;
+                        gjz = aj2 * hrr_0100z;
+                        gjx -= 1 * trr_20x;
+                        glx = al2 * hrr_2101x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_2201x = hrr_3101x - xjxi * hrr_2101x;
+                        gjlx = aj2 * hrr_2201x;
+                        double hrr_0101y = hrr_1001y - yjyi * hrr_0001y;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_0101z = hrr_1001z - zjzi * hrr_0001z;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx -= 1 * hrr_2001x;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+1)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+1] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = hrr_1100x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = wt * dd;
+                        prod_xy = hrr_1100x * Iy;
+                        prod_xz = hrr_1100x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * hrr_2100x;
+                        double trr_20y = c0y * trr_10y + 1*b10 * 1;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_10z;
+                        double hrr_0100x = trr_10x - xjxi * fac;
+                        gix -= 1 * hrr_0100x;
+                        giy -= 1 * 1;
+                        glx = al2 * hrr_1101x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2101x;
+                        double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
+                        double hrr_2001y = trr_21y - ylyk * trr_20y;
+                        gily = ai2 * hrr_2001y;
+                        gilz = ai2 * hrr_1001z;
+                        double trr_01x = cpx * fac;
+                        double hrr_0001x = trr_01x - xlxk * fac;
+                        double hrr_0101x = hrr_1001x - xjxi * hrr_0001x;
+                        gilx -= 1 * hrr_0101x;
+                        gily -= 1 * hrr_0001y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_1200x = hrr_2100x - xjxi * hrr_1100x;
+                        gjx = aj2 * hrr_1200x;
+                        double hrr_1100y = trr_20y - yjyi * trr_10y;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_0100z;
+                        gjx -= 1 * trr_10x;
+                        glx = al2 * hrr_1101x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_1201x = hrr_2101x - xjxi * hrr_1101x;
+                        gjlx = aj2 * hrr_1201x;
+                        double hrr_1101y = hrr_2001y - yjyi * hrr_1001y;
+                        gjly = aj2 * hrr_1101y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx -= 1 * hrr_1001x;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+2)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+2] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = hrr_1100x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = hrr_1100x * Iy;
+                        prod_xz = hrr_1100x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * hrr_2100x;
+                        giy = ai2 * trr_10y;
+                        double trr_20z = c0z * trr_10z + 1*b10 * wt;
+                        giz = ai2 * trr_20z;
+                        gix -= 1 * hrr_0100x;
+                        giz -= 1 * wt;
+                        glx = al2 * hrr_1101x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_1001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2101x;
+                        gily = ai2 * hrr_1001y;
+                        double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
+                        double hrr_2001z = trr_21z - zlzk * trr_20z;
+                        gilz = ai2 * hrr_2001z;
+                        gilx -= 1 * hrr_0101x;
+                        gilz -= 1 * hrr_0001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_1200x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_1100z = trr_20z - zjzi * trr_10z;
+                        gjz = aj2 * hrr_1100z;
+                        gjx -= 1 * trr_10x;
+                        glx = al2 * hrr_1101x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_1001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_1201x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_1101z = hrr_2001z - zjzi * hrr_1001z;
+                        gjlz = aj2 * hrr_1101z;
+                        gjlx -= 1 * hrr_1001x;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+3)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+3] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = hrr_0100x * dd;
+                        Iy = trr_20y * dd;
+                        Iz = wt * dd;
+                        prod_xy = hrr_0100x * Iy;
+                        prod_xz = hrr_0100x * Iz;
+                        prod_yz = trr_20y * Iz;
+                        gix = ai2 * hrr_1100x;
+                        double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
+                        giy = ai2 * trr_30y;
+                        giz = ai2 * trr_10z;
+                        giy -= 2 * trr_10y;
+                        glx = al2 * hrr_0101x;
+                        gly = al2 * hrr_2001y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1101x;
+                        double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
+                        double hrr_3001y = trr_31y - ylyk * trr_30y;
+                        gily = ai2 * hrr_3001y;
+                        gilz = ai2 * hrr_1001z;
+                        gily -= 2 * hrr_1001y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_0200x = hrr_1100x - xjxi * hrr_0100x;
+                        gjx = aj2 * hrr_0200x;
+                        double hrr_2100y = trr_30y - yjyi * trr_20y;
+                        gjy = aj2 * hrr_2100y;
+                        gjz = aj2 * hrr_0100z;
+                        gjx -= 1 * fac;
+                        glx = al2 * hrr_0101x;
+                        gly = al2 * hrr_2001y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_0201x = hrr_1101x - xjxi * hrr_0101x;
+                        gjlx = aj2 * hrr_0201x;
+                        double hrr_2101y = hrr_3001y - yjyi * hrr_2001y;
+                        gjly = aj2 * hrr_2101y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx -= 1 * hrr_0001x;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+4)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+4] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = hrr_0100x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = hrr_0100x * Iy;
+                        prod_xz = hrr_0100x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * hrr_1100x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_20z;
+                        giy -= 1 * 1;
+                        giz -= 1 * wt;
+                        glx = al2 * hrr_0101x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_1001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1101x;
+                        gily = ai2 * hrr_2001y;
+                        gilz = ai2 * hrr_2001z;
+                        gily -= 1 * hrr_0001y;
+                        gilz -= 1 * hrr_0001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0200x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_1100z;
+                        gjx -= 1 * fac;
+                        glx = al2 * hrr_0101x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_1001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0201x;
+                        gjly = aj2 * hrr_1101y;
+                        gjlz = aj2 * hrr_1101z;
+                        gjlx -= 1 * hrr_0001x;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+5)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+5] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = hrr_0100x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_20z * dd;
+                        prod_xy = hrr_0100x * Iy;
+                        prod_xz = hrr_0100x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * hrr_1100x;
+                        giy = ai2 * trr_10y;
+                        double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
+                        giz = ai2 * trr_30z;
+                        giz -= 2 * trr_10z;
+                        glx = al2 * hrr_0101x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_2001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1101x;
+                        gily = ai2 * hrr_1001y;
+                        double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
+                        double hrr_3001z = trr_31z - zlzk * trr_30z;
+                        gilz = ai2 * hrr_3001z;
+                        gilz -= 2 * hrr_1001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0200x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_2100z = trr_30z - zjzi * trr_20z;
+                        gjz = aj2 * hrr_2100z;
+                        gjx -= 1 * fac;
+                        glx = al2 * hrr_0101x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_2001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0201x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_2101z = hrr_3001z - zjzi * hrr_2001z;
+                        gjlz = aj2 * hrr_2101z;
+                        gjlx -= 1 * hrr_0001x;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+1)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+1)*nao+l0+0] * dm[(i0+0)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+1)*nao+i0+0] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+1)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_20x * dd;
+                        Iy = hrr_0100y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_20x * Iy;
+                        prod_xz = trr_20x * Iz;
+                        prod_yz = hrr_0100y * Iz;
+                        gix = ai2 * trr_30x;
+                        giy = ai2 * hrr_1100y;
+                        giz = ai2 * trr_10z;
+                        gix -= 2 * trr_10x;
+                        glx = al2 * hrr_2001x;
+                        gly = al2 * hrr_0101y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_3001x;
+                        gily = ai2 * hrr_1101y;
+                        gilz = ai2 * hrr_1001z;
+                        gilx -= 2 * hrr_1001x;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_2100x;
+                        double hrr_0200y = hrr_1100y - yjyi * hrr_0100y;
+                        gjy = aj2 * hrr_0200y;
+                        gjz = aj2 * hrr_0100z;
+                        gjy -= 1 * 1;
+                        glx = al2 * hrr_2001x;
+                        gly = al2 * hrr_0101y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_2101x;
+                        double hrr_0201y = hrr_1101y - yjyi * hrr_0101y;
+                        gjly = aj2 * hrr_0201y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjly -= 1 * hrr_0001y;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+1)*nao+k0+0] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+1)*nao+l0+0] * dm[(i0+1)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+1)*nao+i0+1] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+1)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = hrr_1100y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = hrr_1100y * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * hrr_2100y;
+                        giz = ai2 * trr_10z;
+                        gix -= 1 * fac;
+                        giy -= 1 * hrr_0100y;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_1101y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2001x;
+                        gily = ai2 * hrr_2101y;
+                        gilz = ai2 * hrr_1001z;
+                        gilx -= 1 * hrr_0001x;
+                        gily -= 1 * hrr_0101y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        double hrr_1200y = hrr_2100y - yjyi * hrr_1100y;
+                        gjy = aj2 * hrr_1200y;
+                        gjz = aj2 * hrr_0100z;
+                        gjy -= 1 * trr_10y;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_1101y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_1101x;
+                        double hrr_1201y = hrr_2101y - yjyi * hrr_1101y;
+                        gjly = aj2 * hrr_1201y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjly -= 1 * hrr_1001y;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+1)*nao+k0+0] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+1)*nao+l0+0] * dm[(i0+2)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+1)*nao+i0+2] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+1)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = hrr_0100y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = hrr_0100y * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * hrr_1100y;
+                        giz = ai2 * trr_20z;
+                        gix -= 1 * fac;
+                        giz -= 1 * wt;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_0101y;
+                        glz = al2 * hrr_1001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2001x;
+                        gily = ai2 * hrr_1101y;
+                        gilz = ai2 * hrr_2001z;
+                        gilx -= 1 * hrr_0001x;
+                        gilz -= 1 * hrr_0001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_0200y;
+                        gjz = aj2 * hrr_1100z;
+                        gjy -= 1 * 1;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_0101y;
+                        glz = al2 * hrr_1001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_1101x;
+                        gjly = aj2 * hrr_0201y;
+                        gjlz = aj2 * hrr_1101z;
+                        gjly -= 1 * hrr_0001y;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+1)*nao+k0+0] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+1)*nao+l0+0] * dm[(i0+3)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+1)*nao+i0+3] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+1)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = hrr_2100y * dd;
+                        Iz = wt * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = hrr_2100y * Iz;
+                        gix = ai2 * trr_10x;
+                        double trr_40y = c0y * trr_30y + 3*b10 * trr_20y;
+                        double hrr_3100y = trr_40y - yjyi * trr_30y;
+                        giy = ai2 * hrr_3100y;
+                        giz = ai2 * trr_10z;
+                        giy -= 2 * hrr_1100y;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_2101y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        double trr_41y = cpy * trr_40y + 4*b00 * trr_30y;
+                        double hrr_4001y = trr_41y - ylyk * trr_40y;
+                        double hrr_3101y = hrr_4001y - yjyi * hrr_3001y;
+                        gily = ai2 * hrr_3101y;
+                        gilz = ai2 * hrr_1001z;
+                        gily -= 2 * hrr_1101y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        double hrr_2200y = hrr_3100y - yjyi * hrr_2100y;
+                        gjy = aj2 * hrr_2200y;
+                        gjz = aj2 * hrr_0100z;
+                        gjy -= 1 * trr_20y;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_2101y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        double hrr_2201y = hrr_3101y - yjyi * hrr_2101y;
+                        gjly = aj2 * hrr_2201y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjly -= 1 * hrr_2001y;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+1)*nao+k0+0] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+1)*nao+l0+0] * dm[(i0+4)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+1)*nao+i0+4] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+1)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = hrr_1100y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = hrr_1100y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * hrr_2100y;
+                        giz = ai2 * trr_20z;
+                        giy -= 1 * hrr_0100y;
+                        giz -= 1 * wt;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_1101y;
+                        glz = al2 * hrr_1001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_2101y;
+                        gilz = ai2 * hrr_2001z;
+                        gily -= 1 * hrr_0101y;
+                        gilz -= 1 * hrr_0001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_1200y;
+                        gjz = aj2 * hrr_1100z;
+                        gjy -= 1 * trr_10y;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_1101y;
+                        glz = al2 * hrr_1001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_1201y;
+                        gjlz = aj2 * hrr_1101z;
+                        gjly -= 1 * hrr_1001y;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+1)*nao+k0+0] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+1)*nao+l0+0] * dm[(i0+5)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+1)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+1)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+1)*nao+i0+5] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+1)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = hrr_0100y * dd;
+                        Iz = trr_20z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = hrr_0100y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * hrr_1100y;
+                        giz = ai2 * trr_30z;
+                        giz -= 2 * trr_10z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_0101y;
+                        glz = al2 * hrr_2001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_1101y;
+                        gilz = ai2 * hrr_3001z;
+                        gilz -= 2 * hrr_1001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_0200y;
+                        gjz = aj2 * hrr_2100z;
+                        gjy -= 1 * 1;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_0101y;
+                        glz = al2 * hrr_2001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_0201y;
+                        gjlz = aj2 * hrr_2101z;
+                        gjly -= 1 * hrr_0001y;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+2)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+2)*nao+l0+0] * dm[(i0+0)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+2)*nao+i0+0] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+2)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_20x * dd;
+                        Iy = 1 * dd;
+                        Iz = hrr_0100z * dd;
+                        prod_xy = trr_20x * Iy;
+                        prod_xz = trr_20x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_30x;
+                        giy = ai2 * trr_10y;
+                        giz = ai2 * hrr_1100z;
+                        gix -= 2 * trr_10x;
+                        glx = al2 * hrr_2001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_0101z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_3001x;
+                        gily = ai2 * hrr_1001y;
+                        gilz = ai2 * hrr_1101z;
+                        gilx -= 2 * hrr_1001x;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_2100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_0200z = hrr_1100z - zjzi * hrr_0100z;
+                        gjz = aj2 * hrr_0200z;
+                        gjz -= 1 * wt;
+                        glx = al2 * hrr_2001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_0101z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_2101x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_0201z = hrr_1101z - zjzi * hrr_0101z;
+                        gjlz = aj2 * hrr_0201z;
+                        gjlz -= 1 * hrr_0001z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+2)*nao+k0+0] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+2)*nao+l0+0] * dm[(i0+1)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+2)*nao+i0+1] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+2)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = hrr_0100z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * hrr_1100z;
+                        gix -= 1 * fac;
+                        giy -= 1 * 1;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_0101z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2001x;
+                        gily = ai2 * hrr_2001y;
+                        gilz = ai2 * hrr_1101z;
+                        gilx -= 1 * hrr_0001x;
+                        gily -= 1 * hrr_0001y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_0200z;
+                        gjz -= 1 * wt;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_0101z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_1101x;
+                        gjly = aj2 * hrr_1101y;
+                        gjlz = aj2 * hrr_0201z;
+                        gjlz -= 1 * hrr_0001z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+2)*nao+k0+0] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+2)*nao+l0+0] * dm[(i0+2)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+2)*nao+i0+2] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+2)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = 1 * dd;
+                        Iz = hrr_1100z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_10y;
+                        giz = ai2 * hrr_2100z;
+                        gix -= 1 * fac;
+                        giz -= 1 * hrr_0100z;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_1101z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2001x;
+                        gily = ai2 * hrr_1001y;
+                        gilz = ai2 * hrr_2101z;
+                        gilx -= 1 * hrr_0001x;
+                        gilz -= 1 * hrr_0101z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_1200z = hrr_2100z - zjzi * hrr_1100z;
+                        gjz = aj2 * hrr_1200z;
+                        gjz -= 1 * trr_10z;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_1101z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_1101x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_1201z = hrr_2101z - zjzi * hrr_1101z;
+                        gjlz = aj2 * hrr_1201z;
+                        gjlz -= 1 * hrr_1001z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+2)*nao+k0+0] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+2)*nao+l0+0] * dm[(i0+3)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+2)*nao+i0+3] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+2)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_20y * dd;
+                        Iz = hrr_0100z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_20y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_30y;
+                        giz = ai2 * hrr_1100z;
+                        giy -= 2 * trr_10y;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_2001y;
+                        glz = al2 * hrr_0101z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_3001y;
+                        gilz = ai2 * hrr_1101z;
+                        gily -= 2 * hrr_1001y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_2100y;
+                        gjz = aj2 * hrr_0200z;
+                        gjz -= 1 * wt;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_2001y;
+                        glz = al2 * hrr_0101z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_2101y;
+                        gjlz = aj2 * hrr_0201z;
+                        gjlz -= 1 * hrr_0001z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+2)*nao+k0+0] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+2)*nao+l0+0] * dm[(i0+4)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+2)*nao+i0+4] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+2)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_10y * dd;
+                        Iz = hrr_1100z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * hrr_2100z;
+                        giy -= 1 * 1;
+                        giz -= 1 * hrr_0100z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_1101z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_2001y;
+                        gilz = ai2 * hrr_2101z;
+                        gily -= 1 * hrr_0001y;
+                        gilz -= 1 * hrr_0101z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_1200z;
+                        gjz -= 1 * trr_10z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_1101z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_1101y;
+                        gjlz = aj2 * hrr_1201z;
+                        gjlz -= 1 * hrr_1001z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+2)*nao+k0+0] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+2)*nao+l0+0] * dm[(i0+5)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+2)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+2)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+2)*nao+i0+5] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+2)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = 1 * dd;
+                        Iz = hrr_2100z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_10y;
+                        double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
+                        double hrr_3100z = trr_40z - zjzi * trr_30z;
+                        giz = ai2 * hrr_3100z;
+                        giz -= 2 * hrr_1100z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_2101z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_1001y;
+                        double trr_41z = cpz * trr_40z + 4*b00 * trr_30z;
+                        double hrr_4001z = trr_41z - zlzk * trr_40z;
+                        double hrr_3101z = hrr_4001z - zjzi * hrr_3001z;
+                        gilz = ai2 * hrr_3101z;
+                        gilz -= 2 * hrr_1101z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_2200z = hrr_3100z - zjzi * hrr_2100z;
+                        gjz = aj2 * hrr_2200z;
+                        gjz -= 1 * trr_20z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_2101z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_2201z = hrr_3101z - zjzi * hrr_2101z;
+                        gjlz = aj2 * hrr_2201z;
+                        gjlz -= 1 * hrr_2001z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        }
+                    }
+                }
+            }
+        }
+        if (task_id >= ntasks) {
+            continue;
+        }
+        int ia = bas[ish*BAS_SLOTS+ATOM_OF];
+        int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
+        int ka = bas[ksh*BAS_SLOTS+ATOM_OF];
+        int la = bas[lsh*BAS_SLOTS+ATOM_OF];
+        int natm = envs.natm;
+        double *ejk = jk.ejk;
+        atomicAdd(ejk + (ia*natm+ka)*9 + 0, v_ixkx);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 1, v_ixky);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 2, v_ixkz);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 3, v_iykx);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 4, v_iyky);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 5, v_iykz);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 6, v_izkx);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 7, v_izky);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 8, v_izkz);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 0, v_jxkx);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 1, v_jxky);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 2, v_jxkz);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 3, v_jykx);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 4, v_jyky);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 5, v_jykz);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 6, v_jzkx);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 7, v_jzky);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 8, v_jzkz);
+        atomicAdd(ejk + (ia*natm+la)*9 + 0, v_ixlx);
+        atomicAdd(ejk + (ia*natm+la)*9 + 1, v_ixly);
+        atomicAdd(ejk + (ia*natm+la)*9 + 2, v_ixlz);
+        atomicAdd(ejk + (ia*natm+la)*9 + 3, v_iylx);
+        atomicAdd(ejk + (ia*natm+la)*9 + 4, v_iyly);
+        atomicAdd(ejk + (ia*natm+la)*9 + 5, v_iylz);
+        atomicAdd(ejk + (ia*natm+la)*9 + 6, v_izlx);
+        atomicAdd(ejk + (ia*natm+la)*9 + 7, v_izly);
+        atomicAdd(ejk + (ia*natm+la)*9 + 8, v_izlz);
+        atomicAdd(ejk + (ja*natm+la)*9 + 0, v_jxlx);
+        atomicAdd(ejk + (ja*natm+la)*9 + 1, v_jxly);
+        atomicAdd(ejk + (ja*natm+la)*9 + 2, v_jxlz);
+        atomicAdd(ejk + (ja*natm+la)*9 + 3, v_jylx);
+        atomicAdd(ejk + (ja*natm+la)*9 + 4, v_jyly);
+        atomicAdd(ejk + (ja*natm+la)*9 + 5, v_jylz);
+        atomicAdd(ejk + (ja*natm+la)*9 + 6, v_jzlx);
+        atomicAdd(ejk + (ja*natm+la)*9 + 7, v_jzly);
+        atomicAdd(ejk + (ja*natm+la)*9 + 8, v_jzlz);
+    }
+}
+__global__
+void rys_ejk_ip2_type3_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+                ShellQuartet *pool, uint32_t *batch_head)
+{
+    int b_id = blockIdx.x;
+    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
+    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
+    __shared__ int batch_id;
+    if (t_id == 0) {
+        batch_id = atomicAdd(batch_head, 1);
+    }
+    __syncthreads();
+    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
+    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
+    while (batch_id < nbatches) {
+        int batch_ij = batch_id / nbatches_kl;
+        int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                     batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
+        if (ntasks > 0) {
+            int tile_ij = bounds.tile_ij_mapping[batch_ij];
+            int nbas_tiles = nbas / TILE;
+            int tile_i = tile_ij / nbas_tiles;
+            int tile_j = tile_ij % nbas_tiles;
+            int ish0 = tile_i * TILE;
+            int jsh0 = tile_j * TILE;
+            _rys_ejk_ip2_type3_2100(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+        }
+        if (t_id == 0) {
+            batch_id = atomicAdd(batch_head, 1);
+            atomicAdd(batch_head+1, ntasks);
+        }
+        __syncthreads();
+    }
+}
+
+__device__ static
+void _rys_ejk_ip2_type3_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+{
+    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
+    int nsq_per_block = blockDim.x * blockDim.y;
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    int kprim = bounds.kprim;
+    int lprim = bounds.lprim;
+    int *ao_loc = envs.ao_loc;
+    int nbas = envs.nbas;
+    int nao = ao_loc[nbas];
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double omega = env[PTR_RANGE_OMEGA];
+    int do_j = jk.j_factor != 0.;
+    int do_k = jk.k_factor != 0.;
+    double *dm = jk.dm;
+    extern __shared__ double Rpa_cicj[];
+    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
+        int ijp = n / TILE2;
+        int sh_ij = n % TILE2;
+        int ish = ish0 + sh_ij / TILE;
+        int jsh = jsh0 + sh_ij % TILE;
+        int ip = ijp / jprim;
+        int jp = ijp % jprim;
+        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double ai = expi[ip];
+        double aj = expj[jp];
+        double aij = ai + aj;
+        double aj_aij = aj / aij;
+        double xjxi = rj[0] - ri[0];
+        double yjyi = rj[1] - ri[1];
+        double zjzi = rj[2] - ri[2];
+        double *Rpa = Rpa_cicj + ijp * TILE2*4;
+        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
+        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
+        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
+        double theta_ij = ai * aj_aij;
+        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
+        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+    }
+
+    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+        __syncthreads();
+        int task_id = task0 + sq_id;
+        double fac_sym = PI_FAC;
+        ShellQuartet sq;
+        if (task_id >= ntasks) {
+            // To avoid __syncthreads blocking blocking idle warps, all remaining
+            // threads compute a valid shell quartet with zero normalization factor
+            sq = shl_quartet_idx[0];
+            fac_sym = 0.;
+        } else {
+            sq = shl_quartet_idx[task_id];
+        }
+        int ish = sq.i;
+        int jsh = sq.j;
+        int ksh = sq.k;
+        int lsh = sq.l;
+        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
+        if (ish == jsh) fac_sym *= .5;
+        if (ksh == lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        int i0 = ao_loc[ish];
+        int j0 = ao_loc[jsh];
+        int k0 = ao_loc[ksh];
+        int l0 = ao_loc[lsh];
+        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
+        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
+        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double dd;
+        double Ix, Iy, Iz, prod_xy, prod_xz, prod_yz;
+        double gix, giy, giz;
+        double gjx, gjy, gjz;
+        double gkx, gky, gkz;
+        double glx, gly, glz;
+        double gikx, giky, gikz;
+        double gjkx, gjky, gjkz;
+        double gilx, gily, gilz;
+        double gjlx, gjly, gjlz;
+        double v_ixkx = 0;
+        double v_ixky = 0;
+        double v_ixkz = 0;
+        double v_iykx = 0;
+        double v_iyky = 0;
+        double v_iykz = 0;
+        double v_izkx = 0;
+        double v_izky = 0;
+        double v_izkz = 0;
+        double v_jxkx = 0;
+        double v_jxky = 0;
+        double v_jxkz = 0;
+        double v_jykx = 0;
+        double v_jyky = 0;
+        double v_jykz = 0;
+        double v_jzkx = 0;
+        double v_jzky = 0;
+        double v_jzkz = 0;
+        double v_ixlx = 0;
+        double v_ixly = 0;
+        double v_ixlz = 0;
+        double v_iylx = 0;
+        double v_iyly = 0;
+        double v_iylz = 0;
+        double v_izlx = 0;
+        double v_izly = 0;
+        double v_izlz = 0;
+        double v_jxlx = 0;
+        double v_jxly = 0;
+        double v_jxlz = 0;
+        double v_jylx = 0;
+        double v_jyly = 0;
+        double v_jylz = 0;
+        double v_jzlx = 0;
+        double v_jzly = 0;
+        double v_jzlz = 0;
+        
+        for (int klp = 0; klp < kprim*lprim; ++klp) {
+            int kp = klp / lprim;
+            int lp = klp % lprim;
+            double ak = expk[kp];
+            double al = expl[lp];
+            double ak2 = ak * 2;
+            double al2 = al * 2;
+            double akl = ak + al;
+            double al_akl = al / akl;
+            double xlxk = rl[0] - rk[0];
+            double ylyk = rl[1] - rk[1];
+            double zlzk = rl[2] - rk[2];
+            double theta_kl = ak * al_akl;
+            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            double xqc = xlxk * al_akl;
+            double yqc = ylyk * al_akl;
+            double zqc = zlzk * al_akl;
+            double xkl = rk[0] + xqc;
+            double ykl = rk[1] + yqc;
+            double zkl = rk[2] + zqc;
+            for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double ai2 = ai * 2;
+                double aj2 = aj * 2;
+                double aij = ai + aj;
+                double *Rpa = Rpa_cicj + ijp * TILE2*4;
+                double cicj = Rpa[sh_ij+3*TILE2];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                double xpa = Rpa[sh_ij+0*TILE2];
+                double ypa = Rpa[sh_ij+1*TILE2];
+                double zpa = Rpa[sh_ij+2*TILE2];
+                double xij = ri[0] + xpa; // (ai*xi+aj*xj)/aij
+                double yij = ri[1] + ypa;
+                double zij = ri[2] + zpa;
+                double xjxi = rj[0] - ri[0];
+                double yjyi = rj[1] - ri[1];
+                double zjzi = rj[2] - ri[2];
+                double xpq = xij - xkl;
+                double ypq = yij - ykl;
+                double zpq = zij - zkl;
+                double theta = aij * akl / (aij + akl);
+                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+                double theta_rr = theta * rr;
+                if (omega == 0) {
+                    rys_roots(3, theta_rr, rw, nsq_per_block, 0, 1);
+                } else if (omega > 0) {
+                    double theta_fac = omega * omega / (omega * omega + theta);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
+                    fac *= sqrt(theta_fac);
+                    for (int irys = 0; irys < 3; ++irys) {
+                        rw[irys*2   *nsq_per_block] *= theta_fac;
+                    }
+                } else {
+                    double *rw1 = rw + 6*nsq_per_block;
+                    rys_roots(3, theta_rr, rw1, nsq_per_block, 0, 1);
+                    double theta_fac = omega * omega / (omega * omega + theta);
+                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
+                    double sqrt_theta_fac = -sqrt(theta_fac);
+                    for (int irys = 0; irys < 3; ++irys) {
+                        rw[ irys*2   *nsq_per_block] *= theta_fac;
+                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
+                    }
+                }
+                if (task_id < ntasks) {
+                    for (int irys = 0; irys < bounds.nroots; ++irys) {
+                        {
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
+                        double rt_aa = rt / (aij + akl);
+                        double rt_aij = rt_aa * akl;
+                        double c0x = Rpa[0*TILE2+sh_ij] - xpq*rt_aij;
+                        double trr_10x = c0x * fac;
+                        double b10 = .5/aij * (1 - rt_aij);
+                        double trr_20x = c0x * trr_10x + 1*b10 * fac;
+                        double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+0)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+0] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_30x * dd;
+                        Iy = 1 * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_30x * Iy;
+                        prod_xz = trr_30x * Iz;
+                        prod_yz = 1 * Iz;
+                        double trr_40x = c0x * trr_30x + 3*b10 * trr_20x;
+                        gix = ai2 * trr_40x;
+                        double c0y = Rpa[1*TILE2+sh_ij] - ypq*rt_aij;
+                        double trr_10y = c0y * 1;
+                        giy = ai2 * trr_10y;
+                        double c0z = Rpa[2*TILE2+sh_ij] - zpq*rt_aij;
+                        double trr_10z = c0z * wt;
+                        giz = ai2 * trr_10z;
+                        gix -= 3 * trr_20x;
+                        double rt_akl = rt_aa * aij;
+                        double cpx = xqc + xpq*rt_akl;
+                        double b00 = .5 * rt_aa;
+                        double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
+                        gkx = ak2 * trr_31x;
+                        double cpy = yqc + ypq*rt_akl;
+                        double trr_01y = cpy * 1;
+                        gky = ak2 * trr_01y;
+                        double cpz = zqc + zpq*rt_akl;
+                        double trr_01z = cpz * wt;
+                        gkz = ak2 * trr_01z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        double trr_41x = cpx * trr_40x + 4*b00 * trr_30x;
+                        gikx = ai2 * trr_41x;
+                        double trr_11y = cpy * trr_10y + 1*b00 * 1;
+                        giky = ai2 * trr_11y;
+                        double trr_11z = cpz * trr_10z + 1*b00 * wt;
+                        gikz = ai2 * trr_11z;
+                        double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
+                        gikx -= 3 * trr_21x;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        double hrr_3100x = trr_40x - xjxi * trr_30x;
+                        gjx = aj2 * hrr_3100x;
+                        double hrr_0100y = trr_10y - yjyi * 1;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_0100z = trr_10z - zjzi * wt;
+                        gjz = aj2 * hrr_0100z;
+                        gkx = ak2 * trr_31x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_01z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        double hrr_3110x = trr_41x - xjxi * trr_31x;
+                        gjkx = aj2 * hrr_3110x;
+                        double hrr_0110y = trr_11y - yjyi * trr_01y;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_0110z = trr_11z - zjzi * trr_01z;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+1)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+1] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_20x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_20x * Iy;
+                        prod_xz = trr_20x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_30x;
+                        double trr_20y = c0y * trr_10y + 1*b10 * 1;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_10z;
+                        gix -= 2 * trr_10x;
+                        giy -= 1 * 1;
+                        gkx = ak2 * trr_21x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_01z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_31x;
+                        double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
+                        giky = ai2 * trr_21y;
+                        gikz = ai2 * trr_11z;
+                        double trr_11x = cpx * trr_10x + 1*b00 * fac;
+                        gikx -= 2 * trr_11x;
+                        giky -= 1 * trr_01y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        double hrr_2100x = trr_30x - xjxi * trr_20x;
+                        gjx = aj2 * hrr_2100x;
+                        double hrr_1100y = trr_20y - yjyi * trr_10y;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_0100z;
+                        gkx = ak2 * trr_21x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_01z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        double hrr_2110x = trr_31x - xjxi * trr_21x;
+                        gjkx = aj2 * hrr_2110x;
+                        double hrr_1110y = trr_21y - yjyi * trr_11y;
+                        gjky = aj2 * hrr_1110y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+2)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+2] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_20x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = trr_20x * Iy;
+                        prod_xz = trr_20x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_30x;
+                        giy = ai2 * trr_10y;
+                        double trr_20z = c0z * trr_10z + 1*b10 * wt;
+                        giz = ai2 * trr_20z;
+                        gix -= 2 * trr_10x;
+                        giz -= 1 * wt;
+                        gkx = ak2 * trr_21x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_11z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_31x;
+                        giky = ai2 * trr_11y;
+                        double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
+                        gikz = ai2 * trr_21z;
+                        gikx -= 2 * trr_11x;
+                        gikz -= 1 * trr_01z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_2100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_1100z = trr_20z - zjzi * trr_10z;
+                        gjz = aj2 * hrr_1100z;
+                        gkx = ak2 * trr_21x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_11z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_2110x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_1110z = trr_21z - zjzi * trr_11z;
+                        gjkz = aj2 * hrr_1110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+3)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+3] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = trr_20y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = trr_20y * Iz;
+                        gix = ai2 * trr_20x;
+                        double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
+                        giy = ai2 * trr_30y;
+                        giz = ai2 * trr_10z;
+                        gix -= 1 * fac;
+                        giy -= 2 * trr_10y;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_21y;
+                        gkz = ak2 * trr_01z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_21x;
+                        double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
+                        giky = ai2 * trr_31y;
+                        gikz = ai2 * trr_11z;
+                        double trr_01x = cpx * fac;
+                        gikx -= 1 * trr_01x;
+                        giky -= 2 * trr_11y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        double hrr_1100x = trr_20x - xjxi * trr_10x;
+                        gjx = aj2 * hrr_1100x;
+                        double hrr_2100y = trr_30y - yjyi * trr_20y;
+                        gjy = aj2 * hrr_2100y;
+                        gjz = aj2 * hrr_0100z;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_21y;
+                        gkz = ak2 * trr_01z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        double hrr_1110x = trr_21x - xjxi * trr_11x;
+                        gjkx = aj2 * hrr_1110x;
+                        double hrr_2110y = trr_31y - yjyi * trr_21y;
+                        gjky = aj2 * hrr_2110y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+4)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+4] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_20z;
+                        gix -= 1 * fac;
+                        giy -= 1 * 1;
+                        giz -= 1 * wt;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_11z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_21x;
+                        giky = ai2 * trr_21y;
+                        gikz = ai2 * trr_21z;
+                        gikx -= 1 * trr_01x;
+                        giky -= 1 * trr_01y;
+                        gikz -= 1 * trr_01z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_1100z;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_11z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_1110x;
+                        gjky = aj2 * hrr_1110y;
+                        gjkz = aj2 * hrr_1110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+5)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+5] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_20z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_10y;
+                        double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
+                        giz = ai2 * trr_30z;
+                        gix -= 1 * fac;
+                        giz -= 2 * trr_10z;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_21z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_21x;
+                        giky = ai2 * trr_11y;
+                        double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
+                        gikz = ai2 * trr_31z;
+                        gikx -= 1 * trr_01x;
+                        gikz -= 2 * trr_11z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_2100z = trr_30z - zjzi * trr_20z;
+                        gjz = aj2 * hrr_2100z;
+                        gkx = ak2 * trr_11x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_21z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_1110x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_2110z = trr_31z - zjzi * trr_21z;
+                        gjkz = aj2 * hrr_2110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+6)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+6)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+6)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+6)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+6] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+6;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_30y * dd;
+                        Iz = wt * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_30y * Iz;
+                        gix = ai2 * trr_10x;
+                        double trr_40y = c0y * trr_30y + 3*b10 * trr_20y;
+                        giy = ai2 * trr_40y;
+                        giz = ai2 * trr_10z;
+                        giy -= 3 * trr_20y;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_31y;
+                        gkz = ak2 * trr_01z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        double trr_41y = cpy * trr_40y + 4*b00 * trr_30y;
+                        giky = ai2 * trr_41y;
+                        gikz = ai2 * trr_11z;
+                        giky -= 3 * trr_21y;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        double hrr_0100x = trr_10x - xjxi * fac;
+                        gjx = aj2 * hrr_0100x;
+                        double hrr_3100y = trr_40y - yjyi * trr_30y;
+                        gjy = aj2 * hrr_3100y;
+                        gjz = aj2 * hrr_0100z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_31y;
+                        gkz = ak2 * trr_01z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        double hrr_0110x = trr_11x - xjxi * trr_01x;
+                        gjkx = aj2 * hrr_0110x;
+                        double hrr_3110y = trr_41y - yjyi * trr_31y;
+                        gjky = aj2 * hrr_3110y;
+                        gjkz = aj2 * hrr_0110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+7)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+7)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+7)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+7)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+7] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+7;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_20y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_20y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_30y;
+                        giz = ai2 * trr_20z;
+                        giy -= 2 * trr_10y;
+                        giz -= 1 * wt;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_21y;
+                        gkz = ak2 * trr_11z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * trr_31y;
+                        gikz = ai2 * trr_21z;
+                        giky -= 2 * trr_11y;
+                        gikz -= 1 * trr_01z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_2100y;
+                        gjz = aj2 * hrr_1100z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_21y;
+                        gkz = ak2 * trr_11z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_2110y;
+                        gjkz = aj2 * hrr_1110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+8)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+8)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+8)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+8)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+8] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+8;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_10y * dd;
+                        Iz = trr_20z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_30z;
+                        giy -= 1 * 1;
+                        giz -= 2 * trr_10z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_21z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * trr_21y;
+                        gikz = ai2 * trr_31z;
+                        giky -= 1 * trr_01y;
+                        gikz -= 2 * trr_11z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_2100z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_11y;
+                        gkz = ak2 * trr_21z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_1110y;
+                        gjkz = aj2 * hrr_2110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+9)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+9)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+9)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+9)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+9] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+9;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_30z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_10y;
+                        double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
+                        giz = ai2 * trr_40z;
+                        giz -= 3 * trr_20z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_31z;
+                        v_ixky += gix * gky * Iz;
+                        v_ixkz += gix * gkz * Iy;
+                        v_iykx += giy * gkx * Iz;
+                        v_iykz += giy * gkz * Ix;
+                        v_izkx += giz * gkx * Iy;
+                        v_izky += giz * gky * Ix;
+                        gikx = ai2 * trr_11x;
+                        giky = ai2 * trr_11y;
+                        double trr_41z = cpz * trr_40z + 4*b00 * trr_30z;
+                        gikz = ai2 * trr_41z;
+                        gikz -= 3 * trr_21z;
+                        gikx *= ak2;
+                        giky *= ak2;
+                        gikz *= ak2;
+                        v_ixkx += gikx * prod_yz;
+                        v_iyky += giky * prod_xz;
+                        v_izkz += gikz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_3100z = trr_40z - zjzi * trr_30z;
+                        gjz = aj2 * hrr_3100z;
+                        gkx = ak2 * trr_01x;
+                        gky = ak2 * trr_01y;
+                        gkz = ak2 * trr_31z;
+                        v_jxky += gjx * gky * Iz;
+                        v_jxkz += gjx * gkz * Iy;
+                        v_jykx += gjy * gkx * Iz;
+                        v_jykz += gjy * gkz * Ix;
+                        v_jzkx += gjz * gkx * Iy;
+                        v_jzky += gjz * gky * Ix;
+                        gjkx = aj2 * hrr_0110x;
+                        gjky = aj2 * hrr_0110y;
+                        double hrr_3110z = trr_41z - zjzi * trr_31z;
+                        gjkz = aj2 * hrr_3110z;
+                        gjkx *= ak2;
+                        gjky *= ak2;
+                        gjkz *= ak2;
+                        v_jxkx += gjkx * prod_yz;
+                        v_jyky += gjky * prod_xz;
+                        v_jzkz += gjkz * prod_xy;
+                        }
+                        {
+                        double wt = rw[(2*irys+1)*nsq_per_block];
+                        double rt = rw[ 2*irys   *nsq_per_block];
+                        double rt_aa = rt / (aij + akl);
+                        double rt_aij = rt_aa * akl;
+                        double c0x = Rpa[0*TILE2+sh_ij] - xpq*rt_aij;
+                        double trr_10x = c0x * fac;
+                        double b10 = .5/aij * (1 - rt_aij);
+                        double trr_20x = c0x * trr_10x + 1*b10 * fac;
+                        double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+0)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+0)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+0)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+0)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+0] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+0;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_30x * dd;
+                        Iy = 1 * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_30x * Iy;
+                        prod_xz = trr_30x * Iz;
+                        prod_yz = 1 * Iz;
+                        double trr_40x = c0x * trr_30x + 3*b10 * trr_20x;
+                        gix = ai2 * trr_40x;
+                        double c0y = Rpa[1*TILE2+sh_ij] - ypq*rt_aij;
+                        double trr_10y = c0y * 1;
+                        giy = ai2 * trr_10y;
+                        double c0z = Rpa[2*TILE2+sh_ij] - zpq*rt_aij;
+                        double trr_10z = c0z * wt;
+                        giz = ai2 * trr_10z;
+                        gix -= 3 * trr_20x;
+                        double rt_akl = rt_aa * aij;
+                        double cpx = xqc + xpq*rt_akl;
+                        double b00 = .5 * rt_aa;
+                        double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
+                        double hrr_3001x = trr_31x - xlxk * trr_30x;
+                        glx = al2 * hrr_3001x;
+                        double cpy = yqc + ypq*rt_akl;
+                        double trr_01y = cpy * 1;
+                        double hrr_0001y = trr_01y - ylyk * 1;
+                        gly = al2 * hrr_0001y;
+                        double cpz = zqc + zpq*rt_akl;
+                        double trr_01z = cpz * wt;
+                        double hrr_0001z = trr_01z - zlzk * wt;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        double trr_41x = cpx * trr_40x + 4*b00 * trr_30x;
+                        double hrr_4001x = trr_41x - xlxk * trr_40x;
+                        gilx = ai2 * hrr_4001x;
+                        double trr_11y = cpy * trr_10y + 1*b00 * 1;
+                        double hrr_1001y = trr_11y - ylyk * trr_10y;
+                        gily = ai2 * hrr_1001y;
+                        double trr_11z = cpz * trr_10z + 1*b00 * wt;
+                        double hrr_1001z = trr_11z - zlzk * trr_10z;
+                        gilz = ai2 * hrr_1001z;
+                        double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
+                        double hrr_2001x = trr_21x - xlxk * trr_20x;
+                        gilx -= 3 * hrr_2001x;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_3100x = trr_40x - xjxi * trr_30x;
+                        gjx = aj2 * hrr_3100x;
+                        double hrr_0100y = trr_10y - yjyi * 1;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_0100z = trr_10z - zjzi * wt;
+                        gjz = aj2 * hrr_0100z;
+                        glx = al2 * hrr_3001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_3101x = hrr_4001x - xjxi * hrr_3001x;
+                        gjlx = aj2 * hrr_3101x;
+                        double hrr_0101y = hrr_1001y - yjyi * hrr_0001y;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_0101z = hrr_1001z - zjzi * hrr_0001z;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+1)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+1)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+1)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+1)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+1] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+1;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_20x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_20x * Iy;
+                        prod_xz = trr_20x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_30x;
+                        double trr_20y = c0y * trr_10y + 1*b10 * 1;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_10z;
+                        gix -= 2 * trr_10x;
+                        giy -= 1 * 1;
+                        glx = al2 * hrr_2001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_3001x;
+                        double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
+                        double hrr_2001y = trr_21y - ylyk * trr_20y;
+                        gily = ai2 * hrr_2001y;
+                        gilz = ai2 * hrr_1001z;
+                        double trr_11x = cpx * trr_10x + 1*b00 * fac;
+                        double hrr_1001x = trr_11x - xlxk * trr_10x;
+                        gilx -= 2 * hrr_1001x;
+                        gily -= 1 * hrr_0001y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_2100x = trr_30x - xjxi * trr_20x;
+                        gjx = aj2 * hrr_2100x;
+                        double hrr_1100y = trr_20y - yjyi * trr_10y;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_0100z;
+                        glx = al2 * hrr_2001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_2101x = hrr_3001x - xjxi * hrr_2001x;
+                        gjlx = aj2 * hrr_2101x;
+                        double hrr_1101y = hrr_2001y - yjyi * hrr_1001y;
+                        gjly = aj2 * hrr_1101y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+2)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+2)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+2)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+2)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+2] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+2;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_20x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = trr_20x * Iy;
+                        prod_xz = trr_20x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_30x;
+                        giy = ai2 * trr_10y;
+                        double trr_20z = c0z * trr_10z + 1*b10 * wt;
+                        giz = ai2 * trr_20z;
+                        gix -= 2 * trr_10x;
+                        giz -= 1 * wt;
+                        glx = al2 * hrr_2001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_1001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_3001x;
+                        gily = ai2 * hrr_1001y;
+                        double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
+                        double hrr_2001z = trr_21z - zlzk * trr_20z;
+                        gilz = ai2 * hrr_2001z;
+                        gilx -= 2 * hrr_1001x;
+                        gilz -= 1 * hrr_0001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_2100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_1100z = trr_20z - zjzi * trr_10z;
+                        gjz = aj2 * hrr_1100z;
+                        glx = al2 * hrr_2001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_1001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_2101x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_1101z = hrr_2001z - zjzi * hrr_1001z;
+                        gjlz = aj2 * hrr_1101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+3)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+3)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+3)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+3)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+3] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+3;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = trr_20y * dd;
+                        Iz = wt * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = trr_20y * Iz;
+                        gix = ai2 * trr_20x;
+                        double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
+                        giy = ai2 * trr_30y;
+                        giz = ai2 * trr_10z;
+                        gix -= 1 * fac;
+                        giy -= 2 * trr_10y;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_2001y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2001x;
+                        double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
+                        double hrr_3001y = trr_31y - ylyk * trr_30y;
+                        gily = ai2 * hrr_3001y;
+                        gilz = ai2 * hrr_1001z;
+                        double trr_01x = cpx * fac;
+                        double hrr_0001x = trr_01x - xlxk * fac;
+                        gilx -= 1 * hrr_0001x;
+                        gily -= 2 * hrr_1001y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_1100x = trr_20x - xjxi * trr_10x;
+                        gjx = aj2 * hrr_1100x;
+                        double hrr_2100y = trr_30y - yjyi * trr_20y;
+                        gjy = aj2 * hrr_2100y;
+                        gjz = aj2 * hrr_0100z;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_2001y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_1101x = hrr_2001x - xjxi * hrr_1001x;
+                        gjlx = aj2 * hrr_1101x;
+                        double hrr_2101y = hrr_3001y - yjyi * hrr_2001y;
+                        gjly = aj2 * hrr_2101y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+4)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+4)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+4)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+4)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+4] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+4;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = trr_10y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_20z;
+                        gix -= 1 * fac;
+                        giy -= 1 * 1;
+                        giz -= 1 * wt;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_1001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2001x;
+                        gily = ai2 * hrr_2001y;
+                        gilz = ai2 * hrr_2001z;
+                        gilx -= 1 * hrr_0001x;
+                        gily -= 1 * hrr_0001y;
+                        gilz -= 1 * hrr_0001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_1100z;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_1001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_1101x;
+                        gjly = aj2 * hrr_1101y;
+                        gjlz = aj2 * hrr_1101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+5)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+5)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+5)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+5)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+5] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+5;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = trr_10x * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_20z * dd;
+                        prod_xy = trr_10x * Iy;
+                        prod_xz = trr_10x * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_20x;
+                        giy = ai2 * trr_10y;
+                        double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
+                        giz = ai2 * trr_30z;
+                        gix -= 1 * fac;
+                        giz -= 2 * trr_10z;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_2001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_2001x;
+                        gily = ai2 * hrr_1001y;
+                        double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
+                        double hrr_3001z = trr_31z - zlzk * trr_30z;
+                        gilz = ai2 * hrr_3001z;
+                        gilx -= 1 * hrr_0001x;
+                        gilz -= 2 * hrr_1001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_1100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_2100z = trr_30z - zjzi * trr_20z;
+                        gjz = aj2 * hrr_2100z;
+                        glx = al2 * hrr_1001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_2001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_1101x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_2101z = hrr_3001z - zjzi * hrr_2001z;
+                        gjlz = aj2 * hrr_2101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+6)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+6)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+6)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+6)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+6] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+6;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_30y * dd;
+                        Iz = wt * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_30y * Iz;
+                        gix = ai2 * trr_10x;
+                        double trr_40y = c0y * trr_30y + 3*b10 * trr_20y;
+                        giy = ai2 * trr_40y;
+                        giz = ai2 * trr_10z;
+                        giy -= 3 * trr_20y;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_3001y;
+                        glz = al2 * hrr_0001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        double trr_41y = cpy * trr_40y + 4*b00 * trr_30y;
+                        double hrr_4001y = trr_41y - ylyk * trr_40y;
+                        gily = ai2 * hrr_4001y;
+                        gilz = ai2 * hrr_1001z;
+                        gily -= 3 * hrr_2001y;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        double hrr_0100x = trr_10x - xjxi * fac;
+                        gjx = aj2 * hrr_0100x;
+                        double hrr_3100y = trr_40y - yjyi * trr_30y;
+                        gjy = aj2 * hrr_3100y;
+                        gjz = aj2 * hrr_0100z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_3001y;
+                        glz = al2 * hrr_0001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        double hrr_0101x = hrr_1001x - xjxi * hrr_0001x;
+                        gjlx = aj2 * hrr_0101x;
+                        double hrr_3101y = hrr_4001y - yjyi * hrr_3001y;
+                        gjly = aj2 * hrr_3101y;
+                        gjlz = aj2 * hrr_0101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+7)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+7)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+7)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+7)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+7] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+7;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_20y * dd;
+                        Iz = trr_10z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_20y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_30y;
+                        giz = ai2 * trr_20z;
+                        giy -= 2 * trr_10y;
+                        giz -= 1 * wt;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_2001y;
+                        glz = al2 * hrr_1001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_3001y;
+                        gilz = ai2 * hrr_2001z;
+                        gily -= 2 * hrr_1001y;
+                        gilz -= 1 * hrr_0001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_2100y;
+                        gjz = aj2 * hrr_1100z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_2001y;
+                        glz = al2 * hrr_1001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_2101y;
+                        gjlz = aj2 * hrr_1101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+8)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+8)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+8)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+8)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+8] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+8;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = trr_10y * dd;
+                        Iz = trr_20z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = trr_10y * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_20y;
+                        giz = ai2 * trr_30z;
+                        giy -= 1 * 1;
+                        giz -= 2 * trr_10z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_2001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_2001y;
+                        gilz = ai2 * hrr_3001z;
+                        gily -= 1 * hrr_0001y;
+                        gilz -= 2 * hrr_1001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_1100y;
+                        gjz = aj2 * hrr_2100z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_1001y;
+                        glz = al2 * hrr_2001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_1101y;
+                        gjlz = aj2 * hrr_2101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        if (do_k) {
+                            dd  = dm[(j0+0)*nao+k0+0] * dm[(i0+9)*nao+l0+0];
+                            dd += dm[(j0+0)*nao+l0+0] * dm[(i0+9)*nao+k0+0];
+                            if (jk.n_dm > 1) {
+                                dd += dm[(nao+j0+0)*nao+k0+0] * dm[(nao+i0+9)*nao+l0+0];
+                                dd += dm[(nao+j0+0)*nao+l0+0] * dm[(nao+i0+9)*nao+k0+0];
+                            }
+                            dd *= jk.k_factor;
+                        } else {
+                            dd = 0.;
+                        }
+                        if (do_j) {
+                            if (jk.n_dm == 1) {
+                                dd += jk.j_factor * dm[(j0+0)*nao+i0+9] * dm[(l0+0)*nao+k0+0];
+                            } else {
+                                int ji = (j0+0)*nao+i0+9;
+                                int lk = (l0+0)*nao+k0+0;
+                                dd += jk.j_factor * (dm[ji] + dm[nao*nao+ji]) * (dm[lk] + dm[nao*nao+lk]);
+                            }
+                        }
+                        Ix = fac * dd;
+                        Iy = 1 * dd;
+                        Iz = trr_30z * dd;
+                        prod_xy = fac * Iy;
+                        prod_xz = fac * Iz;
+                        prod_yz = 1 * Iz;
+                        gix = ai2 * trr_10x;
+                        giy = ai2 * trr_10y;
+                        double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
+                        giz = ai2 * trr_40z;
+                        giz -= 3 * trr_20z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_3001z;
+                        v_ixly += gix * gly * Iz;
+                        v_ixlz += gix * glz * Iy;
+                        v_iylx += giy * glx * Iz;
+                        v_iylz += giy * glz * Ix;
+                        v_izlx += giz * glx * Iy;
+                        v_izly += giz * gly * Ix;
+                        gilx = ai2 * hrr_1001x;
+                        gily = ai2 * hrr_1001y;
+                        double trr_41z = cpz * trr_40z + 4*b00 * trr_30z;
+                        double hrr_4001z = trr_41z - zlzk * trr_40z;
+                        gilz = ai2 * hrr_4001z;
+                        gilz -= 3 * hrr_2001z;
+                        gilx *= al2;
+                        gily *= al2;
+                        gilz *= al2;
+                        v_ixlx += gilx * prod_yz;
+                        v_iyly += gily * prod_xz;
+                        v_izlz += gilz * prod_xy;
+                        gjx = aj2 * hrr_0100x;
+                        gjy = aj2 * hrr_0100y;
+                        double hrr_3100z = trr_40z - zjzi * trr_30z;
+                        gjz = aj2 * hrr_3100z;
+                        glx = al2 * hrr_0001x;
+                        gly = al2 * hrr_0001y;
+                        glz = al2 * hrr_3001z;
+                        v_jxly += gjx * gly * Iz;
+                        v_jxlz += gjx * glz * Iy;
+                        v_jylx += gjy * glx * Iz;
+                        v_jylz += gjy * glz * Ix;
+                        v_jzlx += gjz * glx * Iy;
+                        v_jzly += gjz * gly * Ix;
+                        gjlx = aj2 * hrr_0101x;
+                        gjly = aj2 * hrr_0101y;
+                        double hrr_3101z = hrr_4001z - zjzi * hrr_3001z;
+                        gjlz = aj2 * hrr_3101z;
+                        gjlx *= al2;
+                        gjly *= al2;
+                        gjlz *= al2;
+                        v_jxlx += gjlx * prod_yz;
+                        v_jyly += gjly * prod_xz;
+                        v_jzlz += gjlz * prod_xy;
+                        }
+                    }
+                }
+            }
+        }
+        if (task_id >= ntasks) {
+            continue;
+        }
+        int ia = bas[ish*BAS_SLOTS+ATOM_OF];
+        int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
+        int ka = bas[ksh*BAS_SLOTS+ATOM_OF];
+        int la = bas[lsh*BAS_SLOTS+ATOM_OF];
+        int natm = envs.natm;
+        double *ejk = jk.ejk;
+        atomicAdd(ejk + (ia*natm+ka)*9 + 0, v_ixkx);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 1, v_ixky);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 2, v_ixkz);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 3, v_iykx);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 4, v_iyky);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 5, v_iykz);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 6, v_izkx);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 7, v_izky);
+        atomicAdd(ejk + (ia*natm+ka)*9 + 8, v_izkz);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 0, v_jxkx);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 1, v_jxky);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 2, v_jxkz);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 3, v_jykx);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 4, v_jyky);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 5, v_jykz);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 6, v_jzkx);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 7, v_jzky);
+        atomicAdd(ejk + (ja*natm+ka)*9 + 8, v_jzkz);
+        atomicAdd(ejk + (ia*natm+la)*9 + 0, v_ixlx);
+        atomicAdd(ejk + (ia*natm+la)*9 + 1, v_ixly);
+        atomicAdd(ejk + (ia*natm+la)*9 + 2, v_ixlz);
+        atomicAdd(ejk + (ia*natm+la)*9 + 3, v_iylx);
+        atomicAdd(ejk + (ia*natm+la)*9 + 4, v_iyly);
+        atomicAdd(ejk + (ia*natm+la)*9 + 5, v_iylz);
+        atomicAdd(ejk + (ia*natm+la)*9 + 6, v_izlx);
+        atomicAdd(ejk + (ia*natm+la)*9 + 7, v_izly);
+        atomicAdd(ejk + (ia*natm+la)*9 + 8, v_izlz);
+        atomicAdd(ejk + (ja*natm+la)*9 + 0, v_jxlx);
+        atomicAdd(ejk + (ja*natm+la)*9 + 1, v_jxly);
+        atomicAdd(ejk + (ja*natm+la)*9 + 2, v_jxlz);
+        atomicAdd(ejk + (ja*natm+la)*9 + 3, v_jylx);
+        atomicAdd(ejk + (ja*natm+la)*9 + 4, v_jyly);
+        atomicAdd(ejk + (ja*natm+la)*9 + 5, v_jylz);
+        atomicAdd(ejk + (ja*natm+la)*9 + 6, v_jzlx);
+        atomicAdd(ejk + (ja*natm+la)*9 + 7, v_jzly);
+        atomicAdd(ejk + (ja*natm+la)*9 + 8, v_jzlz);
+    }
+}
+__global__
+void rys_ejk_ip2_type3_3000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+                ShellQuartet *pool, uint32_t *batch_head)
+{
+    int b_id = blockIdx.x;
+    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
+    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
+    __shared__ int batch_id;
+    if (t_id == 0) {
+        batch_id = atomicAdd(batch_head, 1);
+    }
+    __syncthreads();
+    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
+    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
+    while (batch_id < nbatches) {
+        int batch_ij = batch_id / nbatches_kl;
+        int batch_kl = batch_id % nbatches_kl;
+        int nbas = envs.nbas;
+        double *env = envs.env;
+        double omega = env[PTR_RANGE_OMEGA];
+        int ntasks;
+        if (omega >= 0) {
+            ntasks = _fill_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                     batch_ij, batch_kl);
+        } else {
+            ntasks = _fill_sr_ejk_tasks(shl_quartet_idx, envs, jk, bounds,
+                                        batch_ij, batch_kl);
+        }
+        if (ntasks > 0) {
+            int tile_ij = bounds.tile_ij_mapping[batch_ij];
+            int nbas_tiles = nbas / TILE;
+            int tile_i = tile_ij / nbas_tiles;
+            int tile_j = tile_ij % nbas_tiles;
+            int ish0 = tile_i * TILE;
+            int jsh0 = tile_j * TILE;
+            _rys_ejk_ip2_type3_3000(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+        }
+        if (t_id == 0) {
+            batch_id = atomicAdd(batch_head, 1);
+            atomicAdd(batch_head+1, ntasks);
+        }
+        __syncthreads();
+    }
+}
+
 int rys_ejk_ip2_type3_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
                         ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers)
 {
@@ -13686,6 +23055,10 @@ int rys_ejk_ip2_type3_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bo
     case 131: rys_ejk_ip2_type3_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     case 150: rys_ejk_ip2_type3_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     case 155: rys_ejk_ip2_type3_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 250: rys_ejk_ip2_type3_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 255: rys_ejk_ip2_type3_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 275: rys_ejk_ip2_type3_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 375: rys_ejk_ip2_type3_3000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     default: return 0;
     }
     return 1;
