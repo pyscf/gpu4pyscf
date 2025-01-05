@@ -867,7 +867,7 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
         int la = bas[lsh*BAS_SLOTS+ATOM_OF];
         int t_id = gout_id * nsq_per_block;
         int threads = nsq_per_block * gout_stride;
-        double *reduce = rw + sq_id;
+        double *reduce = rw_cache + sq_id;
         __syncthreads();
         reduce[t_id+0 *threads] = v_ix;
         reduce[t_id+1 *threads] = v_iy;

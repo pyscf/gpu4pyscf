@@ -12,12 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pyscf
 import numpy as np
+import cupy as cp
 import unittest
 import pytest
+import pyscf
+from pyscf import lib
 from pyscf import scf as cpu_scf
 from gpu4pyscf import scf as gpu_scf
+from pyscf.grad import rhf as rhf_grad_cpu
+from gpu4pyscf.grad import rhf as rhf_grad_gpu
 from packaging import version
 
 atom = '''
@@ -84,6 +88,32 @@ class KnownValues(unittest.TestCase):
         cpu_gradient = gpu_gradient.to_cpu()
         g_cpu = cpu_gradient.kernel()
         assert np.linalg.norm(g_gpu - g_cpu) < 1e-5
+
+    def test_jk_energy_per_atom(self):
+        mol = pyscf.M(
+            atom = '''
+            O   0.000   -0.    0.1174
+            H  -0.757    4.   -0.4696
+            H   0.757    4.   -0.4696
+            C   3.      1.    0.
+            ''',
+            basis='def2-tzvp',
+            unit='B',)
+        np.random.seed(9)
+        nao = mol.nao
+        dm = np.random.rand(nao, nao) - .5
+        dm = cp.asarray(dm.dot(dm.T))
+        ejk = rhf_grad_gpu._jk_energy_per_atom(mol, dm).get()
+        self.assertAlmostEqual(ejk.sum(), 0, 8)
+        self.assertAlmostEqual(lib.fp(ejk), 2710.490337642, 8)
+
+        dm = dm.get()
+        vj, vk = rhf_grad_cpu.get_jk(mol, dm)
+        veff = vj - vk * .5
+        ref = np.empty_like(ejk)
+        for n, (i0, i1) in enumerate(mol.aoslice_by_atom()[:,2:]):
+            ref[n] = np.einsum('xpq,pq->x', veff[:,i0:i1], dm[i0:i1])
+        self.assertAlmostEqual(abs(ejk - ref).max(), 0, 8)
 
 if __name__ == "__main__":
     print("Full Tests for RHF Gradient")
