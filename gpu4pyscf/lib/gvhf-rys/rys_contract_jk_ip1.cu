@@ -493,8 +493,8 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
-    int lij = li + lj + 2;
-    int lkl = lk + ll + 2;
+    int lij = li + lj + 1;
+    int lkl = lk + ll + 1;
     int nroots = bounds.nroots;
     int stride_j = bounds.stride_j;
     int stride_k = bounds.stride_k;
