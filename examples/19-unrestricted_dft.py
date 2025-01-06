@@ -49,14 +49,3 @@ g = gobj_with_pcm.kernel()
 
 hobj_with_pcm = mf_with_pcm.Hessian()
 h = hobj_with_pcm.kernel()
-
-# SCF, gradient, and Hessian for DF-UKS with IEF-PCM
-mf_with_smd = mf.SMD()
-mf_with_smd.with_solvent.solvent = 'water'
-mf_with_smd.kernel()
-
-gobj_with_smd = mf_with_smd.nuc_grad_method()
-g = gobj_with_smd.kernel()
-
-hobj_with_smd = mf_with_smd.Hessian()
-h = hobj_with_smd.kernel()

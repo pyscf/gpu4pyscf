@@ -21,15 +21,15 @@ import pyscf
 from gpu4pyscf.dft import rks
 
 atom_A = [
-('O', (0.000000, 0.000000, 0.000000)),
-('H', (0.000000, 0.757160, 0.586260)),
-('H', (0.000000, -0.757160, 0.586260))
+    ('O', (0.000000, 0.000000, 0.000000)),
+    ('H', (0.000000, 0.757160, 0.586260)),
+    ('H', (0.000000, -0.757160, 0.586260))
 ]
 
 atom_B = [
-('O', (0.000000, 0.000000, 2.913530)),
-('H', (0.000000, 0.757160, 3.499790)),
-('H', (0.000000, -0.757160, 3.499790))
+    ('O', (0.000000, 0.000000, 2.913530)),
+    ('H', (0.000000, 0.757160, 3.499790)),
+    ('H', (0.000000, -0.757160, 3.499790))
 ]
 
 atom_AB = atom_A + atom_B
@@ -51,7 +51,7 @@ mol_B_ghost.atom.extend([('X-' + atom[0], atom[1]) for atom in ghost_atoms_A])
 mol_B_ghost.build()
 
 def solve_dft(mol, xc='b3lyp'):
-    mf = rks.RKS(mol, xc='b3lyp').density_fit()
+    mf = rks.RKS(mol, xc=xc).density_fit()
     mf.grids.atom_grid = (99,590)
     return mf.kernel()
 

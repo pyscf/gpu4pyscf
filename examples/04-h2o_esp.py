@@ -21,6 +21,7 @@ import pyscf
 import numpy as np
 from pyscf import gto
 from gpu4pyscf.dft import rks
+from gpu4pyscf.gto.int3c1e import int1e_grids
 
 atom ='''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -33,10 +34,8 @@ mf = rks.RKS(mol, xc='B3LYP').density_fit()
 mf.kernel()
 dm = mf.make_rdm1()  # compute one-electron density matrix
 
-# Use default mesh grids
-coords = mf.grids.coords.get()
+# Use default Lebedev grids
+coords = mf.grids.coords
 
-# The efficiency can be improved if needed
-from pyscf import df
-fakemol = gto.fakemol_for_charges(coords)
-v = np.einsum('ijp,ij->p', df.incore.aux_e2(mol, fakemol), dm)
+# Calculate electrostatic potential
+v = int1e_grids(mol, coords, dm=dm) # performing 'ijp,ij->p' efficiently
