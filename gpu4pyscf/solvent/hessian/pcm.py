@@ -237,7 +237,8 @@ def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
 
     for i_atom in atmlst:
         g0,g1 = gridslice[i_atom]
-        dIdx[i_atom, :, :, :] += int1e_grids_ip2(mol, grid_coords[g0:g1,:], charges = q_sym[g0:g1], direct_scf_tol = 1e-14, charge_exponents = charge_exp[g0:g1]**2)
+        dIdx[i_atom, :, :, :] += int1e_grids_ip2(mol, grid_coords[g0:g1,:], charges = q_sym[g0:g1],
+                                                 direct_scf_tol = 1e-14, charge_exponents = charge_exp[g0:g1]**2)
 
     dV_on_molecule_dx = dIdx
 
@@ -276,7 +277,8 @@ def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
 
         for i_atom in atmlst:
             for i_xyz in range(3):
-                dV_on_molecule_dx[i_atom, i_xyz, :, :] += int1e_grids(mol, grid_coords, charges = dqdx[i_atom, i_xyz, :], direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
+                dV_on_molecule_dx[i_atom, i_xyz, :, :] += int1e_grids(mol, grid_coords, charges = dqdx[i_atom, i_xyz, :],
+                                                                      direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
 
     elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SMD']:
         dF, dA = get_dF_dA(pcmobj.surface)
@@ -342,7 +344,8 @@ def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
 
         for i_atom in atmlst:
             for i_xyz in range(3):
-                dV_on_molecule_dx[i_atom, i_xyz, :, :] += int1e_grids(mol, grid_coords, charges = dqdx[i_atom, i_xyz, :], direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
+                dV_on_molecule_dx[i_atom, i_xyz, :, :] += int1e_grids(mol, grid_coords, charges = dqdx[i_atom, i_xyz, :],
+                                                                      direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
 
     elif pcmobj.method.upper() in ['SS(V)PE']:
         dF, dA = get_dF_dA(pcmobj.surface)
@@ -414,7 +417,8 @@ def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
 
         for i_atom in atmlst:
             for i_xyz in range(3):
-                dV_on_molecule_dx[i_atom, i_xyz, :, :] += int1e_grids(mol, grid_coords, charges = dqdx[i_atom, i_xyz, :], direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
+                dV_on_molecule_dx[i_atom, i_xyz, :, :] += int1e_grids(mol, grid_coords, charges = dqdx[i_atom, i_xyz, :],
+                                                                      direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
     else:
         raise RuntimeError(f"Unknown implicit solvent model: {pcmobj.method}")
 
@@ -446,7 +450,8 @@ def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
     for i_atom in atmlst:
         for i_xyz in range(3):
             invK_R_dVdx = 0.5 * (inverse_K @ R + R.T @ inverse_K.T) @ dV_on_charge_dx[i_atom, i_xyz, :]
-            dV_on_molecule_dx[i_atom, i_xyz, :, :] += int1e_grids(mol, grid_coords, charges = invK_R_dVdx, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
+            dV_on_molecule_dx[i_atom, i_xyz, :, :] += int1e_grids(mol, grid_coords, charges = invK_R_dVdx,
+                                                                  direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
 
     dV_on_molecule_dx_mo = cupy.einsum('ip,Adpq,qj->Adij', mo_coeff.T, dV_on_molecule_dx, mocc)
 
