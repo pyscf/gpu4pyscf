@@ -524,8 +524,6 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
     int nao = ao_loc[nbas];
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    int do_j = jk.j_factor != NULL;
-    int do_k = jk.k_factor != NULL;
     double *dm = jk.dm;
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + sq_id;
@@ -814,37 +812,29 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
                         int _j = j + j0;
                         int _k = k + k0;
                         int _l = l + l0;
-                        double dd = 0.;
-                        if (do_k) {
-                            int _jl = _j*nao+_l;
-                            int _jk = _j*nao+_k;
-                            int _il = _i*nao+_l;
-                            int _ik = _i*nao+_k;
-                            dd  = dm[_jk] * dm[_il];
-                            dd += dm[_jl] * dm[_ik];
-                            if (jk.n_dm > 1) {
-                                int nao2 = nao * nao;
-                                dd += dm[nao2+_jk] * dm[nao2+_il];
-                                dd += dm[nao2+_jl] * dm[nao2+_ik];
-                            }
-                            dd *= jk.k_factor;
-                        }
-                        if (do_j) {
-                            int _ji = _j*nao+_i;
-                            int _lk = _l*nao+_k;
-                            if (jk.n_dm == 1) {
-                                dd += jk.j_factor * dm[_ji] * dm[_lk];
-                            } else {
-                                int nao2 = nao * nao;
-                                dd += jk.j_factor * (dm[_ji] + dm[nao2+_ji]) * (dm[_lk] + dm[nao2+_lk]);
-                            }
+                        int _jl = _j*nao+_l;
+                        int _jk = _j*nao+_k;
+                        int _il = _i*nao+_l;
+                        int _ik = _i*nao+_k;
+                        int _ji = _j*nao+_i;
+                        int _lk = _l*nao+_k;
+                        double dd = jk.k_factor * (dm[_jk] * dm[_il] + dm[_jl] * dm[_ik]);
+                        if (jk.n_dm == 1) {
+                            dd += jk.j_factor * dm[_ji] * dm[_lk];
+                        } else {
+                            int nao2 = nao * nao;
+                            dd += jk.k_factor * (dm[nao2+_jk] * dm[nao2+_il] + dm[nao2+_jl] * dm[nao2+_ik]);
+                            dd += jk.j_factor * (dm[_ji] + dm[nao2+_ji]) * (dm[_lk] + dm[nao2+_lk]);
                         }
                         int addrx = (ix + jx*stride_j + kx*stride_k + lx*stride_l) * nsq_per_block;
                         int addry = (iy + jy*stride_j + ky*stride_k + ly*stride_l) * nsq_per_block;
                         int addrz = (iz + jz*stride_j + kz*stride_k + lz*stride_l) * nsq_per_block;
-                        double prod_xy = gx[addrx] * gy[addry] * dd;
-                        double prod_xz = gx[addrx] * gz[addrz] * dd;
-                        double prod_yz = gy[addry] * gz[addrz] * dd;
+                        double Ix = gx[addrx];
+                        double Iy = gy[addry];
+                        double Iz = gz[addrz];
+                        double prod_xy = Ix * Iy * dd;
+                        double prod_xz = Ix * Iz * dd;
+                        double prod_yz = Iy * Iz * dd;
                         double fix = ai2 * gx[addrx+i_1]; if (ix > 0) { fix -= ix * gx[addrx-i_1]; } v_ix += fix * prod_yz;
                         double fiy = ai2 * gy[addry+i_1]; if (iy > 0) { fiy -= iy * gy[addry-i_1]; } v_iy += fiy * prod_xz;
                         double fiz = ai2 * gz[addrz+i_1]; if (iz > 0) { fiz -= iz * gz[addrz-i_1]; } v_iz += fiz * prod_xy;

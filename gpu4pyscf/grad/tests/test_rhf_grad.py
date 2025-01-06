@@ -104,8 +104,8 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(nao, nao) - .5
         dm = cp.asarray(dm.dot(dm.T))
         ejk = rhf_grad_gpu._jk_energy_per_atom(mol, dm).get()
-        self.assertAlmostEqual(ejk.sum(), 0, 8)
-        self.assertAlmostEqual(lib.fp(ejk), 2710.490337642, 8)
+        self.assertAlmostEqual(ejk.sum(), 0, 9)
+        self.assertAlmostEqual(lib.fp(ejk), 2710.490337642, 9)
 
         dm = dm.get()
         vj, vk = rhf_grad_cpu.get_jk(mol, dm)
@@ -113,8 +113,33 @@ class KnownValues(unittest.TestCase):
         ref = np.empty_like(ejk)
         for n, (i0, i1) in enumerate(mol.aoslice_by_atom()[:,2:]):
             ref[n] = np.einsum('xpq,pq->x', veff[:,i0:i1], dm[i0:i1])
-        self.assertAlmostEqual(abs(ejk - ref).max(), 0, 8)
+        self.assertAlmostEqual(abs(ejk - ref).max(), 0, 9)
 
 if __name__ == "__main__":
     print("Full Tests for RHF Gradient")
-    unittest.main()
+    #unittest.main()
+    if 1:
+        mol = pyscf.M(
+            atom = '''
+            O   0.000   -0.    0.1174
+            H  -0.757    4.   -0.4696
+            H   0.757    4.   -0.4696
+            C   3.      1.    0.
+            ''',
+            basis='def2-tzvp',
+            unit='B',)
+        np.random.seed(9)
+        nao = mol.nao
+        dm = np.random.rand(nao, nao) - .5
+        dm = cp.asarray(dm.dot(dm.T))
+        ejk = rhf_grad_gpu._jk_energy_per_atom(mol, dm).get()
+        print(ejk.sum(), 0, 8)
+        print(lib.fp(ejk), 2710.490337642, 8)
+
+        dm = dm.get()
+        vj, vk = rhf_grad_cpu.get_jk(mol, dm)
+        veff = vj - vk * .5
+        ref = np.empty_like(ejk)
+        for n, (i0, i1) in enumerate(mol.aoslice_by_atom()[:,2:]):
+            ref[n] = np.einsum('xpq,pq->x', veff[:,i0:i1], dm[i0:i1])
+        print(abs(ejk - ref).max(), 0, 8)
