@@ -415,7 +415,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         ngrids_glob = grids.coords.shape[0]
         ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
         ngrids_per_device = (ngrids_per_device + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE * MIN_BLK_SIZE
-        grid_start = device_id * ngrids_per_device
+        grid_start = min(device_id * ngrids_per_device, ngrids_glob)
         grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} on Device {device_id}")
@@ -819,7 +819,7 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         ngrids_glob = grids.coords.shape[0]
         ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
         ngrids_per_device = (ngrids_per_device + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE * MIN_BLK_SIZE
-        grid_start = device_id * ngrids_per_device
+        grid_start = min(device_id * ngrids_per_device, ngrids_glob)
         grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} on Device {device_id}")
@@ -1024,7 +1024,7 @@ def _nr_rks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
         ngrids_glob = grids.coords.shape[0]
         ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
         ngrids_per_device = (ngrids_per_device + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE * MIN_BLK_SIZE
-        grid_start = device_id * ngrids_per_device
+        grid_start = min(device_id * ngrids_per_device, ngrids_glob)
         grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} on Device {device_id}")
@@ -1176,7 +1176,7 @@ def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
         ngrids_glob = grids.coords.shape[0]
         ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
         ngrids_per_device = (ngrids_per_device + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE * MIN_BLK_SIZE
-        grid_start = device_id * ngrids_per_device
+        grid_start = min(device_id * ngrids_per_device, ngrids_glob)
         grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} on Device {device_id}")
