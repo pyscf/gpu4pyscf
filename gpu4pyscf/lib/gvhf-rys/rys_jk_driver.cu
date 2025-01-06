@@ -299,9 +299,9 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         nroots *= 2;
     }
     uint8_t stride_j = li + 2;
-    uint8_t stride_k = stride_j * (lj + 2);
+    uint8_t stride_k = stride_j * (lj + 1);
     uint8_t stride_l = stride_k * (lk + 2);
-    int g_size = stride_l * (uint16_t)(ll + 2);
+    int g_size = stride_l * (uint16_t)(ll + 1);
     BoundsInfo bounds = {li, lj, lk, ll, nfi, nfk, nfij, nfkl,
         nroots, stride_j, stride_k, stride_l, iprim, jprim, kprim, lprim,
         ntile_ij_pairs, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
@@ -320,7 +320,7 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;
+        int buflen = (nroots*2 + g_size*3 + ij_prims) * quartets_per_block;
         buflen = MAX(buflen, 9*gout_stride*quartets_per_block);
         rys_ejk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
