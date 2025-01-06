@@ -34,13 +34,15 @@ from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, libvhf_rys, _VHFOpt, init_constant,
     _make_tril_tile_mappings, _nearest_power2)
 
-libvhf_rys.RYS_per_atom_jk_ip1.restype = ctypes.c_int
-
 __all__ = [
     'SCF_GradScanner',
     'Gradients',
     'Grad'
 ]
+
+libvhf_rys.RYS_per_atom_jk_ip1.restype = ctypes.c_int
+# The max. size of nf*nsq_per_block for each block
+DD_CACHE_MAX = 101250
 
 def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
                  device_id=0, verbose=0):
@@ -76,6 +78,8 @@ def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
                                                  log_cutoff-log_max_dm)
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
+        # enough for
+        dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
         info = cp.empty(2, dtype=np.uint32)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
@@ -103,6 +107,7 @@ def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
                 ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                 ctypes.c_float(log_cutoff),
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                 ctypes.cast(info.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(workers),
                 mol._atm.ctypes, ctypes.c_int(mol.natm),

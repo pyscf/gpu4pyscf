@@ -341,7 +341,7 @@ def _ip2_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nps = l_ctr_pattern[:,1]
     ij_prims = nps[0] * nps[1]
     nroots = (order + 2) // 2 + 1
-    unit = nroots*2 + g_size*3 + ij_prims*4
+    unit = nroots*2 + g_size*3 + ij_prims
     if mol.omega < 0: # SR
         unit += nroots * 2
     counts = shm_size // (unit*8)

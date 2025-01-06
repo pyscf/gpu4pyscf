@@ -40,7 +40,7 @@ extern __global__ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo
 extern __global__ void rys_jk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                          ShellQuartet *pool, uint32_t *batch_head);
 extern __global__ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                                          ShellQuartet *pool, uint32_t *batch_head);
+                                          ShellQuartet *pool, double * dd_pool, uint32_t *batch_head);
 extern __global__ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                           ShellQuartet *pool, uint32_t *batch_head);
 extern __global__ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
@@ -63,7 +63,8 @@ extern int os_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
 extern int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
 extern int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
+                     ShellQuartet *pool, double *dd_pool,
+                     uint32_t *batch_head, int *scheme, int workers);
 extern int rys_ejk_ip2_type12_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
 extern int rys_ejk_ip2_type3_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
@@ -271,7 +272,7 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                         int ntile_ij_pairs, int ntile_kl_pairs,
                         int *tile_ij_mapping, int *tile_kl_mapping, float *tile_q_cond,
                         float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
-                        ShellQuartet *pool, uint32_t *batch_head, int workers,
+                        ShellQuartet *pool, double *dd_pool, uint32_t *batch_head, int workers,
                         int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
@@ -315,14 +316,15 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
     JKEnergy jk = {ejk, dm, 2.*j_factor, -k_factor, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(int));
 
-    if (!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
+    if (!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, pool, dd_pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + ij_prims) * quartets_per_block;
         buflen = MAX(buflen, 9*gout_stride*quartets_per_block);
-        rys_ejk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+        rys_ejk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(
+                envs, jk, bounds, pool, dd_pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -387,7 +389,7 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;
+        int buflen = (nroots*2 + g_size*3 + ij_prims) * quartets_per_block;
         rys_ejk_ip2_type12_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
@@ -453,7 +455,7 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;
+        int buflen = (nroots*2 + g_size*3 + ij_prims) * quartets_per_block;
         buflen = MAX(buflen, 9*gout_stride*quartets_per_block);
         rys_ejk_ip2_type3_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }

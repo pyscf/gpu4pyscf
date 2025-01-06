@@ -474,7 +474,8 @@ void rys_jk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 
 __device__
 static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                                ShellQuartet *shl_quartet_idx, int ntasks)
+                                ShellQuartet *shl_quartet_idx, int ntasks,
+                                double *dd_cache)
 {
     // sq is short for shl_quartet
     int sq_id = threadIdx.x;
@@ -532,7 +533,8 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
     double *gy = gx + nsq_per_block * g_size;
     double *gz = gy + nsq_per_block * g_size;
     double *cicj_cache = gz + nsq_per_block * g_size;
-    double rjri[3], rlrk[3], Rpq[3];
+    double Rpq[3];
+    dd_cache += sq_id;
 
     for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
         __syncthreads();
@@ -577,12 +579,6 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
         double xlxk = rl[0] - rk[0];
         double ylyk = rl[1] - rk[1];
         double zlzk = rl[2] - rk[2];
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
-        rlrk[0] = xlxk;
-        rlrk[1] = ylyk;
-        rlrk[2] = zlzk;
         double dist_ij = xjxi*xjxi+yjyi*yjyi+zjzi*zjzi;
         double v_ix = 0;
         double v_iy = 0;
@@ -602,11 +598,72 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
             double ai = expi[ip];
             double aj = expj[jp];
             double aij = ai + aj;
-            double aj_aij = aj / aij;
-            double theta_ij = ai * aj_aij;
+            double theta_ij = ai * aj / aij;
             double Kab = exp(-theta_ij * dist_ij);
             cicj_cache[ij*nsq_per_block] = fac_sym * ci[ip] * cj[jp] * Kab;
         }
+
+        int do_j = jk.j_factor != 0.;
+        int do_k = jk.k_factor != 0.;
+        if (jk.n_dm == 1) {
+            for (int n = gout_id; n < nfij*nfkl; n+=gout_stride) {
+                int kl = n / nfij;
+                int ij = n % nfij;
+                int i = ij % nfi;
+                int j = ij / nfi;
+                int k = kl % nfk;
+                int l = kl / nfk;
+                int _i = i + i0;
+                int _j = j + j0;
+                int _k = k + k0;
+                int _l = l + l0;
+                int _jl = _j*nao+_l;
+                int _jk = _j*nao+_k;
+                int _il = _i*nao+_l;
+                int _ik = _i*nao+_k;
+                int _ji = _j*nao+_i;
+                int _lk = _l*nao+_k;
+                double dd = 0;
+                if (do_k) {
+                    dd += jk.k_factor * (dm[_jk] * dm[_il] + dm[_jl] * dm[_ik]);
+                }
+                if (do_j) {
+                    dd += jk.j_factor * dm[_ji] * dm[_lk];
+                }
+                dd_cache[n*nsq_per_block] = dd;
+            }
+        } else {
+            double *dmb = dm + nao * nao;
+            for (int n = gout_id; n < nfij*nfkl; n+=gout_stride) {
+                int kl = n / nfij;
+                int ij = n % nfij;
+                int i = ij % nfi;
+                int j = ij / nfi;
+                int k = kl % nfk;
+                int l = kl / nfk;
+                int _i = i + i0;
+                int _j = j + j0;
+                int _k = k + k0;
+                int _l = l + l0;
+                int _jl = _j*nao+_l;
+                int _jk = _j*nao+_k;
+                int _il = _i*nao+_l;
+                int _ik = _i*nao+_k;
+                int _ji = _j*nao+_i;
+                int _lk = _l*nao+_k;
+                double dd = 0;
+                if (do_k) {
+                    dd += dm [_jk] * dm [_il] + dm [_jl] * dm [_ik];
+                    dd += dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik];
+                    dd *= jk.k_factor;
+                }
+                if (do_j) {
+                    dd += jk.j_factor * (dm[_ji] + dm[_ji]) * (dmb[_lk] + dmb[_lk]);
+                }
+                dd_cache[n*nsq_per_block] = dd;
+            }
+        }
+
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
@@ -701,7 +758,7 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
                     // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
                     for (int n = gout_id; n < 3; n += gout_stride) {
                         double *_gx = g + n * g_size * nsq_per_block;
-                        double Rpa = rjri[n] * aj_aij;
+                        double Rpa = (rj[n] - ri[n]) * aj_aij;
                         double c0x = Rpa - rt_aij * Rpq[n];
                         s0x = _gx[0];
                         s1x = c0x * s0x;
@@ -720,7 +777,7 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
                         int i = n / 3; //for i in range(lij+1):
                         int _ix = n % 3;
                         double *_gx = g + (i + _ix * g_size) * nsq_per_block;
-                        double Rqc = rlrk[_ix] * al_akl;
+                        double Rqc = (rl[_ix] - rk[_ix]) * al_akl;
                         double cpx = Rqc + rt_akl * Rpq[_ix];
                         //for i in range(lij+1):
                         //    trr(i,1) = c0p * trr(i,0) + i*b00 * trr(i-1,0)
@@ -760,7 +817,7 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
                             for (int m = gout_id; m < lkl3; m += gout_stride) {
                                 int k = m / 3;
                                 int _ix = m % 3;
-                                double xjxi = rjri[_ix];
+                                double xjxi = rj[_ix] - ri[_ix];
                                 double *_gx = g + (_ix*g_size + k*stride_k) * nsq_per_block;
                                 for (int j = 0; j < lj; ++j) {
                                     int ij = (lij-j) + j*stride_j;
@@ -780,7 +837,7 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
                             for (int n = gout_id; n < stride_k*3; n += gout_stride) {
                                 int i = n / 3;
                                 int _ix = n % 3;
-                                double xlxk = rlrk[_ix];
+                                double xlxk = rl[_ix] - rk[_ix];
                                 double *_gx = g + (_ix*g_size + i) * nsq_per_block;
                                 for (int l = 0; l < ll; ++l) {
                                     int kl = (lkl-l)*stride_k + l*stride_l;
@@ -802,7 +859,6 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
                     for (int n = gout_id; n < nfij*nfkl; n+=gout_stride) {
                         int kl = n / nfij;
                         int ij = n % nfij;
-                        if (kl >= nfkl) break;
                         int i = ij % nfi;
                         int j = ij / nfi;
                         int k = kl % nfk;
@@ -819,24 +875,7 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
                         int lx = idx_l[l];
                         int ly = idy_l[l];
                         int lz = idz_l[l];
-                        int _i = i + i0;
-                        int _j = j + j0;
-                        int _k = k + k0;
-                        int _l = l + l0;
-                        int _jl = _j*nao+_l;
-                        int _jk = _j*nao+_k;
-                        int _il = _i*nao+_l;
-                        int _ik = _i*nao+_k;
-                        int _ji = _j*nao+_i;
-                        int _lk = _l*nao+_k;
-                        double dd = jk.k_factor * (dm[_jk] * dm[_il] + dm[_jl] * dm[_ik]);
-                        if (jk.n_dm == 1) {
-                            dd += jk.j_factor * dm[_ji] * dm[_lk];
-                        } else {
-                            int nao2 = nao * nao;
-                            dd += jk.k_factor * (dm[nao2+_jk] * dm[nao2+_il] + dm[nao2+_jl] * dm[nao2+_ik]);
-                            dd += jk.j_factor * (dm[_ji] + dm[nao2+_ji]) * (dm[_lk] + dm[nao2+_lk]);
-                        }
+                        double dd = dd_cache[n*nsq_per_block];
                         int addrx = (ix + jx*stride_j + kx*stride_k + lx*stride_l) * nsq_per_block;
                         int addry = (iy + jy*stride_j + ky*stride_k + ly*stride_l) * nsq_per_block;
                         int addrz = (iz + jz*stride_j + kz*stride_k + lz*stride_l) * nsq_per_block;
@@ -846,24 +885,24 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
                         double prod_xy = Ix * Iy * dd;
                         double prod_xz = Ix * Iz * dd;
                         double prod_yz = Iy * Iz * dd;
-                        double fix = ai2 * gx[addrx+i_1]; if (ix > 0) { fix -= ix * gx[addrx-i_1]; } v_ix += fix * prod_yz;
-                        double fiy = ai2 * gy[addry+i_1]; if (iy > 0) { fiy -= iy * gy[addry-i_1]; } v_iy += fiy * prod_xz;
-                        double fiz = ai2 * gz[addrz+i_1]; if (iz > 0) { fiz -= iz * gz[addrz-i_1]; } v_iz += fiz * prod_xy;
-                        double fkx = ak2 * gx[addrx+k_1]; if (kx > 0) { fkx -= kx * gx[addrx-k_1]; } v_kx += fkx * prod_yz;
-                        double fky = ak2 * gy[addry+k_1]; if (ky > 0) { fky -= ky * gy[addry-k_1]; } v_ky += fky * prod_xz;
-                        double fkz = ak2 * gz[addrz+k_1]; if (kz > 0) { fkz -= kz * gz[addrz-k_1]; } v_kz += fkz * prod_xy;
-                        double fjx = aj2 * ((jx == lj) ? (gx[addrx+i_1] - xjxi * Ix) : gx[addrx+j_1]);
-                        if (jx > 0) { fjx -= jx * gx[addrx-j_1]; } v_jx += fjx * prod_yz;
-                        double fjy = aj2 * ((jy == lj) ? (gy[addry+i_1] - yjyi * Iy) : gy[addry+j_1]);
-                        if (jy > 0) { fjy -= jy * gy[addry-j_1]; } v_jy += fjy * prod_xz;
-                        double fjz = aj2 * ((jz == lj) ? (gz[addrz+i_1] - zjzi * Iz) : gz[addrz+j_1]);
-                        if (jz > 0) { fjz -= jz * gz[addrz-j_1]; } v_jz += fjz * prod_xy;
-                        double flx = al2 * ((lx == ll) ? (gx[addrx+k_1] - xlxk * Ix) : gx[addrx+l_1]);
-                        if (lx > 0) { flx -= lx * gx[addrx-l_1]; } v_lx += flx * prod_yz;
-                        double fly = al2 * ((ly == ll) ? (gy[addry+k_1] - ylyk * Iy) : gy[addry+l_1]);
-                        if (ly > 0) { fly -= ly * gy[addry-l_1]; } v_ly += fly * prod_xz;
-                        double flz = al2 * ((lz == ll) ? (gz[addrz+k_1] - zlzk * Iz) : gz[addrz+l_1]);
-                        if (lz > 0) { flz -= lz * gz[addrz-l_1]; } v_lz += flz * prod_xy;
+                        double gix = gx[addrx+i_1];
+                        double giy = gy[addry+i_1];
+                        double giz = gz[addrz+i_1];
+                        double gkx = gx[addrx+k_1];
+                        double gky = gy[addry+k_1];
+                        double gkz = gz[addrz+k_1];
+                        double fix = ai2 * gix; if (ix > 0) { fix -= ix * gx[addrx-i_1]; } v_ix += fix * prod_yz;
+                        double fiy = ai2 * giy; if (iy > 0) { fiy -= iy * gy[addry-i_1]; } v_iy += fiy * prod_xz;
+                        double fiz = ai2 * giz; if (iz > 0) { fiz -= iz * gz[addrz-i_1]; } v_iz += fiz * prod_xy;
+                        double fkx = ak2 * gkx; if (kx > 0) { fkx -= kx * gx[addrx-k_1]; } v_kx += fkx * prod_yz;
+                        double fky = ak2 * gky; if (ky > 0) { fky -= ky * gy[addry-k_1]; } v_ky += fky * prod_xz;
+                        double fkz = ak2 * gkz; if (kz > 0) { fkz -= kz * gz[addrz-k_1]; } v_kz += fkz * prod_xy;
+                        double fjx = aj2 * (gix - xjxi * Ix); if (jx > 0) { fjx -= jx * gx[addrx-j_1]; } v_jx += fjx * prod_yz;
+                        double fjy = aj2 * (giy - yjyi * Iy); if (jy > 0) { fjy -= jy * gy[addry-j_1]; } v_jy += fjy * prod_xz;
+                        double fjz = aj2 * (giz - zjzi * Iz); if (jz > 0) { fjz -= jz * gz[addrz-j_1]; } v_jz += fjz * prod_xy;
+                        double flx = al2 * (gkx - xlxk * Ix); if (lx > 0) { flx -= lx * gx[addrx-l_1]; } v_lx += flx * prod_yz;
+                        double fly = al2 * (gky - ylyk * Iy); if (ly > 0) { fly -= ly * gy[addry-l_1]; } v_ly += fly * prod_xz;
+                        double flz = al2 * (gkz - zlzk * Iz); if (lz > 0) { flz -= lz * gz[addrz-l_1]; } v_lz += flz * prod_xy;
                     }
                 }
             }
@@ -917,11 +956,17 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
 
 __global__
 void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                        ShellQuartet *pool, uint32_t *batch_head)
+                        ShellQuartet *pool, double *dd_pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
+
+    int nfij = bounds.nfij;
+    int nfkl = bounds.nfkl;
+    int nf = nfij * nfkl;
+    double *dd_cache = dd_pool + b_id * nf * blockDim.x;
+
     __shared__ int batch_id;
     if (t_id == 0) {
         batch_id = atomicAdd(batch_head, 1);
@@ -943,7 +988,7 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                         batch_ij, batch_kl);
         }
         if (ntasks > 0) {
-            rys_ejk_ip1_general(envs, jk, bounds, shl_quartet_idx, ntasks);
+            rys_ejk_ip1_general(envs, jk, bounds, shl_quartet_idx, ntasks, dd_cache);
         }
         if (t_id == 0) {
             batch_id = atomicAdd(batch_head, 1);

@@ -76,12 +76,13 @@ class KnownValues(unittest.TestCase):
             basis='6-31g**', unit='B')
         np.random.seed(9)
         nao = mol.nao
-        mo_coeff = np.random.rand(nao, nao)
+        mo_coeff = np.random.rand(nao, nao) - .5
         dm = mo_coeff.dot(mo_coeff.T) * 2
         mo_occ = np.ones(nao) * 2
         mo_energy = np.random.rand(nao)
 
         ejk = rhf_gpu._partial_ejk_ip2(mol, dm)
+        assert abs(lib.fp(ejk.get()) - 1116.6336092900506) < 1e-8
         mf = mol.RHF()
         mf.mo_coeff = mo_coeff
         mf.mo_occ = mo_occ
@@ -89,7 +90,7 @@ class KnownValues(unittest.TestCase):
         h = rhf_cpu.Hessian(mf)
         e1, refj, refk = rhf_cpu._partial_hess_ejk(h, mo_energy, mo_coeff, mo_occ)
         e2_ref = refj - refk
-        assert abs(ejk.get() - e2_ref).max() < 1e-6
+        assert abs(ejk.get() - e2_ref).max() < 1e-8
 
     def test_get_jk(self):
         mol = gto.M(
