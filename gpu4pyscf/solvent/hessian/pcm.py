@@ -227,20 +227,17 @@ def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
 
     dIdx = cupy.zeros([len(atmlst), 3, nao, nao])
 
-    dIdA = int1e_grids_ip1(mol, grid_coords, direct_scf_tol = 1e-14, charges = q_sym, charge_exponents = charge_exp**2).transpose(0,2,1)
+    dIdA = int1e_grids_ip1(mol, grid_coords, direct_scf_tol = 1e-14, charges = q_sym, charge_exponents = charge_exp**2)
     aoslice = mol.aoslice_by_atom()
     aoslice = numpy.array(aoslice)
     for i_atom in atmlst:
         p0,p1 = aoslice[i_atom, 2:]
         dIdx[i_atom, :, p0:p1, :] += dIdA[:, p0:p1, :]
-        dIdx[i_atom, :, :, p0:p1] += dIdA[:, p0:p1, :].transpose(0, 2, 1)
+        dIdx[i_atom, :, :, p0:p1] += dIdA[:, p0:p1, :].transpose(0,2,1)
 
-    # TODO: new contraction pattern
-    dIdC = int1e_grids_ip2(mol, grid_coords, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2).transpose(0,1,3,2)
-    dIdC = cupy.array(dIdC)
     for i_atom in atmlst:
         g0,g1 = gridslice[i_atom]
-        dIdx[i_atom, :, :, :] += cupy.einsum('dqij,q->dij', dIdC[:, g0:g1, :, :], q_sym[g0:g1])
+        dIdx[i_atom, :, :, :] += int1e_grids_ip2(mol, grid_coords[g0:g1,:], charges = q_sym[g0:g1], direct_scf_tol = 1e-14, charge_exponents = charge_exp[g0:g1]**2)
 
     dV_on_molecule_dx = dIdx
 
@@ -438,13 +435,8 @@ def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
         g0,g1 = gridslice[i_atom]
         dV_on_charge_dx[i_atom,:,g0:g1] += cupy.einsum('dqA,A->dq', v_ng_ip2[:,g0:g1,:], atom_charges)
 
-    # TODO: new contraction pattern
-    dIdA = int1e_grids_ip1(mol, grid_coords, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2).transpose(0,1,3,2)
-    dIdA = cupy.array(dIdA)
-    dIdA = cupy.einsum('dqij,ij->dqi', dIdA, dm + dm.T)
-    for i_atom in atmlst:
-        p0,p1 = aoslice[i_atom, 2:]
-        dV_on_charge_dx[i_atom,:,:] -= cupy.einsum('dqi->dq', dIdA[:,:,p0:p1])
+    dIdA = int1e_grids_ip1(mol, grid_coords, dm = dm + dm.T, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
+    dV_on_charge_dx[atmlst,:,:] -= dIdA[atmlst,:,:]
 
     dIdC = int1e_grids_ip2(mol, grid_coords, direct_scf_tol = 1e-14, dm = dm, charge_exponents = charge_exp**2)
     for i_atom in atmlst:
