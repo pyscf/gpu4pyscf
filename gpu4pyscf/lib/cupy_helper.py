@@ -149,7 +149,7 @@ def reduce_to_device(array_list, inplace=False):
         matrix = matrix.reshape(-1)
         blksize = 1024*1024*1024 // matrix.itemsize # 1GB
         for p0, p1 in lib.prange(0,len(matrix), blksize):
-            result[p0:p1] += copy_array(matrix[p0:p1])#cupy.asarray(matrix[p0:p1]) 
+            result[p0:p1] += copy_array(matrix[p0:p1])
             #result[p0:p1] += cupy.asarray(matrix[p0:p1]) 
     return result.reshape(out_shape)
     

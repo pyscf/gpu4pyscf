@@ -138,7 +138,7 @@ class DF(lib.StreamObject):
         '''
         if nao is None: nao = self.nao
         mem_avail = get_avail_mem()
-        blksize = int(mem_avail*0.4/8/(nao*nao + extra) / ALIGNED) * ALIGNED
+        blksize = int(mem_avail*0.2/8/(nao*nao + extra) / ALIGNED) * ALIGNED
         blksize = min(blksize, MIN_BLK_SIZE)
         log = logger.new_logger(self.mol, self.mol.verbose)
         device_id = cupy.cuda.Device().id

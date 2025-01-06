@@ -811,9 +811,6 @@ def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, re
     for future in futures:
         vmat_dist.append(future.result())
     vmat = reduce_to_device(vmat_dist, inplace=True)
-    #vmat = opt.unsort_orbitals(vmat, axis=[1,2])
-    #if xctype != 'LDA':
-    #    transpose_sum(vmat)
 
     if len(dm_shape) == 2:
         vmat = vmat[0]
