@@ -148,12 +148,12 @@ def test_df_rb3lyp_hessian_medium(benchmark):
     print('testing df rb3lyp hessian medium')
     assert np.isclose(np.linalg.norm(h), 6.31265424196621, atol=1e-4, rtol=1e-16)
 
-@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
+@pytest.mark.benchmark(warmup=False, min_rounds=1)
 def test_rb3lyp_medium(benchmark):
     e = benchmark(run_rb3lyp, medium_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp medium')
     assert np.isclose(np.linalg.norm(e), 1138.3710752128077, atol=1e-7, rtol=1e-16)
-@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
+@pytest.mark.benchmark(warmup=False, min_rounds=1)
 def test_rb3lyp_grad_medium(benchmark):
     g = benchmark(run_rb3lyp_grad, medium_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp grad medium')

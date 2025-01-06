@@ -68,12 +68,12 @@ def run_ub3lyp_hessian(atom, basis, with_df, with_solvent):
 ##########
 # UKS
 ##########
-@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=6)
+@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
 def test_df_ub3lyp(benchmark):
     e = benchmark(run_ub3lyp, small_mol, 'def2-tzvpp', True, False)
     print('testing df ub3lyp')
     assert np.isclose(np.linalg.norm(e), 684.9998712035856, atol=1e-7, rtol=1e-16)
-@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=6)
+@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
 def test_df_ub3lyp_grad(benchmark):
     g = benchmark(run_ub3lyp_grad, small_mol, 'def2-tzvpp', True, False)
     print('testing df ub3lyp grad')
@@ -83,12 +83,12 @@ def test_df_ub3lyp_hessian(benchmark):
     h = benchmark(run_ub3lyp_hessian, small_mol, 'def2-tzvpp', True, False)
     print('testing df ub3lyp hessian')
     assert np.isclose(np.linalg.norm(h), 3.758810345806532, atol=1e-4, rtol=1e-16)
-@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=6)
+@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
 def test_ub3lyp(benchmark):
     e = benchmark(run_ub3lyp, small_mol, '6-31gs', False, False)
     print('testing ub3lyp')
     assert np.isclose(np.linalg.norm(e), 684.6643858622429, atol=1e-7, rtol=1e-16)
-@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=6)
+@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
 def test_ub3lyp_grad(benchmark):
     g = benchmark(run_ub3lyp_grad, small_mol, '6-31gs', False, False)
     print('testing ub3lyp grad')
