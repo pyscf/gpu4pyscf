@@ -474,8 +474,7 @@ void rys_jk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 
 __device__
 static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                                ShellQuartet *shl_quartet_idx, int ntasks,
-                                double *dd_cache)
+                        ShellQuartet *shl_quartet_idx, double *dd_cache, int ntasks)
 {
     // sq is short for shl_quartet
     int sq_id = threadIdx.x;
@@ -526,6 +525,7 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
     double *dm = jk.dm;
+    dd_cache += sq_id;
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + sq_id;
     double *g = rw + nsq_per_block * nroots*2;
@@ -534,7 +534,6 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
     double *gz = gy + nsq_per_block * g_size;
     double *cicj_cache = gz + nsq_per_block * g_size;
     double Rpq[3];
-    dd_cache += sq_id;
 
     for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
         __syncthreads();
@@ -988,7 +987,8 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                         batch_ij, batch_kl);
         }
         if (ntasks > 0) {
-            rys_ejk_ip1_general(envs, jk, bounds, shl_quartet_idx, ntasks, dd_cache);
+            rys_ejk_ip1_general(envs, jk, bounds, shl_quartet_idx,
+                                dd_cache, ntasks);
         }
         if (t_id == 0) {
             batch_id = atomicAdd(batch_head, 1);
