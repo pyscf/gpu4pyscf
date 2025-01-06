@@ -114,3 +114,7 @@ class KnownValues(unittest.TestCase):
         for n, (i0, i1) in enumerate(mol.aoslice_by_atom()[:,2:]):
             ref[n] = np.einsum('xpq,pq->x', veff[:,i0:i1], dm[i0:i1])
         self.assertAlmostEqual(abs(ejk - ref).max(), 0, 8)
+
+if __name__ == "__main__":
+    print("Full Tests for RHF Gradient")
+    unittest.main()

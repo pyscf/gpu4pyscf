@@ -182,6 +182,7 @@ void _rys_ejk_ip1_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 __syncthreads();
                 if (omega == 0) {
                     rys_roots(1, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
+                    __syncthreads();
                     for (int irys = gout_id; irys < 1; irys += gout_stride) {
                         rw[(irys*2+1)*nsq_per_block] *= fac;
                     }
@@ -527,6 +528,7 @@ void _rys_ejk_ip1_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 __syncthreads();
                 if (omega == 0) {
                     rys_roots(2, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
+                    __syncthreads();
                     for (int irys = gout_id; irys < 2; irys += gout_stride) {
                         rw[(irys*2+1)*nsq_per_block] *= fac;
                     }
@@ -981,6 +983,7 @@ void _rys_ejk_ip1_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 __syncthreads();
                 if (omega == 0) {
                     rys_roots(2, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
+                    __syncthreads();
                     for (int irys = gout_id; irys < 2; irys += gout_stride) {
                         rw[(irys*2+1)*nsq_per_block] *= fac;
                     }
@@ -1732,6 +1735,7 @@ void _rys_ejk_ip1_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 __syncthreads();
                 if (omega == 0) {
                     rys_roots(3, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
+                    __syncthreads();
                     for (int irys = gout_id; irys < 3; irys += gout_stride) {
                         rw[(irys*2+1)*nsq_per_block] *= fac;
                     }
@@ -3283,6 +3287,7 @@ void _rys_ejk_ip1_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 __syncthreads();
                 if (omega == 0) {
                     rys_roots(2, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
+                    __syncthreads();
                     for (int irys = gout_id; irys < 2; irys += gout_stride) {
                         rw[(irys*2+1)*nsq_per_block] *= fac;
                     }
@@ -4030,6 +4035,7 @@ void _rys_ejk_ip1_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 __syncthreads();
                 if (omega == 0) {
                     rys_roots(3, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
+                    __syncthreads();
                     for (int irys = gout_id; irys < 3; irys += gout_stride) {
                         rw[(irys*2+1)*nsq_per_block] *= fac;
                     }
@@ -5581,6 +5587,7 @@ void _rys_ejk_ip1_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 __syncthreads();
                 if (omega == 0) {
                     rys_roots(3, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
+                    __syncthreads();
                     for (int irys = gout_id; irys < 3; irys += gout_stride) {
                         rw[(irys*2+1)*nsq_per_block] *= fac;
                     }
@@ -9127,6 +9134,7 @@ void _rys_ejk_ip1_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 __syncthreads();
                 if (omega == 0) {
                     rys_roots(2, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
+                    __syncthreads();
                     for (int irys = gout_id; irys < 2; irys += gout_stride) {
                         rw[(irys*2+1)*nsq_per_block] *= fac;
                     }
@@ -9731,6 +9739,7 @@ void _rys_ejk_ip1_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 __syncthreads();
                 if (omega == 0) {
                     rys_roots(3, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
+                    __syncthreads();
                     for (int irys = gout_id; irys < 3; irys += gout_stride) {
                         rw[(irys*2+1)*nsq_per_block] *= fac;
                     }
@@ -10856,6 +10865,7 @@ void _rys_ejk_ip1_2011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 __syncthreads();
                 if (omega == 0) {
                     rys_roots(3, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
+                    __syncthreads();
                     for (int irys = gout_id; irys < 3; irys += gout_stride) {
                         rw[(irys*2+1)*nsq_per_block] *= fac;
                     }
@@ -13306,6 +13316,7 @@ void _rys_ejk_ip1_2020(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 __syncthreads();
                 if (omega == 0) {
                     rys_roots(3, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
+                    __syncthreads();
                     for (int irys = gout_id; irys < 3; irys += gout_stride) {
                         rw[(irys*2+1)*nsq_per_block] *= fac;
                     }
@@ -15048,6 +15059,7 @@ void _rys_ejk_ip1_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 __syncthreads();
                 if (omega == 0) {
                     rys_roots(3, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
+                    __syncthreads();
                     for (int irys = gout_id; irys < 3; irys += gout_stride) {
                         rw[(irys*2+1)*nsq_per_block] *= fac;
                     }
@@ -16181,6 +16193,7 @@ void _rys_ejk_ip1_2110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 __syncthreads();
                 if (omega == 0) {
                     rys_roots(3, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
+                    __syncthreads();
                     for (int irys = gout_id; irys < 3; irys += gout_stride) {
                         rw[(irys*2+1)*nsq_per_block] *= fac;
                     }
@@ -18623,6 +18636,7 @@ void _rys_ejk_ip1_2200(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 __syncthreads();
                 if (omega == 0) {
                     rys_roots(3, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
+                    __syncthreads();
                     for (int irys = gout_id; irys < 3; irys += gout_stride) {
                         rw[(irys*2+1)*nsq_per_block] *= fac;
                     }
