@@ -264,7 +264,7 @@ def get_int3c1e_ip2_density_contracted(mol, grids, charge_exponents, dm, intopt)
             if charge_exponents is not None:
                 exponents_slice = charge_exponents[p0:p1]
                 charge_exponents_pointer = exponents_slice.data.ptr
-            grids_slice = grids[p0:p1].data.ptr
+            grids_slice = grids[p0:p1]
 
             # n_pair_sum_per_thread = 1 # means every thread processes one pair and one grid
             # n_pair_sum_per_thread = nao_cart # or larger number gaurantees one thread processes one grid and all pairs of the same type
