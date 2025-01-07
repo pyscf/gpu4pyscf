@@ -154,7 +154,7 @@ class WithSolventHess:
         h1ao = super().make_h1(mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
         if isinstance(self.base, scf.hf.RHF):
             dm = self.base.make_rdm1(ao_repr=True)
-            dv = pcm_hess.fd_grad_vmat(self.base.with_solvent, dm, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
+            dv = pcm_hess.analytic_grad_vmat(self.base.with_solvent, dm, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
             for i0, ia in enumerate(atmlst):
                 h1ao[i0] += dv[i0]
             return h1ao
@@ -163,8 +163,8 @@ class WithSolventHess:
             solvent = self.base.with_solvent
             dm = self.base.make_rdm1(ao_repr=True)
             dm = dm[0] + dm[1]
-            dva = pcm_hess.fd_grad_vmat(solvent, dm, mo_coeff[0], mo_occ[0], atmlst=atmlst, verbose=verbose)
-            dvb = pcm_hess.fd_grad_vmat(solvent, dm, mo_coeff[1], mo_occ[1], atmlst=atmlst, verbose=verbose)
+            dva = pcm_hess.analytic_grad_vmat(solvent, dm, mo_coeff[0], mo_occ[0], atmlst=atmlst, verbose=verbose)
+            dvb = pcm_hess.analytic_grad_vmat(solvent, dm, mo_coeff[1], mo_occ[1], atmlst=atmlst, verbose=verbose)
             for i0, ia in enumerate(atmlst):
                 h1aoa[i0] += dva[i0]
                 h1aob[i0] += dvb[i0]

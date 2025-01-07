@@ -153,47 +153,6 @@ def hess_elec(pcmobj, dm, verbose=None):
     pcmobj.reset(pmol)
     return de
 
-def fd_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
-    '''
-    dv_solv / da
-    slow version with finite difference
-    '''
-    log = logger.new_logger(pcmobj, verbose)
-    t1 = log.init_timer()
-    pmol = pcmobj.mol.copy()
-    mol = pmol.copy()
-    if atmlst is None:
-        atmlst = range(mol.natm)
-    nao, nmo = mo_coeff.shape
-    mocc = mo_coeff[:,mo_occ>0]
-    nocc = mocc.shape[1]
-    coords = mol.atom_coords(unit='Bohr')
-    def pcm_vmat_scanner(mol):
-        pcmobj.reset(mol)
-        e, v = pcmobj._get_vind(dm)
-        return v
-
-    mol.verbose = 0
-    vmat = cupy.empty([len(atmlst), 3, nao, nocc])
-    eps = 1e-3
-    for i0, ia in enumerate(atmlst):
-        for ix in range(3):
-            dv = numpy.zeros_like(coords)
-            dv[ia,ix] = eps
-            mol.set_geom_(coords + dv, unit='Bohr')
-            vmat0 = pcm_vmat_scanner(mol)
-
-            mol.set_geom_(coords - dv, unit='Bohr')
-            vmat1 = pcm_vmat_scanner(mol)
-
-            grad_vmat = (vmat0 - vmat1)/2.0/eps
-            grad_vmat = contract("ij,jq->iq", grad_vmat, mocc)
-            grad_vmat = contract("iq,ip->pq", grad_vmat, mo_coeff)
-            vmat[i0,ix] = grad_vmat
-    t1 = log.timer_debug1('computing solvent grad veff', *t1)
-    pcmobj.reset(pmol)
-    return vmat
-
 def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
     '''
     dv_solv / da
