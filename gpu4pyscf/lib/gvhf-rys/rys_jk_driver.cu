@@ -63,12 +63,14 @@ extern int os_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
 extern int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
 extern int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
-                     ShellQuartet *pool, double *dd_pool,
-                     uint32_t *batch_head, int *scheme, int workers);
+                    ShellQuartet *pool, double *dd_pool,
+                    uint32_t *batch_head, int *scheme, int workers);
 extern int rys_ejk_ip2_type12_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
+                    ShellQuartet *pool, double *dd_pool,
+                    uint32_t *batch_head, int *scheme, int workers);
 extern int rys_ejk_ip2_type3_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
+                    ShellQuartet *pool, double *dd_pool,
+                    uint32_t *batch_head, int *scheme, int workers);
 
 extern "C" {
 int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
@@ -384,7 +386,7 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
     JKEnergy jk = {ejk, dm, 4.*j_factor, -k_factor, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(int));
 
-    if (!rys_ejk_ip2_type12_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
+    if (!rys_ejk_ip2_type12_unrolled(&envs, &jk, &bounds, pool, dd_pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
@@ -451,7 +453,7 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
     JKEnergy jk = {ejk, dm, 4.*j_factor, -k_factor, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(int));
 
-    if (!rys_ejk_ip2_type3_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
+    if (!rys_ejk_ip2_type3_unrolled(&envs, &jk, &bounds, pool, dd_pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
