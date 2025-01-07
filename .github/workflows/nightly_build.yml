@@ -14,7 +14,7 @@ permissions:
 jobs:
   build:
 
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux, X64, v100]
 
     steps:
     - uses: actions/checkout@v3
@@ -23,6 +23,7 @@ jobs:
         pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
         python3 -m pip install --upgrade pip
         pip3 install flake8 pytest coverage pytest-cov pyscf-dispersion
+        pip3 install pytest-benchmark
         pip3 install pyscf --upgrade
         pip3 install numpy --upgrade
         pip3 install scipy --upgrade
@@ -35,8 +36,13 @@ jobs:
         export PATH=${CUDA_HOME}/bin:${PATH}
         export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
         sh build.sh
-    - name: Smoke Test
+    - name: Test RKS
       run: |
         echo $GITHUB_WORKSPACE
         export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-        pytest --durations=0
+        pytest gpu4pyscf/tests/test_benchmark_rks.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_rks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/
+    - name: Test UKS
+      run: |
+        echo $GITHUB_WORKSPACE
+        export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+        pytest gpu4pyscf/tests/test_benchmark_uks.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_uks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/

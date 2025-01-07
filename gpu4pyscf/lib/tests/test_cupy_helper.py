@@ -19,7 +19,8 @@ from gpu4pyscf.lib import cupy_helper
 from gpu4pyscf.lib.cupy_helper import (
     take_last2d, transpose_sum, krylov, unpack_sparse,
     add_sparse, takebak, empty_mapped, dist_matrix,
-    grouped_dot, grouped_gemm, cond, cart2sph_cutensor, cart2sph)
+    grouped_dot, grouped_gemm, cond, cart2sph_cutensor, cart2sph,
+    copy_array)
 
 class KnownValues(unittest.TestCase):
     def test_take_last2d(self):
@@ -213,6 +214,41 @@ class KnownValues(unittest.TestCase):
         ref[:,idy,idx] = atril.conj()
         ref[:,idx,idy] = atril
         assert abs(a - ref).max() < 1e-12
+
+    def test_copy_host2dev(self):
+        host_array = cupy.cuda.alloc_pinned_memory(10*10*10 * 8)
+        host_data = numpy.ndarray(10**3, dtype=cupy.float64, buffer=host_array)
+        host_data = host_data.reshape(10,10,10)
+        host_data += numpy.random.rand(10,10,10)
+
+        device_data = cupy.empty_like(host_data)
+        host_view = host_data[:, 8:]  # Non-contiguous view on the host
+        device_view = device_data[:, 8:]  # Non-contiguous view on the device
+
+        copy_array(host_view, device_view)
+        assert numpy.linalg.norm(host_view - device_view.get()) < 1e-10
+
+        copy_array(host_view.copy(), device_view)
+        assert numpy.linalg.norm(host_view - device_view.get()) < 1e-10
+
+        device_view = copy_array(host_view)
+        assert numpy.linalg.norm(host_view - device_view.get()) < 1e-10
+
+    def test_copy_dev2host(self):
+        host_array = cupy.cuda.alloc_pinned_memory(10*10*10 * 8)
+        host_data = numpy.ndarray(3*10**2, dtype=cupy.float64, buffer=host_array)
+        host_data = host_data.reshape(3,10,10)
+
+        device_data = cupy.zeros_like(host_data)
+        device_data += cupy.random.rand(3,10,10)
+        host_view = host_data[:, 8:]  # Non-contiguous view on the host
+        device_view = device_data[:, 8:]  # Non-contiguous view on the device
+
+        copy_array(device_view, host_view)
+        assert numpy.linalg.norm(host_view - device_view.get()) < 1e-10
+
+        copy_array(device_view.copy(), host_view)
+        assert numpy.linalg.norm(host_view - device_view.get()) < 1e-10
 
 if __name__ == "__main__":
     print("Full tests for cupy helper module")

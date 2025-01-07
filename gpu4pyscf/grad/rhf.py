@@ -30,6 +30,7 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.__config__ import _streams, _num_devices
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
+from gpu4pyscf.scf import jk
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, libvhf_rys, _VHFOpt, init_constant,
     _make_tril_tile_mappings, _nearest_power2)
@@ -124,7 +125,11 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol).build()
+        # Small group size for load balance
+        group_size = None
+        if _num_devices > 1: 
+            group_size = jk.GROUP_SIZE
+        vhfopt = _VHFOpt(mol).build(group_size=group_size)
 
     mol = vhfopt.sorted_mol
     nao, nao_orig = vhfopt.coeff.shape

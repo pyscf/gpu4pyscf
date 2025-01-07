@@ -28,7 +28,7 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
 from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem,
-                                       reduce_to_device)
+                                       reduce_to_device, transpose_sum)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, _num_devices
 from gpu4pyscf.hessian import jk
@@ -702,6 +702,121 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     vmat = reduce_to_device(vmat_dist, inplace=True)
     return vmat
 
+def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
+                        verbose=None, hermi=1, device_id=0):
+    with cupy.cuda.Device(device_id), _streams[device_id]:
+        if mo_coeff is not None: mo_coeff = cupy.asarray(mo_coeff)
+        if mo1 is not None: mo1 = cupy.asarray(mo1)
+        if mocc is not None: mocc = cupy.asarray(mocc)
+        if fxc is not None: fxc = cupy.asarray(fxc)
+
+        assert isinstance(verbose, int)
+        log = logger.new_logger(mol, verbose)
+        xctype = ni._xc_type(xc_code)
+        opt = getattr(ni, 'gdftopt', None)
+
+        _sorted_mol = opt.mol
+        nao = mol.nao
+        nset = mo1.shape[0]
+        vmat = cupy.zeros((nset, nao, nao))
+
+        if xctype == 'LDA':
+            ao_deriv = 0
+        else:
+            ao_deriv = 1
+
+        ngrids_glob = grids.coords.shape[0]
+        ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
+        grid_start = device_id * ngrids_per_device
+        grid_end = (device_id + 1) * ngrids_per_device
+
+        p0 = p1 = grid_start
+        t1 = t0 = log.init_timer()
+        for ao, mask, weights, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
+                                                       max_memory=None, blksize=None,
+                                                       grid_range=(grid_start, grid_end)):
+            p0, p1 = p1, p1+len(weights)
+            occ_coeff_mask = mocc[mask]
+            rho1 = numint.eval_rho4(_sorted_mol, ao, 2.0*occ_coeff_mask, mo1[:,mask],
+                                    xctype=xctype, hermi=hermi)
+            t1 = log.timer_debug2('eval rho', *t1)
+
+            # precompute fxc_w
+            if xctype == 'LDA':
+                fxc_w = fxc[0,0,p0:p1] * weights
+                wv = rho1 * fxc_w
+            else:
+                fxc_w = fxc[:,:,p0:p1] * weights
+                wv = contract('axg,xyg->ayg', rho1, fxc_w)
+
+            for i in range(nset):
+                if xctype == 'LDA':
+                    vmat_tmp = ao.dot(numint._scale_ao(ao, wv[i]).T)
+                elif xctype == 'GGA':
+                    wv[i,0] *= .5
+                    aow = numint._scale_ao(ao, wv[i])
+                    vmat_tmp = aow.dot(ao[0].T)
+                elif xctype == 'NLC':
+                    raise NotImplementedError('NLC')
+                else:
+                    wv[i,0] *= .5
+                    wv[i,4] *= .5
+                    vmat_tmp = ao[0].dot(numint._scale_ao(ao[:4], wv[i,:4]).T)
+                    vmat_tmp+= numint._tau_dot(ao, ao, wv[i,4])
+                add_sparse(vmat[i], vmat_tmp, mask)
+
+            t1 = log.timer_debug2('integration', *t1)
+            ao = rho1 = None
+        t0 = log.timer_debug1(f'vxc on Device {device_id} ', *t0)
+        if xctype != 'LDA':
+            transpose_sum(vmat)
+        vmat = jk._ao2mo(vmat, mocc, mo_coeff)
+    return vmat
+
+def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, relativity=0, hermi=0,
+               rho0=None, vxc=None, fxc=None, max_memory=2000, verbose=None):
+    log = logger.new_logger(mol, verbose)
+    t0 = log.init_timer()
+    if fxc is None:
+        raise RuntimeError('fxc was not initialized')
+    #xctype = ni._xc_type(xc_code)
+    opt = getattr(ni, 'gdftopt', None)
+    if opt is None or mol not in [opt.mol, opt._sorted_mol]:
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+
+    nao = mol.nao
+    dms = cupy.asarray(dms)
+    dm_shape = dms.shape
+    # AO basis -> gdftopt AO basis
+    with_mocc = hasattr(dms, 'mo1')
+    mo1 = mocc = None
+    if with_mocc:
+        mo1 = opt.sort_orbitals(dms.mo1, axis=[1])
+        mocc = opt.sort_orbitals(dms.occ_coeff, axis=[0])
+    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
+    dms = opt.sort_orbitals(dms.reshape(-1,nao,nao), axis=[1,2])
+    
+    futures = []
+    cupy.cuda.get_current_stream().synchronize()
+    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
+        for device_id in range(_num_devices):
+            future = executor.submit(
+                _nr_rks_fxc_mo_task,
+                ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
+                verbose=log.verbose, hermi=hermi, device_id=device_id)
+            futures.append(future)
+    dms = None
+    vmat_dist = []
+    for future in futures:
+        vmat_dist.append(future.result())
+    vmat = reduce_to_device(vmat_dist, inplace=True)
+
+    if len(dm_shape) == 2:
+        vmat = vmat[0]
+    t0 = log.timer_debug1('nr_rks_fxc', *t0)
+    return cupy.asarray(vmat)
+
 def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
     mol = hessobj.mol
     mf = hessobj.base
@@ -728,10 +843,10 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
     # TODO: evaluate v1 in MO
     rho0, vxc, fxc = ni.cache_xc_kernel(mol, grids, mf.xc,
                                         mo_coeff, mo_occ, 0)
-    v1 = ni.nr_rks_fxc(mol, grids, mf.xc, None, dms, 0, hermi,
+    v1 = nr_rks_fxc_mo(ni, mol, grids, mf.xc, None, dms, mo_coeff, 0, hermi,
                                     rho0, vxc, fxc, max_memory=None)
-    v1 = jk._ao2mo(v1, mocc, mo_coeff).reshape(-1,nmo*nocc)
-
+    v1 = v1.reshape(-1,nmo*nocc)
+    
     if hybrid:
         vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1)
         vk *= hyb

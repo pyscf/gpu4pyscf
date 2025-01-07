@@ -30,7 +30,7 @@ from pyscf import lib
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.lib.cupy_helper import (
-    contract, tag_array, get_avail_mem, release_gpu_stack, pinv)
+    contract, tag_array, get_avail_mem, release_gpu_stack, pinv, copy_array)
 from gpu4pyscf.df import int3c2e, df
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
@@ -38,7 +38,7 @@ from gpu4pyscf.df.grad.rhf import _gen_metric_solver
 from gpu4pyscf.df.hessian import jk
 
 LINEAR_DEP_THR = df.LINEAR_DEP_THR
-BLKSIZE = 128
+BLKSIZE = 256
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
 GB = 1024*1024*1024
 
@@ -58,7 +58,9 @@ def _hk_ip1_ip1(rhok1_Pko, dm0, mocc_2):
     mem_avail = get_avail_mem()
     blksize = int((mem_avail*0.4/(nao*nao*3*8)/ALIGNED))*ALIGNED
     for k0, k1 in lib.prange(0,nnz,blksize):
-        rhok1_Pko_kslice = cupy.asarray(rhok1_Pko[k0:k1])
+        #rhok1_Pko_kslice = cupy.asarray(rhok1_Pko[k0:k1])
+        rhok1_Pko_kslice = copy_array(rhok1_Pko[k0:k1])
+
         # (10|0)(0|10) without response of RI basis
         vk2_ip1_ip1 = contract('piox,pkoy->ikxy', rhok1_Pko_kslice, rhok1_Pko_kslice)
         hk_ao_ao += contract('ikxy,ik->ikxy', vk2_ip1_ip1, dm0)
@@ -109,7 +111,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
 
     # ================================ sorted AO begin ===============================================
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
+    intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False, verbose=0,
+                 group_size=BLKSIZE, group_size_aux=BLKSIZE)
     naux = auxmol.nao
     mocc_2 = intopt.sort_orbitals(mocc_2, axis=[0])
     dm0 = intopt.sort_orbitals(dm0, axis=[0,1])
@@ -118,45 +121,47 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
     int2c = cupy.asarray(int2c, order='C')
     int2c = intopt.sort_orbitals(int2c, aux_axis=[0,1])
     solve_j2c = _gen_metric_solver(int2c)
-
-    int2c_ip1 = cupy.asarray(int2c_ip1, order='C')
-    int2c_ip1 = intopt.sort_orbitals(int2c_ip1, aux_axis=[1,2])
-    if with_j:
-        hj_ao_ao = cupy.zeros([nao,nao,3,3])
-    if with_k:
-        hk_ao_ao = cupy.zeros([nao,nao,3,3])
-    if hessobj.auxbasis_response:
-        if with_j:
-            hj_ao_aux = cupy.zeros([nao,naux,3,3])
-        if with_k:
-            hk_ao_aux = cupy.zeros([nao,naux,3,3])
-
+    
     #  int3c contributions
     wj, wk_P__ = int3c2e.get_int3c2e_jk(mol, auxmol, dm0_tag, omega=omega)
-    t1 = log.timer_debug1('intermediate variables with int3c2e', *t1)
     rhoj0_P = rhok0_P__ = None
+
     if with_j:
         rhoj0_P = solve_j2c(wj)
+        wj = None
     if with_k:
         rhok0_P__ = solve_j2c(wk_P__)
-    wj = wk_P__ = None
+        wk_P__ = None
+    t1 = log.timer_debug1('intermediate variables with int3c2e', *t1)
+
+    hj_ipip, hk_ipip = jk.get_int3c2e_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag,
+                                          with_j=with_j, with_k=with_k, omega=omega,
+                                          auxbasis_response=hessobj.auxbasis_response)
+    t1 = log.timer_debug1('intermediate variables with int3c2e_ipip', *t1)
 
     # int3c_ip2 contributions
     wj_ip2, wk_ip2_P__ = int3c2e.get_int3c2e_ip2_wjk(intopt, dm0_tag, omega=omega)
-    t1 = log.timer_debug1('interdeidate variables with int3c2e_ip2', *t1)
+    t1 = log.timer_debug1('intermediate variables with int3c2e_ip2', *t1)
 
     #  int3c_ip1 contributions
     wj1_P, wk1_Pko = int3c2e.get_int3c2e_ip1_wjk(intopt, dm0_tag, omega=omega)
+    t1 = log.timer_debug1('intermediate variables with int3c2e_ip1', *t1)
+    
+    cupy.get_default_memory_pool().free_all_blocks()
+    release_gpu_stack()
+
     #rhoj1_P = contract('pq,pix->qix', int2c_inv, wj1_P)
+    int2c_ip1 = cupy.asarray(int2c_ip1, order='C')
+    int2c_ip1 = intopt.sort_orbitals(int2c_ip1, aux_axis=[1,2])
+
     if with_j:
         rhoj1_P = solve_j2c(wj1_P)
-
-        hj_ao_ao += 4.0*contract('pix,pjy->ijxy', rhoj1_P, wj1_P)   # (10|0)(0|0)(0|01)
+        hj_ao_ao = 4.0*contract('pix,pjy->ijxy', rhoj1_P, wj1_P)   # (10|0)(0|0)(0|01)
         wj1_P = None
         if hessobj.auxbasis_response:
             wj0_01 = contract('ypq,q->yp', int2c_ip1, rhoj0_P)
             wj1_01 = contract('yqp,pix->iqxy', int2c_ip1, rhoj1_P)
-            hj_ao_aux += contract('pix,py->ipxy', rhoj1_P, wj_ip2)   # (10|0)(1|00)
+            hj_ao_aux = contract('pix,py->ipxy', rhoj1_P, wj_ip2)   # (10|0)(1|00)
             hj_ao_aux -= contract('pix,yp->ipxy', rhoj1_P, wj0_01)   # (10|0)(1|0)(0|00)
             hj_ao_aux -= contract('q,iqxy->iqxy', rhoj0_P, wj1_01)   # (10|0)(0|1)(0|00)
             wj1_01 = None
@@ -167,13 +172,15 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
         mem_avail = get_avail_mem()
         nocc = mocc.shape[1]
         slice_size = naux*nocc*9   # largest slice of intermediate variables
-        blksize = int(mem_avail*0.2/8/slice_size/ALIGNED) * ALIGNED
+        blksize = int(mem_avail*0.2/8/slice_size)
         log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, {blksize} aux AOs per block')
-        if blksize < ALIGNED:
-            raise RuntimeError('Not enough memory for intermediate variables')
-
+        assert blksize > 0
+        if hessobj.auxbasis_response:
+            hk_ao_aux = cupy.zeros([nao,naux,3,3])
         for i0, i1 in lib.prange(0,nao,blksize):
-            wk1_Pko_islice = cupy.asarray(wk1_Pko[:,i0:i1])
+            #wk1_Pko_islice = cupy.asarray(wk1_Pko[:,i0:i1])
+            wk1_Pko_islice = copy_array(wk1_Pko[:,i0:i1])
+
             #rhok1_Pko = contract('pq,qiox->piox', int2c_inv, wk1_Pko_islice)
             rhok1_Pko = solve_j2c(wk1_Pko_islice)
             wk1_Pko_islice = None
@@ -194,6 +201,12 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
                 hk_ao_aux[i0:i1] -= contract('qoi,qioxy->iqxy', rhok0_P_I, wk1_I)
                 wk1_I = rhok0_P_I = None
         rhok1_Pko = None
+        t1 = log.timer_debug1('contract int3c2e_ip1 with int2c_ip1', *t1)
+        
+        rho2c_0 = contract('pij,qji->pq', rhok0_P__, rhok0_P__)
+        rho2c_10 = contract('rijx,qij->rqx', wk_ip2_P__, rhok0_P__)
+        rho2c_11 = contract('pijx,qijy->pqxy', wk_ip2_P__, wk_ip2_P__)
+        rhok0_P__ = wk_ip2_P__ = None
 
         w, v = cupy.linalg.eigh(int2c)
         idx = w > LINEAR_DEP_THR
@@ -203,25 +216,24 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
 
         rhok1_Pko = wk1_Pko[:nnz]  # Reuse the same memory
         for i0, i1 in lib.prange(0,nao,blksize):
-            wk1_tmp = cupy.asarray(wk1_Pko[:,i0:i1])
+            #wk1_tmp = cupy.asarray(wk1_Pko[:,i0:i1])
+            wk1_tmp = copy_array(wk1_Pko[:,i0:i1])
             if isinstance(rhok1_Pko, cupy.ndarray):
                 rhok1_Pko[:,i0:i1] = contract('qp,qiox->piox', cd_low, wk1_tmp)
             else:
-                rhok1_Pko[:,i0:i1] = contract('qp,qiox->piox', cd_low, wk1_tmp).get()
+                #rhok1_Pko[:,i0:i1] = contract('qp,qiox->piox', cd_low, wk1_tmp).get()
+                wk1_tmp = contract('qp,qiox->piox', cd_low, wk1_tmp)
+                copy_array(wk1_tmp, rhok1_Pko[:,i0:i1])
             wk1_tmp = None
         cd_low = None
-
-        hk_ao_ao += _hk_ip1_ip1(rhok1_Pko, dm0, mocc_2)
+        hk_ao_ao = _hk_ip1_ip1(rhok1_Pko, dm0, mocc_2)
     wk1_Pko = rhok1_Pko = None
-    t1 = log.timer_debug1('intermediate variables with int3c2e_ip1', *t1)
-
-    hj_ipip, hk_ipip = jk.get_int3c2e_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag,
-                                          with_j=with_j, with_k=with_k, omega=omega,
-                                          auxbasis_response=hessobj.auxbasis_response)
-    t1 = log.timer_debug1('intermediate variables with int3c2e_ipip', *t1)
+    solve_j2c = None
+    t1 = log.timer_debug1('contract int3c2e_ip1 with int3c2e_ip1', *t1)
 
     # int2c contributions
     if hessobj.auxbasis_response > 1:
+        cupy.get_default_memory_pool().free_all_blocks()
         if omega and omega > 1e-10:
             with auxmol.with_range_coulomb(omega):
                 int2c_ipip1 = auxmol.intor('int2c2e_ipip1', aosym='s1')
@@ -236,7 +248,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
             rhoj2c_P = contract('xpq,q->xp', int2c_ipip1, rhoj0_P)
             hj_aux_diag = -(rhoj0_P*rhoj2c_P).T.reshape(-1,3,3)
         if with_k:
-            rho2c_0 = contract('pij,qji->pq', rhok0_P__, rhok0_P__)
             hk_aux_diag = -.5 * contract('pq,xpq->px', rho2c_0, int2c_ipip1).reshape(-1,3,3)
         int2c_ipip1 = None
 
@@ -254,10 +265,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
         t1 = log.timer_debug1('intermediate variables with int2c_*', *t1)
         int2c_ip1ip2 = None
 
-    cupy.get_default_memory_pool().free_all_blocks()
-    release_gpu_stack()
-    # aux-aux pair
-    if hessobj.auxbasis_response > 1:
+        # aux-aux pair
         int2c_inv = pinv(int2c, lindep=LINEAR_DEP_THR)
         int2c_ip1_inv = contract('yqp,pr->yqr', int2c_ip1, int2c_inv)
         if with_j:
@@ -278,11 +286,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
             wj0_01 = rhoj0_01 = None
 
         if with_k:
-            rho2c_10 = contract('rijx,qij->rqx', wk_ip2_P__, rhok0_P__)
-            rhok0_P__ = None
-
-            rho2c_11 = contract('pijx,qijy->pqxy', wk_ip2_P__, wk_ip2_P__)
-            wk_ip2_P__ = None
             hk_aux_aux += .5 * contract('pqxy,pq->pqxy', rho2c_11, int2c_inv)      # (00|1)(1|00)
             rho2c_11 = None
 
@@ -323,6 +326,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
     # pi,qi,i->pq
     dme0 = cupy.dot(mocc, (mocc * mo_energy[mo_occ>0] * 2).T)
     de_hcore = rhf_hess._e_hcore_generator(hessobj, dm0)
+    t1 = log.timer_debug1('hcore generate', *t1)
 
     # ------------------------------------
     #      overlap matrix contributions
@@ -336,7 +340,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
     # -----------------------------------------
     #        collecting all
     # -----------------------------------------
-    e1 = cupy.zeros([len(atmlst),len(atmlst),3,3])
+    natm = len(atmlst)
+    e1 = cupy.zeros([natm,natm,3,3])
     ej = hj_ipip
     ek = hk_ipip
 
@@ -393,7 +398,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
                 ej[j0,i0] = ej[i0,j0].T
             if with_k:
                 ek[j0,i0] = ek[i0,j0].T
-
     t1 = log.timer_debug1('hcore contribution', *t1)
 
     aux2atom = int3c2e.get_aux2atom(intopt, auxslices)
@@ -463,7 +467,7 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
 
     intopt.build(mf.direct_scf_tol,
                  diag_block_with_triu=True,
-                 aosym=False,
+                 aosym=False, verbose=0,
                  group_size_aux=BLKSIZE,
                  group_size=BLKSIZE)
     naux = auxmol.nao
@@ -487,8 +491,11 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     else:
         rhok0_Pl_ = wk_Pl_ # reuse the memory
         for p0, p1 in lib.prange(0,nao,64):
-            wk_tmp = cupy.asarray(wk_Pl_[:,p0:p1])
-            rhok0_Pl_[:,p0:p1] = solve_j2c(wk_tmp).get()
+            #wk_tmp = cupy.asarray(wk_Pl_[:,p0:p1])
+            #rhok0_Pl_[:,p0:p1] = solve_j2c(wk_tmp).get()
+            wk_tmp = copy_array(wk_Pl_[:,p0:p1])
+            wk_tmp = solve_j2c(wk_tmp)
+            copy_array(wk_tmp, rhok0_Pl_[:,p0:p1])
         wk_tmp = None
     wk_Pl_ = None
     solve_j2c = None
@@ -503,6 +510,8 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         fn = int3c2e.get_int3c2e_ip2_vjk
         vj1_int3c, vk1_int3c = fn(intopt, rhoj0, rhok0_Pl_, dm0_tag, auxslices,
                                   with_j=with_j, with_k=with_k, omega=omega)
+        t0 = log.timer_debug1('Fock matrix due to int3c2e_ip2', *t0)
+
         # Responses due to int2c2e_ip1
         if omega and omega > 1e-10:
             with auxmol.with_range_coulomb(omega):
@@ -521,7 +530,8 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             else:
                 rhok0_P__ = cupy.empty([naux,nocc,nocc])
                 for p0, p1 in lib.prange(0,naux,64):
-                    rhok0_Pl_tmp = cupy.asarray(rhok0_Pl_[p0:p1])
+                    #rhok0_Pl_tmp = cupy.asarray(rhok0_Pl_[p0:p1])
+                    rhok0_Pl_tmp = copy_array(rhok0_Pl_[p0:p1])
                     rhok0_P__[p0:p1] = contract('pio,ir->pro', rhok0_Pl_tmp, mocc)
                 rhok0_Pl_tmp = None
             wk0_10_P__ = contract('xqp,pro->xqro', int2c_ip1, rhok0_P__)
@@ -531,10 +541,11 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
         blksize = int(0.2*mem_avail/(3*naux*nocc*8)/ALIGNED) * ALIGNED
         log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, {blksize} AOs per block')
         if blksize < ALIGNED:
-            raise RuntimeError('Not enough memory to compute int3c2e_ip2')
+            raise RuntimeError('Not enough memory to compute int2c2e_ip2')
 
         for p0, p1 in lib.prange(0,nao,blksize):
-            rhok_tmp = cupy.asarray(rhok0_Pl_[:,p0:p1])
+            #rhok_tmp = cupy.asarray(rhok0_Pl_[:,p0:p1])
+            rhok_tmp = copy_array(rhok0_Pl_[:,p0:p1])
             wk0_10_Pl_ = contract('xqp,pio->xqio', int2c_ip1, rhok_tmp)
             if with_j:
                 vj1_tmp = contract('pio,xp->xpio', rhok_tmp, wj0_10)
@@ -544,13 +555,12 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             if with_k:
                 vk1_tmp = contract('xpio,pro->xpir', wk0_10_Pl_, rhok0_P__)
                 vk1_tmp += contract('xpro,pir->xpio', wk0_10_P__, rhok_tmp)
-                # 2.0 due to spin
                 vk1_int3c[:,:,p0:p1] += contract('xpio,pa->axio', vk1_tmp, aux2atom)
                 vk1_tmp = None
             wk0_10_Pl_ = rhok_tmp = None
         wj0_10 = wk0_10_P__ = rhok0_P__ = int2c_ip1 = None
         aux2atom = None
-        t0 = log.timer_debug1('Fock matrix due to int3c2e_ip2', *t0)
+        t0 = log.timer_debug1('Fock matrix due to int2c2e_ip1', *t0)
 
     # -----------------------------
     # int3c_ip1 contributions
