@@ -437,9 +437,9 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
         nroots *= 2;
     }
     uint8_t stride_j = li + 2;
-    uint8_t stride_k = stride_j * (lj + 2);
+    uint8_t stride_k = stride_j * (lj + 1);
     uint8_t stride_l = stride_k * (lk + 2);
-    int g_size = stride_l * (uint16_t)(ll + 2);
+    int g_size = stride_l * (uint16_t)(ll + 1);
     BoundsInfo bounds = {li, lj, lk, ll, nfi, nfk, nfij, nfkl,
         nroots, stride_j, stride_k, stride_l, iprim, jprim, kprim, lprim,
         ntile_ij_pairs, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,

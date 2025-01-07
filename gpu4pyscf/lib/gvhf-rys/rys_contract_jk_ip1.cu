@@ -500,6 +500,10 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
     int stride_k = bounds.stride_k;
     int stride_l = bounds.stride_l;
     int g_size = stride_l * (ll + 1);
+    int i_1 =          nsq_per_block;
+    int j_1 = stride_j*nsq_per_block;
+    int k_1 = stride_k*nsq_per_block;
+    int l_1 = stride_l*nsq_per_block;
     int nfj = nfij/nfi;
     int nfl = nfkl/nfk;
     int *idx_i = c_g_pair_idx + c_g_pair_offsets[li*LMAX1];
@@ -514,10 +518,6 @@ static void rys_ejk_ip1_general(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
     int *idx_l = c_g_pair_idx + c_g_pair_offsets[ll*LMAX1];
     int *idy_l = idx_l + nfl;
     int *idz_l = idy_l + nfl;
-    int i_1 = nsq_per_block;
-    int j_1 = stride_j*nsq_per_block;
-    int k_1 = stride_k*nsq_per_block;
-    int l_1 = stride_l*nsq_per_block;
     int *bas = envs.bas;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;

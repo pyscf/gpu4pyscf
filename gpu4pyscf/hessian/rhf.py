@@ -235,6 +235,8 @@ def _ejk_ip2_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
                 ctypes.c_int(workers),
                 mol._atm.ctypes, ctypes.c_int(mol.natm),
                 mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+
+            scheme = _ip2_type3_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
             err2 = kern2(
                 ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
                 ctypes.c_double(j_factor), ctypes.c_double(k_factor),
@@ -255,6 +257,7 @@ def _ejk_ip2_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
                 ctypes.c_int(workers),
                 mol._atm.ctypes, ctypes.c_int(mol.natm),
                 mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+
             if err1 != 0 or err2 != 0:
                 raise RuntimeError(f'RYS_per_atom_jk_ip2 kernel for {llll} failed')
             if log.verbose >= logger.DEBUG1:
@@ -342,6 +345,22 @@ def _ip2_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     li, lj, lk, ll = ls
     order = li + lj + lk + ll
     g_size = (li+2)*(lj+2)*(lk+2)*(ll+2)
+    nps = l_ctr_pattern[:,1]
+    ij_prims = nps[0] * nps[1]
+    nroots = (order + 2) // 2 + 1
+    unit = nroots*2 + g_size*3 + ij_prims
+    if mol.omega < 0: # SR
+        unit += nroots * 2
+    counts = shm_size // (unit*8)
+    n = min(THREADS, _nearest_power2(counts))
+    gout_stride = THREADS // n
+    return n, gout_stride
+
+def _ip2_type3_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
+    ls = l_ctr_pattern[:,0]
+    li, lj, lk, ll = ls
+    order = li + lj + lk + ll
+    g_size = (li+2)*(lj+1)*(lk+2)*(ll+1)
     nps = l_ctr_pattern[:,1]
     ij_prims = nps[0] * nps[1]
     nroots = (order + 2) // 2 + 1
