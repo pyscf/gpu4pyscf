@@ -1,10 +1,11 @@
-v1.2.2 (2025-01-02)
+v1.3.0 (2025-01-07)
 -------------------
 * New Features
   - PBC analytical Fourier transform on GPU
 * Improvements
   - Optimized computation efficiency and memory footprint for density fitting Hessian
   - Support pickle serialization for most classes (SCF, DF, PCM, etc.)
+  - Efficiency of moving CuPy arrays between GPU cards
 
 
 v1.2.1 (2024-12-20)
