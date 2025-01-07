@@ -35,8 +35,8 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.__config__ import _streams, _num_devices
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.jk import (
-    LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt, init_constant,
-    _make_tril_tile_mappings, _nearest_power2)
+    LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt, 
+    init_constant, _make_tril_tile_mappings, _nearest_power2)
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import jk
 
@@ -495,7 +495,7 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
     # Small group size for load balance
     group_size = None
     if _num_devices > 1: 
-        group_size = jk.GROUP_SIZE
+        group_size = GROUP_SIZE
     vhfopt.build(group_size=group_size)
 
     mol = vhfopt.sorted_mol
@@ -909,7 +909,7 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
             # Small group size for load balance
             group_size = None
             if _num_devices > 1: 
-                group_size = jk.GROUP_SIZE
+                group_size = GROUP_SIZE
             vhfopt = _VHFOpt(mol, mf.direct_scf_tol).build(group_size=group_size)
             mf._opt_gpu[omega] = vhfopt
     with mol.with_range_coulomb(omega):
