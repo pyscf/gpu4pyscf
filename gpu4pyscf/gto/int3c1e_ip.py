@@ -215,7 +215,6 @@ def get_int3c1e_ip1_density_contracted(mol, grids, charge_exponents, dm, intopt)
     dm = intopt.sort_orbitals(dm, [0,1])
     if not mol.cart:
         cart2sph_transformation_matrix = intopt.cart2sph
-        print(intopt.cart2sph.shape)
         # TODO: This part is inefficient (O(N^3)), should be changed to the O(N^2) algorithm
         dm = cart2sph_transformation_matrix @ dm @ cart2sph_transformation_matrix.T
     dm = dm.flatten(order='F') # Column major order matches (i + j * n_ao) access pattern in the C function
@@ -487,6 +486,7 @@ def int1e_grids_ip1(mol, grids, charge_exponents=None, dm=None, charges=None, di
         else:
             return get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, intopt)
     else:
+        assert dm is not None
         return get_int3c1e_ip1_density_contracted(mol, grids, charge_exponents, dm, intopt)
 
 def int1e_grids_ip2(mol, grids, charge_exponents=None, dm=None, charges=None, direct_scf_tol=1e-13, intopt=None):
