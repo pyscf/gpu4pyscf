@@ -258,12 +258,13 @@ def get_int3c1e(mol, grids, charge_exponents, intopt):
 
             charge_exponents_pointer = c_null_ptr()
             if charge_exponents is not None:
-                charge_exponents_pointer = charge_exponents[p0:p1].data.ptr
-
+                exponents_slice = charge_exponents[p0:p1]
+                charge_exponents_pointer = exponents_slice.data.ptr
+            grids_slice = grids[p0:p1]
             err = libgint.GINTfill_int3c1e(
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
-                ctypes.cast(grids[p0:p1, :].data.ptr, ctypes.c_void_p),
+                ctypes.cast(grids_slice.data.ptr, ctypes.c_void_p),
                 ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
                 ctypes.c_int(p1-p0),
                 ctypes.cast(int3c_angular_slice.data.ptr, ctypes.c_void_p),
@@ -441,16 +442,17 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
 
             charge_exponents_pointer = c_null_ptr()
             if charge_exponents is not None:
-                charge_exponents_pointer = charge_exponents[p0:p1].data.ptr
+                exponents_slice = charge_exponents[p0:p1]
+                charge_exponents_pointer = exponents_slice.data.ptr
 
             # n_pair_sum_per_thread = 1 # means every thread processes one pair and one grid
             # n_pair_sum_per_thread = nao_cart # or larger number gaurantees one thread processes one grid and all pairs of the same type
             n_pair_sum_per_thread = nao_cart
-
+            grids_slice = grids[p0:p1, :]
             err = libgint.GINTfill_int3c1e_density_contracted(
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
-                ctypes.cast(grids[p0:p1, :].data.ptr, ctypes.c_void_p),
+                ctypes.cast(grids_slice.data.ptr, ctypes.c_void_p),
                 ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
                 ctypes.c_int(p1-p0),
                 ctypes.cast(dm_pair_ordered.data.ptr, ctypes.c_void_p),
