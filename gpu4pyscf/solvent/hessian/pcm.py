@@ -24,7 +24,6 @@ from gpu4pyscf import scf
 from gpu4pyscf.solvent.pcm import PI
 from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_solver, grad_nuc, get_dD_dS, get_dF_dA, get_dSii
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from gpu4pyscf.hessian.jk import _ao2mo
 from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
@@ -172,6 +171,9 @@ def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
     mocc = mo_coeff[:,mo_occ>0]
     nocc = mocc.shape[1]
 
+    if atmlst is None:
+        atmlst = range(mol.natm)
+
     gridslice    = pcmobj.surface['gslice_by_atom']
     charge_exp   = pcmobj.surface['charge_exp']
     grid_coords  = pcmobj.surface['grid_coords']
@@ -198,6 +200,7 @@ def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
     aoslice = numpy.array(aoslice)
     for i_atom in atmlst:
         p0,p1 = aoslice[i_atom, 2:]
+        # dIdx[i_atom, :, :, :] = 0
         # dIdx[i_atom, :, p0:p1, :] += dIdA[:, p0:p1, :]
         # dIdx[i_atom, :, :, p0:p1] += dIdA[:, p0:p1, :].transpose(0,2,1)
         dIdx_mo[i_atom, :, :, :] += cupy.einsum('ip,dpq,qj->dij', mo_coeff[p0:p1, :].T, dIdA[:, p0:p1, :], mocc)
