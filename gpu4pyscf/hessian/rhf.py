@@ -269,7 +269,11 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol).build()
+        # Small group size for load balance
+        group_size = None
+        if _num_devices > 1: 
+            group_size = jk.GROUP_SIZE
+        vhfopt = _VHFOpt(mol).build(group_size=group_size)
 
     mol = vhfopt.sorted_mol
     nao, nao_orig = vhfopt.coeff.shape
@@ -488,7 +492,11 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
     vhfopt = _VHFOpt(mol)
     # tile must set to 1. This tile size is assumed in the GPU kernel code
     vhfopt.tile = 1
-    vhfopt.build()
+    # Small group size for load balance
+    group_size = None
+    if _num_devices > 1: 
+        group_size = jk.GROUP_SIZE
+    vhfopt.build(group_size=group_size)
 
     mol = vhfopt.sorted_mol
     nao, nao_orig = vhfopt.coeff.shape
@@ -898,7 +906,12 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
     vhfopt = mf._opt_gpu.get(omega)
     if vhfopt is None:
         with mol.with_range_coulomb(omega):
-            vhfopt = mf._opt_gpu[omega] = _VHFOpt(mol, mf.direct_scf_tol).build()
+            # Small group size for load balance
+            group_size = None
+            if _num_devices > 1: 
+                group_size = jk.GROUP_SIZE
+            vhfopt = _VHFOpt(mol, mf.direct_scf_tol).build(group_size=group_size)
+            mf._opt_gpu[omega] = vhfopt
     with mol.with_range_coulomb(omega):
         vj, vk = jk.get_jk(mol, dms, mo_coeff, mo_occ, hermi, vhfopt, with_j, with_k)
     return vj, vk

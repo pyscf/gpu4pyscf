@@ -462,7 +462,7 @@ class _VHFOpt:
         self._tile_q_cond = {}
         self._s_estimator = {}
 
-    def build(self, group_size=GROUP_SIZE, verbose=None):
+    def build(self, group_size=None, verbose=None):
         mol = self.mol
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()

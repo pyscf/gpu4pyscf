@@ -76,12 +76,6 @@ def _copy_array(src_view, dst_view):
         kind = cupy.cuda.runtime.memcpyHostToDevice
     else:
         raise NotImplementedError
-    
-
-    if len(chunk_shape) == 0:
-        print('here')
-        print(src_view.nbytes, dst_view.nbytes)
-        print(shape, strides_src, strides_dst)
         
     assert len(chunk_shape) > 0
 

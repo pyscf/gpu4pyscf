@@ -17,7 +17,7 @@ import numpy as np
 import pyscf
 import pytest
 from gpu4pyscf.dft import rks
-
+CUDA_VISIBLE_DEVICES=0
 # Any task taking more than 1000s will be marked as 'slow'
 
 # How to run
