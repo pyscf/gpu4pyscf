@@ -35,7 +35,7 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.__config__ import _streams, _num_devices
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.jk import (
-    LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, libvhf_rys, _VHFOpt, init_constant,
+    LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt, init_constant,
     _make_tril_tile_mappings, _nearest_power2)
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import jk
@@ -272,7 +272,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
         # Small group size for load balance
         group_size = None
         if _num_devices > 1: 
-            group_size = jk.GROUP_SIZE
+            group_size = GROUP_SIZE
         vhfopt = _VHFOpt(mol).build(group_size=group_size)
 
     mol = vhfopt.sorted_mol
