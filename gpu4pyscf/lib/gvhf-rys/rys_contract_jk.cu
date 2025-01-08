@@ -74,7 +74,7 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *gy = g + nsq_per_block * g_size;
     double *gz = g + nsq_per_block * g_size*2;
     double *Rpa_cicj = rw_cache + nsq_per_block * (nroots*2+g_size*3);
-    double Rqc[3], Rpq[3];
+    double Rpq[3];
     double gout[GOUT_WIDTH];
 
     for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
@@ -114,6 +114,12 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xjxi = rj[0] - ri[0];
+        double yjyi = rj[1] - ri[1];
+        double zjzi = rj[2] - ri[2];
+        double xlxk = rl[0] - rk[0];
+        double ylyk = rl[1] - rk[1];
+        double zlzk = rl[2] - rk[2];
         for (int ij = gout_id; ij < iprim*jprim; ij += gout_stride) {
             int ip = ij / jprim;
             int jp = ij % jprim;
@@ -121,9 +127,6 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double aj = expj[jp];
             double aij = ai + aj;
             double aj_aij = aj / aij;
-            double xjxi = rj[0] - ri[0];
-            double yjyi = rj[1] - ri[1];
-            double zjzi = rj[2] - ri[2];
             double *Rpa = Rpa_cicj + ij*4*nsq_per_block + sq_id;
             Rpa[0*nsq_per_block] = xjxi * aj_aij;
             Rpa[1*nsq_per_block] = yjyi * aj_aij;
@@ -143,12 +146,6 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al = expl[lp];
             double akl = ak + al;
             double al_akl = al / akl;
-            double xlxk = rl[0] - rk[0];
-            double ylyk = rl[1] - rk[1];
-            double zlzk = rl[2] - rk[2];
-            Rqc[0] = xlxk * al_akl; // (ak*xk+al*xl)/akl
-            Rqc[1] = ylyk * al_akl;
-            Rqc[2] = zlzk * al_akl;
             __syncthreads();
             if (gout_id == 0) {
                 double theta_kl = ak * al / akl;
@@ -166,9 +163,12 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xij = ri[0] + Rpa[0*nsq_per_block];
                 double yij = ri[1] + Rpa[1*nsq_per_block];
                 double zij = ri[2] + Rpa[2*nsq_per_block];
-                double xkl = rk[0] + Rqc[0];
-                double ykl = rk[1] + Rqc[1];
-                double zkl = rk[2] + Rqc[2];
+                double xqc = xlxk * al_akl;
+                double yqc = ylyk * al_akl;
+                double zqc = zlzk * al_akl;
+                double xkl = rk[0] + xqc;
+                double ykl = rk[1] + yqc;
+                double zkl = rk[2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -253,7 +253,8 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             int i = n / 3; //for i in range(lij+1):
                             int _ix = n % 3; // TODO: remove _ix for nroots > 2
                             double *_gx = g + (i + _ix * g_size) * nsq_per_block;
-                            double cpx = Rqc[_ix] + rt_akl * Rpq[_ix];
+                            double Rqc = (rl[_ix] - rk[_ix]) * al_akl;
+                            double cpx = Rqc + rt_akl * Rpq[_ix];
                             //for i in range(lij+1):
                             //    trr(i,1) = c0p * trr(i,0) + i*b00 * trr(i-1,0)
                             if (n < lij3) {
@@ -398,16 +399,16 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -418,7 +419,7 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                        batch_ij, batch_kl);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         if (ntasks > 0) {

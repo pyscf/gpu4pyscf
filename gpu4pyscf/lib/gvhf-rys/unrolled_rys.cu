@@ -19,8 +19,9 @@ void _rys_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -210,16 +211,16 @@ void rys_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -240,7 +241,7 @@ void rys_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_0000(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -262,8 +263,9 @@ void _rys_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -492,16 +494,16 @@ void rys_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -522,7 +524,7 @@ void rys_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_1000(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -544,8 +546,9 @@ void _rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -859,16 +862,16 @@ void rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -889,7 +892,7 @@ void rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_1010(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -911,8 +914,9 @@ void _rys_jk_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -1431,16 +1435,16 @@ void rys_jk_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -1461,7 +1465,7 @@ void rys_jk_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_1011(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -1483,8 +1487,9 @@ void _rys_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -1801,16 +1806,16 @@ void rys_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -1831,7 +1836,7 @@ void rys_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_1100(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -1853,8 +1858,9 @@ void _rys_jk_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -2377,16 +2383,16 @@ void rys_jk_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -2407,7 +2413,7 @@ void rys_jk_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_1110(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -2429,8 +2435,9 @@ void _rys_jk_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -3515,16 +3522,16 @@ void rys_jk_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -3545,7 +3552,7 @@ void rys_jk_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_1111(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -3567,8 +3574,9 @@ void _rys_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -3846,16 +3854,16 @@ void rys_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -3876,7 +3884,7 @@ void rys_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_2000(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -3898,8 +3906,9 @@ void _rys_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -4331,16 +4340,16 @@ void rys_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -4361,7 +4370,7 @@ void rys_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_2010(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -4383,8 +4392,9 @@ void _rys_jk_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -5204,16 +5214,16 @@ void rys_jk_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -5234,7 +5244,7 @@ void rys_jk_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_2011(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -5256,8 +5266,9 @@ void _rys_jk_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -5905,16 +5916,16 @@ void rys_jk_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -5935,7 +5946,7 @@ void rys_jk_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_2020(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -5948,6 +5959,8 @@ void _rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
+    int nsq_per_block = blockDim.x;
+    int gout_stride = blockDim.y;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -5958,38 +5971,41 @@ void _rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double cache_cicj[];
-    double *rw = cache_cicj + iprim*jprim*TILE2 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1152;
     double *gz = gy + 1152;
+    double *cicj_cache = rw_cache + 64 * (nroots*2+54);
 
     if (gout_id == 0) {
         gx[0] = 1.;
+    }
 
-        for (int n = sq_id; n < iprim*jprim*TILE2; n += 64) {
-            int ijp = n / TILE2;
-            int sh_ij = n % TILE2;
-            int ish = ish0 + sh_ij / TILE;
-            int jsh = jsh0 + sh_ij % TILE;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-            double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-            double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-            double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-            double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double aij = ai + aj;
-            double xjxi = rj[0] - ri[0];
-            double yjyi = rj[1] - ri[1];
-            double zjzi = rj[2] - ri[2];
-            double theta_ij = ai * aj / aij;
-            double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-            cache_cicj[sh_ij+ijp*TILE2] = ci[ip] * cj[jp] * Kab;
-        }
+    int thread_id = nsq_per_block * gout_id + sq_id;
+    int threads = nsq_per_block * gout_stride;
+    for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
+        int ijp = n / TILE2;
+        int sh_ij = n % TILE2;
+        int ish = ish0 + sh_ij / TILE;
+        int jsh = jsh0 + sh_ij % TILE;
+        int ip = ijp / jprim;
+        int jp = ijp % jprim;
+        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double ai = expi[ip];
+        double aj = expj[jp];
+        double aij = ai + aj;
+        double xjxi = rj[0] - ri[0];
+        double yjyi = rj[1] - ri[1];
+        double zjzi = rj[2] - ri[2];
+        double theta_ij = ai * aj / aij;
+        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
+        cicj_cache[sh_ij+ijp*TILE2] = ci[ip] * cj[jp] * Kab;
     }
     double gout0;
     double gout1;
@@ -6114,7 +6130,7 @@ void _rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zjzi = rj[2] - ri[2];
                 __syncthreads();
                 if (gout_id == 0) {
-                    double cicj = cache_cicj[sh_ij+ijp*TILE2];
+                    double cicj = cicj_cache[sh_ij+ijp*TILE2];
                     double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                     gy[0] = fac;
                 }
@@ -7445,16 +7461,16 @@ void rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -7475,7 +7491,7 @@ void rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_2021(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -7497,8 +7513,9 @@ void _rys_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -7932,16 +7949,16 @@ void rys_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -7962,7 +7979,7 @@ void rys_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_2100(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -7984,8 +8001,9 @@ void _rys_jk_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -8805,16 +8823,16 @@ void rys_jk_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -8835,7 +8853,7 @@ void rys_jk_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_2110(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -8848,6 +8866,8 @@ void _rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
+    int nsq_per_block = blockDim.x;
+    int gout_stride = blockDim.y;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -8858,38 +8878,41 @@ void _rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double cache_cicj[];
-    double *rw = cache_cicj + iprim*jprim*TILE2 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1536;
     double *gz = gy + 1536;
+    double *cicj_cache = rw_cache + 64 * (nroots*2+72);
 
     if (gout_id == 0) {
         gx[0] = 1.;
+    }
 
-        for (int n = sq_id; n < iprim*jprim*TILE2; n += 64) {
-            int ijp = n / TILE2;
-            int sh_ij = n % TILE2;
-            int ish = ish0 + sh_ij / TILE;
-            int jsh = jsh0 + sh_ij % TILE;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-            double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-            double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-            double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-            double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double aij = ai + aj;
-            double xjxi = rj[0] - ri[0];
-            double yjyi = rj[1] - ri[1];
-            double zjzi = rj[2] - ri[2];
-            double theta_ij = ai * aj / aij;
-            double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-            cache_cicj[sh_ij+ijp*TILE2] = ci[ip] * cj[jp] * Kab;
-        }
+    int thread_id = nsq_per_block * gout_id + sq_id;
+    int threads = nsq_per_block * gout_stride;
+    for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
+        int ijp = n / TILE2;
+        int sh_ij = n % TILE2;
+        int ish = ish0 + sh_ij / TILE;
+        int jsh = jsh0 + sh_ij % TILE;
+        int ip = ijp / jprim;
+        int jp = ijp % jprim;
+        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double ai = expi[ip];
+        double aj = expj[jp];
+        double aij = ai + aj;
+        double xjxi = rj[0] - ri[0];
+        double yjyi = rj[1] - ri[1];
+        double zjzi = rj[2] - ri[2];
+        double theta_ij = ai * aj / aij;
+        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
+        cicj_cache[sh_ij+ijp*TILE2] = ci[ip] * cj[jp] * Kab;
     }
     double gout0;
     double gout1;
@@ -9042,7 +9065,7 @@ void _rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zjzi = rj[2] - ri[2];
                 __syncthreads();
                 if (gout_id == 0) {
-                    double cicj = cache_cicj[sh_ij+ijp*TILE2];
+                    double cicj = cicj_cache[sh_ij+ijp*TILE2];
                     double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                     gy[0] = fac;
                 }
@@ -10832,16 +10855,16 @@ void rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -10862,7 +10885,7 @@ void rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_2111(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -10875,6 +10898,8 @@ void _rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
+    int nsq_per_block = blockDim.x;
+    int gout_stride = blockDim.y;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -10885,38 +10910,41 @@ void _rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double cache_cicj[];
-    double *rw = cache_cicj + iprim*jprim*TILE2 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1152;
     double *gz = gy + 1152;
+    double *cicj_cache = rw_cache + 64 * (nroots*2+54);
 
     if (gout_id == 0) {
         gx[0] = 1.;
+    }
 
-        for (int n = sq_id; n < iprim*jprim*TILE2; n += 64) {
-            int ijp = n / TILE2;
-            int sh_ij = n % TILE2;
-            int ish = ish0 + sh_ij / TILE;
-            int jsh = jsh0 + sh_ij % TILE;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-            double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-            double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-            double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-            double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double aij = ai + aj;
-            double xjxi = rj[0] - ri[0];
-            double yjyi = rj[1] - ri[1];
-            double zjzi = rj[2] - ri[2];
-            double theta_ij = ai * aj / aij;
-            double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-            cache_cicj[sh_ij+ijp*TILE2] = ci[ip] * cj[jp] * Kab;
-        }
+    int thread_id = nsq_per_block * gout_id + sq_id;
+    int threads = nsq_per_block * gout_stride;
+    for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
+        int ijp = n / TILE2;
+        int sh_ij = n % TILE2;
+        int ish = ish0 + sh_ij / TILE;
+        int jsh = jsh0 + sh_ij % TILE;
+        int ip = ijp / jprim;
+        int jp = ijp % jprim;
+        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double ai = expi[ip];
+        double aj = expj[jp];
+        double aij = ai + aj;
+        double xjxi = rj[0] - ri[0];
+        double yjyi = rj[1] - ri[1];
+        double zjzi = rj[2] - ri[2];
+        double theta_ij = ai * aj / aij;
+        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
+        cicj_cache[sh_ij+ijp*TILE2] = ci[ip] * cj[jp] * Kab;
     }
     double gout0;
     double gout1;
@@ -11041,7 +11069,7 @@ void _rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zjzi = rj[2] - ri[2];
                 __syncthreads();
                 if (gout_id == 0) {
-                    double cicj = cache_cicj[sh_ij+ijp*TILE2];
+                    double cicj = cicj_cache[sh_ij+ijp*TILE2];
                     double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                     gy[0] = fac;
                 }
@@ -12441,16 +12469,16 @@ void rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -12471,7 +12499,7 @@ void rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_2120(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -12493,8 +12521,9 @@ void _rys_jk_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -13149,16 +13178,16 @@ void rys_jk_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -13179,7 +13208,7 @@ void rys_jk_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_2200(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -13192,6 +13221,8 @@ void _rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
+    int nsq_per_block = blockDim.x;
+    int gout_stride = blockDim.y;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -13202,38 +13233,41 @@ void _rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double cache_cicj[];
-    double *rw = cache_cicj + iprim*jprim*TILE2 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1152;
     double *gz = gy + 1152;
+    double *cicj_cache = rw_cache + 64 * (nroots*2+54);
 
     if (gout_id == 0) {
         gx[0] = 1.;
+    }
 
-        for (int n = sq_id; n < iprim*jprim*TILE2; n += 64) {
-            int ijp = n / TILE2;
-            int sh_ij = n % TILE2;
-            int ish = ish0 + sh_ij / TILE;
-            int jsh = jsh0 + sh_ij % TILE;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-            double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-            double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-            double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-            double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double aij = ai + aj;
-            double xjxi = rj[0] - ri[0];
-            double yjyi = rj[1] - ri[1];
-            double zjzi = rj[2] - ri[2];
-            double theta_ij = ai * aj / aij;
-            double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-            cache_cicj[sh_ij+ijp*TILE2] = ci[ip] * cj[jp] * Kab;
-        }
+    int thread_id = nsq_per_block * gout_id + sq_id;
+    int threads = nsq_per_block * gout_stride;
+    for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
+        int ijp = n / TILE2;
+        int sh_ij = n % TILE2;
+        int ish = ish0 + sh_ij / TILE;
+        int jsh = jsh0 + sh_ij % TILE;
+        int ip = ijp / jprim;
+        int jp = ijp % jprim;
+        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double ai = expi[ip];
+        double aj = expj[jp];
+        double aij = ai + aj;
+        double xjxi = rj[0] - ri[0];
+        double yjyi = rj[1] - ri[1];
+        double zjzi = rj[2] - ri[2];
+        double theta_ij = ai * aj / aij;
+        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
+        cicj_cache[sh_ij+ijp*TILE2] = ci[ip] * cj[jp] * Kab;
     }
     double gout0;
     double gout1;
@@ -13358,7 +13392,7 @@ void _rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zjzi = rj[2] - ri[2];
                 __syncthreads();
                 if (gout_id == 0) {
-                    double cicj = cache_cicj[sh_ij+ijp*TILE2];
+                    double cicj = cicj_cache[sh_ij+ijp*TILE2];
                     double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                     gy[0] = fac;
                 }
@@ -14697,16 +14731,16 @@ void rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -14727,7 +14761,7 @@ void rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_2210(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -14749,8 +14783,9 @@ void _rys_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -15091,16 +15126,16 @@ void rys_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -15121,7 +15156,7 @@ void rys_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_3000(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -15143,8 +15178,9 @@ void _rys_jk_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -15726,16 +15762,16 @@ void rys_jk_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -15756,7 +15792,7 @@ void rys_jk_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_3010(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -15769,6 +15805,8 @@ void _rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
+    int nsq_per_block = blockDim.x;
+    int gout_stride = blockDim.y;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -15779,38 +15817,41 @@ void _rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double cache_cicj[];
-    double *rw = cache_cicj + iprim*jprim*TILE2 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1024;
     double *gz = gy + 1024;
+    double *cicj_cache = rw_cache + 64 * (nroots*2+48);
 
     if (gout_id == 0) {
         gx[0] = 1.;
+    }
 
-        for (int n = sq_id; n < iprim*jprim*TILE2; n += 64) {
-            int ijp = n / TILE2;
-            int sh_ij = n % TILE2;
-            int ish = ish0 + sh_ij / TILE;
-            int jsh = jsh0 + sh_ij % TILE;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-            double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-            double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-            double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-            double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double aij = ai + aj;
-            double xjxi = rj[0] - ri[0];
-            double yjyi = rj[1] - ri[1];
-            double zjzi = rj[2] - ri[2];
-            double theta_ij = ai * aj / aij;
-            double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-            cache_cicj[sh_ij+ijp*TILE2] = ci[ip] * cj[jp] * Kab;
-        }
+    int thread_id = nsq_per_block * gout_id + sq_id;
+    int threads = nsq_per_block * gout_stride;
+    for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
+        int ijp = n / TILE2;
+        int sh_ij = n % TILE2;
+        int ish = ish0 + sh_ij / TILE;
+        int jsh = jsh0 + sh_ij % TILE;
+        int ip = ijp / jprim;
+        int jp = ijp % jprim;
+        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double ai = expi[ip];
+        double aj = expj[jp];
+        double aij = ai + aj;
+        double xjxi = rj[0] - ri[0];
+        double yjyi = rj[1] - ri[1];
+        double zjzi = rj[2] - ri[2];
+        double theta_ij = ai * aj / aij;
+        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
+        cicj_cache[sh_ij+ijp*TILE2] = ci[ip] * cj[jp] * Kab;
     }
     double gout0;
     double gout1;
@@ -15927,7 +15968,7 @@ void _rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zjzi = rj[2] - ri[2];
                 __syncthreads();
                 if (gout_id == 0) {
-                    double cicj = cache_cicj[sh_ij+ijp*TILE2];
+                    double cicj = cicj_cache[sh_ij+ijp*TILE2];
                     double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                     gy[0] = fac;
                 }
@@ -17142,16 +17183,16 @@ void rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -17172,7 +17213,7 @@ void rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_3011(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -17194,8 +17235,9 @@ void _rys_jk_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -18132,16 +18174,16 @@ void rys_jk_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -18162,7 +18204,7 @@ void rys_jk_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_3020(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -18184,8 +18226,9 @@ void _rys_jk_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -18769,16 +18812,16 @@ void rys_jk_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -18799,7 +18842,7 @@ void rys_jk_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_3100(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -18812,6 +18855,8 @@ void _rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
+    int nsq_per_block = blockDim.x;
+    int gout_stride = blockDim.y;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -18822,38 +18867,41 @@ void _rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double cache_cicj[];
-    double *rw = cache_cicj + iprim*jprim*TILE2 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1024;
     double *gz = gy + 1024;
+    double *cicj_cache = rw_cache + 64 * (nroots*2+48);
 
     if (gout_id == 0) {
         gx[0] = 1.;
+    }
 
-        for (int n = sq_id; n < iprim*jprim*TILE2; n += 64) {
-            int ijp = n / TILE2;
-            int sh_ij = n % TILE2;
-            int ish = ish0 + sh_ij / TILE;
-            int jsh = jsh0 + sh_ij % TILE;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-            double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-            double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-            double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-            double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double aij = ai + aj;
-            double xjxi = rj[0] - ri[0];
-            double yjyi = rj[1] - ri[1];
-            double zjzi = rj[2] - ri[2];
-            double theta_ij = ai * aj / aij;
-            double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-            cache_cicj[sh_ij+ijp*TILE2] = ci[ip] * cj[jp] * Kab;
-        }
+    int thread_id = nsq_per_block * gout_id + sq_id;
+    int threads = nsq_per_block * gout_stride;
+    for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
+        int ijp = n / TILE2;
+        int sh_ij = n % TILE2;
+        int ish = ish0 + sh_ij / TILE;
+        int jsh = jsh0 + sh_ij % TILE;
+        int ip = ijp / jprim;
+        int jp = ijp % jprim;
+        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double ai = expi[ip];
+        double aj = expj[jp];
+        double aij = ai + aj;
+        double xjxi = rj[0] - ri[0];
+        double yjyi = rj[1] - ri[1];
+        double zjzi = rj[2] - ri[2];
+        double theta_ij = ai * aj / aij;
+        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
+        cicj_cache[sh_ij+ijp*TILE2] = ci[ip] * cj[jp] * Kab;
     }
     double gout0;
     double gout1;
@@ -18970,7 +19018,7 @@ void _rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zjzi = rj[2] - ri[2];
                 __syncthreads();
                 if (gout_id == 0) {
-                    double cicj = cache_cicj[sh_ij+ijp*TILE2];
+                    double cicj = cicj_cache[sh_ij+ijp*TILE2];
                     double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                     gy[0] = fac;
                 }
@@ -20181,16 +20229,16 @@ void rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -20211,7 +20259,7 @@ void rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_3110(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -20233,8 +20281,9 @@ void _rys_jk_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
+    extern __shared__ double rw_cache[];
+    double *rw = rw_cache + sq_id;
+    double *Rpa_cicj = rw_cache + nsq_per_block * bounds.nroots * 2;
     for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -21178,16 +21227,16 @@ void rys_jk_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int b_id = blockIdx.x;
     int t_id = threadIdx.x + blockDim.x * threadIdx.y;
     ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
+    extern __shared__ int batch_id[];
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id[0] = atomicAdd(batch_head, 1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
     int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
+    while (batch_id[0] < nbatches) {
+        int batch_ij = batch_id[0] / nbatches_kl;
+        int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
         int ntasks;
         if (omega >= 0) {
@@ -21208,7 +21257,7 @@ void rys_jk_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             _rys_jk_3200(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();

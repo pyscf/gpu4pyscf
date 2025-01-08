@@ -257,7 +257,7 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3) * quartets_per_block;
-        buflen += ij_prims*12;
+        buflen += ij_prims*6;
         rys_jk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
