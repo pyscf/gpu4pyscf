@@ -418,12 +418,13 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
                                        batch_ij, batch_kl);
         }
+        if (ntasks > 0) {
+            rys_jk_general(envs, jk, bounds, shl_quartet_idx, ntasks);
+            __syncthreads();
+        }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
             atomicAdd(batch_head+1, ntasks);
-        }
-        if (ntasks > 0) {
-            rys_jk_general(envs, jk, bounds, shl_quartet_idx, ntasks);
         }
         __syncthreads();
     }

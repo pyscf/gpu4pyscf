@@ -239,6 +239,7 @@ void rys_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_0000(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -522,6 +523,7 @@ void rys_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_1000(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -890,6 +892,7 @@ void rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_1010(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -1463,6 +1466,7 @@ void rys_jk_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_1011(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -1834,6 +1838,7 @@ void rys_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_1100(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -2411,6 +2416,7 @@ void rys_jk_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_1110(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -3550,6 +3556,7 @@ void rys_jk_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_1111(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -3882,6 +3889,7 @@ void rys_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_2000(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -4368,6 +4376,7 @@ void rys_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_2010(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -5242,6 +5251,7 @@ void rys_jk_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_2011(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -5944,6 +5954,7 @@ void rys_jk_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_2020(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -7489,6 +7500,7 @@ void rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_2021(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -7977,6 +7989,7 @@ void rys_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_2100(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -8851,6 +8864,7 @@ void rys_jk_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_2110(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -10883,6 +10897,7 @@ void rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_2111(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -12497,6 +12512,7 @@ void rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_2120(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -13206,6 +13222,7 @@ void rys_jk_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_2200(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -14759,6 +14776,7 @@ void rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_2210(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -15154,6 +15172,7 @@ void rys_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_3000(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -15790,6 +15809,7 @@ void rys_jk_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_3010(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -17211,6 +17231,7 @@ void rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_3011(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -18202,6 +18223,7 @@ void rys_jk_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_3020(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -18840,6 +18862,7 @@ void rys_jk_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_3100(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -20257,6 +20280,7 @@ void rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_3110(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
@@ -21255,6 +21279,7 @@ void rys_jk_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
             _rys_jk_3200(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);
