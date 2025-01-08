@@ -49,14 +49,7 @@ extern int rys_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head,
                     int *scheme, int workers, double omega);
 extern int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head,
-                    int *scheme, int workers, double omega);
-extern int rys_jk_unrolled_v1(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head,
-                    int *scheme, int workers, double omega);
-extern int rys_sr_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head,
-                    int *scheme, int workers, double omega);
+                    ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
 extern int os_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head,
                     int *scheme, int workers, double omega);
@@ -191,7 +184,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
 
     if (order <= 0) {
         os_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega);
-    } else if (!rys_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
+    } else if (!rys_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;

@@ -984,6 +984,7 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         if (ntasks > 0) {
             rys_ejk_ip1_general(envs, jk, bounds, shl_quartet_idx,
                                 dd_cache, ntasks);
+            __syncthreads();
         }
         if (t_id == 0) {
             batch_id[0] = atomicAdd(batch_head, 1);

@@ -117,9 +117,6 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
         for (int ij = gout_id; ij < iprim*jprim; ij += gout_stride) {
             int ip = ij / jprim;
             int jp = ij % jprim;
@@ -146,6 +143,9 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al = expl[lp];
             double akl = ak + al;
             double al_akl = al / akl;
+            double xlxk = rl[0] - rk[0];
+            double ylyk = rl[1] - rk[1];
+            double zlzk = rl[2] - rk[2];
             __syncthreads();
             if (gout_id == 0) {
                 double theta_kl = ak * al / akl;
