@@ -220,7 +220,7 @@ def grad_nuc(pcmobj, dm):
     t1 = log.timer_debug1('grad nuc', *t1)
     return de
 
-def grad_qv(pcmobj, dm):
+def grad_qv(pcmobj, dm, q_sym = None):
     '''
     contributions due to integrals
     '''
@@ -237,7 +237,8 @@ def grad_qv(pcmobj, dm):
     gridslice   = pcmobj.surface['gslice_by_atom']
     charge_exp  = pcmobj.surface['charge_exp']
     grid_coords = pcmobj.surface['grid_coords']
-    q_sym       = pcmobj._intermediates['q_sym']
+    if q_sym is None:
+        q_sym = pcmobj._intermediates['q_sym']
 
     dvj = int1e_grids_ip1(mol, grid_coords, dm = dm, charges = q_sym, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)
     dq  = int1e_grids_ip2(mol, grid_coords, dm = dm, charges = q_sym, direct_scf_tol = 1e-14, charge_exponents = charge_exp**2)

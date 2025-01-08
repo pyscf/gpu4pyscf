@@ -86,34 +86,88 @@ def hess_nuc(pcmobj):
     return de
 
 def hess_qv(pcmobj, dm, verbose=None):
-    raise NotImplementedError("PCM analytical hessian is not tested")
-    if not pcmobj._intermediates or 'q_sym' not in pcmobj._intermediates:
+    raise NotImplementedError("This implementation requires 9 * nao * nao * ngrids of GPU memory")
+    if not pcmobj._intermediates:
+        pcmobj.build()
+    dm_cache = pcmobj._intermediates.get('dm', None)
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
+        pass
+    else:
         pcmobj._get_vind(dm)
-    gridslice    = pcmobj.surface['gslice_by_atom']
-    q_sym        = pcmobj._intermediates['q_sym']
+    mol = pcmobj.mol
+    log = logger.new_logger(pcmobj, verbose)
+    t1 = log.init_timer()
 
-    intopt = pcmobj.intopt
-    intopt.clear()
-    # rebuild with aosym
+    gridslice   = pcmobj.surface['gslice_by_atom']
+    charge_exp  = pcmobj.surface['charge_exp']
+    grid_coords = pcmobj.surface['grid_coords']
+    q_sym       = pcmobj._intermediates['q_sym']
+
+    ngrids = q_sym.shape[0]
+    nao = mol.nao
+
+    aoslice = mol.aoslice_by_atom()
+    aoslice = numpy.array(aoslice)
+
+    fakemol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
+    intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
-    coeff = intopt.coeff
-    dm_cart = coeff @ dm @ coeff.T
-    #dm_cart = cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
 
-    dvj, _ = int3c2e.get_int3c2e_ipip1_hjk(intopt, q_sym, None, dm_cart, with_k=False)
-    dq, _ = int3c2e.get_int3c2e_ipvip1_hjk(intopt, q_sym, None, dm_cart, with_k=False)
-    dvj, _ = int3c2e.get_int3c2e_ip1ip2_hjk(intopt, q_sym, None, dm_cart, with_k=False)
-    dq, _ = int3c2e.get_int3c2e_ipip2_hjk(intopt, q_sym, None, dm_cart, with_k=False)
+    d2e_from_d2I = cupy.zeros([mol.natm, mol.natm, 3, 3])
 
-    cart_ao_idx = intopt.cart_ao_idx
-    rev_cart_ao_idx = numpy.argsort(cart_ao_idx)
-    dvj = dvj[:,rev_cart_ao_idx]
+    d2I_dA2 = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipip1', direct_scf_tol=1e-14)
+    d2I_dA2 = cupy.einsum('dijq,q->dij', d2I_dA2, q_sym)
+    d2I_dA2 = d2I_dA2.reshape([3, 3, nao, nao])
+    for i_atom in range(mol.natm):
+        p0,p1 = aoslice[i_atom, 2:]
+        d2e_from_d2I[i_atom, i_atom, :, :] += cupy.einsum('ij,dDij->dD', dm[p0:p1, :], d2I_dA2[:, :, p0:p1, :])
+        d2e_from_d2I[i_atom, i_atom, :, :] += cupy.einsum('ij,dDij->dD', dm[:, p0:p1], d2I_dA2[:, :, p0:p1, :].transpose(0,1,3,2))
 
-    aoslice = intopt.mol.aoslice_by_atom()
-    dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
-    dvj= 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
-    de = dq + dvj
-    return de.get()
+    d2I_dAdB = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipvip1', direct_scf_tol=1e-14)
+    d2I_dAdB = cupy.einsum('dijq,q->dij', d2I_dAdB, q_sym)
+    d2I_dAdB = d2I_dAdB.reshape([3, 3, nao, nao])
+    for i_atom in range(mol.natm):
+        pi0,pi1 = aoslice[i_atom, 2:]
+        for j_atom in range(mol.natm):
+            pj0,pj1 = aoslice[j_atom, 2:]
+            d2e_from_d2I[i_atom, j_atom, :, :] += cupy.einsum('ij,dDij->dD', dm[pi0:pi1, pj0:pj1], d2I_dAdB[:, :, pi0:pi1, pj0:pj1])
+            d2e_from_d2I[i_atom, j_atom, :, :] += cupy.einsum('ij,dDij->dD', dm[pj0:pj1, pi0:pi1], d2I_dAdB[:, :, pi0:pi1, pj0:pj1].transpose(0,1,3,2))
+
+    d2I_dAdC = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ip1ip2', direct_scf_tol=1e-14)
+    d2I_dAdC = d2I_dAdC.reshape([3, 3, nao, nao, ngrids])
+    for i_atom in range(mol.natm):
+        p0,p1 = aoslice[i_atom, 2:]
+        for j_atom in range(mol.natm):
+            g0,g1 = gridslice[j_atom]
+            d2e_from_d2I[i_atom, j_atom, :, :] += cupy.einsum('ij,dDijq,q->dD', dm[p0:p1, :], d2I_dAdC[:, :, p0:p1, :, g0:g1], q_sym[g0:g1])
+            d2e_from_d2I[i_atom, j_atom, :, :] += cupy.einsum('ij,dDijq,q->dD', dm[:, p0:p1], d2I_dAdC[:, :, p0:p1, :, g0:g1].transpose(0,1,3,2,4), q_sym[g0:g1])
+
+            d2e_from_d2I[j_atom, i_atom, :, :] += cupy.einsum('ij,dDijq,q->dD', dm[p0:p1, :], d2I_dAdC[:, :, p0:p1, :, g0:g1].transpose(1,0,2,3,4), q_sym[g0:g1])
+            d2e_from_d2I[j_atom, i_atom, :, :] += cupy.einsum('ij,dDijq,q->dD', dm[:, p0:p1], d2I_dAdC[:, :, p0:p1, :, g0:g1].transpose(1,0,3,2,4), q_sym[g0:g1])
+
+    d2I_dC2 = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipip2', direct_scf_tol=1e-14)
+    d2I_dC2 = cupy.einsum('dijq,ij->dq', d2I_dC2, dm)
+    d2I_dC2 = d2I_dC2.reshape([3, 3, ngrids])
+    for i_atom in range(mol.natm):
+        g0,g1 = gridslice[i_atom]
+        d2e_from_d2I[i_atom, i_atom, :, :] += cupy.einsum('dDq,q->dD', d2I_dC2[:, :, g0:g1], q_sym[g0:g1])
+
+    intopt_derivative = int3c1e.VHFOpt(mol)
+    intopt_derivative.build(cutoff = 1e-14, aosym = False)
+
+    dqdx = get_dqsym_dx(pcmobj, dm, range(mol.natm), intopt_derivative)
+
+    d2e_from_dIdq = numpy.zeros([mol.natm, mol.natm, 3, 3])
+    for i_atom in range(mol.natm):
+        for i_xyz in range(3):
+            d2e_from_dIdq[i_atom, :, i_xyz, :] = grad_qv(pcmobj, dm, q_sym = dqdx[i_atom, i_xyz, :])
+
+    d2e_from_d2I = d2e_from_d2I.get()
+    d2e = d2e_from_d2I + d2e_from_dIdq
+    d2e *= -1
+
+    t1 = log.timer_debug1('solvent energy d(dI/dx * q)/dx contribution', *t1)
+    return d2e
 
 def hess_elec(pcmobj, dm, verbose=None):
     '''
