@@ -30,60 +30,72 @@ from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
 
-def hess_nuc(pcmobj):
-    raise NotImplementedError("Not tested")
+def hess_nuc(pcmobj, dm):
     if not pcmobj._intermediates:
         pcmobj.build()
+    dm_cache = pcmobj._intermediates.get('dm', None)
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
+        pass
+    else:
+        pcmobj._get_vind(dm)
     mol = pcmobj.mol
+
     q_sym        = pcmobj._intermediates['q_sym'].get()
     gridslice    = pcmobj.surface['gslice_by_atom']
     grid_coords  = pcmobj.surface['grid_coords'].get()
     exponents    = pcmobj.surface['charge_exp'].get()
+
+    ngrids = q_sym.shape[0]
 
     atom_coords = mol.atom_coords(unit='B')
     atom_charges = numpy.asarray(mol.atom_charges(), dtype=numpy.float64)
     fakemol_nuc = gto.fakemol_for_charges(atom_coords)
     fakemol = gto.fakemol_for_charges(grid_coords, expnt=exponents**2)
 
-    # nuclei potential response
-    int2c2e_ip1ip2 = mol._add_suffix('int2c2e_ip1ip2')
-    v_ng_ip1ip2 = gto.mole.intor_cross(int2c2e_ip1ip2, fakemol_nuc, fakemol).reshape([3,3,mol.natm,-1])
-    dv_g = numpy.einsum('n,xyng->ngxy', atom_charges, v_ng_ip1ip2)
-    dv_g = numpy.einsum('ngxy,g->ngxy', dv_g, q_sym)
-
-    de = numpy.zeros([mol.natm, mol.natm, 3, 3])
-    for ia in range(mol.natm):
-        p0, p1 = gridslice[ia]
-        de_tmp = numpy.sum(dv_g[:,p0:p1], axis=1)
-        de[:,ia] -= de_tmp
-        #de[ia,:] -= de_tmp.transpose([0,2,1])
-
+    d2e_from_d2I = numpy.zeros([mol.natm, mol.natm, 3, 3])
 
     int2c2e_ip1ip2 = mol._add_suffix('int2c2e_ip1ip2')
-    v_ng_ip1ip2 = gto.mole.intor_cross(int2c2e_ip1ip2, fakemol, fakemol_nuc).reshape([3,3,-1,mol.natm])
-    dv_g = numpy.einsum('n,xygn->gnxy', atom_charges, v_ng_ip1ip2)
-    dv_g = numpy.einsum('gnxy,g->gnxy', dv_g, q_sym)
-
-    for ia in range(mol.natm):
-        p0, p1 = gridslice[ia]
-        de_tmp = numpy.sum(dv_g[p0:p1], axis=0)
-        de[ia,:] -= de_tmp
-        #de[ia,:] -= de_tmp.transpose([0,2,1])
+    d2I_dAdC = gto.mole.intor_cross(int2c2e_ip1ip2, fakemol_nuc, fakemol)
+    d2I_dAdC = d2I_dAdC.reshape(3, 3, mol.natm, ngrids)
+    for i_atom in range(mol.natm):
+        g0,g1 = gridslice[i_atom]
+        d2e_from_d2I[:, i_atom, :, :] += numpy.einsum('A,dDAq,q->AdD', atom_charges, d2I_dAdC[:, :, :, g0:g1], q_sym[g0:g1])
+        d2e_from_d2I[i_atom, :, :, :] += numpy.einsum('A,dDAq,q->AdD', atom_charges, d2I_dAdC[:, :, :, g0:g1], q_sym[g0:g1])
 
     int2c2e_ipip1 = mol._add_suffix('int2c2e_ipip1')
-    v_ng_ipip1 = gto.mole.intor_cross(int2c2e_ipip1, fakemol_nuc, fakemol).reshape([3,3,mol.natm,-1])
-    dv_g = numpy.einsum('g,xyng->nxy', q_sym, v_ng_ipip1)
-    for ia in range(mol.natm):
-        de[ia,ia] -= dv_g[ia] * atom_charges[ia]
+    # # Some explanations here:
+    # # Why can we use the ip1ip2 here? Because of the translational invariance
+    # # $\frac{\partial^2 I_{AC}}{\partial A^2} + \frac{\partial^2 I_{AC}}{\partial A \partial C} = 0$
+    # # Why not using the ipip1 here? Because the nuclei, a point charge, is handled as a Gaussian charge with exponent = 1e16
+    # # This causes severe numerical problem in function int2c2e_ip1ip2, and make the main diagonal of hessian garbage.
+    # d2I_dA2 = gto.mole.intor_cross(int2c2e_ipip1, fakemol_nuc, fakemol)
+    d2I_dA2 = -gto.mole.intor_cross(int2c2e_ip1ip2, fakemol_nuc, fakemol)
+    d2I_dA2 = numpy.einsum('dAq,q->dA', d2I_dA2, q_sym)
+    d2I_dA2 = d2I_dA2.reshape(3, 3, mol.natm)
+    for i_atom in range(mol.natm):
+        d2e_from_d2I[i_atom, i_atom, :, :] += atom_charges[i_atom] * d2I_dA2[:, :, i_atom]
 
-    v_ng_ipip1 = gto.mole.intor_cross(int2c2e_ipip1, fakemol, fakemol_nuc).reshape([3,3,-1,mol.natm])
-    dv_g = numpy.einsum('n,xygn->gxy', atom_charges, v_ng_ipip1)
-    dv_g = numpy.einsum('g,gxy->gxy', q_sym, dv_g)
-    for ia in range(mol.natm):
-        p0, p1 = gridslice[ia]
-        de[ia,ia] -= numpy.sum(dv_g[p0:p1], axis=0)
+    d2I_dC2 = gto.mole.intor_cross(int2c2e_ipip1, fakemol, fakemol_nuc)
+    d2I_dC2 = numpy.einsum('dqA,A->dq', d2I_dC2, atom_charges)
+    d2I_dC2 = d2I_dC2.reshape(3, 3, ngrids)
+    for i_atom in range(mol.natm):
+        g0,g1 = gridslice[i_atom]
+        d2e_from_d2I[i_atom, i_atom, :, :] += numpy.einsum('dDq,q->dD', d2I_dC2[:, :, g0:g1], q_sym[g0:g1])
 
-    return de
+    intopt_derivative = int3c1e.VHFOpt(mol)
+    intopt_derivative.build(cutoff = 1e-14, aosym = False)
+
+    dqdx = get_dqsym_dx(pcmobj, dm, range(mol.natm), intopt_derivative)
+    dqdx = dqdx.get()
+
+    d2e_from_dIdq = numpy.zeros([mol.natm, mol.natm, 3, 3])
+    for i_atom in range(mol.natm):
+        for i_xyz in range(3):
+            d2e_from_dIdq[i_atom, :, i_xyz, :] = grad_nuc(pcmobj, dm, q_sym = dqdx[i_atom, i_xyz, :])
+
+    d2e = d2e_from_d2I - d2e_from_dIdq
+
+    return d2e
 
 def hess_qv(pcmobj, dm, verbose=None):
     raise NotImplementedError("This implementation requires 9 * nao * nao * ngrids of GPU memory")
