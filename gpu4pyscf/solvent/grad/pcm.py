@@ -181,7 +181,7 @@ def get_dSii(surface, dF):
     dSii = dSii_dF[:,None] * dF
     return dSii
 
-def grad_nuc(pcmobj, dm):
+def grad_nuc(pcmobj, dm, q_sym = None):
     mol = pcmobj.mol
     log = logger.new_logger(mol, mol.verbose)
     t1 = log.init_timer()
@@ -194,7 +194,8 @@ def grad_nuc(pcmobj, dm):
         pcmobj._get_vind(dm)
 
     mol = pcmobj.mol
-    q_sym        = pcmobj._intermediates['q_sym'].get()
+    if q_sym is None:
+        q_sym = pcmobj._intermediates['q_sym'].get()
     gridslice    = pcmobj.surface['gslice_by_atom']
     grid_coords  = pcmobj.surface['grid_coords'].get()
     exponents    = pcmobj.surface['charge_exp'].get()
@@ -220,7 +221,7 @@ def grad_nuc(pcmobj, dm):
     t1 = log.timer_debug1('grad nuc', *t1)
     return de
 
-def grad_qv(pcmobj, dm):
+def grad_qv(pcmobj, dm, q_sym = None):
     '''
     contributions due to integrals
     '''
@@ -237,7 +238,8 @@ def grad_qv(pcmobj, dm):
     gridslice   = pcmobj.surface['gslice_by_atom']
     charge_exp  = pcmobj.surface['charge_exp']
     grid_coords = pcmobj.surface['grid_coords']
-    q_sym       = pcmobj._intermediates['q_sym']
+    if q_sym is None:
+        q_sym = pcmobj._intermediates['q_sym']
 
     intopt = int3c1e.VHFOpt(mol)
     intopt.build(1e-14, aosym=False)
