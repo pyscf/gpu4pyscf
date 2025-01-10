@@ -153,7 +153,7 @@ def hess_elec(pcmobj, dm, verbose=None):
     pcmobj.reset(pmol)
     return de
 
-def get_dqsym_dx_fix_vgrids(pcmobj, atmlst, inverse_K):
+def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
     assert pcmobj._intermediates is not None
 
     gridslice    = pcmobj.surface['gslice_by_atom']
@@ -162,6 +162,7 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst, inverse_K):
     D            = pcmobj._intermediates['D']
     S            = pcmobj._intermediates['S']
     R            = pcmobj._intermediates['R']
+    inverse_K    = pcmobj._intermediates['inverse_K']
     q_sym        = pcmobj._intermediates['q_sym']
     f_epsilon    = pcmobj._intermediates['f_epsilon']
 
@@ -317,7 +318,7 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst, inverse_K):
 
     return dqdx_fix_Vq
 
-def get_dqsym_dx_fix_K_R(pcmobj, dm, atmlst, inverse_K, intopt_derivative):
+def get_dqsym_dx_fix_K_R(pcmobj, dm, atmlst, intopt_derivative):
     assert pcmobj._intermediates is not None
 
     mol = pcmobj.mol
@@ -325,6 +326,7 @@ def get_dqsym_dx_fix_K_R(pcmobj, dm, atmlst, inverse_K, intopt_derivative):
     charge_exp   = pcmobj.surface['charge_exp']
     grid_coords  = pcmobj.surface['grid_coords']
     R            = pcmobj._intermediates['R']
+    inverse_K    = pcmobj._intermediates['inverse_K']
 
     atom_coords = mol.atom_coords(unit='B')
     atom_charges = numpy.asarray(mol.atom_charges(), dtype=numpy.float64)
@@ -357,9 +359,7 @@ def get_dqsym_dx_fix_K_R(pcmobj, dm, atmlst, inverse_K, intopt_derivative):
     return dqdx_fix_K_R
 
 def get_dqsym_dx(pcmobj, dm, atmlst, intopt_derivative):
-    K = pcmobj._intermediates['K']
-    inverse_K = cupy.linalg.inv(K)
-    return get_dqsym_dx_fix_vgrids(pcmobj, atmlst, inverse_K) + get_dqsym_dx_fix_K_R(pcmobj, dm, atmlst, inverse_K, intopt_derivative)
+    return get_dqsym_dx_fix_vgrids(pcmobj, atmlst) + get_dqsym_dx_fix_K_R(pcmobj, dm, atmlst, intopt_derivative)
 
 def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
     '''
