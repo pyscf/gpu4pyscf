@@ -276,10 +276,10 @@ def grad_solver(pcmobj, dm):
     A            = pcmobj._intermediates['A']
     D            = pcmobj._intermediates['D']
     S            = pcmobj._intermediates['S']
-    K            = pcmobj._intermediates['K']
+    inverse_K    = pcmobj._intermediates['inverse_K']
     q            = pcmobj._intermediates['q']
 
-    vK_1 = cupy.linalg.solve(K.T, v_grids)
+    vK_1 = cupy.dot(inverse_K.T, v_grids)
     epsilon = pcmobj.eps
 
     de = cupy.zeros([pcmobj.mol.natm,3])

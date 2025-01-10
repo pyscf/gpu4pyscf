@@ -381,11 +381,15 @@ class SMD(pcm.PCM):
         K = S - f_epsilon/(2.0*np.pi) * DAS
         R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*np.pi)*DA)
 
+        # Notice the SVD in pseudo inverse scales badly with ngrids
+        inverse_K = cupy.linalg.pinv(K)
+
         intermediates = {
             'S': cupy.asarray(S),
             'D': cupy.asarray(D),
             'A': cupy.asarray(A),
             'K': cupy.asarray(K),
+            'inverse_K': cupy.asarray(inverse_K),
             'R': cupy.asarray(R),
             'f_epsilon': f_epsilon
         }

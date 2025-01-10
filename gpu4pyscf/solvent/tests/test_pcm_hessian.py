@@ -195,7 +195,7 @@ class KnownValues(unittest.TestCase):
         test_grad_vmat = analytic_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
         ref_grad_vmat = _fd_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 3e-10)
 
     def test_grad_vmat_iefpcm(self):
         print("testing IEF-PCM dV_solv/dx")
@@ -209,7 +209,7 @@ class KnownValues(unittest.TestCase):
         test_grad_vmat = analytic_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
         ref_grad_vmat = _fd_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 3e-10)
 
     def test_grad_vmat_ssvpe(self):
         print("testing SS(V)PE dV_solv/dx")
@@ -223,7 +223,7 @@ class KnownValues(unittest.TestCase):
         test_grad_vmat = analytic_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
         ref_grad_vmat = _fd_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 3e-10)
 
     @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_gpu(self):

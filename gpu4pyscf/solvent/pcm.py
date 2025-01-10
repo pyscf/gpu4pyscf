@@ -331,11 +331,15 @@ class PCM(lib.StreamObject):
         else:
             raise RuntimeError(f"Unknown implicit solvent model: {self.method}")
 
+        # Notice the SVD in pseudo inverse scales badly with ngrids
+        inverse_K = cupy.linalg.pinv(K)
+
         intermediates = {
             'S': cupy.asarray(S),
             'D': cupy.asarray(D),
             'A': cupy.asarray(A),
             'K': cupy.asarray(K),
+            'inverse_K': cupy.asarray(inverse_K),
             'R': cupy.asarray(R),
             'f_epsilon': f_epsilon
         }
@@ -366,23 +370,21 @@ class PCM(lib.StreamObject):
             dms = (dms[0] + dms[1]).reshape(-1,nao,nao)
         if not isinstance(dms, cupy.ndarray):
             dms = cupy.asarray(dms)
-        K = self._intermediates['K']
+        inverse_K = self._intermediates['inverse_K']
         R = self._intermediates['R']
         v_grids_e = self._get_v(dms)
         v_grids = self.v_grids_n - v_grids_e
 
         b = cupy.dot(R, v_grids.T)
-        q = cupy.linalg.solve(K, b).T
+        q = cupy.dot(inverse_K, b).T
 
-        vK_1 = cupy.linalg.solve(K.T, v_grids.T)
+        vK_1 = cupy.dot(inverse_K.T, v_grids.T)
         qt = cupy.dot(R.T, vK_1).T
         q_sym = (q + qt)/2.0
 
         vmat = self._get_vmat(q_sym)
         epcm = 0.5 * cupy.dot(v_grids[0], q_sym[0])
 
-        self._intermediates['K'] = K
-        self._intermediates['R'] = R
         self._intermediates['q'] = q[0]
         self._intermediates['q_sym'] = q_sym[0]
         self._intermediates['v_grids'] = v_grids[0]
@@ -439,14 +441,14 @@ class PCM(lib.StreamObject):
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)
 
-        K = self._intermediates['K']
+        inverse_K = self._intermediates['inverse_K']
         R = self._intermediates['R']
         v_grids = -self._get_v(dms)
 
         b = cupy.dot(R, v_grids.T)
-        q = cupy.linalg.solve(K, b).T
+        q = cupy.dot(inverse_K, b).T
 
-        vK_1 = cupy.linalg.solve(K.T, v_grids.T)
+        vK_1 = cupy.dot(inverse_K.T, v_grids.T)
         qt = cupy.dot(R.T, vK_1).T
         q_sym = (q + qt)/2.0
 
