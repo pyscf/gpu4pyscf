@@ -71,7 +71,10 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
           gxyz=None, Gvbase=None, kpt=np.zeros(3), verbose=None):
     from pyscf.pbc.df.ft_ao import ft_ao
     out = ft_ao(cell, Gv, shls_slice, b, gxyz, Gvbase, kpt, verbose)
-    return cp.asarray(out)
+    if out.flags.c_contiguous:
+        return cp.asarray(out)
+    else:
+        return cp.asarray(out, order='F')
 
 def _bas_overlap_mask(cell, bvkmesh_Ls, Ls, cutoff=None):
     '''integral screening mask for basis product between cell and supmol'''

@@ -54,11 +54,13 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None):
     nao, nao_orig = int3c2e_opt.coeff.shape
     naux = int3c2e_opt.aux_coeff.shape[0]
 
-    if kpts is None:
+    if kpts is None and bvk_kmesh is None:
         out = cp.zeros((nao, nao, naux))
     else:
+        if kpts is None:
+            kpts = cell.make_kpts(bvk_kmesh)
         nkpts = len(kpts)
-        out = cp.zeros((nkpts, nao, nkpts, nao, naux), dtype=np.complex128)
+        out = cp.zeros((nkpts, nkpts, nao, nao, naux), dtype=np.complex128)
         kmesh = int3c2e_opt.bvk_kmesh
         assert kmesh is not None
         kpts = cp.asarray(kpts, order='C').reshape(-1,3)

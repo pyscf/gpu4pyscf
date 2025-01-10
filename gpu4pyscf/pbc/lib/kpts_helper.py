@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import numpy as np
+from pyscf import lib
 
 def conj_images_in_bvk_cell(kmesh, return_pair=False):
     '''
@@ -42,3 +43,45 @@ def conj_images_in_bvk_cell(kmesh, return_pair=False):
     mask = Ls_idx <= Ls_idx_conj
     return np.column_stack((Ls_idx[mask], Ls_idx_conj[mask]))
 
+def kk_adapted_iter(kmesh):
+    '''Generates kpt which is adapted to the kpt_p in (ij|p)
+
+    This function provides the similar functionality as the
+    pyscf.pbc.lib.kpts_helper.kk_adapted_iter .
+    '''
+    kmesh = np.asarray(kmesh)
+    nkpts = np.prod(kmesh)
+    nx, ny, nz = kmesh
+    kx = np.fft.fftfreq(nx, 1./nx).astype(int)
+    ky = np.fft.fftfreq(ny, 1./ny).astype(int)
+    kz = np.fft.fftfreq(nz, 1./nz).astype(int)
+
+    kxyz = lib.cartesian_prod([kx, ky, kz])
+    dk = (kxyz[None,:,:] - kxyz[:,None,:]).reshape(-1, 3)
+
+    dk %= kmesh
+    wrap_around_mask = dk >= (kmesh+1)//2
+    dk[wrap_around_mask[:,0],0] -= nx
+    dk[wrap_around_mask[:,1],1] -= ny
+    dk[wrap_around_mask[:,2],2] -= nz
+    uniq_ks, uniq_index, uniq_inverse = np.unique(
+        dk, axis=0, return_index=True, return_inverse=True)
+
+    ks_conj = -uniq_ks
+    strides = np.array((ny*nz, nz, 1))
+    ks_idx = (uniq_ks % kmesh).dot(strides)
+    ks_idx_conj = (ks_conj % kmesh).dot(strides)
+
+    mask = ks_idx <= ks_idx_conj
+    k_conj_groups = np.column_stack((ks_idx[mask], ks_idx_conj[mask]))
+    k_conj_groups = np.sort(k_conj_groups, axis=0)
+
+    for k, k_conj in k_conj_groups:
+        self_conj = k == k_conj
+
+        kpt_ij_idx = np.where(uniq_inverse == k)[0]
+        kpt_ij_idx = np.asarray(kpt_ij_idx, dtype=np.int32)
+        kpti_idx = kpt_ij_idx // nkpts
+        kptj_idx = kpt_ij_idx % nkpts
+        kptp_idx = k
+        yield kptp_idx, kpti_idx, kptj_idx, self_conj
