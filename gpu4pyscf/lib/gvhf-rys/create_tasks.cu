@@ -311,7 +311,7 @@ static int _fill_sr_jk_tasks(ShellQuartet *shl_quartet_idx,
                             float ypq = yij - ykl;
                             float zpq = zij - zkl;
                             float rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                            float theta_rr = logf(rr + 1e-30f) + theta * rr;
+                            float theta_rr = logf(rr + 1.f) + theta * rr;
                             d_cutoff = skl_cutoff - s_estimator[bas_kl] + theta_rr;
                             if (d_cutoff > 0) {
                                 continue;
@@ -457,7 +457,7 @@ static int _fill_sr_jk_tasks(ShellQuartet *shl_quartet_idx,
                             float ypq = yij - ykl;
                             float zpq = zij - zkl;
                             float rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                            float theta_rr = logf(rr + 1e-30f) + theta * rr;
+                            float theta_rr = logf(rr + 1.f) + theta * rr;
                             d_cutoff = skl_cutoff - s_estimator[bas_kl] + theta_rr;
                             if (d_cutoff > 0) {
                                 continue;

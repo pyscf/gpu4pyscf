@@ -23,6 +23,9 @@
 #include "rys_roots.cu"
 #include "create_tasks.cu"
 
+// TODO: benchmark performance for 34, 36, 41, 43, 45, 47, 51, 57
+#define GOUT_WIDTH       42
+
 __device__
 static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                            ShellQuartet *shl_quartet_idx, int ntasks)
@@ -69,7 +72,7 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *g = rw + nsq_per_block * nroots*2;
     double *Rpa_cicj = g + nsq_per_block * g_size*3;
     double Rqc[3], Rpq[3];
-    double gout[GWIDTH];
+    double gout[GOUT_WIDTH];
 
     for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
         __syncthreads();
@@ -126,9 +129,10 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
             Rpa[sq_id+3*nsq_per_block] = fac_sym * ci[ip] * cj[jp] * Kab;
         }
-        for (int gout_start = 0; gout_start < nfij*nfkl; gout_start+=gout_stride*GWIDTH) {
+        for (int gout_start = 0; gout_start < nfij*nfkl;
+             gout_start+=gout_stride*GOUT_WIDTH) {
 #pragma unroll
-        for (int n = 0; n < GWIDTH; ++n) { gout[n] = 0; }
+        for (int n = 0; n < GOUT_WIDTH; ++n) { gout[n] = 0; }
 
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
@@ -197,11 +201,6 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     }
                     double rt = rw[sq_id + irys*2*nsq_per_block];
                     double rt_aa = rt / (aij + akl);
-                    double rt_aij = rt_aa * akl;
-                    double rt_akl = rt_aa * aij;
-                    double b00 = .5 * rt_aa;
-                    double b10 = .5/aij * (1 - rt_aij);
-                    double b01 = .5/akl * (1 - rt_akl);
 
                     // TRR
                     //for i in range(lij):
@@ -211,6 +210,8 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     //        trr(i,k+1) = c0p * trr(i,k) + k*b01 * trr(i,k-1) + i*b00 * trr(i-1,k)
                     if (lij > 0) {
                         __syncthreads();
+                        double rt_aij = rt_aa * akl;
+                        double b10 = .5/aij * (1 - rt_aij);
                         // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
                         for (int n = gout_id; n < 3; n += gout_stride) {
                             double *_gx = g + n * g_size * nsq_per_block;
@@ -230,6 +231,9 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 
                     if (lkl > 0) {
                         int lij3 = (lij+1)*3;
+                        double rt_akl = rt_aa * aij;
+                        double b00 = .5 * rt_aa;
+                        double b01 = .5/akl * (1 - rt_akl);
                         for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
                             __syncthreads();
                             int i = n / 3; //for i in range(lij+1):
@@ -315,7 +319,7 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double *gy = gx + nsq_per_block * g_size;
                     double *gz = gy + nsq_per_block * g_size;
 #pragma unroll
-                    for (int n = 0; n < GWIDTH; ++n) {
+                    for (int n = 0; n < GOUT_WIDTH; ++n) {
                         int ijkl = (gout_start + n*gout_stride+gout_id);
                         int kl = ijkl / nfij;
                         int ij = ijkl % nfij;
@@ -338,7 +342,7 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         int do_k = vk != NULL;
         for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
 #pragma unroll
-            for (int n = 0; n < GWIDTH; ++n) {
+            for (int n = 0; n < GOUT_WIDTH; ++n) {
                 int ijkl = (gout_start + n*gout_stride+gout_id);
                 int kl = ijkl / nfij;
                 int ij = ijkl % nfij;
@@ -422,7 +426,7 @@ static void rys_sr_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds
     double *g = rw + nsq_per_block * nroots*2;
     double *Rpa_cicj = g + nsq_per_block * g_size*3;
     double Rqc[3], Rpq[3];
-    double gout[GWIDTH];
+    double gout[GOUT_WIDTH];
 
     for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
         __syncthreads();
@@ -479,9 +483,10 @@ static void rys_sr_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds
             double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
             Rpa[sq_id+3*nsq_per_block] = fac_sym * ci[ip] * cj[jp] * Kab;
         }
-        for (int gout_start = 0; gout_start < nfij*nfkl; gout_start+=gout_stride*GWIDTH) {
+        for (int gout_start = 0; gout_start < nfij*nfkl;
+             gout_start+=gout_stride*GOUT_WIDTH) {
 #pragma unroll
-        for (int n = 0; n < GWIDTH; ++n) { gout[n] = 0; }
+        for (int n = 0; n < GOUT_WIDTH; ++n) { gout[n] = 0; }
 
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
@@ -669,7 +674,7 @@ static void rys_sr_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds
                     double *gy = gx + nsq_per_block * g_size;
                     double *gz = gy + nsq_per_block * g_size;
 #pragma unroll
-                    for (int n = 0; n < GWIDTH; ++n) {
+                    for (int n = 0; n < GOUT_WIDTH; ++n) {
                         int ijkl = gout_start + n*gout_stride+gout_id;
                         int kl = ijkl / nfij;
                         int ij = ijkl % nfij;
@@ -692,7 +697,7 @@ static void rys_sr_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds
         int do_k = vk != NULL;
         for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
 #pragma unroll
-            for (int n = 0; n < GWIDTH; ++n) {
+            for (int n = 0; n < GOUT_WIDTH; ++n) {
                 int ijkl = (gout_start + n*gout_stride+gout_id);
                 int kl = ijkl / nfij;
                 int ij = ijkl % nfij;
