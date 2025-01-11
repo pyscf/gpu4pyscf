@@ -107,12 +107,7 @@ def build_cderi_kk(cell, auxcell, kmesh=None, omega=0.1,
             # and regular integrals being treated in the same framework. See
             # more detail in pyscf.pbc.df.rsdf_builder.weighted_coulG_LR
             kpt = kpts[kp]
-            coulG = pbctools.get_coulG(cell, kpt=kpt, exx=False, Gv=Gv, omega=omega)
-            coulG *= kws
-            # Add the G=0 contribution from the SR-3c2e analytical integrals
-            assert Gv[0].dot(Gv[0]) == 0
-            coulG[0] -= np.pi / omega**2 / cell.vol
-
+            coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws, kpt)
             auxG_conj = ft_ao.ft_ao(auxcell, Gv, kpt=kpt).conj()
             auxG_conj *= cp.asarray(coulG[:,None])
             for p0, p1 in lib.prange(0, ngrids, Gblksize):
@@ -176,13 +171,7 @@ def build_cderi_gamma_point(cell, auxcell, kmesh=None, omega=0.1,
         Gblksize = min(Gblksize, ngrids, 16384)
         log.debug1('Gblksize = %d', Gblksize)
 
-        coulG = pbctools.get_coulG(cell, exx=False, Gv=Gv, omega=omega)
-        coulG *= kws
-
-        # Add the G=0 contribution from the SR-3c2e analytical integrals
-        assert Gv[0].dot(Gv[0]) == 0
-        coulG[0] -= np.pi / omega**2 / cell.vol
-
+        coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws)
         auxG_conj = ft_ao.ft_ao(auxcell, Gv).conj()
         auxG_conj *= cp.asarray(coulG[:,None])
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
@@ -250,13 +239,7 @@ def build_cderi_j_only(cell, auxcell, kmesh=None, omega=0.1,
         Gblksize = min(Gblksize, ngrids, 16384)
         log.debug1('Gblksize = %d', Gblksize)
 
-        '''exp(-i*(G + k) dot r) * Coulomb_kernel'''
-        coulG = pbctools.get_coulG(cell, exx=False, Gv=Gv, omega=omega)
-        coulG *= kws
-        # Add the G=0 contribution from the SR-3c2e analytical integrals
-        assert Gv[0].dot(Gv[0]) == 0
-        coulG[0] -= np.pi / omega**2 / cell.vol
-
+        coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws)
         kpt = np.zeros(3)
         auxG_conj = ft_ao.ft_ao(auxcell, Gv).conj()
         auxG_conj *= cp.asarray(coulG[:,None])
@@ -278,11 +261,13 @@ def build_cderi_j_only(cell, auxcell, kmesh=None, omega=0.1,
     t1 = log.timer('pass2: solve cderi', *t1)
     return cderi, cderi_neg
 
-def _weighted_coulG(cell, kpt=np.zeros(3), exx=False, mesh=None, omega=None):
-    Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-    coulG = pbctools.get_coulG(cell, kpt, exx, None, mesh, Gv, omega=omega)
+def _weighted_coulG_LR(cell, Gv, omega, kws, kpt=np.zeros(3)):
+    coulG = pbctools.get_coulG(cell, kpt, exx=False, Gv=Gv, omega=abs(omega))
     coulG *= kws
-    return coulG
+    if is_zero(kpt):
+        assert Gv[0].dot(Gv[0]) == 0
+        coulG[0] -= np.pi / omega**2 / auxcell.vol
+    return cp.asarray(coulG)
 
 def decompose_j2c(j2c, linear_dep_threshold=LINEAR_DEP_THR):
     return eigenvalue_decomposed_metric(j2c, linear_dep_threshold)
@@ -333,23 +318,17 @@ def _get_2c2e(auxcell, uniq_kpts, omega, has_long_range=True):
 
     if uniq_kpts is None:
         j2c = cp.asarray(j2c)
-        assert Gv[0].dot(Gv[0]) == 0
-        kpt = np.zeros(3)
-        coulG_LR = cp.asarray(_weighted_coulG(auxcell, kpt, False, mesh, omega=omega))
-        coulG_LR[0] -= np.pi / omega**2 / auxcell.vol
+        coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws)
         for p0, p1 in lib.prange(0, ngrids, blksize):
-            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], None, b, gxyz[p0:p1], Gvbase, kpt).T
+            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], None, b, gxyz[p0:p1], Gvbase).T
             j2c += (auxG.conj() * coulG_LR[p0:p1]).dot(auxG.T).real
             auxG = None
         j2c = [j2c.get()]
     else:
         for k, kpt in enumerate(uniq_kpts):
             j2c_k = cp.asarray(j2c[k])
-            assert Gv[0].dot(Gv[0]) == 0
-            coulG_LR = cp.asarray(_weighted_coulG(auxcell, kpt, False, mesh, omega=omega))
+            coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws, kpt)
             gamma_point = is_zero(kpt)
-            if gamma_point:
-                coulG_LR[0] -= np.pi / omega**2 / auxcell.vol
 
             for p0, p1 in lib.prange(0, ngrids, blksize):
                 auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], None, b, gxyz[p0:p1], Gvbase, kpt).T
