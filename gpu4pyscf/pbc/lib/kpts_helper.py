@@ -79,4 +79,4 @@ def kk_adapted_iter(kmesh):
         kpt_ij_idx = np.where(uniq_inverse == x)[0]
         kpti_idx = kpt_ij_idx // nkpts
         kptj_idx = kpt_ij_idx % nkpts
-        yield kp, kp_coj, kpti_idx, kptj_idx
+        yield kp, kp_conj, kpti_idx, kptj_idx

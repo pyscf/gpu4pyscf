@@ -304,13 +304,13 @@ class FTOpt:
             if kptjs is not None:
                 kptjs = cp.asarray(kptjs, order='C').reshape(-1,3)
                 expLk = cp.exp(1j*cp.dot(bvkmesh_Ls, kptjs.T))
-                out = contract('Lk,LpqG->kGpq', expLk, out)
+                out = contract('Lk,LpqG->kpqG', expLk, out)
 
             if transform_ao:
                 log.debug1('transform basis')
                 #:out = einsum('pqLG,pi,qj->LGij', out, coeff, coeff)
-                out = contract('kGpq,qj->kGpj', out, coeff)
-                out = contract('kGpj,pi->kGij', out, coeff)
+                out = contract('kpqG,pi->kiqG', out, coeff)
+                out = contract('kiqG,qj->kijG', out, coeff)
 
             log.timer('ft_aopair', *cput0)
             return out
@@ -326,7 +326,7 @@ class FTOpt:
             avail_mem = get_avail_mem()
 
             if 2*out_size < avail_mem * .8:
-                return _ft_sub(Gv, q, kptjs, transform_ao)
+                return _ft_sub(Gv, q, kptjs, transform_ao).transpose(0,3,1,2)
 
             elif out_size < avail_mem * .8:
                 if kptjs is None:
@@ -335,16 +335,16 @@ class FTOpt:
                     kptjs = kptjs.reshape(-1, 3)
                     nkpts = len(kptjs)
                 if transform_ao:
-                    out = cp.empty((nkpts, nGv, nao_orig, nao_orig), dtype=np.complex128)
+                    out = cp.empty((nkpts, nao_orig, nao_orig, nGv), dtype=np.complex128)
                 else:
-                    out = cp.empty((nkpts, nGv, nao, nao), dtype=np.complex128)
+                    out = cp.empty((nkpts, nao, nao, nGv), dtype=np.complex128)
                 Gv_block = int((avail_mem * .95 - out_size) / (2*nao**2*bvk_ncells*16))
                 Gv_block &= 0xfffffc
                 if Gv_block >= 4:
                     logger.debug1(cell, 'Processing ft_kernel in sub-blocks, Gv_block = %d', Gv_block)
                     for p0, p1 in lib.prange(0, nGv, Gv_block):
-                        out[:,p0:p1] = _ft_sub(Gv[p0:p1], q, kptjs, transform_ao)
-                    return out
+                        out[:,:,:,p0:p1] = _ft_sub(Gv[p0:p1], q, kptjs, transform_ao)
+                    return out.transpose(0,3,1,2)
 
             raise RuntimeError('Not enough GPU memory. '
                                f'Available: {avail_mem*1e-9:.2f} GB. '

@@ -36,12 +36,11 @@ C    D
     }
     auxcell.build()
     omega = 0.3
-    kmesh = [1,1,1]
-    gpu_dat, dat_neg = build_cderi(cell, auxcell, kmesh=kmesh, omega=omega)
+    gpu_dat, dat_neg = build_cderi(cell, auxcell, kmesh=None, omega=omega)
 
     cell.precision = 1e-10
     auxcell.precision = 1e-10
-    kpts = cell.make_kpts(kmesh)
+    kpts = cell.make_kpts([1,1,1])
     nkpts = len(kpts)
     dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
     dfbuilder.omega = omega
@@ -55,7 +54,6 @@ C    D
         with _load3c(tmpf.name, 'j3c', kpts[[0,0]]) as cderi:
             ref = abs(cderi[:].reshape(naux,nao,nao))
             dat = abs(gpu_dat[0,0].transpose(2,0,1).get())
-            print(ki,kj)
             assert abs(dat - ref).max() < 1e-8
 
 def test_kpts():
