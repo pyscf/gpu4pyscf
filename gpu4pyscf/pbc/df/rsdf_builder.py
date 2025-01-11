@@ -42,7 +42,11 @@ def build_cderi(cell, auxcell, kmesh=None, omega=0.1, j_only=False,
                 linear_dep_threshold=LINEAR_DEP_THR):
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension >= 2
+    return build_cderi_kk(cell, auxcell, kmesh, omega, j_only,
+                          linear_dep_threshold)
 
+def build_cderi_kk(cell, auxcell, kmesh=None, omega=0.1,
+                   linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
     if cell.omega != 0:
@@ -52,17 +56,161 @@ def build_cderi(cell, auxcell, kmesh=None, omega=0.1, j_only=False,
     else:
         omega = abs(omega)
         has_long_range = True
-
-    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
-    mesh = cell.cutoff_to_mesh(ke_cutoff)
-    mesh = cell.symmetrize_mesh(mesh)
+        ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+        mesh = cell.cutoff_to_mesh(ke_cutoff)
+        mesh = cell.symmetrize_mesh(mesh)
 
     j3c = sr_aux_e2(cell, auxcell, -omega, bvk_kmesh=kmesh)
     t1 = log.timer('pass1: int3c2e', *t0)
 
     log.debug('Generate auxcell 2c2e integrals')
     if kmesh is None:
-        raise NotImplementedError
+        kpts = np.zeros((1, 3))
+        kpt_iters = list(kk_adapted_iter([1, 1, 1]))
+    else:
+        kpts = cell.make_kpts(kmesh)
+        kpt_iters = list(kk_adapted_iter(kmesh))
+    nkpts = len(kpts)
+    uniq_kpts = kpts[[x[0] for x in kpt_iters]]
+    j2c = _get_2c2e(auxcell, uniq_kpts, omega, has_long_range) # on CPU
+    t1 = log.timer('int2c2e', *t1)
+
+    if has_long_range:
+        _add_sr_G0(j3c, cell, auxcell, omega, kpts)
+        ft_opt = ft_ao.FTOpt(cell, bvk_kmesh=kmesh)
+        ft_kern = ft_opt.gen_ft_kernel(verbose=log)
+        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+        ngrids = len(Gv)
+        nao = cell.nao
+        bvk_ncells = nkpts
+        avail_mem = get_avail_mem() * .8
+        Gblksize = max(16, int(avail_mem/(2*16*nao**2*bvk_ncells))//8*8)
+        Gblksize = min(Gblksize, ngrids, 16384)
+        log.debug1('Gblksize = %d', Gblksize)
+
+    out = {}
+    out_neg = {}
+    for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
+        log.debug1('make_cderi for k-point %d %s', kp, kpts[kp])
+        log.debug1('ki_idx = %s', ki_idx)
+        log.debug1('kj_idx = %s', kj_idx)
+
+        if has_long_range:
+            '''exp(-i*(G + k) dot r) * Coulomb_kernel'''
+            # TODO: compute the long range part Coulomb kernel as the difference
+            # between coulG(cell.omega) - coulG(df.omega). This allows the SR-
+            # and regular integrals being treated in the same framework. See
+            # more detail in pyscf.pbc.df.rsdf_builder.weighted_coulG_LR
+            kpt = kpts[kp]
+            coulG = pbctools.get_coulG(cell, kpt=kpt, exx=False, Gv=Gv, omega=omega)
+            coulG *= kws
+            auxG = ft_ao.ft_ao(auxcell, Gv, kpt=kpt).T
+            auxG *= cp.asarray(coulG)
+            for p0, p1 in lib.prange(0, ngrids, Gblksize):
+                Gpq = ft_kern(Gv[p0:p1], kpt, kpts)
+                # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
+                # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
+                # functions |P> are assumed to be real
+                j3c[ki_idx,kj_idx] += contract('kGpq,rG->kpqr', Gpq, auxG.conj())
+
+        j2c_k = j2c[j2c_idx]
+        if self_conj:
+            # DF metric for self-conjugated k-point should be real
+            j2c_k = j2c_k.real
+        cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(j2c_k, linear_dep_threshold)
+        assert j2ctag == 'ED'
+
+        for ki, kj in zip(ki_idx, kj_idx):
+            j3c_k = j3c[ki,kj]
+            out[ki,kj] = contract('pqr,Lr->pqL', j3c_k, cd_j2c)
+            if cd_j2c_negative is not None:
+                # for low-dimension systems
+                out_neg[ki,kj] = contract('pqr,Lr->pqL', j3c_k, cd_j2c_negative)
+    t1 = log.timer('pass2: solve cderi', *t1)
+    return out, out_neg
+
+def build_cderi_gamma_point(cell, auxcell, kmesh=None, omega=0.1,
+                            linear_dep_threshold=LINEAR_DEP_THR):
+    log = logger.new_logger(cell)
+    t0 = log.init_timer()
+    if cell.omega != 0:
+        assert cell.omega < 0
+        omega = abs(cell.omega)
+        has_long_range = False
+    else:
+        omega = abs(omega)
+        has_long_range = True
+        ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+        mesh = cell.cutoff_to_mesh(ke_cutoff)
+        mesh = cell.symmetrize_mesh(mesh)
+    kpts = np.zeros((1, 3))
+
+    j3c = sr_aux_e2(cell, auxcell, -omega, bvk_kmesh=kmesh)
+    t1 = log.timer('pass1: int3c2e', *t0)
+
+    log.debug('Generate auxcell 2c2e integrals')
+    j2c = _get_2c2e(auxcell, kpts, omega, has_long_range) # on CPU
+    j2c = j2c[0].real
+    t1 = log.timer('int2c2e', *t1)
+
+    out = {}
+    out_neg = {}
+    if has_long_range:
+        _add_sr_G0(j3c, cell, auxcell, omega, kpts)
+        ft_opt = ft_ao.FTOpt(cell)
+        ft_kern = ft_opt.gen_ft_kernel(verbose=log)
+        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+        ngrids = len(Gv)
+        nao = cell.nao
+        avail_mem = get_avail_mem() * .8
+        Gblksize = max(16, int(avail_mem/(2*16*nao**2))//8*8)
+        Gblksize = min(Gblksize, ngrids, 16384)
+        log.debug1('Gblksize = %d', Gblksize)
+
+        coulG = pbctools.get_coulG(cell, exx=False, Gv=Gv, omega=omega)
+        coulG *= kws
+        auxG = ft_ao.ft_ao(auxcell, Gv).T
+        auxG *= cp.asarray(coulG)
+        for p0, p1 in lib.prange(0, ngrids, Gblksize):
+            Gpq = ft_kern(Gv[p0:p1], kpt, kpts)
+            # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
+            # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
+            # functions |P> are assumed to be real
+            j3c += contract('kGpq,rG->kpqr', Gpq, auxG.conj()).real
+
+    if self_conj:
+        # DF metric for self-conjugated k-point should be real
+    cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(j2c, linear_dep_threshold)
+    assert j2ctag == 'ED'
+
+    out[0,0] = contract('pqr,Lr->pqL', j3c, cd_j2c)
+    if cd_j2c_negative is not None:
+        # for low-dimension systems
+        out_neg[0,0] = contract('pqr,Lr->pqL', j3c, cd_j2c_negative)
+    t1 = log.timer('pass2: solve cderi', *t1)
+    return out, out_neg
+
+def build_cderi_j_only(cell, auxcell, kmesh=None, omega=0.1,
+                       linear_dep_threshold=LINEAR_DEP_THR):
+    log = logger.new_logger(cell)
+    t0 = log.init_timer()
+    if cell.omega != 0:
+        assert cell.omega < 0
+        omega = abs(cell.omega)
+        has_long_range = False
+    else:
+        omega = abs(omega)
+        has_long_range = True
+        ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+        mesh = cell.cutoff_to_mesh(ke_cutoff)
+        mesh = cell.symmetrize_mesh(mesh)
+
+    # TODO: do not generate the entire array
+    j3c = sr_aux_e2(cell, auxcell, -omega, bvk_kmesh=kmesh)
+    t1 = log.timer('pass1: int3c2e', *t0)
+
+    log.debug('Generate auxcell 2c2e integrals')
+    if kmesh is None:
         kpts = np.zeros((1, 3))
         kpt_iters = list(kk_adapted_iter([1, 1, 1]))
     else:
@@ -84,34 +232,23 @@ def build_cderi(cell, auxcell, kmesh=None, omega=0.1, j_only=False,
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('Gblksize = %d', Gblksize)
 
-#TODO    if kmesh is None: gamma point
-#TODO        assert j2c[k].dtype == np.float64
-#TODO    if j_only:
-#TODO        j2c = auxcell.intor('int2c2e')
-#TODO        Gpq = ft_kern(Gv[p0:p1], kpt, kpts)
-#TODO        j3c = eri3c2e
-#TODO        add_ft_j3c(j3c, Gpq, Gaux, p0, p1)
-
     if has_long_range:
         _add_sr_G0(j3c, cell, auxcell, omega, kpts)
 
     out = {}
     out_neg = {}
-    for j2c_idx, (kp_idx, ki_idx, kj_idx, self_conj) in enumerate(kpt_iters):
-        log.debug1('make_cderi for k-point %d %s', kp_idx, kpts[kp_idx])
+    # TODO: consider time-reversal symmetry
+    for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
+        log.debug1('make_cderi for k-point %d %s', kp, kpts[kp])
         log.debug1('ki_idx = %s', ki_idx)
         log.debug1('kj_idx = %s', kj_idx)
 
         if has_long_range:
             '''exp(-i*(G + k) dot r) * Coulomb_kernel'''
-            # TODO: compute the long range part Coulomb kernel as the difference
-            # between coulG(cell.omega) - coulG(df.omega). This allows the SR-
-            # and regular integrals being treated in the same framework. See
-            # more detail in pyscf.pbc.df.rsdf_builder.weighted_coulG_LR
-            kpt = kpts[kp_idx]
-            coulG = cp.asarray(_weighted_coulG(cell, kpt, False, mesh, omega=omega))
-            auxG = ft_ao.ft_ao(auxcell, Gv, kpt=kpt).T
-            auxG *= coulG
+            coulG = pbctools.get_coulG(cell, exx=False, Gv=Gv, omega=omega)
+            coulG *= kws
+            auxG = ft_ao.ft_ao(auxcell, Gv).T
+            auxG *= cp.asarray(coulG)
             for p0, p1 in lib.prange(0, ngrids, Gblksize):
                 Gpq = ft_kern(Gv[p0:p1], kpt, kpts)
                 # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
@@ -120,7 +257,7 @@ def build_cderi(cell, auxcell, kmesh=None, omega=0.1, j_only=False,
                 j3c[ki_idx,kj_idx] += contract('kGpq,rG->kpqr', Gpq, auxG.conj())
 
         j2c_k = j2c[j2c_idx]
-        if self_conj:
+        if kp == kp_conj: # self conjugated
             # DF metric for self-conjugated k-point should be real
             j2c_k = j2c_k.real
         cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(j2c_k, linear_dep_threshold)

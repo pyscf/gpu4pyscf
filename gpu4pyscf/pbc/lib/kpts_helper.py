@@ -72,16 +72,11 @@ def kk_adapted_iter(kmesh):
     ks_idx = (uniq_ks % kmesh).dot(strides)
     ks_idx_conj = (ks_conj % kmesh).dot(strides)
 
-    mask = ks_idx <= ks_idx_conj
-    k_conj_groups = np.column_stack((ks_idx[mask], ks_idx_conj[mask]))
-    k_conj_groups = np.sort(k_conj_groups, axis=0)
-
-    for k, k_conj in k_conj_groups:
-        self_conj = k == k_conj
-
-        kpt_ij_idx = np.where(uniq_inverse == k)[0]
-        kpt_ij_idx = np.asarray(kpt_ij_idx, dtype=np.int32)
+    independent_idx = np.sort(np.nonzero(ks_idx <= ks_idx_conj)[0])
+    for x in independent_idx:
+        kp = ks_idx[x]
+        kp_conj = ks_idx_conj[x]
+        kpt_ij_idx = np.where(uniq_inverse == x)[0]
         kpti_idx = kpt_ij_idx // nkpts
         kptj_idx = kpt_ij_idx % nkpts
-        kptp_idx = k
-        yield kptp_idx, kpti_idx, kptj_idx, self_conj
+        yield kp, kp_coj, kpti_idx, kptj_idx
