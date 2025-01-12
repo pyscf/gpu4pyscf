@@ -41,7 +41,6 @@ C    D
     cell.precision = 1e-10
     auxcell.precision = 1e-10
     kpts = cell.make_kpts([1,1,1])
-    nkpts = len(kpts)
     dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
     dfbuilder.omega = omega
     dfbuilder.j2c_eig_always = True
@@ -53,7 +52,7 @@ C    D
         dfbuilder.make_j3c(tmpf.name, aosym='s1')
         with _load3c(tmpf.name, 'j3c', kpts[[0,0]]) as cderi:
             ref = abs(cderi[:].reshape(naux,nao,nao))
-            dat = abs(gpu_dat[0,0].transpose(2,0,1).get())
+            dat = abs(gpu_dat[0,0].get())
             assert abs(dat - ref).max() < 1e-8
 
 def test_kpts():
@@ -93,7 +92,6 @@ C    D
     cell.precision = 1e-10
     auxcell.precision = 1e-10
     kpts = cell.make_kpts(kmesh)
-    nkpts = len(kpts)
     dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
     dfbuilder.omega = omega
     dfbuilder.j2c_eig_always = True
@@ -106,7 +104,7 @@ C    D
         for ki, kj in gpu_dat:
             with _load3c(tmpf.name, 'j3c', kpts[[ki,kj]]) as cderi:
                 ref = abs(cderi[:].reshape(naux,nao,nao))
-                dat = abs(gpu_dat[ki,kj].transpose(2,0,1).get())
+                dat = abs(gpu_dat[ki,kj].get())
                 print(ki,kj)
                 assert abs(dat - ref).max() < 1e-8
 
@@ -147,7 +145,6 @@ C    D
     cell.precision = 1e-10
     auxcell.precision = 1e-10
     kpts = cell.make_kpts(kmesh)
-    nkpts = len(kpts)
     dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
     dfbuilder.j_only = True
     dfbuilder.omega = omega
@@ -161,6 +158,6 @@ C    D
         for ki, kj in gpu_dat:
             with _load3c(tmpf.name, 'j3c', kpts[[ki,kj]]) as cderi:
                 ref = abs(cderi[:].reshape(naux,nao,nao))
-                dat = abs(gpu_dat[ki,kj].transpose(2,0,1).get())
+                dat = abs(gpu_dat[ki,kj].get())
                 print(ki,kj)
                 assert abs(dat - ref).max() < 3e-8

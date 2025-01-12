@@ -19,7 +19,6 @@ Build GDF tensor using the range-separation integral algorithm.
 import os
 import ctypes
 import warnings
-import tempfile
 import numpy as np
 import cupy as cp
 import scipy.linalg
@@ -62,9 +61,6 @@ def build_cderi_kk(cell, auxcell, kmesh=None, omega=0.1,
     else:
         omega = abs(omega)
         has_long_range = True
-        ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
-        mesh = cell.cutoff_to_mesh(ke_cutoff)
-        mesh = cell.symmetrize_mesh(mesh)
 
     j3c = sr_aux_e2(cell, auxcell, -omega, bvk_kmesh=kmesh)
     t1 = log.timer('pass1: int3c2e', *t0)
@@ -82,19 +78,10 @@ def build_cderi_kk(cell, auxcell, kmesh=None, omega=0.1,
     t1 = log.timer('int2c2e', *t1)
 
     if has_long_range:
-        ft_opt = ft_ao.FTOpt(cell, bvk_kmesh=kmesh)
-        ft_kern = ft_opt.gen_ft_kernel(verbose=log)
-        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-        ngrids = len(Gv)
-        nao = cell.nao
-        bvk_ncells = nkpts
-        avail_mem = get_avail_mem() * .8
-        Gblksize = max(16, int(avail_mem/(2*16*nao**2*bvk_ncells))//8*8)
-        Gblksize = min(Gblksize, ngrids, 16384)
-        log.debug1('Gblksize = %d', Gblksize)
+        ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, kmesh, omega, log)
 
     cderi = {}
-    cderi_neg = {}
+    cderip = {}
     for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
         log.debug1('make_cderi for k-point %d %s', kp, kpts[kp])
         log.debug1('ki_idx = %s', ki_idx)
@@ -102,20 +89,11 @@ def build_cderi_kk(cell, auxcell, kmesh=None, omega=0.1,
 
         if has_long_range:
             '''exp(-i*(G + k) dot r) * Coulomb_kernel'''
-            # TODO: compute the long range part Coulomb kernel as the difference
-            # between coulG(cell.omega) - coulG(df.omega). This allows the SR-
-            # and regular integrals being treated in the same framework. See
-            # more detail in pyscf.pbc.df.rsdf_builder.weighted_coulG_LR
-            kpt = kpts[kp]
-            coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws, kpt)
-            auxG_conj = ft_ao.ft_ao(auxcell, Gv, kpt=kpt).conj()
-            auxG_conj *= cp.asarray(coulG[:,None])
-            for p0, p1 in lib.prange(0, ngrids, Gblksize):
-                pqG = ft_kern(Gv[p0:p1], kpt, kpts[kj_idx]).transpose(0,2,3,1)
+            for pqG, auxG_conj in ft_ao_iter(kpts[kp], kpts[kj_idx]):
                 # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
                 # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
                 # functions |P> are assumed to be real
-                j3c[ki_idx,kj_idx] += contract('kpqG,Gr->kpqr', pqG, auxG_conj[p0:p1])
+                j3c[ki_idx,kj_idx] += contract('kpqG,Gr->kpqr', pqG, auxG_conj)
 
         j2c_k = j2c[j2c_idx]
         if kp == kp_conj: # self conjugated
@@ -126,12 +104,12 @@ def build_cderi_kk(cell, auxcell, kmesh=None, omega=0.1,
 
         for ki, kj in zip(ki_idx, kj_idx):
             j3c_k = j3c[ki,kj]
-            cderi[ki,kj] = contract('pqr,Lr->pqL', j3c_k, cd_j2c)
+            cderi[ki,kj] = contract('Lr,pqr->Lpq', cd_j2c, j3c_k)
             if cd_j2c_negative is not None:
                 # for low-dimension systems
-                cderi_neg[ki,kj] = contract('pqr,Lr->pqL', j3c_k, cd_j2c_negative)
+                cderip[ki,kj] = contract('Lr,pqr->Lpq', cd_j2c_negative, j3c_k)
     t1 = log.timer('pass2: solve cderi', *t1)
-    return cderi, cderi_neg
+    return cderi, cderip
 
 def build_cderi_gamma_point(cell, auxcell, kmesh=None, omega=0.1,
                             linear_dep_threshold=LINEAR_DEP_THR):
@@ -145,9 +123,6 @@ def build_cderi_gamma_point(cell, auxcell, kmesh=None, omega=0.1,
     else:
         omega = abs(omega)
         has_long_range = True
-        ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
-        mesh = cell.cutoff_to_mesh(ke_cutoff)
-        mesh = cell.symmetrize_mesh(mesh)
     kpts = None
 
     j3c = sr_aux_e2(cell, auxcell, -omega)
@@ -159,37 +134,24 @@ def build_cderi_gamma_point(cell, auxcell, kmesh=None, omega=0.1,
     t1 = log.timer('int2c2e', *t1)
 
     cderi = {}
-    cderi_neg = {}
+    cderip = {}
     if has_long_range:
-        ft_opt = ft_ao.FTOpt(cell)
-        ft_kern = ft_opt.gen_ft_kernel(verbose=log)
-        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-        ngrids = len(Gv)
-        nao = cell.nao
-        avail_mem = get_avail_mem() * .8
-        Gblksize = max(16, int(avail_mem/(2*16*nao**2))//8*8)
-        Gblksize = min(Gblksize, ngrids, 16384)
-        log.debug1('Gblksize = %d', Gblksize)
-
-        coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws)
-        auxG_conj = ft_ao.ft_ao(auxcell, Gv).conj()
-        auxG_conj *= cp.asarray(coulG[:,None])
-        for p0, p1 in lib.prange(0, ngrids, Gblksize):
-            pqG = ft_kern(Gv[p0:p1])[0].transpose(1,2,0)
+        ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, kmesh, omega, log)
+        for pqG, auxG_conj in ft_ao_iter():
             # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
             # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
             # functions |P> are assumed to be real
-            j3c += contract('pqG,Gr->pqr', pqG, auxG_conj[p0:p1]).real
+            j3c += contract('pqG,Gr->pqr', pqG[0], auxG_conj).real
 
     cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(j2c, linear_dep_threshold)
     assert j2ctag == 'ED'
 
-    cderi[0,0] = contract('pqr,Lr->pqL', j3c, cd_j2c)
+    cderi[0,0] = contract('Lr,pqr->Lpq', cd_j2c, j3c)
     if cd_j2c_negative is not None:
         # for low-dimension systems
-        cderi_neg[0,0] = contract('pqr,Lr->pqL', j3c, cd_j2c_negative)
+        cderip[0,0] = contract('Lr,pqr->Lpq', cd_j2c_negative, j3c)
     t1 = log.timer('pass2: solve cderi', *t1)
-    return cderi, cderi_neg
+    return cderi, cderip
 
 def build_cderi_j_only(cell, auxcell, kmesh=None, omega=0.1,
                        linear_dep_threshold=LINEAR_DEP_THR):
@@ -202,9 +164,6 @@ def build_cderi_j_only(cell, auxcell, kmesh=None, omega=0.1,
     else:
         omega = abs(omega)
         has_long_range = True
-        ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
-        mesh = cell.cutoff_to_mesh(ke_cutoff)
-        mesh = cell.symmetrize_mesh(mesh)
 
     # TODO: do not generate the entire array
     j3c = sr_aux_e2(cell, auxcell, -omega, bvk_kmesh=kmesh)
@@ -213,61 +172,71 @@ def build_cderi_j_only(cell, auxcell, kmesh=None, omega=0.1,
     log.debug('Generate auxcell 2c2e integrals')
     if kmesh is None:
         kpts = np.zeros((1, 3))
-        kpt_iters = list(kk_adapted_iter([1, 1, 1]))
     else:
         kpts = cell.make_kpts(kmesh)
-        kpt_iters = list(kk_adapted_iter(kmesh))
     nkpts = len(kpts)
-    j3c = j3c[np.arange(nkpts),np.arange(nkpts)]
-    uniq_kpts = kpts[[x[0] for x in kpt_iters]]
+    j3c = j3c[np.arange(nkpts),np.arange(nkpts)] # FIXME
     j2c = _get_2c2e(auxcell, None, omega, has_long_range) # on CPU
     j2c = j2c[0].real
     t1 = log.timer('int2c2e', *t1)
 
     # TODO: consider time-reversal symmetry
     cderi = {}
-    cderi_neg = {}
+    cderip = {}
     if has_long_range:
-        ft_opt = ft_ao.FTOpt(cell, bvk_kmesh=kmesh)
-        ft_kern = ft_opt.gen_ft_kernel(verbose=log)
-        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-        ngrids = len(Gv)
-        nao = cell.nao
-        bvk_ncells = nkpts
-        avail_mem = get_avail_mem() * .8
-        Gblksize = max(16, int(avail_mem/(2*16*nao**2*bvk_ncells))//8*8)
-        Gblksize = min(Gblksize, ngrids, 16384)
-        log.debug1('Gblksize = %d', Gblksize)
-
-        coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws)
+        ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, kmesh, omega, log)
         kpt = np.zeros(3)
-        auxG_conj = ft_ao.ft_ao(auxcell, Gv).conj()
-        auxG_conj *= cp.asarray(coulG[:,None])
-        for p0, p1 in lib.prange(0, ngrids, Gblksize):
-            pqG = ft_kern(Gv[p0:p1], kpt, kpts).transpose(0,2,3,1)
+        for pqG, auxG_conj in ft_ao_iter(kpt, kpts):
             # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
             # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
             # functions |P> are assumed to be real
-            j3c += contract('kpqG,Gr->kpqr', pqG, auxG_conj[p0:p1])
+            j3c += contract('kpqG,Gr->kpqr', pqG, auxG_conj)
 
     cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(j2c, linear_dep_threshold)
     assert j2ctag == 'ED'
 
     for k in range(nkpts):
-        cderi[k, k] = contract('pqr,Lr->pqL', j3c[k], cd_j2c)
+        cderi[k, k] = contract('Lr,pqr->Lpq', cd_j2c, j3c[k])
         if cd_j2c_negative is not None:
             # for low-dimension systems
-            cderi_neg[k, k] = contract('pqr,Lr->pqL', j3c[k], cd_j2c_negative)
+            cderip[k, k] = contract('Lr,pqr->Lpq', cd_j2c_negative, j3c[k])
     t1 = log.timer('pass2: solve cderi', *t1)
-    return cderi, cderi_neg
+    return cderi, cderip
 
 def _weighted_coulG_LR(cell, Gv, omega, kws, kpt=np.zeros(3)):
     coulG = pbctools.get_coulG(cell, kpt, exx=False, Gv=Gv, omega=abs(omega))
     coulG *= kws
     if is_zero(kpt):
         assert Gv[0].dot(Gv[0]) == 0
-        coulG[0] -= np.pi / omega**2 / auxcell.vol
+        coulG[0] -= np.pi / omega**2 / cell.vol
     return cp.asarray(coulG)
+
+def _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, verbose=None):
+    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+    mesh = cell.cutoff_to_mesh(ke_cutoff)
+    mesh = cell.symmetrize_mesh(mesh)
+    Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+    ngrids = len(Gv)
+    nao = cell.nao
+
+    ft_opt = ft_ao.FTOpt(cell, bvk_kmesh=bvk_kmesh)
+    ft_kern = ft_opt.gen_ft_kernel(verbose=verbose)
+    if bvk_kmesh is None:
+        bvk_ncells = 1
+    else:
+        bvk_ncells = np.prod(bvk_kmesh)
+    avail_mem = get_avail_mem() * .8
+    Gblksize = max(16, int(avail_mem/(2*16*nao**2*bvk_ncells))//8*8)
+    Gblksize = min(Gblksize, ngrids, 16384)
+    #logger.debug1(cell, 'Gblksize = %d', Gblksize)
+    def ft_ao_iter(kpt=np.zeros(3), kpts=None):
+        coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws, kpt)
+        auxG_conj = ft_ao.ft_ao(auxcell, Gv, kpt=kpt).conj()
+        auxG_conj *= cp.asarray(coulG[:,None])
+        for p0, p1 in lib.prange(0, ngrids, Gblksize):
+            pqG = ft_kern(Gv[p0:p1], kpt, kpts).transpose(0,2,3,1)
+            yield pqG, auxG_conj[p0:p1]
+    return ft_ao_iter
 
 def decompose_j2c(j2c, linear_dep_threshold=LINEAR_DEP_THR):
     return eigenvalue_decomposed_metric(j2c, linear_dep_threshold)
@@ -323,7 +292,7 @@ def _get_2c2e(auxcell, uniq_kpts, omega, has_long_range=True):
             auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], None, b, gxyz[p0:p1], Gvbase).T
             j2c += (auxG.conj() * coulG_LR[p0:p1]).dot(auxG.T).real
             auxG = None
-        j2c = [j2c.get()]
+        j2c = [j2c.real.get()]
     else:
         for k, kpt in enumerate(uniq_kpts):
             j2c_k = cp.asarray(j2c[k])
@@ -339,3 +308,9 @@ def _get_2c2e(auxcell, uniq_kpts, omega, has_long_range=True):
                 auxG = None
             j2c[k] = j2c_k.get()
     return j2c
+
+def get_nuc(cell):
+    raise NotImplementedError
+
+def get_pp(cell):
+    raise NotImplementedError
