@@ -15,7 +15,6 @@
 
 import numpy as np
 import cupy as cp
-import scipy.linalg
 import time
 from pyscf import gto
 from pyscf import lib
@@ -25,7 +24,6 @@ from gpu4pyscf import scf, dft
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib import logger
-from gpu4pyscf.scf import _response_functions # noqa
 from pyscf import __config__
 
 REAL_EIG_THRESHOLD = tdhf_cpu.REAL_EIG_THRESHOLD
@@ -35,68 +33,6 @@ OUTPUT_THRESHOLD = getattr(__config__, 'tdscf_rhf_get_nto_threshold', 0.3)
 __all__ = [
     'TDA', 'CIS', 'TDHF', 'TDRHF', 'TDBase'
 ]
-
-
-def gen_eri2c_eri3c(mol, auxmol, omega=0, tag='_sph'):
-    '''
-    Total number of contracted GTOs for the mole and auxmol object
-    '''
-
-    mol.set_range_coulomb(omega)
-    auxmol.set_range_coulomb(omega)
-    eri2c = auxmol.intor('int2c2e'+tag)
-    pmol = mol + auxmol
-
-    eri3c = pmol.intor('int3c2e'+tag,
-                        shls_slice=(0,mol.nbas,0,mol.nbas,
-                        mol.nbas,mol.nbas+auxmol.nbas))
-
-    eri2c = cp.asarray(eri2c)
-    eri3c = cp.asarray(eri3c)   
-
-    return eri2c, eri3c
-
-
-def gen_auxmol(mol, theta=0.2):
-    auxmol = gto.M(atom=mol.atom, 
-                    parse_arg = False, 
-                    spin=mol.spin, 
-                    charge=mol.charge,
-                    cart = mol.cart)
-    auxmol_basis_keys = mol._basis.keys()
-    aux_basis = {}
-    for atom_index in auxmol_basis_keys:
-        atom = ''.join([char for char in atom_index if char.isalpha()])
-        '''
-        exponent alpha = 1/R^2 * theta
-        '''
-        exp = parameter.ris_exp[atom] * theta
-        aux_basis[atom_index] = [[0, [exp, 1.0]]]
-
-    auxmol.basis = aux_basis
-    auxmol.build()
-    return auxmol
-
-
-def gen_response_ris(mf, singlet=True, hermi=0):
-    assert hermi != 2
-    assert singlet
-    auxmol = gen_auxmol(mf.mol)
-    eri2c, eri3c = gen_eri2c_eri3c(mf.mol, auxmol)
-    eri2c_inv = cp.linalg.inv(eri2c)
-    eri3c_2c = cp.einsum('uvA,AB->uvB', eri3c, eri2c_inv)
-    if isinstance(mf, dft.KohnShamDFT):
-        hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, mf.mol.spin)[2]
-    else:
-        hyb=1.0
-    def vind(dm1):
-        dm1 = cp.asarray(dm1)
-        tmp = cp.einsum('edB,xde->xB', eri3c, dm1)
-        vj = cp.einsum('uvA,xA->xuv', eri3c_2c, tmp)
-        tmp = cp.einsum('evB,xde->xdvB', eri3c_2c, dm1)
-        vk = cp.einsum('xdvA,udA->xuv', tmp, eri3c)
-        return vj - vk*hyb*.5
-    return vind
 
 
 def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
@@ -118,41 +54,6 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     e_ia = hdiag = mo_energy[viridx] - mo_energy[occidx,None]
     hdiag = hdiag.ravel()#.get()
     vresp = mf.gen_response(singlet=singlet, hermi=0)
-    nocc, nvir = e_ia.shape
-
-    def vind(zs):
-        zs = cp.asarray(zs).reshape(-1,nocc,nvir)
-        mo1 = contract('xov,pv->xpo', zs, orbv)
-        dms = contract('xpo,qo->xpq', mo1, orbo2.conj())
-        dms = tag_array(dms, mo1=mo1, occ_coeff=orbo)
-        v1ao = vresp(dms)
-        v1mo = contract('xpq,qo->xpo', v1ao, orbo)
-        v1mo = contract('xpo,pv->xov', v1mo, orbv.conj())
-        v1mo += zs * e_ia
-        return v1mo.reshape(v1mo.shape[0],-1)#.get()
-
-    return vind, hdiag
-
-
-def gen_tda_ris_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
-    '''Generate function to compute A x
-    '''
-    assert fock_ao is None
-    assert isinstance(mf, scf.hf.SCF)
-    assert wfnsym is None
-    mo_coeff = mf.mo_coeff
-    assert mo_coeff.dtype == cp.float64
-    mo_energy = mf.mo_energy
-    mo_occ = mf.mo_occ
-    occidx = mo_occ == 2
-    viridx = mo_occ == 0
-    orbv = mo_coeff[:,viridx]
-    orbo = mo_coeff[:,occidx]
-    orbo2 = orbo * 2. # *2 for double occupancy
-
-    e_ia = hdiag = mo_energy[viridx] - mo_energy[occidx,None]
-    hdiag = hdiag.ravel()#.get()
-    vresp = gen_response_ris(mf, singlet=singlet, hermi=0)
     nocc, nvir = e_ia.shape
 
     def vind(zs):
@@ -208,12 +109,6 @@ class TDBase(lib.StreamObject):
             a_size = x.shape[1]//2
             diagd[:,a_size:] = diagd[:,a_size:]*(-1)
             return x/diagd
-        # def precond(x, e, *args):
-        #     if isinstance(e, np.ndarray) or isinstance(e, cp.ndarray):
-        #         e = e[0]
-        #     diagd = hdiag - (e-self.level_shift)
-        #     diagd[abs(diagd)<1e-8] = 1e-8
-        #     return x/diagd
         return precond
 
     nuc_grad_method = NotImplemented
@@ -278,10 +173,6 @@ class TDBase(lib.StreamObject):
 class TDA(TDBase):
     __doc__ = tdhf_cpu.TDA.__doc__
 
-    def __init__(self, mf, enable_ris=False):
-        super().__init__(mf)
-        self.enable_ris = enable_ris
-
     def get_precond(self, hdiag):
         t=1.0e-14
         def precond(x, e, *args):
@@ -291,22 +182,14 @@ class TDA(TDBase):
             diagd = hdiag - (e-self.level_shift)
             diagd = cp.where(abs(diagd) < t, cp.sign(diagd)*t, diagd)
             return x/diagd
-        # def precond(x, e, *args):
-        #     if isinstance(e, np.ndarray) or isinstance(e, cp.ndarray):
-        #         e = e[0]
-        #     diagd = hdiag - (e-self.level_shift)
-        #     diagd[abs(diagd)<1e-8] = 1e-8
-        #     return x/diagd
         return precond
 
     def gen_vind(self, mf=None):
         '''Generate function to compute Ax'''
         if mf is None:
             mf = self._scf
-        if self.enable_ris:
-            return gen_tda_ris_operation(mf, singlet=self.singlet)
-        else:
-            return gen_tda_operation(mf, singlet=self.singlet)
+        
+        return gen_tda_operation(mf, singlet=self.singlet)
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
         '''
@@ -358,10 +241,6 @@ class TDA(TDBase):
 
         vind, hdiag = self.gen_vind(self._scf)
         precond = self.get_precond(hdiag)
-
-        # def pickeig(w, v, nroots, envs):
-        #     idx = np.where(w > self.positive_eig_threshold)[0]
-        #     return w[idx], v[:,idx], idx
 
         def pickeig(w, v, nroots, envs):
             idx = cp.where(w > self.positive_eig_threshold)[0]
@@ -427,76 +306,20 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
         v1_top += xs * e_ia  # AX
         v1_bot += ys * e_ia  # (A*)Y
         return cp.hstack((v1_top.reshape(nz,nocc*nvir),
-                          -v1_bot.reshape(nz,nocc*nvir)))#.get()
+                          -v1_bot.reshape(nz,nocc*nvir)))
 
     hdiag = cp.hstack([hdiag.ravel(), -hdiag.ravel()])
-    return vind, hdiag#.get()
-
-
-def gen_tdhf_ris_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
-    '''Generate function to compute
-
-    [ A   B ][X]
-    [-B* -A*][Y]
-    '''
-    assert fock_ao is None
-    assert isinstance(mf, scf.hf.SCF)
-    mo_coeff = mf.mo_coeff
-    assert mo_coeff.dtype == cp.float64
-    mo_energy = mf.mo_energy
-    mo_occ = mf.mo_occ
-    occidx = mo_occ == 2
-    viridx = mo_occ == 0
-    orbv = mo_coeff[:,viridx]
-    orbo = mo_coeff[:,occidx]
-
-    e_ia = hdiag = mo_energy[viridx] - mo_energy[occidx,None]
-    t0 = time.time()
-    vresp = gen_response_ris(mf, singlet=singlet, hermi=0)
-    print('gen_response_ris', time.time()-t0)
-    nocc, nvir = e_ia.shape
-
-    def vind(zs):
-        nz = len(zs)
-        xs, ys = zs.reshape(nz,2,nocc,nvir).transpose(1,0,2,3)
-        xs = cp.asarray(xs).reshape(nz,nocc,nvir)
-        ys = cp.asarray(ys).reshape(nz,nocc,nvir)
-        # *2 for double occupancy
-        tmp = contract('xov,pv->xpo', xs, orbv*2)
-        dms = contract('xpo,qo->xpq', tmp, orbo.conj())
-        tmp = contract('xov,qv->xoq', ys, orbv.conj()*2)
-        dms+= contract('xoq,po->xpq', tmp, orbo)
-        t0 = time.time()
-        v1ao = vresp(dms) # = <mb||nj> Xjb + <mj||nb> Yjb
-        print("debug1", time.time()-t0)
-        v1_top = contract('xpq,qo->xpo', v1ao, orbo)
-        v1_top = contract('xpo,pv->xov', v1_top, orbv)
-        v1_bot = contract('xpq,po->xoq', v1ao, orbo)
-        v1_bot = contract('xoq,qv->xov', v1_bot, orbv)
-        v1_top += xs * e_ia  # AX
-        v1_bot += ys * e_ia  # (A*)Y
-        return cp.hstack((v1_top.reshape(nz,nocc*nvir),
-                          -v1_bot.reshape(nz,nocc*nvir)))#.get()
-
-    hdiag = cp.hstack([hdiag.ravel(), -hdiag.ravel()])
-    return vind, hdiag#.get()
-
+    return vind, hdiag
 
 class TDHF(TDBase):
     __doc__ = tdhf_cpu.TDHF.__doc__
-
-    def __init__(self, mf, enable_ris=False):
-        super().__init__(mf)
-        self.enable_ris = enable_ris
 
     @lib.with_doc(gen_tdhf_operation.__doc__)
     def gen_vind(self, mf=None):
         if mf is None:
             mf = self._scf
-        if self.enable_ris:
-            return gen_tdhf_ris_operation(mf, singlet=self.singlet)
-        else:
-            return gen_tdhf_operation(mf, singlet=self.singlet)
+
+        return gen_tdhf_operation(mf, singlet=self.singlet)
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
         assert not return_symmetry

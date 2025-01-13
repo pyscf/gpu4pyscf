@@ -54,7 +54,6 @@ class CasidaTDDFT(TDDFT):
         d_ia = e_ia ** .5
         ed_ia = e_ia * d_ia
         hdiag = e_ia.ravel() ** 2
-        hdiag = hdiag.get()
         vresp = mf.gen_response(singlet=singlet, hermi=1)
         nocc, nvir = e_ia.shape
 
@@ -71,7 +70,7 @@ class CasidaTDDFT(TDDFT):
             v1mo = contract('xpo,pv->xov', v1mo, orbv)
             v1mo += zs * ed_ia
             v1mo *= d_ia
-            return v1mo.reshape(v1mo.shape[0],-1).get()
+            return v1mo.reshape(v1mo.shape[0],-1)
 
         return vind, hdiag
 
@@ -95,7 +94,7 @@ class CasidaTDDFT(TDDFT):
         precond = self.get_precond(hdiag)
 
         def pickeig(w, v, nroots, envs):
-            idx = np.where(w > self.positive_eig_threshold)[0]
+            idx = cp.where(w > self.positive_eig_threshold)[0]
             return w[idx], v[:,idx], idx
 
         x0sym = None

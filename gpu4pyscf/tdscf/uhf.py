@@ -63,7 +63,7 @@ def gen_tda_operation(mf, fock_ao=None, wfnsym=None):
     e_ia_a = mo_energy[0][viridxa] - mo_energy[0][occidxa,None]
     e_ia_b = mo_energy[1][viridxb] - mo_energy[1][occidxb,None]
     e_ia = cp.hstack((e_ia_a.reshape(-1), e_ia_b.reshape(-1)))
-    hdiag = e_ia.get()
+    hdiag = e_ia
     nocca, nvira = e_ia_a.shape
     noccb, nvirb = e_ia_b.shape
 
@@ -88,7 +88,7 @@ def gen_tda_operation(mf, fock_ao=None, wfnsym=None):
         v1a += za * e_ia_a
         v1b += zb * e_ia_b
         hx = cp.hstack((v1a.reshape(nz,-1), v1b.reshape(nz,-1)))
-        return hx.get()
+        return hx
 
     return vind, hdiag
 
@@ -185,7 +185,7 @@ class TDA(TDBase):
         precond = self.get_precond(hdiag)
 
         def pickeig(w, v, nroots, envs):
-            idx = np.where(w > self.positive_eig_threshold)[0]
+            idx = cp.where(w > self.positive_eig_threshold)[0]
             return w[idx], v[:,idx], idx
 
         x0sym = None
@@ -258,7 +258,7 @@ class SpinFlipTDA(TDBase):
             orbva = mo_coeff[0][:,viridxa]
             orbov = (orbob, orbva)
             e_ia = mo_energy[0][viridxa] - mo_energy[1][occidxb,None]
-            hdiag = e_ia.ravel().get()
+            hdiag = e_ia.ravel()
 
         elif extype == 1:
             occidxa = mo_occ[0] > 0
@@ -267,7 +267,7 @@ class SpinFlipTDA(TDBase):
             orbvb = mo_coeff[1][:,viridxb]
             orbov = (orboa, orbvb)
             e_ia = mo_energy[1][viridxb] - mo_energy[0][occidxa,None]
-            hdiag = e_ia.ravel().get()
+            hdiag = e_ia.ravel()
 
         vresp = gen_uhf_response_sf(
             mf, hermi=0, collinear=self.collinear,
@@ -283,7 +283,7 @@ class SpinFlipTDA(TDBase):
             v1mo = contract('xpq,qo->xpo', v1ao, orbo)
             v1mo = contract('xpo,pv->xov', v1mo, orbv.conj())
             v1mo += zs * e_ia
-            return v1mo.reshape(len(v1mo), -1).get()
+            return v1mo.reshape(len(v1mo), -1)
 
         return vind, hdiag
 
@@ -461,10 +461,10 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
         v1_bot[:,:nocca*nvira] += v1a_bot.reshape(nz,-1)
         v1_top[:,nocca*nvira:] += v1b_top.reshape(nz,-1)
         v1_bot[:,nocca*nvira:] += v1b_bot.reshape(nz,-1)
-        return cp.hstack([v1_top, -v1_bot]).get()
+        return cp.hstack([v1_top, -v1_bot])
 
     hdiag = cp.hstack([hdiag.ravel(), -hdiag.ravel()])
-    return vind, hdiag.get()
+    return vind, hdiag
 
 
 class TDHF(TDBase):
@@ -578,9 +578,9 @@ class SpinFlipTDHF(TDBase):
 
         extype = self.extype
         if extype == 0:
-            hdiag = cp.hstack([e_ia_b2a.ravel(), -e_ia_a2b.ravel()]).get()
+            hdiag = cp.hstack([e_ia_b2a.ravel(), -e_ia_a2b.ravel()])
         else:
-            hdiag = cp.hstack([e_ia_a2b.ravel(), -e_ia_b2a.ravel()]).get()
+            hdiag = cp.hstack([e_ia_a2b.ravel(), -e_ia_b2a.ravel()])
 
         vresp = gen_uhf_response_sf(
             mf, hermi=0, collinear=self.collinear,
@@ -681,7 +681,7 @@ class SpinFlipTDHF(TDBase):
                 v1_top += zs_a2b * e_ia_a2b
                 v1_bot += zs_b2a * e_ia_b2a
             hx = cp.hstack([v1_top.reshape(nz,-1), -v1_bot.reshape(nz,-1)])
-            return hx.get()
+            return hx
 
         return vind, hdiag
 
