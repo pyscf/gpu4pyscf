@@ -21,7 +21,6 @@ from pyscf import gto
 from pyscf import lib
 from pyscf.tdscf import rhf as tdhf_cpu
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, real_eig
-from gpu4pyscf.tdscf import parameter_ris as parameter
 from gpu4pyscf import scf, dft
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import utils
