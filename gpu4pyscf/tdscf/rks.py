@@ -15,7 +15,7 @@
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.tdscf._lr_eig import eigh as lr_eigh
+from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh
 from gpu4pyscf.dft.rks import KohnShamDFT
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, transpose_sum
 from gpu4pyscf.lib import logger
@@ -101,7 +101,6 @@ class CasidaTDDFT(TDDFT):
         x0sym = None
         if x0 is None:
             x0 = self.init_guess()
-
         self.converged, w2, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
             nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,
