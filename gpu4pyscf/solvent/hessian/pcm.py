@@ -21,8 +21,8 @@ import numpy
 import cupy
 from pyscf import lib, gto
 from gpu4pyscf import scf
-from gpu4pyscf.solvent.pcm import PI
-from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_solver, grad_nuc, get_dD_dS, get_dF_dA, get_dSii
+from gpu4pyscf.solvent.pcm import PI, switch_h
+from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_solver, grad_nuc, get_dD_dS, get_dF_dA, get_dSii, grad_switch_h
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
 from gpu4pyscf.hessian.jk import _ao2mo
@@ -30,7 +30,85 @@ from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
 
-def hess_nuc(pcmobj, dm):
+def gradgrad_switch_h(x):
+    ''' 2nd derivative of h(x) '''
+    ddy = 60.0*x - 180.0*x**2 + 120.0*x**3
+    ddy[x<0] = 0.0
+    ddy[x>1] = 0.0
+    return ddy
+
+def get_d2F_d2A(surface):
+    '''
+    Notations adopted from
+    J. Chem. Phys. 133, 244111 (2010), Appendix C
+    '''
+    atom_coords = surface['atom_coords']
+    grid_coords = surface['grid_coords']
+    switch_fun  = surface['switch_fun']
+    area        = surface['area']
+    R_in_J      = surface['R_in_J']
+    R_sw_J      = surface['R_sw_J']
+
+    ngrids = grid_coords.shape[0]
+    natom = atom_coords.shape[0]
+    d2F = cupy.zeros([ngrids, natom, natom, 3, 3])
+    d2A = cupy.zeros([ngrids, natom, natom, 3, 3])
+
+    for i_grid_atom in range(natom):
+        p0,p1 = surface['gslice_by_atom'][i_grid_atom]
+        coords = grid_coords[p0:p1]
+        si_rJ = cupy.expand_dims(coords, axis=1) - atom_coords
+        norm_si_rJ = cupy.linalg.norm(si_rJ, axis=-1)
+        diJ = (norm_si_rJ - R_in_J) / R_sw_J
+        diJ[:,i_grid_atom] = 1.0
+        diJ[diJ < 1e-8] = 0.0
+        si_rJ[:,i_grid_atom,:] = 0.0
+        si_rJ[diJ < 1e-8] = 0.0
+
+        fiJ = switch_h(diJ)
+        dfiJ = grad_switch_h(diJ)
+
+        fiJK = fiJ[:, :, cupy.newaxis] * fiJ[:, cupy.newaxis, :]
+        dfiJK = dfiJ[:, :, cupy.newaxis] * dfiJ[:, cupy.newaxis, :]
+        R_sw_JK = R_sw_J[:, cupy.newaxis] * R_sw_J[cupy.newaxis, :]
+        norm_si_rJK = norm_si_rJ[:, :, cupy.newaxis] * norm_si_rJ[:, cupy.newaxis, :]
+        terms_size_ngrids_natm_natm = dfiJK / (fiJK * norm_si_rJK * R_sw_JK)
+        si_rJK = si_rJ[:, :, cupy.newaxis, :, cupy.newaxis] * si_rJ[:, cupy.newaxis, :, cupy.newaxis, :]
+        d2fiJK_offdiagonal = terms_size_ngrids_natm_natm[:, :, :, cupy.newaxis, cupy.newaxis] * si_rJK
+
+        d2fiJ = gradgrad_switch_h(diJ)
+        terms_size_ngrids_natm = d2fiJ / (norm_si_rJ**2 * R_sw_J) - dfiJ / (norm_si_rJ**3)
+        si_rJJ = si_rJ[:, :, :, cupy.newaxis] * si_rJ[:, :, cupy.newaxis, :]
+        d2fiJK_diagonal = cupy.einsum('qA,qAdD->qAdD', terms_size_ngrids_natm, si_rJJ)
+        d2fiJK_diagonal += cupy.einsum('qA,dD->qAdD', dfiJ / norm_si_rJ, cupy.eye(3))
+        d2fiJK_diagonal /= (fiJ * R_sw_J)[:, :, cupy.newaxis, cupy.newaxis]
+
+        d2fiJK = d2fiJK_offdiagonal
+        for i_atom in range(natom):
+            d2fiJK[:, i_atom, i_atom, :, :] = d2fiJK_diagonal[:, i_atom, :, :]
+        print(cupy.max(d2fiJK), cupy.min(d2fiJK), p1 - p0, ngrids)
+
+        Fi = switch_fun[p0:p1]
+        Ai = area[p0:p1]
+
+        d2F[p0:p1, :, :, :, :] += cupy.einsum('q,qABdD->qABdD', Fi, d2fiJK)
+        d2A[p0:p1, :, :, :, :] += cupy.einsum('q,qABdD->qABdD', Ai, d2fiJK)
+
+        d2fiJK_grid_atom_offdiagonal = -cupy.einsum('qABdD->qAdD', d2fiJK)
+        d2F[p0:p1, i_grid_atom, :, :, :] = cupy.einsum('q,qAdD->qAdD', Fi, d2fiJK_grid_atom_offdiagonal.transpose(0,1,3,2))
+        d2F[p0:p1, :, i_grid_atom, :, :] = cupy.einsum('q,qAdD->qAdD', Fi, d2fiJK_grid_atom_offdiagonal)
+        d2A[p0:p1, i_grid_atom, :, :, :] = cupy.einsum('q,qAdD->qAdD', Ai, d2fiJK_grid_atom_offdiagonal.transpose(0,1,3,2))
+        d2A[p0:p1, :, i_grid_atom, :, :] = cupy.einsum('q,qAdD->qAdD', Ai, d2fiJK_grid_atom_offdiagonal)
+
+        d2fiJK_grid_atom_diagonal = -cupy.einsum('qAdD->qdD', d2fiJK_grid_atom_offdiagonal)
+        d2F[p0:p1, i_grid_atom, i_grid_atom, :, :] = cupy.einsum('q,qdD->qdD', Fi, d2fiJK_grid_atom_diagonal)
+        d2A[p0:p1, i_grid_atom, i_grid_atom, :, :] = cupy.einsum('q,qdD->qdD', Ai, d2fiJK_grid_atom_diagonal)
+
+    d2F = d2F.transpose(1,2,3,4,0)
+    d2A = d2A.transpose(1,2,3,4,0)
+    return d2F, d2A
+
+def hess_nuc(pcmobj, dm, verbose=None):
     if not pcmobj._intermediates:
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)

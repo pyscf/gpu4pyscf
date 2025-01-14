@@ -40,13 +40,6 @@ def grad_switch_h(x):
     dy[x>1] = 0.0
     return dy
 
-def gradgrad_switch_h(x):
-    ''' 2nd derivative of h(x) '''
-    ddy = 60.0*x - 180.0*x**2 + 120*x**3
-    ddy[x<0] = 0.0
-    ddy[x>1] = 0.0
-    return ddy
-
 def get_dF_dA(surface):
     '''
     J. Chem. Phys. 133, 244111 (2010), Appendix C
@@ -63,10 +56,9 @@ def get_dF_dA(surface):
     dF = cupy.zeros([ngrids, natom, 3])
     dA = cupy.zeros([ngrids, natom, 3])
 
-    for ia in range(atom_coords.shape[0]):
+    for ia in range(natom):
         p0,p1 = surface['gslice_by_atom'][ia]
         coords = grid_coords[p0:p1]
-        p1 = p0 + coords.shape[0]
         ri_rJ = cupy.expand_dims(coords, axis=1) - atom_coords
         riJ = cupy.linalg.norm(ri_rJ, axis=-1)
         diJ = (riJ - R_in_J) / R_sw_J
