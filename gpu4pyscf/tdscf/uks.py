@@ -16,7 +16,7 @@ import numpy as np
 import cupy as cp
 from pyscf import symm
 from pyscf import lib
-from pyscf.tdscf._lr_eig import eigh as lr_eigh
+from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh
 from gpu4pyscf.dft.rks import KohnShamDFT
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, transpose_sum
 from gpu4pyscf.lib import logger

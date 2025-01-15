@@ -244,7 +244,7 @@ def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
     if len(x0) < min(x0_size, nroots):
         log.warn(f'Not enough eigenvectors (len(x0)={len(x0)}, nroots={nroots})')
 
-    return conv, e, x0
+    return conv, e.get(), x0.get()
 
 def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
         max_cycle=50, max_memory=MAX_MEMORY, lindep=1e-12, verbose=logger.WARN):
@@ -759,7 +759,7 @@ def real_eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=Non
     if len(x0[0]) < min(A_size, nroots):
         log.warn(f'Not enough eigenvectors (len(x0)={len(x0[0])}, nroots={nroots})')
 
-    return conv[:nroots], e[:nroots], cp.hstack(x0)
+    return conv[:nroots], e[:nroots].get(), cp.hstack(x0).get()
 
 def _gen_x0(v, xs):
     out = _outprod_to_subspace(v[::2], xs)
@@ -1140,6 +1140,9 @@ def VW_Gram_Schmidt_fill_holder_gpu(V_holder, W_holder, X_new, Y_new, lindep=1e-
         csc = c_orth.T.dot(s21).dot(c_orth)
         w, u = cp.linalg.eigh(csc)
         c_orth = c_orth.dot(u)
+    mask = 1 - abs(w) > lindep
+    w = w[mask]
+    c_orth = c_orth[:,mask]
 
     # Symmetric diagonalize
     # [1 w] => c = [a b]
