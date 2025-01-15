@@ -86,7 +86,6 @@ def get_d2F_d2A(surface):
         d2fiJK = d2fiJK_offdiagonal
         for i_atom in range(natom):
             d2fiJK[:, i_atom, i_atom, :, :] = d2fiJK_diagonal[:, i_atom, :, :]
-        print(cupy.max(d2fiJK), cupy.min(d2fiJK), p1 - p0, ngrids)
 
         Fi = switch_fun[p0:p1]
         Ai = area[p0:p1]
@@ -107,6 +106,19 @@ def get_d2F_d2A(surface):
     d2F = d2F.transpose(1,2,3,4,0)
     d2A = d2A.transpose(1,2,3,4,0)
     return d2F, d2A
+
+def get_d2Sii(surface, dF, d2F):
+    ''' Second derivative of S matrix (diagonal only)
+    '''
+    charge_exp  = surface['charge_exp']
+    switch_fun  = surface['switch_fun']
+    dF = dF.transpose(2,0,1)
+    dF_dF = dF[:, cupy.newaxis, :, cupy.newaxis, :] * dF[cupy.newaxis, :, cupy.newaxis, :, :]
+    dF_dF_over_F3 = cupy.einsum('ABdDq,q->ABdDq', dF_dF, 1.0/(switch_fun**3))
+    d2F_over_F2 = cupy.einsum('ABdDq,q->ABdDq', d2F, 1.0/(switch_fun**2))
+    d2Sii = 2 * dF_dF_over_F3 - d2F_over_F2
+    d2Sii = (2.0/PI)**0.5 * cupy.einsum('ABdDq,q->ABdDq', d2Sii, charge_exp)
+    return d2Sii
 
 def hess_nuc(pcmobj, dm, verbose=None):
     if not pcmobj._intermediates:
