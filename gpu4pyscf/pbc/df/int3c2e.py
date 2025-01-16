@@ -31,7 +31,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
-from gpu4pyscf.pbc.gto.cell import _extract_pgto_params
+from gpu4pyscf.pbc.gto.cell import extract_pgto_params
 from gpu4pyscf.pbc.df.ft_ao import libpbc, init_constant
 
 __all__ = [
@@ -113,7 +113,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
 def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
     '''integral screening'''
     # consider only the most diffused component of a basis
-    exps, cs = _extract_pgto_params(cell, 'diffused')
+    exps, cs = extract_pgto_params(cell, 'diffused')
     ls = cell._bas[:,ANG_OF]
     exps = cp.asarray(exps, dtype=np.float32)
     log_cs = np.log(np.abs(cs * ((2*ls+1)/(4*np.pi))**.5))
@@ -122,15 +122,15 @@ def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
     nk = bvkcell.nbas // nbas
 
     # Search the most diffused functions on each atom
-    aux_exps, aux_cs = _extract_pgto_params(auxcell, 'diffused')
+    aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffused')
     aux_ls = auxcell._bas[:,ANG_OF]
     r2_aux = np.log(aux_cs**2 / cell.precision * 10**aux_ls) / aux_exps
-    atoms = auxcell._bas[:,ATOM_OF]
-    atom_splits = np.where(atoms[1:] != atoms[:-1])[0] + 1
-    atom_offsets = np.hstack([0, atom_splits, auxcell.nbas])
     atom_aux_exps = []
-    for i0, i1 in zip(atom_offsets[:1], atom_offsets[1:]):
-        atom_aux_exps.append(aux_exps[i0+r2_aux[i0:i1].argmax()])
+    atoms = auxcell._bas[:,ATOM_OF]
+    for ia in range(cell.natm):
+        bas_mask = atoms == ia
+        es = aux_exps[bas_mask]
+        atom_aux_exps.append(es[r2_aux[bas_mask].argmax()])
     aux_exps = cp.array(atom_aux_exps, dtype=np.float32)
 
     def gen_img_idx(ish0, ish1, jsh0, jsh1):
@@ -242,7 +242,7 @@ class SRInt3c2eOpt:
                 theta = 1./(1./cell_exp + 1./aux_exp + omega**-2)
             lsum = cell_l * 2 + aux_l + 1
             lattice_sum_factor = max(2*np.pi*cell.rcut*lsum/(cell.vol*theta), 1)
-            cutoff = cell.precision / lattice_sum_factor**2 * .1
+            cutoff = cell.precision / lattice_sum_factor**2
             log.debug1('int3c_kernel integral omega=%g theta=%g cutoff=%g',
                        omega, theta, cutoff)
 
@@ -371,7 +371,7 @@ def int3c2e_scheme(cell, li, lj, lk, shm_size=SHM_SIZE):
     return nksh_per_block, gout_stride, nsp_per_block
 
 def most_diffused_pgto(cell):
-    exps, cs = _extract_pgto_params(cell, 'diffused')
+    exps, cs = extract_pgto_params(cell, 'diffused')
     ls = cell._bas[:,ANG_OF]
     r2 = np.log(cs**2 / cell.precision * 10**ls) / exps
     idx = r2.argmax()
@@ -394,7 +394,7 @@ def estimate_rcut(cell, auxcell, omega, precision=None):
     ak, ck, lk = most_diffused_pgto(auxcell)
 
     # the most diffused orbital basis
-    cell_exps, cs = _extract_pgto_params(cell, 'diffused')
+    cell_exps, cs = extract_pgto_params(cell, 'diffused')
     ls = cell._bas[:,ANG_OF]
     r2_cell = np.log(cs**2 / precision * 10**ls) / cell_exps
     ai_idx = r2_cell.argmax()

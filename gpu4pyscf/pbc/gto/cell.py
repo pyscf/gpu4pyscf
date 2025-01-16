@@ -1,7 +1,7 @@
 import numpy as np
 
 # This function is only available in pyscf-2.8 or later
-def _extract_pgto_params(cell, op='diffused'):
+def extract_pgto_params(cell, op='diffused'):
     '''A helper function to extract exponents and contraction coefficients for
     estimate_xxx function
     '''

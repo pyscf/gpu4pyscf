@@ -78,6 +78,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
+    float log_cutoff = envs.log_cutoff;
 
     int gx_len = g_size * nksp_per_block;
     extern __shared__ double rw_buffer[];
@@ -198,7 +199,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                     // may proceeed to a wrong __syncthreads() barrier and
                     // produce wrong g[xyz].
                     if ((thread_id_in_warp / nksh_per_block == 0) &&
-                        img0+img < img1 && 5.f+2.f*lij-Kab_f32 > envs.log_cutoff) {
+                        img0+img < img1 && 5.f+2.f*lij-Kab_f32 > log_cutoff) {
                         // check any not vanished integrals
                         float ai_f32 = ai;
                         float aj_f32 = aj;
@@ -222,7 +223,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                         float tj_fac = .5f*lj * logf(tj*tj + .5f*lj/aij_f32);
                         float tk_fac = .5f*lk * logf(rt_akl*rt_akl + .5f*lk/ak_f32);
                         float estimator = log_fac + ti_fac + tj_fac + tk_fac - Kab_f32 - theta_fac_rr;
-                        if (estimator > envs.log_cutoff) {
+                        if (estimator > log_cutoff) {
                             img_mask[warp_id] = 1;
                         }
                     }

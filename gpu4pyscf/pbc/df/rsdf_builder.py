@@ -35,6 +35,7 @@ from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.gto.cell import extract_pgto_params
 from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2
 
 OMEGA_MIN = 0.1
@@ -247,8 +248,9 @@ def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
 # Create 2c2e, store on CPU
 def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True):
     # j2c ~ (-kpt_ji | kpt_ji) => hermi=1
-    precision = auxcell.precision**1.5
-    aux_exp = np.hstack(auxcell.bas_exps()).min()
+    precision = auxcell.precision * .1
+    aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffused')
+    aux_exp = aux_exps.min()
     theta = 1./(2./aux_exp + omega**-2)
     lattice_sum_factor = max(2*np.pi*auxcell.rcut/(auxcell.vol*theta), 1)
     rcut_sr = (np.log(lattice_sum_factor / precision + 1.) / theta)**.5

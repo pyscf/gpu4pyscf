@@ -36,7 +36,7 @@ C    D
     }
     auxcell.build()
     omega = 0.3
-    gpu_dat, dat_neg = build_cderi(cell, auxcell, kmesh=None, omega=omega)
+    gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts=None, omega=omega)
 
     cell.precision = 1e-10
     auxcell.precision = 1e-10
@@ -87,11 +87,11 @@ C    D
     auxcell.build()
     omega = 0.3
     kmesh = [4,1,3]
-    gpu_dat, dat_neg = build_cderi(cell, auxcell, kmesh=kmesh, omega=omega)
+    kpts = cell.make_kpts(kmesh)
+    gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, omega=omega)
 
     cell.precision = 1e-10
     auxcell.precision = 1e-10
-    kpts = cell.make_kpts(kmesh)
     dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
     dfbuilder.omega = omega
     dfbuilder.j2c_eig_always = True
@@ -141,7 +141,7 @@ C    D
     omega = 0.3
     kmesh = [1,3,4]
     kpts = cell.make_kpts(kmesh)
-    gpu_dat, dat_neg = build_cderi(cell, auxcell, kmesh=kmesh, omega=omega)
+    gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, omega=omega, j_only=True)
 
     cell.precision = 1e-10
     auxcell.precision = 1e-10

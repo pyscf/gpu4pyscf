@@ -26,7 +26,6 @@ from pyscf import lib
 from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD
 from pyscf.scf import _vhf
 from pyscf.pbc import tools as pbctools
-from pyscf.pbc.gto.cell import _extract_pgto_params
 from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
@@ -36,6 +35,7 @@ from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import (
     g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.gto.cell import extract_pgto_params
 from gpu4pyscf.__config__ import props as gpu_specs
 
 __all__ = [
@@ -79,7 +79,7 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
 def _bas_overlap_mask(cell, bvkmesh_Ls, Ls, cutoff=None):
     '''integral screening mask for basis product between cell and supmol'''
     # consider only the most diffused component of a basis
-    exps, cs = _extract_pgto_params(cell, 'min')
+    exps, cs = extract_pgto_params(cell, 'diffused')
     ls = cell._bas[:,ANG_OF]
     bas_coords = cp.asarray(cell.atom_coords()[cell._bas[:,ATOM_OF]])
 
@@ -87,7 +87,7 @@ def _bas_overlap_mask(cell, bvkmesh_Ls, Ls, cutoff=None):
     if cutoff is None:
         theta_ij = exps.min() / 2
         lattice_sum_factor = max(2*np.pi*cell.rcut/(vol*theta_ij), 1)
-        cutoff = cell.precision/lattice_sum_factor * .1
+        cutoff = cell.precision / lattice_sum_factor
         logger.debug(cell, 'Set ft_ao cutoff to %g', cutoff)
 
     ls = cp.asarray(ls)
