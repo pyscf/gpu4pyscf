@@ -35,12 +35,14 @@ void ft_aopair_fill_triu(double *out, int *conj_mapping, int bvk_ncells, int nGv
 extern __global__
 void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds);
 extern __global__
-void sr_int3c2e_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars envs,
-                            float *exps, float *log_coeff, float *aux_exps,
-                            int ish0, int jsh0, int nish, int njsh);
+void sr_int3c2e_img_counts_kernel(int *img_counts, PBCInt3c2eEnvVars envs,
+                                  float *exps, float *log_coeff, float *aux_exps,
+                                  int ish0, int jsh0, int nish, int njsh);
 extern __global__
-void int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int8_t *mask,
-                            int *bas_ij_idx, int nimgs);
+void sr_int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_mapping,
+                               PBCInt3c2eEnvVars envs,
+                               float *exps, float *log_coeff, float *aux_exps,
+                               int ish0, int jsh0, int nish, int njsh);
 
 int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds, int *scheme);
 int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bounds, int *scheme);
@@ -158,9 +160,9 @@ int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
     return 0;
 }
 
-int int3c2e_q_mask(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars *envs,
-                   int *shls_slice, float *exps, float *log_cs, float *aux_exps,
-                   int bvk_ncells, int cell0_natm)
+int int3c2e_img_counts(int *img_counts, PBCInt3c2eEnvVars *envs,
+                       int *shls_slice, float *exps, float *log_cs, float *aux_exps,
+                       int bvk_ncells, int cell0_natm)
 {
     int ish0 = shls_slice[0];
     int ish1 = shls_slice[1];
@@ -172,8 +174,8 @@ int int3c2e_q_mask(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars *envs,
     int buflen = cell0_natm * 3 * sizeof(float);
     int threads = 512;
     buflen = MAX(buflen, threads*sizeof(int));
-    sr_int3c2e_mask_kernel<<<blocks, threads, buflen>>>(
-            mask, img_counts, *envs, exps, log_cs, aux_exps, ish0, jsh0, nish, njsh);
+    sr_int3c2e_img_counts_kernel<<<blocks, threads, buflen>>>(
+        img_counts, *envs, exps, log_cs, aux_exps, ish0, jsh0, nish, njsh);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int3c2e_q_mask: %s\n", cudaGetErrorString(err));
@@ -182,10 +184,25 @@ int int3c2e_q_mask(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars *envs,
     return 0;
 }
 
-int int3c2e_img_idx(int *img_idx, int *img_offsets, int8_t *mask,
-                    int *bas_mapping, int nrow, int nimgs)
+int int3c2e_img_idx(int *img_idx, int *img_offsets, int *bas_mapping, int nrow,
+                    PBCInt3c2eEnvVars *envs,
+                    int *shls_slice, float *exps, float *log_cs, float *aux_exps,
+                    int bvk_ncells, int cell0_natm)
+
 {
-    int3c2e_img_idx_kernel<<<nrow, 1024>>>(img_idx, img_offsets, mask, bas_mapping, nimgs);
+    int ish0 = shls_slice[0];
+    int ish1 = shls_slice[1];
+    int jsh0 = shls_slice[2];
+    int jsh1 = shls_slice[3];
+    int nish = ish1 - ish0;
+    int njsh = jsh1 - jsh0;
+    dim3 blocks(bvk_ncells*nish, bvk_ncells*njsh);
+    int buflen = cell0_natm * 3 * sizeof(float);
+    int threads = 512;
+    buflen = buflen + threads*sizeof(uint16_t) + IMG_BLOCK;
+    sr_int3c2e_img_idx_kernel<<<nrow, threads, buflen>>>(
+        img_idx, img_offsets, bas_mapping, *envs,
+        exps, log_cs, aux_exps, ish0, jsh0, nish, njsh);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int3c2e_img_idx: %s\n", cudaGetErrorString(err));

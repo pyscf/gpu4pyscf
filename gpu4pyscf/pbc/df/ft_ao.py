@@ -135,11 +135,12 @@ class FTOpt:
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
         self.coeff = cp.asarray(coeff, dtype=np.complex128)
 
-        if kpts is not None and bvk_kmesh is None:
-            bvk_kmesh = kpts_to_kmesh(cell, kpts)
-
-        # create BVK super-cell
         if bvk_kmesh is None:
+            if kpts is None or is_zero(kpts):
+                bvk_kmesh = np.ones(3, dtype=int)
+            else:
+                bvk_kmesh = kpts_to_kmesh(cell, kpts)
+        if np.prod(bvk_kmesh) == 1:
             bvkcell = cell
         else:
             bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)
@@ -301,7 +302,8 @@ class FTOpt:
                     raise RuntimeError('ft_aopair_fill_triu kernel failed')
 
             log.debug1('transform BvK-cell to k-points')
-            if kptjs is not None:
+            gamma_point_only = kptjs is None or is_zero(kptjs)
+            if not gamma_point_only:
                 kptjs = cp.asarray(kptjs, order='C').reshape(-1,3)
                 expLk = cp.exp(1j*cp.dot(bvkmesh_Ls, kptjs.T))
                 out = contract('Lk,LpqG->kpqG', expLk, out)

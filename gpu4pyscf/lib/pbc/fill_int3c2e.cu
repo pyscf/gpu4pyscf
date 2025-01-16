@@ -393,9 +393,9 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
 }
 
 __global__
-void sr_int3c2e_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars envs,
-                            float *exps, float *log_coeff, float *aux_exps,
-                            int ish0, int jsh0, int nish, int njsh)
+void sr_int3c2e_img_counts_kernel(int *img_counts, PBCInt3c2eEnvVars envs,
+                                  float *exps, float *log_coeff, float *aux_exps,
+                                  int ish0, int jsh0, int nish, int njsh)
 {
     int Ki = blockIdx.x;
     int Kj = blockIdx.y;
@@ -507,7 +507,6 @@ void sr_int3c2e_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars env
         float drj_fac = .5f*lj * logf(drj*drj + lj*u);
         float estimator = log_fac + dri_fac + drj_fac - theta_ij*rr_ij - theta_rr_min;
         if (estimator > log_cutoff) {
-            mask[(Ki*nKj+Kj)*nimgs2 + ijL] = 1;
             count += 1;
         }
     }
@@ -527,54 +526,172 @@ void sr_int3c2e_mask_kernel(int8_t *mask, int *img_counts, PBCInt3c2eEnvVars env
 }
 
 __global__
-void int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int8_t *mask,
-                            int *bas_mapping, int nimgs)
+void sr_int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_mapping,
+                               PBCInt3c2eEnvVars envs,
+                               float *exps, float *log_coeff, float *aux_exps,
+                               int ish0, int jsh0, int nish, int njsh)
 {
     int thread_id = threadIdx.x;
     int threads = blockDim.x;
+    int ncells = envs.bvk_ncells;
+    int nKj = ncells * njsh;
     int row_id = blockIdx.x;
     int bas_ij = bas_mapping[row_id];
+    int Ki = bas_ij / nKj;
+    int Kj = bas_ij % nKj;
+    int cell_i = Ki / nish;
+    int cell_j = Kj / njsh;
+    int cell0_ish = Ki % nish + ish0;
+    int cell0_jsh = Kj % njsh + jsh0;
+    int nbasp = envs.cell0_nbas;
+    int ish = cell_i * nbasp + cell0_ish;
+    int jsh = cell_j * nbasp + cell0_jsh;
+    int nimgs = envs.nimgs;
     int nimgs2 = nimgs * nimgs;
-    int bacth_size = (nimgs2 + threads - 1) / threads;
-    int ij0 = thread_id * bacth_size;
-    int ij1 = MIN(ij0 + bacth_size, nimgs2);
-    int count = 0;
-    for (int ijL = ij0; ijL < ij1; ++ijL) {
-        if (mask[bas_ij*nimgs2+ijL]) {
-            count += 1;
-        }
+    int cell0_natm = envs.cell0_natm;
+    int *atm = envs.atm;
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double *img_coords = envs.img_coords;
+    extern __shared__ int8_t mask[];
+    uint16_t* cum_count = (uint16_t *)(mask + IMG_BLOCK);
+    float *x_cache = (float *)(cum_count + threads);
+    float *y_cache = x_cache + cell0_natm;
+    float *z_cache = y_cache + cell0_natm;
+    for (int k = thread_id; k < cell0_natm; k += threads) {
+        double *rk = env + atm[k*ATM_SLOTS+PTR_COORD];
+        x_cache[k] = rk[0];
+        y_cache[k] = rk[1];
+        z_cache[k] = rk[2];
     }
-
-    // https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda
-    __shared__ int thread_offsets[1024];
-    thread_offsets[thread_id] = count;
-    // Up-sweep phase
-    for (int stride = 1; stride < threads; stride *= 2) {
-        __syncthreads();
-        int index = (thread_id + 1) * stride * 2 - 1;
-        if (index < threads) {
-            thread_offsets[index] += thread_offsets[index-stride];
-        }
-    }
-    __syncthreads();
-    if (thread_id == threads-1) { thread_offsets[threads-1] = 0; }
-    // Down-sweep phase
-    for (int stride = threads/2; stride > 0; stride /= 2) {
-        __syncthreads();
-        int index = (thread_id + 1) * stride * 2 - 1;
-        if (index < threads) {
-            int temp = thread_offsets[index - stride];
-            thread_offsets[index - stride] = thread_offsets[index];
-            thread_offsets[index] += temp;
-        }
+    for (int i = thread_id; i < IMG_BLOCK; i += threads) {
+        mask[i] = 0;
     }
     __syncthreads();
 
-    int offset = img_offsets[row_id] + thread_offsets[thread_id];
-    for (int ijL = ij0; ijL < ij1; ++ijL) {
-        if (mask[bas_ij*nimgs2+ijL]) {
-            img_idx[offset] = ijL;
-            ++offset;
+    int li = bas[ANG_OF + ish0*BAS_SLOTS];
+    int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
+    float ai = exps[cell0_ish];
+    float aj = exps[cell0_jsh];
+    float log_ci = log_coeff[cell0_ish];
+    float log_cj = log_coeff[cell0_jsh];
+    float aij = ai + aj;
+    float u = .5f / aij;
+    float fi = ai / aij;
+    float fj = aj / aij;
+    float theta_ij = ai * aj / aij;
+    float omega = env[PTR_RANGE_OMEGA];
+    if (omega == 0) {
+        omega = 0.1f;
+    }
+    float omega2 = omega * omega;
+    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    float xi = ri[0];
+    float yi = ri[1];
+    float zi = ri[2];
+    float xj = rj[0];
+    float yj = rj[1];
+    float zj = rj[2];
+    float log_cutoff = envs.log_cutoff;
+
+    // fac_guess = log(sqrt(2.x/(omega*sqrt(pi))) * ((2*li+1)*(2*lj+1)*(2*lk+1))**.5/(4*pi)**1.5)
+    //           ~ between [0, 2]
+    float fac_guess = .5f - logf(omega2)/4;
+    float log_fac = log_ci + log_cj + 1.717f - 1.5f*logf(aij) + fac_guess;
+    int offset_start = img_offsets[row_id];
+
+    for (int img_start = 0; img_start < nimgs2; img_start += IMG_BLOCK) {
+        int block_nimgs2 = MIN(IMG_BLOCK, nimgs2-img_start);
+        int bacth_size = (block_nimgs2 + threads - 1) / threads;
+        int ij0 = img_start + thread_id * bacth_size;
+        int ij1 = MIN(ij0 + bacth_size, nimgs2);
+
+        int count = 0;
+        for (int ijL = ij0; ijL < ij1; ++ijL) {
+            int iL = ijL / nimgs;
+            int jL = ijL % nimgs;
+            float xiL = xi + img_coords[iL*3+0];
+            float yiL = yi + img_coords[iL*3+1];
+            float ziL = zi + img_coords[iL*3+2];
+            float xjL = xj + img_coords[jL*3+0];
+            float yjL = yj + img_coords[jL*3+1];
+            float zjL = zj + img_coords[jL*3+2];
+            float xjxi = xjL - xiL;
+            float yjyi = yjL - yiL;
+            float zjzi = zjL - ziL;
+            float xij = xjxi * fj + xiL;
+            float yij = yjyi * fj + yiL;
+            float zij = zjzi * fj + ziL;
+            float theta = (omega2 * aij) / (omega2 + aij);
+            float rr_min = 1e3f;
+            float theta_rr_min = 1e6f;
+            for (int k = 0; k < cell0_natm; ++k) {
+                float dx = xij - x_cache[k];
+                float dy = yij - y_cache[k];
+                float dz = zij - z_cache[k];
+                float rr = dx * dx + dy * dy + dz * dz;
+                float ak = aux_exps[k];
+                float theta_k = theta * ak / (theta + ak);
+                float theta_rr = theta_k * rr;
+                if (theta_rr < theta_rr_min) {
+                    theta_rr_min = theta_rr;
+                    rr_min = rr;
+                }
+            }
+
+            // exp(- 1/(1/aij+1/ak+1/omega^2) * r_guess^2) < 1e-9
+            // => ~ exp(- omega^2 * r_guess^2) < 1e-9
+            // => r_guess > 5/omega
+            // 1/(1/aij+1/ak+1/omega^2)*r_guess/aij in Eq 64 of arXiv:2302.11307
+            //     ~ omega^2*r_guess/aij ~ omega/aij * 5.f
+            //float rt_aij = fabs(omega)/aij * 5.;
+            float rt_aij = omega2 * sqrtf(rr_min) / aij + 1e-9f;
+            float rr_ij = xjxi * xjxi + yjyi * yjyi + zjzi * zjzi;
+            float dr = sqrtf(rr_ij);
+            float dri = fj * dr + rt_aij;
+            float drj = fi * dr + rt_aij;
+            float dri_fac = .5f*li * logf(dri*dri + li*u);
+            float drj_fac = .5f*lj * logf(drj*drj + lj*u);
+            float estimator = log_fac + dri_fac + drj_fac - theta_ij*rr_ij - theta_rr_min;
+            if (estimator > log_cutoff) {
+                mask[ijL - img_start] = 1;
+                count += 1;
+            }
         }
+
+        cum_count[thread_id] = count;
+        // Up-sweep phase
+        for (int stride = 1; stride < threads; stride *= 2) {
+            __syncthreads();
+            int index = (thread_id + 1) * stride * 2 - 1;
+            if (index < threads) {
+                cum_count[index] += cum_count[index-stride];
+            }
+        }
+        __syncthreads();
+        // Down-sweep phase
+        for (int stride = threads/4; stride > 0; stride /= 2) {
+            __syncthreads();
+            int index = (thread_id + 1) * stride * 2 - 1;
+            if (index + stride < threads) {
+                cum_count[index + stride] += cum_count[index];
+            }
+        }
+        __syncthreads();
+
+        int offset = offset_start;
+        if (thread_id > 0) {
+            offset += cum_count[thread_id-1];
+        }
+        for (int ijL = ij0; ijL < ij1; ++ijL) {
+            if (mask[ijL-img_start]) {
+                img_idx[offset] = ijL;
+                mask[ijL-img_start] = 0;
+                ++offset;
+            }
+        }
+        offset_start += cum_count[threads-1];
+        __syncthreads();
     }
 }

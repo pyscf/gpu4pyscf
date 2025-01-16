@@ -19,38 +19,45 @@ import numpy as np
 from pyscf.lib import logger
 
 # This version of kpts_to_kmesh will be available in PySCF-2.8
-def kpts_to_kmesh(cell, kpts, precision=None, max_images=10000):
-    '''Find the minimal k-points mesh to include all input kpts'''
+def kpts_to_kmesh(cell, kpts, bvk=True, precision=None, max_images=10000):
+    '''Search the minimal BvK mesh or Monkhorst-Pack k-point mesh'''
     scaled_kpts = cell.get_scaled_kpts(kpts)
     logger.debug3(cell, '    scaled_kpts kpts %s', scaled_kpts)
-    # cell.nimgs are the upper limits for kmesh
-    kmesh = np.asarray(cell.nimgs) * 2 + 1
+    if bvk:
+        kmesh = np.asarray(cell.nimgs) * 2 + 1
+    else:
+        # At most 100 grids in each direction
+        kmesh = np.full(3, 100)
     if precision is None:
         precision = cell.precision * 1e2
     for i in range(3):
         floats = scaled_kpts[:,i]
         uniq_floats_idx = np.unique(floats.round(6), return_index=True)[1]
         uniq_floats = floats[uniq_floats_idx]
-        # Limit the number of images to 30 in each direction
         fracs = [Fraction(x).limit_denominator(int(kmesh[i])) for x in uniq_floats]
         denominators = np.unique([x.denominator for x in fracs])
         common_denominator = reduce(np.lcm, denominators)
         fs = common_denominator * uniq_floats
-        if abs(uniq_floats - np.rint(fs)/common_denominator).max() < precision:
+        if bvk and abs(uniq_floats - np.rint(fs)/common_denominator).max() < precision:
             kmesh[i] = min(kmesh[i], common_denominator)
+        else:
+            kmesh[i] = common_denominator
         if cell.verbose >= logger.DEBUG3:
             logger.debug3(cell, 'dim=%d common_denominator %d  error %g',
                           i, common_denominator, abs(fs - np.rint(fs)).max())
             logger.debug3(cell, '    unique kpts %s', uniq_floats)
             logger.debug3(cell, '    frac kpts %s', fracs)
 
-    assert max_images > 0
-    if np.prod(kmesh) > max_images:
-        kmesh_raw = kmesh.copy()
-        for i in itertools.cycle(np.argsort(kmesh)[::-1]):
-            kmesh[i] = int(kmesh[i] * .8)
-            if np.prod(kmesh) < max_images:
-                break
-        logger.warn(cell, 'kmesh (%s) exceeds max_images (%d); reduced to %s',
-                    kmesh_raw, max_images, kmesh)
+    if bvk:
+        assert max_images > 0
+        if np.prod(kmesh) > max_images:
+            kmesh_raw = kmesh.copy()
+            for i in itertools.cycle(np.argsort(kmesh)[::-1]):
+                kmesh[i] = int(kmesh[i] * .8)
+                if np.prod(kmesh) < max_images:
+                    break
+            logger.warn(cell, 'kmesh (%s) exceeds max_images (%d); reduced to %s',
+                        kmesh_raw, max_images, kmesh)
+    else:
+        assert len(kpts) == np.prod(kmesh)
     return kmesh

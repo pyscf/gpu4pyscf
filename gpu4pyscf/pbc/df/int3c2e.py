@@ -45,7 +45,7 @@ L_AUX_MAX = 6
 GOUT_WIDTH = 45
 THREADS = 256
 
-def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None):
+def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     r'''
     Short-range 3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
@@ -54,18 +54,20 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None):
     nao, nao_orig = int3c2e_opt.coeff.shape
     naux = int3c2e_opt.aux_coeff.shape[0]
 
-    if kpts is None and bvk_kmesh is None:
+    if kpts is None:
         out = cp.zeros((nao, nao, naux))
     else:
-        if kpts is None:
-            kpts = cell.make_kpts(bvk_kmesh)
         nkpts = len(kpts)
-        out = cp.zeros((nkpts, nkpts, nao, nao, naux), dtype=np.complex128)
         kmesh = int3c2e_opt.bvk_kmesh
         assert kmesh is not None
         kpts = cp.asarray(kpts, order='C').reshape(-1,3)
         bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
         expLk = cp.exp(1j*cp.dot(cp.asarray(bvkmesh_Ls), kpts.T))
+        if j_only:
+            expLLk = contract('Lk,Mk->LMk', expLk.conj(), expLk)
+            out = cp.zeros((nkpts, nao, nao, naux), dtype=np.complex128)
+        else:
+            out = cp.zeros((nkpts, nkpts, nao, nao, naux), dtype=np.complex128)
 
     ao_loc = int3c2e_opt.sorted_cell.ao_loc
     aux_loc = int3c2e_opt.sorted_auxcell.ao_loc
@@ -77,6 +79,11 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None):
             out[i0:i1,j0:j1,k0:k1] = tmp = eri3c.sum(axis=(0,2))
             if i0 != j0:
                 out[j0:j1,i0:i1,k0:k1] = tmp.transpose(1,0,2)
+        elif j_only:
+            tmp = contract('LMk,LpMqr->kpqr', expLLk, eri3c)
+            out[:,i0:i1,j0:j1,k0:k1] = tmp
+            if i0 != j0:
+                out[:,j0:j1,i0:i1,k0:k1] = tmp.transpose(0,2,1,3).conj()
         else:
             tmp = contract('Lk,LpMqr->kpMqr', expLk.conj(), eri3c)
             tmp = contract('Ml,kpMqr->klpqr', expLk, tmp)
@@ -89,6 +96,12 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None):
         out = contract('pqr,rk->pqk', out, int3c2e_opt.aux_coeff)
         out = contract('pqk,qj->pjk', out, int3c2e_opt.coeff)
         out = contract('pjk,pi->ijk', out, int3c2e_opt.coeff)
+    elif j_only:
+        #:out = einsum('MpNqr,pi,qj,rk->MiNjk', out, coeff, coeff, auxcoeff)
+        out = contract('Npqr,rk->Npqk', out, int3c2e_opt.aux_coeff)
+        coeff = int3c2e_opt.coeff.astype(np.complex128)
+        out = contract('Npqk,qj->Npjk', out, coeff)
+        out = contract('Npjk,pi->Nijk', out, coeff)
     else:
         #:out = einsum('MpNqr,pi,qj,rk->MiNjk', out, coeff, coeff, auxcoeff)
         out = contract('MNpqr,rk->MNpqk', out, int3c2e_opt.aux_coeff)
@@ -107,7 +120,6 @@ def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
     log_cs = cp.asarray(log_cs, np.float32)
     nbas = cell.nbas
     nk = bvkcell.nbas // nbas
-    nimgs = len(Ls)
 
     # Search the most diffused functions on each atom
     aux_exps, aux_cs = _extract_pgto_params(auxcell, 'diffused')
@@ -126,10 +138,8 @@ def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
         njsh = jsh1 - jsh0
         #TODO: only tril part when i == j
         ij_pairs = nk * nish * nk * njsh
-        mask = cp.zeros((ij_pairs, nimgs**2), dtype=np.int8)
         img_counts = cp.zeros(ij_pairs, dtype=np.int32)
-        err = libpbc.int3c2e_q_mask(
-            ctypes.cast(mask.data.ptr, ctypes.c_void_p),
+        err = libpbc.int3c2e_img_counts(
             ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
             ctypes.byref(int3c2e_envs),
             (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
@@ -138,7 +148,7 @@ def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
             ctypes.cast(aux_exps.data.ptr, ctypes.c_void_p),
             ctypes.c_int(nk), ctypes.c_int(cell.natm))
         if err != 0:
-            raise RuntimeError('int3c2e_q_mask failed')
+            raise RuntimeError('int3c2e_img_counts failed')
 
         remaining_idx = np.nonzero(img_counts > 0)[0]
         remaining_idx = remaining_idx[img_counts[remaining_idx].argsort()[::-1]]
@@ -152,9 +162,14 @@ def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
         err = libpbc.int3c2e_img_idx(
             ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(mask.data.ptr, ctypes.c_void_p),
             ctypes.cast(remaining_idx.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(ij_pairs), ctypes.c_int(nimgs))
+            ctypes.c_int(ij_pairs),
+            ctypes.byref(int3c2e_envs),
+            (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+            ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+            ctypes.cast(log_cs.data.ptr, ctypes.c_void_p),
+            ctypes.cast(aux_exps.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nk), ctypes.c_int(cell.natm))
         if err != 0:
             raise RuntimeError('int3c2e_img_idx failed')
 
@@ -186,11 +201,12 @@ class SRInt3c2eOpt:
         self.aux_coeff = cp.asarray(coeff)
         self.sorted_auxcell.omega = omega
 
-        if kpts is not None and bvk_kmesh is None:
-            bvk_kmesh = kpts_to_kmesh(cell, kpts)
-
-        # create BVK super-cell
         if bvk_kmesh is None:
+            if kpts is None or is_zero(kpts):
+                bvk_kmesh = np.ones(3, dtype=int)
+            else:
+                bvk_kmesh = kpts_to_kmesh(cell, kpts)
+        if np.prod(bvk_kmesh) == 1:
             bvkcell = cell
         else:
             bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)

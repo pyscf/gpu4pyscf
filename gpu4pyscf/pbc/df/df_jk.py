@@ -61,11 +61,9 @@ def density_fit(mf, auxbasis=None, mesh=None, with_df=None):
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     log = logger.new_logger(mydf)
     t0 = log.init_timer()
-    if mydf._cderi is None or not mydf.has_kpts(kpts_band):
-        if mydf._cderi is not None:
-            log.warn('DF integrals for band k-points were not found %s. '
-                     'DF integrals will be rebuilt to include band k-points.',
-                     mydf._cderi)
+    assert kpts_band is None or kpts_band is kpts
+    assert mydf.has_kpts(kpts)
+    if mydf._cderi is None:
         mydf.build(j_only=True, kpts_band=kpts_band)
         t0 = log.timer_debug1('Init get_j_kpts', *t0)
 
@@ -84,10 +82,9 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
 
     rho = cp.zeros((nset,naux), dtype=np.complex128)
     max_memory = max(2000, (mydf.max_memory - lib.current_memory()[0]))
-    for k, kpt in enumerate(kpts):
-        kptii = np.asarray((kpt,kpt))
+    for k in range(nkpts):
         p1 = 0
-        for Lpq, sign in mydf.sr_loop(kptii, max_memory, False):
+        for Lpq, sign in mydf.sr_loop(k, k, max_memory, False):
             Lpq = Lpq.reshape(-1,nao,nao)
             p0, p1 = p1, p1+Lpq.shape[0]
             rho[:,p0:p1] += sign * contract('Lpq,xqp->xL', Lpq, dms[:,k])
@@ -102,9 +99,8 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
         vj = cp.zeros((nset,nband,nao_pair), dtype=np.complex128)
 
     for k, kpt in enumerate(kpts_band):
-        kptii = np.asarray((kpt,kpt))
         p1 = 0
-        for Lpq, sign in mydf.sr_loop(kptii, max_memory, aos2symm):
+        for Lpq, sign in mydf.sr_loop(k, k, max_memory, aos2symm):
             nrow = Lpq.shape[0]
             p0, p1 = p1, p1+nrow
             Lpq = Lpq.reshape(nrow, -1)
@@ -137,11 +133,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
         raise RuntimeError('GDF does not support exxdiv %s' % exxdiv)
 
     t0 = (logger.process_clock(), logger.perf_counter())
-    if mydf._cderi is None or not mydf.has_kpts(kpts_band):
-        if mydf._cderi is not None:
-            log.warn('DF integrals for band k-points were not found %s. '
-                     'DF integrals will be rebuilt to include band k-points.',
-                     mydf._cderi)
+    assert kpts_band is None or kpts_band is kpts
+    assert mydf.has_kpts(kpts)
+    if mydf._cderi is not None:
         mydf.build(kpts_band=kpts_band)
         t0 = log.timer_debug1('Init get_k_kpts', *t0)
 
@@ -187,11 +181,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     # input dm is not Hermitian/PSD --> build K from dm
     log.debug2('get_k_kpts: build K from dm')
     max_memory = max(2000, mydf.max_memory-lib.current_memory()[0])
-    def make_kpt(ki, kj, swap_2e, inverse_idx=None):
-        kpti = kpts[ki]
-        kptj = kpts_band[kj]
+    def make_kpt(ki, kj, swap_2e):
         #TODO: utilize kk_adapted_iter with time_reversal_symmetry, as that in aft_jk
-        for Lpq, sign in mydf.sr_loop((kpti,kptj), max_memory, compact=False):
+        for Lpq, sign in mydf.sr_loop(ki, kj, max_memory, compact=False):
             Lpq = Lpq.reshape(-1, nao, nao)
             tmp = contract('njk,Lkl->nLjl', dms[:,ki], Lpq)
             if sign > 0:
@@ -207,14 +199,13 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
                     vk[:,ki] -= contract('nLki,Lji->nkj', tmp, Lpq.conj())
 
     t1 = log.init_timer()
-    if kpts_band is kpts:  # normal k-points HF/DFT
-        for ki in range(nkpts):
-            for kj in range(ki):
-                make_kpt(ki, kj, True)
-            make_kpt(ki, ki, False)
-            t1 = log.timer_debug1('get_k_kpts: make_kpt ki>=kj (%d,*)'%ki, *t1)
-    else:
+    if kpts_band is not kpts:  # normal k-points HF/DFT
         raise NotImplementedError
+    for ki in range(nkpts):
+        for kj in range(ki):
+            make_kpt(ki, kj, True)
+        make_kpt(ki, ki, False)
+        t1 = log.timer_debug1('get_k_kpts: make_kpt ki>=kj (%d,*)'%ki, *t1)
 
     if exxdiv == 'ewald':
         _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band)
@@ -243,29 +234,17 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
     '''JK for given k-point'''
     log = logger.new_logger(mydf)
     t0 = log.init_timer()
-    if mydf._cderi is None or not mydf.has_kpts(kpts_band):
-        if mydf._cderi is not None:
-            log.warn('DF integrals for band k-points were not found %s. '
-                     'DF integrals will be rebuilt to include band k-points.',
-                     mydf._cderi)
+    assert is_zero(kpt)
+    assert kpts_band is None
+    if mydf._cderi is not None:
         mydf.build(j_only=not with_k, kpts_band=kpts_band)
         t0 = log.timer_debug1('Init get_jk', *t0)
-
-    vj = vk = None
-    if kpts_band is not None and abs(kpt-kpts_band).sum() > 1e-9:
-        kpt = np.reshape(kpt, (1,3))
-        if with_k:
-            vk = get_k_kpts(mydf, dm, hermi, kpt, kpts_band, exxdiv)
-        if with_j:
-            vj = get_j_kpts(mydf, dm, hermi, kpt, kpts_band)
-        return vj, vk
 
     cell = mydf.cell
     dm = np.asarray(dm, order='C')
     dms = _format_dms(dm, [kpt])
     nset, _, nao = dms.shape[:3]
     dms = dms.reshape(nset,nao,nao)
-    kptii = np.asarray((kpt,kpt))
     if with_j:
         vj = cp.zeros((nset,nao,nao), dtype=np.complex128)
     if with_k:
@@ -296,7 +275,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
 
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, (mydf.max_memory - mem_now))
-    for Lpq, sign in mydf.sr_loop(kptii, max_memory, False):
+    for Lpq, sign in mydf.sr_loop(0, 0, max_memory, False):
         if with_j:
             #:rho_coeff = np.einsum('Lpq,xqp->xL', Lpq, dms)
             #:vj += np.dot(rho_coeff, Lpq.reshape(-1,nao**2))

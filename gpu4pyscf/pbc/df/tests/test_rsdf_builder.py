@@ -140,11 +140,11 @@ C    D
     auxcell.build()
     omega = 0.3
     kmesh = [1,3,4]
+    kpts = cell.make_kpts(kmesh)
     gpu_dat, dat_neg = build_cderi(cell, auxcell, kmesh=kmesh, omega=omega)
 
     cell.precision = 1e-10
     auxcell.precision = 1e-10
-    kpts = cell.make_kpts(kmesh)
     dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
     dfbuilder.j_only = True
     dfbuilder.omega = omega

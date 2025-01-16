@@ -22,6 +22,7 @@
 #define IMG_MASK_SLOTS  1024
 #define L_AUX_MAX       6
 #define SPTAKS_PER_BLOCK        32
+#define IMG_BLOCK       16384
 
 #ifndef HAVE_DEFINED_PBCINT3CENVVAS_H
 #define HAVE_DEFINED_PBCINT3CENVVAS_H

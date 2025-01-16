@@ -28,29 +28,32 @@ from pyscf import lib
 from pyscf.pbc.tools import pbc as pbctools
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df.rsdf_builder import (
-    OMEGA_MIN, LINEAR_DEP_THR, RCUT_THRESHOLD, estimate_ke_cutoff_for_omega)
+    LINEAR_DEP_THR, RCUT_THRESHOLD, estimate_ke_cutoff_for_omega)
+from pyscf.pbc.df import aft as aft_cpu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2
 
+OMEGA_MIN = 0.1
 
-def build_cderi(cell, auxcell, kmesh=None, omega=0.1, j_only=False,
-                linear_dep_threshold=LINEAR_DEP_THR):
+def build_cderi(cell, auxcell, kpts=None, j_only=False,
+                omega=OMEGA_MIN, linear_dep_threshold=LINEAR_DEP_THR):
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension >= 2
-    if kmesh is None:
+    if kpts is None or is_zero(kpts):
         return build_cderi_gamma_point(
-            cell, auxcell, kmesh, omega, linear_dep_threshold)
+            cell, auxcell, omega, linear_dep_threshold)
     elif j_only:
         return build_cderi_j_only(
-            cell, auxcell, kmesh, omega, linear_dep_threshold)
+            cell, auxcell, kpts, omega, linear_dep_threshold)
     else:
         return build_cderi_kk(
-            cell, auxcell, kmesh, omega, linear_dep_threshold)
+            cell, auxcell, kpts, omega, linear_dep_threshold)
 
-def build_cderi_kk(cell, auxcell, kmesh=None, omega=0.1,
+def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN,
                    linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
@@ -62,23 +65,23 @@ def build_cderi_kk(cell, auxcell, kmesh=None, omega=0.1,
         omega = abs(omega)
         has_long_range = True
 
-    j3c = sr_aux_e2(cell, auxcell, -omega, bvk_kmesh=kmesh)
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+        bvk_kmesh = kmesh = np.ones(3, dtype=int)
+    else:
+        bvk_kmesh = kpts_to_kmesh(cell, kpts)
+        kmesh = kpts_to_kmesh(cell, kpts, bvk=False)
+    j3c = sr_aux_e2(cell, auxcell, -omega, kpts, bvk_kmesh)
     t1 = log.timer('pass1: int3c2e', *t0)
 
-    log.debug('Generate auxcell 2c2e integrals')
-    if kmesh is None:
-        kpts = np.zeros((1, 3))
-        kpt_iters = list(kk_adapted_iter([1, 1, 1]))
-    else:
-        kpts = cell.make_kpts(kmesh)
-        kpt_iters = list(kk_adapted_iter(kmesh))
-    nkpts = len(kpts)
+    kpt_iters = list(kk_adapted_iter(kmesh))
     uniq_kpts = kpts[[x[0] for x in kpt_iters]]
+    log.debug('Generate auxcell 2c2e integrals')
     j2c = _get_2c2e(auxcell, uniq_kpts, omega, has_long_range) # on CPU
     t1 = log.timer('int2c2e', *t1)
 
     if has_long_range:
-        ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, kmesh, omega, log)
+        ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, log)
 
     cderi = {}
     cderip = {}
@@ -111,9 +114,8 @@ def build_cderi_kk(cell, auxcell, kmesh=None, omega=0.1,
     t1 = log.timer('pass2: solve cderi', *t1)
     return cderi, cderip
 
-def build_cderi_gamma_point(cell, auxcell, kmesh=None, omega=0.1,
+def build_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN,
                             linear_dep_threshold=LINEAR_DEP_THR):
-    assert kmesh is None
     log = logger.new_logger(cell)
     t0 = log.init_timer()
     if cell.omega != 0:
@@ -123,6 +125,7 @@ def build_cderi_gamma_point(cell, auxcell, kmesh=None, omega=0.1,
     else:
         omega = abs(omega)
         has_long_range = True
+    kmesh = None
     kpts = None
 
     j3c = sr_aux_e2(cell, auxcell, -omega)
@@ -153,7 +156,7 @@ def build_cderi_gamma_point(cell, auxcell, kmesh=None, omega=0.1,
     t1 = log.timer('pass2: solve cderi', *t1)
     return cderi, cderip
 
-def build_cderi_j_only(cell, auxcell, kmesh=None, omega=0.1,
+def build_cderi_j_only(cell, auxcell, kpts=None, kmesh=None, omega=OMEGA_MIN,
                        linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
@@ -165,17 +168,17 @@ def build_cderi_j_only(cell, auxcell, kmesh=None, omega=0.1,
         omega = abs(omega)
         has_long_range = True
 
-    # TODO: do not generate the entire array
-    j3c = sr_aux_e2(cell, auxcell, -omega, bvk_kmesh=kmesh)
+    # TODO: time-reversal symmetry in j3c, j2c
+    j3c = sr_aux_e2(cell, auxcell, -omega, kpts, kmesh, j_only=True)
     t1 = log.timer('pass1: int3c2e', *t0)
 
     log.debug('Generate auxcell 2c2e integrals')
-    if kmesh is None:
+    if kpts is None:
         kpts = np.zeros((1, 3))
+        bvk_kmesh = np.ones(3, dtype=int)
     else:
-        kpts = cell.make_kpts(kmesh)
+        bvk_kmesh = kpts_to_kmesh(cell, kpts)
     nkpts = len(kpts)
-    j3c = j3c[np.arange(nkpts),np.arange(nkpts)] # FIXME
     j2c = _get_2c2e(auxcell, None, omega, has_long_range) # on CPU
     j2c = j2c[0].real
     t1 = log.timer('int2c2e', *t1)
@@ -184,7 +187,7 @@ def build_cderi_j_only(cell, auxcell, kmesh=None, omega=0.1,
     cderi = {}
     cderip = {}
     if has_long_range:
-        ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, kmesh, omega, log)
+        ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, log)
         kpt = np.zeros(3)
         for pqG, auxG_conj in ft_ao_iter(kpt, kpts):
             # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
@@ -309,8 +312,60 @@ def _get_2c2e(auxcell, uniq_kpts, omega, has_long_range=True):
             j2c[k] = j2c_k.get()
     return j2c
 
-def get_nuc(cell):
-    raise NotImplementedError
+def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
+    fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=False)
+    omega = OMEGA_MIN
+    fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
 
-def get_pp(cell):
-    raise NotImplementedError
+    if kpts is None:
+        bvk_kmesh = np.ones(3, dtype=int)
+    else:
+        bvk_kmesh = kpts_to_kmesh(cell, kpts)
+    nuc = sr_aux_e2(cell, fakenuc, -omega, kpts, bvk_kmesh, j_only=True)
+    charges = -cp.asarray(cell.atom_charges())
+    if kpts is None:
+        nuc = contract('pqr,r->pq', nuc, charges)
+    else:
+        nuc = contract('kpqr,r->kpq', nuc, charges)
+
+    # TODO: consider time-reversal symmetry
+    ft_ao_iter = _ft_ao_iter_generator(cell, fakenuc, bvk_kmesh, omega, verbose)
+    kpt = np.zeros(3)
+    for i, (pqG, auxG_conj) in enumerate(ft_ao_iter(kpt, kpts)):
+        ZG = auxG_conj.dot(charges)
+        # contributions due to pseudo.pp_int.get_gth_vlocG_part1
+        if (with_pseudo and i == 0 and
+            (cell.dimension == 3 or
+             (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+            exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
+            ZG[0] -= charges.dot(np.pi/exps) / cell.vol
+        if kpts is None:
+            nuc += contract('pqG,G->pq', pqG[0], ZG)
+        else:
+            nuc += contract('kpqG,G->kpq', pqG, ZG)
+    return nuc
+
+def get_nuc(cell, kpts=None):
+    '''Get the periodic nuc-el AO matrix, with G=0 removed.
+    '''
+    log = logger.new_logger(cell)
+    t0 = log.init_timer()
+    nuc = get_pp_loc_part1(cell, kpts, with_pseudo=False, verbose=log)
+    log.timer('get_nuc', *t0)
+    return nuc
+
+def get_pp(cell, kpts=None):
+    '''Get the periodic pseudopotential nuc-el ao matrix, with G=0 removed.
+    '''
+    from pyscf.pbc.gto import pseudo
+    log = logger.new_logger(cell)
+    t0 = log.init_timer()
+    vpp = get_pp_loc_part1(cell, kpts, with_pseudo=True, verbose=log)
+    t1 = log.timer_debug1('get_pp_loc_part1', *t0)
+    pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
+    vpp += cp.asarray(pp2builder.get_pp_loc_part2())
+    t1 = log.timer_debug1('get_pp_loc_part2', *t1)
+    vpp += cp.asarray(pseudo.pp_int.get_pp_nl(cell, kpts))
+    t1 = log.timer_debug1('get_pp_nl', *t1)
+    log.timer('get_pp', *t0)
+    return vpp
