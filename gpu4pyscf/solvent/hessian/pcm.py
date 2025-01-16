@@ -19,9 +19,10 @@ Hessian of PCM family solvent model
 
 import numpy
 import cupy
+import ctypes
 from pyscf import lib, gto
 from gpu4pyscf import scf
-from gpu4pyscf.solvent.pcm import PI, switch_h
+from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent
 from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_solver, grad_nuc, get_dD_dS, get_dF_dA, get_dSii, grad_switch_h
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
@@ -29,6 +30,7 @@ from gpu4pyscf.hessian.jk import _ao2mo
 from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
+from pyscf import lib as pyscf_lib
 
 def gradgrad_switch_h(x):
     ''' 2nd derivative of h(x) '''
@@ -119,6 +121,34 @@ def get_d2Sii(surface, dF, d2F):
     d2Sii = 2 * dF_dF_over_F3 - d2F_over_F2
     d2Sii = (2.0/PI)**0.5 * cupy.einsum('ABdDq,q->ABdDq', d2Sii, charge_exp)
     return d2Sii
+
+def get_d2D_d2S(surface, with_S=True, with_D=False, stream=None):
+    ''' Second derivatives of D matrix and S matrix (offdiagonals only)
+    '''
+    charge_exp  = surface['charge_exp']
+    grid_coords = surface['grid_coords']
+    norm_vec    = surface['norm_vec']
+    n = charge_exp.shape[0]
+    d2S = cupy.empty([3,3,n,n])
+    d2D = None
+    d2S_ptr = ctypes.cast(d2S.data.ptr, ctypes.c_void_p)
+    d2D_ptr = pyscf_lib.c_null_ptr()
+    if with_D:
+        d2D = cupy.empty([3,3,n,n])
+        d2D_ptr = ctypes.cast(d2D.data.ptr, ctypes.c_void_p)
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    err = libsolvent.pcm_d2d_d2s(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        d2D_ptr, d2S_ptr,
+        ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(norm_vec.data.ptr, ctypes.c_void_p),
+        ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n)
+    )
+    if err != 0:
+        raise RuntimeError('Failed in generating PCM d2D and d2S matrices.')
+    return d2D, d2S
 
 def hess_nuc(pcmobj, dm, verbose=None):
     if not pcmobj._intermediates:

@@ -137,9 +137,7 @@ def get_dD_dS(surface, with_S=True, with_D=False, stream=None):
     '''
     charge_exp  = surface['charge_exp']
     grid_coords = surface['grid_coords']
-    switch_fun  = surface['switch_fun']
     norm_vec    = surface['norm_vec']
-    R_vdw       = surface['R_vdw']
     n = charge_exp.shape[0]
     dS = cupy.empty([3,n,n])
     dD = None
@@ -155,9 +153,7 @@ def get_dD_dS(surface, with_S=True, with_D=False, stream=None):
         dD_ptr, dS_ptr,
         ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(norm_vec.data.ptr, ctypes.c_void_p),
-        ctypes.cast(R_vdw.data.ptr, ctypes.c_void_p),
         ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
-        ctypes.cast(switch_fun.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n)
     )
     if err != 0:
