@@ -134,7 +134,7 @@ setup(
     ],
     cmdclass={'build_py': CMakeBuildPy},
     install_requires=[
-        'pyscf~=2.7.0',
+        'pyscf~=2.8.0',
         'pyscf-dispersion',
         f'cupy-cuda{CUDA_VERSION}>=13.0', # Due to expm in cupyx.scipy.linalg and cutensor 2.0
         'geometric',
