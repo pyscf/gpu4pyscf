@@ -308,6 +308,7 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     hdiag = cp.hstack([hdiag.ravel(), -hdiag.ravel()])
     return vind, hdiag
 
+
 class TDHF(TDBase):
     __doc__ = tdhf_cpu.TDHF.__doc__
 
