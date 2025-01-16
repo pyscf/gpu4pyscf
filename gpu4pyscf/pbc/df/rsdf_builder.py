@@ -43,44 +43,45 @@ def build_cderi(cell, auxcell, kpts=None, j_only=False,
                 omega=OMEGA_MIN, linear_dep_threshold=LINEAR_DEP_THR):
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension >= 2
-    if kpts is None or is_zero(kpts):
-        return build_cderi_gamma_point(
-            cell, auxcell, omega, linear_dep_threshold)
-    elif j_only:
-        return build_cderi_j_only(
-            cell, auxcell, kpts, omega, linear_dep_threshold)
-    else:
-        return build_cderi_kk(
-            cell, auxcell, kpts, omega, linear_dep_threshold)
-
-def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN,
-                   linear_dep_threshold=LINEAR_DEP_THR):
-    log = logger.new_logger(cell)
-    t0 = log.init_timer()
     if cell.omega != 0:
         assert cell.omega < 0
         omega = abs(cell.omega)
-        has_long_range = False
+        with_long_range = False
     else:
         omega = abs(omega)
-        has_long_range = True
+        with_long_range = True
 
+    if kpts is None or is_zero(kpts):
+        return build_cderi_gamma_point(
+            cell, auxcell, omega, with_long_range, linear_dep_threshold)
+    elif j_only:
+        return build_cderi_j_only(
+            cell, auxcell, kpts, omega, with_long_range, linear_dep_threshold)
+    else:
+        return build_cderi_kk(
+            cell, auxcell, kpts, omega, with_long_range, linear_dep_threshold)
+
+def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
+                   linear_dep_threshold=LINEAR_DEP_THR):
+    log = logger.new_logger(cell)
+    t0 = log.init_timer()
     if kpts is None:
         kpts = np.zeros((1, 3))
         bvk_kmesh = kmesh = np.ones(3, dtype=int)
     else:
-        bvk_kmesh = kpts_to_kmesh(cell, kpts)
-        kmesh = kpts_to_kmesh(cell, kpts, bvk=False)
+        # A truncated bvk_kmesh can cause finite-size errors in HFX.
+        # bvk_kmesh must be identical to MP kmesh in HFX.
+        bvk_kmesh = kmesh = kpts_to_kmesh(cell, kpts, bvk=False)
     j3c = sr_aux_e2(cell, auxcell, -omega, kpts, bvk_kmesh)
     t1 = log.timer('pass1: int3c2e', *t0)
 
     kpt_iters = list(kk_adapted_iter(kmesh))
     uniq_kpts = kpts[[x[0] for x in kpt_iters]]
     log.debug('Generate auxcell 2c2e integrals')
-    j2c = _get_2c2e(auxcell, uniq_kpts, omega, has_long_range) # on CPU
+    j2c = _get_2c2e(auxcell, uniq_kpts, omega, with_long_range) # on CPU
     t1 = log.timer('int2c2e', *t1)
 
-    if has_long_range:
+    if with_long_range:
         ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, log)
 
     cderi = {}
@@ -90,7 +91,7 @@ def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN,
         log.debug1('ki_idx = %s', ki_idx)
         log.debug1('kj_idx = %s', kj_idx)
 
-        if has_long_range:
+        if with_long_range:
             '''exp(-i*(G + k) dot r) * Coulomb_kernel'''
             for pqG, auxG_conj in ft_ao_iter(kpts[kp], kpts[kj_idx]):
                 # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
@@ -114,17 +115,10 @@ def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN,
     t1 = log.timer('pass2: solve cderi', *t1)
     return cderi, cderip
 
-def build_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN,
+def build_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
                             linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
-    if cell.omega != 0:
-        assert cell.omega < 0
-        omega = abs(cell.omega)
-        has_long_range = False
-    else:
-        omega = abs(omega)
-        has_long_range = True
     kmesh = None
     kpts = None
 
@@ -132,13 +126,13 @@ def build_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN,
     t1 = log.timer('pass1: int3c2e', *t0)
 
     log.debug('Generate auxcell 2c2e integrals')
-    j2c = _get_2c2e(auxcell, kpts, omega, has_long_range) # on CPU
+    j2c = _get_2c2e(auxcell, kpts, omega, with_long_range) # on CPU
     j2c = j2c[0].real
     t1 = log.timer('int2c2e', *t1)
 
     cderi = {}
     cderip = {}
-    if has_long_range:
+    if with_long_range:
         ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, kmesh, omega, log)
         for pqG, auxG_conj in ft_ao_iter():
             # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
@@ -156,37 +150,29 @@ def build_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN,
     t1 = log.timer('pass2: solve cderi', *t1)
     return cderi, cderip
 
-def build_cderi_j_only(cell, auxcell, kpts=None, kmesh=None, omega=OMEGA_MIN,
+def build_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
                        linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
-    if cell.omega != 0:
-        assert cell.omega < 0
-        omega = abs(cell.omega)
-        has_long_range = False
-    else:
-        omega = abs(omega)
-        has_long_range = True
-
-    # TODO: time-reversal symmetry in j3c, j2c
-    j3c = sr_aux_e2(cell, auxcell, -omega, kpts, kmesh, j_only=True)
-    t1 = log.timer('pass1: int3c2e', *t0)
-
-    log.debug('Generate auxcell 2c2e integrals')
     if kpts is None:
         kpts = np.zeros((1, 3))
         bvk_kmesh = np.ones(3, dtype=int)
     else:
-        bvk_kmesh = kpts_to_kmesh(cell, kpts)
-    nkpts = len(kpts)
-    j2c = _get_2c2e(auxcell, None, omega, has_long_range) # on CPU
+        # A truncated bvk_kmesh can be used for Coulomb integrals.
+        bvk_kmesh = kpts_to_kmesh(cell, kpts, bvk=True)
+    # TODO: time-reversal symmetry in j3c, j2c
+    j3c = sr_aux_e2(cell, auxcell, -omega, kpts, bvk_kmesh, j_only=True)
+    t1 = log.timer('pass1: int3c2e', *t0)
+
+    log.debug('Generate auxcell 2c2e integrals')
+    j2c = _get_2c2e(auxcell, None, omega, with_long_range) # on CPU
     j2c = j2c[0].real
     t1 = log.timer('int2c2e', *t1)
 
     # TODO: consider time-reversal symmetry
     cderi = {}
     cderip = {}
-    if has_long_range:
+    if with_long_range:
         ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, log)
         kpt = np.zeros(3)
         for pqG, auxG_conj in ft_ao_iter(kpt, kpts):
@@ -198,6 +184,7 @@ def build_cderi_j_only(cell, auxcell, kpts=None, kmesh=None, omega=OMEGA_MIN,
     cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(j2c, linear_dep_threshold)
     assert j2ctag == 'ED'
 
+    nkpts = len(kpts)
     for k in range(nkpts):
         cderi[k, k] = contract('Lr,pqr->Lpq', cd_j2c, j3c[k])
         if cd_j2c_negative is not None:
@@ -258,7 +245,7 @@ def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
     return j2c, j2c_negative, j2ctag
 
 # Create 2c2e, store on CPU
-def _get_2c2e(auxcell, uniq_kpts, omega, has_long_range=True):
+def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True):
     # j2c ~ (-kpt_ji | kpt_ji) => hermi=1
     precision = auxcell.precision**1.5
     aux_exp = np.hstack(auxcell.bas_exps()).min()
@@ -271,7 +258,7 @@ def _get_2c2e(auxcell, uniq_kpts, omega, has_long_range=True):
     with auxcell_sr.with_short_range_coulomb(omega):
         j2c = auxcell_sr.pbc_intor('int2c2e', hermi=1, kpts=uniq_kpts)
 
-    if not has_long_range:
+    if not with_long_range:
         return j2c
 
     ke = estimate_ke_cutoff_for_omega(auxcell, omega, precision)

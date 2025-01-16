@@ -89,6 +89,27 @@ class KnownValues(unittest.TestCase):
         assert abs(vj.get() - jref).max() < 1e-8
         assert abs(vk.get() - kref).max() < 1e-8
 
+    def test_jk1(self):
+        kpts = cell.make_kpts([1,4,1])
+        nkpts = len(kpts)
+        mydf0 = df_cpu.GDF(cell, kpts)
+        mydf  = GDF(cell, kpts)
+
+        nao = cell.nao
+        np.random.seed(12)
+        dm = (np.random.random((nkpts, nao, nao)) +
+              np.random.random((nkpts, nao, nao))*1j)
+        jref, kref = mydf0.get_jk(dm, hermi=0, exxdiv='ewald')
+        vj, vk = mydf.get_jk(dm, hermi=0, exxdiv='ewald')
+        assert abs(vj.get() - jref).max() < 1e-8
+        assert abs(vk.get() - kref).max() < 1e-8
+
+        dm = dm + dm.conj().transpose(0,2,1)
+        jref, kref = mydf0.get_jk(dm, hermi=1, exxdiv='ewald')
+        vj, vk = mydf.get_jk(dm, hermi=1, exxdiv='ewald')
+        assert abs(vj.get() - jref).max() < 1e-8
+        assert abs(vk.get() - kref).max() < 1e-8
+
     @unittest.skip('pbc-gdf only supports Monkhorst-Pack k-mesh')
     def test_jk_complex_dm(self):
         scaled_center = [0.3728,0.5524,0.7672]
@@ -206,3 +227,7 @@ class KnownValues(unittest.TestCase):
         kref = mydf0.get_jk(dm, hermi=1, with_j=False)[1]
         vk = mydf.get_jk(dm, hermi=1, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-8
+
+if __name__ == '__main__':
+    print("Full Tests for PBC DF")
+    unittest.main()
