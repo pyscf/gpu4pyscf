@@ -15,12 +15,10 @@
 
 import numpy as np
 import cupy as cp
-import time
-from pyscf import gto
 from pyscf import lib
 from pyscf.tdscf import rhf as tdhf_cpu
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, real_eig
-from gpu4pyscf import scf, dft
+from gpu4pyscf import scf
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib import logger
@@ -52,7 +50,7 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     orbo2 = orbo * 2. # *2 for double occupancy
 
     e_ia = hdiag = mo_energy[viridx] - mo_energy[occidx,None]
-    hdiag = hdiag.ravel()#.get()
+    hdiag = hdiag.ravel()
     vresp = mf.gen_response(singlet=singlet, hermi=0)
     nocc, nvir = e_ia.shape
 
@@ -65,7 +63,7 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
         v1mo = contract('xpq,qo->xpo', v1ao, orbo)
         v1mo = contract('xpo,pv->xov', v1mo, orbv.conj())
         v1mo += zs * e_ia
-        return v1mo.reshape(v1mo.shape[0],-1)#.get()
+        return v1mo.reshape(v1mo.shape[0],-1)
 
     return vind, hdiag
 
@@ -188,7 +186,6 @@ class TDA(TDBase):
         '''Generate function to compute Ax'''
         if mf is None:
             mf = self._scf
-        
         return gen_tda_operation(mf, singlet=self.singlet)
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
@@ -318,7 +315,6 @@ class TDHF(TDBase):
     def gen_vind(self, mf=None):
         if mf is None:
             mf = self._scf
-
         return gen_tdhf_operation(mf, singlet=self.singlet)
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
@@ -352,6 +348,7 @@ class TDHF(TDBase):
         x0sym = None
         if x0 is None:
             x0 = self.init_guess()
+
         self.converged, self.e, x1 = real_eig(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
             nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,

@@ -84,6 +84,7 @@ def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
         log = verbose
     else:
         log = logger.Logger(sys.stdout, verbose)
+
     if isinstance(x0, np.ndarray) and x0.ndim == 1:
         x0 = x0[None,:]
     
@@ -114,7 +115,7 @@ def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
         xs_ir = cp.array([], dtype=xt_ir.dtype)
 
     for icyc in range(max_cycle):
-        xt, xt_idx = _qr_gpu(xt, lindep)
+        xt, xt_idx = _qr(xt, lindep)
         # Generate at most space_inc trial vectors
         xt = xt[:space_inc]
         xt_idx = xt_idx[:space_inc]
@@ -300,6 +301,7 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
         log = verbose
     else:
         log = logger.Logger(sys.stdout, verbose)
+
     if isinstance(x0, np.ndarray) and x0.ndim == 1:
         x0 = x0[None,:]
     x0 = np.asarray(x0)
@@ -636,7 +638,7 @@ def real_eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=Non
         pi[m0:m1,:m1] = pi_block
 
         if x0sym is None:
-            omega, x, y = TDDFT_subspace_eigen_solver_gpu(
+            omega, x, y = TDDFT_subspace_eigen_solver(
                 a[:m1,:m1], b[:m1,:m1], sigma[:m1,:m1], pi[:m1,:m1], space_inc)
         else:
             # Diagonalize within eash symmetry sectors
@@ -647,7 +649,7 @@ def real_eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=Non
             i1 = 0
             for ir in set(xs_ir):
                 idx = cp.nonzero(xs_ir[:m1] == ir)[0]
-                _w, _x, _y = TDDFT_subspace_eigen_solver_gpu(
+                _w, _x, _y = TDDFT_subspace_eigen_solver(
                     a[idx[:,None],idx], b[idx[:,None],idx],
                     sigma[idx[:,None],idx], pi[idx[:,None],idx], idx.size)
                 i0, i1 = i1, i1 + idx.size
@@ -719,7 +721,7 @@ def real_eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=Non
         X_new = XY_new[:,:A_size].T
         Y_new = XY_new[:,A_size:].T
         if x0sym is None:
-            V, W = VW_Gram_Schmidt_fill_holder_gpu(
+            V, W = VW_Gram_Schmidt_fill_holder(
                 V_holder[:,:m1], W_holder[:,:m1], X_new, Y_new)
         else:
             xt_ir = xt_ir[r_index]
@@ -728,7 +730,7 @@ def real_eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=Non
             W = []
             for ir in set(xt_ir):
                 idx = cp.nonzero(xt_ir == ir)[0]
-                _V, _W = VW_Gram_Schmidt_fill_holder_gpu(
+                _V, _W = VW_Gram_Schmidt_fill_holder(
                     V_holder[:,:m1], W_holder[:,:m1], X_new[:,idx], Y_new[:,idx])
                 V.append(_V)
                 W.append(_W)
@@ -795,29 +797,13 @@ def _qr(xs, lindep=1e-14):
         for j in range(nv):
             prod = xs[j].conj().dot(xi)
             xi -= xs[j] * prod
-        norm = np.linalg.norm(xi)
-        if norm**2 > lindep:
-            xs[nv] = xi/norm
-            nv += 1
-            idx.append(i)
-    return xs[:nv], idx
-
-def _qr_gpu(xs, lindep=1e-14):
-    '''QR decomposition for a list of vectors (for linearly independent vectors only).
-    xs = (r.T).dot(qs)
-    '''
-    nv = 0
-    idx = []
-    for i, xi in enumerate(xs):
-        for j in range(nv):
-            prod = xs[j].conj().dot(xi)
-            xi -= xs[j] * prod
         norm = cp.linalg.norm(xi)
         if norm**2 > lindep:
             xs[nv] = xi/norm
             nv += 1
             idx.append(i)
     return xs[:nv], idx
+
 
 def _symmetric_orth(xt, lindep=1e-6):
     xt = np.asarray(xt)
@@ -930,52 +916,6 @@ def TDDFT_subspace_eigen_solver(a, b, sigma, pi, nroots):
     ''' [ a b ] x - [ σ   π] x  Ω = 0 '''
     ''' [ b a ] y   [-π  -σ] y    = 0 '''
 
-    d = abs(np.diag(sigma))
-    d_mh = d**(-0.5)
-
-    s_m_p = np.einsum('i,ij,j->ij', d_mh, sigma - pi, d_mh)
-
-    '''LU = d^−1/2 (σ − π) d^−1/2'''
-    ''' A = LU '''
-    L, U = scipy.linalg.lu(s_m_p, permute_l=True)
-    L_inv = np.linalg.inv(L)
-    U_inv = np.linalg.inv(U)
-
-    '''U^-T d^−1/2 (a−b) d^-1/2 U^-1 = GG^T '''
-    d_amb_d = np.einsum('i,ij,j->ij', d_mh, a-b, d_mh)
-    GGT = np.linalg.multi_dot([U_inv.T, d_amb_d, U_inv])
-
-    G = scipy.linalg.cholesky(GGT, lower=True)
-    G_inv = np.linalg.inv(G)
-
-    ''' M = G^T L^−1 d^−1/2 (a+b) d^−1/2 L^−T G '''
-    d_apb_d = np.einsum('i,ij,j->ij', d_mh, a+b, d_mh)
-    M = np.linalg.multi_dot([G.T, L_inv, d_apb_d, L_inv.T, G])
-
-    omega2, Z = np.linalg.eigh(M)
-    if np.any(omega2 <= 0):
-        idx = np.nonzero(omega2 > 0)[0]
-        omega2 = omega2[idx[:nroots]]
-        Z = Z[:,idx[:nroots]]
-    else:
-        omega2 = omega2[:nroots]
-        Z = Z[:,:nroots]
-    omega = omega2**0.5
-
-    ''' It requires Z^T Z = 1/Ω '''
-    ''' x+y = d^−1/2 L^−T GZ Ω^-0.5 '''
-    ''' x−y = d^−1/2 U^−1 G^−T Z Ω^0.5 '''
-    x_p_y = np.einsum('i,ik,k->ik', d_mh, L_inv.T.dot(G.dot(Z)), omega**-0.5)
-    x_m_y = np.einsum('i,ik,k->ik', d_mh, U_inv.dot(G_inv.T.dot(Z)), omega**0.5)
-
-    x = (x_p_y + x_m_y)/2
-    y = x_p_y - x
-    return omega, x, y
-
-def TDDFT_subspace_eigen_solver_gpu(a, b, sigma, pi, nroots):
-    ''' [ a b ] x - [ σ   π] x  Ω = 0 '''
-    ''' [ b a ] y   [-π  -σ] y    = 0 '''
-
     d = abs(cp.diag(sigma))
     d_mh = d**(-0.5)
 
@@ -996,7 +936,6 @@ def TDDFT_subspace_eigen_solver_gpu(a, b, sigma, pi, nroots):
 
     ''' M = G^T L^−1 d^−1/2 (a+b) d^−1/2 L^−T G '''
     d_apb_d = cp.einsum('i,ij,j->ij', d_mh, a+b, d_mh)
-    # M = cp.linalg.multi_dot([G.T, L_inv, d_apb_d, L_inv.T, G])
     M = cp.dot(G.T, cp.dot(L_inv, cp.dot(d_apb_d, cp.dot(L_inv.T, G))))
 
     omega2, Z = cp.linalg.eigh(M)
@@ -1019,77 +958,8 @@ def TDDFT_subspace_eigen_solver_gpu(a, b, sigma, pi, nroots):
     y = x_p_y - x
     return omega, x, y
 
+
 def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, X_new, Y_new, lindep=1e-6):
-    '''
-    QR orthogonalization for (X_new, Y_new) basis vectors, then apply symmetric
-    orthogonalization for {[X, Y]}, and its dual basis vectors {[Y, X]}
-    '''
-    _x  = V_holder.T.dot(X_new)
-    _x += W_holder.T.dot(Y_new)
-    _y  = V_holder.T.dot(Y_new)
-    _y += W_holder.T.dot(X_new)
-    X_new -= V_holder.dot(_x)
-    X_new -= W_holder.dot(_y)
-    Y_new -= W_holder.dot(_x)
-    Y_new -= V_holder.dot(_y)
-    x0_size = X_new.shape[0]
-
-    s11  = X_new.T.dot(X_new)
-    s11 += Y_new.T.dot(Y_new)
-    # s21 is symmetric
-    s21  = X_new.T.dot(Y_new)
-    s21 += Y_new.T.dot(X_new)
-    e, c = np.linalg.eigh(s11)
-    mask = e > lindep**2
-    e = e[mask]
-    if e.size == 0:
-        return (np.zeros([0, x0_size], dtype=X_new.dtype),
-                np.zeros([0, x0_size], dtype=Y_new.dtype))
-    c = c[:,mask] * e**-.5
-
-    csc = c.T.dot(s21).dot(c)
-    n = csc.shape[0]
-    for i in range(n):
-        w, u = np.linalg.eigh(csc[i:,i:])
-        mask = 1 - abs(w) > lindep
-        if np.any(mask):
-            c = c[:,i:]
-            break
-    else:
-        return (np.zeros([0, x0_size], dtype=X_new.dtype),
-                np.zeros([0, x0_size], dtype=Y_new.dtype))
-    w = w[mask]
-    u = u[:,mask]
-    c_orth = c.dot(u)
-
-    if e[0] < 1e-6 or 1-abs(w[0]) < 1e-3:
-        # Rerun the orthogonalization to reduce numerical errors
-        e, c = np.linalg.eigh(c_orth.T.dot(s11).dot(c_orth))
-        c *= e**-.5
-        c_orth = c_orth.dot(c)
-        csc = c_orth.T.dot(s21).dot(c_orth)
-        w, u = np.linalg.eigh(csc)
-        c_orth = c_orth.dot(u)
-
-    # Symmetric diagonalize
-    # [1 w] => c = [a b]
-    # [w 1]        [b a]
-    # where
-    # a = ((1+w)**-.5 + (1-w)**-.5)/2
-    # b = ((1+w)**-.5 - (1-w)**-.5)/2
-    a1 = (1 + w)**-.5
-    a2 = (1 - w)**-.5
-    a = (a1 + a2) / 2
-    b = (a1 - a2) / 2
-
-    x_orth  = X_new.dot(c_orth * a)
-    x_orth += Y_new.dot(c_orth * b)
-    y_orth  = Y_new.dot(c_orth * a)
-    y_orth += X_new.dot(c_orth * b)
-    return x_orth.T, y_orth.T
-
-
-def VW_Gram_Schmidt_fill_holder_gpu(V_holder, W_holder, X_new, Y_new, lindep=1e-6):
     '''
     QR orthogonalization for (X_new, Y_new) basis vectors, then apply symmetric
     orthogonalization for {[X, Y]}, and its dual basis vectors {[Y, X]}
