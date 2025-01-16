@@ -78,7 +78,6 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    float log_cutoff = envs.log_cutoff;
 
     int gx_len = g_size * nksp_per_block;
     extern __shared__ double rw_buffer[];
@@ -198,6 +197,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                     // gout on these warps will never be evaluated. These warps
                     // may proceeed to a wrong __syncthreads() barrier and
                     // produce wrong g[xyz].
+                    float log_cutoff = envs.log_cutoff;
                     if ((thread_id_in_warp / nksh_per_block == 0) &&
                         img0+img < img1 && 5.f+2.f*lij-Kab_f32 > log_cutoff) {
                         // check any not vanished integrals

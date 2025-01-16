@@ -28,7 +28,7 @@ def setUpModule():
                   'C' :[[0, [1., 1]]],}
     cell.pseudo = {'C':'gth-pade'}
     cell.a = np.eye(3) * 2.5
-    cell.precision = 1e-9
+    cell.precision = 1e-8
     cell.build()
 
 def tearDownModule():

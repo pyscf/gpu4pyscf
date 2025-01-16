@@ -22,7 +22,7 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.lib.parameters import ANGULAR
-from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD, conc_env
+from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD, PTR_EXP, conc_env
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero
@@ -76,7 +76,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         i0, i1, j0, j1 = ao_loc[list(shls_slice[:4])]
         k0, k1 = aux_loc[list(shls_slice[4:])]
         if kpts is None:
-            out[i0:i1,j0:j1,k0:k1] = tmp = eri3c.sum(axis=(0,2))
+            out[i0:i1,j0:j1,k0:k1] = tmp = eri3c[0,:,0]
             if i0 != j0:
                 out[j0:j1,i0:i1,k0:k1] = tmp.transpose(1,0,2)
         elif j_only:
@@ -249,6 +249,10 @@ class SRInt3c2eOpt:
         _atm_cpu, _bas_cpu, _env_cpu = conc_env(
             bvkcell._atm, bvkcell._bas, _scale_sp_ctr_coeff(bvkcell),
             auxcell._atm, auxcell._bas, _scale_sp_ctr_coeff(auxcell))
+        #NOTE: PTR_BAS_COORD is not updated in conc_env()
+        off = _bas_cpu[bvkcell.nbas,PTR_EXP] - auxcell._bas[0,PTR_EXP]
+        _bas_cpu[bvkcell.nbas:,PTR_BAS_COORD] += off
+
         bvk_ao_loc = bvkcell.ao_loc
         aux_loc = auxcell.ao_loc
 

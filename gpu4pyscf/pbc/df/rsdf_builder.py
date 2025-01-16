@@ -302,11 +302,11 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True):
     return j2c
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
-    fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=False)
-    omega = OMEGA_MIN
     fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
+    omega = OMEGA_MIN
 
-    if kpts is None:
+    if kpts is None or is_zero(kpts):
+        kpts = None
         bvk_kmesh = np.ones(3, dtype=int)
     else:
         bvk_kmesh = kpts_to_kmesh(cell, kpts)
@@ -329,7 +329,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
             exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
             ZG[0] -= charges.dot(np.pi/exps) / cell.vol
         if kpts is None:
-            nuc += contract('pqG,G->pq', pqG[0], ZG)
+            nuc += contract('pqG,G->pq', pqG[0], ZG).real
         else:
             nuc += contract('kpqG,G->kpq', pqG, ZG)
     return nuc
