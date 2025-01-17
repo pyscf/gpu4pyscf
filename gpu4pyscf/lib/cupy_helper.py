@@ -24,7 +24,7 @@ from gpu4pyscf.gto import mole
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 from gpu4pyscf.lib.memcpy import copy_array  #NOQA
-from gpu4pyscf.__config__ import _streams, _num_devices, _p2p_access
+from gpu4pyscf.__config__ import _streams, num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
@@ -126,8 +126,8 @@ def reduce_to_device(array_list, inplace=False):
     ''' Reduce a list of ndarray in different devices to device 0
     TODO: reduce memory footprint, improve throughput
     '''
-    assert len(array_list) == _num_devices
-    if _num_devices == 1:
+    assert len(array_list) == num_devices
+    if num_devices == 1:
         return array_list[0]
     
     out_shape = array_list[0].shape

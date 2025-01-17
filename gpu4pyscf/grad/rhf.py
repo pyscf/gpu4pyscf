@@ -27,7 +27,7 @@ from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.hf import KohnShamDFT
 from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, sandwich_dot, reduce_to_device
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.__config__ import _streams, _num_devices
+from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import jk
@@ -127,7 +127,7 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
     if vhfopt is None:
         # Small group size for load balance
         group_size = None
-        if _num_devices > 1: 
+        if num_devices > 1: 
             group_size = jk.GROUP_SIZE
         vhfopt = _VHFOpt(mol).build(group_size=group_size)
 
@@ -156,13 +156,13 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
                     tasks.append((i,j,k,l))
     tasks = np.array(tasks)
     task_list = []
-    for device_id in range(_num_devices):
-        task_list.append(tasks[device_id::_num_devices])
+    for device_id in range(num_devices):
+        task_list.append(tasks[device_id::num_devices])
 
     cp.cuda.get_current_stream().synchronize()
     futures = []
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _ejk_ip1_task,
                 mol, dms, vhfopt, task_list[device_id],

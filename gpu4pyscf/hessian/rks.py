@@ -30,7 +30,7 @@ from gpu4pyscf.dft import numint
 from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem,
                                        reduce_to_device, transpose_sum)
 from gpu4pyscf.lib import logger
-from gpu4pyscf.__config__ import _streams, _num_devices
+from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.hessian import jk
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
@@ -346,7 +346,7 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     ao_loc = mol.ao_loc_nr()
 
     ngrids_glob = grids.coords.shape[0]
-    ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
+    ngrids_per_device = (ngrids_glob + num_devices - 1) // num_devices
     grid_start = device_id * ngrids_per_device
     grid_end = (device_id + 1) * ngrids_per_device
 
@@ -525,8 +525,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
 
     futures = []
     cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _get_vxc_deriv2_task,
                 hessobj, grids, mo_coeff, mo_occ, max_memory,
@@ -550,7 +550,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     ao_loc = mol.ao_loc_nr()
 
     ngrids_glob = grids.coords.shape[0]
-    ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
+    ngrids_per_device = (ngrids_glob + num_devices - 1) // num_devices
     grid_start = device_id * ngrids_per_device
     grid_end = (device_id + 1) * ngrids_per_device
 
@@ -691,8 +691,8 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
     futures = []
     cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _get_vxc_deriv1_task,
                 hessobj, grids, mo_coeff, mo_occ, max_memory,
@@ -726,7 +726,7 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
             ao_deriv = 1
 
         ngrids_glob = grids.coords.shape[0]
-        ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
+        ngrids_per_device = (ngrids_glob + num_devices - 1) // num_devices
         grid_start = device_id * ngrids_per_device
         grid_end = (device_id + 1) * ngrids_per_device
 
@@ -799,8 +799,8 @@ def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, re
     
     futures = []
     cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _nr_rks_fxc_mo_task,
                 ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
