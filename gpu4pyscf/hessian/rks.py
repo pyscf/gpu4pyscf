@@ -348,7 +348,6 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     ngrids_glob = grids.coords.shape[0]
     grid_start, grid_end = numint.grid_range(ngrids_glob, device_id)
     ngrids_local = grid_end - grid_start
-    log.debug(f"{ngrids_local} grids on Device {device_id}")
 
     with cupy.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(mol, verbose)
@@ -552,7 +551,6 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     ngrids_glob = grids.coords.shape[0]
     grid_start, grid_end = numint.grid_range(ngrids_glob, device_id)
     ngrids_local = grid_end - grid_start
-    log.debug(f"{ngrids_local} grids on Device {device_id}")
     
     with cupy.cuda.Device(device_id), _streams[device_id]:
         mo_occ = cupy.asarray(mo_occ)
