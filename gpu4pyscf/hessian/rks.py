@@ -346,9 +346,9 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     ao_loc = mol.ao_loc_nr()
 
     ngrids_glob = grids.coords.shape[0]
-    ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
-    grid_start = device_id * ngrids_per_device
-    grid_end = (device_id + 1) * ngrids_per_device
+    grid_start, grid_end = numint.grid_range(ngrids_glob, device_id)
+    ngrids_local = grid_end - grid_start
+    log.debug(f"{ngrids_local} grids on Device {device_id}")
 
     with cupy.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(mol, verbose)
@@ -550,10 +550,10 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     ao_loc = mol.ao_loc_nr()
 
     ngrids_glob = grids.coords.shape[0]
-    ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
-    grid_start = device_id * ngrids_per_device
-    grid_end = (device_id + 1) * ngrids_per_device
-
+    grid_start, grid_end = numint.grid_range(ngrids_glob, device_id)
+    ngrids_local = grid_end - grid_start
+    log.debug(f"{ngrids_local} grids on Device {device_id}")
+    
     with cupy.cuda.Device(device_id), _streams[device_id]:
         mo_occ = cupy.asarray(mo_occ)
         mo_coeff = cupy.asarray(mo_coeff)
@@ -726,9 +726,9 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
             ao_deriv = 1
 
         ngrids_glob = grids.coords.shape[0]
-        ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
-        grid_start = device_id * ngrids_per_device
-        grid_end = (device_id + 1) * ngrids_per_device
+        grid_start, grid_end = numint.grid_range(ngrids_glob, device_id)
+        ngrids_local = grid_end - grid_start
+        log.debug(f"{ngrids_local} grids on Device {device_id}")
 
         p0 = p1 = grid_start
         t1 = t0 = log.init_timer()

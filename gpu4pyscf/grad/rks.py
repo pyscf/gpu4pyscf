@@ -151,10 +151,11 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         opt = ni.gdftopt
         _sorted_mol = opt._sorted_mol
         nset = dms.shape[0]
+
         ngrids_glob = grids.coords.shape[0]
-        ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
-        grid_start = device_id * ngrids_per_device
-        grid_end = (device_id + 1) * ngrids_per_device
+        grid_start, grid_end = numint.grid_range(ngrids_glob, device_id)
+        ngrids_local = grid_end - grid_start
+        log.debug(f"{ngrids_local} grids on Device {device_id}")
 
         nset = len(dms)
         assert nset == 1
