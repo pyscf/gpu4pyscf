@@ -97,7 +97,7 @@ class TDBase(lib.StreamObject):
     get_ab = NotImplemented
 
     def get_precond(self, hdiag):
-        t=1.0e-14
+        t=1.0e-4
         def precond(x, e, *args):
             n_states = x.shape[0]
             diagd = cp.repeat(hdiag.reshape(1,-1), n_states, axis=0)
@@ -172,7 +172,7 @@ class TDA(TDBase):
     __doc__ = tdhf_cpu.TDA.__doc__
 
     def get_precond(self, hdiag):
-        t=1.0e-14
+        t=1.0e-4
         def precond(x, e, *args):
             n_states = x.shape[0]
             diagd = cp.repeat(hdiag.reshape(1,-1), n_states, axis=0)
