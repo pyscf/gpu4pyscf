@@ -21,19 +21,17 @@
 Non-relativistic UHF analytical Hessian
 '''
 
-from functools import reduce
 import numpy as np
 import cupy
 import cupy as cp
 from pyscf import lib
 from pyscf.scf import ucphf
-# import _response_functions to load gen_response methods in SCF class
-from gpu4pyscf.scf import _response_functions  # noqa
-from gpu4pyscf.gto.mole import sort_atoms
-from gpu4pyscf.lib.cupy_helper import contract, tag_array, get_avail_mem, krylov
+from gpu4pyscf.lib.cupy_helper import (contract, transpose_sum, get_avail_mem,
+                                       krylov, tag_array)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess_gpu
+from gpu4pyscf.hessian import jk
 
 GB = 1024*1024*1024
 ALIGNED = 4
@@ -67,8 +65,9 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             h1mo = (h1mo[0].get(), h1mo[1].get())
         t1 = log.timer_debug1('making H1', *t1)
     if mo1 is None or mo_e1 is None:
+        fx = hessobj.gen_vind(mo_coeff, mo_occ)
         mo1, mo_e1 = hessobj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1mo,
-                                       None, atmlst, max_memory, log)
+                                       fx, atmlst, max_memory, log)
         t1 = log.timer_debug1('solving MO1', *t1)
 
     mo1a = cupy.asarray(mo1[0])
@@ -181,18 +180,20 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mo_a, mo_b = mo_coeff
     mocca = mo_a[:,mo_occ[0]>0]
     moccb = mo_b[:,mo_occ[1]>0]
-    nao = mo_a.shape[0]
     dm0a = mocca.dot(mocca.T)
     dm0b = moccb.dot(moccb.T)
     grad_obj = hessobj.base.Gradients()
     h1moa = rhf_grad.get_grad_hcore(grad_obj, mo_a, mo_occ[0])
     h1mob = rhf_grad.get_grad_hcore(grad_obj, mo_b, mo_occ[1])
 
+    # Estimate the size of intermediate variables
+    # dm, vj, and vk in [natm,3,nao_cart,nao_cart]
+    nao_cart = mol.nao_cart()
     avail_mem = get_avail_mem()
-    slice_size = int(avail_mem*0.6) // (8*3*nao*nao*2)
+    slice_size = int(avail_mem*0.5) // (8*3*nao_cart*nao_cart*6)
     for atoms_slice in lib.prange(0, natm, slice_size):
-        vja, vka = rhf_hess_gpu._get_jk(mol, dm0a, atoms_slice=atoms_slice, verbose=verbose)
-        vjb, vkb = rhf_hess_gpu._get_jk(mol, dm0b, atoms_slice=atoms_slice, verbose=verbose)
+        vja, vka = rhf_hess_gpu._get_jk_ip1(mol, dm0a, atoms_slice=atoms_slice, verbose=verbose)
+        vjb, vkb = rhf_hess_gpu._get_jk_ip1(mol, dm0b, atoms_slice=atoms_slice, verbose=verbose)
         #:vhfa = vja+vjb - vka
         #:vhfb = vja+vjb - vkb
         vhfa = vka
@@ -291,8 +292,8 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
 
     avail_mem = get_avail_mem()
     # *8 for spin-up/down input dm, vj, vk, and vxc
-    blksize = int(min(avail_mem*.3 / (8*3*nao*nao*8),
-                      avail_mem*.6 / (8*nmo*nocc*natm*3*5)))
+    blksize = int(min(avail_mem*.3 / (8*3*nao*nocc*8),
+                      avail_mem*.3 / (8*nao*nao*3*6)))  # in vj, vk, dm in AO
     if blksize < ALIGNED**2:
         raise RuntimeError('GPU memory insufficient')
 
@@ -368,8 +369,9 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     log.timer('CPHF solver', *t0)
     return (mo1sa, mo1sb), (e1sa, e1sb)
 
-def gen_vind(mf, mo_coeff, mo_occ):
+def gen_vind(hessobj, mo_coeff, mo_occ):
     # Move data to GPU
+    mol = hessobj.mol
     mo_coeff = cupy.asarray(mo_coeff)
     mo_occ = cupy.asarray(mo_occ)
     nao, nmoa = mo_coeff[0].shape
@@ -378,39 +380,32 @@ def gen_vind(mf, mo_coeff, mo_occ):
     moccb = mo_coeff[1][:,mo_occ[1]>0]
     nocca = mocca.shape[1]
     noccb = moccb.shape[1]
-    grids = getattr(mf, 'cphf_grids', None)
-    if grids is not None:
-        logger.info(mf, 'Secondary grids defined for CPHF in Hessian')
-    vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1, grids=grids)
 
     def fx(mo1):
         mo1 = cupy.asarray(mo1)
         mo1 = mo1.reshape(-1,nmoa*nocca+nmob*noccb)
         nset = len(mo1)
 
+        dm1 = cupy.empty([2,nset,nao,nao])
+
         x = mo1[:,:nmoa*nocca].reshape(nset,nmoa,nocca)
         mo1_moa = contract('npo,ip->nio', x, mo_coeff[0])
         dma = contract('nio,jo->nij', mo1_moa, mocca)
+        dm1[0] = transpose_sum(dma)
 
         x = mo1[:,nmoa*nocca:].reshape(nset,nmob,noccb)
         mo1_mob = contract('npo,ip->nio', x, mo_coeff[1])
         dmb = contract('nio,jo->nij', mo1_mob, moccb)
-
-        dm1 = cupy.empty([2,nset,nao,nao])
-        dm1[0] = dma + dma.transpose(0,2,1)
-        dm1[1] = dmb + dmb.transpose(0,2,1)
+        dm1[1] = transpose_sum(dmb)
 
         dm1 = tag_array(dm1, mo1=[mo1_moa,mo1_mob], occ_coeff=[mocca,moccb], mo_occ=mo_occ)
-        v1 = vresp(dm1)
-        v1vo = cupy.empty_like(mo1)
-        tmp = contract('nij,jo->nio', v1[0], mocca)
-        v1vo[:,:nmoa*nocca] = contract('nio,ip->npo', tmp, mo_coeff[0]).reshape(nset,-1)
-
-        tmp = contract('nij,jo->nio', v1[1], moccb)
-        v1vo[:,nmoa*nocca:] = contract('nio,ip->npo', tmp, mo_coeff[1]).reshape(nset,-1)
-        return v1vo
+        return hessobj.get_veff_resp_mo(mol, dm1, mo_coeff, mo_occ, hermi=1)
     return fx
 
+def _get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
+    vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ,
+                               hermi=hermi, with_j=True, with_k=True)
+    return vj - vk
 
 class Hessian(rhf_hess_gpu.HessianBase):
     '''Non-relativistic unrestricted Hartree-Fock hessian'''
@@ -421,6 +416,9 @@ class Hessian(rhf_hess_gpu.HessianBase):
     partial_hess_elec = partial_hess_elec
     hess_elec = hess_elec
     make_h1 = make_h1
+    gen_vind = gen_vind
+    get_jk_mo = rhf_hess_gpu._get_jk_mo
+    get_veff_resp_mo = _get_veff_resp_mo
 
     def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1mo,
                   fx=None, atmlst=None, max_memory=4000, verbose=None):

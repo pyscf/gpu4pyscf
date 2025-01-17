@@ -122,7 +122,7 @@ class _DFHF:
     to_gpu = utils.to_gpu
     device = utils.device
     __name_mixin__ = 'DF'
-    _keys = {'rhoj', 'rhok', 'disp', 'screen_tol'}
+    _keys = {'rhoj', 'rhok', 'disp', 'screen_tol', 'with_df', 'only_dfj'}
 
     def __init__(self, mf, dfobj, only_dfj):
         self.__dict__.update(mf.__dict__)
@@ -132,7 +132,6 @@ class _DFHF:
         self.direct_scf = False
         self.with_df = dfobj
         self.only_dfj = only_dfj
-        self._keys = mf._keys.union(['with_df', 'only_dfj'])
 
     def undo_df(self):
         '''Remove the DFHF Mixin'''

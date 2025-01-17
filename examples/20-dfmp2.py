@@ -35,7 +35,18 @@ ptobj = dfmp2.DFMP2(mf)
 e_corr, t2 = ptobj.kernel()
 e_mp2 = e_hf + e_corr
 
+# It prints out MP2 energies, those energies are assessible in the PT object.
+print('MP2 correlation energy:', ptobj.emp2)
+print('SCS MP2 correlation energy:', ptobj.emp2_scs)
+print('Total energy with SCS MP2:', ptobj.e_tot_scs)
+
+print('----- frozen core --------')
+
 # frozen core
 ptobj.frozen = [0]
 e_corr, t2 = ptobj.kernel()
 e_mp2 = e_hf + e_corr
+
+print('MP2 correlation energy:', ptobj.emp2)
+print('SCS MP2 correlation energy:', ptobj.emp2_scs)
+print('Total energy with SCS MP2:', ptobj.e_tot_scs)

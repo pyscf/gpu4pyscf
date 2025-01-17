@@ -13,9 +13,9 @@
 # limitations under the License.
 
 # modified by Xiaojie Wu (wxj6000@gmail.com)
+
 import cupy
 from pyscf.dft import rks
-
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
 from gpu4pyscf.scf import hf
@@ -257,6 +257,7 @@ class KohnShamDFT(rks.KohnShamDFT):
 ##################################################
 # don't modify the following attributes, they are not input options
         self._numint = numint.NumInt()
+
     @property
     def omega(self):
         return self._numint.omega
@@ -291,8 +292,13 @@ class RKS(KohnShamDFT, hf.RHF):
         hf.SCF.reset(self, mol)
         self.grids.reset(mol)
         self.nlcgrids.reset(mol)
-        self.cphf_grids.reset(mol)
         self._numint.reset()
+        # The cphf_grids attribute is not available in the PySCF CPU version.
+        # In PySCF's to_gpu() function, this attribute is not properly
+        # initialized. mol of the KS object must be used for initialization.
+        if mol is None:
+            mol = self.mol
+        self.cphf_grids.reset(mol)
         return self
 
     def nuc_grad_method(self):

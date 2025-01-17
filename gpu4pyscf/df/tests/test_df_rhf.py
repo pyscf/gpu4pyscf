@@ -13,12 +13,17 @@
 # limitations under the License.
 
 import unittest
+import pickle
 import numpy as np
 import pyscf
 from pyscf import scf as cpu_scf
 from pyscf.df import df_jk as cpu_df_jk
 from gpu4pyscf.df import df_jk as gpu_df_jk
 from gpu4pyscf import scf as gpu_scf
+try:
+    import cloudpickle
+except ImportError:
+    cloudpickle = None
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -48,11 +53,16 @@ class KnownValues(unittest.TestCase):
     '''
     def test_rhf(self):
         print('------- RHF -----------------')
-        mf = gpu_scf.RHF(mol_sph).density_fit(auxbasis='def2-tzvpp-jkfit')
+        mf = mol_sph.RHF().density_fit(auxbasis='def2-tzvpp-jkfit').to_gpu()
         e_tot = mf.kernel()
         e_qchem = -76.0624582299
         print(f'diff from qchem {e_tot - e_qchem}')
         assert np.abs(e_tot - e_qchem) < 1e-5
+
+        # test serialization
+        if cloudpickle is not None:
+            mf1 = pickle.loads(cloudpickle.dumps(mf))
+            assert mf1.e_tot == e_tot
 
     def test_cart(self):
         print('------- RHF Cart -----------------')

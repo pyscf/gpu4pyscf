@@ -14,12 +14,15 @@
 
 import unittest
 import numpy as np
+import cupy as cp
 import pyscf
 import pytest
 from pyscf import gto
 from gpu4pyscf.solvent import pcm
 from gpu4pyscf import scf, dft
 from packaging import version
+from gpu4pyscf.solvent.hessian.pcm import analytic_grad_vmat
+from gpu4pyscf.lib.cupy_helper import contract
 
 pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
@@ -50,7 +53,7 @@ def _make_mf(method='C-PCM', restricted=True, density_fit=True):
         mf = dft.rks.RKS(mol, xc=xc)
     else:
         mf = dft.uks.UKS(mol, xc=xc)
-    
+
     if density_fit:
         mf = mf.density_fit()
     mf = mf.PCM()
@@ -88,6 +91,44 @@ def _check_hessian(mf, h, ix=0, iy=0):
 
     print(f'Norm of H({ix},{iy}) diff, {np.linalg.norm(h[ix,:,iy,:] - h_fd)}')
     assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
+
+def _fd_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None):
+    '''
+    dv_solv / da
+    slow version with finite difference
+    '''
+    pmol = pcmobj.mol.copy()
+    mol = pmol.copy()
+    if atmlst is None:
+        atmlst = range(mol.natm)
+    nao, nmo = mo_coeff.shape
+    mocc = mo_coeff[:,mo_occ>0]
+    nocc = mocc.shape[1]
+    coords = mol.atom_coords(unit='Bohr')
+    def pcm_vmat_scanner(mol):
+        pcmobj.reset(mol)
+        e, v = pcmobj._get_vind(dm)
+        return v
+
+    mol.verbose = 0
+    vmat = cp.empty([len(atmlst), 3, nao, nocc])
+    eps = 1e-5
+    for i0, ia in enumerate(atmlst):
+        for ix in range(3):
+            dv = np.zeros_like(coords)
+            dv[ia,ix] = eps
+            mol.set_geom_(coords + dv, unit='Bohr')
+            vmat0 = pcm_vmat_scanner(mol)
+
+            mol.set_geom_(coords - dv, unit='Bohr')
+            vmat1 = pcm_vmat_scanner(mol)
+
+            grad_vmat = (vmat0 - vmat1)/2.0/eps
+            grad_vmat = contract("ij,jq->iq", grad_vmat, mocc)
+            grad_vmat = contract("iq,ip->pq", grad_vmat, mo_coeff)
+            vmat[i0,ix] = grad_vmat
+    pcmobj.reset(pmol)
+    return vmat
 
 @unittest.skipIf(pcm.libsolvent is None, "solvent extension not compiled")
 class KnownValues(unittest.TestCase):
@@ -142,6 +183,48 @@ class KnownValues(unittest.TestCase):
         _check_hessian(mf, h, ix=0, iy=0)
         _check_hessian(mf, h, ix=0, iy=1)
 
+    def test_grad_vmat_cpcm(self):
+        print("testing C-PCM dV_solv/dx")
+        mf = _make_mf(method='C-PCM')
+        hobj = mf.Hessian()
+
+        dm = mf.make_rdm1()
+        mo_coeff = mf.mo_coeff
+        mo_occ = mf.mo_occ
+
+        test_grad_vmat = analytic_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
+        ref_grad_vmat = _fd_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
+
+        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+
+    def test_grad_vmat_iefpcm(self):
+        print("testing IEF-PCM dV_solv/dx")
+        mf = _make_mf(method='IEF-PCM')
+        hobj = mf.Hessian()
+
+        dm = mf.make_rdm1()
+        mo_coeff = mf.mo_coeff
+        mo_occ = mf.mo_occ
+
+        test_grad_vmat = analytic_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
+        ref_grad_vmat = _fd_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
+
+        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+
+    def test_grad_vmat_ssvpe(self):
+        print("testing SS(V)PE dV_solv/dx")
+        mf = _make_mf(method='SS(V)PE')
+        hobj = mf.Hessian()
+
+        dm = mf.make_rdm1()
+        mo_coeff = mf.mo_coeff
+        mo_occ = mf.mo_occ
+
+        test_grad_vmat = analytic_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
+        ref_grad_vmat = _fd_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
+
+        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+
     @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_gpu(self):
         import pyscf
@@ -187,7 +270,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
         mol.basis = 'sto-3g'
         mol.output = '/dev/null'
         mol.build(verbose=0)
-        
+
         mf = dft.RKS(mol, xc='b3lyp').PCM()
         mf.conv_tol = 1e-12
         mf.conv_tol_cpscf = 1e-7
@@ -209,6 +292,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
         assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+
 if __name__ == "__main__":
     print("Full Tests for Hessian of PCMs")
     unittest.main()

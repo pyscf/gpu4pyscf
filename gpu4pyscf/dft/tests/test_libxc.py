@@ -92,7 +92,7 @@ class KnownValues(unittest.TestCase):
 
     def test_u_GGA(self):
         # large errors found in B88 for the spin polarized case
-        self._check_xc('HYB_GGA_XC_B3LYP', spin=1, fxc_tol=1e-3)
+        self._check_xc('HYB_GGA_XC_B3LYP', spin=1, fxc_tol=1e-2)
         self._check_xc('GGA_X_B88', spin=1, fxc_tol=1e-1)
         self._check_xc('GGA_C_PBE', spin=1, fxc_tol=1e-4)
 

@@ -42,11 +42,11 @@ print('Fitted ESP charge')
 print(q0)
 
 # RESP charge // first stage fitting
-q1 = esp.resp_solve(mol, dm)    
+q1 = esp.resp_solve(mol, dm)
 
-# Add constraint: fix those charges in the second stage 
+# Add constraint: fix those charges in the second stage
 # q2[4] = q1[4]
-# q2[5] = q1[5] 
+# q2[5] = q1[5]
 # q2[6] = q1[6]
 # q2[7] = q1[7]
 sum_constraints = []
@@ -58,7 +58,7 @@ for i in range(4,8):
 equal_constraints = [[1,2,3]]
 
 # RESP charge // second stage fitting
-q2 = esp.resp_solve(mol, dm, resp_a=1e-3, 
+q2 = esp.resp_solve(mol, dm, resp_a=1e-3,
                     sum_constraints=sum_constraints,
                     equal_constraints=equal_constraints)
 print('Fitted RESP charge')
