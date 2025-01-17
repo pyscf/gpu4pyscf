@@ -22,6 +22,7 @@ from gpu4pyscf import scf
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib import logger
+from gpu4pyscf.scf import _response_functions # noqa
 from pyscf import __config__
 
 REAL_EIG_THRESHOLD = tdhf_cpu.REAL_EIG_THRESHOLD
