@@ -155,10 +155,7 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         nset = dms.shape[0]
         
         ngrids_glob = grids.coords.shape[0]
-        ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
-        ngrids_per_device = (ngrids_per_device + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE * MIN_BLK_SIZE
-        grid_start = min(device_id * ngrids_per_device, ngrids_glob)
-        grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
+        grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} grids on Device {device_id}")
 

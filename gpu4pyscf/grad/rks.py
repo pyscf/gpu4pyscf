@@ -136,7 +136,7 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     return tag_array(exc1_per_atom, exc1_grid=exc)
 
 def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
-                  verbose=None, with_lapl=False, grid_range=(), device_id=0):
+                  verbose=None, with_lapl=False, device_id=0):
     ''' Calculate the gradient of vxc on given device
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -153,7 +153,7 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         nset = dms.shape[0]
 
         ngrids_glob = grids.coords.shape[0]
-        grid_start, grid_end = numint.grid_range(ngrids_glob, device_id)
+        grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} grids on Device {device_id}")
 

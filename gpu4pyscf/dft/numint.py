@@ -391,7 +391,7 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     vxc[1,threshind] = 1.5*W*dW0dG
     return exc,vxc
 
-def grid_range(ngrids, device_id, blksize=MIN_BLK_SIZE):
+def gen_grid_range(ngrids, device_id, blksize=MIN_BLK_SIZE):
     '''
     Calculate the range of grids assigned the given device
     '''
@@ -402,7 +402,7 @@ def grid_range(ngrids, device_id, blksize=MIN_BLK_SIZE):
     return grid_start, grid_end
 
 def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
-                 verbose=None, with_lapl=False, grid_range=(), device_id=0, hermi=1):
+                 verbose=None, with_lapl=False, device_id=0, hermi=1):
     ''' nr_rks task on given device
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -423,7 +423,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             ao_deriv = 1
 
         ngrids_glob = grids.coords.shape[0]
-        grid_start, grid_end = grid_range(ngrids_glob, device_id)
+        grid_start, grid_end = gen_grid_range(ngrids_glob, device_id)
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} grids on Device {device_id}")
 
@@ -446,12 +446,12 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 if mo_coeff is None:
                     dms_mask = dms[i][idx[:,None],idx]
                     rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms_mask,
-                                                xctype=xctype, hermi=hermi, with_lapl=with_lapl)
+                                                  xctype=xctype, hermi=hermi, with_lapl=with_lapl)
                 else:
                     assert hermi == 1
                     mo_coeff_mask = mo_coeff[idx,:]
                     rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ,
-                                                None, xctype, with_lapl)
+                                                   None, xctype, with_lapl)
             p0 = p1
         t0 = log.timer_debug1(f'eval rho on Device {device_id}', *t0)
         
@@ -794,7 +794,7 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     return nelec, excsum, vmat
 
 def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
-                verbose=None, with_lapl=False, grid_range=(), device_id=0, hermi=1):
+                verbose=None, with_lapl=False, device_id=0, hermi=1):
     ''' nr_uks task on one device
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -824,7 +824,7 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             ao_deriv = 1
 
         ngrids_glob = grids.coords.shape[0]
-        grid_start, grid_end = grid_range(ngrids_glob, device_id)
+        grid_start, grid_end = gen_grid_range(ngrids_glob, device_id)
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} grids on Device {device_id}")
 
