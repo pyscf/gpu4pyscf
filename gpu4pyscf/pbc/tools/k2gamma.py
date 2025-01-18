@@ -21,6 +21,7 @@ from pyscf.lib import logger
 # This version of kpts_to_kmesh will be available in PySCF-2.8
 def kpts_to_kmesh(cell, kpts, bvk=True, precision=None, max_images=10000):
     '''Search the minimal BvK mesh or Monkhorst-Pack k-point mesh'''
+    assert kpts.ndim == 2
     scaled_kpts = cell.get_scaled_kpts(kpts)
     logger.debug3(cell, '    scaled_kpts kpts %s', scaled_kpts)
     if bvk:

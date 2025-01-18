@@ -26,7 +26,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, unpack_tril
 from gpu4pyscf.pbc.df.fft_jk import _ewald_exxdiv_for_G0, _format_dms, _format_jks
 
-def density_fit(mf, auxbasis=None, mesh=None, with_df=None):
+def density_fit(mf, auxbasis=None, with_df=None):
     '''Generate density-fitting SCF object
 
     Args:
@@ -34,8 +34,6 @@ def density_fit(mf, auxbasis=None, mesh=None, with_df=None):
             Same format to the input attribute mol.basis.  If auxbasis is
             None, auxiliary basis based on AO basis (if possible) or
             even-tempered Gaussian basis will be used.
-        mesh : tuple
-            number of grids in each direction
         with_df : DF object
     '''
     from gpu4pyscf.pbc.df.df import GDF
@@ -45,16 +43,12 @@ def density_fit(mf, auxbasis=None, mesh=None, with_df=None):
         else:
             kpts = np.reshape(mf.kpt, (1,3))
         with_df = GDF(mf.cell, kpts)
-        with_df.max_memory = mf.max_memory
         with_df.stdout = mf.stdout
         with_df.verbose = mf.verbose
         with_df.auxbasis = auxbasis
-        if mesh is not None:
-            with_df.mesh = mesh
 
-    mf = mf.copy()
+    mf = mf.copy().reset()
     mf.with_df = with_df
-    mf._eri = None
     return mf
 
 
@@ -81,10 +75,9 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     nband = len(kpts_band)
 
     rho = cp.zeros((nset,naux), dtype=np.complex128)
-    max_memory = max(2000, (mydf.max_memory - lib.current_memory()[0]))
     for k in range(nkpts):
         p1 = 0
-        for Lpq, sign in mydf.sr_loop(k, k, max_memory, False):
+        for Lpq, sign in mydf.sr_loop(k, k, False):
             Lpq = Lpq.reshape(-1,nao,nao)
             p0, p1 = p1, p1+Lpq.shape[0]
             rho[:,p0:p1] += sign * contract('Lpq,xqp->xL', Lpq, dms[:,k])
@@ -100,7 +93,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
 
     for k, kpt in enumerate(kpts_band):
         p1 = 0
-        for Lpq, sign in mydf.sr_loop(k, k, max_memory, aos2symm):
+        for Lpq, sign in mydf.sr_loop(k, k, aos2symm):
             nrow = Lpq.shape[0]
             p0, p1 = p1, p1+nrow
             Lpq = Lpq.reshape(nrow, -1)
@@ -180,10 +173,12 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     # K_pq = ( p{k1} i{k2} | i{k2} q{k1} )
     # input dm is not Hermitian/PSD --> build K from dm
     log.debug2('get_k_kpts: build K from dm')
-    max_memory = max(2000, mydf.max_memory-lib.current_memory()[0])
+    if mydf._cderi is None:
+        mydf.build()
     def make_kpt(ki, kj, swap_2e):
-        #TODO: utilize kk_adapted_iter with time_reversal_symmetry, as that in aft_jk
-        for Lpq, sign in mydf.sr_loop(ki, kj, max_memory, compact=False):
+        if (ki, kj) not in mydf._cderi:
+            kj, ki = ki, kj
+        for Lpq, sign in mydf.sr_loop(ki, kj, compact=False):
             Lpq = Lpq.reshape(-1, nao, nao)
             tmp = contract('njk,Lkl->nLjl', dms[:,ki], Lpq)
             if sign > 0:
@@ -201,19 +196,20 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     t1 = log.init_timer()
     if kpts_band is not kpts:  # normal k-points HF/DFT
         raise NotImplementedError
+    #TODO: utilize kk_adapted_iter with time_reversal_symmetry, as that in aft_jk
     for ki in range(nkpts):
         for kj in range(ki):
             make_kpt(ki, kj, True)
         make_kpt(ki, ki, False)
         t1 = log.timer_debug1('get_k_kpts: make_kpt ki>=kj (%d,*)'%ki, *t1)
 
-    if exxdiv == 'ewald':
-        _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band)
-
     if (is_zero(kpts) and is_zero(kpts_band) and
         not np.iscomplexobj(dm_kpts)):
         vk = vk.real
     vk *= 1./nkpts
+
+    if exxdiv == 'ewald':
+        _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band)
 
     log.timer('get_k_kpts', *t0)
     return _format_jks(vk, dm_kpts, input_band, kpts)
@@ -273,9 +269,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
         '''
         vk = cp.zeros((nset,nao,nao), dtype=np.complex128)
 
-    mem_now = lib.current_memory()[0]
-    max_memory = max(2000, (mydf.max_memory - mem_now))
-    for Lpq, sign in mydf.sr_loop(0, 0, max_memory, False):
+    for Lpq, sign in mydf.sr_loop(0, 0, False):
         if with_j:
             #:rho_coeff = np.einsum('Lpq,xqp->xL', Lpq, dms)
             #:vj += np.dot(rho_coeff, Lpq.reshape(-1,nao**2))

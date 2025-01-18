@@ -28,12 +28,11 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.df import df as df_cpu
-from pyscf.pbc.df.aft import _check_kpts
 from pyscf.pbc.df.gdf_builder import libpbc
-from pyscf.pbc.lib.kpts_helper import is_zero, unique
-from pyscf.pbc.df.rsdf_builder import _RSNucBuilder
+from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.df import df_jk, rsdf_builder
+from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib.cupy_helper import return_cupy_array, pack_tril, get_avail_mem
 from gpu4pyscf.lib import utils
@@ -69,10 +68,12 @@ class GDF(lib.StreamObject):
         self.auxcell = auxcell
 
         t1 = (logger.process_clock(), logger.perf_counter())
-        kpts = self.kpts
         self._cderi, self._cderip = rsdf_builder.build_cderi(
-            cell, auxcell, kpts, j_only=j_only)
+            cell, auxcell, self.kpts, j_only=j_only)
         t1 = logger.timer_debug1(self, 'j3c', *t1)
+        print('b')
+        import traceback
+        traceback.print_stack()
         return self
 
     has_kpts = df_cpu.GDF.has_kpts
@@ -82,8 +83,7 @@ class GDF(lib.StreamObject):
     get_naoaux = df_cpu.GDF.get_naoaux
     range_coulomb = aft_cpu.AFTDFMixin.range_coulomb
 
-    def sr_loop(self, ki, kj, max_memory=2000,
-                compact=True, blksize=None):
+    def sr_loop(self, ki, kj, compact=True, blksize=None):
         '''Iterator for the 3-index cderi tensor over the auxliary dimension'''
         if self._cderi is None:
             self.build()
@@ -91,9 +91,11 @@ class GDF(lib.StreamObject):
         nao = cell.nao
         if blksize is None:
             avail_mem = get_avail_mem() * .8
-            blksize = max_memory*1e6/16/(nao**2*2)
-            blksize = max(16, min(int(blksize), self.blockdim))
-            logger.debug2(self, 'max_memory %d MB, blksize %d', avail_mem, blksize)
+            blksize = avail_mem/16/(nao**2*2)
+            if blksize < 16:
+                raise RuntimeError('Insufficient GPU memory')
+            blksize = min(int(blksize), self.blockdim)
+            logger.debug2(self, 'max_memory %d MB, blksize %d', avail_mem*1e-6, blksize)
 
         if (ki, kj) in self._cderi:
             req_conj = False
@@ -105,7 +107,7 @@ class GDF(lib.StreamObject):
         naux = self._cderi[0,0].shape[0]
         for b0, b1 in lib.prange(0, naux, blksize):
             if req_conj:
-                Lpq = self._cderi[kj,ki][b0:b1].conj()
+                Lpq = self._cderi[kj,ki][b0:b1].transpose(0,2,1).conj()
             else:
                 Lpq = self._cderi[ki,kj][b0:b1]
             assert Lpq[0].size == nao**2
@@ -118,7 +120,7 @@ class GDF(lib.StreamObject):
             naux = self._cderip[0,0].shape[0]
             for b0, b1 in lib.prange(0, naux, blksize):
                 if req_conj:
-                    Lpq = self._cderip[kj,ki][b0:b1].conj()
+                    Lpq = self._cderip[kj,ki][b0:b1].transpose(0,2,1).conj()
                 else:
                     Lpq = self._cderip[ki,kj][b0:b1]
                 assert Lpq[0].size == nao**2
@@ -126,11 +128,25 @@ class GDF(lib.StreamObject):
                     Lpq = pack_tril(Lpq.reshape(-1, nao, nao))
                 yield Lpq, -1
 
-    def get_pp(self):
-        return rsdf_builder.get_pp(self.cell, self.kpts)
+    def get_pp(self, kpts=None):
+        kpts, is_single_kpt = _check_kpts(self, kpts)
+        if is_single_kpt and is_zero(kpts):
+            vpp = rsdf_builder.get_pp(self.cell)
+        else:
+            vpp = rsdf_builder.get_pp(self.cell, kpts)
+            if is_single_kpt:
+                vpp = vpp[0]
+        return vpp
 
-    def get_nuc(self):
-        return rsdf_builder.get_nuc(self.cell, self.kpts)
+    def get_nuc(self, kpts=None):
+        kpts, is_single_kpt = _check_kpts(self, kpts)
+        if is_single_kpt and is_zero(kpts):
+            nuc = rsdf_builder.get_nuc(self.cell)
+        else:
+            nuc = rsdf_builder.get_nuc(self.cell, kpts)
+            if is_single_kpt:
+                nuc = nuc[0]
+        return nuc
 
     # Note: Special exxdiv by default should not be used for an arbitrary
     # input density matrix. When the df object was used with the molecular

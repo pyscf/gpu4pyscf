@@ -72,6 +72,7 @@ def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
     else:
         # A truncated bvk_kmesh can cause finite-size errors in HFX.
         # bvk_kmesh must be identical to MP kmesh in HFX.
+        kpts = kpts.reshape(-1, 3)
         bvk_kmesh = kmesh = kpts_to_kmesh(cell, kpts, bvk=False)
     j3c = sr_aux_e2(cell, auxcell, -omega, kpts, bvk_kmesh)
     t1 = log.timer('pass1: int3c2e', *t0)
@@ -160,6 +161,7 @@ def build_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tru
         bvk_kmesh = np.ones(3, dtype=int)
     else:
         # A truncated bvk_kmesh can be used for Coulomb integrals.
+        kpts = kpts.reshape(-1, 3)
         bvk_kmesh = kpts_to_kmesh(cell, kpts, bvk=True)
     # TODO: time-reversal symmetry in j3c, j2c
     j3c = sr_aux_e2(cell, auxcell, -omega, kpts, bvk_kmesh, j_only=True)
@@ -349,12 +351,13 @@ def get_pp(cell, kpts=None):
     from pyscf.pbc.gto import pseudo
     log = logger.new_logger(cell)
     t0 = log.init_timer()
-    vpp = get_pp_loc_part1(cell, kpts, with_pseudo=True, verbose=log)
-    t1 = log.timer_debug1('get_pp_loc_part1', *t0)
     pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
-    vpp += cp.asarray(pp2builder.get_pp_loc_part2())
-    t1 = log.timer_debug1('get_pp_loc_part2', *t1)
+    vpp  = cp.asarray(pp2builder.get_pp_loc_part2())
+    t1 = log.timer_debug1('get_pp_loc_part2', *t0)
     vpp += cp.asarray(pseudo.pp_int.get_pp_nl(cell, kpts))
     t1 = log.timer_debug1('get_pp_nl', *t1)
+
+    vpp += get_pp_loc_part1(cell, kpts, with_pseudo=True, verbose=log)
+    t1 = log.timer_debug1('get_pp_loc_part1', *t1)
     log.timer('get_pp', *t0)
     return vpp

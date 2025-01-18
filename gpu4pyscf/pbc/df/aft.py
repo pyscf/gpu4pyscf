@@ -27,7 +27,6 @@ from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.gto.pseudo import pp_int
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df import ft_ao
-from pyscf.pbc.df.aft import _check_kpts
 from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.df import aft_jk
@@ -201,3 +200,19 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
     to_gpu = utils.to_gpu
     device = utils.device
     to_cpu = utils.to_cpu
+
+def _check_kpts(mydf, kpts):
+    '''Check if the argument kpts is a single k-point'''
+    if kpts is None:
+        kpts = mydf.kpts
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+            is_single_kpt = True
+        else:
+            kpts = np.asarray(kpts)
+            is_single_kpt = kpts.ndim == 1 or is_zero(kpts)
+    else:
+        kpts = np.asarray(kpts)
+        is_single_kpt = kpts.ndim == 1
+    kpts = kpts.reshape(-1,3)
+    return kpts, is_single_kpt

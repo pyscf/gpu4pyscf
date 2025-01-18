@@ -54,9 +54,10 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     nao, nao_orig = int3c2e_opt.coeff.shape
     naux = int3c2e_opt.aux_coeff.shape[0]
 
-    if kpts is None:
+    if kpts is None or (kpts.ndim == 1 and is_zero(kpts)):
         out = cp.zeros((nao, nao, naux))
     else:
+        assert kpts.ndim == 2
         nkpts = len(kpts)
         kmesh = int3c2e_opt.bvk_kmesh
         assert kmesh is not None
@@ -127,11 +128,12 @@ def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
     r2_aux = np.log(aux_cs**2 / cell.precision * 10**aux_ls) / aux_exps
     atom_aux_exps = []
     atoms = auxcell._bas[:,ATOM_OF]
+    atom_aux_exps = cp.full(cell.natm, 1e8, dtype=np.float32)
     for ia in range(cell.natm):
         bas_mask = atoms == ia
         es = aux_exps[bas_mask]
-        atom_aux_exps.append(es[r2_aux[bas_mask].argmax()])
-    aux_exps = cp.array(atom_aux_exps, dtype=np.float32)
+        if len(es) > 0:
+            atom_aux_exps[ia] = es[r2_aux[bas_mask].argmax()]
 
     def gen_img_idx(ish0, ish1, jsh0, jsh1):
         nish = ish1 - ish0
@@ -145,7 +147,7 @@ def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
             (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
             ctypes.cast(exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_cs.data.ptr, ctypes.c_void_p),
-            ctypes.cast(aux_exps.data.ptr, ctypes.c_void_p),
+            ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
             ctypes.c_int(nk), ctypes.c_int(cell.natm))
         if err != 0:
             raise RuntimeError('int3c2e_img_counts failed')
@@ -168,7 +170,7 @@ def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
             (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
             ctypes.cast(exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_cs.data.ptr, ctypes.c_void_p),
-            ctypes.cast(aux_exps.data.ptr, ctypes.c_void_p),
+            ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
             ctypes.c_int(nk), ctypes.c_int(cell.natm))
         if err != 0:
             raise RuntimeError('int3c2e_img_idx failed')
@@ -382,11 +384,8 @@ def most_diffused_pgto(cell):
     return exps[idx], cs[idx], ls[idx]
 
 # This modified rcut estimation function will be available in pyscf-2.8 or newer
-def estimate_rcut(cell, auxcell, omega, precision=None):
+def estimate_rcut(cell, auxcell, omega):
     '''Estimate rcut for 3c2e SR-integrals'''
-    if precision is None:
-        precision = cell.precision
-
     if cell.nbas == 0 or auxcell.nbas == 0:
         return np.zeros(1)
 
@@ -395,6 +394,7 @@ def estimate_rcut(cell, auxcell, omega, precision=None):
         assert cell.dimension == 0
         return np.zeros(1)
 
+    precision = cell.precision
     ak, ck, lk = most_diffused_pgto(auxcell)
 
     # the most diffused orbital basis

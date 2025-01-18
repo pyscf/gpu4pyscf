@@ -76,25 +76,20 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
     else:
         return cp.asarray(out, order='F')
 
-def _bas_overlap_mask(cell, bvkmesh_Ls, Ls, cutoff=None):
+def _bas_overlap_mask(cell, bvkmesh_Ls, Ls):
     '''integral screening mask for basis product between cell and supmol'''
     # consider only the most diffused component of a basis
     exps, cs = extract_pgto_params(cell, 'diffused')
     ls = cell._bas[:,ANG_OF]
     bas_coords = cp.asarray(cell.atom_coords()[cell._bas[:,ATOM_OF]])
 
-    vol = cell.vol
-    if cutoff is None:
-        theta_ij = exps.min() / 2
-        lattice_sum_factor = max(2*np.pi*cell.rcut/(vol*theta_ij), 1)
-        cutoff = cell.precision / lattice_sum_factor
-        logger.debug(cell, 'Set ft_ao cutoff to %g', cutoff)
-
     ls = cp.asarray(ls)
     exps = cp.asarray(exps)
     norm = cp.asarray(cs) * ((2*ls+1)/(4*np.pi))**.5
     aij = exps[:,None] + exps
-    theta = exps[:,None] * exps / aij
+    fi = exps[:,None] / aij
+    fj = exps[None,:] / aij
+    theta = exps[:,None] * fj
 
     Ls = cp.asarray(Ls)
     # rj format: (bvk_cell_id, bas_id, lattice_img_id)
@@ -103,16 +98,18 @@ def _bas_overlap_mask(cell, bvkmesh_Ls, Ls, cutoff=None):
 
     dr = cp.linalg.norm(rirj, axis=4)
 
-    dri = exps[None,None,:,None]/aij[:,None,:,None] * dr
-    drj = exps[:,None,None,None]/aij[:,None,:,None] * dr
+    dri = fj[:,None,:,None] * dr
+    drj = fi[:,None,:,None] * dr
     li = ls[:,None,None,None]
     lj = ls[None,None,:,None]
     fac_dri = (li * .5/aij[:,None,:,None] + dri**2) ** (li*.5)
     fac_drj = (lj * .5/aij[:,None,:,None] + drj**2) ** (lj*.5)
-    fl = 2*np.pi/vol * (dr/theta[:,None,:,None]) + 1.
+    rad = (.75/np.pi*cell.vol)**(1./3) * dr
+    surface = 4*np.pi * rad**2
+    fl = cp.where(surface > 1, surface, 1)
     fac_norm = norm[:,None]*norm * (np.pi/aij)**1.5
     ovlp = fac_norm[:,None,:,None] * cp.exp(-theta[:,None,:,None]*dr**2) * fac_dri * fac_drj * fl
-    return ovlp > cutoff
+    return ovlp > cell.precision
 
 def gen_ft_kernel(cell, kpts=None, verbose=None):
     r'''

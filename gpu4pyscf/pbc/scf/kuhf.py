@@ -312,6 +312,8 @@ class KUHF(khf.KSCF):
     to_ks = NotImplemented
     convert_from_ = NotImplemented
 
+    density_fit = khf.KRHF.density_fit
+
     to_gpu = utils.to_gpu
     device = utils.device
 

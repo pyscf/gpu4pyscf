@@ -43,6 +43,10 @@ class KnownValues(unittest.TestCase):
         #v1 = GDF(cell, kpt).get_pp().get()
         #assert abs(v1 - ref).max() < 1e-8
 
+        ref = df_cpu.GDF(cell).get_pp()
+        v1 = GDF(cell).get_pp().get()
+        assert abs(v1 - ref).max() < 1e-8
+
         kpts4 = cell.make_kpts([4,1,1])
         ref = df_cpu.GDF(cell, kpts4).get_pp()
         v1 = GDF(cell, kpts4).get_pp().get()
@@ -90,7 +94,7 @@ class KnownValues(unittest.TestCase):
         assert abs(vk.get() - kref).max() < 1e-8
 
     def test_jk1(self):
-        kpts = cell.make_kpts([1,4,1])
+        kpts = cell.make_kpts([1,6,1])
         nkpts = len(kpts)
         mydf0 = df_cpu.GDF(cell, kpts)
         mydf  = GDF(cell, kpts)
@@ -190,7 +194,7 @@ class KnownValues(unittest.TestCase):
         assert abs(vk.get() - kref).max() < 1e-8
 
     def test_get_k2(self):
-        kpts = cell.make_kpts([2,1,1])
+        kpts = cell.make_kpts([3,1,1])
         nkpts = len(kpts)
         mydf0 = df_cpu.GDF(cell, kpts=kpts)
         mydf  = GDF(cell, kpts=kpts)
@@ -201,7 +205,7 @@ class KnownValues(unittest.TestCase):
         mo = (np.random.random((nkpts,nao,nocc)) +
               np.random.random((nkpts,nao,nocc))*1j)
         mo_occ = np.ones((nkpts,nocc))
-        dm = np.random.rand(nkpts, nao, nao)
+        dm = np.einsum('kpi,kqi->kpq', mo, mo.conj())
         dm = lib.tag_array(dm, mo_coeff=mo, mo_occ=mo_occ)
 
         kref = mydf0.get_jk(dm, hermi=1, with_j=False)[1]
@@ -221,7 +225,7 @@ class KnownValues(unittest.TestCase):
         mo = (np.random.random((nkpts,nao,nocc)) +
               np.random.random((nkpts,nao,nocc))*1j)
         mo_occ = np.ones((nkpts,nocc))
-        dm = np.random.rand(nkpts, nao, nao)
+        dm = np.einsum('kpi,kqi->kpq', mo, mo.conj())
         dm = lib.tag_array(dm, mo_coeff=mo, mo_occ=mo_occ)
 
         kref = mydf0.get_jk(dm, hermi=1, with_j=False)[1]
