@@ -152,8 +152,8 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
         vj = vja = vjb = vka = vkb = None
         if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
             with mol.with_range_coulomb(omega):
-                vka_lr = rhf_hess._get_jk_ip1(mol, dm0a, with_j=False, verbose=verbose)[1]
-                vkb_lr = rhf_hess._get_jk_ip1(mol, dm0b, with_j=False, verbose=verbose)[1]
+                vka_lr = rhf_hess._get_jk_ip1(mol, dm0a, with_j=False, atoms_slice=atoms_slice, verbose=verbose)[1]
+                vkb_lr = rhf_hess._get_jk_ip1(mol, dm0b, with_j=False, atoms_slice=atoms_slice, verbose=verbose)[1]
                 vka_lr *= (alpha-hyb)
                 vkb_lr *= (alpha-hyb)
                 veffa -= vka_lr
