@@ -98,13 +98,13 @@ class TDBase(lib.StreamObject):
     get_ab = NotImplemented
 
     def get_precond(self, hdiag):
-        t=1.0e-4
+        threshold_t=1.0e-4
         def precond(x, e, *args):
             n_states = x.shape[0]
             diagd = cp.repeat(hdiag.reshape(1,-1), n_states, axis=0)
             e = e.reshape(-1,1)
             diagd = hdiag - (e-self.level_shift)
-            diagd = cp.where(abs(diagd) < t, cp.sign(diagd)*t, diagd)
+            diagd = cp.where(abs(diagd) < threshold_t, cp.sign(diagd)*threshold_t, diagd)
             a_size = x.shape[1]//2
             diagd[:,a_size:] = diagd[:,a_size:]*(-1)
             return x/diagd
@@ -173,13 +173,13 @@ class TDA(TDBase):
     __doc__ = tdhf_cpu.TDA.__doc__
 
     def get_precond(self, hdiag):
-        t=1.0e-4
+        threshold_t=1.0e-4
         def precond(x, e, *args):
             n_states = x.shape[0]
             diagd = cp.repeat(hdiag.reshape(1,-1), n_states, axis=0)
             e = e.reshape(-1,1)
             diagd = hdiag - (e-self.level_shift)
-            diagd = cp.where(abs(diagd) < t, cp.sign(diagd)*t, diagd)
+            diagd = cp.where(abs(diagd) < threshold_t, cp.sign(diagd)*threshold_t, diagd)
             return x/diagd
         return precond
 
