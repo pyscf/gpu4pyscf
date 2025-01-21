@@ -217,7 +217,7 @@ def hess_nuc(pcmobj, dm, verbose=None):
 
     d2e = d2e_from_d2I - d2e_from_dIdq
 
-    t1 = log.timer_debug1('solvent energy d(dVnuc/dx * q)/dx contribution', *t1)
+    t1 = log.timer_debug1('solvent hessian d(dVnuc/dx * q)/dx contribution', *t1)
     return d2e
 
 def hess_qv(pcmobj, dm, verbose=None):
@@ -301,7 +301,322 @@ def hess_qv(pcmobj, dm, verbose=None):
     d2e = d2e_from_d2I + d2e_from_dIdq
     d2e *= -1
 
-    t1 = log.timer_debug1('solvent energy d(dI/dx * q)/dx contribution', *t1)
+    t1 = log.timer_debug1('solvent hessian d(dI/dx * q)/dx contribution', *t1)
+    return d2e
+
+def get_dS_dot_q(dS, dSii, q, atmlst, gridslice):
+    output = cupy.einsum('diA,i->Adi', dSii[:,:,atmlst], q)
+    for i_atom in atmlst:
+        g0,g1 = gridslice[i_atom]
+        output[i_atom, :, g0:g1] += cupy.einsum('dij,j->di', dS[:,g0:g1,:], q)
+        output[i_atom, :, :] -= cupy.einsum('dij,j->di', dS[:,:,g0:g1], q[g0:g1])
+    return output
+def get_dST_dot_q(dS, dSii, q, atmlst, gridslice):
+    # S is symmetric
+    return get_dS_dot_q(dS, dSii, q, atmlst, gridslice)
+
+def get_dA_dot_q(dA, q, atmlst):
+    return cupy.einsum('diA,i->Adi', dA[:,:,atmlst], q)
+
+def get_dD_dot_q(dD, q, atmlst, gridslice, ngrids):
+    output = cupy.zeros([len(atmlst), 3, ngrids])
+    for i_atom in atmlst:
+        g0,g1 = gridslice[i_atom]
+        output[i_atom, :, g0:g1] += cupy.einsum('dij,j->di', dD[:,g0:g1,:], q)
+        output[i_atom, :, :] -= cupy.einsum('dij,j->di', dD[:,:,g0:g1], q[g0:g1])
+    return output
+def get_dDT_dot_q(dD, q, atmlst, gridslice, ngrids):
+    return get_dD_dot_q(-dD.transpose(0,2,1), q, atmlst, gridslice, ngrids)
+
+def get_v_dot_d2S_dot_q(d2S, d2Sii, v_left, q_right, natom, gridslice):
+    output = cupy.einsum('ABdDq,q->ABdD', d2Sii, v_left * q_right)
+    for i_atom in range(natom):
+        gi0,gi1 = gridslice[i_atom]
+        for j_atom in range(natom):
+            gj0,gj1 = gridslice[j_atom]
+            d2S_atom_ij = cupy.einsum('q,dDqQ,Q->dD', v_left[gi0:gi1], d2S[:,:,gi0:gi1,gj0:gj1], q_right[gj0:gj1])
+            output[i_atom, i_atom, :, :] += d2S_atom_ij
+            output[j_atom, j_atom, :, :] += d2S_atom_ij
+            output[i_atom, j_atom, :, :] -= d2S_atom_ij
+            output[j_atom, i_atom, :, :] -= d2S_atom_ij
+    return output
+def get_v_dot_d2ST_dot_q(d2S, d2Sii, v_left, q_right, natom, gridslice):
+    # S is symmetric
+    return get_v_dot_d2S_dot_q(d2S, d2Sii, v_left, q_right, natom, gridslice)
+
+def get_v_dot_d2A_dot_q(d2A, v_left, q_right):
+    return cupy.einsum('ABdDq,q->ABdD', d2A, v_left * q_right)
+
+def get_v_dot_d2D_dot_q(d2D, v_left, q_right, natom, gridslice):
+    output = cupy.zeros([natom, natom, 3, 3])
+    for i_atom in range(natom):
+        gi0,gi1 = gridslice[i_atom]
+        for j_atom in range(natom):
+            gj0,gj1 = gridslice[j_atom]
+            d2D_atom_ij = cupy.einsum('q,dDqQ,Q->dD', v_left[gi0:gi1], d2D[:,:,gi0:gi1,gj0:gj1], q_right[gj0:gj1])
+            output[i_atom, i_atom, :, :] += d2D_atom_ij
+            output[j_atom, j_atom, :, :] += d2D_atom_ij
+            output[i_atom, j_atom, :, :] -= d2D_atom_ij
+            output[j_atom, i_atom, :, :] -= d2D_atom_ij
+    return output
+def get_v_dot_d2DT_dot_q(d2D, v_left, q_right, natom, gridslice):
+    return get_v_dot_d2D_dot_q(d2D.transpose(0,1,3,2), v_left, q_right, natom, gridslice)
+
+def hess_solver(pcmobj, dm):
+    if not pcmobj._intermediates:
+        pcmobj.build()
+    dm_cache = pcmobj._intermediates.get('dm', None)
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
+        pass
+    else:
+        pcmobj._get_vind(dm)
+    mol = pcmobj.mol
+    log = logger.new_logger(mol, mol.verbose)
+    t1 = log.init_timer()
+
+    natom = mol.natm
+    atmlst = range(natom) # Attention: This cannot be split
+
+    gridslice    = pcmobj.surface['gslice_by_atom']
+    v_grids      = pcmobj._intermediates['v_grids']
+    A            = pcmobj._intermediates['A']
+    D            = pcmobj._intermediates['D']
+    S            = pcmobj._intermediates['S']
+    K            = pcmobj._intermediates['K']
+    R            = pcmobj._intermediates['R']
+    q            = pcmobj._intermediates['q']
+    f_epsilon    = pcmobj._intermediates['f_epsilon']
+
+    ngrids = q.shape[0]
+
+    inverse_K = cupy.linalg.inv(K)
+    vK_1 = inverse_K.T @ v_grids
+
+    if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
+        _, dS = get_dD_dS(pcmobj.surface, with_D=False, with_S=True)
+        _, d2S = get_d2D_d2S(pcmobj.surface, with_D=False, with_S=True)
+        dF, _ = get_dF_dA(pcmobj.surface)
+        dSii = get_dSii(pcmobj.surface, dF)
+        d2F, _ = get_d2F_d2A(pcmobj.surface)
+        d2Sii = get_d2Sii(pcmobj.surface, dF, d2F)
+        dF = None
+        d2F = None
+
+        # dR = 0, dK = dS
+        # d(S-1 R) = - S-1 dS S-1 R
+        # d2(S-1 R) = (S-1 dS S-1 dS S-1 R) + (S-1 dS S-1 dS S-1 R) - (S-1 d2S S-1 R)
+        dSdx_dot_q = get_dS_dot_q(dS, dSii, q, atmlst, gridslice)
+        S_1_dSdx_dot_q = cupy.einsum('ij,Adj->Adi', inverse_K, dSdx_dot_q)
+        VS_1_dot_dSdx = get_dST_dot_q(dS, dSii, vK_1, atmlst, gridslice)
+        d2e_from_d2KR = cupy.einsum('Adi,BDi->ABdD', VS_1_dot_dSdx, S_1_dSdx_dot_q) * 2
+
+        d2e_from_d2KR -= get_v_dot_d2S_dot_q(d2S, d2Sii, vK_1, q, natom, gridslice)
+
+        dK_1Rv = -cupy.einsum("ij,Adj->Adi", inverse_K, dSdx_dot_q)
+        dvK_1R = -cupy.einsum("Adi,ij->Adj", VS_1_dot_dSdx, inverse_K @ R)
+
+    elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SMD']:
+        dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
+        d2D, d2S = get_d2D_d2S(pcmobj.surface, with_D=True, with_S=True)
+        dF, dA = get_dF_dA(pcmobj.surface)
+        dSii = get_dSii(pcmobj.surface, dF)
+        d2F, d2A = get_d2F_d2A(pcmobj.surface)
+        d2Sii = get_d2Sii(pcmobj.surface, dF, d2F)
+        dF = None
+        d2F = None
+
+        # dR = f_eps/(2*pi) * (dD*A + D*dA)
+        # dK = dS - f_eps/(2*pi) * (dD*A*S + D*dA*S + D*A*dS)
+
+        # d2R = f_eps/(2*pi) * (d2D*A + dD*dA + dD*dA + D*d2A)
+        # d2K = d2S - f_eps/(2*pi) * (d2D*A*S + D*d2A*S + D*A*d2S + dD*dA*S + dD*dA*S + dD*A*dS + dD*A*dS + D*dA*dS + D*dA*dS)
+        # The terms showing up twice on equation above (dD*dA + dD*dA for example) refer to dD/dx * dA/dy + dD/dy * dA/dx,
+        # since D is not symmetric, they are not the same.
+
+        # d(K-1 R) = - K-1 dK K-1 R + K-1 dR
+        # d2(K-1 R) = (K-1 dK K-1 dK K-1 R) + (K-1 dK K-1 dK K-1 R) - (K-1 d2K K-1 R) - (K-1 dK K-1 dR)
+        #             - (K-1 dK K-1 dR) + (K-1 d2R)
+        f_eps_over_2pi = f_epsilon/(2.0*PI)
+
+        dSdx_dot_q = get_dS_dot_q(dS, dSii, q, atmlst, gridslice)
+        DA = D*A
+        dKdx_dot_q = dSdx_dot_q - f_eps_over_2pi * cupy.einsum('ij,Adj->Adi', DA, dSdx_dot_q)
+        dAdx_dot_Sq = get_dA_dot_q(dA, S @ q, atmlst)
+        dKdx_dot_q -= f_eps_over_2pi * cupy.einsum('ij,Adj->Adi', D, dAdx_dot_Sq)
+        AS = (A * S.T).T # It's just diag(A) @ S
+        dDdx_dot_ASq = get_dD_dot_q(dD, AS @ q, atmlst, gridslice, ngrids)
+        dKdx_dot_q -= f_eps_over_2pi * dDdx_dot_ASq
+
+        K_1_dot_dKdx_dot_q = cupy.einsum('ij,Adj->Adi', inverse_K, dKdx_dot_q)
+
+        vK_1_dot_dSdx = get_dST_dot_q(dS, dSii, vK_1, atmlst, gridslice)
+        vK_1_dot_dKdx = vK_1_dot_dSdx
+        vK_1_dot_dDdx = get_dDT_dot_q(dD, vK_1, atmlst, gridslice, ngrids)
+        vK_1_dot_dKdx -= f_eps_over_2pi * cupy.einsum('ij,Adj->Adi', AS.T, vK_1_dot_dDdx)
+        vK_1D_dot_dAdx = get_dA_dot_q(dA, D.T @ vK_1, atmlst)
+        vK_1_dot_dKdx -= f_eps_over_2pi * cupy.einsum('ij,Adj->Adi', S.T, vK_1D_dot_dAdx)
+        vK_1DA_dot_dSdx = get_dST_dot_q(dS, dSii, DA.T @ vK_1, atmlst, gridslice)
+        vK_1_dot_dKdx -= f_eps_over_2pi * vK_1DA_dot_dSdx
+
+        d2e_from_d2KR  = cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
+        d2e_from_d2KR += cupy.einsum('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
+
+        vK_1_d2K_q  = get_v_dot_d2D_dot_q(d2D, vK_1, AS @ q, natom, gridslice)
+        vK_1_d2K_q += get_v_dot_d2A_dot_q(d2A, (D.T @ vK_1).T, S @ q)
+        vK_1_d2K_q += get_v_dot_d2S_dot_q(d2S, d2Sii, (DA.T @ vK_1).T, q, natom, gridslice)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dDdx, dAdx_dot_Sq)
+        vK_1_d2K_q += cupy.einsum('Adi,i,BDi->ABdD', vK_1_dot_dDdx, A, dSdx_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1D_dot_dAdx, dSdx_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1_dot_dDdx, dAdx_dot_Sq)
+        vK_1_d2K_q += cupy.einsum('Adi,i,BDi->BADd', vK_1_dot_dDdx, A, dSdx_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1D_dot_dAdx, dSdx_dot_q)
+        vK_1_d2K_q *= -f_eps_over_2pi
+        vK_1_d2K_q += get_v_dot_d2S_dot_q(d2S, d2Sii, vK_1, q, natom, gridslice)
+
+        d2e_from_d2KR -= vK_1_d2K_q
+
+        dAdx_dot_V = get_dA_dot_q(dA, v_grids, atmlst)
+        dDdx_dot_AV = get_dD_dot_q(dD, A * v_grids, atmlst, gridslice, ngrids)
+        dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + cupy.einsum('ij,Adj->Adi', D, dAdx_dot_V))
+
+        K_1_dot_dRdx_dot_V = cupy.einsum('ij,Adj->Adi', inverse_K, dRdx_dot_V)
+
+        d2e_from_d2KR -= cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
+        d2e_from_d2KR -= cupy.einsum('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
+
+        vK_1_d2R_V  = get_v_dot_d2D_dot_q(d2D, vK_1, A * v_grids, natom, gridslice)
+        vK_1_d2R_V += get_v_dot_d2A_dot_q(d2A, (D.T @ vK_1).T, v_grids)
+        vK_1_d2R_V += cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dDdx, dAdx_dot_V)
+        vK_1_d2R_V += cupy.einsum('Adi,BDi->BADd', vK_1_dot_dDdx, dAdx_dot_V)
+        vK_1_d2R_V *= f_eps_over_2pi
+
+        d2e_from_d2KR += vK_1_d2R_V
+
+        dK_1Rv = -K_1_dot_dKdx_dot_q + K_1_dot_dRdx_dot_V
+
+        VK_1D_dot_dAdx = get_dA_dot_q(dA, (D.T @ vK_1).T, atmlst)
+        VK_1_dot_dDdx = get_dDT_dot_q(dD, vK_1, atmlst, gridslice, ngrids)
+        VK_1_dot_dRdx = f_eps_over_2pi * (VK_1D_dot_dAdx + VK_1_dot_dDdx * A)
+
+        dvK_1R = -cupy.einsum("Adi,ij->Adj", vK_1_dot_dKdx, inverse_K @ R) + VK_1_dot_dRdx
+
+    elif pcmobj.method.upper() in ['SS(V)PE']:
+        dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
+        d2D, d2S = get_d2D_d2S(pcmobj.surface, with_D=True, with_S=True)
+        dF, dA = get_dF_dA(pcmobj.surface)
+        dSii = get_dSii(pcmobj.surface, dF)
+        d2F, d2A = get_d2F_d2A(pcmobj.surface)
+        d2Sii = get_d2Sii(pcmobj.surface, dF, d2F)
+        dF = None
+        d2F = None
+
+        # dR = f_eps/(2*pi) * (dD*A + D*dA)
+        # dK = dS - f_eps/(4*pi) * (dD*A*S + D*dA*S + D*A*dS + dST*AT*DT + ST*dAT*DT + ST*AT*dDT)
+
+        # d2R = f_eps/(2*pi) * (d2D*A + dD*dA + dD*dA + D*d2A)
+        # d2K = d2S - f_eps/(4*pi) * (d2D*A*S + D*d2A*S + D*A*d2S + dD*dA*S + dD*dA*S + dD*A*dS + dD*A*dS + D*dA*dS + D*dA*dS
+        #                           + d2ST*AT*DT + ST*d2AT*DT + ST*AT*d2DT + dST*dAT*DT + dST*dAT*DT + dST*AT*dDT + dST*AT*dDT + ST*dAT*dDT + ST*dAT*dDT)
+        f_eps_over_2pi = f_epsilon/(2.0*PI)
+        f_eps_over_4pi = f_epsilon/(4.0*PI)
+
+        dSdx_dot_q = get_dS_dot_q(dS, dSii, q, atmlst, gridslice)
+        DA = D*A
+        dKdx_dot_q = dSdx_dot_q - f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', DA, dSdx_dot_q)
+        dAdx_dot_Sq = get_dA_dot_q(dA, S @ q, atmlst)
+        dKdx_dot_q -= f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', D, dAdx_dot_Sq)
+        AS = (A * S.T).T # It's just diag(A) @ S
+        dDdx_dot_ASq = get_dD_dot_q(dD, AS @ q, atmlst, gridslice, ngrids)
+        dKdx_dot_q -= f_eps_over_4pi * dDdx_dot_ASq
+        dDdxT_dot_q = get_dDT_dot_q(dD, q, atmlst, gridslice, ngrids)
+        dKdx_dot_q -= f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', AS.T, dDdxT_dot_q)
+        dAdxT_dot_DT_q = get_dA_dot_q(dA, D.T @ q, atmlst)
+        dKdx_dot_q -= f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', S.T, dAdxT_dot_DT_q)
+        dSdxT_dot_AT_DT_q = get_dS_dot_q(dS, dSii, DA.T @ q, atmlst, gridslice)
+        dKdx_dot_q -= f_eps_over_4pi * dSdxT_dot_AT_DT_q
+
+        K_1_dot_dKdx_dot_q = cupy.einsum('ij,Adj->Adi', inverse_K, dKdx_dot_q)
+
+        vK_1_dot_dSdx = get_dST_dot_q(dS, dSii, vK_1, atmlst, gridslice)
+        vK_1_dot_dKdx = vK_1_dot_dSdx
+        vK_1_dot_dDdx = get_dDT_dot_q(dD, vK_1, atmlst, gridslice, ngrids)
+        vK_1_dot_dKdx -= f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', AS.T, vK_1_dot_dDdx)
+        vK_1D_dot_dAdx = get_dA_dot_q(dA, D.T @ vK_1, atmlst)
+        vK_1_dot_dKdx -= f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', S.T, vK_1D_dot_dAdx)
+        vK_1DA_dot_dSdx = get_dST_dot_q(dS, dSii, DA.T @ vK_1, atmlst, gridslice)
+        vK_1_dot_dKdx -= f_eps_over_4pi * vK_1DA_dot_dSdx
+        vK_1_dot_dSdxT = get_dS_dot_q(dS, dSii, vK_1, atmlst, gridslice)
+        vK_1_dot_dKdx -= f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', DA, vK_1_dot_dSdxT)
+        vK_1_ST_dot_dAdxT = get_dA_dot_q(dA, (S @ vK_1).T, atmlst)
+        vK_1_dot_dKdx -= f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', D, vK_1_ST_dot_dAdxT)
+        vK_1_ST_AT_dot_dDdxT = get_dD_dot_q(dD, (AS @ vK_1).T, atmlst, gridslice, ngrids)
+        vK_1_dot_dKdx -= f_eps_over_4pi * vK_1_ST_AT_dot_dDdxT
+
+        d2e_from_d2KR  = cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
+        d2e_from_d2KR += cupy.einsum('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
+
+        vK_1_d2K_q  = get_v_dot_d2D_dot_q(d2D, vK_1, AS @ q, natom, gridslice)
+        vK_1_d2K_q += get_v_dot_d2A_dot_q(d2A, (D.T @ vK_1).T, S @ q)
+        vK_1_d2K_q += get_v_dot_d2S_dot_q(d2S, d2Sii, (DA.T @ vK_1).T, q, natom, gridslice)
+        vK_1_d2K_q += get_v_dot_d2DT_dot_q(d2D, (AS @ vK_1).T, q, natom, gridslice)
+        vK_1_d2K_q += get_v_dot_d2A_dot_q(d2A, (S @ vK_1).T, D.T @ q)
+        vK_1_d2K_q += get_v_dot_d2ST_dot_q(d2S, d2Sii, vK_1, DA.T @ q, natom, gridslice)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dDdx, dAdx_dot_Sq)
+        vK_1_d2K_q += cupy.einsum('Adi,i,BDi->ABdD', vK_1_dot_dDdx, A, dSdx_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1D_dot_dAdx, dSdx_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dSdxT, dAdxT_dot_DT_q)
+        vK_1_d2K_q += cupy.einsum('Adi,i,BDi->ABdD', vK_1_dot_dSdxT, A, dDdxT_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1_ST_dot_dAdxT, dDdxT_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1_dot_dDdx, dAdx_dot_Sq)
+        vK_1_d2K_q += cupy.einsum('Adi,i,BDi->BADd', vK_1_dot_dDdx, A, dSdx_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1D_dot_dAdx, dSdx_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1_dot_dSdxT, dAdxT_dot_DT_q)
+        vK_1_d2K_q += cupy.einsum('Adi,i,BDi->BADd', vK_1_dot_dSdxT, A, dDdxT_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1_ST_dot_dAdxT, dDdxT_dot_q)
+        vK_1_d2K_q *= -f_eps_over_4pi
+        vK_1_d2K_q += get_v_dot_d2S_dot_q(d2S, d2Sii, vK_1, q, natom, gridslice)
+
+        d2e_from_d2KR -= vK_1_d2K_q
+
+        dAdx_dot_V = get_dA_dot_q(dA, v_grids, atmlst)
+        dDdx_dot_AV = get_dD_dot_q(dD, A * v_grids, atmlst, gridslice, ngrids)
+        dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + cupy.einsum('ij,Adj->Adi', D, dAdx_dot_V))
+
+        K_1_dot_dRdx_dot_V = cupy.einsum('ij,Adj->Adi', inverse_K, dRdx_dot_V)
+
+        d2e_from_d2KR -= cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
+        d2e_from_d2KR -= cupy.einsum('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
+
+        vK_1_d2R_V  = get_v_dot_d2D_dot_q(d2D, vK_1, A * v_grids, natom, gridslice)
+        vK_1_d2R_V += get_v_dot_d2A_dot_q(d2A, (D.T @ vK_1).T, v_grids)
+        vK_1_d2R_V += cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dDdx, dAdx_dot_V)
+        vK_1_d2R_V += cupy.einsum('Adi,BDi->BADd', vK_1_dot_dDdx, dAdx_dot_V)
+        vK_1_d2R_V *= f_eps_over_2pi
+
+        d2e_from_d2KR += vK_1_d2R_V
+
+        dK_1Rv = -K_1_dot_dKdx_dot_q + K_1_dot_dRdx_dot_V
+
+        VK_1D_dot_dAdx = get_dA_dot_q(dA, (D.T @ vK_1).T, atmlst)
+        VK_1_dot_dDdx = get_dDT_dot_q(dD, vK_1, atmlst, gridslice, ngrids)
+        VK_1_dot_dRdx = f_eps_over_2pi * (VK_1D_dot_dAdx + VK_1_dot_dDdx * A)
+
+        dvK_1R = -cupy.einsum("Adi,ij->Adj", vK_1_dot_dKdx, inverse_K @ R) + VK_1_dot_dRdx
+
+    else:
+        raise RuntimeError(f"Unknown implicit solvent model: {pcmobj.method}")
+
+    d2e = d2e_from_d2KR
+
+    intopt_derivative = int3c1e.VHFOpt(mol)
+    intopt_derivative.build(cutoff = 1e-14, aosym = False)
+
+    dVdx = get_dvgrids(pcmobj, dm, range(mol.natm), intopt_derivative)
+    d2e -= cupy.einsum('Adi,BDi->BADd', dvK_1R, dVdx)
+    d2e -= cupy.einsum('Adi,BDi->ABdD', dVdx, dK_1Rv)
+
+    d2e *= 0.5
+    d2e = d2e.get()
+    t1 = log.timer_debug1('solvent hessian d(V * dK-1R/dx * V)/dx contribution', *t1)
     return d2e
 
 def hess_elec(pcmobj, dm, verbose=None):
@@ -356,29 +671,6 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst, inverse_K):
 
     ngrids = q_sym.shape[0]
 
-    def get_dS_dot_q(dS, dSii, q, atmlst, gridslice):
-        output = cupy.einsum('diA,i->Adi', dSii[:,:,atmlst], q)
-        for i_atom in atmlst:
-            g0,g1 = gridslice[i_atom]
-            output[i_atom, :, g0:g1] += cupy.einsum('dij,j->di', dS[:,g0:g1,:], q)
-            output[i_atom, :, :] -= cupy.einsum('dij,j->di', dS[:,:,g0:g1], q[g0:g1])
-        return output
-    def get_dST_dot_q(dS, dSii, q, atmlst, gridslice):
-        return get_dS_dot_q(-dS.transpose(0,2,1), dSii, q, atmlst, gridslice)
-
-    def get_dA_dot_q(dA, q, atmlst, gridslice):
-        return cupy.einsum('diA,i->Adi', dA[:,:,atmlst], q)
-
-    def get_dD_dot_q(dD, q, atmlst, gridslice):
-        output = cupy.zeros([len(atmlst), 3, ngrids])
-        for i_atom in atmlst:
-            g0,g1 = gridslice[i_atom]
-            output[i_atom, :, g0:g1] += cupy.einsum('dij,j->di', dD[:,g0:g1,:], q)
-            output[i_atom, :, :] -= cupy.einsum('dij,j->di', dD[:,:,g0:g1], q[g0:g1])
-        return output
-    def get_dDT_dot_q(dD, q, atmlst, gridslice):
-        return get_dD_dot_q(-dD.transpose(0,2,1), q, atmlst, gridslice)
-
     if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
         _, dS = get_dD_dS(pcmobj.surface, with_D=False, with_S=True)
         dF, _ = get_dF_dA(pcmobj.surface)
@@ -407,27 +699,27 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst, inverse_K):
         DA = D*A
         dKdx_dot_q = dSdx_dot_q - f_eps_over_2pi * cupy.einsum('ij,Adj->Adi', DA, dSdx_dot_q)
 
-        dAdx_dot_Sq = get_dA_dot_q(dA, S @ q, atmlst, gridslice)
+        dAdx_dot_Sq = get_dA_dot_q(dA, S @ q, atmlst)
         dKdx_dot_q -= f_eps_over_2pi * cupy.einsum('ij,Adj->Adi', D, dAdx_dot_Sq)
 
         AS = (A * S.T).T # It's just diag(A) @ S
-        dDdx_dot_ASq = get_dD_dot_q(dD, AS @ q, atmlst, gridslice)
+        dDdx_dot_ASq = get_dD_dot_q(dD, AS @ q, atmlst, gridslice, ngrids)
         dKdx_dot_q -= f_eps_over_2pi * dDdx_dot_ASq
 
         dqdx_fix_Vq = -cupy.einsum('ij,Adj->Adi', inverse_K, dKdx_dot_q)
 
-        dAdx_dot_V = get_dA_dot_q(dA, v_grids, atmlst, gridslice)
+        dAdx_dot_V = get_dA_dot_q(dA, v_grids, atmlst)
 
-        dDdx_dot_AV = get_dD_dot_q(dD, A * v_grids, atmlst, gridslice)
+        dDdx_dot_AV = get_dD_dot_q(dD, A * v_grids, atmlst, gridslice, ngrids)
 
         dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + cupy.einsum('ij,Adj->Adi', D, dAdx_dot_V))
         dqdx_fix_Vq += cupy.einsum('ij,Adj->Adi', inverse_K, dRdx_dot_V)
 
         invKT_V = inverse_K.T @ v_grids
-        dDdxT_dot_invKT_V = get_dDT_dot_q(dD, invKT_V, atmlst, gridslice)
+        dDdxT_dot_invKT_V = get_dDT_dot_q(dD, invKT_V, atmlst, gridslice, ngrids)
 
         DT_invKT_V = D.T @ invKT_V
-        dAdxT_dot_DT_invKT_V = get_dA_dot_q(dA, DT_invKT_V, atmlst, gridslice)
+        dAdxT_dot_DT_invKT_V = get_dA_dot_q(dA, DT_invKT_V, atmlst)
         dqdx_fix_Vq += f_eps_over_2pi * (cupy.einsum('i,Adi->Adi', A, dDdxT_dot_invKT_V) + dAdxT_dot_DT_invKT_V)
 
         dSdxT_dot_invKT_V = get_dST_dot_q(dS, dSii, invKT_V, atmlst, gridslice)
@@ -458,17 +750,17 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst, inverse_K):
             DA = D*A
             dKdx_dot_q = dSdx_dot_q - f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', DA, dSdx_dot_q)
 
-            dAdx_dot_Sq = get_dA_dot_q(dA, S @ q, atmlst, gridslice)
+            dAdx_dot_Sq = get_dA_dot_q(dA, S @ q, atmlst)
             dKdx_dot_q -= f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', D, dAdx_dot_Sq)
 
             AS = (A * S.T).T # It's just diag(A) @ S
-            dDdx_dot_ASq = get_dD_dot_q(dD, AS @ q, atmlst, gridslice)
+            dDdx_dot_ASq = get_dD_dot_q(dD, AS @ q, atmlst, gridslice, ngrids)
             dKdx_dot_q -= f_eps_over_4pi * dDdx_dot_ASq
 
-            dDdxT_dot_q = get_dDT_dot_q(dD, q, atmlst, gridslice)
+            dDdxT_dot_q = get_dDT_dot_q(dD, q, atmlst, gridslice, ngrids)
             dKdx_dot_q -= f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', AS.T, dDdxT_dot_q)
 
-            dAdxT_dot_DT_q = get_dA_dot_q(dA, D.T @ q, atmlst, gridslice)
+            dAdxT_dot_DT_q = get_dA_dot_q(dA, D.T @ q, atmlst)
             dKdx_dot_q -= f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', S.T, dAdxT_dot_DT_q)
 
             dSdxT_dot_AT_DT_q = get_dST_dot_q(dS, dSii, DA.T @ q, atmlst, gridslice)
@@ -482,18 +774,18 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst, inverse_K):
         dKdx_dot_q = dK_dot_q(q)
         dqdx_fix_Vq = -cupy.einsum('ij,Adj->Adi', inverse_K, dKdx_dot_q)
 
-        dAdx_dot_V = get_dA_dot_q(dA, v_grids, atmlst, gridslice)
+        dAdx_dot_V = get_dA_dot_q(dA, v_grids, atmlst)
 
-        dDdx_dot_AV = get_dD_dot_q(dD, A * v_grids, atmlst, gridslice)
+        dDdx_dot_AV = get_dD_dot_q(dD, A * v_grids, atmlst, gridslice, ngrids)
 
         dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + cupy.einsum('ij,Adj->Adi', D, dAdx_dot_V))
         dqdx_fix_Vq += cupy.einsum('ij,Adj->Adi', inverse_K, dRdx_dot_V)
 
         invKT_V = inverse_K.T @ v_grids
-        dDdxT_dot_invKT_V = get_dDT_dot_q(dD, invKT_V, atmlst, gridslice)
+        dDdxT_dot_invKT_V = get_dDT_dot_q(dD, invKT_V, atmlst, gridslice, ngrids)
 
         DT_invKT_V = D.T @ invKT_V
-        dAdxT_dot_DT_invKT_V = get_dA_dot_q(dA, DT_invKT_V, atmlst, gridslice)
+        dAdxT_dot_DT_invKT_V = get_dA_dot_q(dA, DT_invKT_V, atmlst)
         dqdx_fix_Vq += f_eps_over_2pi * (cupy.einsum('i,Adi->Adi', A, dDdxT_dot_invKT_V) + dAdxT_dot_DT_invKT_V)
 
         dKdx_dot_invKT_V = dK_dot_q(invKT_V)
@@ -506,14 +798,13 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst, inverse_K):
 
     return dqdx_fix_Vq
 
-def get_dqsym_dx_fix_K_R(pcmobj, dm, atmlst, inverse_K, intopt_derivative):
+def get_dvgrids(pcmobj, dm, atmlst, intopt_derivative):
     assert pcmobj._intermediates is not None
 
     mol = pcmobj.mol
     gridslice    = pcmobj.surface['gslice_by_atom']
     charge_exp   = pcmobj.surface['charge_exp']
     grid_coords  = pcmobj.surface['grid_coords']
-    R            = pcmobj._intermediates['R']
 
     atom_coords = mol.atom_coords(unit='B')
     atom_charges = numpy.asarray(mol.atom_charges(), dtype=numpy.float64)
@@ -540,6 +831,11 @@ def get_dqsym_dx_fix_K_R(pcmobj, dm, atmlst, inverse_K, intopt_derivative):
         g0,g1 = gridslice[i_atom]
         dV_on_charge_dx[i_atom,:,g0:g1] -= dIdC[:,g0:g1]
 
+    return dV_on_charge_dx
+
+def get_dqsym_dx_fix_K_R(pcmobj, dm, atmlst, inverse_K, intopt_derivative):
+    dV_on_charge_dx = get_dvgrids(pcmobj, dm, atmlst, intopt_derivative)
+    R = pcmobj._intermediates['R']
     KR_symmetrized = 0.5 * (inverse_K @ R + R.T @ inverse_K.T)
     dqdx_fix_K_R = cupy.einsum('ij,Adj->Adi', KR_symmetrized, dV_on_charge_dx)
 
@@ -689,7 +985,7 @@ class WithSolventHess:
             return h1aoa, h1aob
         else:
             raise NotImplementedError('Base object is not supported')
-        
+
     def get_veff_resp_mo(self, mol, dms, mo_coeff, mo_occ, hermi=1):
         v1vo = super().get_veff_resp_mo(mol, dms, mo_coeff, mo_occ, hermi=hermi)
         if not self.base.with_solvent.equilibrium_solvation:
@@ -712,7 +1008,7 @@ class WithSolventHess:
         else:
             raise NotImplementedError('Base object is not supported')
         return v1vo
-    
+
     def _finalize(self):
         # disable _finalize. It is called in grad_method.kernel method
         # where self.de was not yet initialized.
