@@ -16,7 +16,7 @@ import numpy as np
 import cupy as cp
 from pyscf import symm
 from pyscf import lib
-from pyscf.tdscf._lr_eig import eigh as lr_eigh
+from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh
 from gpu4pyscf.dft.rks import KohnShamDFT
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, transpose_sum
 from gpu4pyscf.lib import logger
@@ -69,7 +69,7 @@ class CasidaTDDFT(TDDFT):
         d_ia = e_ia**.5
         ed_ia = e_ia * d_ia
         hdiag = e_ia ** 2
-        hdiag = hdiag.get()
+        hdiag = hdiag
         vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1)
         nocca, nvira = e_ia_a.shape
         noccb, nvirb = e_ia_b.shape
@@ -96,7 +96,7 @@ class CasidaTDDFT(TDDFT):
             hx = cp.hstack((v1a.reshape(nz,-1), v1b.reshape(nz,-1)))
             hx += ed_ia * zs
             hx *= d_ia
-            return hx.get()
+            return hx
 
         return vind, hdiag
 
@@ -120,7 +120,7 @@ class CasidaTDDFT(TDDFT):
         precond = self.get_precond(hdiag)
 
         def pickeig(w, v, nroots, envs):
-            idx = np.where(w > self.positive_eig_threshold)[0]
+            idx = cp.where(w > self.positive_eig_threshold)[0]
             return w[idx], v[:,idx], idx
 
         x0sym = None

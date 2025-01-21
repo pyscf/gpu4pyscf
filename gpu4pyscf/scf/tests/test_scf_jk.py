@@ -15,7 +15,7 @@
 import unittest
 import numpy as np
 import pyscf
-from pyscf import lib
+from pyscf import lib, gto
 from gpu4pyscf.scf import jk
 from pyscf.scf.hf import get_jk
 
@@ -125,4 +125,3 @@ def test_jk_hermi0():
 
     assert abs(vj2+vj3 - vj1).max() < 1e-9
     assert abs(vk2+vk3 - vk1).max() < 1e-9
-    

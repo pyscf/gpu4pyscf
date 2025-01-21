@@ -27,7 +27,7 @@ from pyscf.scf import chkfile
 from pyscf.soscf import ciah
 from pyscf.soscf.newton_ah import _CIAH_SOSCF as _SOSCF_cpu
 from gpu4pyscf.lib import logger
-from gpu4pyscf.scf import hf, rohf, uhf
+from gpu4pyscf.scf import hf, rohf, uhf, _response_functions
 from gpu4pyscf.lib.cupy_helper import transpose_sum, contract
 from gpu4pyscf.lib import utils
 

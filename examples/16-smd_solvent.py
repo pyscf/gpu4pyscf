@@ -28,16 +28,14 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
 mol = pyscf.M(atom=atom, basis='def2-tzvpp', verbose=1)
 mf = dft.rks.RKS(mol, xc='HYB_GGA_XC_B3LYP').density_fit()
-mf = mf.SMD()
 mf.grids.atom_grid = (99,590)
-mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
-mf.with_solvent.method = 'SMD'
-mf.with_solvent.solvent = 'water'
-e_tot = mf.kernel()
-print('total energy with SMD:', e_tot)
+e_gas = mf.kernel()
+print('total energy in gas phase:', e_gas)
 
-gradobj = mf.nuc_grad_method()
-f = gradobj.kernel()
+mf = mf.SMD()   # Add SMD model to the mean-field object
+mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids,
+mf.with_solvent.solvent = 'water' # Has to be a string, lookup the solvent name from https://comp.chem.umn.edu/solvation/mnsddb.pdf
+e_smd = mf.kernel()
+print('total energy in water:', e_smd)
 
-hessobj = mf.Hessian()
-h = hessobj.kernel()
+print('Solvation free energy:', e_smd - e_gas)

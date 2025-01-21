@@ -61,7 +61,8 @@ class KnownValues(unittest.TestCase):
         v1vo_cpu = fx_cpu(mo1)
 
         mf = mf.to_gpu()
-        fx_gpu = uhf_gpu.gen_vind(mf, mo_coeff, mo_occ)
+        hessobj = mf.Hessian()
+        fx_gpu = hessobj.gen_vind(mo_coeff, mo_occ)
         mo1 = cupy.asarray(mo1)
         v1vo_gpu = fx_gpu(mo1)
         assert numpy.linalg.norm(v1vo_cpu - v1vo_gpu.get()) < 1e-8
@@ -113,7 +114,8 @@ class KnownValues(unittest.TestCase):
         mo_energy = cupy.asarray(mo_energy)
         mo_coeff = cupy.asarray(mo_coeff)
         mo_occ = cupy.asarray(mo_occ)
-        mo1_gpu, mo_e1_gpu = hobj.solve_mo1(mo_energy, mo_coeff, mo_occ, (h1a_gpu, h1b_gpu), verbose=1)
+        fx = hobj.gen_vind(mo_coeff, mo_occ)
+        mo1_gpu, mo_e1_gpu = hobj.solve_mo1(mo_energy, mo_coeff, mo_occ, (h1a_gpu, h1b_gpu), fx, verbose=1)
         assert numpy.linalg.norm(h1a_cpu - h1a_gpu.get()) < 1e-5
         assert numpy.linalg.norm(h1b_cpu - h1b_gpu.get()) < 1e-5
         mo1_cpu = (numpy.asarray(mo1_cpu[0]), numpy.asarray(mo1_cpu[1]))

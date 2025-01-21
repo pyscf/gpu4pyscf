@@ -93,8 +93,9 @@ def eval_ir_freq_intensity(mf, hessian_obj):
     h1ao = hessian_obj.make_h1(mo_coeff, mo_occ, None, atmlst)
     # TODO: compact with hessian method, which can save one time cphf solve.
     # ! Different from PySCF, mo1 is all in mo!
+    fx = hessian_obj.gen_vind(mo_coeff, mo_occ)
     mo1, mo_e1 = hessian_obj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1ao,
-                                       None, atmlst, hessian_obj.max_memory, log)
+                                       fx, atmlst, hessian_obj.max_memory, log)  
     mo1 = cupy.asarray(mo1)
     mo_e1 = cupy.asarray(mo_e1)
 

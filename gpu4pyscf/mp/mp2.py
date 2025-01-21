@@ -349,6 +349,8 @@ class MP2(lib.StreamObject):
     # to_cpu can be reused only when __init__ still takes mf
     def to_cpu(self):
         mf = self._scf.to_cpu()
+        if mf.converged:
+            mf.kernel() # create intermediate variables if converged
         from importlib import import_module
         mod = import_module(self.__module__.replace('gpu4pyscf', 'pyscf'))
         cls = getattr(mod, self.__class__.__name__)

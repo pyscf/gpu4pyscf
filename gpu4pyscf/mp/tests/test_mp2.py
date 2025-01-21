@@ -37,6 +37,7 @@ def setUpModule():
                  'O': 'cc-pvdz',}
     mol.build()
     mol.incore_anyway = True
+    mol.max_memory = 32000
     mf = scf.RHF(mol)
     mf.conv_tol = 1e-12
     mf.scf()
