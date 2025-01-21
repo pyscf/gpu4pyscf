@@ -71,9 +71,6 @@ class GDF(lib.StreamObject):
         self._cderi, self._cderip = rsdf_builder.build_cderi(
             cell, auxcell, self.kpts, j_only=j_only)
         t1 = logger.timer_debug1(self, 'j3c', *t1)
-        print('b')
-        import traceback
-        traceback.print_stack()
         return self
 
     has_kpts = df_cpu.GDF.has_kpts

@@ -160,4 +160,4 @@ C    D
                 ref = abs(cderi[:].reshape(naux,nao,nao))
                 dat = abs(gpu_dat[ki,kj].get())
                 print(ki,kj)
-                assert abs(dat - ref).max() < 3e-8
+                assert abs(dat - ref).max() < 1e-8

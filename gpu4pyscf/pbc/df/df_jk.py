@@ -128,7 +128,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     t0 = (logger.process_clock(), logger.perf_counter())
     assert kpts_band is None or kpts_band is kpts
     assert mydf.has_kpts(kpts)
-    if mydf._cderi is not None:
+    if mydf._cderi is None:
         mydf.build(kpts_band=kpts_band)
         t0 = log.timer_debug1('Init get_k_kpts', *t0)
 
@@ -232,7 +232,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
     t0 = log.init_timer()
     assert is_zero(kpt)
     assert kpts_band is None
-    if mydf._cderi is not None:
+    if mydf._cderi is None:
         mydf.build(j_only=not with_k, kpts_band=kpts_band)
         t0 = log.timer_debug1('Init get_jk', *t0)
 

@@ -243,8 +243,10 @@ class SRInt3c2eOpt:
             else:
                 theta = 1./(1./cell_exp + 1./aux_exp + omega**-2)
             lsum = cell_l * 2 + aux_l + 1
-            lattice_sum_factor = max(2*np.pi*cell.rcut*lsum/(cell.vol*theta), 1)
-            cutoff = cell.precision / lattice_sum_factor**2
+            rad = cell.vol**(-1./3) * rcut + 1
+            surface = 4*np.pi * rad**2
+            lattice_sum_factor = 2*np.pi*rcut*lsum/(cell.vol*theta) + surface
+            cutoff = cell.precision / lattice_sum_factor
             log.debug1('int3c_kernel integral omega=%g theta=%g cutoff=%g',
                        omega, theta, cutoff)
 
@@ -418,12 +420,15 @@ def estimate_rcut(cell, auxcell, omega):
     sfac = aij*aj/(aij*aj + ai*theta)
     fl = 2
     fac = 2**li*np.pi**2.5*c1 * theta**(l3-.5)
-    fac *= 2*np.pi/(cell.vol*theta) * (l3+1)
+    rad = cell.vol**(-1./3) * cell.rcut + 1
+    surface = 4*np.pi * rad**2
+    lattice_sum_factor = 2*np.pi*cell.rcut/(cell.vol*theta) + surface
+    fac *= lattice_sum_factor
     fac /= aij**(li+1.5) * ak**(lk+1.5) * aj**lj
     fac *= fl / precision
 
     r0 = cell.rcut  # initial guess
-    r0 = (np.log(fac * r0 * (sfac*r0)**(l3-1) + 1.) / (sfac*theta))**.5
-    r0 = (np.log(fac * r0 * (sfac*r0)**(l3-1) + 1.) / (sfac*theta))**.5
+    r0 = (np.log(fac * (sfac*r0)**(l3-1) + 1.) / (sfac*theta))**.5
+    r0 = (np.log(fac * (sfac*r0)**(l3-1) + 1.) / (sfac*theta))**.5
     rcut = r0
     return rcut

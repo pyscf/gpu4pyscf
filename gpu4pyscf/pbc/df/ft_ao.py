@@ -104,7 +104,7 @@ def _bas_overlap_mask(cell, bvkmesh_Ls, Ls):
     lj = ls[None,None,:,None]
     fac_dri = (li * .5/aij[:,None,:,None] + dri**2) ** (li*.5)
     fac_drj = (lj * .5/aij[:,None,:,None] + drj**2) ** (lj*.5)
-    rad = (.75/np.pi*cell.vol)**(1./3) * dr
+    rad = cell.vol**(-1./3) * dr + 1
     surface = 4*np.pi * rad**2
     fl = cp.where(surface > 1, surface, 1)
     fac_norm = norm[:,None]*norm * (np.pi/aij)**1.5
