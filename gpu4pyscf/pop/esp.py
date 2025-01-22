@@ -88,7 +88,7 @@ def vdw_surface(mol, scales=[1.0], density=1.0*radii.BOHR**2, rad=R_VDW):
     Generate vdw surface of molecules, in Bohr
     '''
     coords = mol.atom_coords(unit='B')
-    charges = mol.atom_charges()
+    charges = [gto.charge(sym) for sym in mol.elements]
     atom_radii = rad[charges]
 
     surface_points = []
