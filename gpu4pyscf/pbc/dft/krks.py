@@ -140,6 +140,14 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
                     ecoul.imag)
     return tot_e.real, ecoul.real + exc.real
 
+def get_rho(mf, dm=None, grids=None, kpts=None):
+    if dm is None: dm = mf.make_rdm1()
+    if grids is None: grids = mf.grids
+    if kpts is None: kpts = mf.kpts
+    assert dm.ndim == 3
+    assert kpts.ndim == 2
+    return mf._numint.get_rho(mf.cell, dm, grids, kpts, mf.max_memory)
+
 class KRKS(rks.KohnShamDFT, khf.KRHF):
     '''RKS class adapted for PBCs with k-point sampling.
     '''
@@ -151,7 +159,7 @@ class KRKS(rks.KohnShamDFT, khf.KRHF):
     dump_flags = krks_cpu.KRKS.dump_flags
     get_veff = get_veff
     energy_elec = energy_elec
-    get_rho = return_cupy_array(krks_cpu.get_rho)
+    get_rho = get_rho
 
     nuc_grad_method = NotImplemented
     to_hf = NotImplemented

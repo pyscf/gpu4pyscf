@@ -134,9 +134,12 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
 
     dump_flags = uks_cpu.UKS.dump_flags
 
-    get_rho = return_cupy_array(uks_cpu.get_rho)
     get_veff = get_veff
     energy_elec = mol_uks.energy_elec
+
+    def get_rho(self, dm=None, grids=None, kpt=None):
+        if dm is None: dm = mf.make_rdm1()
+        return rks.get_rho(self, dm[0]+dm[1], grids, kpt)
 
     nuc_grad_method = NotImplemented
     to_hf = NotImplemented

@@ -44,26 +44,25 @@ LMAX = 4
 L_AUX_MAX = 6
 GOUT_WIDTH = 45
 THREADS = 256
+BVK_CELL_SHELLS = 2000
 
 def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     r'''
     Short-range 3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
     '''
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, kpts, bvk_kmesh)
+    bvk_kmesh = guess_bvk_kmesh(cell, kpts)
+    logger.debug(cell, 'BvK cell size %s for sr_aux_e2', bvk_kmesh)
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh)
     nao, nao_orig = int3c2e_opt.coeff.shape
     naux = int3c2e_opt.aux_coeff.shape[0]
 
-    if kpts is None or (kpts.ndim == 1 and is_zero(kpts)):
+    gamma_point = kpts is None or (kpts.ndim == 1 and is_zero(kpts))
+    if gamma_point:
         out = cp.zeros((nao, nao, naux))
     else:
-        assert kpts.ndim == 2
-        nkpts = len(kpts)
-        kmesh = int3c2e_opt.bvk_kmesh
-        assert kmesh is not None
-        kpts = cp.asarray(kpts, order='C').reshape(-1,3)
-        bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
-        expLk = cp.exp(1j*cp.dot(cp.asarray(bvkmesh_Ls), kpts.T))
+        expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls).dot(
+            cp.asarray(kpts).reshape(-1, 3).T))
         if j_only:
             expLLk = contract('Lk,Mk->LMk', expLk.conj(), expLk)
             out = cp.zeros((nkpts, nao, nao, naux), dtype=np.complex128)
@@ -76,8 +75,8 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     for shls_slice, eri3c in int3c2e_opt.int3c2e_kernel():
         i0, i1, j0, j1 = ao_loc[list(shls_slice[:4])]
         k0, k1 = aux_loc[list(shls_slice[4:])]
-        if kpts is None:
-            out[i0:i1,j0:j1,k0:k1] = tmp = eri3c[0,:,0]
+        if gamma_point:
+            out[i0:i1,j0:j1,k0:k1] = tmp = eri3c.sum(axis=(0,2))
             if i0 != j0:
                 out[j0:j1,i0:i1,k0:k1] = tmp.transpose(1,0,2)
         elif j_only:
@@ -185,8 +184,10 @@ def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
     return gen_img_idx
 
 class SRInt3c2eOpt:
-    def __init__(self, cell, auxcell, omega, kpts=None, bvk_kmesh=None):
+    def __init__(self, cell, auxcell, omega, bvk_kmesh=None):
         assert omega < 0
+        self.omega = omega
+
         self.cell = cell
         cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
         self.sorted_cell = cell
@@ -204,10 +205,10 @@ class SRInt3c2eOpt:
         self.sorted_auxcell.omega = omega
 
         if bvk_kmesh is None:
-            if kpts is None or is_zero(kpts):
-                bvk_kmesh = np.ones(3, dtype=int)
-            else:
-                bvk_kmesh = kpts_to_kmesh(cell, kpts)
+            bvk_kmesh = np.ones(3, dtype=int)
+        self.bvk_kmesh = bvk_kmesh
+        self.bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True)
+
         if np.prod(bvk_kmesh) == 1:
             bvkcell = cell
         else:
@@ -215,15 +216,13 @@ class SRInt3c2eOpt:
             # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
         self.bvkcell = bvkcell
-        self.bvk_kmesh = bvk_kmesh
-        self.kpts = kpts
-        self.omega = omega
 
     def int3c2e_kernel(self, cutoff=None, verbose=None):
         cell = self.sorted_cell
         auxcell = self.sorted_auxcell
         uniq_l_ctr = self.uniq_l_ctr
         l_ctr_offsets = self.l_ctr_offsets
+        l_ctr_aux_offsets = self.l_ctr_aux_offsets
         bvkcell = self.bvkcell
 
         log = logger.new_logger(cell, verbose)
@@ -232,7 +231,7 @@ class SRInt3c2eOpt:
         Ls = cp.asarray(bvkcell.get_lattice_Ls(rcut=rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
-        log.debug('rcut = %g, nimgs = %d', rcut, nimgs)
+        log.debug('int3c2e_kernel rcut = %g, nimgs = %d', rcut, nimgs)
 
         if cutoff is None:
             omega = cell.omega
@@ -284,6 +283,11 @@ class SRInt3c2eOpt:
         timing_collection = {}
         kern_counts = 0
 
+        cell_ao_loc = cell.ao_loc
+        di = (cell_ao_loc[l_ctr_offsets[1:]] - cell_ao_loc[l_ctr_offsets[:-1]]).max()
+        dk = (aux_loc[l_ctr_aux_offsets[1:]] - aux_loc[l_ctr_aux_offsets[:-1]]).max()
+        buf = cp.empty(bvk_ncells**2*di**2*dk)
+
         ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
         for i, j in ij_tasks:
             li = uniq_l[i]
@@ -295,10 +299,12 @@ class SRInt3c2eOpt:
             img_idx, img_offsets, bas_ij_idx = gen_img_idx(ish0, ish1, jsh0, jsh1)
 
             for k, lk in enumerate(self.uniq_l_ctr_aux[:,0]):
-                ksh0, ksh1 = self.l_ctr_aux_offsets[k:k+2]
+                ksh0, ksh1 = l_ctr_aux_offsets[k:k+2]
                 naux = aux_loc[ksh1] - aux_loc[ksh0]
                 shls_slice = ish0, ish1, jsh0, jsh1, ksh0, ksh1
-                eri3c = cp.zeros((bvk_ncells, nrow, bvk_ncells, ncol, naux))
+                eri3c = cp.ndarray((bvk_ncells, nrow, bvk_ncells, ncol, naux),
+                                   dtype=np.float64, memptr=buf.data)
+                eri3c.fill(0.)
                 lll = f'({ANGULAR[li]}{ANGULAR[lj]}|{ANGULAR[lk]})'
                 scheme = int3c2e_scheme(cell, li, lj, lk)
                 log.debug2('int3c2e_scheme for %s: %s', lll, scheme)
@@ -432,3 +438,27 @@ def estimate_rcut(cell, auxcell, omega):
     r0 = (np.log(fac * (sfac*r0)**(l3-1) + 1.) / (sfac*theta))**.5
     rcut = r0
     return rcut
+
+def guess_bvk_kmesh(cell, kpts, target_size=BVK_CELL_SHELLS):
+    '''Generate a sufficient large bvk cell for fill_int3c2e kernel to achieve
+    better load balance'''
+    if kpts is None or (kpts.ndim == 1 and is_zero(kpts)):
+        bvk_kmesh = np.ones(3, dtype=int)
+        bvk_ncells = 1
+    else:
+        kpts = np.asarray(kpts).reshape(-1,3)
+        bvk_kmesh = kmesh = kpts_to_kmesh(cell, kpts)
+        bvk_ncells = np.prod(bvk_kmesh)
+
+    # produce a cell with ~2000 shells
+    replica = target_size / (bvk_ncells * cell.nbas)
+    if replica < 1:
+        return bvk_kmesh
+
+    if cell.dimension == 2:
+        fac = replica**.5
+        bvk_kmesh[:2] = np.floor(bvk_kmesh[:2] * fac).astype(int)
+    else:
+        fac = replica**(1./3)
+        bvk_kmesh = np.floor(bvk_kmesh * fac).astype(int)
+    return bvk_kmesh

@@ -184,8 +184,8 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                     double theta_fac = omega2 / (omega2 + theta);
                     double theta_rr = theta * rr;
 // Somehow, this screening test does not filter out many integrals.
-// More benchmarks should be performed
-#if 1
+// More benchmarks are needed
+#if 0
                     __shared__ int8_t img_mask[WARPS];
                     if (thread_id_in_warp == 0) {
                         img_mask[warp_id] = 0;
