@@ -44,7 +44,7 @@ LMAX = 4
 L_AUX_MAX = 6
 GOUT_WIDTH = 45
 THREADS = 256
-BVK_CELL_SHELLS = 2000
+BVK_CELL_SHELLS = 2400
 
 def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     r'''
@@ -286,7 +286,7 @@ class SRInt3c2eOpt:
         cell_ao_loc = cell.ao_loc
         di = (cell_ao_loc[l_ctr_offsets[1:]] - cell_ao_loc[l_ctr_offsets[:-1]]).max()
         dk = (aux_loc[l_ctr_aux_offsets[1:]] - aux_loc[l_ctr_aux_offsets[:-1]]).max()
-        buf = cp.empty(bvk_ncells**2*di**2*dk)
+        buf = cp.empty((bvk_ncells,di, bvk_ncells,di, dk))
 
         ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
         for i, j in ij_tasks:
