@@ -38,7 +38,8 @@ from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.gto.cell import extract_pgto_params
 from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2
 
-OMEGA_MIN = 0.1
+#TODO: adjust omega dynamically according to problem size
+OMEGA_MIN = 0.3
 
 def build_cderi(cell, auxcell, kpts=None, j_only=False,
                 omega=OMEGA_MIN, linear_dep_threshold=LINEAR_DEP_THR):
@@ -250,11 +251,13 @@ def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
 # Create 2c2e, store on CPU
 def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True):
     # j2c ~ (-kpt_ji | kpt_ji) => hermi=1
-    precision = auxcell.precision * .1
+    precision = auxcell.precision ** 1.5
     aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffused')
     aux_exp = aux_exps.min()
     theta = 1./(2./aux_exp + omega**-2)
-    lattice_sum_factor = max(2*np.pi*auxcell.rcut/(auxcell.vol*theta), 1)
+    rad = auxcell.vol**(-1./3) * auxcell.rcut + 1
+    surface = 4*np.pi * rad**2
+    lattice_sum_factor = 2*np.pi*auxcell.rcut/(auxcell.vol*theta) + surface
     rcut_sr = (np.log(lattice_sum_factor / precision + 1.) / theta)**.5
     logger.debug1(auxcell, 'auxcell  rcut_sr = %g', rcut_sr)
     auxcell_sr = auxcell.copy()

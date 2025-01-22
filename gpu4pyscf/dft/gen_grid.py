@@ -30,6 +30,8 @@ import numpy
 import cupy
 from pyscf import lib
 from pyscf import gto
+from pyscf.dft import gen_grid as gen_grid_cpu
+from gpu4pyscf.lib import utils
 from pyscf.gto.eval_gto import BLKSIZE, NBINS, CUTOFF, make_screen_index
 from pyscf import __config__
 from cupyx.scipy.spatial.distance import cdist
@@ -463,8 +465,6 @@ def _load_conf(mod, name, default):
     else:
         return var
 
-from pyscf.dft import gen_grid
-from gpu4pyscf.lib import utils
 class Grids(lib.StreamObject):
 
     from gpu4pyscf.lib.utils import to_gpu, device
@@ -481,9 +481,10 @@ class Grids(lib.StreamObject):
     level = getattr(__config__, 'dft_gen_grid_Grids_level', 3)
     alignment    = ALIGNMENT_UNIT
     cutoff       = CUTOFF
-    _keys        = gen_grid.Grids._keys
+    _keys        = gen_grid_cpu.Grids._keys
 
-    __init__    = gen_grid.Grids.__init__
+    __init__   = gen_grid_cpu.Grids.__init__
+    dump_flags = gen_grid_cpu.Grids.dump_flags
 
     def __setattr__(self, key, val):
         if key in ('atom_grid', 'atomic_radii', 'radii_adjust', 'radi_method',
@@ -581,12 +582,12 @@ class Grids(lib.StreamObject):
         return self
 
     def to_cpu(self):
-        grids = gen_grid.Grids(self.mol)
+        grids = gen_grid_cpu.Grids(self.mol)
         utils.to_cpu(self, out=grids)
         return grids
 
-_default_rad = gen_grid._default_rad
-RAD_GRIDS = gen_grid.RAD_GRIDS
-_default_ang = gen_grid._default_ang
-ANG_ORDER = gen_grid.ANG_ORDER
-_padding_size = gen_grid._padding_size
+_default_rad = gen_grid_cpu._default_rad
+RAD_GRIDS = gen_grid_cpu.RAD_GRIDS
+_default_ang = gen_grid_cpu._default_ang
+ANG_ORDER = gen_grid_cpu.ANG_ORDER
+_padding_size = gen_grid_cpu._padding_size

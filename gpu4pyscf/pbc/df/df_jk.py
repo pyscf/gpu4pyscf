@@ -237,7 +237,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
         t0 = log.timer_debug1('Init get_jk', *t0)
 
     cell = mydf.cell
-    dm = np.asarray(dm, order='C')
+    dm = cp.asarray(dm, order='C')
     dms = _format_dms(dm, [kpt])
     nset, _, nao = dms.shape[:3]
     dms = dms.reshape(nset,nao,nao)

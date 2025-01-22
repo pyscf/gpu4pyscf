@@ -90,7 +90,7 @@ def eval_rho(cell, ao, dm, non0tab=None, xctype='LDA', hermi=0, with_lapl=False,
         pyscf.dft.numint.eval_rho
 
     '''
-    if np.iscomplexobj(ao) or np.iscomplexobj(dm):
+    if cp.iscomplexobj(ao) or cp.iscomplexobj(dm):
         ngrids, nao = ao.shape[-2:]
         ao_loc = cell.ao_loc_nr()
         assert nao == ao_loc[-1]
@@ -378,7 +378,6 @@ def _tau_dot(bra, ket, wv):
     return mat
 
 
-#TODO: put NumInt and KNumInt into one
 class KNumInt(lib.StreamObject, numint.LibXCMixin):
     eval_ao = staticmethod(eval_ao_kpts)
 
@@ -445,7 +444,7 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
         for ip0, ip1 in lib.prange(0, ngrids, blksize):
             coords = grids_coords[ip0:ip1]
             weight = grids_weights[ip0:ip1]
-            ao_ks = eval_ao_kpts(cell, coords, kpts, deriv=deriv)
+            ao_ks = self.eval_ao(cell, coords, kpts, deriv=deriv)
             yield ao_ks, weight, coords
             ao_ks = None
 
