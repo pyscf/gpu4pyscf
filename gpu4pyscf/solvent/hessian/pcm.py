@@ -151,7 +151,7 @@ def get_d2D_d2S(surface, with_S=True, with_D=False, stream=None):
         raise RuntimeError('Failed in generating PCM d2D and d2S matrices.')
     return d2D, d2S
 
-def hess_nuc(pcmobj, dm, verbose=None):
+def analytical_hess_nuc(pcmobj, dm, verbose=None):
     if not pcmobj._intermediates:
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
@@ -221,7 +221,7 @@ def hess_nuc(pcmobj, dm, verbose=None):
     t1 = log.timer_debug1('solvent hessian d(dVnuc/dx * q)/dx contribution', *t1)
     return d2e
 
-def hess_qv(pcmobj, dm, verbose=None):
+def analytical_hess_qv(pcmobj, dm, verbose=None):
     if not pcmobj._intermediates:
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
@@ -237,9 +237,6 @@ def hess_qv(pcmobj, dm, verbose=None):
     charge_exp  = pcmobj.surface['charge_exp']
     grid_coords = pcmobj.surface['grid_coords']
     q_sym       = pcmobj._intermediates['q_sym']
-
-    ngrids = q_sym.shape[0]
-    nao = mol.nao
 
     aoslice = mol.aoslice_by_atom()
     aoslice = numpy.array(aoslice)
@@ -368,7 +365,7 @@ def get_v_dot_d2D_dot_q(d2D, v_left, q_right, natom, gridslice):
 def get_v_dot_d2DT_dot_q(d2D, v_left, q_right, natom, gridslice):
     return get_v_dot_d2D_dot_q(d2D.transpose(0,1,3,2), v_left, q_right, natom, gridslice)
 
-def hess_solver(pcmobj, dm):
+def analytical_hess_solver(pcmobj, dm):
     if not pcmobj._intermediates:
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
@@ -625,44 +622,6 @@ def hess_solver(pcmobj, dm):
     t1 = log.timer_debug1('solvent hessian d(V * dK-1R/dx * V)/dx contribution', *t1)
     return d2e
 
-def hess_elec(pcmobj, dm, verbose=None):
-    '''
-    slow version with finite difference
-    TODO: use analytical hess_nuc
-    '''
-    log = logger.new_logger(pcmobj, verbose)
-    t1 = log.init_timer()
-    pmol = pcmobj.mol.copy()
-    mol = pmol.copy()
-    coords = mol.atom_coords(unit='Bohr')
-
-    def pcm_grad_scanner(mol):
-        # TODO: use more analytical forms
-        pcmobj.reset(mol)
-        e, v = pcmobj._get_vind(dm)
-        #return grad_elec(pcmobj, dm)
-        pcm_grad = grad_nuc(pcmobj, dm)
-        pcm_grad+= grad_solver(pcmobj, dm)
-        pcm_grad+= grad_qv(pcmobj, dm)
-        return pcm_grad
-
-    mol.verbose = 0
-    de = numpy.zeros([mol.natm, mol.natm, 3, 3])
-    eps = 1e-3
-    for ia in range(mol.natm):
-        for ix in range(3):
-            dv = numpy.zeros_like(coords)
-            dv[ia,ix] = eps
-            mol.set_geom_(coords + dv, unit='Bohr')
-            g0 = pcm_grad_scanner(mol)
-
-            mol.set_geom_(coords - dv, unit='Bohr')
-            g1 = pcm_grad_scanner(mol)
-            de[ia,:,ix] = (g0 - g1)/2.0/eps
-    t1 = log.timer_debug1('solvent energy', *t1)
-    pcmobj.reset(pmol)
-    return de
-
 def get_dqsym_dx_fix_vgrids(pcmobj, atmlst, inverse_K):
     assert pcmobj._intermediates is not None
 
@@ -852,7 +811,7 @@ def get_dqsym_dx(pcmobj, dm, atmlst, intopt_derivative):
     inverse_K = cupy.linalg.inv(K)
     return get_dqsym_dx_fix_vgrids(pcmobj, atmlst, inverse_K) + get_dqsym_dx_fix_K_R(pcmobj, dm, atmlst, inverse_K, intopt_derivative)
 
-def analytic_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
+def analytical_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None):
     '''
     dv_solv / da
     '''
@@ -961,8 +920,9 @@ class WithSolventHess:
             dm = dm[0] + dm[1]
         is_equilibrium = self.base.with_solvent.equilibrium_solvation
         self.base.with_solvent.equilibrium_solvation = True
-        self.de_solvent = hess_elec(self.base.with_solvent, dm, verbose=self.verbose)
-        #self.de_solvent+= hess_nuc(self.base.with_solvent)
+        self.de_solvent  =    analytical_hess_nuc(self.base.with_solvent, dm, verbose=self.verbose)
+        self.de_solvent +=     analytical_hess_qv(self.base.with_solvent, dm, verbose=self.verbose)
+        self.de_solvent += analytical_hess_solver(self.base.with_solvent, dm, verbose=self.verbose)
         self.de_solute = super().kernel(*args, **kwargs)
         self.de = self.de_solute + self.de_solvent
         self.base.with_solvent.equilibrium_solvation = is_equilibrium
@@ -974,7 +934,7 @@ class WithSolventHess:
         h1ao = super().make_h1(mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
         if isinstance(self.base, scf.hf.RHF):
             dm = self.base.make_rdm1(ao_repr=True)
-            dv = analytic_grad_vmat(self.base.with_solvent, dm, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
+            dv = analytical_grad_vmat(self.base.with_solvent, dm, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
             for i0, ia in enumerate(atmlst):
                 h1ao[i0] += dv[i0]
             return h1ao
@@ -983,8 +943,8 @@ class WithSolventHess:
             solvent = self.base.with_solvent
             dm = self.base.make_rdm1(ao_repr=True)
             dm = dm[0] + dm[1]
-            dva = analytic_grad_vmat(solvent, dm, mo_coeff[0], mo_occ[0], atmlst=atmlst, verbose=verbose)
-            dvb = analytic_grad_vmat(solvent, dm, mo_coeff[1], mo_occ[1], atmlst=atmlst, verbose=verbose)
+            dva = analytical_grad_vmat(solvent, dm, mo_coeff[0], mo_occ[0], atmlst=atmlst, verbose=verbose)
+            dvb = analytical_grad_vmat(solvent, dm, mo_coeff[1], mo_occ[1], atmlst=atmlst, verbose=verbose)
             for i0, ia in enumerate(atmlst):
                 h1aoa[i0] += dva[i0]
                 h1aob[i0] += dvb[i0]
