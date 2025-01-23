@@ -137,13 +137,19 @@ class KnownValues(unittest.TestCase):
         L = 4.
         cell = pbcgto.Cell()
         cell.a = np.eye(3)*L
-        cell.atom =[['He' , ( L/2+0., L/2+0. ,   L/2+1.)],
-                    ['He' , ( L/2+1., L/2+0. ,   L/2+1.)]]
-        cell.basis = {'He': [[0, (4.0, 1.0)], [0, (1.0, 1.0)]]}
+        cell.atom =[['H' , ( L/2+0., L/2+0. ,   L/2+1.)],
+                    ['H' , ( L/2+1., L/2+0. ,   L/2+1.)]]
+        cell.basis = [[0, (4.0, 1.0)], [0, (1.0, 1.0)]]
         cell.build()
-        ref = cell.KRHF().density_fit().run()
 
-        mf = cell.KRHF().to_gpu().density_fit().run(conv_tol=1e-8)
+        ref = cell.RHF().density_fit().run()
+        mf = ref.to_gpu().run(conv_tol=1e-8)
+        self.assertTrue(isinstance(mf.with_df, GDF))
+        self.assertAlmostEqual(ref.e_tot, -4.83677020554507, 9)
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+        ref = cell.KRHF().density_fit().run()
+        mf = ref.to_gpu().run(conv_tol=1e-8)
         self.assertTrue(isinstance(mf.with_df, GDF))
         self.assertAlmostEqual(ref.e_tot, -4.83677020554507, 9)
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)

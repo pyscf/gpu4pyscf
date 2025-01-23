@@ -61,8 +61,9 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     if gamma_point:
         out = cp.zeros((nao, nao, naux))
     else:
-        expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls).dot(
-            cp.asarray(kpts).reshape(-1, 3).T))
+        kpts = cp.asarray(kpts).reshape(-1, 3)
+        expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls).dot(kpts.T))
+        nkpts = len(kpts)
         if j_only:
             expLLk = contract('Lk,Mk->LMk', expLk.conj(), expLk)
             out = cp.zeros((nkpts, nao, nao, naux), dtype=np.complex128)
@@ -447,7 +448,7 @@ def guess_bvk_kmesh(cell, kpts, target_size=BVK_CELL_SHELLS):
         bvk_ncells = 1
     else:
         kpts = np.asarray(kpts).reshape(-1,3)
-        bvk_kmesh = kmesh = kpts_to_kmesh(cell, kpts)
+        bvk_kmesh = kpts_to_kmesh(cell, kpts)
         bvk_ncells = np.prod(bvk_kmesh)
 
     # produce a cell with ~2000 shells
@@ -455,10 +456,18 @@ def guess_bvk_kmesh(cell, kpts, target_size=BVK_CELL_SHELLS):
     if replica < 1:
         return bvk_kmesh
 
+    mesh_max = cell.nimgs * 2 + 1
+    bvk_multiplier = mesh_max / bvk_kmesh
     if cell.dimension == 2:
-        fac = replica**.5
-        bvk_kmesh[:2] = np.floor(bvk_kmesh[:2] * fac).astype(int)
+        fac = (replica / np.prod(bvk_multiplier[:2]))**.5
+        fac = min(fac, 1)
+        bvk_kmesh[:2] *= (fac * bvk_multiplier[:2]).astype(int)
     else:
-        fac = replica**(1./3)
-        bvk_kmesh = np.floor(bvk_kmesh * fac).astype(int)
+        # The replica on each axis should be proportional to the required nimg
+        # along each direction.
+        fac = (replica / np.prod(bvk_multiplier))**(1./3)
+        # The replica is not necessary to be more than the required nimg.
+        fac = min(fac, 1)
+        bvk_kmesh *= (fac * bvk_multiplier).astype(int)
+
     return bvk_kmesh

@@ -110,7 +110,7 @@ C    D
     omega = -0.2
     dat = sr_aux_e2(cell, auxcell, omega).get()
 
-    cell.precision=1e-10
+    cell.precision=1e-12
     cell.build()
     df = rsdf_builder._RSGDFBuilder(cell, auxcell).build(omega=abs(omega))
     int3c = df.gen_int3c_kernel('int3c2e', aosym='s1', return_complex=True)

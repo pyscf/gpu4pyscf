@@ -138,7 +138,7 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
     energy_elec = mol_uks.energy_elec
 
     def get_rho(self, dm=None, grids=None, kpt=None):
-        if dm is None: dm = mf.make_rdm1()
+        if dm is None: dm = self.make_rdm1()
         return rks.get_rho(self, dm[0]+dm[1], grids, kpt)
 
     nuc_grad_method = NotImplemented

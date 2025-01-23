@@ -152,7 +152,7 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
     energy_elec = energy_elec
 
     def get_rho(self, dm=None, grids=None, kpts=None):
-        if dm is None: dm = mf.make_rdm1()
+        if dm is None: dm = self.make_rdm1()
         return krks.get_rho(self, dm[0]+dm[1], grids, kpts)
 
     nuc_grad_method = NotImplemented
