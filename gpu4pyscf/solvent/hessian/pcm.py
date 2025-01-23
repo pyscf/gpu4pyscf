@@ -28,6 +28,7 @@ from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
 from gpu4pyscf.hessian.jk import _ao2mo
 from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
+from gpu4pyscf.gto.int3c1e_ipip import int1e_grids_ipip1, int1e_grids_ipvip1, int1e_grids_ipip2, int1e_grids_ip1ip2
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from pyscf import lib as pyscf_lib
@@ -221,7 +222,6 @@ def hess_nuc(pcmobj, dm, verbose=None):
     return d2e
 
 def hess_qv(pcmobj, dm, verbose=None):
-    raise NotImplementedError("This implementation requires 9 * nao * nao * ngrids of GPU memory")
     if not pcmobj._intermediates:
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
@@ -244,23 +244,28 @@ def hess_qv(pcmobj, dm, verbose=None):
     aoslice = mol.aoslice_by_atom()
     aoslice = numpy.array(aoslice)
 
-    fakemol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
-    intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
-    intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
+    intopt_derivative = int3c1e.VHFOpt(mol)
+    intopt_derivative.build(cutoff = 1e-14, aosym = False)
+
+    # fakemol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
+    # intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
+    # intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
 
     d2e_from_d2I = cupy.zeros([mol.natm, mol.natm, 3, 3])
 
-    d2I_dA2 = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipip1', direct_scf_tol=1e-14)
-    d2I_dA2 = cupy.einsum('dijq,q->dij', d2I_dA2, q_sym)
-    d2I_dA2 = d2I_dA2.reshape([3, 3, nao, nao])
+    # d2I_dA2 = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipip1', direct_scf_tol=1e-14)
+    # d2I_dA2 = cupy.einsum('dijq,q->dij', d2I_dA2, q_sym)
+    # d2I_dA2 = d2I_dA2.reshape([3, 3, nao, nao])
+    d2I_dA2 = int1e_grids_ipip1(mol, grid_coords, charges = q_sym, intopt = intopt_derivative, charge_exponents = charge_exp**2)
     for i_atom in range(mol.natm):
         p0,p1 = aoslice[i_atom, 2:]
         d2e_from_d2I[i_atom, i_atom, :, :] += cupy.einsum('ij,dDij->dD', dm[p0:p1, :], d2I_dA2[:, :, p0:p1, :])
         d2e_from_d2I[i_atom, i_atom, :, :] += cupy.einsum('ij,dDij->dD', dm[:, p0:p1], d2I_dA2[:, :, p0:p1, :].transpose(0,1,3,2))
 
-    d2I_dAdB = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipvip1', direct_scf_tol=1e-14)
-    d2I_dAdB = cupy.einsum('dijq,q->dij', d2I_dAdB, q_sym)
-    d2I_dAdB = d2I_dAdB.reshape([3, 3, nao, nao])
+    # d2I_dAdB = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipvip1', direct_scf_tol=1e-14)
+    # d2I_dAdB = cupy.einsum('dijq,q->dij', d2I_dAdB, q_sym)
+    # d2I_dAdB = d2I_dAdB.reshape([3, 3, nao, nao])
+    d2I_dAdB = int1e_grids_ipvip1(mol, grid_coords, charges = q_sym, intopt = intopt_derivative, charge_exponents = charge_exp**2)
     for i_atom in range(mol.natm):
         pi0,pi1 = aoslice[i_atom, 2:]
         for j_atom in range(mol.natm):
@@ -268,27 +273,28 @@ def hess_qv(pcmobj, dm, verbose=None):
             d2e_from_d2I[i_atom, j_atom, :, :] += cupy.einsum('ij,dDij->dD', dm[pi0:pi1, pj0:pj1], d2I_dAdB[:, :, pi0:pi1, pj0:pj1])
             d2e_from_d2I[i_atom, j_atom, :, :] += cupy.einsum('ij,dDij->dD', dm[pj0:pj1, pi0:pi1], d2I_dAdB[:, :, pi0:pi1, pj0:pj1].transpose(0,1,3,2))
 
-    d2I_dAdC = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ip1ip2', direct_scf_tol=1e-14)
-    d2I_dAdC = d2I_dAdC.reshape([3, 3, nao, nao, ngrids])
-    for i_atom in range(mol.natm):
-        p0,p1 = aoslice[i_atom, 2:]
-        for j_atom in range(mol.natm):
-            g0,g1 = gridslice[j_atom]
-            d2e_from_d2I[i_atom, j_atom, :, :] += cupy.einsum('ij,dDijq,q->dD', dm[p0:p1, :], d2I_dAdC[:, :, p0:p1, :, g0:g1], q_sym[g0:g1])
-            d2e_from_d2I[i_atom, j_atom, :, :] += cupy.einsum('ij,dDijq,q->dD', dm[:, p0:p1], d2I_dAdC[:, :, p0:p1, :, g0:g1].transpose(0,1,3,2,4), q_sym[g0:g1])
+    for j_atom in range(mol.natm):
+        g0,g1 = gridslice[j_atom]
+        # d2I_dAdC = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ip1ip2', direct_scf_tol=1e-14)
+        # d2I_dAdC = cupy.einsum('dijq,q->dij', d2I_dAdC[:, :, :, g0:g1], q_sym[g0:g1])
+        # d2I_dAdC = d2I_dAdC.reshape([3, 3, nao, nao])
+        d2I_dAdC = int1e_grids_ip1ip2(mol, grid_coords[g0:g1, :], charges = q_sym[g0:g1], intopt = intopt_derivative, charge_exponents = charge_exp[g0:g1]**2)
 
-            d2e_from_d2I[j_atom, i_atom, :, :] += cupy.einsum('ij,dDijq,q->dD', dm[p0:p1, :], d2I_dAdC[:, :, p0:p1, :, g0:g1].transpose(1,0,2,3,4), q_sym[g0:g1])
-            d2e_from_d2I[j_atom, i_atom, :, :] += cupy.einsum('ij,dDijq,q->dD', dm[:, p0:p1], d2I_dAdC[:, :, p0:p1, :, g0:g1].transpose(1,0,3,2,4), q_sym[g0:g1])
+        for i_atom in range(mol.natm):
+            p0,p1 = aoslice[i_atom, 2:]
+            d2e_from_d2I[i_atom, j_atom, :, :] += cupy.einsum('ij,dDij->dD', dm[p0:p1, :], d2I_dAdC[:, :, p0:p1, :])
+            d2e_from_d2I[i_atom, j_atom, :, :] += cupy.einsum('ij,dDij->dD', dm[:, p0:p1], d2I_dAdC[:, :, p0:p1, :].transpose(0,1,3,2))
 
-    d2I_dC2 = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipip2', direct_scf_tol=1e-14)
-    d2I_dC2 = cupy.einsum('dijq,ij->dq', d2I_dC2, dm)
-    d2I_dC2 = d2I_dC2.reshape([3, 3, ngrids])
+            d2e_from_d2I[j_atom, i_atom, :, :] += cupy.einsum('ij,dDij->dD', dm[p0:p1, :], d2I_dAdC[:, :, p0:p1, :].transpose(1,0,2,3))
+            d2e_from_d2I[j_atom, i_atom, :, :] += cupy.einsum('ij,dDij->dD', dm[:, p0:p1], d2I_dAdC[:, :, p0:p1, :].transpose(1,0,3,2))
+
+    # d2I_dC2 = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipip2', direct_scf_tol=1e-14)
+    # d2I_dC2 = cupy.einsum('dijq,ij->dq', d2I_dC2, dm)
+    # d2I_dC2 = d2I_dC2.reshape([3, 3, ngrids])
+    d2I_dC2 = int1e_grids_ipip2(mol, grid_coords, dm = dm, intopt = intopt_derivative, charge_exponents = charge_exp**2)
     for i_atom in range(mol.natm):
         g0,g1 = gridslice[i_atom]
         d2e_from_d2I[i_atom, i_atom, :, :] += cupy.einsum('dDq,q->dD', d2I_dC2[:, :, g0:g1], q_sym[g0:g1])
-
-    intopt_derivative = int3c1e.VHFOpt(mol)
-    intopt_derivative.build(cutoff = 1e-14, aosym = False)
 
     dqdx = get_dqsym_dx(pcmobj, dm, range(mol.natm), intopt_derivative)
 
