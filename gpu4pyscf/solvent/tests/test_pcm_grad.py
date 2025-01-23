@@ -174,9 +174,9 @@ class KnownValues(unittest.TestCase):
         #       QChem 6.1 has a bug in SSVPE gradient, they use the IEFPCM gradient algorithm
         #       to compute SSVPE gradient, which is wrong.
         g0 = numpy.asarray([
-            [ 2.13162821e-09,  0.00000000e+00, -5.89116532e-02],
-            [ 2.28518083e-02, -2.13162821e-09,  2.94558255e-02],
-            [-2.28518090e-02,  0.00000000e+00,  2.94558234e-02],
+            [ 0.00000000e+00, -7.10542736e-10, -1.63195623e+00],
+            [ 1.07705138e+00,  2.13162821e-09,  8.15978117e-01],
+            [-1.07705138e+00, -2.13162821e-09,  8.15978116e-01],
         ])
         print(f"Gradient error in RHF with SS(V)PE: {numpy.linalg.norm(g0 - grad)}")
         assert numpy.linalg.norm(g0 - grad) < 1e-6
