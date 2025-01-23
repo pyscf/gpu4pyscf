@@ -17,9 +17,13 @@ from functools import reduce
 import cupy as cp
 from pyscf import lib
 from pyscf.lib import logger
+from gpu4pyscf import lib as lib_gpu
+from gpu4pyscf.lib.cupy_helper import  contract
+from gpu4pyscf.df import int3c2e
 from gpu4pyscf.dft import rks
 from gpu4pyscf.dft import numint
 from gpu4pyscf.scf import cphf
+from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.grad import tdrhf
 
@@ -27,8 +31,7 @@ from gpu4pyscf.grad import tdrhf
 #
 # Given Y = 0, TDDFT gradients (XAX+XBY+YBX+YAY)^1 turn to TDA gradients (XAX)^1
 #
-def grad_elec(td_grad, x_y, singlet=True, atmlst=None,
-              max_memory=2000, verbose=logger.INFO):
+def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     '''
     Electronic part of TDA, TDDFT nuclear gradients
 
@@ -48,7 +51,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None,
     mo_energy = cp.asarray(mf.mo_energy)
     mo_occ = cp.asarray(mf.mo_occ)
     nao, nmo = mo_coeff.shape
-    nocc = (mo_occ>0).sum()
+    nocc = int((mo_occ>0).sum())
     nvir = nmo - nocc
     x, y = x_y
     x = cp.asarray(x)
@@ -64,19 +67,18 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None,
     dmzoo = reduce(cp.dot, (orbo, doo, orbo.T)) # T_{ij}*2 in ao basis
     dmzoo+= reduce(cp.dot, (orbv, dvv, orbv.T)) # T_{ij}*2 + T_{ab}*2 in ao basis
 
-    mem_now = lib.current_memory()[0]
-    max_memory = max(2000, td_grad.max_memory*.9-mem_now)
-
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     f1vo, f1oo, vxc1, k1ao = \
             _contract_xc_kernel(td_grad, mf.xc, dmxpy,
-                                dmzoo, True, True, singlet, max_memory)
+                                dmzoo, True, True, singlet)
 
     if ni.libxc.is_hybrid_xc(mf.xc):
         dm = (dmzoo, dmxpy+dmxpy.T, dmxmy-dmxmy.T)
         vj, vk = mf.get_jk(mol, dm, hermi=0)
+        if not isinstance(vj, cp.ndarray): vj = cp.asarray(vj)
+        if not isinstance(vk, cp.ndarray): vk = cp.asarray(vk)
         vk *= hyb
         if omega != 0:
             vk += mf.get_k(mol, dm, hermi=0, omega=omega) * (alpha-hyb)
@@ -130,7 +132,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None,
     im0[nocc:,:nocc] = cp.einsum('ki,ai->ak', veff0mop[:nocc,:nocc], xpy)*2
     im0[nocc:,:nocc]+= cp.einsum('ki,ai->ak', veff0mom[:nocc,:nocc], xmy)*2
 
-    zeta = lib.direct_sum('i+j->ij', mo_energy, mo_energy) * .5
+    zeta = lib_gpu.cupy_helper.direct_sum('i+j->ij', mo_energy, mo_energy) * .5
     zeta[nocc:,:nocc] = mo_energy[:nocc]
     zeta[:nocc,nocc:] = mo_energy[nocc:]
     dm1 = cp.zeros((nmo,nmo))
@@ -143,80 +145,118 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None,
     # Initialize hcore_deriv with the underlying SCF object because some
     # extensions (e.g. QM/MM, solvent) modifies the SCF object only.
     mf_grad = td_grad.base._scf.nuc_grad_method()
-    hcore_deriv = mf_grad.hcore_generator(mol)
     s1 = mf_grad.get_ovlp(mol)
 
     dmz1doo = z1ao + dmzoo
     oo0 = reduce(cp.dot, (orbo, orbo.T))
-    if ni.libxc.is_hybrid_xc(mf.xc):
-        dm = (oo0, dmz1doo+dmz1doo.T, dmxpy+dmxpy.T, dmxmy-dmxmy.T)
-        vj, vk = td_grad.get_jk(mol, dm)
-        vk *= hyb
-        if omega != 0:
-            vk += td_grad.get_k(mol, dm, omega=omega) * (alpha-hyb)
-        vj = vj.reshape(-1,3,nao,nao)
-        vk = vk.reshape(-1,3,nao,nao)
-        veff1 = -vk
-        if singlet:
-            veff1 += vj * 2
-        else:
-            veff1[:2] += vj[:2] * 2
+
+    if atmlst is None:
+        atmlst = range(mol.natm)
+    h1 = cp.asarray(mf_grad.get_hcore(mol)) # without 1/r like terms
+    s1 = cp.asarray(mf_grad.get_ovlp(mol))
+    dh_ground = contract('xij,ij->xi', h1, oo0*2)
+    dh_td = contract('xij,ij->xi', h1, (dmz1doo+dmz1doo.T)*0.5)
+    ds = contract('xij,ij->xi', s1, (im0+im0.T)*0.5)
+
+    dh1e_ground = int3c2e.get_dh1e(mol, oo0*2) # 1/r like terms
+    if mol.has_ecp():
+        dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0*2) # 1/r like terms
+    dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo+dmz1doo.T)*0.5) # 1/r like terms
+    if mol.has_ecp():
+        dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo+dmz1doo.T)*0.5) # 1/r like terms
+
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
+    vhfopt = mf._opt_gpu.get(None, None)
+    j_factor = 1.
+    k_factor = 0.
+    if with_k:
+        if omega == 0:
+            k_factor = hyb
+        elif alpha == 0: # LR=0, only SR exchange
+            pass
+        elif hyb == 0: # SR=0, only LR exchange
+            k_factor = alpha
+        else: # SR and LR exchange with different ratios
+            k_factor = alpha
+        dvhf_DD_DP = rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5 + oo0*2, vhfopt, j_factor, k_factor, verbose=verbose)
+        dvhf_DD_DP-= rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5, vhfopt, j_factor, k_factor, verbose=verbose)
+        dvhf_xpy = rhf_grad._jk_energy_per_atom(mol, dmxpy+dmxpy.T, vhfopt, j_factor, k_factor, verbose=verbose)*2
+    if with_k and omega != 0:
+        j_factor = 0.
+        omega = -omega # Prefer computing the SR part
+        if alpha == 0: # LR=0, only SR exchange
+            k_factor = hyb
+        elif hyb == 0: # SR=0, only LR exchange
+            # full range exchange was computed in the previous step
+            k_factor = -alpha
+        else: # SR and LR exchange with different ratios
+            k_factor = hyb - alpha # =beta
+        vhfopt = mf._opt_gpu.get(omega, None)
+        with mol.with_range_coulomb(omega):
+            dvhf_DD_DP += rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5 + oo0*2, vhfopt, j_factor, k_factor, verbose=verbose)
+            dvhf_DD_DP-= rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5, vhfopt, j_factor, k_factor, verbose=verbose)
+            dvhf_xpy += rhf_grad._jk_energy_per_atom(mol, dmxpy+dmxpy.T, vhfopt, j_factor, k_factor, verbose=verbose)*2
+
+    vj, vk = tdrhf.get_jk(mol, (dmxmy-dmxmy.T)) #D, P, (X+Y), (X-Y)
+    if not isinstance(vj, cp.ndarray): vj = cp.asarray(vj)
+    if not isinstance(vk, cp.ndarray): vk = cp.asarray(vk)
+    vj = vj.reshape(3,nao,nao)
+    vk = vk.reshape(3,nao,nao)
+    veff1_3 = -vk
+    if singlet:
+        veff1_3 += vj * 2
     else:
-        vj = td_grad.get_j(mol, (oo0, dmz1doo+dmz1doo.T, dmxpy+dmxpy.T))
-        vj = vj.reshape(-1,3,nao,nao)
-        veff1 = cp.zeros((4,3,nao,nao))
-        if singlet:
-            veff1[:3] = vj * 2
-        else:
-            veff1[:2] = vj[:2] * 2
+        veff1_3 += vj*2
 
     fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None,
-                                False, False, True, max_memory)[0]
+                                False, False, True)[0]
 
-    veff1[0] += vxc1[1:]
-    veff1[1] +=(f1oo[1:] + fxcz1[1:] + k1ao[1:]*2)*2 # *2 for dmz1doo+dmz1oo.T
+    veff1_0 = vxc1[1:]
+    veff1_1 =(f1oo[1:] + fxcz1[1:] + k1ao[1:]*2)*2 # *2 for dmz1doo+dmz1oo.T
     if singlet:
-        veff1[2] += f1vo[1:] * 2
+        veff1_2 = f1vo[1:] * 2
     else:
-        veff1[2] += f1vo[1:]
+        veff1_2 = f1vo[1:]
     time1 = log.timer('2e AO integral derivatives', *time1)
+    extra_force = cp.zeros((len(atmlst),3))
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+
+    delec = 2.0*(dh_ground + dh_td - ds)
+    aoslices = mol.aoslice_by_atom()
+    delec= cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
+    de = 2.0 * (dvhf_DD_DP + dvhf_xpy) + dh1e_ground + dh1e_td + delec + extra_force
 
     if atmlst is None:
         atmlst = range(mol.natm)
     offsetdic = mol.offset_nr_by_atom()
     de = cp.zeros((len(atmlst),3))
+    tmp = cp.zeros((3, nao, nao))
     for k, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = offsetdic[ia]
+        tmp[:,p0:p1]   += veff1_0[:,p0:p1]
+        tmp[:,:,p0:p1] += veff1_0[:,p0:p1].transpose(0,2,1)
+        de[k]  = cp.einsum('xpq,pq->x', tmp, oo0) * 2
 
-        # Ground state gradients
-        h1ao = hcore_deriv(ia)
-        h1ao[:,p0:p1]   += veff1[0,:,p0:p1]
-        h1ao[:,:,p0:p1] += veff1[0,:,p0:p1].transpose(0,2,1)
-        # oo0*2 for doubly occupied orbitals
-        e1  = cp.einsum('xpq,pq->x', h1ao, oo0) * 2
+        de[k] += cp.einsum('xpq,pq->x', tmp, dmz1doo)
+        de[k] -= cp.einsum('xpq,pq->x', s1[:,p0:p1], im0[p0:p1])
+        de[k] -= cp.einsum('xqp,pq->x', s1[:,p0:p1], im0[:,p0:p1])
 
-        e1 += cp.einsum('xpq,pq->x', h1ao, dmz1doo)
-        e1 -= cp.einsum('xpq,pq->x', s1[:,p0:p1], im0[p0:p1])
-        e1 -= cp.einsum('xqp,pq->x', s1[:,p0:p1], im0[:,p0:p1])
-
-        e1 += cp.einsum('xij,ij->x', veff1[1,:,p0:p1], oo0[p0:p1])
-        e1 += cp.einsum('xij,ij->x', veff1[2,:,p0:p1], dmxpy[p0:p1,:]) * 2
-        e1 += cp.einsum('xji,ij->x', veff1[2,:,p0:p1], dmxpy[:,p0:p1]) * 2
-        e1 += cp.einsum('xij,ij->x', veff1[3,:,p0:p1], dmxmy[p0:p1,:]) * 2
-        e1 -= cp.einsum('xji,ij->x', veff1[3,:,p0:p1], dmxmy[:,p0:p1]) * 2
-
-        e1 += td_grad.extra_force(ia, locals())
-
-        de[k] = e1
+        de[k] += cp.einsum('xij,ij->x', veff1_1[:,p0:p1], oo0[p0:p1])
+        de[k] += cp.einsum('xij,ij->x', veff1_2[:,p0:p1], dmxpy[p0:p1,:]) * 2
+        de[k] += cp.einsum('xji,ij->x', veff1_2[:,p0:p1], dmxpy[:,p0:p1]) * 2
+        de[k] += cp.einsum('xij,ij->x', veff1_3[:,p0:p1], dmxmy[p0:p1,:]) * 2
+        de[k] -= cp.einsum('xji,ij->x', veff1_3[:,p0:p1], dmxmy[:,p0:p1]) * 2
 
     log.timer('TDRKS nuclear gradients', *time0)
-    return de
+    return de.get()
 
 
 # dmvo, dmoo in AO-representation
 # Note spin-trace is applied for fxc, kxc
 def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
-                        with_kxc=True, singlet=True, max_memory=2000):
+                        with_kxc=True, singlet=True):
     mol = td_grad.mol
     mf = td_grad.base._scf
     grids = mf.grids
@@ -263,7 +303,7 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
 
     if singlet:
         for ao, mask, weight, coords \
-                in ni.block_loop(mol, grids, nao, ao_deriv, max_memory):
+                in ni.block_loop(mol, grids, nao, ao_deriv):
             if xctype == 'LDA':
                 ao0 = ao[0]
             else:
@@ -291,7 +331,7 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
                 fmat_(mol, k1ao, ao, wv, mask, shls_slice, ao_loc)
     else:
         for ao, mask, weight, coords \
-                in ni.block_loop(mol, grids, nao, ao_deriv, max_memory):
+                in ni.block_loop(mol, grids, nao, ao_deriv):
             if xctype == 'LDA':
                 ao0 = ao[0]
             else:
@@ -349,7 +389,8 @@ def _gga_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
     aow = numint._scale_ao(ao[:4], wv[:4])
     tmp = numint._dot_ao_ao(mol, ao[0], aow, mask, shls_slice, ao_loc)
     vmat[0] += tmp + tmp.T
-    rks_grad._gga_grad_sum_(vmat[1:], mol, ao, wv, mask, ao_loc)
+    wv = cp.ascontiguousarray(wv)
+    vmat[1:] = rks_grad._gga_grad_sum_(ao, wv)
     return vmat
 
 def _mgga_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
@@ -367,7 +408,7 @@ def _mgga_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
 class Gradients(tdrhf.Gradients):
     @lib.with_doc(grad_elec.__doc__)
     def grad_elec(self, xy, singlet, atmlst=None):
-        return grad_elec(self, xy, singlet, atmlst, self.max_memory, self.verbose)
+        return grad_elec(self, xy, singlet, atmlst, self.verbose)
 
 Grad = Gradients
 

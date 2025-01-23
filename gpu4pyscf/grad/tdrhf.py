@@ -42,8 +42,7 @@ def get_jk(mol, dm):
                                mol._atm, mol._bas, mol._env)
     return -vj, -vk
 
-def grad_elec(td_grad, x_y, singlet=True, atmlst=None,
-              max_memory=2000, verbose=logger.INFO):
+def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     '''
     Electronic part of TDA, TDHF nuclear gradients
 
@@ -144,7 +143,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None,
     if atmlst is None:
         atmlst = range(mol.natm)
     # offsetdic = mol.offset_nr_by_atom()
-    de = cp.zeros((len(atmlst),3))
     h1 = cp.asarray(mf_grad.get_hcore(mol)) # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
     dh_ground = contract('xij,ij->xi', h1, oo0*2)
@@ -299,7 +297,7 @@ class Gradients(rhf_grad.GradientsBase):
 
     @lib.with_doc(grad_elec.__doc__)
     def grad_elec(self, xy, singlet, atmlst=None):
-        return grad_elec(self, xy, singlet, atmlst, self.max_memory, self.verbose)
+        return grad_elec(self, xy, singlet, atmlst, self.verbose)
 
     def kernel(self, xy=None, state=None, singlet=None, atmlst=None):
         '''
