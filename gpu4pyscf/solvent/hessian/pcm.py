@@ -365,7 +365,7 @@ def get_v_dot_d2D_dot_q(d2D, v_left, q_right, natom, gridslice):
 def get_v_dot_d2DT_dot_q(d2D, v_left, q_right, natom, gridslice):
     return get_v_dot_d2D_dot_q(d2D.transpose(0,1,3,2), v_left, q_right, natom, gridslice)
 
-def analytical_hess_solver(pcmobj, dm):
+def analytical_hess_solver(pcmobj, dm, verbose=None):
     if not pcmobj._intermediates:
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
@@ -374,7 +374,7 @@ def analytical_hess_solver(pcmobj, dm):
     else:
         pcmobj._get_vind(dm)
     mol = pcmobj.mol
-    log = logger.new_logger(mol, mol.verbose)
+    log = logger.new_logger(mol, verbose)
     t1 = log.init_timer()
 
     natom = mol.natm
