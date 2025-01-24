@@ -98,8 +98,6 @@ def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
     if with_long_range:
         ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, log)
 
-    nao = cell.nao
-    naux = auxcell.nao
     prefer_ed = PREFER_ED
     if cell.dimension == 2:
         prefer_ed = True
