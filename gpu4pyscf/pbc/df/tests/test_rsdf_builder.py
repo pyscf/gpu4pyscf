@@ -43,7 +43,7 @@ C    D
     kpts = cell.make_kpts([1,1,1])
     dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
     dfbuilder.omega = omega
-    dfbuilder.j2c_eig_always = True
+    dfbuilder.j2c_eig_always = False
     dfbuilder.fft_dd_block = True
     dfbuilder.exclude_d_aux = True
     naux = auxcell.nao
@@ -94,7 +94,7 @@ C    D
     auxcell.precision = 1e-10
     dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
     dfbuilder.omega = omega
-    dfbuilder.j2c_eig_always = True
+    dfbuilder.j2c_eig_always = False
     dfbuilder.fft_dd_block = True
     dfbuilder.exclude_d_aux = True
     naux = auxcell.nao
@@ -148,7 +148,7 @@ C    D
     dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
     dfbuilder.j_only = True
     dfbuilder.omega = omega
-    dfbuilder.j2c_eig_always = True
+    dfbuilder.j2c_eig_always = False
     dfbuilder.fft_dd_block = True
     dfbuilder.exclude_d_aux = True
     naux = auxcell.nao

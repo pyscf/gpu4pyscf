@@ -21,7 +21,7 @@ import ctypes
 import warnings
 import numpy as np
 import cupy as cp
-import scipy.linalg
+from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 #from pyscf.pbc import gto as pbcgto
 #from pyscf.pbc.gto import pseudo
@@ -124,22 +124,15 @@ def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
             j2c_k = j2c_k.real
         cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
             j2c_k, prefer_ed, linear_dep_threshold)
+        if cd_j2c.dtype != j3c.dtype:
+            cd_j2c = cd_j2c.astype(j3c.dtype)
 
         for ki, kj in zip(ki_idx, kj_idx):
             j3c_k = j3c[ki,kj]
-            if j2ctag == 'ED':
-                cderi[ki,kj] = contract('Lr,pqr->Lpq', cd_j2c, j3c_k)
-            else:
-                cderi[ki,kj] = cp.linalg.solve(
-                    cd_j2c, j3c_k.reshape(-1,naux).T).reshape(naux,nao,nao)
+            cderi[ki,kj] = _solve_cderi(cd_j2c, j3c_k, j2ctag)
             if cd_j2c_negative is not None:
                 assert cell.dimension == 2
-                # for low-dimension systems
-                if j2ctag == 'ED':
-                    cderip[ki,kj] = contract('Lr,pqr->Lpq', cd_j2c_negative, j3c_k)
-                else:
-                    cderip[ki,kj] = cp.linalg.solve(
-                        cd_j2c_negative, j3c_k.reshape(-1,naux).T).reshape(naux,nao,nao)
+                cderip[ki,kj] = _solve_cderi(cd_j2c_negative, j3c_k, j2ctag)
     t1 = log.timer('pass2: solve cderi', *t1)
     return cderi, cderip
 
@@ -168,13 +161,16 @@ def build_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True
             # functions |P> are assumed to be real
             j3c += contract('pqG,Gr->pqr', pqG[0], auxG_conj).real
 
-    cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(j2c, linear_dep_threshold)
-    assert j2ctag == 'ED'
+    prefer_ed = PREFER_ED
+    if cell.dimension == 2:
+        prefer_ed = True
+    cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
+        j2c, prefer_ed, linear_dep_threshold)
 
-    cderi[0,0] = contract('Lr,pqr->Lpq', cd_j2c, j3c)
+    cderi[0,0] = _solve_cderi(cd_j2c, j3c, j2ctag)
     if cd_j2c_negative is not None:
-        # for low-dimension systems
-        cderip[0,0] = contract('Lr,pqr->Lpq', cd_j2c_negative, j3c)
+        assert cell.dimension == 2
+        cderip[0,0] = _solve_cderi(cd_j2c_negative, j3c, j2ctag)
     t1 = log.timer('pass2: solve cderi', *t1)
     return cderi, cderip
 
@@ -210,15 +206,20 @@ def build_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tru
             # functions |P> are assumed to be real
             j3c += contract('kpqG,Gr->kpqr', pqG, auxG_conj)
 
-    cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(j2c, linear_dep_threshold)
-    assert j2ctag == 'ED'
+    prefer_ed = PREFER_ED
+    if cell.dimension == 2:
+        prefer_ed = True
+    cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
+        j2c, prefer_ed, linear_dep_threshold)
+    if cd_j2c.dtype != j3c.dtype:
+        cd_j2c = cd_j2c.astype(j3c.dtype)
 
     nkpts = len(kpts)
     for k in range(nkpts):
-        cderi[k, k] = contract('Lr,pqr->Lpq', cd_j2c, j3c[k])
+        cderi[k, k] = _solve_cderi(cd_j2c, j3c[k], j2ctag)
         if cd_j2c_negative is not None:
-            # for low-dimension systems
-            cderip[k, k] = contract('Lr,pqr->Lpq', cd_j2c_negative, j3c[k])
+            assert cell.dimension == 2
+            cderip[k, k] = _solve_cderi(cd_j2c_negative, j3c[k], j2ctag)
     t1 = log.timer('pass2: solve cderi', *t1)
     return cderi, cderip
 
@@ -344,6 +345,14 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True):
                 auxG = None
             j2c[k] = j2c_k.get()
     return j2c
+
+def _solve_cderi(cd_j2c, j3c, j2ctag):
+    if j2ctag == 'ED':
+        return contract('Lr,pqr->Lpq', cd_j2c, j3c)
+    else:
+        nao, naux = j3c.shape[1:3]
+        j3c = solve_triangular(cd_j2c, j3c.reshape(-1,naux).T, lower=True)
+        return j3c.reshape(naux,nao,nao)
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)

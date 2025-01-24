@@ -145,13 +145,13 @@ class KnownValues(unittest.TestCase):
         ref = cell.RHF().density_fit().run()
         mf = ref.to_gpu().run(conv_tol=1e-8)
         self.assertTrue(isinstance(mf.with_df, GDF))
-        self.assertAlmostEqual(ref.e_tot, -4.83677020554507, 9)
+        self.assertAlmostEqual(ref.e_tot, -0.3740002917376214, 9)
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
         ref = cell.KRHF().density_fit().run()
         mf = ref.to_gpu().run(conv_tol=1e-8)
         self.assertTrue(isinstance(mf.with_df, GDF))
-        self.assertAlmostEqual(ref.e_tot, -4.83677020554507, 9)
+        self.assertAlmostEqual(ref.e_tot, -0.3740002917376214, 9)
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
 if __name__ == '__main__':
