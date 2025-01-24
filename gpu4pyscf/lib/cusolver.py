@@ -16,11 +16,13 @@
 import numpy as np
 import cupy
 import ctypes
+from ctypes.util import find_library
 from cupy_backends.cuda.libs import cusolver
 from cupy_backends.cuda.libs import cublas
 from cupy.cuda import device
 
-libcusolver = ctypes.CDLL('libcusolver.so')
+libcusolver = find_library('cusolver')
+libcusolver = ctypes.CDLL(libcusolver)
 
 CUSOLVER_EIG_TYPE_1 = 1
 CUSOLVER_EIG_TYPE_2 = 2
