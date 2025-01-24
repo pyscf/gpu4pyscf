@@ -169,7 +169,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     if singlet:
         vhf1 += vj * 2
     else:
-        vhf1 += vj*2
+        vhf1 += vj * 2
     extra_force = cp.zeros((len(atmlst),3))
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
