@@ -155,13 +155,6 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
 
     def test_kpts_gga_gdf(self):
-        nk = [2, 1, 1]
-        kpts = cell.make_kpts(nk)
-        kmf = pbcdft.KRKS(cell, xc='pbe0', kpts=kpts).density_fit().run(conv_tol=1e-10)
-        mf_ref = kmf.to_cpu().run()
-        self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
-
-    def test_kpts_gga_gdf(self):
         from gpu4pyscf.pbc.df.df import GDF
         L = 4.
         cell = pbcgto.Cell()
@@ -172,7 +165,7 @@ class KnownValues(unittest.TestCase):
         cell.build()
 
         mf = cell.RKS(xc='pbe0').to_gpu().density_fit().run()
-        self.assertTrue(isinstance(kmf.with_df, GDF))
+        self.assertTrue(isinstance(mf.with_df, GDF))
         mf_ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 8)
 

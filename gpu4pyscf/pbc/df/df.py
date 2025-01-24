@@ -88,7 +88,7 @@ class GDF(lib.StreamObject):
         nao = cell.nao
         if blksize is None:
             avail_mem = get_avail_mem() * .8
-            blksize = avail_mem/16/(nao**2*2)
+            blksize = avail_mem/16/(nao**2*3)
             if blksize < 16:
                 raise RuntimeError('Insufficient GPU memory')
             blksize = min(int(blksize), self.blockdim)
@@ -101,12 +101,13 @@ class GDF(lib.StreamObject):
         else:
             raise RuntimeError('CDERI for kpoints {ki},{kj} not generated')
 
-        naux = self._cderi[0,0].shape[0]
+        Lpq_kij = self._cderi[ki,kj]
+        naux = len(Lpq_kij)
         for b0, b1 in lib.prange(0, naux, blksize):
             if req_conj:
-                Lpq = self._cderi[kj,ki][b0:b1].transpose(0,2,1).conj()
+                Lpq = Lpq_kij[b0:b1].transpose(0,2,1).conj()
             else:
-                Lpq = self._cderi[ki,kj][b0:b1]
+                Lpq = Lpq_kij[b0:b1]
             assert Lpq[0].size == nao**2
             if compact:
                 Lpq = pack_tril(Lpq.reshape(-1, nao, nao))
@@ -114,12 +115,13 @@ class GDF(lib.StreamObject):
 
         if cell.dimension == 2:
             assert cell.low_dim_ft_type != 'inf_vacuum'
-            naux = self._cderip[0,0].shape[0]
+            Lpq_kij = self._cderip[ki,kj]
+            naux = len(Lpq_kij)
             for b0, b1 in lib.prange(0, naux, blksize):
                 if req_conj:
-                    Lpq = self._cderip[kj,ki][b0:b1].transpose(0,2,1).conj()
+                    Lpq = Lpq_kij[b0:b1].transpose(0,2,1).conj()
                 else:
-                    Lpq = self._cderip[ki,kj][b0:b1]
+                    Lpq = Lpq_kij[b0:b1]
                 assert Lpq[0].size == nao**2
                 if compact:
                     Lpq = pack_tril(Lpq.reshape(-1, nao, nao))

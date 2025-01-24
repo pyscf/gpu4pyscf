@@ -28,7 +28,7 @@ from pyscf import lib
 from pyscf.pbc.tools import pbc as pbctools
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df.rsdf_builder import (
-    LINEAR_DEP_THR, RCUT_THRESHOLD, estimate_ke_cutoff_for_omega)
+    RCUT_THRESHOLD, estimate_ke_cutoff_for_omega)
 from pyscf.pbc.df import aft as aft_cpu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem
@@ -40,6 +40,17 @@ from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2
 
 #TODO: adjust omega dynamically according to problem size
 OMEGA_MIN = 0.3
+
+# In the ED of the j2c2e metric, the default LINEAR_DEP_THR setting in pyscf-2.8
+# is too loose. The linear dependency truncation often leads to serious errors.
+# PBC GDF very differs to the molecular GDF approximation where diffused
+# functions typically have insignificant contributions. The diffused auxliary
+# crystial orbitals have large impacts on the accuracy of Coulomb integrals. A
+# tight linear dependency threshold have to be applied to control the error,
+# even this may cause more numericial stability issues.
+LINEAR_DEP_THR = 1e-11
+# Use eigenvalue decomposition in decompose_j2c
+PREFER_ED = False
 
 def build_cderi(cell, auxcell, kpts=None, j_only=False,
                 omega=OMEGA_MIN, linear_dep_threshold=LINEAR_DEP_THR):
@@ -87,6 +98,11 @@ def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
     if with_long_range:
         ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, log)
 
+    nao = cell.nao
+    naux = auxcell.nao
+    prefer_ed = PREFER_ED
+    if cell.dimension == 2:
+        prefer_ed = True
     cderi = {}
     cderip = {}
     for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
@@ -106,15 +122,24 @@ def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
         if kp == kp_conj: # self conjugated
             # DF metric for self-conjugated k-point should be real
             j2c_k = j2c_k.real
-        cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(j2c_k, linear_dep_threshold)
-        assert j2ctag == 'ED'
+        cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
+            j2c_k, prefer_ed, linear_dep_threshold)
 
         for ki, kj in zip(ki_idx, kj_idx):
             j3c_k = j3c[ki,kj]
-            cderi[ki,kj] = contract('Lr,pqr->Lpq', cd_j2c, j3c_k)
+            if j2ctag == 'ED':
+                cderi[ki,kj] = contract('Lr,pqr->Lpq', cd_j2c, j3c_k)
+            else:
+                cderi[ki,kj] = cp.linalg.solve(
+                    cd_j2c, j3c_k.reshape(-1,naux).T).reshape(naux,nao,nao)
             if cd_j2c_negative is not None:
+                assert cell.dimension == 2
                 # for low-dimension systems
-                cderip[ki,kj] = contract('Lr,pqr->Lpq', cd_j2c_negative, j3c_k)
+                if j2ctag == 'ED':
+                    cderip[ki,kj] = contract('Lr,pqr->Lpq', cd_j2c_negative, j3c_k)
+                else:
+                    cderip[ki,kj] = cp.linalg.solve(
+                        cd_j2c_negative, j3c_k.reshape(-1,naux).T).reshape(naux,nao,nao)
     t1 = log.timer('pass2: solve cderi', *t1)
     return cderi, cderip
 
@@ -232,16 +257,30 @@ def _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, verbose=None):
             yield pqG, auxG_conj[p0:p1]
     return ft_ao_iter
 
-def decompose_j2c(j2c, linear_dep_threshold=LINEAR_DEP_THR):
-    return eigenvalue_decomposed_metric(j2c, linear_dep_threshold)
+def decompose_j2c(j2c, prefer_ed=PREFER_ED, linear_dep_threshold=LINEAR_DEP_THR):
+    if prefer_ed:
+        return eigenvalue_decomposed_metric(j2c, linear_dep_threshold)
+    else:
+        return cholesky_decomposed_metric(j2c)
+
+def cholesky_decomposed_metric(j2c):
+    '''Return L for j2c = L L^T'''
+    j2c = cp.asarray(j2c)
+    j2c_negative = None
+    j2ctag = 'CD'
+    j2c = cp.linalg.cholesky(j2c)
+    if cp.isnan(j2c[-1,-1]):
+        raise RuntimeError('j2c is not positive definite')
+    return j2c, j2c_negative, j2ctag
 
 def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
-    w, v = scipy.linalg.eigh(j2c)
+    j2c = cp.asarray(j2c)
+    w, v = cp.linalg.eigh(j2c)
     mask = w > linear_dep_threshold
     v1 = v[:,mask].conj().T
     v1 *= w[mask, None]**-.5
     j2c = v1
-    idx = np.where(w < -linear_dep_threshold)[0]
+    idx = cp.where(w < -linear_dep_threshold)[0]
     j2c_negative = None
     if len(idx) > 0:
         j2c_negative = (v[:,idx] * (-w[idx])**-.5).conj().T

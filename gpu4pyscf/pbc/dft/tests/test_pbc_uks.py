@@ -165,7 +165,7 @@ class KnownValues(unittest.TestCase):
         cell.build()
 
         mf = cell.UKS(xc='pbe0').to_gpu().density_fit().run()
-        self.assertTrue(isinstance(kmf.with_df, GDF))
+        self.assertTrue(isinstance(mf.with_df, GDF))
         mf_ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 8)
 
