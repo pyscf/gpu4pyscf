@@ -173,7 +173,10 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts(nk)
         kmf = pbcdft.KUKS(cell, xc='pbe0', kpts=kpts).density_fit().run()
         self.assertTrue(isinstance(kmf.with_df, GDF))
-        mf_ref = kmf.to_cpu().run()
+        mf_ref = kmf.to_cpu()
+        # Maybe a bug in pyscf-2.8
+        mf_ref.with_df.force_dm_kbuild = True
+        mf_ref.run()
         self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 8)
 
 if __name__ == '__main__':
