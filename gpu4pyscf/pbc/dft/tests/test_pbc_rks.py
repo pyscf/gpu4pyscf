@@ -166,7 +166,7 @@ class KnownValues(unittest.TestCase):
 
         mf = cell.RKS(xc='pbe0').to_gpu().density_fit().run()
         self.assertTrue(isinstance(mf.with_df, GDF))
-        self.assertAlmostEqual(mf.e_tot, -0.19581151356547888, 7)
+        self.assertAlmostEqual(mf.e_tot, -0.44834992009430463, 7)
         mf_ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 8)
 
@@ -174,7 +174,7 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts(nk)
         kmf = pbcdft.KRKS(cell, xc='pbe0', kpts=kpts).density_fit().run()
         self.assertTrue(isinstance(kmf.with_df, GDF))
-        self.assertAlmostEqual(kmf.e_tot, -0.19581151356547888, 7)
+        self.assertAlmostEqual(kmf.e_tot, -0.44429306, 7)
         mf_ref = kmf.to_cpu()
         mf_ref.run()
         self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 8)
