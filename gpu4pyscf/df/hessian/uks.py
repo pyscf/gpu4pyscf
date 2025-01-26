@@ -48,7 +48,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     moccb = mo_coeff[1][:,mo_occ[1]>0]
     dm0a = numpy.dot(mocca, mocca.T)
     dm0b = numpy.dot(moccb, moccb.T)
-    if mf.nlc != '':
+    if mf.do_nlc():
         raise NotImplementedError
 
     omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
