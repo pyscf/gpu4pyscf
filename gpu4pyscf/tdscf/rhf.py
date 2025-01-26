@@ -15,11 +15,9 @@
 
 import numpy as np
 import cupy as cp
-import scipy.linalg
-from pyscf import gto
 from pyscf import lib
 from pyscf.tdscf import rhf as tdhf_cpu
-from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, eig as lr_eig, real_eig
+from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, real_eig
 from gpu4pyscf import scf
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import utils
@@ -53,7 +51,7 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     orbo2 = orbo * 2. # *2 for double occupancy
 
     e_ia = hdiag = mo_energy[viridx] - mo_energy[occidx,None]
-    hdiag = hdiag.ravel().get()
+    hdiag = hdiag.ravel()
     vresp = mf.gen_response(singlet=singlet, hermi=0)
     nocc, nvir = e_ia.shape
 
@@ -66,7 +64,7 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
         v1mo = contract('xpq,qo->xpo', v1ao, orbo)
         v1mo = contract('xpo,pv->xov', v1mo, orbv.conj())
         v1mo += zs * e_ia
-        return v1mo.reshape(v1mo.shape[0],-1).get()
+        return v1mo.reshape(v1mo.shape[0],-1)
 
     return vind, hdiag
 
@@ -100,11 +98,15 @@ class TDBase(lib.StreamObject):
     get_ab = NotImplemented
 
     def get_precond(self, hdiag):
+        threshold_t=1.0e-4
         def precond(x, e, *args):
-            if isinstance(e, np.ndarray):
-                e = e[0]
+            n_states = x.shape[0]
+            diagd = cp.repeat(hdiag.reshape(1,-1), n_states, axis=0)
+            e = e.reshape(-1,1)
             diagd = hdiag - (e-self.level_shift)
-            diagd[abs(diagd)<1e-8] = 1e-8
+            diagd = cp.where(abs(diagd) < threshold_t, cp.sign(diagd)*threshold_t, diagd)
+            a_size = x.shape[1]//2
+            diagd[:,a_size:] = diagd[:,a_size:]*(-1)
             return x/diagd
         return precond
 
@@ -170,6 +172,17 @@ class TDBase(lib.StreamObject):
 class TDA(TDBase):
     __doc__ = tdhf_cpu.TDA.__doc__
 
+    def get_precond(self, hdiag):
+        threshold_t=1.0e-4
+        def precond(x, e, *args):
+            n_states = x.shape[0]
+            diagd = cp.repeat(hdiag.reshape(1,-1), n_states, axis=0)
+            e = e.reshape(-1,1)
+            diagd = hdiag - (e-self.level_shift)
+            diagd = cp.where(abs(diagd) < threshold_t, cp.sign(diagd)*threshold_t, diagd)
+            return x/diagd
+        return precond
+
     def gen_vind(self, mf=None):
         '''Generate function to compute Ax'''
         if mf is None:
@@ -228,7 +241,7 @@ class TDA(TDBase):
         precond = self.get_precond(hdiag)
 
         def pickeig(w, v, nroots, envs):
-            idx = np.where(w > self.positive_eig_threshold)[0]
+            idx = cp.where(w > self.positive_eig_threshold)[0]
             return w[idx], v[:,idx], idx
 
         x0sym = None
@@ -291,10 +304,10 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
         v1_top += xs * e_ia  # AX
         v1_bot += ys * e_ia  # (A*)Y
         return cp.hstack((v1_top.reshape(nz,nocc*nvir),
-                          -v1_bot.reshape(nz,nocc*nvir))).get()
+                          -v1_bot.reshape(nz,nocc*nvir)))
 
     hdiag = cp.hstack([hdiag.ravel(), -hdiag.ravel()])
-    return vind, hdiag.get()
+    return vind, hdiag
 
 
 class TDHF(TDBase):
