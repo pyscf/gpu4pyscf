@@ -1,0 +1,25 @@
+[{
+    "input_dir": "./",
+    "output_dir": "./",
+    "molecules": [
+        "020_Vitamin_C.xyz",
+        "020_Vitamin_C.xyz",
+        "020_Vitamin_C.xyz",
+        "020_Vitamin_C.xyz",
+        "020_Vitamin_C.xyz"
+    ],
+    "xc": "wb97x3c",
+    "verbose": 4,
+    "with_solvent": false,
+    "with_thermo": false,
+    "solvent": {
+        "eps": 78.3553,
+        "solvent": "water",
+        "method": "SMD"
+    },
+    "with_gpu": true,
+    "with_df": true,
+    "with_grad": true,
+    "with_hess": true,
+    "save_density": false
+}]
