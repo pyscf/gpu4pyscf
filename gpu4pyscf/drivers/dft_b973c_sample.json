@@ -9,6 +9,7 @@
         "020_Vitamin_C.xyz"
     ],
     "xc": "b973c",
+    "auxbasis": "def2-universal-JFIT",
     "verbose": 6,
     "with_solvent": false,
     "with_thermo": false,
