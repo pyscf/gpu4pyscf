@@ -17,24 +17,25 @@ import numpy as np
 import pyscf
 import pytest
 from gpu4pyscf.dft import rks
+from gpu4pyscf import tdscf
 CUDA_VISIBLE_DEVICES=0
 # Any task taking more than 1000s will be marked as 'slow'
 
 # How to run
 # 1. run test only
-# pytest test_benchmark_rks.py --benchmark-disable -s -v -m "not slow" --durations=20
+# pytest test_benchmark_tddft.py --benchmark-disable -s -v -m "not slow" --durations=20
 
 # 2. benchmark less expensive tasks
-# pytest test_benchmark_rks.py -v -m "not slow"
+# pytest test_benchmark_tddft.py -v -m "not slow"
 
 # 3. benchmark all the tests
-# pytest test_benchmark_rks.py -v
+# pytest test_benchmark_tddft.py -v
 
 # 4. save benchmark results
-# pytest test_benchmark_rks.py -s -v -m "not slow and not high_memory" --benchmark-save=v1.3.0_rks_1v100
+# pytest test_benchmark_tddft.py -s -v -m "not slow and not high_memory" --benchmark-save=v1.3.0_tddft_1v100
 
 # 5. compare benchmark results, fail if performance regresses by more than 10%
-# pytest test_benchmark_rks.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=1v100 --benchmark-storage=benchmark_results/
+# pytest test_benchmark_tddft.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=1v100 --benchmark-storage=benchmark_results/
 
 current_folder = os.path.dirname(os.path.abspath(__file__))
 small_mol = os.path.join(current_folder, '020_Vitamin_C.xyz')
