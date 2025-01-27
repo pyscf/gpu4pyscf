@@ -1,4 +1,4 @@
-# Copyright 2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2024-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -54,13 +54,14 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     if bvk_kmesh is None and kpts is not None:
         if j_only:
             # Coulomb integrals requires smaller kmesh to converge finite-size effects
-            bvk_kmesh = guess_bvk_kmesh(cell, kpts)
+            bvk_kmesh = kpts_to_kmesh(cell, bvk_kmesh)
         else:
             # The remote images may contribute to certain k-point mesh,
             # contributing to the finite-size effects in exchange matrix.
             rcut = estimate_rcut(cell, auxcell, omega).max()
-            bvk_kmesh = guess_bvk_kmesh(cell, kpts, rcut=rcut)
-    logger.debug(cell, 'BvK cell size %s for sr_aux_e2', bvk_kmesh)
+            bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut)
+    bvk_kmesh, bvk_kmesh_inp = guess_bvk_kmesh(cell, bvk_kmesh), bvk_kmesh
+    logger.debug(cell, 'BvK input %s, set to %s for sr_aux_e2', bvk_kmesh_inp, bvk_kmesh)
     int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh)
     nao, nao_orig = int3c2e_opt.coeff.shape
     naux = int3c2e_opt.aux_coeff.shape[0]
@@ -448,16 +449,12 @@ def estimate_rcut(cell, auxcell, omega):
     rcut = r0
     return rcut
 
-def guess_bvk_kmesh(cell, kpts, target_size=BVK_CELL_SHELLS):
+def guess_bvk_kmesh(cell, bvk_kmesh, target_size=BVK_CELL_SHELLS):
     '''Generate a sufficient large bvk cell for fill_int3c2e kernel to achieve
     better load balance'''
-    if kpts is None or (kpts.ndim == 1 and is_zero(kpts)):
+    if bvk_kmesh is None:
         bvk_kmesh = np.ones(3, dtype=int)
-        bvk_ncells = 1
-    else:
-        kpts = np.asarray(kpts).reshape(-1,3)
-        bvk_kmesh = kpts_to_kmesh(cell, kpts)
-        bvk_ncells = np.prod(bvk_kmesh)
+    bvk_ncells = np.prod(bvk_kmesh)
 
     # produce a cell with ~2000 shells
     replica = target_size / (bvk_ncells * cell.nbas)

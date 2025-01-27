@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 The PySCF Developers. All Rights Reserved.
+ * Copyright 2024-2025 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -145,8 +145,8 @@ int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
         int gout_stride = scheme[1];
         int nsp_per_block = scheme[2];
         dim3 threads(nksh_per_block, gout_stride, nsp_per_block);
-        int sp_blocks = (npairs_ij + SPTAKS_PER_BLOCK*nsp_per_block - 1) /
-            (SPTAKS_PER_BLOCK*nsp_per_block);
+        int tasks_per_block = SPTAKS_PER_BLOCK * nsp_per_block;
+        int sp_blocks = (npairs_ij + tasks_per_block - 1) / tasks_per_block;
         int ksh_blocks = (nksh + nksh_per_block - 1) / nksh_per_block;
         dim3 blocks(sp_blocks, ksh_blocks);
         int buflen = (nroots*2+g_size*3+6) * (nksh_per_block * nsp_per_block) * sizeof(double);

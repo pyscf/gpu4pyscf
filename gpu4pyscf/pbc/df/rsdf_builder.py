@@ -1,4 +1,4 @@
-# Copyright 2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2024-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -85,8 +85,9 @@ def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
         kpts = np.zeros((1, 3))
         bvk_kmesh = kmesh = np.ones(3, dtype=int)
     else:
-        # The truncation radious cell.rcut may cause finite-size errors in HFX
-        # for sufficiently large number of kpts.
+        # The remote images may contribute to certain k-point mesh, contributing
+        # to the finite-size effects in HFX. For sufficiently large number of
+        # kpts, the truncation radious cell.rcut may cause finite-size errors.
         kpts = kpts.reshape(-1, 3)
         rcut = estimate_rcut(cell, auxcell, omega).max()
         bvk_kmesh = kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut)
@@ -189,6 +190,7 @@ def build_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tru
         kpts = np.zeros((1, 3))
         bvk_kmesh = np.ones(3, dtype=int)
     else:
+        # Coulomb integrals requires smaller kmesh to converge finite-size effects.
         # A relatively small bvk_kmesh can be used for Coulomb integrals.
         kpts = kpts.reshape(-1, 3)
         bvk_kmesh = kpts_to_kmesh(cell, kpts)
