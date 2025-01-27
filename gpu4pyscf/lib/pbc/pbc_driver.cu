@@ -45,7 +45,7 @@ void sr_int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_mapping,
                                int ish0, int jsh0, int nish, int njsh);
 
 int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds, int *scheme);
-int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bounds, int *scheme);
+int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bounds);
 
 extern "C" {
 int build_ft_ao(double *out, AFTIntEnvVars *envs,
@@ -140,7 +140,7 @@ int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
         (uint16_t)nrow, (uint16_t)ncol, (uint16_t)naux, nksh, ish0, jsh0, ksh0,
         npairs_ij, bas_ij_idx, img_idx, img_offsets};
 
-    if (!int3c2e_unrolled(out, envs, &bounds, scheme)) {
+    if (!int3c2e_unrolled(out, envs, &bounds)) {
         int nksh_per_block = scheme[0];
         int gout_stride = scheme[1];
         int nsp_per_block = scheme[2];

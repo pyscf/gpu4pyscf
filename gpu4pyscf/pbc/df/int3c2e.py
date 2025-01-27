@@ -51,7 +51,15 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     Short-range 3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
     '''
-    bvk_kmesh = guess_bvk_kmesh(cell, kpts)
+    if bvk_kmesh is None and kpts is not None:
+        if j_only:
+            # Coulomb integrals requires smaller kmesh to converge finite-size effects
+            bvk_kmesh = guess_bvk_kmesh(cell, kpts)
+        else:
+            # The remote images may contribute to certain k-point mesh,
+            # contributing to the finite-size effects in exchange matrix.
+            rcut = estimate_rcut(cell, auxcell, omega).max()
+            bvk_kmesh = guess_bvk_kmesh(cell, kpts, rcut=rcut)
     logger.debug(cell, 'BvK cell size %s for sr_aux_e2', bvk_kmesh)
     int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh)
     nao, nao_orig = int3c2e_opt.coeff.shape

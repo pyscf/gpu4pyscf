@@ -36,9 +36,8 @@ from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.gto.cell import extract_pgto_params
-from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2
+from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, estimate_rcut
 
-#TODO: adjust omega dynamically according to problem size
 OMEGA_MIN = 0.3
 
 # In the ED of the j2c2e metric, the default LINEAR_DEP_THR setting in pyscf-2.8
@@ -53,7 +52,7 @@ LINEAR_DEP_THR = 1e-11
 PREFER_ED = False
 
 def build_cderi(cell, auxcell, kpts=None, j_only=False,
-                omega=OMEGA_MIN, linear_dep_threshold=LINEAR_DEP_THR):
+                omega=None, linear_dep_threshold=LINEAR_DEP_THR):
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension >= 2
     if cell.omega != 0:
@@ -61,6 +60,10 @@ def build_cderi(cell, auxcell, kpts=None, j_only=False,
         omega = abs(cell.omega)
         with_long_range = False
     else:
+        if omega is None:
+            cell_exps, cs = extract_pgto_params(cell, 'diffused')
+            omega = cell_exps.min()**.5
+            logger.debug(cell, 'omega guess in rsdf_builder = %g', omega)
         omega = abs(omega)
         with_long_range = True
 
@@ -82,10 +85,16 @@ def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
         kpts = np.zeros((1, 3))
         bvk_kmesh = kmesh = np.ones(3, dtype=int)
     else:
-        # A truncated bvk_kmesh can cause finite-size errors in HFX.
-        # bvk_kmesh must be identical to MP kmesh in HFX.
+        # The truncation radious cell.rcut may cause finite-size errors in HFX
+        # for sufficiently large number of kpts.
         kpts = kpts.reshape(-1, 3)
-        bvk_kmesh = kmesh = kpts_to_kmesh(cell, kpts, bvk=False)
+        rcut = estimate_rcut(cell, auxcell, omega).max()
+        bvk_kmesh = kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut)
+        if len(kpts) != np.prod(kmesh):
+            # When targeting many kpts, num-kpts can be more than num-bvk-images.
+            # Using a large radius to regenerate MP kmesh. The new MP kmesh
+            # should cover all kpts.
+            kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut*20)
     j3c = sr_aux_e2(cell, auxcell, -omega, kpts, bvk_kmesh)
     t1 = log.timer('pass1: int3c2e', *t0)
 
@@ -180,9 +189,9 @@ def build_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tru
         kpts = np.zeros((1, 3))
         bvk_kmesh = np.ones(3, dtype=int)
     else:
-        # A truncated bvk_kmesh can be used for Coulomb integrals.
+        # A relatively small bvk_kmesh can be used for Coulomb integrals.
         kpts = kpts.reshape(-1, 3)
-        bvk_kmesh = kpts_to_kmesh(cell, kpts, bvk=True)
+        bvk_kmesh = kpts_to_kmesh(cell, kpts)
     # TODO: time-reversal symmetry in j3c, j2c
     j3c = sr_aux_e2(cell, auxcell, -omega, kpts, bvk_kmesh, j_only=True)
     t1 = log.timer('pass1: int3c2e', *t0)
@@ -264,10 +273,13 @@ def decompose_j2c(j2c, prefer_ed=PREFER_ED, linear_dep_threshold=LINEAR_DEP_THR)
 
 def cholesky_decomposed_metric(j2c):
     '''Return L for j2c = L L^T'''
-    j2c = cp.asarray(j2c)
     j2c_negative = None
     j2ctag = 'CD'
-    j2c = cp.linalg.cholesky(j2c)
+    # Cupy cholesky does not check positive-definite, seems returning nan in the
+    # resultant CD matrix silently.
+    #j2c = cp.asarray(j2c)
+    #j2c = cp.linalg.cholesky(j2c)
+    j2c = cp.asarray(np.linalg.cholesky(j2c))
     if cp.isnan(j2c[-1,-1]):
         raise RuntimeError('j2c is not positive definite')
     return j2c, j2c_negative, j2ctag
@@ -354,7 +366,9 @@ def _solve_cderi(cd_j2c, j3c, j2ctag):
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
-    omega = OMEGA_MIN
+    cell_exps, cs = extract_pgto_params(cell, 'diffused')
+    omega = (2*cell_exps.min())**.5
+    logger.debug(cell, 'omega guess in get_pp_loc_part1 = %g', omega)
 
     if kpts is None or is_zero(kpts):
         kpts = None

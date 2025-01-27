@@ -86,7 +86,7 @@ C    D
     }
     auxcell.build()
     omega = 0.3
-    kmesh = [4,1,3]
+    kmesh = [6,1,1]
     kpts = cell.make_kpts(kmesh)
     gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, omega=omega)
 

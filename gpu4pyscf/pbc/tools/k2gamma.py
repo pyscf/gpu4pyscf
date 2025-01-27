@@ -18,17 +18,17 @@ import itertools
 import numpy as np
 from pyscf.lib import logger
 
-# This version of kpts_to_kmesh will be available in PySCF-2.8
-def kpts_to_kmesh(cell, kpts, bvk=True, precision=None, max_images=10000):
+# This version of kpts_to_kmesh may become available in PySCF-2.9
+def kpts_to_kmesh(cell, kpts, precision=None, rcut=None):
     '''Search the minimal BvK mesh or Monkhorst-Pack k-point mesh'''
     assert kpts.ndim == 2
     scaled_kpts = cell.get_scaled_kpts(kpts)
     logger.debug3(cell, '    scaled_kpts kpts %s', scaled_kpts)
-    if bvk:
+    if rcut is None:
         kmesh = np.asarray(cell.nimgs) * 2 + 1
     else:
-        # At most 100 grids in each direction
-        kmesh = np.full(3, 100)
+        nimgs = cell.get_bounding_sphere(rcut)
+        kmesh = nimgs * 2 + 1
     if precision is None:
         precision = cell.precision * 1e2
     for i in range(3):
@@ -40,23 +40,10 @@ def kpts_to_kmesh(cell, kpts, bvk=True, precision=None, max_images=10000):
         common_denominator = reduce(np.lcm, denominators)
         fs = common_denominator * uniq_floats
         if abs(uniq_floats - np.rint(fs)/common_denominator).max() < precision:
-            kmesh[i] = common_denominator
+            kmesh[i] = min(kmesh[i], common_denominator)
         if cell.verbose >= logger.DEBUG3:
             logger.debug3(cell, 'dim=%d common_denominator %d  error %g',
                           i, common_denominator, abs(fs - np.rint(fs)).max())
             logger.debug3(cell, '    unique kpts %s', uniq_floats)
             logger.debug3(cell, '    frac kpts %s', fracs)
-
-    if bvk:
-        assert max_images > 0
-        if np.prod(kmesh) > max_images:
-            kmesh_raw = kmesh.copy()
-            for i in itertools.cycle(np.argsort(kmesh)[::-1]):
-                kmesh[i] = int(kmesh[i] * .8)
-                if np.prod(kmesh) < max_images:
-                    break
-            logger.warn(cell, 'kmesh (%s) exceeds max_images (%d); reduced to %s',
-                        kmesh_raw, max_images, kmesh)
-    else:
-        assert len(kpts) == np.prod(kmesh)
     return kmesh

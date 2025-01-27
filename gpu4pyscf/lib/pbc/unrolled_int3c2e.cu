@@ -16,7 +16,7 @@
 
 #include "int3c2e.cuh"
 
-int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bounds, int *scheme)
+int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bounds)
 {
     return 0;
 }
