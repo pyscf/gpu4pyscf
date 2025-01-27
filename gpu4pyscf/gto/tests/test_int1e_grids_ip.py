@@ -364,5 +364,5 @@ class KnownValues(unittest.TestCase):
         cp.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
 
 if __name__ == "__main__":
-    print("Full Tests for One Electron Coulomb Integrals")
+    print("Full Tests for One Electron Coulomb Integrals 1st Derivative")
     unittest.main()
