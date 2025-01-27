@@ -117,10 +117,10 @@ def get_d2Sii(surface, dF, d2F):
     switch_fun  = surface['switch_fun']
     dF = dF.transpose(2,0,1)
     dF_dF = dF[:, cupy.newaxis, :, cupy.newaxis, :] * dF[cupy.newaxis, :, cupy.newaxis, :, :]
-    dF_dF_over_F3 = cupy.einsum('ABdDq,q->ABdDq', dF_dF, 1.0/(switch_fun**3))
-    d2F_over_F2 = cupy.einsum('ABdDq,q->ABdDq', d2F, 1.0/(switch_fun**2))
+    dF_dF_over_F3 = dF_dF * (1.0/(switch_fun**3))
+    d2F_over_F2 = d2F * (1.0/(switch_fun**2))
     d2Sii = 2 * dF_dF_over_F3 - d2F_over_F2
-    d2Sii = (2.0/PI)**0.5 * cupy.einsum('ABdDq,q->ABdDq', d2Sii, charge_exp)
+    d2Sii = (2.0/PI)**0.5 * (d2Sii * charge_exp)
     return d2Sii
 
 def get_d2D_d2S(surface, with_S=True, with_D=False, stream=None):
@@ -193,17 +193,17 @@ def analytical_hess_nuc(pcmobj, dm, verbose=None):
     # # This causes severe numerical problem in function int2c2e_ip1ip2, and make the main diagonal of hessian garbage.
     # d2I_dA2 = gto.mole.intor_cross(int2c2e_ipip1, fakemol_nuc, fakemol)
     d2I_dA2 = -gto.mole.intor_cross(int2c2e_ip1ip2, fakemol_nuc, fakemol)
-    d2I_dA2 = numpy.einsum('dAq,q->dA', d2I_dA2, q_sym)
+    d2I_dA2 = d2I_dA2 @ q_sym
     d2I_dA2 = d2I_dA2.reshape(3, 3, mol.natm)
     for i_atom in range(mol.natm):
         d2e_from_d2I[i_atom, i_atom, :, :] += atom_charges[i_atom] * d2I_dA2[:, :, i_atom]
 
     d2I_dC2 = gto.mole.intor_cross(int2c2e_ipip1, fakemol, fakemol_nuc)
-    d2I_dC2 = numpy.einsum('dqA,A->dq', d2I_dC2, atom_charges)
+    d2I_dC2 = d2I_dC2 @ atom_charges
     d2I_dC2 = d2I_dC2.reshape(3, 3, ngrids)
     for i_atom in range(mol.natm):
         g0,g1 = gridslice[i_atom]
-        d2e_from_d2I[i_atom, i_atom, :, :] += numpy.einsum('dDq,q->dD', d2I_dC2[:, :, g0:g1], q_sym[g0:g1])
+        d2e_from_d2I[i_atom, i_atom, :, :] += d2I_dC2[:, :, g0:g1] @ q_sym[g0:g1]
 
     intopt_derivative = int3c1e.VHFOpt(mol)
     intopt_derivative.build(cutoff = 1e-14, aosym = False)
@@ -291,7 +291,7 @@ def analytical_hess_qv(pcmobj, dm, verbose=None):
     d2I_dC2 = int1e_grids_ipip2(mol, grid_coords, dm = dm, intopt = intopt_derivative, charge_exponents = charge_exp**2)
     for i_atom in range(mol.natm):
         g0,g1 = gridslice[i_atom]
-        d2e_from_d2I[i_atom, i_atom, :, :] += cupy.einsum('dDq,q->dD', d2I_dC2[:, :, g0:g1], q_sym[g0:g1])
+        d2e_from_d2I[i_atom, i_atom, :, :] += d2I_dC2[:, :, g0:g1] @ q_sym[g0:g1]
 
     dqdx = get_dqsym_dx(pcmobj, dm, range(mol.natm), intopt_derivative)
 
@@ -320,8 +320,8 @@ def get_dS_dot_q(dS, dSii, q, atmlst, gridslice):
     output = cupy.einsum('diA,i->Adi', dSii[:,:,atmlst], q)
     for i_atom in atmlst:
         g0,g1 = gridslice[i_atom]
-        output[i_atom, :, g0:g1] += cupy.einsum('dij,j->di', dS[:,g0:g1,:], q)
-        output[i_atom, :, :] -= cupy.einsum('dij,j->di', dS[:,:,g0:g1], q[g0:g1])
+        output[i_atom, :, g0:g1] += dS[:,g0:g1,:] @ q
+        output[i_atom, :, :] -= dS[:,:,g0:g1] @ q[g0:g1]
     return output
 def get_dST_dot_q(dS, dSii, q, atmlst, gridslice):
     # S is symmetric
@@ -334,19 +334,19 @@ def get_dD_dot_q(dD, q, atmlst, gridslice, ngrids):
     output = cupy.zeros([len(atmlst), 3, ngrids])
     for i_atom in atmlst:
         g0,g1 = gridslice[i_atom]
-        output[i_atom, :, g0:g1] += cupy.einsum('dij,j->di', dD[:,g0:g1,:], q)
-        output[i_atom, :, :] -= cupy.einsum('dij,j->di', dD[:,:,g0:g1], q[g0:g1])
+        output[i_atom, :, g0:g1] += dD[:,g0:g1,:] @ q
+        output[i_atom, :, :] -= dD[:,:,g0:g1] @ q[g0:g1]
     return output
 def get_dDT_dot_q(dD, q, atmlst, gridslice, ngrids):
     return get_dD_dot_q(-dD.transpose(0,2,1), q, atmlst, gridslice, ngrids)
 
 def get_v_dot_d2S_dot_q(d2S, d2Sii, v_left, q_right, natom, gridslice):
-    output = cupy.einsum('ABdDq,q->ABdD', d2Sii, v_left * q_right)
+    output = d2Sii @ (v_left * q_right)
     for i_atom in range(natom):
         gi0,gi1 = gridslice[i_atom]
         for j_atom in range(natom):
             gj0,gj1 = gridslice[j_atom]
-            d2S_atom_ij = cupy.einsum('q,dDqQ,Q->dD', v_left[gi0:gi1], d2S[:,:,gi0:gi1,gj0:gj1], q_right[gj0:gj1])
+            d2S_atom_ij = cupy.einsum('q,dDq->dD', v_left[gi0:gi1], d2S[:,:,gi0:gi1,gj0:gj1] @ q_right[gj0:gj1])
             output[i_atom, i_atom, :, :] += d2S_atom_ij
             output[j_atom, j_atom, :, :] += d2S_atom_ij
             output[i_atom, j_atom, :, :] -= d2S_atom_ij
@@ -357,7 +357,7 @@ def get_v_dot_d2ST_dot_q(d2S, d2Sii, v_left, q_right, natom, gridslice):
     return get_v_dot_d2S_dot_q(d2S, d2Sii, v_left, q_right, natom, gridslice)
 
 def get_v_dot_d2A_dot_q(d2A, v_left, q_right):
-    return cupy.einsum('ABdDq,q->ABdD', d2A, v_left * q_right)
+    return d2A @ (v_left * q_right)
 
 def get_v_dot_d2D_dot_q(d2D, v_left, q_right, natom, gridslice):
     output = cupy.zeros([natom, natom, 3, 3])
@@ -365,7 +365,7 @@ def get_v_dot_d2D_dot_q(d2D, v_left, q_right, natom, gridslice):
         gi0,gi1 = gridslice[i_atom]
         for j_atom in range(natom):
             gj0,gj1 = gridslice[j_atom]
-            d2D_atom_ij = cupy.einsum('q,dDqQ,Q->dD', v_left[gi0:gi1], d2D[:,:,gi0:gi1,gj0:gj1], q_right[gj0:gj1])
+            d2D_atom_ij = cupy.einsum('q,dDq->dD', v_left[gi0:gi1], d2D[:,:,gi0:gi1,gj0:gj1] @ q_right[gj0:gj1])
             output[i_atom, i_atom, :, :] += d2D_atom_ij
             output[j_atom, j_atom, :, :] += d2D_atom_ij
             output[i_atom, j_atom, :, :] -= d2D_atom_ij
@@ -476,10 +476,10 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         vK_1_d2K_q += get_v_dot_d2A_dot_q(d2A, (D.T @ vK_1).T, S @ q)
         vK_1_d2K_q += get_v_dot_d2S_dot_q(d2S, d2Sii, (DA.T @ vK_1).T, q, natom, gridslice)
         vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dDdx, dAdx_dot_Sq)
-        vK_1_d2K_q += cupy.einsum('Adi,i,BDi->ABdD', vK_1_dot_dDdx, A, dSdx_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dDdx * A, dSdx_dot_q)
         vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1D_dot_dAdx, dSdx_dot_q)
         vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1_dot_dDdx, dAdx_dot_Sq)
-        vK_1_d2K_q += cupy.einsum('Adi,i,BDi->BADd', vK_1_dot_dDdx, A, dSdx_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1_dot_dDdx * A, dSdx_dot_q)
         vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1D_dot_dAdx, dSdx_dot_q)
         vK_1_d2K_q *= -f_eps_over_2pi
         vK_1_d2K_q += get_v_dot_d2S_dot_q(d2S, d2Sii, vK_1, q, natom, gridslice)
@@ -572,16 +572,16 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         vK_1_d2K_q += get_v_dot_d2A_dot_q(d2A, (S @ vK_1).T, D.T @ q)
         vK_1_d2K_q += get_v_dot_d2ST_dot_q(d2S, d2Sii, vK_1, DA.T @ q, natom, gridslice)
         vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dDdx, dAdx_dot_Sq)
-        vK_1_d2K_q += cupy.einsum('Adi,i,BDi->ABdD', vK_1_dot_dDdx, A, dSdx_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dDdx * A, dSdx_dot_q)
         vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1D_dot_dAdx, dSdx_dot_q)
         vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dSdxT, dAdxT_dot_DT_q)
-        vK_1_d2K_q += cupy.einsum('Adi,i,BDi->ABdD', vK_1_dot_dSdxT, A, dDdxT_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dSdxT * A, dDdxT_dot_q)
         vK_1_d2K_q += cupy.einsum('Adi,BDi->ABdD', vK_1_ST_dot_dAdxT, dDdxT_dot_q)
         vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1_dot_dDdx, dAdx_dot_Sq)
-        vK_1_d2K_q += cupy.einsum('Adi,i,BDi->BADd', vK_1_dot_dDdx, A, dSdx_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1_dot_dDdx * A, dSdx_dot_q)
         vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1D_dot_dAdx, dSdx_dot_q)
         vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1_dot_dSdxT, dAdxT_dot_DT_q)
-        vK_1_d2K_q += cupy.einsum('Adi,i,BDi->BADd', vK_1_dot_dSdxT, A, dDdxT_dot_q)
+        vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1_dot_dSdxT * A, dDdxT_dot_q)
         vK_1_d2K_q += cupy.einsum('Adi,BDi->BADd', vK_1_ST_dot_dAdxT, dDdxT_dot_q)
         vK_1_d2K_q *= -f_eps_over_4pi
         vK_1_d2K_q += get_v_dot_d2S_dot_q(d2S, d2Sii, vK_1, q, natom, gridslice)

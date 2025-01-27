@@ -66,7 +66,7 @@ def get_int3c1e_ipip1_charge_contracted(mol, grids, charge_exponents, charges, i
         ngrids = grids.shape[0]
         # n_charge_sum_per_thread = 1 # means every thread processes one pair and one grid
         # n_charge_sum_per_thread = ngrids # or larger number gaurantees one thread processes one pair and all grid points
-        n_charge_sum_per_thread = 10
+        n_charge_sum_per_thread = 100 # This number roughly optimize kernel performance on a large system
 
         int1e_angular_slice = cp.zeros([3, 3, j1-j0, i1-i0], order='C')
 
@@ -145,7 +145,7 @@ def get_int3c1e_ipvip1_charge_contracted(mol, grids, charge_exponents, charges, 
         ngrids = grids.shape[0]
         # n_charge_sum_per_thread = 1 # means every thread processes one pair and one grid
         # n_charge_sum_per_thread = ngrids # or larger number gaurantees one thread processes one pair and all grid points
-        n_charge_sum_per_thread = 10
+        n_charge_sum_per_thread = 100 # This number roughly optimize kernel performance on a large system
 
         int1e_angular_slice = cp.zeros([3, 3, j1-j0, i1-i0], order='C')
 
@@ -220,7 +220,7 @@ def get_int3c1e_ip1ip2_charge_contracted(mol, grids, charge_exponents, charges, 
         ngrids = grids.shape[0]
         # n_charge_sum_per_thread = 1 # means every thread processes one pair and one grid
         # n_charge_sum_per_thread = ngrids # or larger number gaurantees one thread processes one pair and all grid points
-        n_charge_sum_per_thread = 10
+        n_charge_sum_per_thread = 100 # This number roughly optimize kernel performance on a large system
 
         int1e_angular_slice = cp.zeros([3, 3, j1-j0, i1-i0], order='C')
 
