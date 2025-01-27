@@ -26,6 +26,7 @@ from gpu4pyscf.scf import cphf
 from gpu4pyscf import lib as lib_gpu
 from pyscf import __config__
 from pyscf.scf import _vhf
+from gpu4pyscf.lib import utils
 
 
 def get_jk(mol, dm):
@@ -65,6 +66,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     nocc = int((mo_occ>0).sum())
     nvir = nmo - nocc
     x, y = x_y
+    # if y != 0:
+    #     raise NotImplementedError('TDDFT is not perfectly supported')
     x = cp.asarray(x)
     y = cp.asarray(y)
     xpy = (x+y).reshape(nocc,nvir).T
@@ -142,7 +145,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
 
     if atmlst is None:
         atmlst = range(mol.natm)
-    # offsetdic = mol.offset_nr_by_atom()
+
     h1 = cp.asarray(mf_grad.get_hcore(mol)) # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
     dh_ground = contract('xij,ij->xi', h1, oo0*2)
@@ -180,6 +183,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     de = 2.0 * (dvhf_DD_DP + dvhf_xpy) + dh1e_ground + dh1e_td + delec + extra_force
     if atmlst is None:
         atmlst = range(mol.natm)
+    # The following codes are for TDDFT
     offsetdic = mol.offset_nr_by_atom()
     for k, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = offsetdic[ia]
@@ -264,6 +268,10 @@ class Gradients(rhf_grad.GradientsBase):
 
     cphf_max_cycle = getattr(__config__, 'grad_tdrhf_Gradients_cphf_max_cycle', 20)
     cphf_conv_tol = getattr(__config__, 'grad_tdrhf_Gradients_cphf_conv_tol', 1e-8)
+
+    to_cpu = utils.to_cpu
+    to_gpu = utils.to_gpu
+    device = utils.device
 
     _keys = {
         'cphf_max_cycle', 'cphf_conv_tol',
