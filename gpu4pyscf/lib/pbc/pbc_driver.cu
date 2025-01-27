@@ -149,7 +149,7 @@ int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
             (SPTAKS_PER_BLOCK*nsp_per_block);
         int ksh_blocks = (nksh + nksh_per_block - 1) / nksh_per_block;
         dim3 blocks(sp_blocks, ksh_blocks);
-        int buflen = (nroots*2+g_size*3) * (nksh_per_block * nsp_per_block) * sizeof(double);
+        int buflen = (nroots*2+g_size*3+6) * (nksh_per_block * nsp_per_block) * sizeof(double);
         pbc_int3c2e_kernel<<<blocks, threads, buflen>>>(out, *envs, bounds);
     }
     cudaError_t err = cudaGetLastError();

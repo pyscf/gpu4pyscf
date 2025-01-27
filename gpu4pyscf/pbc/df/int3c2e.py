@@ -360,7 +360,7 @@ def int3c2e_scheme(cell, li, lj, lk, shm_size=SHM_SIZE):
     nroots = (order//2 + 1) * 2
 
     g_size = (li+1)*(lj+1)*(lk+1)
-    unit = g_size*3 + nroots*2
+    unit = g_size*3 + nroots*2 + 6
     nksp_max = shm_size//(unit*8)
     nksp_max = _nearest_power2(nksp_max)
 

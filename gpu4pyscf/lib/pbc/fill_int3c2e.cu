@@ -86,8 +86,9 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
     double *gx = g;
     double *gy = gx + gx_len;
     double *gz = gy + gx_len;
+    double *rjri = gz + gx_len;
+    double *Rpq = rjri + nksp_per_block * 3;
     __shared__ int img_counts_in_warp[WARPS];
-    double rjri[3], Rpq[3];
     double gout[GOUT_WIDTH];
 
     int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
@@ -110,6 +111,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
             img_counts_in_warp[warp_id] = 0;
         }
         atomicMax(&img_counts_in_warp[warp_id], img1-img0);
+        __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
@@ -232,14 +234,16 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                         continue;
                     }
 #endif
-                    rjri[0] = xjxi;
-                    rjri[1] = yjyi;
-                    rjri[2] = zjzi;
-                    Rpq[0] = xpq;
-                    Rpq[1] = ypq;
-                    Rpq[2] = zpq;
+                    if (gout_id == 0) {
+                        rjri[0*nksp_per_block] = xjxi;
+                        rjri[1*nksp_per_block] = yjyi;
+                        rjri[2*nksp_per_block] = zjzi;
+                        Rpq[0*nksp_per_block] = xpq;
+                        Rpq[1*nksp_per_block] = ypq;
+                        Rpq[2*nksp_per_block] = zpq;
+                        gx[0] = exp(-Kab);
+                    }
                     int _nroots = nroots/2;
-                    gx[0] = exp(-Kab);
                     rys_roots(_nroots, theta_rr, rw+nroots*nksp_per_block,
                               nksp_per_block, gout_id, gout_stride);
                     rys_roots(_nroots, theta_fac*theta_rr, rw,
@@ -266,9 +270,9 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                             // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
                             for (int n = gout_id; n < 3; n += gout_stride) {
                                 double *_gx = gx + n * gx_len;
-                                double xpa = rjri[n] * aj_aij;
+                                double xpa = rjri[n*nksp_per_block] * aj_aij;
                                 //double c0x = Rpa[ir] - rt_aij * Rpq[n];
-                                double c0x = xpa - rt_aij * Rpq[n];
+                                double c0x = xpa - rt_aij * Rpq[n*nksp_per_block];
                                 s0x = _gx[0];
                                 s1x = c0x * s0x;
                                 _gx[nksp_per_block] = s1x;
@@ -291,7 +295,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                                 int i = n / 3; //for i in range(lij+1):
                                 int _ix = n % 3; // TODO: remove _ix for nroots > 2
                                 double *_gx = gx + (i + _ix * g_size) * nksp_per_block;
-                                double cpx = rt_ak * Rpq[_ix];
+                                double cpx = rt_ak * Rpq[_ix*nksp_per_block];
                                 //for i in range(lij+1):
                                 //    trr(i,1) = c0p * trr(i,0) + i*b00 * trr(i-1,0)
                                 if (n < lij3) {
@@ -330,7 +334,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                                 for (int m = gout_id; m < lk3; m += gout_stride) {
                                     int k = m / 3;
                                     int _ix = m % 3;
-                                    double xjxi = rjri[_ix];
+                                    double xjxi = rjri[_ix*nksp_per_block];
                                     double *_gx = g + (_ix*g_size + k*stride_k) * nksp_per_block;
                                     for (int j = 0; j < lj; ++j) {
                                         int ij = (lij-j) + j*stride_j;
