@@ -70,7 +70,6 @@ class UniformGrids(lib.StreamObject):
     kernel = gen_grid_cpu.UniformGrids.kernel
 
     to_gpu = utils.to_gpu
-    device = utils.device
     to_cpu = utils.to_cpu
 
 
@@ -96,7 +95,6 @@ class BeckeGrids(Grids):
         return self
 
     to_gpu = utils.to_gpu
-    device = utils.device
     to_cpu = utils.to_cpu
 
 AtomicGrids = BeckeGrids

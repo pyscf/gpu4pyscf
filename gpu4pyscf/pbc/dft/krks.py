@@ -127,6 +127,7 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
 
     weight = 1./len(h1e_kpts)
     e1 = weight * cp.einsum('kij,kji', h1e_kpts, dm_kpts)
+    print('e1', h1e_kpts.sum(), dm_kpts.sum())
     ecoul = vhf.ecoul
     exc = vhf.exc
     tot_e = e1 + ecoul + exc
@@ -146,7 +147,7 @@ def get_rho(mf, dm=None, grids=None, kpts=None):
     if kpts is None: kpts = mf.kpts
     assert dm.ndim == 3
     assert kpts.ndim == 2
-    return mf._numint.get_rho(mf.cell, dm, grids, kpts, mf.max_memory)
+    return mf._numint.get_rho(mf.cell, dm, grids, kpts)
 
 class KRKS(rks.KohnShamDFT, khf.KRHF):
     '''RKS class adapted for PBCs with k-point sampling.

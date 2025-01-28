@@ -213,7 +213,7 @@ def get_rho(mf, dm=None, grids=None, kpt=None):
     if kpt is None: kpt = mf.kpt
     assert dm.ndim == 2
     assert kpt.ndim == 1
-    return mf._numint.get_rho(mf.cell, dm[None], grids, kpt[None], mf.max_memory)
+    return mf._numint.get_rho(mf.cell, dm[None], grids, kpt[None])
 
 class RKS(KohnShamDFT, pbchf.RHF):
     '''RKS class adapted for PBCs.

@@ -382,6 +382,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
         nuc = contract('pqr,r->pq', nuc, charges)
     else:
         nuc = contract('kpqr,r->kpq', nuc, charges)
+    print('gdf-sr-nuc', nuc.sum())
 
     # TODO: consider time-reversal symmetry
     ft_ao_iter = _ft_ao_iter_generator(cell, fakenuc, bvk_kmesh, omega, verbose)
@@ -394,6 +395,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
             exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
             ZG[0] -= charges.dot(np.pi/exps) / cell.vol
+        print('gdf-nuc-ZG', ZG.sum())
         if kpts is None:
             nuc += contract('pqG,G->pq', pqG[0], ZG).real
         else:

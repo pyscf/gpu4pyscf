@@ -108,6 +108,7 @@ def eval_rho(cell, ao, dm, non0tab=None, xctype='LDA', hermi=0, with_lapl=False,
             dtype = np.complex128
 
         if xctype == 'LDA' or xctype == 'HF':
+            print('eval_rho', ao.sum())
             c0 = ao.dot(dm)
             rho = dot_bra(ao, c0)
 
@@ -384,7 +385,7 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
 
     make_mask = NotImplemented
 
-    def get_rho(self, cell, dm, grids, kpts=np.zeros((1,3)), max_memory=2000):
+    def get_rho(self, cell, dm, grids, kpts=np.zeros((1,3))):
         '''Density in real space
         '''
         kpts = kpts.reshape(-1, 3)
