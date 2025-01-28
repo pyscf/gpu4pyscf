@@ -27,6 +27,7 @@ def setUpModule():
     cell = pbcgto.Cell()
     cell.build(unit = 'B',
                a = ((L,0,0),(0,L,0),(0,0,L)),
+               verbose = 6,
                mesh = [n,n,n],
                atom = [['He', (L/2.-.5,L/2.,L/2.-.5)],
                        ['He', (L/2.   ,L/2.,L/2.+.5)]],
@@ -162,6 +163,7 @@ class KnownValues(unittest.TestCase):
         cell.atom =[['H' , ( L/2+0., L/2+0. ,   L/2+1.)],
                     ['H' , ( L/2+1., L/2+0. ,   L/2+1.)]]
         cell.basis = [[0, (4.0, 1.0)], [0, (1.0, 1.0)]]
+        cell.verbose = 6
         cell.spin = 2
         cell.build()
 

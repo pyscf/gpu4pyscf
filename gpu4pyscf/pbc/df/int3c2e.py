@@ -316,7 +316,7 @@ class SRInt3c2eOpt:
                                    dtype=np.float64, memptr=buf.data)
                 eri3c.fill(0.)
                 lll = f'({ANGULAR[li]}{ANGULAR[lj]}|{ANGULAR[lk]})'
-                scheme = int3c2e_scheme(cell, li, lj, lk)
+                scheme = int3c2e_scheme(li, lj, lk)
                 log.debug2('int3c2e_scheme for %s: %s', lll, scheme)
                 err = kern(
                     ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
@@ -364,7 +364,7 @@ def _conc_locs(ao_loc1, ao_loc2):
     comp_loc = np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)
     return cp.array(comp_loc, dtype=np.int32)
 
-def int3c2e_scheme(cell, li, lj, lk, shm_size=SHM_SIZE):
+def int3c2e_scheme(li, lj, lk, shm_size=SHM_SIZE):
     order = li + lj + lk
     nroots = (order//2 + 1) * 2
 
