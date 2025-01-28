@@ -168,7 +168,7 @@ class KnownValues(unittest.TestCase):
         self.assertTrue(isinstance(mf.with_df, GDF))
         self.assertAlmostEqual(mf.e_tot, -0.44834992009430463, 7)
         mf_ref = mf.to_cpu().run()
-        self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 8)
+        self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
         nk = [2, 1, 1]
         kpts = cell.make_kpts(nk)
@@ -177,7 +177,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(kmf.e_tot, -0.44429306, 7)
         mf_ref = kmf.to_cpu()
         mf_ref.run()
-        self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 8)
+        self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
 
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.rks")

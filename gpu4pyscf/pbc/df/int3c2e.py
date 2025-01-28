@@ -454,6 +454,8 @@ def guess_bvk_kmesh(cell, bvk_kmesh, target_size=BVK_CELL_SHELLS):
     better load balance'''
     if bvk_kmesh is None:
         bvk_kmesh = np.ones(3, dtype=int)
+    else:
+        bvk_kmesh = bvk_kmesh.copy()
     bvk_ncells = np.prod(bvk_kmesh)
 
     # produce a cell with ~2000 shells
