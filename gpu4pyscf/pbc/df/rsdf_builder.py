@@ -260,7 +260,7 @@ def _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, verbose=None):
     #logger.debug1(cell, 'Gblksize = %d', Gblksize)
     def ft_ao_iter(kpt=np.zeros(3), kpts=None):
         coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws, kpt)
-        auxG_conj = ft_ao.ft_ao(auxcell, Gv, kpt=kpt).conj()
+        auxG_conj = cp.asarray(ft_ao.ft_ao(auxcell, Gv, kpt=kpt).conj(), order='C')
         auxG_conj *= cp.asarray(coulG[:,None])
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             pqG = ft_kern(Gv[p0:p1], kpt, kpts).transpose(0,2,3,1)
@@ -279,9 +279,8 @@ def cholesky_decomposed_metric(j2c):
     j2ctag = 'CD'
     # Cupy cholesky does not check positive-definite, seems returning nan in the
     # resultant CD matrix silently.
-    #j2c = cp.asarray(j2c)
-    #j2c = cp.linalg.cholesky(j2c)
-    j2c = cp.asarray(np.linalg.cholesky(j2c))
+    j2c = cp.asarray(j2c)
+    j2c = cp.linalg.cholesky(j2c)
     if cp.isnan(j2c[-1,-1]):
         raise RuntimeError('j2c is not positive definite')
     return j2c, j2c_negative, j2ctag

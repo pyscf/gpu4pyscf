@@ -95,12 +95,12 @@ def eval_rho(cell, ao, dm, non0tab=None, xctype='LDA', hermi=0, with_lapl=False,
         ao_loc = cell.ao_loc_nr()
         assert nao == ao_loc[-1]
         dm = cp.asarray(dm, dtype=np.complex128)
+        ao = cp.asarray(ao, dtype=np.complex128)
 
         if hermi == 1:
             def dot_bra(bra, aodm):
-                rho = contract('pi,pi->p', bra.real, aodm.real)
-                rho += contract('pi,pi->p', bra.imag, aodm.imag)
-                return rho
+                rho = contract('pi,pi->p', bra.conj(), aodm).real
+                return cp.asarray(rho, order='C')
             dtype = np.float64
         else:
             def dot_bra(bra, aodm):
@@ -147,6 +147,7 @@ def eval_rho(cell, ao, dm, non0tab=None, xctype='LDA', hermi=0, with_lapl=False,
         ngrids, nao = ao.shape[-2:]
         ao_loc = cell.ao_loc_nr()
         assert nao == ao_loc[-1]
+        assert ao.dtype == dm.dtype
 
         def dot_bra(bra, aodm):
             return contract('pi,pi->p', bra, aodm)
