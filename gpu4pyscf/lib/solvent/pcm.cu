@@ -130,7 +130,6 @@ static void _pcm_dD_dS(double *matrix_dd, double *matrix_ds,
     }
 }
 
-
 __global__
 static void _pcm_d2D_d2S(double *matrix_d2D, double *matrix_d2S,
                          const double *coords, const double *norm_vec,
@@ -205,6 +204,53 @@ static void _pcm_d2D_d2S(double *matrix_d2D, double *matrix_d2S,
     }
 }
 
+__global__
+static void _pcm_d2F_to_d2Sii(const double* F, const double* dF, const double* d2F, const double* charge_exp,
+                              double* d2Sii, const int n_atom, const int n_grid)
+{
+    const int i_grid = blockIdx.x * blockDim.x + threadIdx.x;
+    const int ij_atom = blockIdx.y * blockDim.y + threadIdx.y;
+    if (i_grid >= n_grid || ij_atom >= n_atom * n_atom) {
+        return;
+    }
+
+    const int i_atom = ij_atom / n_atom;
+    const int j_atom = ij_atom % n_atom;
+
+    const double zeta = charge_exp[i_grid];
+    const double F_value = F[i_grid];
+    const double F_1 = 1.0 / F_value;
+    const double F_2 = F_1 * F_1;
+    const double combined_factor = SQRT2_PI * zeta * F_2;
+
+    const double dFix = dF[(i_atom * 3    ) * n_grid + i_grid];
+    const double dFiy = dF[(i_atom * 3 + 1) * n_grid + i_grid];
+    const double dFiz = dF[(i_atom * 3 + 2) * n_grid + i_grid];
+    const double dFjx = dF[(j_atom * 3    ) * n_grid + i_grid];
+    const double dFjy = dF[(j_atom * 3 + 1) * n_grid + i_grid];
+    const double dFjz = dF[(j_atom * 3 + 2) * n_grid + i_grid];
+
+    const double d2Fixjx = d2F[((i_atom * n_atom + j_atom) * 9 + 0 * 3    ) * n_grid + i_grid];
+    const double d2Fixjy = d2F[((i_atom * n_atom + j_atom) * 9 + 0 * 3 + 1) * n_grid + i_grid];
+    const double d2Fixjz = d2F[((i_atom * n_atom + j_atom) * 9 + 0 * 3 + 2) * n_grid + i_grid];
+    const double d2Fiyjx = d2F[((i_atom * n_atom + j_atom) * 9 + 1 * 3    ) * n_grid + i_grid];
+    const double d2Fiyjy = d2F[((i_atom * n_atom + j_atom) * 9 + 1 * 3 + 1) * n_grid + i_grid];
+    const double d2Fiyjz = d2F[((i_atom * n_atom + j_atom) * 9 + 1 * 3 + 2) * n_grid + i_grid];
+    const double d2Fizjx = d2F[((i_atom * n_atom + j_atom) * 9 + 2 * 3    ) * n_grid + i_grid];
+    const double d2Fizjy = d2F[((i_atom * n_atom + j_atom) * 9 + 2 * 3 + 1) * n_grid + i_grid];
+    const double d2Fizjz = d2F[((i_atom * n_atom + j_atom) * 9 + 2 * 3 + 2) * n_grid + i_grid];
+
+    d2Sii[((i_atom * n_atom + j_atom) * 9 + 0 * 3    ) * n_grid + i_grid] = combined_factor * (2 * F_1 * dFix * dFjx - d2Fixjx);
+    d2Sii[((i_atom * n_atom + j_atom) * 9 + 0 * 3 + 1) * n_grid + i_grid] = combined_factor * (2 * F_1 * dFix * dFjy - d2Fixjy);
+    d2Sii[((i_atom * n_atom + j_atom) * 9 + 0 * 3 + 2) * n_grid + i_grid] = combined_factor * (2 * F_1 * dFix * dFjz - d2Fixjz);
+    d2Sii[((i_atom * n_atom + j_atom) * 9 + 1 * 3    ) * n_grid + i_grid] = combined_factor * (2 * F_1 * dFiy * dFjx - d2Fiyjx);
+    d2Sii[((i_atom * n_atom + j_atom) * 9 + 1 * 3 + 1) * n_grid + i_grid] = combined_factor * (2 * F_1 * dFiy * dFjy - d2Fiyjy);
+    d2Sii[((i_atom * n_atom + j_atom) * 9 + 1 * 3 + 2) * n_grid + i_grid] = combined_factor * (2 * F_1 * dFiy * dFjz - d2Fiyjz);
+    d2Sii[((i_atom * n_atom + j_atom) * 9 + 2 * 3    ) * n_grid + i_grid] = combined_factor * (2 * F_1 * dFiz * dFjx - d2Fizjx);
+    d2Sii[((i_atom * n_atom + j_atom) * 9 + 2 * 3 + 1) * n_grid + i_grid] = combined_factor * (2 * F_1 * dFiz * dFjy - d2Fizjy);
+    d2Sii[((i_atom * n_atom + j_atom) * 9 + 2 * 3 + 2) * n_grid + i_grid] = combined_factor * (2 * F_1 * dFiz * dFjz - d2Fizjz);
+}
+
 extern "C" {
 int pcm_d_s(cudaStream_t stream, double *matrix_d, double *matrix_s,
                     const double *coords, const double *norm_vec, const double *r_vdw,
@@ -250,6 +296,21 @@ int pcm_d2d_d2s(cudaStream_t stream, double *matrix_d2D, double *matrix_d2S,
     const dim3 threads(THREADS, THREADS);
     const dim3 blocks(ntilex, ntiley);
     _pcm_d2D_d2S<<<blocks, threads, 0, stream>>>(matrix_d2D, matrix_d2S, coords, norm_vec, charge_exp, n);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        return 1;
+    }
+    return 0;
+}
+
+int pcm_d2f_to_d2sii(cudaStream_t stream, const double* F, const double* dF, const double* d2F, const double* charge_exp,
+                     double* d2Sii, const int n_atom, const int n_grid)
+{
+    const int ntilex = (n_grid + THREADS - 1) / THREADS;
+    const int ntiley = (n_atom * n_atom + THREADS - 1) / THREADS;
+    const dim3 threads(THREADS, THREADS);
+    const dim3 blocks(ntilex, ntiley);
+    _pcm_d2F_to_d2Sii<<<blocks, threads, 0, stream>>>(F, dF, d2F, charge_exp, d2Sii, n_atom, n_grid);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
