@@ -162,7 +162,6 @@ class KnownValues(unittest.TestCase):
         cell.atom =[['H' , ( L/2+0., L/2+0. ,   L/2+1.)],
                     ['H' , ( L/2+1., L/2+0. ,   L/2+1.)]]
         cell.basis = [[0, (4.0, 1.0)], [0, (1.0, 1.0)]]
-        cell.verbose = 6
         cell.build()
 
         mf = cell.RKS(xc='pbe0').to_gpu().density_fit().run()

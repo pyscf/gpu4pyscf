@@ -70,11 +70,12 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     if gamma_point:
         out = cp.zeros((nao, nao, naux))
     else:
-        kpts = cp.asarray(kpts).reshape(-1, 3)
-        expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls).dot(kpts.T))
-        nkpts = len(kpts)
+        kpts = np.asarray(kpts).reshape(-1, 3)
+        expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(kpts.T)))
+        nL, nkpts = expLk.shape
         if j_only:
             expLLk = contract('Lk,Mk->LMk', expLk.conj(), expLk)
+            expLLk = expLLk.view(np.float64).reshape(nL,nL,nkpts,2)
             out = cp.zeros((nkpts, nao, nao, naux), dtype=np.complex128)
         else:
             out = cp.zeros((nkpts, nkpts, nao, nao, naux), dtype=np.complex128)
@@ -90,20 +91,21 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
             if i0 != j0:
                 out[j0:j1,i0:i1,k0:k1] = tmp.transpose(1,0,2)
         elif j_only:
-            tmp = contract('LMk,LpMqr->kpqr', expLLk, eri3c)
-            print('sr_aux_e2-tmp', shls_slice, tmp.sum(), eri3c.sum())
+            tmp = contract('LMkz,LpMqr->kpqrz', expLLk, eri3c)
+            tmp = tmp.view(np.complex128)[...,0]
             out[:,i0:i1,j0:j1,k0:k1] = tmp
             if i0 != j0:
                 out[:,j0:j1,i0:i1,k0:k1] = tmp.transpose(0,2,1,3).conj()
         else:
-            tmp = contract('Lk,LpMqr->kpMqr', expLk.conj(), eri3c)
-            tmp = contract('Ml,kpMqr->klpqr', expLk, tmp)
+            expLkz = expLk.view(np.float64).reshape(nL,nkpts,2)
+            tmp = contract('Lkz,MpLqr->Mkpqrz', expLkz, eri3c)
+            tmp = tmp.view(np.complex128)[...,0]
+            tmp = contract('Mk,Mlpqr->klpqr', expLk.conj(), tmp)
             out[:,:,i0:i1,j0:j1,k0:k1] = tmp
             if i0 != j0:
                 out[:,:,j0:j1,i0:i1,k0:k1] = tmp.transpose(1,0,3,2,4).conj()
         tmp = None
 
-    print('sr_aux_e2', out.sum())
     if kpts is None:
         out = contract('pqr,rk->pqk', out, int3c2e_opt.aux_coeff)
         out = contract('pqk,qj->pjk', out, int3c2e_opt.coeff)
@@ -111,13 +113,11 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     elif j_only:
         #:out = einsum('MpNqr,pi,qj,rk->MiNjk', out, coeff, coeff, auxcoeff)
         out = contract('Npqr,rk->Npqk', out, int3c2e_opt.aux_coeff)
-        coeff = int3c2e_opt.coeff.astype(np.complex128)
         out = contract('Npqk,qj->Npjk', out, coeff)
         out = contract('Npjk,pi->Nijk', out, coeff)
     else:
         #:out = einsum('MpNqr,pi,qj,rk->MiNjk', out, coeff, coeff, auxcoeff)
         out = contract('MNpqr,rk->MNpqk', out, int3c2e_opt.aux_coeff)
-        coeff = int3c2e_opt.coeff.astype(np.complex128)
         out = contract('MNpqk,qj->MNpjk', out, coeff)
         out = contract('MNpjk,pi->MNijk', out, coeff)
     return out
@@ -299,7 +299,6 @@ class SRInt3c2eOpt:
         di = (cell_ao_loc[l_ctr_offsets[1:]] - cell_ao_loc[l_ctr_offsets[:-1]]).max()
         dk = (aux_loc[l_ctr_aux_offsets[1:]] - aux_loc[l_ctr_aux_offsets[:-1]]).max()
         buf = cp.empty((bvk_ncells,di, bvk_ncells,di, dk))
-        buf[:] = 1e99
 
         ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
         for i, j in ij_tasks:

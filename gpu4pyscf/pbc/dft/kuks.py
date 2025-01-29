@@ -47,7 +47,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
         n, exc, vxc = multigrid.nr_uks(ks.with_df, ks.xc, dm, hermi,
                                        kpts, kpts_band,
                                        with_j=True, return_j=False)
-        log.info('nelec by numeric integration = %s', n)
+        log.debug('nelec by numeric integration = %s', n)
         t0 = log.timer('vxc', *t0)
         return vxc
 
@@ -71,7 +71,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
                                           0, hermi, kpts, max_memory=max_memory)
             exc += enlc
             vxc += vnlc
-        log.info('nelec by numeric integration = %s', n)
+        log.debug('nelec by numeric integration = %s', n)
         t0 = log.timer('vxc', *t0)
 
     nkpts = len(kpts)

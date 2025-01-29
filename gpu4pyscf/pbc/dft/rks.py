@@ -83,7 +83,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
             n, enlc, vnlc = ni.nr_nlc_vxc(cell, ks.nlcgrids, xc, dm, 0, hermi, kpt)
             exc += enlc
             vxc += vnlc
-            log.info('nelec with nlc grids = %s', n)
+            log.debug('nelec with nlc grids = %s', n)
         t0 = log.timer('vxc', *t0)
 
     if not hybrid:
