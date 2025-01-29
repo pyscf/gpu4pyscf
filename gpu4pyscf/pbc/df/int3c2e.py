@@ -113,13 +113,13 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     elif j_only:
         #:out = einsum('MpNqr,pi,qj,rk->MiNjk', out, coeff, coeff, auxcoeff)
         out = contract('Npqr,rk->Npqk', out, int3c2e_opt.aux_coeff)
-        out = contract('Npqk,qj->Npjk', out, coeff)
-        out = contract('Npjk,pi->Nijk', out, coeff)
+        out = contract('Npqk,qj->Npjk', out, int3c2e_opt.coeff)
+        out = contract('Npjk,pi->Nijk', out, int3c2e_opt.coeff)
     else:
         #:out = einsum('MpNqr,pi,qj,rk->MiNjk', out, coeff, coeff, auxcoeff)
         out = contract('MNpqr,rk->MNpqk', out, int3c2e_opt.aux_coeff)
-        out = contract('MNpqk,qj->MNpjk', out, coeff)
-        out = contract('MNpjk,pi->MNijk', out, coeff)
+        out = contract('MNpqk,qj->MNpjk', out, int3c2e_opt.coeff)
+        out = contract('MNpjk,pi->MNijk', out, int3c2e_opt.coeff)
     return out
 
 def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
