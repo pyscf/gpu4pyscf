@@ -45,12 +45,8 @@ typedef struct {
     uint8_t stride_j;
     uint8_t stride_k;
     uint8_t g_size;
-    uint16_t nrow;
-    uint16_t ncol;
     uint16_t naux;
     uint16_t nksh;
-    uint16_t ish0;
-    uint16_t jsh0;
     uint16_t ksh0;
     int nshl_pair;
     int *bas_ij_idx;

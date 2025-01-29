@@ -267,7 +267,7 @@ def extract_pgto_params(mol, op='diffused'):
     es = []
     cs = []
     if op == 'diffused':
-        precision = mol.precision
+        precision = 1e-8
         for i in range(mol.nbas):
             e = mol.bas_exp(i)
             c = abs(mol._libcint_ctr_coeff(i)).max(axis=1)
@@ -278,7 +278,7 @@ def extract_pgto_params(mol, op='diffused'):
             es.append(e[idx])
             cs.append(c[idx].max())
     elif op == 'compact':
-        precision = mol.precision
+        precision = 1e-8
         for i in range(mol.nbas):
             e = mol.bas_exp(i)
             c = abs(mol._libcint_ctr_coeff(i)).max(axis=1)

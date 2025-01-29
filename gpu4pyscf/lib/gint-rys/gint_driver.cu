@@ -36,7 +36,7 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
 
 extern "C" {
 int fill_int3c2e(double *out, Int3c2eEnvVars *envs, int *scheme, int *shls_slice,
-                 int nrow, int ncol, int naux, int nshl_pair, int *bas_ij_idx,
+                 int *aux_loc, int naux, int nshl_pair, int *bas_ij_idx,
                  int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
@@ -67,9 +67,10 @@ int fill_int3c2e(double *out, Int3c2eEnvVars *envs, int *scheme, int *shls_slice
     uint8_t g_size = stride_k * (lk + 1);
     Int3c2eBounds bounds = {li, lj, lk, nroots, nfi, nfij, nfk,
         iprim, jprim, kprim, stride_i, stride_j, stride_k, g_size,
-        (uint16_t)nrow, (uint16_t)ncol, (uint16_t)naux, nksh, ish0, jsh0, ksh0,
-        nshl_pair, bas_ij_idx};
+        (uint16_t)naux, nksh, ksh0, nshl_pair, bas_ij_idx};
 
+    int k0 = aux_loc[ksh0 - nbas];
+    out += k0; // offset when writing output
     if (!int3c2e_unrolled(out, envs, &bounds)) {
         int nst_per_block = scheme[0];
         int gout_stride = scheme[1];

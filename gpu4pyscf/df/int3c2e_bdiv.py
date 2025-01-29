@@ -42,7 +42,7 @@ L_AUX_MAX = 6
 GOUT_WIDTH = 45
 THREADS = 256
 
-def int3c2e(mol, auxmol):
+def aux_e2(mol, auxmol):
     r'''
     Short-range 3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
@@ -103,7 +103,7 @@ class Int3c2eOpt:
         _atm = cp.array(_atm_cpu, dtype=np.int32)
         _bas = cp.array(_bas_cpu, dtype=np.int32)
         _env = cp.array(_env_cpu, dtype=np.float64)
-        ao_loc = _conc_locs(ao_loc_cpu, aux_loc)
+        ao_loc = cp.asarray(_conc_locs(ao_loc_cpu, aux_loc), dtype=np.int32)
         int3c2e_envs = Int3c2eEnvVars(
             mol.natm, mol.nbas, _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
             ao_loc.data.ptr, math.log(cutoff),
@@ -125,8 +125,10 @@ class Int3c2eOpt:
         for i, j in ij_tasks:
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
             jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            ijoffset = ish0 * nbas + jsh0
-            idx = np.where(mask[ish0:ish1,jsh0:jsh1])[0] + ijoffset
+            ish, jsh = np.where(mask[ish0:ish1,jsh0:jsh1])
+            ish += ish0
+            jsh += jsh0
+            idx = ish * nbas + jsh
             shl_pair_idx.append(idx)
             nfij = nfcart[i] * nfcart[j]
             npair_ij = max(nfij * idx.size, npair_ij)
@@ -156,9 +158,9 @@ class Int3c2eOpt:
             ish, jsh = divmod(bas_ij_idx, nbas)
             nfi = nfcart[i]
             nfj = nfcart[j]
-            ij = np.arnge(nfi)*nfj + np.arange(nfj)[:,None]
-            ao_pair_mapping = ao_loc_cpu[ish] * nao + ao_loc_cpu[jsh]
-            ao_pair_mapping = (ao_pair_mapping[:,None] + ij.ravel()).ravel()
+            iaddr = ao_loc_cpu[ish,None] + np.arange(nfi)
+            jaddr = ao_loc_cpu[jsh,None] + np.arange(nfj)
+            ao_pair_mapping = (iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel()
 
             npair_ij = len(bas_ij_idx)
             bas_ij_idx = cp.asarray(bas_ij_idx, dtype=np.int32)
@@ -177,7 +179,7 @@ class Int3c2eOpt:
                     ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
                     ctypes.byref(int3c2e_envs), (ctypes.c_int*3)(*scheme),
                     (ctypes.c_int*6)(*shls_slice), aux_loc.ctypes,
-                    ctypes.c_int(npair_ij),
+                    ctypes.c_int(naux), ctypes.c_int(npair_ij),
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                     _atm_cpu.ctypes, ctypes.c_int(mol.natm),
                     _bas_cpu.ctypes, ctypes.c_int(mol.nbas), _env_cpu.ctypes)
@@ -223,7 +225,7 @@ class Int3c2eOpt:
         _atm = cp.array(_atm_cpu, dtype=np.int32)
         _bas = cp.array(_bas_cpu, dtype=np.int32)
         _env = cp.array(_env_cpu, dtype=np.float64)
-        ao_loc = _conc_locs(ao_loc_cpu, aux_loc)
+        ao_loc = cp.asarray(_conc_locs(ao_loc_cpu, aux_loc), dtype=np.int32)
         int3c2e_envs = Int3c2eEnvVars(
             mol.natm, mol.nbas, _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
             ao_loc.data.ptr, math.log(cutoff),
@@ -256,8 +258,10 @@ class Int3c2eOpt:
             lj = uniq_l[j]
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
             jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            ijoffset = ish0 * nbas + jsh0
-            idx = np.where(mask[ish0:ish1,jsh0:jsh1])[0] + ijoffset
+            ish, jsh = np.where(mask[ish0:ish1,jsh0:jsh1])
+            ish += ish0
+            jsh += jsh0
+            idx = ish * nbas + jsh
             shl_pair_idx.append(idx)
             nfi = (li + 1) * (li + 2) // 2
             nfj = (lj + 1) * (lj + 2) // 2
@@ -311,8 +315,7 @@ class Int3c2eOpt:
         return eri3c, ao_pair_mapping, aux_mapping
 
 def _conc_locs(ao_loc1, ao_loc2):
-    comp_loc = np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)
-    return cp.array(comp_loc, dtype=np.int32)
+    return np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)
 
 class Int3c2eEnvVars(ctypes.Structure):
     _fields_ = [
@@ -370,7 +373,7 @@ def estimate_shl_ovlp(mol):
     # consider only the most diffused component of a basis
     exps, cs = extract_pgto_params(mol, 'diffused')
     ls = mol._bas[:,ANG_OF]
-    bas_coords = cp.asarray(mol.atom_coords()[mol._bas[:,ATOM_OF]])
+    bas_coords = mol.atom_coords()[mol._bas[:,ATOM_OF]]
 
     norm = cs * ((2*ls+1)/(4*np.pi))**.5
     aij = exps[:,None] + exps

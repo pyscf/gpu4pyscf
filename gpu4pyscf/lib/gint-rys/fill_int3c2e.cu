@@ -294,7 +294,7 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             if (ijk_idx < nst) {
                 int naux = bounds.naux;
                 int koff = ksh - bounds.ksh0;
-                double *eri_tensor = out + shl_pair_idx * nfij * naux + koff * nfk;
+                double *eri_tensor = out + shl_pair_idx * nfij * naux + koff;
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                     int ijk = gout_start + n*gout_stride+gout_id;
                     int k  = ijk % nfk;
@@ -594,7 +594,7 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
                 int naux = bounds.naux;
                 int koff = ksh - ksh0;
                 double *eri_tensor = out + bounds.ao_pair_loc[sp_block_id] * naux + k0 +
-                    shl_pair_idx * nfij * naux + koff * nfk;
+                    shl_pair_idx * nfij * naux + koff;
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                     int ijk = gout_start + n*gout_stride+gout_id;
                     int k  = ijk % nfk;
