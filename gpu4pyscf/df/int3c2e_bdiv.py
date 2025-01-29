@@ -30,7 +30,7 @@ from gpu4pyscf.scf.jk import g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, S
 from gpu4pyscf.gto.mole import extract_pgto_params
 
 __all__ = [
-    'int3c2e',
+    'aux_e2',
 ]
 libgint_rys = load_library('libgint_rys')
 libgint_rys.fill_int3c2e.restype = ctypes.c_int
@@ -50,7 +50,6 @@ def aux_e2(mol, auxmol):
     int3c2e_opt = Int3c2eOpt(mol, auxmol)
     nao, nao_orig = int3c2e_opt.coeff.shape
     naux = int3c2e_opt.aux_coeff.shape[0]
-
     out = cp.zeros((nao*nao, naux))
     for ij_shls, eri3c, ao_pair_mapping, aux_mapping in int3c2e_opt.int3c2e_kernel():
         out[ao_pair_mapping] = eri3c
@@ -133,8 +132,8 @@ class Int3c2eOpt:
             nfij = nfcart[i] * nfcart[j]
             npair_ij = max(nfij * idx.size, npair_ij)
 
-        aux_mapping = _create_ao_mapping(self.uniq_l_ctr_aux[:,0],
-                                         l_ctr_aux_offsets)
+        # aux_mapping to indicate the address k.
+        aux_mapping = _create_ao_mapping(self.uniq_l_ctr_aux[:,0], l_ctr_aux_offsets)
         naux = aux_loc[-1]
         nao = ao_loc_cpu[-1]
         buf = cp.empty((npair_ij, naux))
@@ -154,7 +153,6 @@ class Int3c2eOpt:
 
             # int3c2e CUDA kernel stores intgrals as [ij_shl,j,i,k,ksh].
             # Uisng ao_pair_mapping to indicate ij addresses in eri3c[k,i,j];
-            # aux_mapping to indicate the address k.
             ish, jsh = divmod(bas_ij_idx, nbas)
             nfi = nfcart[i]
             nfj = nfcart[j]
@@ -164,8 +162,6 @@ class Int3c2eOpt:
 
             npair_ij = len(bas_ij_idx)
             bas_ij_idx = cp.asarray(bas_ij_idx, dtype=np.int32)
-            nfi = nfcart[i]
-            nfj = nfcart[j]
             nfij = nfi * nfj
             eri3c = cp.ndarray((npair_ij*nfij, naux), dtype=np.float64, memptr=buf.data)
 
@@ -231,13 +227,16 @@ class Int3c2eOpt:
             ao_loc.data.ptr, math.log(cutoff),
         )
 
+        # nst_lookup stores the nst_per_block for each (li,lj,lk) pattern
         nst_lookup = cp.asarray(create_nst_lookup_table(), dtype=np.int32)
         nksh_per_block = 16
+        # the auxiliary function offset (address) in the output tensor for each blockIdx.y
         ksh_offsets = []
         for ksh0, ksh1 in zip(l_ctr_aux_offsets[:-1], l_ctr_aux_offsets[1:]):
             ksh_offsets.append(np.arange(ksh0, ksh1, nksh_per_block, dtype=np.int32))
         ksh_offsets.append(l_ctr_aux_offsets[-1])
         ksh_offsets = cp.asarray(np.hstack(ksh_offsets), dtype=np.int32)
+        ksh_offsets += mol.nbas
 
         uniq_l = uniq_l_ctr[:,0]
         assert uniq_l.max() <= LMAX
@@ -246,11 +245,20 @@ class Int3c2eOpt:
 
         ovlp = estimate_shl_ovlp(mol)
         mask = np.tril(ovlp > cutoff)
+        # The effective shell pair = ish*nbas+jsh
         shl_pair_idx = []
+        # the bas_ij_idx offset for each blockIdx.x
         shl_pair_offsets = []
-        ao_pair_loc = [0]
-        nao_pair = 0
-        p0 = p1 = 0
+        # the AO-pair offset (address) in the output tensor for each blockIdx.x
+        ao_pair_loc = []
+        # AO-pair addresses in the nao x nao matrix, which allows the
+        # decompression for the CUDA kernel generated compressed_eri3c:
+        # sparse_eri3c[ao_pair_mapping] = compressed_eri3c
+        # int3c2e CUDA kernel stores intgrals as [ij_shl,j,i,k,ksh].
+        # ao_pair_mapping indicates the ij addresses in eri3c[k,i,j];
+        ao_pair_mapping = []
+        nao_pair0 = nao_pair = 0
+        sp0 = sp1 = 0
         nbas = mol.nbas
         nao = ao_loc_cpu[-1]
         for i, j in ij_tasks:
@@ -266,26 +274,30 @@ class Int3c2eOpt:
             nfi = (li + 1) * (li + 2) // 2
             nfj = (lj + 1) * (lj + 2) // 2
             nfij = nfi * nfj
-            nao_pair += nfij * idx.size
+            nao_pair0, nao_pair = nao_pair, nao_pair + nfij * idx.size
 
-            p0, p1 = p1, p1 + idx.size
-            nsp_per_block = 256 // _nearest_power2(li+lj+1)
-            shl_pair_offsets.append(np.arange(p0, p1, nsp_per_block, dtype=np.int32))
-            ao_pair_loc.append(nao_pair)
+            sp0, sp1 = sp1, sp1 + idx.size
+            nsp_per_block = THREADS // _nearest_power2(li+lj+1)
+            shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
+            ao_pair_loc.append(
+                np.arange(nao_pair0, nao_pair, nsp_per_block*nfij, dtype=np.int32))
 
-            # int3c2e CUDA kernel stores intgrals as [ij_shl,j,i,k,ksh].
-            # Uisng ao_pair_mapping to indicate ij addresses in eri3c[k,i,j];
-            # aux_mapping to indicate the address k.
-            ish, jsh = divmod(idx, nbas)
-            ij = np.arnge(nfi)*nfj + np.arange(nfj)[:,None]
-            ao_pair_mapping = ao_loc_cpu[ish] * nao + ao_loc_cpu[jsh]
-            ao_pair_mapping = (ao_pair_mapping[:,None] + ij.ravel()).ravel()
+            iaddr = ao_loc_cpu[ish,None] + np.arange(nfi)
+            jaddr = ao_loc_cpu[jsh,None] + np.arange(nfj)
+            ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
+            if log.verbose >= logger.DEBUG2:
+                log.debug2('group=(%d,%d), li,lj=(%d,%d), sp range(%d,%d,%d), '
+                           'nao_pair offset=%d',
+                           i, j, li, lj, sp0, sp1, nsp_per_block, nao_pair0)
 
         shl_pair_idx = cp.asarray(np.hstack(shl_pair_idx), dtype=np.int32)
-        shl_pair_offsets.append([p1])
+        shl_pair_offsets.append([sp1])
         shl_pair_offsets = cp.asarray(np.hstack(shl_pair_offsets), dtype=np.int32)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         nbatches_ksh = len(ksh_offsets) - 1
+        ao_pair_loc.append(nao_pair)
+        ao_pair_loc = cp.asarray(np.hstack(ao_pair_loc), dtype=np.int32)
+        log.debug1('sp_blocks = %d, ksh_blocks = %d', nbatches_shl_pair, nbatches_ksh)
 
         init_constant(mol)
         kern = libgint_rys.fill_int3c2e_bdiv
@@ -310,8 +322,8 @@ class Int3c2eOpt:
             raise RuntimeError('fill_int3c2e_bdiv kernel failed')
         log.timer_debug1('processing int3c2e_bdiv_kernel', *t1)
 
-        aux_mapping = _create_ao_mapping(self.uniq_l_ctr_aux[:,0],
-                                         l_ctr_aux_offsets)
+        ao_pair_mapping = np.hstack(ao_pair_mapping)
+        aux_mapping = _create_ao_mapping(self.uniq_l_ctr_aux[:,0], l_ctr_aux_offsets)
         return eri3c, ao_pair_mapping, aux_mapping
 
 def _conc_locs(ao_loc1, ao_loc2):

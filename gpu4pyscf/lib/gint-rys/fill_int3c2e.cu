@@ -372,6 +372,9 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
     double *Rpq = gz + gx_len;
     double *rjri = Rpq + nst_per_block * 3;
     double gout[GOUT_WIDTH];
+    int naux = bounds.naux;
+    double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
+
     if (gout_id == 0) {
         gx[0] = 1.;
     }
@@ -386,9 +389,10 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
                 gx[0] = 0.;
             }
         }
-        int ksh = ijk_idx % nksh + ksh0;
-        int shl_pair_idx = ijk_idx / nksh;
-        int bas_ij = bounds.bas_ij_idx[shl_pair_idx];
+        int shl_pair_in_block = ijk_idx / nksh;
+        int ksh_in_block = ijk_idx % nksh;
+        int ksh = ksh_in_block + ksh0;
+        int bas_ij = bounds.bas_ij_idx[shl_pair_in_block + shl_pair0];
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -588,13 +592,11 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
                 }
             }
 
-            if (ijk_idx < nst) {
+            if (task_id + st_id < nst) {
                 int *ao_loc = envs.ao_loc;
                 int k0 = ao_loc[ksh0] - ao_loc[nbas];
                 int naux = bounds.naux;
-                int koff = ksh - ksh0;
-                double *eri_tensor = out + bounds.ao_pair_loc[sp_block_id] * naux + k0 +
-                    shl_pair_idx * nfij * naux + koff;
+                double *eri_tensor = out_local + k0 + shl_pair_in_block * nfij * naux + ksh_in_block;
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                     int ijk = gout_start + n*gout_stride+gout_id;
                     int k  = ijk % nfk;

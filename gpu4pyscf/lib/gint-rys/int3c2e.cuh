@@ -49,15 +49,21 @@ typedef struct {
     uint16_t nksh;
     uint16_t ksh0;
     int nshl_pair;
+    // The effective basis pair Id = ish*nbas+jsh
     int *bas_ij_idx;
 } Int3c2eBounds;
 
 typedef struct {
     int naux;
-    int *shl_pair_offsets;
-    int *ao_pair_loc;
-    int *ksh_offsets;
+    // The effective basis pair Id = ish*nbas+jsh
     int *bas_ij_idx;
+    // the bas_ij_idx offset for each blockIdx.x
+    int *shl_pair_offsets;
+    // the AO-pair offset (address) in the output tensor for each blockIdx.x
+    int *ao_pair_loc;
+    // the auxiliary function offset (address) in the output tensor for each blockIdx.y
+    int *ksh_offsets;
+    // nst_per_block for each (li,lj,lk) pattern
     int *nst_lookup;
 } BDiv3c2eBounds;
 

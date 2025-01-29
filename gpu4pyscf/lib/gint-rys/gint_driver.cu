@@ -94,8 +94,8 @@ int fill_int3c2e_bdiv(double *out, Int3c2eEnvVars *envs, int shm_size, int naux,
                       int *bas_ij_idx, int *nst_lookup,
                       int *atm, int natm, int *bas, int nbas, double *env)
 {
-    BDiv3c2eBounds bounds = {naux, shl_pair_offsets, ao_pair_loc,
-        ksh_offsets, bas_ij_idx, nst_lookup};
+    BDiv3c2eBounds bounds = {naux, bas_ij_idx, shl_pair_offsets, ao_pair_loc,
+        ksh_offsets, nst_lookup};
     int threads = 256;
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     int3c2e_bdiv_kernel<<<blocks, threads, shm_size>>>(out, *envs, bounds);
