@@ -144,6 +144,7 @@ if(BUILD_SOLVENT)
   add_subdirectory(solvent)
 endif()
 
+add_subdirectory(gint-rys)
 add_subdirectory(gvhf-rys)
 add_subdirectory(gvhf-md)
 add_subdirectory(pbc)
