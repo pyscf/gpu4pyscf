@@ -108,7 +108,6 @@ def eval_rho(cell, ao, dm, non0tab=None, xctype='LDA', hermi=0, with_lapl=False,
             dtype = np.complex128
 
         if xctype == 'LDA' or xctype == 'HF':
-            print('eval_rho', ao.sum())
             c0 = ao.dot(dm)
             rho = dot_bra(ao, c0)
 

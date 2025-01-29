@@ -127,7 +127,6 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
 
     weight = 1./len(h1e_kpts)
     e1 = weight * cp.einsum('kij,kji', h1e_kpts, dm_kpts)
-    print('e1', h1e_kpts.sum(), dm_kpts.sum())
     ecoul = vhf.ecoul
     exc = vhf.exc
     tot_e = e1 + ecoul + exc

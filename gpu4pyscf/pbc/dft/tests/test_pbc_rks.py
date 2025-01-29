@@ -27,7 +27,6 @@ class KnownValues(unittest.TestCase):
         n = 21
         cell = pbcgto.Cell()
         cell.build(unit = 'B',
-                   verbose = 6,
                    a = ((L,0,0),(0,L,0),(0,0,L)),
                    mesh = [n,n,n],
                    atom = [['He', (L/2.-.5,L/2.,L/2.-.5)],

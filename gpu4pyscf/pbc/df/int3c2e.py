@@ -91,6 +91,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
                 out[j0:j1,i0:i1,k0:k1] = tmp.transpose(1,0,2)
         elif j_only:
             tmp = contract('LMk,LpMqr->kpqr', expLLk, eri3c)
+            print('sr_aux_e2-tmp', shls_slice, tmp.sum(), eri3c.sum())
             out[:,i0:i1,j0:j1,k0:k1] = tmp
             if i0 != j0:
                 out[:,j0:j1,i0:i1,k0:k1] = tmp.transpose(0,2,1,3).conj()
@@ -102,6 +103,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
                 out[:,:,j0:j1,i0:i1,k0:k1] = tmp.transpose(1,0,3,2,4).conj()
         tmp = None
 
+    print('sr_aux_e2', out.sum())
     if kpts is None:
         out = contract('pqr,rk->pqk', out, int3c2e_opt.aux_coeff)
         out = contract('pqk,qj->pjk', out, int3c2e_opt.coeff)
@@ -297,6 +299,7 @@ class SRInt3c2eOpt:
         di = (cell_ao_loc[l_ctr_offsets[1:]] - cell_ao_loc[l_ctr_offsets[:-1]]).max()
         dk = (aux_loc[l_ctr_aux_offsets[1:]] - aux_loc[l_ctr_aux_offsets[:-1]]).max()
         buf = cp.empty((bvk_ncells,di, bvk_ncells,di, dk))
+        buf[:] = 1e99
 
         ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
         for i, j in ij_tasks:
