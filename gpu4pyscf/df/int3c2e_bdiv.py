@@ -56,8 +56,7 @@ def aux_e2(mol, auxmol):
         i, j = divmod(ao_pair_mapping, nao)
         out[j*nao+i] = eri3c
     out = out.reshape(nao, nao, naux)
-    aux_coeff = cp.empty_like(int3c2e_opt.aux_coeff)
-    aux_coeff[aux_mapping] = int3c2e_opt.aux_coeff
+    aux_coeff = int3c2e_opt.aux_coeff[aux_mapping]
     out = contract('pqr,rk->pqk', out, aux_coeff)
     out = contract('pqk,qj->pjk', out, int3c2e_opt.coeff)
     out = contract('pjk,pi->ijk', out, int3c2e_opt.coeff)
@@ -270,14 +269,15 @@ class Int3c2eOpt:
             ish += ish0
             jsh += jsh0
             idx = ish * nbas + jsh
+            nshl_pair = idx.size
             shl_pair_idx.append(idx)
             nfi = (li + 1) * (li + 2) // 2
             nfj = (lj + 1) * (lj + 2) // 2
             nfij = nfi * nfj
-            nao_pair0, nao_pair = nao_pair, nao_pair + nfij * idx.size
+            nao_pair0, nao_pair = nao_pair, nao_pair + nfij * nshl_pair
 
-            sp0, sp1 = sp1, sp1 + idx.size
-            nsp_per_block = THREADS // _nearest_power2(li+lj+1)
+            sp0, sp1 = sp1, sp1 + nshl_pair
+            nsp_per_block = _estimate_shl_pairs_per_block(li, lj, nshl_pair)
             shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
             ao_pair_loc.append(
                 np.arange(nao_pair0, nao_pair, nsp_per_block*nfij, dtype=np.int32))
@@ -353,7 +353,7 @@ def int3c2e_scheme(li, lj, lk, shm_size=SHM_SIZE):
     nroots = (order//2 + 1) * 2
 
     g_size = (li+1)*(lj+1)*(lk+1)
-    unit = g_size*3 + nroots*2 + 6
+    unit = g_size*3 + nroots*2 + 7
     nst_max = shm_size//(unit*8)
     nst_max = _nearest_power2(nst_max)
 
@@ -369,6 +369,9 @@ def int3c2e_scheme(li, lj, lk, shm_size=SHM_SIZE):
     nst_per_block = min(nst_max, THREADS // gout_stride)
     gout_stride = THREADS // nst_per_block
     return nst_per_block, gout_stride
+
+def _estimate_shl_pairs_per_block(li, lj, nshl_pair):
+    return _nearest_power2(THREADS*2 // ((li+1)*(lj+1)), return_leq=False)
 
 def create_nst_lookup_table():
     nst_lookup = np.empty([L_AUX_MAX+1]*3, dtype=np.int32)
@@ -407,14 +410,14 @@ def estimate_shl_ovlp(mol):
 
 def _create_ao_mapping(uniq_l, l_ctr_offsets):
     '''AO mapping is an array that indicates the index for each element created
-    in CUDA int3c2e kernel: int3c2e_on_cpu[ao_mapping] = int3c2e_on_gpu'''
+    in CUDA int3c2e kernel: int3c2e_on_cpu[ao_mapping] == int3c2e_on_gpu'''
     ao_mapping = []
     koff = 0
     for k, lk in enumerate(uniq_l):
         ksh0, ksh1 = l_ctr_offsets[k], l_ctr_offsets[k+1]
         nksh = ksh1 - ksh0
         nfk = (lk + 1) * (lk + 2) // 2
-        idx = koff + np.arange(nksh)[:,None] + np.arange(nfk)*nksh
+        idx = koff + np.arange(nfk)[:,None] + np.arange(nksh) * nfk
         ao_mapping.append(idx.ravel())
         koff += nfk * nksh
     return np.hstack(ao_mapping)

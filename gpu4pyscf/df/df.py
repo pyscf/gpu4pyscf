@@ -23,6 +23,7 @@ from pyscf.df import df, addons, incore
 from gpu4pyscf.lib.cupy_helper import (cholesky, tag_array, get_avail_mem, 
                                        cart2sph, p2p_transfer, copy_array)
 from gpu4pyscf.df import int3c2e, df_jk
+from gpu4pyscf.df import int3c2e_bdiv
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
 from gpu4pyscf.__config__ import _streams, _num_devices
@@ -30,6 +31,7 @@ from gpu4pyscf.__config__ import _streams, _num_devices
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
 GB = 1024*1024*1024
+RYS_V2 = False
 
 LINEAR_DEP_THR = incore.LINEAR_DEP_THR
 GROUP_SIZE = 256
@@ -109,8 +111,11 @@ class DF(lib.StreamObject):
         naux = self.naux = self.cd_low.shape[1]
         log.debug('size of aux basis %d', naux)
 
-        self._cderi = cholesky_eri_gpu(intopt, mol, auxmol, self.cd_low,
-                                       omega=omega, use_gpu_memory=self.use_gpu_memory)
+        if RYS_V2:
+            raise NotImplementedError
+        else:
+            self._cderi = cholesky_eri_gpu(intopt, mol, auxmol, self.cd_low,
+                                           omega=omega, use_gpu_memory=self.use_gpu_memory)
         log.timer_debug1('cholesky_eri', *t0)
         self.intopt = intopt
         return self
@@ -364,3 +369,21 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
                 _cderi[0][:,ij0:ij1] = cderi_block
             t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)    
     return
+
+# Generate CDERI using the new int3c2e_bdiv algorithm
+def _cholesky_eri_bdiv(intopt, omega=None, sr_only=False, use_gpu_memory=True):
+    '''
+    Returns:
+        2D array of (naux,nao*(nao+1)/2) in C-contiguous
+    '''
+    assert isinstance(intopt, int3c2e_bdiv.Int3c2eOpt)
+    nao, nao_orig = intopt.coeff.shape
+    naux = intopt.aux_coeff.shape[0]
+    out = cp.zeros((nao*nao, naux))
+    eri3c, ao_pair_mapping, aux_mapping = intopt.int3c2e_bdiv_kernel()
+    cd_low = decompose_j2c2e(intopt.sorted_auxmol)[aux_mapping]
+    if cd_low_tag == 'eig':
+        cderi = cd_low.T.dot(eri3c.T)
+    elif cd_low_tag == 'cd':
+        cderi = solve_triangular(cd_low, eri3c.T, lower=True, overwrite_b=True)
+    return cderi

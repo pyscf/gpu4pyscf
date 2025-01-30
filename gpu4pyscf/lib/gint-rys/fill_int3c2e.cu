@@ -58,6 +58,7 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int *idy_k = idx_k + nfk;
     int *idz_k = idy_k + nfk;
     int *bas = envs.bas;
+    int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
 
@@ -80,9 +81,9 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst = nksh * nshl_pair;
     int st0 = batch_id * nst_per_block * BATCHES_PER_BLOCK;
     int st1 = MIN(nst, st0 + nst_per_block * BATCHES_PER_BLOCK);
-    for (int task_id = st0; task_id < st1; task_id += nst_per_block) {
-        int ijk_idx = task_id + st_id;
-        int ksh = ijk_idx % nksh + bounds.ksh0;
+    for (int ijk_idx = st0+st_id; ijk_idx < st1+st_id; ijk_idx += nst_per_block) {
+        int ksh_in_auxmol = ijk_idx % nksh;
+        int ksh = ksh_in_auxmol + bounds.ksh0;
         int shl_pair_idx = ijk_idx / nksh;
         if (ijk_idx >= nst) {
             shl_pair_idx = st0 / nksh;
@@ -91,7 +92,6 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int bas_ij = bounds.bas_ij_idx[shl_pair_idx];
-        int nbas = envs.nbas;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -103,21 +103,16 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double xi = ri[0];
-        double yi = ri[1];
-        double zi = ri[2];
-        double xj = rj[0];
-        double yj = rj[1];
-        double zj = rj[2];
-        double xjxi = xj - xi;
-        double yjyi = yj - yi;
-        double zjzi = zj - zi;
         if (gout_id == 0) {
+            double xjxi = rj[0] - ri[0];
+            double yjyi = rj[1] - ri[1];
+            double zjzi = rj[2] - ri[2];
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             rjri[0*nst_per_block] = xjxi;
             rjri[1*nst_per_block] = yjyi;
             rjri[2*nst_per_block] = zjzi;
+            rjri[3*nst_per_block] = rr_ij;
         }
-        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
 
         for (int gout_start = 0; gout_start < nfij*nfk;
              gout_start+=gout_stride*GOUT_WIDTH) {
@@ -134,26 +129,26 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
                 double ak = expk[kp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double cijk = ci[ip] * cj[jp] * ck[kp];
                 __syncthreads();
-                if (gout_id == 0) {
-                    double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-                    gy[0] = fac * exp(-Kab);
-                }
-                double xij = rjri[0*nst_per_block] * aj_aij + xi;
-                double yij = rjri[1*nst_per_block] * aj_aij + yi;
-                double zij = rjri[2*nst_per_block] * aj_aij + zi;
+                double xij = rjri[0*nst_per_block] * aj_aij + ri[0];
+                double yij = rjri[1*nst_per_block] * aj_aij + ri[1];
+                double zij = rjri[2*nst_per_block] * aj_aij + ri[2];
                 double xpq = xij - rk[0];
                 double ypq = yij - rk[1];
                 double zpq = zij - rk[2];
+                if (gout_id == 0) {
+                    double cijk = ci[ip] * cj[jp] * ck[kp];
+                    double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
+                    double theta_ij = ai * aj_aij;
+                    double Kab = theta_ij * rjri[3*nst_per_block];
+                    gy[0] = fac * exp(-Kab);
+                    Rpq[0*nst_per_block] = xpq;
+                    Rpq[1*nst_per_block] = ypq;
+                    Rpq[2*nst_per_block] = zpq;
+                }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * ak / (aij + ak);
                 double theta_rr = theta * rr;
-                Rpq[0*nst_per_block] = xpq;
-                Rpq[1*nst_per_block] = ypq;
-                Rpq[2*nst_per_block] = zpq;
                 if (omega == 0) {
                     rys_roots(nroots, theta_rr, rw, nst_per_block, gout_id, gout_stride);
                 } else if (omega > 0) {
@@ -293,8 +288,7 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
 
             if (ijk_idx < nst) {
                 int naux = bounds.naux;
-                int koff = ksh - bounds.ksh0;
-                double *eri_tensor = out + shl_pair_idx * nfij * naux + koff;
+                double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                     int ijk = gout_start + n*gout_stride+gout_id;
                     int k  = ijk % nfk;
@@ -310,8 +304,9 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
 __global__
 void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
-    int sp_block_id = blockIdx.x;
-    int ksh_block_id = blockIdx.y;
+    // For better load balance, consume blocks in the reversed order
+    int sp_block_id = gridDim.x - blockIdx.x - 1;
+    int ksh_block_id = gridDim.y - blockIdx.y - 1;
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -380,17 +375,16 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
     }
 
     int nst = nshl_pair * nksh;
-    for (int task_id = 0; task_id < nst; task_id += nst_per_block) {
+    for (int ijk_idx = st_id; ijk_idx < nst+st_id; ijk_idx += nst_per_block) {
         // convert task_id to ish, jsh, ksh
-        int ijk_idx = task_id + st_id;
+        int shl_pair_in_block = ijk_idx / nksh;
+        int ksh_in_block = ijk_idx % nksh;
         if (ijk_idx >= nst) {
-            ijk_idx = 0;
+            shl_pair_in_block = 0;
             if (gout_id == 0) {
                 gx[0] = 0.;
             }
         }
-        int shl_pair_in_block = ijk_idx / nksh;
-        int ksh_in_block = ijk_idx % nksh;
         int ksh = ksh_in_block + ksh0;
         int bas_ij = bounds.bas_ij_idx[shl_pair_in_block + shl_pair0];
         int ish = bas_ij / nbas;
@@ -404,21 +398,16 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double xi = ri[0];
-        double yi = ri[1];
-        double zi = ri[2];
-        double xj = rj[0];
-        double yj = rj[1];
-        double zj = rj[2];
-        double xjxi = xj - xi;
-        double yjyi = yj - yi;
-        double zjzi = zj - zi;
         if (gout_id == 0) {
+            double xjxi = rj[0] - ri[0];
+            double yjyi = rj[1] - ri[1];
+            double zjzi = rj[2] - ri[2];
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             rjri[0*nst_per_block] = xjxi;
             rjri[1*nst_per_block] = yjyi;
             rjri[2*nst_per_block] = zjzi;
+            rjri[3*nst_per_block] = rr_ij;
         }
-        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
 
         for (int gout_start = 0; gout_start < nfij*nfk;
              gout_start+=gout_stride*GOUT_WIDTH) {
@@ -435,26 +424,26 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
                 double ak = expk[kp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double cijk = ci[ip] * cj[jp] * ck[kp];
                 __syncthreads();
-                if (gout_id == 0) {
-                    double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-                    gy[0] = fac * exp(-Kab);
-                }
-                double xij = rjri[0*nst_per_block] * aj_aij + xi;
-                double yij = rjri[1*nst_per_block] * aj_aij + yi;
-                double zij = rjri[2*nst_per_block] * aj_aij + zi;
+                double xij = rjri[0*nst_per_block] * aj_aij + ri[0];
+                double yij = rjri[1*nst_per_block] * aj_aij + ri[1];
+                double zij = rjri[2*nst_per_block] * aj_aij + ri[2];
                 double xpq = xij - rk[0];
                 double ypq = yij - rk[1];
                 double zpq = zij - rk[2];
+                if (gout_id == 0) {
+                    double cijk = ci[ip] * cj[jp] * ck[kp];
+                    double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
+                    double theta_ij = ai * aj_aij;
+                    double Kab = theta_ij * rjri[3*nst_per_block];
+                    gy[0] = fac * exp(-Kab);
+                    Rpq[0*nst_per_block] = xpq;
+                    Rpq[1*nst_per_block] = ypq;
+                    Rpq[2*nst_per_block] = zpq;
+                }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * ak / (aij + ak);
                 double theta_rr = theta * rr;
-                Rpq[0*nst_per_block] = xpq;
-                Rpq[1*nst_per_block] = ypq;
-                Rpq[2*nst_per_block] = zpq;
                 if (omega == 0) {
                     rys_roots(nroots, theta_rr, rw, nst_per_block, gout_id, gout_stride);
                 } else if (omega > 0) {
@@ -592,7 +581,7 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
                 }
             }
 
-            if (task_id + st_id < nst) {
+            if (ijk_idx < nst) {
                 int *ao_loc = envs.ao_loc;
                 int k0 = ao_loc[ksh0] - ao_loc[nbas];
                 int naux = bounds.naux;

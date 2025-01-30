@@ -1,12 +1,15 @@
+import cupy as cp
 import pyscf
 from pyscf.df import incore
+from gpu4pyscf.df import int3c2e_bdiv
+from gpu4pyscf.lib.cupy_helper import contract
 
 def test_int3c2e():
     mol = pyscf.M(
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
         ''',
-        basis={'C1': [[3, [1.1, 1.]],
+        basis={'C1': [[3, [1.5, 1.], [.9, 1.]],
                       [4, [2., 1.]]],
                'C2': 'ccpvdz'})
     auxmol = mol.copy()
@@ -29,7 +32,7 @@ C    D
         'C2': [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]],
     }
     auxmol.build()
-    dat = aux_e2(mol, auxmol)
+    dat = int3c2e_bdiv.aux_e2(mol, auxmol)
     ref = incore.aux_e2(mol, auxmol)
     assert abs(dat.get()-ref).max() < 1e-10
 
@@ -38,7 +41,7 @@ def test_int3c2e_bdiv():
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
         ''',
-        basis={'C1': [[3, [1.1, 1.]],
+        basis={'C1': [[3, [1.5, 1.], [.9, 1.]],
                       [4, [2., 1.]]],
                'C2': 'ccpvdz'})
 
@@ -62,7 +65,7 @@ C    D
         'C2':[[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]],
     }
     auxmol.build()
-    int3c2e_opt = Int3c2eOpt(mol, auxmol)
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol)
     nao, nao_orig = int3c2e_opt.coeff.shape
     naux = int3c2e_opt.aux_coeff.shape[0]
     out = cp.zeros((nao*nao, naux))
@@ -71,8 +74,7 @@ C    D
     i, j = divmod(ao_pair_mapping, nao)
     out[j*nao+i] = eri3c
     out = out.reshape(nao, nao, naux)
-    aux_coeff = cp.empty_like(int3c2e_opt.aux_coeff)
-    aux_coeff[aux_mapping] = int3c2e_opt.aux_coeff
+    aux_coeff = int3c2e_opt.aux_coeff[aux_mapping]
     out = contract('pqr,rk->pqk', out, aux_coeff)
     out = contract('pqk,qj->pjk', out, int3c2e_opt.coeff)
     out = contract('pjk,pi->ijk', out, int3c2e_opt.coeff)

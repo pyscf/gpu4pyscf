@@ -77,7 +77,7 @@ int fill_int3c2e(double *out, Int3c2eEnvVars *envs, int *scheme, int *shls_slice
         dim3 threads(nst_per_block, gout_stride);
         int tasks_per_block = BATCHES_PER_BLOCK * nst_per_block;
         int st_blocks = (nksh*nshl_pair + tasks_per_block - 1) / tasks_per_block;
-        int buflen = (nroots*2+g_size*3+6) * nst_per_block * sizeof(double);
+        int buflen = (nroots*2+g_size*3+7) * nst_per_block * sizeof(double);
         int3c2e_kernel<<<st_blocks, threads, buflen>>>(out, *envs, bounds);
     }
     cudaError_t err = cudaGetLastError();
