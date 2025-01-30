@@ -55,11 +55,14 @@ def aux_e2(mol, auxmol):
         out[ao_pair_mapping] = eri3c
         i, j = divmod(ao_pair_mapping, nao)
         out[j*nao+i] = eri3c
+    log = logger.new_logger(mol)
+    t1 = log.init_timer()
     out = out.reshape(nao, nao, naux)
     aux_coeff = int3c2e_opt.aux_coeff[aux_mapping]
     out = contract('pqr,rk->pqk', out, aux_coeff)
     out = contract('pqk,qj->pjk', out, int3c2e_opt.coeff)
     out = contract('pjk,pi->ijk', out, int3c2e_opt.coeff)
+    t1 = log.timer_debug1('aux_e2: transform basis ordering', *t1)
     return out
 
 class Int3c2eOpt:
@@ -139,8 +142,9 @@ class Int3c2eOpt:
 
         init_constant(mol)
         kern = libgint_rys.fill_int3c2e
-        cp.cuda.Stream.null.synchronize()
-        t1 = log.timer_debug1('initialize int3c2e_kernel', *cput0)
+        if log.verbose >= logger.DEBUG1:
+            cp.cuda.Stream.null.synchronize()
+            t1 = log.timer_debug1('initialize int3c2e_kernel', *cput0)
         timing_collection = {}
         kern_counts = 0
 
@@ -191,6 +195,7 @@ class Int3c2eOpt:
             yield ij_shls, eri3c, ao_pair_mapping.ravel(), aux_mapping
 
         if log.verbose >= logger.DEBUG1:
+            cp.cuda.Stream.null.synchronize()
             log.timer('int3c2e', *cput0)
             log.debug1('kernel launches %d', kern_counts)
             for lll, t in timing_collection.items():
@@ -301,8 +306,9 @@ class Int3c2eOpt:
 
         init_constant(mol)
         kern = libgint_rys.fill_int3c2e_bdiv
-        cp.cuda.Stream.null.synchronize()
-        t1 = log.timer_debug1('initialize int3c2e_bdiv_kernel', *cput0)
+        if log.verbose >= logger.DEBUG1:
+            cp.cuda.Stream.null.synchronize()
+            t1 = log.timer_debug1('initialize int3c2e_bdiv_kernel', *cput0)
 
         naux = aux_loc[-1]
         eri3c = cp.empty((nao_pair, naux))
@@ -320,7 +326,9 @@ class Int3c2eOpt:
             _bas_cpu.ctypes, ctypes.c_int(mol.nbas), _env_cpu.ctypes)
         if err != 0:
             raise RuntimeError('fill_int3c2e_bdiv kernel failed')
-        log.timer_debug1('processing int3c2e_bdiv_kernel', *t1)
+        if log.verbose >= logger.DEBUG1:
+            cp.cuda.Stream.null.synchronize()
+            log.timer_debug1('processing int3c2e_bdiv_kernel', *t1)
 
         ao_pair_mapping = np.hstack(ao_pair_mapping)
         aux_mapping = _create_ao_mapping(self.uniq_l_ctr_aux[:,0], l_ctr_aux_offsets)

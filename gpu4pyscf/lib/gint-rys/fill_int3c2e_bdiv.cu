@@ -22,33 +22,41 @@
 #include "gvhf-rys/vhf.cuh"
 #include "pbc/rys_roots.cu"
 #include "int3c2e.cuh"
+#include "unrolled_int3c2e_bdiv.cu"
 
 // TODO: benchmark performance for 32, 38, 40, 45, 54
 #define GOUT_WIDTH      45
 
 __global__
-void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
-    int nst_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    int st_id = threadIdx.x;
-    int gout_id = threadIdx.y;
-    int batch_id = blockIdx.x;
-    int li = bounds.li;
-    int lj = bounds.lj;
-    int lk = bounds.lk;
+    if (int3c2e_bdiv_unrolled(out, envs, bounds)) {
+        return;
+    }
+    // For better load balance, consume blocks in the reversed order
+    int sp_block_id = gridDim.x - blockIdx.x - 1;
+    int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
+    int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
+    int ksh0 = bounds.ksh_offsets[ksh_block_id];
+    int ksh1 = bounds.ksh_offsets[ksh_block_id+1];
+    int nksh = ksh1 - ksh0;
+    int nshl_pair = shl_pair1 - shl_pair0;
+    int bas_ij0 = bounds.bas_ij_idx[shl_pair0];
+    int nbas = envs.nbas;
+    int ish0 = bas_ij0 / nbas;
+    int jsh0 = bas_ij0 % nbas;
+
+    int *bas = envs.bas;
+    int li = bas[ish0*BAS_SLOTS+ANG_OF];
+    int lj = bas[jsh0*BAS_SLOTS+ANG_OF];
+    int lk = bas[ksh0*BAS_SLOTS+ANG_OF];
     int lij = li + lj;
-    int nroots = bounds.nroots;
-    int nfij = bounds.nfij;
-    int nfk = bounds.nfk;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
-    int stride_j = bounds.stride_j;
-    int stride_k = bounds.stride_k;
-    int g_size = bounds.g_size;
+    int nroots = (lij + lk) / 2 + 1;
+    int nfi = (li + 1) * (li + 2) / 2;
+    int nfj = (lj + 1) * (lj + 2) / 2;
+    int nfk = (lk + 1) * (lk + 2) / 2;
+    int nfij = nfi * nfj;
     int *idx_ij = c_g_pair_idx + c_g_pair_offsets[li*LMAX1+lj];
     int *idy_ij = idx_ij + nfij;
     int *idz_ij = idy_ij + nfij;
@@ -56,11 +64,28 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int *idx_k = c_g_cart_idx + lk_offset;
     int *idy_k = idx_k + nfk;
     int *idz_k = idy_k + nfk;
-    int *bas = envs.bas;
-    int nbas = envs.nbas;
+    int stride_j = li + 1;
+    int stride_k = stride_j * (lj + 1);
+    int g_size = stride_k * (lk + 1);
+    int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
+    int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
+    int kprim = bas[ksh0*BAS_SLOTS+NPRIM_OF];
+    int ijprim = iprim * jprim;
+    int ijkprim = ijprim * kprim;
+
+    int nst_per_block = blockDim.x;
+    if (lij + lk > 2) {
+        nst_per_block = bounds.nst_lookup[(lk*LMAX1+lj)*LMAX1+li];
+    }
+    int gout_stride = blockDim.x / nst_per_block;
+    int thread_id = threadIdx.x;
+    int st_id = thread_id % nst_per_block;
+    int gout_id = thread_id / nst_per_block;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-
+    if (omega < 0) {
+        nroots *= 2;
+    }
     int gx_len = g_size * nst_per_block;
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
@@ -71,26 +96,27 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     double *Rpq = gz + gx_len;
     double *rjri = Rpq + nst_per_block * 3;
     double gout[GOUT_WIDTH];
+    int naux = bounds.naux;
+    double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
+
     if (gout_id == 0) {
         gx[0] = 1.;
     }
 
-    int nksh = bounds.nksh;
-    int nshl_pair = bounds.nshl_pair;
-    int nst = nksh * nshl_pair;
-    int st0 = batch_id * nst_per_block * BATCHES_PER_BLOCK;
-    int st1 = MIN(nst, st0 + nst_per_block * BATCHES_PER_BLOCK);
-    for (int ijk_idx = st0+st_id; ijk_idx < st1+st_id; ijk_idx += nst_per_block) {
-        int ksh_in_auxmol = ijk_idx % nksh;
-        int ksh = ksh_in_auxmol + bounds.ksh0;
-        int shl_pair_idx = ijk_idx / nksh;
+    int nst = nshl_pair * nksh;
+    for (int ijk_idx = st_id; ijk_idx < nst+st_id; ijk_idx += nst_per_block) {
+        // convert task_id to ish, jsh, ksh
+        int shl_pair_in_block = ijk_idx / nksh;
+        int ksh_in_block = ijk_idx % nksh;
+        __syncthreads();
         if (ijk_idx >= nst) {
-            shl_pair_idx = st0 / nksh;
+            shl_pair_in_block = 0;
             if (gout_id == 0) {
                 gx[0] = 0.;
             }
         }
-        int bas_ij = bounds.bas_ij_idx[shl_pair_idx];
+        int ksh = ksh_in_block + ksh0;
+        int bas_ij = bounds.bas_ij_idx[shl_pair_in_block + shl_pair0];
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -286,8 +312,9 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
 
             if (ijk_idx < nst) {
-                int naux = bounds.naux;
-                double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
+                int *ao_loc = envs.ao_loc;
+                int k0 = ao_loc[ksh0] - ao_loc[nbas];
+                double *eri_tensor = out_local + k0 + shl_pair_in_block * nfij * naux + ksh_in_block;
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                     int ijk = gout_start + n*gout_stride+gout_id;
                     int k  = ijk % nfk;

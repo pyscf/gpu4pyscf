@@ -2,6 +2,7 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=12
 
 add_library(gint_rys SHARED
   gint_driver.cu fill_int3c2e.cu unrolled_int3c2e.cu
+  fill_int3c2e_bdiv.cu
 )
 
 set_target_properties(gint_rys PROPERTIES
