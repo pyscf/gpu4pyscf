@@ -215,10 +215,7 @@ def get_dh1e_ecp(mol, dm):
     for ia in ecp_atoms:
         with mol.with_rinv_at_nucleus(ia):
             ecp = mol.intor('ECPscalar_iprinv', comp=3)
-            print(ecp.shape)
-            print(ecp[0,:4,:4])
             dh1e_ecp[ia] = contract('xij,ij->x', cupy.asarray(ecp), dm)
-    exit()
     return 2.0 * dh1e_ecp
 
 def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):

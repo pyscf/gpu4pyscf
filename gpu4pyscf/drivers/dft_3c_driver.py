@@ -43,9 +43,6 @@ required_version = "1.3.0"
 installed_version = importlib.metadata.version('pyscf-dispersion')
 assert installed_version >= required_version
 
-# TODO:
-# Add requirements for BSE, GPU4PySCF,
-
 def parse_3c(xc_name):
     """
     return xc, nlc, basis, ecp, (xc_disp, disp), xc_gcp

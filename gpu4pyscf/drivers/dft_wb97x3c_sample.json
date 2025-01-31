@@ -2,11 +2,11 @@
     "input_dir": "./",
     "output_dir": "./",
     "molecules": [
-        "020_Vitamin_C.xyz",
-        "020_Vitamin_C.xyz",
-        "020_Vitamin_C.xyz",
-        "020_Vitamin_C.xyz",
-        "020_Vitamin_C.xyz"
+        "h2o.xyz",
+        "h2o.xyz",
+        "h2o.xyz",
+        "h2o.xyz",
+        "h2o.xyz"
     ],
     "xc": "wb97x3c",
     "verbose": 4,
