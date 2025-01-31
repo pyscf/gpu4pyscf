@@ -132,6 +132,28 @@ class KnownValues(unittest.TestCase):
         e_ref = kmf_cpu.get_bands(kpts_bands)[0]
         self.assertAlmostEqual(abs(e.get()-e_ref).max(), 0, 7)
 
+    def test_density_fit(self):
+        from gpu4pyscf.pbc.df.df import GDF
+        L = 4.
+        cell = pbcgto.Cell()
+        cell.a = np.eye(3)*L
+        cell.atom =[['H' , ( L/2+0., L/2+0. ,   L/2+1.)],
+                    ['H' , ( L/2+1., L/2+0. ,   L/2+1.)]]
+        cell.basis = [[0, (4.0, 1.0)], [0, (1.0, 1.0)]]
+        cell.build()
+
+        ref = cell.RHF().density_fit().run()
+        mf = ref.to_gpu().run(conv_tol=1e-8)
+        self.assertTrue(isinstance(mf.with_df, GDF))
+        self.assertAlmostEqual(ref.e_tot, -0.3740002917376214, 8)
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+        ref = cell.KRHF().density_fit().run()
+        mf = ref.to_gpu().run(conv_tol=1e-8)
+        self.assertTrue(isinstance(mf.with_df, GDF))
+        self.assertAlmostEqual(ref.e_tot, -0.3740002917376214, 8)
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
 if __name__ == '__main__':
     print("Full Tests for pbc.scf.hf")
     unittest.main()

@@ -201,7 +201,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*4 + g_size*3 + ij_prims*4) * quartets_per_block;// + ij_prims*4*TILE2;
+        int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;// + ij_prims*4*TILE2;
         rys_sr_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
@@ -329,7 +329,7 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;
-        buflen = MAX(buflen, 9*gout_stride*quartets_per_block);
+        buflen = MAX(buflen, 12*gout_stride*quartets_per_block);
         rys_ejk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();

@@ -47,7 +47,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
         n, exc, vxc = multigrid.nr_rks(ks.with_df, ks.xc, dm, hermi,
                                        kpts, kpts_band,
                                        with_j=True, return_j=False)
-        log.info('nelec by numeric integration = %s', n)
+        log.debug('nelec by numeric integration = %s', n)
         t0 = log.timer('vxc', *t0)
         return vxc
 
@@ -61,7 +61,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
         max_memory = ks.max_memory - lib.current_memory()[0]
         n, exc, vxc = ni.nr_rks(cell, ks.grids, ks.xc, dm, 0, hermi,
                                 kpts, kpts_band, max_memory=max_memory)
-        log.info('nelec by numeric integration = %s', n)
+        log.debug('nelec by numeric integration = %s', n)
         if ks.do_nlc():
             if ni.libxc.is_nlc(ks.xc):
                 xc = ks.xc
@@ -72,7 +72,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
                                           max_memory=max_memory)
             exc += enlc
             vxc += vnlc
-            log.info('nelec with nlc grids = %s', n)
+            log.debug('nelec with nlc grids = %s', n)
         t0 = log.timer('vxc', *t0)
 
     nkpts = len(kpts)
@@ -140,6 +140,14 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
                     ecoul.imag)
     return tot_e.real, ecoul.real + exc.real
 
+def get_rho(mf, dm=None, grids=None, kpts=None):
+    if dm is None: dm = mf.make_rdm1()
+    if grids is None: grids = mf.grids
+    if kpts is None: kpts = mf.kpts
+    assert dm.ndim == 3
+    assert kpts.ndim == 2
+    return mf._numint.get_rho(mf.cell, dm, grids, kpts)
+
 class KRKS(rks.KohnShamDFT, khf.KRHF):
     '''RKS class adapted for PBCs with k-point sampling.
     '''
@@ -151,7 +159,7 @@ class KRKS(rks.KohnShamDFT, khf.KRHF):
     dump_flags = krks_cpu.KRKS.dump_flags
     get_veff = get_veff
     energy_elec = energy_elec
-    get_rho = return_cupy_array(krks_cpu.get_rho)
+    get_rho = get_rho
 
     nuc_grad_method = NotImplemented
     to_hf = NotImplemented
