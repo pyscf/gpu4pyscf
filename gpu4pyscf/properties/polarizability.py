@@ -58,8 +58,8 @@ def eval_polarizability(mf):
     Returns:
         polarizability (numpy.array): polarizability in au
     """
-    assert isinstance(mf, hf.RHF)
-    
+    assert isinstance(mf, hf.RHF), "Unrestricted mf object is not supported."
+
     polarizability = np.empty((3, 3))
 
     mo_coeff = mf.mo_coeff
