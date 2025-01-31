@@ -84,6 +84,17 @@ class DF(lib.StreamObject):
         if auxmol is None:
             self.auxmol = auxmol = addons.make_auxmol(mol, self.auxbasis)
 
+        if RYS_V2:
+            self.intopt = intopt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol)
+            self._cderi = {}
+            self._cderi[0] = _cholesky_eri_bdiv(intopt, omega=omega)
+            self.ao_pair_mapping = cupy.asarray(intopt.create_ao_pair_mapping())
+            rows, cols = divmod(self.ao_pair_mapping, mol.nao)
+            intor.cderi_row = rows
+            intor.cderi_col = cols
+            log.timer_debug1('cholesky_eri', *t0)
+            return self
+
         if omega and omega > 1e-10:
             with auxmol.with_range_coulomb(omega):
                 j2c_cpu = auxmol.intor('int2c2e', hermi=1)
@@ -111,11 +122,8 @@ class DF(lib.StreamObject):
         naux = self.naux = self.cd_low.shape[1]
         log.debug('size of aux basis %d', naux)
 
-        if RYS_V2:
-            raise NotImplementedError
-        else:
-            self._cderi = cholesky_eri_gpu(intopt, mol, auxmol, self.cd_low,
-                                           omega=omega, use_gpu_memory=self.use_gpu_memory)
+        self._cderi = cholesky_eri_gpu(intopt, mol, auxmol, self.cd_low,
+                                       omega=omega, use_gpu_memory=self.use_gpu_memory)
         log.timer_debug1('cholesky_eri', *t0)
         self.intopt = intopt
         return self
@@ -371,19 +379,15 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
     return
 
 # Generate CDERI using the new int3c2e_bdiv algorithm
-def _cholesky_eri_bdiv(intopt, omega=None, sr_only=False, use_gpu_memory=True):
-    '''
-    Returns:
-        2D array of (naux,nao*(nao+1)/2) in C-contiguous
-    '''
+def _cholesky_eri_bdiv(intopt, omega=None):
     assert isinstance(intopt, int3c2e_bdiv.Int3c2eOpt)
-    nao, nao_orig = intopt.coeff.shape
-    naux = intopt.aux_coeff.shape[0]
-    out = cp.zeros((nao*nao, naux))
-    eri3c, ao_pair_mapping, aux_mapping = intopt.int3c2e_bdiv_kernel()
-    cd_low = decompose_j2c2e(intopt.sorted_auxmol)[aux_mapping]
-    if cd_low_tag == 'eig':
-        cderi = cd_low.T.dot(eri3c.T)
-    elif cd_low_tag == 'cd':
-        cderi = solve_triangular(cd_low, eri3c.T, lower=True, overwrite_b=True)
+    assert omega is None
+    eri3c = intopt.int3c2e_bdiv_kernel()
+    eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c)
+    auxmol = intopt.sorted_auxmol
+    j2c = cupy.asarray(auxmol.intor('int2c2e', hermi=1), order='C')
+    cd_low = cholesky(j2c)
+    aux_mapping = int3c2e.create_aux_ao_mapping()
+    cd_low = cd_low[aux_mapping]
+    cderi = solve_triangular(cd_low, eri3c.T, lower=True, overwrite_b=True)
     return cderi

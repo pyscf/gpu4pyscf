@@ -29,10 +29,6 @@ from gpu4pyscf.__config__ import _streams, _num_devices, _p2p_access
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
 
-c2s_l = mole.get_cart2sph(lmax=LMAX_ON_GPU)
-c2s_offset = np.cumsum([0] + [x.shape[0]*x.shape[1] for x in c2s_l])
-_data = {'c2s': None}
-
 _kernel_registery = {}
 
 def load_library(libname):
@@ -323,6 +319,13 @@ def dist_matrix(x, y, out=None):
         raise RuntimeError('failed in calculating distance matrix')
     return out
 
+@functools.lru_cache(1)
+def _initialize_c2s_data():
+    c2s_l = [mole.cart2sph_by_l(l) for l in range(LMAX_ON_GPU)]
+    c2s_data = cupy.concatenate([x.ravel() for x in c2s_l])
+    c2s_offset = np.cumsum([0] + [x.shape[0]*x.shape[1] for x in c2s_l])
+    return c2s_l, c2s_data, c2s_offset
+
 def block_c2s_diag(angular, counts):
     '''
     Diagonal blocked cartesian to spherical transformation
@@ -330,10 +333,7 @@ def block_c2s_diag(angular, counts):
         angular (list): angular momentum type, e.g. [0,1,2,3]
         counts (list): count of each angular momentum
     '''
-    if _data['c2s'] is None:
-        c2s_data = cupy.concatenate([cupy.asarray(x.ravel()) for x in c2s_l])
-        _data['c2s'] = c2s_data
-    c2s_data = _data['c2s']
+    c2s_l, c2s_data, c2s_offset = _initialize_c2s_data()
 
     nshells = np.sum(counts)
     rows = [np.array([0], dtype='int32')]
@@ -510,7 +510,7 @@ def cart2sph_cutensor(t, axis=0, ang=1, out=None):
         if(out is not None): out[:] = t
         return t
     size = list(t.shape)
-    c2s = cupy.asarray(c2s_l[ang])
+    c2s = mole.cart2sph_by_l(ang)
     if(not t.flags['C_CONTIGUOUS']): t = cupy.asarray(t, order='C')
     li_size = c2s.shape
     nli = size[axis] // li_size[0]
@@ -532,7 +532,7 @@ def cart2sph(t, axis=0, ang=1, out=None, stream=None):
         if(out is not None): out[:] = t
         return t
     size = list(t.shape)
-    c2s = c2s_l[ang]
+    c2s = mole.cart2sph_by_l(ang)
     if(not t.flags['C_CONTIGUOUS']): t = cupy.asarray(t, order='C')
     li_size = c2s.shape
     nli = size[axis] // li_size[0]

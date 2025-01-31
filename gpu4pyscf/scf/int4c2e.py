@@ -20,7 +20,7 @@ import scipy.linalg
 import cupy
 from pyscf import gto
 from pyscf.scf import _vhf
-from gpu4pyscf.lib.cupy_helper import block_c2s_diag, cart2sph, block_diag, contract, load_library, c2s_l
+from gpu4pyscf.lib.cupy_helper import block_c2s_diag, cart2sph, block_diag, contract, load_library
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import basis_seg_contraction
 

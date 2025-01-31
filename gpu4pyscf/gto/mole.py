@@ -16,7 +16,7 @@
 import functools
 import numpy as np
 import cupy as cp
-import scipy.linalg
+from cupyx.scipy.linalg import block_diag
 from pyscf import gto
 from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
                        PTR_EXP)
@@ -25,12 +25,9 @@ from gpu4pyscf.lib import logger
 PTR_BAS_COORD = 7
 
 @functools.lru_cache(20)
-def get_cart2sph(lmax=12):
-    cart2sph = []
-    for l in range(lmax):
-        c2s = gto.mole.cart2sph(l, normalized='sp')
-        cart2sph.append(np.asarray(c2s, order='C'))
-    return cart2sph
+def cart2sph_by_l(l, normalized='sp'):
+    c2s = gto.mole.cart2sph(l, normalized='sp')
+    return cp.asarray(c2s, order='C')
 
 def basis_seg_contraction(mol, allow_replica=1):
     '''transform generally contracted basis to segment contracted basis
@@ -70,13 +67,13 @@ def basis_seg_contraction(mol, allow_replica=1):
                 nctr = shell[NCTR_OF]
                 if nctr == 1:
                     bas_of_ia.append(shell)
-                    coeff.append(np.eye(nf))
+                    coeff.append(cp.eye(nf))
                     continue
                 # Only basis with nctr > 1 needs to be decontracted
                 nprim = shell[NPRIM_OF]
                 pcoeff = shell[PTR_COEFF]
                 if l <= allow_replica:
-                    coeff.extend([np.eye(nf)] * nctr)
+                    coeff.extend([cp.eye(nf)] * nctr)
                     bs = np.repeat(shell[np.newaxis], nctr, axis=0)
                     bs[:,NCTR_OF] = 1
                     bs[:,PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr, nprim)
@@ -88,7 +85,7 @@ def basis_seg_contraction(mol, allow_replica=1):
                     # remove normalization from contraction coefficients
                     c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
                     c = np.einsum('ip,p,ef->iepf', c, 1/norm, np.eye(nf))
-                    coeff.append(c.reshape(nf*nctr, nf*nprim).T)
+                    coeff.append(cp.asarray(c.reshape(nf*nctr, nf*nprim).T))
 
                     _env[pcoeff:pcoeff+nprim] = norm
                     bs = np.repeat(shell[np.newaxis], nprim, axis=0)
@@ -111,10 +108,11 @@ def basis_seg_contraction(mol, allow_replica=1):
     pmol.cart = True
     pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
     pmol._env = _env
-    contr_coeff = scipy.linalg.block_diag(*contr_coeff)
+    contr_coeff = block_diag(*contr_coeff)
 
     if not mol.cart:
-        contr_coeff = contr_coeff.dot(mol.cart2sph_coeff())
+        c2s = block_diag(*[cart2sph_by_l(l) for l in pmol._bas[:,ANG_OF]])
+        contr_coeff = contr_coeff.dot(c2s)
     return pmol, contr_coeff
 
 def sort_atoms(mol):
@@ -161,8 +159,12 @@ def sort_atoms(mol):
 
     return [x for heavy_list in full_path for x in heavy_list]
 
-def group_basis(mol, tile=1, group_size=None):
-    '''Group basis functions according to their [l, nprim] patterns'''
+def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False):
+    '''Group basis functions according to their [l, nprim] patterns.
+
+    bas_mapping is the index that transforms _bas from sorted_mol to mol:
+    mol._bas = sorted_mol._bas[bas_mapping]
+    '''
     mol, coeff = basis_seg_contraction(mol)
     # Sort basis according to angular momentum and contraction patterns so
     # as to group the basis functions to blocks in GPU kernel.
@@ -176,10 +178,11 @@ def group_basis(mol, tile=1, group_size=None):
 
     nao_orig = coeff.shape[1]
     ao_loc = mol.ao_loc
-    coeff = np.split(coeff, ao_loc[1:-1], axis=0)
+    coeff = cp.split(coeff, ao_loc[1:-1], axis=0)
 
     pad_bas = []
     if tile > 1:
+        assert not return_bas_mapping, 'bas_mapping requires tile=1'
         l_ctr_counts_orig = l_ctr_counts.copy()
         pad_inv_idx = []
         env_ptr = mol._env.size
@@ -197,12 +200,12 @@ def group_basis(mol, tile=1, group_size=None):
 
             l = l_ctr[0]
             nf = (l + 1) * (l + 2) // 2
-            coeff.extend([np.zeros((nf, nao_orig))] * padding)
+            coeff.extend([cp.zeros((nf, nao_orig))] * padding)
 
         inv_idx = np.hstack([inv_idx.ravel(), pad_inv_idx])
 
     sorted_idx = np.argsort(inv_idx.ravel(), kind='stable').astype(np.int32)
-    coeff = np.vstack([coeff[i] for i in sorted_idx])
+    coeff = cp.vstack([coeff[i] for i in sorted_idx])
     assert coeff.shape[0] < 32768
 
     max_nprims = uniq_l_ctr[:,1].max()
@@ -229,7 +232,10 @@ def group_basis(mol, tile=1, group_size=None):
 
     # PTR_BAS_COORD is required by various CUDA kernels
     mol._bas[:,PTR_BAS_COORD] = mol._atm[mol._bas[:,ATOM_OF],PTR_COORD]
-    return mol, coeff, uniq_l_ctr, l_ctr_counts
+    if return_bas_mapping:
+        return mol, coeff, uniq_l_ctr, l_ctr_counts, sorted_idx.argsort()
+    else:
+        return mol, coeff, uniq_l_ctr, l_ctr_counts
 
 def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size, align=1):
     '''Splits l_ctr patterns into small groups with group_size the maximum

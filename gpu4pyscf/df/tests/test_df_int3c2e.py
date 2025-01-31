@@ -65,18 +65,32 @@ C    D
         'C2':[[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]],
     }
     auxmol.build()
-    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol)
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
     nao, nao_orig = int3c2e_opt.coeff.shape
     naux = int3c2e_opt.aux_coeff.shape[0]
     out = cp.zeros((nao*nao, naux))
-    eri3c, ao_pair_mapping, aux_mapping = int3c2e_opt.int3c2e_bdiv_kernel()
+    eri3c = int3c2e_opt.int3c2e_bdiv_kernel()
+    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping()
+    aux_mapping = int3c2e_opt.create_aux_ao_mapping()
     out[ao_pair_mapping] = eri3c
     i, j = divmod(ao_pair_mapping, nao)
     out[j*nao+i] = eri3c
     out = out.reshape(nao, nao, naux)
-    aux_coeff = int3c2e_opt.aux_coeff[aux_mapping]
+    aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)[aux_mapping]
+    coeff = cp.asarray(int3c2e_opt.coeff)
     out = contract('pqr,rk->pqk', out, aux_coeff)
-    out = contract('pqk,qj->pjk', out, int3c2e_opt.coeff)
-    out = contract('pjk,pi->ijk', out, int3c2e_opt.coeff)
+    out = contract('pqk,qj->pjk', out, coeff)
+    out = contract('pjk,pi->ijk', out, coeff)
     ref = incore.aux_e2(mol, auxmol)
+    assert abs(out.get()-ref).max() < 1e-10
+
+    eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c)
+    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
+    out = cp.zeros((nao_orig*nao_orig, naux))
+    out[ao_pair_mapping] = eri3c
+    i, j = divmod(ao_pair_mapping, nao_orig)
+    out[j*nao_orig+i] = eri3c
+    out = out.reshape(nao_orig, nao_orig, naux)
+    out = contract('pqr,rk->pqk', out, aux_coeff)
+    out = int3c2e_opt.unsort_orbitals(out, axis=(0,1))
     assert abs(out.get()-ref).max() < 1e-10

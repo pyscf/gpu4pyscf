@@ -27,7 +27,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import load_library, contract
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
-from gpu4pyscf.gto.mole import extract_pgto_params
+from gpu4pyscf.gto.mole import basis_seg_contraction, extract_pgto_params, cart2sph_by_l
 
 __all__ = [
     'aux_e2',
@@ -47,49 +47,59 @@ def aux_e2(mol, auxmol):
     Short-range 3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
     '''
-    int3c2e_opt = Int3c2eOpt(mol, auxmol)
+    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+    aux_mapping = int3c2e_opt.create_aux_ao_mapping()
+    ao_pair_mapping = cp.asarray(int3c2e_opt.create_ao_pair_mapping())
     nao, nao_orig = int3c2e_opt.coeff.shape
     naux = int3c2e_opt.aux_coeff.shape[0]
     out = cp.zeros((nao*nao, naux))
-    for ij_shls, eri3c, ao_pair_mapping, aux_mapping in int3c2e_opt.int3c2e_kernel():
-        out[ao_pair_mapping] = eri3c
-        i, j = divmod(ao_pair_mapping, nao)
+    p0 = p1 = 0
+    for ij_shls, eri3c in int3c2e_opt.int3c2e_kernel():
+        p0, p1 = p1, p1 + eri3c.shape[0]
+        addr = ao_pair_mapping[p0:p1]
+        out[addr] = eri3c
+        i, j = divmod(addr, nao)
         out[j*nao+i] = eri3c
     log = logger.new_logger(mol)
     t1 = log.init_timer()
     out = out.reshape(nao, nao, naux)
-    aux_coeff = int3c2e_opt.aux_coeff[aux_mapping]
+    aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)[aux_mapping]
+    coeff = cp.asarray(int3c2e_opt.coeff)
     out = contract('pqr,rk->pqk', out, aux_coeff)
-    out = contract('pqk,qj->pjk', out, int3c2e_opt.coeff)
-    out = contract('pjk,pi->ijk', out, int3c2e_opt.coeff)
+    out = contract('pqk,qj->pjk', out, coeff)
+    out = contract('pjk,pi->ijk', out, coeff)
     t1 = log.timer_debug1('aux_e2: transform basis ordering', *t1)
     return out
 
 class Int3c2eOpt:
     def __init__(self, mol, auxmol):
         self.mol = mol
-        mol, coeff, uniq_l_ctr, l_ctr_counts = group_basis(mol, tile=1)
+        self.auxmol = auxmol
+        self.sorted_mol = None
+
+    def build(self, cutoff=1e-14):
+        log = logger.new_logger(self.mol)
+        cput0 = log.init_timer()
+        # allow_replica=True to transform the general contracted basis sets into
+        # segment contracted sets
+        mol, c2s = basis_seg_contraction(self.mol, allow_replica=True)
+        mol, coeff, uniq_l_ctr, l_ctr_counts, bas_mapping = group_basis(
+            mol, tile=1, return_bas_mapping=True)
         self.sorted_mol = mol
         self.uniq_l_ctr = uniq_l_ctr
-        self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
-        self.coeff = cp.asarray(coeff)
+        l_ctr_offsets = self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+        self.coeff = coeff.dot(c2s).get()
+        # Sorted AO indices, allow using the fancyindices to transform tensors
+        # between sorted_mol and mol (see function sort_orbitals)
+        ao_loc = mol.ao_loc_nr(cart=self.mol.cart)
+        ao_idx = np.array_split(np.arange(self.mol.nao), ao_loc[1:-1])
+        self.ao_idx = np.hstack([ao_idx[i] for i in bas_mapping]).argsort()
 
-        self.auxmol = auxmol
-        auxmol, coeff, uniq_l_ctr, l_ctr_counts = group_basis(auxmol, tile=1)
+        auxmol, coeff, uniq_l_ctr_aux, l_ctr_aux_counts = group_basis(self.auxmol, tile=1)
         self.sorted_auxmol = auxmol
-        self.uniq_l_ctr_aux = uniq_l_ctr
-        self.l_ctr_aux_offsets = np.append(0, np.cumsum(l_ctr_counts))
-        self.aux_coeff = cp.asarray(coeff)
-
-    def int3c2e_kernel(self, cutoff=1e-14, verbose=None):
-        mol = self.sorted_mol
-        auxmol = self.sorted_auxmol
-        uniq_l_ctr = self.uniq_l_ctr
-        l_ctr_offsets = self.l_ctr_offsets
-        l_ctr_aux_offsets = self.l_ctr_aux_offsets
-
-        log = logger.new_logger(mol, verbose)
-        cput0 = log.init_timer()
+        self.uniq_l_ctr_aux = uniq_l_ctr_aux
+        l_ctr_aux_offsets = self.l_ctr_aux_offsets = np.append(0, np.cumsum(l_ctr_aux_counts))
+        self.aux_coeff = coeff.get()
 
         _atm_cpu, _bas_cpu, _env_cpu = conc_env(
             mol._atm, mol._bas, _scale_sp_ctr_coeff(mol),
@@ -97,6 +107,9 @@ class Int3c2eOpt:
         #NOTE: PTR_BAS_COORD is not updated in conc_env()
         off = _bas_cpu[mol.nbas,PTR_EXP] - auxmol._bas[0,PTR_EXP]
         _bas_cpu[mol.nbas:,PTR_BAS_COORD] += off
+        self._atm = _atm_cpu
+        self._bas = _bas_cpu
+        self._env = _env_cpu
 
         ao_loc_cpu = mol.ao_loc
         aux_loc = auxmol.ao_loc
@@ -105,67 +118,112 @@ class Int3c2eOpt:
         _bas = cp.array(_bas_cpu, dtype=np.int32)
         _env = cp.array(_env_cpu, dtype=np.float64)
         ao_loc = cp.asarray(_conc_locs(ao_loc_cpu, aux_loc), dtype=np.int32)
-        int3c2e_envs = Int3c2eEnvVars(
+        self.int3c2e_envs = Int3c2eEnvVars(
             mol.natm, mol.nbas, _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
             ao_loc.data.ptr, math.log(cutoff),
         )
         # Keep a reference to these arrays, prevent releasing them upon returning the closure
-        int3c2e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc)
+        self.int3c2e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc)
+
+        nksh_per_block = 16
+        # the auxiliary function offset (address) in the output tensor for each blockIdx.y
+        ksh_offsets = []
+        for ksh0, ksh1 in zip(l_ctr_aux_offsets[:-1], l_ctr_aux_offsets[1:]):
+            ksh_offsets.append(np.arange(ksh0, ksh1, nksh_per_block, dtype=np.int32))
+        ksh_offsets.append(l_ctr_aux_offsets[-1])
+        ksh_offsets = np.hstack(ksh_offsets)
+        ksh_offsets += mol.nbas
+        self.ksh_offsets = ksh_offsets
 
         uniq_l = uniq_l_ctr[:,0]
-        nfcart = (uniq_l + 1) * (uniq_l + 2) // 2
         assert uniq_l.max() <= LMAX
         n_groups = len(uniq_l)
-        ij_tasks = [(i, j) for i in range(n_groups) for j in range(i+1)]
+        ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
 
         ovlp = estimate_shl_ovlp(mol)
         mask = np.tril(ovlp > cutoff)
+        # The effective shell pair = ish*nbas+jsh
         shl_pair_idx = []
-        npair_ij = 0
+        # the bas_ij_idx offset for each blockIdx.x
+        shl_pair_offsets = []
+        # the AO-pair offset (address) in the output tensor for each blockIdx.x
+        ao_pair_loc = []
+        nao_pair0 = nao_pair = 0
+        sp0 = sp1 = 0
         nbas = mol.nbas
         for i, j in ij_tasks:
+            li = uniq_l[i]
+            lj = uniq_l[j]
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
             jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
             ish, jsh = np.where(mask[ish0:ish1,jsh0:jsh1])
             ish += ish0
             jsh += jsh0
             idx = ish * nbas + jsh
+            nshl_pair = idx.size
             shl_pair_idx.append(idx)
-            nfij = nfcart[i] * nfcart[j]
-            npair_ij = max(nfij * idx.size, npair_ij)
+            nfi = (li + 1) * (li + 2) // 2
+            nfj = (lj + 1) * (lj + 2) // 2
+            nfij = nfi * nfj
+            nao_pair0, nao_pair = nao_pair, nao_pair + nfij * nshl_pair
 
-        # aux_mapping to indicate the address k.
-        aux_mapping = _create_ao_mapping(self.uniq_l_ctr_aux[:,0], l_ctr_aux_offsets)
+            sp0, sp1 = sp1, sp1 + nshl_pair
+            nsp_per_block = _estimate_shl_pairs_per_block(li, lj, nshl_pair)
+            shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
+            ao_pair_loc.append(
+                np.arange(nao_pair0, nao_pair, nsp_per_block*nfij, dtype=np.int32))
+            if log.verbose >= logger.DEBUG2:
+                log.debug2('group=(%d,%d), li,lj=(%d,%d), sp range(%d,%d,%d), '
+                           'nao_pair offset=%d',
+                           i, j, li, lj, sp0, sp1, nsp_per_block, nao_pair0)
+
+        self.shl_pair_idx = shl_pair_idx
+        shl_pair_offsets.append([sp1])
+        self.shl_pair_offsets = np.hstack(shl_pair_offsets)
+        ao_pair_loc.append(nao_pair)
+        self.ao_pair_loc = np.hstack(ao_pair_loc)
+        if log.verbose >= logger.DEBUG1:
+            log.timer_debug1('initialize int3c2e_kernel', *cput0)
+        return self
+
+    def int3c2e_kernel(self, cutoff=1e-14, verbose=None):
+        if self.sorted_mol is None:
+            self.build(cutoff)
+        log = logger.new_logger(self.mol, verbose)
+        cput0 = t1 = log.init_timer()
+        l_ctr_offsets = self.l_ctr_offsets
+        l_ctr_aux_offsets = self.l_ctr_aux_offsets
+        int3c2e_envs = self.int3c2e_envs
+        _atm_cpu = self._atm
+        _bas_cpu = self._bas
+        _env_cpu = self._env
+        mol = self.sorted_mol
+        aux_loc = self.sorted_auxmol.ao_loc
         naux = aux_loc[-1]
-        nao = ao_loc_cpu[-1]
+
+        uniq_l = self.uniq_l_ctr[:,0]
+        nfcart = (uniq_l + 1) * (uniq_l + 2) // 2
+        n_groups = len(uniq_l)
+        ij_tasks = [(i, j) for i in range(n_groups) for j in range(i+1)]
+        npair_ij = 0
+        for (i, j), bas_ij_idx in zip(ij_tasks, self.shl_pair_idx):
+            nfij = nfcart[i] * nfcart[j]
+            npair_ij = max(npair_ij, len(bas_ij_idx) * nfij)
         buf = cp.empty((npair_ij, naux))
 
         init_constant(mol)
         kern = libgint_rys.fill_int3c2e
-        if log.verbose >= logger.DEBUG1:
-            cp.cuda.Stream.null.synchronize()
-            t1 = log.timer_debug1('initialize int3c2e_kernel', *cput0)
         timing_collection = {}
         kern_counts = 0
 
-        for (i, j), bas_ij_idx in zip(ij_tasks, shl_pair_idx):
-            li = uniq_l[i]
-            lj = uniq_l[j]
+        for (i, j), bas_ij_idx in zip(ij_tasks, self.shl_pair_idx):
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
             jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-
-            # int3c2e CUDA kernel stores intgrals as [ij_shl,j,i,k,ksh].
-            # Uisng ao_pair_mapping to indicate ij addresses in eri3c[k,i,j];
-            ish, jsh = divmod(bas_ij_idx, nbas)
-            nfi = nfcart[i]
-            nfj = nfcart[j]
-            iaddr = ao_loc_cpu[ish,None] + np.arange(nfi)
-            jaddr = ao_loc_cpu[jsh,None] + np.arange(nfj)
-            ao_pair_mapping = (iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel()
-
             npair_ij = len(bas_ij_idx)
             bas_ij_idx = cp.asarray(bas_ij_idx, dtype=np.int32)
-            nfij = nfi * nfj
+            li = uniq_l[i]
+            lj = uniq_l[j]
+            nfij = nfcart[i] * nfcart[j]
             eri3c = cp.ndarray((npair_ij*nfij, naux), dtype=np.float64, memptr=buf.data)
 
             for k, lk in enumerate(self.uniq_l_ctr_aux[:,0]):
@@ -192,7 +250,7 @@ class Int3c2eOpt:
                     kern_counts += 1
 
             ij_shls = ish0, ish1, jsh0, jsh1
-            yield ij_shls, eri3c, ao_pair_mapping.ravel(), aux_mapping
+            yield ij_shls, eri3c
 
         if log.verbose >= logger.DEBUG1:
             cp.cuda.Stream.null.synchronize()
@@ -202,115 +260,33 @@ class Int3c2eOpt:
                 log.debug1('%s wall time %.2f', lll, t)
 
     def int3c2e_bdiv_kernel(self, cutoff=1e-14, verbose=None):
-        '''Block-divergent kernel'''
-        mol = self.sorted_mol
-        auxmol = self.sorted_auxmol
-        uniq_l_ctr = self.uniq_l_ctr
-        l_ctr_offsets = self.l_ctr_offsets
-        l_ctr_aux_offsets = self.l_ctr_aux_offsets
-
-        log = logger.new_logger(mol, verbose)
+        '''Construct the entire block using the block-divergent parallelism'''
+        if self.sorted_mol is None:
+            self.build(cutoff)
+        log = logger.new_logger(self.mol, verbose)
         cput0 = log.init_timer()
-
-        _atm_cpu, _bas_cpu, _env_cpu = conc_env(
-            mol._atm, mol._bas, _scale_sp_ctr_coeff(mol),
-            auxmol._atm, auxmol._bas, _scale_sp_ctr_coeff(auxmol))
-        #NOTE: PTR_BAS_COORD is not updated in conc_env()
-        off = _bas_cpu[mol.nbas,PTR_EXP] - auxmol._bas[0,PTR_EXP]
-        _bas_cpu[mol.nbas:,PTR_BAS_COORD] += off
-
-        ao_loc_cpu = mol.ao_loc
-        aux_loc = auxmol.ao_loc
-
-        _atm = cp.array(_atm_cpu, dtype=np.int32)
-        _bas = cp.array(_bas_cpu, dtype=np.int32)
-        _env = cp.array(_env_cpu, dtype=np.float64)
-        ao_loc = cp.asarray(_conc_locs(ao_loc_cpu, aux_loc), dtype=np.int32)
-        int3c2e_envs = Int3c2eEnvVars(
-            mol.natm, mol.nbas, _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
-            ao_loc.data.ptr, math.log(cutoff),
-        )
+        int3c2e_envs = self.int3c2e_envs
+        _atm_cpu = self._atm
+        _bas_cpu = self._bas
+        _env_cpu = self._env
+        mol = self.sorted_mol
+        aux_loc = self.sorted_auxmol.ao_loc
+        naux = aux_loc[-1]
+        nao_pair = self.ao_pair_loc[-1]
 
         # nst_lookup stores the nst_per_block for each (li,lj,lk) pattern
         nst_lookup = cp.asarray(create_nst_lookup_table(), dtype=np.int32)
-        nksh_per_block = 16
-        # the auxiliary function offset (address) in the output tensor for each blockIdx.y
-        ksh_offsets = []
-        for ksh0, ksh1 in zip(l_ctr_aux_offsets[:-1], l_ctr_aux_offsets[1:]):
-            ksh_offsets.append(np.arange(ksh0, ksh1, nksh_per_block, dtype=np.int32))
-        ksh_offsets.append(l_ctr_aux_offsets[-1])
-        ksh_offsets = cp.asarray(np.hstack(ksh_offsets), dtype=np.int32)
-        ksh_offsets += mol.nbas
 
-        uniq_l = uniq_l_ctr[:,0]
-        assert uniq_l.max() <= LMAX
-        n_groups = len(uniq_l)
-        ij_tasks = [(i, j) for i in range(n_groups) for j in range(i+1)]
-
-        ovlp = estimate_shl_ovlp(mol)
-        mask = np.tril(ovlp > cutoff)
-        # The effective shell pair = ish*nbas+jsh
-        shl_pair_idx = []
-        # the bas_ij_idx offset for each blockIdx.x
-        shl_pair_offsets = []
-        # the AO-pair offset (address) in the output tensor for each blockIdx.x
-        ao_pair_loc = []
-        # AO-pair addresses in the nao x nao matrix, which allows the
-        # decompression for the CUDA kernel generated compressed_eri3c:
-        # sparse_eri3c[ao_pair_mapping] = compressed_eri3c
-        # int3c2e CUDA kernel stores intgrals as [ij_shl,j,i,k,ksh].
-        # ao_pair_mapping indicates the ij addresses in eri3c[k,i,j];
-        ao_pair_mapping = []
-        nao_pair0 = nao_pair = 0
-        sp0 = sp1 = 0
-        nbas = mol.nbas
-        nao = ao_loc_cpu[-1]
-        for i, j in ij_tasks:
-            li = uniq_l[i]
-            lj = uniq_l[j]
-            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            ish, jsh = np.where(mask[ish0:ish1,jsh0:jsh1])
-            ish += ish0
-            jsh += jsh0
-            idx = ish * nbas + jsh
-            nshl_pair = idx.size
-            shl_pair_idx.append(idx)
-            nfi = (li + 1) * (li + 2) // 2
-            nfj = (lj + 1) * (lj + 2) // 2
-            nfij = nfi * nfj
-            nao_pair0, nao_pair = nao_pair, nao_pair + nfij * nshl_pair
-
-            sp0, sp1 = sp1, sp1 + nshl_pair
-            nsp_per_block = _estimate_shl_pairs_per_block(li, lj, nshl_pair)
-            shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
-            ao_pair_loc.append(
-                np.arange(nao_pair0, nao_pair, nsp_per_block*nfij, dtype=np.int32))
-
-            iaddr = ao_loc_cpu[ish,None] + np.arange(nfi)
-            jaddr = ao_loc_cpu[jsh,None] + np.arange(nfj)
-            ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
-            if log.verbose >= logger.DEBUG2:
-                log.debug2('group=(%d,%d), li,lj=(%d,%d), sp range(%d,%d,%d), '
-                           'nao_pair offset=%d',
-                           i, j, li, lj, sp0, sp1, nsp_per_block, nao_pair0)
-
-        shl_pair_idx = cp.asarray(np.hstack(shl_pair_idx), dtype=np.int32)
-        shl_pair_offsets.append([sp1])
-        shl_pair_offsets = cp.asarray(np.hstack(shl_pair_offsets), dtype=np.int32)
+        shl_pair_idx = cp.asarray(np.hstack(self.shl_pair_idx), dtype=np.int32)
+        shl_pair_offsets = cp.asarray(self.shl_pair_offsets, dtype=np.int32)
+        ksh_offsets = cp.asarray(self.ksh_offsets, dtype=np.int32)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         nbatches_ksh = len(ksh_offsets) - 1
-        ao_pair_loc.append(nao_pair)
-        ao_pair_loc = cp.asarray(np.hstack(ao_pair_loc), dtype=np.int32)
+        ao_pair_loc = cp.asarray(self.ao_pair_loc, dtype=np.int32)
         log.debug1('sp_blocks = %d, ksh_blocks = %d', nbatches_shl_pair, nbatches_ksh)
 
         init_constant(mol)
         kern = libgint_rys.fill_int3c2e_bdiv
-        if log.verbose >= logger.DEBUG1:
-            cp.cuda.Stream.null.synchronize()
-            t1 = log.timer_debug1('initialize int3c2e_bdiv_kernel', *cput0)
-
-        naux = aux_loc[-1]
         eri3c = cp.empty((nao_pair, naux))
         err = kern(
             ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
@@ -328,11 +304,120 @@ class Int3c2eOpt:
             raise RuntimeError('fill_int3c2e_bdiv kernel failed')
         if log.verbose >= logger.DEBUG1:
             cp.cuda.Stream.null.synchronize()
-            log.timer_debug1('processing int3c2e_bdiv_kernel', *t1)
+            log.timer_debug1('processing int3c2e_bdiv_kernel', *cput0)
+        return eri3c
 
-        ao_pair_mapping = np.hstack(ao_pair_mapping)
-        aux_mapping = _create_ao_mapping(self.uniq_l_ctr_aux[:,0], l_ctr_aux_offsets)
-        return eri3c, ao_pair_mapping, aux_mapping
+    def create_ao_pair_mapping(self, cart=True):
+        '''ao_pair_mapping stores AO-pair addresses in the nao x nao matrix,
+        which allows the decompression for the CUDA kernel generated compressed_eri3c:
+        sparse_eri3c[ao_pair_mapping] = compressed_eri3c
+
+        int3c2e CUDA kernel stores intgrals as [ij_shl,j,i,k,ksh].
+        ao_pair_mapping indicates the ij addresses in eri3c[k,i,j];
+        '''
+        mol = self.sorted_mol
+        ao_loc = mol.ao_loc_nr(cart)
+        nao = ao_loc[-1]
+        uniq_l = self.uniq_l_ctr[:,0]
+        if cart:
+            nf = (uniq_l + 1) * (uniq_l + 2) // 2
+        else:
+            nf = uniq_l * 2 + 1
+        n_groups = len(uniq_l)
+        ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
+        nbas = mol.nbas
+        ao_pair_mapping = []
+        for (i, j), bas_ij_idx in zip(ij_tasks, self.shl_pair_idx):
+            ish, jsh = divmod(bas_ij_idx, nbas)
+            nfi = nf[i]
+            nfj = nf[j]
+            iaddr = ao_loc[ish,None] + np.arange(nfi)
+            jaddr = ao_loc[jsh,None] + np.arange(nfj)
+            ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
+        return np.hstack(ao_pair_mapping)
+
+    def create_aux_ao_mapping(self):
+        '''AO mapping is an array that indicates the index for each element created
+        in CUDA int3c2e kernel: int3c2e_on_cpu[ao_mapping] == int3c2e_on_gpu'''
+        uniq_l = self.uniq_l_ctr_aux[:,0]
+        l_ctr_offsets = self.l_ctr_aux_offsets
+        ao_mapping = []
+        koff = 0
+        for k, lk in enumerate(uniq_l):
+            ksh0, ksh1 = l_ctr_offsets[k], l_ctr_offsets[k+1]
+            nksh = ksh1 - ksh0
+            nfk = (lk + 1) * (lk + 2) // 2
+            idx = koff + np.arange(nfk)[:,None] + np.arange(nksh) * nfk
+            ao_mapping.append(idx.ravel())
+            koff += nfk * nksh
+        return np.hstack(ao_mapping)
+
+    def orbital_pair_cart2sph(self, compressed_eri3c, inplace=True):
+        '''Transforms the AO of the compressed eri3c from Cartesian to spherical basis'''
+        if inplace:
+            out = compressed_eri3c
+        else:
+            out = compressed_eri3c.copy()
+        uniq_l = self.uniq_l_ctr[:,0]
+        n_groups = len(uniq_l)
+        ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
+        c2s = [cart2sph_by_l(l) for l in uniq_l]
+        naux = compressed_eri3c.shape[1]
+        npair0 = npair = 0
+        p0 = p1 = 0
+        for (i, j), bas_ij_idx in zip(ij_tasks, self.shl_pair_idx):
+            nshl_pair = bas_ij_idx.size
+            ci = c2s[i]
+            cj = c2s[j]
+            nfi, di = ci.shape
+            nfj, dj = cj.shape
+            npair0, npair = npair, npair + nfi*nfj * nshl_pair
+            p0, p1 = p1, p1 + di*dj * nshl_pair
+            if npair0 > len(compressed_eri3c):
+                raise RuntimeError('Size mismatch. The eri3c may have been transformed')
+            t = compressed_eri3c[npair0:npair].reshape(nshl_pair,nfj,nfi,naux)
+            t = contract('mpqr,pj->mjqr', t, cj)
+            t = contract('mjqr,qi->mjir', t, ci)
+            out[p0:p1] = t.reshape(p1-p0,naux)
+        return out[:p1]
+
+    def sort_orbitals(self, mat, axis=[]):
+        ''' Transform given axis of a matrix into sorted AO'''
+        ndim_to_transform = len(axis)
+        assert ndim_to_transform <= 2
+        if ndim_to_transform == 0:
+            return mat
+
+        idx = self.ao_idx
+        fancy_index = [slice(None)] * mat.ndim
+        if ndim_to_transform == 1:
+            fancy_index[axis[0]] = idx
+        elif ndim_to_transform == 2:
+            assert abs(axis[0] - axis[1]) == 1, 'Must be adjacent axes'
+            fancy_index[axis[0]] = idx[:,None]
+            fancy_index[axis[1]] = idx
+        return mat[tuple(fancy_index)]
+
+    def unsort_orbitals(self, sorted_mat, axis=[]):
+        '''sort_orbitals reversed, transform the matrix in sorted AOs back to
+        the original matrix.
+        '''
+        ndim_to_transform = len(axis)
+        assert ndim_to_transform <= 2
+        if ndim_to_transform == 0:
+            return sorted_mat
+
+        idx = self.ao_idx
+        fancy_index = [slice(None)] * sorted_mat.ndim
+        if ndim_to_transform == 1:
+            fancy_index[axis[0]] = idx
+        elif ndim_to_transform == 2:
+            assert abs(axis[0] - axis[1]) == 1, 'Must be adjacent axes'
+            fancy_index[axis[0]] = idx[:,None]
+            fancy_index[axis[1]] = idx
+        mat = cp.empty_like(sorted_mat)
+        mat[tuple(fancy_index)] = sorted_mat
+        return mat
 
 def _conc_locs(ao_loc1, ao_loc2):
     return np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)
@@ -415,17 +500,3 @@ def estimate_shl_ovlp(mol):
     fac_norm = norm[:,None]*norm * (np.pi/aij)**1.5
     ovlp = fac_norm * np.exp(-theta*dr**2) * fac_dri * fac_drj
     return ovlp
-
-def _create_ao_mapping(uniq_l, l_ctr_offsets):
-    '''AO mapping is an array that indicates the index for each element created
-    in CUDA int3c2e kernel: int3c2e_on_cpu[ao_mapping] == int3c2e_on_gpu'''
-    ao_mapping = []
-    koff = 0
-    for k, lk in enumerate(uniq_l):
-        ksh0, ksh1 = l_ctr_offsets[k], l_ctr_offsets[k+1]
-        nksh = ksh1 - ksh0
-        nfk = (lk + 1) * (lk + 2) // 2
-        idx = koff + np.arange(nfk)[:,None] + np.arange(nksh) * nfk
-        ao_mapping.append(idx.ravel())
-        koff += nfk * nksh
-    return np.hstack(ao_mapping)
