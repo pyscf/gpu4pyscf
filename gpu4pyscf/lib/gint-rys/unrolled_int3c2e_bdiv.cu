@@ -2113,7 +2113,7 @@ void int3c2e_bdiv_211(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_221(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_221(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
@@ -3560,7 +3560,7 @@ void int3c2e_bdiv_202(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_212(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_212(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
@@ -4073,12 +4073,12 @@ int int3c2e_bdiv_unrolled(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bound
     case 31: int3c2e_bdiv_111(out, envs, bounds); break;
     case 35: int3c2e_bdiv_201(out, envs, bounds); break;
     case 36: int3c2e_bdiv_211(out, envs, bounds); break;
-    case 37: int3c2e_221(out, envs, bounds); break;
+    case 37: int3c2e_bdiv_221(out, envs, bounds); break;
     case 50: int3c2e_bdiv_002(out, envs, bounds); break;
     case 55: int3c2e_bdiv_102(out, envs, bounds); break;
     case 56: int3c2e_bdiv_112(out, envs, bounds); break;
     case 60: int3c2e_bdiv_202(out, envs, bounds); break;
-    case 61: int3c2e_212(out, envs, bounds); break;
+    case 61: int3c2e_bdiv_212(out, envs, bounds); break;
     default: return 0;
     }
     return 1;

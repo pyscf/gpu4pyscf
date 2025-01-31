@@ -93,21 +93,27 @@ class DF(lib.StreamObject):
             intopt.cderi_row = rows
             intopt.cderi_col = cols
 
+            uniq_l = intopt.uniq_l_ctr[:,0]
+            if mol.cart:
+                nf = (uniq_l + 1) * (uniq_l + 2) // 2
+            else:
+                nf = uniq_l * 2 + 1
+            n_groups = len(uniq_l)
+            ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
             ao_loc = intopt.sorted_mol.ao_loc_nr(mol.cart)
-            nf = ao_loc[1:] - ao_loc[:-1]
             nao = ao_loc[-1]
-            nbas = len(ao_loc) - 1
+            nbas = intopt.sorted_mol.nbas
             offset = 0
             cderi_diag = []
-            for bas_ij_idx in intopt.shl_pair_idx:
-                ish, jsh = divmod(bas_ij_idx, nbas)
-                nfi = nf[ish[0]]
-                nfj = nf[jsh[0]]
-                idx = np.where(ish == jsh)[0]
-                if idx.size > 0:
+            for (i, j), bas_ij_idx in zip(ij_tasks, intopt.shl_pair_idx):
+                nfi = nf[i]
+                nfj = nf[j]
+                if i == j:
+                    ish, jsh = divmod(bas_ij_idx, nbas)
+                    idx = np.where(ish == jsh)[0]
                     addr = offset + idx[:,None] * (nfi*nfi) + np.arange(nfi*nfi)
                     cderi_diag.append(addr.ravel())
-                offset += ish.size * nfi * nfj
+                offset += bas_ij_idx.size * nfi * nfj
             # cderi_diag here is the indices for cderi_row that corresponds to
             # the diagonal blocks
             intopt.cderi_diag = cupy.asarray(np.hstack(cderi_diag))
