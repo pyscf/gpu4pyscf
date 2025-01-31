@@ -221,7 +221,6 @@ def run_dft(mol_name, config, charge=None, spin=0):
     mf.get_dispersion = MethodType(gen_disp_fun(xc_disp, xc_gcp), mf)
     mf.do_disp = lambda: True
     mf.chkfile = None
-    mf.small_rho_cutoff = 1e-40
 
     if with_solvent:
         if solvent['method'].endswith(('PCM', 'pcm')):
