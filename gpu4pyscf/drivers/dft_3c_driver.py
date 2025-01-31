@@ -29,12 +29,11 @@ import traceback
 import h5py
 import numpy as np
 from types import MethodType
-from pyscf import lib, gto
-from pyscf import dft, scf
+from pyscf import lib
+from pyscf import dft
 from pyscf.hessian import thermo
 from pyscf.lib import logger
 from pyscf.dispersion import dftd3, dftd4, gcp
-import basis_set_exchange
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -52,9 +51,10 @@ def parse_3c(xc_name):
     elif xc_name == 'r2scan3c':
         return 'r2scan', None, 'def2-mtzvpp', None, ('r2scan-3c', 'D4'), 'r2scan3c'
     elif xc_name == 'wb97x3c':
-        #basis = 'Grimme vDZP'#
+        # 'Grimme vDZP' is available is BSE, but pyscf 2.8 is not able to parse ECP properly
+        # basis = 'Grimme vDZP'
+        # ecp = 'Grimme vDZP'
         basis = os.path.join(CURRENT_DIR, 'basis_vDZP_NWCHEM.dat')
-        #ecp = 'Grimme vDZP'#
         ecp = os.path.join(CURRENT_DIR, 'ecp_vDZP_NWCHEM.dat')
         return 'wb97x-v', None, basis, ecp, ('wb97x-3c', 'D4'), None
     else:
@@ -122,7 +122,7 @@ def gen_disp_hess_fun(xc_disp, xc_gcp):
         mf = mf_hess.base
         mol = mf.mol
         natm = mol.natm
-        h_disp = np.zeros([natm,natm,3,3])
+        h_disp = np.empty([natm,natm,3,3])
 
         coords = mf_hess.mol.atom_coords()
         mol = mol.copy()
