@@ -287,13 +287,14 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
 
             if (ijk_idx < nst) {
                 int naux = bounds.naux;
-                double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
+                double *eri_tensor = out + shl_pair_idx * nfij * naux
+                        + ksh_in_auxmol * nfk;
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                     int ijk = gout_start + n*gout_stride+gout_id;
                     int k  = ijk % nfk;
                     int ij = ijk / nfk;
                     if (ij >= nfij) break;
-                    eri_tensor[ij * naux + k*nksh] = gout[n];
+                    eri_tensor[ij * naux + k] = gout[n];
                 }
             }
         }

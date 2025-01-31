@@ -48,7 +48,6 @@ def aux_e2(mol, auxmol):
     placed at the second electron.
     '''
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
-    aux_mapping = int3c2e_opt.create_aux_ao_mapping()
     ao_pair_mapping = cp.asarray(int3c2e_opt.create_ao_pair_mapping())
     nao, nao_orig = int3c2e_opt.coeff.shape
     naux = int3c2e_opt.aux_coeff.shape[0]
@@ -63,7 +62,7 @@ def aux_e2(mol, auxmol):
     log = logger.new_logger(mol)
     t1 = log.init_timer()
     out = out.reshape(nao, nao, naux)
-    aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)[aux_mapping]
+    aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)
     coeff = cp.asarray(int3c2e_opt.coeff)
     out = contract('pqr,rk->pqk', out, aux_coeff)
     out = contract('pqk,qj->pjk', out, coeff)
@@ -79,7 +78,7 @@ class Int3c2eOpt:
 
     def build(self, cutoff=1e-14):
         log = logger.new_logger(self.mol)
-        cput0 = log.init_timer()
+        t0 = log.init_timer()
         # allow_replica=True to transform the general contracted basis sets into
         # segment contracted sets
         mol, c2s = basis_seg_contraction(self.mol, allow_replica=True)
@@ -183,14 +182,14 @@ class Int3c2eOpt:
         ao_pair_loc.append(nao_pair)
         self.ao_pair_loc = np.hstack(ao_pair_loc)
         if log.verbose >= logger.DEBUG1:
-            log.timer_debug1('initialize int3c2e_kernel', *cput0)
+            log.timer_debug1('initialize int3c2e_kernel', *t0)
         return self
 
     def int3c2e_kernel(self, cutoff=1e-14, verbose=None):
         if self.sorted_mol is None:
             self.build(cutoff)
         log = logger.new_logger(self.mol, verbose)
-        cput0 = t1 = log.init_timer()
+        t0 = t1 = log.init_timer()
         l_ctr_offsets = self.l_ctr_offsets
         l_ctr_aux_offsets = self.l_ctr_aux_offsets
         int3c2e_envs = self.int3c2e_envs
@@ -254,7 +253,7 @@ class Int3c2eOpt:
 
         if log.verbose >= logger.DEBUG1:
             cp.cuda.Stream.null.synchronize()
-            log.timer('int3c2e', *cput0)
+            log.timer('int3c2e', *t0)
             log.debug1('kernel launches %d', kern_counts)
             for lll, t in timing_collection.items():
                 log.debug1('%s wall time %.2f', lll, t)
@@ -264,7 +263,7 @@ class Int3c2eOpt:
         if self.sorted_mol is None:
             self.build(cutoff)
         log = logger.new_logger(self.mol, verbose)
-        cput0 = log.init_timer()
+        t0 = log.init_timer()
         int3c2e_envs = self.int3c2e_envs
         _atm_cpu = self._atm
         _bas_cpu = self._bas
@@ -304,7 +303,7 @@ class Int3c2eOpt:
             raise RuntimeError('fill_int3c2e_bdiv kernel failed')
         if log.verbose >= logger.DEBUG1:
             cp.cuda.Stream.null.synchronize()
-            log.timer_debug1('processing int3c2e_bdiv_kernel', *cput0)
+            log.timer_debug1('processing int3c2e_bdiv_kernel', *t0)
         return eri3c
 
     def create_ao_pair_mapping(self, cart=True):
@@ -335,22 +334,6 @@ class Int3c2eOpt:
             jaddr = ao_loc[jsh,None] + np.arange(nfj)
             ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
         return np.hstack(ao_pair_mapping)
-
-    def create_aux_ao_mapping(self):
-        '''AO mapping is an array that indicates the index for each element created
-        in CUDA int3c2e kernel: int3c2e_on_cpu[ao_mapping] == int3c2e_on_gpu'''
-        uniq_l = self.uniq_l_ctr_aux[:,0]
-        l_ctr_offsets = self.l_ctr_aux_offsets
-        ao_mapping = []
-        koff = 0
-        for k, lk in enumerate(uniq_l):
-            ksh0, ksh1 = l_ctr_offsets[k], l_ctr_offsets[k+1]
-            nksh = ksh1 - ksh0
-            nfk = (lk + 1) * (lk + 2) // 2
-            idx = koff + np.arange(nfk)[:,None] + np.arange(nksh) * nfk
-            ao_mapping.append(idx.ravel())
-            koff += nfk * nksh
-        return np.hstack(ao_mapping)
 
     def orbital_pair_cart2sph(self, compressed_eri3c, inplace=True):
         '''Transforms the AO of the compressed eri3c from Cartesian to spherical basis'''

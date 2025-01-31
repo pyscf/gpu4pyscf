@@ -31,7 +31,7 @@ from gpu4pyscf.__config__ import _streams, _num_devices
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
 GB = 1024*1024*1024
-RYS_V2 = False
+INT3C2E_V2 = False
 
 LINEAR_DEP_THR = incore.LINEAR_DEP_THR
 GROUP_SIZE = 256
@@ -84,14 +84,33 @@ class DF(lib.StreamObject):
         if auxmol is None:
             self.auxmol = auxmol = addons.make_auxmol(mol, self.auxbasis)
 
-        if RYS_V2:
+        if INT3C2E_V2:
             self.intopt = intopt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol)
             self._cderi = {}
             self._cderi[0] = _cholesky_eri_bdiv(intopt, omega=omega)
-            self.ao_pair_mapping = cupy.asarray(intopt.create_ao_pair_mapping())
-            rows, cols = divmod(self.ao_pair_mapping, mol.nao)
-            intor.cderi_row = rows
-            intor.cderi_col = cols
+            ao_pair_mapping = intopt.create_ao_pair_mapping(cart=mol.cart)
+            rows, cols = divmod(cupy.asarray(ao_pair_mapping), mol.nao)
+            intopt.cderi_row = rows
+            intopt.cderi_col = cols
+
+            ao_loc = intopt.sorted_mol.ao_loc_nr(mol.cart)
+            nf = ao_loc[1:] - ao_loc[:-1]
+            nao = ao_loc[-1]
+            nbas = len(ao_loc) - 1
+            offset = 0
+            cderi_diag = []
+            for bas_ij_idx in intopt.shl_pair_idx:
+                ish, jsh = divmod(bas_ij_idx, nbas)
+                nfi = nf[ish[0]]
+                nfj = nf[jsh[0]]
+                idx = np.where(ish == jsh)[0]
+                if idx.size > 0:
+                    addr = offset + idx[:,None] * (nfi*nfi) + np.arange(nfi*nfi)
+                    cderi_diag.append(addr.ravel())
+                offset += ish.size * nfi * nfj
+            # cderi_diag here is the indices for cderi_row that corresponds to
+            # the diagonal blocks
+            intopt.cderi_diag = cupy.asarray(np.hstack(cderi_diag))
             log.timer_debug1('cholesky_eri', *t0)
             return self
 
@@ -124,6 +143,26 @@ class DF(lib.StreamObject):
 
         self._cderi = cholesky_eri_gpu(intopt, mol, auxmol, self.cd_low,
                                        omega=omega, use_gpu_memory=self.use_gpu_memory)
+        nao = mol.nao
+        out = cupy.zeros((auxmol.nao, nao, nao))
+        rows = intopt.cderi_row
+        cols = intopt.cderi_col
+        print(rows)
+        print(cols)
+        out[:,cols,rows] = self._cderi[0]
+        out[:,rows,cols] = self._cderi[0]
+        out = intopt.unsort_orbitals(out, axis=(1,2))
+        print(self.cd_low.tag)
+        print(out[1])
+        import pyscf.lib
+        print(pyscf.lib.unpack_tril(self.ref[1]))
+        ix, iy = np.tril_indices(mol.nao)
+        out = out[:,ix,iy]
+        print(abs(out.get()- self.ref).max())
+        #print(abs(out[0].get()- self.ref[0]).max())
+        print(abs(out[1].get()- self.ref[1]).max())
+        #print(abs(out[2].get()- self.ref[2]).max())
+        exit()
         log.timer_debug1('cholesky_eri', *t0)
         self.intopt = intopt
         return self
@@ -383,11 +422,12 @@ def _cholesky_eri_bdiv(intopt, omega=None):
     assert isinstance(intopt, int3c2e_bdiv.Int3c2eOpt)
     assert omega is None
     eri3c = intopt.int3c2e_bdiv_kernel()
-    eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c)
-    auxmol = intopt.sorted_auxmol
+    if intopt.mol.cart:
+        eri3c = intopt.orbital_pair_cart2sph(eri3c)
+    auxmol = intopt.auxmol
     j2c = cupy.asarray(auxmol.intor('int2c2e', hermi=1), order='C')
     cd_low = cholesky(j2c)
-    aux_mapping = int3c2e.create_aux_ao_mapping()
-    cd_low = cd_low[aux_mapping]
-    cderi = solve_triangular(cd_low, eri3c.T, lower=True, overwrite_b=True)
+    aux_coeff = cupy.array(intopt.aux_coeff, copy=True)
+    cd_low = solve_triangular(cd_low, aux_coeff.T, lower=True, overwrite_b=True)
+    cderi = cd_low.dot(eri3c.T)
     return cderi

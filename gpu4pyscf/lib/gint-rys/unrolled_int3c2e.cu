@@ -18,7 +18,6 @@ void int3c2e_000(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -61,6 +60,7 @@ void int3c2e_000(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
             int ijp = ijkp / kprim;
@@ -73,7 +73,6 @@ void int3c2e_000(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -116,8 +115,8 @@ void int3c2e_000(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
+        double *eri_tensor = out + shl_pair_idx * 1 * naux + ksh_in_auxmol * 1;
+        eri_tensor[0*naux + 0] = gout0;
     }
 }
 
@@ -131,7 +130,6 @@ void int3c2e_100(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -174,6 +172,7 @@ void int3c2e_100(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
@@ -188,7 +187,6 @@ void int3c2e_100(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -242,10 +240,10 @@ void int3c2e_100(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
-        eri_tensor[1*naux + 0*nksh] = gout1;
-        eri_tensor[2*naux + 0*nksh] = gout2;
+        double *eri_tensor = out + shl_pair_idx * 3 * naux + ksh_in_auxmol * 1;
+        eri_tensor[0*naux + 0] = gout0;
+        eri_tensor[1*naux + 0] = gout1;
+        eri_tensor[2*naux + 0] = gout2;
     }
 }
 
@@ -259,7 +257,6 @@ void int3c2e_110(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -302,6 +299,7 @@ void int3c2e_110(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
@@ -322,7 +320,6 @@ void int3c2e_110(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -392,16 +389,16 @@ void int3c2e_110(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
-        eri_tensor[1*naux + 0*nksh] = gout1;
-        eri_tensor[2*naux + 0*nksh] = gout2;
-        eri_tensor[3*naux + 0*nksh] = gout3;
-        eri_tensor[4*naux + 0*nksh] = gout4;
-        eri_tensor[5*naux + 0*nksh] = gout5;
-        eri_tensor[6*naux + 0*nksh] = gout6;
-        eri_tensor[7*naux + 0*nksh] = gout7;
-        eri_tensor[8*naux + 0*nksh] = gout8;
+        double *eri_tensor = out + shl_pair_idx * 9 * naux + ksh_in_auxmol * 1;
+        eri_tensor[0*naux + 0] = gout0;
+        eri_tensor[1*naux + 0] = gout1;
+        eri_tensor[2*naux + 0] = gout2;
+        eri_tensor[3*naux + 0] = gout3;
+        eri_tensor[4*naux + 0] = gout4;
+        eri_tensor[5*naux + 0] = gout5;
+        eri_tensor[6*naux + 0] = gout6;
+        eri_tensor[7*naux + 0] = gout7;
+        eri_tensor[8*naux + 0] = gout8;
     }
 }
 
@@ -415,7 +412,6 @@ void int3c2e_200(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -458,6 +454,7 @@ void int3c2e_200(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
@@ -475,7 +472,6 @@ void int3c2e_200(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -536,13 +532,13 @@ void int3c2e_200(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
-        eri_tensor[1*naux + 0*nksh] = gout1;
-        eri_tensor[2*naux + 0*nksh] = gout2;
-        eri_tensor[3*naux + 0*nksh] = gout3;
-        eri_tensor[4*naux + 0*nksh] = gout4;
-        eri_tensor[5*naux + 0*nksh] = gout5;
+        double *eri_tensor = out + shl_pair_idx * 6 * naux + ksh_in_auxmol * 1;
+        eri_tensor[0*naux + 0] = gout0;
+        eri_tensor[1*naux + 0] = gout1;
+        eri_tensor[2*naux + 0] = gout2;
+        eri_tensor[3*naux + 0] = gout3;
+        eri_tensor[4*naux + 0] = gout4;
+        eri_tensor[5*naux + 0] = gout5;
     }
 }
 
@@ -556,7 +552,6 @@ void int3c2e_210(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -599,6 +594,7 @@ void int3c2e_210(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
@@ -628,7 +624,6 @@ void int3c2e_210(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -713,25 +708,25 @@ void int3c2e_210(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
-        eri_tensor[1*naux + 0*nksh] = gout1;
-        eri_tensor[2*naux + 0*nksh] = gout2;
-        eri_tensor[3*naux + 0*nksh] = gout3;
-        eri_tensor[4*naux + 0*nksh] = gout4;
-        eri_tensor[5*naux + 0*nksh] = gout5;
-        eri_tensor[6*naux + 0*nksh] = gout6;
-        eri_tensor[7*naux + 0*nksh] = gout7;
-        eri_tensor[8*naux + 0*nksh] = gout8;
-        eri_tensor[9*naux + 0*nksh] = gout9;
-        eri_tensor[10*naux + 0*nksh] = gout10;
-        eri_tensor[11*naux + 0*nksh] = gout11;
-        eri_tensor[12*naux + 0*nksh] = gout12;
-        eri_tensor[13*naux + 0*nksh] = gout13;
-        eri_tensor[14*naux + 0*nksh] = gout14;
-        eri_tensor[15*naux + 0*nksh] = gout15;
-        eri_tensor[16*naux + 0*nksh] = gout16;
-        eri_tensor[17*naux + 0*nksh] = gout17;
+        double *eri_tensor = out + shl_pair_idx * 18 * naux + ksh_in_auxmol * 1;
+        eri_tensor[0*naux + 0] = gout0;
+        eri_tensor[1*naux + 0] = gout1;
+        eri_tensor[2*naux + 0] = gout2;
+        eri_tensor[3*naux + 0] = gout3;
+        eri_tensor[4*naux + 0] = gout4;
+        eri_tensor[5*naux + 0] = gout5;
+        eri_tensor[6*naux + 0] = gout6;
+        eri_tensor[7*naux + 0] = gout7;
+        eri_tensor[8*naux + 0] = gout8;
+        eri_tensor[9*naux + 0] = gout9;
+        eri_tensor[10*naux + 0] = gout10;
+        eri_tensor[11*naux + 0] = gout11;
+        eri_tensor[12*naux + 0] = gout12;
+        eri_tensor[13*naux + 0] = gout13;
+        eri_tensor[14*naux + 0] = gout14;
+        eri_tensor[15*naux + 0] = gout15;
+        eri_tensor[16*naux + 0] = gout16;
+        eri_tensor[17*naux + 0] = gout17;
     }
 }
 
@@ -741,7 +736,6 @@ void int3c2e_220(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -784,6 +778,7 @@ void int3c2e_220(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
@@ -831,7 +826,6 @@ void int3c2e_220(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -949,43 +943,43 @@ void int3c2e_220(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
-        eri_tensor[1*naux + 0*nksh] = gout1;
-        eri_tensor[2*naux + 0*nksh] = gout2;
-        eri_tensor[3*naux + 0*nksh] = gout3;
-        eri_tensor[4*naux + 0*nksh] = gout4;
-        eri_tensor[5*naux + 0*nksh] = gout5;
-        eri_tensor[6*naux + 0*nksh] = gout6;
-        eri_tensor[7*naux + 0*nksh] = gout7;
-        eri_tensor[8*naux + 0*nksh] = gout8;
-        eri_tensor[9*naux + 0*nksh] = gout9;
-        eri_tensor[10*naux + 0*nksh] = gout10;
-        eri_tensor[11*naux + 0*nksh] = gout11;
-        eri_tensor[12*naux + 0*nksh] = gout12;
-        eri_tensor[13*naux + 0*nksh] = gout13;
-        eri_tensor[14*naux + 0*nksh] = gout14;
-        eri_tensor[15*naux + 0*nksh] = gout15;
-        eri_tensor[16*naux + 0*nksh] = gout16;
-        eri_tensor[17*naux + 0*nksh] = gout17;
-        eri_tensor[18*naux + 0*nksh] = gout18;
-        eri_tensor[19*naux + 0*nksh] = gout19;
-        eri_tensor[20*naux + 0*nksh] = gout20;
-        eri_tensor[21*naux + 0*nksh] = gout21;
-        eri_tensor[22*naux + 0*nksh] = gout22;
-        eri_tensor[23*naux + 0*nksh] = gout23;
-        eri_tensor[24*naux + 0*nksh] = gout24;
-        eri_tensor[25*naux + 0*nksh] = gout25;
-        eri_tensor[26*naux + 0*nksh] = gout26;
-        eri_tensor[27*naux + 0*nksh] = gout27;
-        eri_tensor[28*naux + 0*nksh] = gout28;
-        eri_tensor[29*naux + 0*nksh] = gout29;
-        eri_tensor[30*naux + 0*nksh] = gout30;
-        eri_tensor[31*naux + 0*nksh] = gout31;
-        eri_tensor[32*naux + 0*nksh] = gout32;
-        eri_tensor[33*naux + 0*nksh] = gout33;
-        eri_tensor[34*naux + 0*nksh] = gout34;
-        eri_tensor[35*naux + 0*nksh] = gout35;
+        double *eri_tensor = out + shl_pair_idx * 36 * naux + ksh_in_auxmol * 1;
+        eri_tensor[0*naux + 0] = gout0;
+        eri_tensor[1*naux + 0] = gout1;
+        eri_tensor[2*naux + 0] = gout2;
+        eri_tensor[3*naux + 0] = gout3;
+        eri_tensor[4*naux + 0] = gout4;
+        eri_tensor[5*naux + 0] = gout5;
+        eri_tensor[6*naux + 0] = gout6;
+        eri_tensor[7*naux + 0] = gout7;
+        eri_tensor[8*naux + 0] = gout8;
+        eri_tensor[9*naux + 0] = gout9;
+        eri_tensor[10*naux + 0] = gout10;
+        eri_tensor[11*naux + 0] = gout11;
+        eri_tensor[12*naux + 0] = gout12;
+        eri_tensor[13*naux + 0] = gout13;
+        eri_tensor[14*naux + 0] = gout14;
+        eri_tensor[15*naux + 0] = gout15;
+        eri_tensor[16*naux + 0] = gout16;
+        eri_tensor[17*naux + 0] = gout17;
+        eri_tensor[18*naux + 0] = gout18;
+        eri_tensor[19*naux + 0] = gout19;
+        eri_tensor[20*naux + 0] = gout20;
+        eri_tensor[21*naux + 0] = gout21;
+        eri_tensor[22*naux + 0] = gout22;
+        eri_tensor[23*naux + 0] = gout23;
+        eri_tensor[24*naux + 0] = gout24;
+        eri_tensor[25*naux + 0] = gout25;
+        eri_tensor[26*naux + 0] = gout26;
+        eri_tensor[27*naux + 0] = gout27;
+        eri_tensor[28*naux + 0] = gout28;
+        eri_tensor[29*naux + 0] = gout29;
+        eri_tensor[30*naux + 0] = gout30;
+        eri_tensor[31*naux + 0] = gout31;
+        eri_tensor[32*naux + 0] = gout32;
+        eri_tensor[33*naux + 0] = gout33;
+        eri_tensor[34*naux + 0] = gout34;
+        eri_tensor[35*naux + 0] = gout35;
     }
 }
 
@@ -999,7 +993,6 @@ void int3c2e_001(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -1042,6 +1035,7 @@ void int3c2e_001(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
@@ -1056,7 +1050,6 @@ void int3c2e_001(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -1110,10 +1103,10 @@ void int3c2e_001(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
-        eri_tensor[0*naux + 1*nksh] = gout1;
-        eri_tensor[0*naux + 2*nksh] = gout2;
+        double *eri_tensor = out + shl_pair_idx * 1 * naux + ksh_in_auxmol * 3;
+        eri_tensor[0*naux + 0] = gout0;
+        eri_tensor[0*naux + 1] = gout1;
+        eri_tensor[0*naux + 2] = gout2;
     }
 }
 
@@ -1127,7 +1120,6 @@ void int3c2e_101(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -1170,6 +1162,7 @@ void int3c2e_101(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
@@ -1190,7 +1183,6 @@ void int3c2e_101(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -1261,16 +1253,16 @@ void int3c2e_101(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
-        eri_tensor[0*naux + 1*nksh] = gout3;
-        eri_tensor[0*naux + 2*nksh] = gout6;
-        eri_tensor[1*naux + 0*nksh] = gout1;
-        eri_tensor[1*naux + 1*nksh] = gout4;
-        eri_tensor[1*naux + 2*nksh] = gout7;
-        eri_tensor[2*naux + 0*nksh] = gout2;
-        eri_tensor[2*naux + 1*nksh] = gout5;
-        eri_tensor[2*naux + 2*nksh] = gout8;
+        double *eri_tensor = out + shl_pair_idx * 3 * naux + ksh_in_auxmol * 3;
+        eri_tensor[0*naux + 0] = gout0;
+        eri_tensor[0*naux + 1] = gout3;
+        eri_tensor[0*naux + 2] = gout6;
+        eri_tensor[1*naux + 0] = gout1;
+        eri_tensor[1*naux + 1] = gout4;
+        eri_tensor[1*naux + 2] = gout7;
+        eri_tensor[2*naux + 0] = gout2;
+        eri_tensor[2*naux + 1] = gout5;
+        eri_tensor[2*naux + 2] = gout8;
     }
 }
 
@@ -1280,7 +1272,6 @@ void int3c2e_111(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -1323,6 +1314,7 @@ void int3c2e_111(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
@@ -1361,7 +1353,6 @@ void int3c2e_111(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -1469,34 +1460,34 @@ void int3c2e_111(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
-        eri_tensor[0*naux + 1*nksh] = gout9;
-        eri_tensor[0*naux + 2*nksh] = gout18;
-        eri_tensor[1*naux + 0*nksh] = gout1;
-        eri_tensor[1*naux + 1*nksh] = gout10;
-        eri_tensor[1*naux + 2*nksh] = gout19;
-        eri_tensor[2*naux + 0*nksh] = gout2;
-        eri_tensor[2*naux + 1*nksh] = gout11;
-        eri_tensor[2*naux + 2*nksh] = gout20;
-        eri_tensor[3*naux + 0*nksh] = gout3;
-        eri_tensor[3*naux + 1*nksh] = gout12;
-        eri_tensor[3*naux + 2*nksh] = gout21;
-        eri_tensor[4*naux + 0*nksh] = gout4;
-        eri_tensor[4*naux + 1*nksh] = gout13;
-        eri_tensor[4*naux + 2*nksh] = gout22;
-        eri_tensor[5*naux + 0*nksh] = gout5;
-        eri_tensor[5*naux + 1*nksh] = gout14;
-        eri_tensor[5*naux + 2*nksh] = gout23;
-        eri_tensor[6*naux + 0*nksh] = gout6;
-        eri_tensor[6*naux + 1*nksh] = gout15;
-        eri_tensor[6*naux + 2*nksh] = gout24;
-        eri_tensor[7*naux + 0*nksh] = gout7;
-        eri_tensor[7*naux + 1*nksh] = gout16;
-        eri_tensor[7*naux + 2*nksh] = gout25;
-        eri_tensor[8*naux + 0*nksh] = gout8;
-        eri_tensor[8*naux + 1*nksh] = gout17;
-        eri_tensor[8*naux + 2*nksh] = gout26;
+        double *eri_tensor = out + shl_pair_idx * 9 * naux + ksh_in_auxmol * 3;
+        eri_tensor[0*naux + 0] = gout0;
+        eri_tensor[0*naux + 1] = gout9;
+        eri_tensor[0*naux + 2] = gout18;
+        eri_tensor[1*naux + 0] = gout1;
+        eri_tensor[1*naux + 1] = gout10;
+        eri_tensor[1*naux + 2] = gout19;
+        eri_tensor[2*naux + 0] = gout2;
+        eri_tensor[2*naux + 1] = gout11;
+        eri_tensor[2*naux + 2] = gout20;
+        eri_tensor[3*naux + 0] = gout3;
+        eri_tensor[3*naux + 1] = gout12;
+        eri_tensor[3*naux + 2] = gout21;
+        eri_tensor[4*naux + 0] = gout4;
+        eri_tensor[4*naux + 1] = gout13;
+        eri_tensor[4*naux + 2] = gout22;
+        eri_tensor[5*naux + 0] = gout5;
+        eri_tensor[5*naux + 1] = gout14;
+        eri_tensor[5*naux + 2] = gout23;
+        eri_tensor[6*naux + 0] = gout6;
+        eri_tensor[6*naux + 1] = gout15;
+        eri_tensor[6*naux + 2] = gout24;
+        eri_tensor[7*naux + 0] = gout7;
+        eri_tensor[7*naux + 1] = gout16;
+        eri_tensor[7*naux + 2] = gout25;
+        eri_tensor[8*naux + 0] = gout8;
+        eri_tensor[8*naux + 1] = gout17;
+        eri_tensor[8*naux + 2] = gout26;
     }
 }
 
@@ -1510,7 +1501,6 @@ void int3c2e_201(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -1553,6 +1543,7 @@ void int3c2e_201(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
@@ -1582,7 +1573,6 @@ void int3c2e_201(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -1669,25 +1659,25 @@ void int3c2e_201(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
-        eri_tensor[0*naux + 1*nksh] = gout6;
-        eri_tensor[0*naux + 2*nksh] = gout12;
-        eri_tensor[1*naux + 0*nksh] = gout1;
-        eri_tensor[1*naux + 1*nksh] = gout7;
-        eri_tensor[1*naux + 2*nksh] = gout13;
-        eri_tensor[2*naux + 0*nksh] = gout2;
-        eri_tensor[2*naux + 1*nksh] = gout8;
-        eri_tensor[2*naux + 2*nksh] = gout14;
-        eri_tensor[3*naux + 0*nksh] = gout3;
-        eri_tensor[3*naux + 1*nksh] = gout9;
-        eri_tensor[3*naux + 2*nksh] = gout15;
-        eri_tensor[4*naux + 0*nksh] = gout4;
-        eri_tensor[4*naux + 1*nksh] = gout10;
-        eri_tensor[4*naux + 2*nksh] = gout16;
-        eri_tensor[5*naux + 0*nksh] = gout5;
-        eri_tensor[5*naux + 1*nksh] = gout11;
-        eri_tensor[5*naux + 2*nksh] = gout17;
+        double *eri_tensor = out + shl_pair_idx * 6 * naux + ksh_in_auxmol * 3;
+        eri_tensor[0*naux + 0] = gout0;
+        eri_tensor[0*naux + 1] = gout6;
+        eri_tensor[0*naux + 2] = gout12;
+        eri_tensor[1*naux + 0] = gout1;
+        eri_tensor[1*naux + 1] = gout7;
+        eri_tensor[1*naux + 2] = gout13;
+        eri_tensor[2*naux + 0] = gout2;
+        eri_tensor[2*naux + 1] = gout8;
+        eri_tensor[2*naux + 2] = gout14;
+        eri_tensor[3*naux + 0] = gout3;
+        eri_tensor[3*naux + 1] = gout9;
+        eri_tensor[3*naux + 2] = gout15;
+        eri_tensor[4*naux + 0] = gout4;
+        eri_tensor[4*naux + 1] = gout10;
+        eri_tensor[4*naux + 2] = gout16;
+        eri_tensor[5*naux + 0] = gout5;
+        eri_tensor[5*naux + 1] = gout11;
+        eri_tensor[5*naux + 2] = gout17;
     }
 }
 
@@ -1697,7 +1687,6 @@ void int3c2e_211(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -1740,6 +1729,7 @@ void int3c2e_211(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
@@ -1805,7 +1795,6 @@ void int3c2e_211(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -1952,61 +1941,61 @@ void int3c2e_211(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
-        eri_tensor[0*naux + 1*nksh] = gout18;
-        eri_tensor[0*naux + 2*nksh] = gout36;
-        eri_tensor[1*naux + 0*nksh] = gout1;
-        eri_tensor[1*naux + 1*nksh] = gout19;
-        eri_tensor[1*naux + 2*nksh] = gout37;
-        eri_tensor[2*naux + 0*nksh] = gout2;
-        eri_tensor[2*naux + 1*nksh] = gout20;
-        eri_tensor[2*naux + 2*nksh] = gout38;
-        eri_tensor[3*naux + 0*nksh] = gout3;
-        eri_tensor[3*naux + 1*nksh] = gout21;
-        eri_tensor[3*naux + 2*nksh] = gout39;
-        eri_tensor[4*naux + 0*nksh] = gout4;
-        eri_tensor[4*naux + 1*nksh] = gout22;
-        eri_tensor[4*naux + 2*nksh] = gout40;
-        eri_tensor[5*naux + 0*nksh] = gout5;
-        eri_tensor[5*naux + 1*nksh] = gout23;
-        eri_tensor[5*naux + 2*nksh] = gout41;
-        eri_tensor[6*naux + 0*nksh] = gout6;
-        eri_tensor[6*naux + 1*nksh] = gout24;
-        eri_tensor[6*naux + 2*nksh] = gout42;
-        eri_tensor[7*naux + 0*nksh] = gout7;
-        eri_tensor[7*naux + 1*nksh] = gout25;
-        eri_tensor[7*naux + 2*nksh] = gout43;
-        eri_tensor[8*naux + 0*nksh] = gout8;
-        eri_tensor[8*naux + 1*nksh] = gout26;
-        eri_tensor[8*naux + 2*nksh] = gout44;
-        eri_tensor[9*naux + 0*nksh] = gout9;
-        eri_tensor[9*naux + 1*nksh] = gout27;
-        eri_tensor[9*naux + 2*nksh] = gout45;
-        eri_tensor[10*naux + 0*nksh] = gout10;
-        eri_tensor[10*naux + 1*nksh] = gout28;
-        eri_tensor[10*naux + 2*nksh] = gout46;
-        eri_tensor[11*naux + 0*nksh] = gout11;
-        eri_tensor[11*naux + 1*nksh] = gout29;
-        eri_tensor[11*naux + 2*nksh] = gout47;
-        eri_tensor[12*naux + 0*nksh] = gout12;
-        eri_tensor[12*naux + 1*nksh] = gout30;
-        eri_tensor[12*naux + 2*nksh] = gout48;
-        eri_tensor[13*naux + 0*nksh] = gout13;
-        eri_tensor[13*naux + 1*nksh] = gout31;
-        eri_tensor[13*naux + 2*nksh] = gout49;
-        eri_tensor[14*naux + 0*nksh] = gout14;
-        eri_tensor[14*naux + 1*nksh] = gout32;
-        eri_tensor[14*naux + 2*nksh] = gout50;
-        eri_tensor[15*naux + 0*nksh] = gout15;
-        eri_tensor[15*naux + 1*nksh] = gout33;
-        eri_tensor[15*naux + 2*nksh] = gout51;
-        eri_tensor[16*naux + 0*nksh] = gout16;
-        eri_tensor[16*naux + 1*nksh] = gout34;
-        eri_tensor[16*naux + 2*nksh] = gout52;
-        eri_tensor[17*naux + 0*nksh] = gout17;
-        eri_tensor[17*naux + 1*nksh] = gout35;
-        eri_tensor[17*naux + 2*nksh] = gout53;
+        double *eri_tensor = out + shl_pair_idx * 18 * naux + ksh_in_auxmol * 3;
+        eri_tensor[0*naux + 0] = gout0;
+        eri_tensor[0*naux + 1] = gout18;
+        eri_tensor[0*naux + 2] = gout36;
+        eri_tensor[1*naux + 0] = gout1;
+        eri_tensor[1*naux + 1] = gout19;
+        eri_tensor[1*naux + 2] = gout37;
+        eri_tensor[2*naux + 0] = gout2;
+        eri_tensor[2*naux + 1] = gout20;
+        eri_tensor[2*naux + 2] = gout38;
+        eri_tensor[3*naux + 0] = gout3;
+        eri_tensor[3*naux + 1] = gout21;
+        eri_tensor[3*naux + 2] = gout39;
+        eri_tensor[4*naux + 0] = gout4;
+        eri_tensor[4*naux + 1] = gout22;
+        eri_tensor[4*naux + 2] = gout40;
+        eri_tensor[5*naux + 0] = gout5;
+        eri_tensor[5*naux + 1] = gout23;
+        eri_tensor[5*naux + 2] = gout41;
+        eri_tensor[6*naux + 0] = gout6;
+        eri_tensor[6*naux + 1] = gout24;
+        eri_tensor[6*naux + 2] = gout42;
+        eri_tensor[7*naux + 0] = gout7;
+        eri_tensor[7*naux + 1] = gout25;
+        eri_tensor[7*naux + 2] = gout43;
+        eri_tensor[8*naux + 0] = gout8;
+        eri_tensor[8*naux + 1] = gout26;
+        eri_tensor[8*naux + 2] = gout44;
+        eri_tensor[9*naux + 0] = gout9;
+        eri_tensor[9*naux + 1] = gout27;
+        eri_tensor[9*naux + 2] = gout45;
+        eri_tensor[10*naux + 0] = gout10;
+        eri_tensor[10*naux + 1] = gout28;
+        eri_tensor[10*naux + 2] = gout46;
+        eri_tensor[11*naux + 0] = gout11;
+        eri_tensor[11*naux + 1] = gout29;
+        eri_tensor[11*naux + 2] = gout47;
+        eri_tensor[12*naux + 0] = gout12;
+        eri_tensor[12*naux + 1] = gout30;
+        eri_tensor[12*naux + 2] = gout48;
+        eri_tensor[13*naux + 0] = gout13;
+        eri_tensor[13*naux + 1] = gout31;
+        eri_tensor[13*naux + 2] = gout49;
+        eri_tensor[14*naux + 0] = gout14;
+        eri_tensor[14*naux + 1] = gout32;
+        eri_tensor[14*naux + 2] = gout50;
+        eri_tensor[15*naux + 0] = gout15;
+        eri_tensor[15*naux + 1] = gout33;
+        eri_tensor[15*naux + 2] = gout51;
+        eri_tensor[16*naux + 0] = gout16;
+        eri_tensor[16*naux + 1] = gout34;
+        eri_tensor[16*naux + 2] = gout52;
+        eri_tensor[17*naux + 0] = gout17;
+        eri_tensor[17*naux + 1] = gout35;
+        eri_tensor[17*naux + 2] = gout53;
     }
 }
 
@@ -2022,7 +2011,6 @@ void int3c2e_221(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int ijprim = iprim * jprim;
     int ijkprim = ijprim * kprim;
     int nroots = bounds.nroots;
-    int nfij = bounds.nfij;
     int *bas = envs.bas;
     int nbas = envs.nbas;
     double *env = envs.env;
@@ -2374,123 +2362,123 @@ void int3c2e_221(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         }
         if (ijk_idx < nst) {
             int naux = bounds.naux;
-            double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
+            double *eri_tensor = out + shl_pair_idx * 36 * naux + ksh_in_auxmol * 3;
             switch (gout_id) {
             case 0:
-            eri_tensor[0*naux + 0*nksh] = gout0;
-            eri_tensor[1*naux + 1*nksh] = gout1;
-            eri_tensor[2*naux + 2*nksh] = gout2;
-            eri_tensor[4*naux + 0*nksh] = gout3;
-            eri_tensor[5*naux + 1*nksh] = gout4;
-            eri_tensor[6*naux + 2*nksh] = gout5;
-            eri_tensor[8*naux + 0*nksh] = gout6;
-            eri_tensor[9*naux + 1*nksh] = gout7;
-            eri_tensor[10*naux + 2*nksh] = gout8;
-            eri_tensor[12*naux + 0*nksh] = gout9;
-            eri_tensor[13*naux + 1*nksh] = gout10;
-            eri_tensor[14*naux + 2*nksh] = gout11;
-            eri_tensor[16*naux + 0*nksh] = gout12;
-            eri_tensor[17*naux + 1*nksh] = gout13;
-            eri_tensor[18*naux + 2*nksh] = gout14;
-            eri_tensor[20*naux + 0*nksh] = gout15;
-            eri_tensor[21*naux + 1*nksh] = gout16;
-            eri_tensor[22*naux + 2*nksh] = gout17;
-            eri_tensor[24*naux + 0*nksh] = gout18;
-            eri_tensor[25*naux + 1*nksh] = gout19;
-            eri_tensor[26*naux + 2*nksh] = gout20;
-            eri_tensor[28*naux + 0*nksh] = gout21;
-            eri_tensor[29*naux + 1*nksh] = gout22;
-            eri_tensor[30*naux + 2*nksh] = gout23;
-            eri_tensor[32*naux + 0*nksh] = gout24;
-            eri_tensor[33*naux + 1*nksh] = gout25;
-            eri_tensor[34*naux + 2*nksh] = gout26;
+            eri_tensor[0*naux + 0] = gout0;
+            eri_tensor[1*naux + 1] = gout1;
+            eri_tensor[2*naux + 2] = gout2;
+            eri_tensor[4*naux + 0] = gout3;
+            eri_tensor[5*naux + 1] = gout4;
+            eri_tensor[6*naux + 2] = gout5;
+            eri_tensor[8*naux + 0] = gout6;
+            eri_tensor[9*naux + 1] = gout7;
+            eri_tensor[10*naux + 2] = gout8;
+            eri_tensor[12*naux + 0] = gout9;
+            eri_tensor[13*naux + 1] = gout10;
+            eri_tensor[14*naux + 2] = gout11;
+            eri_tensor[16*naux + 0] = gout12;
+            eri_tensor[17*naux + 1] = gout13;
+            eri_tensor[18*naux + 2] = gout14;
+            eri_tensor[20*naux + 0] = gout15;
+            eri_tensor[21*naux + 1] = gout16;
+            eri_tensor[22*naux + 2] = gout17;
+            eri_tensor[24*naux + 0] = gout18;
+            eri_tensor[25*naux + 1] = gout19;
+            eri_tensor[26*naux + 2] = gout20;
+            eri_tensor[28*naux + 0] = gout21;
+            eri_tensor[29*naux + 1] = gout22;
+            eri_tensor[30*naux + 2] = gout23;
+            eri_tensor[32*naux + 0] = gout24;
+            eri_tensor[33*naux + 1] = gout25;
+            eri_tensor[34*naux + 2] = gout26;
             break;
             case 1:
-            eri_tensor[0*naux + 1*nksh] = gout0;
-            eri_tensor[1*naux + 2*nksh] = gout1;
-            eri_tensor[3*naux + 0*nksh] = gout2;
-            eri_tensor[4*naux + 1*nksh] = gout3;
-            eri_tensor[5*naux + 2*nksh] = gout4;
-            eri_tensor[7*naux + 0*nksh] = gout5;
-            eri_tensor[8*naux + 1*nksh] = gout6;
-            eri_tensor[9*naux + 2*nksh] = gout7;
-            eri_tensor[11*naux + 0*nksh] = gout8;
-            eri_tensor[12*naux + 1*nksh] = gout9;
-            eri_tensor[13*naux + 2*nksh] = gout10;
-            eri_tensor[15*naux + 0*nksh] = gout11;
-            eri_tensor[16*naux + 1*nksh] = gout12;
-            eri_tensor[17*naux + 2*nksh] = gout13;
-            eri_tensor[19*naux + 0*nksh] = gout14;
-            eri_tensor[20*naux + 1*nksh] = gout15;
-            eri_tensor[21*naux + 2*nksh] = gout16;
-            eri_tensor[23*naux + 0*nksh] = gout17;
-            eri_tensor[24*naux + 1*nksh] = gout18;
-            eri_tensor[25*naux + 2*nksh] = gout19;
-            eri_tensor[27*naux + 0*nksh] = gout20;
-            eri_tensor[28*naux + 1*nksh] = gout21;
-            eri_tensor[29*naux + 2*nksh] = gout22;
-            eri_tensor[31*naux + 0*nksh] = gout23;
-            eri_tensor[32*naux + 1*nksh] = gout24;
-            eri_tensor[33*naux + 2*nksh] = gout25;
-            eri_tensor[35*naux + 0*nksh] = gout26;
+            eri_tensor[0*naux + 1] = gout0;
+            eri_tensor[1*naux + 2] = gout1;
+            eri_tensor[3*naux + 0] = gout2;
+            eri_tensor[4*naux + 1] = gout3;
+            eri_tensor[5*naux + 2] = gout4;
+            eri_tensor[7*naux + 0] = gout5;
+            eri_tensor[8*naux + 1] = gout6;
+            eri_tensor[9*naux + 2] = gout7;
+            eri_tensor[11*naux + 0] = gout8;
+            eri_tensor[12*naux + 1] = gout9;
+            eri_tensor[13*naux + 2] = gout10;
+            eri_tensor[15*naux + 0] = gout11;
+            eri_tensor[16*naux + 1] = gout12;
+            eri_tensor[17*naux + 2] = gout13;
+            eri_tensor[19*naux + 0] = gout14;
+            eri_tensor[20*naux + 1] = gout15;
+            eri_tensor[21*naux + 2] = gout16;
+            eri_tensor[23*naux + 0] = gout17;
+            eri_tensor[24*naux + 1] = gout18;
+            eri_tensor[25*naux + 2] = gout19;
+            eri_tensor[27*naux + 0] = gout20;
+            eri_tensor[28*naux + 1] = gout21;
+            eri_tensor[29*naux + 2] = gout22;
+            eri_tensor[31*naux + 0] = gout23;
+            eri_tensor[32*naux + 1] = gout24;
+            eri_tensor[33*naux + 2] = gout25;
+            eri_tensor[35*naux + 0] = gout26;
             break;
             case 2:
-            eri_tensor[0*naux + 2*nksh] = gout0;
-            eri_tensor[2*naux + 0*nksh] = gout1;
-            eri_tensor[3*naux + 1*nksh] = gout2;
-            eri_tensor[4*naux + 2*nksh] = gout3;
-            eri_tensor[6*naux + 0*nksh] = gout4;
-            eri_tensor[7*naux + 1*nksh] = gout5;
-            eri_tensor[8*naux + 2*nksh] = gout6;
-            eri_tensor[10*naux + 0*nksh] = gout7;
-            eri_tensor[11*naux + 1*nksh] = gout8;
-            eri_tensor[12*naux + 2*nksh] = gout9;
-            eri_tensor[14*naux + 0*nksh] = gout10;
-            eri_tensor[15*naux + 1*nksh] = gout11;
-            eri_tensor[16*naux + 2*nksh] = gout12;
-            eri_tensor[18*naux + 0*nksh] = gout13;
-            eri_tensor[19*naux + 1*nksh] = gout14;
-            eri_tensor[20*naux + 2*nksh] = gout15;
-            eri_tensor[22*naux + 0*nksh] = gout16;
-            eri_tensor[23*naux + 1*nksh] = gout17;
-            eri_tensor[24*naux + 2*nksh] = gout18;
-            eri_tensor[26*naux + 0*nksh] = gout19;
-            eri_tensor[27*naux + 1*nksh] = gout20;
-            eri_tensor[28*naux + 2*nksh] = gout21;
-            eri_tensor[30*naux + 0*nksh] = gout22;
-            eri_tensor[31*naux + 1*nksh] = gout23;
-            eri_tensor[32*naux + 2*nksh] = gout24;
-            eri_tensor[34*naux + 0*nksh] = gout25;
-            eri_tensor[35*naux + 1*nksh] = gout26;
+            eri_tensor[0*naux + 2] = gout0;
+            eri_tensor[2*naux + 0] = gout1;
+            eri_tensor[3*naux + 1] = gout2;
+            eri_tensor[4*naux + 2] = gout3;
+            eri_tensor[6*naux + 0] = gout4;
+            eri_tensor[7*naux + 1] = gout5;
+            eri_tensor[8*naux + 2] = gout6;
+            eri_tensor[10*naux + 0] = gout7;
+            eri_tensor[11*naux + 1] = gout8;
+            eri_tensor[12*naux + 2] = gout9;
+            eri_tensor[14*naux + 0] = gout10;
+            eri_tensor[15*naux + 1] = gout11;
+            eri_tensor[16*naux + 2] = gout12;
+            eri_tensor[18*naux + 0] = gout13;
+            eri_tensor[19*naux + 1] = gout14;
+            eri_tensor[20*naux + 2] = gout15;
+            eri_tensor[22*naux + 0] = gout16;
+            eri_tensor[23*naux + 1] = gout17;
+            eri_tensor[24*naux + 2] = gout18;
+            eri_tensor[26*naux + 0] = gout19;
+            eri_tensor[27*naux + 1] = gout20;
+            eri_tensor[28*naux + 2] = gout21;
+            eri_tensor[30*naux + 0] = gout22;
+            eri_tensor[31*naux + 1] = gout23;
+            eri_tensor[32*naux + 2] = gout24;
+            eri_tensor[34*naux + 0] = gout25;
+            eri_tensor[35*naux + 1] = gout26;
             break;
             case 3:
-            eri_tensor[1*naux + 0*nksh] = gout0;
-            eri_tensor[2*naux + 1*nksh] = gout1;
-            eri_tensor[3*naux + 2*nksh] = gout2;
-            eri_tensor[5*naux + 0*nksh] = gout3;
-            eri_tensor[6*naux + 1*nksh] = gout4;
-            eri_tensor[7*naux + 2*nksh] = gout5;
-            eri_tensor[9*naux + 0*nksh] = gout6;
-            eri_tensor[10*naux + 1*nksh] = gout7;
-            eri_tensor[11*naux + 2*nksh] = gout8;
-            eri_tensor[13*naux + 0*nksh] = gout9;
-            eri_tensor[14*naux + 1*nksh] = gout10;
-            eri_tensor[15*naux + 2*nksh] = gout11;
-            eri_tensor[17*naux + 0*nksh] = gout12;
-            eri_tensor[18*naux + 1*nksh] = gout13;
-            eri_tensor[19*naux + 2*nksh] = gout14;
-            eri_tensor[21*naux + 0*nksh] = gout15;
-            eri_tensor[22*naux + 1*nksh] = gout16;
-            eri_tensor[23*naux + 2*nksh] = gout17;
-            eri_tensor[25*naux + 0*nksh] = gout18;
-            eri_tensor[26*naux + 1*nksh] = gout19;
-            eri_tensor[27*naux + 2*nksh] = gout20;
-            eri_tensor[29*naux + 0*nksh] = gout21;
-            eri_tensor[30*naux + 1*nksh] = gout22;
-            eri_tensor[31*naux + 2*nksh] = gout23;
-            eri_tensor[33*naux + 0*nksh] = gout24;
-            eri_tensor[34*naux + 1*nksh] = gout25;
-            eri_tensor[35*naux + 2*nksh] = gout26;
+            eri_tensor[1*naux + 0] = gout0;
+            eri_tensor[2*naux + 1] = gout1;
+            eri_tensor[3*naux + 2] = gout2;
+            eri_tensor[5*naux + 0] = gout3;
+            eri_tensor[6*naux + 1] = gout4;
+            eri_tensor[7*naux + 2] = gout5;
+            eri_tensor[9*naux + 0] = gout6;
+            eri_tensor[10*naux + 1] = gout7;
+            eri_tensor[11*naux + 2] = gout8;
+            eri_tensor[13*naux + 0] = gout9;
+            eri_tensor[14*naux + 1] = gout10;
+            eri_tensor[15*naux + 2] = gout11;
+            eri_tensor[17*naux + 0] = gout12;
+            eri_tensor[18*naux + 1] = gout13;
+            eri_tensor[19*naux + 2] = gout14;
+            eri_tensor[21*naux + 0] = gout15;
+            eri_tensor[22*naux + 1] = gout16;
+            eri_tensor[23*naux + 2] = gout17;
+            eri_tensor[25*naux + 0] = gout18;
+            eri_tensor[26*naux + 1] = gout19;
+            eri_tensor[27*naux + 2] = gout20;
+            eri_tensor[29*naux + 0] = gout21;
+            eri_tensor[30*naux + 1] = gout22;
+            eri_tensor[31*naux + 2] = gout23;
+            eri_tensor[33*naux + 0] = gout24;
+            eri_tensor[34*naux + 1] = gout25;
+            eri_tensor[35*naux + 2] = gout26;
             break;
             }
         }
@@ -2507,7 +2495,6 @@ void int3c2e_002(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -2550,6 +2537,7 @@ void int3c2e_002(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
@@ -2567,7 +2555,6 @@ void int3c2e_002(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -2628,13 +2615,13 @@ void int3c2e_002(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
-        eri_tensor[0*naux + 1*nksh] = gout1;
-        eri_tensor[0*naux + 2*nksh] = gout2;
-        eri_tensor[0*naux + 3*nksh] = gout3;
-        eri_tensor[0*naux + 4*nksh] = gout4;
-        eri_tensor[0*naux + 5*nksh] = gout5;
+        double *eri_tensor = out + shl_pair_idx * 1 * naux + ksh_in_auxmol * 6;
+        eri_tensor[0*naux + 0] = gout0;
+        eri_tensor[0*naux + 1] = gout1;
+        eri_tensor[0*naux + 2] = gout2;
+        eri_tensor[0*naux + 3] = gout3;
+        eri_tensor[0*naux + 4] = gout4;
+        eri_tensor[0*naux + 5] = gout5;
     }
 }
 
@@ -2648,7 +2635,6 @@ void int3c2e_102(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -2691,6 +2677,7 @@ void int3c2e_102(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
@@ -2720,7 +2707,6 @@ void int3c2e_102(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -2807,25 +2793,25 @@ void int3c2e_102(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
-        eri_tensor[0*naux + 1*nksh] = gout3;
-        eri_tensor[0*naux + 2*nksh] = gout6;
-        eri_tensor[0*naux + 3*nksh] = gout9;
-        eri_tensor[0*naux + 4*nksh] = gout12;
-        eri_tensor[0*naux + 5*nksh] = gout15;
-        eri_tensor[1*naux + 0*nksh] = gout1;
-        eri_tensor[1*naux + 1*nksh] = gout4;
-        eri_tensor[1*naux + 2*nksh] = gout7;
-        eri_tensor[1*naux + 3*nksh] = gout10;
-        eri_tensor[1*naux + 4*nksh] = gout13;
-        eri_tensor[1*naux + 5*nksh] = gout16;
-        eri_tensor[2*naux + 0*nksh] = gout2;
-        eri_tensor[2*naux + 1*nksh] = gout5;
-        eri_tensor[2*naux + 2*nksh] = gout8;
-        eri_tensor[2*naux + 3*nksh] = gout11;
-        eri_tensor[2*naux + 4*nksh] = gout14;
-        eri_tensor[2*naux + 5*nksh] = gout17;
+        double *eri_tensor = out + shl_pair_idx * 3 * naux + ksh_in_auxmol * 6;
+        eri_tensor[0*naux + 0] = gout0;
+        eri_tensor[0*naux + 1] = gout3;
+        eri_tensor[0*naux + 2] = gout6;
+        eri_tensor[0*naux + 3] = gout9;
+        eri_tensor[0*naux + 4] = gout12;
+        eri_tensor[0*naux + 5] = gout15;
+        eri_tensor[1*naux + 0] = gout1;
+        eri_tensor[1*naux + 1] = gout4;
+        eri_tensor[1*naux + 2] = gout7;
+        eri_tensor[1*naux + 3] = gout10;
+        eri_tensor[1*naux + 4] = gout13;
+        eri_tensor[1*naux + 5] = gout16;
+        eri_tensor[2*naux + 0] = gout2;
+        eri_tensor[2*naux + 1] = gout5;
+        eri_tensor[2*naux + 2] = gout8;
+        eri_tensor[2*naux + 3] = gout11;
+        eri_tensor[2*naux + 4] = gout14;
+        eri_tensor[2*naux + 5] = gout17;
     }
 }
 
@@ -2835,7 +2821,6 @@ void int3c2e_112(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -2878,6 +2863,7 @@ void int3c2e_112(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
@@ -2943,7 +2929,6 @@ void int3c2e_112(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -3094,61 +3079,61 @@ void int3c2e_112(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
-        eri_tensor[0*naux + 1*nksh] = gout9;
-        eri_tensor[0*naux + 2*nksh] = gout18;
-        eri_tensor[0*naux + 3*nksh] = gout27;
-        eri_tensor[0*naux + 4*nksh] = gout36;
-        eri_tensor[0*naux + 5*nksh] = gout45;
-        eri_tensor[1*naux + 0*nksh] = gout1;
-        eri_tensor[1*naux + 1*nksh] = gout10;
-        eri_tensor[1*naux + 2*nksh] = gout19;
-        eri_tensor[1*naux + 3*nksh] = gout28;
-        eri_tensor[1*naux + 4*nksh] = gout37;
-        eri_tensor[1*naux + 5*nksh] = gout46;
-        eri_tensor[2*naux + 0*nksh] = gout2;
-        eri_tensor[2*naux + 1*nksh] = gout11;
-        eri_tensor[2*naux + 2*nksh] = gout20;
-        eri_tensor[2*naux + 3*nksh] = gout29;
-        eri_tensor[2*naux + 4*nksh] = gout38;
-        eri_tensor[2*naux + 5*nksh] = gout47;
-        eri_tensor[3*naux + 0*nksh] = gout3;
-        eri_tensor[3*naux + 1*nksh] = gout12;
-        eri_tensor[3*naux + 2*nksh] = gout21;
-        eri_tensor[3*naux + 3*nksh] = gout30;
-        eri_tensor[3*naux + 4*nksh] = gout39;
-        eri_tensor[3*naux + 5*nksh] = gout48;
-        eri_tensor[4*naux + 0*nksh] = gout4;
-        eri_tensor[4*naux + 1*nksh] = gout13;
-        eri_tensor[4*naux + 2*nksh] = gout22;
-        eri_tensor[4*naux + 3*nksh] = gout31;
-        eri_tensor[4*naux + 4*nksh] = gout40;
-        eri_tensor[4*naux + 5*nksh] = gout49;
-        eri_tensor[5*naux + 0*nksh] = gout5;
-        eri_tensor[5*naux + 1*nksh] = gout14;
-        eri_tensor[5*naux + 2*nksh] = gout23;
-        eri_tensor[5*naux + 3*nksh] = gout32;
-        eri_tensor[5*naux + 4*nksh] = gout41;
-        eri_tensor[5*naux + 5*nksh] = gout50;
-        eri_tensor[6*naux + 0*nksh] = gout6;
-        eri_tensor[6*naux + 1*nksh] = gout15;
-        eri_tensor[6*naux + 2*nksh] = gout24;
-        eri_tensor[6*naux + 3*nksh] = gout33;
-        eri_tensor[6*naux + 4*nksh] = gout42;
-        eri_tensor[6*naux + 5*nksh] = gout51;
-        eri_tensor[7*naux + 0*nksh] = gout7;
-        eri_tensor[7*naux + 1*nksh] = gout16;
-        eri_tensor[7*naux + 2*nksh] = gout25;
-        eri_tensor[7*naux + 3*nksh] = gout34;
-        eri_tensor[7*naux + 4*nksh] = gout43;
-        eri_tensor[7*naux + 5*nksh] = gout52;
-        eri_tensor[8*naux + 0*nksh] = gout8;
-        eri_tensor[8*naux + 1*nksh] = gout17;
-        eri_tensor[8*naux + 2*nksh] = gout26;
-        eri_tensor[8*naux + 3*nksh] = gout35;
-        eri_tensor[8*naux + 4*nksh] = gout44;
-        eri_tensor[8*naux + 5*nksh] = gout53;
+        double *eri_tensor = out + shl_pair_idx * 9 * naux + ksh_in_auxmol * 6;
+        eri_tensor[0*naux + 0] = gout0;
+        eri_tensor[0*naux + 1] = gout9;
+        eri_tensor[0*naux + 2] = gout18;
+        eri_tensor[0*naux + 3] = gout27;
+        eri_tensor[0*naux + 4] = gout36;
+        eri_tensor[0*naux + 5] = gout45;
+        eri_tensor[1*naux + 0] = gout1;
+        eri_tensor[1*naux + 1] = gout10;
+        eri_tensor[1*naux + 2] = gout19;
+        eri_tensor[1*naux + 3] = gout28;
+        eri_tensor[1*naux + 4] = gout37;
+        eri_tensor[1*naux + 5] = gout46;
+        eri_tensor[2*naux + 0] = gout2;
+        eri_tensor[2*naux + 1] = gout11;
+        eri_tensor[2*naux + 2] = gout20;
+        eri_tensor[2*naux + 3] = gout29;
+        eri_tensor[2*naux + 4] = gout38;
+        eri_tensor[2*naux + 5] = gout47;
+        eri_tensor[3*naux + 0] = gout3;
+        eri_tensor[3*naux + 1] = gout12;
+        eri_tensor[3*naux + 2] = gout21;
+        eri_tensor[3*naux + 3] = gout30;
+        eri_tensor[3*naux + 4] = gout39;
+        eri_tensor[3*naux + 5] = gout48;
+        eri_tensor[4*naux + 0] = gout4;
+        eri_tensor[4*naux + 1] = gout13;
+        eri_tensor[4*naux + 2] = gout22;
+        eri_tensor[4*naux + 3] = gout31;
+        eri_tensor[4*naux + 4] = gout40;
+        eri_tensor[4*naux + 5] = gout49;
+        eri_tensor[5*naux + 0] = gout5;
+        eri_tensor[5*naux + 1] = gout14;
+        eri_tensor[5*naux + 2] = gout23;
+        eri_tensor[5*naux + 3] = gout32;
+        eri_tensor[5*naux + 4] = gout41;
+        eri_tensor[5*naux + 5] = gout50;
+        eri_tensor[6*naux + 0] = gout6;
+        eri_tensor[6*naux + 1] = gout15;
+        eri_tensor[6*naux + 2] = gout24;
+        eri_tensor[6*naux + 3] = gout33;
+        eri_tensor[6*naux + 4] = gout42;
+        eri_tensor[6*naux + 5] = gout51;
+        eri_tensor[7*naux + 0] = gout7;
+        eri_tensor[7*naux + 1] = gout16;
+        eri_tensor[7*naux + 2] = gout25;
+        eri_tensor[7*naux + 3] = gout34;
+        eri_tensor[7*naux + 4] = gout43;
+        eri_tensor[7*naux + 5] = gout52;
+        eri_tensor[8*naux + 0] = gout8;
+        eri_tensor[8*naux + 1] = gout17;
+        eri_tensor[8*naux + 2] = gout26;
+        eri_tensor[8*naux + 3] = gout35;
+        eri_tensor[8*naux + 4] = gout44;
+        eri_tensor[8*naux + 5] = gout53;
     }
 }
 
@@ -3158,7 +3143,6 @@ void int3c2e_202(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
-    int nfij = bounds.nfij;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -3201,6 +3185,7 @@ void int3c2e_202(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         double xjxi = rj[0] - xi;
         double yjyi = rj[1] - yi;
         double zjzi = rj[2] - zi;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
@@ -3248,7 +3233,6 @@ void int3c2e_202(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             double aij = ai + aj;
             double cijk = ci[ip] * cj[jp] * ck[kp];
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double Kab = theta_ij * rr_ij;
@@ -3363,43 +3347,43 @@ void int3c2e_202(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
             }
         }
         int naux = bounds.naux;
-        double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
-        eri_tensor[0*naux + 0*nksh] = gout0;
-        eri_tensor[0*naux + 1*nksh] = gout6;
-        eri_tensor[0*naux + 2*nksh] = gout12;
-        eri_tensor[0*naux + 3*nksh] = gout18;
-        eri_tensor[0*naux + 4*nksh] = gout24;
-        eri_tensor[0*naux + 5*nksh] = gout30;
-        eri_tensor[1*naux + 0*nksh] = gout1;
-        eri_tensor[1*naux + 1*nksh] = gout7;
-        eri_tensor[1*naux + 2*nksh] = gout13;
-        eri_tensor[1*naux + 3*nksh] = gout19;
-        eri_tensor[1*naux + 4*nksh] = gout25;
-        eri_tensor[1*naux + 5*nksh] = gout31;
-        eri_tensor[2*naux + 0*nksh] = gout2;
-        eri_tensor[2*naux + 1*nksh] = gout8;
-        eri_tensor[2*naux + 2*nksh] = gout14;
-        eri_tensor[2*naux + 3*nksh] = gout20;
-        eri_tensor[2*naux + 4*nksh] = gout26;
-        eri_tensor[2*naux + 5*nksh] = gout32;
-        eri_tensor[3*naux + 0*nksh] = gout3;
-        eri_tensor[3*naux + 1*nksh] = gout9;
-        eri_tensor[3*naux + 2*nksh] = gout15;
-        eri_tensor[3*naux + 3*nksh] = gout21;
-        eri_tensor[3*naux + 4*nksh] = gout27;
-        eri_tensor[3*naux + 5*nksh] = gout33;
-        eri_tensor[4*naux + 0*nksh] = gout4;
-        eri_tensor[4*naux + 1*nksh] = gout10;
-        eri_tensor[4*naux + 2*nksh] = gout16;
-        eri_tensor[4*naux + 3*nksh] = gout22;
-        eri_tensor[4*naux + 4*nksh] = gout28;
-        eri_tensor[4*naux + 5*nksh] = gout34;
-        eri_tensor[5*naux + 0*nksh] = gout5;
-        eri_tensor[5*naux + 1*nksh] = gout11;
-        eri_tensor[5*naux + 2*nksh] = gout17;
-        eri_tensor[5*naux + 3*nksh] = gout23;
-        eri_tensor[5*naux + 4*nksh] = gout29;
-        eri_tensor[5*naux + 5*nksh] = gout35;
+        double *eri_tensor = out + shl_pair_idx * 6 * naux + ksh_in_auxmol * 6;
+        eri_tensor[0*naux + 0] = gout0;
+        eri_tensor[0*naux + 1] = gout6;
+        eri_tensor[0*naux + 2] = gout12;
+        eri_tensor[0*naux + 3] = gout18;
+        eri_tensor[0*naux + 4] = gout24;
+        eri_tensor[0*naux + 5] = gout30;
+        eri_tensor[1*naux + 0] = gout1;
+        eri_tensor[1*naux + 1] = gout7;
+        eri_tensor[1*naux + 2] = gout13;
+        eri_tensor[1*naux + 3] = gout19;
+        eri_tensor[1*naux + 4] = gout25;
+        eri_tensor[1*naux + 5] = gout31;
+        eri_tensor[2*naux + 0] = gout2;
+        eri_tensor[2*naux + 1] = gout8;
+        eri_tensor[2*naux + 2] = gout14;
+        eri_tensor[2*naux + 3] = gout20;
+        eri_tensor[2*naux + 4] = gout26;
+        eri_tensor[2*naux + 5] = gout32;
+        eri_tensor[3*naux + 0] = gout3;
+        eri_tensor[3*naux + 1] = gout9;
+        eri_tensor[3*naux + 2] = gout15;
+        eri_tensor[3*naux + 3] = gout21;
+        eri_tensor[3*naux + 4] = gout27;
+        eri_tensor[3*naux + 5] = gout33;
+        eri_tensor[4*naux + 0] = gout4;
+        eri_tensor[4*naux + 1] = gout10;
+        eri_tensor[4*naux + 2] = gout16;
+        eri_tensor[4*naux + 3] = gout22;
+        eri_tensor[4*naux + 4] = gout28;
+        eri_tensor[4*naux + 5] = gout34;
+        eri_tensor[5*naux + 0] = gout5;
+        eri_tensor[5*naux + 1] = gout11;
+        eri_tensor[5*naux + 2] = gout17;
+        eri_tensor[5*naux + 3] = gout23;
+        eri_tensor[5*naux + 4] = gout29;
+        eri_tensor[5*naux + 5] = gout35;
     }
 }
 
@@ -3415,7 +3399,6 @@ void int3c2e_212(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int ijprim = iprim * jprim;
     int ijkprim = ijprim * kprim;
     int nroots = bounds.nroots;
-    int nfij = bounds.nfij;
     int *bas = envs.bas;
     int nbas = envs.nbas;
     double *env = envs.env;
@@ -3756,123 +3739,123 @@ void int3c2e_212(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
         }
         if (ijk_idx < nst) {
             int naux = bounds.naux;
-            double *eri_tensor = out + shl_pair_idx * nfij * naux + ksh_in_auxmol;
+            double *eri_tensor = out + shl_pair_idx * 18 * naux + ksh_in_auxmol * 6;
             switch (gout_id) {
             case 0:
-            eri_tensor[0*naux + 0*nksh] = gout0;
-            eri_tensor[0*naux + 4*nksh] = gout1;
-            eri_tensor[1*naux + 2*nksh] = gout2;
-            eri_tensor[2*naux + 0*nksh] = gout3;
-            eri_tensor[2*naux + 4*nksh] = gout4;
-            eri_tensor[3*naux + 2*nksh] = gout5;
-            eri_tensor[4*naux + 0*nksh] = gout6;
-            eri_tensor[4*naux + 4*nksh] = gout7;
-            eri_tensor[5*naux + 2*nksh] = gout8;
-            eri_tensor[6*naux + 0*nksh] = gout9;
-            eri_tensor[6*naux + 4*nksh] = gout10;
-            eri_tensor[7*naux + 2*nksh] = gout11;
-            eri_tensor[8*naux + 0*nksh] = gout12;
-            eri_tensor[8*naux + 4*nksh] = gout13;
-            eri_tensor[9*naux + 2*nksh] = gout14;
-            eri_tensor[10*naux + 0*nksh] = gout15;
-            eri_tensor[10*naux + 4*nksh] = gout16;
-            eri_tensor[11*naux + 2*nksh] = gout17;
-            eri_tensor[12*naux + 0*nksh] = gout18;
-            eri_tensor[12*naux + 4*nksh] = gout19;
-            eri_tensor[13*naux + 2*nksh] = gout20;
-            eri_tensor[14*naux + 0*nksh] = gout21;
-            eri_tensor[14*naux + 4*nksh] = gout22;
-            eri_tensor[15*naux + 2*nksh] = gout23;
-            eri_tensor[16*naux + 0*nksh] = gout24;
-            eri_tensor[16*naux + 4*nksh] = gout25;
-            eri_tensor[17*naux + 2*nksh] = gout26;
+            eri_tensor[0*naux + 0] = gout0;
+            eri_tensor[0*naux + 4] = gout1;
+            eri_tensor[1*naux + 2] = gout2;
+            eri_tensor[2*naux + 0] = gout3;
+            eri_tensor[2*naux + 4] = gout4;
+            eri_tensor[3*naux + 2] = gout5;
+            eri_tensor[4*naux + 0] = gout6;
+            eri_tensor[4*naux + 4] = gout7;
+            eri_tensor[5*naux + 2] = gout8;
+            eri_tensor[6*naux + 0] = gout9;
+            eri_tensor[6*naux + 4] = gout10;
+            eri_tensor[7*naux + 2] = gout11;
+            eri_tensor[8*naux + 0] = gout12;
+            eri_tensor[8*naux + 4] = gout13;
+            eri_tensor[9*naux + 2] = gout14;
+            eri_tensor[10*naux + 0] = gout15;
+            eri_tensor[10*naux + 4] = gout16;
+            eri_tensor[11*naux + 2] = gout17;
+            eri_tensor[12*naux + 0] = gout18;
+            eri_tensor[12*naux + 4] = gout19;
+            eri_tensor[13*naux + 2] = gout20;
+            eri_tensor[14*naux + 0] = gout21;
+            eri_tensor[14*naux + 4] = gout22;
+            eri_tensor[15*naux + 2] = gout23;
+            eri_tensor[16*naux + 0] = gout24;
+            eri_tensor[16*naux + 4] = gout25;
+            eri_tensor[17*naux + 2] = gout26;
             break;
             case 1:
-            eri_tensor[0*naux + 1*nksh] = gout0;
-            eri_tensor[0*naux + 5*nksh] = gout1;
-            eri_tensor[1*naux + 3*nksh] = gout2;
-            eri_tensor[2*naux + 1*nksh] = gout3;
-            eri_tensor[2*naux + 5*nksh] = gout4;
-            eri_tensor[3*naux + 3*nksh] = gout5;
-            eri_tensor[4*naux + 1*nksh] = gout6;
-            eri_tensor[4*naux + 5*nksh] = gout7;
-            eri_tensor[5*naux + 3*nksh] = gout8;
-            eri_tensor[6*naux + 1*nksh] = gout9;
-            eri_tensor[6*naux + 5*nksh] = gout10;
-            eri_tensor[7*naux + 3*nksh] = gout11;
-            eri_tensor[8*naux + 1*nksh] = gout12;
-            eri_tensor[8*naux + 5*nksh] = gout13;
-            eri_tensor[9*naux + 3*nksh] = gout14;
-            eri_tensor[10*naux + 1*nksh] = gout15;
-            eri_tensor[10*naux + 5*nksh] = gout16;
-            eri_tensor[11*naux + 3*nksh] = gout17;
-            eri_tensor[12*naux + 1*nksh] = gout18;
-            eri_tensor[12*naux + 5*nksh] = gout19;
-            eri_tensor[13*naux + 3*nksh] = gout20;
-            eri_tensor[14*naux + 1*nksh] = gout21;
-            eri_tensor[14*naux + 5*nksh] = gout22;
-            eri_tensor[15*naux + 3*nksh] = gout23;
-            eri_tensor[16*naux + 1*nksh] = gout24;
-            eri_tensor[16*naux + 5*nksh] = gout25;
-            eri_tensor[17*naux + 3*nksh] = gout26;
+            eri_tensor[0*naux + 1] = gout0;
+            eri_tensor[0*naux + 5] = gout1;
+            eri_tensor[1*naux + 3] = gout2;
+            eri_tensor[2*naux + 1] = gout3;
+            eri_tensor[2*naux + 5] = gout4;
+            eri_tensor[3*naux + 3] = gout5;
+            eri_tensor[4*naux + 1] = gout6;
+            eri_tensor[4*naux + 5] = gout7;
+            eri_tensor[5*naux + 3] = gout8;
+            eri_tensor[6*naux + 1] = gout9;
+            eri_tensor[6*naux + 5] = gout10;
+            eri_tensor[7*naux + 3] = gout11;
+            eri_tensor[8*naux + 1] = gout12;
+            eri_tensor[8*naux + 5] = gout13;
+            eri_tensor[9*naux + 3] = gout14;
+            eri_tensor[10*naux + 1] = gout15;
+            eri_tensor[10*naux + 5] = gout16;
+            eri_tensor[11*naux + 3] = gout17;
+            eri_tensor[12*naux + 1] = gout18;
+            eri_tensor[12*naux + 5] = gout19;
+            eri_tensor[13*naux + 3] = gout20;
+            eri_tensor[14*naux + 1] = gout21;
+            eri_tensor[14*naux + 5] = gout22;
+            eri_tensor[15*naux + 3] = gout23;
+            eri_tensor[16*naux + 1] = gout24;
+            eri_tensor[16*naux + 5] = gout25;
+            eri_tensor[17*naux + 3] = gout26;
             break;
             case 2:
-            eri_tensor[0*naux + 2*nksh] = gout0;
-            eri_tensor[1*naux + 0*nksh] = gout1;
-            eri_tensor[1*naux + 4*nksh] = gout2;
-            eri_tensor[2*naux + 2*nksh] = gout3;
-            eri_tensor[3*naux + 0*nksh] = gout4;
-            eri_tensor[3*naux + 4*nksh] = gout5;
-            eri_tensor[4*naux + 2*nksh] = gout6;
-            eri_tensor[5*naux + 0*nksh] = gout7;
-            eri_tensor[5*naux + 4*nksh] = gout8;
-            eri_tensor[6*naux + 2*nksh] = gout9;
-            eri_tensor[7*naux + 0*nksh] = gout10;
-            eri_tensor[7*naux + 4*nksh] = gout11;
-            eri_tensor[8*naux + 2*nksh] = gout12;
-            eri_tensor[9*naux + 0*nksh] = gout13;
-            eri_tensor[9*naux + 4*nksh] = gout14;
-            eri_tensor[10*naux + 2*nksh] = gout15;
-            eri_tensor[11*naux + 0*nksh] = gout16;
-            eri_tensor[11*naux + 4*nksh] = gout17;
-            eri_tensor[12*naux + 2*nksh] = gout18;
-            eri_tensor[13*naux + 0*nksh] = gout19;
-            eri_tensor[13*naux + 4*nksh] = gout20;
-            eri_tensor[14*naux + 2*nksh] = gout21;
-            eri_tensor[15*naux + 0*nksh] = gout22;
-            eri_tensor[15*naux + 4*nksh] = gout23;
-            eri_tensor[16*naux + 2*nksh] = gout24;
-            eri_tensor[17*naux + 0*nksh] = gout25;
-            eri_tensor[17*naux + 4*nksh] = gout26;
+            eri_tensor[0*naux + 2] = gout0;
+            eri_tensor[1*naux + 0] = gout1;
+            eri_tensor[1*naux + 4] = gout2;
+            eri_tensor[2*naux + 2] = gout3;
+            eri_tensor[3*naux + 0] = gout4;
+            eri_tensor[3*naux + 4] = gout5;
+            eri_tensor[4*naux + 2] = gout6;
+            eri_tensor[5*naux + 0] = gout7;
+            eri_tensor[5*naux + 4] = gout8;
+            eri_tensor[6*naux + 2] = gout9;
+            eri_tensor[7*naux + 0] = gout10;
+            eri_tensor[7*naux + 4] = gout11;
+            eri_tensor[8*naux + 2] = gout12;
+            eri_tensor[9*naux + 0] = gout13;
+            eri_tensor[9*naux + 4] = gout14;
+            eri_tensor[10*naux + 2] = gout15;
+            eri_tensor[11*naux + 0] = gout16;
+            eri_tensor[11*naux + 4] = gout17;
+            eri_tensor[12*naux + 2] = gout18;
+            eri_tensor[13*naux + 0] = gout19;
+            eri_tensor[13*naux + 4] = gout20;
+            eri_tensor[14*naux + 2] = gout21;
+            eri_tensor[15*naux + 0] = gout22;
+            eri_tensor[15*naux + 4] = gout23;
+            eri_tensor[16*naux + 2] = gout24;
+            eri_tensor[17*naux + 0] = gout25;
+            eri_tensor[17*naux + 4] = gout26;
             break;
             case 3:
-            eri_tensor[0*naux + 3*nksh] = gout0;
-            eri_tensor[1*naux + 1*nksh] = gout1;
-            eri_tensor[1*naux + 5*nksh] = gout2;
-            eri_tensor[2*naux + 3*nksh] = gout3;
-            eri_tensor[3*naux + 1*nksh] = gout4;
-            eri_tensor[3*naux + 5*nksh] = gout5;
-            eri_tensor[4*naux + 3*nksh] = gout6;
-            eri_tensor[5*naux + 1*nksh] = gout7;
-            eri_tensor[5*naux + 5*nksh] = gout8;
-            eri_tensor[6*naux + 3*nksh] = gout9;
-            eri_tensor[7*naux + 1*nksh] = gout10;
-            eri_tensor[7*naux + 5*nksh] = gout11;
-            eri_tensor[8*naux + 3*nksh] = gout12;
-            eri_tensor[9*naux + 1*nksh] = gout13;
-            eri_tensor[9*naux + 5*nksh] = gout14;
-            eri_tensor[10*naux + 3*nksh] = gout15;
-            eri_tensor[11*naux + 1*nksh] = gout16;
-            eri_tensor[11*naux + 5*nksh] = gout17;
-            eri_tensor[12*naux + 3*nksh] = gout18;
-            eri_tensor[13*naux + 1*nksh] = gout19;
-            eri_tensor[13*naux + 5*nksh] = gout20;
-            eri_tensor[14*naux + 3*nksh] = gout21;
-            eri_tensor[15*naux + 1*nksh] = gout22;
-            eri_tensor[15*naux + 5*nksh] = gout23;
-            eri_tensor[16*naux + 3*nksh] = gout24;
-            eri_tensor[17*naux + 1*nksh] = gout25;
-            eri_tensor[17*naux + 5*nksh] = gout26;
+            eri_tensor[0*naux + 3] = gout0;
+            eri_tensor[1*naux + 1] = gout1;
+            eri_tensor[1*naux + 5] = gout2;
+            eri_tensor[2*naux + 3] = gout3;
+            eri_tensor[3*naux + 1] = gout4;
+            eri_tensor[3*naux + 5] = gout5;
+            eri_tensor[4*naux + 3] = gout6;
+            eri_tensor[5*naux + 1] = gout7;
+            eri_tensor[5*naux + 5] = gout8;
+            eri_tensor[6*naux + 3] = gout9;
+            eri_tensor[7*naux + 1] = gout10;
+            eri_tensor[7*naux + 5] = gout11;
+            eri_tensor[8*naux + 3] = gout12;
+            eri_tensor[9*naux + 1] = gout13;
+            eri_tensor[9*naux + 5] = gout14;
+            eri_tensor[10*naux + 3] = gout15;
+            eri_tensor[11*naux + 1] = gout16;
+            eri_tensor[11*naux + 5] = gout17;
+            eri_tensor[12*naux + 3] = gout18;
+            eri_tensor[13*naux + 1] = gout19;
+            eri_tensor[13*naux + 5] = gout20;
+            eri_tensor[14*naux + 3] = gout21;
+            eri_tensor[15*naux + 1] = gout22;
+            eri_tensor[15*naux + 5] = gout23;
+            eri_tensor[16*naux + 3] = gout24;
+            eri_tensor[17*naux + 1] = gout25;
+            eri_tensor[17*naux + 5] = gout26;
             break;
             }
         }

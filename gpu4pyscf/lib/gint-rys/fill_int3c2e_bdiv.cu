@@ -314,13 +314,14 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
             if (ijk_idx < nst) {
                 int *ao_loc = envs.ao_loc;
                 int k0 = ao_loc[ksh0] - ao_loc[nbas];
-                double *eri_tensor = out_local + k0 + shl_pair_in_block * nfij * naux + ksh_in_block;
+                double *eri_tensor = out_local + shl_pair_in_block * nfij * naux
+                        + k0 + ksh_in_block * nfk;
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                     int ijk = gout_start + n*gout_stride+gout_id;
                     int k  = ijk % nfk;
                     int ij = ijk / nfk;
                     if (ij >= nfij) break;
-                    eri_tensor[ij * naux + k*nksh] = gout[n];
+                    eri_tensor[ij * naux + k] = gout[n];
                 }
             }
         }
