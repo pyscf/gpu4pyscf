@@ -21,6 +21,7 @@ part in real space, long range part in reciprocal space.
 
 __all__ = ['GDF']
 
+import warnings
 import ctypes
 import tempfile
 import numpy as np
@@ -41,7 +42,6 @@ class GDF(lib.StreamObject):
     '''Gaussian density fitting
     '''
     blockdim = df_cpu.GDF.blockdim
-    _dataname = 'j3c'
     _prefer_ccdf = False
     force_dm_kbuild = False
 
@@ -57,6 +57,8 @@ class GDF(lib.StreamObject):
     dump_flags = df_cpu.GDF.dump_flags
 
     def build(self, j_only=None, kpts_band=None):
+        warnings.warn(
+            'PBC.df is currently experimental and subject to significant changes.')
         if j_only is not None:
             self._j_only = j_only
         assert kpts_band is None and self.kpts_band is None
