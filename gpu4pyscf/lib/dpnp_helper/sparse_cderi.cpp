@@ -18,7 +18,7 @@
  */
 
 #include <stdio.h>
-#include "gint/cuda_alloc.cuh"
+#include "gint/sycl_alloc.hpp"
 #define THREADS        32
 
 typedef struct {
@@ -37,9 +37,9 @@ typedef struct {
 }CDERI;
 
 __attribute__((always_inline))
-void _unpack(CDERI_BLOCK block, int nao, int offset, double *out){
-    int ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int k = blockIdx.y * blockDim.y + threadIdx.y;
+void _unpack(CDERI_BLOCK block, int nao, int offset, double *out, sycl::nd_item<2>& item){
+    int ij = item.get_global_id(1);
+    int k = item.get_global_id(0);
     int nij = block.nij;
 
     int idx_aux = k + offset;
@@ -55,7 +55,7 @@ void _unpack(CDERI_BLOCK block, int nao, int offset, double *out){
 }
 
 
-extern "C" {__host__
+extern "C" {
 
 void init_cderi(CDERI **pcderi, int nblocks_max, int nao){
     CDERI *cderi = (CDERI *)malloc(sizeof(CDERI));
@@ -98,15 +98,9 @@ int unpack_block(CDERI_BLOCK *block, int p1, int p2, int nao, double *buf){
     int nij = block->nij;
     int blockx = (nij + THREADS - 1) / THREADS;
     int blocky = (p2 - p1 + THREADS - 1) / THREADS;
-    dim3 threads(THREADS, THREADS);
-    dim3 blocks(blockx, blocky);
-
-    _unpack<<<blocks, threads>>>(*block, nao, p1, buf);
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        return 1;
-    }
+    sycl::range<2> threads(THREADS, THREADS);
+    sycl::range<2> blocks(blocky, blockx);
+    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _unpack(*block, nao, p1, buf, item); });
     return 0;
 }
 

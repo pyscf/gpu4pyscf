@@ -1,5 +1,5 @@
 /*
- * gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+ * gpu4pyscf is a plugin to use Intel GPU in PySCF package
  *
  * Copyright (C) 2022 Qiming Sun
  *
@@ -19,14 +19,14 @@
 
 #include <sycl/sycl.hpp>
 
-#define THREADS        32
-#define BLOCK_DIM   32
+#define THREADS 32
+#define BLOCK_DIM 32
 
 __attribute__((always_inline))
-void _add_sparse(double *a, double *b, int *indices, int n, int m, int count)
+void _add_sparse(double *a, double *b, int *indices, int n, int m, int count, sycl::nd_item<2>& item)
 {
-	int row = blockIdx.x * BLOCK_DIM + threadIdx.x;
-    int col = blockIdx.y * BLOCK_DIM + threadIdx.y;
+    int row = item.get_group(2) * BLOCK_DIM + item.get_local_id(2);
+    int col = item.get_group(1) * BLOCK_DIM + item.get_local_id(1);
     if (row >= m || col >= m){
         return;
     }
@@ -38,16 +38,11 @@ void _add_sparse(double *a, double *b, int *indices, int n, int m, int count)
 }
 
 extern "C" {
-__host__
-int add_sparse(sycl::queue& stream, double *a, double *b, int *indices, int n, int m, int count){
-    int ntile = (m + THREADS - 1) / THREADS;
-    dim3 threads(THREADS, THREADS);
-    dim3 blocks(ntile, ntile);
-    _add_sparse<<<blocks, threads, 0, stream>>>(a, b, indices, n, m, count);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        return 1;
+    int add_sparse(sycl::queue& stream, double *a, double *b, int *indices, int n, int m, int count){
+	int ntile = (m + THREADS - 1) / THREADS;
+	sycl::range<3> threads(1, THREADS, THREADS);
+	sycl::range<3> blocks(1, ntile, ntile);
+	stream.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { _add_sparse(a, b, indices, n, m, count, item); });
+	return 0;
     }
-    return 0;
-}
 }

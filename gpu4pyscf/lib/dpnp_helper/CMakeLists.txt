@@ -17,7 +17,7 @@
 
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80")
 
-add_library(syclpy_helper SHARED
+add_library(dpnp_helper SHARED
   transpose.cpp
   block_diag.cpp
   unpack.cpp
@@ -25,13 +25,12 @@ add_library(syclpy_helper SHARED
   async_d2h_2d.cpp
   add_sparse.cpp
   dist_matrix.cpp
+  grouped_gemm.cpp
+  grouped_dot.cpp  
   cart2sph.cpp
 )
 
-#  grouped_gemm.cpp
-#  grouped_dot.cpp
+#add_dependencies(dpnp_helper cutlass)
+#target_include_directories(dpnp_helper PRIVATE ${cutlass_SOURCE_DIR}/tools/util/include ${cutlass_SOURCE_DIR}/include)
 
-#add_dependencies(syclpy_helper cutlass)
-#target_include_directories(syclpy_helper PRIVATE ${cutlass_SOURCE_DIR}/tools/util/include ${cutlass_SOURCE_DIR}/include)
-
-set_target_properties(syclpy_helper PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+set_target_properties(dpnp_helper PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})

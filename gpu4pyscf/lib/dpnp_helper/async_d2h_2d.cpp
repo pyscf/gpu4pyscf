@@ -30,11 +30,7 @@ int async_d2h_2d(sycl::queue& stream, double *dst, int dstride, const double *sr
     int height = cols * sizeof(double);
     
     stream.ext_oneapi_memcpy2d(host_ptr, dpitch, device_ptr, spitch, 
-                                        width, height);
-    /*
-    cudaError_t err = cudaMemcpy2D(dst, dpitch, src, spitch, 
-                                    width, height, cudaMemcpyDeviceToHost);
-    */
+			       width, height);
     printf("%zd \n", sizeof(size_t));
     return 0;
 }

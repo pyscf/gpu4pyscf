@@ -16,13 +16,13 @@
 
 #include <sycl/sycl.hpp>
 #include <stdio.h>
-#define THREADS        32
+#define THREADS 32
 
 __attribute__((always_inline))
-static void _calc_distances(double *dist, const double *x, const double *y, int m, int n)
+static void _calc_distances(double *dist, const double *x, const double *y, int m, int n, sycl::nd_item<2>& item)
 {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    int i = item.get_global_id(1);
+    int j = item.get_global_id(0);
     if (i >= m || j >= n){
         return;
     }
@@ -38,13 +38,9 @@ int dist_matrix(sycl::queue& stream, double *dist, const double *x, const double
 {
     int ntilex = (m + THREADS - 1) / THREADS;
     int ntiley = (n + THREADS - 1) / THREADS;
-    dim3 threads(THREADS, THREADS);
-    dim3 blocks(ntilex, ntiley);
-    _calc_distances<<<blocks, threads, 0, stream>>>(dist, x, y, m, n);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        return 1;
-    }
+    sycl::range<2> threads(THREADS, THREADS);
+    sycl::range<2> blocks(ntiley, ntilex);
+    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _calc_distances(dist, x, y, m, n, item); });
     return 0;
 }
 }

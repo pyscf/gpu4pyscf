@@ -21,8 +21,8 @@
 
 // (n,ncart,stride) -> (n,nsph,stride), count = n*stride
 __attribute__((always_inline))
-static void _cart2sph_ang2(double *cart, double *sph, int stride, int count){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+static void _cart2sph_ang2(double *cart, double *sph, int stride, int count, sycl::nd_item<1>& item){
+    int idx = item.get_global_id(0);
     if (idx >= count){
         return;
     }
@@ -45,8 +45,8 @@ static void _cart2sph_ang2(double *cart, double *sph, int stride, int count){
 }
 
 __attribute__((always_inline))
-static void _cart2sph_ang3(double *cart, double *sph, int stride, int count){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+static void _cart2sph_ang3(double *cart, double *sph, int stride, int count, sycl::nd_item<1>& item){
+    int idx = item.get_global_id(0);
     if (idx >= count){
         return;
     }
@@ -75,8 +75,8 @@ static void _cart2sph_ang3(double *cart, double *sph, int stride, int count){
 }
 
 __attribute__((always_inline))
-static void _cart2sph_ang4(double *cart, double *sph, int stride, int count){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+static void _cart2sph_ang4(double *cart, double *sph, int stride, int count, sycl::nd_item<1>& item){
+    int idx = item.get_global_id(0);
     if (idx >= count){
         return;
     }
@@ -112,8 +112,8 @@ static void _cart2sph_ang4(double *cart, double *sph, int stride, int count){
 }
 
 __attribute__((always_inline))
-static void _cart2sph_ang5(double *cart, double *sph, int stride, int count){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+static void _cart2sph_ang5(double *cart, double *sph, int stride, int count, sycl::nd_item<1>& item){
+    int idx = item.get_global_id(0);
     if (idx >= count){
         return;
     }
@@ -156,8 +156,8 @@ static void _cart2sph_ang5(double *cart, double *sph, int stride, int count){
 }
 
 __attribute__((always_inline))
-static void _cart2sph_ang6(double *cart, double *sph, int stride, int count){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+static void _cart2sph_ang6(double *cart, double *sph, int stride, int count, sycl::nd_item<1>& item){
+    int idx = item.get_global_id(0);
     if (idx >= count){
         return;
     }
@@ -209,8 +209,8 @@ static void _cart2sph_ang6(double *cart, double *sph, int stride, int count){
 }
 
 __attribute__((always_inline))
-static void _cart2sph_ang7(double *cart, double *sph, int stride, int count){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+static void _cart2sph_ang7(double *cart, double *sph, int stride, int count, sycl::nd_item<1>& item){
+    int idx = item.get_global_id(0);
     if (idx >= count){
         return;
     }
@@ -272,28 +272,22 @@ static void _cart2sph_ang7(double *cart, double *sph, int stride, int count){
 }
 
 extern "C" {
-__host__
 int cart2sph(sycl::queue& stream, double *cart_gto, double *sph_gto, int stride, int count, int ang)
 {
-    dim3 threads(THREADS);
-    dim3 blocks((count + THREADS - 1)/THREADS);
+    sycl::range<1> threads(THREADS);
+    sycl::range<1> blocks((count + THREADS - 1)/THREADS);
     switch (ang) {
         case 0: break;
         case 1: break;
-        case 2: _cart2sph_ang2 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
-        case 3: _cart2sph_ang3 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
-        case 4: _cart2sph_ang4 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
-        case 5: _cart2sph_ang5 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
-        case 6: _cart2sph_ang6 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
-        case 7: _cart2sph_ang7 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
+        case 2: stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang2(cart_gto, sph_gto, stride, count, item); }); break;
+        case 3: stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang3(cart_gto, sph_gto, stride, count, item); }); break;
+        case 4: stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang4(cart_gto, sph_gto, stride, count, item); }); break;
+        case 5: stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang5(cart_gto, sph_gto, stride, count, item); }); break;
+        case 6: stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang6(cart_gto, sph_gto, stride, count, item); }); break;
+        case 7: stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang7(cart_gto, sph_gto, stride, count, item); }); break;
         default:
             fprintf(stderr, "Ang > 7 is not supported!\n");
             return 1;
-    }
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        return 1;
     }
     return 0;
 }
