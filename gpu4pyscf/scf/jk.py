@@ -78,7 +78,6 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = sandwich_dot(dms, vhfopt.coeff.T)
     dms = cp.asarray(dms, order='C')
-    n_dm = dms.shape[0]
 
     ao_loc = mol.ao_loc
     nao = ao_loc[-1]
@@ -93,7 +92,7 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
         # Wrap the triu contribution to tril
         dm_cond = dm_cond + dm_cond.T
     dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
-    log_max_dm = dm_cond.max()
+    log_max_dm = float(dm_cond.max())
     log_cutoff = math.log(vhfopt.direct_scf_tol)
 
     tasks = [(i,j,k,l)
@@ -114,7 +113,9 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
         if hermi == 0:
             # Contract the tril and triu parts separately
             dms = cp.vstack([dms, dms.transpose(0,2,1)])
-        tile_q_ptr = ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p)
+        n_dm = dms.shape[0]
+        tile_q_cond = vhfopt.tile_q_cond
+        tile_q_ptr = ctypes.cast(tile_q_cond.data.ptr, ctypes.c_void_p)
         q_ptr = ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p)
         s_ptr = lib.c_null_ptr()
         if mol.omega < 0:
@@ -130,7 +131,7 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
             vj = cp.zeros(dms.shape)
             vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
 
-        tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
+        tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond,
                                                  log_cutoff-log_max_dm)
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
@@ -238,10 +239,7 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
             else:
                 scripts.append('jk->s1il')
         shls_excludes = [0, h_shls[0]] * 4
-        if hermi == 1:
-            dms = dms.get()
-        else:
-            dms = dms[:n_dm//2].get()
+        dms = dms.get()
         vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
                                  dms, 1, mol._atm, mol._bas, mol._env,
                                  shls_excludes=shls_excludes)
@@ -297,7 +295,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
 
     ao_loc = mol.ao_loc
     dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-    log_max_dm = dm_cond.max()
+    log_max_dm = float(dm_cond.max())
     log_cutoff = math.log(vhfopt.direct_scf_tol)
 
     uniq_l_ctr = vhfopt.uniq_l_ctr
@@ -321,12 +319,13 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
              for l in range(k+1)]
     schemes = {t: _j_engine_quartets_scheme(mol, uniq_l_ctr[list(t)]) for t in tasks}
 
-    def proc(dm_xyz):
+    def proc(dm_xyz, dm_cond):
         device_id = cp.cuda.device.get_device_id()
         stream = cp.cuda.stream.get_current_stream()
         log = logger.new_logger(mol, verbose)
         t0 = log.init_timer()
         dm_xyz = cp.asarray(dm_xyz) # transfer to current device
+        dm_cond = cp.asarray(dm_cond)
         vj_xyz = cp.zeros_like(dm_xyz)
         pair_loc_on_gpu = cp.asarray(pair_loc)
         _atm, _bas, _env, _ = vhfopt.rys_envs._env_ref_holder
@@ -379,7 +378,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
             shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
             tile_ij_mapping = tile_mappings[i,j]
             tile_kl_mapping = tile_mappings[k,l]
-            scheme = schemes[t]
+            scheme = schemes[task]
             err = kern(
                 ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
                 ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
@@ -414,7 +413,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
                 stream.synchronize()
         return vj_xyz, kern_counts, timing_collection
 
-    results = multi_gpu.run(proc, args=(dm_xyz), non_blocking=True)
+    results = multi_gpu.run(proc, args=(dm_xyz, dm_cond), non_blocking=True)
     kern_counts = 0
     timing_collection = Counter()
     vj_dist = []
@@ -435,10 +434,9 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
         vj.ctypes, vj_xyz.ctypes, ao_loc.ctypes, pair_loc.ctypes,
         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
     #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
-    vj = sandwich_dot(vj, vhfopt.coeff)
+    vj = sandwich_dot(cp.asarray(vj), vhfopt.coeff)
     vj = transpose_sum(vj)
     vj *= 2.
-    vj = vj.reshape(dm.shape)
 
     h_shls = vhfopt.h_shls
     if h_shls:
@@ -447,7 +445,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
         scripts = ['ji->s2kl']
         shls_excludes = [0, h_shls[0]] * 4
         vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
-                                 dms.get(), 1, mol._atm, mol._bas, mol._env,
+                                 dms, 1, mol._atm, mol._bas, mol._env,
                                  shls_excludes=shls_excludes)
         vj1 = vs_h[0].reshape(n_dm,nao,nao)
         coeff = vhfopt.coeff
@@ -457,6 +455,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
             vj[i] += coeff.T.dot(cp.asarray(v)).dot(coeff)
         log.timer_debug1('get_j pass 2 for h functions on cpu', *cput1)
 
+    vj = vj.reshape(dm.shape)
     log.timer('vj', *cput0)
     return vj
 

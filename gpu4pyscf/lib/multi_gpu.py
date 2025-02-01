@@ -123,10 +123,10 @@ def array_reduce(array_list, inplace=False):
     if num_devices == 1:
         return array_list[0]
 
-    out_shape = array_list[0].shape
-    cp.cuda.stream.Stream.null.synchronize()
-
-    dtype = array_list[0].dtype
+    a0 = array_list[0]
+    out_shape = a0.shape
+    size = a0.size
+    dtype = a0.dtype
     assert all(x.dtype == dtype for x in array_list)
 
     array_list = list(array_list)
@@ -137,9 +137,7 @@ def array_reduce(array_list, inplace=False):
             else:
                 array_list[device_id] = array_list[device_id].copy().ravel()
 
-    size = array_list[0].size
-    blksize = 1024*1024*1024 // array_list[0].itemsize # 1GB
-
+    blksize = 1024*1024*1024 // dtype.itemsize # 1GB
     # Tree-reduce
     step = 1
     while step < num_devices:
