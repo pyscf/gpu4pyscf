@@ -26,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pyscf import lib
 from pyscf.scf import _vhf
 from pyscf import __config__
-
+from gpu4pyscf.scf import jk
 from gpu4pyscf.scf.jk import (_make_tril_tile_mappings, quartets_scheme, QUEUE_DEPTH,
                               _VHFOpt, LMAX, init_constant, libvhf_rys)
 from gpu4pyscf.lib.cupy_helper import (condense, sandwich_dot, transpose_sum,
@@ -172,7 +172,11 @@ def get_jk(mol, dm, mo_coeff, mo_occ, hermi=0, vhfopt=None,
     cput0 = log.init_timer()
     assert hermi == 1
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol).build()
+        # Small group size for load balance
+        group_size = None
+        if _num_devices > 1:
+            group_size = jk.GROUP_SIZE
+        vhfopt = _VHFOpt(mol).build(group_size=group_size)
 
     mol = vhfopt.sorted_mol
     nao, nao_orig = vhfopt.coeff.shape

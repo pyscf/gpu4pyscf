@@ -32,10 +32,10 @@ mf = rks.RKS(mol, xc='B3LYP').density_fit()
 mf.kernel()
 dm = mf.make_rdm1()
 
-dip = mf.dip_moment(unit='DEBYE', dm=dm.get())
+dip = mf.dip_moment(unit='DEBYE', dm=dm)
 print('dipole moment:')
 print(dip)
 
-quad = mf.quad_moment(unit='DEBYE-ANG', dm=dm.get())
+quad = mf.quad_moment(unit='DEBYE-ANG', dm=dm)
 print('quadrupole moment:')
 print(quad)

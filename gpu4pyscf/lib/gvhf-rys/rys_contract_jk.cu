@@ -23,6 +23,7 @@
 #include "rys_roots.cu"
 #include "create_tasks.cu"
 
+// TODO: benchmark performance for 34, 36, 41, 43, 45, 47, 51, 57
 #define GOUT_WIDTH      42
 
 __device__
@@ -332,7 +333,7 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     __syncthreads();
 #pragma unroll
                     for (int n = 0; n < GOUT_WIDTH; ++n) {
-                        int ijkl = (gout_start + n*gout_stride+gout_id);
+                        int ijkl = gout_start + n*gout_stride+gout_id;
                         int kl = ijkl / nfij;
                         int ij = ijkl % nfij;
                         if (kl >= nfkl) break;

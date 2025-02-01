@@ -1009,7 +1009,7 @@ class QMMMGrad:
             nao = mol.nao
             if mm_mol.charge_model == 'gaussian' and len(coords) != 0:
                 expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
-                g_qm += int1e_grids_ip1(mol, coords, charges = charges, charge_exponents = expnts).transpose(0,2,1)
+                g_qm += int1e_grids_ip1(mol, coords, charges = charges, charge_exponents = expnts)
             elif mm_mol.charge_model == 'point' and len(coords) != 0:
                 raise RuntimeError("Not tested yet")
                 max_memory = self.max_memory - lib.current_memory()[0]

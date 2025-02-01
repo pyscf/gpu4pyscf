@@ -35,8 +35,8 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.__config__ import _streams, _num_devices
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.jk import (
-    LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, libvhf_rys, _VHFOpt, init_constant,
-    _make_tril_tile_mappings, _nearest_power2)
+    LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt, 
+    init_constant, _make_tril_tile_mappings, _nearest_power2)
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import jk
 
@@ -276,7 +276,11 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol).build()
+        # Small group size for load balance
+        group_size = None
+        if _num_devices > 1: 
+            group_size = GROUP_SIZE
+        vhfopt = _VHFOpt(mol).build(group_size=group_size)
 
     mol = vhfopt.sorted_mol
     nao, nao_orig = vhfopt.coeff.shape
@@ -511,7 +515,11 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
     vhfopt = _VHFOpt(mol)
     # tile must set to 1. This tile size is assumed in the GPU kernel code
     vhfopt.tile = 1
-    vhfopt.build()
+    # Small group size for load balance
+    group_size = None
+    if _num_devices > 1: 
+        group_size = GROUP_SIZE
+    vhfopt.build(group_size=group_size)
 
     mol = vhfopt.sorted_mol
     nao, nao_orig = vhfopt.coeff.shape
@@ -857,14 +865,14 @@ def _e_hcore_generator(hessobj, dm):
     h1aa = cupy.asarray(h1aa)
     h1ab = cupy.asarray(h1ab)
 
-    hcore = cupy.empty((3,3,nao,nao))
     t1 = log.timer_debug1('get_hcore', *t1)
     def get_hcore(iatm, jatm):
-        nonlocal hcore
         ish0, ish1, i0, i1 = aoslices[iatm]
         jsh0, jsh1, j0, j1 = aoslices[jatm]
         rinv2aa = rinv2ab = None
         if iatm == jatm:
+            de = contract('xypq,pq->xy', h1aa[:,:,i0:i1], dm[i0:i1])
+            de+= contract('xypq,pq->xy', h1ab[:,:,i0:i1,i0:i1], dm[i0:i1,i0:i1])
             with mol.with_rinv_at_nucleus(iatm):
                 # The remaining integrals like int1e_ipiprinv are computed in
                 # hess_nuc_elec(mol, dm)
@@ -875,18 +883,16 @@ def _e_hcore_generator(hessobj, dm):
                     rinv2ab = cupy.asarray(rinv2ab)
                     rinv2aa = rinv2aa.reshape(3,3,nao,nao)
                     rinv2ab = rinv2ab.reshape(3,3,nao,nao)
-            hcore[:] = 0.
-            hcore[:,:,i0:i1] += h1aa[:,:,i0:i1]
-            hcore[:,:,i0:i1,i0:i1] += h1ab[:,:,i0:i1,i0:i1]
+            
             if rinv2aa is not None or rinv2ab is not None:
-                hcore -= rinv2aa + rinv2ab
+                hcore = -(rinv2aa + rinv2ab)
                 hcore[:,:,i0:i1] += rinv2aa[:,:,i0:i1]
                 hcore[:,:,i0:i1] += rinv2ab[:,:,i0:i1]
                 hcore[:,:,:,i0:i1] += rinv2aa[:,:,i0:i1].transpose(0,1,3,2)
                 hcore[:,:,:,i0:i1] += rinv2ab[:,:,:,i0:i1]
+                de += cupy.einsum('xypq,pq->xy', hcore, dm)
         else:
-            hcore[:] = 0.
-            hcore[:,:,i0:i1,j0:j1] += h1ab[:,:,i0:i1,j0:j1]
+            de = contract('xypq,pq->xy',h1ab[:,:,i0:i1,j0:j1],dm[i0:i1,j0:j1])
             with mol.with_rinv_at_nucleus(iatm):
                 if with_ecp and iatm in ecp_atoms:
                     shls_slice = (jsh0, jsh1, 0, nbas)
@@ -894,8 +900,9 @@ def _e_hcore_generator(hessobj, dm):
                     rinv2ab = -mol.intor('ECPscalar_iprinvip', comp=9, shls_slice=shls_slice)
                     rinv2aa = cupy.asarray(rinv2aa)
                     rinv2ab = cupy.asarray(rinv2ab)
-                    hcore[:,:,j0:j1] += rinv2aa.reshape(3,3,j1-j0,nao)
-                    hcore[:,:,j0:j1] += rinv2ab.reshape(3,3,j1-j0,nao).transpose(1,0,2,3)
+                    hcore = rinv2aa.reshape(3,3,j1-j0,nao)
+                    hcore+= rinv2ab.reshape(3,3,j1-j0,nao).transpose(1,0,2,3)
+                    de += contract('xypq,pq->xy', hcore, dm[j0:j1])
             with mol.with_rinv_at_nucleus(jatm):
                 if with_ecp and jatm in ecp_atoms:
                     shls_slice = (ish0, ish1, 0, nbas)
@@ -903,11 +910,11 @@ def _e_hcore_generator(hessobj, dm):
                     rinv2ab = -mol.intor('ECPscalar_iprinvip', comp=9, shls_slice=shls_slice)
                     rinv2aa = cupy.asarray(rinv2aa)
                     rinv2ab = cupy.asarray(rinv2ab)
-                    hcore[:,:,i0:i1] += rinv2aa.reshape(3,3,i1-i0,nao)
-                    hcore[:,:,i0:i1] += rinv2ab.reshape(3,3,i1-i0,nao)
-        de = cupy.einsum('xypq,pq->xy', hcore, dm)
-        de += cupy.einsum('xyqp,pq->xy', hcore, dm)
-        return cp.asarray(de + de_nuc_elec[:,:,iatm,jatm])
+                    hcore = rinv2aa.reshape(3,3,i1-i0,nao)
+                    hcore+= rinv2ab.reshape(3,3,i1-i0,nao)
+                    de += contract('xypq,pq->xy', hcore, dm[i0:i1])
+        # 2.0* due to the symmetry
+        return cp.asarray(2.0*de + de_nuc_elec[:,:,iatm,jatm])
     return get_hcore
 
 def hcore_generator(hessobj, mol=None):
@@ -921,7 +928,12 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
     vhfopt = mf._opt_gpu.get(omega)
     if vhfopt is None:
         with mol.with_range_coulomb(omega):
-            vhfopt = mf._opt_gpu[omega] = _VHFOpt(mol, mf.direct_scf_tol).build()
+            # Small group size for load balance
+            group_size = None
+            if _num_devices > 1: 
+                group_size = GROUP_SIZE
+            vhfopt = _VHFOpt(mol, mf.direct_scf_tol).build(group_size=group_size)
+            mf._opt_gpu[omega] = vhfopt
     with mol.with_range_coulomb(omega):
         vj, vk = jk.get_jk(mol, dms, mo_coeff, mo_occ, hermi, vhfopt, with_j, with_k)
     return vj, vk

@@ -51,15 +51,13 @@ def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
     vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega)
     return vj, vk
 
-def make_rdm1(mf, mo_coeff=None, mo_occ=None, **kwargs):
-    if mo_occ is None: mo_occ = mf.mo_occ
-    if mo_coeff is None: mo_coeff = mf.mo_coeff
+def make_rdm1(mo_coeff, mo_occ):
     mo_coeff = cupy.asarray(mo_coeff)
     mo_occ = cupy.asarray(mo_occ)
     is_occ = mo_occ > 0
     mocc = mo_coeff[:, is_occ]
     dm = cupy.dot(mocc*mo_occ[is_occ], mocc.conj().T)
-    occ_coeff = mo_coeff[:, mo_occ>1.0]
+    occ_coeff = mo_coeff[:, is_occ]
     return tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
 
 def get_occ(mf, mo_energy=None, mo_coeff=None):
@@ -422,7 +420,6 @@ class SCF(pyscf_lib.StreamObject):
     init_guess_by_chkfile    = hf_cpu.SCF.init_guess_by_chkfile
     from_chk                 = hf_cpu.SCF.from_chk
     get_init_guess           = return_cupy_array(hf_cpu.SCF.get_init_guess)
-    make_rdm1                = make_rdm1
     make_rdm2                = NotImplemented
     energy_elec              = energy_elec
     energy_tot               = energy_tot
@@ -460,6 +457,11 @@ class SCF(pyscf_lib.StreamObject):
     canonicalize             = NotImplemented
     mulliken_pop             = NotImplemented
     mulliken_meta            = NotImplemented
+
+    def make_rdm1(self, mo_coeff=None, mo_occ=None, **kwargs):
+        if mo_occ is None: mo_occ = self.mo_occ
+        if mo_coeff is None: mo_coeff = self.mo_coeff
+        return make_rdm1(mo_coeff, mo_occ)
 
     def dip_moment(self, mol=None, dm=None, unit='Debye', origin=None,
                    verbose=logger.NOTE):

@@ -16,10 +16,14 @@ import ctypes
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.lib import logger
 from pyscf.pbc.dft import gen_grid as gen_grid_cpu
 from pyscf.pbc.gto.cell import get_uniform_grids
-from gpu4pyscf.lib import utils
+from gpu4pyscf.dft import Grids
+from gpu4pyscf.lib import utils, logger
+
+__all__ = [
+    'UniformGrids', 'BeckeGrids', 'AtomicGrids'
+]
 
 class UniformGrids(lib.StreamObject):
     '''Uniform Grid class.'''
@@ -66,8 +70,31 @@ class UniformGrids(lib.StreamObject):
     kernel = gen_grid_cpu.UniformGrids.kernel
 
     to_gpu = utils.to_gpu
-    device = utils.device
     to_cpu = utils.to_cpu
 
-class BeckeGrids:
-    pass
+
+class BeckeGrids(Grids):
+    '''Atomic grids for all-electron calculation.'''
+    def __init__(self, cell):
+        self.cell = cell
+        Grids.__init__(self, cell)
+
+    def build(self, cell=None, with_non0tab=False):
+        if cell is None: cell = self.cell
+        coords, weights = gen_grid_cpu.get_becke_grids(
+            self.cell, self.atom_grid, radi_method=self.radi_method,
+            level=self.level, prune=self.prune)
+        self.coords = cp.asarray(coords)
+        self.weights = cp.asarray(weights)
+        if with_non0tab:
+            raise NotImplementedError
+        self.non0tab = None
+        logger.info(self, 'tot grids = %d', len(self.weights))
+        logger.info(self, 'cell vol = %.9g  sum(weights) = %.9g',
+                    cell.vol, self.weights.sum())
+        return self
+
+    to_gpu = utils.to_gpu
+    to_cpu = utils.to_cpu
+
+AtomicGrids = BeckeGrids

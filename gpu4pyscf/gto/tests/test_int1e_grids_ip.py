@@ -18,7 +18,7 @@ import numpy as np
 import cupy as cp
 import pyscf
 from pyscf import lib, gto, df
-from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
+from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2, int1e_grids_ip2_charge_contracted
 
 def setUpModule():
     global mol_sph, mol_cart, grid_points, integral_threshold, density_contraction_threshold, charge_contraction_threshold
@@ -74,8 +74,8 @@ class KnownValues(unittest.TestCase):
 
         test_int1e_dA = int1e_grids_ip1(mol, grid_points)
         test_int1e_dC = int1e_grids_ip2(mol, grid_points)
-        test_int1e_dA = test_int1e_dA.transpose(0, 3, 2, 1)
-        test_int1e_dC = test_int1e_dC.transpose(0, 3, 2, 1)
+        test_int1e_dA = test_int1e_dA.transpose(0, 2, 3, 1)
+        test_int1e_dC = test_int1e_dC.transpose(0, 2, 3, 1)
 
         np.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         np.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
@@ -94,8 +94,8 @@ class KnownValues(unittest.TestCase):
 
         test_int1e_dA = int1e_grids_ip1(mol, grid_points)
         test_int1e_dC = int1e_grids_ip2(mol, grid_points)
-        test_int1e_dA = test_int1e_dA.transpose(0, 3, 2, 1)
-        test_int1e_dC = test_int1e_dC.transpose(0, 3, 2, 1)
+        test_int1e_dA = test_int1e_dA.transpose(0, 2, 3, 1)
+        test_int1e_dC = test_int1e_dC.transpose(0, 2, 3, 1)
 
         np.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         np.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
@@ -117,8 +117,8 @@ class KnownValues(unittest.TestCase):
 
         test_int1e_dA = int1e_grids_ip1(mol, grid_points, charge_exponents = charge_exponents)
         test_int1e_dC = int1e_grids_ip2(mol, grid_points, charge_exponents = charge_exponents)
-        test_int1e_dA = test_int1e_dA.transpose(0, 3, 2, 1)
-        test_int1e_dC = test_int1e_dC.transpose(0, 3, 2, 1)
+        test_int1e_dA = test_int1e_dA.transpose(0, 2, 3, 1)
+        test_int1e_dC = test_int1e_dC.transpose(0, 2, 3, 1)
 
         np.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         np.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
@@ -141,8 +141,8 @@ class KnownValues(unittest.TestCase):
 
         test_int1e_dA = int1e_grids_ip1(mol, grid_points)
         test_int1e_dC = int1e_grids_ip2(mol, grid_points)
-        test_int1e_dA = test_int1e_dA.transpose(0, 3, 2, 1)
-        test_int1e_dC = test_int1e_dC.transpose(0, 3, 2, 1)
+        test_int1e_dA = test_int1e_dA.transpose(0, 2, 3, 1)
+        test_int1e_dC = test_int1e_dC.transpose(0, 2, 3, 1)
 
         np.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         np.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
@@ -168,8 +168,8 @@ class KnownValues(unittest.TestCase):
 
         test_int1e_dA = int1e_grids_ip1(mol, grid_points, charge_exponents = charge_exponents)
         test_int1e_dC = int1e_grids_ip2(mol, grid_points, charge_exponents = charge_exponents)
-        test_int1e_dA = test_int1e_dA.transpose(0, 3, 2, 1)
-        test_int1e_dC = test_int1e_dC.transpose(0, 3, 2, 1)
+        test_int1e_dA = test_int1e_dA.transpose(0, 2, 3, 1)
+        test_int1e_dC = test_int1e_dC.transpose(0, 2, 3, 1)
 
         np.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         np.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
@@ -314,6 +314,55 @@ class KnownValues(unittest.TestCase):
         cp.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
         cp.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
 
+    def test_int1e_grids_ip2_charge_contracted(self):
+        np.random.seed(12346)
+        charges = np.random.uniform(-2.0, 2.0, grid_points.shape[0])
+
+        mol = mol_sph
+        fakemol = gto.fakemol_for_charges(grid_points)
+
+        int3c2e_ip2 = mol._add_suffix('int3c2e_ip2')
+        cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e_ip2)
+        q_nj = df.incore.aux_e2(mol, fakemol, intor=int3c2e_ip2, aosym='s1', cintopt=cintopt)
+
+        ngrids = grid_points.shape[0]
+        n_atom = mol.natm
+        nao = mol.nao
+        gridslice = [[ngrids * i // n_atom, ngrids * (i + 1) // n_atom] for i in range(n_atom)]
+        ref_int1e_dC = np.zeros([n_atom, 3, nao, nao])
+        for i_atom in range(n_atom):
+            g0,g1 = gridslice[i_atom]
+            ref_int1e_dC[i_atom, :, :, :] += np.einsum('dijq,q->dij', q_nj[:, :, :, g0:g1], charges[g0:g1])
+
+        test_int1e_dC = cp.zeros([n_atom, 3, nao, nao])
+        int1e_grids_ip2_charge_contracted(mol, grid_points, charges, gridslice, test_int1e_dC)
+
+        cp.testing.assert_allclose(ref_int1e_dC, test_int1e_dC, atol = integral_threshold)
+
+    def test_int1e_grids_ip1_density_contracted(self):
+        np.random.seed(12347)
+        dm = np.random.uniform(-2.0, 2.0, (mol_sph.nao, mol_sph.nao))
+
+        mol = mol_sph
+        fakemol = gto.fakemol_for_charges(grid_points)
+
+        int3c2e_ip1 = mol._add_suffix('int3c2e_ip1')
+        cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e_ip1)
+        v_nj = df.incore.aux_e2(mol, fakemol, intor=int3c2e_ip1, aosym='s1', cintopt=cintopt)
+
+        v_nj = np.einsum('dijq,ij->dqi', v_nj, dm)
+
+        ngrids = grid_points.shape[0]
+        aoslice = np.array(mol.aoslice_by_atom())
+        ref_int1e_dA = np.empty([mol.natm, 3, ngrids])
+        for i_atom in range(mol.natm):
+            p0,p1 = aoslice[i_atom, 2:]
+            ref_int1e_dA[i_atom,:,:] = np.einsum('dqi->dq', v_nj[:,:,p0:p1])
+
+        test_int1e_dA = int1e_grids_ip1(mol, grid_points, dm = dm)
+
+        cp.testing.assert_allclose(ref_int1e_dA, test_int1e_dA, atol = integral_threshold)
+
 if __name__ == "__main__":
-    print("Full Tests for One Electron Coulomb Integrals")
+    print("Full Tests for One Electron Coulomb Integrals 1st Derivative")
     unittest.main()

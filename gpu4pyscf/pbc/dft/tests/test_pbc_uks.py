@@ -68,6 +68,7 @@ class KnownValues(unittest.TestCase):
 
     def test_rsh_fft(self):
         mf = pbcdft.UKS(cell, xc='camb3lyp').run(conv_tol=1e-9)
+        self.assertAlmostEqual(mf.e_tot, -4.350842690091271, 7)
         mf_ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
@@ -151,6 +152,32 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts(nk)
         kmf = pbcdft.KUKS(cell, xc='camb3lyp', kpts=kpts).run(conv_tol=1e-9)
         mf_ref = kmf.to_cpu().run()
+        self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
+
+    def test_kpts_gga_gdf(self):
+        from gpu4pyscf.pbc.df.df import GDF
+        L = 4.
+        cell = pbcgto.Cell()
+        cell.a = np.eye(3)*L
+        cell.atom =[['H' , ( L/2+0., L/2+0. ,   L/2+1.)],
+                    ['H' , ( L/2+1., L/2+0. ,   L/2+1.)]]
+        cell.basis = [[0, (4.0, 1.0)], [0, (1.0, 1.0)]]
+        cell.spin = 2
+        cell.build()
+
+        mf = cell.UKS(xc='pbe0').to_gpu().density_fit().run()
+        self.assertTrue(isinstance(mf.with_df, GDF))
+        self.assertAlmostEqual(mf.e_tot, -0.10443638, 7)
+        mf_ref = mf.to_cpu().run()
+        self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
+
+        nk = [2, 1, 1]
+        kpts = cell.make_kpts(nk)
+        kmf = pbcdft.KUKS(cell, xc='pbe0', kpts=kpts).density_fit().run()
+        self.assertTrue(isinstance(kmf.with_df, GDF))
+        self.assertAlmostEqual(kmf.e_tot, -0.19581151, 7)
+        mf_ref = kmf.to_cpu()
+        mf_ref.run()
         self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
 
 if __name__ == '__main__':

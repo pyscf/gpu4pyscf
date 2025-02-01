@@ -31,9 +31,9 @@ mol = pyscf.M(atom=atom, basis='def2-tzvpp')
 mf = rks.RKS(mol, xc='HYB_GGA_XC_B3LYP').density_fit()
 mf = mf.PCM()
 mf.grids.atom_grid = (99,590)
-mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
-mf.with_solvent.method = 'IEF-PCM'
-mf.with_solvent.eps = 78.3553
+mf.with_solvent.lebedev_order = 29  # 302 Lebedev grids
+mf.with_solvent.method = 'IEF-PCM'   # Can be C-PCM, SS(V)PE, COSMO
+mf.with_solvent.eps = 78.3553        # Dielectric constant
 mf.kernel()
 
 gradobj = mf.nuc_grad_method()
