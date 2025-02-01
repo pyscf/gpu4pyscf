@@ -240,10 +240,15 @@ class RHF(SCF):
     to_gpu = utils.to_gpu
     device = utils.device
 
+    def density_fit(self, auxbasis=None, with_df=None):
+        from gpu4pyscf.pbc.df.df_jk import density_fit
+        return density_fit(self, auxbasis, with_df)
+
     def to_cpu(self):
         mf = hf_cpu.RHF(self.cell)
         utils.to_cpu(self, out=mf)
         return mf
+
 
 def _format_jks(vj, dm, kpts_band):
     if kpts_band is None:

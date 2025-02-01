@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2024-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ part in real space, long range part in reciprocal space.
 
 __all__ = ['GDF']
 
+import warnings
 import ctypes
 import tempfile
 import numpy as np
@@ -28,20 +29,19 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.df import df as df_cpu
-from pyscf.pbc.df.aft import _check_kpts
 from pyscf.pbc.df.gdf_builder import libpbc
-from pyscf.pbc.lib.kpts_helper import is_zero, unique
-from pyscf.pbc.df.rsdf_builder import _RSGDFBuilder, _RSNucBuilder
+from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
-from gpu4pyscf.pbc.df import df_jk
-from gpu4pyscf.lib.cupy_helper import return_cupy_array, pack_tril, unpack_tril
+from gpu4pyscf.pbc.df import df_jk, rsdf_builder
+from gpu4pyscf.pbc.df.aft import _check_kpts
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.lib.cupy_helper import return_cupy_array, pack_tril, get_avail_mem
 from gpu4pyscf.lib import utils
 
 class GDF(lib.StreamObject):
     '''Gaussian density fitting
     '''
     blockdim = df_cpu.GDF.blockdim
-    _dataname = 'j3c'
     _prefer_ccdf = False
     force_dm_kbuild = False
 
@@ -56,50 +56,24 @@ class GDF(lib.StreamObject):
     reset = df_cpu.GDF.reset
     dump_flags = df_cpu.GDF.dump_flags
 
-    def build(self, j_only=None, with_j3c=True, kpts_band=None):
+    def build(self, j_only=None, kpts_band=None):
+        warnings.warn(
+            'PBC.df is currently experimental and subject to significant changes.')
         if j_only is not None:
             self._j_only = j_only
-        if self.kpts_band is not None:
-            self.kpts_band = np.reshape(self.kpts_band, (-1,3))
-        assert kpts_band is None
+        assert kpts_band is None and self.kpts_band is None
 
         self.check_sanity()
         self.dump_flags()
+        cell = self.cell
+        auxcell = df_cpu.make_auxcell(cell, self.auxbasis, self.exp_to_discard)
+        self.auxcell = auxcell
 
-        self.auxcell = df_cpu.make_auxcell(self.cell, self.auxbasis,
-                                           self.exp_to_discard)
-
-        if with_j3c and self._cderi_to_save is not None:
-            if isinstance(self._cderi_to_save, str):
-                cderi = self._cderi_to_save
-            else:
-                cderi = self._cderi_to_save.name
-            self._cderi = cderi
-            t1 = (logger.process_clock(), logger.perf_counter())
-            self._make_j3c(self.cell, self.auxcell, None, cderi)
-            t1 = logger.timer_debug1(self, 'j3c', *t1)
+        t1 = (logger.process_clock(), logger.perf_counter())
+        self._cderi, self._cderip = rsdf_builder.build_cderi(
+            cell, auxcell, self.kpts, j_only=j_only)
+        t1 = logger.timer_debug1(self, 'j3c', *t1)
         return self
-
-    def _make_j3c(self, cell=None, auxcell=None, kptij_lst=None, cderi_file=None):
-        if cell is None: cell = self.cell
-        if auxcell is None: auxcell = self.auxcell
-        if cderi_file is None: cderi_file = self._cderi_to_save
-
-        # Remove duplicated k-points. Duplicated kpts may lead to a buffer
-        # located in incore.wrap_int3c larger than necessary. Integral code
-        # only fills necessary part of the buffer, leaving some space in the
-        # buffer unfilled.
-        if self.kpts_band is None:
-            kpts_union = self.kpts
-        else:
-            kpts_union = unique(np.vstack([self.kpts, self.kpts_band]))[0]
-
-        dfbuilder = _RSGDFBuilder(cell, auxcell, kpts_union)
-        dfbuilder.mesh = self.mesh
-        dfbuilder.linear_dep_threshold = self.linear_dep_threshold
-        j_only = self._j_only or len(kpts_union) == 1
-        dfbuilder.make_j3c(cderi_file, j_only=j_only, dataname=self._dataname,
-                           kptij_lst=kptij_lst)
 
     has_kpts = df_cpu.GDF.has_kpts
     weighted_coulG = return_cupy_array(aft_cpu.weighted_coulG)
@@ -108,48 +82,72 @@ class GDF(lib.StreamObject):
     get_naoaux = df_cpu.GDF.get_naoaux
     range_coulomb = aft_cpu.AFTDFMixin.range_coulomb
 
-    def sr_loop(self, kpti_kptj=np.zeros((2,3)), max_memory=2000,
-                compact=True, blksize=None, aux_slice=None):
-        '''Short range part'''
-        assert aux_slice is None
+    def sr_loop(self, ki, kj, compact=True, blksize=None):
+        '''Iterator for the 3-index cderi tensor over the auxliary dimension'''
         if self._cderi is None:
             self.build()
         cell = self.cell
-        kpti, kptj = kpti_kptj
-        unpack = is_zero(kpti-kptj) and not compact
         nao = cell.nao
         if blksize is None:
-            blksize = max_memory*1e6/16/(nao**2*2)
-            blksize /= 2  # For prefetch
-            blksize = max(16, min(int(blksize), self.blockdim))
-            logger.debug2(self, 'max_memory %d MB, blksize %d', max_memory, blksize)
+            avail_mem = get_avail_mem() * .8
+            blksize = avail_mem/16/(nao**2*3)
+            if blksize < 16:
+                raise RuntimeError('Insufficient GPU memory')
+            blksize = min(int(blksize), self.blockdim)
+            logger.debug2(self, 'max_memory %d MB, blksize %d', avail_mem*1e-6, blksize)
 
-        def load(aux_slice):
-            b0, b1 = aux_slice
-            naux = b1 - b0
-            Lpq = cp.asarray(j3c[b0:b1])
-            if compact and Lpq.shape[1] == nao**2:
-                Lpq = pack_tril(Lpq.reshape(naux, nao, nao))
-            elif unpack and Lpq.shape[1] != nao**2:
-                Lpq = unpack_tril(Lpq)
-            return Lpq
+        if (ki, kj) in self._cderi:
+            req_conj = False
+        elif (kj, ki) in self._cderi:
+            req_conj = True
+        else:
+            raise RuntimeError('CDERI for kpoints {ki},{kj} not generated')
 
-        with df_cpu._load3c(self._cderi, self._dataname, kpti_kptj) as j3c:
-            slices = lib.prange(0, j3c.shape[0], blksize)
-            for Lpq in lib.map_with_prefetch(load, slices):
-                yield Lpq, 1
+        Lpq_kij = self._cderi[ki,kj]
+        naux = len(Lpq_kij)
+        for b0, b1 in lib.prange(0, naux, blksize):
+            if req_conj:
+                Lpq = Lpq_kij[b0:b1].transpose(0,2,1).conj()
+            else:
+                Lpq = Lpq_kij[b0:b1]
+            assert Lpq[0].size == nao**2
+            if compact:
+                Lpq = pack_tril(Lpq.reshape(-1, nao, nao))
+            yield Lpq, 1
 
-        if cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum':
-            # Truncated Coulomb operator is not positive definite. Load the
-            # CDERI tensor of negative part.
-            with df_cpu._load3c(self._cderi, self._dataname+'-', kpti_kptj,
-                                ignore_key_error=True) as j3c:
-                slices = lib.prange(0, j3c.shape[0], blksize)
-                for Lpq in lib.map_with_prefetch(load, slices):
-                    yield Lpq, -1
+        if cell.dimension == 2:
+            assert cell.low_dim_ft_type != 'inf_vacuum'
+            Lpq_kij = self._cderip[ki,kj]
+            naux = len(Lpq_kij)
+            for b0, b1 in lib.prange(0, naux, blksize):
+                if req_conj:
+                    Lpq = Lpq_kij[b0:b1].transpose(0,2,1).conj()
+                else:
+                    Lpq = Lpq_kij[b0:b1]
+                assert Lpq[0].size == nao**2
+                if compact:
+                    Lpq = pack_tril(Lpq.reshape(-1, nao, nao))
+                yield Lpq, -1
 
-    get_pp = return_cupy_array(df_cpu.GDF.get_pp)
-    get_nuc = return_cupy_array(df_cpu.GDF.get_nuc)
+    def get_pp(self, kpts=None):
+        kpts, is_single_kpt = _check_kpts(self, kpts)
+        if is_single_kpt and is_zero(kpts):
+            vpp = rsdf_builder.get_pp(self.cell)
+        else:
+            vpp = rsdf_builder.get_pp(self.cell, kpts)
+            if is_single_kpt:
+                vpp = vpp[0]
+        return vpp
+
+    def get_nuc(self, kpts=None):
+        kpts, is_single_kpt = _check_kpts(self, kpts)
+        if is_single_kpt and is_zero(kpts):
+            nuc = rsdf_builder.get_nuc(self.cell)
+        else:
+            nuc = rsdf_builder.get_nuc(self.cell, kpts)
+            if is_single_kpt:
+                nuc = nuc[0]
+        return nuc
 
     # Note: Special exxdiv by default should not be used for an arbitrary
     # input density matrix. When the df object was used with the molecular
