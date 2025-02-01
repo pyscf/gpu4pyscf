@@ -125,12 +125,12 @@ class KnownValues(unittest.TestCase):
         nvir = nmo - nocc
         zs = np.random.rand(3,nocc,nvir)
         ref = mf.to_cpu().TDA().set(singlet=False).gen_vind()[0](zs)
-        dat = mf.TDA().set(singlet=False).gen_vind()[0](cp.asarray(zs))
+        dat = mf.TDA().set(singlet=False).gen_vind()[0](cp.asarray(zs)).get()
         self.assertAlmostEqual(abs(ref - dat).max(), 0, 9)
 
         df_mf = self.df_mf
         ref = df_mf.to_cpu().TDA().set(singlet=True).gen_vind()[0](zs)
-        dat = df_mf.TDA().set(singlet=True).gen_vind()[0](cp.asarray(zs))
+        dat = df_mf.TDA().set(singlet=True).gen_vind()[0](cp.asarray(zs)).get()
         self.assertAlmostEqual(abs(ref - dat).max(), 0, 9)
 
     def test_tdhf_vind(self):
@@ -140,12 +140,12 @@ class KnownValues(unittest.TestCase):
         nvir = nmo - nocc
         zs = np.random.rand(3,2,nocc,nvir)
         ref = mf.to_cpu().TDHF().set(singlet=True).gen_vind()[0](zs)
-        dat = mf.TDHF().set(singlet=True).gen_vind()[0](zs)
+        dat = mf.TDHF().set(singlet=True).gen_vind()[0](zs).get()
         self.assertAlmostEqual(abs(ref - dat).max(), 0, 9)
 
         df_mf = self.df_mf
         ref = df_mf.to_cpu().TDHF().set(singlet=False).gen_vind()[0](zs)
-        dat = df_mf.TDHF().set(singlet=False).gen_vind()[0](zs)
+        dat = df_mf.TDHF().set(singlet=False).gen_vind()[0](zs).get()
         self.assertAlmostEqual(abs(ref - dat).max(), 0, 9)
 
 if __name__ == "__main__":

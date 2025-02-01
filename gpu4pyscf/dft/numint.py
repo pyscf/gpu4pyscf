@@ -467,8 +467,18 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     vxc[1,threshind] = 1.5*W*dW0dG
     return exc,vxc
 
+def gen_grid_range(ngrids, device_id, blksize=MIN_BLK_SIZE):
+    '''
+    Calculate the range of grids assigned the given device
+    '''
+    ngrids_per_device = (ngrids + _num_devices - 1) // _num_devices
+    ngrids_per_device = (ngrids_per_device + blksize - 1) // blksize * blksize
+    grid_start = min(device_id * ngrids_per_device, ngrids)
+    grid_end = min((device_id + 1) * ngrids_per_device, ngrids)
+    return grid_start, grid_end
+
 def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
-                 verbose=None, with_lapl=False, grid_range=(), device_id=0, hermi=1):
+                 verbose=None, with_lapl=False, device_id=0, hermi=1):
     ''' nr_rks task on given device
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -489,12 +499,9 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             ao_deriv = 1
 
         ngrids_glob = grids.coords.shape[0]
-        ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
-        ngrids_per_device = (ngrids_per_device + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE * MIN_BLK_SIZE
-        grid_start = min(device_id * ngrids_per_device, ngrids_glob)
-        grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
+        grid_start, grid_end = gen_grid_range(ngrids_glob, device_id)
         ngrids_local = grid_end - grid_start
-        log.debug(f"{ngrids_local} on Device {device_id}")
+        log.debug(f"{ngrids_local} grids on Device {device_id}")
 
         weights = cupy.empty([ngrids_local])
         if xctype == 'LDA':
@@ -515,7 +522,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 if mo_coeff is None:
                     dms_mask = dms[i][idx[:,None],idx]
                     rho_tot[i,:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms_mask,
-                                                xctype=xctype, hermi=hermi, with_lapl=with_lapl)
+                                                  xctype=xctype, hermi=hermi, with_lapl=with_lapl)
                 else:
                     assert hermi == 1
                     mo_coeff_mask = mo_coeff[idx,:]
@@ -873,7 +880,7 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     return nelec, excsum, vmat
 
 def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
-                verbose=None, with_lapl=False, grid_range=(), device_id=0, hermi=1):
+                verbose=None, with_lapl=False, device_id=0, hermi=1):
     ''' nr_uks task on one device
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -903,12 +910,9 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             ao_deriv = 1
 
         ngrids_glob = grids.coords.shape[0]
-        ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
-        ngrids_per_device = (ngrids_per_device + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE * MIN_BLK_SIZE
-        grid_start = min(device_id * ngrids_per_device, ngrids_glob)
-        grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
+        grid_start, grid_end = gen_grid_range(ngrids_glob, device_id)
         ngrids_local = grid_end - grid_start
-        log.debug(f"{ngrids_local} on Device {device_id}")
+        log.debug(f"{ngrids_local} grids on Device {device_id}")
 
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                      max_memory=None,
@@ -1760,6 +1764,9 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 ni.non0ao_idx[lookup_key] = _sparse_index(_sorted_mol, coords, opt.l_ctr_offsets)
 
             pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[lookup_key]
+            if len(idx) == 0: 
+                continue
+            
             ao_mask = eval_ao(
                 _sorted_mol, coords, deriv,
                 nao_slice=len(idx),

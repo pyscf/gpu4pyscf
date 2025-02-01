@@ -36,6 +36,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
     mol.basis = 'sto3g'
     mol.output = '/dev/null'
     mol.build(verbose=0)
+    # Warning: This system has all orbitals filled, which is FAR from physical
     mol.nelectron = mol.nao * 2
     epsilon = 35.9
     lebedev_order = 3
@@ -169,11 +170,14 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_SSVPE(self):
         grad = _grad_with_solvent('SS(V)PE')
-        g0 = numpy.asarray(
-            [[ 3.42479745e-15, -1.00280742e-16, -1.61117735e+00],
-            [ 1.07135985e+00, -6.97375148e-16,  8.05588676e-01],
-            [-1.07135985e+00,  7.91425487e-16,  8.05588676e-01]]
-        )
+        # Note: This reference value is obtained via finite difference with dx = 1e-5
+        #       QChem 6.1 has a bug in SSVPE gradient, they use the IEFPCM gradient algorithm
+        #       to compute SSVPE gradient, which is wrong.
+        g0 = numpy.asarray([
+            [ 0.00000000e+00, -7.10542736e-10, -1.63195623e+00],
+            [ 1.07705138e+00,  2.13162821e-09,  8.15978117e-01],
+            [-1.07705138e+00, -2.13162821e-09,  8.15978116e-01],
+        ])
         print(f"Gradient error in RHF with SS(V)PE: {numpy.linalg.norm(g0 - grad)}")
         assert numpy.linalg.norm(g0 - grad) < 1e-6
 

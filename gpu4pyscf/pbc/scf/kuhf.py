@@ -38,8 +38,9 @@ def make_rdm1(mo_coeff_kpts, mo_occ_kpts, **kwargs):
     Returns:
         dm_kpts : (2, nkpts, nao, nao) ndarray
     '''
-    assert isinstance(mo_occ_kpts, cp.ndarray)
-    assert isinstance(mo_coeff_kpts, cp.ndarray)
+    mo_occ_kpts = cp.asarray(mo_occ_kpts)
+    mo_coeff_kpts = cp.asarray(mo_coeff_kpts)
+    assert mo_occ_kpts.dtype == np.float64
     c = mo_coeff_kpts * mo_occ_kpts[:,:,None,:]
     dm = contract('nkpi,nkqi->nkpq', mo_coeff_kpts, c.conj())
     return tag_array(dm, mo_coeff=mo_coeff_kpts, mo_occ=mo_occ_kpts)
@@ -311,6 +312,8 @@ class KUHF(khf.KSCF):
     nuc_grad_method = NotImplemented
     to_ks = NotImplemented
     convert_from_ = NotImplemented
+
+    density_fit = khf.KRHF.density_fit
 
     to_gpu = utils.to_gpu
     device = utils.device

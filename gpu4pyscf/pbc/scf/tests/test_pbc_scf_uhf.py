@@ -90,6 +90,28 @@ class KnownValues(unittest.TestCase):
         mf = pscf.KUHF(mol,kpts=[[0., 0., 0.]]).run()
         self.assertAlmostEqual(mf.e_tot, -2.2719576422665635, 8)
 
+    def test_density_fit(self):
+        from gpu4pyscf.pbc.df.df import GDF
+        L = 4.
+        cell = pbcgto.Cell()
+        cell.a = np.eye(3)*L
+        cell.atom =[['H' , ( L/2+0., L/2+0. ,   L/2+1.)],
+                    ['H' , ( L/2+1., L/2+0. ,   L/2+1.)]]
+        cell.basis = [[0, (4.0, 1.0)], [0, (1.0, 1.0)]]
+        cell.spin = 2
+        cell.build()
+
+        ref = cell.UHF().density_fit().run()
+        mf = ref.to_gpu().run(conv_tol=1e-8)
+        self.assertTrue(isinstance(mf.with_df, GDF))
+        self.assertAlmostEqual(ref.e_tot, -0.11995733902879813, 8)
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+        ref = cell.UHF().density_fit().run()
+        mf = ref.to_gpu().run(conv_tol=1e-8)
+        self.assertTrue(isinstance(mf.with_df, GDF))
+        self.assertAlmostEqual(ref.e_tot, -0.11995733902879813, 8)
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
 if __name__ == '__main__':
     print("Tests for PBC UHF and PBC KUHF")

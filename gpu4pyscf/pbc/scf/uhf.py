@@ -124,6 +124,8 @@ class UHF(pbchf.SCF):
     to_ks = NotImplemented
     convert_from_ = NotImplemented
 
+    density_fit = pbchf.RHF.density_fit
+
     to_gpu = utils.to_gpu
     device = utils.device
 

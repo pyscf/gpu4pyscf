@@ -97,39 +97,35 @@ static int _fill_jk_tasks(ShellQuartet *shl_quartet_idx,
     }
 
     // https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda
-    extern __shared__ int thread_offsets[];
-    thread_offsets[t_id] = count;
+    extern __shared__ int cum_count[];
+    cum_count[t_id] = count;
     // Up-sweep phase
     for (int stride = 1; stride < threads; stride *= 2) {
         __syncthreads();
         int index = (t_id + 1) * stride * 2 - 1;
         if (index < threads) {
-            thread_offsets[index] += thread_offsets[index-stride];
+            cum_count[index] += cum_count[index-stride];
         }
     }
     __syncthreads();
-    if (t_id == threads-1) { thread_offsets[threads-1] = 0; }
     // Down-sweep phase
-    for (int stride = threads/2; stride > 0; stride /= 2) {
+    for (int stride = threads/4; stride > 0; stride /= 2) {
         __syncthreads();
         int index = (t_id + 1) * stride * 2 - 1;
-        if (index < threads) {
-            int temp = thread_offsets[index - stride];
-            thread_offsets[index - stride] = thread_offsets[index];
-            thread_offsets[index] += temp;
+        if (index + stride < threads) {
+            cum_count[index + stride] += cum_count[index];
         }
     }
     __syncthreads();
-    __shared__ int ntasks;
-    if (t_id == threads-1) {
-        ntasks = thread_offsets[threads-1] + count;
-    }
-    __syncthreads();
+    int ntasks = cum_count[threads-1];
     if (ntasks == 0) {
         return ntasks;
     }
 
-    int offset = thread_offsets[t_id];
+    int offset = 0;
+    if (t_id > 0) {
+        offset = cum_count[t_id-1];
+    }
     for (int t_kl_id = t_kl0+t_id; t_kl_id < t_kl1; t_kl_id += threads) {
         int tile_kl = tile_kl_mapping[t_kl_id];
         if (tile_q_ij + tile_q_cond[tile_kl] < cutoff) {
@@ -311,7 +307,7 @@ static int _fill_sr_jk_tasks(ShellQuartet *shl_quartet_idx,
                             float ypq = yij - ykl;
                             float zpq = zij - zkl;
                             float rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                            float theta_rr = logf(rr + 1e-30f) + theta * rr;
+                            float theta_rr = logf(rr + 1.f) + theta * rr;
                             d_cutoff = skl_cutoff - s_estimator[bas_kl] + theta_rr;
                             if (d_cutoff > 0) {
                                 continue;
@@ -332,39 +328,35 @@ static int _fill_sr_jk_tasks(ShellQuartet *shl_quartet_idx,
     }
 
     // https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda
-    extern __shared__ int thread_offsets[];
-    thread_offsets[t_id] = count;
+    extern __shared__ int cum_count[];
+    cum_count[t_id] = count;
     // Up-sweep phase
     for (int stride = 1; stride < threads; stride *= 2) {
         __syncthreads();
         int index = (t_id + 1) * stride * 2 - 1;
         if (index < threads) {
-            thread_offsets[index] += thread_offsets[index-stride];
+            cum_count[index] += cum_count[index-stride];
         }
     }
     __syncthreads();
-    if (t_id == threads-1) { thread_offsets[threads-1] = 0; }
     // Down-sweep phase
-    for (int stride = threads/2; stride > 0; stride /= 2) {
+    for (int stride = threads/4; stride > 0; stride /= 2) {
         __syncthreads();
         int index = (t_id + 1) * stride * 2 - 1;
-        if (index < threads) {
-            int temp = thread_offsets[index - stride];
-            thread_offsets[index - stride] = thread_offsets[index];
-            thread_offsets[index] += temp;
+        if (index + stride < threads) {
+            cum_count[index + stride] += cum_count[index];
         }
     }
     __syncthreads();
-    __shared__ int ntasks;
-    if (t_id == threads-1) {
-        ntasks = thread_offsets[threads-1] + count;
-    }
-    __syncthreads();
+    int ntasks = cum_count[threads-1];
     if (ntasks == 0) {
         return ntasks;
     }
 
-    int offset = thread_offsets[t_id];
+    int offset = 0;
+    if (t_id > 0) {
+        offset = cum_count[t_id-1];
+    }
     for (int t_kl_id = t_kl0+t_id; t_kl_id < t_kl1; t_kl_id += threads) {
         int tile_kl = tile_kl_mapping[t_kl_id];
         if (tile_q_ij + tile_q_cond[tile_kl] < cutoff) {
@@ -457,7 +449,7 @@ static int _fill_sr_jk_tasks(ShellQuartet *shl_quartet_idx,
                             float ypq = yij - ykl;
                             float zpq = zij - zkl;
                             float rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                            float theta_rr = logf(rr + 1e-30f) + theta * rr;
+                            float theta_rr = logf(rr + 1.f) + theta * rr;
                             d_cutoff = skl_cutoff - s_estimator[bas_kl] + theta_rr;
                             if (d_cutoff > 0) {
                                 continue;

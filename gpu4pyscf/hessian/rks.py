@@ -49,7 +49,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     dm0 = cupy.dot(mocc, mocc.T) * 2
 
     if mf.do_nlc():
-        raise NotImplementedError
+        raise NotImplementedError("2nd derivative of NLC is not implemented.")
 
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
@@ -137,7 +137,8 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
         vj = vk = None
         if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
             with mol.with_range_coulomb(omega):
-                vk_lr = rhf_hess._get_jk_ip1(mol, dm0, with_j=False, verbose=verbose)[1]
+                vk_lr = rhf_hess._get_jk_ip1(
+                    mol, dm0, with_j=False, atoms_slice=atoms_slice, verbose=verbose)[1]
                 vk_lr *= (alpha-hyb) * .5
                 veff -= vk_lr
         atom0, atom1 = atoms_slice
@@ -346,9 +347,7 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     ao_loc = mol.ao_loc_nr()
 
     ngrids_glob = grids.coords.shape[0]
-    ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
-    grid_start = device_id * ngrids_per_device
-    grid_end = (device_id + 1) * ngrids_per_device
+    grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
 
     with cupy.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(mol, verbose)
@@ -550,10 +549,8 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     ao_loc = mol.ao_loc_nr()
 
     ngrids_glob = grids.coords.shape[0]
-    ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
-    grid_start = device_id * ngrids_per_device
-    grid_end = (device_id + 1) * ngrids_per_device
-
+    grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
+    
     with cupy.cuda.Device(device_id), _streams[device_id]:
         mo_occ = cupy.asarray(mo_occ)
         mo_coeff = cupy.asarray(mo_coeff)
@@ -726,9 +723,9 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
             ao_deriv = 1
 
         ngrids_glob = grids.coords.shape[0]
-        ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
-        grid_start = device_id * ngrids_per_device
-        grid_end = (device_id + 1) * ngrids_per_device
+        grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
+        ngrids_local = grid_end - grid_start
+        log.debug(f"{ngrids_local} grids on Device {device_id}")
 
         p0 = p1 = grid_start
         t1 = t0 = log.init_timer()
