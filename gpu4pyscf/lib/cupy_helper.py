@@ -23,7 +23,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
-from gpu4pyscf.lib.memcpy import copy_array  #NOQA
+from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
 from gpu4pyscf.__config__ import _streams, num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
@@ -80,23 +80,6 @@ def get_avail_mem():
         # get memGetInfo() is slow
         mem_avail = cupy.cuda.runtime.memGetInfo()[0]
         return mem_avail + total_mem - used_mem
-
-def p2p_transfer(a, b):
-    ''' If the direct P2P data transfer is not available, transfer data via CPU memory
-    '''
-    if a.device == b.device:
-        a[:] = b
-    elif _p2p_access:
-        a[:] = b
-        '''
-    elif a.strides == b.strides and a.flags.c_contiguous and a.dtype == b.dtype:
-        # cupy supports a direct copy from different devices without p2p. See also
-        # https://github.com/cupy/cupy/blob/v13.3.0/cupy/_core/_routines_indexing.pyx#L48
-        # https://github.com/cupy/cupy/blob/v13.3.0/cupy/_core/_routines_indexing.pyx#L1015
-        a[:] = b
-        '''
-    else:
-        copy_array(b, a)
 
 def concatenate(array_list):
     ''' Concatenate axis=0 only

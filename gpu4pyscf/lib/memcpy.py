@@ -15,6 +15,27 @@
 
 import cupy
 import numpy as np
+from gpu4pyscf.__config__ import _p2p_access
+
+__all__ = ['p2p_transfer', 'copy_array']
+
+def p2p_transfer(a, b):
+    ''' If the direct P2P data transfer is not available, transfer data via CPU memory
+    '''
+    if a.device == b.device:
+        a[:] = b
+    elif _p2p_access:
+        a[:] = b
+        '''
+    elif a.strides == b.strides and a.flags.c_contiguous and a.dtype == b.dtype:
+        # cupy supports a direct copy from different devices without p2p. See also
+        # https://github.com/cupy/cupy/blob/v13.3.0/cupy/_core/_routines_indexing.pyx#L48
+        # https://github.com/cupy/cupy/blob/v13.3.0/cupy/_core/_routines_indexing.pyx#L1015
+        a[:] = b
+        '''
+    else:
+        copy_array(b, a)
+    return a
 
 def find_contiguous_chunks(shape, h_strides, d_strides):
     """
