@@ -46,8 +46,7 @@ extern __global__ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk
 extern __global__ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                           ShellQuartet *pool, double *dd_pool, uint32_t *batch_head);
 extern int rys_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head,
-                    int *scheme, int workers, double omega);
+                    ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
 extern int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
 extern int os_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
@@ -112,8 +111,11 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
     JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(uint32_t));
 
-    if (!rys_j_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
+    if (!rys_j_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
+#if CUDA_VERSION >= 12040
+        quartets_per_block *= 2;
+#endif
         int gout_stride = scheme[1];
         int with_gout = scheme[2];
         dim3 threads(quartets_per_block, gout_stride);

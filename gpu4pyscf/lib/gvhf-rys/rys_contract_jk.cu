@@ -74,8 +74,10 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *gx = g;
     double *gy = g + nsq_per_block * g_size;
     double *gz = g + nsq_per_block * g_size*2;
-    double *Rpa_cicj = rw_cache + nsq_per_block * (nroots*2+g_size*3);
-    double Rpq[3];
+    double *rjri = g + nsq_per_block * g_size*3;
+    double *rlrk = rjri + nsq_per_block * 3;
+    double *Rpq = rlrk + nsq_per_block * 3;
+    double *cicj_cache = Rpq + nsq_per_block * 3;
     double gout[GOUT_WIDTH];
 
     for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
@@ -118,20 +120,27 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
+        double xlxk = rl[0] - rk[0];
+        double ylyk = rl[1] - rk[1];
+        double zlzk = rl[2] - rk[2];
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        if (gout_id == 0) {
+            rjri[0] = xjxi;
+            rjri[1] = yjyi;
+            rjri[2] = zjzi;
+            rlrk[0] = xlxk;
+            rlrk[1] = ylyk;
+            rlrk[2] = zlzk;
+        }
         for (int ij = gout_id; ij < iprim*jprim; ij += gout_stride) {
             int ip = ij / jprim;
             int jp = ij % jprim;
             double ai = expi[ip];
             double aj = expj[jp];
             double aij = ai + aj;
-            double aj_aij = aj / aij;
-            double *Rpa = Rpa_cicj + ij*4*nsq_per_block + sq_id;
-            Rpa[0*nsq_per_block] = xjxi * aj_aij;
-            Rpa[1*nsq_per_block] = yjyi * aj_aij;
-            Rpa[2*nsq_per_block] = zjzi * aj_aij;
             double theta_ij = ai * aj / aij;
-            double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-            Rpa[3*nsq_per_block] = fac_sym * ci[ip] * cj[jp] * Kab;
+            double Kab = exp(-theta_ij * rr_ij);
+            cicj_cache[ij*nsq_per_block] = fac_sym * ci[ip] * cj[jp] * Kab;
         }
         for (int gout_start = 0; gout_start < nfij*nfkl; gout_start+=gout_stride*GOUT_WIDTH) {
 #pragma unroll
@@ -144,13 +153,14 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al = expl[lp];
             double akl = ak + al;
             double al_akl = al / akl;
-            double xlxk = rl[0] - rk[0];
-            double ylyk = rl[1] - rk[1];
-            double zlzk = rl[2] - rk[2];
             __syncthreads();
             if (gout_id == 0) {
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
+                double rr_kl = xlxk*xlxk + ylyk*ylyk + zlzk*zlzk;
                 double theta_kl = ak * al / akl;
-                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+                double Kcd = exp(-theta_kl * rr_kl);
                 double ckcl = ck[kp] * cl[lp] * Kcd;
                 gx[0] = ckcl;
             }
@@ -160,25 +170,22 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp*4*nsq_per_block + sq_id;
-                double xij = ri[0] + Rpa[0*nsq_per_block];
-                double yij = ri[1] + Rpa[1*nsq_per_block];
-                double zij = ri[2] + Rpa[2*nsq_per_block];
-                double xqc = xlxk * al_akl;
-                double yqc = ylyk * al_akl;
-                double zqc = zlzk * al_akl;
-                double xkl = rk[0] + xqc;
-                double ykl = rk[1] + yqc;
-                double zkl = rk[2] + zqc;
+                double aj_aij = aj / aij;
+                double xij = ri[0] + rjri[0*nsq_per_block] * aj_aij;
+                double yij = ri[1] + rjri[1*nsq_per_block] * aj_aij;
+                double zij = ri[2] + rjri[2*nsq_per_block] * aj_aij;
+                double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
+                double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
+                double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                Rpq[0] = xpq;
-                Rpq[1] = ypq;
-                Rpq[2] = zpq;
+                Rpq[0*nsq_per_block] = xpq;
+                Rpq[1*nsq_per_block] = ypq;
+                Rpq[2*nsq_per_block] = zpq;
                 __syncthreads();
                 if (gout_id == 0) {
-                    double cicj = Rpa[3*nsq_per_block];
+                    double cicj = cicj_cache[ijp*nsq_per_block];
                     gy[0] = cicj / (aij*akl*sqrt(aij+akl));
                 }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
@@ -230,8 +237,8 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
                         for (int n = gout_id; n < 3; n += gout_stride) {
                             double *_gx = g + n * g_size * nsq_per_block;
-                            int ir = n * nsq_per_block;
-                            double c0x = Rpa[ir] - rt_aij * Rpq[n];
+                            double Rpa = rjri[n*nsq_per_block] * aj_aij;
+                            double c0x = Rpa - rt_aij * Rpq[n*nsq_per_block];
                             s0x = _gx[0];
                             s1x = c0x * s0x;
                             _gx[nsq_per_block] = s1x;
@@ -254,8 +261,8 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             int i = n / 3; //for i in range(lij+1):
                             int _ix = n % 3; // TODO: remove _ix for nroots > 2
                             double *_gx = g + (i + _ix * g_size) * nsq_per_block;
-                            double Rqc = (rl[_ix] - rk[_ix]) * al_akl;
-                            double cpx = Rqc + rt_akl * Rpq[_ix];
+                            double Rqc = rlrk[_ix*nsq_per_block] * al_akl;
+                            double cpx = Rqc + rt_akl * Rpq[_ix*nsq_per_block];
                             //for i in range(lij+1):
                             //    trr(i,1) = c0p * trr(i,0) + i*b00 * trr(i-1,0)
                             if (n < lij3) {
@@ -295,14 +302,14 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             for (int m = gout_id; m < lkl3; m += gout_stride) {
                                 int k = m / 3;
                                 int _ix = m % 3;
-                                double xixj = ri[_ix] - rj[_ix];
+                                double xjxi = rjri[_ix*nsq_per_block];
                                 double *_gx = g + (_ix*g_size + k*stride_k) * nsq_per_block;
                                 for (int j = 0; j < lj; ++j) {
                                     int ij = (lij-j) + j*stride_j;
                                     s1x = _gx[ij*nsq_per_block];
                                     for (--ij; ij >= j*stride_j; --ij) {
                                         s0x = _gx[ij*nsq_per_block];
-                                        _gx[(ij+stride_j)*nsq_per_block] = xixj * s0x + s1x;
+                                        _gx[(ij+stride_j)*nsq_per_block] = s1x - xjxi * s0x;
                                         s1x = s0x;
                                     }
                                 }
@@ -315,14 +322,14 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             for (int n = gout_id; n < stride_k*3; n += gout_stride) {
                                 int i = n / 3;
                                 int _ix = n % 3;
-                                double xkxl = rk[_ix] - rl[_ix];
+                                double xlxk = rlrk[_ix*nsq_per_block];
                                 double *_gx = g + (_ix*g_size + i) * nsq_per_block;
                                 for (int l = 0; l < ll; ++l) {
                                     int kl = (lkl-l)*stride_k + l*stride_l;
                                     s1x = _gx[kl*nsq_per_block];
                                     for (kl-=stride_k; kl >= l*stride_l; kl-=stride_k) {
                                         s0x = _gx[kl*nsq_per_block];
-                                        _gx[(kl+stride_l)*nsq_per_block] = xkxl * s0x + s1x;
+                                        _gx[(kl+stride_l)*nsq_per_block] = s1x - xlxk * s0x;
                                         s1x = s0x;
                                     }
                                 }

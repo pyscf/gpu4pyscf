@@ -26,10 +26,11 @@ from pyscf import lib
 from pyscf import __config__
 from gpu4pyscf.lib.cupy_helper import load_library, condense, sandwich_dot, transpose_sum
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.__config__ import _num_devices
+from gpu4pyscf.__config__ import _num_devices, shm_size
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import jk
-from gpu4pyscf.scf.jk import _make_j_engine_pair_locs, RysIntEnvVars, _scale_sp_ctr_coeff
+from gpu4pyscf.scf.jk import (
+    _make_j_engine_pair_locs, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2)
 
 __all__ = [
     'get_j',
@@ -37,8 +38,7 @@ __all__ = [
 
 PTR_BAS_COORD = 7
 LMAX = 4
-SHM_SIZE = getattr(__config__, 'GPU_SHM_SIZE',
-                   int(gpu_specs['sharedMemPerBlockOptin']//9)*8)
+SHM_SIZE = shm_size - 1024
 THREADS = 256
 
 libvhf_md = load_library('libgvhf_md')
@@ -230,10 +230,3 @@ def _md_j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
         cache_size = ij*tilex * (4+nf3ij) + kl*tiley * (4+nf3kl)
     gout_stride = THREADS // nsq
     return ij, kl, gout_stride
-
-def _nearest_power2(n):
-    t = 0
-    while n > 1:
-        n >>= 1
-        t += 1
-    return 2**t

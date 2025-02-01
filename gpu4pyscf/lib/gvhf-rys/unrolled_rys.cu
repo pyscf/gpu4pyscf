@@ -21336,7 +21336,6 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     int ll = bounds->ll;
     int ijkl = li*125 + lj*25 + lk*5 + ll;
     int nroots = bounds->nroots;
-    int g_size = bounds->stride_l * (bounds->ll + 1);
     int iprim = bounds->iprim;
     int jprim = bounds->jprim;
     int ij_prims = iprim * jprim;
@@ -21421,8 +21420,7 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
         buflen += ij_prims*TILE2*3;
         rys_jk_2020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     case 261:
-        buflen += g_size * 3 * nsq_per_block;
-        cudaFuncSetAttribute(rys_jk_2021, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen*sizeof(double));
+        buflen += 3456;
         rys_jk_2021<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     case 275:
         buflen += ij_prims*TILE2*3;
@@ -21431,19 +21429,17 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
         buflen += ij_prims*TILE2*3;
         rys_jk_2110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     case 281:
-        buflen += g_size * 3 * nsq_per_block;
+        buflen += 4608;
         cudaFuncSetAttribute(rys_jk_2111, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen*sizeof(double));
         rys_jk_2111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     case 285:
-        buflen += g_size * 3 * nsq_per_block;
-        cudaFuncSetAttribute(rys_jk_2120, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen*sizeof(double));
+        buflen += 3456;
         rys_jk_2120<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     case 300:
         buflen += ij_prims*TILE2*3;
         rys_jk_2200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     case 305:
-        buflen += g_size * 3 * nsq_per_block;
-        cudaFuncSetAttribute(rys_jk_2210, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen*sizeof(double));
+        buflen += 3456;
         rys_jk_2210<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     case 375:
         buflen += ij_prims*TILE2*3;
@@ -21452,8 +21448,7 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
         buflen += ij_prims*TILE2*3;
         rys_jk_3010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     case 381:
-        buflen += g_size * 3 * nsq_per_block;
-        cudaFuncSetAttribute(rys_jk_3011, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen*sizeof(double));
+        buflen += 3072;
         rys_jk_3011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     case 385:
         buflen += ij_prims*TILE2*3;
@@ -21462,8 +21457,7 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
         buflen += ij_prims*TILE2*3;
         rys_jk_3100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     case 405:
-        buflen += g_size * 3 * nsq_per_block;
-        cudaFuncSetAttribute(rys_jk_3110, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen*sizeof(double));
+        buflen += 3072;
         rys_jk_3110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
     case 425:
         buflen += ij_prims*TILE2*3;
