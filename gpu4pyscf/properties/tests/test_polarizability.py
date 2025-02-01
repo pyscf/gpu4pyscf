@@ -17,6 +17,7 @@ import numpy as np
 import pyscf
 from pyscf import lib
 from pyscf.dft import rks as rks_cpu
+from pyscf.dft import uks as uks_cpu
 from gpu4pyscf.dft import rks, uks
 from gpu4pyscf.properties import polarizability
 
@@ -62,13 +63,27 @@ def run_dft_df_polarizability(xc):
     polar = polarizability.eval_polarizability(mf)
     return e_dft, polar
 
-def _vs_cpu(xc):
+def _vs_cpu_rks(xc):
     mf = rks.RKS(mol, xc=xc)
     mf.grids.level = grids_level
     e_gpu = mf.kernel()
     polar_gpu = polarizability.eval_polarizability(mf)
     
     mf_cpu = rks_cpu.RKS(mol, xc=xc)
+    mf_cpu.conv_tol = 1e-12
+    e_cpu = mf_cpu.kernel()
+    polar_cpu = polar.rhf.Polarizability(mf_cpu).polarizability()
+
+    assert np.abs(e_gpu - e_cpu) < 1e-5
+    assert np.linalg.norm(polar_cpu - polar_gpu) < 1e-3
+
+def _vs_cpu_uks(xc):
+    mf = uks.UKS(mol, xc=xc)
+    mf.grids.level = grids_level
+    e_gpu = mf.kernel()
+    polar_gpu = polarizability.eval_polarizability(mf)
+    
+    mf_cpu = uks_cpu.UKS(mol, xc=xc)
     mf_cpu.conv_tol = 1e-12
     e_cpu = mf_cpu.kernel()
     polar_cpu = polar.rhf.Polarizability(mf_cpu).polarizability()
@@ -140,9 +155,16 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(polar, qchem_polar)
 
     @unittest.skipIf(polar is None, "Skipping test if pyscf.properties is not installed")
-    def test_cpu(self):
-        _vs_cpu('b3lyp')
+    def test_cpu_rks(self):
+        _vs_cpu_rks('b3lyp')
 
+    """
+    # UKS is not supported yet
+    @unittest.skipIf(polar is None, "Skipping test if pyscf.properties is not installed")
+    def test_cpu_uks(self):
+        _vs_cpu_uks('b3lyp')
+    """
+    
 if __name__ == "__main__":
     print("Full Tests for polarizabillity")
     unittest.main()

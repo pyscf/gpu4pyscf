@@ -47,8 +47,8 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     dm0b = moccb.dot(moccb.T)
     dm0 = cp.asarray((dm0a, dm0b))
 
-    if mf.nlc != '':
-        raise NotImplementedError
+    if mf.do_nlc():
+        raise NotImplementedError("2nd derivative of NLC is not implemented.")
 
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
@@ -152,8 +152,8 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
         vj = vja = vjb = vka = vkb = None
         if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
             with mol.with_range_coulomb(omega):
-                vka_lr = rhf_hess._get_jk_ip1(mol, dm0a, with_j=False, verbose=verbose)[1]
-                vkb_lr = rhf_hess._get_jk_ip1(mol, dm0b, with_j=False, verbose=verbose)[1]
+                vka_lr = rhf_hess._get_jk_ip1(mol, dm0a, with_j=False, atoms_slice=atoms_slice, verbose=verbose)[1]
+                vkb_lr = rhf_hess._get_jk_ip1(mol, dm0b, with_j=False, atoms_slice=atoms_slice, verbose=verbose)[1]
                 vka_lr *= (alpha-hyb)
                 vkb_lr *= (alpha-hyb)
                 veffa -= vka_lr

@@ -38,10 +38,6 @@ def make_rdm1(mo_coeff, mo_occ, **kwargs):
     mo_b = mo_coeff[1]
     dm_a = cupy.dot(mo_a*mo_occ[0], mo_a.conj().T)
     dm_b = cupy.dot(mo_b*mo_occ[1], mo_b.conj().T)
-# DO NOT make tag_array for DM here because the DM arrays may be modified and
-# passed to functions like get_jk, get_vxc.  These functions may take the tags
-# (mo_coeff, mo_occ) to compute the potential if tags were found in the DM
-# arrays and modifications to DM arrays may be ignored.
     return tag_array((dm_a, dm_b), mo_coeff=mo_coeff, mo_occ=mo_occ)
 
 

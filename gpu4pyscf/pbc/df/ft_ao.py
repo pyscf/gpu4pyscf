@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2024-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,7 +26,6 @@ from pyscf import lib
 from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD
 from pyscf.scf import _vhf
 from pyscf.pbc import tools as pbctools
-from pyscf.pbc.gto.cell import _extract_pgto_params
 from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
@@ -36,6 +35,7 @@ from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import (
     g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.gto.cell import extract_pgto_params
 from gpu4pyscf.__config__ import props as gpu_specs
 
 __all__ = [
@@ -43,8 +43,8 @@ __all__ = [
 ]
 
 libpbc = load_library('libpbc')
-libpbc.PBC_build_ft_ao.restype = ctypes.c_int
-libpbc.PBC_FT_init_constant.restype = ctypes.c_int
+libpbc.build_ft_ao.restype = ctypes.c_int
+libpbc.init_constant.restype = ctypes.c_int
 
 LMAX = 4
 GOUT_WIDTH = 19
@@ -71,27 +71,25 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
           gxyz=None, Gvbase=None, kpt=np.zeros(3), verbose=None):
     from pyscf.pbc.df.ft_ao import ft_ao
     out = ft_ao(cell, Gv, shls_slice, b, gxyz, Gvbase, kpt, verbose)
-    return cp.asarray(out)
+    if out.flags.c_contiguous:
+        return cp.asarray(out)
+    else:
+        return cp.asarray(out, order='F')
 
-def _bas_overlap_mask(cell, bvkmesh_Ls, Ls, cutoff=None):
+def _bas_overlap_mask(cell, bvkmesh_Ls, Ls):
     '''integral screening mask for basis product between cell and supmol'''
     # consider only the most diffused component of a basis
-    exps, cs = _extract_pgto_params(cell, 'min')
+    exps, cs = extract_pgto_params(cell, 'diffused')
     ls = cell._bas[:,ANG_OF]
     bas_coords = cp.asarray(cell.atom_coords()[cell._bas[:,ATOM_OF]])
-
-    vol = cell.vol
-    if cutoff is None:
-        theta_ij = exps.min() / 2
-        lattice_sum_factor = max(2*np.pi*cell.rcut/(vol*theta_ij), 1)
-        cutoff = cell.precision/lattice_sum_factor * .1
-        logger.debug(cell, 'Set ft_ao cutoff to %g', cutoff)
 
     ls = cp.asarray(ls)
     exps = cp.asarray(exps)
     norm = cp.asarray(cs) * ((2*ls+1)/(4*np.pi))**.5
     aij = exps[:,None] + exps
-    theta = exps[:,None] * exps / aij
+    fi = exps[:,None] / aij
+    fj = exps[None,:] / aij
+    theta = exps[:,None] * fj
 
     Ls = cp.asarray(Ls)
     # rj format: (bvk_cell_id, bas_id, lattice_img_id)
@@ -100,16 +98,18 @@ def _bas_overlap_mask(cell, bvkmesh_Ls, Ls, cutoff=None):
 
     dr = cp.linalg.norm(rirj, axis=4)
 
-    dri = exps[None,None,:,None]/aij[:,None,:,None] * dr
-    drj = exps[:,None,None,None]/aij[:,None,:,None] * dr
+    dri = fj[:,None,:,None] * dr
+    drj = fi[:,None,:,None] * dr
     li = ls[:,None,None,None]
     lj = ls[None,None,:,None]
     fac_dri = (li * .5/aij[:,None,:,None] + dri**2) ** (li*.5)
     fac_drj = (lj * .5/aij[:,None,:,None] + drj**2) ** (lj*.5)
-    fl = 2*np.pi/vol * (dr/theta[:,None,:,None]) + 1.
+    rad = cell.vol**(-1./3) * dr + 1
+    surface = 4*np.pi * rad**2
+    fl = cp.where(surface > 1, surface, 1)
     fac_norm = norm[:,None]*norm * (np.pi/aij)**1.5
     ovlp = fac_norm[:,None,:,None] * cp.exp(-theta[:,None,:,None]*dr**2) * fac_dri * fac_drj * fl
-    return ovlp > cutoff
+    return ovlp > cell.precision
 
 def gen_ft_kernel(cell, kpts=None, verbose=None):
     r'''
@@ -132,11 +132,12 @@ class FTOpt:
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
         self.coeff = cp.asarray(coeff, dtype=np.complex128)
 
-        if kpts is not None and bvk_kmesh is None:
-            bvk_kmesh = kpts_to_kmesh(cell, kpts)
-
-        # create BVK super-cell
         if bvk_kmesh is None:
+            if kpts is None or is_zero(kpts):
+                bvk_kmesh = np.ones(3, dtype=int)
+            else:
+                bvk_kmesh = kpts_to_kmesh(cell, kpts)
+        if np.prod(bvk_kmesh) == 1:
             bvkcell = cell
         else:
             bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)
@@ -169,7 +170,7 @@ class FTOpt:
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
 
         if bvk_kmesh is None:
-            bvkmesh_Ls = cp.zeros(3)
+            bvkmesh_Ls = cp.zeros((1, 3))
         else:
             bvkmesh_Ls = cp.asarray(
                 k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True))
@@ -209,7 +210,7 @@ class FTOpt:
             conj_mapping = cp.asarray(conj_images_in_bvk_cell(bvk_kmesh), dtype=np.int32)
 
         init_constant(cell)
-        kern = libpbc.PBC_build_ft_ao
+        kern = libpbc.build_ft_ao
         cp.cuda.Stream.null.synchronize()
         log.timer_debug1('initialize ft_kern', *cput0)
 
@@ -270,7 +271,7 @@ class FTOpt:
                     cell._atm.ctypes, ctypes.c_int(cell.natm),
                     cell._bas.ctypes, ctypes.c_int(cell.nbas), cell._env.ctypes)
                 if err != 0:
-                    raise RuntimeError(f'PBC_build_ft_ao kernel for {ll_pattern} failed')
+                    raise RuntimeError(f'build_ft_ao kernel for {ll_pattern} failed')
                 if log.verbose >= logger.DEBUG1:
                     t1, t1p = log.timer_debug1(f'processing {ll_pattern}', *t1), t1
                     if ll_pattern not in timing_collection:
@@ -290,24 +291,25 @@ class FTOpt:
                 #ix, iy = cp.tril_indices(nao, -1)
                 #for k, ck in enumerate(conj_mapping):
                 #    out[iy,ix,ck] = out[ix,iy,k]
-                err = libpbc.PBC_ft_aopair_fill_triu(
+                err = libpbc.ft_aopair_fill_triu(
                     ctypes.cast(out.data.ptr, ctypes.c_void_p),
                     ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(nao), ctypes.c_int(bvk_ncells), ctypes.c_int(nGv))
                 if err != 0:
-                    raise RuntimeError('PBC_ft_aopair_fill_triu kernel failed')
+                    raise RuntimeError('ft_aopair_fill_triu kernel failed')
 
             log.debug1('transform BvK-cell to k-points')
-            if kptjs is not None:
+            gamma_point_only = kptjs is None or is_zero(kptjs)
+            if not gamma_point_only:
                 kptjs = cp.asarray(kptjs, order='C').reshape(-1,3)
                 expLk = cp.exp(1j*cp.dot(bvkmesh_Ls, kptjs.T))
-                out = contract('Lk,LpqG->kGpq', expLk, out)
+                out = contract('Lk,LpqG->kpqG', expLk, out)
 
             if transform_ao:
                 log.debug1('transform basis')
                 #:out = einsum('pqLG,pi,qj->LGij', out, coeff, coeff)
-                out = contract('kGpq,qj->kGpj', out, coeff)
-                out = contract('kGpj,pi->kGij', out, coeff)
+                out = contract('kpqG,pi->kiqG', out, coeff)
+                out = contract('kiqG,qj->kijG', out, coeff)
 
             log.timer('ft_aopair', *cput0)
             return out
@@ -323,7 +325,7 @@ class FTOpt:
             avail_mem = get_avail_mem()
 
             if 2*out_size < avail_mem * .8:
-                return _ft_sub(Gv, q, kptjs, transform_ao)
+                return _ft_sub(Gv, q, kptjs, transform_ao).transpose(0,3,1,2)
 
             elif out_size < avail_mem * .8:
                 if kptjs is None:
@@ -332,16 +334,16 @@ class FTOpt:
                     kptjs = kptjs.reshape(-1, 3)
                     nkpts = len(kptjs)
                 if transform_ao:
-                    out = cp.empty((nkpts, nGv, nao_orig, nao_orig), dtype=np.complex128)
+                    out = cp.empty((nkpts, nao_orig, nao_orig, nGv), dtype=np.complex128)
                 else:
-                    out = cp.empty((nkpts, nGv, nao, nao), dtype=np.complex128)
+                    out = cp.empty((nkpts, nao, nao, nGv), dtype=np.complex128)
                 Gv_block = int((avail_mem * .95 - out_size) / (2*nao**2*bvk_ncells*16))
                 Gv_block &= 0xfffffc
                 if Gv_block >= 4:
                     logger.debug1(cell, 'Processing ft_kernel in sub-blocks, Gv_block = %d', Gv_block)
                     for p0, p1 in lib.prange(0, nGv, Gv_block):
-                        out[:,p0:p1] = _ft_sub(Gv[p0:p1], q, kptjs, transform_ao)
-                    return out
+                        out[:,:,:,p0:p1] = _ft_sub(Gv[p0:p1], q, kptjs, transform_ao)
+                    return out.transpose(0,3,1,2)
 
             raise RuntimeError('Not enough GPU memory. '
                                f'Available: {avail_mem*1e-9:.2f} GB. '
@@ -365,7 +367,7 @@ class AFTIntEnvVars(ctypes.Structure):
 
 def init_constant(cell):
     g_idx, offsets = g_pair_idx()
-    err = libpbc.PBC_FT_init_constant(
+    err = libpbc.init_constant(
         g_idx.ctypes, offsets.ctypes, cell._env.ctypes, ctypes.c_int(cell._env.size),
         ctypes.c_int(SHM_SIZE))
     if err != 0:

@@ -26,11 +26,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
 from pyscf import lib
 from pyscf.scf import _vhf
-from pyscf import __config__
 from gpu4pyscf.lib.cupy_helper import (load_library, condense, sandwich_dot, transpose_sum,
                                        reduce_to_device)
+from gpu4pyscf.__config__ import _streams, num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.gto.mole import group_basis
@@ -55,9 +54,9 @@ UNROLL_LMAX = ctypes.c_int.in_dll(libvhf_rys, 'rys_jk_unrolled_lmax').value
 UNROLL_NFMAX = ctypes.c_int.in_dll(libvhf_rys, 'rys_jk_unrolled_max_nf').value
 UNROLL_J_LMAX = ctypes.c_int.in_dll(libvhf_rys, 'rys_j_unrolled_lmax').value
 UNROLL_J_MAX_ORDER = ctypes.c_int.in_dll(libvhf_rys, 'rys_j_unrolled_max_order').value
+SHM_SIZE = shm_size - 1024
+del shm_size
 GOUT_WIDTH = 42
-SHM_SIZE = getattr(__config__, 'GPU_SHM_SIZE',
-                   int(gpu_specs['sharedMemPerBlockOptin']//9)*8)
 THREADS = 256
 GROUP_SIZE = 256
 
