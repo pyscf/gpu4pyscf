@@ -21,10 +21,15 @@
 #include <assert.h>
 #include <cuda_runtime.h>
 #include "contract_rho.cuh"
-// TODO: improve this?
+
+#define THREADS        32
+#define BLOCK_DIM   32
+
 __global__
-void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, int nao)
+void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, double alpha, double beta,
+                            int ngrids, int nao)
 {
+    // rho = alpha * rho + beta * <bra, ket>
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     const bool active = grid_id < ngrids;
     size_t Ngrids = ngrids;
@@ -49,7 +54,7 @@ void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, 
     if (blockDim.y >= 2  && iy < 1)  buf[ixy] += buf[ixy + BLKSIZEX * 1];  __syncthreads();
 
     if (iy == 0 && active) {
-        rho[grid_id] = buf[ix];
+        rho[grid_id] = alpha * rho[grid_id] + beta * buf[ix];
     }
 }
 
@@ -211,7 +216,7 @@ void GDFTcontract_rho_mgga_kernel(double *rho, double *bra, double *ket, int ngr
 }
 
 __global__
-void GDFTscale_ao_kernel(double *out, double *ket, double *wv,
+void GDFTscale_ao_kernel(double *out, const double *ket, const double *wv,
                          int ngrids, int nao, int nvar)
 {
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -276,11 +281,12 @@ void GDFT_make_dR_dao_w_kernel(double *out, double *ket, double *wv,
 
 extern "C"{
 __host__
-int GDFTcontract_rho(cudaStream_t stream, double *rho, double *bra, double *ket, int ngrids, int nao)
+int GDFTcontract_rho(cudaStream_t stream, double *rho, double *bra, double *ket, double alpha, double beta,
+                    int ngrids, int nao)
 {
     dim3 threads(BLKSIZEX, BLKSIZEY);
     dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX);
-    GDFTcontract_rho_kernel<<<blocks, threads, 0, stream>>>(rho, bra, ket, ngrids, nao);
+    GDFTcontract_rho_kernel<<<blocks, threads, 0, stream>>>(rho, bra, ket, alpha, beta, ngrids, nao);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of GDFTcontract_rho: %s\n", cudaGetErrorString(err));
@@ -342,7 +348,7 @@ int GDFT_make_dR_dao_w(cudaStream_t stream, double *out, double *ket, double *wv
     return 0;
 }
 
-int GDFTscale_ao(cudaStream_t stream, double *out, double *ket, double *wv,
+int GDFTscale_ao(cudaStream_t stream, double *out, const double *ket, const double *wv,
                  int ngrids, int nao, int nvar)
 {
     dim3 threads(BLKSIZEX, BLKSIZEY);

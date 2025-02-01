@@ -210,6 +210,50 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
         rho[tau_idx] *= .5
     return rho
 
+def eval_rho2_fast(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
+              with_lapl=False, verbose=None, out=None):
+    xctype = xctype.upper()
+    if xctype == 'LDA' or xctype == 'HF':
+        _, ngrids = ao.shape
+    else:
+        _, ngrids = ao[0].shape
+
+    cpos = (mo_coeff * mo_occ**0.5)[:,mo_occ>0]
+
+    nao, nocc = cpos.shape
+    buf1 = cupy.empty([nocc, ngrids])
+    buf2 = cupy.empty([nocc, ngrids])
+
+    cublas_handle = cupy.cuda.device.get_cublas_handle()
+    stream = cupy.cuda.get_current_stream()
+    if xctype in ("LDA", "HF"):
+        xctype_code = 0
+        rho = cupy.empty([ngrids])
+    elif xctype in ("GGA", "NLC"):
+        xctype_code = 1
+        rho = cupy.empty([4, ngrids])
+    else:
+        xctype_code = 2
+        rho = cupy.empty([5, ngrids])
+
+    assert ao.flags.c_contiguous and cpos.flags.c_contiguous
+
+    err = libgdft.GDFTeval_rho2(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(cublas_handle, ctypes.c_void_p),
+        ctypes.cast(ao.data.ptr, ctypes.c_void_p),
+        ctypes.cast(cpos.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids), ctypes.c_int(nocc), ctypes.c_int(nao),
+        ctypes.c_int(xctype_code),
+        ctypes.cast(buf1.data.ptr, ctypes.c_void_p),
+        ctypes.cast(buf2.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho.data.ptr, ctypes.c_void_p))
+
+    if err != 0:
+        raise RuntimeError('CUDA Error in GDFTeval_rho2')
+
+    return rho
+
 def eval_rho3(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
               with_lapl=False, verbose=None):
     xctype = xctype.upper()
@@ -295,6 +339,38 @@ def eval_rho4(mol, ao, mo0, mo1, non0tab=None, xctype='LDA', hermi=0,
         rho *= 2.
     t0 = log.timer_debug2('contract rho', *t0)
     return rho
+
+def eval_vxc(mol, ao, wv, idx, vmat, xctype_code):
+    nao = mol.nao
+    wv = cupy.asarray(wv, order='C')
+    assert ao.flags['C_CONTIGUOUS']
+    assert vmat.flags['C_CONTIGUOUS']
+    assert idx.dtype == np.int32
+
+    ngrids, nao_mask = ao.shape[-1], ao.shape[-2]
+    cublas_handle = cupy.cuda.device.get_cublas_handle()
+    stream = cupy.cuda.get_current_stream()
+    buf1 = cupy.empty([nao_mask, ngrids])
+    buf2 = cupy.empty([nao_mask, nao_mask])
+
+    err = libgdft.GDFTeval_vxc(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(cublas_handle, ctypes.c_void_p),
+        ctypes.c_int(xctype_code),
+        ctypes.cast(ao.data.ptr, ctypes.c_void_p),
+        ctypes.cast(wv.data.ptr, ctypes.c_void_p),
+        ctypes.cast(buf1.data.ptr, ctypes.c_void_p),
+        ctypes.cast(buf2.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+        ctypes.c_int(nao_mask),
+        ctypes.c_int(nao),
+        ctypes.cast(idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(vmat.data.ptr, ctypes.c_void_p),
+    )
+
+    if err != 0:
+        raise RuntimeError('CUDA Error in GDFTeval_vxc')
+    return
 
 def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     thresh=1e-10
@@ -427,7 +503,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             rho_tot = cupy.empty([nset,4,ngrids_local])
         else:
             rho_tot = cupy.empty([nset,5,ngrids_local])
-        
+
         p0 = p1 = 0
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                      max_memory=None,
@@ -443,11 +519,11 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 else:
                     assert hermi == 1
                     mo_coeff_mask = mo_coeff[idx,:]
-                    rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ,
-                                                None, xctype, with_lapl)
+                    rho_tot[i,:,p0:p1] = eval_rho2_fast(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ,
+                                                        None, xctype, with_lapl)
             p0 = p1
         t0 = log.timer_debug1(f'eval rho on Device {device_id}', *t0)
-        
+
         # libxc calls are still running on default stream
         nelec = cupy.zeros(nset)
         excsum = cupy.zeros(nset)
@@ -466,6 +542,13 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 wv[i][[0,4]] *= .5
         t0 = log.timer_debug1(f'eval vxc on Device {device_id}', *t0)
 
+        if xctype in ("LDA", "HF"):
+            xctype_code = 0
+        elif xctype in ("GGA", "NLC"):
+            xctype_code = 1
+        else:
+            xctype_code = 2
+
         vmat = cupy.zeros((nset, nao, nao))
         p0 = p1 = 0
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
@@ -473,6 +556,8 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                                                      grid_range=(grid_start, grid_end)):
             p1 = p0 + weight.size
             for i in range(nset):
+                eval_vxc(_sorted_mol, ao_mask, wv[i][:,p0:p1], idx, vmat[i], xctype_code)
+                '''
                 if xctype == 'LDA':
                     aow = _scale_ao(ao_mask, wv[i][0,p0:p1])
                     add_sparse(vmat[i], ao_mask.dot(aow.T), idx)
@@ -490,6 +575,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     pass
                 else:
                     raise NotImplementedError(f'numint.nr_rks for functional {xc_code}')
+                '''
             p0 = p1
         t0 = log.timer_debug1(f'eval integration on {device_id}', *t0)
     return vmat, nelec.get(), excsum.get()
@@ -1143,15 +1229,15 @@ def nr_rks_fxc_st(ni, mol, grids, xc_code, dm0=None, dms_alpha=None,
 def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
                      verbose=None, hermi=1, device_id=0):
     with cupy.cuda.Device(device_id), _streams[device_id]:
-        if dms is not None: 
+        if dms is not None:
             dma, dmb = dms
             dma = cupy.asarray(dma)
             dmb = cupy.asarray(dmb)
-        if mo1 is not None: 
+        if mo1 is not None:
             mo1a, mo1b = mo1
             mo1a = cupy.asarray(mo1a)
             mo1b = cupy.asarray(mo1b)
-        if occ_coeff is not None: 
+        if occ_coeff is not None:
             occ_coeff_a, occ_coeff_b = occ_coeff
             occ_coeff_a = cupy.asarray(occ_coeff_a)
             occ_coeff_b = cupy.asarray(occ_coeff_b)
@@ -1183,10 +1269,10 @@ def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
 
         p0 = p1 = grid_start
         t1 = t0 = log.init_timer()
-        for ao, mask, weights, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, 
+        for ao, mask, weights, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                   max_memory=None,
                                                   grid_range=(grid_start, grid_end)):
-            
+
             t0 = log.init_timer()
             p0, p1 = p1, p1+len(weights)
             # precompute fxc_w
@@ -1250,7 +1336,7 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     if opt is None or mol not in [opt.mol, opt._sorted_mol]:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
-    
+
     nao, nao0 = opt.coeff.shape
     dma, dmb = dms
     dm_shape = dma.shape
@@ -1280,13 +1366,13 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 ni, mol, grids, xc_code, fxc, (dma, dmb), mo1, occ_coeff,
                 verbose=log.verbose, hermi=hermi, device_id=device_id)
             futures.append(future)
-    vmata_dist = [] 
+    vmata_dist = []
     vmatb_dist = []
     for future in futures:
         vmata, vmatb = future.result()
         vmata_dist.append(vmata)
         vmatb_dist.append(vmatb)
-    
+
     vmata = reduce_to_device(vmata_dist, inplace=True)
     vmatb = reduce_to_device(vmatb_dist, inplace=True)
 
@@ -1867,23 +1953,28 @@ def _make_pairs2shls_idx(pair_mask, l_bas_loc, hermi=0):
             pair2bra + pair2ket).astype(np.int32).reshape(2,-1)
     return bas_pair2shls, bas_pairs_locs
 
-def _contract_rho(bra, ket, rho=None):
+def _contract_rho(bra, ket, rho=None, alpha=0.0, beta=1.0):
+    """ rho = alpha * rho + beta * contract('ig,ig->g', bra, ket)
+    """
     if bra.flags.c_contiguous and ket.flags.c_contiguous:
         assert bra.shape == ket.shape
         nao, ngrids = bra.shape
         if rho is None:
             rho = cupy.empty(ngrids)
         stream = cupy.cuda.get_current_stream()
+
         err = libgdft.GDFTcontract_rho(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(rho.data.ptr, ctypes.c_void_p),
             ctypes.cast(bra.data.ptr, ctypes.c_void_p),
             ctypes.cast(ket.data.ptr, ctypes.c_void_p),
+            ctypes.c_double(alpha), ctypes.c_double(beta),
             ctypes.c_int(ngrids), ctypes.c_int(nao))
         if err != 0:
-            raise RuntimeError('CUDA Error')
+            raise RuntimeError('CUDA Error in _contract_rho kernel')
     else:
-        rho = contract('ig,ig->g', bra, ket)
+        raise NotImplementedError
+        #rho = contract('ig,ig->g', bra, ket)
     return rho
 
 def _contract_rho1(bra, ket, rho=None):
@@ -1895,6 +1986,8 @@ def _contract_rho1(bra, ket, rho=None):
     if rho is None:
         rho = cupy.empty([nvar, ngrids])
 
+    alpha = 0.0
+    beta = 1.0
     for i in range(nvar):
         stream = cupy.cuda.get_current_stream()
         err = libgdft.GDFTcontract_rho(
@@ -1902,9 +1995,10 @@ def _contract_rho1(bra, ket, rho=None):
             ctypes.cast(rho[i].data.ptr, ctypes.c_void_p),
             ctypes.cast(bra[i].data.ptr, ctypes.c_void_p),
             ctypes.cast(ket.data.ptr, ctypes.c_void_p),
+            ctypes.c_double(alpha), ctypes.c_double(beta),
             ctypes.c_int(ngrids), ctypes.c_int(nao))
         if err != 0:
-            raise RuntimeError('CUDA Error')
+            raise RuntimeError('CUDA Error in GDFTcontract_rho')
     return rho
 
 def _contract_rho_gga(bra, ket, rho=None):
@@ -1922,7 +2016,7 @@ def _contract_rho_gga(bra, ket, rho=None):
         ctypes.cast(ket.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids), ctypes.c_int(nao))
     if err != 0:
-        raise RuntimeError('CUDA Error')
+        raise RuntimeError('CUDA Error in GDFTcontract_rho_gga')
     return rho
 
 def _contract_rho_mgga(bra, ket, rho=None):
@@ -1940,7 +2034,7 @@ def _contract_rho_mgga(bra, ket, rho=None):
         ctypes.cast(ket.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids), ctypes.c_int(nao))
     if err != 0:
-        raise RuntimeError('CUDA Error')
+        raise RuntimeError('CUDA Error in GDFTcontract_rho_mgga')
     return rho
 
 def _dot_ao_dm(mol, ao, dm, non0tab, shls_slice, ao_loc, out=None):
