@@ -1,1 +1,1 @@
-../gvhf-rys/rys_roots_dat.cu
+#include "gvhf-rys/rys_roots_dat.cu"
