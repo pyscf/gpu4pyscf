@@ -5771,7 +5771,7 @@ int rys_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     int ll = bounds->ll;
     int lij = li + lj;
     int lkl = lk + ll;
-    int threads = scheme[0] * scheme[1];
+    int threads = 256;
     int nroots = bounds->nroots;
     int nf3_ij = (lij+1)*(lij+2)*(lij+3)/6;
     int iprim = bounds->iprim;

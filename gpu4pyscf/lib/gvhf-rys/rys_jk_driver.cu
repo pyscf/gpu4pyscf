@@ -113,16 +113,16 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
 
     if (!rys_j_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
-#if CUDA_VERSION >= 12040
-        quartets_per_block *= 2;
-#endif
         int gout_stride = scheme[1];
+#if CUDA_VERSION >= 12040
+        gout_stride *= 2;
+#endif
         int with_gout = scheme[2];
         dim3 threads(quartets_per_block, gout_stride);
         int nmax = MAX(lij, lkl);
         int nf3_ij = (lij+1)*(lij+2)*(lij+3)/6;
         int nf3_kl = (lkl+1)*(lkl+2)*(lkl+3)/6;
-        int buflen = (nroots*2 + g_size*3 + iprim*jprim*4) * quartets_per_block;
+        int buflen = (nroots*2 + g_size*3 + iprim*jprim + 9) * quartets_per_block;
         if (with_gout) {
             buflen += nf3_ij*nf3_kl * quartets_per_block;
             rys_j_with_gout_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
@@ -184,14 +184,14 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
     JKMatrix jk = {vj, vk, dm, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(uint32_t));
 
-    if (order <= 0) {
+    if (order == 0) {
         os_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega);
     } else if (!rys_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;// + ij_prims*4*TILE2;
+        int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;// + ij_prims*4*TILE2;
         rys_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();

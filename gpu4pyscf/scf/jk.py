@@ -394,7 +394,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
                         mol._atm.ctypes, ctypes.c_int(mol.natm),
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
                     if err != 0:
-                        raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                        raise RuntimeError(f'RYS_build_j kernel for {llll} failed')
                     if log.verbose >= logger.DEBUG1:
                         t1, t1p = log.timer_debug1(f'processing {llll}, tasks = {info[1]}', *t1), t1
                         if llll not in timing_collection:
@@ -667,7 +667,7 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nf3_kl = (lkl+1)*(lkl+2)*(lkl+3)//6
     nroots = order // 2 + 1
 
-    unit = nroots*2 + g_size*3 + ij_prims*4
+    unit = nroots*2 + g_size*3 + ij_prims + 9
     dm_cache_size = nf3_ij + nf3_kl*2 + (lij+1)*(lkl+1)*(nmax+2)
     gout_size = nf3_ij * nf3_kl
     if dm_cache_size < gout_size:
@@ -683,8 +683,6 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     counts = shm_size // (unit*8)
     n = min(THREADS, _nearest_power2(counts))
     gout_stride = THREADS // n
-    if CUDA_VERSION >= 12040:
-        gout_stride *= 2
     return n, gout_stride, with_gout
 
 def _nearest_power2(n, return_leq=True):
