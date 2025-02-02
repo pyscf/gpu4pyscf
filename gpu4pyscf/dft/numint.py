@@ -211,12 +211,9 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
     return rho
 
 def eval_rho2_fast(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
-              with_lapl=False, verbose=None, out=None):
+                   with_lapl=False, verbose=None, out=None):
     xctype = xctype.upper()
-    if xctype == 'LDA' or xctype == 'HF':
-        _, ngrids = ao.shape
-    else:
-        _, ngrids = ao[0].shape
+    ngrids = ao.shape[-1]
 
     cpos = (mo_coeff * mo_occ**0.5)[:,mo_occ>0]
 
@@ -564,25 +561,6 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             p1 = p0 + weight.size
             for i in range(nset):
                 eval_vxc(_sorted_mol, ao_mask, wv[i][:,p0:p1], idx, vmat[i], xctype_code)
-                '''
-                if xctype == 'LDA':
-                    aow = _scale_ao(ao_mask, wv[i][0,p0:p1])
-                    add_sparse(vmat[i], ao_mask.dot(aow.T), idx)
-                elif xctype == 'GGA':
-                    aow = _scale_ao(ao_mask, wv[i][:,p0:p1])
-                    add_sparse(vmat[i], ao_mask[0].dot(aow.T), idx)
-                elif xctype == 'NLC':
-                    raise NotImplementedError('NLC')
-                elif xctype == 'MGGA':
-                    aow = _scale_ao(ao_mask, wv[i][:4,p0:p1])
-                    vtmp = ao_mask[0].dot(aow.T)
-                    vtmp+= _tau_dot(ao_mask, ao_mask, wv[i][4,p0:p1])
-                    add_sparse(vmat[i], vtmp, idx)
-                elif xctype == 'HF':
-                    pass
-                else:
-                    raise NotImplementedError(f'numint.nr_rks for functional {xc_code}')
-                '''
             p0 = p1
         t0 = log.timer_debug1(f'eval integration on {device_id}', *t0)
     return vmat, nelec.get(), excsum.get()
@@ -1764,9 +1742,9 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 ni.non0ao_idx[lookup_key] = _sparse_index(_sorted_mol, coords, opt.l_ctr_offsets)
 
             pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[lookup_key]
-            if len(idx) == 0: 
+            if len(idx) == 0:
                 continue
-            
+
             ao_mask = eval_ao(
                 _sorted_mol, coords, deriv,
                 nao_slice=len(idx),
