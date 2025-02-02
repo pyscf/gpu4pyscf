@@ -272,7 +272,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     ao_deriv = 2
     vvrho = []
-    for ao_mask, mask, weight, coords \
+    for ao_mask, mask, weight, _ \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         mo_coeff_mask = mo_coeff[mask]
         #rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
@@ -286,7 +286,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     vmat = cupy.zeros((3,nao,nao))
     p1 = 0
-    for ao_mask, mask, weight, coords \
+    for ao_mask, mask, weight, _ \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
         p0, p1 = p1, p1 + weight.size
         wv = vv_vxc[:,p0:p1] * weight

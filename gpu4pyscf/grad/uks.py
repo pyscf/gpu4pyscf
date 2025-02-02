@@ -388,7 +388,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
 
     ao_deriv = 2
     vvrho = []
-    for ao_mask, mask, weight, coords \
+    for ao_mask, mask, weight, _ \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         mo_coeff_mask_0 = mo_coeff_0[mask]
         mo_coeff_mask_1 = mo_coeff_1[mask]
@@ -403,7 +403,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
 
     vmat = cupy.zeros((3,nao,nao))
     p1 = 0
-    for ao_mask, mask, weight, coords \
+    for ao_mask, mask, weight, _ \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
         p0, p1 = p1, p1 + weight.size
         wv = vv_vxc[:,p0:p1] * weight

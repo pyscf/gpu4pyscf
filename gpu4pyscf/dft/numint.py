@@ -331,8 +331,8 @@ def eval_rho4(mol, ao, mo0, mo1, non0tab=None, xctype='LDA', hermi=0,
     t0 = log.timer_debug2('contract rho', *t0)
     return rho
 
-def eval_vxc(mol, ao, wv, idx, vmat, xctype_code):
-    nao = mol.nao
+def eval_vxc(ao, wv, idx, vmat, xctype_code):
+    nao = vmat.shape[-1]
     wv = cupy.asarray(wv, order='C')
     assert ao.flags['C_CONTIGUOUS']
     assert vmat.flags['C_CONTIGUOUS']
@@ -556,7 +556,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                                                      max_memory=None,
                                                      grid_range=(grid_start, grid_end)):
             p1 = p0 + weight.size
-            eval_vxc(_sorted_mol, ao_mask, wv[:,:,p0:p1], idx, vmat, xctype_code)
+            eval_vxc(ao_mask, wv[:,:,p0:p1], idx, vmat, xctype_code)
             p0 = p1
         t0 = log.timer_debug1(f'eval integration on {device_id}', *t0)
     return vmat, nelec.get(), excsum.get()
@@ -926,8 +926,8 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 else:
                     raise NotImplementedError(f'numint.nr_uks for functional {xc_code}')
 
-                eval_vxc(_sorted_mol, ao_mask, wv[0], idx, vmata[i], xctype_code)
-                eval_vxc(_sorted_mol, ao_mask, wv[1], idx, vmatb[i], xctype_code)
+                eval_vxc(ao_mask, wv[0], idx, vmata[i], xctype_code)
+                eval_vxc(ao_mask, wv[1], idx, vmatb[i], xctype_code)
 
                 if xctype == "LDA":
                     den_a = rho_a * weight
@@ -1135,7 +1135,7 @@ def _nr_rks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
                 wv[:,0] *= .5
                 wv[:,4] *= .5
 
-            eval_vxc(_sorted_mol, ao, wv, mask, vmat, xctype_code)
+            eval_vxc(ao, wv, mask, vmat, xctype_code)
 
             t1 = log.timer_debug2('integration', *t1)
             ao = rho1 = None
@@ -1223,6 +1223,8 @@ def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
         assert isinstance(verbose, int)
         log = logger.new_logger(mol, verbose)
         xctype = ni._xc_type(xc_code)
+        if xctype == 'NLC':
+            raise NotImplementedError('NLC')
         opt = getattr(ni, 'gdftopt', None)
 
         _sorted_mol = opt.mol
@@ -1291,14 +1293,12 @@ def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
                 if xctype == 'GGA':
                     wv_a[0] *= .5 # for transpose_sum at the end
                     wv_b[0] *= .5
-                #elif xctype == 'NLC':
-                #    raise NotImplementedError('NLC')
                 if xctype == 'MGGA':
                     wv_a[[0,4]] *= .5 # for transpose_sum at the end
                     wv_b[[0,4]] *= .5
 
-                eval_vxc(_sorted_mol, ao, wv_a, mask, vmata[i], xctype_code)
-                eval_vxc(_sorted_mol, ao, wv_b, mask, vmatb[i], xctype_code)
+                eval_vxc(ao, wv_a, mask, vmata[i], xctype_code)
+                eval_vxc(ao, wv_b, mask, vmatb[i], xctype_code)
 
             t1 = log.timer_debug2('integration', *t1)
         t0 = log.timer_debug1('vxc', *t0)
@@ -1459,9 +1459,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         p0, p1 = p1, p1 + weight.size
         wv = vv_vxc[:,p0:p1] * weight
         wv[0] *= .5
-        #aow = _scale_ao(ao, wv)
-        #add_sparse(vmat, ao[0].dot(aow.T), mask)
-        eval_vxc(_sorted_mol, ao, wv, mask, vmat, 0)
+        eval_vxc(ao, wv, mask, vmat, 0)
     t1 = log.timer_debug1('integration', *t1)
 
     transpose_sum(vmat)
@@ -1518,7 +1516,7 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
             #rhoa_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype)
             #rhob_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[1], mo_occ[1], None, xctype)
             rhoa_slice = eval_rho2_fast(ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype)
-            rhob_slice = eval_rho2_fast(ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype)
+            rhob_slice = eval_rho2_fast(ao_mask, mo_coeff_mask[1], mo_occ[1], None, xctype)
             rhoa.append(rhoa_slice)
             rhob.append(rhob_slice)
             t1 = log.timer_debug2('eval rho in fxc', *t1)
