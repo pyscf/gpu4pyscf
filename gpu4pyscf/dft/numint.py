@@ -509,7 +509,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                      max_memory=None,
                                                      grid_range=(grid_start, grid_end)):
-            p1 = p0 + weight.size
+            p0, p1 = p1, p1 + weight.size
             weights[p0:p1] = weight
             for i in range(nset):
                 # If AO is sparse enough, use density matrix to calculate rho
@@ -522,7 +522,6 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     mo_coeff_mask = mo_coeff[idx,:]
                     rho_tot[i,:,p0:p1] = eval_rho2_fast(ao_mask, mo_coeff_mask, mo_occ,
                                                         None, xctype, with_lapl)
-            p0 = p1
         t0 = log.timer_debug1(f'eval rho on Device {device_id}', *t0)
 
         # libxc calls are still running on default stream
@@ -555,9 +554,8 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                      max_memory=None,
                                                      grid_range=(grid_start, grid_end)):
-            p1 = p0 + weight.size
+            p0, p1 = p1, p1 + weight.size
             eval_vxc(ao_mask, wv[:,:,p0:p1], idx, vmat, xctype_code)
-            p0 = p1
         t0 = log.timer_debug1(f'eval integration on {device_id}', *t0)
     return vmat, nelec.get(), excsum.get()
 
@@ -751,7 +749,7 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     t1 = t0 = log.init_timer()
     for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                  max_memory=max_memory):
-        p1 = p0 + weight.size
+        p0, p1 = p1, p1 + weight.size
         for i in range(nset):
             if mo_coeff is None:
                 rho_tot[i,:,p0:p1] = eval_rho(
@@ -762,7 +760,6 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 mo_coeff_mask = mo_coeff[idx,:]
                 rho_tot[i,:,p0:p1] = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask,
                                                mo_occ, None, xctype)
-        p0 = p1
         t1 = log.timer_debug2('eval rho slice', *t1)
     t0 = log.timer_debug1('eval rho', *t0)
 
@@ -1424,13 +1421,12 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     ao_deriv = 1
     vvrho = []
-    for ao, idx, weight, coords \
+    for ao, idx, weight, _ \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         if mo_coeff is None:
             rho = eval_rho(_sorted_mol, ao, dms[0][idx[:,None],idx], xctype='GGA', hermi=1)
         else:
             mo_coeff_mask = mo_coeff[idx,:]
-            #rho = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, 'GGA')
             rho = eval_rho2_fast(ao, mo_coeff_mask, mo_occ, None, 'GGA')
         vvrho.append(rho)
 
@@ -1454,7 +1450,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     vmat = cupy.zeros((nao,nao))
     p1 = 0
-    for ao, mask, weight, coords \
+    for ao, mask, weight, _ \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         p0, p1 = p1, p1 + weight.size
         wv = vv_vxc[:,p0:p1] * weight
@@ -1493,9 +1489,8 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
         rho = []
         t1 = t0 = log.init_timer()
         for ao_mask, idx, _, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
-                                                     max_memory=max_memory):
+                                                max_memory=max_memory):
             mo_coeff_mask = mo_coeff[idx,:]
-            #rho_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype)
             rho_slice = eval_rho2_fast(ao_mask, mo_coeff_mask, mo_occ, None, xctype)
             rho.append(rho_slice)
             t1 = log.timer_debug2('eval rho slice', *t1)
@@ -1513,8 +1508,6 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
         for ao_mask, idx, _, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                      max_memory=max_memory):
             mo_coeff_mask = mo_coeff[:,idx,:]
-            #rhoa_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype)
-            #rhob_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[1], mo_occ[1], None, xctype)
             rhoa_slice = eval_rho2_fast(ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype)
             rhob_slice = eval_rho2_fast(ao_mask, mo_coeff_mask[1], mo_occ[1], None, xctype)
             rhoa.append(rhoa_slice)
