@@ -27,7 +27,7 @@ from gpu4pyscf.df.grad.jk import get_rhojk, get_grad_vjk
 FREE_CUPY_CACHE = True
 BINSIZE = 128
 
-def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, 
+def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
            omega=None, mo_coeff=None, mo_occ=None, dm2 = None):
     '''
     Computes the first-order derivatives of the energy contributions from
@@ -143,11 +143,11 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
 
     nao_cart = intopt._sorted_mol.nao
     block_size = with_df.get_blksize(nao=nao_cart)
-    
+
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
     intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False,
                  group_size_aux=block_size)#, group_size=block_size)
-    
+
     if not mol.cart:
         # sph2cart for ao
         cart2sph = intopt.cart2sph
@@ -168,7 +168,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
     with_df._cderi = None  # release GPU memory
     vj, vk, vjaux, vkaux = get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbo_cart,
                                         with_j=with_j, with_k=with_k, omega=omega)
-    
+
     # NOTE: vj and vk are still in cartesian
     _sorted_mol = intopt._sorted_mol
     natm = _sorted_mol.natm

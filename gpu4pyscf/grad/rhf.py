@@ -127,7 +127,7 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
     if vhfopt is None:
         # Small group size for load balance
         group_size = None
-        if _num_devices > 1: 
+        if _num_devices > 1:
             group_size = jk.GROUP_SIZE
         vhfopt = _VHFOpt(mol).build(group_size=group_size)
 

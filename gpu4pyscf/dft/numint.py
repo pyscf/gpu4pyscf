@@ -1451,7 +1451,6 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
     t1 = log.timer_debug1('transform vxc', *t1)
 
-    xctype_code = 1
     vmat = cupy.zeros((nao,nao))
     p1 = 0
     for ao, mask, weight, coords \
@@ -1461,7 +1460,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         wv[0] *= .5
         #aow = _scale_ao(ao, wv)
         #add_sparse(vmat, ao[0].dot(aow.T), mask)
-        eval_vxc(_sorted_mol, ao, wv, mask, vmat, xctype_code)
+        eval_vxc(_sorted_mol, ao, wv, mask, vmat, 0)
     t1 = log.timer_debug1('integration', *t1)
 
     transpose_sum(vmat)
@@ -2122,7 +2121,7 @@ def _scale_ao(ao, wv, out=None):
         ctypes.cast(wv.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids), ctypes.c_int(nao), ctypes.c_int(nvar))
     if err != 0:
-        raise RuntimeError('CUDA Error')
+        raise RuntimeError('CUDA Error in GDFTscale_ao')
     return out
 
 def _tau_dot(bra, ket, wv):
