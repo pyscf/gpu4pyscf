@@ -210,7 +210,7 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
         rho[tau_idx] *= .5
     return rho
 
-def eval_rho2_fast(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
+def eval_rho2_fast(ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
                    with_lapl=False, verbose=None, out=None):
     xctype = xctype.upper()
     ngrids = ao.shape[-1]
@@ -254,10 +254,7 @@ def eval_rho2_fast(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
 def eval_rho3(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
               with_lapl=False, verbose=None):
     xctype = xctype.upper()
-    if xctype == 'LDA' or xctype == 'HF':
-        _, ngrids = ao.shape
-    else:
-        _, ngrids = ao[0].shape
+    ngrids = ao.shape[-1]
     shls_slice = (0, mol.nbas)
     ao_loc = None #mol.ao_loc_nr()
 
@@ -306,10 +303,7 @@ def eval_rho4(mol, ao, mo0, mo1, non0tab=None, xctype='LDA', hermi=0,
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
     xctype = xctype.upper()
-    if xctype == 'LDA' or xctype == 'HF':
-        _, ngrids = ao.shape
-    else:
-        _, ngrids = ao[0].shape
+    ngrids = ao.shape[-1]
 
     na = mo1.shape[0]
     if xctype == 'LDA' or xctype == 'HF':
@@ -456,7 +450,7 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
                         ctypes.c_int(coords.shape[0]))
 
     if err != 0:
-        raise RuntimeError('CUDA Error')
+        raise RuntimeError('CUDA Error in VXC_vv10nlc kernel')
 
     #exc is multiplied by Rho later
     exc[threshind] = Beta+0.5*F
@@ -523,7 +517,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 else:
                     assert hermi == 1
                     mo_coeff_mask = mo_coeff[idx,:]
-                    rho_tot[i,:,p0:p1] = eval_rho2_fast(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ,
+                    rho_tot[i,:,p0:p1] = eval_rho2_fast(ao_mask, mo_coeff_mask, mo_occ,
                                                         None, xctype, with_lapl)
             p0 = p1
         t0 = log.timer_debug1(f'eval rho on Device {device_id}', *t0)
@@ -887,6 +881,13 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         else:
             ao_deriv = 1
 
+        if xctype in ("LDA", "HF"):
+            xctype_code = 0
+        elif xctype in ("GGA", "NLC"):
+            xctype_code = 1
+        else:
+            xctype_code = 2
+
         ngrids_glob = grids.coords.shape[0]
         grid_start, grid_end = gen_grid_range(ngrids_glob, device_id)
         ngrids_local = grid_end - grid_start
@@ -902,30 +903,36 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     rho_b = eval_rho(_sorted_mol, ao_mask, dmb[i][idx[:,None],idx], xctype=xctype, hermi=hermi)
                 else:
                     mo_coeff_mask = mo_coeff[:, idx,:]
-                    rho_a = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype)
-                    rho_b = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[1], mo_occ[1], None, xctype)
-
+                    #rho_a = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype)
+                    #rho_b = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[1], mo_occ[1], None, xctype)
+                    rho_a = eval_rho2_fast(ao_mask, mo_coeff_mask[0], mo_occ[1], None, xctype, with_lapl)
+                    rho_b = eval_rho2_fast(ao_mask, mo_coeff_mask[0], mo_occ[1], None, xctype, with_lapl)
                 rho = cupy.stack([rho_a, rho_b], axis=0)
                 exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
                 t1 = log.timer_debug1('eval vxc', *t0)
+
                 if xctype == 'LDA':
                     den_a = rho_a * weight
                     den_b = rho_b * weight
                     wv = vxc[:,0] * weight
-                    va = ao_mask.dot(_scale_ao(ao_mask, wv[0]).T)
-                    vb = ao_mask.dot(_scale_ao(ao_mask, wv[1]).T)
-                    add_sparse(vmata[i], va, idx)
-                    add_sparse(vmatb[i], vb, idx)
+                    eval_vxc(_sorted_mol, ao_mask, wv[0], idx, vmata[i], xctype_code)
+                    eval_vxc(_sorted_mol, ao_mask, wv[1], idx, vmatb[i], xctype_code)
+                    #va = ao_mask.dot(_scale_ao(ao_mask, wv[0]).T)
+                    #vb = ao_mask.dot(_scale_ao(ao_mask, wv[1]).T)
+                    #add_sparse(vmata[i], va, idx)
+                    #add_sparse(vmatb[i], vb, idx)
 
                 elif xctype == 'GGA':
                     den_a = rho_a[0] * weight
                     den_b = rho_b[0] * weight
                     wv = vxc * weight
                     wv[:,0] *= .5
-                    va = ao_mask[0].dot(_scale_ao(ao_mask, wv[0]).T)
-                    vb = ao_mask[0].dot(_scale_ao(ao_mask, wv[1]).T)
-                    add_sparse(vmata[i], va, idx)
-                    add_sparse(vmatb[i], vb, idx)
+                    eval_vxc(_sorted_mol, ao_mask, wv[0], idx, vmata[i], xctype_code)
+                    eval_vxc(_sorted_mol, ao_mask, wv[1], idx, vmatb[i], xctype_code)
+                    #va = ao_mask[0].dot(_scale_ao(ao_mask, wv[0]).T)
+                    #vb = ao_mask[0].dot(_scale_ao(ao_mask, wv[1]).T)
+                    #add_sparse(vmata[i], va, idx)
+                    #add_sparse(vmatb[i], vb, idx)
                 elif xctype == 'NLC':
                     raise NotImplementedError('NLC')
                 elif xctype == 'MGGA':
@@ -933,16 +940,19 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     den_b = rho_b[0] * weight
                     wv = vxc * weight
                     wv[:,[0, 4]] *= .5
-                    va = ao_mask[0].dot(_scale_ao(ao_mask[:4], wv[0,:4]).T)
-                    vb = ao_mask[0].dot(_scale_ao(ao_mask[:4], wv[1,:4]).T)
-                    va += _tau_dot(ao_mask, ao_mask, wv[0,4])
-                    vb += _tau_dot(ao_mask, ao_mask, wv[1,4])
-                    add_sparse(vmata[i], va, idx)
-                    add_sparse(vmatb[i], vb, idx)
+                    eval_vxc(_sorted_mol, ao_mask, wv[0], idx, vmata[i], xctype_code)
+                    eval_vxc(_sorted_mol, ao_mask, wv[1], idx, vmatb[i], xctype_code)
+                    #va = ao_mask[0].dot(_scale_ao(ao_mask[:4], wv[0,:4]).T)
+                    #vb = ao_mask[0].dot(_scale_ao(ao_mask[:4], wv[1,:4]).T)
+                    #va += _tau_dot(ao_mask, ao_mask, wv[0,4])
+                    #vb += _tau_dot(ao_mask, ao_mask, wv[1,4])
+                    #add_sparse(vmata[i], va, idx)
+                    #add_sparse(vmatb[i], vb, idx)
                 elif xctype == 'HF':
                     pass
                 else:
                     raise NotImplementedError(f'numint.nr_uks for functional {xc_code}')
+
                 nelec[0,i] += den_a.sum()
                 nelec[1,i] += den_b.sum()
                 excsum[i] += cupy.dot(den_a, exc[:,0])
