@@ -166,7 +166,8 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                                                          grid_range=(grid_start, grid_end)):
                 for idm in range(nset):
                     mo_coeff_mask = mo_coeff[idx,:]
-                    rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype)
+                    #rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype)
+                    rho = numint.eval_rho2_fast(ao_mask[0], mo_coeff_mask, mo_occ, None, xctype)
                     vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                     wv = weight * vxc[0]
                     aow = numint._scale_ao(ao_mask[0], wv)
@@ -178,7 +179,8 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                                                          grid_range=(grid_start, grid_end)):
                 for idm in range(nset):
                     mo_coeff_mask = mo_coeff[idx,:]
-                    rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype)
+                    #rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype)
+                    rho = numint.eval_rho2_fast(ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype)
                     vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                     wv = weight * vxc
                     wv[0] *= .5
@@ -193,7 +195,8 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                                                          grid_range=(grid_start, grid_end)):
                 for idm in range(nset):
                     mo_coeff_mask = mo_coeff[idx,:]
-                    rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
+                    #rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
+                    rho = numint.eval_rho2_fast(ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype)
                     vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                     wv = weight * vxc
                     wv[0] *= .5
@@ -272,7 +275,8 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     for ao_mask, mask, weight, coords \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         mo_coeff_mask = mo_coeff[mask]
-        rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
+        #rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
+        rho = numint.eval_rho2_fast(ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
         vvrho.append(rho)
     rho = cupy.hstack(vvrho)
 

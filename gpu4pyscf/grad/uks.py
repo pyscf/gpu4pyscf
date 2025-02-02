@@ -25,7 +25,7 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint, xc_deriv
-from gpu4pyscf.dft.numint import eval_rho2
+from gpu4pyscf.dft.numint import eval_rho2, eval_rho2_fast
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, add_sparse, tag_array, reduce_to_device)
 from gpu4pyscf.lib import logger
@@ -153,7 +153,7 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         opt = ni.gdftopt
         _sorted_mol = opt._sorted_mol
         nset = dms.shape[0]
-        
+
         ngrids_glob = grids.coords.shape[0]
         grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
         ngrids_local = grid_end - grid_start
@@ -162,11 +162,14 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         vmat = cupy.zeros((nset,3,nao,nao))
         if xctype == 'LDA':
             ao_deriv = 1
-            for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None, 
+            for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
                 mo_coeff_mask = mo_coeff[:,idx,:]
-                rho_a = eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask[0], mo_occ[0], None, xctype)
-                rho_b = eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask[1], mo_occ[1], None, xctype)
+                #rho_a = eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask[0], mo_occ[0], None, xctype)
+                #rho_b = eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask[1], mo_occ[1], None, xctype)
+
+                rho_a = eval_rho2_fast(ao_mask[0], mo_coeff_mask[0], mo_occ[0], None, xctype)
+                rho_b = eval_rho2_fast(ao_mask[0], mo_coeff_mask[1], mo_occ[1], None, xctype)
 
                 vxc = ni.eval_xc_eff(xc_code, cupy.array([rho_a,rho_b]), 1, xctype=xctype)[1]
                 wv = weight * vxc[:,0]
@@ -181,8 +184,10 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
                 mo_coeff_mask = mo_coeff[:,idx,:]
-                rho_a = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask[0], mo_occ[0], None, xctype)
-                rho_b = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask[1], mo_occ[1], None, xctype)
+                #rho_a = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask[0], mo_occ[0], None, xctype)
+                #rho_b = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask[1], mo_occ[1], None, xctype)
+                rho_a = eval_rho2_fast(ao_mask[:4], mo_coeff_mask[0], mo_occ[0], None, xctype)
+                rho_b = eval_rho2_fast(ao_mask[:4], mo_coeff_mask[1], mo_occ[1], None, xctype)
 
                 vxc = ni.eval_xc_eff(xc_code, cupy.array([rho_a,rho_b]), 1, xctype=xctype)[1]
                 wv = weight * vxc
@@ -199,8 +204,10 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
                 mo_coeff_mask = mo_coeff[:,idx,:]
-                rho_a = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask[0], mo_occ[0], None, xctype)
-                rho_b = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask[1], mo_occ[1], None, xctype)
+                #rho_a = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask[0], mo_occ[0], None, xctype)
+                #rho_b = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask[1], mo_occ[1], None, xctype)
+                rho_a = eval_rho2_fast(ao_mask[:4], mo_coeff_mask[0], mo_occ[0], None, xctype)
+                rho_b = eval_rho2_fast(ao_mask[:4], mo_coeff_mask[1], mo_occ[1], None, xctype)
                 vxc = ni.eval_xc_eff(xc_code, cupy.array([rho_a,rho_b]), 1, xctype=xctype)[1]
                 wv = weight * vxc
                 wv[:,0] *= .5
@@ -385,8 +392,8 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         mo_coeff_mask_0 = mo_coeff_0[mask]
         mo_coeff_mask_1 = mo_coeff_1[mask]
-        rhoa = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask_0, mo_occ[0], None, xctype)
-        rhob = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask_1, mo_occ[1], None, xctype)
+        rhoa = eval_rho2_fast(ao_mask[:4], mo_coeff_mask_0, mo_occ[0], None, xctype)
+        rhob = eval_rho2_fast(ao_mask[:4], mo_coeff_mask_1, mo_occ[1], None, xctype)
         vvrho.append(rhoa + rhob)
     rho = cupy.hstack(vvrho)
 

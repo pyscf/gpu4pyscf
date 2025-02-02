@@ -1430,7 +1430,8 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             rho = eval_rho(_sorted_mol, ao, dms[0][idx[:,None],idx], xctype='GGA', hermi=1)
         else:
             mo_coeff_mask = mo_coeff[idx,:]
-            rho = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, 'GGA')
+            #rho = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, 'GGA')
+            rho = eval_rho2_fast(ao, mo_coeff_mask, mo_occ, None, 'GGA')
         vvrho.append(rho)
 
     rho = cupy.hstack(vvrho)
@@ -1493,10 +1494,11 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
         rho = []
         t1 = t0 = log.init_timer()
-        for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
+        for ao_mask, idx, _, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                      max_memory=max_memory):
             mo_coeff_mask = mo_coeff[idx,:]
-            rho_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype)
+            #rho_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask, mo_occ, None, xctype)
+            rho_slice = eval_rho2_fast(ao_mask, mo_coeff_mask, mo_occ, None, xctype)
             rho.append(rho_slice)
             t1 = log.timer_debug2('eval rho slice', *t1)
         rho = cupy.hstack(rho)
@@ -1510,11 +1512,13 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
         rhoa = []
         rhob = []
         t1 = t0 = log.init_timer()
-        for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
+        for ao_mask, idx, _, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                      max_memory=max_memory):
             mo_coeff_mask = mo_coeff[:,idx,:]
-            rhoa_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype)
-            rhob_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[1], mo_occ[1], None, xctype)
+            #rhoa_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype)
+            #rhob_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[1], mo_occ[1], None, xctype)
+            rhoa_slice = eval_rho2_fast(ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype)
+            rhob_slice = eval_rho2_fast(ao_mask, mo_coeff_mask[0], mo_occ[0], None, xctype)
             rhoa.append(rhoa_slice)
             rhob.append(rhob_slice)
             t1 = log.timer_debug2('eval rho in fxc', *t1)
