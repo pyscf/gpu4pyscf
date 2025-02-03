@@ -308,8 +308,7 @@ static void rys_ejk_ip2_type12_general(RysIntEnvVars envs, JKEnergy jk, BoundsIn
                 }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
-                rys_roots_omega(nroots, theta, rr, omega, rw,
-                                nsq_per_block, gout_id, gout_stride);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
                 double s0x, s1x, s2x;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
@@ -973,8 +972,7 @@ static void rys_ejk_ip2_type3_general(RysIntEnvVars envs, JKEnergy jk, BoundsInf
                 }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
-                rys_roots_omega(nroots, theta, rr, omega, rw,
-                                nsq_per_block, gout_id, gout_stride);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
                 double s0x, s1x, s2x;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();

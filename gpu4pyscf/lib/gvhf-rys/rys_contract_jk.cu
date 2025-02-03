@@ -190,8 +190,7 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
-                rys_roots_omega(nroots, theta, rr, omega, rw,
-                                nsq_per_block, gout_id, gout_stride);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
                 double s0x, s1x, s2x;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();

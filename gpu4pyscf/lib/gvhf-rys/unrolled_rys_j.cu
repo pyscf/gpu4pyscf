@@ -123,7 +123,7 @@ void _rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     gout_0_0 += fac * 1 * wt;
@@ -313,7 +313,7 @@ void _rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -522,7 +522,7 @@ void _rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -768,7 +768,7 @@ void _rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -1023,7 +1023,7 @@ void _rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -1266,7 +1266,7 @@ void _rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -1549,7 +1549,7 @@ void _rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -1919,7 +1919,7 @@ void _rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -2378,7 +2378,7 @@ void _rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -2853,7 +2853,7 @@ void _rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -3130,7 +3130,7 @@ void _rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -3454,7 +3454,7 @@ void _rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -3890,7 +3890,7 @@ void _rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -4377,7 +4377,7 @@ void _rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -4686,7 +4686,7 @@ void _rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -5116,7 +5116,7 @@ void _rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];

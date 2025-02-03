@@ -210,31 +210,7 @@ static void rys_j_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
-                double theta_rr = theta * rr;
-                if (omega == 0) {
-                    rys_roots(nroots, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(nroots, theta_fac*theta_rr, rw, nsq_per_block, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = sqrt(theta_fac);
-                    for (int irys = gout_id; irys < nroots; irys+=gout_stride) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                } else {
-                    int _nroots = nroots / 2;
-                    double *rw1 = rw + nroots*nsq_per_block;
-                    rys_roots(_nroots, theta_rr, rw1, nsq_per_block, gout_id, gout_stride);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(_nroots, theta_fac*theta_rr, rw, nsq_per_block, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = -sqrt(theta_fac);
-                    for (int irys = gout_id; irys < _nroots; irys+=gout_stride) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                }
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
                 double s0x, s1x, s2x;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
@@ -680,31 +656,7 @@ static void rys_j_with_gout(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
-                double theta_rr = theta * rr;
-                if (omega == 0) {
-                    rys_roots(nroots, theta_rr, rw, nsq_per_block, gout_id, gout_stride);
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(nroots, theta_fac*theta_rr, rw, nsq_per_block, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = sqrt(theta_fac);
-                    for (int irys = gout_id; irys < nroots; irys+=gout_stride) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                } else {
-                    int _nroots = nroots / 2;
-                    double *rw1 = rw + nroots*nsq_per_block;
-                    rys_roots(_nroots, theta_rr, rw1, nsq_per_block, gout_id, gout_stride);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(_nroots, theta_fac*theta_rr, rw, nsq_per_block, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = -sqrt(theta_fac);
-                    for (int irys = gout_id; irys < _nroots; irys+=gout_stride) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                }
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
                 double s0x, s1x, s2x;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();

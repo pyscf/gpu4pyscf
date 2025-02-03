@@ -171,7 +171,7 @@ void _rys_ejk_ip1_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, 256, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 256, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -482,7 +482,7 @@ void _rys_ejk_ip1_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, 256, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 256, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -902,7 +902,7 @@ void _rys_ejk_ip1_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, 256, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 256, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -1635,7 +1635,7 @@ void _rys_ejk_ip1_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, 256, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 256, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -2944,7 +2944,7 @@ void _rys_ejk_ip1_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, 256, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 256, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -3685,7 +3685,7 @@ void _rys_ejk_ip1_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, 256, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 256, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -5021,7 +5021,7 @@ void _rys_ejk_ip1_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     Rpq[32] = ypq;
                     Rpq[64] = zpq;
                 }
-                rys_roots_omega(nroots, theta, rr, omega, rw, 32, gout_id, 8);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 32, gout_id, 8);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*64];
@@ -7018,7 +7018,7 @@ void _rys_ejk_ip1_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, 256, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 256, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -7594,7 +7594,7 @@ void _rys_ejk_ip1_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, 256, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 256, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -8585,7 +8585,7 @@ void _rys_ejk_ip1_2011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     Rpq[64] = ypq;
                     Rpq[128] = zpq;
                 }
-                rys_roots_omega(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
@@ -10157,7 +10157,7 @@ void _rys_ejk_ip1_2020(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, 256, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 256, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -11799,7 +11799,7 @@ void _rys_ejk_ip1_2021(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     Rpq[32] = ypq;
                     Rpq[64] = zpq;
                 }
-                rys_roots_omega(nroots, theta, rr, omega, rw, 32, gout_id, 8);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 32, gout_id, 8);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*64];
@@ -14346,7 +14346,7 @@ void _rys_ejk_ip1_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, 256, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 256, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -15345,7 +15345,7 @@ void _rys_ejk_ip1_2110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     Rpq[64] = ypq;
                     Rpq[128] = zpq;
                 }
-                rys_roots_omega(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
@@ -16795,7 +16795,7 @@ void _rys_ejk_ip1_2111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     Rpq[32] = ypq;
                     Rpq[64] = zpq;
                 }
-                rys_roots_omega(nroots, theta, rr, omega, rw, 32, gout_id, 8);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 32, gout_id, 8);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*64];
@@ -20413,7 +20413,7 @@ void _rys_ejk_ip1_2120(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     Rpq[32] = ypq;
                     Rpq[64] = zpq;
                 }
-                rys_roots_omega(nroots, theta, rr, omega, rw, 32, gout_id, 8);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 32, gout_id, 8);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*64];
@@ -23047,7 +23047,7 @@ void _rys_ejk_ip1_2200(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_omega(nroots, theta, rr, omega, rw, 256, 0, 1);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 256, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -24715,7 +24715,7 @@ void _rys_ejk_ip1_2210(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     Rpq[32] = ypq;
                     Rpq[64] = zpq;
                 }
-                rys_roots_omega(nroots, theta, rr, omega, rw, 32, gout_id, 8);
+                rys_roots_rs(nroots, theta, rr, omega, rw, 32, gout_id, 8);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*64];
