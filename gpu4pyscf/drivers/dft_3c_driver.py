@@ -47,16 +47,16 @@ def parse_3c(xc_name):
     return xc, nlc, basis, ecp, (xc_disp, disp), xc_gcp
     """
     if xc_name == 'b973c':
-        return 'GGA_XC_B97_3C', None, 'def2-mtzvp', None, ('b97-3c', 'D3BJ'), 'b973c'
+        return 'GGA_XC_B97_3C', 0, 'def2-mtzvp', None, ('b97-3c', 'D3BJ'), 'b973c'
     elif xc_name == 'r2scan3c':
-        return 'r2scan', None, 'def2-mtzvpp', None, ('r2scan-3c', 'D4'), 'r2scan3c'
+        return 'r2scan', 0, 'def2-mtzvpp', None, ('r2scan-3c', 'D4'), 'r2scan3c'
     elif xc_name == 'wb97x3c':
         # 'Grimme vDZP' is available is BSE, but pyscf 2.8 is not able to parse ECP properly
         # basis = 'Grimme vDZP'
         # ecp = 'Grimme vDZP'
         basis = os.path.join(CURRENT_DIR, 'basis_vDZP_NWCHEM.dat')
         ecp = os.path.join(CURRENT_DIR, 'ecp_vDZP_NWCHEM.dat')
-        return 'wb97x-v', None, basis, ecp, ('wb97x-3c', 'D4'), None
+        return 'wb97x-v', 0, basis, ecp, ('wb97x-3c', 'D4'), None
     else:
         raise RuntimeError('Unknow xc functionals for parsing 3c')
 
@@ -213,12 +213,14 @@ def run_dft(mol_name, config, charge=None, spin=0):
     if with_gpu:
         mf = mf.to_gpu()
 
+    #### Changes for 3C methods #####
     # Setup dispersion correction and GCP
-    mf.nlc = 0
+    mf.nlc = nlc
     mf.get_dispersion = MethodType(gen_disp_fun(xc_disp, xc_gcp), mf)
     mf.do_disp = lambda: True
-    mf.chkfile = None
+    #################################
 
+    mf.chkfile = None
     if with_solvent:
         if solvent['method'].endswith(('PCM', 'pcm')):
             mf = mf.PCM()
@@ -305,6 +307,7 @@ def run_dft(mol_name, config, charge=None, spin=0):
         try:
             start_time = time.time()
             g = mf.nuc_grad_method()
+            # Overwrite the method for 3C method
             g.get_dispersion = MethodType(gen_disp_grad_fun(xc_disp, xc_gcp), g)
             if with_df:
                 g.auxbasis_response = True
@@ -329,6 +332,7 @@ def run_dft(mol_name, config, charge=None, spin=0):
             natm = mol.natm
             start_time = time.time()
             h = mf.Hessian()
+            # Overwrite the method for 3C method
             h.get_dispersion = MethodType(gen_disp_hess_fun(xc_disp, xc_gcp), h)
             h.auxbasis_response = 2
             _h_dft = h.kernel()
