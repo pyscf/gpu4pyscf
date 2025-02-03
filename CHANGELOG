@@ -1,3 +1,11 @@
+v1.3.1 (2025-02-03)
+-------------------
+* New Features
+  - Analytical Hessian for PCM solvent model
+* Improvements
+  - Preconditioner and computation efficiency of Davidson iterations for TDDFT
+
+
 v1.3.0 (2025-01-07)
 -------------------
 * New Features
