@@ -198,11 +198,11 @@ def _ejk_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ls = l_ctr_pattern[:,0]
     li, lj, lk, ll = ls
     order = li + lj + lk + ll
-    g_size = (li+2)*(lj+1)*(lk+2)*(ll+1)
+    g_size = (li+2)*(lj+2)*(lk+2)*(ll+2)
     nps = l_ctr_pattern[:,1]
     ij_prims = nps[0] * nps[1]
     nroots = (order + 1) // 2 + 1
-    unit = nroots*2 + g_size*3 + ij_prims
+    unit = nroots*2 + g_size*3 + ij_prims + 9
     if mol.omega < 0: # SR
         unit += nroots * 2
     counts = shm_size // (unit*8)

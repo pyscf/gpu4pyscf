@@ -251,7 +251,7 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3) * quartets_per_block;
+        int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
         buflen += ij_prims*6;
         rys_jk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
@@ -318,7 +318,7 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3 + ij_prims) * quartets_per_block;
+        int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;
         buflen = MAX(buflen, 12*gout_stride*quartets_per_block);
         rys_ejk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, pool, dd_pool, batch_head);
@@ -386,7 +386,7 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3 + ij_prims) * quartets_per_block;
+        int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;
         rys_ejk_ip2_type12_kernel<<<workers, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, pool, dd_pool, batch_head);
     }
@@ -453,7 +453,7 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3 + ij_prims) * quartets_per_block;
+        int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;
         buflen = MAX(buflen, 9*gout_stride*quartets_per_block);
         rys_ejk_ip2_type3_kernel<<<workers, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, pool, dd_pool, batch_head);

@@ -16,6 +16,7 @@ void _rys_ejk_ip1_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -172,37 +173,12 @@ void _rys_ejk_ip1_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
-                if (omega == 0) {
-                    rys_roots(1, theta_rr, rw, nsq_per_block, 0, 1);
-                    for (int irys = 0; irys < 1; ++irys) {
-                        rw[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(1, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 1; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 2*nsq_per_block;
-                    rys_roots(1, theta_rr, rw1, nsq_per_block, 0, 1);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(1, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 1; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                }
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
-                    double wt = rw[(2*irys+1)*nsq_per_block];
+                for (int irys = 0; irys < nroots; ++irys) {
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     dd = dd_cache0;
@@ -343,6 +319,7 @@ void _rys_ejk_ip1_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -509,37 +486,12 @@ void _rys_ejk_ip1_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
-                if (omega == 0) {
-                    rys_roots(2, theta_rr, rw, nsq_per_block, 0, 1);
-                    for (int irys = 0; irys < 2; ++irys) {
-                        rw[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(2, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 2; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 4*nsq_per_block;
-                    rys_roots(2, theta_rr, rw1, nsq_per_block, 0, 1);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(2, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 2; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                }
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
-                    double wt = rw[(2*irys+1)*nsq_per_block];
+                for (int irys = 0; irys < nroots; ++irys) {
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
@@ -759,6 +711,7 @@ void _rys_ejk_ip1_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -955,37 +908,12 @@ void _rys_ejk_ip1_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
-                if (omega == 0) {
-                    rys_roots(2, theta_rr, rw, nsq_per_block, 0, 1);
-                    for (int irys = 0; irys < 2; ++irys) {
-                        rw[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(2, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 2; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 4*nsq_per_block;
-                    rys_roots(2, theta_rr, rw1, nsq_per_block, 0, 1);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(2, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 2; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                }
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
-                    double wt = rw[(2*irys+1)*nsq_per_block];
+                for (int irys = 0; irys < nroots; ++irys) {
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     double rt_akl = rt_aa * aij;
@@ -1428,6 +1356,7 @@ void _rys_ejk_ip1_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -1714,37 +1643,12 @@ void _rys_ejk_ip1_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
-                if (omega == 0) {
-                    rys_roots(3, theta_rr, rw, nsq_per_block, 0, 1);
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 6*nsq_per_block;
-                    rys_roots(3, theta_rr, rw1, nsq_per_block, 0, 1);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                }
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
-                    double wt = rw[(2*irys+1)*nsq_per_block];
+                for (int irys = 0; irys < nroots; ++irys) {
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     double rt_akl = rt_aa * aij;
@@ -2853,6 +2757,7 @@ void _rys_ejk_ip1_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -3049,37 +2954,12 @@ void _rys_ejk_ip1_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
-                if (omega == 0) {
-                    rys_roots(2, theta_rr, rw, nsq_per_block, 0, 1);
-                    for (int irys = 0; irys < 2; ++irys) {
-                        rw[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(2, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 2; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 4*nsq_per_block;
-                    rys_roots(2, theta_rr, rw1, nsq_per_block, 0, 1);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(2, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 2; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                }
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
-                    double wt = rw[(2*irys+1)*nsq_per_block];
+                for (int irys = 0; irys < nroots; ++irys) {
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
@@ -3530,6 +3410,7 @@ void _rys_ejk_ip1_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -3816,37 +3697,12 @@ void _rys_ejk_ip1_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
-                if (omega == 0) {
-                    rys_roots(3, theta_rr, rw, nsq_per_block, 0, 1);
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 6*nsq_per_block;
-                    rys_roots(3, theta_rr, rw1, nsq_per_block, 0, 1);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                }
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
-                    double wt = rw[(2*irys+1)*nsq_per_block];
+                for (int irys = 0; irys < nroots; ++irys) {
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     double rt_akl = rt_aa * aij;
@@ -4961,6 +4817,7 @@ void _rys_ejk_ip1_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -4971,7 +4828,7 @@ void _rys_ejk_ip1_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     dd_cache += sq_id;
     extern __shared__ double cicj_cache[];
     double *rw = cicj_cache + iprim*jprim*TILE2 + sq_id;
-    double *gx = rw + 64 * bounds.nroots;
+    double *gx = rw + 64 * nroots;
     double *gy = gx + 1152;
     double *gz = gy + 1152;
     if (gout_id == 0) {
@@ -5118,7 +4975,7 @@ void _rys_ejk_ip1_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                          dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik]);
                 }
                 if (do_j) {
-                    dd += jk.j_factor * (dm[_ji] + dm[_ji]) * (dmb[_lk] + dmb[_lk]);
+                    dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
                 }
                 dd_cache[n*nsq_per_block] = dd;
             }
@@ -5162,42 +5019,14 @@ void _rys_ejk_ip1_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
+                double theta = aij * akl / (aij + akl);
+                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 Rpq[0] = xpq;
                 Rpq[1] = ypq;
                 Rpq[2] = zpq;
-                double theta = aij * akl / (aij + akl);
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 __syncthreads();
-                if (omega == 0) {
-                    rys_roots(3, theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    for (int irys = gout_id; irys < 3; irys += gout_stride) {
-                        rw[(irys*2+1)*32] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = gout_id; irys < 3; irys += gout_stride) {
-                        rw[ irys*2   *32] *= theta_fac;
-                        rw[(irys*2+1)*32] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 6*32;
-                    rys_roots(3, theta_rr, rw1, 32, gout_id, gout_stride);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = gout_id; irys < 3; irys += gout_stride) {
-                        rw[ irys*2   *32] *= theta_fac;
-                        rw[(irys*2+1)*32] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*32] *= fac;
-                    }
-                }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
+                for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*64];
                     double rt_aa = rt / (aij + akl);
@@ -5208,7 +5037,7 @@ void _rys_ejk_ip1_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 8) {
                         if (n == 2) {
-                            gz[0] = rw[irys*64+32];
+                            gz[0] = rw[irys*64+32] * fac;
                         }
                         double *_gx = gx + n * 1152;
                         double xjxi = rj[n] - ri[n];
@@ -7007,6 +6836,7 @@ void _rys_ejk_ip1_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -7188,37 +7018,12 @@ void _rys_ejk_ip1_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
-                if (omega == 0) {
-                    rys_roots(2, theta_rr, rw, nsq_per_block, 0, 1);
-                    for (int irys = 0; irys < 2; ++irys) {
-                        rw[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(2, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 2; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 4*nsq_per_block;
-                    rys_roots(2, theta_rr, rw1, nsq_per_block, 0, 1);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(2, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 2; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                }
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
-                    double wt = rw[(2*irys+1)*nsq_per_block];
+                for (int irys = 0; irys < nroots; ++irys) {
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
@@ -7549,6 +7354,7 @@ void _rys_ejk_ip1_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -7790,37 +7596,12 @@ void _rys_ejk_ip1_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
-                if (omega == 0) {
-                    rys_roots(3, theta_rr, rw, nsq_per_block, 0, 1);
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 6*nsq_per_block;
-                    rys_roots(3, theta_rr, rw1, nsq_per_block, 0, 1);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                }
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
-                    double wt = rw[(2*irys+1)*nsq_per_block];
+                for (int irys = 0; irys < nroots; ++irys) {
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     double rt_akl = rt_aa * aij;
@@ -8590,6 +8371,7 @@ void _rys_ejk_ip1_2011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -8600,7 +8382,7 @@ void _rys_ejk_ip1_2011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     dd_cache += sq_id;
     extern __shared__ double cicj_cache[];
     double *rw = cicj_cache + iprim*jprim*TILE2 + sq_id;
-    double *gx = rw + 128 * bounds.nroots;
+    double *gx = rw + 128 * nroots;
     double *gy = gx + 1536;
     double *gz = gy + 1536;
     if (gout_id == 0) {
@@ -8747,7 +8529,7 @@ void _rys_ejk_ip1_2011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                          dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik]);
                 }
                 if (do_j) {
-                    dd += jk.j_factor * (dm[_ji] + dm[_ji]) * (dmb[_lk] + dmb[_lk]);
+                    dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
                 }
                 dd_cache[n*nsq_per_block] = dd;
             }
@@ -8791,42 +8573,14 @@ void _rys_ejk_ip1_2011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
+                double theta = aij * akl / (aij + akl);
+                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 Rpq[0] = xpq;
                 Rpq[1] = ypq;
                 Rpq[2] = zpq;
-                double theta = aij * akl / (aij + akl);
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 __syncthreads();
-                if (omega == 0) {
-                    rys_roots(3, theta_rr, rw, 64, gout_id, gout_stride);
-                    __syncthreads();
-                    for (int irys = gout_id; irys < 3; irys += gout_stride) {
-                        rw[(irys*2+1)*64] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, 64, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = gout_id; irys < 3; irys += gout_stride) {
-                        rw[ irys*2   *64] *= theta_fac;
-                        rw[(irys*2+1)*64] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 6*64;
-                    rys_roots(3, theta_rr, rw1, 64, gout_id, gout_stride);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, 64, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = gout_id; irys < 3; irys += gout_stride) {
-                        rw[ irys*2   *64] *= theta_fac;
-                        rw[(irys*2+1)*64] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*64] *= fac;
-                    }
-                }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
+                for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
                     double rt_aa = rt / (aij + akl);
@@ -8837,7 +8591,7 @@ void _rys_ejk_ip1_2011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64];
+                            gz[0] = rw[irys*128+64] * fac;
                         }
                         double *_gx = gx + n * 1536;
                         double xjxi = rj[n] - ri[n];
@@ -10061,6 +9815,7 @@ void _rys_ejk_ip1_2020(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -10392,37 +10147,12 @@ void _rys_ejk_ip1_2020(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
-                if (omega == 0) {
-                    rys_roots(3, theta_rr, rw, nsq_per_block, 0, 1);
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 6*nsq_per_block;
-                    rys_roots(3, theta_rr, rw1, nsq_per_block, 0, 1);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                }
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
-                    double wt = rw[(2*irys+1)*nsq_per_block];
+                for (int irys = 0; irys < nroots; ++irys) {
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     double rt_akl = rt_aa * aij;
@@ -11843,6 +11573,7 @@ void _rys_ejk_ip1_2021(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -11853,7 +11584,7 @@ void _rys_ejk_ip1_2021(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     dd_cache += sq_id;
     extern __shared__ double cicj_cache[];
     double *rw = cicj_cache + iprim*jprim*TILE2 + sq_id;
-    double *gx = rw + 64 * bounds.nroots;
+    double *gx = rw + 64 * nroots;
     double *gy = gx + 1024;
     double *gz = gy + 1024;
     if (gout_id == 0) {
@@ -12000,7 +11731,7 @@ void _rys_ejk_ip1_2021(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                          dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik]);
                 }
                 if (do_j) {
-                    dd += jk.j_factor * (dm[_ji] + dm[_ji]) * (dmb[_lk] + dmb[_lk]);
+                    dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
                 }
                 dd_cache[n*nsq_per_block] = dd;
             }
@@ -12044,42 +11775,14 @@ void _rys_ejk_ip1_2021(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
+                double theta = aij * akl / (aij + akl);
+                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 Rpq[0] = xpq;
                 Rpq[1] = ypq;
                 Rpq[2] = zpq;
-                double theta = aij * akl / (aij + akl);
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 __syncthreads();
-                if (omega == 0) {
-                    rys_roots(4, theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    for (int irys = gout_id; irys < 4; irys += gout_stride) {
-                        rw[(irys*2+1)*32] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(4, theta_fac*theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = gout_id; irys < 4; irys += gout_stride) {
-                        rw[ irys*2   *32] *= theta_fac;
-                        rw[(irys*2+1)*32] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 8*32;
-                    rys_roots(4, theta_rr, rw1, 32, gout_id, gout_stride);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(4, theta_fac*theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = gout_id; irys < 4; irys += gout_stride) {
-                        rw[ irys*2   *32] *= theta_fac;
-                        rw[(irys*2+1)*32] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*32] *= fac;
-                    }
-                }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
+                for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*64];
                     double rt_aa = rt / (aij + akl);
@@ -12090,7 +11793,7 @@ void _rys_ejk_ip1_2021(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 8) {
                         if (n == 2) {
-                            gz[0] = rw[irys*64+32];
+                            gz[0] = rw[irys*64+32] * fac;
                         }
                         double *_gx = gx + n * 1024;
                         double xjxi = rj[n] - ri[n];
@@ -14379,6 +14082,7 @@ void _rys_ejk_ip1_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -14620,37 +14324,12 @@ void _rys_ejk_ip1_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
-                if (omega == 0) {
-                    rys_roots(3, theta_rr, rw, nsq_per_block, 0, 1);
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 6*nsq_per_block;
-                    rys_roots(3, theta_rr, rw1, nsq_per_block, 0, 1);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                }
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
-                    double wt = rw[(2*irys+1)*nsq_per_block];
+                for (int irys = 0; irys < nroots; ++irys) {
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
@@ -15428,6 +15107,7 @@ void _rys_ejk_ip1_2110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -15438,7 +15118,7 @@ void _rys_ejk_ip1_2110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     dd_cache += sq_id;
     extern __shared__ double cicj_cache[];
     double *rw = cicj_cache + iprim*jprim*TILE2 + sq_id;
-    double *gx = rw + 128 * bounds.nroots;
+    double *gx = rw + 128 * nroots;
     double *gy = gx + 1536;
     double *gz = gy + 1536;
     if (gout_id == 0) {
@@ -15585,7 +15265,7 @@ void _rys_ejk_ip1_2110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                          dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik]);
                 }
                 if (do_j) {
-                    dd += jk.j_factor * (dm[_ji] + dm[_ji]) * (dmb[_lk] + dmb[_lk]);
+                    dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
                 }
                 dd_cache[n*nsq_per_block] = dd;
             }
@@ -15629,42 +15309,14 @@ void _rys_ejk_ip1_2110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
+                double theta = aij * akl / (aij + akl);
+                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 Rpq[0] = xpq;
                 Rpq[1] = ypq;
                 Rpq[2] = zpq;
-                double theta = aij * akl / (aij + akl);
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 __syncthreads();
-                if (omega == 0) {
-                    rys_roots(3, theta_rr, rw, 64, gout_id, gout_stride);
-                    __syncthreads();
-                    for (int irys = gout_id; irys < 3; irys += gout_stride) {
-                        rw[(irys*2+1)*64] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, 64, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = gout_id; irys < 3; irys += gout_stride) {
-                        rw[ irys*2   *64] *= theta_fac;
-                        rw[(irys*2+1)*64] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 6*64;
-                    rys_roots(3, theta_rr, rw1, 64, gout_id, gout_stride);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, 64, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = gout_id; irys < 3; irys += gout_stride) {
-                        rw[ irys*2   *64] *= theta_fac;
-                        rw[(irys*2+1)*64] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*64] *= fac;
-                    }
-                }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
+                for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
                     double rt_aa = rt / (aij + akl);
@@ -15675,7 +15327,7 @@ void _rys_ejk_ip1_2110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64];
+                            gz[0] = rw[irys*128+64] * fac;
                         }
                         double *_gx = gx + n * 1536;
                         double xjxi = rj[n] - ri[n];
@@ -16891,6 +16543,7 @@ void _rys_ejk_ip1_2111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -16901,7 +16554,7 @@ void _rys_ejk_ip1_2111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     dd_cache += sq_id;
     extern __shared__ double cicj_cache[];
     double *rw = cicj_cache + iprim*jprim*TILE2 + sq_id;
-    double *gx = rw + 64 * bounds.nroots;
+    double *gx = rw + 64 * nroots;
     double *gy = gx + 1536;
     double *gz = gy + 1536;
     if (gout_id == 0) {
@@ -17048,7 +16701,7 @@ void _rys_ejk_ip1_2111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                          dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik]);
                 }
                 if (do_j) {
-                    dd += jk.j_factor * (dm[_ji] + dm[_ji]) * (dmb[_lk] + dmb[_lk]);
+                    dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
                 }
                 dd_cache[n*nsq_per_block] = dd;
             }
@@ -17092,42 +16745,14 @@ void _rys_ejk_ip1_2111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
+                double theta = aij * akl / (aij + akl);
+                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 Rpq[0] = xpq;
                 Rpq[1] = ypq;
                 Rpq[2] = zpq;
-                double theta = aij * akl / (aij + akl);
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 __syncthreads();
-                if (omega == 0) {
-                    rys_roots(4, theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    for (int irys = gout_id; irys < 4; irys += gout_stride) {
-                        rw[(irys*2+1)*32] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(4, theta_fac*theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = gout_id; irys < 4; irys += gout_stride) {
-                        rw[ irys*2   *32] *= theta_fac;
-                        rw[(irys*2+1)*32] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 8*32;
-                    rys_roots(4, theta_rr, rw1, 32, gout_id, gout_stride);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(4, theta_fac*theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = gout_id; irys < 4; irys += gout_stride) {
-                        rw[ irys*2   *32] *= theta_fac;
-                        rw[(irys*2+1)*32] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*32] *= fac;
-                    }
-                }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
+                for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*64];
                     double rt_aa = rt / (aij + akl);
@@ -17138,7 +16763,7 @@ void _rys_ejk_ip1_2111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 8) {
                         if (n == 2) {
-                            gz[0] = rw[irys*64+32];
+                            gz[0] = rw[irys*64+32] * fac;
                         }
                         double *_gx = gx + n * 1536;
                         double xjxi = rj[n] - ri[n];
@@ -20522,6 +20147,7 @@ void _rys_ejk_ip1_2120(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -20532,7 +20158,7 @@ void _rys_ejk_ip1_2120(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     dd_cache += sq_id;
     extern __shared__ double cicj_cache[];
     double *rw = cicj_cache + iprim*jprim*TILE2 + sq_id;
-    double *gx = rw + 64 * bounds.nroots;
+    double *gx = rw + 64 * nroots;
     double *gy = gx + 1024;
     double *gz = gy + 1024;
     if (gout_id == 0) {
@@ -20679,7 +20305,7 @@ void _rys_ejk_ip1_2120(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                          dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik]);
                 }
                 if (do_j) {
-                    dd += jk.j_factor * (dm[_ji] + dm[_ji]) * (dmb[_lk] + dmb[_lk]);
+                    dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
                 }
                 dd_cache[n*nsq_per_block] = dd;
             }
@@ -20723,42 +20349,14 @@ void _rys_ejk_ip1_2120(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
+                double theta = aij * akl / (aij + akl);
+                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 Rpq[0] = xpq;
                 Rpq[1] = ypq;
                 Rpq[2] = zpq;
-                double theta = aij * akl / (aij + akl);
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 __syncthreads();
-                if (omega == 0) {
-                    rys_roots(4, theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    for (int irys = gout_id; irys < 4; irys += gout_stride) {
-                        rw[(irys*2+1)*32] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(4, theta_fac*theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = gout_id; irys < 4; irys += gout_stride) {
-                        rw[ irys*2   *32] *= theta_fac;
-                        rw[(irys*2+1)*32] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 8*32;
-                    rys_roots(4, theta_rr, rw1, 32, gout_id, gout_stride);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(4, theta_fac*theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = gout_id; irys < 4; irys += gout_stride) {
-                        rw[ irys*2   *32] *= theta_fac;
-                        rw[(irys*2+1)*32] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*32] *= fac;
-                    }
-                }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
+                for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*64];
                     double rt_aa = rt / (aij + akl);
@@ -20769,7 +20367,7 @@ void _rys_ejk_ip1_2120(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 8) {
                         if (n == 2) {
-                            gz[0] = rw[irys*64+32];
+                            gz[0] = rw[irys*64+32] * fac;
                         }
                         double *_gx = gx + n * 1024;
                         double xjxi = rj[n] - ri[n];
@@ -23055,6 +22653,7 @@ void _rys_ejk_ip1_2200(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -23386,37 +22985,12 @@ void _rys_ejk_ip1_2200(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
-                if (omega == 0) {
-                    rys_roots(3, theta_rr, rw, nsq_per_block, 0, 1);
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 6*nsq_per_block;
-                    rys_roots(3, theta_rr, rw1, nsq_per_block, 0, 1);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(3, theta_fac*theta_rr, rw, nsq_per_block, 0, 1);
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = 0; irys < 3; ++irys) {
-                        rw[ irys*2   *nsq_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsq_per_block] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*nsq_per_block] *= fac;
-                    }
-                }
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
-                    double wt = rw[(2*irys+1)*nsq_per_block];
+                for (int irys = 0; irys < nroots; ++irys) {
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
@@ -24863,6 +24437,7 @@ void _rys_ejk_ip1_2210(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
+    int nroots = bounds.nroots;
     int *ao_loc = envs.ao_loc;
     int nbas = envs.nbas;
     int nao = ao_loc[nbas];
@@ -24873,7 +24448,7 @@ void _rys_ejk_ip1_2210(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     dd_cache += sq_id;
     extern __shared__ double cicj_cache[];
     double *rw = cicj_cache + iprim*jprim*TILE2 + sq_id;
-    double *gx = rw + 64 * bounds.nroots;
+    double *gx = rw + 64 * nroots;
     double *gy = gx + 1152;
     double *gz = gy + 1152;
     if (gout_id == 0) {
@@ -25020,7 +24595,7 @@ void _rys_ejk_ip1_2210(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                          dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik]);
                 }
                 if (do_j) {
-                    dd += jk.j_factor * (dm[_ji] + dm[_ji]) * (dmb[_lk] + dmb[_lk]);
+                    dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
                 }
                 dd_cache[n*nsq_per_block] = dd;
             }
@@ -25064,42 +24639,14 @@ void _rys_ejk_ip1_2210(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
+                double theta = aij * akl / (aij + akl);
+                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 Rpq[0] = xpq;
                 Rpq[1] = ypq;
                 Rpq[2] = zpq;
-                double theta = aij * akl / (aij + akl);
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 __syncthreads();
-                if (omega == 0) {
-                    rys_roots(4, theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    for (int irys = gout_id; irys < 4; irys += gout_stride) {
-                        rw[(irys*2+1)*32] *= fac;
-                    }
-                } else if (omega > 0) {
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(4, theta_fac*theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = sqrt(theta_fac) * fac;
-                    for (int irys = gout_id; irys < 4; irys += gout_stride) {
-                        rw[ irys*2   *32] *= theta_fac;
-                        rw[(irys*2+1)*32] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double *rw1 = rw + 8*32;
-                    rys_roots(4, theta_rr, rw1, 32, gout_id, gout_stride);
-                    double theta_fac = omega * omega / (omega * omega + theta);
-                    rys_roots(4, theta_fac*theta_rr, rw, 32, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = -sqrt(theta_fac) * fac;
-                    for (int irys = gout_id; irys < 4; irys += gout_stride) {
-                        rw[ irys*2   *32] *= theta_fac;
-                        rw[(irys*2+1)*32] *= sqrt_theta_fac;
-                        rw1[(irys*2+1)*32] *= fac;
-                    }
-                }
-                for (int irys = 0; irys < bounds.nroots; ++irys) {
+                rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
+                for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*64];
                     double rt_aa = rt / (aij + akl);
@@ -25110,7 +24657,7 @@ void _rys_ejk_ip1_2210(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 8) {
                         if (n == 2) {
-                            gz[0] = rw[irys*64+32];
+                            gz[0] = rw[irys*64+32] * fac;
                         }
                         double *_gx = gx + n * 1152;
                         double xjxi = rj[n] - ri[n];
