@@ -53,7 +53,7 @@ void _rys_ejk_ip2_type12_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
         cicj_cache[n] = ci[ip] * cj[jp] * Kab;
     }
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task0 = 0; task0 < ntasks; task0 += 256) {
         __syncthreads();
         int task_id = task0 + sq_id;
         double fac_sym = PI_FAC;
@@ -493,7 +493,7 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
         cicj_cache[n] = ci[ip] * cj[jp] * Kab;
     }
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task0 = 0; task0 < ntasks; task0 += 256) {
         __syncthreads();
         int task_id = task0 + sq_id;
         double fac_sym = PI_FAC;
@@ -1150,7 +1150,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
         cicj_cache[n] = ci[ip] * cj[jp] * Kab;
     }
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task0 = 0; task0 < ntasks; task0 += 256) {
         __syncthreads();
         int task_id = task0 + sq_id;
         double fac_sym = PI_FAC;
@@ -2524,12 +2524,14 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
     double *gx = rw + 64 * nroots;
     double *gy = gx + 1728;
     double *gz = gy + 1728;
+    double *rjri = gz + 1728;
+    double *rlrk = rjri + 96;
+    double *Rpq = rlrk + 96;
     if (gout_id == 0) {
         gx[0] = 1.;
         gy[0] = 1.;
     }
     double s0, s1, s2;
-    double Rpq[3];
     int thread_id = nsq_per_block * gout_id + sq_id;
     int threads = nsq_per_block * gout_stride;
     for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
@@ -2556,7 +2558,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
         cicj_cache[n] = ci[ip] * cj[jp] * Kab;
     }
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task0 = 0; task0 < ntasks; task0 += 32) {
         __syncthreads();
         int task_id = task0 + sq_id;
         double fac_sym = PI_FAC;
@@ -2597,6 +2599,14 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
         double xlxk = rl[0] - rk[0];
         double ylyk = rl[1] - rk[1];
         double zlzk = rl[2] - rk[2];
+        if (gout_id == 0) {
+            rjri[0] = xjxi;
+            rjri[32] = yjyi;
+            rjri[64] = zjzi;
+            rlrk[0] = xlxk;
+            rlrk[32] = ylyk;
+            rlrk[64] = zlzk;
+        }
         double dd;
         double Ix, Iy, Iz;
         double Ixdd, Iydd, Izdd;
@@ -2744,10 +2754,12 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                Rpq[0] = xpq;
-                Rpq[1] = ypq;
-                Rpq[2] = zpq;
                 __syncthreads();
+                if (gout_id == 0) {
+                    Rpq[0*nsq_per_block] = xpq;
+                    Rpq[1*nsq_per_block] = ypq;
+                    Rpq[2*nsq_per_block] = zpq;
+                }
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
@@ -2763,9 +2775,9 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             gz[0] = rw[irys*64+32] * fac;
                         }
                         double *_gx = gx + n * 1728;
-                        double xjxi = rj[n] - ri[n];
+                        double xjxi = rjri[n*32];
                         double Rpa = xjxi * aj_aij;
-                        double c0x = Rpa - rt_aij * Rpq[n];
+                        double c0x = Rpa - rt_aij * Rpq[n*32];
                         s0 = _gx[0];
                         s1 = c0x * s0;
                         _gx[32] = s1;
@@ -2775,9 +2787,9 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                         s1 = s2;
                         s2 = c0x * s1 + 2 * b10 * s0;
                         _gx[96] = s2;
-                        double xlxk = rl[n] - rk[n];
+                        double xlxk = rlrk[n*32];
                         double Rqc = xlxk * al_akl;
-                        double cpx = Rqc + rt_akl * Rpq[n];
+                        double cpx = Rqc + rt_akl * Rpq[n*32];
                         s0 = _gx[0];
                         s1 = cpx * s0;
                         _gx[192] = s1;
@@ -4916,7 +4928,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
         cicj_cache[n] = ci[ip] * cj[jp] * Kab;
     }
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task0 = 0; task0 < ntasks; task0 += 256) {
         __syncthreads();
         int task_id = task0 + sq_id;
         double fac_sym = PI_FAC;
@@ -6310,12 +6322,14 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
     double *gx = rw + 64 * nroots;
     double *gy = gx + 1728;
     double *gz = gy + 1728;
+    double *rjri = gz + 1728;
+    double *rlrk = rjri + 96;
+    double *Rpq = rlrk + 96;
     if (gout_id == 0) {
         gx[0] = 1.;
         gy[0] = 1.;
     }
     double s0, s1, s2;
-    double Rpq[3];
     int thread_id = nsq_per_block * gout_id + sq_id;
     int threads = nsq_per_block * gout_stride;
     for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
@@ -6342,7 +6356,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
         cicj_cache[n] = ci[ip] * cj[jp] * Kab;
     }
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task0 = 0; task0 < ntasks; task0 += 32) {
         __syncthreads();
         int task_id = task0 + sq_id;
         double fac_sym = PI_FAC;
@@ -6383,6 +6397,14 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
         double xlxk = rl[0] - rk[0];
         double ylyk = rl[1] - rk[1];
         double zlzk = rl[2] - rk[2];
+        if (gout_id == 0) {
+            rjri[0] = xjxi;
+            rjri[32] = yjyi;
+            rjri[64] = zjzi;
+            rlrk[0] = xlxk;
+            rlrk[32] = ylyk;
+            rlrk[64] = zlzk;
+        }
         double dd;
         double Ix, Iy, Iz;
         double Ixdd, Iydd, Izdd;
@@ -6530,10 +6552,12 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                Rpq[0] = xpq;
-                Rpq[1] = ypq;
-                Rpq[2] = zpq;
                 __syncthreads();
+                if (gout_id == 0) {
+                    Rpq[0*nsq_per_block] = xpq;
+                    Rpq[1*nsq_per_block] = ypq;
+                    Rpq[2*nsq_per_block] = zpq;
+                }
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
@@ -6549,9 +6573,9 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             gz[0] = rw[irys*64+32] * fac;
                         }
                         double *_gx = gx + n * 1728;
-                        double xjxi = rj[n] - ri[n];
+                        double xjxi = rjri[n*32];
                         double Rpa = xjxi * aj_aij;
-                        double c0x = Rpa - rt_aij * Rpq[n];
+                        double c0x = Rpa - rt_aij * Rpq[n*32];
                         s0 = _gx[0];
                         s1 = c0x * s0;
                         _gx[32] = s1;
@@ -6565,9 +6589,9 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                         s1 = s2;
                         s2 = c0x * s1 + 3 * b10 * s0;
                         _gx[128] = s2;
-                        double xlxk = rl[n] - rk[n];
+                        double xlxk = rlrk[n*32];
                         double Rqc = xlxk * al_akl;
-                        double cpx = Rqc + rt_akl * Rpq[n];
+                        double cpx = Rqc + rt_akl * Rpq[n*32];
                         s0 = _gx[0];
                         s1 = cpx * s0;
                         _gx[288] = s1;
@@ -8670,12 +8694,14 @@ void _rys_ejk_ip2_type12_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
     double *gx = rw + 32 * nroots;
     double *gy = gx + 1296;
     double *gz = gy + 1296;
+    double *rjri = gz + 1296;
+    double *rlrk = rjri + 48;
+    double *Rpq = rlrk + 48;
     if (gout_id == 0) {
         gx[0] = 1.;
         gy[0] = 1.;
     }
     double s0, s1, s2;
-    double Rpq[3];
     int thread_id = nsq_per_block * gout_id + sq_id;
     int threads = nsq_per_block * gout_stride;
     for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
@@ -8702,7 +8728,7 @@ void _rys_ejk_ip2_type12_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
         cicj_cache[n] = ci[ip] * cj[jp] * Kab;
     }
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task0 = 0; task0 < ntasks; task0 += 16) {
         __syncthreads();
         int task_id = task0 + sq_id;
         double fac_sym = PI_FAC;
@@ -8743,6 +8769,14 @@ void _rys_ejk_ip2_type12_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
         double xlxk = rl[0] - rk[0];
         double ylyk = rl[1] - rk[1];
         double zlzk = rl[2] - rk[2];
+        if (gout_id == 0) {
+            rjri[0] = xjxi;
+            rjri[16] = yjyi;
+            rjri[32] = zjzi;
+            rlrk[0] = xlxk;
+            rlrk[16] = ylyk;
+            rlrk[32] = zlzk;
+        }
         double dd;
         double Ix, Iy, Iz;
         double Ixdd, Iydd, Izdd;
@@ -8890,10 +8924,12 @@ void _rys_ejk_ip2_type12_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                Rpq[0] = xpq;
-                Rpq[1] = ypq;
-                Rpq[2] = zpq;
                 __syncthreads();
+                if (gout_id == 0) {
+                    Rpq[0*nsq_per_block] = xpq;
+                    Rpq[1*nsq_per_block] = ypq;
+                    Rpq[2*nsq_per_block] = zpq;
+                }
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
@@ -8909,9 +8945,9 @@ void _rys_ejk_ip2_type12_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                             gz[0] = rw[irys*32+16] * fac;
                         }
                         double *_gx = gx + n * 1296;
-                        double xjxi = rj[n] - ri[n];
+                        double xjxi = rjri[n*16];
                         double Rpa = xjxi * aj_aij;
-                        double c0x = Rpa - rt_aij * Rpq[n];
+                        double c0x = Rpa - rt_aij * Rpq[n*16];
                         s0 = _gx[0];
                         s1 = c0x * s0;
                         _gx[16] = s1;
@@ -8925,9 +8961,9 @@ void _rys_ejk_ip2_type12_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                         s1 = s2;
                         s2 = c0x * s1 + 3 * b10 * s0;
                         _gx[64] = s2;
-                        double xlxk = rl[n] - rk[n];
+                        double xlxk = rlrk[n*16];
                         double Rqc = xlxk * al_akl;
-                        double cpx = Rqc + rt_akl * Rpq[n];
+                        double cpx = Rqc + rt_akl * Rpq[n*16];
                         s0 = _gx[0];
                         s1 = cpx * s0;
                         _gx[144] = s1;
@@ -14671,17 +14707,17 @@ int rys_ejk_ip2_type12_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *b
     case 130:
         rys_ejk_ip2_type12_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, batch_head); break;
     case 131:
-        buflen += g_size * 3 * nsq_per_block;
+        buflen += (g_size * 3 + 9) * nsq_per_block;
         cudaFuncSetAttribute(rys_ejk_ip2_type12_1011, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen*sizeof(double));
         rys_ejk_ip2_type12_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, batch_head); break;
     case 150:
         rys_ejk_ip2_type12_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, batch_head); break;
     case 155:
-        buflen += g_size * 3 * nsq_per_block;
+        buflen += (g_size * 3 + 9) * nsq_per_block;
         cudaFuncSetAttribute(rys_ejk_ip2_type12_1110, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen*sizeof(double));
         rys_ejk_ip2_type12_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, batch_head); break;
     case 156:
-        buflen += g_size * 3 * nsq_per_block;
+        buflen += (g_size * 3 + 9) * nsq_per_block;
         cudaFuncSetAttribute(rys_ejk_ip2_type12_1111, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen*sizeof(double));
         rys_ejk_ip2_type12_1111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, batch_head); break;
     default: return 0;

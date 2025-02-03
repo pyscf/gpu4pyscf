@@ -68,15 +68,14 @@ static void rys_jk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bound
     int nao = ao_loc[nbas];
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
-    double *rw = rw_cache + sq_id;
+    extern __shared__ double rjri_cache[];
+    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
     double *g = rw + nsq_per_block * nroots*2;
     double *gx = g;
     double *gy = gx + nsq_per_block * g_size;
     double *gz = gy + nsq_per_block * g_size;
     double *rlrk = gz + nsq_per_block * g_size;
     double *Rpq = rlrk + nsq_per_block * 3;
-    double *rjri_cache = rw_cache + nsq_per_block * (nroots*2+g_size*3+6);
     double goutx[GWIDTH_IP1];
     double gouty[GWIDTH_IP1];
     double goutz[GWIDTH_IP1];
@@ -215,7 +214,7 @@ static void rys_jk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bound
                     for (int n = gout_id; n < 3; n += gout_stride) {
                         double *_gx = g + n * g_size * nsq_per_block;
                         double Rpa = rjri[n] * aj_aij;
-                        double c0x = Rpa - rt_aij * Rpq[n];
+                        double c0x = Rpa - rt_aij * Rpq[n*nsq_per_block];
                         s0x = _gx[0];
                         s1x = c0x * s0x;
                         _gx[nsq_per_block] = s1x;
@@ -235,7 +234,7 @@ static void rys_jk_ip1_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bound
                             int _ix = n % 3;
                             double *_gx = g + (i + _ix * g_size) * nsq_per_block;
                             double Rqc = rlrk[_ix*nsq_per_block] * al_akl;
-                            double cpx = Rqc + rt_akl * Rpq[_ix];
+                            double cpx = Rqc + rt_akl * Rpq[_ix*nsq_per_block];
                             //for i in range(lij+1):
                             //    trr(i,1) = c0p * trr(i,0) + i*b00 * trr(i-1,0)
                             if (n < lij3) {

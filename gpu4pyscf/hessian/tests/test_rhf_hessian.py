@@ -51,7 +51,7 @@ class KnownValues(unittest.TestCase):
 
     def test_partial_hess_elec(self):
         mf = pyscf.scf.RHF(mol)
-        mf.conv_tol = 1e-14
+        mf.conv_tol = 1e-12
         mf.kernel()
         hobj = mf.Hessian()
         e1_cpu, ej_cpu, ek_cpu = rhf_cpu._partial_hess_ejk(hobj)
@@ -62,8 +62,8 @@ class KnownValues(unittest.TestCase):
         hobj = mf.Hessian()
         e1_gpu, e2_gpu = rhf_gpu._partial_hess_ejk(hobj)
 
-        assert abs(e1_cpu - e1_gpu.get()).max() < 1e-5
-        assert abs(e2_cpu - e2_gpu.get()).max() < 1e-5
+        assert abs(e1_cpu - e1_gpu.get()).max() < 1e-7
+        assert abs(e2_cpu - e2_gpu.get()).max() < 1e-7
 
     def test_ejk_ip2(self):
         mol = gto.M(

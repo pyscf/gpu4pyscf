@@ -130,7 +130,6 @@ void _rys_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -183,7 +182,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void rys_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -357,7 +356,6 @@ void _rys_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -445,7 +443,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void rys_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -631,7 +629,6 @@ void _rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -792,7 +789,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -1014,7 +1011,6 @@ void _rys_jk_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -1344,7 +1340,7 @@ void _rys_jk_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -1534,7 +1530,6 @@ void _rys_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -1694,7 +1689,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void rys_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -1920,7 +1915,6 @@ void _rys_jk_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -2250,7 +2244,7 @@ void _rys_jk_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -2584,7 +2578,6 @@ void _rys_jk_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -3368,7 +3361,7 @@ void _rys_jk_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -3548,7 +3541,6 @@ void _rys_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -3679,7 +3671,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void rys_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -3883,7 +3875,6 @@ void _rys_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -4144,7 +4135,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void rys_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -4420,7 +4411,6 @@ void _rys_jk_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -4997,7 +4987,7 @@ void _rys_jk_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -5237,7 +5227,6 @@ void _rys_jk_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -5678,7 +5667,7 @@ void _rys_jk_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -5728,8 +5717,6 @@ void _rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -5740,18 +5727,17 @@ void _rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double rw_cache[];
-    double *rw = rw_cache + sq_id;
+    extern __shared__ double cicj_cache[];
+    double *rw = cicj_cache + iprim*jprim*TILE2 + sq_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1152;
     double *gz = gy + 1152;
     double *rjri = gz + 1152;
     double *rlrk = rjri + 192;
     double *Rpq = rlrk + 192;
-    double *cicj_cache = rw_cache + 64 * (nroots*2+63);
 
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    int thread_id = 64 * gout_id + sq_id;
+    int threads = 256;
     for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -5848,12 +5834,12 @@ void _rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double xlxk = rl[0] - rk[0];
             double ylyk = rl[1] - rk[1];
             double zlzk = rl[2] - rk[2];
-            rjri[0*nsq_per_block] = xjxi;
-            rjri[1*nsq_per_block] = yjyi;
-            rjri[2*nsq_per_block] = zjzi;
-            rlrk[0*nsq_per_block] = xlxk;
-            rlrk[1*nsq_per_block] = ylyk;
-            rlrk[2*nsq_per_block] = zlzk;
+            rjri[0] = xjxi;
+            rjri[64] = yjyi;
+            rjri[128] = zjzi;
+            rlrk[0] = xlxk;
+            rlrk[64] = ylyk;
+            rlrk[128] = zlzk;
         }
         
         gout0 = 0;
@@ -5892,9 +5878,9 @@ void _rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al_akl = al / akl;
             __syncthreads();
             if (gout_id == 0) {
-                double xlxk = rlrk[0*nsq_per_block];
-                double ylyk = rlrk[1*nsq_per_block];
-                double zlzk = rlrk[2*nsq_per_block];
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
@@ -5907,20 +5893,20 @@ void _rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double aj = expj[jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + rjri[0*nsq_per_block] * aj_aij;
-                double yij = ri[1] + rjri[1*nsq_per_block] * aj_aij;
-                double zij = ri[2] + rjri[2*nsq_per_block] * aj_aij;
-                double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
-                double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
-                double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[64] * aj_aij;
+                double zij = ri[2] + rjri[128] * aj_aij;
+                double xkl = rk[0] + rlrk[0] * al_akl;
+                double ykl = rk[1] + rlrk[64] * al_akl;
+                double zkl = rk[2] + rlrk[128] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
                 __syncthreads();
                 if (gout_id == 0) {
-                    Rpq[0*nsq_per_block] = xpq;
-                    Rpq[1*nsq_per_block] = ypq;
-                    Rpq[2*nsq_per_block] = zpq;
+                    Rpq[0] = xpq;
+                    Rpq[64] = ypq;
+                    Rpq[128] = zpq;
                     double cicj = cicj_cache[sh_ij+ijp*TILE2];
                     gy[0] = cicj / (aij*akl*sqrt(aij+akl));
                 }
@@ -5943,17 +5929,17 @@ void _rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             gz[0] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1152;
-                        double xjxi = rj[n] - ri[n];
+                        double xjxi = rjri[n*64];
                         double Rpa = xjxi * aj_aij;
-                        double c0x = Rpa - rt_aij * Rpq[n*nsq_per_block];
+                        double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
                         _gx[64] = s1;
                         s2 = c0x * s1 + 1 * b10 * s0;
                         _gx[128] = s2;
-                        double xlxk = rl[n] - rk[n];
+                        double xlxk = rlrk[n*64];
                         double Rqc = xlxk * al_akl;
-                        double cpx = Rqc + rt_akl * Rpq[n*nsq_per_block];
+                        double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
                         _gx[192] = s1;
@@ -7208,7 +7194,7 @@ void _rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -7416,7 +7402,6 @@ void _rys_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -7675,7 +7660,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void rys_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -7955,7 +7940,6 @@ void _rys_jk_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -8528,7 +8512,7 @@ void _rys_jk_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -8578,8 +8562,6 @@ void _rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -8590,18 +8572,17 @@ void _rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double rw_cache[];
-    double *rw = rw_cache + sq_id;
+    extern __shared__ double cicj_cache[];
+    double *rw = cicj_cache + iprim*jprim*TILE2 + sq_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1536;
     double *gz = gy + 1536;
     double *rjri = gz + 1536;
     double *rlrk = rjri + 192;
     double *Rpq = rlrk + 192;
-    double *cicj_cache = rw_cache + 64 * (nroots*2+81);
 
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    int thread_id = 64 * gout_id + sq_id;
+    int threads = 256;
     for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -8712,12 +8693,12 @@ void _rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double xlxk = rl[0] - rk[0];
             double ylyk = rl[1] - rk[1];
             double zlzk = rl[2] - rk[2];
-            rjri[0*nsq_per_block] = xjxi;
-            rjri[1*nsq_per_block] = yjyi;
-            rjri[2*nsq_per_block] = zjzi;
-            rlrk[0*nsq_per_block] = xlxk;
-            rlrk[1*nsq_per_block] = ylyk;
-            rlrk[2*nsq_per_block] = zlzk;
+            rjri[0] = xjxi;
+            rjri[64] = yjyi;
+            rjri[128] = zjzi;
+            rlrk[0] = xlxk;
+            rlrk[64] = ylyk;
+            rlrk[128] = zlzk;
         }
         
         gout0 = 0;
@@ -8770,9 +8751,9 @@ void _rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al_akl = al / akl;
             __syncthreads();
             if (gout_id == 0) {
-                double xlxk = rlrk[0*nsq_per_block];
-                double ylyk = rlrk[1*nsq_per_block];
-                double zlzk = rlrk[2*nsq_per_block];
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
@@ -8785,20 +8766,20 @@ void _rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double aj = expj[jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + rjri[0*nsq_per_block] * aj_aij;
-                double yij = ri[1] + rjri[1*nsq_per_block] * aj_aij;
-                double zij = ri[2] + rjri[2*nsq_per_block] * aj_aij;
-                double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
-                double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
-                double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[64] * aj_aij;
+                double zij = ri[2] + rjri[128] * aj_aij;
+                double xkl = rk[0] + rlrk[0] * al_akl;
+                double ykl = rk[1] + rlrk[64] * al_akl;
+                double zkl = rk[2] + rlrk[128] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
                 __syncthreads();
                 if (gout_id == 0) {
-                    Rpq[0*nsq_per_block] = xpq;
-                    Rpq[1*nsq_per_block] = ypq;
-                    Rpq[2*nsq_per_block] = zpq;
+                    Rpq[0] = xpq;
+                    Rpq[64] = ypq;
+                    Rpq[128] = zpq;
                     double cicj = cicj_cache[sh_ij+ijp*TILE2];
                     gy[0] = cicj / (aij*akl*sqrt(aij+akl));
                 }
@@ -8821,9 +8802,9 @@ void _rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             gz[0] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1536;
-                        double xjxi = rj[n] - ri[n];
+                        double xjxi = rjri[n*64];
                         double Rpa = xjxi * aj_aij;
-                        double c0x = Rpa - rt_aij * Rpq[n*nsq_per_block];
+                        double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
                         _gx[64] = s1;
@@ -8833,9 +8814,9 @@ void _rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s1 = s2;
                         s2 = c0x * s1 + 2 * b10 * s0;
                         _gx[192] = s2;
-                        double xlxk = rl[n] - rk[n];
+                        double xlxk = rlrk[n*64];
                         double Rqc = xlxk * al_akl;
-                        double cpx = Rqc + rt_akl * Rpq[n*nsq_per_block];
+                        double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
                         _gx[384] = s1;
@@ -10545,7 +10526,7 @@ void _rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -10595,8 +10576,6 @@ void _rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -10607,18 +10586,17 @@ void _rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double rw_cache[];
-    double *rw = rw_cache + sq_id;
+    extern __shared__ double cicj_cache[];
+    double *rw = cicj_cache + iprim*jprim*TILE2 + sq_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1152;
     double *gz = gy + 1152;
     double *rjri = gz + 1152;
     double *rlrk = rjri + 192;
     double *Rpq = rlrk + 192;
-    double *cicj_cache = rw_cache + 64 * (nroots*2+63);
 
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    int thread_id = 64 * gout_id + sq_id;
+    int threads = 256;
     for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -10715,12 +10693,12 @@ void _rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double xlxk = rl[0] - rk[0];
             double ylyk = rl[1] - rk[1];
             double zlzk = rl[2] - rk[2];
-            rjri[0*nsq_per_block] = xjxi;
-            rjri[1*nsq_per_block] = yjyi;
-            rjri[2*nsq_per_block] = zjzi;
-            rlrk[0*nsq_per_block] = xlxk;
-            rlrk[1*nsq_per_block] = ylyk;
-            rlrk[2*nsq_per_block] = zlzk;
+            rjri[0] = xjxi;
+            rjri[64] = yjyi;
+            rjri[128] = zjzi;
+            rlrk[0] = xlxk;
+            rlrk[64] = ylyk;
+            rlrk[128] = zlzk;
         }
         
         gout0 = 0;
@@ -10759,9 +10737,9 @@ void _rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al_akl = al / akl;
             __syncthreads();
             if (gout_id == 0) {
-                double xlxk = rlrk[0*nsq_per_block];
-                double ylyk = rlrk[1*nsq_per_block];
-                double zlzk = rlrk[2*nsq_per_block];
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
@@ -10774,20 +10752,20 @@ void _rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double aj = expj[jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + rjri[0*nsq_per_block] * aj_aij;
-                double yij = ri[1] + rjri[1*nsq_per_block] * aj_aij;
-                double zij = ri[2] + rjri[2*nsq_per_block] * aj_aij;
-                double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
-                double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
-                double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[64] * aj_aij;
+                double zij = ri[2] + rjri[128] * aj_aij;
+                double xkl = rk[0] + rlrk[0] * al_akl;
+                double ykl = rk[1] + rlrk[64] * al_akl;
+                double zkl = rk[2] + rlrk[128] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
                 __syncthreads();
                 if (gout_id == 0) {
-                    Rpq[0*nsq_per_block] = xpq;
-                    Rpq[1*nsq_per_block] = ypq;
-                    Rpq[2*nsq_per_block] = zpq;
+                    Rpq[0] = xpq;
+                    Rpq[64] = ypq;
+                    Rpq[128] = zpq;
                     double cicj = cicj_cache[sh_ij+ijp*TILE2];
                     gy[0] = cicj / (aij*akl*sqrt(aij+akl));
                 }
@@ -10810,9 +10788,9 @@ void _rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             gz[0] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1152;
-                        double xjxi = rj[n] - ri[n];
+                        double xjxi = rjri[n*64];
                         double Rpa = xjxi * aj_aij;
-                        double c0x = Rpa - rt_aij * Rpq[n*nsq_per_block];
+                        double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
                         _gx[64] = s1;
@@ -10822,9 +10800,9 @@ void _rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s1 = s2;
                         s2 = c0x * s1 + 2 * b10 * s0;
                         _gx[192] = s2;
-                        double xlxk = rl[n] - rk[n];
+                        double xlxk = rlrk[n*64];
                         double Rqc = xlxk * al_akl;
-                        double cpx = Rqc + rt_akl * Rpq[n*nsq_per_block];
+                        double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
                         _gx[384] = s1;
@@ -12144,7 +12122,7 @@ void _rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -12388,7 +12366,6 @@ void _rys_jk_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -12832,7 +12809,7 @@ void _rys_jk_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -12882,8 +12859,6 @@ void _rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -12894,18 +12869,17 @@ void _rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double rw_cache[];
-    double *rw = rw_cache + sq_id;
+    extern __shared__ double cicj_cache[];
+    double *rw = cicj_cache + iprim*jprim*TILE2 + sq_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1152;
     double *gz = gy + 1152;
     double *rjri = gz + 1152;
     double *rlrk = rjri + 192;
     double *Rpq = rlrk + 192;
-    double *cicj_cache = rw_cache + 64 * (nroots*2+63);
 
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    int thread_id = 64 * gout_id + sq_id;
+    int threads = 256;
     for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -13002,12 +12976,12 @@ void _rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double xlxk = rl[0] - rk[0];
             double ylyk = rl[1] - rk[1];
             double zlzk = rl[2] - rk[2];
-            rjri[0*nsq_per_block] = xjxi;
-            rjri[1*nsq_per_block] = yjyi;
-            rjri[2*nsq_per_block] = zjzi;
-            rlrk[0*nsq_per_block] = xlxk;
-            rlrk[1*nsq_per_block] = ylyk;
-            rlrk[2*nsq_per_block] = zlzk;
+            rjri[0] = xjxi;
+            rjri[64] = yjyi;
+            rjri[128] = zjzi;
+            rlrk[0] = xlxk;
+            rlrk[64] = ylyk;
+            rlrk[128] = zlzk;
         }
         
         gout0 = 0;
@@ -13046,9 +13020,9 @@ void _rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al_akl = al / akl;
             __syncthreads();
             if (gout_id == 0) {
-                double xlxk = rlrk[0*nsq_per_block];
-                double ylyk = rlrk[1*nsq_per_block];
-                double zlzk = rlrk[2*nsq_per_block];
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
@@ -13061,20 +13035,20 @@ void _rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double aj = expj[jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + rjri[0*nsq_per_block] * aj_aij;
-                double yij = ri[1] + rjri[1*nsq_per_block] * aj_aij;
-                double zij = ri[2] + rjri[2*nsq_per_block] * aj_aij;
-                double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
-                double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
-                double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[64] * aj_aij;
+                double zij = ri[2] + rjri[128] * aj_aij;
+                double xkl = rk[0] + rlrk[0] * al_akl;
+                double ykl = rk[1] + rlrk[64] * al_akl;
+                double zkl = rk[2] + rlrk[128] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
                 __syncthreads();
                 if (gout_id == 0) {
-                    Rpq[0*nsq_per_block] = xpq;
-                    Rpq[1*nsq_per_block] = ypq;
-                    Rpq[2*nsq_per_block] = zpq;
+                    Rpq[0] = xpq;
+                    Rpq[64] = ypq;
+                    Rpq[128] = zpq;
                     double cicj = cicj_cache[sh_ij+ijp*TILE2];
                     gy[0] = cicj / (aij*akl*sqrt(aij+akl));
                 }
@@ -13096,9 +13070,9 @@ void _rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             gz[0] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1152;
-                        double xjxi = rj[n] - ri[n];
+                        double xjxi = rjri[n*64];
                         double Rpa = xjxi * aj_aij;
-                        double c0x = Rpa - rt_aij * Rpq[n*nsq_per_block];
+                        double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
                         _gx[64] = s1;
@@ -13112,9 +13086,9 @@ void _rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s1 = s2;
                         s2 = c0x * s1 + 3 * b10 * s0;
                         _gx[256] = s2;
-                        double xlxk = rl[n] - rk[n];
+                        double xlxk = rlrk[n*64];
                         double Rqc = xlxk * al_akl;
-                        double cpx = Rqc + rt_akl * Rpq[n*nsq_per_block];
+                        double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
                         _gx[576] = s1;
@@ -14370,7 +14344,7 @@ void _rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -14558,7 +14532,6 @@ void _rys_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -14744,7 +14717,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void rys_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -14972,7 +14945,6 @@ void _rys_jk_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -15359,7 +15331,7 @@ void _rys_jk_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -15409,8 +15381,6 @@ void _rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -15421,18 +15391,17 @@ void _rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double rw_cache[];
-    double *rw = rw_cache + sq_id;
+    extern __shared__ double cicj_cache[];
+    double *rw = cicj_cache + iprim*jprim*TILE2 + sq_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1024;
     double *gz = gy + 1024;
     double *rjri = gz + 1024;
     double *rlrk = rjri + 192;
     double *Rpq = rlrk + 192;
-    double *cicj_cache = rw_cache + 64 * (nroots*2+57);
 
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    int thread_id = 64 * gout_id + sq_id;
+    int threads = 256;
     for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -15525,12 +15494,12 @@ void _rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double xlxk = rl[0] - rk[0];
             double ylyk = rl[1] - rk[1];
             double zlzk = rl[2] - rk[2];
-            rjri[0*nsq_per_block] = xjxi;
-            rjri[1*nsq_per_block] = yjyi;
-            rjri[2*nsq_per_block] = zjzi;
-            rlrk[0*nsq_per_block] = xlxk;
-            rlrk[1*nsq_per_block] = ylyk;
-            rlrk[2*nsq_per_block] = zlzk;
+            rjri[0] = xjxi;
+            rjri[64] = yjyi;
+            rjri[128] = zjzi;
+            rlrk[0] = xlxk;
+            rlrk[64] = ylyk;
+            rlrk[128] = zlzk;
         }
         
         gout0 = 0;
@@ -15565,9 +15534,9 @@ void _rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al_akl = al / akl;
             __syncthreads();
             if (gout_id == 0) {
-                double xlxk = rlrk[0*nsq_per_block];
-                double ylyk = rlrk[1*nsq_per_block];
-                double zlzk = rlrk[2*nsq_per_block];
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
@@ -15580,20 +15549,20 @@ void _rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double aj = expj[jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + rjri[0*nsq_per_block] * aj_aij;
-                double yij = ri[1] + rjri[1*nsq_per_block] * aj_aij;
-                double zij = ri[2] + rjri[2*nsq_per_block] * aj_aij;
-                double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
-                double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
-                double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[64] * aj_aij;
+                double zij = ri[2] + rjri[128] * aj_aij;
+                double xkl = rk[0] + rlrk[0] * al_akl;
+                double ykl = rk[1] + rlrk[64] * al_akl;
+                double zkl = rk[2] + rlrk[128] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
                 __syncthreads();
                 if (gout_id == 0) {
-                    Rpq[0*nsq_per_block] = xpq;
-                    Rpq[1*nsq_per_block] = ypq;
-                    Rpq[2*nsq_per_block] = zpq;
+                    Rpq[0] = xpq;
+                    Rpq[64] = ypq;
+                    Rpq[128] = zpq;
                     double cicj = cicj_cache[sh_ij+ijp*TILE2];
                     gy[0] = cicj / (aij*akl*sqrt(aij+akl));
                 }
@@ -15616,9 +15585,9 @@ void _rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             gz[0] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1024;
-                        double xjxi = rj[n] - ri[n];
+                        double xjxi = rjri[n*64];
                         double Rpa = xjxi * aj_aij;
-                        double c0x = Rpa - rt_aij * Rpq[n*nsq_per_block];
+                        double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
                         _gx[64] = s1;
@@ -15628,9 +15597,9 @@ void _rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s1 = s2;
                         s2 = c0x * s1 + 2 * b10 * s0;
                         _gx[192] = s2;
-                        double xlxk = rl[n] - rk[n];
+                        double xlxk = rlrk[n*64];
                         double Rqc = xlxk * al_akl;
-                        double cpx = Rqc + rt_akl * Rpq[n*nsq_per_block];
+                        double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
                         _gx[256] = s1;
@@ -16765,7 +16734,7 @@ void _rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -17053,7 +17022,6 @@ void _rys_jk_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -17735,7 +17703,7 @@ void _rys_jk_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -17967,7 +17935,6 @@ void _rys_jk_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -18352,7 +18319,7 @@ void _rys_jk_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -18402,8 +18369,6 @@ void _rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -18414,18 +18379,17 @@ void _rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nao = ao_loc[nbas];
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double rw_cache[];
-    double *rw = rw_cache + sq_id;
+    extern __shared__ double cicj_cache[];
+    double *rw = cicj_cache + iprim*jprim*TILE2 + sq_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1024;
     double *gz = gy + 1024;
     double *rjri = gz + 1024;
     double *rlrk = rjri + 192;
     double *Rpq = rlrk + 192;
-    double *cicj_cache = rw_cache + 64 * (nroots*2+57);
 
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    int thread_id = 64 * gout_id + sq_id;
+    int threads = 256;
     for (int n = thread_id; n < iprim*jprim*TILE2; n += threads) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -18518,12 +18482,12 @@ void _rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double xlxk = rl[0] - rk[0];
             double ylyk = rl[1] - rk[1];
             double zlzk = rl[2] - rk[2];
-            rjri[0*nsq_per_block] = xjxi;
-            rjri[1*nsq_per_block] = yjyi;
-            rjri[2*nsq_per_block] = zjzi;
-            rlrk[0*nsq_per_block] = xlxk;
-            rlrk[1*nsq_per_block] = ylyk;
-            rlrk[2*nsq_per_block] = zlzk;
+            rjri[0] = xjxi;
+            rjri[64] = yjyi;
+            rjri[128] = zjzi;
+            rlrk[0] = xlxk;
+            rlrk[64] = ylyk;
+            rlrk[128] = zlzk;
         }
         
         gout0 = 0;
@@ -18558,9 +18522,9 @@ void _rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al_akl = al / akl;
             __syncthreads();
             if (gout_id == 0) {
-                double xlxk = rlrk[0*nsq_per_block];
-                double ylyk = rlrk[1*nsq_per_block];
-                double zlzk = rlrk[2*nsq_per_block];
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
@@ -18573,20 +18537,20 @@ void _rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double aj = expj[jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + rjri[0*nsq_per_block] * aj_aij;
-                double yij = ri[1] + rjri[1*nsq_per_block] * aj_aij;
-                double zij = ri[2] + rjri[2*nsq_per_block] * aj_aij;
-                double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
-                double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
-                double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[64] * aj_aij;
+                double zij = ri[2] + rjri[128] * aj_aij;
+                double xkl = rk[0] + rlrk[0] * al_akl;
+                double ykl = rk[1] + rlrk[64] * al_akl;
+                double zkl = rk[2] + rlrk[128] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
                 __syncthreads();
                 if (gout_id == 0) {
-                    Rpq[0*nsq_per_block] = xpq;
-                    Rpq[1*nsq_per_block] = ypq;
-                    Rpq[2*nsq_per_block] = zpq;
+                    Rpq[0] = xpq;
+                    Rpq[64] = ypq;
+                    Rpq[128] = zpq;
                     double cicj = cicj_cache[sh_ij+ijp*TILE2];
                     gy[0] = cicj / (aij*akl*sqrt(aij+akl));
                 }
@@ -18608,9 +18572,9 @@ void _rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             gz[0] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1024;
-                        double xjxi = rj[n] - ri[n];
+                        double xjxi = rjri[n*64];
                         double Rpa = xjxi * aj_aij;
-                        double c0x = Rpa - rt_aij * Rpq[n*nsq_per_block];
+                        double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
                         _gx[64] = s1;
@@ -18624,9 +18588,9 @@ void _rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s1 = s2;
                         s2 = c0x * s1 + 3 * b10 * s0;
                         _gx[256] = s2;
-                        double xlxk = rl[n] - rk[n];
+                        double xlxk = rlrk[n*64];
                         double Rqc = xlxk * al_akl;
-                        double cpx = Rqc + rt_akl * Rpq[n*nsq_per_block];
+                        double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
                         _gx[512] = s1;
@@ -19754,7 +19718,7 @@ void _rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -20046,7 +20010,6 @@ void _rys_jk_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                double theta_rr = theta * rr;
                 double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_omega(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
@@ -20731,7 +20694,7 @@ void _rys_jk_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_jk_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_jk_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
