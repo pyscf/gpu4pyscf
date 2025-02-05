@@ -1,7 +1,8 @@
-v1.3.1 (2025-02-03)
+v1.3.1 (2025-02-04)
 -------------------
 * New Features
   - Analytical Hessian for PCM solvent model
+  - Driver for 3c methods (wB97x-3c, R2Scan-3c, B97-3c, etc.)
 * Improvements
   - Preconditioner and computation efficiency of Davidson iterations for TDDFT
 
