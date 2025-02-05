@@ -1,0 +1,22 @@
+[{
+    "input_dir": "./",
+    "output_dir": "./",
+    "molecules": [
+        "ethane.xyz",
+        "ethane.xyz"
+    ],
+    "constraints": [
+        "constraints.txt",
+        "constraints.txt"
+    ],
+    "xc": "b973c",
+    "auxbasis": "def2-universal-JFIT",
+    "verbose": 4,
+    "with_solvent": false,
+    "solvent": {
+        "eps": 78.3553,
+        "method": "CPCM"
+    },
+    "with_gpu": true,
+    "with_df": true
+}]

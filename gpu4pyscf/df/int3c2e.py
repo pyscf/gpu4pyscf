@@ -24,7 +24,7 @@ from gpu4pyscf.lib.cupy_helper import (block_c2s_diag, cart2sph, contract, get_a
                                        reduce_to_device, copy_array, transpose_sum)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import basis_seg_contraction
-from gpu4pyscf.__config__ import _num_devices, _streams
+from gpu4pyscf.__config__ import num_devices, _streams
 
 LMAX_ON_GPU = 8
 FREE_CUPY_CACHE = True
@@ -824,11 +824,11 @@ def get_int3c2e_jk(mol, auxmol, dm0_tag, with_k=True, omega=None):
     futures = []
     aux_ao_loc = np.array(intopt.aux_ao_loc)
     loads = aux_ao_loc[1:] - aux_ao_loc[:-1]
-    task_list = _split_tasks(loads, _num_devices)
+    task_list = _split_tasks(loads, num_devices)
 
     cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _int3c2e_jk_task, intopt, task_list[device_id],
                 dm0_tag, orbo, device_id=device_id, omega=omega)
@@ -935,11 +935,11 @@ def get_int3c2e_ip1_vjk(intopt, rhoj, rhok, dm0_tag, aoslices, with_j=True,
 
     aux_ao_loc = np.array(intopt.aux_ao_loc)
     loads = aux_ao_loc[1:] - aux_ao_loc[:-1]
-    task_list = _split_tasks(loads, _num_devices)
+    task_list = _split_tasks(loads, num_devices)
 
     cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _int3c2e_ip1_vjk_task, intopt, task_list[device_id],
                 rhoj, rhok, dm0_tag, orbo, with_j=with_j, with_k=with_k,
@@ -1033,11 +1033,11 @@ def get_int3c2e_ip2_vjk(intopt, rhoj, rhok, dm0_tag, auxslices,
 
     aux_ao_loc = np.array(intopt.aux_ao_loc)
     loads = aux_ao_loc[1:] - aux_ao_loc[:-1]
-    task_list = _split_tasks(loads, _num_devices)
+    task_list = _split_tasks(loads, num_devices)
 
     cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _int3c2e_ip2_vjk_task, intopt, task_list[device_id],
                 rhoj, rhok, dm0_tag, orbo, with_j=with_j,
@@ -1096,7 +1096,7 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
 
     aux_ao_loc = np.array(intopt.aux_ao_loc)
     loads = aux_ao_loc[1:] - aux_ao_loc[:-1]
-    task_list = _split_tasks(loads, _num_devices)
+    task_list = _split_tasks(loads, num_devices)
 
     nao = intopt.mol.nao
     naux = intopt.auxmol.nao
@@ -1107,8 +1107,8 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
         wk = np.ndarray([naux,nao,nocc,3], dtype=np.float64, order='C', buffer=mem)
 
     cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _int3c2e_ip1_wjk_task, intopt, task_list[device_id],
                 dm0_tag, orbo, wk, with_k=with_k, device_id=device_id, omega=omega)
@@ -1156,11 +1156,11 @@ def get_int3c2e_ip2_wjk(intopt, dm0_tag, with_k=True, omega=None):
 
     aux_ao_loc = np.array(intopt.aux_ao_loc)
     loads = aux_ao_loc[1:] - aux_ao_loc[:-1]
-    task_list = _split_tasks(loads, _num_devices)
+    task_list = _split_tasks(loads, num_devices)
 
     cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _int3c2e_ip2_wjk, intopt, task_list[device_id],
                 dm0_tag, orbo, with_k=with_k, device_id=device_id, omega=omega)

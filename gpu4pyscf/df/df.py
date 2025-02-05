@@ -25,7 +25,7 @@ from gpu4pyscf.lib.cupy_helper import (cholesky, tag_array, get_avail_mem,
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
-from gpu4pyscf.__config__ import _streams, _num_devices
+from gpu4pyscf.__config__ import _streams, num_devices
 
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
@@ -218,7 +218,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
         # CDERI will be equally distributed to the devices
         # Other devices usually have more memory available than Device 0
         # CDERI will use up to 40% of the available memory
-        use_gpu_memory = naux * npairs * 8 < 0.4 * avail_mem * _num_devices
+        use_gpu_memory = naux * npairs * 8 < 0.4 * avail_mem * num_devices
 
     if use_gpu_memory:
         log.debug("Saving CDERI on GPU")
@@ -226,9 +226,9 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
         log.debug("Saving CDERI on CPU")
 
     _cderi = {}
-    aux_blksize = (naux + _num_devices - 1) // _num_devices
+    aux_blksize = (naux + num_devices - 1) // num_devices
     aux_blksize = (aux_blksize + ALIGNED - 1) // ALIGNED * ALIGNED
-    for device_id in range(_num_devices):
+    for device_id in range(num_devices):
         p0 = min(aux_blksize*device_id, naux)
         p1 = min(aux_blksize*(device_id+1), naux)
         #for device_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
@@ -246,16 +246,16 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     npairs_per_ctr = np.array(npairs_per_ctr)
     total_task_list = np.argsort(npairs_per_ctr)
     task_list_per_device = []
-    for device_id in range(_num_devices):
-        task_list_per_device.append(total_task_list[device_id::_num_devices])
+    for device_id in range(num_devices):
+        task_list_per_device.append(total_task_list[device_id::num_devices])
 
     cd_low_f = cupy.array(cd_low, order='F', copy=False)
     cd_low_f = tag_array(cd_low_f, tag=cd_low.tag)
 
     cupy.cuda.get_current_stream().synchronize()
     futures = []
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             task_list = task_list_per_device[device_id]
             future = executor.submit(_cderi_task, intopt, cd_low_f, task_list, _cderi, aux_blksize,
                                      omega=omega, sr_only=sr_only, device_id=device_id)
@@ -352,7 +352,7 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
                 for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
                     tmp = cupy.array(cderi_block[p0:p1], order='C', copy=True)
                     copy_array(tmp, _cderi[slice_id][:p1-p0,ij0:ij1])
-            elif _num_devices > 1:
+            elif num_devices > 1:
                 # Multi-GPU case, copy data to other Devices
                 for dev_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
                     # Making a copy for contiguous data transfer
