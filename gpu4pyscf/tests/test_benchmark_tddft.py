@@ -90,12 +90,12 @@ def run_rb3lyp_tda(atom, basis, with_df, with_solvent, disp=None):
 def test_df_rb3lyp_tddft(benchmark):
     e = benchmark(run_rb3lyp_tddft, small_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp tddft')
-    assert np.allclose([0.1652341, 0.19442237, 0.21143863, 0.21809428, 0.22871117], e)
+    assert np.allclose([0.16523319, 0.19442242, 0.21143836, 0.21809395, 0.22871087], e)
 @pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
 def test_df_rb3lyp_tda(benchmark):
     e = benchmark(run_rb3lyp_tda, small_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp tda')
-    assert np.allclose([0.16602878, 0.2008427, 0.21245292, 0.22157353, 0.2294365], e)
+    assert np.allclose([0.16602786, 0.20084277, 0.21245269, 0.2215731,  0.2294362], e)
 
 
 ################
@@ -105,12 +105,12 @@ def test_df_rb3lyp_tda(benchmark):
 def test_rb3lyp_tddft(benchmark):
     e = benchmark(run_rb3lyp_tddft, small_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp tddft')
-    assert np.allclose([0.16523407, 0.19442038, 0.21143666, 0.21809283, 0.22870855], e)
+    assert np.allclose([0.16523316, 0.19442043, 0.21143639, 0.2180925,  0.22870825], e)
 @pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
 def test_rb3lyp_tda(benchmark):
     e = benchmark(run_rb3lyp_tda, small_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp tda')
-    assert np.allclose([0.16602873, 0.20084131, 0.21245116, 0.22157196, 0.2294339 ], e)
+    assert np.allclose([0.16602782, 0.20084139, 0.21245093, 0.22157153, 0.2294336], e)
 
 
 ####################
@@ -120,23 +120,23 @@ def test_rb3lyp_tda(benchmark):
 def test_df_rb3lyp_tddft_medium(benchmark):
     e = benchmark(run_rb3lyp_tddft, medium_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp tddft medium')
-    assert np.allclose([0.1652341, 0.19442237, 0.21143863, 0.21809428, 0.22871117], e)
+    assert np.allclose([0.14359969, 0.15114103, 0.15593607, 0.16176117, 0.16484172], e)
 @pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
 def test_df_rb3lyp_tda_medium(benchmark):
     e = benchmark(run_rb3lyp_tda, medium_mol, 'def2-tzvpp', True, False)
     print('testing df rb3lyp tda medium')
-    assert np.allclose([0.1652341, 0.19442237, 0.21143863, 0.21809428, 0.22871117], e)
+    assert np.allclose([0.14642032, 0.15194237, 0.15696979, 0.16456322, 0.16519566], e)
 
 @pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
 def test_rb3lyp_tddft_medium(benchmark):
     e = benchmark(run_rb3lyp_tddft, medium_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp tddft medium')
-    assert np.allclose([0.1652341, 0.19442237, 0.21143863, 0.21809428, 0.22871117], e)
+    assert np.allclose([0.14359864, 0.15114158, 0.15593616, 0.16176195, 0.16483943], e)
 @pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
 def test_rb3lyp_tda_medium(benchmark):
     e = benchmark(run_rb3lyp_tda, medium_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp tda medium')
-    assert np.allclose([0.1652341, 0.19442237, 0.21143863, 0.21809428, 0.22871117], e)
+    assert np.allclose([0.14641966, 0.15194219, 0.15697108, 0.16456213, 0.16519457], e)
 
 
 
@@ -147,11 +147,11 @@ def test_rb3lyp_tda_medium(benchmark):
 def test_df_rb3lyp_631gs_tddft(benchmark):
     e = benchmark(run_rb3lyp_tddft, small_mol, '6-31gs', True, False)
     print('testing df rb3lyp 631gs tddft')
-    assert np.allclose([0.16324444, 0.19561619, 0.20816938, 0.21759079, 0.22805259], e)
+    assert np.allclose([0.16324379, 0.19561657, 0.20816873, 0.21759055, 0.22805238], e)
 @pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
 def test_df_rb3lyp_631gs_tda(benchmark):
     e = benchmark(run_rb3lyp_tda, small_mol, '6-31gs', True, False)
     print('testing df rb3lyp 631gs tda')
-    assert np.allclose([0.16397102, 0.20123098, 0.20907196, 0.22170831, 0.22844169], e)
+    assert np.allclose([0.16397038, 0.20123123, 0.20907137, 0.22170817, 0.2284415], e)
 
 
