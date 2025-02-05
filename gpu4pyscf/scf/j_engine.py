@@ -26,7 +26,7 @@ from pyscf import lib
 from pyscf import __config__
 from gpu4pyscf.lib.cupy_helper import load_library, condense, sandwich_dot, transpose_sum
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.__config__ import _num_devices
+from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import jk
 from gpu4pyscf.scf.jk import _make_j_engine_pair_locs, RysIntEnvVars, _scale_sp_ctr_coeff
@@ -53,7 +53,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
     if vhfopt is None:
         with mol.with_range_coulomb(omega):
             groupsize = None
-            if _num_devices > 1:                
+            if num_devices > 1:                
                 groupsize = jk.GROUP_SIZE
             vhfopt = _VHFOpt(mol).build(group_size=groupsize)
     if omega is None:

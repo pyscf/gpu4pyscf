@@ -23,7 +23,7 @@ from gpu4pyscf.scf.int4c2e import libgint
 from gpu4pyscf.hessian.jk import _ao2mo
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, cart2sph, reduce_to_device
-from gpu4pyscf.__config__ import _streams, _num_devices
+from gpu4pyscf.__config__ import _streams, num_devices
 
 NROOT_ON_GPU = 7
 
@@ -171,8 +171,8 @@ def get_jk(dfobj, dms_tag, mo_coeff, mocc, hermi=0,
     mo_coeff = [intopt.sort_orbitals(mo, axis=[0]) for mo in mo_coeff]
 
     futures = []
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _jk_task_with_mo1,
                 dfobj, dms, mo_coeff, mo1s, occ_coeffs,
@@ -415,12 +415,12 @@ def get_int3c2e_hjk(intopt, rhoj, rhok, dm0_tag, with_j=True, with_k=True,
     ncp_ij = len(intopt.log_qs)
     tasks = np.array(list(itertools.product(range(ncp_k), range(ncp_ij))))
     task_list = []
-    for device_id in range(_num_devices):
-        task_list.append(tasks[device_id::_num_devices])
+    for device_id in range(num_devices):
+        task_list.append(tasks[device_id::num_devices])
 
     cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _int3c2e_ipip_tasks, intopt, task_list[device_id],
                 rhoj, rhok, dm0_tag, orbo, with_j=with_j, with_k=with_k,

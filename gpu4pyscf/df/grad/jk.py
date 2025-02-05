@@ -18,7 +18,7 @@ import cupy
 from gpu4pyscf.df.int3c2e import get_int3c2e_ip_jk, VHFOpt, _split_tasks
 from gpu4pyscf.lib.cupy_helper import contract, concatenate, reduce_to_device
 from gpu4pyscf.lib import logger
-from gpu4pyscf.__config__ import _streams, _num_devices
+from gpu4pyscf.__config__ import _streams, num_devices
 
 def _jk_task(with_df, dm, orbo, with_j=True, with_k=True, device_id=0):
     '''  # (L|ij) -> rhoj: (L), rhok: (L|oo)
@@ -61,8 +61,8 @@ def get_rhojk(with_df, dm, orbo, with_j=True, with_k=True):
     '''
     futures = []
     cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _jk_task, with_df, dm, orbo,
                 with_j=with_j, with_k=with_k, device_id=device_id)
@@ -161,12 +161,12 @@ def get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbo_cart,
 
     aux_ao_loc = np.array(intopt.aux_ao_loc)
     loads = aux_ao_loc[1:] - aux_ao_loc[:-1]
-    task_list = _split_tasks(loads, _num_devices)
+    task_list = _split_tasks(loads, num_devices)
 
     futures = []
     cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _jk_ip_task, intopt, rhoj_cart, dm_cart, rhok_cart, orbo_cart, task_list[device_id],
                 with_j=with_j, with_k=with_k, device_id=device_id, omega=omega)

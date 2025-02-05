@@ -32,7 +32,7 @@ from gpu4pyscf.lib.cupy_helper import (reduce_to_device,
     contract, tag_array, sandwich_dot, transpose_sum, get_avail_mem, condense,
     krylov)
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.__config__ import _streams, _num_devices
+from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt, 
@@ -271,7 +271,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
     if vhfopt is None:
         # Small group size for load balance
         group_size = None
-        if _num_devices > 1: 
+        if num_devices > 1: 
             group_size = GROUP_SIZE
         vhfopt = _VHFOpt(mol).build(group_size=group_size)
 
@@ -296,13 +296,13 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
                     tasks.append((i,j,k,l))
     tasks = np.array(tasks)
     task_list = []
-    for device_id in range(_num_devices):
-        task_list.append(tasks[device_id::_num_devices])
+    for device_id in range(num_devices):
+        task_list.append(tasks[device_id::num_devices])
 
     cp.cuda.get_current_stream().synchronize()
     futures = []
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _ejk_ip2_task,
                 mol, dms, vhfopt, task_list[device_id],
@@ -494,7 +494,7 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
     vhfopt.tile = 1
     # Small group size for load balance
     group_size = None
-    if _num_devices > 1: 
+    if num_devices > 1: 
         group_size = GROUP_SIZE
     vhfopt.build(group_size=group_size)
 
@@ -532,13 +532,13 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
                     tasks.append((i,j,k,l))
     tasks = np.array(tasks)
     task_list = []
-    for device_id in range(_num_devices):
-        task_list.append(tasks[device_id::_num_devices])
+    for device_id in range(num_devices):
+        task_list.append(tasks[device_id::num_devices])
 
     cp.cuda.get_current_stream().synchronize()
     futures = []
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _build_jk_ip1_task,
                 mol, dms, vhfopt, task_list[device_id], atoms_slice,
@@ -908,7 +908,7 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
         with mol.with_range_coulomb(omega):
             # Small group size for load balance
             group_size = None
-            if _num_devices > 1: 
+            if num_devices > 1: 
                 group_size = GROUP_SIZE
             vhfopt = _VHFOpt(mol, mf.direct_scf_tol).build(group_size=group_size)
             mf._opt_gpu[omega] = vhfopt
