@@ -30,7 +30,7 @@ from pyscf import __config__
 from gpu4pyscf.lib.cupy_helper import (load_library, condense, sandwich_dot, transpose_sum,
                                        reduce_to_device)
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.__config__ import _streams, _num_devices
+from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import group_basis
 
@@ -210,13 +210,13 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
                     tasks.append((i,j,k,l))
     tasks = np.array(tasks)
     task_list = []
-    for device_id in range(_num_devices):
-        task_list.append(tasks[device_id::_num_devices])
+    for device_id in range(num_devices):
+        task_list.append(tasks[device_id::num_devices])
 
     cp.cuda.get_current_stream().synchronize()
     futures = []
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _jk_task,
                 mol, dms, vhfopt, task_list[device_id], hermi=hermi,
@@ -458,7 +458,7 @@ def g_pair_idx(ij_inc=None):
 
 def init_constant(mol):
     g_idx, offsets = g_pair_idx()
-    for device_id in range(_num_devices):
+    for device_id in range(num_devices):
         with cp.cuda.Device(device_id), _streams[device_id]:
             err = libvhf_rys.RYS1_init_constant(
                 g_idx.ctypes, offsets.ctypes, mol._env.ctypes,
