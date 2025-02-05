@@ -16,7 +16,7 @@
 
 #define THREADS        128
 
-__device__
+__constant__
 static double _factorial[] = {
     1.0, 1.0, 2.0, 6.0, 24.,
     1.2e+2, 7.2e+2, 5.04e+3, 4.032e+4, 3.6288e+5,
@@ -27,7 +27,7 @@ static double _factorial[] = {
     1.1240007277776077e+21, 2.5852016738884978e+22,
 };
 
-__device__
+__constant__
 static double _factorial2[] = {
     1., 1., 2., 3., 8.,
     15., 48., 105., 384., 945.,
@@ -42,6 +42,27 @@ static double _factorial2[] = {
     1.6783438527143608e+21, 8.2007945326378929e+21,
     6.3777066403145712e+22, 3.1983098677287775e+23,
 };
+
+__device__
+static double factorial2(int n){
+    if (n < 0) {
+        return 1;
+    } else {
+        return _factorial2[n];
+    }
+}
+
+__device__
+static double int_unit_xyz(int i, int j, int k)
+{
+    if (i % 2 || j % 2 || k % 2) {
+        return 0;
+    } else {
+        return (factorial2(i-1) * factorial2(j-1) *
+        factorial2(k-1) / factorial2(i+j+k+1));
+    }
+}
+
 
 /*
  * exponentially scaled modified spherical Bessel function of the first kind

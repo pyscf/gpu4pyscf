@@ -21,7 +21,7 @@ from pyscf import gto
 from pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import load_library
 
-libecp = load_library('libecp')
+libecp = load_library('libgecp')
 libecp_cpu = gto.moleintor.libcgto
 
 def ang_nuc_part(l, rij):
@@ -43,6 +43,54 @@ def ang_nuc_part(l, rij):
              omega_xyz.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(l))
         return omega
 
+def type1_rad_part(lmax, k, aij, ur, rs):
+    rad_all = numpy.empty((lmax+1,lmax+1))
+
+    order = numpy.arange(lmax+1).reshape(lmax+1,-1)
+    bessel_val = scipy.special.spherical_in(order, k*rs) * numpy.exp(-k*rs)
+
+    ur_base = numpy.exp(k**2/(4*aij)) * ur * numpy.exp(-aij*(rs-k/(2*aij))**2)
+    idx = abs(ur_base) > 1e-80
+    for lab in range(lmax+1):
+        val = ur_base[idx] * rs[idx]**lab
+        for l in range(lmax+1):
+            if (lab+l) % 2 == 0:
+                val1 = val * bessel_val[l,idx]
+                rad_all[lab,l] = val1.sum()
+            else:
+                rad_all[lab,l] = 0
+    return rad_all
+
+mol = gto.M(atom='''
+            Na 0.5 0.5 0.
+            H  0.  1.  1.
+            ''',
+            basis={'Na':'lanl2dz',
+                   'H':[[0,[1.21,1.],[.521,1.]],
+                        [1,[3.12,1.],[.512,1.]],
+                        [2,[2.54,1.],[.554,1.]],
+                        [3,[0.98,1.],[.598,1.]],
+                        [4,[0.79,1.],[.579,1.]]]},
+            ecp = {'Na': gto.basis.parse_ecp('''
+Na nelec 10
+Na ul
+0      2.0000000              6.0000000
+1    175.5502590            -10.0000000
+2      2.3365719             -6.0637782
+2      0.7799867             -0.7299393
+Na S
+0    243.3605846              3.0000000
+#1     41.5764759             36.2847626
+#2     13.2649167             72.9304880
+#2      0.9764209              6.0123861
+#Na P
+#0   1257.2650682              5.0000000
+#1    189.6248810            117.4495683
+#2     54.5247759            423.3986704
+#2      0.9461106              7.1241813
+''')})
+
+
 class KnownValues(unittest.TestCase):
 
     def test_bessel(self):
@@ -63,17 +111,67 @@ class KnownValues(unittest.TestCase):
         n = 10
         x = numpy.random.rand(n,3)
         x_gpu = cupy.asarray(x)
+        fn = libecp.ECPang_nuc_part
         for l in range(4):
             omega_gpu = cupy.empty([n, 2*l+1])
-            libecp.ECPang_nuc_part(
-                ctypes.cast(omega_gpu.data.ptr, ctypes.c_void_p),
-                ctypes.cast(x_gpu.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(n),
-                ctypes.c_int(l))
+            fn(ctypes.cast(omega_gpu.data.ptr, ctypes.c_void_p),
+               ctypes.cast(x_gpu.data.ptr, ctypes.c_void_p),
+               ctypes.c_int(n),
+               ctypes.c_int(l))
             omega_cpu = numpy.empty([n, 2*l+1])
             for i in range(n):
                 omega_cpu[i] = ang_nuc_part(l, x[i])
-            assert numpy.linalg.norm(omega_cpu - omega_gpu.get())
+            assert numpy.linalg.norm(omega_cpu - omega_gpu.get()) < 1e-10
+
+    def test_type1_rad_part(self):
+        k = 1.621
+        aij = .792
+        rs, ws = radi.gauss_chebyshev(99)
+        ur = numpy.random.rand(99)#rad_part(mol, mol._ecpbas, rs) * ws
+        cache = numpy.empty(100000)
+        for l in range(5):
+            rad_all1 = numpy.zeros([l+1,l+1])
+            libecp_cpu.type1_rad_part(
+                rad_all1.ctypes.data_as(ctypes.c_void_p),
+                ctypes.c_int(l),
+                ctypes.c_double(k), ctypes.c_double(aij),
+                ur.ctypes.data_as(ctypes.c_void_p),
+                rs.ctypes.data_as(ctypes.c_void_p),
+                ctypes.c_int(len(rs)), ctypes.c_int(1),
+                cache.ctypes.data_as(ctypes.c_void_p))
+
+            ur_gpu = cupy.asarray(ur)
+            rad_all0 = cupy.zeros([l+1,l+1])
+            libecp.ECPtype1_rad_part(
+                ctypes.cast(rad_all0.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(l),
+                ctypes.c_double(k),
+                ctypes.c_double(aij),
+                ctypes.cast(ur_gpu.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(1))
+            assert numpy.linalg.norm(rad_all0.get() - rad_all1) < 1e-10
+
+    def test_type1_rad_ang(self):
+        numpy.random.seed(4)
+        n = 1
+        ri = numpy.random.random(3) - .5
+        for l in range(5):
+            rad_all = numpy.random.random((l+1,l+1))
+            rad_ang1 = numpy.zeros((l+1,l+1,l+1))
+            libecp_cpu.type1_rad_ang(rad_ang1.ctypes.data_as(ctypes.c_void_p),
+                                     ctypes.c_int(l),
+                                     ri.ctypes.data_as(ctypes.c_void_p),
+                                     rad_all.ctypes.data_as(ctypes.c_void_p))
+
+            ri_gpu = cupy.asarray(ri)
+            rad_all = cupy.asarray(rad_all)
+            rad_ang0 = cupy.zeros_like(rad_ang1)
+            libecp.ECPtype1_rad_ang(ctypes.cast(rad_ang0.data.ptr, ctypes.c_void_p),
+                                  ctypes.c_int(l),
+                                  ctypes.c_int(n),
+                                  ctypes.cast(ri_gpu.data.ptr, ctypes.c_void_p),
+                                  ctypes.cast(rad_all.data.ptr, ctypes.c_void_p))
+            assert numpy.linalg.norm(rad_ang1 - rad_ang0.get()) < 1e-7
 
 if __name__ == "__main__":
     print("Full tests for ECP module")

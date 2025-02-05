@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <stdio.h>
 #include "ecp.h"
 #include "bessel.cu"
 
@@ -93,7 +94,7 @@ static double w99[] = {
 
 #define NGAUSS  99
 
-__device__
+__constant__
 static int _cart_pow_y[] = {
         0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4, 3, 2, 1, 0, 5, 4, 3, 2, 1,
         0, 6, 5, 4, 3, 2, 1, 0, 7, 6, 5, 4, 3, 2, 1, 0, 8, 7, 6, 5,
@@ -103,7 +104,7 @@ static int _cart_pow_y[] = {
         4, 3, 2, 1, 0,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
 };
 
-__device__
+__constant__
 static int _cart_pow_z[] = {
         0, 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4,
         5, 0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3,
@@ -113,27 +114,53 @@ static int _cart_pow_z[] = {
         9,10,11,12,13, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
 };
 
-template<int L> __device__
+__constant__
+static int _offset_cart[] = {0, 1, 4, 10, 20, 35, 56, 84, 120,
+                             165, 220, 286, 364, 455, 560};
+
+template<int LMAX> __device__
 static void ang_nuc_part(double *omega, double rx, double ry, double rz){
-    if (L == 0){
-        omega[0] = 0.282094791773878143;
-    } else if (L == 1){
-        omega[0] = 0.488602511902919921 * rx;
-        omega[1] = 0.488602511902919921 * ry;
-        omega[2] = 0.488602511902919921 * rz;
-    } else if (L == 2){
+    /*
+    Accumulated angular ECP part in Cartesian
+    Angular momentum L = 0, 1, ... LMAX
+    Cartesian xyz --> Spherical --> Cartesian
+    */
+    if (LMAX >= 0){
+        omega[0] = 0.07957747154594767;
+        omega += 1;
+    }
+
+    if (LMAX >= 1){
+        omega[0] = 0.2387324146378430 * rx;
+        omega[1] = 0.2387324146378430 * ry;
+        omega[2] = 0.2387324146378430 * rz;
+        omega += 3;
+    }
+
+    if (LMAX >= 2){
         double g0 = rx * rx;
         double g1 = rx * ry;
         double g2 = rx * rz;
         double g3 = ry * ry;
         double g4 = ry * rz;
         double g5 = rz * rz;
-        omega[0] = 1.092548430592079070 * g1;
-        omega[1] = 1.092548430592079070 * g4;
-        omega[2] = 0.630783130505040012 * g5 - 0.315391565252520002 * (g0 + g3);
-        omega[3] = 1.092548430592079070 * g2;
-        omega[4] = 0.546274215296039535 * (g0 - g3);
-    } else if (L == 3){
+
+        double c0 = 1.092548430592079070 * g1;
+        double c1 = 1.092548430592079070 * g4;
+        double c2 = 0.630783130505040012 * g5 - 0.315391565252520002 * (g0 + g3);
+        double c3 = 1.092548430592079070 * g2;
+        double c4 = 0.546274215296039535 * (g0 - g3);
+
+        omega[0] = -0.315391565252520002 * c2 + 0.546274215296039535 * c4;
+        omega[1] =  1.092548430592079070 * c0;
+        omega[2] =  1.092548430592079070 * c3;
+        omega[3] = -0.315391565252520002 * c2 - 0.546274215296039535 * c4;
+        omega[4] =  1.092548430592079070 * c1;
+        omega[5] =  0.630783130505040012 * c2;
+        omega += 6;
+    }
+
+    if (LMAX >= 3){
         double g0 = rx * rx * rx;
         double g1 = rx * rx * ry;
         double g2 = rx * rx * rz;
@@ -144,14 +171,30 @@ static void ang_nuc_part(double *omega, double rx, double ry, double rz){
         double g7 = ry * ry * rz;
         double g8 = ry * rz * rz;
         double g9 = rz * rz * rz;
-        omega[0] = 1.770130769779930531 * g1 - 0.590043589926643510 * g6;
-        omega[1] = 2.890611442640554055 * g4;
-        omega[2] = 1.828183197857862944 * g8 - 0.457045799464465739 * (g1 + g6);
-        omega[3] = 0.746352665180230782 * g9 - 1.119528997770346170 * (g2 + g7);
-        omega[4] = 1.828183197857862944 * g5 - 0.457045799464465739 * (g0 + g3);
-        omega[5] = 1.445305721320277020 * (g2 - g7);
-        omega[6] = 0.590043589926643510 * g0 - 1.770130769779930530 * g3;
-    } else if (L == 4){
+
+        double c0 = 1.770130769779930531 * g1 - 0.590043589926643510 * g6;
+        double c1 = 2.890611442640554055 * g4;
+        double c2 = 1.828183197857862944 * g8 - 0.457045799464465739 * (g1 + g6);
+        double c3 = 0.746352665180230782 * g9 - 1.119528997770346170 * (g2 + g7);
+        double c4 = 1.828183197857862944 * g5 - 0.457045799464465739 * (g0 + g3);
+        double c5 = 1.445305721320277020 * (g2 - g7);
+        double c6 = 0.590043589926643510 * g0 - 1.770130769779930530 * g3;
+
+        omega[0] = -0.457045799464465739 * c4 + 0.590043589926643510 * c6;
+        omega[1] =  1.770130769779930531 * c0 - 0.457045799464465739 * c2;
+        omega[2] = -1.119528997770346170 * c3 + 1.445305721320277020 * c5;
+        omega[3] = -0.457045799464465739 * c4 - 1.770130769779930530 * c6;
+        omega[4] =  2.890611442640554055 * c1;
+        omega[5] =  1.828183197857862944 * c4;
+        omega[6] = -0.590043589926643510 * c0 - 0.457045799464465739 * c2;
+        omega[7] = -1.119528997770346170 * c3 - 1.445305721320277020 * c5;
+        omega[8] =  1.828183197857862944 * c2;
+        omega[9] =  0.746352665180230782 * c3;
+
+        omega += 10;
+    }
+
+    if (LMAX >= 4){
         double g0  = rx * rx * rx * rx;
         double g1  = rx * rx * rx * ry;
         double g2  = rx * rx * rx * rz;
@@ -167,15 +210,38 @@ static void ang_nuc_part(double *omega, double rx, double ry, double rz){
         double g12 = ry * ry * rz * rz;
         double g13 = ry * rz * rz * rz;
         double g14 = rz * rz * rz * rz;
-        omega[0] = 2.503342941796704538 * (g1 - g6);
-        omega[1] = 5.310392309339791593 * g4 - 1.770130769779930530 * g11;
-        omega[2] = 5.677048174545360108 * g8 - 0.946174695757560014 * (g1 + g6);
-        omega[3] = 2.676186174229156671 * g13- 2.007139630671867500 * (g4 + g11);
-        omega[4] = 0.317356640745612911 * (g0 + g10) + 0.634713281491225822 * g3 - 2.538853125964903290 * (g5 + g12) + 0.846284375321634430 * g14;
-        omega[5] = 2.676186174229156671 * g9 - 2.007139630671867500 * (g2 + g7);
-        omega[6] = 2.838524087272680054 * (g5 - g12) + 0.473087347878780009 * (g10 - g0);
-        omega[7] = 1.770130769779930531 * g2 - 5.310392309339791590 * g7 ;
-        omega[8] = 0.625835735449176134 * (g0  + g10) - 3.755014412695056800 * g3;
+
+        double c0 = 2.503342941796704538 * (g1 - g6);
+        double c1 = 5.310392309339791593 * g4 - 1.770130769779930530 * g11;
+        double c2 = 5.677048174545360108 * g8 - 0.946174695757560014 * (g1 + g6);
+        double c3 = 2.676186174229156671 * g13- 2.007139630671867500 * (g4 + g11);
+        double c4 = 0.317356640745612911 * (g0 + g10) + 0.634713281491225822 * g3 - 2.538853125964903290 * (g5 + g12) + 0.846284375321634430 * g14;
+        double c5 = 2.676186174229156671 * g9 - 2.007139630671867500 * (g2 + g7);
+        double c6 = 2.838524087272680054 * (g5 - g12) + 0.473087347878780009 * (g10 - g0);
+        double c7 = 1.770130769779930531 * g2 - 5.310392309339791590 * g7 ;
+        double c8 = 0.625835735449176134 * (g0  + g10) - 3.755014412695056800 * g3;
+
+        omega[0] = 0.317356640745612911 * c4 - 0.473087347878780009 * c6 + 0.625835735449176134 * c8;
+        omega[1] = 2.503342941796704538 * c0 - 0.946174695757560014 * c2;
+        omega[2] =-2.007139630671867500 * c5 + 1.770130769779930531 * c7;
+        omega[3] = 0.634713281491225822 * c4 - 3.755014412695056800 * c8;
+        omega[4] = 5.310392309339791593 * c1 - 2.007139630671867500 * c3;
+        omega[5] =-2.538853125964903290 * c4 + 2.838524087272680054 * c6;
+        omega[6] =-2.503342941796704538 * c0 - 0.946174695757560014 * c2;
+        omega[7] =-2.007139630671867500 * c5 - 5.310392309339791590 * c7;
+        omega[8] = 5.677048174545360108 * c2;
+        omega[9] = 2.676186174229156671 * c5;
+        omega[10]= 0.317356640745612911 * c4 + 0.473087347878780009 * c6 + 0.625835735449176134 * c8 ;
+        omega[11]=-1.770130769779930530 * c1 - 2.007139630671867500 * c3;
+        omega[12]=-2.538853125964903290 * c4 - 2.838524087272680054 * c6;
+        omega[13]= 2.676186174229156671 * c3;
+        omega[14]= 0.846284375321634430 * c4;
+
+        omega += 15;
+    }
+
+    if (LMAX >= 5){
+        printf("L >= 5 is not supported\n");
     }
 }
 
@@ -187,21 +253,23 @@ void _ang_nuc_part(double *omega, double *x, int n){
         return;
     }
     int offset = idx * (2*L+1);
-    ang_nuc_part<L>(omega+offset, x[3*n], x[3*n+1], x[3*n+2]);
+    ang_nuc_part<L>(omega+offset, x[3*idx], x[3*idx+1], x[3*idx+2]);
 }
 
+/*
+rad_all: [lmax+1, lmax+1]
+*/
 template <int LMAX> __device__
-void type1_rad_part(double *rad_all, double k, double aij,
-                    double *ur, int inc)
+void type1_rad_part(double *rad_all, double k, double aij, double *ur)
 {
     constexpr int LMAX1 = LMAX + 1;
-    double rur[LMAX1];
+    double rur[NGAUSS];
     double bval[NGAUSS*LMAX1];
 
     double kaij = k / (2*aij);
     double fac = kaij * kaij * aij;
     for (int n = 0; n < NGAUSS; n++){
-        double tmp = r99[n*inc] - kaij;
+        double tmp = r99[n] - kaij;
         tmp = fac - aij*tmp*tmp;
         if (ur[n] == 0 || tmp > CUTOFF || tmp < -(EXPCUTOFF+6.+30.)) {
             rur[n] = 0;
@@ -210,16 +278,16 @@ void type1_rad_part(double *rad_all, double k, double aij,
             }
         } else {
             rur[n] = ur[n] * exp(tmp);
-            _ine(bval+n*LMAX1, LMAX, k*r99[n*inc]);
+            _ine(bval+n*LMAX1, LMAX, k*r99[n]);
         }
     }
-
     for (int lab = 0; lab <= LMAX; lab++){
         if (lab > 0){
             for (int n = 0; n < NGAUSS; n++){
                 rur[n] *= r99[n];
             }
         }
+
         double *prad = rad_all + lab * LMAX1;
         for (int i = lab%2; i <= LMAX; i+=2){
             double s = prad[i];
@@ -231,28 +299,29 @@ void type1_rad_part(double *rad_all, double k, double aij,
     }
 }
 
-/*
+template <int L>
+__global__
+void _type1_rad_part(double *rad_all, double k, double aij, double *ur, int n){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n){
+        return;
+    }
+    int offset = (L+1)*(L+1);
+    type1_rad_part<L>(rad_all+offset*idx, k, aij, ur+3*idx);
+}
+
+
 template <int LMAX> __device__
 void type1_rad_ang(double *rad_ang, double *r, double *rad_all)
 {
+    double norm_r = -rnorm3d(r[0], r[1], r[2]);
     double unitr[3];
-    if (r[0] == 0 && r[1] == 0 && r[2] == 0) {
-        unitr[0] = 0;
-        unitr[1] = 0;
-        unitr[2] = 0;
-    } else {
-        double norm_r = -1/sqrt(r[0]*r[0] + r[1]*r[1] + r[2]*r[2]);
-        unitr[0] = r[0] * norm_r;
-        unitr[1] = r[1] * norm_r;
-        unitr[2] = r[2] * norm_r;
-    }
+    unitr[0] = r[0] * norm_r;
+    unitr[1] = r[1] * norm_r;
+    unitr[2] = r[2] * norm_r;
 
     double omega_nuc[CART_CUM];
-    double *pnuc;
-    for (int i = 0; i <= LMAX; i++) {
-        pnuc = omega_nuc + _offset_cart[i];
-        ang_nuc_in_cart(pnuc, i, unitr);
-    }
+    ang_nuc_part<LMAX>(omega_nuc, unitr[0], unitr[1], unitr[2]);
 
     const int d1 = LMAX + 1;
     const int d2 = d1 * d1;
@@ -269,7 +338,7 @@ void type1_rad_ang(double *rad_ang, double *r, double *rad_all)
         int need_even = (i+j+k)%2;
         for (int lmb = need_even; lmb <= LMAX; lmb+=2) {
             double tmp = 0;
-            pnuc = omega_nuc + _offset_cart[lmb];
+            double *pnuc = omega_nuc + _offset_cart[lmb];
             for (int n = 0; n < (lmb+1)*(lmb+2)/2; n++){
                 int ps = _cart_pow_y[n];
                 int pt = _cart_pow_z[n];
@@ -280,11 +349,27 @@ void type1_rad_ang(double *rad_ang, double *r, double *rad_all)
         }
     } } }
 }
-*/
 
-/*
+template <int L>
+__global__
+void _type1_rad_ang(double *rad_ang, double *r, double *rad_all, int n){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n){
+        return;
+    }
+    int offset = (L+1)*(L+1)*(L+1);
+    type1_rad_ang<L>(rad_ang+offset*idx, r+3*idx, rad_all);
+}
+
+__device__
+void rad_part(int necp, int *ecpbas, double *rs, double *ur, int nr){
+    for (int sh = 0; sh < necp; sh++){
+        npk = ecpsh[]
+    }
+}
+
 template <int LI, int LJ> __device__
-static  void ECPtype1_cart(double *gctr, int *ecpbas, int necpbas,
+static void ECPtype1_cart(double *gctr, int *ecpbas, int necpbas,
                             int *atm, int natm,
                             int *bas, int nbas, double *env)
 {
@@ -296,14 +381,16 @@ static  void ECPtype1_cart(double *gctr, int *ecpbas, int necpbas,
     const int jsh = blockIdx.y * blockDim.y + threadIdx.y;
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
     const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
-    const int nfi = (LI+1) * (LI+2) / 2;
-    const int nfj = (LI+1) * (LJ+2) / 2;
+    constexpr int nfi = (LI+1) * (LI+2) / 2;
+    constexpr int nfj = (LI+1) * (LJ+2) / 2;
     const double *ai = env + bas[PTR_EXP+ish*BAS_SLOTS];
     const double *aj = env + bas[PTR_EXP+jsh*BAS_SLOTS];
     const double *ci = env + bas[PTR_COEFF+ish*BAS_SLOTS];
     const double *cj = env + bas[PTR_COEFF+jsh*BAS_SLOTS];
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
+
+    double g1[nfi*nfj];
 
     for (int iloc = 0; iloc < nslots; iloc++){
         if (ecpbas[ANG_OF+ecploc[iloc]*BAS_SLOTS] != -1 || ecpbas[SO_TYPE_OF+ecploc[iloc]*BAS_SLOTS] == 1) {
@@ -314,16 +401,61 @@ static  void ECPtype1_cart(double *gctr, int *ecpbas, int necpbas,
         rc = env + atm[PTR_COORD+atm_id*ATM_SLOTS];
         ecpshls = ecploc + iloc;
 
+        double rca[3], rcb[3];
         rca[0] = rc[0] - ri[0];
         rca[1] = rc[1] - ri[1];
         rca[2] = rc[2] - ri[2];
         rcb[0] = rc[0] - rj[0];
         rcb[1] = rc[1] - rj[1];
         rcb[2] = rc[2] - rj[2];
+
+        for (int ip = 0; ip < npi; ip++){
+            for (int jp = 0; jp < npj; jp++){
+                double rij0 = ai[ip] * rca[0] + aj[jp] * rcb[0];
+                double rij1 = ai[ip] * rca[1] + aj[jp] * rcb[1];
+                double rij2 = ai[ip] * rca[2] + aj[jp] * rcb[2];
+                double k = 2.0 * norm3d(rij0, rij1, rij2);
+                double aij = ai[ip] + aj[jp];
+                type1_rad_part<LI+LJ>(rad_all, k, aij, ur);
+                type1_rad_ang<LI+LJ>(rad_ang, rij, rad_all);
+            }
+        }
+
+        type1_cache_fac(LI, rca);
+        type2_cache_fac(LJ, rcb);
+
+        // TODO: code generator
+        for (int mi = 0; mi < nfi; mi++){
+            int iy = _cart_pow_y[mi];
+            int iz = _cart_pow_z[mi];
+            int ix = LI - iy - iz;
+            for (int mj = 0; mj < nfj; mj++){
+                int jy = _cart_pow_y[mj];
+                int jz = _cart_pow_z[mj];
+                int jx = LJ - jy - jz;
+
+                double tmp = 0.0;
+                for (int i1 = 0; i1 < ix; i1++){
+                    for (int i2 = 0; i2 < iy; i2++){
+                        for (int i3 = 0; i3 < iz; i3++){
+                            for (int j1 = 0; j1 < jx; j1++){
+                                for (int j2 = 0; j2 < jy; j2++){
+                                    for (int j3 = 0; j3 < jz; j3++){
+                                        double fac = ifac[mi,i1,i2,i3] * jfac[mj,j1,j2,j3];
+                                        tmp += fac * rad_ang_all[i1+j1, i2+j2, i3+j3];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                g1[mi,mj] += tmp;
+            }
+        }
     }
 
+
 }
-*/
 
 extern "C" {
 int ECPsph_ine(double *out, int order, double *zs, int n)
@@ -350,6 +482,51 @@ int ECPang_nuc_part(double *omega, double *x, int n, const int l){
     case 3: _ang_nuc_part<3><<<blocks, threads>>>(omega, x, n); break;
     case 4: _ang_nuc_part<4><<<blocks, threads>>>(omega, x, n); break;
     default:
+        printf("l > 4 is not supported\n");
+        break;
+    }
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        return 1;
+    }
+    return 0;
+}
+
+int ECPtype1_rad_part(double *rad_all, int l, double k, double aij, double *ur, int n){
+    int ntile = (n + THREADS - 1) / THREADS;
+    dim3 threads(THREADS);
+    dim3 blocks(ntile);
+    switch (l){
+    case 0: _type1_rad_part<0><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
+    case 1: _type1_rad_part<1><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
+    case 2: _type1_rad_part<2><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
+    case 3: _type1_rad_part<3><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
+    case 4: _type1_rad_part<4><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
+    default:
+        printf("l > 4 is not supported\n");
+        break;
+    }
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        return 1;
+    }
+    return 0;
+}
+
+int ECPtype1_rad_ang(double *rad_ang, int l, int n, double *r, double *rad_all){
+    int ntile = (n + THREADS - 1) / THREADS;
+    dim3 threads(THREADS);
+    dim3 blocks(ntile);
+    switch (l){
+    case 0: _type1_rad_ang<0><<<blocks, threads>>>(rad_ang, r, rad_all, n); break;
+    case 1: _type1_rad_ang<1><<<blocks, threads>>>(rad_ang, r, rad_all, n); break;
+    case 2: _type1_rad_ang<2><<<blocks, threads>>>(rad_ang, r, rad_all, n); break;
+    case 3: _type1_rad_ang<3><<<blocks, threads>>>(rad_ang, r, rad_all, n); break;
+    case 4: _type1_rad_ang<4><<<blocks, threads>>>(rad_ang, r, rad_all, n); break;
+    default:
+        printf("l > 4 is not supported\n");
         break;
     }
 
