@@ -184,15 +184,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dvhf_DD_DP = rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5 + oo0*2, vhfopt, j_factor, k_factor, verbose=verbose)
     dvhf_DD_DP-= rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5, vhfopt, j_factor, k_factor, verbose=verbose)
     dvhf_xpy = rhf_grad._jk_energy_per_atom(mol, dmxpy+dmxpy.T, vhfopt, j_factor, k_factor, verbose=verbose)*2
+    dvhf_xmy = rhf_grad._jk_energy_per_atom(mol, dmxmy-dmxmy.T, vhfopt, j_factor=0.0, k_factor=k_factor)*2
     
-    vj, vk = tdrhf.get_jk(mol, (dmxmy-dmxmy.T)) #D, P, (X+Y), (X-Y)
     if omega !=0:
         raise NotImplementedError("X-Y part not supported for range-seperated functionals")
-    veff1_3 = -vk * hyb
-    if singlet:
-        veff1_3 += vj * 2
-    else:
-        veff1_3 = vj * 2
 
     if with_k and omega != 0:
         j_factor = 0.
@@ -209,6 +204,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             dvhf_DD_DP += rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5 + oo0*2, vhfopt, j_factor, k_factor, verbose=verbose)
             dvhf_DD_DP -= rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5, vhfopt, j_factor, k_factor, verbose=verbose)
             dvhf_xpy += rhf_grad._jk_energy_per_atom(mol, dmxpy+dmxpy.T, vhfopt, j_factor, k_factor, verbose=verbose)*2
+            dvhf_xmy += rhf_grad._jk_energy_per_atom(mol, dmxmy-dmxmy.T, vhfopt, j_factor=0.0, k_factor=k_factor)*2
 
     fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None,
                                 False, False, True)[0]
@@ -227,7 +223,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     delec = 2.0*(dh_ground + dh_td - ds)
     aoslices = mol.aoslice_by_atom()
     delec= cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
-    de = 2.0 * (dvhf_DD_DP + dvhf_xpy) + dh1e_ground + dh1e_td + delec + extra_force
+    de = 2.0 * (dvhf_DD_DP + dvhf_xpy + dvhf_xmy) + dh1e_ground + dh1e_td + delec + extra_force
 
     if atmlst is None:
         atmlst = range(mol.natm)
@@ -245,8 +241,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         de[k] += cp.einsum('xij,ij->x', veff1_1[:,p0:p1], oo0[p0:p1])
         de[k] += cp.einsum('xij,ij->x', veff1_2[:,p0:p1], dmxpy[p0:p1,:]) * 2
         de[k] += cp.einsum('xji,ij->x', veff1_2[:,p0:p1], dmxpy[:,p0:p1]) * 2
-        de[k] += cp.einsum('xij,ij->x', veff1_3[:,p0:p1], dmxmy[p0:p1,:]) * 2
-        de[k] -= cp.einsum('xji,ij->x', veff1_3[:,p0:p1], dmxmy[:,p0:p1]) * 2
 
     log.timer('TDRKS nuclear gradients', *time0)
     return de.get()
@@ -333,7 +327,6 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
                 wv = cp.einsum('yg,xyg,g->xg', rho2, fxc, weight)
                 fmat_(_sorted_mol, f1oo, ao, wv, mask, shls_slice, ao_loc)
             if with_vxc:
-                print(vxc)
                 fmat_(_sorted_mol, v1ao, ao, vxc * weight, mask, shls_slice, ao_loc)
             if with_kxc:
                 wv = cp.einsum('yg,zg,xyzg,g->xg', rho1, rho1, kxc, weight)

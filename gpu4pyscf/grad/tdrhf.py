@@ -29,20 +29,6 @@ from pyscf.scf import _vhf
 from gpu4pyscf.lib import utils
 
 
-def get_jk(mol, dm):
-    '''J = ((-nabla i) j| kl) D_lk
-    K = ((-nabla i) j| kl) D_jk
-    '''
-    if not isinstance(dm, np.ndarray): dm = dm.get()
-    # vhfopt = _VHFOpt(mol, 'int2e_ip1').build()
-    intor = mol._add_suffix('int2e_ip1')
-    vj, vk = _vhf.direct_mapdm(intor,  # (nabla i,j|k,l)
-                               's2kl', # ip1_sph has k>=l,
-                               ('lk->s1ij', 'jk->s1il'),
-                               dm, 3, # xyz, 3 components
-                               mol._atm, mol._bas, mol._env)
-    return -vj, -vk
-
 def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     '''
     Electronic part of TDA, TDHF nuclear gradients
@@ -158,21 +144,12 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo+dmz1doo.T)*0.5) # 1/r like terms
     if mol.has_ecp():
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo+dmz1doo.T)*0.5) # 1/r like terms
+    vhfopt = mf._opt_gpu.get(None, None)
+    dvhf_DD_DP  = rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5 + oo0*2, vhfopt)
+    dvhf_DD_DP -= rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5, vhfopt)
+    dvhf_xpy = rhf_grad._jk_energy_per_atom(mol, dmxpy+dmxpy.T, vhfopt)*2
+    dvhf_xmy = rhf_grad._jk_energy_per_atom(mol, dmxmy-dmxmy.T, vhfopt, j_factor=0.0)*2
 
-    dvhf_DD_DP = mf_grad.get_veff(mol, (dmz1doo+dmz1doo.T)*0.5 + oo0*2)
-    dvhf_DD_DP -= mf_grad.get_veff(mol, (dmz1doo+dmz1doo.T)*0.5)
-    dvhf_xpy = mf_grad.get_veff(mol, dmxpy+dmxpy.T)*2
-    dvhf_xmy = mf_grad.get_veff(mol, dmxmy-dmxmy.T)*2
-    vj, vk = get_jk(mol, (dmxmy-dmxmy.T)) #D, P, (X+Y), (X-Y)
-    if not isinstance(vj, cp.ndarray): vj = cp.asarray(vj)
-    if not isinstance(vk, cp.ndarray): vk = cp.asarray(vk)
-    vj = vj.reshape(3,nao,nao)
-    vk = vk.reshape(3,nao,nao)
-    vhf1 = -vk
-    if singlet:
-        vhf1 += vj * 2
-    else:
-        vhf1 += vj * 2
     extra_force = cp.zeros((len(atmlst),3))
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
@@ -180,15 +157,9 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     delec = 2.0*(dh_ground + dh_td - ds)
     aoslices = mol.aoslice_by_atom()
     delec= cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
-    de = 2.0 * (dvhf_DD_DP + dvhf_xpy) + dh1e_ground + dh1e_td + delec + extra_force
+    de = 2.0 * (dvhf_DD_DP + dvhf_xpy + dvhf_xmy) + dh1e_ground + dh1e_td + delec + extra_force
     if atmlst is None:
         atmlst = range(mol.natm)
-    # The following codes are for TDDFT
-    offsetdic = mol.offset_nr_by_atom()
-    for k, ia in enumerate(atmlst):
-        shl0, shl1, p0, p1 = offsetdic[ia]
-        de[k] += cp.einsum('xij,ij->x', vhf1[:,p0:p1], dmxmy[p0:p1,:]) * 2
-        de[k] -= cp.einsum('xji,ij->x', vhf1[:,p0:p1], dmxmy[:,p0:p1]) * 2
 
     log.timer('TDHF nuclear gradients', *time0)
     return de.get()
