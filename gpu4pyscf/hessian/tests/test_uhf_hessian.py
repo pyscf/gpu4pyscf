@@ -53,7 +53,7 @@ class KnownValues(unittest.TestCase):
 
     def test_partial_hess_elec(self):
         mf = pyscf.scf.UHF(mol)
-        mf.conv_tol = 1e-14
+        mf.conv_tol = 1e-12
         mf.kernel()
         hobj = mf.Hessian()
         e1_cpu, ej_cpu, ek_cpu = uhf_cpu._partial_hess_ejk(hobj)
@@ -64,8 +64,8 @@ class KnownValues(unittest.TestCase):
         hobj = mf.Hessian()
         e1_gpu, e2_gpu = uhf_gpu._partial_hess_ejk(hobj)
 
-        assert numpy.linalg.norm(e1_cpu - e1_gpu.get()) < 1e-5
-        assert numpy.linalg.norm(e2_cpu - e2_gpu.get()) < 1e-5
+        assert numpy.linalg.norm(e1_cpu - e1_gpu.get()) < 1e-7
+        assert numpy.linalg.norm(e2_cpu - e2_gpu.get()) < 1e-7
 
     def test_hessian_uhf_D3(self):
         print('----- testing UHF with D3BJ ------')

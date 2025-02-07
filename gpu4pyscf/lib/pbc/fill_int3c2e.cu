@@ -20,7 +20,7 @@
 #include <cuda_runtime.h>
 
 #include "gvhf-rys/vhf.cuh"
-#include "rys_roots.cu"
+#include "gvhf-rys/rys_roots.cu"
 #include "int3c2e.cuh"
 
 #define THREADS         (WARP_SIZE*WARPS)
