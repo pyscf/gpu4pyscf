@@ -182,7 +182,7 @@ class KnownValues(unittest.TestCase):
         self._check_uks_fxc(MGGA_M06, hermi=1)
     '''
     # Not implemented yet
-    
+
     def test_rks_fxc_st_lda(self):
         self._check_rks_fxc_st('lda', -0.06358425564270553)
 

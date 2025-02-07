@@ -20,7 +20,7 @@ import numpy as np
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from pyscf.df import df, addons, incore
-from gpu4pyscf.lib.cupy_helper import (cholesky, tag_array, get_avail_mem, 
+from gpu4pyscf.lib.cupy_helper import (cholesky, tag_array, get_avail_mem,
                                        cart2sph, p2p_transfer, copy_array)
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.lib import logger
@@ -269,7 +269,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
 
     return _cderi
 
-def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize, 
+def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
                 omega=None, sr_only=False, device_id=0):
     ''' Execute CDERI tasks on one device
     '''
@@ -362,5 +362,5 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
                         _cderi[dev_id][:,ij0:ij1] = tmp
             else:
                 _cderi[0][:,ij0:ij1] = cderi_block
-            t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)    
+            t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)
     return

@@ -16,8 +16,9 @@
 
 add_library(gdft SHARED
   nr_eval_gto.cu
-  contract_rho.cu
+  #contract_rho.cu
   gen_grids.cu
+  numint.cu
   nr_numint_sparse.cu
   vv10.cu
   libxc.cu
@@ -25,3 +26,6 @@ add_library(gdft SHARED
 
 set_target_properties(gdft PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+# Link cuBLAS
+target_link_libraries(gdft PRIVATE cublas)

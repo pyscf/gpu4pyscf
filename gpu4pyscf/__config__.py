@@ -32,7 +32,7 @@ grid_aligned = 256
 # Use smaller blksize for old gaming GPUs
 if props['totalGlobalMem'] < 16 * GB:
     min_ao_blksize = 64
-    min_grid_blksize = 64*64
+    min_grid_blksize = 128*128
 
 # Use 90% of the global memory for CuPy memory pool
 mem_fraction = 0.9
