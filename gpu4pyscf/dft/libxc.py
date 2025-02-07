@@ -183,7 +183,7 @@ class XCfun:
 
     def compute(self, inp, output=None, do_exc=True, do_vxc=True, do_fxc=False, do_kxc=False, do_lxc=False):
         # TODO: turn to dft.libxc.eval_xc for do_kxc and do_lxc
-        assert not do_kxc
+        # assert not do_kxc
         assert not do_lxc
         if isinstance(inp, cupy.ndarray):
             inp = {"rho": cupy.asarray(inp, dtype=cupy.double)}
