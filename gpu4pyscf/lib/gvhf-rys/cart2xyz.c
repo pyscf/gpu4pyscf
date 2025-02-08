@@ -1,6 +1,7 @@
 // Edit based on pyscf/lib/dft/grid_common.c
 
 #include <stdint.h>
+#include <omp.h>
 #include "vhf.cuh"
 
 static int _LEN_CART0[] = {
@@ -151,58 +152,66 @@ static void _dm_xyz_to_dm(double* dm_xyz, double* dm, int nao, int li, int lj, d
 void transform_cart_to_xyz(double *dm_xyz, double *dm, int *ao_loc, int *pair_loc,
                            int *bas, int nbas, double *env)
 {
+#pragma omp parallel
+{
     int nao = ao_loc[nbas];
     double cache[(LMAX*2+1)*(LMAX*2+1)*(LMAX*2+1)];
-    for (int ish = 0; ish < nbas; ish++) {
+#pragma omp for schedule(dynamic, 4)
+    for (int ijsh = 0; ijsh < nbas*nbas; ijsh++) {
+        int ish = ijsh / nbas;
+        int jsh = ijsh % nbas;
         int i0 = ao_loc[ish];
+        int j0 = ao_loc[jsh];
         int li = bas[ish*BAS_SLOTS+ANG_OF];
+        int lj = bas[jsh*BAS_SLOTS+ANG_OF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        for (int jsh = 0; jsh < nbas; jsh++) {
-            int j0 = ao_loc[jsh];
-            int lj = bas[jsh*BAS_SLOTS+ANG_OF];
-            double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-            _dm_to_dm_xyz(cache, dm+i0*nao+j0, nao, li, lj, ri, rj);
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        _dm_to_dm_xyz(cache, dm+i0*nao+j0, nao, li, lj, ri, rj);
 
-            int lij = li + lj;
-            int l1 = lij + 1;
-            double *pdm_xyz = dm_xyz + pair_loc[ish*nbas+jsh];
-            for (int ix = 0, n = 0; ix <= lij; ix++) {
-                for (int iy = 0; iy <= lij-ix; iy++) {
-                    for (int iz = 0; iz <= lij-ix-iy; iz++, n++) {
-                        pdm_xyz[n] = cache[(ix*l1+iy)*l1+iz];
-                    }
+        int lij = li + lj;
+        int l1 = lij + 1;
+        double *pdm_xyz = dm_xyz + pair_loc[ish*nbas+jsh];
+        for (int ix = 0, n = 0; ix <= lij; ix++) {
+            for (int iy = 0; iy <= lij-ix; iy++) {
+                for (int iz = 0; iz <= lij-ix-iy; iz++, n++) {
+                    pdm_xyz[n] = cache[(ix*l1+iy)*l1+iz];
                 }
             }
         }
     }
+}
 }
 
 
 void transform_xyz_to_cart(double *vj, double *vj_xyz, int *ao_loc, int *pair_loc,
                            int *bas, int nbas, double *env)
 {
+#pragma omp parallel
+{
     int nao = ao_loc[nbas];
     double cache[(LMAX*2+1)*(LMAX*2+1)*(LMAX*2+1)];
-    for (int ish = 0; ish < nbas; ish++) {
+#pragma omp for schedule(dynamic, 4)
+    for (int ijsh = 0; ijsh < nbas*nbas; ijsh++) {
+        int ish = ijsh / nbas;
+        int jsh = ijsh % nbas;
         int i0 = ao_loc[ish];
+        int j0 = ao_loc[jsh];
         int li = bas[ish*BAS_SLOTS+ANG_OF];
+        int lj = bas[jsh*BAS_SLOTS+ANG_OF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        for (int jsh = 0; jsh < nbas; jsh++) {
-            int j0 = ao_loc[jsh];
-            int lj = bas[jsh*BAS_SLOTS+ANG_OF];
-            double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
 
-            int lij = li + lj;
-            int l1 = lij + 1;
-            double *pvj_xyz = vj_xyz + pair_loc[ish*nbas+jsh];
-            for (int ix = 0, n = 0; ix <= lij; ix++) {
-                for (int iy = 0; iy <= lij-ix; iy++) {
-                    for (int iz = 0; iz <= lij-ix-iy; iz++, n++) {
-                        cache[(ix*l1+iy)*l1+iz] = pvj_xyz[n];
-                    }
+        int lij = li + lj;
+        int l1 = lij + 1;
+        double *pvj_xyz = vj_xyz + pair_loc[ish*nbas+jsh];
+        for (int ix = 0, n = 0; ix <= lij; ix++) {
+            for (int iy = 0; iy <= lij-ix; iy++) {
+                for (int iz = 0; iz <= lij-ix-iy; iz++, n++) {
+                    cache[(ix*l1+iy)*l1+iz] = pvj_xyz[n];
                 }
             }
-            _dm_xyz_to_dm(cache, vj+i0*nao+j0, nao, li, lj, ri, rj);
         }
+        _dm_xyz_to_dm(cache, vj+i0*nao+j0, nao, li, lj, ri, rj);
     }
+}
 }
