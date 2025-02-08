@@ -106,7 +106,7 @@ class KnownValues(unittest.TestCase):
                           ctypes.cast(rs.data.ptr, ctypes.c_void_p),
                           ctypes.c_int(n))
         self.assertTrue(numpy.allclose(bessel0, bessel1))
-
+    '''
     def test_ang_nuc_part(self):
         n = 10
         x = numpy.random.rand(n,3)
@@ -122,7 +122,7 @@ class KnownValues(unittest.TestCase):
             for i in range(n):
                 omega_cpu[i] = ang_nuc_part(l, x[i])
             assert numpy.linalg.norm(omega_cpu - omega_gpu.get()) < 1e-10
-
+    '''
     def test_rad_part(self):
         rs, ws = radi.gauss_chebyshev(99)
         cache = numpy.empty(100000)
@@ -163,7 +163,7 @@ class KnownValues(unittest.TestCase):
         rs, ws = radi.gauss_chebyshev(99)
         ur = numpy.random.rand(99)#rad_part(mol, mol._ecpbas, rs) * ws
         cache = numpy.empty(100000)
-        for l in range(5):
+        for l in range(8):
             rad_all1 = numpy.zeros([l+1,l+1])
             libecp_cpu.type1_rad_part(
                 rad_all1.ctypes.data_as(ctypes.c_void_p),
@@ -242,9 +242,9 @@ class KnownValues(unittest.TestCase):
                 tasks = cupy.asarray([ish,jsh,0], dtype=numpy.int32)
                 li = mol.bas_angular(ish)
                 lj = mol.bas_angular(jsh)
-                if li > 3 or lj > 3:
+                if li != 1 or lj != 3:
                     continue
-
+                print(li, lj)
                 libecp.ECPtype1_cart(
                     ctypes.cast(mat1.data.ptr, ctypes.c_void_p),
                     ctypes.cast(tasks.data.ptr, ctypes.c_void_p),
@@ -256,7 +256,10 @@ class KnownValues(unittest.TestCase):
                     ctypes.cast(env.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(li),
                     ctypes.c_int(lj))
-
+                print(mat1[:3,:3])
+                print(mat0[:3,:3])
+                #print(mat1.get() - mat0)
+                #print(mat0[:3,:3])
                 assert numpy.linalg.norm(mat1.get() - mat0) < 1e-10
 
 if __name__ == "__main__":

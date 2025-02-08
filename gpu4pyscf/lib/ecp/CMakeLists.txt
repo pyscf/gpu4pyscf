@@ -14,6 +14,8 @@
 
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80 --ptxas-options=-v")
 
+#set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")
+
 add_library(gecp SHARED
   ecp.cu
 )

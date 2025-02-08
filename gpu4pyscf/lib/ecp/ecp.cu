@@ -357,7 +357,6 @@ void type1_rad_ang(double *rad_ang, double *r, double *rad_all, double fac)
 
     constexpr int d1 = LMAX + 1;
     constexpr int d2 = d1 * d1;
-    constexpr int d3 = d2 * d1;
 
     for (int i = 0; i <= LMAX; i++) {
     for (int j = 0; j <= LMAX-i; j++) {
@@ -420,7 +419,7 @@ void _rad_part(int ish, int *ecpbas, double *env, double *rs, double *ws, double
 
 
 template <int LI> __device__
-void type1_cache_fac(double *ifac, double *ri){
+void type1_cache_fac(double* __restrict__ ifac, double *ri){
     constexpr int LI1 = LI + 1;
     double xx[LI1], yy[LI1], zz[LI1];
     xx[0] = 1; yy[0] = 1; zz[0] = 1;
@@ -430,19 +429,18 @@ void type1_cache_fac(double *ifac, double *ri){
         zz[i] = zz[i-1] * ri[2];
     }
 
-    double fx[3*LI1*LI1];
-    double *fy;
-    double *fz;
-    fy = fx + LI1*LI1;
-    fz = fy + LI1*LI1;
+    double fx[LI1*LI1*3];
+    double *fy = fx + LI1*LI1;
+    double *fz = fy + LI1*LI1;
     for (int i = 0; i <= LI; i++){
         for (int j = 0; j <= i; j++){
-            double bfac = _binom[i*(i+1)/2+j]; // binom(i,j)
-            fx[i*LI1 + j] = bfac * xx[i-j];
-            fy[i*LI1 + j] = bfac * yy[i-j];
-            fz[i*LI1 + j] = bfac * zz[i-j];
+            const double bfac = _binom[i*(i+1)/2+j]; // binom(i,j)
+            fx[i*LI1+j] = bfac * xx[i-j];
+            fy[i*LI1+j] = bfac * yy[i-j];
+            fz[i*LI1+j] = bfac * zz[i-j];
         }
     }
+
     constexpr int LI2 = LI1 * LI1;
     constexpr int LI3 = LI2 * LI1;
     constexpr int nfi = (LI+1)*(LI+2)/2;
@@ -453,7 +451,7 @@ void type1_cache_fac(double *ifac, double *ri){
         for (int i1 = 0; i1 <= ix; i1++){
             for (int i2 = 0; i2 <= iy; i2++){
                 for (int i3 = 0; i3 <= iz; i3++){
-                    int idx = mi*LI3 + i1*LI2 + i2*LI1 + i3;
+                    const int idx = mi*LI3 + i1*LI2 + i2*LI1 + i3;
                     ifac[idx] = fx[ix*LI1+i1] * fy[iy*LI1+i2] * fz[iz*LI1+i3];
                 }
             }
@@ -486,7 +484,7 @@ void type1_cart(double *gctr, int *tasks, int ntasks,
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
 
-    int atm_id = ecpbas[ATOM_OF+ecploc[ecp_id]*BAS_SLOTS];
+    const int atm_id = ecpbas[ATOM_OF+ecploc[ecp_id]*BAS_SLOTS];
     double *rc = env + atm[PTR_COORD+atm_id*ATM_SLOTS];
 
     double rca[3], rcb[3];
@@ -496,8 +494,8 @@ void type1_cart(double *gctr, int *tasks, int ntasks,
     rcb[0] = rc[0] - rj[0];
     rcb[1] = rc[1] - rj[1];
     rcb[2] = rc[2] - rj[2];
-    double r2ca = rca[0]*rca[0] + rca[1]*rca[1] + rca[2]*rca[2];
-    double r2cb = rcb[0]*rcb[0] + rcb[1]*rcb[1] + rcb[2]*rcb[2];
+    const double r2ca = rca[0]*rca[0] + rca[1]*rca[1] + rca[2]*rca[2];
+    const double r2cb = rcb[0]*rcb[0] + rcb[1]*rcb[1] + rcb[2]*rcb[2];
     double ur[NGAUSS];
     for (int i = 0; i < NGAUSS; i++){
         ur[i] = 0.0;
@@ -512,19 +510,19 @@ void type1_cart(double *gctr, int *tasks, int ntasks,
     double rad_ang[LMAX1*LMAX1*LMAX1];
     for (int i = 0; i < LMAX1*LMAX1*LMAX1; i++) { rad_ang[i] = 0; }
 
-    double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
+    const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
     for (int ip = 0; ip < npi; ip++){
         for (int jp = 0; jp < npj; jp++){
             double rij[3];
             rij[0] = ai[ip] * rca[0] + aj[jp] * rcb[0];
             rij[1] = ai[ip] * rca[1] + aj[jp] * rcb[1];
             rij[2] = ai[ip] * rca[2] + aj[jp] * rcb[2];
-            double k = 2.0 * norm3d(rij[0], rij[1], rij[2]);
-            double aij = ai[ip] + aj[jp];
+            const double k = 2.0 * norm3d(rij[0], rij[1], rij[2]);
+            const double aij = ai[ip] + aj[jp];
             type1_rad_part<LI+LJ>(rad_all, k, aij, ur);
 
-            double eij = exp(-ai[ip]*r2ca - aj[jp]*r2cb);
-            double ceij = eij * ci[ip] * cj[jp];
+            const double eij = exp(-ai[ip]*r2ca - aj[jp]*r2cb);
+            const double ceij = eij * ci[ip] * cj[jp];
             type1_rad_ang<LI+LJ>(rad_ang, rij, rad_all, fac * ceij);
         }
     }
@@ -536,9 +534,9 @@ void type1_cart(double *gctr, int *tasks, int ntasks,
     constexpr int LI3 = LI1*LI2;
     constexpr int LJ3 = LJ1*LJ2;
     double ifac[nfi*LI3];
-    double jfac[nfj*LJ3];
-
     type1_cache_fac<LI>(ifac, rca);
+    
+    double jfac[nfj*LJ3];
     type1_cache_fac<LJ>(jfac, rcb);
 
     // TODO: unrolling with a code generator
@@ -550,7 +548,7 @@ void type1_cart(double *gctr, int *tasks, int ntasks,
             int jy = _cart_pow_y[mj];
             int jz = _cart_pow_z[mj];
             int jx = LJ - jy - jz;
-
+            
             double tmp = 0.0;
             for (int i1 = 0; i1 <= ix; i1++){
                 for (int i2 = 0; i2 <= iy; i2++){
@@ -563,12 +561,14 @@ void type1_cart(double *gctr, int *tasks, int ntasks,
                                     int jr = mj * LJ3 + j1 * LJ2 + j2 * LJ1 + j3;
                                     int ijr = (i1+j1)*LMAX1*LMAX1 + (i2+j2)*LMAX1 + (i3+j3);
                                     tmp += ifac[ir] * jfac[jr] * rad_ang[ijr];
+                                    printf("%d %d %d %d %d %d (%d) %f %f %f \n", i1, i2, i3, j1, j2, j3, jr, ifac[ir], jfac[jr], rad_ang[ijr]);
                                 }
                             }
                         }
                     }
                 }
             }
+            printf("%d %d %d %d %d %d %d %d\n", mi, mj, ix, iy, iz, jx, jy, jz);
             atomicAdd(gctr+mi+mj*nfi, tmp);
         }
     }
@@ -630,8 +630,13 @@ int ECPtype1_rad_part(double *rad_all, int l, double k, double aij, double *ur, 
     case 2: _type1_rad_part<2><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
     case 3: _type1_rad_part<3><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
     case 4: _type1_rad_part<4><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
+    case 5: _type1_rad_part<5><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
+    case 6: _type1_rad_part<6><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
+    case 7: _type1_rad_part<7><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
+    case 8: _type1_rad_part<8><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
+    
     default:
-        printf("l > 4 is not supported\n");
+        printf("l > 8 is not supported\n");
         break;
     }
 
