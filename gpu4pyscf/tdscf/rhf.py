@@ -110,7 +110,9 @@ class TDBase(lib.StreamObject):
             return x/diagd
         return precond
 
-    nuc_grad_method = NotImplemented
+    def nuc_grad_method(self):
+        from gpu4pyscf.grad import tdrhf
+        return tdrhf.Gradients(self)
     as_scanner = tdhf_cpu.as_scanner
 
     oscillator_strength = tdhf_cpu.oscillator_strength
