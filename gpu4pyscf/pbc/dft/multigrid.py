@@ -1,0 +1,627 @@
+#!/usr/bin/env python
+# Copyright 2024-2025 The PySCF Developers. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import ctypes
+import numpy as np
+import cupy as cp
+import scipy.linalg
+from pyscf.gto import ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF, PTR_COORD
+from pyscf.pbc.tools.pbc import mesh_to_cutoff
+from pyscf.pbc.df.df_jk import _format_kpts_band
+from gpu4pyscf.pbc import tools
+from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import utils
+from gpu4pyscf.lib.cupy_helper import load_library, tag_array, sandwich_dot, block_diag
+from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
+from gpu4pyscf.__config__ import props as gpu_specs
+try:
+    from gpu4pyscf.gto.mole import cart2sph_by_l
+except ImportError:
+    import functools
+    from pyscf.gto.mole import cart2sph
+    @functools.lru_cache(20)
+    def cart2sph_by_l(l, normalized='sp'):
+        c2s = cart2sph(l, normalized='sp')
+        return cp.asarray(c2s, order='C')
+
+__all__ = ['MultiGridFFTDF']
+
+libmgrid = load_library('libmgrid')
+libmgrid.MG_eval_rho_orth.restype = ctypes.c_int
+libmgrid.MG_eval_mat_lda_orth.restype = ctypes.c_int
+libmgrid.init_mgrid_constant.restype = ctypes.c_int
+
+PRIMBAS_ANG = 0
+PRIMBAS_EXP = 1
+PRIMBAS_COEFF = 2
+PRIMBAS_COORD = 3
+LMAX = 4
+SHARED_RHO_SIZE = 2097152 # 128^3
+N_RADIUS = 16
+
+def eval_mat(cell, weights, shls_slice=None, comp=1, hermi=0,
+             xctype='LDA', kpts=None, mesh=None, offset=None, submesh=None):
+    raise NotImplementedError
+
+def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
+    '''Get the Coulomb (J) AO matrix at sampled k-points.
+
+    Args:
+        dm_kpts : (nkpts, nao, nao) ndarray or a list of (nkpts,nao,nao) ndarray
+            Density matrix at each k-point.  If a list of k-point DMs, eg,
+            UHF alpha and beta DM, the alpha and beta DMs are contracted
+            separately.
+        kpts : (nkpts, 3) ndarray
+
+    Kwargs:
+        kpts_band : ``(3,)`` ndarray or ``(*,3)`` ndarray
+            A list of arbitrary "band" k-points at which to evalute the matrix.
+
+    Returns:
+        vj : (nkpts, nao, nao) ndarray
+        or list of vj if the input dm_kpts is a list of DMs
+    '''
+    cell = mydf.cell
+    dm_kpts = cp.asarray(dm_kpts)
+    rhoG = _eval_rhoG(mydf, dm_kpts, hermi, kpts, deriv=0)
+    coulG = tools.get_coulG(cell, mesh=cell.mesh)
+    #:vG = np.einsum('ng,g->ng', rhoG[:,0], coulG)
+    vG = rhoG[:,0]
+    vG *= coulG
+
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    vj_kpts = _get_j_pass2(mydf, vG, hermi, kpts_band)
+    return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
+
+
+def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), deriv=0):
+    cell = mydf.cell
+    log = logger.new_logger(cell)
+    t0 = log.init_timer()
+
+    dm_kpts = cp.asarray(dm_kpts, order='C')
+    dm_kpts = mydf.sort_orbitals(dm_kpts)
+    dms = _format_dms(dm_kpts, kpts)
+    nset, nkpts, nao = dms.shape[:3]
+    lmax = cell._bas[:,ANG_OF].max()
+    assert lmax <= LMAX
+
+    assert (deriv < 2)
+    #hermi = hermi and abs(dms - dms.transpose(0,1,3,2).conj()).max() < 1e-9
+    gga_high_order = False
+    if deriv == 0:
+        #xctype = 'LDA'
+        rhodim = 1
+
+    elif deriv == 1:
+        gga_high_order = True
+        #xctype = 'LDA'
+        rhodim = 1
+        deriv = 0
+
+    elif deriv == 2:  # meta-GGA
+        raise NotImplementedError
+
+    ignore_imag = (hermi == 1)
+    assert ignore_imag
+
+    a = cell.lattice_vectors()
+    assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
+    lattice_params = cp.asarray(a.diagonal())
+    supmol_bas = cp.asarray(mydf.supmol_bas, dtype=np.int32)
+    supmol_env = cp.asarray(mydf.supmol_env)
+    sub_meshs = mydf.sub_meshs
+    ao_loc_in_cell0 = cp.asarray(mydf.ao_loc_in_cell0, dtype=np.int32)
+    mg_envs = MGridEnvVars(
+        mydf.primitive_nbas, len(supmol_bas), nao, supmol_bas.data.ptr,
+        supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
+    sp_groups = group_shl_pairs(cell, supmol_bas[:mydf.primitive_nbas],
+                                mydf.supmol_bas, mydf.supmol_env, sub_meshs)
+    workers = gpu_specs['multiProcessorCount']
+    nf3 = (lmax*2+1)*(lmax*2+2)*(lmax*2+3)//6
+    cache_size = ((lmax*2+1)*(N_RADIUS*2)*3 + nf3 + 6) * 32
+    pool = cp.empty((workers, cache_size))
+
+    kern = libmgrid.MG_eval_rho_orth
+    assert rhodim == 1
+    rhoG = None
+
+    for i, mesh in enumerate(sub_meshs):
+        ngrids = np.prod(mesh)
+        rhoR = cp.empty((nset, *mesh))
+        for iset in range(nset):
+            if ngrids < SHARED_RHO_SIZE:
+                rho_local = cp.zeros((workers*8, *mesh))
+            else:
+                rho_local = cp.zeros(mesh)
+            for l in range(lmax*2+1):
+                pair_idx = sp_groups[i,l]
+                kern(ctypes.cast(rho_local.data.ptr, ctypes.c_void_p),
+                     ctypes.cast(dms[iset].data.ptr, ctypes.c_void_p),
+                     mg_envs,
+                     ctypes.c_int(l), ctypes.c_int(N_RADIUS),
+                     (ctypes.c_int*3)(*mesh),
+                     ctypes.c_uint32(len(pair_idx)),
+                     ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
+                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                     ctypes.c_int(workers))
+            if ngrids < SHARED_RHO_SIZE:
+                rho_local = rho_local.sum(axis=0)
+            rhoR[iset] = rho_local
+
+        weight = 1./nkpts * cell.vol/ngrids
+        rho_freq = tools.fft(rhoR.reshape(nset*rhodim, -1), mesh)
+        rho_freq *= weight
+        if rhoG is None:
+            rhoG = rho_freq
+        else:
+            _takebak_4d(rhoG, rho_freq.reshape((-1,) + mesh), mesh)
+
+    rhoG = rhoG.reshape(nset,rhodim,-1)
+
+    if gga_high_order:
+        Gv = cp.asarray(cell.get_Gv(mydf.mesh))
+        rhoG1 = cp.einsum('np,px->nxp', 1j*rhoG[:,0], Gv)
+        rhoG = cp.concatenate([rhoG, rhoG1], axis=1)
+    log.timer_debug1('eval_rhoG', *t0)
+    return rhoG
+
+def _get_j_pass2(mydf, vG, hermi=1, kpts=np.zeros((1,3)), verbose=None):
+    cell = mydf.cell
+    log = logger.new_logger(cell, verbose)
+    t0 = log.init_timer()
+    nkpts = len(kpts)
+    assert nkpts == 1
+    nao = cell.nao_nr()
+    nset = vG.shape[0]
+    lmax = cell._bas[:,ANG_OF].max()
+    assert lmax <= LMAX
+
+    sub_meshs = mydf.sub_meshs
+    mesh_largest = sub_meshs[0]
+    vG = vG.reshape(-1, *mesh_largest)
+
+    a = cell.lattice_vectors()
+    assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
+    lattice_params = cp.asarray(a.diagonal())
+    supmol_bas = cp.asarray(mydf.supmol_bas, dtype=np.int32)
+    supmol_env = cp.asarray(mydf.supmol_env)
+    ao_loc_in_cell0 = cp.asarray(mydf.ao_loc_in_cell0, dtype=np.int32)
+    mg_envs = MGridEnvVars(
+        mydf.primitive_nbas, len(supmol_bas), nao, supmol_bas.data.ptr,
+        supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
+    sp_groups = group_shl_pairs(cell, supmol_bas[:mydf.primitive_nbas],
+                                mydf.supmol_bas, mydf.supmol_env, sub_meshs)
+
+    workers = gpu_specs['multiProcessorCount']
+    nf2 = (lmax*2+1)*(lmax*2+2)//2
+    cache_size = ((lmax*2+1)*(N_RADIUS*2)*3 + nf2*(N_RADIUS*2)) * 32 + 6*16
+    pool = cp.empty((workers, cache_size))
+
+    kern = libmgrid.eval_mat_lda_orth
+    # TODO: might be complex array when tddft amplitudes are complex
+    vj = np.zeros((nset,nao,nao))
+
+    for i, mesh in enumerate(sub_meshs):
+        ngrids = np.prod(mesh)
+        sub_vG = _take_4d(vG, mesh).reshape(nset,ngrids)
+        v_rs = tools.ifft(sub_vG, mesh).reshape(nset,ngrids)
+        if abs(v_rs.imag).max() > 1e-8:
+            raise RuntimeError('Complex values in potential. mesh might be insufficient')
+
+        vR = cp.asarray(v_rs.real, order='C')
+        for iset in range(nset):
+            for l in range(lmax*2+1):
+                pair_idx = sp_groups[i,l]
+                kern(ctypes.cast(vj[nset].data.ptr, ctypes.c_void_p),
+                     ctypes.cast(vR[iset].data.ptr, ctypes.c_void_p),
+                     mg_envs, ctypes.c_int(l), ctypes.c_int(N_RADIUS),
+                     (ctypes.c_int*3)(*mesh),
+                     ctypes.c_uint32(len(pair_idx)),
+                     ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
+                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                     ctypes.c_int(workers))
+    vj = mydf.unsort_orbitals(vj)
+    log.timer_debug1('get_j pass2', *t0)
+    return vj
+
+def _get_gga_pass2(mydf, vG, hermi=1, kpts=np.zeros((1,3)), verbose=None):
+    raise NotImplementedError
+
+def nr_rks(mydf, xc_code, dm_kpts, hermi=1, kpts=None,
+           kpts_band=None, with_j=False, return_j=False, verbose=None):
+    '''Compute the XC energy and RKS XC matrix at sampled k-points.
+    multigrid version of function pbc.dft.numint.nr_rks.
+
+    Args:
+        dm_kpts : (nkpts, nao, nao) ndarray or a list of (nkpts,nao,nao) ndarray
+            Density matrix at each k-point.
+        kpts : (nkpts, 3) ndarray
+
+    Kwargs:
+        kpts_band : ``(3,)`` ndarray or ``(*,3)`` ndarray
+            A list of arbitrary "band" k-points at which to evalute the matrix.
+
+    Returns:
+        exc : XC energy
+        nelec : number of electrons obtained from the numerical integration
+        veff : (nkpts, nao, nao) ndarray
+            or list of veff if the input dm_kpts is a list of DMs
+        vj : (nkpts, nao, nao) ndarray
+            or list of vj if the input dm_kpts is a list of DMs
+    '''
+    if kpts is None: kpts = mydf.kpts
+    log = logger.new_logger(mydf, verbose)
+    cell = mydf.cell
+    dm_kpts = cp.asarray(dm_kpts, order='C')
+    dm_kpts = mydf.sort_orbitals(dm_kpts)
+    dms = _format_dms(dm_kpts, kpts)
+    nset, nkpts, nao = dms.shape[:3]
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+
+    ni = mydf._numint
+    xctype = ni._xc_type(xc_code)
+
+    if xctype == 'LDA':
+        deriv = 0
+    elif xctype == 'GGA':
+        deriv = 1
+    elif xctype == 'MGGA':
+        deriv = 1
+        raise NotImplementedError
+    rhoG = _eval_rhoG(mydf, dm_kpts, hermi, kpts, deriv)
+
+    mesh = mydf.mesh
+    ngrids = np.prod(mesh)
+    coulG = tools.get_coulG(cell, mesh=mesh)
+    vG = rhoG[:,0] * coulG
+    ecoul = .5 * cp.einsum('ng,ng->n', rhoG[:,0].real, vG.real)
+    ecoul+= .5 * cp.einsum('ng,ng->n', rhoG[:,0].imag, vG.imag)
+    ecoul /= cell.vol
+    log.debug('Multigrid Coulomb energy %s', ecoul)
+
+    weight = cell.vol / ngrids
+    # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
+    # computing rhoR with IFFT, the weight factor is not needed.
+    rhoR = tools.ifft(rhoG.reshape(-1,ngrids), mesh).real * (1./weight)
+    rhoR = cp.asarray(rhoR.reshape(nset,-1,ngrids), order='C')
+    nelec = rhoR[:,0].sum(axis=1) * weight
+
+    wv_freq = []
+    excsum = np.zeros(nset)
+    for i in range(nset):
+        if xctype == 'LDA':
+            exc, vxc = ni.eval_xc_eff(xc_code, rhoR[i,0], deriv=1, xctype=xctype)[:2]
+        else:
+            exc, vxc = ni.eval_xc_eff(xc_code, rhoR[i], deriv=1, xctype=xctype)[:2]
+        excsum[i] += (rhoR[i,0]*exc).sum() * weight
+        wv = weight * vxc
+        wv_freq.append(tools.fft(wv, mesh))
+    wv_freq = cp.asarray(wv_freq).reshape(nset,-1,*mesh)
+    rhoR = rhoG = None
+
+    if nset == 1:
+        ecoul = ecoul[0]
+        nelec = nelec[0]
+        excsum = excsum[0]
+    log.debug('Multigrid exc %s  nelec %s', excsum, nelec)
+
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    if xctype == 'LDA':
+        if with_j:
+            wv_freq[:,0] += vG.reshape(nset,*mesh)
+        veff = _get_j_pass2(mydf, wv_freq, hermi, kpts_band, verbose=log)
+    elif xctype == 'GGA':
+        if with_j:
+            wv_freq[:,0] += vG.reshape(nset,*mesh)
+        # *.5 because v+v.T is always called in _get_gga_pass2
+        wv_freq[:,0] *= .5
+        veff = _get_gga_pass2(mydf, wv_freq, hermi, kpts_band, verbose=log)
+    veff = _format_jks(veff, dm_kpts, input_band, kpts)
+
+    if return_j:
+        vj = _get_j_pass2(mydf, vG, hermi, kpts_band, verbose=log)
+        vj = _format_jks(veff, dm_kpts, input_band, kpts)
+    else:
+        vj = None
+
+    shape = list(dm_kpts.shape)
+    if len(shape) == 3 and shape[0] != kpts_band.shape[0]:
+        shape[0] = kpts_band.shape[0]
+    veff = veff.reshape(shape)
+    veff = tag_array(veff, ecoul=ecoul, exc=excsum, vj=vj, vk=None)
+    return nelec, excsum, veff
+
+# Note nr_uks handles only one set of KUKS density matrices (alpha, beta) in
+# each call (nr_rks supports multiple sets of KRKS density matrices)
+def nr_uks(mydf, xc_code, dm_kpts, hermi=1, kpts=None,
+           kpts_band=None, with_j=False, return_j=False, verbose=None):
+    raise NotImplementedError
+
+def get_rho(mydf, dm, kpts=np.zeros((1,3))):
+    '''Density in real space
+    '''
+    cell = mydf.cell
+    hermi = 1
+    rhoG = _eval_rhoG(mydf, cp.asarray(dm), hermi, kpts, deriv=0)
+
+    mesh = mydf.mesh
+    ngrids = np.prod(mesh)
+    weight = cell.vol / ngrids
+    # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
+    # computing rhoR with IFFT, the weight factor is not needed.
+    rhoR = tools.ifft(rhoG.reshape(ngrids), mesh).real * (1./weight)
+    return rhoR
+
+def _to_primitive_bas(cell):
+    '''Decontract the cell basis sets into primitive bases in super-mole'''
+    bas_templates = {}
+    prim_bas = []
+    prim_env = cell._env.copy()
+    ao_loc = cell.ao_loc_nr()
+    ao_loc_in_cell0 = []
+    aoslices = cell.aoslice_by_atom()
+    for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
+        ptr_coord = cell._atm[ia,PTR_COORD]
+        key = tuple(cell._bas[ib0:ib1,PTR_COEFF])
+        if key in bas_templates:
+            bas_of_ia, local_ao_mapping = bas_templates[key]
+            bas_of_ia = bas_of_ia.copy()
+            bas_of_ia[:,PRIMBAS_COORD] = ptr_coord
+        else:
+            # Generate the template for decontracted basis
+            local_ao_mapping = []
+            off = 0
+            bas_of_ia = []
+            for shell in cell._bas[ib0:ib1]:
+                l = shell[ANG_OF]
+                nf = (l + 1) * (l + 2) // 2
+                nctr = shell[NCTR_OF]
+                nprim = shell[NPRIM_OF]
+                pexp = shell[PTR_EXP]
+                pcoeff = shell[PTR_COEFF]
+                bs = np.empty((nprim*nctr, 4), dtype=np.int32)
+                bs[:,PRIMBAS_ANG] = l
+                bs[:,PRIMBAS_EXP] = _vrepeat(np.arange(pexp, pexp+nprim), nctr)
+                bs[:,PRIMBAS_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr)
+                bs[:,PRIMBAS_COORD] = ptr_coord
+                bas_of_ia.append(bs)
+                if cell.cart and l <= 1:
+                    # sort_orbitals and unsort_orbitals do not transform the
+                    # orbitals when cell.cart is enabled. The special Cartesian
+                    # normalization coefficients for s and p functions should be
+                    # applied into the contraction coefficients.
+                    prim_env[pcoeff:pcoeff+nprim*nctr] *= ((2*l+1)/(4*np.pi))**.5
+                off += nprim * nctr
+                idx = np.hstack([np.arange(0, nf*nprim, nf)] * nctr)
+                local_ao_mapping.append(off + idx)
+
+            bas_of_ia = np.vstack(bas_of_ia)
+            local_ao_mapping = np.hstack(local_ao_mapping)
+            bas_templates[key] = (bas_of_ia, local_ao_mapping)
+
+        prim_bas.append(bas_of_ia)
+        off = ao_loc[ib0]
+        ao_loc_in_cell0.append(off + local_ao_mapping)
+
+    prim_bas = np.asarray(np.vstack(prim_bas), dtype=np.int32)
+    ao_loc_in_cell0 = np.asarray(np.hstack(ao_loc_in_cell0), dtype=np.int32)
+
+    # Transform to super-mole
+    Ls = cell.get_lattice_Ls()
+    Ls = Ls[np.linalg.norm(Ls+0.5, axis=1).argsort()]
+    nimgs = len(Ls)
+    ptr_coords = prim_bas[:,PRIMBAS_COORD]
+    bas_coords = cell._env[ptr_coords[:,None] + np.arange(3)]
+    basLr = (bas_coords + Ls[1:,None]).reshape(-1, 3)
+    dr = np.linalg.norm(bas_coords[:,None,:] - basLr, axis=2)
+    idx = np.where(dr.min(axis=0) < cell.rcut)[0]
+    _env = np.hstack([cell._env, basLr[idx].ravel()])
+    supmol_bas = _vrepeat(prim_bas, nimgs-1)[idx]
+    supmol_bas[:,PRIMBAS_COORD] = len(cell._env) + np.arange(idx.size) * 3
+    supmol_bas = np.vstack([prim_bas, supmol_bas])
+    ao_loc_in_cell0 = np.asarray(np.hstack([ao_loc_in_cell0]*nimgs)[idx], dtype=np.int32)
+    return supmol_bas, _env, ao_loc_in_cell0
+
+def _vrepeat(a, repeats):
+    '''repeats vertically'''
+    ap = np.repeat(a[np.newaxis], repeats, axis=0)
+    return ap.reshape(-1, *a.shape[1:])
+
+def group_shl_pairs(cell, prim_bas, supmol_bas, supmol_env, sub_meshs):
+    vol = cell.vol
+    weight_penalty = vol
+    precision = cell.precision / max(weight_penalty, 1)
+
+    cell0_nprims = len(prim_bas)
+    ls = cp.asarray(supmol_bas[:,PRIMBAS_ANG])
+    es = cp.asarray(supmol_env[supmol_bas[:,PRIMBAS_EXP]])
+    cs = cp.asarray(abs(supmol_env[supmol_bas[:,PRIMBAS_COEFF]]))
+    norm = cs * ((2*ls+1)/(4*np.pi))**.5
+    ptr_coords = supmol_bas[:,PRIMBAS_COORD]
+    bas_coords = cp.asarray(supmol_env[ptr_coords[:,None] + np.arange(3)])
+
+    # TODO: rewritten in C
+    # Estimate <cell0|supmol> overlap
+    li = ls[:cell0_nprims,None]
+    lj = ls[None,:]
+    lij = li + lj
+    aij = es[:cell0_nprims,None] + es
+    fi = es[:cell0_nprims,None] / aij
+    fj = es[None,:] / aij
+    theta = es[:cell0_nprims,None] * fj
+    rirj = bas_coords[:cell0_nprims,None,:] - bas_coords
+    dr = cp.linalg.norm(rirj, axis=2)
+    dri = fj * dr
+    drj = fi * dr
+    fac_dri = (li * .5/aij + dri**2) ** (li*.5)
+    fac_drj = (lj * .5/aij + drj**2) ** (lj*.5)
+    rad = cell.vol**(-1./3) * dr + 1
+    surface = 4*np.pi * rad**2
+    fl = cp.where(surface > 1, surface, 1)
+    fac_norm = norm[:cell0_nprims,None]*norm * (np.pi/aij)**1.5
+    ovlp = fac_norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj * fl
+
+    #FIXME: Ecut estimation based on pyscf.pbc.gto.cell.estimate_ke_cutoff
+    #scale = norm[:,None]*norm * cp.exp(-theta*dr**2) * fl
+    #scale * 32*np.pi**2*(2*np.pi)**1.5 * norm[:,None]*norm / aij**(lij+.5) / precision
+    fac = ovlp / precision
+    Ecut = 20.
+    Ecut = cp.log(fac * (Ecut*2)**(lij-.5) + 1.) * 2*aij
+    Ecut = cp.log(fac * (Ecut*2)**(lij-.5) + 1.) * 2*aij
+    Ecut[ovlp < cell.precision] = -1
+
+    a = cell.lattice_vectors()
+    lmax = cell._bas[:,ANG_OF].max()
+    task_Ecuts = [mesh_to_cutoff(a, mesh) for mesh in sub_meshs]
+    task_Ecuts[0] = 1e10
+    task_Ecuts.append(0)
+    shl_pairs_groups = {}
+    for i, mesh in enumerate(sub_meshs):
+        E_mask = Ecut <= task_Ecuts[i]
+        E_mask &= Ecut > task_Ecuts[i+1]
+        for l in range(lmax*2+1):
+            mask = l == lij
+            mask &= E_mask
+            pair_idx = cp.asarray(cp.where(mask.ravel())[0], dtype=np.int32)
+            shl_pairs_groups[i,l] = pair_idx
+    return shl_pairs_groups
+
+def multigrid_submeshs(cell):
+    a = cell.lattice_vectors()
+    assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
+    cell_len = a.diagonal().min()
+    b = 2*np.pi / cell_len
+    penalty = 1e-2
+    precision = cell.precision * penalty
+
+    # Estimate the proper radius and Ecut boundaries in each task. Given mesh
+    # in each task, a resolution can be obtained to determine the radius and
+    # Ecut boundaries. The largest radius in each task ~= 16 * resolution.
+    # This means that the numerical integration with 32 grids for the most
+    # diffused orbital-product is sufficient to produce the required precision.
+    # The largest Ecut in each task ~= cutoff_to_mesh(mesh), which is sufficient
+    # to produce the required precision for the most compact orbital-product.
+
+    mesh = cell.mesh
+    sub_meshs = [mesh]
+    while True:
+        dh = (cell_len / mesh).min()
+        radius = dh * 15
+        #if radius > 5:
+        #    TODO: additional penalty to adjust precision
+        aij = np.log((4*np.pi*radius**2)/precision) / radius**2
+        Ecut = np.log((2*np.pi)**1.5 / precision) * (2*aij)
+        Gmax = (2*Ecut)**.5 / b
+        mesh = np.ceil(Gmax).astype(int) * 2 + 1
+        if np.prod(mesh) < 4000:
+            break
+        sub_meshs.append(mesh)
+    return sub_meshs
+
+def _take_4d(a, mesh):
+    gx = np.fft.fftfreq(mesh[0], 1./mesh[0]).astype(np.int32)
+    gy = np.fft.fftfreq(mesh[1], 1./mesh[1]).astype(np.int32)
+    gz = np.fft.fftfreq(mesh[2], 1./mesh[2]).astype(np.int32)
+    return a[:,gx[:,None,None],gy[:,None],gz]
+
+def _takebak_4d(out, a, mesh):
+    gx = np.fft.fftfreq(mesh[0], 1./mesh[0]).astype(np.int32)
+    gy = np.fft.fftfreq(mesh[1], 1./mesh[1]).astype(np.int32)
+    gz = np.fft.fftfreq(mesh[2], 1./mesh[2]).astype(np.int32)
+    out[:,gx[:,None,None],gy[:,None],gz] += a.reshape((-1,)+mesh)
+    return out
+
+class MGridEnvVars(ctypes.Structure):
+    _fields_ = [
+        ('nbas_i', ctypes.c_uint16),
+        ('nbas_j', ctypes.c_uint16),
+        ('nao', ctypes.c_int),
+        ('bas', ctypes.c_void_p),
+        ('env', ctypes.c_void_p),
+        ('ao_loc', ctypes.c_void_p),
+        ('lattice_params', ctypes.c_void_p),
+    ]
+
+
+class MultiGridFFTDF:
+    def __init__(self, cell, kpts=np.zeros((1,3))):
+        self.cell = cell
+        self.kpts = kpts
+        self.mesh = cell.mesh
+        # ao_loc_in_cell0 is the address of Cartesian AO in cell-0 for each
+        # primitive GTOs in the super-mole.
+        self.supmol_bas, self.supmol_env, self.ao_loc_in_cell0 = \
+                _to_primitive_bas(cell)
+        # Number of primitive shells
+        self.primitive_nbas = cell._bas[:,NPRIM_OF].dot(cell._bas[:,NCTR_OF])
+        # A list of integral meshgrids for each task
+        self.sub_meshs = multigrid_submeshs(cell)
+        logger.debug(cell, 'Multigrid ntasks %s', len(self.sub_meshs))
+
+    def reset(self, cell=None):
+        if cell is not None:
+            self.cell = cell
+        self.sub_meshs = None
+        return self
+
+    def get_j(self, dm, hermi=1, kpts=None, kpts_band=None,
+              omega=None, exxdiv='ewald'):
+        if kpts is None:
+            if np.all(self.kpts == 0): # Gamma-point J/K by default
+                kpts = np.zeros(3)
+            else:
+                kpts = self.kpts
+        else:
+            raise NotImplementedError
+            kpts = np.asarray(kpts)
+
+        vj = get_j_kpts(self, dm, hermi, kpts.reshape(-1,3), kpts_band)
+        if kpts.ndim == 1 and kpts_band is None:
+            vj = vj[...,0,:,:]
+        return vj
+
+    def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
+               with_j=True, with_k=True, omega=None, exxdiv='ewald'):
+        assert not with_k
+        raise NotImplementedError('MG combined to other DF methods')
+
+    def get_veff(self, dm, xc):
+        '''Computing XC matrix and Coulomb interactions'''
+        raise NotImplementedError
+
+    get_rho = get_rho
+
+    def sort_orbitals(self, mat):
+        ''' Transform bases of a matrix into Cartesian bases
+        '''
+        cell = self.cell
+        if cell.cart:
+            return mat
+        c2s = block_diag([cart2sph_by_l(l)
+                          for l, nc in zip(cell._bas[:,ANG_OF], cell._bas[:,NCTR_OF])
+                          for _ in range(nc)])
+        return sandwich_dot(mat, c2s.T)
+
+    def unsort_orbitals(self, mat):
+        ''' Transform bases of a matrix into original AOs
+        '''
+        cell = self.cell
+        if cell.cart:
+            return mat
+        c2s = block_diag([cart2sph_by_l(l)
+                          for l, nc in zip(cell._bas[:,ANG_OF], cell._bas[:,NCTR_OF])
+                          for _ in range(nc)])
+        return sandwich_dot(mat, c2s)

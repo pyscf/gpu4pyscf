@@ -50,16 +50,14 @@ typedef struct {
     // address. (ao_loc[n+1] - ao_loc[n]) cannot be used as the dimension for
     // each shell.
     int *ao_loc;
+    double *lattice_params;
 } MGridEnvVars;
 
 typedef struct {
-    uint32_t nshl_pair;
+    int nshl_pair;
     int *bas_ij_idx;
     int n_radius;
-    int mesh_x;
-    int mesh_y;
-    int mesh_z;
-    double *voxel;
+    int mesh[3];
 } MGridBounds;
 
 typedef struct {

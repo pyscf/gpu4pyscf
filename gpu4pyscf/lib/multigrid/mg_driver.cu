@@ -21,6 +21,14 @@
 #include <cuda_runtime.h>
 #include "multigrid.cuh"
 
+#define checkCudaErrors(val) check((val), #val, __FILE__, __LINE__)
+
+#define MALLOC(type, var, size) \
+
+#define MEMSET(addr, val, size) \
+    checkCudaErrors(cudaMemset(addr, val, size))
+
+
 __constant__ Fold2Index c_i_in_fold2idx[165];
 __constant__ Fold3Index c_i_in_fold3idx[495];
 int eval_rho_orth(double *rho, double *dm, MGridEnvVars *envs, MGridBounds *bounds,
@@ -30,40 +38,48 @@ int eval_mat_lda_orth(double *out, double *rho, MGridEnvVars *envs, MGridBounds 
 
 extern "C" {
 int MG_eval_rho_orth(double *rho, double *dm, MGridEnvVars envs,
-                     int l, int n_radius, uint32_t nshl_pair,
-                     int *bas_ij_idx, int *mesh, double *voxel,
-                     double *pool, uint32_t *batch_head, int workers)
+                     int l, int n_radius, int *mesh,
+                     int nshl_pair, int *bas_ij_idx, double *pool, int workers)
 {
     MGridBounds bounds = {
-        nshl_pair, bas_ij_idx, n_radius, mesh[0], mesh[1], mesh[2], voxel,
+        nshl_pair, bas_ij_idx, n_radius, {mesh[0], mesh[1], mesh[2]},
     };
+    uint32_t *batch_head;
+    cudaMalloc(reinterpret_cast<void **>(&batch_head), sizeof(uint32_t) * 1);
+    cudaMemset(batch_head, 0, sizeof(uint32_t));
     eval_rho_orth(rho, dm, &envs, &bounds, l, pool, batch_head, workers);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in MG_eval_rho_orth: %s\n", cudaGetErrorString(err));
+        cudaFree(batch_head);
         return 1;
     }
+    cudaFree(batch_head);
     return 0;
 }
 
 int MG_eval_mat_lda_orth(double *out, double *rho, MGridEnvVars envs,
-                         int l, int n_radius, uint32_t nshl_pair,
-                         int *bas_ij_idx, int *mesh, double *voxel,
-                         double *pool, uint32_t *batch_head, int workers)
+                         int l, int n_radius, int *mesh,
+                         int nshl_pair, int *bas_ij_idx, double *pool, int workers)
 {
     MGridBounds bounds = {
-        nshl_pair, bas_ij_idx, n_radius, mesh[0], mesh[1], mesh[2], voxel,
+        nshl_pair, bas_ij_idx, n_radius, {mesh[0], mesh[1], mesh[2]},
     };
+    uint32_t *batch_head;
+    cudaMalloc(reinterpret_cast<void **>(&batch_head), sizeof(uint32_t) * 1);
+    cudaMemset(batch_head, 0, sizeof(uint32_t));
     eval_mat_lda_orth(out, rho, &envs, &bounds, l, pool, batch_head, workers);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in MG_eval_rho_orth: %s\n", cudaGetErrorString(err));
+        cudaFree(batch_head);
         return 1;
     }
+    cudaFree(batch_head);
     return 0;
 }
 
-int init_mg_constant(int shm_size)
+int init_mgrid_constant(int shm_size)
 {
     Fold2Index i_in_fold2idx[165];
     Fold3Index i_in_fold3idx[495];
