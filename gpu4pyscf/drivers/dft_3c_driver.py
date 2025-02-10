@@ -215,6 +215,11 @@ def run_dft(mol_name, config, charge=None, spin=0):
 
     #### Changes for 3C methods #####
     # Setup dispersion correction and GCP
+    # To developers: Right now the 3c method is supported via modifications of mf class methods.
+    #                These modifications are not copied over during to_gpu() or to_cpu() calls.
+    #                As a result, to_gpu() or to_cpu() has to be called before the following lines,
+    #                otherwise you'll get a wrong dispersion.
+    #                If you need to reproduce 3c method in other packages, please pay attention.
     mf.nlc = nlc
     mf.get_dispersion = MethodType(gen_disp_fun(xc_disp, xc_gcp), mf)
     mf.do_disp = lambda: True
