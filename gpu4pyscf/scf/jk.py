@@ -49,11 +49,6 @@ PTR_BAS_COORD = 7
 LMAX = 4
 TILE = 2
 QUEUE_DEPTH = 262144
-UNROLL_ORDER = ctypes.c_int.in_dll(libvhf_rys, 'rys_jk_unrolled_max_order').value
-UNROLL_LMAX = ctypes.c_int.in_dll(libvhf_rys, 'rys_jk_unrolled_lmax').value
-UNROLL_NFMAX = ctypes.c_int.in_dll(libvhf_rys, 'rys_jk_unrolled_max_nf').value
-UNROLL_J_LMAX = ctypes.c_int.in_dll(libvhf_rys, 'rys_j_unrolled_lmax').value
-UNROLL_J_MAX_ORDER = ctypes.c_int.in_dll(libvhf_rys, 'rys_j_unrolled_max_order').value
 SHM_SIZE = shm_size - 1024
 del shm_size
 GOUT_WIDTH = 42
@@ -401,7 +396,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
                 mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
             if err != 0:
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                raise RuntimeError(f'RYS_build_j kernel for {llll} failed')
             if log.verbose >= logger.DEBUG1:
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 t1, t1p = log.timer_debug1(f'processing {llll}, tasks = {info[1]}', *t1), t1
@@ -655,17 +650,11 @@ def quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nfk = (lk + 1) * (lk + 2) // 2
     nfl = (ll + 1) * (ll + 2) // 2
     gout_size = nfi * nfj * nfk * nfl
-    if (gout_size <= UNROLL_NFMAX or order <= UNROLL_ORDER) and all(ls <= UNROLL_LMAX):
-        if (CUDA_VERSION >= 12040 and
-            order <= 3 and (li,lj,lk,ll) != (1,1,1,0) and (li,lj,lk,ll) != (1,0,1,1)):
-            return 512, 1
-        return 256, 1
-
     g_size = (li+1)*(lj+1)*(lk+1)*(ll+1)
     nps = l_ctr_pattern[:,1]
     ij_prims = nps[0] * nps[1]
     nroots = order // 2 + 1
-    unit = nroots*2 + g_size*3 + ij_prims*4
+    unit = nroots*2 + g_size*3 + ij_prims + 9
     if mol.omega < 0: # SR
         unit += nroots * 2
     counts = shm_size // (unit*8)
@@ -689,13 +678,8 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nf3_ij = (lij+1)*(lij+2)*(lij+3)//6
     nf3_kl = (lkl+1)*(lkl+2)*(lkl+3)//6
     nroots = order // 2 + 1
-    # UNROLL_J_LMAX is different to UNROLL_LMAX of orbital basis. see rys_contract_j kernel
-    if order <= UNROLL_J_MAX_ORDER and lij <= UNROLL_J_LMAX and lkl <= UNROLL_J_LMAX:
-        if CUDA_VERSION >= 12040 and order <= 2:
-            return 512, 1, False
-        return 256, 1, False
 
-    unit = nroots*2 + g_size*3 + ij_prims*4
+    unit = nroots*2 + g_size*3 + ij_prims + 9
     dm_cache_size = nf3_ij + nf3_kl*2 + (lij+1)*(lkl+1)*(nmax+2)
     gout_size = nf3_ij * nf3_kl
     if dm_cache_size < gout_size:
@@ -711,8 +695,6 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     counts = shm_size // (unit*8)
     n = min(THREADS, _nearest_power2(counts))
     gout_stride = THREADS // n
-    if CUDA_VERSION >= 12040:
-        gout_stride *= 2
     return n, gout_stride, with_gout
 
 def _nearest_power2(n, return_leq=True):

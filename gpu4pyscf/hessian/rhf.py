@@ -46,6 +46,7 @@ libvhf_rys.RYS_build_jk_ip1.restype = ctypes.c_int
 
 GB = 1024*1024*1024
 ALIGNED = 4
+DD_CACHE_MAX = rhf_grad.DD_CACHE_MAX
 
 def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
               mo1=None, mo_e1=None, h1mo=None,
@@ -201,6 +202,7 @@ def _ejk_ip2_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
                                                  log_cutoff-log_max_dm)
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
+        dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
         info = cp.empty(2, dtype=np.uint32)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
@@ -228,10 +230,13 @@ def _ejk_ip2_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
                 ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                 ctypes.c_float(log_cutoff),
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                 ctypes.cast(info.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(workers),
                 mol._atm.ctypes, ctypes.c_int(mol.natm),
                 mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+
+            scheme = _ip2_type3_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
             err2 = kern2(
                 ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
                 ctypes.c_double(j_factor), ctypes.c_double(k_factor),
@@ -247,10 +252,12 @@ def _ejk_ip2_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
                 ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                 ctypes.c_float(log_cutoff),
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                 ctypes.cast(info.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(workers),
                 mol._atm.ctypes, ctypes.c_int(mol.natm),
                 mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+
             if err1 != 0 or err2 != 0:
                 raise RuntimeError(f'RYS_per_atom_jk_ip2 kernel for {llll} failed')
             if log.verbose >= logger.DEBUG1:
@@ -345,7 +352,23 @@ def _ip2_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nps = l_ctr_pattern[:,1]
     ij_prims = nps[0] * nps[1]
     nroots = (order + 2) // 2 + 1
-    unit = nroots*2 + g_size*3 + ij_prims*4
+    unit = nroots*2 + g_size*3 + ij_prims + 9
+    if mol.omega < 0: # SR
+        unit += nroots * 2
+    counts = shm_size // (unit*8)
+    n = min(THREADS, _nearest_power2(counts))
+    gout_stride = THREADS // n
+    return n, gout_stride
+
+def _ip2_type3_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
+    ls = l_ctr_pattern[:,0]
+    li, lj, lk, ll = ls
+    order = li + lj + lk + ll
+    g_size = (li+2)*(lj+1)*(lk+2)*(ll+1)
+    nps = l_ctr_pattern[:,1]
+    ij_prims = nps[0] * nps[1]
+    nroots = (order + 2) // 2 + 1
+    unit = nroots*2 + g_size*3 + ij_prims + 9
     if mol.omega < 0: # SR
         unit += nroots * 2
     counts = shm_size // (unit*8)
@@ -590,9 +613,8 @@ def _ip1_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ij_prims = nps[0] * nps[1]
     nroots = (order + 1) // 2 + 1
 
-    unit = nroots*2 + g_size*3
-    shm_size -= ij_prims*12 * 8
-    counts = shm_size // (unit*8)
+    unit = nroots*2 + g_size*3 + 6
+    counts = (shm_size - ij_prims*6 * 8) // (unit*8)
     n = min(THREADS, _nearest_power2(counts))
     gout_stride = THREADS // n
     gout_width = 18
