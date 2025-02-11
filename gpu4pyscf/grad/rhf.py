@@ -42,8 +42,18 @@ __all__ = [
 ]
 
 libvhf_rys.RYS_per_atom_jk_ip1.restype = ctypes.c_int
-# The max. size of nf*nsq_per_block for each block
-DD_CACHE_MAX = 101250
+# The max. size of nf*nsq_per_block for each block.
+# If shared memory is 48KB, this is enough to cache up to g-type functions,
+# corresponding to 15^4 with nsq_per_block=2. All other cases require smaller
+# cache for the product of density matrices. Although nsq_per_block would be
+# larger, the overall cache requirements is smaller. The following code gives
+# the size estimation for each angular momentum pattern (see also
+# _ejk_quartets_scheme)
+# for li, lj, lk, ll in itertools.product(*[range(LMAX+1)]*4):
+#     nf = (li+1)*(li+2) * (lj+1)*(lj+2) * (lk+1)*(lk+2) * (ll+1)*(ll+2) // 16
+#     g_size = (li+2)*(lj+1)*(lk+2)*(ll+1)
+#     dd_cache_size = nf * min(THREADS, _nearest_power2(SHM_SIZE//(g_size*3*8)))
+DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
 
 def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
                  device_id=0, verbose=0):
@@ -79,7 +89,6 @@ def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
                                                  log_cutoff-log_max_dm)
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
-        # enough for
         dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
         info = cp.empty(2, dtype=np.uint32)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
@@ -198,7 +207,7 @@ def _ejk_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ls = l_ctr_pattern[:,0]
     li, lj, lk, ll = ls
     order = li + lj + lk + ll
-    g_size = (li+2)*(lj+2)*(lk+2)*(ll+2)
+    g_size = (li+2)*(lj+1)*(lk+2)*(ll+1)
     nps = l_ctr_pattern[:,1]
     ij_prims = nps[0] * nps[1]
     nroots = (order + 1) // 2 + 1
