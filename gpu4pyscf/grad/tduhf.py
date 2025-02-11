@@ -114,8 +114,8 @@ def grad_elec(td_grad, x_y, atmlst=None, max_memory=2000, verbose=logger.INFO):
     vresp = mf.gen_response(hermi=1)
     def fvind(x):
         dm1 = cp.empty((2,nao,nao))
-        xa = x[0,:nvira*nocca].reshape(nvira,nocca)
-        xb = x[0,nvira*nocca:].reshape(nvirb,noccb)
+        xa = x[0].reshape(nvira,nocca)
+        xb = x[1].reshape(nvirb,noccb)
         dma = reduce(cp.dot, (orbva, xa, orboa.T))
         dmb = reduce(cp.dot, (orbvb, xb, orbob.T))
         dm1[0] = dma + dma.T
@@ -123,8 +123,8 @@ def grad_elec(td_grad, x_y, atmlst=None, max_memory=2000, verbose=logger.INFO):
         v1 = vresp(dm1)
         v1a = reduce(cp.dot, (orbva.T, v1[0], orboa))
         v1b = reduce(cp.dot, (orbvb.T, v1[1], orbob))
-        return cp.hstack((v1a.ravel(), v1b.ravel()))
-    z1a, z1b = ucphf.solve(fvind, mo_energy, mo_occ, (wvoa,wvob),
+        return cp.stack((v1a.ravel(), v1b.ravel()))
+    z1a, z1b = ucphf.solve(fvind, mo_energy, mo_occ, cp.stack([wvoa.ravel(),wvob.ravel()]),
                            max_cycle=td_grad.cphf_max_cycle,
                            tol=td_grad.cphf_conv_tol)[0]
     time1 = log.timer('Z-vector using UCPHF solver', *time0)
@@ -191,21 +191,23 @@ def grad_elec(td_grad, x_y, atmlst=None, max_memory=2000, verbose=logger.INFO):
     dh1e_td = int3c2e.get_dh1e(mol, (dmz1dooa + dmz1doob) * .5) # 1/r like terms
     if mol.has_ecp():
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1dooa + dmz1doob) * .5) # 1/r like terms
-
-    dvhf_DD_DP = mf_grad.get_veff(mol, ((dmz1dooa+dmz1dooa.T)*0.5 + oo0a,
-                                        (dmz1doob+dmz1doob.T)*0.5 + oo0b))
-    dvhf_DD_DP -= mf_grad.get_veff(mol, ((dmz1dooa+dmz1dooa.T)*0.5,
-                                         (dmz1doob+dmz1doob.T)*0.5))
-    dvhf_xpy = mf_grad.get_veff(mol, (dmxpya+dmxpya.T,
-                                      dmxpyb+dmxpyb.T))
+    vhfopt = mf._opt_gpu.get(None, None)
+    dvhf_DD_DP = rhf_grad._jk_energy_per_atom(mol, ((dmz1dooa+dmz1dooa.T)*0.5 + oo0a,
+                                        (dmz1doob+dmz1doob.T)*0.5 + oo0b), vhfopt)
+    dvhf_DD_DP -= rhf_grad._jk_energy_per_atom(mol, ((dmz1dooa+dmz1dooa.T)*0.5,
+                                         (dmz1doob+dmz1doob.T)*0.5), vhfopt)
+    dvhf_xpy = rhf_grad._jk_energy_per_atom(mol, (dmxpya+dmxpya.T,
+                                      dmxpyb+dmxpyb.T), vhfopt)
+    dvhf_xmy = rhf_grad._jk_energy_per_atom(mol, (dmxmya-dmxmya.T,
+                                      dmxmyb-dmxmyb.T), vhfopt, j_factor=0.0)
     
-    vj, vk = tdrhf_grad.get_jk(mol, (dmxmya-dmxmya.T,
-                                     dmxmyb-dmxmyb.T)) #D, P, (X+Y), (X-Y)
-    if not isinstance(vj, cp.ndarray): vj = cp.asarray(vj)
-    if not isinstance(vk, cp.ndarray): vk = cp.asarray(vk)
-    vj = vj.reshape(2,4,3,nao,nao)
-    vk = vk.reshape(2,4,3,nao,nao)
-    vhf1a, vhf1b = vj[0] + vj[1] - vk
+    # vj, vk = tdrhf_grad.get_jk(mol, (dmxmya-dmxmya.T,
+    #                                  dmxmyb-dmxmyb.T)) #D, P, (X+Y), (X-Y)
+    # if not isinstance(vj, cp.ndarray): vj = cp.asarray(vj)
+    # if not isinstance(vk, cp.ndarray): vk = cp.asarray(vk)
+    # vj = vj.reshape(2,4,3,nao,nao)
+    # vk = vk.reshape(2,4,3,nao,nao)
+    # vhf1a, vhf1b = vj[0] + vj[1] - vk
     extra_force = cp.zeros((len(atmlst),3))
 
     for k, ia in enumerate(atmlst):
@@ -214,19 +216,19 @@ def grad_elec(td_grad, x_y, atmlst=None, max_memory=2000, verbose=logger.INFO):
     delec = 2.0*(dh_ground + dh_td - ds)
     aoslices = mol.aoslice_by_atom()
     delec= cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
-    de = 2.0 * (dvhf_DD_DP + dvhf_xpy) + dh1e_ground + dh1e_td + delec + extra_force
+    de = 2.0 * (dvhf_DD_DP + dvhf_xpy + dvhf_xmy) + dh1e_ground + dh1e_td + delec + extra_force
 
     if atmlst is None:
         atmlst = range(mol.natm)
     offsetdic = mol.offset_nr_by_atom()
     
-    for k, ia in enumerate(atmlst):
-        shl0, shl1, p0, p1 = offsetdic[ia]
+    # for k, ia in enumerate(atmlst):
+    #     shl0, shl1, p0, p1 = offsetdic[ia]
 
-        de[k] += cp.einsum('xij,ij->x', vhf1a[3,:,p0:p1], dmxmya[p0:p1,:])
-        de[k] += cp.einsum('xij,ij->x', vhf1b[3,:,p0:p1], dmxmyb[p0:p1,:])
-        de[k] -= cp.einsum('xji,ij->x', vhf1a[3,:,p0:p1], dmxmya[:,p0:p1])
-        de[k] -= cp.einsum('xji,ij->x', vhf1b[3,:,p0:p1], dmxmyb[:,p0:p1])
+    #     de[k] += cp.einsum('xij,ij->x', vhf1a[3,:,p0:p1], dmxmya[p0:p1,:])
+    #     de[k] += cp.einsum('xij,ij->x', vhf1b[3,:,p0:p1], dmxmyb[p0:p1,:])
+    #     de[k] -= cp.einsum('xji,ij->x', vhf1a[3,:,p0:p1], dmxmya[:,p0:p1])
+    #     de[k] -= cp.einsum('xji,ij->x', vhf1b[3,:,p0:p1], dmxmyb[:,p0:p1])
 
     log.timer('TDUHF nuclear gradients', *time0)
     return de.get()

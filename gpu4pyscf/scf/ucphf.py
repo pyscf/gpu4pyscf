@@ -42,11 +42,11 @@ def solve_nos1(fvind, mo_energy, mo_occ, h1,
     '''For field independent basis. First order overlap matrix is zero'''
     log = logger.new_logger(verbose=verbose)
     t0 = (logger.process_clock(), logger.perf_counter())
-    nocca = cupy.sum(mo_occ[0] > 0)
-    noccb = cupy.sum(mo_occ[1] > 0)
+    nocca = int(cupy.sum(mo_occ[0] > 0))
+    noccb = int(cupy.sum(mo_occ[1] > 0))
 
-    nvira = mo_occ[0].size - nocca
-    nvirb = mo_occ[1].size - noccb
+    nvira = int(mo_occ[0].size - nocca)
+    nvirb = int(mo_occ[1].size - noccb)
 
     mo_ea, mo_eb = mo_energy
     e_a = mo_ea[mo_occ[0]==0]

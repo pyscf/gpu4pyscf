@@ -6,3 +6,4 @@ from gpu4pyscf.grad.uhf import Gradients as UHF
 from gpu4pyscf.grad.uks import Gradients as UKS
 from . import tdrhf
 from . import tdrks
+from . import tduhf
