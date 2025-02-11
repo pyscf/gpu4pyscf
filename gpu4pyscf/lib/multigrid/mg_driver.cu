@@ -38,11 +38,11 @@ int eval_mat_lda_orth(double *out, double *rho, MGridEnvVars *envs, MGridBounds 
 
 extern "C" {
 int MG_eval_rho_orth(double *rho, double *dm, MGridEnvVars envs,
-                     int l, int n_radius, int *mesh,
-                     int nshl_pair, int *bas_ij_idx, double *pool, int workers)
+                     int l, int *mesh, int nshl_pair, int *bas_ij_idx,
+                     double *pool, int workers)
 {
     MGridBounds bounds = {
-        nshl_pair, bas_ij_idx, n_radius, {mesh[0], mesh[1], mesh[2]},
+        nshl_pair, bas_ij_idx, {mesh[0], mesh[1], mesh[2]},
     };
     uint32_t *batch_head;
     cudaMalloc(reinterpret_cast<void **>(&batch_head), sizeof(uint32_t) * 1);
@@ -59,11 +59,11 @@ int MG_eval_rho_orth(double *rho, double *dm, MGridEnvVars envs,
 }
 
 int MG_eval_mat_lda_orth(double *out, double *rho, MGridEnvVars envs,
-                         int l, int n_radius, int *mesh,
-                         int nshl_pair, int *bas_ij_idx, double *pool, int workers)
+                         int l, int *mesh, int nshl_pair, int *bas_ij_idx,
+                         double *pool, int workers)
 {
     MGridBounds bounds = {
-        nshl_pair, bas_ij_idx, n_radius, {mesh[0], mesh[1], mesh[2]},
+        nshl_pair, bas_ij_idx, {mesh[0], mesh[1], mesh[2]},
     };
     uint32_t *batch_head;
     cudaMalloc(reinterpret_cast<void **>(&batch_head), sizeof(uint32_t) * 1);

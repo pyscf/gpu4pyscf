@@ -49,13 +49,13 @@ PRIMBAS_COEFF = 2
 PRIMBAS_COORD = 3
 LMAX = 4
 SHARED_RHO_SIZE = 2097152 # 128^3
-N_RADIUS = 16
+NGRID_RADIUS = 16
 
 def eval_mat(cell, weights, shls_slice=None, comp=1, hermi=0,
              xctype='LDA', kpts=None, mesh=None, offset=None, submesh=None):
     raise NotImplementedError
 
-def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
+def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.
 
     Args:
@@ -73,6 +73,9 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
         vj : (nkpts, nao, nao) ndarray
         or list of vj if the input dm_kpts is a list of DMs
     '''
+    assert kpts is None
+    kpts = np.zeros((1, 3))
+
     cell = mydf.cell
     dm_kpts = cp.asarray(dm_kpts)
     rhoG = _eval_rhoG(mydf, dm_kpts, hermi, kpts, deriv=0)
@@ -86,7 +89,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
 
 
-def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), deriv=0):
+def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=None, deriv=0):
     cell = mydf.cell
     log = logger.new_logger(cell)
     t0 = log.init_timer()
@@ -119,7 +122,7 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), deriv=0):
 
     a = cell.lattice_vectors()
     assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
-    lattice_params = cp.asarray(a.diagonal())
+    lattice_params = cp.asarray(a.diagonal(), order='C')
     supmol_bas = cp.asarray(mydf.supmol_bas, dtype=np.int32)
     supmol_env = cp.asarray(mydf.supmol_env)
     sub_meshs = mydf.sub_meshs
@@ -127,11 +130,12 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), deriv=0):
     mg_envs = MGridEnvVars(
         mydf.primitive_nbas, len(supmol_bas), nao, supmol_bas.data.ptr,
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
+    mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     sp_groups = group_shl_pairs(cell, supmol_bas[:mydf.primitive_nbas],
                                 mydf.supmol_bas, mydf.supmol_env, sub_meshs)
     workers = gpu_specs['multiProcessorCount']
     nf3 = (lmax*2+1)*(lmax*2+2)*(lmax*2+3)//6
-    cache_size = ((lmax*2+1)*(N_RADIUS*2)*3 + nf3 + 6) * 32
+    cache_size = ((lmax*2+1)*(NGRID_RADIUS*2)*3 + nf3 + 6) * 32
     pool = cp.empty((workers, cache_size))
 
     kern = libmgrid.MG_eval_rho_orth
@@ -150,8 +154,7 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), deriv=0):
                 pair_idx = sp_groups[i,l]
                 kern(ctypes.cast(rho_local.data.ptr, ctypes.c_void_p),
                      ctypes.cast(dms[iset].data.ptr, ctypes.c_void_p),
-                     mg_envs,
-                     ctypes.c_int(l), ctypes.c_int(N_RADIUS),
+                     mg_envs, ctypes.c_int(l),
                      (ctypes.c_int*3)(*mesh),
                      ctypes.c_uint32(len(pair_idx)),
                      ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
@@ -178,13 +181,13 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), deriv=0):
     log.timer_debug1('eval_rhoG', *t0)
     return rhoG
 
-def _get_j_pass2(mydf, vG, hermi=1, kpts=np.zeros((1,3)), verbose=None):
+def _get_j_pass2(mydf, vG, hermi=1, kpts=None, verbose=None):
     cell = mydf.cell
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
     nkpts = len(kpts)
-    assert nkpts == 1
-    nao = cell.nao_nr()
+    assert nkpts == 1, 'gamma point only'
+    nao = cell.nao_nr(cart=True)
     nset = vG.shape[0]
     lmax = cell._bas[:,ANG_OF].max()
     assert lmax <= LMAX
@@ -195,24 +198,25 @@ def _get_j_pass2(mydf, vG, hermi=1, kpts=np.zeros((1,3)), verbose=None):
 
     a = cell.lattice_vectors()
     assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
-    lattice_params = cp.asarray(a.diagonal())
+    lattice_params = cp.asarray(a.diagonal(), order='C')
     supmol_bas = cp.asarray(mydf.supmol_bas, dtype=np.int32)
     supmol_env = cp.asarray(mydf.supmol_env)
     ao_loc_in_cell0 = cp.asarray(mydf.ao_loc_in_cell0, dtype=np.int32)
     mg_envs = MGridEnvVars(
         mydf.primitive_nbas, len(supmol_bas), nao, supmol_bas.data.ptr,
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
+    mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     sp_groups = group_shl_pairs(cell, supmol_bas[:mydf.primitive_nbas],
                                 mydf.supmol_bas, mydf.supmol_env, sub_meshs)
 
     workers = gpu_specs['multiProcessorCount']
     nf2 = (lmax*2+1)*(lmax*2+2)//2
-    cache_size = ((lmax*2+1)*(N_RADIUS*2)*3 + nf2*(N_RADIUS*2)) * 32 + 6*16
+    cache_size = ((lmax*2+1)*(NGRID_RADIUS*2)*3 + nf2*(NGRID_RADIUS*2) + 6) * 32
     pool = cp.empty((workers, cache_size))
 
-    kern = libmgrid.eval_mat_lda_orth
+    kern = libmgrid.MG_eval_mat_lda_orth
     # TODO: might be complex array when tddft amplitudes are complex
-    vj = np.zeros((nset,nao,nao))
+    vj = cp.zeros((nset,nao,nao))
 
     for i, mesh in enumerate(sub_meshs):
         ngrids = np.prod(mesh)
@@ -225,15 +229,16 @@ def _get_j_pass2(mydf, vG, hermi=1, kpts=np.zeros((1,3)), verbose=None):
         for iset in range(nset):
             for l in range(lmax*2+1):
                 pair_idx = sp_groups[i,l]
-                kern(ctypes.cast(vj[nset].data.ptr, ctypes.c_void_p),
+                kern(ctypes.cast(vj[iset].data.ptr, ctypes.c_void_p),
                      ctypes.cast(vR[iset].data.ptr, ctypes.c_void_p),
-                     mg_envs, ctypes.c_int(l), ctypes.c_int(N_RADIUS),
+                     mg_envs, ctypes.c_int(l),
                      (ctypes.c_int*3)(*mesh),
                      ctypes.c_uint32(len(pair_idx)),
                      ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
                      ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                      ctypes.c_int(workers))
     vj = mydf.unsort_orbitals(vj)
+    vj = vj.reshape(nset,nkpts,nao,nao)
     log.timer_debug1('get_j pass2', *t0)
     return vj
 
@@ -262,7 +267,9 @@ def nr_rks(mydf, xc_code, dm_kpts, hermi=1, kpts=None,
         vj : (nkpts, nao, nao) ndarray
             or list of vj if the input dm_kpts is a list of DMs
     '''
-    if kpts is None: kpts = mydf.kpts
+    assert kpts is None
+    kpts = np.zeros((1, 3))
+
     log = logger.new_logger(mydf, verbose)
     cell = mydf.cell
     dm_kpts = cp.asarray(dm_kpts, order='C')
@@ -306,7 +313,7 @@ def nr_rks(mydf, xc_code, dm_kpts, hermi=1, kpts=None,
             exc, vxc = ni.eval_xc_eff(xc_code, rhoR[i,0], deriv=1, xctype=xctype)[:2]
         else:
             exc, vxc = ni.eval_xc_eff(xc_code, rhoR[i], deriv=1, xctype=xctype)[:2]
-        excsum[i] += (rhoR[i,0]*exc).sum() * weight
+        excsum[i] += float((rhoR[i,0]*exc).sum()) * weight
         wv = weight * vxc
         wv_freq.append(tools.fft(wv, mesh))
     wv_freq = cp.asarray(wv_freq).reshape(nset,-1,*mesh)
@@ -350,9 +357,12 @@ def nr_uks(mydf, xc_code, dm_kpts, hermi=1, kpts=None,
            kpts_band=None, with_j=False, return_j=False, verbose=None):
     raise NotImplementedError
 
-def get_rho(mydf, dm, kpts=np.zeros((1,3))):
+def get_rho(mydf, dm, kpts=None):
     '''Density in real space
     '''
+    assert kpts is None
+    kpts = np.zeros((1, 3))
+
     cell = mydf.cell
     hermi = 1
     rhoG = _eval_rhoG(mydf, cp.asarray(dm), hermi, kpts, deriv=0)
@@ -394,19 +404,18 @@ def _to_primitive_bas(cell):
                 pcoeff = shell[PTR_COEFF]
                 bs = np.empty((nprim*nctr, 4), dtype=np.int32)
                 bs[:,PRIMBAS_ANG] = l
-                bs[:,PRIMBAS_EXP] = _vrepeat(np.arange(pexp, pexp+nprim), nctr)
+                bs[:,PRIMBAS_EXP] = _repeat(np.arange(pexp, pexp+nprim), nctr)
                 bs[:,PRIMBAS_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr)
                 bs[:,PRIMBAS_COORD] = ptr_coord
                 bas_of_ia.append(bs)
-                if cell.cart and l <= 1:
+                if l <= 1:
                     # sort_orbitals and unsort_orbitals do not transform the
-                    # orbitals when cell.cart is enabled. The special Cartesian
-                    # normalization coefficients for s and p functions should be
-                    # applied into the contraction coefficients.
+                    # s and p orbitals. The special normalization coefficients
+                    # should be applied into the contraction coefficients.
                     prim_env[pcoeff:pcoeff+nprim*nctr] *= ((2*l+1)/(4*np.pi))**.5
+                idx = _repeat(np.arange(off, off+nf*nprim, nf), nctr)
+                local_ao_mapping.append(idx)
                 off += nprim * nctr
-                idx = np.hstack([np.arange(0, nf*nprim, nf)] * nctr)
-                local_ao_mapping.append(off + idx)
 
             bas_of_ia = np.vstack(bas_of_ia)
             local_ao_mapping = np.hstack(local_ao_mapping)
@@ -425,17 +434,21 @@ def _to_primitive_bas(cell):
     nimgs = len(Ls)
     ptr_coords = prim_bas[:,PRIMBAS_COORD]
     bas_coords = cell._env[ptr_coords[:,None] + np.arange(3)]
+    # Keep the unit cell at the beginning
     basLr = (bas_coords + Ls[1:,None]).reshape(-1, 3)
     dr = np.linalg.norm(bas_coords[:,None,:] - basLr, axis=2)
     idx = np.where(dr.min(axis=0) < cell.rcut)[0]
-    _env = np.hstack([cell._env, basLr[idx].ravel()])
-    supmol_bas = _vrepeat(prim_bas, nimgs-1)[idx]
-    supmol_bas[:,PRIMBAS_COORD] = len(cell._env) + np.arange(idx.size) * 3
-    supmol_bas = np.vstack([prim_bas, supmol_bas])
-    ao_loc_in_cell0 = np.asarray(np.hstack([ao_loc_in_cell0]*nimgs)[idx], dtype=np.int32)
+    _env = np.hstack([prim_env, basLr[idx].ravel()])
+    extended_bas = _repeat(prim_bas, nimgs-1)[idx]
+    extended_bas[:,PRIMBAS_COORD] = len(prim_env) + np.arange(idx.size) * 3
+    supmol_bas = np.vstack([prim_bas, extended_bas])
+
+    ao_loc_in_cell0 = np.append(
+        ao_loc_in_cell0, np.hstack([ao_loc_in_cell0]*(nimgs-1))[idx])
+    ao_loc_in_cell0 = np.asarray(ao_loc_in_cell0, dtype=np.int32)
     return supmol_bas, _env, ao_loc_in_cell0
 
-def _vrepeat(a, repeats):
+def _repeat(a, repeats):
     '''repeats vertically'''
     ap = np.repeat(a[np.newaxis], repeats, axis=0)
     return ap.reshape(-1, *a.shape[1:])
@@ -557,9 +570,8 @@ class MGridEnvVars(ctypes.Structure):
 
 
 class MultiGridFFTDF:
-    def __init__(self, cell, kpts=np.zeros((1,3))):
+    def __init__(self, cell):
         self.cell = cell
-        self.kpts = kpts
         self.mesh = cell.mesh
         # ao_loc_in_cell0 is the address of Cartesian AO in cell-0 for each
         # primitive GTOs in the super-mole.
@@ -579,24 +591,11 @@ class MultiGridFFTDF:
 
     def get_j(self, dm, hermi=1, kpts=None, kpts_band=None,
               omega=None, exxdiv='ewald'):
-        if kpts is None:
-            if np.all(self.kpts == 0): # Gamma-point J/K by default
-                kpts = np.zeros(3)
-            else:
-                kpts = self.kpts
-        else:
+        if kpts is not None:
             raise NotImplementedError
-            kpts = np.asarray(kpts)
 
-        vj = get_j_kpts(self, dm, hermi, kpts.reshape(-1,3), kpts_band)
-        if kpts.ndim == 1 and kpts_band is None:
-            vj = vj[...,0,:,:]
+        vj = get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj
-
-    def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
-               with_j=True, with_k=True, omega=None, exxdiv='ewald'):
-        assert not with_k
-        raise NotImplementedError('MG combined to other DF methods')
 
     def get_veff(self, dm, xc):
         '''Computing XC matrix and Coulomb interactions'''

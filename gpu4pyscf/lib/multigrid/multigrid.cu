@@ -21,15 +21,15 @@
 #include "cart2xyz.cu"
 
 #define SHARED_RHO_SIZE 2097152
+#define NGRID_RADIUS    16
 
 __device__ static
 void init_orth_data(double *pool, int *grid_slice,
                     MGridEnvVars envs, MGridBounds bounds, double *ri, double *rj,
                     double ai, double aj, int l1, int warp_id)
 {
-    int n_radius = bounds.n_radius;
-    int ngridx = n_radius * 2;
-    int nl_gridx = ngridx * l1;
+    int ngrid_span = NGRID_RADIUS * 2;
+    int nl_gridx = ngrid_span * l1;
     int xs_size = nl_gridx * WARP_SIZE;
     int z = warp_id % 3;
     int w = warp_id / 3;
@@ -41,8 +41,8 @@ void init_orth_data(double *pool, int *grid_slice,
         double xij = xjxi * aj_aij + ri[z];
         double dx = envs.lattice_params[z] / bounds.mesh[z];
         int xij_latt = rint(xij / dx);
-        int x0_latt = xij_latt + 1 - n_radius;
-        int x1_latt = xij_latt + 1 + n_radius;
+        int x0_latt = xij_latt + 1 - NGRID_RADIUS;
+        int x1_latt = xij_latt + 1 + NGRID_RADIUS;
         if (w == 0) {
             grid_slice[(z*2  )*WARP_SIZE] = x0_latt;
             grid_slice[(z*2+1)*WARP_SIZE] = x1_latt;
@@ -54,7 +54,7 @@ void init_orth_data(double *pool, int *grid_slice,
         double _x0dx = -2 * aij * x0xij * dx;
         double exp_2dxdx = exp(2 * _dxdx);
         double exp_x0x0 = exp(_x0x0);
-        int istart = n_radius - 1;
+        int istart = NGRID_RADIUS - 1;
         if (w == 0) {
             double exp_x0dx = exp(_dxdx - _x0dx);
             for (int i = istart; i >= 0; i--) {
@@ -80,7 +80,7 @@ void init_orth_data(double *pool, int *grid_slice,
         double x0xi = x0_latt * dx - ri[z];
         double *xs_exp = pool + z * xs_size;
 
-        for (int i = warp_id; i < ngridx; i += WARPS) {
+        for (int i = warp_id; i < ngrid_span; i += WARPS) {
             double gridx = x0xi + i * dx;
             double s1 = xs_exp[i*WARP_SIZE];
             for (int m = 1; m < l1; m++) {
@@ -90,14 +90,14 @@ void init_orth_data(double *pool, int *grid_slice,
         }
 
         // add up contributions from all images to the reference image
-        if (ngridx >= nx_per_cell) {
-            int nl_gridx = ngridx * l1;
+        if (ngrid_span >= nx_per_cell) {
+            int nl_gridx = ngrid_span * l1;
             for (int n = warp_id; n < nx_per_cell*l1; n += WARPS) {
                 int i = n % nx_per_cell;
                 int m = n / nx_per_cell;
                 double s1 = 0.;
                 double *xe = xs_exp + m*nl_gridx*WARP_SIZE;
-                for (; i < ngridx; i += nx_per_cell) {
+                for (; i < ngrid_span; i += nx_per_cell) {
                     s1 += xe[i*WARP_SIZE];
                 }
                 xs_exp[(m*nl_gridx + n%nx_per_cell)*WARP_SIZE] = s1;
@@ -111,7 +111,7 @@ void init_orth_data(double *pool, int *grid_slice,
     __syncthreads();
 }
 
-// load a small chunk, of shape [batch_size, WARPS]
+// load a small chunk [0:l+1, ix0:ix0+batch_size, 0:WARPS] from xs_exp
 __device__ inline
 int load_xs_chunk(double *xs_cache, double *xs_exp, int ix0, int ngridx,
                   int l, int batch_size)
@@ -121,8 +121,8 @@ int load_xs_chunk(double *xs_cache, double *xs_exp, int ix0, int ngridx,
     int g_id  = thread_id / WARPS;
     int nx = MIN(ngridx - ix0, batch_size);
     if (g_id < nx) {
-        double _xs_exp = xs_exp + (ix0+g_id) * WARP_SIZE + sp_id;
-        double _xs_cache = xs_cache + g_id * WARPS;
+        double *_xs_exp = xs_exp + (ix0+g_id) * WARP_SIZE + sp_id;
+        double *_xs_cache = xs_cache + g_id * WARPS;
         int stride = batch_size * WARPS;
         int xs_size = ngridx * WARP_SIZE;
         for (int m = 0; m <= l; ++m) {
@@ -138,7 +138,7 @@ int load_xs(double *xs_cache, double *xs_exp, int ix0, int ngridx,
             int l, int batch_size, int warp_id)
 {
     int nx = MIN(ngridx - ix0, batch_size);
-    double _xs_exp = xs_exp + ix0 * WARP_SIZE;
+    double *_xs_exp = xs_exp + ix0 * WARP_SIZE;
     for (int i = warp_id; i < nx; i += WARPS) {
         for (int m = 0; m <= l; ++m) {
             xs_cache[(m*batch_size+i)*WARP_SIZE] = _xs_exp[(m*ngridx+i)*WARP_SIZE];
@@ -148,6 +148,22 @@ int load_xs(double *xs_cache, double *xs_exp, int ix0, int ngridx,
     return nx;
 }
 
+__device__ static
+double reduce_warps(double val, int thread_id, int sp_id, int warp_id)
+{
+    __shared__ double cache[THREADS];
+    cache[thread_id] = val;
+    __syncthreads();
+    for (int stride = 4; stride > 0; stride /= 2) {
+        if (warp_id < stride) {
+            cache[thread_id] += cache[thread_id + stride*WARP_SIZE];
+        }
+        __syncthreads();
+    }
+    return cache[sp_id];
+}
+
+
 template <int L, int TILEy> __device__ static
 void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
                            MGridBounds bounds, double *pool, uint32_t pair_idx0)
@@ -155,16 +171,13 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
-
-    uint32_t pair_idx = pair_idx0 + sp_id;
-    int npairs_per_block = WARP_SIZE;
-    if (pair_idx >= bounds.nshl_pair) {
-        pair_idx = pair_idx0;
-        npairs_per_block = bounds.nshl_pair - pair_idx0;
-    }
-
+    int npairs_per_block = MIN(bounds.nshl_pair - pair_idx0, WARP_SIZE);
     int *bas = envs.bas;
     double *env = envs.env;
+    uint32_t pair_idx = pair_idx0 + sp_id;
+    if (sp_id >= npairs_per_block) {
+        pair_idx = pair_idx0;
+    }
     int bas_ij = bounds.bas_ij_idx[pair_idx];
     int nbas_j = envs.nbas_j;
     int ish = bas_ij / nbas_j;
@@ -188,7 +201,7 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     int mesh_z = mesh[2];
     int mesh_yz = mesh_y * mesh_z;
     int mesh_xyz = mesh_x * mesh_yz;
-    int ngrid_span = bounds.n_radius * 2;
+    int ngrid_span = NGRID_RADIUS * 2;
     int xs_size = (L+1) * ngrid_span * WARP_SIZE;
     double *xs_exp = pool;
     double *ys_exp = xs_exp + xs_size;
@@ -204,7 +217,7 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     // TODO: multiple dms
-    _dm_to_dm_xyz(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, sp_id, warp_id, cicj);
+    _dm_to_dm_xyz(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, cicj, sp_id, warp_id);
 
     double *rho_local = rho;
     if (mesh_xyz < SHARED_RHO_SIZE) {
@@ -229,7 +242,7 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
         int ngridy = ny1 - ny0;
         int ngridz = nz1 - nz0;
 
-        for (int iz0 = 0; iz0 < ngridz; iz0 += WARP_SIZE) {
+        for (int iz0 = 0; iz0 < ngrid_span; iz0 += WARP_SIZE) {
             int iz = sp_id;
             int nz = MIN(ngridz - iz0, WARP_SIZE);
             if (iz < nz) {
@@ -238,7 +251,7 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
                     r1[mz] = _zs_exp[mz*ngridz*WARP_SIZE];
                 }
             }
-            for (int iy0 = 0; iy0 < ngridy; iy0 += TILEy) {
+            for (int iy0 = 0; iy0 < ngrid_span; iy0 += TILEy) {
                 int ny = load_xs_chunk(ys_cache, ys_exp+sp0, iy0, ngridy, L, TILEy);
                 if (iz < nz && sp0 < npairs_per_block) {
                     int n = 0;
@@ -265,7 +278,7 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
                     }
                 }
                 if (mesh_xyz <= SHARED_RHO_SIZE) {
-                    for (int ix0 = 0; ix0 < ngridx; ix0 += WARP_SIZE) {
+                    for (int ix0 = 0; ix0 < ngrid_span; ix0 += WARP_SIZE) {
                         int nx = load_xs_chunk(xs_cache, xs_exp+sp0, ix0, ngridx, L, WARP_SIZE);
                         if (iz < nz && sp0 < npairs_per_block) {
                             int tz = (iz+iz0 + nz0) % mesh_z;
@@ -333,7 +346,7 @@ void eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     if (mesh_xyz <= SHARED_RHO_SIZE) {
         rho += mesh_xyz * WARPS * b_id;
     }
-    int ngrid_span = bounds.n_radius * 2;
+    int ngrid_span = NGRID_RADIUS * 2;
     int xs_size = (L+1) * ngrid_span;
     int nf3 = (L+1)*(L+2)*(L+3)/6;
     pool += (xs_size*3 + nf3 + 6) * WARP_SIZE * b_id;
@@ -360,16 +373,13 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
-
-    uint32_t pair_idx = pair_idx0 + sp_id;
-    int npairs_per_block = WARP_SIZE;
-    if (pair_idx >= bounds.nshl_pair) {
-        pair_idx = pair_idx0;
-        npairs_per_block = bounds.nshl_pair - pair_idx0;
-    }
-
+    int npairs_per_block = MIN(bounds.nshl_pair - pair_idx0, WARP_SIZE);
     int *bas = envs.bas;
     double *env = envs.env;
+    uint32_t pair_idx = pair_idx0 + sp_id;
+    if (sp_id >= npairs_per_block) {
+        pair_idx = pair_idx0;
+    }
     int bas_ij = bounds.bas_ij_idx[pair_idx];
     int nbas_j = envs.nbas_j;
     int ish = bas_ij / nbas_j;
@@ -392,7 +402,7 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     int mesh_y = mesh[1];
     int mesh_z = mesh[2];
     int mesh_yz = mesh_y * mesh_z;
-    int ngrid_span = bounds.n_radius * 2;
+    int ngrid_span = NGRID_RADIUS * 2;
     int xs_size = ngrid_span * (L+1) * WARP_SIZE;
     double *xs_exp = pool + sp_id;
     double *ys_exp = xs_exp + xs_size;
@@ -418,17 +428,14 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     int ngridy = ny1 - ny0;
     int ngridz = nz1 - nz0;
 
-    for (int ix = warp_id; ix < ngridx; ix += WARPS) {
-        double *pgx = gx_dmyz + ix * (L+1)*(L+2)/2*WARP_SIZE;
-        for (int m = 0; m < (L+1)*(L+2)/2; ++m) {
-            pgx[m*WARP_SIZE] = 0.;
-        }
+    for (int n = warp_id; n < ngrid_span*(L+1)*(L+2)/2; n += WARPS) {
+        gx_dmyz[n*WARP_SIZE] = 0.;
     }
 
-    for (int iz0 = 0; iz0 < ngridz; iz0 += TILE) {
+    for (int iz0 = 0; iz0 < ngrid_span; iz0 += TILE) {
         int iz1 = MIN(iz0 + TILE, ngridz);
         load_xs(zs_cache, zs_exp, iz0, ngridz, L, TILE, warp_id);
-        for (int iy0 = 0; iy0 < ngridy; iy0 += TILE) {
+        for (int iy0 = 0; iy0 < ngrid_span; iy0 += TILE) {
             int iy1 = MIN(iy0 + TILE, ngridy);
             load_xs(ys_cache, ys_exp, iy0, ngridy, L, TILE, warp_id);
             for (int ix = warp_id; ix < ngridx; ix += WARPS) {
@@ -486,7 +493,10 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
 #pragma unroll
             for (int mz = 0; mz <= L-mx-my; ++mz) {
                 int n = ADDR3(L,mx,my,mz);
-                cache[n*WARP_SIZE] = r2[n] * cicj;
+                r2[n] = reduce_warps(r2[n], thread_id, sp_id, warp_id);
+                if (warp_id == 0) {
+                    dm_xyz[n*WARP_SIZE] = r2[n];
+                }
             }
         }
     }
@@ -496,7 +506,9 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     int nao = envs.nao;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
-    _dm_xyz_to_dm(out+i0*nao+j0, dm_xyz, nao, li, lj, L, ri, rj, sp_id, warp_id);
+    _dm_xyz_to_dm(out+i0*nao+j0, dm_xyz, nao, li, lj, L, ri, rj, cicj,
+                  cache+(L+1)*(L+2)*(L+3)/6*WARP_SIZE,
+                  sp_id, warp_id, npairs_per_block);
 }
 
 template <> __device__
@@ -508,16 +520,13 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
-
-    uint32_t pair_idx = pair_idx0 + sp_id;
-    int npairs_per_block = WARP_SIZE;
-    if (pair_idx >= bounds.nshl_pair) {
-        pair_idx = pair_idx0;
-        npairs_per_block = bounds.nshl_pair - pair_idx0;
-    }
-
+    int npairs_per_block = MIN(bounds.nshl_pair - pair_idx0, WARP_SIZE);
     int *bas = envs.bas;
     double *env = envs.env;
+    uint32_t pair_idx = pair_idx0 + sp_id;
+    if (sp_id >= npairs_per_block) {
+        pair_idx = pair_idx0;
+    }
     int bas_ij = bounds.bas_ij_idx[pair_idx];
     int nbas_j = envs.nbas_j;
     int ish = bas_ij / nbas_j;
@@ -540,7 +549,7 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
     int mesh_y = mesh[1];
     int mesh_z = mesh[2];
     int mesh_yz = mesh_y * mesh_z;
-    int ngrid_span = bounds.n_radius * 2;
+    int ngrid_span = NGRID_RADIUS * 2;
     int xs_size = ngrid_span * (L+1) * WARP_SIZE;
     double *xs_exp = pool + sp_id;
     double *ys_exp = xs_exp + xs_size;
@@ -566,17 +575,14 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
     int ngridy = ny1 - ny0;
     int ngridz = nz1 - nz0;
 
-    for (int ix = warp_id; ix < ngridx; ix += WARPS) {
-        double *pgx = gx_dmyz + ix * (L+1)*(L+2)/2*WARP_SIZE;
-        for (int m = 0; m < (L+1)*(L+2)/2; ++m) {
-            pgx[m*WARP_SIZE] = 0.;
-        }
+    for (int n = warp_id; n < ngrid_span*(L+1)*(L+2)/2; n += WARPS) {
+        gx_dmyz[n*WARP_SIZE] = 0.;
     }
 
-    for (int iz0 = 0; iz0 < ngridz; iz0 += TILE) {
+    for (int iz0 = 0; iz0 < ngrid_span; iz0 += TILE) {
         int iz1 = MIN(iz0 + TILE, ngridz);
         load_xs(zs_cache, zs_exp, iz0, ngridz, L, TILE, warp_id);
-        for (int iy0 = 0; iy0 < ngridy; iy0 += TILE) {
+        for (int iy0 = 0; iy0 < ngrid_span; iy0 += TILE) {
             int iy1 = MIN(iy0 + TILE, ngridy);
             load_xs(ys_cache, ys_exp, iy0, ngridy, L, TILE, warp_id);
             for (int ix = warp_id; ix < ngridx; ix += WARPS) {
@@ -608,7 +614,9 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
         }
     }
 
-    double *dm_xyz = cache + sp_id;
+    // reuse the global memory in pool. (L+1)*(L+2)*(L+3)/6 is generally smaller
+    // than (ngrid_span * (L+1) * 2) occupied by ys_exp and zs_exp
+    double *dm_xyz = ys_exp;
     for (int ix = warp_id; ix < ngridx; ix += WARPS) {
 #pragma unroll
         for (int mx = 0; mx <= 1; ++mx) {
@@ -634,7 +642,10 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
 #pragma unroll
             for (int mz = 0; mz <= L-mx-my; ++mz) {
                 int n = ADDR3(L,mx,my,mz);
-                cache[n*WARP_SIZE] = r2[n] * cicj;
+                r2[n] = reduce_warps(r2[n], thread_id, sp_id, warp_id);
+                if (warp_id == 0) {
+                    dm_xyz[n*WARP_SIZE] = r2[n];
+                }
             }
         }
     }
@@ -665,7 +676,10 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
 #pragma unroll
             for (int mz = 0; mz <= L-mx-my; ++mz) {
                 int n = ADDR3(L,mx,my,mz);
-                cache[n*WARP_SIZE] = r2[n - offset] * cicj;
+                r2[n-offset] = reduce_warps(r2[n-offset], thread_id, sp_id, warp_id);
+                if (warp_id == 0) {
+                    dm_xyz[n*WARP_SIZE] = r2[n-offset];
+                }
             }
         }
     }
@@ -675,7 +689,8 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
     int nao = envs.nao;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
-    _dm_xyz_to_dm(out+i0*nao+j0, dm_xyz, nao, li, lj, L, ri, rj, sp_id, warp_id);
+    _dm_xyz_to_dm(out+i0*nao+j0, dm_xyz, nao, li, lj, L, ri, rj, cicj, cache,
+                  sp_id, warp_id, npairs_per_block);
 }
 
 template <> __device__
@@ -687,16 +702,13 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
-
-    uint32_t pair_idx = pair_idx0 + sp_id;
-    int npairs_per_block = WARP_SIZE;
-    if (pair_idx >= bounds.nshl_pair) {
-        pair_idx = pair_idx0;
-        npairs_per_block = bounds.nshl_pair - pair_idx0;
-    }
-
+    int npairs_per_block = MIN(bounds.nshl_pair - pair_idx0, WARP_SIZE);
     int *bas = envs.bas;
     double *env = envs.env;
+    uint32_t pair_idx = pair_idx0 + sp_id;
+    if (sp_id >= npairs_per_block) {
+        pair_idx = pair_idx0;
+    }
     int bas_ij = bounds.bas_ij_idx[pair_idx];
     int nbas_j = envs.nbas_j;
     int ish = bas_ij / nbas_j;
@@ -719,7 +731,7 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
     int mesh_y = mesh[1];
     int mesh_z = mesh[2];
     int mesh_yz = mesh_y * mesh_z;
-    int ngrid_span = bounds.n_radius * 2;
+    int ngrid_span = NGRID_RADIUS * 2;
     int xs_size = ngrid_span * (L+1) * WARP_SIZE;
     double *xs_exp = pool + sp_id;
     double *ys_exp = xs_exp + xs_size;
@@ -745,17 +757,14 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
     int ngridy = ny1 - ny0;
     int ngridz = nz1 - nz0;
 
-    for (int ix = warp_id; ix < ngridx; ix += WARPS) {
-        double *pgx = gx_dmyz + ix * (L+1)*(L+2)/2*WARP_SIZE;
-        for (int m = 0; m < (L+1)*(L+2)/2; ++m) {
-            pgx[m*WARP_SIZE] = 0.;
-        }
+    for (int n = warp_id; n < ngrid_span*(L+1)*(L+2)/2; n += WARPS) {
+        gx_dmyz[n*WARP_SIZE] = 0.;
     }
 
-    for (int iz0 = 0; iz0 < ngridz; iz0 += TILE) {
+    for (int iz0 = 0; iz0 < ngrid_span; iz0 += TILE) {
         int iz1 = MIN(iz0 + TILE, ngridz);
         load_xs(zs_cache, zs_exp, iz0, ngridz, L, TILE, warp_id);
-        for (int iy0 = 0; iy0 < ngridy; iy0 += TILE) {
+        for (int iy0 = 0; iy0 < ngrid_span; iy0 += TILE) {
             int iy1 = MIN(iy0 + TILE, ngridy);
             load_xs(ys_cache, ys_exp, iy0, ngridy, L, TILE, warp_id);
             for (int ix = warp_id; ix < ngridx; ix += WARPS) {
@@ -787,7 +796,9 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
         }
     }
 
-    double *dm_xyz = cache + sp_id;
+    // reuse the global memory in pool. (L+1)*(L+2)*(L+3)/6 is generally smaller
+    // than (ngrid_span * (L+1) * 2) occupied by ys_exp and zs_exp
+    double *dm_xyz = ys_exp;
     for (int ix = warp_id; ix < ngridx; ix += WARPS) {
         r1[0] = xs_exp[ix*WARP_SIZE];
         double *pgx = gx_dmyz + ix * (L+1)*(L+2)/2*WARP_SIZE;
@@ -805,7 +816,10 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
 #pragma unroll
         for (int mz = 0; mz <= L-my; ++mz) {
             int n = ADDR3(L,0,my,mz);
-            cache[n*WARP_SIZE] = r2[n] * cicj;
+            r2[n] = reduce_warps(r2[n], thread_id, sp_id, warp_id);
+            if (warp_id == 0) {
+                dm_xyz[n*WARP_SIZE] = r2[n];
+            }
         }
     }
 
@@ -835,7 +849,10 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
 #pragma unroll
             for (int mz = 0; mz <= L-1-my; ++mz) {
                 int n = ADDR3(L,1,my,mz);
-                cache[n*WARP_SIZE] = r2[n-offset] * cicj;
+                r2[n-offset] = reduce_warps(r2[n-offset], thread_id, sp_id, warp_id);
+                if (warp_id == 0) {
+                    dm_xyz[n*WARP_SIZE] = r2[n-offset];
+                }
             }
         }
     }
@@ -866,7 +883,10 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
 #pragma unroll
             for (int mz = 0; mz <= L-mx-my; ++mz) {
                 int n = ADDR3(L,mx,my,mz);
-                cache[n*WARP_SIZE] = r2[n - offset] * cicj;
+                r2[n-offset] = reduce_warps(r2[n-offset], thread_id, sp_id, warp_id);
+                if (warp_id == 0) {
+                    dm_xyz[n*WARP_SIZE] = r2[n-offset];
+                }
             }
         }
     }
@@ -876,7 +896,8 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
     int nao = envs.nao;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
-    _dm_xyz_to_dm(out+i0*nao+j0, dm_xyz, nao, li, lj, L, ri, rj, sp_id, warp_id);
+    _dm_xyz_to_dm(out+i0*nao+j0, dm_xyz, nao, li, lj, L, ri, rj, cicj, cache,
+                  sp_id, warp_id, npairs_per_block);
 }
 
 template <int L, int TILE> __global__
@@ -885,7 +906,7 @@ void eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
 {
     int thread_id = threadIdx.x;
     int b_id = blockIdx.x;
-    int ngrid_span = bounds.n_radius * 2;
+    int ngrid_span = NGRID_RADIUS * 2;
     int xs_size = (L+1) * ngrid_span;
     int nf2 = (L+1)*(L+2)/2;
     pool += (xs_size*3 + nf2*ngrid_span + 6) * WARP_SIZE * b_id;
@@ -904,7 +925,7 @@ void eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     }
 }
 
-inline size_t buflen1(int l, int tiley)
+static size_t buflen1(int l, int tiley)
 {
     return ((WARP_SIZE + tiley) * WARPS * (l+1)) * sizeof(double);
 }
@@ -926,9 +947,15 @@ int eval_rho_orth(double *rho, double *dm, MGridEnvVars *envs, MGridBounds *boun
     return 0;
 }
 
-inline size_t buflen2(int l, int tile)
+static size_t buflen2(int l, int tile)
 {
-    return (WARP_SIZE * tile * 2 * (l+1)) * sizeof(double);
+    int lj = MIN(l, LMAX);
+    size_t len1 = WARP_SIZE * tile * (l+1) * 2;
+    size_t len2 = WARP_SIZE * (lj+1)*(lj+1) * 3;
+    if (l < 7) {
+        len2 += WARP_SIZE * (l+1)*(l+2)*(l+3)/6;
+    }
+    return MAX(len1, len2) * sizeof(double);
 }
 int eval_mat_lda_orth(double *out, double *rho, MGridEnvVars *envs, MGridBounds *bounds,
                       int l, double *pool, uint32_t *batch_head, int workers)

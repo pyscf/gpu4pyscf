@@ -50,7 +50,7 @@ double sub_dm_xyz(int lx, int ly, int lz, int li, int lj, int nao,
 {
     // TODO: unroll lij < 4
     int lj1 = lj + 1;
-    double out;
+    double out = 0.;
     for (int lx_i = MIN(lx, li); lx_i >= 0; lx_i--) {
     for (int ly_i = MIN(ly, li-lx_i); ly_i >= 0; ly_i--) {
         int lz_i = li - lx_i - ly_i;
@@ -75,7 +75,7 @@ double sub_dm_xyz(int lx, int ly, int lz, int li, int lj, int nao,
 
 __device__ static
 void _dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
-                   double *ri, double *rj, int sp_id, int warp_id, double fac)
+                   double *ri, double *rj, double cicj, int sp_id, int warp_id)
 {
     int lj1 = lj + 1;
     int lij = li + lj;
@@ -96,17 +96,17 @@ void _dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
         int ly = fold3idx[n].y;
         int lz = fold3idx[n].z;
         double val = sub_dm_xyz(lx, ly, lz, li, lj, nao, cx, cy, cz, dm);
-        dm_xyz[n*WARP_SIZE+sp_id] = val;
+        dm_xyz[n*WARP_SIZE+sp_id] = val * cicj;
     }
     __syncthreads();
 }
 
 __device__ static
-void _dm_xyz_to_dm(double *dm_xyz, double *dm, int nao, int li, int lj, int lij,
-                   double *ri, double *rj, int sp_id, int warp_id)
+void _dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj, int lij,
+                   double *ri, double *rj, double cicj, double *cache,
+                   int sp_id, int warp_id, int npairs_per_block)
 {
     int lj1 = lj + 1;
-    extern __shared__ double cache[];
     double *cx = cache + sp_id;
     double *cy = cx + lj1 * lj1 * WARP_SIZE;
     double *cz = cy + lj1 * lj1 * WARP_SIZE;
@@ -116,11 +116,13 @@ void _dm_xyz_to_dm(double *dm_xyz, double *dm, int nao, int li, int lj, int lij,
     }
     __syncthreads();
 
+    if (sp_id >= npairs_per_block) {
+        return;
+    }
+
     int nfi = (li + 1) * (li + 2) / 2;
     int nfj = (lj + 1) * (lj + 2) / 2;
     int nfij = nfi * nfj;
-    //int nf3 = (lij+1)*(lij+2)*(lij+3)/6;
-    //Fold3Index *fold3idx = c_i_in_fold3idx + lij*nf3ij/4;
     Fold2Index *i_fold2idx = c_i_in_fold2idx + li*nfi/3;
     Fold2Index *j_fold2idx = c_i_in_fold2idx + lj*nfj/3;
     for (int n = warp_id; n < nfij; n += WARPS) {
@@ -132,16 +134,16 @@ void _dm_xyz_to_dm(double *dm_xyz, double *dm, int nao, int li, int lj, int lij,
         int lx_j = j_fold2idx[j].x;
         int ly_j = j_fold2idx[j].y;
         int lz_j = lj - lx_j - ly_j;
-        double dm_ij = 0;
+        double dm_ij = 0.;
         for (int jx = 0; jx <= lx_j; ++jx) {
-            double fac = cx[(jx+lx_j*lj1)*WARP_SIZE];
+            double fac = cicj * cx[(jx+lx_j*lj1)*WARP_SIZE];
             int lx = lx_i + jx;
             for (int jy = 0; jy <= ly_j; ++jy) {
                 fac *= cy[(jy+ly_j*lj1)*WARP_SIZE];
                 int ly = ly_i + jy;
-                for (int jz = 0; jz <= lz_j; jz++) {
-                    fac *= cz[(jz+lz_j*lj1)*WARP_SIZE];
+                for (int jz = 0; jz <= lz_j; ++jz) {
                     int lz = lz_i + jz;
+                    fac *= cz[(jz+lz_j*lj1)*WARP_SIZE];
                     dm_ij += fac * dm_xyz[ADDR3(lij,lx,ly,lz)*WARP_SIZE];
                 }
             }

@@ -19,7 +19,7 @@
 #define WARP_SIZE       32
 #define WARPS           8
 #define THREADS         (WARP_SIZE*WARPS)
-#define LMAX            8
+#define LMAX            4
 
 #define PRIMBAS_SLOTS   4
 #define PRIMBAS_ANG     0
@@ -56,7 +56,6 @@ typedef struct {
 typedef struct {
     int nshl_pair;
     int *bas_ij_idx;
-    int n_radius;
     int mesh[3];
 } MGridBounds;
 
