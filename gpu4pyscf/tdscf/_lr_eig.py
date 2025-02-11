@@ -722,7 +722,7 @@ def real_eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=Non
         Y_new = XY_new[:,A_size:].T
         if x0sym is None:
             V, W = VW_Gram_Schmidt_fill_holder(
-                V_holder[:,:m1], W_holder[:,:m1], X_new, Y_new)
+                V_holder[:,:m1], W_holder[:,:m1], X_new, Y_new, lindep)
         else:
             xt_ir = xt_ir[r_index]
             xt_orth_ir = []
@@ -731,7 +731,7 @@ def real_eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=Non
             for ir in set(xt_ir):
                 idx = cp.nonzero(xt_ir == ir)[0]
                 _V, _W = VW_Gram_Schmidt_fill_holder(
-                    V_holder[:,:m1], W_holder[:,:m1], X_new[:,idx], Y_new[:,idx])
+                    V_holder[:,:m1], W_holder[:,:m1], X_new[:,idx], Y_new[:,idx], lindep)
                 V.append(_V)
                 W.append(_W)
                 xt_orth_ir.append([ir] * len(_V))
