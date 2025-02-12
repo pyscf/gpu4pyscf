@@ -79,7 +79,7 @@ int MG_eval_mat_lda_orth(double *out, double *rho, MGridEnvVars envs,
     return 0;
 }
 
-int init_mgrid_constant(int shm_size)
+int MG_init_constant(int shm_size)
 {
     Fold2Index i_in_fold2idx[165];
     Fold3Index i_in_fold3idx[495];

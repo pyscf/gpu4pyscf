@@ -24,32 +24,27 @@ from gpu4pyscf.pbc import tools
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import load_library, tag_array, sandwich_dot, block_diag
+from gpu4pyscf.gto.mole import cart2sph_by_l
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
+from gpu4pyscf.__config__ import shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
-try:
-    from gpu4pyscf.gto.mole import cart2sph_by_l
-except ImportError:
-    import functools
-    from pyscf.gto.mole import cart2sph
-    @functools.lru_cache(20)
-    def cart2sph_by_l(l, normalized='sp'):
-        c2s = cart2sph(l, normalized='sp')
-        return cp.asarray(c2s, order='C')
 
 __all__ = ['MultiGridFFTDF']
 
 libmgrid = load_library('libmgrid')
 libmgrid.MG_eval_rho_orth.restype = ctypes.c_int
 libmgrid.MG_eval_mat_lda_orth.restype = ctypes.c_int
-libmgrid.init_mgrid_constant.restype = ctypes.c_int
+libmgrid.MG_init_constant.restype = ctypes.c_int
 
 PRIMBAS_ANG = 0
 PRIMBAS_EXP = 1
 PRIMBAS_COEFF = 2
 PRIMBAS_COORD = 3
 LMAX = 4
-SHARED_RHO_SIZE = 2097152 # 128^3
 NGRID_RADIUS = 16
+SHARED_RHO_SIZE = 2097152 # 128^3
+SHM_SIZE = shm_size - 1024
+del shm_size
 
 def eval_mat(cell, weights, shls_slice=None, comp=1, hermi=0,
              xctype='LDA', kpts=None, mesh=None, offset=None, submesh=None):
@@ -134,10 +129,12 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=None, deriv=0):
     sp_groups = group_shl_pairs(cell, supmol_bas[:mydf.primitive_nbas],
                                 mydf.supmol_bas, mydf.supmol_env, sub_meshs)
     workers = gpu_specs['multiProcessorCount']
+    workers = 1
     nf3 = (lmax*2+1)*(lmax*2+2)*(lmax*2+3)//6
     cache_size = ((lmax*2+1)*(NGRID_RADIUS*2)*3 + nf3 + 6) * 32
     pool = cp.empty((workers, cache_size))
 
+    init_constant(cell)
     kern = libmgrid.MG_eval_rho_orth
     assert rhodim == 1
     rhoG = None
@@ -171,6 +168,8 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=None, deriv=0):
             rhoG = rho_freq
         else:
             _takebak_4d(rhoG, rho_freq.reshape((-1,) + mesh), mesh)
+    # TODO: for diffused basis functions lower than minimal Ecut, compute the
+    # rhoR using normal FFTDF code
 
     rhoG = rhoG.reshape(nset,rhodim,-1)
 
@@ -214,6 +213,7 @@ def _get_j_pass2(mydf, vG, hermi=1, kpts=None, verbose=None):
     cache_size = ((lmax*2+1)*(NGRID_RADIUS*2)*3 + nf2*(NGRID_RADIUS*2) + 6) * 32
     pool = cp.empty((workers, cache_size))
 
+    init_constant(cell)
     kern = libmgrid.MG_eval_mat_lda_orth
     # TODO: might be complex array when tddft amplitudes are complex
     vj = cp.zeros((nset,nao,nao))
@@ -237,6 +237,8 @@ def _get_j_pass2(mydf, vG, hermi=1, kpts=None, verbose=None):
                      ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
                      ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                      ctypes.c_int(workers))
+    # TODO: for diffused basis functions lower than minimal Ecut, compute the
+    # vj using normal FFTDF code
     vj = mydf.unsort_orbitals(vj)
     vj = vj.reshape(nset,nkpts,nao,nao)
     log.timer_debug1('get_j pass2', *t0)
@@ -413,17 +415,18 @@ def _to_primitive_bas(cell):
                     # s and p orbitals. The special normalization coefficients
                     # should be applied into the contraction coefficients.
                     prim_env[pcoeff:pcoeff+nprim*nctr] *= ((2*l+1)/(4*np.pi))**.5
-                idx = _repeat(np.arange(off, off+nf*nprim, nf), nctr)
+                # idx = [ao_loc[ib], ao_loc[ib], ... nprim terms ...,
+                #        ao_loc[ib]+nf, ao_loc[ib]+nv, ... nprim terms ...]
+                idx = np.repeat(np.arange(off, off+nf*nctr, nf), nprim)
                 local_ao_mapping.append(idx)
-                off += nprim * nctr
+                off += nf * nctr
 
             bas_of_ia = np.vstack(bas_of_ia)
             local_ao_mapping = np.hstack(local_ao_mapping)
             bas_templates[key] = (bas_of_ia, local_ao_mapping)
 
         prim_bas.append(bas_of_ia)
-        off = ao_loc[ib0]
-        ao_loc_in_cell0.append(off + local_ao_mapping)
+        ao_loc_in_cell0.append(ao_loc[ib0] + local_ao_mapping)
 
     prim_bas = np.asarray(np.vstack(prim_bas), dtype=np.int32)
     ao_loc_in_cell0 = np.asarray(np.hstack(ao_loc_in_cell0), dtype=np.int32)
@@ -437,6 +440,7 @@ def _to_primitive_bas(cell):
     # Keep the unit cell at the beginning
     basLr = (bas_coords + Ls[1:,None]).reshape(-1, 3)
     dr = np.linalg.norm(bas_coords[:,None,:] - basLr, axis=2)
+    # TODO: optimize the rcut for each basis
     idx = np.where(dr.min(axis=0) < cell.rcut)[0]
     _env = np.hstack([prim_env, basLr[idx].ravel()])
     extended_bas = _repeat(prim_bas, nimgs-1)[idx]
@@ -543,6 +547,11 @@ def multigrid_submeshs(cell):
             break
         sub_meshs.append(mesh)
     return sub_meshs
+
+def init_constant(cell):
+    err = libmgrid.MG_init_constant(ctypes.c_int(SHM_SIZE))
+    if err != 0:
+        raise RuntimeError('CUDA kernel initialization')
 
 def _take_4d(a, mesh):
     gx = np.fft.fftfreq(mesh[0], 1./mesh[0]).astype(np.int32)

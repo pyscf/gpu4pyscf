@@ -24,6 +24,11 @@ from gpu4pyscf.lib import logger
 PTR_BAS_COORD = 7
 
 @functools.lru_cache(20)
+def cart2sph_by_l(l, normalized='sp'):
+    c2s = gto.mole.cart2sph(l, normalized='sp')
+    return cp.asarray(c2s, order='C')
+
+@functools.lru_cache(20)
 def get_cart2sph(lmax=12):
     cart2sph = []
     for l in range(lmax):
