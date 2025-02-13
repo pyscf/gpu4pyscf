@@ -161,7 +161,10 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
             LDA : [2,1,2,1,2,1,N]
             GGA : [2,4,2,4,2,4,N]
             MGGA: [2,5,2,5,2,5,N]
-        * spin unpolarized is not implemented
+        * spin unpolarized
+            LDA : [1,1,1,N]
+            GGA : [4,4,4,N]
+            MGGA: [5,5,5,N]
     '''
     rho = cupy.asarray(rho, order='C')
     if xctype == 'GGA':
@@ -185,7 +188,90 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
 
     ngrids = rho.shape[-1]
     if spin == 1:
-        raise NotImplementedError()
+        if order == 0:
+            vp = _stack_frrr(frrr).reshape(2,nvar, 2,nvar, 2,nvar, ngrids).transpose(1,3,5,0,2,4,6)
+        else:
+            vp = cupy.empty((2,nvar, 2,nvar, 2,nvar, ngrids)).transpose(1,3,5,0,2,4,6)
+            vp[0,0,0] = _stack_frrr(frrr)
+            i3 = np.arange(3)
+            #:qggg = _stack_fggg(fggg)
+            #:qggg = np.einsum('abcdefg,axg->xbcdefg', qggg, rho[:,1:4])
+            #:qggg = np.einsum('xbcdefg,cyg->xybdefg', qggg, rho[:,1:4])
+            #:qggg = np.einsum('xybdefg,ezg->xyzbdfg', qggg, rho[:,1:4])
+            qggg = _stack_fggg(fggg, rho=rho).transpose(1,3,5,0,2,4,6)
+            qgg = _stack_fgg(fgg)
+            qgg = cupy.einsum('abcdg,axg->xbcdg', qgg, rho[:,1:4])
+            for i in range(3):
+                qggg[:,i,i] += qgg
+                qggg[i,:,i] += qgg.transpose(0,2,1,3,4)
+                qggg[i,i,:] += qgg.transpose(0,2,3,1,4)
+            vp[1:4,1:4,1:4] = qggg
+
+            frgg = frgg.reshape(2,6,ngrids)
+            #:qrgg = _stack_fgg(frgg, axis=1)
+            #:qrgg = np.einsum('rabcdg,axg->xrbcdg', qrgg, rho[:,1:4])
+            #:qrgg = np.einsum('xrbcdg,cyg->xyrbdg', qrgg, rho[:,1:4])
+            qrgg = _stack_fgg(frgg, axis=1, rho=rho).transpose(2,4,0,1,3,5)
+            qrg = _stack_fg(frg.reshape(2,3,ngrids), axis=1)
+            qrgg[i3,i3] += qrg
+            vp[0,1:4,1:4] = qrgg
+            vp[1:4,0,1:4] = qrgg.transpose(0,1,3,2,4,5)
+            vp[1:4,1:4,0] = qrgg.transpose(0,1,3,4,2,5)
+
+            frrg = frrg.reshape(3,3,ngrids)
+            qrrg = _stack_frr(frrg, axis=0)
+            #:qrrg = _stack_fg(qrrg, axis=2)
+            #:qrrg = np.einsum('rsabg,axg->rsxbg', qrrg, rho[:,1:4])
+            qrrg = _stack_fg(qrrg, axis=2, rho=rho).transpose(3,0,1,2,4)
+            vp[0,0,1:4] = qrrg
+            vp[0,1:4,0] = qrrg.transpose(0,1,3,2,4)
+            vp[1:4,0,0] = qrrg.transpose(0,3,1,2,4)
+
+        if order > 1:
+            fggt = fggt.reshape(6,2,ngrids)
+            #:qggt = _stack_fgg(fggt, axis=0)
+            #:qggt = np.einsum('abcdrg,axg->xbcdrg', qggt, rho[:,1:4])
+            #:qggt = np.einsum('xbcdrg,cyg->xybdrg', qggt, rho[:,1:4])
+            qggt = _stack_fgg(fggt, axis=0, rho=rho).transpose(1,3,0,2,4,5)
+            qgt = _stack_fg(fgt.reshape(3,2,ngrids), axis=0)
+            i3 = np.arange(3)
+            qggt[i3,i3] += qgt
+            vp[1:4,1:4,4] = qggt
+            vp[1:4,4,1:4] = qggt.transpose(0,1,2,4,3,5)
+            vp[4,1:4,1:4] = qggt.transpose(0,1,4,2,3,5)
+
+            qgtt = _stack_frr(fgtt.reshape(3,3,ngrids), axis=1)
+            #:qgtt = _stack_fg(qgtt, axis=0)
+            #:qgtt = np.einsum('abrsg,axg->xbrsg', qgtt, rho[:,1:4])
+            qgtt = _stack_fg(qgtt, axis=0, rho=rho).transpose(1,0,2,3,4)
+            vp[1:4,4,4] = qgtt
+            vp[4,1:4,4] = qgtt.transpose(0,2,1,3,4)
+            vp[4,4,1:4] = qgtt.transpose(0,2,3,1,4)
+
+            frgt = frgt.reshape(2,3,2,ngrids)
+            #:qrgt = _stack_fg(frgt, axis=1)
+            #:qrgt = np.einsum('rabsg,axg->xrbsg', qrgt, rho[:,1:4])
+            qrgt = _stack_fg(frgt, axis=1, rho=rho).transpose(2,0,1,3,4)
+            vp[0,1:4,4] = qrgt
+            vp[0,4,1:4] = qrgt.transpose(0,1,3,2,4)
+            vp[1:4,0,4] = qrgt.transpose(0,2,1,3,4)
+            vp[4,0,1:4] = qrgt.transpose(0,3,1,2,4)
+            vp[1:4,4,0] = qrgt.transpose(0,2,3,1,4)
+            vp[4,1:4,0] = qrgt.transpose(0,3,2,1,4)
+
+            qrrt = _stack_frr(frrt.reshape(3,2,ngrids), axis=0)
+            vp[0,0,4] = qrrt
+            vp[0,4,0] = qrrt.transpose(0,2,1,3)
+            vp[4,0,0] = qrrt.transpose(2,0,1,3)
+
+            qrtt = _stack_frr(frtt.reshape(2,3,ngrids), axis=1)
+            vp[0,4,4] = qrtt
+            vp[4,0,4] = qrtt.transpose(1,0,2,3)
+            vp[4,4,0] = qrtt.transpose(1,2,0,3)
+
+            vp[4,4,4] = _stack_frrr(fttt, axis=0)
+
+        vp = vp.transpose(3,0,4,1,5,2,6)
 
     else:
         if order == 0:
@@ -241,3 +327,32 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
             vp[4,4,0] = frtt
             vp[4,4,4] = fttt
     return vp
+
+
+def _stack_frrr(frrr, axis=0):
+    '''
+    frrr [u_u_u, u_u_d, u_d_d, d_d_d]
+    -> tensor with shape [2, 2, 2, ...]
+    '''
+    if frrr.shape[axis] != 4:
+        frrr = frrr.reshape(frrr.shape[:axis] + (4, -1) + frrr.shape[axis+1:])
+    slices = [slice(None)] * frrr.ndim
+    slices[axis] = [[[0, 1], [1, 2]],
+                    [[1, 2], [2, 3]]]
+    return frrr[tuple(slices)]
+
+def _stack_fggg(fggg, axis=0, rho=None):
+    '''
+    fggg [uu_uu_uu, uu_uu_ud, uu_uu_dd, uu_ud_ud, uu_ud_dd, uu_dd_dd, ud_ud_ud, ud_ud_dd, ud_dd_dd, dd_dd_dd]
+    -> tensor with shape [2,2, 2,2, 2,2, ...]
+    '''
+    if fggg.shape[axis] != 10:
+        fggg = fggg.reshape(fggg.shape[:axis] + (10, 2) + fggg.shape[axis+1:])
+    slices = [slice(None)] * fggg.ndim
+    slices[axis] = [[[0, 1, 2], [1, 3, 4], [2, 4, 5]],
+                    [[1, 3, 4], [3, 6, 7], [4, 7, 8]],
+                    [[2, 4, 5], [4, 7, 8], [5, 8, 9]]]
+    fggg = fggg[tuple(slices)]
+    fggg = _stack_fg(fggg, axis=axis+2, rho=rho)
+    fggg = _stack_fg(fggg, axis=axis+1, rho=rho)
+    return _stack_fg(fggg, axis=axis, rho=rho)

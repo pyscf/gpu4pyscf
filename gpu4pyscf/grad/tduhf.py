@@ -25,7 +25,7 @@ from pyscf import __config__
 from gpu4pyscf.lib import utils
 
 
-def grad_elec(td_grad, x_y, atmlst=None, max_memory=2000, verbose=logger.INFO):
+def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
     '''
     Electronic part of TDA, TDHF nuclear gradients
 
@@ -222,7 +222,7 @@ class Gradients(tdrhf_grad.Gradients):
 
     @lib.with_doc(grad_elec.__doc__)
     def grad_elec(self, xy, singlet=None, atmlst=None):
-        return grad_elec(self, xy, atmlst, self.max_memory, self.verbose)
+        return grad_elec(self, xy, atmlst, self.verbose)
 
 Grad = Gradients
 

@@ -94,13 +94,15 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
     # dm0 = mf.make_rdm1(mo_coeff, mo_occ), but it is not used when computing
     # fxc since rho0 is passed to fxc function.
     f1vo, f1oo, vxc1, k1ao = \
-            _contract_xc_kernel(td_grad, mf.xc, (dmxpya,dmxpyb),
-                                (dmzooa,dmzoob), True, True)
+            _contract_xc_kernel(td_grad, mf.xc, cp.stack((dmxpya,dmxpyb)),
+                                cp.stack((dmzooa,dmzoob)), True, True)
 
     if ni.libxc.is_hybrid_xc(mf.xc):
         dm = (dmzooa, dmxpya+dmxpya.T, dmxmya-dmxmya.T,
               dmzoob, dmxpyb+dmxpyb.T, dmxmyb-dmxmyb.T)
         vj, vk = mf.get_jk(mol, dm, hermi=0)
+        if not isinstance(vj, cp.ndarray): vj = cp.asarray(vj)
+        if not isinstance(vk, cp.ndarray): vk = cp.asarray(vk)
         vk *= hyb
         if omega != 0:
             vk += mf.get_k(mol, dm, hermi=0, omega=omega) * (alpha-hyb)
@@ -128,6 +130,7 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
         dm = (dmzooa, dmxpya+dmxpya.T,
               dmzoob, dmxpyb+dmxpyb.T)
         vj = mf.get_j(mol, dm, hermi=1).reshape(2,2,nao,nao)
+        if not isinstance(vj, cp.ndarray): vj = cp.asarray(vj)
 
         veff0doo = vj[0,0]+vj[1,0] + f1oo[:,0] + k1ao[:,0] * 2
         wvoa = reduce(cp.dot, (orbva.T, veff0doo[0], orboa)) * 2
@@ -272,11 +275,11 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
                                       (dmxmyb-dmxmyb.T)*0.5), vhfopt, j_factor=0.0, k_factor=k_factor)*2
 
     fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None,
-                                False, False, True)[0]
+                                False, False)[0]
     
-    veff1_0 = vxc1[1:]
-    veff1_1 =(f1oo[1:] + fxcz1[1:] + k1ao[1:]*2)*2 # *2 for dmz1doo+dmz1oo.T
-    veff1_2 = f1vo[1:] * 2
+    veff1_0 = vxc1[:, 1:]
+    veff1_1 =(f1oo[:, 1:] + fxcz1[:, 1:] + k1ao[:, 1:]*2)*2 # *2 for dmz1doo+dmz1oo.T
+    veff1_2 = f1vo[:, 1:] * 2
     veff1_0_a, veff1_0_b = veff1_0
     veff1_1_a, veff1_1_b = veff1_1
     veff1_2_a, veff1_2_b = veff1_2
@@ -343,7 +346,7 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
     _sorted_mol = opt._sorted_mol
-    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
+    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
 
     # dmvo ~ reduce(cp.dot, (orbv, Xai, orbo.T))
     dmvo = cp.array([(dmvo[0] + dmvo[0].T) * .5, # because K_{ia,jb} == K_{ia,jb}
@@ -385,8 +388,8 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
             ao0 = ao[0]
         else:
             ao0 = ao
-        rho = (ni.eval_rho2(_sorted_mol, ao0, mo_coeff[0], mo_occ[0], mask, xctype, with_lapl=False),
-               ni.eval_rho2(_sorted_mol, ao0, mo_coeff[1], mo_occ[1], mask, xctype, with_lapl=False))
+        rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao0, mo_coeff[0], mo_occ[0], mask, xctype, with_lapl=False),
+               ni.eval_rho2(_sorted_mol, ao0, mo_coeff[1], mo_occ[1], mask, xctype, with_lapl=False)))
         vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
 
         rho1 = cp.asarray((
@@ -434,7 +437,7 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
 class Gradients(tdrhf_grad.Gradients):
     @lib.with_doc(grad_elec.__doc__)
     def grad_elec(self, xy, singlet=None, atmlst=None):
-        return grad_elec(self, xy, atmlst, self.max_memory, self.verbose)
+        return grad_elec(self, xy, atmlst, self.verbose)
 
 Grad = Gradients
 
