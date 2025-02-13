@@ -16,6 +16,7 @@
 from functools import reduce
 import cupy as cp
 from pyscf import lib
+from pyscf import dft
 from pyscf.lib import logger
 from gpu4pyscf import lib as lib_gpu
 from gpu4pyscf.lib.cupy_helper import  contract
@@ -171,16 +172,16 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     vhfopt = mf._opt_gpu.get(None, None)
     j_factor = 1.
     k_factor = 0.
-    veff1_3 = 0.0
     
-    if omega == 0:
-        k_factor = hyb
-    elif alpha == 0: # LR=0, only SR exchange
-        pass
-    elif hyb == 0: # SR=0, only LR exchange
-        k_factor = alpha
-    else: # SR and LR exchange with different ratios
-        k_factor = alpha
+    if with_k:
+        if omega == 0:
+            k_factor = hyb
+        elif alpha == 0: # LR=0, only SR exchange
+            pass
+        elif hyb == 0: # SR=0, only LR exchange
+            k_factor = alpha
+        else: # SR and LR exchange with different ratios
+            k_factor = alpha
     dvhf_DD_DP = rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5 + oo0*2, vhfopt, j_factor, k_factor, verbose=verbose)
     dvhf_DD_DP-= rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5, vhfopt, j_factor, k_factor, verbose=verbose)
     dvhf_xpy = rhf_grad._jk_energy_per_atom(mol, dmxpy+dmxpy.T, vhfopt, j_factor, k_factor, verbose=verbose)*2
@@ -225,8 +226,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     delec= cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
     de = 2.0 * (dvhf_DD_DP + dvhf_xpy + dvhf_xmy) + dh1e_ground + dh1e_td + delec + extra_force
 
-    if atmlst is None:
-        atmlst = range(mol.natm)
     offsetdic = mol.offset_nr_by_atom()
     tmp = cp.zeros((3, nao, nao))
     for k, ia in enumerate(atmlst):
@@ -409,7 +408,7 @@ def _mgga_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
     aow = numint._scale_ao(ao[:4], wv[:4])
     tmp = numint._dot_ao_ao(mol, ao[0], aow, mask, shls_slice, ao_loc)
     vmat[0] += tmp + tmp.T
-    vmat[0] += numint._tau_dot(mol, ao, ao, wv[4], mask, shls_slice, ao_loc)
+    vmat[0] += numint._tau_dot(ao, ao, wv[4])
     wv = cp.asarray(wv, order='C')
     vmat[1:] += rks_grad._gga_grad_sum_(ao, wv[:4])
     vmat[1:] += rks_grad._tau_grad_dot_(ao, wv[4])
