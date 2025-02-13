@@ -332,5 +332,5 @@ class Gradients(rhf_grad.GradientsBase):
 
 Grad = Gradients
 
-from pyscf import tdscf
+from gpu4pyscf import tdscf
 tdscf.rhf.TDA.Gradients = tdscf.rhf.TDHF.Gradients = lib.class_as_method(Gradients)

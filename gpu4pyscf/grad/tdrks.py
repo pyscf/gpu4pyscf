@@ -16,12 +16,10 @@
 from functools import reduce
 import cupy as cp
 from pyscf import lib
-from pyscf import dft
 from pyscf.lib import logger
 from gpu4pyscf import lib as lib_gpu
 from gpu4pyscf.lib.cupy_helper import  contract
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.dft import rks
 from gpu4pyscf.dft import numint
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.grad import rhf as rhf_grad
@@ -167,7 +165,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     if mol.has_ecp():
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo+dmz1doo.T)*0.5) # 1/r like terms
 
-    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
     vhfopt = mf._opt_gpu.get(None, None)
     j_factor = 1.
@@ -187,9 +184,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dvhf_xpy = rhf_grad._jk_energy_per_atom(mol, dmxpy+dmxpy.T, vhfopt, j_factor, k_factor, verbose=verbose)*2
     dvhf_xmy = rhf_grad._jk_energy_per_atom(mol, dmxmy-dmxmy.T, vhfopt, j_factor=0.0, k_factor=k_factor)*2
     
-    if omega !=0:
-        raise NotImplementedError("X-Y part not supported for range-seperated functionals")
-
     if with_k and omega != 0:
         j_factor = 0.
         omega = -omega # Prefer computing the SR part
@@ -227,7 +221,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     de = 2.0 * (dvhf_DD_DP + dvhf_xpy + dvhf_xmy) + dh1e_ground + dh1e_td + delec + extra_force
 
     offsetdic = mol.offset_nr_by_atom()
-    tmp = cp.zeros((3, nao, nao))
+    tmp = cp.zeros((3, nao, nao)) # TODO: not the same with UKS, can be changed!
     for k, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = offsetdic[ia]
         tmp[:,p0:p1]   += veff1_0[:,p0:p1]
@@ -422,5 +416,5 @@ class Gradients(tdrhf.Gradients):
 
 Grad = Gradients
 
-from pyscf import tdscf
+from gpu4pyscf import tdscf
 tdscf.rks.TDA.Gradients = tdscf.rks.TDDFT.Gradients = lib.class_as_method(Gradients)

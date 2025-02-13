@@ -14,19 +14,23 @@
 
 
 from functools import reduce
-import numpy
+import cupy as cp
 from pyscf import lib
-from pyscf.lib import logger
-from pyscf.dft import numint
-from pyscf.grad import tdrhf as tdrhf_grad
-from pyscf.grad import tdrks as tdrks_grad
-from pyscf.scf import ucphf
+from gpu4pyscf import lib as lib_gpu
+from gpu4pyscf.lib.cupy_helper import  contract
+from gpu4pyscf.lib import logger
+from gpu4pyscf.df import int3c2e
+from gpu4pyscf.dft import numint
+from gpu4pyscf.grad import rhf as rhf_grad
+from gpu4pyscf.grad import tdrhf as tdrhf_grad
+from gpu4pyscf.grad import tdrks as tdrks_grad
+from gpu4pyscf.scf import ucphf
 
 
 #
 # Given Y = 0, TDHF gradients (XAX+XBY+YBX+YAY)^1 turn to TDA gradients (XAX)^1
 #
-def grad_elec(td_grad, x_y, atmlst=None, max_memory=2000, verbose=logger.INFO):
+def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
     '''
     Electronic part of TDA, TDDFT nuclear gradients
 
@@ -42,13 +46,13 @@ def grad_elec(td_grad, x_y, atmlst=None, max_memory=2000, verbose=logger.INFO):
 
     mol = td_grad.mol
     mf = td_grad.base._scf
-    mo_coeff = mf.mo_coeff
-    mo_energy = mf.mo_energy
-    mo_occ = mf.mo_occ
-    occidxa = numpy.where(mo_occ[0]>0)[0]
-    occidxb = numpy.where(mo_occ[1]>0)[0]
-    viridxa = numpy.where(mo_occ[0]==0)[0]
-    viridxb = numpy.where(mo_occ[1]==0)[0]
+    mo_coeff = cp.asarray(mf.mo_coeff)
+    mo_energy = cp.asarray(mf.mo_energy)
+    mo_occ = cp.asarray(mf.mo_occ)
+    occidxa = cp.where(mo_occ[0]>0)[0]
+    occidxb = cp.where(mo_occ[1]>0)[0]
+    viridxa = cp.where(mo_occ[0]==0)[0]
+    viridxb = cp.where(mo_occ[1]==0)[0]
     nocca = len(occidxa)
     noccb = len(occidxb)
     nvira = len(viridxa)
@@ -62,34 +66,36 @@ def grad_elec(td_grad, x_y, atmlst=None, max_memory=2000, verbose=logger.INFO):
     nmob = noccb + nvirb
 
     (xa, xb), (ya, yb) = x_y
+    xa = cp.asarray(xa)
+    xb = cp.asarray(xb)
+    ya = cp.asarray(ya)
+    yb = cp.asarray(yb)
     xpya = (xa+ya).reshape(nocca,nvira).T
     xpyb = (xb+yb).reshape(noccb,nvirb).T
     xmya = (xa-ya).reshape(nocca,nvira).T
     xmyb = (xb-yb).reshape(noccb,nvirb).T
 
-    dvva = numpy.einsum('ai,bi->ab', xpya, xpya) + numpy.einsum('ai,bi->ab', xmya, xmya)
-    dvvb = numpy.einsum('ai,bi->ab', xpyb, xpyb) + numpy.einsum('ai,bi->ab', xmyb, xmyb)
-    dooa =-numpy.einsum('ai,aj->ij', xpya, xpya) - numpy.einsum('ai,aj->ij', xmya, xmya)
-    doob =-numpy.einsum('ai,aj->ij', xpyb, xpyb) - numpy.einsum('ai,aj->ij', xmyb, xmyb)
-    dmxpya = reduce(numpy.dot, (orbva, xpya, orboa.T))
-    dmxpyb = reduce(numpy.dot, (orbvb, xpyb, orbob.T))
-    dmxmya = reduce(numpy.dot, (orbva, xmya, orboa.T))
-    dmxmyb = reduce(numpy.dot, (orbvb, xmyb, orbob.T))
-    dmzooa = reduce(numpy.dot, (orboa, dooa, orboa.T))
-    dmzoob = reduce(numpy.dot, (orbob, doob, orbob.T))
-    dmzooa+= reduce(numpy.dot, (orbva, dvva, orbva.T))
-    dmzoob+= reduce(numpy.dot, (orbvb, dvvb, orbvb.T))
+    dvva = cp.einsum('ai,bi->ab', xpya, xpya) + cp.einsum('ai,bi->ab', xmya, xmya)
+    dvvb = cp.einsum('ai,bi->ab', xpyb, xpyb) + cp.einsum('ai,bi->ab', xmyb, xmyb)
+    dooa =-cp.einsum('ai,aj->ij', xpya, xpya) - cp.einsum('ai,aj->ij', xmya, xmya)
+    doob =-cp.einsum('ai,aj->ij', xpyb, xpyb) - cp.einsum('ai,aj->ij', xmyb, xmyb)
+    dmxpya = reduce(cp.dot, (orbva, xpya, orboa.T))
+    dmxpyb = reduce(cp.dot, (orbvb, xpyb, orbob.T))
+    dmxmya = reduce(cp.dot, (orbva, xmya, orboa.T))
+    dmxmyb = reduce(cp.dot, (orbvb, xmyb, orbob.T))
+    dmzooa = reduce(cp.dot, (orboa, dooa, orboa.T))
+    dmzoob = reduce(cp.dot, (orbob, doob, orbob.T))
+    dmzooa+= reduce(cp.dot, (orbva, dvva, orbva.T))
+    dmzoob+= reduce(cp.dot, (orbvb, dvvb, orbvb.T))
 
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     # dm0 = mf.make_rdm1(mo_coeff, mo_occ), but it is not used when computing
     # fxc since rho0 is passed to fxc function.
-    rho0, vxc, fxc = ni.cache_xc_kernel(mf.mol, mf.grids, mf.xc,
-                                        mo_coeff, mo_occ, spin=1)
     f1vo, f1oo, vxc1, k1ao = \
             _contract_xc_kernel(td_grad, mf.xc, (dmxpya,dmxpyb),
-                                (dmzooa,dmzoob), True, True, max_memory)
+                                (dmzooa,dmzoob), True, True)
 
     if ni.libxc.is_hybrid_xc(mf.xc):
         dm = (dmzooa, dmxpya+dmxpya.T, dmxmya-dmxmya.T,
@@ -102,79 +108,79 @@ def grad_elec(td_grad, x_y, atmlst=None, max_memory=2000, verbose=logger.INFO):
         vk = vk.reshape(2,3,nao,nao)
 
         veff0doo = vj[0,0]+vj[1,0] - vk[:,0] + f1oo[:,0] + k1ao[:,0] * 2
-        wvoa = reduce(numpy.dot, (orbva.T, veff0doo[0], orboa)) * 2
-        wvob = reduce(numpy.dot, (orbvb.T, veff0doo[1], orbob)) * 2
+        wvoa = reduce(cp.dot, (orbva.T, veff0doo[0], orboa)) * 2
+        wvob = reduce(cp.dot, (orbvb.T, veff0doo[1], orbob)) * 2
         veff = vj[0,1]+vj[1,1] - vk[:,1] + f1vo[:,0] * 2
-        veff0mopa = reduce(numpy.dot, (mo_coeff[0].T, veff[0], mo_coeff[0]))
-        veff0mopb = reduce(numpy.dot, (mo_coeff[1].T, veff[1], mo_coeff[1]))
-        wvoa -= numpy.einsum('ki,ai->ak', veff0mopa[:nocca,:nocca], xpya) * 2
-        wvob -= numpy.einsum('ki,ai->ak', veff0mopb[:noccb,:noccb], xpyb) * 2
-        wvoa += numpy.einsum('ac,ai->ci', veff0mopa[nocca:,nocca:], xpya) * 2
-        wvob += numpy.einsum('ac,ai->ci', veff0mopb[noccb:,noccb:], xpyb) * 2
+        veff0mopa = reduce(cp.dot, (mo_coeff[0].T, veff[0], mo_coeff[0]))
+        veff0mopb = reduce(cp.dot, (mo_coeff[1].T, veff[1], mo_coeff[1]))
+        wvoa -= cp.einsum('ki,ai->ak', veff0mopa[:nocca,:nocca], xpya) * 2
+        wvob -= cp.einsum('ki,ai->ak', veff0mopb[:noccb,:noccb], xpyb) * 2
+        wvoa += cp.einsum('ac,ai->ci', veff0mopa[nocca:,nocca:], xpya) * 2
+        wvob += cp.einsum('ac,ai->ci', veff0mopb[noccb:,noccb:], xpyb) * 2
         veff = -vk[:,2]
-        veff0moma = reduce(numpy.dot, (mo_coeff[0].T, veff[0], mo_coeff[0]))
-        veff0momb = reduce(numpy.dot, (mo_coeff[1].T, veff[1], mo_coeff[1]))
-        wvoa -= numpy.einsum('ki,ai->ak', veff0moma[:nocca,:nocca], xmya) * 2
-        wvob -= numpy.einsum('ki,ai->ak', veff0momb[:noccb,:noccb], xmyb) * 2
-        wvoa += numpy.einsum('ac,ai->ci', veff0moma[nocca:,nocca:], xmya) * 2
-        wvob += numpy.einsum('ac,ai->ci', veff0momb[noccb:,noccb:], xmyb) * 2
+        veff0moma = reduce(cp.dot, (mo_coeff[0].T, veff[0], mo_coeff[0]))
+        veff0momb = reduce(cp.dot, (mo_coeff[1].T, veff[1], mo_coeff[1]))
+        wvoa -= cp.einsum('ki,ai->ak', veff0moma[:nocca,:nocca], xmya) * 2
+        wvob -= cp.einsum('ki,ai->ak', veff0momb[:noccb,:noccb], xmyb) * 2
+        wvoa += cp.einsum('ac,ai->ci', veff0moma[nocca:,nocca:], xmya) * 2
+        wvob += cp.einsum('ac,ai->ci', veff0momb[noccb:,noccb:], xmyb) * 2
     else:
         dm = (dmzooa, dmxpya+dmxpya.T,
               dmzoob, dmxpyb+dmxpyb.T)
         vj = mf.get_j(mol, dm, hermi=1).reshape(2,2,nao,nao)
 
         veff0doo = vj[0,0]+vj[1,0] + f1oo[:,0] + k1ao[:,0] * 2
-        wvoa = reduce(numpy.dot, (orbva.T, veff0doo[0], orboa)) * 2
-        wvob = reduce(numpy.dot, (orbvb.T, veff0doo[1], orbob)) * 2
+        wvoa = reduce(cp.dot, (orbva.T, veff0doo[0], orboa)) * 2
+        wvob = reduce(cp.dot, (orbvb.T, veff0doo[1], orbob)) * 2
         veff = vj[0,1]+vj[1,1] + f1vo[:,0] * 2
-        veff0mopa = reduce(numpy.dot, (mo_coeff[0].T, veff[0], mo_coeff[0]))
-        veff0mopb = reduce(numpy.dot, (mo_coeff[1].T, veff[1], mo_coeff[1]))
-        wvoa -= numpy.einsum('ki,ai->ak', veff0mopa[:nocca,:nocca], xpya) * 2
-        wvob -= numpy.einsum('ki,ai->ak', veff0mopb[:noccb,:noccb], xpyb) * 2
-        wvoa += numpy.einsum('ac,ai->ci', veff0mopa[nocca:,nocca:], xpya) * 2
-        wvob += numpy.einsum('ac,ai->ci', veff0mopb[noccb:,noccb:], xpyb) * 2
-        veff0moma = numpy.zeros((nmoa,nmoa))
-        veff0momb = numpy.zeros((nmob,nmob))
+        veff0mopa = reduce(cp.dot, (mo_coeff[0].T, veff[0], mo_coeff[0]))
+        veff0mopb = reduce(cp.dot, (mo_coeff[1].T, veff[1], mo_coeff[1]))
+        wvoa -= cp.einsum('ki,ai->ak', veff0mopa[:nocca,:nocca], xpya) * 2
+        wvob -= cp.einsum('ki,ai->ak', veff0mopb[:noccb,:noccb], xpyb) * 2
+        wvoa += cp.einsum('ac,ai->ci', veff0mopa[nocca:,nocca:], xpya) * 2
+        wvob += cp.einsum('ac,ai->ci', veff0mopb[noccb:,noccb:], xpyb) * 2
+        veff0moma = cp.zeros((nmoa,nmoa))
+        veff0momb = cp.zeros((nmob,nmob))
 
     vresp = mf.gen_response(hermi=1)
     def fvind(x):
-        dm1 = numpy.empty((2,nao,nao))
+        dm1 = cp.empty((2,nao,nao))
         xa = x[0,:nvira*nocca].reshape(nvira,nocca)
         xb = x[0,nvira*nocca:].reshape(nvirb,noccb)
-        dma = reduce(numpy.dot, (orbva, xa, orboa.T))
-        dmb = reduce(numpy.dot, (orbvb, xb, orbob.T))
+        dma = reduce(cp.dot, (orbva, xa, orboa.T))
+        dmb = reduce(cp.dot, (orbvb, xb, orbob.T))
         dm1[0] = dma + dma.T
         dm1[1] = dmb + dmb.T
         v1 = vresp(dm1)
-        v1a = reduce(numpy.dot, (orbva.T, v1[0], orboa))
-        v1b = reduce(numpy.dot, (orbvb.T, v1[1], orbob))
-        return numpy.hstack((v1a.ravel(), v1b.ravel()))
+        v1a = reduce(cp.dot, (orbva.T, v1[0], orboa))
+        v1b = reduce(cp.dot, (orbvb.T, v1[1], orbob))
+        return cp.hstack((v1a.ravel(), v1b.ravel()))
     z1a, z1b = ucphf.solve(fvind, mo_energy, mo_occ, (wvoa,wvob),
                            max_cycle=td_grad.cphf_max_cycle,
                            tol=td_grad.cphf_conv_tol)[0]
     time1 = log.timer('Z-vector using UCPHF solver', *time0)
 
-    z1ao = numpy.empty((2,nao,nao))
-    z1ao[0] = reduce(numpy.dot, (orbva, z1a, orboa.T))
-    z1ao[1] = reduce(numpy.dot, (orbvb, z1b, orbob.T))
+    z1ao = cp.empty((2,nao,nao))
+    z1ao[0] = reduce(cp.dot, (orbva, z1a, orboa.T))
+    z1ao[1] = reduce(cp.dot, (orbvb, z1b, orbob.T))
     veff = vresp((z1ao+z1ao.transpose(0,2,1)) * .5)
 
-    im0a = numpy.zeros((nmoa,nmoa))
-    im0b = numpy.zeros((nmob,nmob))
-    im0a[:nocca,:nocca] = reduce(numpy.dot, (orboa.T, veff0doo[0]+veff[0], orboa)) * .5
-    im0b[:noccb,:noccb] = reduce(numpy.dot, (orbob.T, veff0doo[1]+veff[1], orbob)) * .5
-    im0a[:nocca,:nocca]+= numpy.einsum('ak,ai->ki', veff0mopa[nocca:,:nocca], xpya) * .5
-    im0b[:noccb,:noccb]+= numpy.einsum('ak,ai->ki', veff0mopb[noccb:,:noccb], xpyb) * .5
-    im0a[:nocca,:nocca]+= numpy.einsum('ak,ai->ki', veff0moma[nocca:,:nocca], xmya) * .5
-    im0b[:noccb,:noccb]+= numpy.einsum('ak,ai->ki', veff0momb[noccb:,:noccb], xmyb) * .5
-    im0a[nocca:,nocca:] = numpy.einsum('ci,ai->ac', veff0mopa[nocca:,:nocca], xpya) * .5
-    im0b[noccb:,noccb:] = numpy.einsum('ci,ai->ac', veff0mopb[noccb:,:noccb], xpyb) * .5
-    im0a[nocca:,nocca:]+= numpy.einsum('ci,ai->ac', veff0moma[nocca:,:nocca], xmya) * .5
-    im0b[noccb:,noccb:]+= numpy.einsum('ci,ai->ac', veff0momb[noccb:,:noccb], xmyb) * .5
-    im0a[nocca:,:nocca] = numpy.einsum('ki,ai->ak', veff0mopa[:nocca,:nocca], xpya)
-    im0b[noccb:,:noccb] = numpy.einsum('ki,ai->ak', veff0mopb[:noccb,:noccb], xpyb)
-    im0a[nocca:,:nocca]+= numpy.einsum('ki,ai->ak', veff0moma[:nocca,:nocca], xmya)
-    im0b[noccb:,:noccb]+= numpy.einsum('ki,ai->ak', veff0momb[:noccb,:noccb], xmyb)
+    im0a = cp.zeros((nmoa,nmoa))
+    im0b = cp.zeros((nmob,nmob))
+    im0a[:nocca,:nocca] = reduce(cp.dot, (orboa.T, veff0doo[0]+veff[0], orboa)) * .5
+    im0b[:noccb,:noccb] = reduce(cp.dot, (orbob.T, veff0doo[1]+veff[1], orbob)) * .5
+    im0a[:nocca,:nocca]+= cp.einsum('ak,ai->ki', veff0mopa[nocca:,:nocca], xpya) * .5
+    im0b[:noccb,:noccb]+= cp.einsum('ak,ai->ki', veff0mopb[noccb:,:noccb], xpyb) * .5
+    im0a[:nocca,:nocca]+= cp.einsum('ak,ai->ki', veff0moma[nocca:,:nocca], xmya) * .5
+    im0b[:noccb,:noccb]+= cp.einsum('ak,ai->ki', veff0momb[noccb:,:noccb], xmyb) * .5
+    im0a[nocca:,nocca:] = cp.einsum('ci,ai->ac', veff0mopa[nocca:,:nocca], xpya) * .5
+    im0b[noccb:,noccb:] = cp.einsum('ci,ai->ac', veff0mopb[noccb:,:noccb], xpyb) * .5
+    im0a[nocca:,nocca:]+= cp.einsum('ci,ai->ac', veff0moma[nocca:,:nocca], xmya) * .5
+    im0b[noccb:,noccb:]+= cp.einsum('ci,ai->ac', veff0momb[noccb:,:noccb], xmyb) * .5
+    im0a[nocca:,:nocca] = cp.einsum('ki,ai->ak', veff0mopa[:nocca,:nocca], xpya)
+    im0b[noccb:,:noccb] = cp.einsum('ki,ai->ak', veff0mopb[:noccb,:noccb], xpyb)
+    im0a[nocca:,:nocca]+= cp.einsum('ki,ai->ak', veff0moma[:nocca,:nocca], xmya)
+    im0b[noccb:,:noccb]+= cp.einsum('ki,ai->ak', veff0momb[:noccb,:noccb], xmyb)
 
     zeta_a = (mo_energy[0][:,None] + mo_energy[0]) * .5
     zeta_b = (mo_energy[1][:,None] + mo_energy[1]) * .5
@@ -182,103 +188,143 @@ def grad_elec(td_grad, x_y, atmlst=None, max_memory=2000, verbose=logger.INFO):
     zeta_b[noccb:,:noccb] = mo_energy[1][:noccb]
     zeta_a[:nocca,nocca:] = mo_energy[0][nocca:]
     zeta_b[:noccb,noccb:] = mo_energy[1][noccb:]
-    dm1a = numpy.zeros((nmoa,nmoa))
-    dm1b = numpy.zeros((nmob,nmob))
+    dm1a = cp.zeros((nmoa,nmoa))
+    dm1b = cp.zeros((nmob,nmob))
     dm1a[:nocca,:nocca] = dooa * .5
     dm1b[:noccb,:noccb] = doob * .5
     dm1a[nocca:,nocca:] = dvva * .5
     dm1b[noccb:,noccb:] = dvvb * .5
     dm1a[nocca:,:nocca] = z1a * .5
     dm1b[noccb:,:noccb] = z1b * .5
-    dm1a[:nocca,:nocca] += numpy.eye(nocca) # for ground state
-    dm1b[:noccb,:noccb] += numpy.eye(noccb)
-    im0a = reduce(numpy.dot, (mo_coeff[0], im0a+zeta_a*dm1a, mo_coeff[0].T))
-    im0b = reduce(numpy.dot, (mo_coeff[1], im0b+zeta_b*dm1b, mo_coeff[1].T))
+    dm1a[:nocca,:nocca] += cp.eye(nocca) # for ground state
+    dm1b[:noccb,:noccb] += cp.eye(noccb)
+    im0a = reduce(cp.dot, (mo_coeff[0], im0a+zeta_a*dm1a, mo_coeff[0].T))
+    im0b = reduce(cp.dot, (mo_coeff[1], im0b+zeta_b*dm1b, mo_coeff[1].T))
     im0 = im0a + im0b
+
+    dmz1dooa = z1ao[0] + dmzooa
+    dmz1doob = z1ao[1] + dmzoob
+    oo0a = reduce(cp.dot, (orboa, orboa.T))
+    oo0b = reduce(cp.dot, (orbob, orbob.T))
 
     # Initialize hcore_deriv with the underlying SCF object because some
     # extensions (e.g. QM/MM, solvent) modifies the SCF object only.
     mf_grad = td_grad.base._scf.nuc_grad_method()
-    hcore_deriv = mf_grad.hcore_generator(mol)
-    s1 = mf_grad.get_ovlp(mol)
+    h1 = cp.asarray(mf_grad.get_hcore(mol)) # without 1/r like terms
+    s1 = cp.asarray(mf_grad.get_ovlp(mol))
+    dh_ground = contract('xij,ij->xi', h1, oo0a + oo0b)
+    dh_td = contract('xij,ij->xi', h1, (dmz1dooa + dmz1doob) * .25 
+                                        + (dmz1dooa + dmz1doob).T * .25)
+    ds = contract('xij,ij->xi', s1, (im0+im0.T)*0.5)
 
-    dmz1dooa = z1ao[0] + dmzooa
-    dmz1doob = z1ao[1] + dmzoob
-    oo0a = reduce(numpy.dot, (orboa, orboa.T))
-    oo0b = reduce(numpy.dot, (orbob, orbob.T))
-    as_dm1 = oo0a + oo0b + (dmz1dooa + dmz1doob) * .5
+    dh1e_ground = int3c2e.get_dh1e(mol, oo0a + oo0b) # 1/r like terms
+    if mol.has_ecp():
+        dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0a + oo0b) # 1/r like terms
+    dh1e_td = int3c2e.get_dh1e(mol, (dmz1dooa + dmz1doob) * .25
+                               + (dmz1dooa + dmz1doob).T * .25) # 1/r like terms
+    if mol.has_ecp():
+        dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1dooa + dmz1doob) * .25 
+                                                + (dmz1dooa + dmz1doob).T * .25) # 1/r like terms
 
-    if ni.libxc.is_hybrid_xc(mf.xc):
-        dm = (oo0a, dmz1dooa+dmz1dooa.T, dmxpya+dmxpya.T, dmxmya-dmxmya.T,
-              oo0b, dmz1doob+dmz1doob.T, dmxpyb+dmxpyb.T, dmxmyb-dmxmyb.T)
-        vj, vk = td_grad.get_jk(mol, dm)
-        vj = vj.reshape(2,4,3,nao,nao)
-        vk = vk.reshape(2,4,3,nao,nao) * hyb
-        if omega != 0:
-            vk += td_grad.get_k(mol, dm, omega=omega).reshape(2,4,3,nao,nao) * (alpha-hyb)
-        veff1 = vj[0] + vj[1] - vk
-    else:
-        dm = (oo0a, dmz1dooa+dmz1dooa.T, dmxpya+dmxpya.T,
-              oo0b, dmz1doob+dmz1doob.T, dmxpyb+dmxpyb.T)
-        vj = td_grad.get_j(mol, dm).reshape(2,3,3,nao,nao)
-        veff1 = numpy.zeros((2,4,3,nao,nao))
-        veff1[:,:3] = vj[0] + vj[1]
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
+    vhfopt = mf._opt_gpu.get(None, None)
+    j_factor = 1.
+    k_factor = 0.
+
+    if with_k:
+        if omega == 0:
+            k_factor = hyb
+        elif alpha == 0: # LR=0, only SR exchange
+            pass
+        elif hyb == 0: # SR=0, only LR exchange
+            k_factor = alpha
+        else: # SR and LR exchange with different ratios
+            k_factor = alpha
+
+    dvhf_DD_DP = rhf_grad._jk_energy_per_atom(mol, ((dmz1dooa+dmz1dooa.T)*0.25 + oo0a,
+                                        (dmz1doob+dmz1doob.T)*0.25 + oo0b), vhfopt, j_factor, k_factor, verbose=verbose)
+    dvhf_DD_DP-= rhf_grad._jk_energy_per_atom(mol, ((dmz1dooa+dmz1dooa.T)*0.25,
+                                         (dmz1doob+dmz1doob.T)*0.25), vhfopt, j_factor, k_factor, verbose=verbose)
+    dvhf_xpy = rhf_grad._jk_energy_per_atom(mol, ((dmxpya+dmxpya.T)*0.5,
+                                      (dmxpyb+dmxpyb.T)*0.5), vhfopt, j_factor, k_factor, verbose=verbose)*2
+    dvhf_xmy = rhf_grad._jk_energy_per_atom(mol, ((dmxmya-dmxmya.T)*0.5,
+                                      (dmxmyb-dmxmyb.T)*0.5), vhfopt, j_factor=0.0, k_factor=k_factor)*2
+        
+    if with_k and omega != 0:
+        j_factor = 0.
+        omega = -omega # Prefer computing the SR part
+        if alpha == 0: # LR=0, only SR exchange
+            k_factor = hyb
+        elif hyb == 0: # SR=0, only LR exchange
+            # full range exchange was computed in the previous step
+            k_factor = -alpha
+        else: # SR and LR exchange with different ratios
+            k_factor = hyb - alpha # =beta
+        vhfopt = mf._opt_gpu.get(omega, None)
+        with mol.with_range_coulomb(omega):
+            dvhf_DD_DP += rhf_grad._jk_energy_per_atom(mol, ((dmz1dooa+dmz1dooa.T)*0.25 + oo0a,
+                                        (dmz1doob+dmz1doob.T)*0.25 + oo0b), vhfopt, j_factor, k_factor, verbose=verbose)
+            dvhf_DD_DP -= rhf_grad._jk_energy_per_atom(mol, ((dmz1dooa+dmz1dooa.T)*0.25,
+                                         (dmz1doob+dmz1doob.T)*0.25), vhfopt, j_factor, k_factor, verbose=verbose)
+            dvhf_xpy += rhf_grad._jk_energy_per_atom(mol, ((dmxpya+dmxpya.T)*0.5,
+                                      (dmxpyb+dmxpyb.T)*0.5), vhfopt, j_factor, k_factor, verbose=verbose)*2
+            dvhf_xmy += rhf_grad._jk_energy_per_atom(mol, ((dmxmya-dmxmya.T)*0.5,
+                                      (dmxmyb-dmxmyb.T)*0.5), vhfopt, j_factor=0.0, k_factor=k_factor)*2
 
     fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None,
-                                False, False, max_memory)[0]
+                                False, False, True)[0]
+    
+    veff1_0 = vxc1[1:]
+    veff1_1 =(f1oo[1:] + fxcz1[1:] + k1ao[1:]*2)*2 # *2 for dmz1doo+dmz1oo.T
+    veff1_2 = f1vo[1:] * 2
+    veff1_0_a, veff1_0_b = veff1_0
+    veff1_1_a, veff1_1_b = veff1_1
+    veff1_2_a, veff1_2_b = veff1_2
 
-    veff1[:,0] += vxc1[:,1:]
-    veff1[:,1] +=(f1oo[:,1:] + fxcz1[:,1:] + k1ao[:,1:]*2)*2 # *2 for dmz1doo+dmz1oo.T
-    veff1[:,2] += f1vo[:,1:] * 2
-    veff1a, veff1b = veff1
     time1 = log.timer('2e AO integral derivatives', *time1)
-
     if atmlst is None:
         atmlst = range(mol.natm)
+    extra_force = cp.zeros((len(atmlst),3))
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+
+    delec = 2.0*(dh_ground + dh_td - ds)
+    aoslices = mol.aoslice_by_atom()
+    delec= cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
+    de = 2.0 * (dvhf_DD_DP + dvhf_xpy + dvhf_xmy) + dh1e_ground + dh1e_td + delec + extra_force
+    
     offsetdic = mol.offset_nr_by_atom()
-    de = numpy.zeros((len(atmlst),3))
+
     for k, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = offsetdic[ia]
+        
+        de[k] += cp.einsum('xpq,pq->x', veff1_0_a[:,p0:p1], oo0a[p0:p1])
+        de[k] += cp.einsum('xpq,pq->x', veff1_0_b[:,p0:p1], oo0b[p0:p1])
+        de[k] += cp.einsum('xpq,qp->x', veff1_0_a[:,p0:p1], oo0a[:,p0:p1])
+        de[k] += cp.einsum('xpq,qp->x', veff1_0_b[:,p0:p1], oo0b[:,p0:p1])
 
-        # Ground state gradients
-        h1ao = hcore_deriv(ia)
-        de[k] = numpy.einsum('xpq,pq->x', h1ao, as_dm1)
+        de[k] += cp.einsum('xpq,pq->x', veff1_0_a[:,p0:p1], dmz1dooa[p0:p1]) * .5
+        de[k] += cp.einsum('xpq,pq->x', veff1_0_b[:,p0:p1], dmz1doob[p0:p1]) * .5
+        de[k] += cp.einsum('xpq,qp->x', veff1_0_a[:,p0:p1], dmz1dooa[:,p0:p1]) * .5
+        de[k] += cp.einsum('xpq,qp->x', veff1_0_b[:,p0:p1], dmz1doob[:,p0:p1]) * .5
 
-        de[k] += numpy.einsum('xpq,pq->x', veff1a[0,:,p0:p1], oo0a[p0:p1])
-        de[k] += numpy.einsum('xpq,pq->x', veff1b[0,:,p0:p1], oo0b[p0:p1])
-        de[k] += numpy.einsum('xpq,qp->x', veff1a[0,:,p0:p1], oo0a[:,p0:p1])
-        de[k] += numpy.einsum('xpq,qp->x', veff1b[0,:,p0:p1], oo0b[:,p0:p1])
 
-        de[k] += numpy.einsum('xpq,pq->x', veff1a[0,:,p0:p1], dmz1dooa[p0:p1]) * .5
-        de[k] += numpy.einsum('xpq,pq->x', veff1b[0,:,p0:p1], dmz1doob[p0:p1]) * .5
-        de[k] += numpy.einsum('xpq,qp->x', veff1a[0,:,p0:p1], dmz1dooa[:,p0:p1]) * .5
-        de[k] += numpy.einsum('xpq,qp->x', veff1b[0,:,p0:p1], dmz1doob[:,p0:p1]) * .5
+        de[k] += cp.einsum('xij,ij->x', veff1_1_a[:,p0:p1], oo0a[p0:p1]) * .5
+        de[k] += cp.einsum('xij,ij->x', veff1_1_b[:,p0:p1], oo0b[p0:p1]) * .5
+        de[k] += cp.einsum('xij,ij->x', veff1_2_a[:,p0:p1], dmxpya[p0:p1,:])
+        de[k] += cp.einsum('xij,ij->x', veff1_2_b[:,p0:p1], dmxpyb[p0:p1,:])
+        de[k] += cp.einsum('xji,ij->x', veff1_2_a[:,p0:p1], dmxpya[:,p0:p1])
+        de[k] += cp.einsum('xji,ij->x', veff1_2_b[:,p0:p1], dmxpyb[:,p0:p1])
 
-        de[k] -= numpy.einsum('xpq,pq->x', s1[:,p0:p1], im0[p0:p1])
-        de[k] -= numpy.einsum('xqp,pq->x', s1[:,p0:p1], im0[:,p0:p1])
-
-        de[k] += numpy.einsum('xij,ij->x', veff1a[1,:,p0:p1], oo0a[p0:p1]) * .5
-        de[k] += numpy.einsum('xij,ij->x', veff1b[1,:,p0:p1], oo0b[p0:p1]) * .5
-        de[k] += numpy.einsum('xij,ij->x', veff1a[2,:,p0:p1], dmxpya[p0:p1,:])
-        de[k] += numpy.einsum('xij,ij->x', veff1b[2,:,p0:p1], dmxpyb[p0:p1,:])
-        de[k] += numpy.einsum('xij,ij->x', veff1a[3,:,p0:p1], dmxmya[p0:p1,:])
-        de[k] += numpy.einsum('xij,ij->x', veff1b[3,:,p0:p1], dmxmyb[p0:p1,:])
-        de[k] += numpy.einsum('xji,ij->x', veff1a[2,:,p0:p1], dmxpya[:,p0:p1])
-        de[k] += numpy.einsum('xji,ij->x', veff1b[2,:,p0:p1], dmxpyb[:,p0:p1])
-        de[k] -= numpy.einsum('xji,ij->x', veff1a[3,:,p0:p1], dmxmya[:,p0:p1])
-        de[k] -= numpy.einsum('xji,ij->x', veff1b[3,:,p0:p1], dmxmyb[:,p0:p1])
-
-        de[k] += td_grad.extra_force(ia, locals())
-
-    log.timer('TDUKS nuclear gradients', *time0)
-    return de
+    log.timer('TDRKS nuclear gradients', *time0)
+    return de.get()
 
 
 # dmov, dmoo in AO-representation
 # Note spin-trace is applied for fxc, kxc
 #TODO: to include the response of grids
 def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
-                        with_kxc=True, max_memory=2000):
+                        with_kxc=True):
     mol = td_grad.mol
     mf = td_grad.base._scf
     grids = mf.grids
@@ -292,22 +338,31 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
     shls_slice = (0, mol.nbas)
     ao_loc = mol.ao_loc_nr()
 
-    # dmvo ~ reduce(numpy.dot, (orbv, Xai, orbo.T))
-    dmvo = [(dmvo[0] + dmvo[0].T) * .5, # because K_{ia,jb} == K_{ia,jb}
-            (dmvo[1] + dmvo[1].T) * .5]
+    opt = getattr(ni, 'gdftopt', None)
+    if opt is None:
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+    _sorted_mol = opt._sorted_mol
+    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
 
-    f1vo = numpy.zeros((2,4,nao,nao))
+    # dmvo ~ reduce(cp.dot, (orbv, Xai, orbo.T))
+    dmvo = cp.array([(dmvo[0] + dmvo[0].T) * .5, # because K_{ia,jb} == K_{ia,jb}
+                     (dmvo[1] + dmvo[1].T) * .5])
+    dmvo = opt.sort_orbitals(dmvo, axis=[1,2])
+
+    f1vo = cp.zeros((2,4,nao,nao))
     deriv = 2
     if dmoo is not None:
-        f1oo = numpy.zeros((2,4,nao,nao))
+        f1oo = cp.zeros((2,4,nao,nao))
+        dmoo = opt.sort_orbitals(dmoo, axis=[1,2])
     else:
         f1oo = None
     if with_vxc:
-        v1ao = numpy.zeros((2,4,nao,nao))
+        v1ao = cp.zeros((2,4,nao,nao))
     else:
         v1ao = None
     if with_kxc:
-        k1ao = numpy.zeros((2,4,nao,nao))
+        k1ao = cp.zeros((2,4,nao,nao))
         deriv = 3
     else:
         k1ao = None
@@ -325,46 +380,54 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
         raise NotImplementedError(f'td-uks for functional {xc_code}')
 
     for ao, mask, weight, coords \
-            in ni.block_loop(mol, grids, nao, ao_deriv, max_memory):
+            in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
         if xctype == 'LDA':
             ao0 = ao[0]
         else:
             ao0 = ao
-        rho = (ni.eval_rho2(mol, ao0, mo_coeff[0], mo_occ[0], mask, xctype, with_lapl=False),
-               ni.eval_rho2(mol, ao0, mo_coeff[1], mo_occ[1], mask, xctype, with_lapl=False))
+        rho = (ni.eval_rho2(_sorted_mol, ao0, mo_coeff[0], mo_occ[0], mask, xctype, with_lapl=False),
+               ni.eval_rho2(_sorted_mol, ao0, mo_coeff[1], mo_occ[1], mask, xctype, with_lapl=False))
         vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
 
-        rho1 = numpy.asarray((
-            ni.eval_rho(mol, ao0, dmvo[0], mask, xctype, hermi=1, with_lapl=False),
-            ni.eval_rho(mol, ao0, dmvo[1], mask, xctype, hermi=1, with_lapl=False)))
+        rho1 = cp.asarray((
+            ni.eval_rho(_sorted_mol, ao0, dmvo[0], mask, xctype, hermi=1, with_lapl=False),
+            ni.eval_rho(_sorted_mol, ao0, dmvo[1], mask, xctype, hermi=1, with_lapl=False)))
         if xctype == 'LDA':
-            rho1 = rho1[:,numpy.newaxis]
-        wv = numpy.einsum('axg,axbyg,g->byg', rho1, fxc, weight)
-        fmat_(mol, f1vo[0], ao, wv[0], mask, shls_slice, ao_loc)
-        fmat_(mol, f1vo[1], ao, wv[1], mask, shls_slice, ao_loc)
+            rho1 = rho1[:,cp.newaxis]
+        wv = cp.einsum('axg,axbyg,g->byg', rho1, fxc, weight)
+        fmat_(_sorted_mol, f1vo[0], ao, wv[0], mask, shls_slice, ao_loc)
+        fmat_(_sorted_mol, f1vo[1], ao, wv[1], mask, shls_slice, ao_loc)
 
         if dmoo is not None:
-            rho2 = numpy.asarray((
-                ni.eval_rho(mol, ao0, dmoo[0], mask, xctype, hermi=1, with_lapl=False),
-                ni.eval_rho(mol, ao0, dmoo[1], mask, xctype, hermi=1, with_lapl=False)))
+            rho2 = cp.asarray((
+                ni.eval_rho(_sorted_mol, ao0, dmoo[0], mask, xctype, hermi=1, with_lapl=False),
+                ni.eval_rho(_sorted_mol, ao0, dmoo[1], mask, xctype, hermi=1, with_lapl=False)))
             if xctype == 'LDA':
-                rho2 = rho2[:,numpy.newaxis]
-            wv = numpy.einsum('axg,axbyg,g->byg', rho2, fxc, weight)
-            fmat_(mol, f1oo[0], ao, wv[0], mask, shls_slice, ao_loc)
-            fmat_(mol, f1oo[1], ao, wv[1], mask, shls_slice, ao_loc)
+                rho2 = rho2[:,cp.newaxis]
+            wv = cp.einsum('axg,axbyg,g->byg', rho2, fxc, weight)
+            fmat_(_sorted_mol, f1oo[0], ao, wv[0], mask, shls_slice, ao_loc)
+            fmat_(_sorted_mol, f1oo[1], ao, wv[1], mask, shls_slice, ao_loc)
         if with_vxc:
             wv = vxc * weight
-            fmat_(mol, v1ao[0], ao, wv[0], mask, shls_slice, ao_loc)
-            fmat_(mol, v1ao[1], ao, wv[1], mask, shls_slice, ao_loc)
+            fmat_(_sorted_mol, v1ao[0], ao, wv[0], mask, shls_slice, ao_loc)
+            fmat_(_sorted_mol, v1ao[1], ao, wv[1], mask, shls_slice, ao_loc)
         if with_kxc:
-            wv = numpy.einsum('axg,byg,axbyczg,g->czg', rho1, rho1, kxc, weight)
-            fmat_(mol, k1ao[0], ao, wv[0], mask, shls_slice, ao_loc)
-            fmat_(mol, k1ao[1], ao, wv[1], mask, shls_slice, ao_loc)
+            wv = cp.einsum('axg,byg,axbyczg,g->czg', rho1, rho1, kxc, weight)
+            fmat_(_sorted_mol, k1ao[0], ao, wv[0], mask, shls_slice, ao_loc)
+            fmat_(_sorted_mol, k1ao[1], ao, wv[1], mask, shls_slice, ao_loc)
 
     f1vo[:,1:] *= -1
-    if f1oo is not None: f1oo[:,1:] *= -1
-    if v1ao is not None: v1ao[:,1:] *= -1
-    if k1ao is not None: k1ao[:,1:] *= -1
+    f1vo = opt.unsort_orbitals(f1vo, axis=[2,3])
+    if f1oo is not None: 
+        f1oo[:,1:] *= -1
+        f1oo = opt.unsort_orbitals(f1oo, axis=[2,3])
+    if v1ao is not None: 
+        v1ao[:,1:] *= -1
+        v1ao = opt.unsort_orbitals(v1ao, axis=[2,3])
+    if k1ao is not None: 
+        k1ao[:,1:] *= -1
+        k1ao = opt.unsort_orbitals(k1ao, axis=[2,3])
+
     return f1vo, f1oo, v1ao, k1ao
 
 
@@ -375,5 +438,5 @@ class Gradients(tdrhf_grad.Gradients):
 
 Grad = Gradients
 
-from pyscf import tdscf
+from gpu4pyscf import tdscf
 tdscf.uks.TDA.Gradients = tdscf.uks.TDDFT.Gradients = lib.class_as_method(Gradients)

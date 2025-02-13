@@ -177,15 +177,18 @@ def grad_elec(td_grad, x_y, atmlst=None, max_memory=2000, verbose=logger.INFO):
     h1 = cp.asarray(mf_grad.get_hcore(mol)) # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
     dh_ground = contract('xij,ij->xi', h1, oo0a + oo0b)
-    dh_td = contract('xij,ij->xi', h1, (dmz1dooa + dmz1doob) * .25 + (dmz1dooa + dmz1doob).T * .25)
+    dh_td = contract('xij,ij->xi', h1, (dmz1dooa + dmz1doob) * .25 
+                                        + (dmz1dooa + dmz1doob).T * .25)
     ds = contract('xij,ij->xi', s1, (im0+im0.T)*0.5)
 
     dh1e_ground = int3c2e.get_dh1e(mol, oo0a + oo0b) # 1/r like terms
     if mol.has_ecp():
         dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0a + oo0b) # 1/r like terms
-    dh1e_td = int3c2e.get_dh1e(mol, (dmz1dooa + dmz1doob) * .25+ (dmz1dooa + dmz1doob).T * .25) # 1/r like terms
+    dh1e_td = int3c2e.get_dh1e(mol, (dmz1dooa + dmz1doob) * .25
+                               + (dmz1dooa + dmz1doob).T * .25) # 1/r like terms
     if mol.has_ecp():
-        dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1dooa + dmz1doob) * .25 + (dmz1dooa + dmz1doob).T * .25) # 1/r like terms
+        dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1dooa + dmz1doob) * .25 
+                                                + (dmz1dooa + dmz1doob).T * .25) # 1/r like terms
     vhfopt = mf._opt_gpu.get(None, None)
     dvhf_DD_DP = rhf_grad._jk_energy_per_atom(mol, ((dmz1dooa+dmz1dooa.T)*0.25 + oo0a,
                                         (dmz1doob+dmz1doob.T)*0.25 + oo0b), vhfopt)
@@ -223,5 +226,5 @@ class Gradients(tdrhf_grad.Gradients):
 
 Grad = Gradients
 
-from pyscf import tdscf
+from gpu4pyscf import tdscf
 tdscf.uhf.TDA.Gradients = tdscf.uhf.TDHF.Gradients = lib.class_as_method(Gradients)
