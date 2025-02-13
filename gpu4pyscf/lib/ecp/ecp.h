@@ -1,6 +1,6 @@
 #define EXPCUTOFF       39   // 1e-17
 #define CUTOFF          460  // ~ 1e200
-#define CART_CUM        (455+1) // upto l = 12
+#define CART_CUM        (165) // upto l = 12
 
 // slots of bas
 #define ATOM_OF         0
@@ -17,5 +17,8 @@
 #define SO_TYPE_OF      4
 
 // atm
-#define PTR_COORD  1
-#define ATM_SLOTS   6
+#define PTR_COORD       1
+#define ATM_SLOTS       6
+
+#define ECP_LMAX        4
+#define AO_LMAX         4

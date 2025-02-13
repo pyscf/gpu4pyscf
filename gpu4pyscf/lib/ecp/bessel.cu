@@ -53,8 +53,7 @@ static double factorial2(int n){
 }
 
 __device__
-static double int_unit_xyz(int i, int j, int k)
-{
+static double int_unit_xyz(int i, int j, int k){
     if (i % 2 || j % 2 || k % 2) {
         return 0;
     } else {

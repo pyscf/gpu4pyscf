@@ -163,7 +163,7 @@ class KnownValues(unittest.TestCase):
         rs, ws = radi.gauss_chebyshev(99)
         ur = numpy.random.rand(99)#rad_part(mol, mol._ecpbas, rs) * ws
         cache = numpy.empty(100000)
-        for l in range(8):
+        for l in range(4):
             rad_all1 = numpy.zeros([l+1,l+1])
             libecp_cpu.type1_rad_part(
                 rad_all1.ctypes.data_as(ctypes.c_void_p),
@@ -189,7 +189,7 @@ class KnownValues(unittest.TestCase):
         numpy.random.seed(4)
         n = 1
         ri = numpy.random.random(3) - .5
-        for l in range(5):
+        for l in range(8):
             rad_all = numpy.random.random((l+1,l+1))
             rad_ang1 = numpy.zeros((l+1,l+1,l+1))
             libecp_cpu.type1_rad_ang(rad_ang1.ctypes.data_as(ctypes.c_void_p),
@@ -242,9 +242,7 @@ class KnownValues(unittest.TestCase):
                 tasks = cupy.asarray([ish,jsh,0], dtype=numpy.int32)
                 li = mol.bas_angular(ish)
                 lj = mol.bas_angular(jsh)
-                if li != 1 or lj != 3:
-                    continue
-                print(li, lj)
+
                 libecp.ECPtype1_cart(
                     ctypes.cast(mat1.data.ptr, ctypes.c_void_p),
                     ctypes.cast(tasks.data.ptr, ctypes.c_void_p),
@@ -256,10 +254,116 @@ class KnownValues(unittest.TestCase):
                     ctypes.cast(env.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(li),
                     ctypes.c_int(lj))
-                print(mat1[:3,:3])
+                assert numpy.linalg.norm(mat1.get() - mat0) < 1e-10
+
+    def test_type2_rad_part(self):
+        rc = .8712
+        nrs = 99
+        rs, _ = radi.gauss_chebyshev(nrs)
+        cache = numpy.empty(100000)
+        for ish in range(mol.nbas):
+            npi = mol.bas_nprim(ish)
+            l = mol.bas_angular(ish)
+            ai = mol.bas_exp(ish)
+            ci = mol._libcint_ctr_coeff(ish)
+            for lc in range(5):
+                facs1 = numpy.zeros((nrs, l+lc+1))
+                libecp_cpu.type2_facs_rad(
+                    facs1.ctypes.data_as(ctypes.c_void_p),
+                    ctypes.c_int(ish), ctypes.c_int(lc),
+                    ctypes.c_double(rc),
+                    rs.ctypes.data_as(ctypes.c_void_p),
+                    ctypes.c_int(len(rs)), ctypes.c_int(1),
+                    mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(mol.natm),
+                    mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(mol.nbas),
+                    mol._env.ctypes.data_as(ctypes.c_void_p),
+                    cache.ctypes.data_as(ctypes.c_void_p))
+
+                facs0 = cupy.zeros_like(facs1)
+                ai = cupy.asarray(ai)
+                ci = cupy.asarray(ci)
+                libecp.ECPtype2_facs_rad(
+                    ctypes.cast(facs0.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(l),
+                    ctypes.c_int(lc),
+                    ctypes.c_int(npi),
+                    ctypes.c_double(rc),
+                    ctypes.cast(ci.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(ai.data.ptr, ctypes.c_void_p))
+
+                assert numpy.linalg.norm(facs1 - facs0.get()) < 1e-10
+
+    def test_type2_ang_part(self):
+        numpy.random.seed(4)
+        rca = numpy.random.random(3)
+        cache = numpy.empty(100000)
+        for li in range(4):
+            for lc in range(4):
+                facs1 = numpy.zeros((li+1,(li+1)*(li+2)//2,lc*2+1,li+lc+1))
+                libecp_cpu.type2_facs_ang(
+                    facs1.ctypes.data_as(ctypes.c_void_p),
+                    ctypes.c_int(li), ctypes.c_int(lc),
+                    rca.ctypes.data_as(ctypes.c_void_p),
+                    cache.ctypes.data_as(ctypes.c_void_p))
+                facs0 = cupy.zeros_like(facs1)
+                rca_gpu = cupy.asarray(rca)
+                libecp.ECPtype2_facs_ang(
+                    ctypes.cast(facs0.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(rca_gpu.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(li),
+                    ctypes.c_int(lc))
+                assert numpy.linalg.norm(facs0.get() - facs1) < 1e-10
+
+    def test_type2_cart(self):
+        for ish in range(mol.nbas):
+            for jsh in range(mol.nbas):
+                li = mol.bas_angular(ish)
+                lj = mol.bas_angular(jsh)
+                di = (li+1) * (li+2) // 2 * mol.bas_nctr(ish)
+                dj = (lj+1) * (lj+2) // 2 * mol.bas_nctr(jsh)
+                mat0 = numpy.zeros((di,dj))
+                cache = numpy.empty(100000)
+                ecpbas = mol._ecpbas.copy()
+                shls = (ish, jsh)
+                shl_ptr = (ctypes.c_int*2)(*shls)
+                null_ptr = lib.c_null_ptr()
+
+                libecp_cpu.ECPtype2_cart(
+                    mat0.ctypes.data_as(ctypes.c_void_p),
+                    shl_ptr,
+                    ecpbas.ctypes.data_as(ctypes.c_void_p),
+                    ctypes.c_int(len(mol._ecpbas)),
+                    mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(mol.natm),
+                    mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(mol.nbas),
+                    mol._env.ctypes.data_as(ctypes.c_void_p),
+                    null_ptr, cache.ctypes.data_as(ctypes.c_void_p))
+
+                mat1 = cupy.zeros_like(mat0)
+                ecpbas0 = ecpbas[ecpbas[:,gto.ANG_OF] >= 0]
+                ecpbas = cupy.asarray(ecpbas0)
+                atm = cupy.asarray(mol._atm)
+                bas = cupy.asarray(mol._bas)
+                env = cupy.asarray(mol._env)
+                ecploc = cupy.asarray([0,len(ecpbas)], dtype=numpy.int32)
+                tasks = cupy.asarray([ish,jsh,0], dtype=numpy.int32)
+                ntasks = 1
+                libecp.ECPtype2_cart(
+                    ctypes.cast(mat1.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(tasks.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(ntasks),
+                    ctypes.cast(ecpbas.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(ecploc.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(atm.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(bas.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(env.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(li),
+                    ctypes.c_int(lj))
+                print(bas[ish])
+                print(bas[jsh])
+                print(li, lj, ish, jsh)
                 print(mat0[:3,:3])
-                #print(mat1.get() - mat0)
-                #print(mat0[:3,:3])
+                print((mat1[:3,:3].get() + 1e-16))
+                print('-------')
                 assert numpy.linalg.norm(mat1.get() - mat0) < 1e-10
 
 if __name__ == "__main__":

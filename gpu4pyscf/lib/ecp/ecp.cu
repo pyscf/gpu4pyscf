@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include "ecp.h"
 #include "bessel.cu"
+#include "cart2sph.cu"
 
 __device__
 static double r99[] = {
@@ -115,9 +116,7 @@ static int _cart_pow_z[] = {
 };
 
 __constant__
-static int _offset_cart[] = {0, 1, 4, 10, 20, 35, 56, 84, 120,
-                             165, 220, 286, 364, 455, 560};
-
+static int _offset_cart[] = {0, 1, 4, 10, 20, 35, 56, 84, 120, 165};
 
 __constant__
 static double _binom[] = {
@@ -141,29 +140,34 @@ static double _common_fac[] = {
     1.0,
     1.0,
     1.0,
+    1.0,
+    1.0,
     1.0
 };
 
-template<int LMAX> __device__
-static void ang_nuc_part(double *omega, double rx, double ry, double rz){
+__device__
+static void ang_nuc_part(double *omega_cum, int l, double rx, double ry, double rz){
     /*
     Accumulated angular ECP part in Cartesian
     Angular momentum L = 0, 1, ... LMAX
     Cartesian xyz --> Spherical --> Cartesian
+
+    The code is generated with generate_ang_nuc.py
     */
-    if (LMAX >= 0){
+    double *omega = omega_cum;
+    if (l >= 0){
         omega[0] = 0.07957747154594767;
         omega += 1;
     }
 
-    if (LMAX >= 1){
+    if (l >= 1){
         omega[0] = 0.2387324146378430 * rx;
         omega[1] = 0.2387324146378430 * ry;
         omega[2] = 0.2387324146378430 * rz;
         omega += 3;
     }
 
-    if (LMAX >= 2){
+    if (l >= 2){
         double g0 = rx * rx;
         double g1 = rx * ry;
         double g2 = rx * rz;
@@ -186,7 +190,7 @@ static void ang_nuc_part(double *omega, double rx, double ry, double rz){
         omega += 6;
     }
 
-    if (LMAX >= 3){
+    if (l >= 3){
         double g0 = rx * rx * rx;
         double g1 = rx * rx * ry;
         double g2 = rx * rx * rz;
@@ -216,11 +220,10 @@ static void ang_nuc_part(double *omega, double rx, double ry, double rz){
         omega[7] = -1.119528997770346170 * c3 - 1.445305721320277020 * c5;
         omega[8] =  1.828183197857862944 * c2;
         omega[9] =  0.746352665180230782 * c3;
-
         omega += 10;
     }
 
-    if (LMAX >= 4){
+    if (l >= 4){
         double g0  = rx * rx * rx * rx;
         double g1  = rx * rx * rx * ry;
         double g2  = rx * rx * rx * rz;
@@ -262,86 +265,425 @@ static void ang_nuc_part(double *omega, double rx, double ry, double rz){
         omega[12]=-2.538853125964903290 * c4 - 2.838524087272680054 * c6;
         omega[13]= 2.676186174229156671 * c3;
         omega[14]= 0.846284375321634430 * c4;
-
         omega += 15;
     }
 
-    if (LMAX >= 5){
-        printf("L >= 5 is not supported\n");
+    if (l >= 5){
+        double g0 = rx*rx*rx*rx*rx;
+        double g1 = rx*rx*rx*rx*ry;
+        double g2 = rx*rx*rx*rx*rz;
+        double g3 = rx*rx*rx*ry*ry;
+        double g4 = rx*rx*rx*ry*rz;
+        double g5 = rx*rx*rx*rz*rz;
+        double g6 = rx*rx*ry*ry*ry;
+        double g7 = rx*rx*ry*ry*rz;
+        double g8 = rx*rx*ry*rz*rz;
+        double g9 = rx*rx*rz*rz*rz;
+        double g10 = rx*ry*ry*ry*ry;
+        double g11 = rx*ry*ry*ry*rz;
+        double g12 = rx*ry*ry*rz*rz;
+        double g13 = rx*ry*rz*rz*rz;
+        double g14 = rx*rz*rz*rz*rz;
+        double g15 = ry*ry*ry*ry*ry;
+        double g16 = ry*ry*ry*ry*rz;
+        double g17 = ry*ry*ry*rz*rz;
+        double g18 = ry*ry*rz*rz*rz;
+        double g19 = ry*rz*rz*rz*rz;
+        double g20 = rz*rz*rz*rz*rz;
+        double c0 = 3.2819102842008507*g1 + -6.563820568401701*g6 + 0.6563820568401701*g15;
+        double c1 = 8.302649259524165*g4 + -8.302649259524165*g11;
+        double c2 = -1.467714898305751*g1 + -0.9784765988705008*g6 + 11.741719186446009*g8 + 0.4892382994352504*g15 + -3.913906395482003*g17;
+        double c3 = -4.793536784973324*g4 + -4.793536784973324*g11 + 9.587073569946648*g13;
+        double c4 = 0.45294665119569694*g1 + 0.9058933023913939*g6 + -5.435359814348363*g8 + 0.45294665119569694*g15 + -5.435359814348363*g17 + 3.6235732095655755*g19;
+        double c5 = 1.754254836801354*g2 + 3.508509673602708*g7 + -4.678012898136944*g9 + 1.754254836801354*g16 + -4.678012898136944*g18 + 0.9356025796273888*g20;
+        double c6 = 0.45294665119569694*g0 + 0.9058933023913939*g3 + -5.435359814348363*g5 + 0.45294665119569694*g10 + -5.435359814348363*g12 + 3.6235732095655755*g14;
+        double c7 = -2.396768392486662*g2 + 4.793536784973324*g9 + 2.396768392486662*g16 + -4.793536784973324*g18;
+        double c8 = -0.4892382994352504*g0 + 0.9784765988705008*g3 + 3.913906395482003*g5 + 1.467714898305751*g10 + -11.741719186446009*g12;
+        double c9 = 2.075662314881041*g2 + -12.453973889286248*g7 + 2.075662314881041*g16;
+        double c10 = 0.6563820568401701*g0 + -6.563820568401701*g3 + 3.2819102842008507*g10;
+        omega[0] = 0.45294665119569694*c6 + -0.4892382994352504*c8 + 0.6563820568401701*c10;
+        omega[1] = 3.2819102842008507*c0 + -1.467714898305751*c2 + 0.45294665119569694*c4;
+        omega[2] = 1.754254836801354*c5 + -2.396768392486662*c7 + 2.075662314881041*c9;
+        omega[3] = 0.9058933023913939*c6 + 0.9784765988705008*c8 + -6.563820568401701*c10;
+        omega[4] = 8.302649259524165*c1 + -4.793536784973324*c3;
+        omega[5] = -5.435359814348363*c6 + 3.913906395482003*c8;
+        omega[6] = -6.563820568401701*c0 + -0.9784765988705008*c2 + 0.9058933023913939*c4;
+        omega[7] = 3.508509673602708*c5 + -12.453973889286248*c9;
+        omega[8] = 11.741719186446009*c2 + -5.435359814348363*c4;
+        omega[9] = -4.678012898136944*c5 + 4.793536784973324*c7;
+        omega[10] = 0.45294665119569694*c6 + 1.467714898305751*c8 + 3.2819102842008507*c10;
+        omega[11] = -8.302649259524165*c1 + -4.793536784973324*c3;
+        omega[12] = -5.435359814348363*c6 + -11.741719186446009*c8;
+        omega[13] = 9.587073569946648*c3;
+        omega[14] = 3.6235732095655755*c6;
+        omega[15] = 0.6563820568401701*c0 + 0.4892382994352504*c2 + 0.45294665119569694*c4;
+        omega[16] = 1.754254836801354*c5 + 2.396768392486662*c7 + 2.075662314881041*c9;
+        omega[17] = -3.913906395482003*c2 + -5.435359814348363*c4;
+        omega[18] = -4.678012898136944*c5 + -4.793536784973324*c7;
+        omega[19] = 3.6235732095655755*c4;
+        omega[20] = 0.9356025796273888*c5;
+        omega += 21;
     }
-}
 
-template <int L>
-__global__
-void _ang_nuc_part(double *omega, double *x, int n){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n){
-        return;
+    if (l >= 6) {
+        double g0 = rx*rx*rx*rx*rx*rx;
+        double g1 = rx*rx*rx*rx*rx*ry;
+        double g2 = rx*rx*rx*rx*rx*rz;
+        double g3 = rx*rx*rx*rx*ry*ry;
+        double g4 = rx*rx*rx*rx*ry*rz;
+        double g5 = rx*rx*rx*rx*rz*rz;
+        double g6 = rx*rx*rx*ry*ry*ry;
+        double g7 = rx*rx*rx*ry*ry*rz;
+        double g8 = rx*rx*rx*ry*rz*rz;
+        double g9 = rx*rx*rx*rz*rz*rz;
+        double g10 = rx*rx*ry*ry*ry*ry;
+        double g11 = rx*rx*ry*ry*ry*rz;
+        double g12 = rx*rx*ry*ry*rz*rz;
+        double g13 = rx*rx*ry*rz*rz*rz;
+        double g14 = rx*rx*rz*rz*rz*rz;
+        double g15 = rx*ry*ry*ry*ry*ry;
+        double g16 = rx*ry*ry*ry*ry*rz;
+        double g17 = rx*ry*ry*ry*rz*rz;
+        double g18 = rx*ry*ry*rz*rz*rz;
+        double g19 = rx*ry*rz*rz*rz*rz;
+        double g20 = rx*rz*rz*rz*rz*rz;
+        double g21 = ry*ry*ry*ry*ry*ry;
+        double g22 = ry*ry*ry*ry*ry*rz;
+        double g23 = ry*ry*ry*ry*rz*rz;
+        double g24 = ry*ry*ry*rz*rz*rz;
+        double g25 = ry*ry*rz*rz*rz*rz;
+        double g26 = ry*rz*rz*rz*rz*rz;
+        double g27 = rz*rz*rz*rz*rz*rz;
+        double c0 = 4.099104631151486*g1 + -13.663682103838289*g6 + 4.099104631151486*g15;
+        double c1 = 11.833095811158763*g4 + -23.666191622317527*g11 + 2.3666191622317525*g22;
+        double c2 = -2.0182596029148963*g1 + 20.182596029148968*g8 + 2.0182596029148963*g15 + -20.182596029148968*g17;
+        double c3 = -8.29084733563431*g4 + -5.527231557089541*g11 + 22.108926228358165*g13 + 2.7636157785447706*g22 + -7.369642076119389*g24;
+        double c4 = 0.9212052595149236*g1 + 1.8424105190298472*g6 + -14.739284152238778*g8 + 0.9212052595149236*g15 + -14.739284152238778*g17 + 14.739284152238778*g19;
+        double c5 = 2.913106812593657*g4 + 5.826213625187314*g11 + -11.652427250374627*g13 + 2.913106812593657*g22 + -11.652427250374627*g24 + 4.6609709001498505*g26;
+        double c6 = -0.3178460113381421*g0 + -0.9535380340144264*g3 + 5.721228204086558*g5 + -0.9535380340144264*g10 + 11.442456408173117*g12 + -7.628304272115411*g14 + -0.3178460113381421*g21 + 5.721228204086558*g23 + -7.628304272115411*g25 + 1.0171072362820548*g27;
+        double c7 = 2.913106812593657*g2 + 5.826213625187314*g7 + -11.652427250374627*g9 + 2.913106812593657*g16 + -11.652427250374627*g18 + 4.6609709001498505*g20;
+        double c8 = 0.4606026297574618*g0 + 0.4606026297574618*g3 + -7.369642076119389*g5 + -0.4606026297574618*g10 + 7.369642076119389*g14 + -0.4606026297574618*g21 + 7.369642076119389*g23 + -7.369642076119389*g25;
+        double c9 = -2.7636157785447706*g2 + 5.527231557089541*g7 + 7.369642076119389*g9 + 8.29084733563431*g16 + -22.108926228358165*g18;
+        double c10 = -0.5045649007287241*g0 + 2.52282450364362*g3 + 5.045649007287242*g5 + 2.52282450364362*g10 + -30.273894043723452*g12 + -0.5045649007287241*g21 + 5.045649007287242*g23;
+        double c11 = 2.3666191622317525*g2 + -23.666191622317527*g7 + 11.833095811158763*g16;
+        double c12 = 0.6831841051919144*g0 + -10.247761577878716*g3 + 10.247761577878716*g10 + -0.6831841051919144*g21;
+        omega[0] = -0.3178460113381421*c6 + 0.4606026297574618*c8 + -0.5045649007287241*c10 + 0.6831841051919144*c12;
+        omega[1] = 4.099104631151486*c0 + -2.0182596029148963*c2 + 0.9212052595149236*c4;
+        omega[2] = 2.913106812593657*c7 + -2.7636157785447706*c9 + 2.3666191622317525*c11;
+        omega[3] = -0.9535380340144264*c6 + 0.4606026297574618*c8 + 2.52282450364362*c10 + -10.247761577878716*c12;
+        omega[4] = 11.833095811158763*c1 + -8.29084733563431*c3 + 2.913106812593657*c5;
+        omega[5] = 5.721228204086558*c6 + -7.369642076119389*c8 + 5.045649007287242*c10;
+        omega[6] = -13.663682103838289*c0 + 1.8424105190298472*c4;
+        omega[7] = 5.826213625187314*c7 + 5.527231557089541*c9 + -23.666191622317527*c11;
+        omega[8] = 20.182596029148968*c2 + -14.739284152238778*c4;
+        omega[9] = -11.652427250374627*c7 + 7.369642076119389*c9;
+        omega[10] = -0.9535380340144264*c6 + -0.4606026297574618*c8 + 2.52282450364362*c10 + 10.247761577878716*c12;
+        omega[11] = -23.666191622317527*c1 + -5.527231557089541*c3 + 5.826213625187314*c5;
+        omega[12] = 11.442456408173117*c6 + -30.273894043723452*c10;
+        omega[13] = 22.108926228358165*c3 + -11.652427250374627*c5;
+        omega[14] = -7.628304272115411*c6 + 7.369642076119389*c8;
+        omega[15] = 4.099104631151486*c0 + 2.0182596029148963*c2 + 0.9212052595149236*c4;
+        omega[16] = 2.913106812593657*c7 + 8.29084733563431*c9 + 11.833095811158763*c11;
+        omega[17] = -20.182596029148968*c2 + -14.739284152238778*c4;
+        omega[18] = -11.652427250374627*c7 + -22.108926228358165*c9;
+        omega[19] = 14.739284152238778*c4;
+        omega[20] = 4.6609709001498505*c7;
+        omega[21] = -0.3178460113381421*c6 + -0.4606026297574618*c8 + -0.5045649007287241*c10 + -0.6831841051919144*c12;
+        omega[22] = 2.3666191622317525*c1 + 2.7636157785447706*c3 + 2.913106812593657*c5;
+        omega[23] = 5.721228204086558*c6 + 7.369642076119389*c8 + 5.045649007287242*c10;
+        omega[24] = -7.369642076119389*c3 + -11.652427250374627*c5;
+        omega[25] = -7.628304272115411*c6 + -7.369642076119389*c8;
+        omega[26] = 4.6609709001498505*c5;
+        omega[27] = 1.0171072362820548*c6;
+        omega += 28;
     }
-    int offset = idx * (2*L+1);
-    ang_nuc_part<L>(omega+offset, x[3*idx], x[3*idx+1], x[3*idx+2]);
+
+    if (l >= 7) {
+        double g0 = rx*rx*rx*rx*rx*rx*rx;
+        double g1 = rx*rx*rx*rx*rx*rx*ry;
+        double g2 = rx*rx*rx*rx*rx*rx*rz;
+        double g3 = rx*rx*rx*rx*rx*ry*ry;
+        double g4 = rx*rx*rx*rx*rx*ry*rz;
+        double g5 = rx*rx*rx*rx*rx*rz*rz;
+        double g6 = rx*rx*rx*rx*ry*ry*ry;
+        double g7 = rx*rx*rx*rx*ry*ry*rz;
+        double g8 = rx*rx*rx*rx*ry*rz*rz;
+        double g9 = rx*rx*rx*rx*rz*rz*rz;
+        double g10 = rx*rx*rx*ry*ry*ry*ry;
+        double g11 = rx*rx*rx*ry*ry*ry*rz;
+        double g12 = rx*rx*rx*ry*ry*rz*rz;
+        double g13 = rx*rx*rx*ry*rz*rz*rz;
+        double g14 = rx*rx*rx*rz*rz*rz*rz;
+        double g15 = rx*rx*ry*ry*ry*ry*ry;
+        double g16 = rx*rx*ry*ry*ry*ry*rz;
+        double g17 = rx*rx*ry*ry*ry*rz*rz;
+        double g18 = rx*rx*ry*ry*rz*rz*rz;
+        double g19 = rx*rx*ry*rz*rz*rz*rz;
+        double g20 = rx*rx*rz*rz*rz*rz*rz;
+        double g21 = rx*ry*ry*ry*ry*ry*ry;
+        double g22 = rx*ry*ry*ry*ry*ry*rz;
+        double g23 = rx*ry*ry*ry*ry*rz*rz;
+        double g24 = rx*ry*ry*ry*rz*rz*rz;
+        double g25 = rx*ry*ry*rz*rz*rz*rz;
+        double g26 = rx*ry*rz*rz*rz*rz*rz;
+        double g27 = rx*rz*rz*rz*rz*rz*rz;
+        double g28 = ry*ry*ry*ry*ry*ry*ry;
+        double g29 = ry*ry*ry*ry*ry*ry*rz;
+        double g30 = ry*ry*ry*ry*ry*rz*rz;
+        double g31 = ry*ry*ry*ry*rz*rz*rz;
+        double g32 = ry*ry*ry*rz*rz*rz*rz;
+        double g33 = ry*ry*rz*rz*rz*rz*rz;
+        double g34 = ry*rz*rz*rz*rz*rz*rz;
+        double g35 = rz*rz*rz*rz*rz*rz*rz;
+        double c0 = 4.950139127672174*g1 + -24.75069563836087*g6 + 14.850417383016522*g15 + -0.7071627325245963*g28;
+        double c1 = 15.8757639708114*g4 + -52.919213236038004*g11 + 15.8757639708114*g22;
+        double c2 = -2.594577893601302*g1 + 2.594577893601302*g6 + 31.134934723215622*g8 + 4.670240208482344*g15 + -62.269869446431244*g17 + -0.5189155787202604*g28 + 6.226986944643125*g30;
+        double c3 = -12.45397388928625*g4 + 41.51324629762083*g13 + 12.45397388928625*g22 + -41.51324629762083*g24;
+        double c4 = 1.4081304047606462*g1 + 2.3468840079344107*g6 + -28.162608095212924*g8 + 0.4693768015868821*g15 + -18.77507206347528*g17 + 37.55014412695057*g19 + -0.4693768015868821*g28 + 9.38753603173764*g30 + -12.516714708983523*g32;
+        double c5 = 6.637990386674741*g4 + 13.275980773349483*g11 + -35.402615395598616*g13 + 6.637990386674741*g22 + -35.402615395598616*g24 + 21.241569237359172*g26;
+        double c6 = -0.4516580379125866*g1 + -1.35497411373776*g6 + 10.839792909902078*g8 + -1.35497411373776*g15 + 21.679585819804156*g17 + -21.679585819804156*g19 + -0.4516580379125866*g28 + 10.839792909902078*g30 + -21.679585819804156*g32 + 5.781222885281109*g34;
+        double c7 = -2.389949691920173*g2 + -7.169849075760519*g7 + 14.339698151521036*g9 + -7.169849075760519*g16 + 28.679396303042072*g18 + -11.47175852121683*g20 + -2.389949691920173*g29 + 14.339698151521036*g31 + -11.47175852121683*g33 + 1.092548430592079*g35;
+        double c8 = -0.4516580379125866*g0 + -1.35497411373776*g3 + 10.839792909902078*g5 + -1.35497411373776*g10 + 21.679585819804156*g12 + -21.679585819804156*g14 + -0.4516580379125866*g21 + 10.839792909902078*g23 + -21.679585819804156*g25 + 5.781222885281109*g27;
+        double c9 = 3.3189951933373707*g2 + 3.3189951933373707*g7 + -17.701307697799308*g9 + -3.3189951933373707*g16 + 10.620784618679586*g20 + -3.3189951933373707*g29 + 17.701307697799308*g31 + -10.620784618679586*g33;
+        double c10 = 0.4693768015868821*g0 + -0.4693768015868821*g3 + -9.38753603173764*g5 + -2.3468840079344107*g10 + 18.77507206347528*g12 + 12.516714708983523*g14 + -1.4081304047606462*g21 + 28.162608095212924*g23 + -37.55014412695057*g25;
+        double c11 = -3.1134934723215624*g2 + 15.567467361607811*g7 + 10.378311574405208*g9 + 15.567467361607811*g16 + -62.269869446431244*g18 + -3.1134934723215624*g29 + 10.378311574405208*g31;
+        double c12 = -0.5189155787202604*g0 + 4.670240208482344*g3 + 6.226986944643125*g5 + 2.594577893601302*g10 + -62.269869446431244*g12 + -2.594577893601302*g21 + 31.134934723215622*g23;
+        double c13 = 2.6459606618019*g2 + -39.6894099270285*g7 + 39.6894099270285*g16 + -2.6459606618019*g29;
+        double c14 = 0.7071627325245963*g0 + -14.850417383016522*g3 + 24.75069563836087*g10 + -4.950139127672174*g21;
+        omega[0] = -0.4516580379125866*c8 + 0.4693768015868821*c10 + -0.5189155787202604*c12 + 0.7071627325245963*c14;
+        omega[1] = 4.950139127672174*c0 + -2.594577893601302*c2 + 1.4081304047606462*c4 + -0.4516580379125866*c6;
+        omega[2] = -2.389949691920173*c7 + 3.3189951933373707*c9 + -3.1134934723215624*c11 + 2.6459606618019*c13;
+        omega[3] = -1.35497411373776*c8 + -0.4693768015868821*c10 + 4.670240208482344*c12 + -14.850417383016522*c14;
+        omega[4] = 15.8757639708114*c1 + -12.45397388928625*c3 + 6.637990386674741*c5;
+        omega[5] = 10.839792909902078*c8 + -9.38753603173764*c10 + 6.226986944643125*c12;
+        omega[6] = -24.75069563836087*c0 + 2.594577893601302*c2 + 2.3468840079344107*c4 + -1.35497411373776*c6;
+        omega[7] = -7.169849075760519*c7 + 3.3189951933373707*c9 + 15.567467361607811*c11 + -39.6894099270285*c13;
+        omega[8] = 31.134934723215622*c2 + -28.162608095212924*c4 + 10.839792909902078*c6;
+        omega[9] = 14.339698151521036*c7 + -17.701307697799308*c9 + 10.378311574405208*c11;
+        omega[10] = -1.35497411373776*c8 + -2.3468840079344107*c10 + 2.594577893601302*c12 + 24.75069563836087*c14;
+        omega[11] = -52.919213236038004*c1 + 13.275980773349483*c5;
+        omega[12] = 21.679585819804156*c8 + 18.77507206347528*c10 + -62.269869446431244*c12;
+        omega[13] = 41.51324629762083*c3 + -35.402615395598616*c5;
+        omega[14] = -21.679585819804156*c8 + 12.516714708983523*c10;
+        omega[15] = 14.850417383016522*c0 + 4.670240208482344*c2 + 0.4693768015868821*c4 + -1.35497411373776*c6;
+        omega[16] = -7.169849075760519*c7 + -3.3189951933373707*c9 + 15.567467361607811*c11 + 39.6894099270285*c13;
+        omega[17] = -62.269869446431244*c2 + -18.77507206347528*c4 + 21.679585819804156*c6;
+        omega[18] = 28.679396303042072*c7 + -62.269869446431244*c11;
+        omega[19] = 37.55014412695057*c4 + -21.679585819804156*c6;
+        omega[20] = -11.47175852121683*c7 + 10.620784618679586*c9;
+        omega[21] = -0.4516580379125866*c8 + -1.4081304047606462*c10 + -2.594577893601302*c12 + -4.950139127672174*c14;
+        omega[22] = 15.8757639708114*c1 + 12.45397388928625*c3 + 6.637990386674741*c5;
+        omega[23] = 10.839792909902078*c8 + 28.162608095212924*c10 + 31.134934723215622*c12;
+        omega[24] = -41.51324629762083*c3 + -35.402615395598616*c5;
+        omega[25] = -21.679585819804156*c8 + -37.55014412695057*c10;
+        omega[26] = 21.241569237359172*c5;
+        omega[27] = 5.781222885281109*c8;
+        omega[28] = -0.7071627325245963*c0 + -0.5189155787202604*c2 + -0.4693768015868821*c4 + -0.4516580379125866*c6;
+        omega[29] = -2.389949691920173*c7 + -3.3189951933373707*c9 + -3.1134934723215624*c11 + -2.6459606618019*c13;
+        omega[30] = 6.226986944643125*c2 + 9.38753603173764*c4 + 10.839792909902078*c6;
+        omega[31] = 14.339698151521036*c7 + 17.701307697799308*c9 + 10.378311574405208*c11;
+        omega[32] = -12.516714708983523*c4 + -21.679585819804156*c6;
+        omega[33] = -11.47175852121683*c7 + -10.620784618679586*c9;
+        omega[34] = 5.781222885281109*c6;
+        omega[35] = 1.092548430592079*c7;
+        omega += 36;
+    }
+
+    if (l >= 8) {
+        double g0 = rx*rx*rx*rx*rx*rx*rx*rx;
+        double g1 = rx*rx*rx*rx*rx*rx*rx*ry;
+        double g2 = rx*rx*rx*rx*rx*rx*rx*rz;
+        double g3 = rx*rx*rx*rx*rx*rx*ry*ry;
+        double g4 = rx*rx*rx*rx*rx*rx*ry*rz;
+        double g5 = rx*rx*rx*rx*rx*rx*rz*rz;
+        double g6 = rx*rx*rx*rx*rx*ry*ry*ry;
+        double g7 = rx*rx*rx*rx*rx*ry*ry*rz;
+        double g8 = rx*rx*rx*rx*rx*ry*rz*rz;
+        double g9 = rx*rx*rx*rx*rx*rz*rz*rz;
+        double g10 = rx*rx*rx*rx*ry*ry*ry*ry;
+        double g11 = rx*rx*rx*rx*ry*ry*ry*rz;
+        double g12 = rx*rx*rx*rx*ry*ry*rz*rz;
+        double g13 = rx*rx*rx*rx*ry*rz*rz*rz;
+        double g14 = rx*rx*rx*rx*rz*rz*rz*rz;
+        double g15 = rx*rx*rx*ry*ry*ry*ry*ry;
+        double g16 = rx*rx*rx*ry*ry*ry*ry*rz;
+        double g17 = rx*rx*rx*ry*ry*ry*rz*rz;
+        double g18 = rx*rx*rx*ry*ry*rz*rz*rz;
+        double g19 = rx*rx*rx*ry*rz*rz*rz*rz;
+        double g20 = rx*rx*rx*rz*rz*rz*rz*rz;
+        double g21 = rx*rx*ry*ry*ry*ry*ry*ry;
+        double g22 = rx*rx*ry*ry*ry*ry*ry*rz;
+        double g23 = rx*rx*ry*ry*ry*ry*rz*rz;
+        double g24 = rx*rx*ry*ry*ry*rz*rz*rz;
+        double g25 = rx*rx*ry*ry*rz*rz*rz*rz;
+        double g26 = rx*rx*ry*rz*rz*rz*rz*rz;
+        double g27 = rx*rx*rz*rz*rz*rz*rz*rz;
+        double g28 = rx*ry*ry*ry*ry*ry*ry*ry;
+        double g29 = rx*ry*ry*ry*ry*ry*ry*rz;
+        double g30 = rx*ry*ry*ry*ry*ry*rz*rz;
+        double g31 = rx*ry*ry*ry*ry*rz*rz*rz;
+        double g32 = rx*ry*ry*ry*rz*rz*rz*rz;
+        double g33 = rx*ry*ry*rz*rz*rz*rz*rz;
+        double g34 = rx*ry*rz*rz*rz*rz*rz*rz;
+        double g35 = rx*rz*rz*rz*rz*rz*rz*rz;
+        double g36 = ry*ry*ry*ry*ry*ry*ry*ry;
+        double g37 = ry*ry*ry*ry*ry*ry*ry*rz;
+        double g38 = ry*ry*ry*ry*ry*ry*rz*rz;
+        double g39 = ry*ry*ry*ry*ry*rz*rz*rz;
+        double g40 = ry*ry*ry*ry*rz*rz*rz*rz;
+        double g41 = ry*ry*ry*rz*rz*rz*rz*rz;
+        double g42 = ry*ry*rz*rz*rz*rz*rz*rz;
+        double g43 = ry*rz*rz*rz*rz*rz*rz*rz;
+        double g44 = rz*rz*rz*rz*rz*rz*rz*rz;
+        double c0 = 5.83141328139864*g1 + -40.81989296979048*g6 + 40.81989296979048*g15 + -5.83141328139864*g28;
+        double c1 = 20.40994648489524*g4 + -102.0497324244762*g11 + 61.22983945468572*g22 + -2.91570664069932*g37;
+        double c2 = -3.193996596357255*g1 + 7.452658724833595*g6 + 44.71595234900157*g8 + 7.452658724833595*g15 + -149.0531744966719*g17 + -3.193996596357255*g28 + 44.71595234900157*g30;
+        double c3 = -17.24955311049054*g4 + 17.24955311049054*g11 + 68.99821244196217*g13 + 31.04919559888297*g22 + -137.9964248839243*g24 + -3.449910622098108*g37 + 13.79964248839243*g39;
+        double c4 = 1.913666099037323*g1 + 1.913666099037323*g6 + -45.92798637689575*g8 + -1.913666099037323*g15 + 76.54664396149292*g19 + -1.913666099037323*g28 + 45.92798637689575*g30 + -76.54664396149292*g32;
+        double c5 = 11.1173953976599*g4 + 18.52899232943316*g11 + -74.11596931773265*g13 + 3.705798465886632*g22 + -49.41064621182176*g24 + 59.29277545418611*g26 + -3.705798465886632*g37 + 24.70532310591088*g39 + -19.7642584847287*g41;
+        double c6 = -0.912304516869819*g1 + -2.736913550609457*g6 + 27.36913550609457*g8 + -2.736913550609457*g15 + 54.73827101218914*g17 + -72.98436134958553*g19 + -0.912304516869819*g28 + 27.36913550609457*g30 + -72.98436134958553*g32 + 29.19374453983421*g34;
+        double c7 = -3.8164436064573*g4 + -11.4493308193719*g11 + 30.5315488516584*g13 + -11.4493308193719*g22 + 61.06309770331679*g24 + -36.63785862199007*g26 + -3.8164436064573*g37 + 30.5315488516584*g39 + -36.63785862199007*g41 + 6.978639737521918*g43;
+        double c8 = 0.3180369672047749*g0 + 1.272147868819099*g3 + -10.1771829505528*g5 + 1.908221803228649*g10 + -30.53154885165839*g12 + 30.53154885165839*g14 + 1.272147868819099*g21 + -30.53154885165839*g23 + 61.06309770331677*g25 + -16.28349272088447*g27 + 0.3180369672047749*g36 + -10.1771829505528*g38 + 30.53154885165839*g40 + -16.28349272088447*g42 + 1.16310662292032*g44;
+        double c9 = -3.8164436064573*g2 + -11.4493308193719*g7 + 30.5315488516584*g9 + -11.4493308193719*g16 + 61.06309770331679*g18 + -36.63785862199007*g20 + -3.8164436064573*g29 + 30.5315488516584*g31 + -36.63785862199007*g33 + 6.978639737521918*g35;
+        double c10 = -0.4561522584349095*g0 + -0.912304516869819*g3 + 13.68456775304729*g5 + 13.68456775304729*g12 + -36.49218067479276*g14 + 0.912304516869819*g21 + -13.68456775304729*g23 + 14.5968722699171*g27 + 0.4561522584349095*g36 + -13.68456775304729*g38 + 36.49218067479276*g40 + -14.5968722699171*g42;
+        double c11 = 3.705798465886632*g2 + -3.705798465886632*g7 + -24.70532310591088*g9 + -18.52899232943316*g16 + 49.41064621182176*g18 + 19.7642584847287*g20 + -11.1173953976599*g29 + 74.11596931773265*g31 + -59.29277545418611*g33;
+        double c12 = 0.4784165247593308*g0 + -1.913666099037323*g3 + -11.48199659422394*g5 + -4.784165247593307*g10 + 57.40998297111968*g12 + 19.13666099037323*g14 + -1.913666099037323*g21 + 57.40998297111968*g23 + -114.8199659422394*g25 + 0.4784165247593308*g36 + -11.48199659422394*g38 + 19.13666099037323*g40;
+        double c13 = -3.449910622098108*g2 + 31.04919559888297*g7 + 13.79964248839243*g9 + 17.24955311049054*g16 + -137.9964248839243*g18 + -17.24955311049054*g29 + 68.99821244196217*g31;
+        double c14 = -0.5323327660595425*g0 + 7.452658724833595*g3 + 7.452658724833595*g5 + -111.7898808725039*g12 + -7.452658724833595*g21 + 111.7898808725039*g23 + 0.5323327660595425*g36 + -7.452658724833595*g38;
+        double c15 = 2.91570664069932*g2 + -61.22983945468572*g7 + 102.0497324244762*g16 + -20.40994648489524*g29;
+        double c16 = 0.72892666017483*g0 + -20.40994648489524*g3 + 51.0248662122381*g10 + -20.40994648489524*g21 + 0.72892666017483*g36;
+        omega[0] = 0.3180369672047749*c8 + -0.4561522584349095*c10 + 0.4784165247593308*c12 + -0.5323327660595425*c14 + 0.72892666017483*c16;
+        omega[1] = 5.83141328139864*c0 + -3.193996596357255*c2 + 1.913666099037323*c4 + -0.912304516869819*c6;
+        omega[2] = -3.8164436064573*c9 + 3.705798465886632*c11 + -3.449910622098108*c13 + 2.91570664069932*c15;
+        omega[3] = 1.272147868819099*c8 + -0.912304516869819*c10 + -1.913666099037323*c12 + 7.452658724833595*c14 + -20.40994648489524*c16;
+        omega[4] = 20.40994648489524*c1 + -17.24955311049054*c3 + 11.1173953976599*c5 + -3.8164436064573*c7;
+        omega[5] = -10.1771829505528*c8 + 13.68456775304729*c10 + -11.48199659422394*c12 + 7.452658724833595*c14;
+        omega[6] = -40.81989296979048*c0 + 7.452658724833595*c2 + 1.913666099037323*c4 + -2.736913550609457*c6;
+        omega[7] = -11.4493308193719*c9 + -3.705798465886632*c11 + 31.04919559888297*c13 + -61.22983945468572*c15;
+        omega[8] = 44.71595234900157*c2 + -45.92798637689575*c4 + 27.36913550609457*c6;
+        omega[9] = 30.5315488516584*c9 + -24.70532310591088*c11 + 13.79964248839243*c13;
+        omega[10] = 1.908221803228649*c8 + -4.784165247593307*c12 + 51.0248662122381*c16;
+        omega[11] = -102.0497324244762*c1 + 17.24955311049054*c3 + 18.52899232943316*c5 + -11.4493308193719*c7;
+        omega[12] = -30.53154885165839*c8 + 13.68456775304729*c10 + 57.40998297111968*c12 + -111.7898808725039*c14;
+        omega[13] = 68.99821244196217*c3 + -74.11596931773265*c5 + 30.5315488516584*c7;
+        omega[14] = 30.53154885165839*c8 + -36.49218067479276*c10 + 19.13666099037323*c12;
+        omega[15] = 40.81989296979048*c0 + 7.452658724833595*c2 + -1.913666099037323*c4 + -2.736913550609457*c6;
+        omega[16] = -11.4493308193719*c9 + -18.52899232943316*c11 + 17.24955311049054*c13 + 102.0497324244762*c15;
+        omega[17] = -149.0531744966719*c2 + 54.73827101218914*c6;
+        omega[18] = 61.06309770331679*c9 + 49.41064621182176*c11 + -137.9964248839243*c13;
+        omega[19] = 76.54664396149292*c4 + -72.98436134958553*c6;
+        omega[20] = -36.63785862199007*c9 + 19.7642584847287*c11;
+        omega[21] = 1.272147868819099*c8 + 0.912304516869819*c10 + -1.913666099037323*c12 + -7.452658724833595*c14 + -20.40994648489524*c16;
+        omega[22] = 61.22983945468572*c1 + 31.04919559888297*c3 + 3.705798465886632*c5 + -11.4493308193719*c7;
+        omega[23] = -30.53154885165839*c8 + -13.68456775304729*c10 + 57.40998297111968*c12 + 111.7898808725039*c14;
+        omega[24] = -137.9964248839243*c3 + -49.41064621182176*c5 + 61.06309770331679*c7;
+        omega[25] = 61.06309770331677*c8 + -114.8199659422394*c12;
+        omega[26] = 59.29277545418611*c5 + -36.63785862199007*c7;
+        omega[27] = -16.28349272088447*c8 + 14.5968722699171*c10;
+        omega[28] = -5.83141328139864*c0 + -3.193996596357255*c2 + -1.913666099037323*c4 + -0.912304516869819*c6;
+        omega[29] = -3.8164436064573*c9 + -11.1173953976599*c11 + -17.24955311049054*c13 + -20.40994648489524*c15;
+        omega[30] = 44.71595234900157*c2 + 45.92798637689575*c4 + 27.36913550609457*c6;
+        omega[31] = 30.5315488516584*c9 + 74.11596931773265*c11 + 68.99821244196217*c13;
+        omega[32] = -76.54664396149292*c4 + -72.98436134958553*c6;
+        omega[33] = -36.63785862199007*c9 + -59.29277545418611*c11;
+        omega[34] = 29.19374453983421*c6;
+        omega[35] = 6.978639737521918*c9;
+        omega[36] = 0.3180369672047749*c8 + 0.4561522584349095*c10 + 0.4784165247593308*c12 + 0.5323327660595425*c14 + 0.72892666017483*c16;
+        omega[37] = -2.91570664069932*c1 + -3.449910622098108*c3 + -3.705798465886632*c5 + -3.8164436064573*c7;
+        omega[38] = -10.1771829505528*c8 + -13.68456775304729*c10 + -11.48199659422394*c12 + -7.452658724833595*c14;
+        omega[39] = 13.79964248839243*c3 + 24.70532310591088*c5 + 30.5315488516584*c7;
+        omega[40] = 30.53154885165839*c8 + 36.49218067479276*c10 + 19.13666099037323*c12;
+        omega[41] = -19.7642584847287*c5 + -36.63785862199007*c7;
+        omega[42] = -16.28349272088447*c8 + -14.5968722699171*c10;
+        omega[43] = 6.978639737521918*c7;
+        omega[44] = 1.16310662292032*c8;
+        omega += 45;
+    }
 }
 
 /*
 rad_all: [lmax+1, lmax+1]
 */
-template <int LMAX> __device__
-void type1_rad_part(double *rad_all, double k, double aij, double *ur)
+template <int LIJ> __device__
+void type1_rad_part(double* __restrict__ rad_all, double k, double aij, double *ur)
 {
-    constexpr int LMAX1 = LMAX + 1;
-    double rur[NGAUSS];
-    double bval[NGAUSS*LMAX1];
+    constexpr int LIJ1 = LIJ + 1;
+    __shared__ double rur[NGAUSS];
 
-    double kaij = k / (2*aij);
-    double fac = kaij * kaij * aij;
+    const double kaij = k / (2*aij);
+    const double fac = kaij * kaij * aij;
+
+    for (int lab = 0; lab <= LIJ; lab++){
+        for (int i = 0; i <= LIJ; i++){
+            rad_all[lab*LIJ1+i] = 0.0;
+        }
+    }
+
     for (int n = 0; n < NGAUSS; n++){
         double tmp = r99[n] - kaij;
         tmp = fac - aij*tmp*tmp;
+        double bval[LIJ1];
         if (ur[n] == 0 || tmp > CUTOFF || tmp < -(EXPCUTOFF+6.+30.)) {
             rur[n] = 0;
-            for (int i = 0; i < LMAX1; i++){
-                bval[n*LMAX1 + i] = 0;
+            for (int i = 0; i < LIJ1; i++){
+                bval[i] = 0;
             }
         } else {
             rur[n] = ur[n] * exp(tmp);
-            _ine(bval+n*LMAX1, LMAX, k*r99[n]);
+            _ine(bval, LIJ, k*r99[n]);
         }
-    }
-    for (int lab = 0; lab <= LMAX; lab++){
-        if (lab > 0){
-            for (int n = 0; n < NGAUSS; n++){
+
+        for (int lab = 0; lab <= LIJ; lab++){
+            if (lab > 0){
                 rur[n] *= r99[n];
             }
-        }
 
-        double *prad = rad_all + lab * LMAX1;
-        for (int i = lab%2; i <= LMAX; i+=2){
-            double s = 0.0;
-            for (int n = 0; n < NGAUSS; n++){
-                s += rur[n] * bval[n*LMAX1+i];
+            for (int i = lab%2; i <= LIJ; i+=2){
+                rad_all[lab*LIJ1+i] += rur[n] * bval[i];
             }
-            prad[i] = s;
         }
     }
 }
 
-template <int L>
-__global__
-void _type1_rad_part(double *rad_all, double k, double aij, double *ur, int n){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n){
-        return;
+template <int LI> __device__
+void type2_facs_rad(double* facs, const int lc, const int np, double rca,
+                    const double *ci, const double *ai){
+    for (int i = 0; i < NGAUSS; i++){
+        double r = r99[i] - rca;
+        double r2 = r*r;
+        double *pfacs = facs + (LI+lc+1) * i;
+        for (int j = 0; j <= LI+lc; j++){
+            pfacs[j] = 0.0;
+        }
+
+        for (int ip = 0; ip < np; ip++){
+            double ka = 2.0 * ai[ip] * rca;
+            double ar2 = ai[ip] * r2;
+            double buf[LI+ECP_LMAX+1];
+            if (ar2 > EXPCUTOFF + 6.0){
+                for (int j = 0; j <= LI+lc; j++){
+                    buf[j] = 0.0;
+                }
+            } else {
+                double t1 = exp(-ar2);
+                _ine(buf, LI+lc, ka*r99[i]);
+                for (int j = 0; j <= LI+lc; j++){
+                    buf[j] *= t1;
+                }
+            }
+            for (int j = 0; j <= LI+lc; j++){
+                pfacs[j] += ci[ip] * buf[j];
+            }
+            //printf("%d %d %d %f %f %f\n", LI+lc, i, ip, ci[ip], buf[0], pfacs[0]);
+        }
     }
-    int offset = (L+1)*(L+1);
-    type1_rad_part<L>(rad_all+offset*idx, k, aij, ur+3*idx);
 }
 
-
-template <int LMAX> __device__
+template <int LIJ> __device__
 void type1_rad_ang(double *rad_ang, double *r, double *rad_all, double fac)
 {
     double unitr[3];
-    if (r[0] == 0 && r[1] == 0 && r[2] == 0){
+    if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
         unitr[0] = 0;
         unitr[1] = 0;
         unitr[2] = 0;
@@ -352,26 +694,28 @@ void type1_rad_ang(double *rad_ang, double *r, double *rad_all, double fac)
         unitr[2] = r[2] * norm_r;
     }
 
-    double omega_nuc[CART_CUM];
-    ang_nuc_part<LMAX>(omega_nuc, unitr[0], unitr[1], unitr[2]);
+    __shared__ double omega_nuc[CART_CUM];
+    ang_nuc_part(omega_nuc, LIJ, unitr[0], unitr[1], unitr[2]);
 
-    constexpr int d1 = LMAX + 1;
+    constexpr int d1 = LIJ + 1;
     constexpr int d2 = d1 * d1;
-
-    for (int i = 0; i <= LMAX; i++) {
-    for (int j = 0; j <= LMAX-i; j++) {
-    for (int k = 0; k <= LMAX-i-j; k++) {
+    for (int i = 0; i <= LIJ; i++) {
+    for (int j = 0; j <= LIJ-i; j++) {
+    for (int k = 0; k <= LIJ-i-j; k++) {
         double *pout = rad_ang + i*d2+j*d1+k;
         double *prad = rad_all + (i+j+k)*d1;
         // need_even to ensure (a+b+c+lmb) is even
-        int need_even = (i+j+k)%2;
-        for (int lmb = need_even; lmb <= LMAX; lmb+=2) {
+        const int need_even = (i+j+k)%2;
+        for (int lmb = need_even; lmb <= LIJ; lmb+=2) {
             double tmp = 0;
             double *pnuc = omega_nuc + _offset_cart[lmb];
             for (int n = 0; n < (lmb+1)*(lmb+2)/2; n++){
-                int ps = _cart_pow_y[n];
-                int pt = _cart_pow_z[n];
-                int pr = lmb - ps - pt;
+                const int ps = _cart_pow_y[n];
+                const int pt = _cart_pow_z[n];
+                const int pr = lmb - ps - pt;
+                if ((i+pr)%2 || (j+ps)%2 || (k+pt)%2){
+                    continue;
+                }
                 tmp += pnuc[n] * int_unit_xyz(i+pr, j+ps, k+pt);
             }
             *pout += fac * prad[lmb] * tmp;
@@ -379,47 +723,28 @@ void type1_rad_ang(double *rad_ang, double *r, double *rad_all, double fac)
     } } }
 }
 
-template <int L>
-__global__
-void _type1_rad_ang(double *rad_ang, double *r, double *rad_all, double fac, int n){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n){
-        return;
-    }
-    constexpr int offset = (L+1)*(L+1)*(L+1);
-    type1_rad_ang<L>(rad_ang+offset*idx, r+3*idx, rad_all, fac);
-}
 
 __device__
-void rad_part(int ish, int *ecpbas, double *env, double *rs, double *ws, double *ur, int nr){
-    int npk = ecpbas[ish*BAS_SLOTS+NPRIM_OF];
-    int r_order = ecpbas[ish*BAS_SLOTS+RADI_POWER];
-    int exp_ptr = ecpbas[ish*BAS_SLOTS+PTR_EXP];
-    int coeff_ptr = ecpbas[ish*BAS_SLOTS+PTR_COEFF];
+void rad_part(int ish, const int *ecpbas, const double *env, double *ur){
+    const int npk = ecpbas[ish*BAS_SLOTS+NPRIM_OF];
+    const int r_order = ecpbas[ish*BAS_SLOTS+RADI_POWER];
+    const int exp_ptr = ecpbas[ish*BAS_SLOTS+PTR_EXP];
+    const int coeff_ptr = ecpbas[ish*BAS_SLOTS+PTR_COEFF];
 
-    for (int n = 0; n < nr; n++){
+    for (int n = 0; n < NGAUSS; n++){
         double u1 = 0.0;
+        const double r = r99[n];
         for (int kp = 0; kp < npk; kp++){
-            double ak = env[exp_ptr+kp];
-            double ck = env[coeff_ptr+kp];
-            u1 += ck * exp(-ak * rs[n] * rs[n]);
+            const double ak = env[exp_ptr+kp];
+            const double ck = env[coeff_ptr+kp];
+            u1 += ck * exp(-ak * r * r);
         }
-        ur[n] += u1 * pow(rs[n], r_order) * ws[n];
+        ur[n] += u1 * pow(r, r_order) * w99[n];
     }
 }
-
-__global__
-void _rad_part(int ish, int *ecpbas, double *env, double *rs, double *ws, double *ur, int nr, int n){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n){
-        return;
-    }
-    rad_part(ish, ecpbas, env, rs, ws, ur, nr);
-}
-
 
 template <int LI> __device__
-void type1_cache_fac(double* __restrict__ ifac, double *ri){
+void cache_fac(double *fx, double *ri){
     constexpr int LI1 = LI + 1;
     double xx[LI1], yy[LI1], zz[LI1];
     xx[0] = 1; yy[0] = 1; zz[0] = 1;
@@ -429,40 +754,237 @@ void type1_cache_fac(double* __restrict__ ifac, double *ri){
         zz[i] = zz[i-1] * ri[2];
     }
 
-    double fx[LI1*LI1*3];
-    double *fy = fx + LI1*LI1;
-    double *fz = fy + LI1*LI1;
+    constexpr int fsize = (LI1+1)*LI1/2;
+    double *fy = fx + fsize;
+    double *fz = fy + fsize;
     for (int i = 0; i <= LI; i++){
+        int ioffset = i*(i+1)/2;
         for (int j = 0; j <= i; j++){
-            const double bfac = _binom[i*(i+1)/2+j]; // binom(i,j)
-            fx[i*LI1+j] = bfac * xx[i-j];
-            fy[i*LI1+j] = bfac * yy[i-j];
-            fz[i*LI1+j] = bfac * zz[i-j];
+            const double bfac = _binom[ioffset+j]; // binom(i,j)
+            fx[ioffset+j] = bfac * xx[i-j];
+            fy[ioffset+j] = bfac * yy[i-j];
+            fz[ioffset+j] = bfac * zz[i-j];
         }
     }
+}
 
+template <int LI> __device__
+void type1_cache_fac(double* __restrict__ ifac, double *ri){
+    constexpr int LI1 = LI + 1;
+    constexpr int fsize = (LI1+1)*LI1/2;
+    double fx[fsize*3];
+    cache_fac<LI>(fx, ri);
+
+    double *fy = fx + fsize;
+    double *fz = fy + fsize;
     constexpr int LI2 = LI1 * LI1;
     constexpr int LI3 = LI2 * LI1;
-    constexpr int nfi = (LI+1)*(LI+2)/2;
+    constexpr int nfi = (LI1)*(LI1+1)/2;
     for (int mi = 0; mi < nfi; mi++){
         int iy = _cart_pow_y[mi];
         int iz = _cart_pow_z[mi];
         int ix = LI - iy - iz;
         for (int i1 = 0; i1 <= ix; i1++){
-            for (int i2 = 0; i2 <= iy; i2++){
-                for (int i3 = 0; i3 <= iz; i3++){
-                    const int idx = mi*LI3 + i1*LI2 + i2*LI1 + i3;
-                    ifac[idx] = fx[ix*LI1+i1] * fy[iy*LI1+i2] * fz[iz*LI1+i3];
+        for (int i2 = 0; i2 <= iy; i2++){
+        for (int i3 = 0; i3 <= iz; i3++){
+            const int idx = mi*LI3 + i1*LI2 + i2*LI1 + i3;
+            const int xoffset = (ix+1)*ix/2;
+            const int yoffset = (iy+1)*iy/2;
+            const int zoffset = (iz+1)*iz/2;
+            ifac[idx] = fx[xoffset+i1] * fy[yoffset+i2] * fz[zoffset+i3];
+        }}}
+    }
+}
+
+template <int LI> __device__
+void type2_facs_ang(double* facs, int lc, double *r){
+    double unitr[3];
+    if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
+        unitr[0] = 0;
+        unitr[1] = 0;
+        unitr[2] = 0;
+    } else {
+        double norm_r = -rnorm3d(r[0], r[1], r[2]);
+        unitr[0] = r[0] * norm_r;
+        unitr[1] = r[1] * norm_r;
+        unitr[2] = r[2] * norm_r;
+    }
+    constexpr int LI1 = LI + 1;
+    constexpr int LIC1 = LI + ECP_LMAX + 1;
+    constexpr int LCC1 = ECP_LMAX * 2 + 1;
+
+    double omega_nuc[CART_CUM];
+
+    ang_nuc_part(omega_nuc, LI+lc, unitr[0], unitr[1], unitr[2]);
+    // The total number of (i,j,k) is tetrahedral number
+    // store (i,j,k) such that i+j+k<=LI
+    // store (i+j+k+lc)%2 = 0 only
+    // up to 12600 Bytes
+    constexpr int BLKSIZE = LCC1 * (LIC1+1)/2;
+    double omega[LI1*(LI1+1)*(LI1+2)/6 * BLKSIZE];
+    for (int i = 0; i <= LI; i++){
+    for (int j = 0; j <= LI-i; j++){
+    for (int k = 0; k <= LI-i-j; k++){
+        const int need_even = (lc+i+j+k)%2;
+        const int ioff = (LI-i)*(LI-i+1)*(LI-i+2)/6;
+        const int joff = (LI-i-j)*(LI-i-j+1)/2;
+        double *pomega = omega + (ioff+joff+k)*BLKSIZE;
+        for (int lmb = need_even; lmb <= LI+lc; lmb+=2){
+            double *pnuc = omega_nuc + _offset_cart[lmb];
+            double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
+            for (int m = 0; m < (lc+1)*(lc+2)/2; m++){
+                int pv = _cart_pow_y[m];
+                int pw = _cart_pow_z[m];
+                int pu = lc - pv - pw;
+                buf[m] = 0.0;
+                for (int n = 0; n < (lmb+1)*(lmb+2)/2; n++){
+                    int ps = _cart_pow_y[n];
+                    int pt = _cart_pow_z[n];
+                    int pr = lmb - ps - pt;
+                    buf[m] += pnuc[n] * int_unit_xyz(i+pu+pr, j+pv+ps, k+pw+pt);
                 }
+                buf[m] *= 4.0 * M_PI;
             }
+            cart2sph(pomega, lc, buf);
+            pomega += LCC1;
         }
+    }}}
+
+    constexpr int fsize = LI1*(LI1+1)/2;
+    double fx[fsize*3];
+    double* fy = fx + fsize;
+    double* fz = fy + fsize;
+    cache_fac<LI>(fx, r);
+
+    const int lic1 = LI+lc+1;
+    const int lcc1 = 2*lc+1;
+
+    for (int i = 0; i < LI1*fsize*lcc1*lic1; i++){
+        facs[i] = 0.0;
+    }
+    // i,j,k,ijkmn->(i+j+k)pmn
+    for (int p = 0; p < (LI+1)*(LI+2)/2; p++){
+        int iy = _cart_pow_y[p];
+        int iz = _cart_pow_z[p];
+        int ix = LI - iy - iz;
+        for (int i = 0; i <= ix; i++){
+        for (int j = 0; j <= iy; j++){
+        for (int k = 0; k <= iz; k++){
+            const int need_even = (lc+i+j+k)%2;
+            const int xoffset = (ix+1)*ix/2;
+            const int yoffset = (iy+1)*iy/2;
+            const int zoffset = (iz+1)*iz/2;
+            double fac = fx[xoffset+i] * fy[yoffset+j] * fz[zoffset+k];
+
+            const int ioff = (LI-i)*(LI-i+1)*(LI-i+2)/6;
+            const int joff = (LI-i-j)*(LI-i-j+1)/2;
+            double *pomega = omega + (ioff+joff+k)*BLKSIZE;
+            double *pfacs = facs + ((i+j+k)*fsize+p)*lcc1*lic1;
+            for (int m = 0; m < 2*lc+1; m++){
+            for (int n = need_even; n < lic1; n+=2){
+                pfacs[m*lic1+n] += fac * pomega[n/2*LCC1+m];
+            }}
+        }}}
+    }
+}
+
+template <int LI> __device__
+void type2_facs_omega(double* omega, int lc, double *r){
+    double unitr[3];
+    if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
+        unitr[0] = 0;
+        unitr[1] = 0;
+        unitr[2] = 0;
+    } else {
+        double norm_r = -rnorm3d(r[0], r[1], r[2]);
+        unitr[0] = r[0] * norm_r;
+        unitr[1] = r[1] * norm_r;
+        unitr[2] = r[2] * norm_r;
+    }
+    constexpr int LI1 = LI + 1;
+    constexpr int LIC1 = LI + ECP_LMAX + 1;
+    constexpr int LCC1 = ECP_LMAX * 2 + 1;
+
+    double omega_nuc[CART_CUM];
+
+    ang_nuc_part(omega_nuc, LI+lc, unitr[0], unitr[1], unitr[2]);
+    // The total number of (i,j,k) is tetrahedral number
+    // store (i,j,k) such that i+j+k<=LI
+    // store (i+j+k+lc)%2 = 0 only
+    // up to 12600 Bytes
+    constexpr int BLKSIZE = LCC1 * (LIC1+1)/2;
+    for (int i = 0; i <= LI; i++){
+    for (int j = 0; j <= LI-i; j++){
+    for (int k = 0; k <= LI-i-j; k++){
+        const int need_even = (lc+i+j+k)%2;
+        const int ioff = (LI-i)*(LI-i+1)*(LI-i+2)/6;
+        const int joff = (LI-i-j)*(LI-i-j+1)/2;
+        double *pomega = omega + (ioff+joff+k)*BLKSIZE;
+        for (int lmb = need_even; lmb <= LI+lc; lmb+=2){
+            double *pnuc = omega_nuc + _offset_cart[lmb];
+            double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
+            for (int m = 0; m < (lc+1)*(lc+2)/2; m++){
+                int pv = _cart_pow_y[m];
+                int pw = _cart_pow_z[m];
+                int pu = lc - pv - pw;
+                buf[m] = 0.0;
+                for (int n = 0; n < (lmb+1)*(lmb+2)/2; n++){
+                    int ps = _cart_pow_y[n];
+                    int pt = _cart_pow_z[n];
+                    int pr = lmb - ps - pt;
+                    buf[m] += pnuc[n] * int_unit_xyz(i+pu+pr, j+pv+ps, k+pw+pt);
+                }
+                buf[m] *= 4.0 * M_PI;
+            }
+            cart2sph(pomega, lc, buf);
+            pomega += LCC1;
+        }
+    }}}
+}
+
+template <int LI> __device__
+void type2_ang(double *facs, double *fx, double *omega, int lc, int m){
+    constexpr int LI1 = LI+1;
+    constexpr int nfi = LI1*(LI1+1)/2;
+    constexpr int LCC1 = (2*ECP_LMAX+1);
+    constexpr int BLK = LCC1*(LI+ECP_LMAX+1)/2;
+
+    const int lic1 = LI+lc+1;
+    double *fy = fx + nfi;
+    double *fz = fy + nfi;
+
+    for (int i = 0; i < LI1*nfi*lic1; i++){
+        facs[i] = 0.0;
+    }
+    // i,j,k,ijkmn->(i+j+k)pmn
+    for (int p = 0; p < (LI+1)*(LI+2)/2; p++){
+        int iy = _cart_pow_y[p];
+        int iz = _cart_pow_z[p];
+        int ix = LI - iy - iz;
+        for (int i = 0; i <= ix; i++){
+        for (int j = 0; j <= iy; j++){
+        for (int k = 0; k <= iz; k++){
+            const int need_even = (lc+i+j+k)%2;
+            const int xoffset = (ix+1)*ix/2;
+            const int yoffset = (iy+1)*iy/2;
+            const int zoffset = (iz+1)*iz/2;
+            double fac = fx[xoffset+i] * fy[yoffset+j] * fz[zoffset+k];
+
+            const int ioff = (LI-i)*(LI-i+1)*(LI-i+2)/6;
+            const int joff = (LI-i-j)*(LI-i-j+1)/2;
+            double *pomega = omega + (ioff+joff+k)*BLK;
+            double *pfacs = facs + ((i+j+k)*nfi+p)*lic1;
+            for (int n = need_even; n < lic1; n+=2){
+                pfacs[n] += fac * pomega[n/2*LCC1+m];
+            }
+        }}}
     }
 }
 
 template <int LI, int LJ> __global__
-void type1_cart(double *gctr, int *tasks, int ntasks,
-                int *ecpbas, int *ecploc, int *atm,
-                int *bas, double *env)
+void type1_cart(double *gctr, const int *tasks, const int ntasks,
+                const int *ecpbas, const int *ecploc, const int *atm,
+                const int *bas, const double *env)
 {
     const int task_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (task_id >= ntasks){
@@ -485,7 +1007,7 @@ void type1_cart(double *gctr, int *tasks, int ntasks,
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
 
     const int atm_id = ecpbas[ATOM_OF+ecploc[ecp_id]*BAS_SLOTS];
-    double *rc = env + atm[PTR_COORD+atm_id*ATM_SLOTS];
+    const double *rc = env + atm[PTR_COORD+atm_id*ATM_SLOTS];
 
     double rca[3], rcb[3];
     rca[0] = rc[0] - ri[0];
@@ -502,12 +1024,12 @@ void type1_cart(double *gctr, int *tasks, int ntasks,
     }
 
     for (int kbas = ecploc[ecp_id]; kbas < ecploc[ecp_id+1]; kbas++){
-        rad_part(kbas, ecpbas, env, r99, w99, ur, NGAUSS);
+        rad_part(kbas, ecpbas, env, ur);
     }
 
     constexpr int LMAX1 = LI+LJ+1;
-    double rad_all[LMAX1*LMAX1];
-    double rad_ang[LMAX1*LMAX1*LMAX1];
+
+    double rad_ang[LMAX1*LMAX1*LMAX1]; // up to 5832 Bytes
     for (int i = 0; i < LMAX1*LMAX1*LMAX1; i++) { rad_ang[i] = 0; }
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
@@ -519,11 +1041,12 @@ void type1_cart(double *gctr, int *tasks, int ntasks,
             rij[2] = ai[ip] * rca[2] + aj[jp] * rcb[2];
             const double k = 2.0 * norm3d(rij[0], rij[1], rij[2]);
             const double aij = ai[ip] + aj[jp];
+            double rad_all[LMAX1*LMAX1];
             type1_rad_part<LI+LJ>(rad_all, k, aij, ur);
 
             const double eij = exp(-ai[ip]*r2ca - aj[jp]*r2cb);
             const double ceij = eij * ci[ip] * cj[jp];
-            type1_rad_ang<LI+LJ>(rad_ang, rij, rad_all, fac * ceij);
+            type1_rad_ang<LI+LJ>(rad_ang, rij, rad_all, fac*ceij);
         }
     }
 
@@ -533,9 +1056,9 @@ void type1_cart(double *gctr, int *tasks, int ntasks,
     constexpr int LJ2 = LJ1*LJ1;
     constexpr int LI3 = LI1*LI2;
     constexpr int LJ3 = LJ1*LJ2;
-    double ifac[nfi*LI3];
+    double ifac[nfi*LI3]; // up to 15625 Bytes
     type1_cache_fac<LI>(ifac, rca);
-    
+
     double jfac[nfj*LJ3];
     type1_cache_fac<LJ>(jfac, rcb);
 
@@ -548,160 +1071,156 @@ void type1_cart(double *gctr, int *tasks, int ntasks,
             int jy = _cart_pow_y[mj];
             int jz = _cart_pow_z[mj];
             int jx = LJ - jy - jz;
-            
+
             double tmp = 0.0;
             for (int i1 = 0; i1 <= ix; i1++){
-                for (int i2 = 0; i2 <= iy; i2++){
-                    for (int i3 = 0; i3 <= iz; i3++){
-
-                        for (int j1 = 0; j1 <= jx; j1++){
-                            for (int j2 = 0; j2 <= jy; j2++){
-                                for (int j3 = 0; j3 <= jz; j3++){
-                                    int ir = mi * LI3 + i1 * LI2 + i2 * LI1 + i3;
-                                    int jr = mj * LJ3 + j1 * LJ2 + j2 * LJ1 + j3;
-                                    int ijr = (i1+j1)*LMAX1*LMAX1 + (i2+j2)*LMAX1 + (i3+j3);
-                                    tmp += ifac[ir] * jfac[jr] * rad_ang[ijr];
-                                    printf("%d %d %d %d %d %d (%d) %f %f %f \n", i1, i2, i3, j1, j2, j3, jr, ifac[ir], jfac[jr], rad_ang[ijr]);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            printf("%d %d %d %d %d %d %d %d\n", mi, mj, ix, iy, iz, jx, jy, jz);
+            for (int i2 = 0; i2 <= iy; i2++){
+            for (int i3 = 0; i3 <= iz; i3++){
+                for (int j1 = 0; j1 <= jx; j1++){
+                for (int j2 = 0; j2 <= jy; j2++){
+                for (int j3 = 0; j3 <= jz; j3++){
+                    const int ir = mi * LI3 + i1 * LI2 + i2 * LI1 + i3;
+                    const int jr = mj * LJ3 + j1 * LJ2 + j2 * LJ1 + j3;
+                    const int ijr = (i1+j1)*LMAX1*LMAX1 + (i2+j2)*LMAX1 + (i3+j3);
+                    tmp += ifac[ir] * jfac[jr] * rad_ang[ijr];
+                }}}
+            }}}
             atomicAdd(gctr+mi+mj*nfi, tmp);
         }
     }
     return;
 }
 
-extern "C" {
-int ECPsph_ine(double *out, int order, double *zs, int n)
+
+template <int LI, int LJ> __global__
+void type2_cart(double *gctr, const int *tasks, const int ntasks,
+                const int *ecpbas, const int *ecploc, const int *atm,
+                const int *bas, const double *env)
 {
-    int ntile = (n + THREADS - 1) / THREADS;
-    dim3 threads(THREADS);
-    dim3 blocks(ntile);
-    _ine_kernel<<<blocks, threads>>>(out, order, zs, n);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        return 1;
+    const int task_id = blockIdx.x * blockDim.x + threadIdx.x;
+    if (task_id >= ntasks){
+        return;
     }
-    return 0;
+
+    const int ish = tasks[task_id];
+    const int jsh = tasks[task_id + ntasks];
+    const int ecp_id = tasks[task_id + 2*ntasks];
+
+    const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
+    const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
+    constexpr int nfi = (LI+1) * (LI+2) / 2;
+    constexpr int nfj = (LJ+1) * (LJ+2) / 2;
+    const double *ai = env + bas[PTR_EXP+ish*BAS_SLOTS];
+    const double *aj = env + bas[PTR_EXP+jsh*BAS_SLOTS];
+    const double *ci = env + bas[PTR_COEFF+ish*BAS_SLOTS];
+    const double *cj = env + bas[PTR_COEFF+jsh*BAS_SLOTS];
+    const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
+    const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
+
+    const int atm_id = ecpbas[ATOM_OF+ecploc[ecp_id]*BAS_SLOTS];
+    const double *rc = env + atm[PTR_COORD+atm_id*ATM_SLOTS];
+
+    double rca[3], rcb[3];
+    rca[0] = rc[0] - ri[0];
+    rca[1] = rc[1] - ri[1];
+    rca[2] = rc[2] - ri[2];
+    rcb[0] = rc[0] - rj[0];
+    rcb[1] = rc[1] - rj[1];
+    rcb[2] = rc[2] - rj[2];
+    const double dca = norm3d(rca[0], rca[1], rca[2]);
+    const double dcb = norm3d(rcb[0], rcb[1], rcb[2]);
+
+    double ur[NGAUSS];
+    for (int i = 0; i < NGAUSS; i++){
+        ur[i] = 0.0;
+    }
+
+    constexpr int LI1 = LI+1;
+    constexpr int LJ1 = LJ+1;
+    constexpr int LIC1 = LI + ECP_LMAX + 1;
+    constexpr int LJC1 = LJ + ECP_LMAX + 1;
+    constexpr int LCC1 = (2 * ECP_LMAX + 1);
+
+    const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
+
+    for (int kbas = ecploc[ecp_id]; kbas < ecploc[ecp_id+1]; kbas++){
+        const int lc = ecpbas[ANG_OF+kbas*BAS_SLOTS];
+        if (lc == -1){
+            continue;
+        }
+        rad_part(kbas, ecpbas, env, ur);
+
+        double radi[LI1*NGAUSS]; // TODO: move to registers
+        double radj[LJ1*NGAUSS];
+        type2_facs_rad<LI>(radi, lc, npi, dca, ci, ai);
+        type2_facs_rad<LJ>(radj, lc, npj, dcb, cj, aj);
+
+        double rad_all[(LI+LJ+1) * LI1 * LJ1]; // up to 1800 Bytes
+        for (int p = 0; p <= LI+LJ; p++){
+            double *prad = rad_all + p*LI1*LJ1;
+            for (int i = 0; i <= LI; i++){
+            for (int j = 0; j <= LJ; j++){
+                double s = 0;
+                for (int ir = 0; ir < NGAUSS; ir++){
+                    s += radi[i+ir*LI1] * radj[j+ir*LJ1] * ur[ir];
+                }
+                prad[i*LJ1+j] = s;
+            }}
+            for (int ir = 0; ir < NGAUSS; ir++){
+                ur[ir] *= r99[ir];
+            }
+        }
+
+        //double angi[LI1 * nfi * LCC1 * LIC1]; // up to 48600 Bytes
+        //double angj[LJ1 * nfj * LCC1 * LJC1];
+        //type2_facs_ang<LI>(angi, lc, rca);
+        //type2_facs_ang<LJ>(angj, lc, rcb);
+        constexpr int BLKI = LCC1 * (LIC1+1)/2; // up to 12600 Bytes
+        double omegai[LI1*(LI1+1)*(LI1+2)/6 * BLKI];
+        type2_facs_omega<LI>(omegai, lc, rca);
+
+        constexpr int BLKJ = LCC1 * (LJC1+1)/2;
+        double omegaj[LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ];
+        type2_facs_omega<LJ>(omegaj, lc, rcb);
+
+        double fi[nfi*3];
+        double fj[nfj*3];
+        cache_fac<LI>(fi, rca);
+        cache_fac<LJ>(fj, rcb);
+
+        const int lic1 = LI+lc+1;
+        const int ljc1 = LJ+lc+1;
+        const int lcc1 = 2*lc+1;
+
+        double angi[LI1*nfi*LIC1]; // up to 5400 Bytes, further compression
+        double angj[LJ1*nfj*LJC1];
+
+        // (k+l)pq,kimp,ljmq->ij
+        for (int m = 0; m < lcc1; m++){
+            type2_ang<LI>(angi, fi, omegai, lc, m);
+            type2_ang<LJ>(angj, fj, omegaj, lc, m);
+            for (int i = 0; i < nfi; i++){
+            for (int j = 0; j < nfj; j++){
+                double s = 0;
+                for (int k = 0; k <= LI; k++){
+                for (int l = 0; l <= LJ; l++){
+                    double *pangi = angi + k*nfi*lic1 + i*lic1;
+                    double *pangj = angj + l*nfj*ljc1 + j*ljc1;
+                    double *prad = rad_all + (k+l)*LI1*LJ1;
+                    for (int p = 0; p < lic1; p++){
+                    for (int q = 0; q < ljc1; q++){
+                        s += prad[p*LJ1+q] * pangi[p] * pangj[q];
+                    }}
+                }}
+                gctr[i+j*nfi] += fac * s;
+            }}
+        }
+    }
+    return;
 }
 
-int ECPang_nuc_part(double *omega, double *x, int n, const int l){
-    int ntile = (n + THREADS - 1) / THREADS;
-    dim3 threads(THREADS);
-    dim3 blocks(ntile);
-    switch (l){
-    case 0: _ang_nuc_part<0><<<blocks, threads>>>(omega, x, n); break;
-    case 1: _ang_nuc_part<1><<<blocks, threads>>>(omega, x, n); break;
-    case 2: _ang_nuc_part<2><<<blocks, threads>>>(omega, x, n); break;
-    case 3: _ang_nuc_part<3><<<blocks, threads>>>(omega, x, n); break;
-    case 4: _ang_nuc_part<4><<<blocks, threads>>>(omega, x, n); break;
-    default:
-        printf("l > 4 is not supported\n");
-        break;
-    }
+/*
+extern "C" {
 
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        return 1;
-    }
-    return 0;
 }
-
-int ECPrad_part(int ish, int *ecpbas, double *env, double *rs, double *ws, double *ur, int nr){
-    int n = 1;
-    int ntile = (n + THREADS - 1) / THREADS;
-    dim3 threads(THREADS);
-    dim3 blocks(ntile);
-    _rad_part<<<blocks, threads>>>(ish, ecpbas, env, rs, ws, ur, nr, n);
-    return 0;
-}
-
-int ECPtype1_rad_part(double *rad_all, int l, double k, double aij, double *ur, int n){
-    int ntile = (n + THREADS - 1) / THREADS;
-    dim3 threads(THREADS);
-    dim3 blocks(ntile);
-    switch (l){
-    case 0: _type1_rad_part<0><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
-    case 1: _type1_rad_part<1><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
-    case 2: _type1_rad_part<2><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
-    case 3: _type1_rad_part<3><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
-    case 4: _type1_rad_part<4><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
-    case 5: _type1_rad_part<5><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
-    case 6: _type1_rad_part<6><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
-    case 7: _type1_rad_part<7><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
-    case 8: _type1_rad_part<8><<<blocks, threads>>>(rad_all, k, aij, ur, n); break;
-    
-    default:
-        printf("l > 8 is not supported\n");
-        break;
-    }
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        return 1;
-    }
-    return 0;
-}
-
-int ECPtype1_rad_ang(double *rad_ang, int l, int n, double *r, double fac, double *rad_all){
-    int ntile = (n + THREADS - 1) / THREADS;
-    dim3 threads(THREADS);
-    dim3 blocks(ntile);
-    switch (l){
-    case 0: _type1_rad_ang<0><<<blocks, threads>>>(rad_ang, r, rad_all, fac, n); break;
-    case 1: _type1_rad_ang<1><<<blocks, threads>>>(rad_ang, r, rad_all, fac, n); break;
-    case 2: _type1_rad_ang<2><<<blocks, threads>>>(rad_ang, r, rad_all, fac, n); break;
-    case 3: _type1_rad_ang<3><<<blocks, threads>>>(rad_ang, r, rad_all, fac, n); break;
-    case 4: _type1_rad_ang<4><<<blocks, threads>>>(rad_ang, r, rad_all, fac, n); break;
-    default:
-        printf("l > 4 is not supported\n");
-        break;
-    }
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        return 1;
-    }
-    return 0;
-}
-
-int ECPtype1_cart(double *gctr, int *tasks, int ntasks,
-                    int *ecpbas, int *ecploc, int *atm,
-                    int *bas, double *env, int li, int lj){
-    int ntile = (ntasks + THREADS - 1) / THREADS;
-    dim3 threads(THREADS);
-    dim3 blocks(ntile);
-
-    int task_type = li * 10 + lj;
-    switch (task_type)
-    {
-    case 0:  type1_cart<0,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-
-    case 1:  type1_cart<0,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 10: type1_cart<1,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-
-    case 11: type1_cart<1,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 2:  type1_cart<0,2><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 20: type1_cart<2,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-
-    case 3:  type1_cart<0,3><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 12: type1_cart<1,2><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 21: type1_cart<2,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 30: type1_cart<3,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-
-    case 4:  type1_cart<0,4><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 13: type1_cart<1,3><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 22: type1_cart<2,2><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 31: type1_cart<3,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 40: type1_cart<4,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-
-    default: printf("(%d,%d) is not supported in ECP.\n", li, lj); break;
-    }
-
-    return 0;
-    }
-}
+*/
