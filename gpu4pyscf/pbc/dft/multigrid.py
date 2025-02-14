@@ -18,13 +18,13 @@ import numpy as np
 import cupy as cp
 import scipy.linalg
 from pyscf.gto import ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF, PTR_COORD
-from pyscf.pbc.tools.pbc import mesh_to_cutoff
+from pyscf.pbc.tools.pbc import mesh_to_cutoff, cutoff_to_mesh
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import load_library, tag_array, sandwich_dot, block_diag
-from gpu4pyscf.gto.mole import cart2sph_by_l
+from gpu4pyscf.gto.mole import cart2sph_by_l, extract_pgto_params
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.__config__ import shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
@@ -41,7 +41,6 @@ PRIMBAS_EXP = 1
 PRIMBAS_COEFF = 2
 PRIMBAS_COORD = 3
 LMAX = 4
-NGRID_RADIUS = 16
 SHARED_RHO_SIZE = 2097152 # 128^3
 SHM_SIZE = shm_size - 1024
 del shm_size
@@ -120,18 +119,18 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=None, deriv=0):
     lattice_params = cp.asarray(a.diagonal(), order='C')
     supmol_bas = cp.asarray(mydf.supmol_bas, dtype=np.int32)
     supmol_env = cp.asarray(mydf.supmol_env)
-    sub_meshs = mydf.sub_meshs
+    tasks = mydf.tasks
     ao_loc_in_cell0 = cp.asarray(mydf.ao_loc_in_cell0, dtype=np.int32)
     mg_envs = MGridEnvVars(
         mydf.primitive_nbas, len(supmol_bas), nao, supmol_bas.data.ptr,
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     sp_groups = group_shl_pairs(cell, supmol_bas[:mydf.primitive_nbas],
-                                mydf.supmol_bas, mydf.supmol_env, sub_meshs)
+                                mydf.supmol_bas, mydf.supmol_env, tasks)
     workers = gpu_specs['multiProcessorCount']
-    workers = 1
     nf3 = (lmax*2+1)*(lmax*2+2)*(lmax*2+3)//6
-    cache_size = ((lmax*2+1)*(NGRID_RADIUS*2)*3 + nf3 + 6) * 32
+    ngrid_span = max(task.n_radius*2 for task in tasks)
+    cache_size = ((lmax*2+1)*ngrid_span*3 + nf3 + 6) * 32
     pool = cp.empty((workers, cache_size))
 
     init_constant(cell)
@@ -139,7 +138,9 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=None, deriv=0):
     assert rhodim == 1
     rhoG = None
 
-    for i, mesh in enumerate(sub_meshs):
+    for i, task in enumerate(tasks):
+        mesh = task.mesh
+        n_radius = task.n_radius
         ngrids = np.prod(mesh)
         rhoR = cp.empty((nset, *mesh))
         for iset in range(nset):
@@ -148,10 +149,11 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=None, deriv=0):
             else:
                 rho_local = cp.zeros(mesh)
             for l in range(lmax*2+1):
+                if (i, l) not in sp_groups: continue
                 pair_idx = sp_groups[i,l]
                 kern(ctypes.cast(rho_local.data.ptr, ctypes.c_void_p),
                      ctypes.cast(dms[iset].data.ptr, ctypes.c_void_p),
-                     mg_envs, ctypes.c_int(l),
+                     mg_envs, ctypes.c_int(l), ctypes.c_int(n_radius),
                      (ctypes.c_int*3)(*mesh),
                      ctypes.c_uint32(len(pair_idx)),
                      ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
@@ -162,12 +164,12 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=None, deriv=0):
             rhoR[iset] = rho_local
 
         weight = 1./nkpts * cell.vol/ngrids
-        rho_freq = tools.fft(rhoR.reshape(nset*rhodim, -1), mesh)
+        rho_freq = tools.fft(rhoR.reshape(nset*rhodim, *mesh), mesh)
         rho_freq *= weight
         if rhoG is None:
-            rhoG = rho_freq
+            rhoG = rho_freq.reshape(-1, *mesh)
         else:
-            _takebak_4d(rhoG, rho_freq.reshape((-1,) + mesh), mesh)
+            _takebak_4d(rhoG, rho_freq.reshape(-1, *mesh), mesh)
     # TODO: for diffused basis functions lower than minimal Ecut, compute the
     # rhoR using normal FFTDF code
 
@@ -191,8 +193,8 @@ def _get_j_pass2(mydf, vG, hermi=1, kpts=None, verbose=None):
     lmax = cell._bas[:,ANG_OF].max()
     assert lmax <= LMAX
 
-    sub_meshs = mydf.sub_meshs
-    mesh_largest = sub_meshs[0]
+    tasks = mydf.tasks
+    mesh_largest = tasks[0].mesh
     vG = vG.reshape(-1, *mesh_largest)
 
     a = cell.lattice_vectors()
@@ -206,11 +208,12 @@ def _get_j_pass2(mydf, vG, hermi=1, kpts=None, verbose=None):
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     sp_groups = group_shl_pairs(cell, supmol_bas[:mydf.primitive_nbas],
-                                mydf.supmol_bas, mydf.supmol_env, sub_meshs)
+                                mydf.supmol_bas, mydf.supmol_env, tasks)
 
     workers = gpu_specs['multiProcessorCount']
     nf2 = (lmax*2+1)*(lmax*2+2)//2
-    cache_size = ((lmax*2+1)*(NGRID_RADIUS*2)*3 + nf2*(NGRID_RADIUS*2) + 6) * 32
+    ngrid_span = max(task.n_radius*2 for task in tasks)
+    cache_size = ((lmax*2+1)*ngrid_span*3 + nf2*ngrid_span + 6) * 32
     pool = cp.empty((workers, cache_size))
 
     init_constant(cell)
@@ -218,7 +221,9 @@ def _get_j_pass2(mydf, vG, hermi=1, kpts=None, verbose=None):
     # TODO: might be complex array when tddft amplitudes are complex
     vj = cp.zeros((nset,nao,nao))
 
-    for i, mesh in enumerate(sub_meshs):
+    for i, task in enumerate(tasks):
+        mesh = task.mesh
+        n_radius = task.n_radius
         ngrids = np.prod(mesh)
         sub_vG = _take_4d(vG, mesh).reshape(nset,ngrids)
         v_rs = tools.ifft(sub_vG, mesh).reshape(nset,ngrids)
@@ -231,7 +236,7 @@ def _get_j_pass2(mydf, vG, hermi=1, kpts=None, verbose=None):
                 pair_idx = sp_groups[i,l]
                 kern(ctypes.cast(vj[iset].data.ptr, ctypes.c_void_p),
                      ctypes.cast(vR[iset].data.ptr, ctypes.c_void_p),
-                     mg_envs, ctypes.c_int(l),
+                     mg_envs, ctypes.c_int(l), ctypes.c_int(n_radius),
                      (ctypes.c_int*3)(*mesh),
                      ctypes.c_uint32(len(pair_idx)),
                      ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
@@ -382,7 +387,8 @@ def _to_primitive_bas(cell):
     bas_templates = {}
     prim_bas = []
     prim_env = cell._env.copy()
-    ao_loc = cell.ao_loc_nr()
+    # In kernel, ao_loc are access in Cartesian bases
+    ao_loc = cell.ao_loc_nr(cart=True)
     ao_loc_in_cell0 = []
     aoslices = cell.aoslice_by_atom()
     for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
@@ -457,7 +463,7 @@ def _repeat(a, repeats):
     ap = np.repeat(a[np.newaxis], repeats, axis=0)
     return ap.reshape(-1, *a.shape[1:])
 
-def group_shl_pairs(cell, prim_bas, supmol_bas, supmol_env, sub_meshs):
+def group_shl_pairs(cell, prim_bas, supmol_bas, supmol_env, tasks):
     vol = cell.vol
     weight_penalty = vol
     precision = cell.precision / max(weight_penalty, 1)
@@ -500,13 +506,17 @@ def group_shl_pairs(cell, prim_bas, supmol_bas, supmol_env, sub_meshs):
     Ecut = cp.log(fac * (Ecut*2)**(lij-.5) + 1.) * 2*aij
     Ecut[ovlp < cell.precision] = -1
 
-    a = cell.lattice_vectors()
+    task_Ecuts = [task.Ecut for task in tasks]
+    task_Ecuts[0] = Ecut.max()
+    task_Ecuts.append(0.)
+
+    ntasks = len(tasks)
     lmax = cell._bas[:,ANG_OF].max()
-    task_Ecuts = [mesh_to_cutoff(a, mesh) for mesh in sub_meshs]
-    task_Ecuts[0] = 1e10
-    task_Ecuts.append(0)
     shl_pairs_groups = {}
-    for i, mesh in enumerate(sub_meshs):
+    for i in range(ntasks): # Exclude the last
+        # task_Ecuts[i:i+2] defines the window. Shell pairs within this window
+        # uses the same task.n_radius and mesh in kernel.
+        # TODO: adjust n_radius and mesh for high angular l.
         E_mask = Ecut <= task_Ecuts[i]
         E_mask &= Ecut > task_Ecuts[i+1]
         for l in range(lmax*2+1):
@@ -516,37 +526,72 @@ def group_shl_pairs(cell, prim_bas, supmol_bas, supmol_env, sub_meshs):
             shl_pairs_groups[i,l] = pair_idx
     return shl_pairs_groups
 
-def multigrid_submeshs(cell):
+def multigrid_tasks(cell):
     a = cell.lattice_vectors()
     assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
-    cell_len = a.diagonal().min()
-    b = 2*np.pi / cell_len
-    penalty = 1e-2
+    cell_len = a.diagonal()
+    Gbase = 2*np.pi / cell_len
+    penalty = 1
     precision = cell.precision * penalty
 
-    # Estimate the proper radius and Ecut boundaries in each task. Given mesh
+    # * Estimate the proper radius and Ecut boundaries in each task. Given mesh
     # in each task, a resolution can be obtained to determine the radius and
-    # Ecut boundaries. The largest radius in each task ~= 16 * resolution.
-    # This means that the numerical integration with 32 grids for the most
+    # Ecut boundaries. The largest radius in each task ~= n_radius * resolution.
+    # This means that the numerical integration with n_radius*2 grids for the most
     # diffused orbital-product is sufficient to produce the required precision.
     # The largest Ecut in each task ~= cutoff_to_mesh(mesh), which is sufficient
     # to produce the required precision for the most compact orbital-product.
+    # * Approximately, n_radius = np.log(1/precision) * 2/np.pi would produce a
+    # balanced n_radius. The "balance" means that given the pair-GTO exponent, a
+    # Ecut can be determined, which corresponds to a mesh grid in real space.
+    # The resolution for this mesh and n_radius can determine a radius, at the
+    # boundary of which, the pair-GTO can converge to the required precision.
+    # * We choose a n_radius ~50% larger than the balanced one. By doing so, a
+    # window of Ecut can be obtained. In this Ecut window, the mesh is
+    # sufficient to converge all GTO pairs, as the mesh is determined from the
+    # upper bound of the Ecut window. The n_radius is sufficient to converge the
+    # most diffused GTOs, as the lower bound of the Ecut window is estimated
+    # based those diffused GTO pairs.
+    n_radius = int(np.log(1./precision))
 
+    # for diffused basis functions lower than minimal Ecut, skip the multi-grid
+    # computation. The regular FFTDF algorithm in this case may be more accurate
+    # and efficient.
+    Ecut_min = ((Gbase * 4)**2 / 2).min()
     mesh = cell.mesh
-    sub_meshs = [mesh]
-    while True:
-        dh = (cell_len / mesh).min()
-        radius = dh * 15
-        #if radius > 5:
-        #    TODO: additional penalty to adjust precision
-        aij = np.log((4*np.pi*radius**2)/precision) / radius**2
-        Ecut = np.log((2*np.pi)**1.5 / precision) * (2*aij)
-        Gmax = (2*Ecut)**.5 / b
-        mesh = np.ceil(Gmax).astype(int) * 2 + 1
-        if np.prod(mesh) < 4000:
+    Ecut = mesh_to_cutoff(a, mesh).max()
+    tasks = []
+    for _ in range(20):
+        if Ecut < Ecut_min:
             break
-        sub_meshs.append(mesh)
-    return sub_meshs
+        tasks.append(_Task(Ecut=Ecut, mesh=mesh, n_radius=n_radius, algorithm='MG'))
+        dh = (cell_len / mesh).min()
+        radius = dh * n_radius
+        aij = np.log(1./precision) / radius**2
+        Ecut = np.log(1./precision) * (2*aij)
+        Gmax = (2*Ecut)**.5
+        mesh = np.floor(Gmax / Gbase).astype(int) * 2 + 1
+    else:
+        raise RuntimeError(f'failed to generate mesh tasks for precision {cell.precision}.')
+    # TODO: Attach a regular FFTDF task?
+    #tasks.append(_Task(Ecut=Ecut, mesh=mesh, n_radius=None, algorithm='FFTDF'))
+
+    # estimate n_radius for the most diffused GTO pairs
+    es, _ = extract_pgto_params(cell)
+    aij = es.min() * 2
+    radius = (np.log(1./precision) / aij)**.5
+    dh = (cell_len / mesh).min()
+    tasks.append(_Task(Ecut=Ecut, mesh=mesh, n_radius=n_radius, algorithm='MG'))
+    return tasks
+
+from dataclasses import dataclass
+@dataclass
+class _Task:
+    Ecut: float
+    mesh: tuple
+    n_radius: int
+    algorithm: str
+    shl_pair_idx: np.ndarray = None
 
 def init_constant(cell):
     err = libmgrid.MG_init_constant(ctypes.c_int(SHM_SIZE))
@@ -563,7 +608,7 @@ def _takebak_4d(out, a, mesh):
     gx = np.fft.fftfreq(mesh[0], 1./mesh[0]).astype(np.int32)
     gy = np.fft.fftfreq(mesh[1], 1./mesh[1]).astype(np.int32)
     gz = np.fft.fftfreq(mesh[2], 1./mesh[2]).astype(np.int32)
-    out[:,gx[:,None,None],gy[:,None],gz] += a.reshape((-1,)+mesh)
+    out[:,gx[:,None,None],gy[:,None],gz] += a.reshape(-1, *mesh)
     return out
 
 class MGridEnvVars(ctypes.Structure):
@@ -589,13 +634,13 @@ class MultiGridFFTDF:
         # Number of primitive shells
         self.primitive_nbas = cell._bas[:,NPRIM_OF].dot(cell._bas[:,NCTR_OF])
         # A list of integral meshgrids for each task
-        self.sub_meshs = multigrid_submeshs(cell)
-        logger.debug(cell, 'Multigrid ntasks %s', len(self.sub_meshs))
+        self.tasks = multigrid_tasks(cell)
+        logger.debug(cell, 'Multigrid ntasks %s', len(self.tasks))
 
     def reset(self, cell=None):
         if cell is not None:
             self.cell = cell
-        self.sub_meshs = None
+        self.tasks = None
         return self
 
     def get_j(self, dm, hermi=1, kpts=None, kpts_band=None,

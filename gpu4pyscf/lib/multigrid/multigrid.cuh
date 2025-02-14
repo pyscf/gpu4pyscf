@@ -56,6 +56,7 @@ typedef struct {
 typedef struct {
     int nshl_pair;
     int *bas_ij_idx;
+    int ngrid_radius;
     int mesh[3];
 } MGridBounds;
 
