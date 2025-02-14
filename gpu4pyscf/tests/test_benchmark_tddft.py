@@ -57,6 +57,7 @@ def run_rb3lyp_tddft(atom, basis, with_df, with_solvent, disp=None):
 
     td = mf.TDDFT().set(nstates=5)
     assert td.device == 'gpu'
+    td.lindep = 1e-6
     e = td.kernel()[0]
 
     return e
