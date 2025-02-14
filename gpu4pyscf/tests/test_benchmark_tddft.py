@@ -127,11 +127,13 @@ def test_df_rb3lyp_tda_medium(benchmark):
     print('testing df rb3lyp tda medium')
     assert np.allclose([0.14642032, 0.15194237, 0.15696979, 0.16456322, 0.16519566], e)
 
+@pytest.mark.slow
 @pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
 def test_rb3lyp_tddft_medium(benchmark):
     e = benchmark(run_rb3lyp_tddft, medium_mol, 'def2-tzvpp', False, False)
     print('testing rb3lyp tddft medium')
     assert np.allclose([0.14359864, 0.15114158, 0.15593616, 0.16176195, 0.16483943], e)
+@pytest.mark.slow
 @pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
 def test_rb3lyp_tda_medium(benchmark):
     e = benchmark(run_rb3lyp_tda, medium_mol, 'def2-tzvpp', False, False)
