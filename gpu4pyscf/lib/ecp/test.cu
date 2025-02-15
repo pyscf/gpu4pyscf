@@ -24,22 +24,21 @@ void _ang_nuc_part(double *omega, double *x, int n){
         return;
     }
     int offset = idx * (2*LMAX+1);
-    ang_nuc_part(omega+offset, LMAX, x[3*idx], x[3*idx+1], x[3*idx+2]);
+    ang_nuc_part<LMAX>(omega+offset, x[3*idx], x[3*idx+1], x[3*idx+2]);
 }
 
 template <int LMAX> __global__
 void _type1_rad_part(double *rad_all, double k, double aij, double *ur, int n){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = blockIdx.x;
     if (idx >= n){
         return;
     }
-    int offset = (LMAX+1)*(LMAX+1);
-    type1_rad_part<LMAX>(rad_all+offset*idx, k, aij, ur+3*idx);
+    type1_rad_part<LMAX>(rad_all, k, aij, ur[threadIdx.x]);
 }
 
 template <int LMAX> __global__
 void _type1_rad_ang(double *rad_ang, double *r, double *rad_all, double fac, int n){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = blockIdx.x;
     if (idx >= n){
         return;
     }
@@ -49,11 +48,11 @@ void _type1_rad_ang(double *rad_ang, double *r, double *rad_all, double fac, int
 
 __global__
 void _rad_part(int ish, int *ecpbas, double *env, double *rs, double *ws, double *ur, int nr, int n){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = blockIdx.x;
     if (idx >= n){
         return;
     }
-    rad_part(ish, ecpbas, env, ur);
+    ur[threadIdx.x] = rad_part(ish, ecpbas, env);
 }
 
 template <int LI, int LC>
@@ -63,21 +62,22 @@ void _type2_facs_ang(double *facs, double *r){
     if (idx >= 1){
         return;
     }
-    type2_facs_ang<LI>(facs, LC, r);
+    type2_facs_ang<LI, LC>(facs, r);
 }
 
-template <int LI>
+template <int LI, int LC>
 __global__
-void _type2_facs_rad(double *facs, int lc, int np, double rca, double *ci, double *ai){
+void _type2_facs_rad(double *facs, int np, double rca, double *ci, double *ai){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= 1){
         return;
     }
-    type2_facs_rad<LI>(facs, lc, np, rca, ci, ai);
+    type2_facs_rad<LI, LC>(facs, np, rca, ci, ai);
 }
 
 
 extern "C" {
+
 int ECPsph_ine(double *out, int order, double *zs, int n)
 {
     int ntile = (n + THREADS - 1) / THREADS;
@@ -192,36 +192,25 @@ int ECPtype1_cart(double *gctr, const int *tasks, const int ntasks,
     case 0:  type1_cart<0,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
     case 1:  type1_cart<0,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 10: type1_cart<1,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
     case 11: type1_cart<1,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
     case 2:  type1_cart<0,2><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 20: type1_cart<2,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
     case 3:  type1_cart<0,3><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
     case 12: type1_cart<1,2><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 21: type1_cart<2,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 30: type1_cart<3,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
     case 4:  type1_cart<0,4><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
     case 13: type1_cart<1,3><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
     case 22: type1_cart<2,2><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 31: type1_cart<3,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 40: type1_cart<4,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
     case 5:  type1_cart<0,5><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
     case 14: type1_cart<1,4><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
     case 23: type1_cart<2,3><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 32: type1_cart<3,2><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 41: type1_cart<4,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 50: type1_cart<5,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
     case 24: type1_cart<2,4><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
     case 33: type1_cart<3,3><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 42: type1_cart<4,2><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
     case 34: type1_cart<3,4><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 43: type1_cart<4,3><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
     case 44: type1_cart<4,4><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
@@ -231,21 +220,23 @@ int ECPtype1_cart(double *gctr, const int *tasks, const int ntasks,
     return 0;
     }
 
+    /*
 int ECPtype2_facs_rad(double *facs, int l, int lc, int np, double rca, double *ci, double *ai){
     int n = 1;
     int ntile = (n + THREADS - 1) / THREADS;
     dim3 threads(THREADS);
     dim3 blocks(ntile);
-    switch (l){
-    case 0: _type2_facs_rad<0><<<blocks, threads>>>(facs, lc, np, rca, ci, ai); break;
-    case 1: _type2_facs_rad<1><<<blocks, threads>>>(facs, lc, np, rca, ci, ai); break;
-    case 2: _type2_facs_rad<2><<<blocks, threads>>>(facs, lc, np, rca, ci, ai); break;
-    case 3: _type2_facs_rad<3><<<blocks, threads>>>(facs, lc, np, rca, ci, ai); break;
-    case 4: _type2_facs_rad<4><<<blocks, threads>>>(facs, lc, np, rca, ci, ai); break;
-    case 5: _type2_facs_rad<5><<<blocks, threads>>>(facs, lc, np, rca, ci, ai); break;
-    case 6: _type2_facs_rad<6><<<blocks, threads>>>(facs, lc, np, rca, ci, ai); break;
-    case 7: _type2_facs_rad<7><<<blocks, threads>>>(facs, lc, np, rca, ci, ai); break;
-    case 8: _type2_facs_rad<8><<<blocks, threads>>>(facs, lc, np, rca, ci, ai); break;
+    int task_type = l * 10 + lc;
+    switch (task_type) {
+    case 0: _type2_facs_rad<0,0><<<blocks, threads>>>(facs, np, rca, ci, ai); break;
+    case 1: _type2_facs_rad<1,1><<<blocks, threads>>>(facs, np, rca, ci, ai); break;
+    case 2: _type2_facs_rad<2,2><<<blocks, threads>>>(facs, np, rca, ci, ai); break;
+    case 3: _type2_facs_rad<3,3><<<blocks, threads>>>(facs, np, rca, ci, ai); break;
+    case 4: _type2_facs_rad<4,4><<<blocks, threads>>>(facs, np, rca, ci, ai); break;
+    case 5: _type2_facs_rad<5,0><<<blocks, threads>>>(facs, np, rca, ci, ai); break;
+    case 6: _type2_facs_rad<6,1><<<blocks, threads>>>(facs, np, rca, ci, ai); break;
+    case 7: _type2_facs_rad<7,2><<<blocks, threads>>>(facs, np, rca, ci, ai); break;
+    case 8: _type2_facs_rad<8,3><<<blocks, threads>>>(facs, np, rca, ci, ai); break;
     default:
         fprintf(stderr, "l > 8 is not supported\n");
         break;
@@ -257,7 +248,7 @@ int ECPtype2_facs_rad(double *facs, int l, int lc, int np, double rca, double *c
     }
     return 0;
     }
-
+*/
 
 int ECPtype2_facs_ang(double *facs, double *r, int l, int lc){
     int n = 1;
@@ -322,41 +313,30 @@ int ECPtype2_cart(double *gctr, const int *tasks, const int ntasks,
     int task_type = li * 10 + lj;
     switch (task_type)
     {
-    case 0:  type2_cart<0,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 0:  type2_cart<0,0,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
-    case 1:  type2_cart<0,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 10: type2_cart<1,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 1:  type2_cart<0,1,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
-    case 11: type2_cart<1,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 2:  type2_cart<0,2><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 20: type2_cart<2,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 11: type2_cart<1,1,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 2:  type2_cart<0,2,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
-    case 3:  type2_cart<0,3><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 12: type2_cart<1,2><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 21: type2_cart<2,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 30: type2_cart<3,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 3:  type2_cart<0,3,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 12: type2_cart<1,2,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
-    case 4:  type2_cart<0,4><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 13: type2_cart<1,3><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 22: type2_cart<2,2><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 31: type2_cart<3,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 40: type2_cart<4,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 4:  type2_cart<0,4,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 13: type2_cart<1,3,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 22: type2_cart<2,2,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
-    case 5:  type2_cart<0,5><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 14: type2_cart<1,4><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 23: type2_cart<2,3><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 32: type2_cart<3,2><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 41: type2_cart<4,1><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 50: type2_cart<5,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 5:  type2_cart<0,5,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 14: type2_cart<1,4,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 23: type2_cart<2,3,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
-    case 24: type2_cart<2,4><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 33: type2_cart<3,3><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 42: type2_cart<4,2><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 24: type2_cart<2,4,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 33: type2_cart<3,3,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
-    case 34: type2_cart<3,4><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-    case 43: type2_cart<4,3><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 34: type2_cart<3,4,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
-    case 44: type2_cart<4,4><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+    case 44: type2_cart<4,4,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
     default: fprintf(stderr, "(%d,%d) is not supported in ECP.\n", li, lj); break;
     }
 

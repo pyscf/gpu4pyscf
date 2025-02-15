@@ -16,137 +16,13 @@
 
 #include <stdio.h>
 #include "ecp.h"
+
+#include "gauss_chebyshev.cu"
 #include "bessel.cu"
 #include "cart2sph.cu"
 
-__device__
-static double r99[] = {
-    7.49149775547408580678e-09,2.39390171574704879731e-07,1.81360303841415770876e-06,
-    7.61741913646307722274e-06,2.31485030718348028245e-05,5.73044613240147882038e-05,
-    1.23105600339346032968e-04,2.38337096238994128328e-04,4.26098829770071851897e-04,
-    7.15253566223816861225e-04,1.14076690801112601292e-03,1.74393542073036922346e-03,
-    2.57250241525242007157e-03,3.68066393021282411979e-03,5.12897037092585605933e-03,
-    6.98413189926139210684e-03,9.31873792827664360061e-03,1.22109028731325341965e-02,
-    1.57438515926779931675e-02,2.00054587018748675220e-02,2.50877561523923375830e-02,
-    3.10864232033296605806e-02,3.81002721950566280995e-02,4.62307424720755921754e-02,
-    5.55814134610747023757e-02,6.62575463867129954565e-02,7.83656624864419448784e-02,
-    9.20131639458153793854e-02,1.07308002185481865531e-01,1.24358396645808944037e-01,
-    1.43272605876474390385e-01,1.64158751574681183172e-01,1.87124695242669281114e-01,
-    2.12277966358133562963e-01,2.39725740366322215280e-01,2.69574864399791169767e-01,
-    3.01931928396128146375e-01,3.36903379197803665157e-01,3.74595675262858196497e-01,
-    4.15115479771713591362e-01,4.58569890166489968486e-01,5.05066702489160856970e-01,
-    5.54714709280482720644e-01,6.07624030252335245450e-01,6.63906475444308141753e-01,
-    7.23675941116369569883e-01,7.87048839211608508570e-01,8.54144561847640537700e-01,
-    9.25085982966693309848e-01,1.00000000000000000000e+00,1.07901811919271173323e+00,
-    1.16227708910521165819e+00,1.24991958777366174438e+00,1.34209497009947353874e+00,
-    1.43896008327213209554e+00,1.54068015944685710039e+00,1.64742979654017807079e+00,
-    1.75939403992477760852e+00,1.87676958006419325464e+00,1.99976608380819209643e+00,
-    2.12860768027057822849e+00,2.26353462605831046162e+00,2.40480517927247383625e+00,
-    2.55269771735934725143e+00,2.70751314081141725154e+00,2.86957761323600735182e+00,
-    3.03924569885439943562e+00,3.21690397163072372422e+00,3.40297518669977883121e+00,
-    3.59792312555240823002e+00,3.80225825286600205288e+00,4.01654435671977161348e+00,
-    4.24140638764222543955e+00,4.47753976885303650590e+00,4.72572152485034457925e+00,
-    4.98682367473171250793e+00,5.26182946969805254156e+00,5.55185323462325097665e+00,
-    5.85816482123891901779e+00,6.18222002494881728296e+00,6.52569880330852480910e+00,
-    6.89055383078500405247e+00,7.27907294007241034706e+00,7.69396050945778942065e+00,
-    8.13844514586779865795e+00,8.61642457049883248033e+00,9.13266428605907520932e+00,
-    9.69307592048363630965e+00,1.03051169664600053011e+01,1.09783815787195599967e+01,
-    1.17255037073349104304e+01,1.25635944005437458770e+01,1.35166439102318687304e+01,
-    1.46197880380327820404e+01,1.59274995188788217604e+01,1.75310364710511947806e+01,
-    1.96014771359075226087e+01,2.25228992353034804808e+01,2.75208650628360445012e+01
-};
-
-__device__
-static double w99[] = {
-    3.74504465546597569538e-08,5.98025425874844469710e-07,3.01755904037220807623e-06,
-    9.49315435270622856210e-06,2.30398689788116110507e-05,4.74313676460523959283e-05,
-    8.71259201682535134800e-05,1.47179566351102945714e-04,2.33148687103363678368e-04,
-    3.50984582880628406387e-04,5.06922938043571566502e-04,7.07371219265206943941e-04,
-    9.58797101661354954881e-04,1.26762093081784132584e-03,1.64011501514828858875e-03,
-    2.08231221338544105273e-03,2.59992585711949202726e-03,3.19828255500335511402e-03,
-    3.88226889403487296012e-03,4.65629251553667869445e-03,5.52425752862067010601e-03,
-    6.48955375754613900119e-03,7.55505892130658475436e-03,8.72315252730691305383e-03,
-    9.99574003267965187358e-03,1.13742856869007685078e-02,1.28598524127975146619e-02,
-    1.44531471005464283441e-02,1.61545697688108974566e-02,1.79642651752900291140e-02,
-    1.98821756219053555337e-02,2.19080938846085149230e-02,2.40417153927295589033e-02,
-    2.62826889781383951639e-02,2.86306657025656371984e-02,3.10853454466156094160e-02,
-    3.36465211026480970347e-02,3.63141203538897561209e-02,3.90882451433852487477e-02,
-    4.19692090394069017290e-02,4.49575727902660482460e-02,4.80541784332910032473e-02,
-    5.12601823826394700778e-02,5.45770879714215714773e-02,5.80067779682611125991e-02,
-    6.15515476299037800345e-02,6.52141388927818116406e-02,6.89977763505640606656e-02,
-    7.29062057147122910550e-02,7.69437355140780432361e-02,8.11152828609839615659e-02,
-    8.54264241987284650426e-02,8.98834520532275083049e-02,9.44934389444379158052e-02,
-    9.92643097771207100211e-02,1.04204924232482093460e-01,1.09325170931016332765e-01,
-    1.14636075443408688712e-01,1.20149924604410915374e-01,1.25880410051722568809e-01,
-    1.31842794490549808373e-01,1.38054104903617747002e-01,1.44533357823557057076e-01,
-    1.51301822908832206416e-01,1.58383332480235811124e-01,1.65804646467863830983e-01,
-    1.73595884502318081877e-01,1.81791039811778243340e-01,1.90428593366022247402e-01,
-    1.99552251623036053241e-01,2.09211837674749323579e-01,2.19464374100552722657e-01,
-    2.30375407187545538923e-01,2.42020637456367176954e-01,2.54487942212678397436e-01,
-    2.67879904418947323297e-01,2.82317001937544220791e-01,2.97941667216647110283e-01,
-    3.14923507520003143068e-01,3.33466091844559053836e-01,3.53815881680646926455e-01,
-    3.76274139285664444010e-01,4.01213039460866560670e-01,4.29097823819136747758e-01,
-    4.60517817328173983960e-01,4.96230738223049638869e-01,5.37227459212045510561e-01,
-    5.84829149853474561382e-01,6.40837406259777031536e-01,7.07774459213704520977e-01,
-    7.89283521639834395600e-01,8.90829397324601646169e-01,1.02099961208170930682e+00,
-    1.19410667684690441348e+00,1.43591306733334556078e+00,1.79794367421340983704e+00,
-    2.40042315475528500457e+00,3.60402534195157464580e+00,7.21211908055371253568e+00
-};
-
-#define NGAUSS  99
-
-__constant__
-static int _cart_pow_y[] = {
-        0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4, 3, 2, 1, 0, 5, 4, 3, 2, 1,
-        0, 6, 5, 4, 3, 2, 1, 0, 7, 6, 5, 4, 3, 2, 1, 0, 8, 7, 6, 5,
-        4, 3, 2, 1, 0, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,10, 9, 8, 7, 6,
-        5, 4, 3, 2, 1, 0,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,12,11,
-       10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,13,12,11,10, 9, 8, 7, 6, 5,
-        4, 3, 2, 1, 0,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
-};
-
-__constant__
-static int _cart_pow_z[] = {
-        0, 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4,
-        5, 0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3,
-        4, 5, 6, 7, 8, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4,
-        5, 6, 7, 8, 9,10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11, 0, 1,
-        2, 3, 4, 5, 6, 7, 8, 9,10,11,12, 0, 1, 2, 3, 4, 5, 6, 7, 8,
-        9,10,11,12,13, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
-};
-
-__constant__
-static int _offset_cart[] = {0, 1, 4, 10, 20, 35, 56, 84, 120, 165};
-
-__constant__
-static double _binom[] = {
-        1,
-        1, 1,
-        1, 2, 1,
-        1, 3, 3, 1,
-        1, 4, 6, 4, 1,
-        1, 5, 10, 10, 5, 1,
-        1, 6, 15, 20, 15, 6, 1,
-        1, 7, 21, 35, 35, 21, 7, 1,
-        1, 8, 28, 56, 70, 56, 28, 8, 1,
-        1, 9, 36, 84, 126, 126, 84, 36, 9, 1,};
-
-__constant__
-static double _common_fac[] = {
-    0.282094791773878143,
-    0.488602511902919921,
-    1.0,
-    1.0,
-    1.0,
-    1.0,
-    1.0,
-    1.0,
-    1.0,
-    1.0
-};
-
-__device__
-static void ang_nuc_part(double *omega_cum, int l, double rx, double ry, double rz){
+template <int l> __device__
+static void ang_nuc_part(double *omega_cum, double rx, double ry, double rz){
     /*
     Accumulated angular ECP part in Cartesian
     Angular momentum L = 0, 1, ... LMAX
@@ -605,76 +481,68 @@ static void ang_nuc_part(double *omega_cum, int l, double rx, double ry, double 
 rad_all: [lmax+1, lmax+1]
 */
 template <int LIJ> __device__
-void type1_rad_part(double* __restrict__ rad_all, double k, double aij, double *ur)
+void type1_rad_part(double* __restrict__ rad_all, double k, double aij, double ur)
 {
     constexpr int LIJ1 = LIJ + 1;
-    __shared__ double rur[NGAUSS];
-
     const double kaij = k / (2*aij);
     const double fac = kaij * kaij * aij;
 
+    double tmp = r128[threadIdx.x] - kaij;
+    tmp = fac - aij*tmp*tmp;
+    double bval[LIJ1];
+    double rur;
+    if (ur == 0 || tmp > CUTOFF || tmp < -(EXPCUTOFF+6.+30.)) {
+        rur = 0;
+        for (int i = 0; i < LIJ1; i++){
+            bval[i] = 0;
+        }
+    } else {
+        rur = ur * exp(tmp);
+        _ine(bval, LIJ, k*r128[threadIdx.x]);
+    }
+
+    for (int i = threadIdx.x; i <= LIJ1*LIJ1; i+=blockDim.x){
+        rad_all[i] = 0.0;
+    }
+    __syncthreads();
     for (int lab = 0; lab <= LIJ; lab++){
-        for (int i = 0; i <= LIJ; i++){
-            rad_all[lab*LIJ1+i] = 0.0;
+        if (lab > 0){
+            rur *= r128[threadIdx.x];
+        }
+        for (int i = lab%2; i <= LIJ; i+=2){
+            atomicAdd(rad_all+lab*LIJ1+i, rur*bval[i]);
+            //rad_all[lab*LIJ1+i] = rur * bval[i];
         }
     }
-
-    for (int n = 0; n < NGAUSS; n++){
-        double tmp = r99[n] - kaij;
-        tmp = fac - aij*tmp*tmp;
-        double bval[LIJ1];
-        if (ur[n] == 0 || tmp > CUTOFF || tmp < -(EXPCUTOFF+6.+30.)) {
-            rur[n] = 0;
-            for (int i = 0; i < LIJ1; i++){
-                bval[i] = 0;
-            }
-        } else {
-            rur[n] = ur[n] * exp(tmp);
-            _ine(bval, LIJ, k*r99[n]);
-        }
-
-        for (int lab = 0; lab <= LIJ; lab++){
-            if (lab > 0){
-                rur[n] *= r99[n];
-            }
-
-            for (int i = lab%2; i <= LIJ; i+=2){
-                rad_all[lab*LIJ1+i] += rur[n] * bval[i];
-            }
-        }
-    }
+    __syncthreads();
 }
 
-template <int LI> __device__
-void type2_facs_rad(double* facs, const int lc, const int np, double rca,
+template <int LI, int LC> __device__
+void type2_facs_rad(double* facs, const int np, double rca,
                     const double *ci, const double *ai){
-    for (int i = 0; i < NGAUSS; i++){
-        double r = r99[i] - rca;
-        double r2 = r*r;
-        double *pfacs = facs + (LI+lc+1) * i;
-        for (int j = 0; j <= LI+lc; j++){
-            pfacs[j] = 0.0;
-        }
+    double r = r128[threadIdx.x] - rca;
+    double r2 = r*r;
+    for (int j = 0; j <= LI+LC; j++){
+        facs[j] = 0.0;
+    }
 
-        for (int ip = 0; ip < np; ip++){
-            double ka = 2.0 * ai[ip] * rca;
-            double ar2 = ai[ip] * r2;
-            double buf[LI+ECP_LMAX+1];
-            if (ar2 > EXPCUTOFF + 6.0){
-                for (int j = 0; j <= LI+lc; j++){
-                    buf[j] = 0.0;
-                }
-            } else {
-                double t1 = exp(-ar2);
-                _ine(buf, LI+lc, ka*r99[i]);
-                for (int j = 0; j <= LI+lc; j++){
-                    buf[j] *= t1;
-                }
+    for (int ip = 0; ip < np; ip++){
+        double ka = 2.0 * ai[ip] * rca;
+        double ar2 = ai[ip] * r2;
+        double buf[LI+LC+1];
+        if (ar2 > EXPCUTOFF + 6.0){
+            for (int j = 0; j <= LI+LC; j++){
+                buf[j] = 0.0;
             }
-            for (int j = 0; j <= LI+lc; j++){
-                pfacs[j] += ci[ip] * buf[j];
+        } else {
+            double t1 = exp(-ar2);
+            _ine(buf, LI+LC, ka*r128[threadIdx.x]);
+            for (int j = 0; j <= LI+LC; j++){
+                buf[j] *= t1;
             }
-            //printf("%d %d %d %f %f %f\n", LI+lc, i, ip, ci[ip], buf[0], pfacs[0]);
+        }
+        for (int j = 0; j <= LI+LC; j++){
+            facs[j] += ci[ip] * buf[j];
         }
     }
 }
@@ -694,12 +562,12 @@ void type1_rad_ang(double *rad_ang, double *r, double *rad_all, double fac)
         unitr[2] = r[2] * norm_r;
     }
 
-    __shared__ double omega_nuc[CART_CUM];
-    ang_nuc_part(omega_nuc, LIJ, unitr[0], unitr[1], unitr[2]);
+    double omega_nuc[CART_CUM];
+    ang_nuc_part<LIJ>(omega_nuc, unitr[0], unitr[1], unitr[2]);
 
     constexpr int d1 = LIJ + 1;
     constexpr int d2 = d1 * d1;
-    for (int i = 0; i <= LIJ; i++) {
+    for (int i = threadIdx.x; i <= LIJ; i+=blockDim.x) {
     for (int j = 0; j <= LIJ-i; j++) {
     for (int k = 0; k <= LIJ-i-j; k++) {
         double *pout = rad_ang + i*d2+j*d1+k;
@@ -718,29 +586,28 @@ void type1_rad_ang(double *rad_ang, double *r, double *rad_all, double fac)
                 }
                 tmp += pnuc[n] * int_unit_xyz(i+pr, j+ps, k+pt);
             }
-            *pout += fac * prad[lmb] * tmp;
+            //*pout += fac * prad[lmb] * tmp;
+            atomicAdd(pout, fac*prad[lmb]*tmp);
         }
     } } }
 }
 
 
 __device__
-void rad_part(int ish, const int *ecpbas, const double *env, double *ur){
+double rad_part(int ish, const int *ecpbas, const double *env){
     const int npk = ecpbas[ish*BAS_SLOTS+NPRIM_OF];
     const int r_order = ecpbas[ish*BAS_SLOTS+RADI_POWER];
     const int exp_ptr = ecpbas[ish*BAS_SLOTS+PTR_EXP];
     const int coeff_ptr = ecpbas[ish*BAS_SLOTS+PTR_COEFF];
 
-    for (int n = 0; n < NGAUSS; n++){
-        double u1 = 0.0;
-        const double r = r99[n];
-        for (int kp = 0; kp < npk; kp++){
-            const double ak = env[exp_ptr+kp];
-            const double ck = env[coeff_ptr+kp];
-            u1 += ck * exp(-ak * r * r);
-        }
-        ur[n] += u1 * pow(r, r_order) * w99[n];
+    double u1 = 0.0;
+    const double r = r128[threadIdx.x];
+    for (int kp = 0; kp < npk; kp++){
+        const double ak = env[exp_ptr+kp];
+        const double ck = env[coeff_ptr+kp];
+        u1 += ck * exp(-ak * r * r);
     }
+    return u1 * pow(r, r_order) * w128[threadIdx.x];
 }
 
 template <int LI> __device__
@@ -754,9 +621,9 @@ void cache_fac(double *fx, double *ri){
         zz[i] = zz[i-1] * ri[2];
     }
 
-    constexpr int fsize = (LI1+1)*LI1/2;
-    double *fy = fx + fsize;
-    double *fz = fy + fsize;
+    constexpr int nfi = (LI1+1)*LI1/2;
+    double *fy = fx + nfi;
+    double *fz = fy + nfi;
     for (int i = 0; i <= LI; i++){
         int ioffset = i*(i+1)/2;
         for (int j = 0; j <= i; j++){
@@ -771,15 +638,14 @@ void cache_fac(double *fx, double *ri){
 template <int LI> __device__
 void type1_cache_fac(double* __restrict__ ifac, double *ri){
     constexpr int LI1 = LI + 1;
-    constexpr int fsize = (LI1+1)*LI1/2;
-    double fx[fsize*3];
+    constexpr int nfi = (LI1+1)*LI1/2;
+    double fx[nfi*3];
     cache_fac<LI>(fx, ri);
 
-    double *fy = fx + fsize;
-    double *fz = fy + fsize;
+    double *fy = fx + nfi;
+    double *fz = fy + nfi;
     constexpr int LI2 = LI1 * LI1;
     constexpr int LI3 = LI2 * LI1;
-    constexpr int nfi = (LI1)*(LI1+1)/2;
     for (int mi = 0; mi < nfi; mi++){
         int iy = _cart_pow_y[mi];
         int iz = _cart_pow_z[mi];
@@ -796,8 +662,8 @@ void type1_cache_fac(double* __restrict__ ifac, double *ri){
     }
 }
 
-template <int LI> __device__
-void type2_facs_ang(double* facs, int lc, double *r){
+template <int LI, int LC> __device__
+void type2_facs_ang(double* facs, double *r){
     double unitr[3];
     if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
         unitr[0] = 0;
@@ -809,33 +675,33 @@ void type2_facs_ang(double* facs, int lc, double *r){
         unitr[1] = r[1] * norm_r;
         unitr[2] = r[2] * norm_r;
     }
-    constexpr int LI1 = LI + 1;
-    constexpr int LIC1 = LI + ECP_LMAX + 1;
-    constexpr int LCC1 = ECP_LMAX * 2 + 1;
+    constexpr int LI1 = LI+1;
+    constexpr int LIC1 = LI+LC+1;
+    constexpr int LCC1 = LC*2+1;
 
     double omega_nuc[CART_CUM];
 
-    ang_nuc_part(omega_nuc, LI+lc, unitr[0], unitr[1], unitr[2]);
+    ang_nuc_part<LI+LC>(omega_nuc, unitr[0], unitr[1], unitr[2]);
     // The total number of (i,j,k) is tetrahedral number
     // store (i,j,k) such that i+j+k<=LI
     // store (i+j+k+lc)%2 = 0 only
     // up to 12600 Bytes
-    constexpr int BLKSIZE = LCC1 * (LIC1+1)/2;
-    double omega[LI1*(LI1+1)*(LI1+2)/6 * BLKSIZE];
+    constexpr int BLK = (LIC1+1)/2 * LCC1;
+    double omega[LI1*(LI1+1)*(LI1+2)/6 * BLK];
     for (int i = 0; i <= LI; i++){
     for (int j = 0; j <= LI-i; j++){
     for (int k = 0; k <= LI-i-j; k++){
-        const int need_even = (lc+i+j+k)%2;
+        const int need_even = (LC+i+j+k)%2;
         const int ioff = (LI-i)*(LI-i+1)*(LI-i+2)/6;
         const int joff = (LI-i-j)*(LI-i-j+1)/2;
-        double *pomega = omega + (ioff+joff+k)*BLKSIZE;
-        for (int lmb = need_even; lmb <= LI+lc; lmb+=2){
+        double *pomega = omega + (ioff+joff+k)*BLK;
+        for (int lmb = need_even; lmb <= LI+LC; lmb+=2){
             double *pnuc = omega_nuc + _offset_cart[lmb];
-            double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
-            for (int m = 0; m < (lc+1)*(lc+2)/2; m++){
+            double buf[(LC+1)*(LC+2)/2];
+            for (int m = 0; m < (LC+1)*(LC+2)/2; m++){
                 int pv = _cart_pow_y[m];
                 int pw = _cart_pow_z[m];
-                int pu = lc - pv - pw;
+                int pu = LC - pv - pw;
                 buf[m] = 0.0;
                 for (int n = 0; n < (lmb+1)*(lmb+2)/2; n++){
                     int ps = _cart_pow_y[n];
@@ -845,21 +711,18 @@ void type2_facs_ang(double* facs, int lc, double *r){
                 }
                 buf[m] *= 4.0 * M_PI;
             }
-            cart2sph(pomega, lc, buf);
+            cart2sph(pomega, LC, buf);
             pomega += LCC1;
         }
     }}}
 
-    constexpr int fsize = LI1*(LI1+1)/2;
-    double fx[fsize*3];
-    double* fy = fx + fsize;
-    double* fz = fy + fsize;
+    constexpr int nfi = LI1*(LI1+1)/2;
+    double fx[nfi*3];
+    double* fy = fx + nfi;
+    double* fz = fy + nfi;
     cache_fac<LI>(fx, r);
 
-    const int lic1 = LI+lc+1;
-    const int lcc1 = 2*lc+1;
-
-    for (int i = 0; i < LI1*fsize*lcc1*lic1; i++){
+    for (int i = 0; i < LI1*nfi*LIC1*LCC1; i++){
         facs[i] = 0.0;
     }
     // i,j,k,ijkmn->(i+j+k)pmn
@@ -870,101 +733,7 @@ void type2_facs_ang(double* facs, int lc, double *r){
         for (int i = 0; i <= ix; i++){
         for (int j = 0; j <= iy; j++){
         for (int k = 0; k <= iz; k++){
-            const int need_even = (lc+i+j+k)%2;
-            const int xoffset = (ix+1)*ix/2;
-            const int yoffset = (iy+1)*iy/2;
-            const int zoffset = (iz+1)*iz/2;
-            double fac = fx[xoffset+i] * fy[yoffset+j] * fz[zoffset+k];
-
-            const int ioff = (LI-i)*(LI-i+1)*(LI-i+2)/6;
-            const int joff = (LI-i-j)*(LI-i-j+1)/2;
-            double *pomega = omega + (ioff+joff+k)*BLKSIZE;
-            double *pfacs = facs + ((i+j+k)*fsize+p)*lcc1*lic1;
-            for (int m = 0; m < 2*lc+1; m++){
-            for (int n = need_even; n < lic1; n+=2){
-                pfacs[m*lic1+n] += fac * pomega[n/2*LCC1+m];
-            }}
-        }}}
-    }
-}
-
-template <int LI> __device__
-void type2_facs_omega(double* omega, int lc, double *r){
-    double unitr[3];
-    if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
-        unitr[0] = 0;
-        unitr[1] = 0;
-        unitr[2] = 0;
-    } else {
-        double norm_r = -rnorm3d(r[0], r[1], r[2]);
-        unitr[0] = r[0] * norm_r;
-        unitr[1] = r[1] * norm_r;
-        unitr[2] = r[2] * norm_r;
-    }
-    constexpr int LI1 = LI + 1;
-    constexpr int LIC1 = LI + ECP_LMAX + 1;
-    constexpr int LCC1 = ECP_LMAX * 2 + 1;
-
-    double omega_nuc[CART_CUM];
-
-    ang_nuc_part(omega_nuc, LI+lc, unitr[0], unitr[1], unitr[2]);
-    // The total number of (i,j,k) is tetrahedral number
-    // store (i,j,k) such that i+j+k<=LI
-    // store (i+j+k+lc)%2 = 0 only
-    // up to 12600 Bytes
-    constexpr int BLKSIZE = LCC1 * (LIC1+1)/2;
-    for (int i = 0; i <= LI; i++){
-    for (int j = 0; j <= LI-i; j++){
-    for (int k = 0; k <= LI-i-j; k++){
-        const int need_even = (lc+i+j+k)%2;
-        const int ioff = (LI-i)*(LI-i+1)*(LI-i+2)/6;
-        const int joff = (LI-i-j)*(LI-i-j+1)/2;
-        double *pomega = omega + (ioff+joff+k)*BLKSIZE;
-        for (int lmb = need_even; lmb <= LI+lc; lmb+=2){
-            double *pnuc = omega_nuc + _offset_cart[lmb];
-            double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
-            for (int m = 0; m < (lc+1)*(lc+2)/2; m++){
-                int pv = _cart_pow_y[m];
-                int pw = _cart_pow_z[m];
-                int pu = lc - pv - pw;
-                buf[m] = 0.0;
-                for (int n = 0; n < (lmb+1)*(lmb+2)/2; n++){
-                    int ps = _cart_pow_y[n];
-                    int pt = _cart_pow_z[n];
-                    int pr = lmb - ps - pt;
-                    buf[m] += pnuc[n] * int_unit_xyz(i+pu+pr, j+pv+ps, k+pw+pt);
-                }
-                buf[m] *= 4.0 * M_PI;
-            }
-            cart2sph(pomega, lc, buf);
-            pomega += LCC1;
-        }
-    }}}
-}
-
-template <int LI> __device__
-void type2_ang(double *facs, double *fx, double *omega, int lc, int m){
-    constexpr int LI1 = LI+1;
-    constexpr int nfi = LI1*(LI1+1)/2;
-    constexpr int LCC1 = (2*ECP_LMAX+1);
-    constexpr int BLK = LCC1*(LI+ECP_LMAX+1)/2;
-
-    const int lic1 = LI+lc+1;
-    double *fy = fx + nfi;
-    double *fz = fy + nfi;
-
-    for (int i = 0; i < LI1*nfi*lic1; i++){
-        facs[i] = 0.0;
-    }
-    // i,j,k,ijkmn->(i+j+k)pmn
-    for (int p = 0; p < (LI+1)*(LI+2)/2; p++){
-        int iy = _cart_pow_y[p];
-        int iz = _cart_pow_z[p];
-        int ix = LI - iy - iz;
-        for (int i = 0; i <= ix; i++){
-        for (int j = 0; j <= iy; j++){
-        for (int k = 0; k <= iz; k++){
-            const int need_even = (lc+i+j+k)%2;
+            const int need_even = (LC+i+j+k)%2;
             const int xoffset = (ix+1)*ix/2;
             const int yoffset = (iy+1)*iy/2;
             const int zoffset = (iz+1)*iz/2;
@@ -973,12 +742,109 @@ void type2_ang(double *facs, double *fx, double *omega, int lc, int m){
             const int ioff = (LI-i)*(LI-i+1)*(LI-i+2)/6;
             const int joff = (LI-i-j)*(LI-i-j+1)/2;
             double *pomega = omega + (ioff+joff+k)*BLK;
-            double *pfacs = facs + ((i+j+k)*nfi+p)*lic1;
-            for (int n = need_even; n < lic1; n+=2){
+            double *pfacs = facs + ((i+j+k)*nfi+p)*LCC1*LIC1;
+            for (int m = 0; m < 2*LC+1; m++){
+            for (int n = need_even; n < LIC1; n+=2){
+                pfacs[m*LIC1+n] += fac * pomega[n/2*LCC1+m];
+            }}
+        }}}
+    }
+}
+
+template <int LI, int LC> __device__
+void type2_facs_omega(double* omega, double *r){
+    double unitr[3];
+    if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
+        unitr[0] = 0;
+        unitr[1] = 0;
+        unitr[2] = 0;
+    } else {
+        double norm_r = -rnorm3d(r[0], r[1], r[2]);
+        unitr[0] = r[0] * norm_r;
+        unitr[1] = r[1] * norm_r;
+        unitr[2] = r[2] * norm_r;
+    }
+    constexpr int LIC1 = LI+LC+1;
+    constexpr int LCC1 = LC*2+1;
+
+    double omega_nuc[CART_CUM];
+
+    ang_nuc_part<LI+LC>(omega_nuc, unitr[0], unitr[1], unitr[2]);
+    // The total number of (i,j,k) is tetrahedral number
+    // store (i,j,k) such that i+j+k<=LI
+    // store (i+j+k+lc)%2 = 0 only
+    // up to 12600 Bytes
+    constexpr int BLK = (LIC1+1)/2 * LCC1;
+    for (int i = threadIdx.x; i <= LI; i+=blockDim.x){
+    for (int j = 0; j <= LI-i; j++){
+    for (int k = 0; k <= LI-i-j; k++){
+        const int need_even = (LC+i+j+k)%2;
+        const int ioff = (LI-i)*(LI-i+1)*(LI-i+2)/6;
+        const int joff = (LI-i-j)*(LI-i-j+1)/2;
+        double *pomega = omega + (ioff+joff+k)*BLK;
+        for (int lmb = need_even; lmb <= LI+LC; lmb+=2){
+            double *pnuc = omega_nuc + _offset_cart[lmb];
+            double buf[(LC+1)*(LC+2)/2];
+            for (int m = 0; m < (LC+1)*(LC+2)/2; m++){
+                int pv = _cart_pow_y[m];
+                int pw = _cart_pow_z[m];
+                int pu = LC - pv - pw;
+                buf[m] = 0.0;
+                for (int n = 0; n < (lmb+1)*(lmb+2)/2; n++){
+                    int ps = _cart_pow_y[n];
+                    int pt = _cart_pow_z[n];
+                    int pr = lmb - ps - pt;
+                    buf[m] += pnuc[n] * int_unit_xyz(i+pu+pr, j+pv+ps, k+pw+pt);
+                }
+                buf[m] *= 4.0 * M_PI;
+            }
+            cart2sph(pomega, LC, buf);
+            pomega += LCC1;
+        }
+    }}}
+    __syncthreads();
+}
+
+template <int LI, int LC> __device__
+void type2_ang(double *facs, double *fx, double *omega, int m){
+    constexpr int LI1 = LI+1;
+    constexpr int nfi = LI1*(LI1+1)/2;
+    constexpr int LCC1 = (2*LC+1);
+    constexpr int LIC1 = LI+LC+1;
+    constexpr int BLK = (LIC1+1)/2 * LCC1;
+
+    double *fy = fx + nfi;
+    double *fz = fy + nfi;
+
+    for (int i = threadIdx.x; i < LI1*nfi*(LI+LC+1); i+=blockDim.x){
+        facs[i] = 0.0;
+    }
+    __syncthreads();
+
+    // i,j,k,ijkmn->(i+j+k)pmn
+    for (int p = threadIdx.x; p < (LI+1)*(LI+2)/2; p+=blockDim.x){
+        int iy = _cart_pow_y[p];
+        int iz = _cart_pow_z[p];
+        int ix = LI - iy - iz;
+        for (int i = 0; i <= ix; i++){
+        for (int j = 0; j <= iy; j++){
+        for (int k = 0; k <= iz; k++){
+            const int need_even = (LC+i+j+k)%2;
+            const int xoffset = (ix+1)*ix/2;
+            const int yoffset = (iy+1)*iy/2;
+            const int zoffset = (iz+1)*iz/2;
+            double fac = fx[xoffset+i] * fy[yoffset+j] * fz[zoffset+k];
+
+            const int ioff = (LI-i)*(LI-i+1)*(LI-i+2)/6;
+            const int joff = (LI-i-j)*(LI-i-j+1)/2;
+            double *pomega = omega + (ioff+joff+k)*BLK;
+            double *pfacs = facs + ((i+j+k)*nfi+p)*LIC1;
+            for (int n = need_even; n < LIC1; n+=2){
                 pfacs[n] += fac * pomega[n/2*LCC1+m];
             }
         }}}
     }
+    __syncthreads();
 }
 
 template <int LI, int LJ> __global__
@@ -986,7 +852,7 @@ void type1_cart(double *gctr, const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc, const int *atm,
                 const int *bas, const double *env)
 {
-    const int task_id = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_id = blockIdx.x;
     if (task_id >= ntasks){
         return;
     }
@@ -1018,19 +884,19 @@ void type1_cart(double *gctr, const int *tasks, const int ntasks,
     rcb[2] = rc[2] - rj[2];
     const double r2ca = rca[0]*rca[0] + rca[1]*rca[1] + rca[2]*rca[2];
     const double r2cb = rcb[0]*rcb[0] + rcb[1]*rcb[1] + rcb[2]*rcb[2];
-    double ur[NGAUSS];
-    for (int i = 0; i < NGAUSS; i++){
-        ur[i] = 0.0;
-    }
 
+    double ur = 0.0;
     for (int kbas = ecploc[ecp_id]; kbas < ecploc[ecp_id+1]; kbas++){
-        rad_part(kbas, ecpbas, env, ur);
+        ur += rad_part(kbas, ecpbas, env);
     }
 
-    constexpr int LMAX1 = LI+LJ+1;
-
-    double rad_ang[LMAX1*LMAX1*LMAX1]; // up to 5832 Bytes
-    for (int i = 0; i < LMAX1*LMAX1*LMAX1; i++) { rad_ang[i] = 0; }
+    constexpr int LIJ1 = LI+LJ+1;
+    constexpr int LIJ3 = LIJ1*LIJ1*LIJ1;
+    __shared__ double rad_ang[LIJ3]; // up to 5832 Bytes
+    for (int i = threadIdx.x; i < LIJ3; i+=blockDim.x) {
+        rad_ang[i] = 0;
+    }
+    __syncthreads();
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
     for (int ip = 0; ip < npi; ip++){
@@ -1041,12 +907,14 @@ void type1_cart(double *gctr, const int *tasks, const int ntasks,
             rij[2] = ai[ip] * rca[2] + aj[jp] * rcb[2];
             const double k = 2.0 * norm3d(rij[0], rij[1], rij[2]);
             const double aij = ai[ip] + aj[jp];
-            double rad_all[LMAX1*LMAX1];
+            // TODO: reduce the register usage
+            __shared__ double rad_all[LIJ1*LIJ1];
             type1_rad_part<LI+LJ>(rad_all, k, aij, ur);
 
             const double eij = exp(-ai[ip]*r2ca - aj[jp]*r2cb);
             const double ceij = eij * ci[ip] * cj[jp];
             type1_rad_ang<LI+LJ>(rad_ang, rij, rad_all, fac*ceij);
+            __syncthreads();
         }
     }
 
@@ -1056,11 +924,15 @@ void type1_cart(double *gctr, const int *tasks, const int ntasks,
     constexpr int LJ2 = LJ1*LJ1;
     constexpr int LI3 = LI1*LI2;
     constexpr int LJ3 = LJ1*LJ2;
-    double ifac[nfi*LI3]; // up to 15625 Bytes
-    type1_cache_fac<LI>(ifac, rca);
+    __shared__ double ifac[nfi*LI3]; // up to 15625 Bytes
+    __shared__ double jfac[nfj*LJ3];
 
-    double jfac[nfj*LJ3];
+    if (threadIdx.x != 0){
+        return;
+    }
     type1_cache_fac<LJ>(jfac, rcb);
+    type1_cache_fac<LI>(ifac, rca);
+    __syncthreads();
 
     // TODO: unrolling with a code generator
     for (int mi = 0; mi < nfi; mi++){
@@ -1081,7 +953,7 @@ void type1_cart(double *gctr, const int *tasks, const int ntasks,
                 for (int j3 = 0; j3 <= jz; j3++){
                     const int ir = mi * LI3 + i1 * LI2 + i2 * LI1 + i3;
                     const int jr = mj * LJ3 + j1 * LJ2 + j2 * LJ1 + j3;
-                    const int ijr = (i1+j1)*LMAX1*LMAX1 + (i2+j2)*LMAX1 + (i3+j3);
+                    const int ijr = (i1+j1)*LIJ1*LIJ1 + (i2+j2)*LIJ1 + (i3+j3);
                     tmp += ifac[ir] * jfac[jr] * rad_ang[ijr];
                 }}}
             }}}
@@ -1092,12 +964,12 @@ void type1_cart(double *gctr, const int *tasks, const int ntasks,
 }
 
 
-template <int LI, int LJ> __global__
+template <int LI, int LJ, int LC> __global__
 void type2_cart(double *gctr, const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc, const int *atm,
                 const int *bas, const double *env)
 {
-    const int task_id = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_id = blockIdx.x;
     if (task_id >= ntasks){
         return;
     }
@@ -1130,90 +1002,80 @@ void type2_cart(double *gctr, const int *tasks, const int ntasks,
     const double dca = norm3d(rca[0], rca[1], rca[2]);
     const double dcb = norm3d(rcb[0], rcb[1], rcb[2]);
 
-    double ur[NGAUSS];
-    for (int i = 0; i < NGAUSS; i++){
-        ur[i] = 0.0;
-    }
-
     constexpr int LI1 = LI+1;
     constexpr int LJ1 = LJ+1;
-    constexpr int LIC1 = LI + ECP_LMAX + 1;
-    constexpr int LJC1 = LJ + ECP_LMAX + 1;
-    constexpr int LCC1 = (2 * ECP_LMAX + 1);
+    constexpr int LIC1 = LI+LC+1;
+    constexpr int LJC1 = LJ+LC+1;
+    constexpr int LCC1 = (2*LC+1);
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
 
+    double ur = 0.0;
     for (int kbas = ecploc[ecp_id]; kbas < ecploc[ecp_id+1]; kbas++){
-        const int lc = ecpbas[ANG_OF+kbas*BAS_SLOTS];
-        if (lc == -1){
-            continue;
-        }
-        rad_part(kbas, ecpbas, env, ur);
+        ur += rad_part(kbas, ecpbas, env);
+    }
 
-        double radi[LI1*NGAUSS]; // TODO: move to registers
-        double radj[LJ1*NGAUSS];
-        type2_facs_rad<LI>(radi, lc, npi, dca, ci, ai);
-        type2_facs_rad<LJ>(radj, lc, npj, dcb, cj, aj);
+    double radi[LIC1]; // TODO: move to registers
+    double radj[LJC1];
+    type2_facs_rad<LI, LC>(radi, npi, dca, ci, ai);
+    type2_facs_rad<LJ, LC>(radj, npj, dcb, cj, aj);
 
-        double rad_all[(LI+LJ+1) * LI1 * LJ1]; // up to 1800 Bytes
-        for (int p = 0; p <= LI+LJ; p++){
-            double *prad = rad_all + p*LI1*LJ1;
-            for (int i = 0; i <= LI; i++){
-            for (int j = 0; j <= LJ; j++){
-                double s = 0;
-                for (int ir = 0; ir < NGAUSS; ir++){
-                    s += radi[i+ir*LI1] * radj[j+ir*LJ1] * ur[ir];
-                }
-                prad[i*LJ1+j] = s;
-            }}
-            for (int ir = 0; ir < NGAUSS; ir++){
-                ur[ir] *= r99[ir];
-            }
-        }
+    __shared__ double rad_all[(LI+LJ+1) * LI1 * LJ1]; // up to 1800 Bytes
+    for (int i = threadIdx.x; i < (LI+LJ+1)*LI1*LJ1; i+=blockDim.x){
+        rad_all[i] = 0.0;
+    }
+    __syncthreads();
 
-        //double angi[LI1 * nfi * LCC1 * LIC1]; // up to 48600 Bytes
-        //double angj[LJ1 * nfj * LCC1 * LJC1];
-        //type2_facs_ang<LI>(angi, lc, rca);
-        //type2_facs_ang<LJ>(angj, lc, rcb);
-        constexpr int BLKI = LCC1 * (LIC1+1)/2; // up to 12600 Bytes
-        double omegai[LI1*(LI1+1)*(LI1+2)/6 * BLKI];
-        type2_facs_omega<LI>(omegai, lc, rca);
+    int ir = threadIdx.x;
+    for (int p = 0; p <= LI+LJ; p++){
+        double *prad = rad_all + p*LI1*LJ1;
+        for (int i = 0; i <= LI; i++){
+        for (int j = 0; j <= LJ; j++){
+            atomicAdd(prad+i*LJ1+j, radi[i] * radj[j] * ur);
+        }}
+        ur *= r128[ir];
+    }
+    __syncthreads();
 
-        constexpr int BLKJ = LCC1 * (LJC1+1)/2;
-        double omegaj[LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ];
-        type2_facs_omega<LJ>(omegaj, lc, rcb);
+    constexpr int BLKI = (LIC1+1)/2 * LCC1;
+    constexpr int BLKJ = (LJC1+1)/2 * LCC1;
 
-        double fi[nfi*3];
-        double fj[nfj*3];
-        cache_fac<LI>(fi, rca);
-        cache_fac<LJ>(fj, rcb);
+    __shared__ double omegai[LI1*(LI1+1)*(LI1+2)/6 * BLKI]; // up to 12600 Bytes
+    __shared__ double omegaj[LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ];
 
-        const int lic1 = LI+lc+1;
-        const int ljc1 = LJ+lc+1;
-        const int lcc1 = 2*lc+1;
+    type2_facs_omega<LI, LC>(omegai, rca);
+    type2_facs_omega<LJ, LC>(omegaj, rcb);
 
-        double angi[LI1*nfi*LIC1]; // up to 5400 Bytes, further compression
-        double angj[LJ1*nfj*LJC1];
+    double fi[nfi*3];
+    double fj[nfj*3];
+    cache_fac<LI>(fi, rca);
+    cache_fac<LJ>(fj, rcb);
 
-        // (k+l)pq,kimp,ljmq->ij
-        for (int m = 0; m < lcc1; m++){
-            type2_ang<LI>(angi, fi, omegai, lc, m);
-            type2_ang<LJ>(angj, fj, omegaj, lc, m);
-            for (int i = 0; i < nfi; i++){
-            for (int j = 0; j < nfj; j++){
-                double s = 0;
-                for (int k = 0; k <= LI; k++){
-                for (int l = 0; l <= LJ; l++){
-                    double *pangi = angi + k*nfi*lic1 + i*lic1;
-                    double *pangj = angj + l*nfj*ljc1 + j*ljc1;
-                    double *prad = rad_all + (k+l)*LI1*LJ1;
-                    for (int p = 0; p < lic1; p++){
-                    for (int q = 0; q < ljc1; q++){
-                        s += prad[p*LJ1+q] * pangi[p] * pangj[q];
-                    }}
+    __shared__ double angi[LI1*nfi*LIC1]; // up to 5400 Bytes, further compression
+    __shared__ double angj[LJ1*nfj*LJC1];
+
+    // (k+l)pq,kimp,ljmq->ij
+    for (int m = 0; m < LCC1; m++){
+        type2_ang<LI, LC>(angi, fi, omegai, m);
+        type2_ang<LJ, LC>(angj, fj, omegaj, m);
+
+        //for (int i = 0; i < nfi; i++){
+        //for (int j = 0; j < nfj; j++){
+        for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+            int i = ij%nfi;
+            int j = ij/nfi;
+            double s = 0;
+            for (int k = 0; k <= LI; k++){
+            for (int l = 0; l <= LJ; l++){
+                double *pangi = angi + k*nfi*LIC1 + i*LIC1;
+                double *pangj = angj + l*nfj*LJC1 + j*LJC1;
+                double *prad = rad_all + (k+l)*LI1*LJ1;
+                for (int p = 0; p < LIC1; p++){
+                for (int q = 0; q < LJC1; q++){
+                    s += prad[p*LJ1+q] * pangi[p] * pangj[q];
                 }}
-                gctr[i+j*nfi] += fac * s;
             }}
+            gctr[i+j*nfi] += fac * s;
         }
     }
     return;
