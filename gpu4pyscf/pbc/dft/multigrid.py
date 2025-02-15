@@ -209,7 +209,6 @@ def _get_j_pass2(mydf, vG, hermi=1, kpts=None, verbose=None):
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     sp_groups = group_shl_pairs(cell, supmol_bas[:mydf.primitive_nbas],
                                 mydf.supmol_bas, mydf.supmol_env, tasks)
-
     workers = gpu_specs['multiProcessorCount']
     nf2 = (lmax*2+1)*(lmax*2+2)//2
     ngrid_span = max(task.n_radius*2 for task in tasks)
@@ -233,6 +232,7 @@ def _get_j_pass2(mydf, vG, hermi=1, kpts=None, verbose=None):
         vR = cp.asarray(v_rs.real, order='C')
         for iset in range(nset):
             for l in range(lmax*2+1):
+                if (i, l) not in sp_groups: continue
                 pair_idx = sp_groups[i,l]
                 kern(ctypes.cast(vj[iset].data.ptr, ctypes.c_void_p),
                      ctypes.cast(vR[iset].data.ptr, ctypes.c_void_p),
@@ -242,9 +242,11 @@ def _get_j_pass2(mydf, vG, hermi=1, kpts=None, verbose=None):
                      ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
                      ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                      ctypes.c_int(workers))
+
     # TODO: for diffused basis functions lower than minimal Ecut, compute the
     # vj using normal FFTDF code
     vj = mydf.unsort_orbitals(vj)
+    nao = vj.shape[-1]
     vj = vj.reshape(nset,nkpts,nao,nao)
     log.timer_debug1('get_j pass2', *t0)
     return vj
@@ -504,7 +506,7 @@ def group_shl_pairs(cell, prim_bas, supmol_bas, supmol_env, tasks):
     Ecut = 20.
     Ecut = cp.log(fac * (Ecut*2)**(lij-.5) + 1.) * 2*aij
     Ecut = cp.log(fac * (Ecut*2)**(lij-.5) + 1.) * 2*aij
-    Ecut[ovlp < cell.precision] = -1
+    Ecut[ovlp < precision] = -1
 
     task_Ecuts = [task.Ecut for task in tasks]
     task_Ecuts[0] = Ecut.max()
@@ -523,7 +525,8 @@ def group_shl_pairs(cell, prim_bas, supmol_bas, supmol_env, tasks):
             mask = l == lij
             mask &= E_mask
             pair_idx = cp.asarray(cp.where(mask.ravel())[0], dtype=np.int32)
-            shl_pairs_groups[i,l] = pair_idx
+            if len(pair_idx) > 0:
+                shl_pairs_groups[i,l] = pair_idx
     return shl_pairs_groups
 
 def multigrid_tasks(cell):
@@ -564,10 +567,15 @@ def multigrid_tasks(cell):
     for _ in range(20):
         if Ecut < Ecut_min:
             break
+        #tasks.append(_Task(Ecut=Ecut, mesh=mesh, n_radius=n_radius+16, algorithm='MG'))
         tasks.append(_Task(Ecut=Ecut, mesh=mesh, n_radius=n_radius, algorithm='MG'))
+        # Based on the current mesh/resolution, determine the lower bound of aij
+        # exponent that has negligible values at the boundary of the radius.
         dh = (cell_len / mesh).min()
         radius = dh * n_radius
         aij = np.log(1./precision) / radius**2
+#        print(
+#            np.exp(-aij*((n_radius+16)*(cell_len/tasks[-1].mesh).min())**2))
         Ecut = np.log(1./precision) * (2*aij)
         Gmax = (2*Ecut)**.5
         mesh = np.floor(Gmax / Gbase).astype(int) * 2 + 1
@@ -581,6 +589,8 @@ def multigrid_tasks(cell):
     aij = es.min() * 2
     radius = (np.log(1./precision) / aij)**.5
     dh = (cell_len / mesh).min()
+    #n_radius = int(np.ceil(radius / dh)) + 4
+    n_radius = int(np.ceil(radius / dh))
     tasks.append(_Task(Ecut=Ecut, mesh=mesh, n_radius=n_radius, algorithm='MG'))
     return tasks
 
@@ -613,8 +623,8 @@ def _takebak_4d(out, a, mesh):
 
 class MGridEnvVars(ctypes.Structure):
     _fields_ = [
-        ('nbas_i', ctypes.c_uint16),
-        ('nbas_j', ctypes.c_uint16),
+        ('nbas_i', ctypes.c_int),
+        ('nbas_j', ctypes.c_int),
         ('nao', ctypes.c_int),
         ('bas', ctypes.c_void_p),
         ('env', ctypes.c_void_p),
