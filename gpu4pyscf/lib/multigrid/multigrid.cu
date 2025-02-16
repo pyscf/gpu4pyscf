@@ -506,6 +506,10 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
         }
     }
 
+#pragma unroll
+    for (int m = 0; m < (L+1)*(L+2)*(L+3)/6; ++m) {
+        r2[m] = 0.;
+    }
     for (int ix = warp_id; ix < ngridx; ix += WARPS) {
 #pragma unroll
         for (int mx = 0; mx <= L; ++mx) {
@@ -673,6 +677,11 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
     // reuse the global memory in pool. (L+1)*(L+2)*(L+3)/6 is generally smaller
     // than (ngrid_span * (L+1) * 2) occupied by ys_exp and zs_exp
     double *dm_xyz = ys_exp;
+    int offset = (L+1)*(L+2)/2 + L*(L+1)/2;
+#pragma unroll
+    for (int m = 0; m < offset; ++m) {
+        r2[m] = 0.;
+    }
     for (int ix = warp_id; ix < ngridx; ix += WARPS) {
 #pragma unroll
         for (int mx = 0; mx <= 1; ++mx) {
@@ -706,7 +715,10 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
         }
     }
 
-    int offset = (L+1)*(L+2)/2 + L*(L+1)/2;
+#pragma unroll
+    for (int m = 0; m < (L+1)*(L+2)*(L+3)/6-offset; ++m) {
+        r2[m] = 0.;
+    }
     for (int ix = warp_id; ix < ngridx; ix += WARPS) {
 #pragma unroll
         for (int mx = 2; mx <= L; ++mx) {
@@ -872,6 +884,11 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
     // reuse the global memory in pool. (L+1)*(L+2)*(L+3)/6 is generally smaller
     // than (ngrid_span * (L+1) * 2) occupied by ys_exp and zs_exp
     double *dm_xyz = ys_exp;
+    int offset = (L+1)*(L+2)/2;
+#pragma unroll
+    for (int m = 0; m < offset; ++m) {
+        r2[m] = 0.;
+    }
     for (int ix = warp_id; ix < ngridx; ix += WARPS) {
         r1[0] = xs_exp[ix*WARP_SIZE];
         double *pgx = gx_dmyz + ix * (L+1)*(L+2)/2*WARP_SIZE;
@@ -896,7 +913,10 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
         }
     }
 
-    int offset = (L+1)*(L+2)/2;
+#pragma unroll
+    for (int m = 0; m < L*(L+1)/2 + (L-1)*L/2; ++m) {
+        r2[m] = 0.;
+    }
     for (int ix = warp_id; ix < ngridx; ix += WARPS) {
 #pragma unroll
         for (int mx = 1; mx <= 2; ++mx) {
@@ -931,6 +951,10 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
     }
 
     offset = (L+1)*(L+2)/2 + L*(L+1)/2 + (L-1)*L/2;
+#pragma unroll
+    for (int m = 0; m < L*(L+1)/2 + (L-1)*L/2; ++m) {
+        r2[m] = 0.;
+    }
     for (int ix = warp_id; ix < ngridx; ix += WARPS) {
 #pragma unroll
         for (int mx = 3; mx <= L; ++mx) {

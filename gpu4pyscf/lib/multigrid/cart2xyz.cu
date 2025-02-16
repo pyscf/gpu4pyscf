@@ -22,7 +22,7 @@ void dm_xyz_coeff(double *cx, double xi, double xj, int lmax)
 {
     double xij = xi - xj;
     int lmax1 = lmax + 1;
-    cx[0] = 1.0;
+    cx[0] = 1.;
     for (int lx = 1; lx <= lmax; lx++) {
         cx[lx*WARP_SIZE] = cx[(lx-1)*WARP_SIZE] * xij;
     }
@@ -139,12 +139,12 @@ void _dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj, int lij,
             double fac = cicj * cx[(jx+lx_j*lj1)*WARP_SIZE];
             int lx = lx_i + jx;
             for (int jy = 0; jy <= ly_j; ++jy) {
-                fac *= cy[(jy+ly_j*lj1)*WARP_SIZE];
+                double cxy = fac * cy[(jy+ly_j*lj1)*WARP_SIZE];
                 int ly = ly_i + jy;
                 for (int jz = 0; jz <= lz_j; ++jz) {
                     int lz = lz_i + jz;
-                    fac *= cz[(jz+lz_j*lj1)*WARP_SIZE];
-                    dm_ij += fac * dm_xyz[ADDR3(lij,lx,ly,lz)*WARP_SIZE];
+                    double cxyz = cxy * cz[(jz+lz_j*lj1)*WARP_SIZE];
+                    dm_ij += cxyz * dm_xyz[ADDR3(lij,lx,ly,lz)*WARP_SIZE];
                 }
             }
         }

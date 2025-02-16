@@ -31,7 +31,7 @@
 #define MAX(x, y)       ((x) > (y) ? (x) : (y))
 
 // an index associated to enumerate([_ for t in range(L+1) for u in range(L+1-t)])
-#define ADDR2(l, t, u)  ((l+1)*(l+2)/2 - ((l-(t)+1)*(l-(t)+2)/2 + (u)))
+#define ADDR2(l, t, u)  ((l+1)*(l+2)/2 - (l-(t)+1)*(l-(t)+2)/2 + (u))
 // an index associated to enumerate([_ for t in range(L+1) for u in range(L+1-t) for v in range(L+1-t-u)])
 #define ADDR3(l, t, u, v) \
         ((l+1)*(l+2)*(l+3)/6 - ((l)-(t)+1)*((l)-(t)+2)*((l)-(t)+3)/6 + \

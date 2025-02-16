@@ -87,14 +87,17 @@ int MG_init_constant(int shm_size)
     int n3 = 0;
     for (int l = 0; l <= LMAX; ++l) {
         for (int i = 0, ijk = 0; i <= l; ++i) {
-        for (int j = 0; j <= l-i; ++j, ++n2) {
-            i_in_fold2idx[n2].x = i;
-            i_in_fold2idx[n2].y = j;
+        for (int j = 0; j <= l-i; ++j) {
             for (int k = 0; k <= l-i-j; ++k, ++n3, ++ijk) {
                 i_in_fold3idx[n3].x = i;
                 i_in_fold3idx[n3].y = j;
                 i_in_fold3idx[n3].z = k;
             }
+        } }
+        for (int i = l; i >= 0; --i) {
+        for (int j = l-i; j >= 0; --j, ++n2) {
+            i_in_fold2idx[n2].x = i;
+            i_in_fold2idx[n2].y = j;
         } }
     }
     cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
