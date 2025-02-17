@@ -83,6 +83,7 @@ class KnownValues(unittest.TestCase):
         nstates = self.nstates
         td = mf.TDHF().set(nstates=nstates)
         assert td.device == 'gpu'
+        td.lindep=1.0E-6
         e = td.kernel()[0]
         ref = [11.8348584, 11.8348584, 16.6630381]
         self.assertAlmostEqual(abs(e[:len(ref)] * 27.2114 - ref).max(), 0, 5)
@@ -91,6 +92,7 @@ class KnownValues(unittest.TestCase):
 
         df_mf = self.df_mf
         td = df_mf.TDHF().set(nstates=nstates)
+        td.lindep=1.0E-6
         e = td.kernel()[0]
         ref = td.to_cpu().kernel()[0][:3]
         self.assertAlmostEqual(abs(e[:len(ref)] - ref).max(), 0, 7)
@@ -103,6 +105,7 @@ class KnownValues(unittest.TestCase):
         td = mf.TDHF().set(nstates=nstates)
         assert td.device == 'gpu'
         td.singlet = False
+        td.lindep=1.0E-6
         e = td.kernel()[0]
         ref = [10.8919091, 10.8919091, 12.6343507]
         self.assertAlmostEqual(abs(e[:len(ref)] * 27.2114 - ref).max(), 0, 5)
@@ -112,6 +115,7 @@ class KnownValues(unittest.TestCase):
         df_mf = self.df_mf
         td = df_mf.TDHF().set(nstates=nstates)
         td.singlet = False
+        td.lindep=1.0E-6
         e = td.kernel()[0]
         ref = td.to_cpu().kernel()[0][:3]
         self.assertAlmostEqual(abs(e[:len(ref)] - ref).max(), 0, 7)
