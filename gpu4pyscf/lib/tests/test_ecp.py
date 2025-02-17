@@ -193,20 +193,22 @@ class KnownValues(unittest.TestCase):
         for l in range(8):
             rad_all = numpy.random.random((l+1,l+1))
             rad_ang1 = numpy.zeros((l+1,l+1,l+1))
-            libecp_cpu.type1_rad_ang(rad_ang1.ctypes.data_as(ctypes.c_void_p),
-                                     ctypes.c_int(l),
-                                     ri.ctypes.data_as(ctypes.c_void_p),
-                                     rad_all.ctypes.data_as(ctypes.c_void_p))
+            libecp_cpu.type1_rad_ang(
+                rad_ang1.ctypes.data_as(ctypes.c_void_p),
+                ctypes.c_int(l),
+                ri.ctypes.data_as(ctypes.c_void_p),
+                rad_all.ctypes.data_as(ctypes.c_void_p))
 
             ri_gpu = cupy.asarray(ri)
             rad_all = cupy.asarray(rad_all)
             rad_ang0 = cupy.zeros_like(rad_ang1)
-            libecp.ECPtype1_rad_ang(ctypes.cast(rad_ang0.data.ptr, ctypes.c_void_p),
-                                  ctypes.c_int(l),
-                                  ctypes.c_int(n),
-                                  ctypes.cast(ri_gpu.data.ptr, ctypes.c_void_p),
-                                  ctypes.c_double(1.0),
-                                  ctypes.cast(rad_all.data.ptr, ctypes.c_void_p))
+            libecp.ECPtype1_rad_ang(
+                ctypes.cast(rad_ang0.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(l),
+                ctypes.c_int(n),
+                ctypes.cast(ri_gpu.data.ptr, ctypes.c_void_p),
+                ctypes.c_double(1.0),
+                ctypes.cast(rad_all.data.ptr, ctypes.c_void_p))
             assert numpy.linalg.norm(rad_ang1 - rad_ang0.get()) < 1e-7
 
     def test_type1_cart(self):
@@ -257,6 +259,9 @@ class KnownValues(unittest.TestCase):
                     ctypes.cast(env.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(li),
                     ctypes.c_int(lj))
+                print(li,lj)
+                print(mat0[:3,:3])
+                print(mat1[:3,:3])
                 assert numpy.linalg.norm(mat1.get() - mat0) < 1e-10
     '''
     def test_type2_rad_part(self):
