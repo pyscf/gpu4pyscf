@@ -33,21 +33,84 @@ bas0='cc-pvtz'
 
 benchmark_results = {}
 
+def diagonalize(a, b, nroots=5):
+    nocc, nvir = a.shape[:2]
+    nov = nocc * nvir
+    a = a.reshape(nov, nov)
+    b = b.reshape(nov, nov)
+    h = np.block([[a        , b       ],
+                     [-b.conj(),-a.conj()]])
+    e, xy = np.linalg.eig(np.asarray(h))
+    sorted_indices = np.argsort(e)
+    
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+    
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
+
+
+def diagonalize_tda(a, nroots=5):
+    nocc, nvir = a.shape[:2]
+    nov = nocc * nvir
+    a = a.reshape(nov, nov)
+    e, xy = np.linalg.eig(np.asarray(a))
+    sorted_indices = np.argsort(e)
+    
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+    
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
+
+
 def setUpModule():
-    global mol_sph, mol_cart
+    global mol
     mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000,
                       output='/dev/null', verbose=1)
 
 def tearDownModule():
-    global mol_sph, mol_cart
-    mol_sph.stdout.close()
-    mol_cart.stdout.close()
-    del mol_sph, mol_cart
+    global mol
+    del mol
 
-def finite_difference_test(mol, tda=False):
 
-    delta=1.0E-6
+def benchmark_with_cpu(mol, nstates=3, lindep=1.0E-12, tda=False):
+    mf = scf.RHF(mol).run()
+    if tda:
+        td = mf.TDA()
+    else:
+        td = mf.TDHF()
+    td.lindep=lindep
+    td.nstates=nstates
+    td.kernel()
 
+    tdgrad_cpu = pyscf.grad.tdrhf.Gradients(td)
+    tdgrad_cpu.kernel()
+
+    td_gpu = td.to_gpu()
+    tdgrad_gpu = gpu4pyscf.grad.tdrhf.Gradients(td_gpu)
+    tdgrad_gpu.kernel()
+
+    return tdgrad_cpu.de, tdgrad_gpu.de
+
+
+def benchmark_with_finite_diff(mol_input, delta=0.1, nstates=3, lindep=1.0E-12, tda=False):
+    mol = mol_input.copy()
+    mf = scf.RHF(mol).to_gpu()
+    mf.run()
+    if tda:
+        td = gpu4pyscf.tdscf.rhf.TDA(mf)
+    else:
+        td = gpu4pyscf.tdscf.rhf.TDHF(mf)
+    td.nstates = nstates
+    td.lindep = lindep
+    assert td.device == 'gpu'
+    td.kernel()
+
+    tdgrad = gpu4pyscf.grad.tdrhf.Gradients(td)
+    gradient_ana = tdgrad.kernel()
     coords = mol.atom_coords(unit='Ang')*1.0
     natm = coords.shape[0]
     grad = np.zeros((natm, 3))
@@ -57,87 +120,65 @@ def finite_difference_test(mol, tda=False):
             coords_new[i, j] += delta
             mol.set_geom_(coords_new, unit='Ang')
             mol.build()
+            mf_add = scf.RHF(mol).to_gpu()
+            mf_add.run()
 
-            mf_add = scf.RHF(mol).run().to_gpu()
             if tda:
                 td_add = gpu4pyscf.tdscf.rhf.TDA(mf_add)
+                a, b = td_add.get_ab()
+                e1 = diagonalize_tda(a)[0]
             else:
                 td_add = gpu4pyscf.tdscf.rhf.TDHF(mf_add)
-            td_add.nroots = 5
-            e1 = td_add.kernel()[0]
+                a, b = td_add.get_ab()
+                e1 = diagonalize(a, b)[0]
+                
             e_add = e1[0] + mf_add.e_tot
 
             coords_new = coords*1.0
             coords_new[i, j] -= delta
             mol.set_geom_(coords_new, unit='Ang')
             mol.build()
-
-            mf_minus = scf.RHF(mol).run().to_gpu()
+            mf_minus = scf.RHF(mol).to_gpu()
+            mf_minus.run()
+            
             if tda:
                 td_minus = gpu4pyscf.tdscf.rhf.TDA(mf_minus)
+                a, b = td_minus.get_ab()
+                e1 = diagonalize_tda(a)[0]
             else:
                 td_minus = gpu4pyscf.tdscf.rhf.TDHF(mf_minus)
-            td_minus.nroots = 5
-            e1 = td_minus.kernel()[0]
+                a, b = td_minus.get_ab()
+                e1 = diagonalize(a, b)[0]
+                
             e_minus = e1[0] + mf_minus.e_tot
-
             grad[i, j] = (e_add - e_minus)/(delta*2.0)*0.52917721092
-    return grad
-    
 
-def calculate_benchmark(mol, tol=1e-6, disp=None, method='cpu', tda=False):
-    
-    key = (id(mol), tol, disp, method.lower(), tda)
-    if key in benchmark_results:
-        return benchmark_results[key]
-    
-    g_cpu = 0.0
-    if method.lower() == 'cpu':
-        mf_cpu = scf.hf.RHF(mol)
-        mf_cpu.direct_scf_tol = 1e-14
-        mf_cpu.disp = disp
-        mf_cpu.kernel()
-        if tda:
-            postmf = tdscf.rhf.TDA(mf_cpu).run()
-        else:
-            postmf = tdscf.rhf.TDHF(mf_cpu).run()
-        g = postmf.nuc_grad_method()
-        g_cpu = g.kernel(state=1)
-    else:
-        g_cpu = finite_difference_test(mol, tda=tda)
+    return gradient_ana, grad
 
-    mf_gpu = gpu_scf.hf.RHF(mol)
-    mf_gpu.direct_scf_tol = 1e-14
-    mf_gpu.disp = disp
-    mf_gpu.kernel()
-    if tda:
-        postmf = gpu4pyscf.tdscf.rhf.TDA(mf_gpu).run()
-    else:
-        postmf = gpu4pyscf.tdscf.rhf.TDHF(mf_gpu).run()
-    g_gpu = postmf.kernel()
 
-    norm_diff = np.linalg.norm(g_cpu - g_gpu)
-    print('|| CPU - GPU ||:', norm_diff)
-
-    benchmark_results[key] = norm_diff
-    return norm_diff
-
-def _check_grad(mol, tol=1e-6, disp=None, method='cpu'):
-    norm_diff = calculate_benchmark(mol, tol, disp, method)
+def _check_grad(mol, tol=1e-6, disp=None, tda=False, method='cpu'):
+    if method == 'cpu':
+        gradi_cpu, grad_gpu = benchmark_with_cpu(mol, nstates=5, lindep=1.0E-12, tda=tda)
+        norm_diff = np.linalg.norm(gradi_cpu - grad_gpu)
+    elif method == 'numerical':
+        grad_ana, grad = benchmark_with_finite_diff(mol, nstates=5, lindep=1.0E-12, tda=tda)
+        norm_diff = np.linalg.norm(grad_ana - grad)
+    print(f'{tda}  {method}  norm_diff = {norm_diff}')
     assert norm_diff < tol
 
 class KnownValues(unittest.TestCase):
     def test_grad_tda_singlet_cpu(self):
-        _check_grad(mol_sph, tol=1e-6)
+        _check_grad(mol, tol=1e-11, tda=True, method='cpu')
 
     def test_grad_tda_singlet_numerical(self):
-        _check_grad(mol_sph, tol=1e-6)
+        _check_grad(mol, tol=1e-3, tda=True, method='numerical')
 
-    def test_grad_tddft_cart_singlet_cpu(self):
-        _check_grad(mol_cart, tol=1e-6)
+    def test_grad_tddft_singlet_cpu(self):
+        _check_grad(mol, tol=1e-11, tda=False, method='cpu')
 
-    def test_grad_tddft_cart_singlet_numerical(self):
-        _check_grad(mol_cart, tol=1e-6)
+    def test_grad_tddft_singlet_numerical(self):
+        _check_grad(mol, tol=1e-3, tda=False, method='numerical')
+
 
 if __name__ == "__main__":
     print("Full Tests for TD-RHF Gradient")

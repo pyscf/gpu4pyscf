@@ -398,11 +398,12 @@ def _gga_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
 
 def _mgga_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
     wv[0] *= .5  # *.5 because vmat + vmat.T at the end
-    wv[4] *= .5  # *.5 for 1/2 in tau
     aow = numint._scale_ao(ao[:4], wv[:4])
     tmp = numint._dot_ao_ao(mol, ao[0], aow, mask, shls_slice, ao_loc)
     vmat[0] += tmp + tmp.T
     vmat[0] += numint._tau_dot(ao, ao, wv[4])
+    # ! The following line should only be here, because the tau is *0.5 in the _tau_dot function
+    wv[4] *= .5  # *.5 for 1/2 in tau
     wv = cp.asarray(wv, order='C')
     vmat[1:] += rks_grad._gga_grad_sum_(ao, wv[:4])
     vmat[1:] += rks_grad._tau_grad_dot_(ao, wv[4])
