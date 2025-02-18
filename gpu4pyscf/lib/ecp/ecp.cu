@@ -669,6 +669,7 @@ void type1_cache_fac(double* __restrict__ ifac, double *ri){
     }
 }
 
+/*
 template <int LI, int LC> __device__
 void type2_facs_ang(double* facs, double *r){
     double unitr[3];
@@ -718,7 +719,7 @@ void type2_facs_ang(double* facs, double *r){
                 }
                 buf[m] *= 4.0 * M_PI;
             }
-            cart2sph(pomega, LC, buf);
+            cart2sph<LC>(pomega, buf);
             pomega += LCC1;
         }
     }}}
@@ -757,7 +758,7 @@ void type2_facs_ang(double* facs, double *r){
         }}}
     }
 }
-
+*/
 template <int LI, int LC> __device__
 void type2_facs_omega(double* omega, double *r){
     double unitr[3];
@@ -782,9 +783,17 @@ void type2_facs_omega(double* omega, double *r){
     // store (i+j+k+lc)%2 = 0 only
     // up to 12600 Bytes
     constexpr int BLK = (LIC1+1)/2 * LCC1;
-    for (int i = threadIdx.x; i <= LI; i+=blockDim.x){
-    for (int j = 0; j <= LI-i; j++){
-    for (int k = 0; k <= LI-i-j; k++){
+    //for (int i = threadIdx.x; i <= LI; i+=blockDim.x){
+    //for (int j = 0; j <= LI-i; j++){
+    //for (int k = 0; k <= LI-i-j; k++){
+    constexpr int LI1 = LI + 1;
+    for (int n = threadIdx.x; n < LI1*LI1*LI1; n+=blockDim.x){
+        const int i = n/LI1/LI1;
+        const int j = n/LI1%LI1;
+        const int k = n%LI1;
+        if (i+j+k > LI){
+            continue;
+        }
         const int need_even = (LC+i+j+k)%2;
         const int ioff = (LI-i)*(LI-i+1)*(LI-i+2)/6;
         const int joff = (LI-i-j)*(LI-i-j+1)/2;
@@ -793,22 +802,22 @@ void type2_facs_omega(double* omega, double *r){
             double *pnuc = omega_nuc + _offset_cart[lmb];
             double buf[(LC+1)*(LC+2)/2];
             for (int m = 0; m < (LC+1)*(LC+2)/2; m++){
-                int pv = _cart_pow_y[m];
-                int pw = _cart_pow_z[m];
-                int pu = LC - pv - pw;
+                const int pv = _cart_pow_y[m];
+                const int pw = _cart_pow_z[m];
+                const int pu = LC - pv - pw;
                 buf[m] = 0.0;
                 for (int n = 0; n < (lmb+1)*(lmb+2)/2; n++){
-                    int ps = _cart_pow_y[n];
-                    int pt = _cart_pow_z[n];
-                    int pr = lmb - ps - pt;
+                    const int ps = _cart_pow_y[n];
+                    const int pt = _cart_pow_z[n];
+                    const int pr = lmb - ps - pt;
                     buf[m] += pnuc[n] * int_unit_xyz(i+pu+pr, j+pv+ps, k+pw+pt);
                 }
                 buf[m] *= 4.0 * M_PI;
             }
-            cart2sph(pomega, LC, buf);
+            cart2sph<LC>(pomega, buf);
             pomega += LCC1;
         }
-    }}}
+    }
     __syncthreads();
 }
 
@@ -830,9 +839,9 @@ void type2_ang(double *facs, double *fx, double *omega, int m){
 
     // i,j,k,ijkmn->(i+j+k)pmn
     for (int p = threadIdx.x; p < (LI+1)*(LI+2)/2; p+=blockDim.x){
-        int iy = _cart_pow_y[p];
-        int iz = _cart_pow_z[p];
-        int ix = LI - iy - iz;
+        const int iy = _cart_pow_y[p];
+        const int iz = _cart_pow_z[p];
+        const int ix = LI - iy - iz;
         for (int i = 0; i <= ix; i++){
         for (int j = 0; j <= iy; j++){
         for (int k = 0; k <= iz; k++){
@@ -855,9 +864,11 @@ void type2_ang(double *facs, double *fx, double *omega, int m){
 }
 
 template <int LI, int LJ> __global__
-void type1_cart(double *gctr, const int *tasks, const int ntasks,
-                const int *ecpbas, const int *ecploc, const int *atm,
-                const int *bas, const double *env)
+void type1_cart(double *gctr, 
+                const int *ao_loc, const int nao, 
+                const int *tasks, const int ntasks,
+                const int *ecpbas, const int *ecploc, 
+                const int *atm, const int *bas, const double *env)
 {
     const int task_id = blockIdx.x;
     if (task_id >= ntasks){
@@ -866,7 +877,7 @@ void type1_cart(double *gctr, const int *tasks, const int ntasks,
 
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
-    const int ecp_id = tasks[task_id + 2*ntasks];
+    const int ksh = tasks[task_id + 2*ntasks];
 
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
     const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
@@ -879,7 +890,7 @@ void type1_cart(double *gctr, const int *tasks, const int ntasks,
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
 
-    const int atm_id = ecpbas[ATOM_OF+ecploc[ecp_id]*BAS_SLOTS];
+    const int atm_id = ecpbas[ATOM_OF+ecploc[ksh]*BAS_SLOTS];
     const double *rc = env + atm[PTR_COORD+atm_id*ATM_SLOTS];
 
     double rca[3], rcb[3];
@@ -893,10 +904,10 @@ void type1_cart(double *gctr, const int *tasks, const int ntasks,
     const double r2cb = rcb[0]*rcb[0] + rcb[1]*rcb[1] + rcb[2]*rcb[2];
 
     double ur = 0.0;
-    for (int kbas = ecploc[ecp_id]; kbas < ecploc[ecp_id+1]; kbas++){
+    for (int kbas = ecploc[ksh]; kbas < ecploc[ksh+1]; kbas++){
         ur += rad_part(kbas, ecpbas, env);
     }
-
+    
     constexpr int LIJ1 = LI+LJ+1;
     constexpr int LIJ3 = LIJ1*LIJ1*LIJ1;
     __shared__ double rad_ang[LIJ3]; // up to 5832 Bytes
@@ -938,18 +949,21 @@ void type1_cart(double *gctr, const int *tasks, const int ntasks,
     type1_cache_fac<LI>(ifac, rca);
     __syncthreads();
 
+    const int ioff = ao_loc[ish];
+    const int joff = ao_loc[jsh];
+    
     // TODO: unrolling with a code generator
     for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
-        int mi = ij%nfi;
-        int mj = ij/nfi;
+        const int mi = ij%nfi;
+        const int mj = ij/nfi;
 
-        int iy = _cart_pow_y[mi];
-        int iz = _cart_pow_z[mi];
-        int ix = LI - iy - iz;
+        const int iy = _cart_pow_y[mi];
+        const int iz = _cart_pow_z[mi];
+        const int ix = LI - iy - iz;
 
-        int jy = _cart_pow_y[mj];
-        int jz = _cart_pow_z[mj];
-        int jx = LJ - jy - jz;
+        const int jy = _cart_pow_y[mj];
+        const int jz = _cart_pow_z[mj];
+        const int jx = LJ - jy - jz;
 
         // cache ifac and jfac in register
         double tmp = 0.0;
@@ -965,16 +979,20 @@ void type1_cart(double *gctr, const int *tasks, const int ntasks,
                 tmp += ifac[ir] * jfac[jr] * rad_ang[ijr];
             }}}
         }}}
-        atomicAdd(gctr+mi+mj*nfi, tmp);
+        atomicAdd(gctr + mi+ioff + (mj+joff)*nao, tmp);
+        if (LI != LJ){
+            atomicAdd(gctr + (mi+ioff)*nao + mj+joff, tmp);
+        }
     }
     return;
 }
 
-
 template <int LI, int LJ, int LC> __global__
-void type2_cart(double *gctr, const int *tasks, const int ntasks,
-                const int *ecpbas, const int *ecploc, const int *atm,
-                const int *bas, const double *env)
+void type2_cart(double *gctr, 
+                const int *ao_loc, const int nao, 
+                const int *tasks, const int ntasks,
+                const int *ecpbas, const int *ecploc, 
+                const int *atm, const int *bas, const double *env)
 {
     const int task_id = blockIdx.x;
     if (task_id >= ntasks){
@@ -983,7 +1001,7 @@ void type2_cart(double *gctr, const int *tasks, const int ntasks,
 
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
-    const int ecp_id = tasks[task_id + 2*ntasks];
+    const int ksh = tasks[task_id + 2*ntasks];
 
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
     const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
@@ -996,7 +1014,7 @@ void type2_cart(double *gctr, const int *tasks, const int ntasks,
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
 
-    const int atm_id = ecpbas[ATOM_OF+ecploc[ecp_id]*BAS_SLOTS];
+    const int atm_id = ecpbas[ATOM_OF+ecploc[ksh]*BAS_SLOTS];
     const double *rc = env + atm[PTR_COORD+atm_id*ATM_SLOTS];
 
     double rca[3], rcb[3];
@@ -1018,7 +1036,8 @@ void type2_cart(double *gctr, const int *tasks, const int ntasks,
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
 
     double ur = 0.0;
-    for (int kbas = ecploc[ecp_id]; kbas < ecploc[ecp_id+1]; kbas++){
+    // Each ECP shell has multiple powers and primitive basis
+    for (int kbas = ecploc[ksh]; kbas < ecploc[ksh+1]; kbas++){
         ur += rad_part(kbas, ecpbas, env);
     }
 
@@ -1061,14 +1080,17 @@ void type2_cart(double *gctr, const int *tasks, const int ntasks,
     __shared__ double angi[LI1*nfi*LIC1]; // up to 5400 Bytes, further compression
     __shared__ double angj[LJ1*nfj*LJC1];
 
+    const int ioff = ao_loc[ish];
+    const int joff = ao_loc[jsh];
+
     // (k+l)pq,kimp,ljmq->ij
     for (int m = 0; m < LCC1; m++){
         type2_ang<LI, LC>(angi, fi, omegai, m);
         type2_ang<LJ, LC>(angj, fj, omegaj, m);
 
         for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
-            int i = ij%nfi;
-            int j = ij/nfi;
+            const int i = ij%nfi;
+            const int j = ij/nfi;
             double s = 0;
             for (int k = 0; k <= LI; k++){
             for (int l = 0; l <= LJ; l++){
@@ -1080,7 +1102,11 @@ void type2_cart(double *gctr, const int *tasks, const int ntasks,
                     s += prad[p*LJ1+q] * pangi[p] * pangj[q];
                 }}
             }}
-            gctr[i+j*nfi] += fac * s;
+            const double tmp = fac*s;
+            atomicAdd(gctr + i+ioff + (j+joff)*nao, tmp);
+            if (LI != LJ){
+                atomicAdd(gctr + (i+ioff)*nao + j+joff*nao, tmp);
+            }
         }
     }
     return;

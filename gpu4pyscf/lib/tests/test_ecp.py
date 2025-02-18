@@ -244,6 +244,7 @@ class KnownValues(unittest.TestCase):
                 bas = cupy.asarray(mol._bas)
                 env = cupy.asarray(mol._env)
                 ecploc = cupy.asarray([0,len(ecpbas)], dtype=numpy.int32)
+                print(ecploc)
                 tasks = cupy.asarray([ish,jsh,0], dtype=numpy.int32)
                 li = mol.bas_angular(ish)
                 lj = mol.bas_angular(jsh)
@@ -356,6 +357,7 @@ class KnownValues(unittest.TestCase):
                 bas = cupy.asarray(mol._bas)
                 env = cupy.asarray(mol._env)
                 ecploc = cupy.asarray([0,len(ecpbas)], dtype=numpy.int32)
+                
                 tasks = cupy.asarray([ish,jsh,0], dtype=numpy.int32)
                 ntasks = 1
                 libecp.ECPtype2_cart(

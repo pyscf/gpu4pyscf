@@ -16,7 +16,7 @@
 
 #include <stdio.h>
 #include "ecp.cu"
-
+/*
 template <int LMAX> __global__
 void _ang_nuc_part(double *omega, double *x, int n){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -74,10 +74,10 @@ void _type2_facs_rad(double *facs, int np, double rca, double *ci, double *ai){
     }
     type2_facs_rad<LI, LC>(facs, np, rca, ci, ai);
 }
-
+*/
 
 extern "C" {
-
+/*
 int ECPsph_ine(double *out, int order, double *zs, int n)
 {
     int ntile = (n + THREADS - 1) / THREADS;
@@ -178,7 +178,8 @@ int ECPtype1_rad_ang(double *rad_ang, int l, int n, double *r, double fac, doubl
     }
     return 0;
 }
-
+*/
+/*
 int ECPtype1_cart(double *gctr, const int *tasks, const int ntasks,
                     const int *ecpbas, const int *ecploc, const int *atm,
                     const int *bas, const double *env, int li, int lj){
@@ -219,7 +220,7 @@ int ECPtype1_cart(double *gctr, const int *tasks, const int ntasks,
 
     return 0;
     }
-
+*/
     /*
 int ECPtype2_facs_rad(double *facs, int l, int lc, int np, double rca, double *ci, double *ai){
     int n = 1;
@@ -249,7 +250,7 @@ int ECPtype2_facs_rad(double *facs, int l, int lc, int np, double rca, double *c
     return 0;
     }
 */
-
+/*
 int ECPtype2_facs_ang(double *facs, double *r, int l, int lc){
     int n = 1;
     int ntile = (n + THREADS - 1) / THREADS;
@@ -302,7 +303,8 @@ int ECPtype2_facs_ang(double *facs, double *r, int l, int lc){
     }
     return 0;
     }
-
+*/
+/*
 int ECPtype2_cart(double *gctr, const int *tasks, const int ntasks,
         const int *ecpbas, const int *ecploc, const int *atm,
         const int *bas, const double *env, int li, int lj){
@@ -338,6 +340,84 @@ int ECPtype2_cart(double *gctr, const int *tasks, const int ntasks,
 
     case 44: type2_cart<4,4,0><<<blocks, threads>>>(gctr, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
     default: fprintf(stderr, "(%d,%d) is not supported in ECP.\n", li, lj); break;
+    }
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+    }
+*/
+int ECP_cart(double *gctr, 
+            const int *ao_loc, const int nao, 
+            const int *tasks, const int ntasks,
+            const int *ecpbas, const int *ecploc, 
+            const int *atm, const int *bas, const double *env, 
+            int li, int lj, int lk){
+    // one task per thread block
+    dim3 threads(THREADS);
+    dim3 blocks(ntasks);
+    if (lk >= 0){
+        int task_type = li * 100 + lj * 10 + lk;
+        switch (task_type)
+        {
+        case 0:  type2_cart<0,0,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 10:  type2_cart<0,1,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 110: type2_cart<1,1,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 20:  type2_cart<0,2,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 30:  type2_cart<0,3,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 120: type2_cart<1,2,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 40:  type2_cart<0,4,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 130: type2_cart<1,3,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 220: type2_cart<2,2,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 140: type2_cart<1,4,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 230: type2_cart<2,3,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 240: type2_cart<2,4,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 330: type2_cart<3,3,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 340: type2_cart<3,4,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 440: type2_cart<4,4,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        default: fprintf(stderr, "(%d,%d) is not supported in ECP.\n", li, lj); break;
+        }
+    } else {
+        int task_type = li * 10 + lj;
+        switch (task_type)
+        {
+        case 0:  type1_cart<0,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 1:  type1_cart<0,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 11: type1_cart<1,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 2:  type1_cart<0,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 3:  type1_cart<0,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 12: type1_cart<1,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 4:  type1_cart<0,4><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 13: type1_cart<1,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 22: type1_cart<2,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 14: type1_cart<1,4><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 23: type1_cart<2,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 24: type1_cart<2,4><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 33: type1_cart<3,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 34: type1_cart<3,4><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        case 44: type1_cart<4,4><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+
+        default: fprintf(stderr, "(%d,%d) is not supported in ECP.\n", li, lj); break;
+        }
     }
 
     cudaError_t err = cudaGetLastError();
