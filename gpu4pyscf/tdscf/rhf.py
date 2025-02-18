@@ -34,6 +34,148 @@ __all__ = [
 ]
 
 
+def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
+    r'''A and B matrices for TDDFT response function.
+
+    A[i,a,j,b] = \delta_{ab}\delta_{ij}(E_a - E_i) + (ai||jb)
+    B[i,a,j,b] = (ai||bj)
+
+    Ref: Chem Phys Lett, 256, 454
+    '''
+    from pyscf import ao2mo
+    
+    if mo_energy is None: mo_energy = mf.mo_energy
+    if mo_coeff is None: mo_coeff = mf.mo_coeff
+    if mo_occ is None: mo_occ = mf.mo_occ
+    # assert (mo_coeff.dtype == numpy.double)
+
+    mo_energy = cp.asarray(mo_energy)
+    mo_coeff = cp.asarray(mo_coeff)
+    mo_occ = cp.asarray(mo_occ)
+    mol = mf.mol
+    nao, nmo = mo_coeff.shape
+    occidx = cp.where(mo_occ==2)[0]
+    viridx = cp.where(mo_occ==0)[0]
+    orbv = mo_coeff[:,viridx]
+    orbo = mo_coeff[:,occidx]
+    nvir = orbv.shape[1]
+    nocc = orbo.shape[1]
+    mo = cp.hstack((orbo,orbv))
+
+    e_ia = mo_energy[viridx] - mo_energy[occidx,None]
+    a = cp.diag(e_ia.ravel()).reshape(nocc,nvir,nocc,nvir)
+    b = cp.zeros_like(a)
+
+    def add_hf_(a, b, hyb=1):
+        eri = mol.intor('int2e_sph', aosym='s8')
+        eri= ao2mo.restore(1, eri, nao)
+        eri = cp.asarray(eri)
+        eri_mo = cp.einsum('pjkl,pi->ijkl', eri, orbo.conj())
+        eri_mo = cp.einsum('ipkl,pj->ijkl', eri_mo, mo)
+        eri_mo = cp.einsum('ijpl,pk->ijkl', eri_mo, mo.conj())
+        eri_mo = cp.einsum('ijkp,pl->ijkl', eri_mo, mo)
+        eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
+        a += cp.einsum('iabj->iajb', eri_mo[:nocc,nocc:,nocc:,:nocc]) * 2
+        a -= cp.einsum('ijba->iajb', eri_mo[:nocc,:nocc,nocc:,nocc:]) * hyb
+
+        b += cp.einsum('iajb->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * 2
+        b -= cp.einsum('jaib->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * hyb
+
+    if isinstance(mf, scf.hf.KohnShamDFT):
+        ni = mf._numint
+        ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
+        if mf.do_nlc():
+            logger.warn(mf, 'NLC functional found in DFT object.  Its second '
+                        'derivative is not available. Its contribution is '
+                        'not included in the response function.')
+        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+
+        add_hf_(a, b, hyb)
+        if omega != 0:  # For RSH
+            with mol.with_range_coulomb(omega):
+                eri = mol.intor('int2e_sph', aosym='s8')
+                eri= ao2mo.restore(1, eri, nao)
+                eri = cp.asarray(eri)
+                eri_mo = cp.einsum('pjkl,pi->ijkl', eri, orbo.conj())
+                eri_mo = cp.einsum('ipkl,pj->ijkl', eri_mo, mo)
+                eri_mo = cp.einsum('ijpl,pk->ijkl', eri_mo, mo.conj())
+                eri_mo = cp.einsum('ijkp,pl->ijkl', eri_mo, mo)
+                eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
+                k_fac = alpha - hyb
+                a -= cp.einsum('ijba->iajb', eri_mo[:nocc,:nocc,nocc:,nocc:]) * k_fac
+                b -= cp.einsum('jaib->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * k_fac
+
+        xctype = ni._xc_type(mf.xc)
+        opt = getattr(ni, 'gdftopt', None)
+        if opt is None:
+            ni.build(mol, mf.grids.coords)
+            opt = ni.gdftopt
+        _sorted_mol = opt._sorted_mol
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
+        orbo = opt.sort_orbitals(orbo, axis=[0])
+        orbv = opt.sort_orbitals(orbv, axis=[0])
+        if xctype == 'LDA':
+            ao_deriv = 0
+            for ao, mask, weight, coords \
+                    in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv):
+
+                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff, mo_occ, mask, xctype, with_lapl=False)
+                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                wfxc = fxc[0,0] * weight
+
+                rho_o = cp.einsum('pr,pi->ri', ao, orbo)
+                rho_v = cp.einsum('pr,pi->ri', ao, orbv)
+                rho_ov = cp.einsum('ri,ra->ria', rho_o, rho_v)
+                w_ov = cp.einsum('ria,r->ria', rho_ov, wfxc)
+                iajb = cp.einsum('ria,rjb->iajb', rho_ov, w_ov) * 2
+                a += iajb
+                b += iajb
+
+        elif xctype == 'GGA':
+            ao_deriv = 1
+            for ao, mask, weight, coords \
+                    in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv):
+                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff, mo_occ, mask, xctype, with_lapl=False)
+                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                wfxc = fxc * weight
+                rho_o = cp.einsum('xpr,pi->xri', ao, orbo)
+                rho_v = cp.einsum('xpr,pi->xri', ao, orbv)
+                rho_ov = cp.einsum('xri,ra->xria', rho_o, rho_v[0])
+                rho_ov[1:4] += cp.einsum('ri,xra->xria', rho_o[0], rho_v[1:4])
+                w_ov = cp.einsum('xyr,xria->yria', wfxc, rho_ov)
+                iajb = cp.einsum('xria,xrjb->iajb', w_ov, rho_ov) * 2
+                a += iajb
+                b += iajb
+
+        elif xctype == 'HF':
+            pass
+
+        elif xctype == 'NLC':
+            raise NotImplementedError('NLC')
+
+        elif xctype == 'MGGA':
+            ao_deriv = 1
+            for ao, mask, weight, coords \
+                    in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv):
+                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff, mo_occ, mask, xctype, with_lapl=False)
+                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                wfxc = fxc * weight
+                rho_o = cp.einsum('xpr,pi->xri', ao, orbo)
+                rho_v = cp.einsum('xpr,pi->xri', ao, orbv)
+                rho_ov = cp.einsum('xri,ra->xria', rho_o, rho_v[0])
+                rho_ov[1:4] += cp.einsum('ri,xra->xria', rho_o[0], rho_v[1:4])
+                tau_ov = cp.einsum('xri,xra->ria', rho_o[1:4], rho_v[1:4]) * .5
+                rho_ov = cp.vstack([rho_ov, tau_ov[cp.newaxis]])
+                w_ov = cp.einsum('xyr,xria->yria', wfxc, rho_ov)
+                iajb = cp.einsum('xria,xrjb->iajb', w_ov, rho_ov) * 2
+                a += iajb
+                b += iajb
+
+    else:
+        add_hf_(a, b)
+
+    return a.get(), b.get()
+
 def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     '''Generate function to compute A x
     '''
@@ -95,7 +237,9 @@ class TDBase(lib.StreamObject):
     _finalize = tdhf_cpu.TDBase._finalize
 
     gen_vind = NotImplemented
-    get_ab = NotImplemented
+    def get_ab(self, mf=None):
+        if mf is None: mf = self._scf
+        return get_ab(mf)
 
     def get_precond(self, hdiag):
         threshold_t=1.0e-4
