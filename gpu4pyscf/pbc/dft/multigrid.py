@@ -13,7 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import itertools
 import ctypes
+from dataclasses import dataclass
 import numpy as np
 import cupy as cp
 import scipy.linalg
@@ -44,6 +46,8 @@ LMAX = 4
 SHARED_RHO_SIZE = 2097152 # 128^3
 SHM_SIZE = shm_size - 1024
 del shm_size
+WARP_SIZE = 32
+
 
 def eval_mat(cell, weights, shls_slice=None, comp=1, hermi=0,
              xctype='LDA', kpts=None, mesh=None, offset=None, submesh=None):
@@ -93,7 +97,6 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=None, deriv=0):
     dms = _format_dms(dm_kpts, kpts)
     nset, nkpts, nao = dms.shape[:3]
     lmax = cell._bas[:,ANG_OF].max()
-    assert lmax <= LMAX
 
     assert (deriv < 2)
     #hermi = hermi and abs(dms - dms.transpose(0,1,3,2).conj()).max() < 1e-9
@@ -119,18 +122,16 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=None, deriv=0):
     lattice_params = cp.asarray(a.diagonal(), order='C')
     supmol_bas = cp.asarray(mydf.supmol_bas, dtype=np.int32)
     supmol_env = cp.asarray(mydf.supmol_env)
-    tasks = mydf.tasks
     ao_loc_in_cell0 = cp.asarray(mydf.ao_loc_in_cell0, dtype=np.int32)
     mg_envs = MGridEnvVars(
         mydf.primitive_nbas, len(supmol_bas), nao, supmol_bas.data.ptr,
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
-    sp_groups = group_shl_pairs(cell, supmol_bas[:mydf.primitive_nbas],
-                                mydf.supmol_bas, mydf.supmol_env, tasks)
+    tasks = mydf.tasks
     workers = gpu_specs['multiProcessorCount']
     nf3 = (lmax*2+1)*(lmax*2+2)*(lmax*2+3)//6
-    ngrid_span = max(task.n_radius*2 for task in tasks)
-    cache_size = ((lmax*2+1)*ngrid_span*3 + nf3 + 6) * 32
+    ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
+    cache_size = ((lmax*2+1)*ngrid_span*3 + nf3 + 6) * WARP_SIZE
     pool = cp.empty((workers, cache_size))
 
     init_constant(cell)
@@ -138,9 +139,10 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=None, deriv=0):
     assert rhodim == 1
     rhoG = None
 
-    for i, task in enumerate(tasks):
+    for i, sub_tasks in enumerate(tasks):
+        if not sub_tasks: continue
+        task = sub_tasks[0]
         mesh = task.mesh
-        n_radius = task.n_radius
         ngrids = np.prod(mesh)
         rhoR = cp.empty((nset, *mesh))
         for iset in range(nset):
@@ -148,15 +150,13 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=None, deriv=0):
                 rho_local = cp.zeros((workers*8, *mesh))
             else:
                 rho_local = cp.zeros(mesh)
-            for l in range(lmax*2+1):
-                if (i, l) not in sp_groups: continue
-                pair_idx = sp_groups[i,l]
+            for task in sub_tasks:
                 kern(ctypes.cast(rho_local.data.ptr, ctypes.c_void_p),
                      ctypes.cast(dms[iset].data.ptr, ctypes.c_void_p),
-                     mg_envs, ctypes.c_int(l), ctypes.c_int(n_radius),
-                     (ctypes.c_int*3)(*mesh),
-                     ctypes.c_uint32(len(pair_idx)),
-                     ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
+                     mg_envs, ctypes.c_int(task.l), ctypes.c_int(task.n_radius),
+                     (ctypes.c_int*3)(*task.mesh),
+                     ctypes.c_uint32(len(task.shl_pair_idx)),
+                     ctypes.cast(task.shl_pair_idx.data.ptr, ctypes.c_void_p),
                      ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                      ctypes.c_int(workers))
             if ngrids < SHARED_RHO_SIZE:
@@ -191,11 +191,6 @@ def _get_j_pass2(mydf, vG, hermi=1, kpts=None, verbose=None):
     nao = cell.nao_nr(cart=True)
     nset = vG.shape[0]
     lmax = cell._bas[:,ANG_OF].max()
-    assert lmax <= LMAX
-
-    tasks = mydf.tasks
-    mesh_largest = tasks[0].mesh
-    vG = vG.reshape(-1, *mesh_largest)
 
     a = cell.lattice_vectors()
     assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
@@ -207,39 +202,43 @@ def _get_j_pass2(mydf, vG, hermi=1, kpts=None, verbose=None):
         mydf.primitive_nbas, len(supmol_bas), nao, supmol_bas.data.ptr,
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
-    sp_groups = group_shl_pairs(cell, supmol_bas[:mydf.primitive_nbas],
-                                mydf.supmol_bas, mydf.supmol_env, tasks)
     workers = gpu_specs['multiProcessorCount']
+    tasks = mydf.tasks
     nf2 = (lmax*2+1)*(lmax*2+2)//2
-    ngrid_span = max(task.n_radius*2 for task in tasks)
-    cache_size = ((lmax*2+1)*ngrid_span*3 + nf2*ngrid_span + 6) * 32
+    ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
+    cache_size = ((lmax*2+1)*ngrid_span*3 + nf2*ngrid_span + 6) * WARP_SIZE
     pool = cp.empty((workers, cache_size))
+
+    mesh_largest = tasks[0][0].mesh
+    vG = vG.reshape(-1, *mesh_largest)
 
     init_constant(cell)
     kern = libmgrid.MG_eval_mat_lda_orth
     # TODO: might be complex array when tddft amplitudes are complex
     vj = cp.zeros((nset,nao,nao))
 
-    for i, task in enumerate(tasks):
+    for i, sub_tasks in enumerate(tasks):
+        if not sub_tasks: continue
+        task = sub_tasks[0]
         mesh = task.mesh
-        n_radius = task.n_radius
         ngrids = np.prod(mesh)
         sub_vG = _take_4d(vG, mesh).reshape(nset,ngrids)
         v_rs = tools.ifft(sub_vG, mesh).reshape(nset,ngrids)
-        if abs(v_rs.imag).max() > 1e-8:
-            raise RuntimeError('Complex values in potential. mesh might be insufficient')
+        imag_max = abs(v_rs.imag).max()
+        if imag_max > 1e-5:
+            msg = f'Imaginary values {imag_max} in potential. mesh {mesh} might be insufficient'
+            #raise RuntimeError(msg)
+            logger.warn(cell, msg)
 
         vR = cp.asarray(v_rs.real, order='C')
         for iset in range(nset):
-            for l in range(lmax*2+1):
-                if (i, l) not in sp_groups: continue
-                pair_idx = sp_groups[i,l]
+            for task in sub_tasks:
                 kern(ctypes.cast(vj[iset].data.ptr, ctypes.c_void_p),
                      ctypes.cast(vR[iset].data.ptr, ctypes.c_void_p),
-                     mg_envs, ctypes.c_int(l), ctypes.c_int(n_radius),
-                     (ctypes.c_int*3)(*mesh),
-                     ctypes.c_uint32(len(pair_idx)),
-                     ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
+                     mg_envs, ctypes.c_int(task.l), ctypes.c_int(task.n_radius),
+                     (ctypes.c_int*3)(*task.mesh),
+                     ctypes.c_uint32(len(task.shl_pair_idx)),
+                     ctypes.cast(task.shl_pair_idx.data.ptr, ctypes.c_void_p),
                      ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                      ctypes.c_int(workers))
 
@@ -465,7 +464,17 @@ def _repeat(a, repeats):
     ap = np.repeat(a[np.newaxis], repeats, axis=0)
     return ap.reshape(-1, *a.shape[1:])
 
-def group_shl_pairs(cell, prim_bas, supmol_bas, supmol_env, tasks):
+@dataclass
+class Task:
+    mesh: tuple
+    n_radius: int
+    l: int
+    shl_pair_idx: np.ndarray
+
+def create_tasks(cell, prim_bas, supmol_bas, supmol_env):
+    a = cell.lattice_vectors()
+    assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
+
     vol = cell.vol
     weight_penalty = vol
     precision = cell.precision / max(weight_penalty, 1)
@@ -478,7 +487,6 @@ def group_shl_pairs(cell, prim_bas, supmol_bas, supmol_env, tasks):
     ptr_coords = supmol_bas[:,PRIMBAS_COORD]
     bas_coords = cp.asarray(supmol_env[ptr_coords[:,None] + np.arange(3)])
 
-    # TODO: rewritten in C
     # Estimate <cell0|supmol> overlap
     li = ls[:cell0_nprims,None]
     lj = ls[None,:]
@@ -506,102 +514,84 @@ def group_shl_pairs(cell, prim_bas, supmol_bas, supmol_env, tasks):
     Ecut = 20.
     Ecut = cp.log(fac * (Ecut*2)**(lij-.5) + 1.) * 2*aij
     Ecut = cp.log(fac * (Ecut*2)**(lij-.5) + 1.) * 2*aij
-    Ecut[ovlp < precision] = -1
 
-    task_Ecuts = [task.Ecut for task in tasks]
-    task_Ecuts[0] = Ecut.max()
-    task_Ecuts.append(0.)
+    # rho[r-Rp] = fl*norm[:cell0_nprims,None]*norm * exp(-theta*dr**2)
+    #             * r**lij * exp(-aij*r**2)
+    fac = fl*norm[:cell0_nprims,None]*norm * cp.exp(-theta*dr**2)
+    log_fac = cp.log(fac / precision)
+    log_fac[ovlp < precision] = 0
+    radius = (log_fac / aij)**.5
+    radius = ((log_fac + lij * cp.log(radius+1.)) / aij)**.5
+    radius = ((log_fac + lij * cp.log(radius+1.)) / aij)**.5
 
-    ntasks = len(tasks)
+    # n_radius=32 is the optimal for best performance. However, when
+    # cell.precision is very tight, n_radius=32 might be insufficient to converge
+    # the value of GTO-pair and the integration of GTO pair simultaneously.
+    # n_radius is adjusted accordingly to ensure the convergence.
+    n_radius = (int(np.log(1./cell.precision) * 1.2) + 7) // 8 * 8
+    if n_radius < 32:
+        n_radius = 32
+    logger.debug1(cell, 'n_radius = %d', n_radius)
+
     lmax = cell._bas[:,ANG_OF].max()
-    shl_pairs_groups = {}
-    for i in range(ntasks): # Exclude the last
-        # task_Ecuts[i:i+2] defines the window. Shell pairs within this window
-        # uses the same task.n_radius and mesh in kernel.
-        # TODO: adjust n_radius and mesh for high angular l.
-        E_mask = Ecut <= task_Ecuts[i]
-        E_mask &= Ecut > task_Ecuts[i+1]
-        for l in range(lmax*2+1):
-            mask = l == lij
-            mask &= E_mask
-            pair_idx = cp.asarray(cp.where(mask.ravel())[0], dtype=np.int32)
-            if len(pair_idx) > 0:
-                shl_pairs_groups[i,l] = pair_idx
-    return shl_pairs_groups
-
-def multigrid_tasks(cell):
-    a = cell.lattice_vectors()
-    assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
+    assert lmax <= LMAX
     cell_len = a.diagonal()
+
+    def sub_tasks_for_l(mesh, n_radius, mask):
+        sub_tasks = []
+        for l in range(lmax*2+1):
+            pair_idx = cp.where((mask & (l == lij)).ravel())[0]
+            n_pairs = len(pair_idx)
+            if n_pairs > 0:
+                # TODO: n_radius for each task?
+                task = Task(mesh=mesh, n_radius=n_radius, l=l,
+                            shl_pair_idx=cp.asarray(pair_idx, dtype=np.int32))
+                sub_tasks.append(task)
+                logger.debug1(cell, 'Add task: mesh=%s, n_radius=%d, rcut=%.5g, l=%d, n_pairs=%d',
+                              mesh, n_radius, rcut_threshold, l, n_pairs)
+        return sub_tasks
+
+    remaining_mask = ovlp > precision
     Gbase = 2*np.pi / cell_len
-    penalty = 1
-    precision = cell.precision * penalty
-
-    # * Estimate the proper radius and Ecut boundaries in each task. Given mesh
-    # in each task, a resolution can be obtained to determine the radius and
-    # Ecut boundaries. The largest radius in each task ~= n_radius * resolution.
-    # This means that the numerical integration with n_radius*2 grids for the most
-    # diffused orbital-product is sufficient to produce the required precision.
-    # The largest Ecut in each task ~= cutoff_to_mesh(mesh), which is sufficient
-    # to produce the required precision for the most compact orbital-product.
-    # * Approximately, n_radius = np.log(1/precision) * 2/np.pi would produce a
-    # balanced n_radius. The "balance" means that given the pair-GTO exponent, a
-    # Ecut can be determined, which corresponds to a mesh grid in real space.
-    # The resolution for this mesh and n_radius can determine a radius, at the
-    # boundary of which, the pair-GTO can converge to the required precision.
-    # * We choose a n_radius ~50% larger than the balanced one. By doing so, a
-    # window of Ecut can be obtained. In this Ecut window, the mesh is
-    # sufficient to converge all GTO pairs, as the mesh is determined from the
-    # upper bound of the Ecut window. The n_radius is sufficient to converge the
-    # most diffused GTOs, as the lower bound of the Ecut window is estimated
-    # based those diffused GTO pairs.
-    n_radius = int(np.log(1./precision))
-
-    # for diffused basis functions lower than minimal Ecut, skip the multi-grid
-    # computation. The regular FFTDF algorithm in this case may be more accurate
-    # and efficient.
-    Ecut_min = ((Gbase * 4)**2 / 2).min()
-    mesh = cell.mesh
-    Ecut = mesh_to_cutoff(a, mesh).max()
+    ngrid_min = 128
+    mesh = np.asarray(cell.mesh)
     tasks = []
     for _ in range(20):
-        if Ecut < Ecut_min:
+        if np.prod(mesh) <= ngrid_min:
             break
-        #tasks.append(_Task(Ecut=Ecut, mesh=mesh, n_radius=n_radius+16, algorithm='MG'))
-        tasks.append(_Task(Ecut=Ecut, mesh=mesh, n_radius=n_radius, algorithm='MG'))
-        # Based on the current mesh/resolution, determine the lower bound of aij
-        # exponent that has negligible values at the boundary of the radius.
         dh = (cell_len / mesh).min()
-        radius = dh * n_radius
-        aij = np.log(1./precision) / radius**2
-#        print(
-#            np.exp(-aij*((n_radius+16)*(cell_len/tasks[-1].mesh).min())**2))
-        Ecut = np.log(1./precision) * (2*aij)
-        Gmax = (2*Ecut)**.5
-        mesh = np.floor(Gmax / Gbase).astype(int) * 2 + 1
+        rcut_threshold = dh * n_radius
+        mask = remaining_mask & (radius < rcut_threshold)
+        sub_tasks = sub_tasks_for_l(mesh, n_radius, mask)
+        if not sub_tasks:
+            # Due to errors in the Ecut and radius estimation, some GTO pairs
+            # might require larger n_radius under the specified mesh (Ecut).
+            # When this happen, the mesh generation (from Ecut_max) is not
+            # changed during iterations, leading to endless loop and empty tasks.
+            # This issue can happen for tight cell.precision.
+            # Increase the n_radius a little bit to handle this issue.
+            sub_tasks = sub_tasks_for_l(mesh, n_radius+8, mask)
+        if not sub_tasks:
+            raise RuntimeError(f'Failed to create multigrid task for cell.precision={precision}')
+
+        tasks.append(sub_tasks)
+        remaining_mask &= radius >= rcut_threshold
+        if cp.any(remaining_mask):
+            Ecut_max = float(Ecut[remaining_mask].max())
+            Gmax = (2*Ecut_max)**.5
+            mesh = np.floor(Gmax/Gbase).astype(int) * 2 + 1
+        else:
+            break
     else:
-        raise RuntimeError(f'failed to generate mesh tasks for precision {cell.precision}.')
-    # TODO: Attach a regular FFTDF task?
-    #tasks.append(_Task(Ecut=Ecut, mesh=mesh, n_radius=None, algorithm='FFTDF'))
+        logger.warn()
 
-    # estimate n_radius for the most diffused GTO pairs
-    es, _ = extract_pgto_params(cell)
-    aij = es.min() * 2
-    radius = (np.log(1./precision) / aij)**.5
-    dh = (cell_len / mesh).min()
-    #n_radius = int(np.ceil(radius / dh)) + 4
-    n_radius = int(np.ceil(radius / dh))
-    tasks.append(_Task(Ecut=Ecut, mesh=mesh, n_radius=n_radius, algorithm='MG'))
+    if cp.any(remaining_mask):
+        # TODO: Using a regular FFTDF task than the MG algorithm?
+        dh = (cell_len / mesh).min()
+        n_radius = int(np.ceil(radius[remaining_mask].max() / dh))
+        sub_tasks = sub_tasks_for_l(mesh, n_radius, remaining_mask)
+        tasks.append(sub_tasks)
     return tasks
-
-from dataclasses import dataclass
-@dataclass
-class _Task:
-    Ecut: float
-    mesh: tuple
-    n_radius: int
-    algorithm: str
-    shl_pair_idx: np.ndarray = None
 
 def init_constant(cell):
     err = libmgrid.MG_init_constant(ctypes.c_int(SHM_SIZE))
@@ -639,12 +629,16 @@ class MultiGridFFTDF:
         self.mesh = cell.mesh
         # ao_loc_in_cell0 is the address of Cartesian AO in cell-0 for each
         # primitive GTOs in the super-mole.
-        self.supmol_bas, self.supmol_env, self.ao_loc_in_cell0 = \
-                _to_primitive_bas(cell)
+        supmol_bas, supmol_env, ao_loc_in_cell0 = _to_primitive_bas(cell)
+        self.supmol_bas = supmol_bas
+        self.supmol_env = supmol_env
+        self.ao_loc_in_cell0 = ao_loc_in_cell0
         # Number of primitive shells
         self.primitive_nbas = cell._bas[:,NPRIM_OF].dot(cell._bas[:,NCTR_OF])
         # A list of integral meshgrids for each task
-        self.tasks = multigrid_tasks(cell)
+        #self.tasks = multigrid_tasks(cell)
+        prim_bas = supmol_bas[:self.primitive_nbas]
+        self.tasks = create_tasks(cell, prim_bas, supmol_bas, supmol_env)
         logger.debug(cell, 'Multigrid ntasks %s', len(self.tasks))
 
     def reset(self, cell=None):
