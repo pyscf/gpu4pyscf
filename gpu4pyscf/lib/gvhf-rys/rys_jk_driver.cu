@@ -37,36 +37,32 @@ extern __global__ void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, B
                                     ShellQuartet *pool, uint32_t *batch_head);
 extern __global__ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                      ShellQuartet *pool, uint32_t *batch_head);
-extern __global__ void rys_sr_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                                     ShellQuartet *pool, uint32_t *batch_head);
 extern __global__ void rys_jk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                          ShellQuartet *pool, uint32_t *batch_head);
 extern __global__ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                                          ShellQuartet *pool, uint32_t *batch_head);
+                                          ShellQuartet *pool, double *dd_pool, uint32_t *batch_head);
 extern __global__ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                                          ShellQuartet *pool, uint32_t *batch_head);
+                                          ShellQuartet *pool, double *dd_pool, uint32_t *batch_head);
 extern __global__ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                                          ShellQuartet *pool, uint32_t *batch_head);
+                                          ShellQuartet *pool, double *dd_pool, uint32_t *batch_head);
 extern int rys_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head,
-                    int *scheme, int workers, double omega);
+                    ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
 extern int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head,
-                    int *scheme, int workers, double omega);
-extern int rys_sr_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head,
-                    int *scheme, int workers, double omega);
+                    ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
 extern int os_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head,
                     int *scheme, int workers, double omega);
 extern int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
 extern int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
+                    ShellQuartet *pool, double *dd_pool,
+                    uint32_t *batch_head, int *scheme, int workers);
 extern int rys_ejk_ip2_type12_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
+                    ShellQuartet *pool, double *dd_pool,
+                    uint32_t *batch_head, int *scheme, int workers);
 extern int rys_ejk_ip2_type3_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
+                    ShellQuartet *pool, double *dd_pool,
+                    uint32_t *batch_head, int *scheme, int workers);
 
 extern "C" {
 int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
@@ -115,15 +111,18 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
     JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(uint32_t));
 
-    if (!rys_j_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
+    if (!rys_j_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
+#if CUDA_VERSION >= 12040
+        gout_stride *= 2;
+#endif
         int with_gout = scheme[2];
         dim3 threads(quartets_per_block, gout_stride);
         int nmax = MAX(lij, lkl);
         int nf3_ij = (lij+1)*(lij+2)*(lij+3)/6;
         int nf3_kl = (lkl+1)*(lkl+2)*(lkl+3)/6;
-        int buflen = (nroots*2 + g_size*3 + iprim*jprim*4) * quartets_per_block;
+        int buflen = (nroots*2 + g_size*3 + iprim*jprim + 9) * quartets_per_block;
         if (with_gout) {
             buflen += nf3_ij*nf3_kl * quartets_per_block;
             rys_j_with_gout_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
@@ -185,24 +184,15 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
     JKMatrix jk = {vj, vk, dm, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(uint32_t));
 
-    if (omega >= 0) {
-        if (order <= 0) {
-            os_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega);
-        } else if (!rys_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
-            int quartets_per_block = scheme[0];
-            int gout_stride = scheme[1];
-            int ij_prims = iprim * jprim;
-            dim3 threads(quartets_per_block, gout_stride);
-            int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;// + ij_prims*4*TILE2;
-            rys_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
-        }
-    } else if (!rys_sr_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega)) {
+    if (order == 0) {
+        os_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega);
+    } else if (!rys_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*4 + g_size*3 + ij_prims*4) * quartets_per_block;// + ij_prims*4*TILE2;
-        rys_sr_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+        int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;// + ij_prims*4*TILE2;
+        rys_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -261,8 +251,8 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3) * quartets_per_block;
-        buflen += ij_prims*12;
+        int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
+        buflen += ij_prims*6;
         rys_jk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
@@ -279,7 +269,7 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                         int ntile_ij_pairs, int ntile_kl_pairs,
                         int *tile_ij_mapping, int *tile_kl_mapping, float *tile_q_cond,
                         float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
-                        ShellQuartet *pool, uint32_t *batch_head, int workers,
+                        ShellQuartet *pool, double *dd_pool, uint32_t *batch_head, int workers,
                         int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
@@ -307,9 +297,9 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         nroots *= 2;
     }
     uint8_t stride_j = li + 2;
-    uint8_t stride_k = stride_j * (lj + 2);
+    uint8_t stride_k = stride_j * (lj + 1);
     uint8_t stride_l = stride_k * (lk + 2);
-    int g_size = stride_l * (uint16_t)(ll + 2);
+    int g_size = stride_l * (uint16_t)(ll + 1);
     BoundsInfo bounds = {li, lj, lk, ll, nfi, nfk, nfij, nfkl,
         nroots, stride_j, stride_k, stride_l, iprim, jprim, kprim, lprim,
         ntile_ij_pairs, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
@@ -323,14 +313,15 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
     JKEnergy jk = {ejk, dm, 2.*j_factor, -k_factor, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(int));
 
-    if (!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
+    if (!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, pool, dd_pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;
-        buflen = MAX(buflen, 9*gout_stride*quartets_per_block);
-        rys_ejk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+        int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;
+        buflen = MAX(buflen, 12*gout_stride*quartets_per_block);
+        rys_ejk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(
+                envs, jk, bounds, pool, dd_pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -346,7 +337,7 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
                         int ntile_ij_pairs, int ntile_kl_pairs,
                         int *tile_ij_mapping, int *tile_kl_mapping, float *tile_q_cond,
                         float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
-                        ShellQuartet *pool, uint32_t *batch_head, int workers,
+                        ShellQuartet *pool, double *dd_pool, uint32_t *batch_head, int workers,
                         int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
@@ -390,13 +381,14 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
     JKEnergy jk = {ejk, dm, 4.*j_factor, -k_factor, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(int));
 
-    if (!rys_ejk_ip2_type12_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
+    if (!rys_ejk_ip2_type12_unrolled(&envs, &jk, &bounds, pool, dd_pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;
-        rys_ejk_ip2_type12_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+        int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;
+        rys_ejk_ip2_type12_kernel<<<workers, threads, buflen*sizeof(double)>>>(
+                envs, jk, bounds, pool, dd_pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -412,7 +404,7 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
                         int ntile_ij_pairs, int ntile_kl_pairs,
                         int *tile_ij_mapping, int *tile_kl_mapping, float *tile_q_cond,
                         float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
-                        ShellQuartet *pool, uint32_t *batch_head, int workers,
+                        ShellQuartet *pool, double *dd_pool, uint32_t *batch_head, int workers,
                         int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
@@ -440,9 +432,9 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
         nroots *= 2;
     }
     uint8_t stride_j = li + 2;
-    uint8_t stride_k = stride_j * (lj + 2);
+    uint8_t stride_k = stride_j * (lj + 1);
     uint8_t stride_l = stride_k * (lk + 2);
-    int g_size = stride_l * (uint16_t)(ll + 2);
+    int g_size = stride_l * (uint16_t)(ll + 1);
     BoundsInfo bounds = {li, lj, lk, ll, nfi, nfk, nfij, nfkl,
         nroots, stride_j, stride_k, stride_l, iprim, jprim, kprim, lprim,
         ntile_ij_pairs, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
@@ -456,14 +448,15 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
     JKEnergy jk = {ejk, dm, 4.*j_factor, -k_factor, (uint16_t)n_dm};
     cudaMemset(batch_head, 0, 2*sizeof(int));
 
-    if (!rys_ejk_ip2_type3_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
+    if (!rys_ejk_ip2_type3_unrolled(&envs, &jk, &bounds, pool, dd_pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3 + ij_prims*4) * quartets_per_block;
+        int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;
         buflen = MAX(buflen, 9*gout_stride*quartets_per_block);
-        rys_ejk_ip2_type3_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+        rys_ejk_ip2_type3_kernel<<<workers, threads, buflen*sizeof(double)>>>(
+                envs, jk, bounds, pool, dd_pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -481,7 +474,6 @@ int RYS_init_constant(int *g_pair_idx, int *offsets,
     cudaMemcpyToSymbol(c_g_pair_idx, g_pair_idx, 3675*sizeof(int));
     cudaMemcpyToSymbol(c_g_pair_offsets, offsets, sizeof(int) * LMAX1*LMAX1);
     cudaFuncSetAttribute(rys_jk_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaFuncSetAttribute(rys_sr_jk_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_jk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_ejk_ip2_type12_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);

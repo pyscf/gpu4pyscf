@@ -28,7 +28,7 @@ from gpu4pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, add_sparse, tag_array, sandwich_dot, reduce_to_device)
 from gpu4pyscf.lib import logger
-from gpu4pyscf.__config__ import _streams, _num_devices
+from gpu4pyscf.__config__ import _streams, num_devices
 
 from pyscf import __config__
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 128*128)
@@ -223,8 +223,8 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     futures = []
     cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _get_vxc_task,
                 ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,

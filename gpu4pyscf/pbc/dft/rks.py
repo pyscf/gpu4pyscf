@@ -73,7 +73,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     else:
         n, exc, vxc = ni.nr_rks(cell, ks.grids, ks.xc, dm, 0, hermi,
                                 kpt, kpts_band)
-        log.info('nelec by numeric integration = %s', n)
+        log.debug('nelec by numeric integration = %s', n)
         if ks.do_nlc():
             if ni.libxc.is_nlc(ks.xc):
                 xc = ks.xc
@@ -83,7 +83,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
             n, enlc, vnlc = ni.nr_nlc_vxc(cell, ks.nlcgrids, xc, dm, 0, hermi, kpt)
             exc += enlc
             vxc += vnlc
-            log.info('nelec with nlc grids = %s', n)
+            log.debug('nelec with nlc grids = %s', n)
         t0 = log.timer('vxc', *t0)
 
     if not hybrid:
@@ -122,8 +122,18 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=None, vk=None)
     return vxc
 
-def prune_small_rho_grids_(ks, cell, dm, grids, kpts):
-    raise NotImplementedError
+NELEC_ERROR_TOL = getattr(__config__, 'pbc_dft_rks_prune_error_tol', 0.02)
+def prune_small_rho_grids_(mf, cell, dm, grids, kpts):
+    rho = mf.get_rho(dm, grids, kpts)
+    n = rho.dot(grids.weights)
+    if abs(n-cell.nelectron) < NELEC_ERROR_TOL*n:
+        rho *= grids.weights
+        size0 = grids.weights.size
+        idx = abs(rho) > mf.small_rho_cutoff / size0
+        grids.coords  = grids.coords [idx]
+        grids.weights = grids.weights[idx]
+        logger.debug(mf, 'Drop grids %d', size0 - grids.weights.size)
+    return grids
 
 class KohnShamDFT(mol_ks.KohnShamDFT):
     '''PBC-KS'''
@@ -148,9 +158,21 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
     dump_flags = rks_cpu.KohnShamDFT.dump_flags
 
     get_veff = NotImplemented
-    get_rho = return_cupy_array(rks_cpu.get_rho)
+    get_rho = NotImplemented
 
-    density_fit = NotImplemented
+    def density_fit(self, auxbasis=None, with_df=None):
+        from gpu4pyscf.pbc.df.df_jk import density_fit
+        cell = self.cell
+        mf = density_fit(self, auxbasis, with_df)
+        mf.with_df._j_only = not self._numint.libxc.is_hybrid_xc(self.xc)
+        mf.grids = gen_grid.BeckeGrids(cell)
+        mf.grids.level = getattr(
+            __config__, 'dft_rks_RKS_grids_level', mf.grids.level)
+        mf.nlcgrids = gen_grid.BeckeGrids(cell)
+        mf.nlcgrids.level = getattr(
+            __config__, 'dft_rks_RKS_nlcgrids_level', mf.nlcgrids.level)
+        return mf
+
     rs_density_fit = NotImplemented
 
     jk_method = NotImplemented
@@ -164,7 +186,7 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
         '''Initialize self.grids the first time call get_veff'''
         if self.grids.coords is None:
             t0 = (logger.process_clock(), logger.perf_counter())
-            self.grids.build(with_non0tab=True)
+            self.grids.build()
             if (isinstance(self.grids, gen_grid.BeckeGrids) and
                 self.small_rho_cutoff > 1e-20 and ground_state):
                 self.grids = prune_small_rho_grids_(
@@ -173,7 +195,7 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
         is_nlc = self.do_nlc()
         if is_nlc and self.nlcgrids.coords is None:
             t0 = (logger.process_clock(), logger.perf_counter())
-            self.nlcgrids.build(with_non0tab=True)
+            self.nlcgrids.build()
             if (isinstance(self.grids, gen_grid.BeckeGrids) and
                 self.small_rho_cutoff > 1e-20 and ground_state):
                 self.nlcgrids = prune_small_rho_grids_(
@@ -184,6 +206,14 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
 # Update the KohnShamDFT label in pbc.scf.hf module
 pbchf.KohnShamDFT = KohnShamDFT
 
+
+def get_rho(mf, dm=None, grids=None, kpt=None):
+    if dm is None: dm = mf.make_rdm1()
+    if grids is None: grids = mf.grids
+    if kpt is None: kpt = mf.kpt
+    assert dm.ndim == 2
+    assert kpt.ndim == 1
+    return mf._numint.get_rho(mf.cell, dm[None], grids, kpt[None])
 
 class RKS(KohnShamDFT, pbchf.RHF):
     '''RKS class adapted for PBCs.
@@ -203,6 +233,7 @@ class RKS(KohnShamDFT, pbchf.RHF):
 
     get_veff = get_veff
     energy_elec = mol_ks.energy_elec
+    get_rho = get_rho
 
     to_gpu = utils.to_gpu
     device = utils.device

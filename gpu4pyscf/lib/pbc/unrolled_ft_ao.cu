@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 The PySCF Developers. All Rights Reserved.
+ * Copyright 2024-2025 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
-#include "ft_ao.h"
+#include "ft_ao.cuh"
 #define OVERLAP_FAC     5.56832799683170787
 #define OF_COMPLEX      2
 

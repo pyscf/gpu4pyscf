@@ -24,7 +24,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.int4c2e import BasisProdCache
 from gpu4pyscf.df.int3c2e import sort_mol, _split_l_ctr_groups, get_pairing
 from gpu4pyscf.gto.mole import basis_seg_contraction
-from gpu4pyscf.__config__ import _num_devices, _streams
+from gpu4pyscf.__config__ import num_devices, _streams
 
 BLKSIZE = 128
 
@@ -132,7 +132,7 @@ class VHFOpt(_vhf.VHFOpt):
         self.density_offset = np.append(0, np.cumsum(n_density_per_angular_pair)).astype(np.int32)
 
         self._bpcache = {}
-        for n in range(_num_devices):
+        for n in range(num_devices):
             with cp.cuda.Device(n), _streams[n]:
                 bpcache = ctypes.POINTER(BasisProdCache)()
                 scale_shellpair_diag = 1.0

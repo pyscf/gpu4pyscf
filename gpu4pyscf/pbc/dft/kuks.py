@@ -28,7 +28,7 @@ from pyscf.pbc.dft import multigrid
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import return_cupy_array, tag_array
 from gpu4pyscf.pbc.scf import khf, kuhf
-from gpu4pyscf.pbc.dft import rks
+from gpu4pyscf.pbc.dft import rks, krks
 
 def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
              kpts=None, kpts_band=None):
@@ -47,7 +47,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
         n, exc, vxc = multigrid.nr_uks(ks.with_df, ks.xc, dm, hermi,
                                        kpts, kpts_band,
                                        with_j=True, return_j=False)
-        log.info('nelec by numeric integration = %s', n)
+        log.debug('nelec by numeric integration = %s', n)
         t0 = log.timer('vxc', *t0)
         return vxc
 
@@ -71,7 +71,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
                                           0, hermi, kpts, max_memory=max_memory)
             exc += enlc
             vxc += vnlc
-        log.info('nelec by numeric integration = %s', n)
+        log.debug('nelec by numeric integration = %s', n)
         t0 = log.timer('vxc', *t0)
 
     nkpts = len(kpts)
@@ -150,7 +150,10 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
 
     get_veff = get_veff
     energy_elec = energy_elec
-    get_rho = return_cupy_array(kuks_cpu.get_rho)
+
+    def get_rho(self, dm=None, grids=None, kpts=None):
+        if dm is None: dm = self.make_rdm1()
+        return krks.get_rho(self, dm[0]+dm[1], grids, kpts)
 
     nuc_grad_method = NotImplemented
     to_hf = NotImplemented

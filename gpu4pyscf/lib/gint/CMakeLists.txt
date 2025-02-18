@@ -26,6 +26,7 @@ add_library(gint SHARED
   nr_fill_ao_ints.cu
   nr_fill_ao_int3c1e.cu
   nr_fill_ao_int3c1e_ip.cu
+  nr_fill_ao_int3c1e_ipip.cu
   nr_fill_ao_int3c2e.cu
   nr_fill_ao_int3c2e_ip1.cu
   nr_fill_ao_int3c2e_ip2.cu
@@ -34,6 +35,7 @@ add_library(gint SHARED
   nr_fill_ao_int3c2e_ip1ip2.cu
   nr_fill_ao_int3c2e_ipvip1.cu
   j_engine_matrix_reorder.c
+  rys_roots_dat.cu
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
