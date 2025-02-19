@@ -69,6 +69,47 @@ static void _add_out(double *out, const double *buf, double coef, int np, int di
 extern "C" {
 
 __host__
+void copy_gga2lda(xc_gga_out_params *gga, xc_lda_out_params *lda){
+    lda->zk = gga->zk;
+    lda->vrho = gga->vrho;
+    lda->v2rho2 = gga->v2rho2;
+    lda->v3rho3 = gga->v3rho3;
+    lda->v4rho4 = gga->v4rho4;
+}
+
+__host__
+void copy_mgga2lda(xc_mgga_out_params *mgga, xc_lda_out_params *lda){
+    lda->zk = mgga->zk;
+    lda->vrho = mgga->vrho;
+    lda->v2rho2 = mgga->v2rho2;
+    lda->v3rho3 = mgga->v3rho3;
+    lda->v4rho4 = mgga->v4rho4;
+}
+
+__host__
+void copy_mgga2gga(xc_mgga_out_params *mgga, xc_gga_out_params *gga){
+    gga->zk = mgga->zk;
+
+    gga->vrho = mgga->vrho;
+    gga->vsigma = mgga->vsigma;
+
+    gga->v2rho2 = mgga->v2rho2;
+    gga->v2rhosigma = mgga->v2rhosigma;
+    gga->v2sigma2 = mgga->v2sigma2;
+
+    gga->v3rho3 = mgga->v3rho3;
+    gga->v3rho2sigma = mgga->v3rho2sigma;
+    gga->v3rhosigma2 = mgga->v3rhosigma2;
+    gga->v3sigma3 = mgga->v3sigma3;
+
+    gga->v4rho4 = mgga->v4rho4;
+    gga->v4rho3sigma = mgga->v4rho3sigma;
+    gga->v4rho2sigma2 = mgga->v4rho2sigma2;
+    gga->v4rhosigma3 = mgga->v4rhosigma3;
+    gga->v4sigma4 = mgga->v4sigma4;
+}
+
+__host__
 void _memset_lda(xc_lda_out_params *out, int order, int np, const xc_dimensions *dim){
     if(order >= 0) cudaMemset(out->zk, 0, sizeof(double)*np*dim->zk);
     if(order >= 1) cudaMemset(out->vrho, 0, sizeof(double)*np*dim->vrho);
@@ -225,12 +266,12 @@ int _xc_lda(const xc_func_type *func, int np, int order, const double *rho,
 __host__
 int _xc_gga(const xc_func_type *func, int np, int order, const double *rho, const double *sigma,
             xc_gga_out_params *out){
-    
+
     if(func->info->gga == NULL){
         fprintf(stderr, "Nested xc functional is not supported\n");
         return 1;
     }
-        
+
     //xc_dimensions* dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
     //memcpy(dim, &(func->dim), sizeof(xc_dimensions));
     //DEVICE_INIT(xc_dimensions, dim, &(func->dim), 1);
@@ -238,7 +279,7 @@ int _xc_gga(const xc_func_type *func, int np, int order, const double *rho, cons
     const xc_dimensions *dim = &(func->dim);
     _memset_gga(out, order, np, dim);
     //FREE(dim);
-    
+
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of memset_gga: %s\n", cudaGetErrorString(err));
@@ -271,7 +312,7 @@ int _xc_mgga(const xc_func_type *func, int np, int order, const double *rho, con
         fprintf(stderr, "Nested xc functional is not supported\n");
         return 1;
     }
-    
+
     //xc_dimensions* dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
     //memcpy(dim, &(func->dim), sizeof(xc_dimensions));
     //DEVICE_INIT(xc_dimensions, dim, &(func->dim), 1);
@@ -310,7 +351,7 @@ int GDFT_xc_lda(cudaStream_t stream,
     xc_lda_out_params *out, xc_lda_out_params *buf)
 {
     int ierr = 0;
-     
+
     int order = -1;
     if(out->zk     != NULL) order = 0;
     if(out->vrho   != NULL) order = 1;
@@ -338,11 +379,11 @@ int GDFT_xc_lda(cudaStream_t stream,
 
     dim3 threads(THREADS);
     dim3 blocks((np+THREADS-1)/THREADS);
-    
+
     for (int ii=0; ii< n_func_aux; ii++){
         xc_func_type *aux = func->func_aux[ii];
     	double coef = func->mix_coef[ii];
-	
+
 	    /* Evaluate the functional */
         switch(aux->info->family){
             case XC_FAMILY_LDA:{
@@ -396,13 +437,15 @@ int GDFT_xc_gga(cudaStream_t stream,
 	    /* Evaluate the functional */
         switch(aux->info->family){
             case XC_FAMILY_LDA:{
-                xc_lda_out_params *out_lda = (xc_lda_out_params *)(buf);
+                xc_lda_out_params *out_lda = (xc_lda_out_params *)malloc(sizeof(xc_lda_out_params));
+                copy_gga2lda(buf, out_lda);
 		        ierr = _xc_lda(aux, np, order, rho, out_lda);
 		        ADD_LDA;
+                free(out_lda);
                 break;
             }
             case XC_FAMILY_GGA:{
-                xc_gga_out_params *out_gga = (xc_gga_out_params *)(buf);
+                xc_gga_out_params *out_gga = buf;
 		        ierr = _xc_gga(aux, np, order, rho, sigma, out_gga);
 		        ADD_GGA;
                 break;
@@ -447,27 +490,31 @@ int GDFT_xc_mgga(cudaStream_t stream,
 
     dim3 threads(THREADS);
     dim3 blocks((np+THREADS-1)/THREADS);
-    
+
     for (int ii=0; ii< n_func_aux; ii++){
     	xc_func_type *aux = func->func_aux[ii];
         double coef = func->mix_coef[ii];
-	
+
         /* Evaluate the functional */
         switch(aux->info->family){
             case XC_FAMILY_LDA:{
-                xc_lda_out_params *out_lda = (xc_lda_out_params *)(buf);
+                xc_lda_out_params *out_lda = (xc_lda_out_params *)malloc(sizeof(xc_lda_out_params));
+                copy_mgga2lda(buf, out_lda);
                 ierr = _xc_lda(aux, np, order, rho, out_lda);
                 ADD_LDA;
+                free(out_lda);
                 break;
             }
             case XC_FAMILY_GGA:{
-                xc_gga_out_params *out_gga = (xc_gga_out_params *)(buf);
+                xc_gga_out_params *out_gga = (xc_gga_out_params *) malloc(sizeof(xc_gga_out_params));
+                copy_mgga2gga(buf, out_gga);
                 ierr = _xc_gga(aux, np, order, rho, sigma, out_gga);
                 ADD_GGA;
+                free(out_gga);
                 break;
             }
             case XC_FAMILY_MGGA:{
-                xc_mgga_out_params *out_mgga = (xc_mgga_out_params *)(buf);
+                xc_mgga_out_params *out_mgga = buf;
                 ierr = _xc_mgga(aux, np, order, rho, sigma, lapl, tau, out_mgga);
                 ADD_MGGA;
                 break;
