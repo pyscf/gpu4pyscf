@@ -23,7 +23,7 @@
 #define SHARED_RHO_SIZE 2097152
 
 __device__ static
-void init_orth_data(double *pool, int *grid_slice,
+void init_orth_data(double *pool, int *grid_start,
                     MGridEnvVars envs, MGridBounds bounds, double *ri, double *rj,
                     double ai, double aj, int l1, int warp_id)
 {
@@ -43,7 +43,7 @@ void init_orth_data(double *pool, int *grid_slice,
         int xij_latt = static_cast<int>(floor(xij / dx));
         if (w == 0) {
             int x0_latt = xij_latt + 1 - bounds.ngrid_radius;
-            grid_slice[z*2*WARP_SIZE] = x0_latt;
+            grid_start[z*WARP_SIZE] = x0_latt;
         }
         double base_x = dx * xij_latt;
         double x0xij = base_x - xij;
@@ -78,7 +78,7 @@ void init_orth_data(double *pool, int *grid_slice,
 
     for (int z = 0; z < 3; ++z) {
         int nx_per_cell = bounds.mesh[z];
-        int x0_latt = grid_slice[z*2*WARP_SIZE];
+        int x0_latt = grid_start[z*WARP_SIZE];
         double dx = envs.lattice_params[z] / nx_per_cell;
         double x0xi = x0_latt * dx - ri[z];
         double *xs_exp = pool + z * xs_size;
@@ -93,14 +93,6 @@ void init_orth_data(double *pool, int *grid_slice,
         }
         __syncthreads();
 
-        if (warp_id == 0) {
-            // Using translation vectors to shift the first grid to cell 0.
-            // This can simplify the computation of the address for the
-            // wrapped-around grid using (x0_latt+ix)%nx_per_cell
-            x0_latt = (x0_latt % nx_per_cell + nx_per_cell) % nx_per_cell;
-            grid_slice[ z*2   *WARP_SIZE] = x0_latt;
-            grid_slice[(z*2+1)*WARP_SIZE] = x0_latt + ngrid_span;
-        }
         // add up contributions from all images to the reference image
         if (ngrid_span >= nx_per_cell) {
             for (int n = warp_id; n < nx_per_cell*l1; n += WARPS) {
@@ -113,9 +105,6 @@ void init_orth_data(double *pool, int *grid_slice,
                 }
                 i = n % nx_per_cell;
                 xs_exp[(m*ngrid_span + i)*WARP_SIZE] = s1;
-            }
-            if (warp_id == 0) {
-                grid_slice[(z*2+1)*WARP_SIZE] = x0_latt + nx_per_cell;
             }
         }
     }
@@ -225,8 +214,8 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     double *zs_exp = ys_exp + xs_size;
     double *dm_xyz = zs_exp + xs_size;
     int nf3 = (L+1)*(L+2)*(L+3)/6;
-    int *grid_slice = (int *)(dm_xyz + nf3*WARP_SIZE);
-    init_orth_data(xs_exp+sp_id, grid_slice+sp_id, envs, bounds,
+    int *grid_start = (int *)(dm_xyz + nf3*WARP_SIZE);
+    init_orth_data(xs_exp+sp_id, grid_start+sp_id, envs, bounds,
                    ri, rj, ai, aj, L+1, warp_id);
 
     int nao = envs.nao;
@@ -247,29 +236,35 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     double *xs_cache = cache;
     double *ys_cache = xs_cache + WARPS * WARP_SIZE * (L+1);
 
+    int ngridx = ngrid_span;
+    int ngridy = ngrid_span;
+    int ngridz = ngrid_span;
+    if (ngrid_span > mesh_x) {
+        ngridx = mesh_x;
+    }
+    if (ngrid_span > mesh_y) {
+        ngridy = mesh_y;
+    }
+    if (ngrid_span > mesh_z) {
+        ngridz = mesh_z;
+    }
     //TODO: iz = thread_id % ngrid_span
     int iz = sp_id;
     for (int sp_start = 0; sp_start < npairs_this_block; sp_start += WARPS) {
         int sp_id = sp_start + warp_id;
         double *dm_local = dm_xyz + sp_id;
-        int nx0 = grid_slice[0*WARP_SIZE+sp_id];
-        int nx1 = grid_slice[1*WARP_SIZE+sp_id];
-        int ny0 = grid_slice[2*WARP_SIZE+sp_id];
-        int ny1 = grid_slice[3*WARP_SIZE+sp_id];
-        int nz0 = grid_slice[4*WARP_SIZE+sp_id];
-        int nz1 = grid_slice[5*WARP_SIZE+sp_id];
-        int ngridx = nx1 - nx0;
-        int ngridy = ny1 - ny0;
-        int ngridz = nz1 - nz0;
-        // TODO: warp_shfl to determine the max ngridx among the threads, for the
-        // upper bound of the loop
-        int max_ngridx = ngrid_span;
-        int max_ngridy = ngrid_span;
-        int max_ngridz = ngrid_span;
+        int nx0 = grid_start[0*WARP_SIZE+sp_id];
+        int ny0 = grid_start[1*WARP_SIZE+sp_id];
+        int nz0 = grid_start[2*WARP_SIZE+sp_id];
+        // Using translation vectors to shift the first grid to cell 0.
+        // This can simplify the address computation for the wrapped-around grid.
+        nx0 = (nx0 % mesh_x + mesh_x) % mesh_x;
+        ny0 = (ny0 % mesh_y + mesh_y) % mesh_y;
+        nz0 = (nz0 % mesh_z + mesh_z) % mesh_z;
 
         // Using ngrid_span for loop upper bound to ensure all warps process the
         // same number of iterations. ngridz might be different on different warps.
-        for (int iz0 = 0; iz0 < max_ngridz; iz0 += WARP_SIZE) {
+        for (int iz0 = 0; iz0 < ngridz; iz0 += WARP_SIZE) {
             int nz = MIN(ngridz - iz0, WARP_SIZE);
             if (iz < nz) {
                 double *_zs_exp = zs_exp + (iz0+iz) * WARP_SIZE + sp_id;
@@ -277,7 +272,7 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
                     r1[mz] = _zs_exp[mz*ngrid_span*WARP_SIZE];
                 }
             }
-            for (int iy0 = 0; iy0 < max_ngridy; iy0 += TILEy) {
+            for (int iy0 = 0; iy0 < ngridy; iy0 += TILEy) {
                 __syncthreads();
                 int ny = load_xs_chunk(ys_cache, ys_exp+sp_start, iy0, ngridy,
                                        L, TILEy, ngrid_span);
@@ -305,7 +300,7 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
                         }
                     }
                 }
-                for (int ix0 = 0; ix0 < max_ngridx; ix0 += WARP_SIZE) {
+                for (int ix0 = 0; ix0 < ngridx; ix0 += WARP_SIZE) {
                     __syncthreads();
                     int nx = load_xs_chunk(xs_cache, xs_exp+sp_start, ix0, ngridx,
                                            L, WARP_SIZE, ngrid_span);
@@ -373,7 +368,7 @@ void eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = (L+1) * ngrid_span;
     int nf3 = (L+1)*(L+2)*(L+3)/6;
-    pool += (xs_size*3 + nf3 + 6) * WARP_SIZE * b_id;
+    pool += (xs_size*3 + nf3 + 3) * WARP_SIZE * b_id;
 
     __shared__ uint32_t pair_idx0;
     if (thread_id == 0) {
@@ -438,8 +433,8 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     double *ys_exp = xs_exp + xs_size;
     double *zs_exp = ys_exp + xs_size;
     double *gx_dmyz = zs_exp + xs_size;
-    int *grid_slice = (int *)(pool + xs_size*3 + ngrid_span*(L+1)*(L+2)/2*WARP_SIZE) + sp_id;
-    init_orth_data(xs_exp, grid_slice, envs, bounds,
+    int *grid_start = (int *)(pool + xs_size*3 + ngrid_span*(L+1)*(L+2)/2*WARP_SIZE) + sp_id;
+    init_orth_data(xs_exp, grid_start, envs, bounds,
                    ri, rj, ai, aj, L+1, warp_id);
 
     double r2[(L+1)*(L+2)*(L+3)/6];
@@ -448,29 +443,35 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     double *ys_cache = cache + sp_id;
     double *zs_cache = ys_cache + TILE * (L+1) * WARP_SIZE;
 
-    int nx0 = grid_slice[0*WARP_SIZE];
-    int nx1 = grid_slice[1*WARP_SIZE];
-    int ny0 = grid_slice[2*WARP_SIZE];
-    int ny1 = grid_slice[3*WARP_SIZE];
-    int nz0 = grid_slice[4*WARP_SIZE];
-    int nz1 = grid_slice[5*WARP_SIZE];
-    int ngridx = nx1 - nx0;
-    int ngridy = ny1 - ny0;
-    int ngridz = nz1 - nz0;
-    // TODO: warp_shfl to determine the max ngridx among the threads, for the
-    // upper bound of the loop
-    int max_ngridx = ngrid_span;
-    int max_ngridy = ngrid_span;
-    int max_ngridz = ngrid_span;
+    int nx0 = grid_start[0*WARP_SIZE];
+    int ny0 = grid_start[1*WARP_SIZE];
+    int nz0 = grid_start[2*WARP_SIZE];
+    // Using translation vectors to shift the first grid to cell 0.
+    // This can simplify the address computation for the wrapped-around grid.
+    nx0 = (nx0 % mesh_x + mesh_x) % mesh_x;
+    ny0 = (ny0 % mesh_y + mesh_y) % mesh_y;
+    nz0 = (nz0 % mesh_z + mesh_z) % mesh_z;
+    int ngridx = ngrid_span;
+    int ngridy = ngrid_span;
+    int ngridz = ngrid_span;
+    if (ngrid_span > mesh_x) {
+        ngridx = mesh_x;
+    }
+    if (ngrid_span > mesh_y) {
+        ngridy = mesh_y;
+    }
+    if (ngrid_span > mesh_z) {
+        ngridz = mesh_z;
+    }
 
-    for (int n = warp_id; n < max_ngridx*(L+1)*(L+2)/2; n += WARPS) {
+    for (int n = warp_id; n < ngridx*(L+1)*(L+2)/2; n += WARPS) {
         gx_dmyz[n*WARP_SIZE] = 0.;
     }
 
-    for (int iz0 = 0; iz0 < max_ngridz; iz0 += TILE) {
+    for (int iz0 = 0; iz0 < ngridz; iz0 += TILE) {
         __syncthreads();
         int nz = load_xs(zs_cache, zs_exp, iz0, ngridz, L, TILE, ngrid_span, warp_id);
-        for (int iy0 = 0; iy0 < max_ngridy; iy0 += TILE) {
+        for (int iy0 = 0; iy0 < ngridy; iy0 += TILE) {
             __syncthreads();
             int ny = load_xs(ys_cache, ys_exp, iy0, ngridy, L, TILE, ngrid_span, warp_id);
             for (int ix = warp_id; ix < ngridx; ix += WARPS) {
@@ -609,8 +610,8 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
     double *ys_exp = xs_exp + xs_size;
     double *zs_exp = ys_exp + xs_size;
     double *gx_dmyz = zs_exp + xs_size;
-    int *grid_slice = (int *)(pool + xs_size*3 + ngrid_span*(L+1)*(L+2)/2*WARP_SIZE) + sp_id;
-    init_orth_data(xs_exp, grid_slice, envs, bounds,
+    int *grid_start = (int *)(pool + xs_size*3 + ngrid_span*(L+1)*(L+2)/2*WARP_SIZE) + sp_id;
+    init_orth_data(xs_exp, grid_start, envs, bounds,
                    ri, rj, ai, aj, L+1, warp_id);
 
     double r2[64];
@@ -619,29 +620,35 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
     double *ys_cache = cache + sp_id;
     double *zs_cache = ys_cache + TILE * (L+1) * WARP_SIZE;
 
-    int nx0 = grid_slice[0*WARP_SIZE];
-    int nx1 = grid_slice[1*WARP_SIZE];
-    int ny0 = grid_slice[2*WARP_SIZE];
-    int ny1 = grid_slice[3*WARP_SIZE];
-    int nz0 = grid_slice[4*WARP_SIZE];
-    int nz1 = grid_slice[5*WARP_SIZE];
-    int ngridx = nx1 - nx0;
-    int ngridy = ny1 - ny0;
-    int ngridz = nz1 - nz0;
-    // TODO: warp_shfl to determine the max ngridx among the threads, for the
-    // upper bound of the loop
-    int max_ngridx = ngrid_span;
-    int max_ngridy = ngrid_span;
-    int max_ngridz = ngrid_span;
+    int nx0 = grid_start[0*WARP_SIZE];
+    int ny0 = grid_start[1*WARP_SIZE];
+    int nz0 = grid_start[2*WARP_SIZE];
+    // Using translation vectors to shift the first grid to cell 0.
+    // This can simplify the address computation for the wrapped-around grid.
+    nx0 = (nx0 % mesh_x + mesh_x) % mesh_x;
+    ny0 = (ny0 % mesh_y + mesh_y) % mesh_y;
+    nz0 = (nz0 % mesh_z + mesh_z) % mesh_z;
+    int ngridx = ngrid_span;
+    int ngridy = ngrid_span;
+    int ngridz = ngrid_span;
+    if (ngrid_span > mesh_x) {
+        ngridx = mesh_x;
+    }
+    if (ngrid_span > mesh_y) {
+        ngridy = mesh_y;
+    }
+    if (ngrid_span > mesh_z) {
+        ngridz = mesh_z;
+    }
 
-    for (int n = warp_id; n < max_ngridx*(L+1)*(L+2)/2; n += WARPS) {
+    for (int n = warp_id; n < ngridx*(L+1)*(L+2)/2; n += WARPS) {
         gx_dmyz[n*WARP_SIZE] = 0.;
     }
 
-    for (int iz0 = 0; iz0 < max_ngridz; iz0 += TILE) {
+    for (int iz0 = 0; iz0 < ngridz; iz0 += TILE) {
         __syncthreads();
         int nz = load_xs(zs_cache, zs_exp, iz0, ngridz, L, TILE, ngrid_span, warp_id);
-        for (int iy0 = 0; iy0 < max_ngridy; iy0 += TILE) {
+        for (int iy0 = 0; iy0 < ngridy; iy0 += TILE) {
             __syncthreads();
             int ny = load_xs(ys_cache, ys_exp, iy0, ngridy, L, TILE, ngrid_span, warp_id);
             for (int ix = warp_id; ix < ngridx; ix += WARPS) {
@@ -819,8 +826,8 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
     double *ys_exp = xs_exp + xs_size;
     double *zs_exp = ys_exp + xs_size;
     double *gx_dmyz = zs_exp + xs_size;
-    int *grid_slice = (int *)(pool + xs_size*3 + ngrid_span*(L+1)*(L+2)/2*WARP_SIZE) + sp_id;
-    init_orth_data(xs_exp, grid_slice, envs, bounds,
+    int *grid_start = (int *)(pool + xs_size*3 + ngrid_span*(L+1)*(L+2)/2*WARP_SIZE) + sp_id;
+    init_orth_data(xs_exp, grid_start, envs, bounds,
                    ri, rj, ai, aj, L+1, warp_id);
 
     double r2[64];
@@ -829,29 +836,35 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
     double *ys_cache = cache + sp_id;
     double *zs_cache = ys_cache + TILE * (L+1) * WARP_SIZE;
 
-    int nx0 = grid_slice[0*WARP_SIZE];
-    int nx1 = grid_slice[1*WARP_SIZE];
-    int ny0 = grid_slice[2*WARP_SIZE];
-    int ny1 = grid_slice[3*WARP_SIZE];
-    int nz0 = grid_slice[4*WARP_SIZE];
-    int nz1 = grid_slice[5*WARP_SIZE];
-    int ngridx = nx1 - nx0;
-    int ngridy = ny1 - ny0;
-    int ngridz = nz1 - nz0;
-    // TODO: warp_shfl to determine the max ngridx among the threads, for the
-    // upper bound of the loop
-    int max_ngridx = ngrid_span;
-    int max_ngridy = ngrid_span;
-    int max_ngridz = ngrid_span;
+    int nx0 = grid_start[0*WARP_SIZE];
+    int ny0 = grid_start[1*WARP_SIZE];
+    int nz0 = grid_start[2*WARP_SIZE];
+    // Using translation vectors to shift the first grid to cell 0.
+    // This can simplify the address computation for the wrapped-around grid.
+    nx0 = (nx0 % mesh_x + mesh_x) % mesh_x;
+    ny0 = (ny0 % mesh_y + mesh_y) % mesh_y;
+    nz0 = (nz0 % mesh_z + mesh_z) % mesh_z;
+    int ngridx = ngrid_span;
+    int ngridy = ngrid_span;
+    int ngridz = ngrid_span;
+    if (ngrid_span > mesh_x) {
+        ngridx = mesh_x;
+    }
+    if (ngrid_span > mesh_y) {
+        ngridy = mesh_y;
+    }
+    if (ngrid_span > mesh_z) {
+        ngridz = mesh_z;
+    }
 
-    for (int n = warp_id; n < max_ngridx*(L+1)*(L+2)/2; n += WARPS) {
+    for (int n = warp_id; n < ngridx*(L+1)*(L+2)/2; n += WARPS) {
         gx_dmyz[n*WARP_SIZE] = 0.;
     }
 
-    for (int iz0 = 0; iz0 < max_ngridz; iz0 += TILE) {
+    for (int iz0 = 0; iz0 < ngridz; iz0 += TILE) {
         __syncthreads();
         int nz = load_xs(zs_cache, zs_exp, iz0, ngridz, L, TILE, ngrid_span, warp_id);
-        for (int iy0 = 0; iy0 < max_ngridy; iy0 += TILE) {
+        for (int iy0 = 0; iy0 < ngridy; iy0 += TILE) {
             __syncthreads();
             int ny = load_xs(ys_cache, ys_exp, iy0, ngridy, L, TILE, ngrid_span, warp_id);
             for (int ix = warp_id; ix < ngridx; ix += WARPS) {
@@ -1017,7 +1030,7 @@ void eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = (L+1) * ngrid_span;
     int nf2 = (L+1)*(L+2)/2;
-    pool += (xs_size*3 + nf2*ngrid_span + 6) * WARP_SIZE * b_id;
+    pool += (xs_size*3 + nf2*ngrid_span + 3) * WARP_SIZE * b_id;
 
     __shared__ uint32_t pair_idx0;
     if (thread_id == 0) {

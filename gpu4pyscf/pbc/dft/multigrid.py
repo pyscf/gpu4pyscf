@@ -131,7 +131,7 @@ def _eval_rhoG(mydf, dm_kpts, hermi=1, kpts=None, deriv=0):
     workers = gpu_specs['multiProcessorCount']
     nf3 = (lmax*2+1)*(lmax*2+2)*(lmax*2+3)//6
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
-    cache_size = ((lmax*2+1)*ngrid_span*3 + nf3 + 6) * WARP_SIZE
+    cache_size = ((lmax*2+1)*ngrid_span*3 + nf3 + 3) * WARP_SIZE
     pool = cp.empty((workers, cache_size))
 
     init_constant(cell)
@@ -206,7 +206,7 @@ def _get_j_pass2(mydf, vG, hermi=1, kpts=None, verbose=None):
     tasks = mydf.tasks
     nf2 = (lmax*2+1)*(lmax*2+2)//2
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
-    cache_size = ((lmax*2+1)*ngrid_span*3 + nf2*ngrid_span + 6) * WARP_SIZE
+    cache_size = ((lmax*2+1)*ngrid_span*3 + nf2*ngrid_span + 3) * WARP_SIZE
     pool = cp.empty((workers, cache_size))
 
     mesh_largest = tasks[0][0].mesh
@@ -506,32 +506,29 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env):
     fl = cp.where(surface > 1, surface, 1)
     fac_norm = norm[:cell0_nprims,None]*norm * (np.pi/aij)**1.5
     ovlp = fac_norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj * fl
+    ovlp[ovlp > 1.] = 1.
 
-    #FIXME: Ecut estimation based on pyscf.pbc.gto.cell.estimate_ke_cutoff
-    #scale = norm[:,None]*norm * cp.exp(-theta*dr**2) * fl
-    #scale * 32*np.pi**2*(2*np.pi)**1.5 * norm[:,None]*norm / aij**(lij+.5) / precision
+    # Ecut estimation based on pyscf.pbc.gto.cell.estimate_ke_cutoff
+    # Factors for Ecut estimation should be
+    #     fac = norm[:,None]*norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj * fl
+    # where
+    #     fac_dri = (li * .5/aij + dri**2 + Ecut/2/aij**2)**(li*.5)
+    #             ~= (li * .5/aij + dri**2 + log(1./precision)/aij)**(li*.5)
+    #     fac_drj = (lj * .5/aij + drj**2 + Ecut/2/aij**2)**(lj*.5)
+    #             ~= (lj * .5/aij + drj**2 + log(1./precision)/aij)**(lj*.5)
+    # Here, this fac is approximately derived from the overlap integral
     fac = ovlp / precision
-    Ecut = 20.
-    Ecut = cp.log(fac * (Ecut*2)**(lij-.5) + 1.) * 2*aij
-    Ecut = cp.log(fac * (Ecut*2)**(lij-.5) + 1.) * 2*aij
+    fac[fac<1.] = 1.
+    Ecut = cp.log(fac) * 2*aij
 
+    # Estimate radius:
     # rho[r-Rp] = fl*norm[:cell0_nprims,None]*norm * exp(-theta*dr**2)
     #             * r**lij * exp(-aij*r**2)
     fac = fl*norm[:cell0_nprims,None]*norm * cp.exp(-theta*dr**2)
-    log_fac = cp.log(fac / precision)
-    log_fac[ovlp < precision] = 0
-    radius = (log_fac / aij)**.5
-    radius = ((log_fac + lij * cp.log(radius+1.)) / aij)**.5
-    radius = ((log_fac + lij * cp.log(radius+1.)) / aij)**.5
-
-    # n_radius=32 is the optimal for best performance. However, when
-    # cell.precision is very tight, n_radius=32 might be insufficient to converge
-    # the value of GTO-pair and the integration of GTO pair simultaneously.
-    # n_radius is adjusted accordingly to ensure the convergence.
-    n_radius = (int(np.log(1./cell.precision) * 1.2) + 7) // 8 * 8
-    if n_radius < 32:
-        n_radius = 32
-    logger.debug1(cell, 'n_radius = %d', n_radius)
+    radius = (cp.log(fac/precision + 1.) / aij)**.5
+    radius = (cp.log(fac/precision * radius**lij + 1.) / aij)**.5
+    #radius = (cp.log(fac/precision * radius**lij + 1.) / aij)**.5
+    radius[ovlp < precision] = 0.
 
     lmax = cell._bas[:,ANG_OF].max()
     assert lmax <= LMAX
@@ -539,11 +536,12 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env):
 
     def sub_tasks_for_l(mesh, n_radius, mask):
         sub_tasks = []
+        dh = float((cell_len / mesh).min())
+        rcut_threshold = n_radius * dh
         for l in range(lmax*2+1):
             pair_idx = cp.where((mask & (l == lij)).ravel())[0]
             n_pairs = len(pair_idx)
             if n_pairs > 0:
-                # TODO: n_radius for each task?
                 task = Task(mesh=mesh, n_radius=n_radius, l=l,
                             shl_pair_idx=cp.asarray(pair_idx, dtype=np.int32))
                 sub_tasks.append(task)
@@ -551,39 +549,90 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env):
                               mesh, n_radius, rcut_threshold, l, n_pairs)
         return sub_tasks
 
-    remaining_mask = ovlp > precision
+    remaining_mask = ovlp >= precision
     Gbase = 2*np.pi / cell_len
-    ngrid_min = 128
+    ngrid_min = 256
     mesh = np.asarray(cell.mesh)
+    assert all(mesh < 1000)
     tasks = []
+    if 1:
+        # partition tasks based on Ecut.
+        # TODO: benchmark against the radius-based task Partitioning 
+        Ecut_threshold = ((mesh+1)//2 * Gbase).max()**2 / 4
+        # Ecut/2 ~ mesh*.7 ~ radius*1.5
+        for _ in range(20):
+            if np.prod(mesh) <= ngrid_min:
+                break
+            dh = float((cell_len / mesh).min())
+            mask = remaining_mask & (Ecut > Ecut_threshold)
+            r_active = radius[mask]
+            if r_active.size == 0:
+                continue
+
+            n_radius = int(np.ceil(r_active.max() / dh))
+            sub_tasks = sub_tasks_for_l(mesh, n_radius, mask)
+            tasks.append(sub_tasks)
+
+            remaining_mask &= Ecut <= Ecut_threshold
+            # Determine mesh for the next task
+            Gmax = (2*Ecut_threshold)**.5
+            mesh = np.floor(Gmax/Gbase).astype(int) * 2 + 1
+
+            Ecut_threshold /= 2
+
+        if cp.any(remaining_mask):
+            # TODO: Using a regular FFTDF task than the MG algorithm?
+            dh = (cell_len / mesh).min()
+            n_radius = int(np.ceil(radius[remaining_mask].max() / dh))
+            sub_tasks = sub_tasks_for_l(mesh, n_radius, remaining_mask)
+            tasks.append(sub_tasks)
+        return tasks
+
+    # The derivation of n_radius
+    # Ecut -> Gmax -> mesh -> resolution -> n_radius = radius/resolution
+    # can be simplified to
+    # n_radius ~= sqrt(2)/pi * Ecut**.5*radius
+    # This n_radius for compact GTOs is larger than that for diffused GTOs.
+    n_radius = int(2**.5/np.pi * (Ecut**.5*radius).max() * .8)
+    # 8 aligned for ngrid_span in CUDA kernel
+    n_radius = (n_radius + 3) // 4 * 4
+    logger.debug1(cell, 'n_radius = %d', n_radius)
+
     for _ in range(20):
         if np.prod(mesh) <= ngrid_min:
             break
-        dh = (cell_len / mesh).min()
-        rcut_threshold = dh * n_radius
-        mask = remaining_mask & (radius < rcut_threshold)
-        sub_tasks = sub_tasks_for_l(mesh, n_radius, mask)
-        if not sub_tasks:
-            # Due to errors in the Ecut and radius estimation, some GTO pairs
-            # might require larger n_radius under the specified mesh (Ecut).
-            # When this happen, the mesh generation (from Ecut_max) is not
-            # changed during iterations, leading to endless loop and empty tasks.
+        dh = float((cell_len / mesh).min())
+        # n_radius=16 can produce best performance. However, when cell.precision is
+        # very tight, it might be insufficient to converge the value of GTO-pair and
+        # the integration of GTO pair simultaneously.
+        # Take several trials to adjust n_radius
+        for inc in [0, 4, 8]:
+            # The derivation of n_radius
+            # Ecut -> Gmax -> mesh -> resolution -> n_radius = radius/resolution
+            # can be simplified to
+            # n_radius ~= sqrt(2)/pi * Ecut**.5*radius
+            # This n_radius for compact GTOs is larger than that for diffused GTOs.
+            # The mesh generation (from Ecut_max) may not changed during
+            # iterations, leading to endless loop and empty tasks.
             # This issue can happen for tight cell.precision.
             # Increase the n_radius a little bit to handle this issue.
-            sub_tasks = sub_tasks_for_l(mesh, n_radius+8, mask)
-        if not sub_tasks:
-            raise RuntimeError(f'Failed to create multigrid task for cell.precision={precision}')
+            rcut_threshold = dh * (n_radius + inc)
+            mask = remaining_mask & (radius < rcut_threshold)
+            sub_tasks = sub_tasks_for_l(mesh, n_radius+inc, mask)
+            if sub_tasks:
+                break
+        else:
+            raise RuntimeError(f'Failed to create multigrid task for cell.precision={cell.precision}')
 
         tasks.append(sub_tasks)
         remaining_mask &= radius >= rcut_threshold
-        if cp.any(remaining_mask):
-            Ecut_max = float(Ecut[remaining_mask].max())
+        Ecut_remaining = Ecut[remaining_mask]
+        if Ecut_remaining.size > 0:
+            Ecut_max = float(Ecut_remaining.max())
             Gmax = (2*Ecut_max)**.5
             mesh = np.floor(Gmax/Gbase).astype(int) * 2 + 1
         else:
             break
-    else:
-        logger.warn()
 
     if cp.any(remaining_mask):
         # TODO: Using a regular FFTDF task than the MG algorithm?
