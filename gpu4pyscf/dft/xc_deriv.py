@@ -194,11 +194,12 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
             vp = cupy.empty((2,nvar, 2,nvar, 2,nvar, ngrids)).transpose(1,3,5,0,2,4,6)
             vp[0,0,0] = _stack_frrr(frrr)
             i3 = np.arange(3)
-            #:qggg = _stack_fggg(fggg)
-            #:qggg = np.einsum('abcdefg,axg->xbcdefg', qggg, rho[:,1:4])
-            #:qggg = np.einsum('xbcdefg,cyg->xybdefg', qggg, rho[:,1:4])
-            #:qggg = np.einsum('xybdefg,ezg->xyzbdfg', qggg, rho[:,1:4])
-            qggg = _stack_fggg(fggg, rho=rho).transpose(1,3,5,0,2,4,6)
+            qggg = _stack_fggg(fggg)
+            qggg = cupy.einsum('abcdefg,axg->xbcdefg', qggg, rho[:,1:4])
+            qggg = cupy.einsum('xbcdefg,cyg->xybdefg', qggg, rho[:,1:4])
+            qggg = cupy.einsum('xybdefg,ezg->xyzbdfg', qggg, rho[:,1:4])
+            # qggg = _stack_fggg(fggg, rho=rho).transpose(1,3,5,0,2,4,6)
+            # qggg = cupy.asarray(qggg)
             qgg = _stack_fgg(fgg)
             qgg = cupy.einsum('abcdg,axg->xbcdg', qgg, rho[:,1:4])
             for i in range(3):
@@ -208,11 +209,12 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
             vp[1:4,1:4,1:4] = qggg
 
             frgg = frgg.reshape(2,6,ngrids)
-            #:qrgg = _stack_fgg(frgg, axis=1)
-            #:qrgg = np.einsum('rabcdg,axg->xrbcdg', qrgg, rho[:,1:4])
-            #:qrgg = np.einsum('xrbcdg,cyg->xyrbdg', qrgg, rho[:,1:4])
-            qrgg = _stack_fgg(frgg, axis=1, rho=rho).transpose(2,4,0,1,3,5)
+            qrgg = _stack_fgg(frgg, axis=1)
+            qrgg = cupy.einsum('rabcdg,axg->xrbcdg', qrgg, rho[:,1:4])
+            qrgg = cupy.einsum('xrbcdg,cyg->xyrbdg', qrgg, rho[:,1:4])
+            # qrgg = _stack_fgg(frgg.get(), axis=1, rho=rho.get()).transpose(2,4,0,1,3,5)
             qrg = _stack_fg(frg.reshape(2,3,ngrids), axis=1)
+            # qrgg = cupy.asarray(qrgg)
             qrgg[i3,i3] += qrg
             vp[0,1:4,1:4] = qrgg
             vp[1:4,0,1:4] = qrgg.transpose(0,1,3,2,4,5)
@@ -220,19 +222,20 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
 
             frrg = frrg.reshape(3,3,ngrids)
             qrrg = _stack_frr(frrg, axis=0)
-            #:qrrg = _stack_fg(qrrg, axis=2)
-            #:qrrg = np.einsum('rsabg,axg->rsxbg', qrrg, rho[:,1:4])
-            qrrg = _stack_fg(qrrg, axis=2, rho=rho).transpose(3,0,1,2,4)
+            qrrg = _stack_fg(qrrg, axis=2)
+            qrrg = cupy.einsum('rsabg,axg->rsxbg', qrrg, rho[:,1:4]).transpose(2,0,1,3,4)
+            # qrrg = _stack_fg(qrrg.get(), axis=2, rho=rho.get()).transpose(3,0,1,2,4)
+            # qrrg = cupy.asarray(qrrg)
             vp[0,0,1:4] = qrrg
             vp[0,1:4,0] = qrrg.transpose(0,1,3,2,4)
             vp[1:4,0,0] = qrrg.transpose(0,3,1,2,4)
 
         if order > 1:
             fggt = fggt.reshape(6,2,ngrids)
-            #:qggt = _stack_fgg(fggt, axis=0)
-            #:qggt = np.einsum('abcdrg,axg->xbcdrg', qggt, rho[:,1:4])
-            #:qggt = np.einsum('xbcdrg,cyg->xybdrg', qggt, rho[:,1:4])
-            qggt = _stack_fgg(fggt, axis=0, rho=rho).transpose(1,3,0,2,4,5)
+            qggt = _stack_fgg(fggt, axis=0)
+            qggt = cupy.einsum('abcdrg,axg->xbcdrg', qggt, rho[:,1:4])
+            qggt = cupy.einsum('xbcdrg,cyg->xybdrg', qggt, rho[:,1:4])
+            # qggt = _stack_fgg(fggt, axis=0, rho=rho).transpose(1,3,0,2,4,5)
             qgt = _stack_fg(fgt.reshape(3,2,ngrids), axis=0)
             i3 = np.arange(3)
             qggt[i3,i3] += qgt
@@ -241,17 +244,17 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
             vp[4,1:4,1:4] = qggt.transpose(0,1,4,2,3,5)
 
             qgtt = _stack_frr(fgtt.reshape(3,3,ngrids), axis=1)
-            #:qgtt = _stack_fg(qgtt, axis=0)
-            #:qgtt = np.einsum('abrsg,axg->xbrsg', qgtt, rho[:,1:4])
-            qgtt = _stack_fg(qgtt, axis=0, rho=rho).transpose(1,0,2,3,4)
+            qgtt = _stack_fg(qgtt, axis=0)
+            qgtt = cupy.einsum('abrsg,axg->xbrsg', qgtt, rho[:,1:4])
+            # qgtt = _stack_fg(qgtt, axis=0, rho=rho).transpose(1,0,2,3,4)
             vp[1:4,4,4] = qgtt
             vp[4,1:4,4] = qgtt.transpose(0,2,1,3,4)
             vp[4,4,1:4] = qgtt.transpose(0,2,3,1,4)
 
             frgt = frgt.reshape(2,3,2,ngrids)
-            #:qrgt = _stack_fg(frgt, axis=1)
-            #:qrgt = np.einsum('rabsg,axg->xrbsg', qrgt, rho[:,1:4])
-            qrgt = _stack_fg(frgt, axis=1, rho=rho).transpose(2,0,1,3,4)
+            qrgt = _stack_fg(frgt, axis=1)
+            qrgt = cupy.einsum('rabsg,axg->xrbsg', qrgt, rho[:,1:4])
+            # qrgt = _stack_fg(frgt, axis=1, rho=rho).transpose(2,0,1,3,4)
             vp[0,1:4,4] = qrgt
             vp[0,4,1:4] = qrgt.transpose(0,1,3,2,4)
             vp[1:4,0,4] = qrgt.transpose(0,2,1,3,4)

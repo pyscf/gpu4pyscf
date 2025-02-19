@@ -34,7 +34,7 @@ __all__ = [
 ]
 
 
-def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
+def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
     r'''A and B matrices for TDDFT response function.
 
     A[i,a,j,b] = \delta_{ab}\delta_{ij}(E_a - E_i) + (ai||jb)
@@ -43,7 +43,8 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
     Ref: Chem Phys Lett, 256, 454
     '''
     from pyscf import ao2mo
-    
+    if not singlet:
+        raise NotImplementedError('Only singlet is implemented')
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_coeff is None: mo_coeff = mf.mo_coeff
     if mo_occ is None: mo_occ = mf.mo_occ
@@ -237,9 +238,9 @@ class TDBase(lib.StreamObject):
     _finalize = tdhf_cpu.TDBase._finalize
 
     gen_vind = NotImplemented
-    def get_ab(self, mf=None):
+    def get_ab(self, mf=None, singlet=True):
         if mf is None: mf = self._scf
-        return get_ab(mf)
+        return get_ab(mf, singlet=singlet)
 
     def get_precond(self, hdiag):
         threshold_t=1.0e-4
