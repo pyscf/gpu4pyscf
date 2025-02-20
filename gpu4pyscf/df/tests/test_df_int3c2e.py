@@ -71,7 +71,6 @@ C    D
     out = cp.zeros((nao*nao, naux))
     eri3c = int3c2e_opt.int3c2e_bdiv_kernel()
     ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping()
-    aux_mapping = int3c2e_opt.create_aux_ao_mapping()
     out[ao_pair_mapping] = eri3c
     i, j = divmod(ao_pair_mapping, nao)
     out[j*nao+i] = eri3c
