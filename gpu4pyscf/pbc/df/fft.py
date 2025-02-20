@@ -24,12 +24,14 @@ from pyscf import gto
 from pyscf import lib
 from pyscf.pbc.df import fft as fft_cpu
 from pyscf.pbc.df import aft as aft_cpu
-from pyscf.pbc.df.aft import _check_kpts, ft_ao
 from pyscf.pbc.gto import pseudo
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger, utils
+from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.df import fft_jk
+from gpu4pyscf.pbc.df.aft import _check_kpts
+from gpu4pyscf.pbc.df.ft_ao import ft_ao
 
 def get_nuc(mydf, kpts=None):
     from gpu4pyscf.pbc.dft import numint
@@ -74,8 +76,7 @@ def get_pp(mydf, kpts=None):
     Gv = cell.get_Gv(mesh)
     SI = get_SI(cell, mesh=mesh)
     vpplocG = pseudo.get_vlocG(cell, Gv)
-    vpplocG = -np.einsum('ij,ij->j', SI, vpplocG)
-    vpplocG = cp.asarray(vpplocG)
+    vpplocG = -cp.einsum('ij,ij->j', SI, cp.asarray(vpplocG))
     # vpploc evaluated in real-space
     vpplocR = tools.ifft(vpplocG, mesh).real
 
@@ -107,7 +108,7 @@ def get_pp(mydf, kpts=None):
     def vppnl_by_k(kpt):
         Gk = Gv + kpt
         G_rad = lib.norm(Gk, axis=1)
-        aokG = ft_ao.ft_ao(cell, Gv, kpt=kpt) * (1/cell.vol)**.5
+        aokG = ft_ao(cell, Gv, kpt=kpt) * (1/cell.vol)**.5
         vppnl = 0
         for ia in range(cell.natm):
             symb = cell.atom_symbol(ia)
@@ -134,18 +135,18 @@ def get_pp(mydf, kpts=None):
                     #:tmp = np.einsum('ij,jmp->imp', hl, SPG_lm_aoG)
                     #:vppnl += np.einsum('imp,imq->pq', SPG_lm_aoG.conj(), tmp)
             if p1 > 0:
-                SPG_lmi = buf[:p1]
+                SPG_lmi = cp.asarray(buf[:p1])
                 SPG_lmi *= SI[ia].conj()
-                SPG_lm_aoGs = lib.zdot(SPG_lmi, aokG)
+                SPG_lm_aoGs = SPG_lmi.dot(aokG)
                 p1 = 0
                 for l, proj in enumerate(pp[5:]):
                     rl, nl, hl = proj
                     if nl > 0:
                         p0, p1 = p1, p1+nl*(l*2+1)
-                        hl = np.asarray(hl)
+                        hl = cp.asarray(hl)
                         SPG_lm_aoG = SPG_lm_aoGs[p0:p1].reshape(nl,l*2+1,-1)
-                        tmp = np.einsum('ij,jmp->imp', hl, SPG_lm_aoG)
-                        vppnl += np.einsum('imp,imq->pq', SPG_lm_aoG.conj(), tmp)
+                        tmp = contract('ij,jmp->imp', hl, SPG_lm_aoG)
+                        vppnl += contract('imp,imq->pq', SPG_lm_aoG.conj(), tmp)
         return vppnl * (1./cell.vol)
 
     for k, kpt in enumerate(kpts):
