@@ -33,7 +33,7 @@ from gpu4pyscf.lib.cupy_helper import (condense, sandwich_dot, transpose_sum,
                                        reduce_to_device, contract)
 
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.__config__ import _streams, _num_devices
+from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.lib import logger
 
 
@@ -174,7 +174,7 @@ def get_jk(mol, dm, mo_coeff, mo_occ, hermi=0, vhfopt=None,
     if vhfopt is None:
         # Small group size for load balance
         group_size = None
-        if _num_devices > 1:
+        if num_devices > 1:
             group_size = jk.GROUP_SIZE
         vhfopt = _VHFOpt(mol).build(group_size=group_size)
 
@@ -202,13 +202,13 @@ def get_jk(mol, dm, mo_coeff, mo_occ, hermi=0, vhfopt=None,
                     tasks.append((i,j,k,l))
     tasks = np.array(tasks)
     task_list = []
-    for device_id in range(_num_devices):
-        task_list.append(tasks[device_id::_num_devices])
+    for device_id in range(num_devices):
+        task_list.append(tasks[device_id::num_devices])
 
     cp.cuda.get_current_stream().synchronize()
     futures = []
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _jk_task,
                 mol, dms, mo_coeff, mo_occ, vhfopt, task_list[device_id], hermi=hermi,

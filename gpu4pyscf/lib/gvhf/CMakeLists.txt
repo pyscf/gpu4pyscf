@@ -23,6 +23,7 @@ add_library(gvhf SHARED
   nr_jk_driver_int3c2e_pass2.cu
   #nr_jk_driver_ip1.cu
   #get_veff_driver_ip1.cu
+  rys_roots_dat.cu
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)

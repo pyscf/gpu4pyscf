@@ -33,7 +33,7 @@ def setUpModule():
     mol_sph = pyscf.M(atom=atom, basis=bas0, max_memory=32000,
                       output='/dev/null', verbose=1)
 
-    mol_cart = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=1,
+    mol_cart = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=1, spin=2,
                        output='/dev/null', verbose=1)
 
 def tearDownModule():
@@ -65,31 +65,31 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_with_grids_response(self):
         print("-----testing unrestricted DFT gradient with grids response----")
-        _check_grad(mol_sph, grid_response=True)
+        _check_grad(mol_sph, grid_response=True, tol=1e-10)
 
     def test_grad_without_grids_response(self):
         print('-----testing unrestricted DFT gradient without grids response----')
-        _check_grad(mol_sph, grid_response=False)
+        _check_grad(mol_sph, grid_response=False, tol=1e-10)
 
     def test_grad_lda(self):
         print("-----LDA testing-------")
-        _check_grad(mol_sph, xc='LDA', disp=None)
+        _check_grad(mol_sph, xc='LDA', disp=None, tol=1e-10)
 
     def test_grad_gga(self):
         print('-----GGA testing-------')
-        _check_grad(mol_sph, xc='PBE', disp=None)
+        _check_grad(mol_sph, xc='PBE', disp=None, tol=1e-10)
 
     def test_grad_hybrid(self):
         print('------hybrid GGA testing--------')
-        _check_grad(mol_sph, xc='B3LYP', disp=None)
+        _check_grad(mol_sph, xc='B3LYP', disp=None, tol=1e-10)
 
     def test_grad_mgga(self):
         print('-------mGGA testing-------------')
-        _check_grad(mol_sph, xc='tpss', disp=None)
+        _check_grad(mol_sph, xc='tpss', disp=None, tol=1e-10)
 
     def test_grad_rsh(self):
         print('--------RSH testing-------------')
-        _check_grad(mol_sph, xc='wb97', disp=None)
+        _check_grad(mol_sph, xc='wb97', disp=None, tol=1e-10)
 
     def test_grad_nlc(self):
         print('--------nlc testing-------------')
@@ -97,7 +97,7 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_cart(self):
         print('------hybrid GGA Cart testing--------')
-        _check_grad(mol_cart, xc='B3LYP', disp=None)
+        _check_grad(mol_cart, xc='B3LYP', disp=None, tol=1e-10)
 
     def test_grad_d3bj(self):
         print('------hybrid GGA with D3(BJ) testing--------')

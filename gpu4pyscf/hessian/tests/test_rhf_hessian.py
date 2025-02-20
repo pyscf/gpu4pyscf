@@ -51,7 +51,7 @@ class KnownValues(unittest.TestCase):
 
     def test_partial_hess_elec(self):
         mf = pyscf.scf.RHF(mol)
-        mf.conv_tol = 1e-14
+        mf.conv_tol = 1e-12
         mf.kernel()
         hobj = mf.Hessian()
         e1_cpu, ej_cpu, ek_cpu = rhf_cpu._partial_hess_ejk(hobj)
@@ -62,8 +62,8 @@ class KnownValues(unittest.TestCase):
         hobj = mf.Hessian()
         e1_gpu, e2_gpu = rhf_gpu._partial_hess_ejk(hobj)
 
-        assert abs(e1_cpu - e1_gpu.get()).max() < 1e-5
-        assert abs(e2_cpu - e2_gpu.get()).max() < 1e-5
+        assert abs(e1_cpu - e1_gpu.get()).max() < 1e-7
+        assert abs(e2_cpu - e2_gpu.get()).max() < 1e-7
 
     def test_ejk_ip2(self):
         mol = gto.M(
@@ -76,12 +76,13 @@ class KnownValues(unittest.TestCase):
             basis='6-31g**', unit='B')
         np.random.seed(9)
         nao = mol.nao
-        mo_coeff = np.random.rand(nao, nao)
+        mo_coeff = np.random.rand(nao, nao) - .5
         dm = mo_coeff.dot(mo_coeff.T) * 2
         mo_occ = np.ones(nao) * 2
         mo_energy = np.random.rand(nao)
 
         ejk = rhf_gpu._partial_ejk_ip2(mol, dm)
+        assert abs(lib.fp(ejk.get()) - 1116.6336092900506) < 1e-8
         mf = mol.RHF()
         mf.mo_coeff = mo_coeff
         mf.mo_occ = mo_occ
@@ -89,7 +90,7 @@ class KnownValues(unittest.TestCase):
         h = rhf_cpu.Hessian(mf)
         e1, refj, refk = rhf_cpu._partial_hess_ejk(h, mo_energy, mo_coeff, mo_occ)
         e2_ref = refj - refk
-        assert abs(ejk.get() - e2_ref).max() < 1e-6
+        assert abs(ejk.get() - e2_ref).max() < 1e-8
 
     def test_get_jk(self):
         mol = gto.M(

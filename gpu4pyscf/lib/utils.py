@@ -105,6 +105,7 @@ def device(obj):
 def format_sys_info():
     '''Format a list of system information for printing.'''
     from cupyx._runtime import get_runtime_info
+    from gpu4pyscf.__config__ import num_devices, mem_fraction, props as device_props
 
     pyscf_info = lib.repo_info(pyscf.__file__)
     gpu4pyscf_info = lib.repo_info(os.path.join(__file__, '..', '..'))
@@ -112,7 +113,6 @@ def format_sys_info():
     cuda_version = f"{cuda_version // 1000}.{(cuda_version % 1000) // 10}"
 
     runtime_info = get_runtime_info()
-    device_props = cupy.cuda.runtime.getDeviceProperties(0)
     result = [
         f'System: {platform.uname()}  Threads {lib.num_threads()}',
         f'Python {sys.version}',
@@ -134,6 +134,8 @@ def format_sys_info():
         'Device info',
         f'    Device name {device_props["name"]}',
         f'    Device global memory {device_props["totalGlobalMem"] / 1024**3:.2f} GB',
+        f'    CuPy memory fraction {mem_fraction}',
+        f'    Num. Devices {num_devices}',
         f'GPU4PySCF {gpu4pyscf.__version__}',
         f'GPU4PySCF path  {gpu4pyscf_info["path"]}'
     ]
