@@ -58,6 +58,7 @@ def setUpModule():
         ecp="crenbl",    # Assign the corresponding ECP
         spin=1,           # Copper (Cu) has an unpaired electron
         charge=0
+        output = '/dev/null'
     )
 
     mol2 = gto.M(
@@ -65,6 +66,7 @@ def setUpModule():
             Na 0.5 0.5 0.
             H  0.  1.  1.
             ''',
+        output = '/dev/null'
         basis={'Na': cu1_basis, 'H': cu1_basis},
         ecp = {'Na': gto.basis.parse_ecp('''
 Na nelec 10
@@ -85,9 +87,11 @@ Na G
 2       4.808857             -21.607597
                                          ''')})
 def tearDownModule():
-    global mol
+    global mol, mol1, mol2
     mol.stdout.close()
-    del mol
+    mol1.stdout.close()
+    mol2.stdout.close()
+    del mol, mol1, mol2
 
 class KnownValues(unittest.TestCase):
     def test_ecp(self):
