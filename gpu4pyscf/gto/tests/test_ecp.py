@@ -57,7 +57,7 @@ def setUpModule():
         basis="sto3g",  # A basis set that includes an ECP for Cu
         ecp="crenbl",    # Assign the corresponding ECP
         spin=1,           # Copper (Cu) has an unpaired electron
-        charge=0
+        charge=0,
         output = '/dev/null'
     )
 
@@ -66,7 +66,7 @@ def setUpModule():
             Na 0.5 0.5 0.
             H  0.  1.  1.
             ''',
-        output = '/dev/null'
+        output = '/dev/null',
         basis={'Na': cu1_basis, 'H': cu1_basis},
         ecp = {'Na': gto.basis.parse_ecp('''
 Na nelec 10
