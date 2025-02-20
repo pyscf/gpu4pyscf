@@ -40,10 +40,6 @@ def setUpModule():
      H    G
             6.491000E-01           1.0000000   
                                 ''')
-    h_basis = gto.basis.parse('''
-     H    S
-           1.8000000              1.0000000
-                                   ''')
     
     mol = gto.M(
         atom='''

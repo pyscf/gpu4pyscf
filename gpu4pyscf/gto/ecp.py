@@ -110,7 +110,7 @@ def get_ecp(mol):
                     atm.data.ptr, bas.data.ptr, env.data.ptr,
                     li, lj, lk)
                 if err != 0:
-                    raise RuntimeError(f'ECP CUDA kernel')
+                    raise RuntimeError('ECP CUDA kernel')
 
     coeff = cp.asarray(coeff)
     return coeff.T @ mat1 @ coeff
