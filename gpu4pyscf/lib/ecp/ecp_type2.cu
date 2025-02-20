@@ -14,21 +14,38 @@
  * limitations under the License.
  */
 
-#include <stdio.h>
-#include "ecp.h"
+template <int LIC> __device__
+void type2_facs_rad(double* facs, const int np, double rca,
+                    const double *ci, const double *ai){
+    double r = r128[threadIdx.x] - rca;
+    double r2 = r*r;
+    for (int j = 0; j <= LIC; j++){
+        facs[j] = 0.0;
+    }
 
-#include "gauss_chebyshev.cu"
-#include "bessel.cu"
-#include "cart2sph.cu"
+    for (int ip = 0; ip < np; ip++){
+        double ka = 2.0 * ai[ip] * rca;
+        double ar2 = ai[ip] * r2;
+        double buf[LIC+1];
+        if (ar2 > EXPCUTOFF + 6.0){
+            for (int j = 0; j <= LIC; j++){
+                buf[j] = 0.0;
+            }
+        } else {
+            double t1 = exp(-ar2);
+            _ine<LIC>(buf, ka*r128[threadIdx.x]);
+            for (int j = 0; j <= LIC; j++){
+                buf[j] *= t1;
+            }
+        }
+        for (int j = 0; j <= LIC; j++){
+            facs[j] += ci[ip] * buf[j];
+        }
+    }
+}
 
-
-
-
-
-
-/*
 template <int LI, int LC> __device__
-void type2_facs_ang(double* facs, double *r){
+void type2_facs_omega(double* omega, double *r){
     double unitr[3];
     if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
         unitr[0] = 0;
@@ -40,7 +57,6 @@ void type2_facs_ang(double* facs, double *r){
         unitr[1] = r[1] * norm_r;
         unitr[2] = r[2] * norm_r;
     }
-    constexpr int LI1 = LI+1;
     constexpr int LIC1 = LI+LC+1;
     constexpr int LCC1 = LC*2+1;
 
@@ -52,10 +68,17 @@ void type2_facs_ang(double* facs, double *r){
     // store (i+j+k+lc)%2 = 0 only
     // up to 12600 Bytes
     constexpr int BLK = (LIC1+1)/2 * LCC1;
-    double omega[LI1*(LI1+1)*(LI1+2)/6 * BLK];
-    for (int i = 0; i <= LI; i++){
-    for (int j = 0; j <= LI-i; j++){
-    for (int k = 0; k <= LI-i-j; k++){
+    //for (int i = threadIdx.x; i <= LI; i+=blockDim.x){
+    //for (int j = 0; j <= LI-i; j++){
+    //for (int k = 0; k <= LI-i-j; k++){
+    constexpr int LI1 = LI + 1;
+    for (int n = threadIdx.x; n < LI1*LI1*LI1; n+=blockDim.x){
+        const int i = n/LI1/LI1;
+        const int j = n/LI1%LI1;
+        const int k = n%LI1;
+        if (i+j+k > LI){
+            continue;
+        }
         const int need_even = (LC+i+j+k)%2;
         const int ioff = (LI-i)*(LI-i+1)*(LI-i+2)/6;
         const int joff = (LI-i-j)*(LI-i-j+1)/2;
@@ -64,14 +87,14 @@ void type2_facs_ang(double* facs, double *r){
             double *pnuc = omega_nuc + _offset_cart[lmb];
             double buf[(LC+1)*(LC+2)/2];
             for (int m = 0; m < (LC+1)*(LC+2)/2; m++){
-                int pv = _cart_pow_y[m];
-                int pw = _cart_pow_z[m];
-                int pu = LC - pv - pw;
+                const int pv = _cart_pow_y[m];
+                const int pw = _cart_pow_z[m];
+                const int pu = LC - pv - pw;
                 buf[m] = 0.0;
                 for (int n = 0; n < (lmb+1)*(lmb+2)/2; n++){
-                    int ps = _cart_pow_y[n];
-                    int pt = _cart_pow_z[n];
-                    int pr = lmb - ps - pt;
+                    const int ps = _cart_pow_y[n];
+                    const int pt = _cart_pow_z[n];
+                    const int pr = lmb - ps - pt;
                     buf[m] += pnuc[n] * int_unit_xyz(i+pu+pr, j+pv+ps, k+pw+pt);
                 }
                 buf[m] *= 4.0 * M_PI;
@@ -79,22 +102,31 @@ void type2_facs_ang(double* facs, double *r){
             cart2sph<LC>(pomega, buf);
             pomega += LCC1;
         }
-    }}}
+    }
+    __syncthreads();
+}
 
+template <int LI, int LC> __device__
+void type2_ang(double *facs, double *fx, double *omega, int m){
+    constexpr int LI1 = LI+1;
     constexpr int nfi = LI1*(LI1+1)/2;
-    double fx[nfi*3];
-    double* fy = fx + nfi;
-    double* fz = fy + nfi;
-    cache_fac<LI>(fx, r);
+    constexpr int LCC1 = (2*LC+1);
+    constexpr int LIC1 = LI+LC+1;
+    constexpr int BLK = (LIC1+1)/2 * LCC1;
 
-    for (int i = 0; i < LI1*nfi*LIC1*LCC1; i++){
+    double *fy = fx + nfi;
+    double *fz = fy + nfi;
+
+    for (int i = threadIdx.x; i < LI1*nfi*LIC1; i+=blockDim.x){
         facs[i] = 0.0;
     }
+    __syncthreads();
+
     // i,j,k,ijkmn->(i+j+k)pmn
-    for (int p = 0; p < (LI+1)*(LI+2)/2; p++){
-        int iy = _cart_pow_y[p];
-        int iz = _cart_pow_z[p];
-        int ix = LI - iy - iz;
+    for (int p = threadIdx.x; p < (LI+1)*(LI+2)/2; p+=blockDim.x){
+        const int iy = _cart_pow_y[p];
+        const int iz = _cart_pow_z[p];
+        const int ix = LI - iy - iz;
         for (int i = 0; i <= ix; i++){
         for (int j = 0; j <= iy; j++){
         for (int k = 0; k <= iz; k++){
@@ -107,20 +139,14 @@ void type2_facs_ang(double* facs, double *r){
             const int ioff = (LI-i)*(LI-i+1)*(LI-i+2)/6;
             const int joff = (LI-i-j)*(LI-i-j+1)/2;
             double *pomega = omega + (ioff+joff+k)*BLK;
-            double *pfacs = facs + ((i+j+k)*nfi+p)*LCC1*LIC1;
-            for (int m = 0; m < 2*LC+1; m++){
+            double *pfacs = facs + ((i+j+k)*nfi+p)*LIC1;
             for (int n = need_even; n < LIC1; n+=2){
-                pfacs[m*LIC1+n] += fac * pomega[n/2*LCC1+m];
-            }}
+                atomicAdd(pfacs+n, fac * pomega[n/2*LCC1+m]);
+            }
         }}}
     }
+    __syncthreads();
 }
-*/
-
-
-
-
-
 
 template <int LI, int LJ, int LC> __global__
 void type2_cart(double *gctr, 
@@ -249,9 +275,3 @@ void type2_cart(double *gctr,
     }
     return;
 }
-
-/*
-extern "C" {
-
-}
-*/

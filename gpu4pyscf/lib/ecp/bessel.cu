@@ -69,8 +69,8 @@ static double int_unit_xyz(int i, int j, int k){
  *
  * JCC, 27, 1009
  */
-__device__
-static void _ine(double *out, int order, double z)
+template <int order> __device__
+static void _ine(double *out, double z)
 {
     if (z < 1e-7) {
         // (1-z) * z^l / (2l+1)!!
@@ -115,13 +115,13 @@ static void _ine(double *out, int order, double z)
 
 }
 
-__global__
-void _ine_kernel(double *out, int order, double *zs, int n)
+template <int order> __global__
+void _ine_kernel(double *out, double *zs, int n)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n){
         return;
     }
     int offset = idx * (order + 1);
-    _ine(out+offset, order, zs[idx]);
+    _ine<order>(out+offset, zs[idx]);
 }

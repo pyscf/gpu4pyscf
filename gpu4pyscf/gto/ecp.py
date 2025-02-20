@@ -58,7 +58,7 @@ def make_tasks(l_ctr_offsets, lecp_ctr_offsets):
 
     # TODO: Add screening and symmetry here
     for i in range(n_groups):
-        for j in range(n_groups):
+        for j in range(i,n_groups):
             for k in range(n_ecp_groups):
                 ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
                 jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
@@ -67,13 +67,12 @@ def make_tasks(l_ctr_offsets, lecp_ctr_offsets):
                     np.arange(ish0,ish1),
                     np.arange(jsh0,jsh1),
                     np.arange(ksh0,ksh1))
-                tasks[i,j,k] = np.stack(grid, axis=-1).reshape(-1, 3)
+                grid = np.stack(grid, axis=-1).reshape(-1, 3)
+                idx = grid[:,0] <= grid[:,1]
+                tasks[i,j,k] = grid[idx]
     return tasks
     
 def get_ecp(mol):
-    #_mol = basis_seg_contraction(mol, allow_replica=True)[0]
-    #_sorted_mol, idx, uniq_l_ctr, l_ctr_counts = sort_mol(_mol)
-    
     _sorted_mol, coeff, uniq_l_ctr, l_ctr_counts = group_basis(mol)
     _sorted_mol, uniq_lecp, lecp_counts, ecp_loc= sort_ecp(_sorted_mol)
 
@@ -95,7 +94,6 @@ def get_ecp(mol):
     ao_loc = cp.asarray(ao_loc, dtype=np.int32)
 
     mat1 = cp.zeros([nao, nao])
-    count = 0
     for i in range(n_groups):
         for j in range(i,n_groups):
             for k in range(n_ecp_groups):
@@ -103,6 +101,7 @@ def get_ecp(mol):
                 ntasks = len(tasks)
                 li = uniq_l_ctr[i,0]
                 lj = uniq_l_ctr[j,0]
+
                 lk = uniq_lecp[k]
                 err = libecp.ECP_cart(
                     mat1.data.ptr, ao_loc.data.ptr, nao, 
@@ -110,7 +109,5 @@ def get_ecp(mol):
                     ecpbas.data.ptr, ecploc.data.ptr,
                     atm.data.ptr, bas.data.ptr, env.data.ptr,
                     li, lj, lk)
-    #mat0 = cp.zeros_like(mat1)
-    #mat0[np.ix_(idx,idx)] = mat1
     coeff = cp.asarray(coeff)
     return coeff.T @ mat1 @ coeff

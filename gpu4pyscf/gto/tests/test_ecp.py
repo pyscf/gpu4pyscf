@@ -22,8 +22,8 @@ from gpu4pyscf.gto.ecp import get_ecp
 def setUpModule():
     global mol, mol1, mol2, cu1_basis
     cu1_basis = gto.basis.parse('''
-     H    S
-           1.8000000              1.0000000
+     H    D
+          1.8000000              1.0000000
      H    S
            2.8000000              0.0210870             -0.0045400              0.0000000
            1.3190000              0.3461290             -0.1703520              0.0000000
@@ -37,8 +37,14 @@ def setUpModule():
      H    F
            2.1330000              0.1868660              0.0000000
            0.3827000              0.2010080              1.0000000
+     H    G
+            6.491000E-01           1.0000000   
+                                ''')
+    h_basis = gto.basis.parse('''
+     H    S
+           1.8000000              1.0000000
                                    ''')
-
+    
     mol = gto.M(
         atom='''
     Cu1 0. 0. 0.
@@ -63,21 +69,25 @@ def setUpModule():
             Na 0.5 0.5 0.
             H  0.  1.  1.
             ''',
-        basis='sto3g',
+        basis={'Na': cu1_basis, 'H': cu1_basis},
         ecp = {'Na': gto.basis.parse_ecp('''
 Na nelec 10
 Na ul
-0      2.0000000              6.0000000
-1    175.5502590            -10.0000000
-2      2.3365719             -6.0637782
-2      0.7799867             -0.7299393
+2       1.0                    0.0
 Na S
-0    243.3605846              3.0000000
-1     41.5764759             36.2847626
-2     13.2649167             72.9304880
-2      0.9764209              6.0123861
+2      13.652203             732.2692
+2       6.826101              26.484721
+Na P
+2      10.279868             299.489474
+2       5.139934              26.466234
+Na D
+2       7.349859             124.457595
+2       3.674929              14.035995
+Na F
+2       3.034072              21.531031
+Na G
+2       4.808857             -21.607597
                                          ''')})
-
 def tearDownModule():
     global mol
     mol.stdout.close()
@@ -85,21 +95,20 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     def test_ecp(self):
+        mol2.cart = True
         h1 = mol2.intor('ECPscalar_cart')
         print(h1.shape)
 
         #h1 = mol2.intor('ECPscalar_sph')
-        print(h1[:3,:3])
-        print(h1.shape)
         
         h1_gpu = get_ecp(mol2)
         #h1 = coeff @ h1 @ coeff.T
-
         print(h1[:4,:4])
-        print(h1_gpu[:4,:4])
+        print(h1[:5,:5] - h1_gpu[:5,:5].get())
         print('-----')
         print(h1[-4:,-4:])
-        print(h1_gpu[-4:,-4:])
+        print(h1_gpu[-4:,-4:].get())
+        #print(h1 - h1_gpu.get())
         print(np.linalg.norm(h1 - h1_gpu.get()))
         assert np.linalg.norm(h1 - h1_gpu.get()) < 1e-8
 
