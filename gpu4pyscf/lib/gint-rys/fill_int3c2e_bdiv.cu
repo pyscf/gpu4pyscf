@@ -22,10 +22,11 @@
 #include "gvhf-rys/vhf.cuh"
 #include "pbc/rys_roots.cu"
 #include "int3c2e.cuh"
-#include "unrolled_int3c2e_bdiv.cu"
 
 // TODO: benchmark performance for 32, 38, 40, 45, 54
 #define GOUT_WIDTH      45
+
+__device__ int int3c2e_bdiv_unrolled(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds);
 
 __global__
 void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)

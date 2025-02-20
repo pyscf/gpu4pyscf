@@ -16,11 +16,11 @@
 import functools
 import numpy as np
 import cupy as cp
-from cupyx.scipy.linalg import block_diag
 from pyscf import gto
 from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
                        PTR_EXP)
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import block_diag
 
 PTR_BAS_COORD = 7
 
@@ -108,10 +108,10 @@ def basis_seg_contraction(mol, allow_replica=1):
     pmol.cart = True
     pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
     pmol._env = _env
-    contr_coeff = block_diag(*contr_coeff)
+    contr_coeff = block_diag(contr_coeff)
 
     if not mol.cart:
-        c2s = block_diag(*[cart2sph_by_l(l) for l in pmol._bas[:,ANG_OF]])
+        c2s = block_diag([cart2sph_by_l(l) for l in pmol._bas[:,ANG_OF]])
         contr_coeff = contr_coeff.dot(c2s)
     return pmol, contr_coeff
 

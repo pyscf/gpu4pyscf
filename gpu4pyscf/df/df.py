@@ -93,6 +93,10 @@ class DF(lib.StreamObject):
             intopt.cderi_row = rows
             intopt.cderi_col = cols
 
+            # intopt.cderi_diag stores the indices for cderi_row that
+            # corresponds to the diagonal blocks. Note this index array can
+            # contain some of the off-diagonal elements which happen to be the
+            # off-diagonal elements while within the diagonal blocks.
             uniq_l = intopt.uniq_l_ctr[:,0]
             if mol.cart:
                 nf = (uniq_l + 1) * (uniq_l + 2) // 2
@@ -108,14 +112,12 @@ class DF(lib.StreamObject):
             for (i, j), bas_ij_idx in zip(ij_tasks, intopt.shl_pair_idx):
                 nfi = nf[i]
                 nfj = nf[j]
-                if i == j:
+                if i == j: # the diagonal blocks
                     ish, jsh = divmod(bas_ij_idx, nbas)
                     idx = np.where(ish == jsh)[0]
                     addr = offset + idx[:,None] * (nfi*nfi) + np.arange(nfi*nfi)
                     cderi_diag.append(addr.ravel())
                 offset += bas_ij_idx.size * nfi * nfj
-            # cderi_diag here is the indices for cderi_row that corresponds to
-            # the diagonal blocks
             intopt.cderi_diag = cupy.asarray(np.hstack(cderi_diag))
             log.timer_debug1('cholesky_eri', *t0)
             return self

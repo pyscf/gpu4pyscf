@@ -1,5 +1,13 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <cuda_runtime.h>
 
-__device__ static
+#include "gvhf-rys/vhf.cuh"
+#include "pbc/rys_roots.cu"
+#include "int3c2e.cuh"
+
+__device__
 void int3c2e_bdiv_000(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -121,7 +129,7 @@ void int3c2e_bdiv_000(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 void int3c2e_bdiv_100(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -258,7 +266,7 @@ void int3c2e_bdiv_100(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 void int3c2e_bdiv_110(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -423,7 +431,7 @@ void int3c2e_bdiv_110(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 void int3c2e_bdiv_200(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -573,7 +581,7 @@ void int3c2e_bdiv_200(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 void int3c2e_bdiv_210(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -771,7 +779,7 @@ void int3c2e_bdiv_210(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 void int3c2e_bdiv_220(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -1038,7 +1046,7 @@ void int3c2e_bdiv_220(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 void int3c2e_bdiv_001(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -1175,7 +1183,7 @@ void int3c2e_bdiv_001(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 void int3c2e_bdiv_101(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -1341,7 +1349,7 @@ void int3c2e_bdiv_101(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 void int3c2e_bdiv_111(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -1580,7 +1588,7 @@ void int3c2e_bdiv_111(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 void int3c2e_bdiv_201(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -1780,7 +1788,7 @@ void int3c2e_bdiv_201(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 void int3c2e_bdiv_211(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -2609,7 +2617,7 @@ void int3c2e_bdiv_221(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 void int3c2e_bdiv_002(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -2759,7 +2767,7 @@ void int3c2e_bdiv_002(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 void int3c2e_bdiv_102(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -2959,7 +2967,7 @@ void int3c2e_bdiv_102(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 void int3c2e_bdiv_112(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -3295,7 +3303,7 @@ void int3c2e_bdiv_112(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 void int3c2e_bdiv_202(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -4045,7 +4053,7 @@ void int3c2e_bdiv_212(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
+__device__
 int int3c2e_bdiv_unrolled(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -4062,9 +4070,9 @@ int int3c2e_bdiv_unrolled(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bound
     int lk = bas[ksh0*BAS_SLOTS+ANG_OF];
     int kij_type = lk*25 + li*5 + lj;
     switch (kij_type) {
-    case 0: int3c2e_bdiv_000(out, envs, bounds); break;
-    case 5: int3c2e_bdiv_100(out, envs, bounds); break;
-    case 6: int3c2e_bdiv_110(out, envs, bounds); break;
+    case 0:  int3c2e_bdiv_000(out, envs, bounds); break;
+    case 5:  int3c2e_bdiv_100(out, envs, bounds); break;
+    case 6:  int3c2e_bdiv_110(out, envs, bounds); break;
     case 10: int3c2e_bdiv_200(out, envs, bounds); break;
     case 11: int3c2e_bdiv_210(out, envs, bounds); break;
     case 12: int3c2e_bdiv_220(out, envs, bounds); break;
