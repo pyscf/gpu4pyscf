@@ -191,7 +191,8 @@ void type2_cart(double *gctr,
         for (int i = 0; i <= LI+LC; i++){
         for (int j = 0; j <= LJ+LC; j++){
             // TODO: block reduction
-            atomicAdd(prad+i*LJC1+j, radi[i] * radj[j] * ur);
+            //atomicAdd(prad+i*LJC1+j, radi[i] * radj[j] * ur);
+            block_reduce(radi[i]*radj[j]*ur, prad+i*LJC1+j)
         }}
         ur *= r128[ir];
     }
@@ -249,9 +250,3 @@ void type2_cart(double *gctr,
     }
     return;
 }
-
-/*
-extern "C" {
-
-}
-*/

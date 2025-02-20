@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#define THREADS        128
-
 __constant__
 static double _factorial[] = {
     1.0, 1.0, 2.0, 6.0, 24.,

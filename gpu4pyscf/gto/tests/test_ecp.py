@@ -97,19 +97,7 @@ class KnownValues(unittest.TestCase):
     def test_ecp(self):
         mol2.cart = True
         h1 = mol2.intor('ECPscalar_cart')
-        print(h1.shape)
-
-        #h1 = mol2.intor('ECPscalar_sph')
-        
         h1_gpu = get_ecp(mol2)
-        #h1 = coeff @ h1 @ coeff.T
-        print(h1[:4,:4])
-        print(h1[:5,:5] - h1_gpu[:5,:5].get())
-        print('-----')
-        print(h1[-4:,-4:])
-        print(h1_gpu[-4:,-4:].get())
-        #print(h1 - h1_gpu.get())
-        print(np.linalg.norm(h1 - h1_gpu.get()))
         assert np.linalg.norm(h1 - h1_gpu.get()) < 1e-8
 
 if __name__ == "__main__":

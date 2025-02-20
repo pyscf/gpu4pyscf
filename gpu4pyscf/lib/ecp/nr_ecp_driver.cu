@@ -15,7 +15,7 @@
  */
 
 #include <stdio.h>
-#include <ecp.h>
+#include "ecp.h"
 #include "bessel.cu"
 #include "cart2sph.cu"
 #include "gauss_chebyshev.cu"

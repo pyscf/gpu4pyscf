@@ -86,19 +86,20 @@ void type2_facs_omega(double* omega, double *r){
         for (int lmb = need_even; lmb <= LI+LC; lmb+=2){
             double *pnuc = omega_nuc + _offset_cart[lmb];
             double buf[(LC+1)*(LC+2)/2];
-            for (int m = 0; m < (LC+1)*(LC+2)/2; m++){
-                const int pv = _cart_pow_y[m];
-                const int pw = _cart_pow_z[m];
-                const int pu = LC - pv - pw;
-                buf[m] = 0.0;
-                for (int n = 0; n < (lmb+1)*(lmb+2)/2; n++){
-                    const int ps = _cart_pow_y[n];
-                    const int pt = _cart_pow_z[n];
-                    const int pr = lmb - ps - pt;
-                    buf[m] += pnuc[n] * int_unit_xyz(i+pu+pr, j+pv+ps, k+pw+pt);
+            for (int m = 0; m < (LC+1)*(LC+2)/2; m++) buf[m] = 0.0;
+            for (int n = 0; n < (lmb+1)*(lmb+2)/2; n++){
+                const int ps = _cart_pow_y[n];
+                const int pt = _cart_pow_z[n];
+                const int pr = lmb - ps - pt;
+                double nuc = pnuc[n];
+                for (int m = 0; m < (LC+1)*(LC+2)/2; m++){
+                    const int pv = _cart_pow_y[m];
+                    const int pw = _cart_pow_z[m];
+                    const int pu = LC - pv - pw;
+                    buf[m] += nuc * int_unit_xyz(i+pu+pr, j+pv+ps, k+pw+pt);
                 }
-                buf[m] *= 4.0 * M_PI;
             }
+            for (int m = 0; m < (LC+1)*(LC+2)/2; m++) buf[m] *= 4.0 * M_PI;
             cart2sph<LC>(pomega, buf);
             pomega += LCC1;
         }
@@ -217,7 +218,8 @@ void type2_cart(double *gctr,
         for (int i = 0; i <= LI+LC; i++){
         for (int j = 0; j <= LJ+LC; j++){
             // TODO: block reduction
-            atomicAdd(prad+i*LJC1+j, radi[i] * radj[j] * ur);
+            block_reduce(radi[i]*radj[j]*ur, prad+i*LJC1+j);
+            //atomicAdd(prad+i*LJC1+j, radi[i] * radj[j] * ur);
         }}
         ur *= r128[ir];
     }

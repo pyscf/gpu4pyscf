@@ -23,6 +23,9 @@
 #define ECP_LMAX        4
 #define AO_LMAX         4
 
+// Thread number has to be the same as qudrature points
+#define THREADS        128
+
 __constant__
 static int _cart_pow_y[] = {
         0, 

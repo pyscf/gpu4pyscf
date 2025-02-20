@@ -44,8 +44,9 @@ void type1_rad_part(double* __restrict__ rad_all, double k, double aij, double u
             rur *= r128[threadIdx.x];
         }
         for (int i = lab%2; i <= LIJ; i+=2){
-            atomicAdd(rad_all+lab*LIJ1+i, rur*bval[i]);
+            //atomicAdd(rad_all+lab*LIJ1+i, rur*bval[i]);
             //rad_all[lab*LIJ1+i] = rur * bval[i];
+            block_reduce(rur*bval[i], rad_all+lab*LIJ1+i);
         }
     }
     __syncthreads();
