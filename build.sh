@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}
+export CUDA_HOME=${CUDA_HOME:-/usr/bin/}
 echo "PATH=${PATH}"
 echo "CUDA_HOME=${CUDA_HOME}"
 export PATH="${CUDA_HOME}/bin:$PATH"
