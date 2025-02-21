@@ -34,7 +34,6 @@ from pyscf.dft import gen_grid as gen_grid_cpu
 from gpu4pyscf.lib import utils
 from pyscf.gto.eval_gto import BLKSIZE, NBINS, CUTOFF, make_screen_index
 from pyscf import __config__
-from cupyx.scipy.spatial.distance import cdist
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import load_library
@@ -74,13 +73,17 @@ def sg1_prune(nuc, rads, n_ang, radii=radi.SG1RADII):
     '''
 # In SG1 the ang grids for the five regions
 #            6  38 86  194 86
-    leb_ngrid = cupy.array([6, 38, 86, 194, 86])
-    alphas = cupy.array((
+    if nuc >= 19:
+        return 194 * numpy.ones_like(rads, dtype=numpy.int64)
+
+    leb_ngrid = numpy.array([6, 38, 86, 194, 86], dtype=numpy.int64)
+    alphas = numpy.array((
         (0.25  , 0.5, 1.0, 4.5),
         (0.1667, 0.5, 0.9, 3.5),
         (0.1   , 0.4, 0.8, 2.5)))
+
     r_atom = radii[nuc] + 1e-200
-    rads = cupy.asarray(rads)
+    rads = numpy.asarray(rads)
     if nuc <= 2:  # H, He
         place = ((rads/r_atom).reshape(-1,1) > alphas[0]).sum(axis=1)
     elif nuc <= 10:  # Li - Ne

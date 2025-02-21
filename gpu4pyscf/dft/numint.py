@@ -28,7 +28,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.dft import xc_deriv, xc_alias, libxc
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
-from gpu4pyscf.__config__ import _streams, _num_devices
+from gpu4pyscf.__config__ import _streams, num_devices
 
 LMAX_ON_GPU = 6
 BAS_ALIGNED = 1
@@ -395,7 +395,7 @@ def gen_grid_range(ngrids, device_id, blksize=MIN_BLK_SIZE):
     '''
     Calculate the range of grids assigned the given device
     '''
-    ngrids_per_device = (ngrids + _num_devices - 1) // _num_devices
+    ngrids_per_device = (ngrids + num_devices - 1) // num_devices
     ngrids_per_device = (ngrids_per_device + blksize - 1) // blksize * blksize
     grid_start = min(device_id * ngrids_per_device, ngrids)
     grid_end = min((device_id + 1) * ngrids_per_device, ngrids)
@@ -523,8 +523,8 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     release_gpu_stack()
     cupy.cuda.get_current_stream().synchronize()
     futures = []
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _nr_rks_task,
                 ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
@@ -914,8 +914,8 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     release_gpu_stack()
     cupy.cuda.get_current_stream().synchronize()
     futures = []
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _nr_uks_task,
                 ni, mol, grids, xc_code, (dma,dmb), mo_coeff, mo_occ,
@@ -1026,7 +1026,7 @@ def _nr_rks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
             ao_deriv = 1
 
         ngrids_glob = grids.coords.shape[0]
-        ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
+        ngrids_per_device = (ngrids_glob + num_devices - 1) // num_devices
         ngrids_per_device = (ngrids_per_device + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE * MIN_BLK_SIZE
         grid_start = min(device_id * ngrids_per_device, ngrids_glob)
         grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
@@ -1108,8 +1108,8 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
 
     futures = []
     cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _nr_rks_fxc_task,
                 ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
@@ -1178,7 +1178,7 @@ def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
             ao_deriv = 1
 
         ngrids_glob = grids.coords.shape[0]
-        ngrids_per_device = (ngrids_glob + _num_devices - 1) // _num_devices
+        ngrids_per_device = (ngrids_glob + num_devices - 1) // num_devices
         ngrids_per_device = (ngrids_per_device + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE * MIN_BLK_SIZE
         grid_start = min(device_id * ngrids_per_device, ngrids_glob)
         grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
@@ -1277,8 +1277,8 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
 
     futures = []
     cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
             future = executor.submit(
                 _nr_uks_fxc_task,
                 ni, mol, grids, xc_code, fxc, (dma, dmb), mo1, occ_coeff,

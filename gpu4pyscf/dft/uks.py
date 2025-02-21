@@ -16,7 +16,7 @@ import cupy
 from pyscf.dft import uks as uks_cpu
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.dft import numint, gen_grid, rks
+from gpu4pyscf.dft import rks
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf.lib import utils

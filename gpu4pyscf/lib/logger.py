@@ -17,9 +17,6 @@ import time
 import cupy
 from pyscf import lib
 
-from pyscf.lib import parameters as param
-import pyscf.__config__
-
 INFO = lib.logger.INFO
 NOTE = lib.logger.NOTE
 WARN = lib.logger.WARN
@@ -29,66 +26,66 @@ DEBUG2= lib.logger.DEBUG2
 TIMER_LEVEL = lib.logger.TIMER_LEVEL
 flush = lib.logger.flush
 
-if sys.version_info < (3, 0):
-    process_clock = time.clock
-    perf_counter = time.time
-else:
-    process_clock = time.process_time
-    perf_counter = time.perf_counter
+process_clock = time.process_time
+perf_counter = time.perf_counter
 
 
 def init_timer(rec):
+    wall = e0 = None
     if rec.verbose >= TIMER_LEVEL:
         e0 = cupy.cuda.Event()
         e0.record()
-        return (process_clock(), perf_counter(), e0)
-    elif rec.verbose >= DEBUG:
-        return (process_clock(), perf_counter())
-    else:
-        return process_clock(),
+        wall = perf_counter()
+    return (process_clock(), wall, e0)
 
 def timer(rec, msg, cpu0=None, wall0=None, gpu0=None):
-    if cpu0 is None:
-        cpu0 = rec._t0
-    if wall0 and gpu0:
-        rec._t0, rec._w0, rec._e0 = process_clock(), perf_counter(), cupy.cuda.Event()
+    if gpu0:
+        t0, w0, e0 = process_clock(), perf_counter(), cupy.cuda.Event()
+        e0.record()
         if rec.verbose >= TIMER_LEVEL:
-            rec._e0.record()
-            rec._e0.synchronize()
-
+            e0.synchronize()
             flush(rec, '    CPU time for %-50s %9.2f sec, wall time %9.2f sec, GPU time %9.2f ms'
-                  % (msg, rec._t0-cpu0, rec._w0-wall0, cupy.cuda.get_elapsed_time(gpu0,rec._e0)))
-        return rec._t0, rec._w0, rec._e0
+                  % (msg, t0-cpu0, w0-wall0, cupy.cuda.get_elapsed_time(gpu0,e0)))
+        return t0, w0, e0
     elif wall0:
-        rec._t0, rec._w0 = process_clock(), perf_counter()
+        t0, w0 = process_clock(), perf_counter()
         if rec.verbose >= TIMER_LEVEL:
             flush(rec, '    CPU time for %s %9.2f sec, wall time %9.2f sec'
-                  % (msg, rec._t0-cpu0, rec._w0-wall0))
-        return rec._t0, rec._w0
+                  % (msg, t0-cpu0, w0-wall0))
+        return t0, w0
     else:
-        rec._t0 = process_clock()
+        t0 = process_clock()
         if rec.verbose >= TIMER_LEVEL:
-            flush(rec, '    CPU time for %s %9.2f sec' % (msg, rec._t0-cpu0))
-        return rec._t0,
+            flush(rec, '    CPU time for %s %9.2f sec' % (msg, t0-cpu0))
+        return t0,
 
 def _timer_debug1(rec, msg, cpu0=None, wall0=None, gpu0=None, sync=True):
     if rec.verbose >= DEBUG1:
         return timer(rec, msg, cpu0, wall0, gpu0)
-    elif wall0 and gpu0:
-        rec._t0, rec._w0, rec._e0 = process_clock(), perf_counter(), cupy.cuda.Event()
-        rec._e0.record()
-        return rec._t0, rec._w0, rec._e0
+    elif gpu0:
+        t0, w0, e0 = process_clock(), perf_counter(), cupy.cuda.Event()
+        e0.record()
+        return t0, w0, e0
     elif wall0:
-        rec._t0, rec._w0 = process_clock(), perf_counter()
-        return rec._t0, rec._w0
+        t0, w0 = process_clock(), perf_counter()
+        return t0, w0
     else:
-        rec._t0 = process_clock()
-        return rec._t0,
+        t0 = process_clock()
+        return t0,
 
 def _timer_debug2(rec, msg, cpu0=None, wall0=None, gpu0=None, sync=True):
     if rec.verbose >= DEBUG2:
         return timer(rec, msg, cpu0, wall0, gpu0)
-    return cpu0, wall0, gpu0
+    elif gpu0:
+        t0, w0, e0 = process_clock(), perf_counter(), cupy.cuda.Event()
+        e0.record()
+        return t0, w0, e0
+    elif wall0:
+        t0, w0 = process_clock(), perf_counter()
+        return t0, w0
+    else:
+        t0 = process_clock()
+        return t0,
 
 info = lib.logger.info
 note = lib.logger.note
