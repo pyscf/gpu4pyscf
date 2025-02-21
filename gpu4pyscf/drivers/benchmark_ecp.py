@@ -24,7 +24,7 @@ for i in range(runs):
     h1_cpu = mol.intor('ECPscalar')
     end_time = time.perf_counter()
     times.append(end_time - start_time)
-print(f"average time with CPU: {sum(times[warmup:])/runs}")
+print(f"average time with CPU: {sum(times[warmup:])}")
 
 times = []
 start_event = cp.cuda.Event()
@@ -38,7 +38,7 @@ for i in range(runs):
     elapsed_time = cp.cuda.get_elapsed_time(start_event, end_event)
     times.append(elapsed_time)
 
-avg_time = (sum(times[warmup:]) / runs)/1000
+avg_time = (sum(times[warmup:]))/1000
 print(f"average time with GPU: {avg_time}")
 
 assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-7

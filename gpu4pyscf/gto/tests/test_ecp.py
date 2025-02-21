@@ -40,15 +40,6 @@ def setUpModule():
      H    G
             6.491000E-01           1.0000000   
                                 ''')
-    
-    mol = gto.M(
-        atom='''
-    Cu1 0. 0. 0.
-    Cu 0. 1. 0.
-    He 1. 0. 0.
-    ''',
-    basis={'Cu':'lanl2dz', 'Cu1': cu1_basis, 'He':'sto3g'},
-    ecp = {'cu':'lanl2dz'})
 
     mol1 = gto.M(
         atom="""
@@ -58,6 +49,7 @@ def setUpModule():
         ecp="crenbl",    # Assign the corresponding ECP
         spin=1,           # Copper (Cu) has an unpaired electron
         charge=0,
+        cart=1,
         output = '/dev/null'
     )
 
@@ -87,19 +79,24 @@ Na G
 2       4.808857             -21.607597
                                          ''')})
 def tearDownModule():
-    global mol, mol1, mol2
-    mol.stdout.close()
+    global mol1, mol2
     mol1.stdout.close()
     mol2.stdout.close()
-    del mol, mol1, mol2
+    del mol1, mol2
 
 class KnownValues(unittest.TestCase):
-    def test_ecp(self):
-        mol2.cart = True
-        h1 = mol2.intor('ECPscalar_cart')
+    def test_ecp_cart(self):
+        h1_cpu = mol1.intor('ECPscalar_cart')
+        h1_gpu = get_ecp(mol1)
+        assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
+    
+    def test_ecp_sph(self):
+        h1_cpu = mol2.intor('ECPscalar_sph')
         h1_gpu = get_ecp(mol2)
-        assert np.linalg.norm(h1 - h1_gpu.get()) < 1e-8
-
+        print(h1_cpu[:3,:3])
+        print(h1_gpu[:3,:3])
+        assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
+    
 if __name__ == "__main__":
     print("Full Tests for ECP Integrals")
     unittest.main()

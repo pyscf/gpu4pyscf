@@ -27,15 +27,22 @@ libecp.ECP_cart.argtypes = [
 
 def sort_ecp(mol0, cart=True, log=None):
     '''
-    # Sort basis according to angular momentum and contraction patterns so
+    # Sort basis according to angular momentum
     # as to group the basis functions to blocks in GPU kernel.
+    
+    # Order ECP basis based on angular momentum
+    # Remove SO Type basis functions
     '''
     if log is None:
         log = logger.new_logger(mol0, mol0.verbose)
     mol = mol0.copy(deep=True)
-    
+
+    not_so_type = mol._ecpbas[:, gto.SO_TYPE_OF] == 0
+    mol._ecpbas = mol._ecpbas[not_so_type]
+
     # Sort ECP basis based on angular momentum and atom_id
     l_atm = mol._ecpbas[:,[gto.ANG_OF, gto.ATOM_OF]]
+
     uniq_l_atm, inv_idx, l_atm_counts = np.unique(
         l_atm, return_inverse=True, return_counts=True, axis=0)
     sorted_idx = np.argsort(inv_idx.ravel(), kind='stable').astype(np.int32)
@@ -49,6 +56,7 @@ def sort_ecp(mol0, cart=True, log=None):
 
     # Further group based on angular momentum for counting
     uniq_l, l_counts = np.unique(uniq_l_atm[:,0], return_counts=True, axis=0)
+
     return mol, uniq_l, l_counts, ecp_loc
 
 def make_tasks(l_ctr_offsets, lecp_ctr_offsets):

@@ -117,6 +117,9 @@ double rad_part(int ish, const int *ecpbas, const double *env){
     for (int kp = 0; kp < npk; kp++){
         const double ak = env[exp_ptr+kp];
         const double ck = env[coeff_ptr+kp];
+        if (threadIdx.x == 0){
+            printf("%d %d %f %f\n", ish, kp, ak, ck);
+        }
         u1 += ck * exp(-ak * r * r);
     }
     return u1 * pow(r, r_order) * w128[threadIdx.x];
