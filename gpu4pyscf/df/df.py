@@ -151,26 +151,6 @@ class DF(lib.StreamObject):
 
         self._cderi = cholesky_eri_gpu(intopt, mol, auxmol, self.cd_low,
                                        omega=omega, use_gpu_memory=self.use_gpu_memory)
-        nao = mol.nao
-        out = cupy.zeros((auxmol.nao, nao, nao))
-        rows = intopt.cderi_row
-        cols = intopt.cderi_col
-        print(rows)
-        print(cols)
-        out[:,cols,rows] = self._cderi[0]
-        out[:,rows,cols] = self._cderi[0]
-        out = intopt.unsort_orbitals(out, axis=(1,2))
-        print(self.cd_low.tag)
-        print(out[1])
-        import pyscf.lib
-        print(pyscf.lib.unpack_tril(self.ref[1]))
-        ix, iy = np.tril_indices(mol.nao)
-        out = out[:,ix,iy]
-        print(abs(out.get()- self.ref).max())
-        #print(abs(out[0].get()- self.ref[0]).max())
-        print(abs(out[1].get()- self.ref[1]).max())
-        #print(abs(out[2].get()- self.ref[2]).max())
-        exit()
         log.timer_debug1('cholesky_eri', *t0)
         self.intopt = intopt
         return self
