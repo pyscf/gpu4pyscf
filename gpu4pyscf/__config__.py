@@ -14,11 +14,11 @@
 
 import cupy
 
-_num_devices = cupy.cuda.runtime.getDeviceCount()
+num_devices = cupy.cuda.runtime.getDeviceCount()
 
 # TODO: switch to non_blocking stream (currently blocked by libxc)
-_streams = [None] * _num_devices
-for device_id in range(_num_devices):
+_streams = [None] * num_devices
+for device_id in range(num_devices):
     with cupy.cuda.Device(device_id):
         _streams[device_id] = cupy.cuda.stream.Stream(non_blocking=False)
 
@@ -45,9 +45,9 @@ else:
 
 # Check P2P data transfer is available
 _p2p_access = True
-if _num_devices > 1:
-    for src in range(_num_devices):
-        for dst in range(_num_devices):
+if num_devices > 1:
+    for src in range(num_devices):
+        for dst in range(num_devices):
             if src != dst:
                 can_access_peer = cupy.cuda.runtime.deviceCanAccessPeer(src, dst)
                 _p2p_access &= can_access_peer

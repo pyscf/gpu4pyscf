@@ -3,6 +3,9 @@
 #include <stdint.h>
 #include "vhf.cuh"
 
+// up to l=7
+#define L_SLOTS 8
+
 static int _LEN_CART0[] = {
     0, 1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 66, 78, 91, 105, 120, 136
 };
@@ -32,9 +35,9 @@ static void _get_dm_to_dm_xyz_coeff(double* pcx, double* rij, int lmax)
 {
     int lmax1 = lmax + 1;
     int l, lx;
-    double rx_pow[LMAX1];
-    double ry_pow[LMAX1];
-    double rz_pow[LMAX1];
+    double rx_pow[L_SLOTS];
+    double ry_pow[L_SLOTS];
+    double rz_pow[L_SLOTS];
 
     rx_pow[0] = 1.0;
     ry_pow[0] = 1.0;
@@ -67,7 +70,7 @@ static void _dm_to_dm_xyz(double* dm_xyz, double* dm, int nao, int li, int lj, d
     int lij = li + lj;
     int l1 = lij + 1;
     int l1l1 = l1 * l1;
-    double pcx[LMAX1*LMAX1*3];
+    double pcx[L_SLOTS*L_SLOTS*3];
     double *pcy = pcx + lj1 * lj1;
     double *pcz = pcy + lj1 * lj1;
     _get_dm_to_dm_xyz_coeff(pcx, rij, lj);
@@ -116,7 +119,7 @@ static void _dm_xyz_to_dm(double* dm_xyz, double* dm, int nao, int li, int lj, d
     int lj1 = lj + 1;
     int l1 = li + lj + 1;
     int l1l1 = l1 * l1;
-    double pcx[LMAX1*LMAX1*3];
+    double pcx[L_SLOTS*L_SLOTS*3];
     double *pcy = pcx + lj1 * lj1;
     double *pcz = pcy + lj1 * lj1;
     _get_dm_to_dm_xyz_coeff(pcx, rij, lj);
@@ -152,7 +155,7 @@ void transform_cart_to_xyz(double *dm_xyz, double *dm, int *ao_loc, int *pair_lo
                            int *bas, int nbas, double *env)
 {
     int nao = ao_loc[nbas];
-    double cache[(LMAX*2+1)*(LMAX*2+1)*(LMAX*2+1)];
+    double cache[L_SLOTS*L_SLOTS*L_SLOTS*8];
     for (int ish = 0; ish < nbas; ish++) {
         int i0 = ao_loc[ish];
         int li = bas[ish*BAS_SLOTS+ANG_OF];
@@ -182,7 +185,7 @@ void transform_xyz_to_cart(double *vj, double *vj_xyz, int *ao_loc, int *pair_lo
                            int *bas, int nbas, double *env)
 {
     int nao = ao_loc[nbas];
-    double cache[(LMAX*2+1)*(LMAX*2+1)*(LMAX*2+1)];
+    double cache[L_SLOTS*L_SLOTS*L_SLOTS*8];
     for (int ish = 0; ish < nbas; ish++) {
         int i0 = ao_loc[ish];
         int li = bas[ish*BAS_SLOTS+ANG_OF];
