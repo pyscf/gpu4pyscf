@@ -621,17 +621,14 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env):
     #             ~= (lj * .5/aij + drj**2 + log(1./precision)/aij)**(lj*.5)
     # Here, this fac is approximately derived from the overlap integral
     fac = ovlp / precision
-    fac[fac<1.] = 1.
-    Ecut = cp.log(fac) * 2*aij
+    Ecut = cp.log(fac + 1.) * 2*aij
 
     # Estimate radius:
     # rho[r-Rp] = fl*norm[:cell0_nprims,None]*norm * exp(-theta*dr**2)
     #             * r**lij * exp(-aij*r**2)
-    fac = fl*norm[:cell0_nprims,None]*norm * cp.exp(-theta*dr**2)
-    radius = (cp.log(fac/precision + 1.) / aij)**.5
-    radius = (cp.log(fac/precision * radius**lij + 1.) / aij)**.5
-    #radius = (cp.log(fac/precision * radius**lij + 1.) / aij)**.5
-    radius[ovlp < precision] = 0.
+    radius = 2.
+    radius = (cp.log(ovlp/precision * radius**lij + 1.) / aij)**.5
+    radius = (cp.log(ovlp/precision * radius**lij + 1.) / aij)**.5
 
     lmax = cell._bas[:,ANG_OF].max()
     assert lmax <= LMAX
@@ -654,7 +651,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env):
 
     remaining_mask = ovlp >= precision
     Gbase = 2*np.pi / cell_len
-    ngrid_min = 256
+    ngrid_min = 512
     mesh = np.asarray(cell.mesh)
     assert all(mesh < 1000)
     tasks = []
@@ -673,6 +670,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env):
                 continue
 
             n_radius = int(np.ceil(r_active.max() / dh))
+            n_radius = max(n_radius, 4)
             sub_tasks = sub_tasks_for_l(mesh, n_radius, mask)
             tasks.append(sub_tasks)
 
@@ -687,6 +685,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env):
             # TODO: Using a regular FFTDF task than the MG algorithm?
             dh = (cell_len / mesh).min()
             n_radius = int(np.ceil(radius[remaining_mask].max() / dh))
+            n_radius = max(n_radius, 4)
             sub_tasks = sub_tasks_for_l(mesh, n_radius, remaining_mask)
             tasks.append(sub_tasks)
         return tasks
@@ -741,6 +740,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env):
         # TODO: Using a regular FFTDF task than the MG algorithm?
         dh = (cell_len / mesh).min()
         n_radius = int(np.ceil(radius[remaining_mask].max() / dh))
+        n_radius = max(n_radius, 4)
         sub_tasks = sub_tasks_for_l(mesh, n_radius, remaining_mask)
         tasks.append(sub_tasks)
     return tasks

@@ -85,10 +85,10 @@ int MG_init_constant(int shm_size)
     Fold3Index i_in_fold3idx[495];
     int n2 = 0;
     int n3 = 0;
-    for (int l = 0; l <= LMAX; ++l) {
-        for (int i = 0, ijk = 0; i <= l; ++i) {
+    for (int l = 0; l <= LMAX*2; ++l) {
+        for (int i = 0; i <= l; ++i) {
         for (int j = 0; j <= l-i; ++j) {
-            for (int k = 0; k <= l-i-j; ++k, ++n3, ++ijk) {
+            for (int k = 0; k <= l-i-j; ++k, ++n3) {
                 i_in_fold3idx[n3].x = i;
                 i_in_fold3idx[n3].y = j;
                 i_in_fold3idx[n3].z = k;

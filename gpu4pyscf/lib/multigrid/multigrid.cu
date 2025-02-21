@@ -962,10 +962,10 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
 #pragma unroll
     for (int mx = 1; mx <= 2; ++mx) {
 #pragma unroll
-        for (int my = 0; my <= L-1; ++my) {
+        for (int my = 0; my <= L-mx; ++my) {
 #pragma unroll
-            for (int mz = 0; mz <= L-1-my; ++mz) {
-                int n = ADDR3(L,1,my,mz);
+            for (int mz = 0; mz <= L-mx-my; ++mz) {
+                int n = ADDR3(L,mx,my,mz);
                 r2[n-offset] = reduce_warps(r2[n-offset], ngridx, thread_id, sp_id, warp_id);
                 if (warp_id == 0) {
                     dm_xyz[n*WARP_SIZE] = r2[n-offset];
@@ -976,7 +976,7 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
 
     offset = (L+1)*(L+2)/2 + L*(L+1)/2 + (L-1)*L/2;
 #pragma unroll
-    for (int m = 0; m < L*(L+1)/2 + (L-1)*L/2; ++m) {
+    for (int m = 0; m < (L+1)*(L+2)*(L+3)/6 - offset; ++m) {
         r2[m] = 0.;
     }
     for (int ix = warp_id; ix < ngridx; ix += WARPS) {
@@ -1048,7 +1048,10 @@ void eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
 
 static size_t buflen1(int l, int tiley)
 {
-    return ((WARP_SIZE + tiley) * WARPS * (l+1)) * sizeof(double);
+    int lj = MIN(l, LMAX);
+    size_t len1 = (WARP_SIZE + tiley) * WARPS * (l+1);
+    size_t len2 = WARP_SIZE * (lj+1)*(lj+1) * 3;
+    return MAX(len1, len2) * sizeof(double);
 }
 int eval_rho_orth(double *rho, double *dm, MGridEnvVars *envs, MGridBounds *bounds,
                   int l, double *pool, uint32_t *batch_head, int workers)

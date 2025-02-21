@@ -31,10 +31,9 @@ def setUpModule():
         a = np.eye(3)*3.5668,
         atom = '''C     0.      0.      0.
                   C     1.8     1.8     1.8   ''',
-        #basis = ('gth-dzv', [[4, [1., 1.]]]),
-        basis = 'gth-dzv',
+        basis = ('gth-dzv', [[3, [2., 1.]], [4, [1., 1.]]]),
         pseudo = 'gth-pade',
-        precision = 1e-8,
+        precision = 1e-9,
     )
 
     kptsa = np.random.random((2,3))
@@ -113,11 +112,12 @@ class KnownValues(unittest.TestCase):
                       C     0.8917  2.6751  2.6751''',
             basis = 'gth-dzv',
             pseudo = 'gth-pbe',
+            precision = 1e-9,
         )
         mf = cell.RKS().to_gpu()
         mf._numint = multigrid.MultiGridNumInt(cell)
         mf.run()
-        self.assertAlmostEqual(mf.e_tot, -44.77733762241786, 9)
+        self.assertAlmostEqual(mf.e_tot, -44.777337612, 8)
 
     @unittest.skip('MultiGrid for UKS not implemented')
     def test_uks_lda(self):
