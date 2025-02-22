@@ -48,7 +48,7 @@ PRIMBAS_EXP = 1
 PRIMBAS_COEFF = 2
 PRIMBAS_COORD = 3
 LMAX = 4
-SHARED_RHO_SIZE = 2097152 # 128^3
+SHARED_RHO_SIZE = 8000000 # 200^3
 SHM_SIZE = shm_size - 1024
 del shm_size
 WARP_SIZE = 32
@@ -131,9 +131,10 @@ def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, deriv=0):
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     tasks = ni.tasks
     workers = gpu_specs['multiProcessorCount']
+    nf2 = (lmax*2+1)*(lmax*2+2)//2
     nf3 = (lmax*2+1)*(lmax*2+2)*(lmax*2+3)//6
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
-    cache_size = ((lmax*2+1)*ngrid_span*3 + nf3 + 3) * WARP_SIZE
+    cache_size = ((lmax*2+1)*ngrid_span*3 + nf3 + nf2*ngrid_span + 3) * WARP_SIZE
     pool = cp.empty((workers, cache_size))
 
     init_constant(cell)
@@ -148,8 +149,8 @@ def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, deriv=0):
         ngrids = np.prod(mesh)
         rhoR = cp.empty((nset, *mesh))
         for iset in range(nset):
-            if ngrids < SHARED_RHO_SIZE:
-                rho_local = cp.zeros((workers*8, *mesh))
+            if ngrids <= SHARED_RHO_SIZE:
+                rho_local = cp.zeros((workers, *mesh))
             else:
                 rho_local = cp.zeros(mesh)
             for task in sub_tasks:

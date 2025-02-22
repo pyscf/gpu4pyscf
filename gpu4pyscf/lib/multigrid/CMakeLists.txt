@@ -1,7 +1,7 @@
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
 
 add_library(mgrid SHARED
-  multigrid.cu mg_driver.cu
+  eval_rho.cu eval_mat.cu mg_driver.cu
 )
 
 set_target_properties(mgrid PROPERTIES

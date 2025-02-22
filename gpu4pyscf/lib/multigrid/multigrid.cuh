@@ -38,7 +38,7 @@
          ((l)-(t)+1)*((l)-(t)+2)/2 - ((l)-(t)-(u)+1)*((l)-(t)-(u)+2)/2 + (v))
 
 #ifndef HAVE_DEFINED_MGRIDENVVAS_H
-#define HAVE_DEFINED_MGRIDT3CENVVAS_H
+#define HAVE_DEFINED_MGRIDENVVAS_H
 typedef struct {
     int nbas_i;
     int nbas_j;
