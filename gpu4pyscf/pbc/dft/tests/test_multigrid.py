@@ -18,6 +18,7 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.pbc import gto
+from pyscf.pbc.gto import pseudo
 from pyscf.pbc.dft import multigrid as multigrid_cpu
 from gpu4pyscf.pbc.dft import multigrid
 
@@ -60,6 +61,21 @@ class KnownValues(unittest.TestCase):
         out = multigrid.MultiGridNumInt(cell_orth).get_nuc().get()
         self.assertEqual(out.shape, ref.shape)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
+
+    def test_eval_nucG(self):
+        mesh = cell_orth.mesh
+        SI = cell_orth.get_SI(mesh=mesh)
+        ref = np.einsum('i,ij->j', -cell_orth.atom_charges(), SI)
+        dat = multigrid.eval_nucG(cell_orth, mesh)
+        self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
+
+    def test_eval_vpplocG(self):
+        mesh = cell_orth.mesh
+        Gv = cell_orth.get_Gv(mesh)
+        SI = cell_orth.get_SI(Gv)
+        ref = -np.einsum('ij,ij->j', pseudo.get_vlocG(cell_orth, Gv), SI)
+        dat = multigrid.eval_vpplocG(cell_orth, mesh)
+        self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
 
     @unittest.skip('MultiGrid for kpts not implemented')
     def test_get_nuc_kpts(self):

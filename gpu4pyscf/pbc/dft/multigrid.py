@@ -20,7 +20,6 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.gto import ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF, PTR_COORD
-from pyscf.pbc.gto import pseudo
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
@@ -373,6 +372,22 @@ def get_rho(ni, dm, kpts=None):
     rhoR = tools.ifft(rhoG.reshape(ngrids), mesh).real * (1./weight)
     return rhoR
 
+def eval_nucG(cell, mesh):
+    basex, basey, basez = cell.get_Gv_weights(mesh)[1]
+    basex = cp.asarray(basex)
+    basey = cp.asarray(basey)
+    basez = cp.asarray(basez)
+    b = cell.reciprocal_vectors()
+    coords = cell.atom_coords()
+    rb = cp.asarray(coords.dot(b.T))
+    SIx = cp.exp(-1j*rb[:,0,None] * basex)
+    SIy = cp.exp(-1j*rb[:,1,None] * basey)
+    SIz = cp.exp(-1j*rb[:,2,None] * basez)
+    SIx *= cp.asarray(-cell.atom_charges())[:,None]
+    rho_xy = SIx[:,:,None] * SIy[:,None,:]
+    nucG = contract('qxy,qz->xyz', rho_xy, SIz)
+    return nucG.ravel()
+
 def get_nuc(ni, kpts=None):
     assert kpts is None or all(kpts == 0)
     if kpts is None or kpts.ndim == 1:
@@ -381,20 +396,87 @@ def get_nuc(ni, kpts=None):
 
     cell = ni.cell
     mesh = ni.mesh
-    charge = cp.asarray(-cell.atom_charges())
-    Gv = cell.get_Gv(mesh)
-    # TODO: SI size = prod(mesh)*natm, may exceed the GPU memory size
-    SI = get_SI(cell, mesh=mesh)
-    rhoG = charge.dot(SI)
 
-    coulG = tools.get_coulG(cell, mesh=mesh, Gv=Gv)
-    vneG = rhoG
-    vneG *= coulG
+    # Compute the density of nuclear charges in reciprocal space
+    # charge.dot(cell.get_SI(mesh=mesh))
+    vneG = eval_nucG(cell, mesh)
+    Gv = cell.get_Gv(mesh)
+    vneG *= tools.get_coulG(cell, mesh=mesh, Gv=Gv)
     hermi = 1
     vne = _get_j_pass2(ni, vneG[None,:], hermi, kpts)[0]
     if is_single_kpt:
         vne = vne[0]
     return vne
+
+def eval_vpplocG(cell, mesh):
+    '''PRB, 58, 3641 Eq (5) first term
+    '''
+    assert cell.dimension != 2
+    basex, basey, basez = cell.get_Gv_weights(mesh)[1]
+    basex = cp.asarray(basex)
+    basey = cp.asarray(basey)
+    basez = cp.asarray(basez)
+    b = cell.reciprocal_vectors()
+    assert abs(b - np.diag(b.diagonal())).max() < 1e-8
+    coords = cell.atom_coords()
+    rb = cp.asarray(coords.dot(b.T))
+    SIx = cp.exp(-1j*rb[:,0,None] * basex)
+    SIy = cp.exp(-1j*rb[:,1,None] * basey)
+    SIz = cp.exp(-1j*rb[:,2,None] * basez)
+    Gx2 = (basex * b[0,0])**2
+    Gy2 = (basey * b[1,1])**2
+    Gz2 = (basez * b[2,2])**2
+    #Gx = basex[:,None] * b[0]
+    #Gy = basey[:,None] * b[1]
+    #Gz = basez[:,None] * b[2]
+    #Gv = (Gx[:,None,None] + Gy[:,None] + Gz).reshape(-1,3)
+    #G2 = contract('px,px->p', Gv, Gv)
+    G2 = (Gx2[:,None,None] + Gy2[:,None] + Gz2).ravel()
+
+    charges = cell.atom_charges()
+    vlocG = cp.zeros(len(G2), dtype=np.complex128)
+    vlocG0 = 0
+    for ia in range(cell.natm):
+        symb = cell.atom_symbol(ia)
+        if symb not in cell._pseudo:
+            continue
+
+        pp = cell._pseudo[symb]
+        rloc, nexp, cexp = pp[1:3+1]
+        SIx[ia] *= cp.exp(-.5*rloc**2 * Gx2)
+        SIy[ia] *= cp.exp(-.5*rloc**2 * Gy2)
+        SIz[ia] *= cp.exp(-.5*rloc**2 * Gz2)
+
+        # alpha parameters from the non-divergent Hartree+Vloc G=0 term.
+        vlocG0 += -2*np.pi*charges[ia]*rloc**2
+
+        if nexp == 0:
+            continue
+        # Add the C1, C2, C3, C4 contributions
+        G2_red = G2 * rloc**2
+        cfacs = 0
+        if nexp >= 1:
+            cfacs += cexp[0]
+        if nexp >= 2:
+            cfacs += cexp[1] * (3 - G2_red)
+        if nexp >= 3:
+            cfacs += cexp[2] * (15 - 10*G2_red + G2_red**2)
+        if nexp >= 4:
+            cfacs += cexp[3] * (105 - 105*G2_red + 21*G2_red**2 - G2_red**3)
+
+        xyz_exp = ((2*np.pi)**(3/2.)*rloc**3 * SIx[ia,:,None,None] *
+                   SIy[ia,:,None] * SIz[ia]).ravel()
+        xyz_exp *= cfacs
+        vlocG += xyz_exp
+
+    SIx *= cp.asarray(-charges)[:,None]
+    rho_xy = SIx[:,:,None] * SIy[:,None,:]
+    vlocG_part1 = contract('qxy,qz->xyz', rho_xy, SIz).ravel()
+    Gv = cell.get_Gv(mesh)
+    vlocG_part1 *= tools.get_coulG(cell, Gv=Gv)
+    vlocG_part1[0] -= vlocG0
+    vlocG += vlocG_part1
+    return vlocG
 
 def get_pp(ni, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
@@ -410,80 +492,22 @@ def get_pp(ni, kpts=None):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
     mesh = ni.mesh
-    Gv = cell.get_Gv(mesh)
-    # TODO: SI size = prod(mesh)*natm, may exceed the GPU memory size
-    SI = get_SI(cell, mesh=mesh)
-    vpplocG = cp.asarray(pseudo.get_vlocG(cell, Gv))
-    vpplocG = -contract('ij,ij->j', SI, vpplocG)
+    # Compute the vpplocG as
+    # -einsum('ij,ij->j', pseudo.get_vlocG(cell, Gv), cell.get_SI(Gv))
+    vpplocG = eval_vpplocG(cell, mesh)
     vpp = _get_j_pass2(ni, vpplocG[None,:], kpts=kpts)[0]
+    t1 = log.timer_debug1('vpploc', *t0)
 
-    # vppnonloc evaluated in reciprocal space
-    fakemol = gto.Mole()
-    fakemol._atm = np.zeros((1,gto.ATM_SLOTS), dtype=np.int32)
-    fakemol._bas = np.zeros((1,gto.BAS_SLOTS), dtype=np.int32)
-    ptr = gto.PTR_ENV_START
-    fakemol._env = np.zeros(ptr+10)
-    fakemol._bas[0,gto.NPRIM_OF ] = 1
-    fakemol._bas[0,gto.NCTR_OF  ] = 1
-    fakemol._bas[0,gto.PTR_EXP  ] = ptr+3
-    fakemol._bas[0,gto.PTR_COEFF] = ptr+4
-
-    # buf for SPG_lmi upto l=0..3 and nl=3
-    ngrids = np.prod(mesh)
-    buf = np.empty((48,ngrids), dtype=np.complex128)
-    def vppnl_by_k(kpt):
-        Gk = Gv + kpt
-        G_rad = lib.norm(Gk, axis=1)
-        aokG = ft_ao(cell, Gv, kpt=kpt) * (1/cell.vol)**.5
-        vppnl = 0
-        for ia in range(cell.natm):
-            symb = cell.atom_symbol(ia)
-            if symb not in cell._pseudo:
-                continue
-            pp = cell._pseudo[symb]
-            p1 = 0
-            for l, proj in enumerate(pp[5:]):
-                rl, nl, hl = proj
-                if nl > 0:
-                    fakemol._bas[0,gto.ANG_OF] = l
-                    fakemol._env[ptr+3] = .5*rl**2
-                    fakemol._env[ptr+4] = rl**(l+1.5)*np.pi**1.25
-                    pYlm_part = fakemol.eval_gto('GTOval', Gk)
-
-                    p0, p1 = p1, p1+nl*(l*2+1)
-                    # pYlm is real, SI[ia] is complex
-                    pYlm = np.ndarray((nl,l*2+1,ngrids), dtype=np.complex128, buffer=buf[p0:p1])
-                    for k in range(nl):
-                        qkl = pseudo.pp._qli(G_rad*rl, l, k)
-                        pYlm[k] = pYlm_part.T * qkl
-                    #:SPG_lmi = np.einsum('g,nmg->nmg', SI[ia].conj(), pYlm)
-                    #:SPG_lm_aoG = np.einsum('nmg,gp->nmp', SPG_lmi, aokG)
-                    #:tmp = np.einsum('ij,jmp->imp', hl, SPG_lm_aoG)
-                    #:vppnl += np.einsum('imp,imq->pq', SPG_lm_aoG.conj(), tmp)
-            if p1 > 0:
-                SPG_lmi = cp.asarray(buf[:p1])
-                SPG_lmi *= SI[ia].conj()
-                SPG_lm_aoGs = SPG_lmi.dot(aokG)
-                p1 = 0
-                for l, proj in enumerate(pp[5:]):
-                    rl, nl, hl = proj
-                    if nl > 0:
-                        p0, p1 = p1, p1+nl*(l*2+1)
-                        hl = cp.asarray(hl)
-                        SPG_lm_aoG = SPG_lm_aoGs[p0:p1].reshape(nl,l*2+1,-1)
-                        tmp = contract('ij,jmp->imp', hl, SPG_lm_aoG)
-                        vppnl += contract('imp,imq->pq', SPG_lm_aoG.conj(), tmp)
-        return vppnl * (1./cell.vol)
-
+    vppnl = pp_int.get_pp_nl(cell, kpts)
     for k, kpt in enumerate(kpts):
-        vppnl = vppnl_by_k(kpt)
         if is_zero(kpt):
-            vpp[k] += cp.asarray(vppnl.real)
+            vpp[k] += cp.asarray(vppnl[k].real)
         else:
-            vpp[k] += cp.asarray(vppnl)
+            vpp[k] += cp.asarray(vppnl[k])
 
     if is_single_kpt:
         vpp = vpp[0]
+    log.timer_debug1('vppnl', *t1)
     log.timer('get_pp', *t0)
     return vpp
 
@@ -576,6 +600,8 @@ class Task:
     shl_pair_idx: np.ndarray
 
 def create_tasks(cell, prim_bas, supmol_bas, supmol_env):
+    log = logger.new_logger(cell)
+    t0 = log.init_timer()
     a = cell.lattice_vectors()
     assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
 
@@ -630,6 +656,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env):
     radius = 2.
     radius = (cp.log(ovlp/precision * radius**lij + 1.) / aij)**.5
     radius = (cp.log(ovlp/precision * radius**lij + 1.) / aij)**.5
+    log.timer_debug1('Ecut and radius estimation in create_tasks', *t0)
 
     lmax = cell._bas[:,ANG_OF].max()
     assert lmax <= LMAX
@@ -689,6 +716,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env):
             n_radius = max(n_radius, 4)
             sub_tasks = sub_tasks_for_l(mesh, n_radius, remaining_mask)
             tasks.append(sub_tasks)
+        log.timer_debug1('create_tasks', *t0)
         return tasks
 
     # The derivation of n_radius
