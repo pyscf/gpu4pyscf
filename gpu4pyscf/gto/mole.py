@@ -19,8 +19,6 @@ import cupy as cp
 from pyscf import gto
 from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
                        PTR_EXP)
-from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import block_diag
 
 PTR_BAS_COORD = 7
 
@@ -38,6 +36,7 @@ def basis_seg_contraction(mol, allow_replica=1):
             By default, high angular momentum functions (d, f shells) are fully
             uncontracted.
     '''
+    from gpu4pyscf.lib.cupy_helper import block_diag
     # Ensure backward compatibility. When allow_replica is True, decontraction
     # to primitive functions is disabled. When allow_replica is False, all
     # general contraction are decontracted.
@@ -165,6 +164,7 @@ def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False):
     bas_mapping is the index that transforms _bas from sorted_mol to mol:
     mol._bas = sorted_mol._bas[bas_mapping]
     '''
+    from gpu4pyscf.lib import logger
     mol, coeff = basis_seg_contraction(mol)
     # Sort basis according to angular momentum and contraction patterns so
     # as to group the basis functions to blocks in GPU kernel.

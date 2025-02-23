@@ -20,7 +20,6 @@ import numpy as np
 import cupy
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.gto import mole
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
@@ -304,6 +303,7 @@ def dist_matrix(x, y, out=None):
 
 @functools.lru_cache(1)
 def _initialize_c2s_data():
+    from gpu4pyscf.gto import mole
     c2s_l = [mole.cart2sph_by_l(l) for l in range(LMAX_ON_GPU)]
     c2s_data = cupy.concatenate([x.ravel() for x in c2s_l])
     c2s_offset = np.cumsum([0] + [x.shape[0]*x.shape[1] for x in c2s_l])
@@ -489,6 +489,7 @@ def cart2sph_cutensor(t, axis=0, ang=1, out=None):
     '''
     transform 'axis' of a tensor from cartesian basis into spherical basis with cutensor
     '''
+    from gpu4pyscf.gto import mole
     if(ang <= 1):
         if(out is not None): out[:] = t
         return t
@@ -511,6 +512,7 @@ def cart2sph(t, axis=0, ang=1, out=None, stream=None):
     '''
     transform 'axis' of a tensor from cartesian basis into spherical basis
     '''
+    from gpu4pyscf.gto import mole
     if(ang <= 1):
         if(out is not None): out[:] = t
         return t

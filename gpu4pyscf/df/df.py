@@ -104,7 +104,6 @@ class DF(lib.StreamObject):
                 nf = uniq_l * 2 + 1
             n_groups = len(uniq_l)
             ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
-            ao_loc = intopt.sorted_mol.ao_loc_nr(mol.cart)
             nbas = intopt.sorted_mol.nbas
             offset = 0
             cderi_diag = []
