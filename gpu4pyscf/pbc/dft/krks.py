@@ -41,7 +41,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)
 
-    if not hybrid and isinstance(ks.with_df, multigrid.MultiGridFFTDF):
+    if isinstance(ni, multigrid.MultiGridNumInt):
         if ks.do_nlc():
             raise NotImplementedError(f'MultiGrid for NLC functional {ks.xc} + {ks.nlc}')
         n, exc, vxc = ni.nr_rks(
