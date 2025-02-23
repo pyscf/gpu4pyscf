@@ -20,7 +20,7 @@
 #include <cuda_runtime.h>
 
 #include "gvhf-rys/vhf.cuh"
-#include "pbc/rys_roots.cu"
+#include "gvhf-rys/rys_roots.cu"
 #include "int3c2e.cuh"
 
 // TODO: benchmark performance for 32, 38, 40, 45, 54
