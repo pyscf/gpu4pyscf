@@ -158,7 +158,7 @@ void transform_cart_to_xyz(double *dm_xyz, double *dm, int *ao_loc, int *pair_lo
 #pragma omp parallel
 {
     int nao = ao_loc[nbas];
-    double cache[(LMAX*2+1)*(LMAX*2+1)*(LMAX*2+1)];
+    double cache[L_SLOTS*L_SLOTS*L_SLOTS*8];
 #pragma omp for schedule(dynamic, 4)
     for (int ijsh = 0; ijsh < nbas*nbas; ijsh++) {
         int ish = ijsh / nbas;
@@ -192,7 +192,7 @@ void transform_xyz_to_cart(double *vj, double *vj_xyz, int *ao_loc, int *pair_lo
 #pragma omp parallel
 {
     int nao = ao_loc[nbas];
-    double cache[(LMAX*2+1)*(LMAX*2+1)*(LMAX*2+1)];
+    double cache[L_SLOTS*L_SLOTS*L_SLOTS*8];
 #pragma omp for schedule(dynamic, 4)
     for (int ijsh = 0; ijsh < nbas*nbas; ijsh++) {
         int ish = ijsh / nbas;
