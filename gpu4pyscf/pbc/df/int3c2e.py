@@ -31,7 +31,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
-from gpu4pyscf.pbc.gto.cell import extract_pgto_params
+from gpu4pyscf.gto.mole import extract_pgto_params
 from gpu4pyscf.pbc.df.ft_ao import libpbc, init_constant
 
 __all__ = [

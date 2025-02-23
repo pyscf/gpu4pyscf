@@ -35,7 +35,7 @@ from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import (
     g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
-from gpu4pyscf.pbc.gto.cell import extract_pgto_params
+from gpu4pyscf.gto.mole import extract_pgto_params
 from gpu4pyscf.__config__ import props as gpu_specs
 
 __all__ = [

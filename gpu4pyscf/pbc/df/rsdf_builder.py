@@ -35,7 +35,7 @@ from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.gto.cell import extract_pgto_params
+from gpu4pyscf.gto.mole import extract_pgto_params
 from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, estimate_rcut
 
 OMEGA_MIN = 0.3

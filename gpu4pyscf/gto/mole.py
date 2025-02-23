@@ -15,6 +15,7 @@
 
 import functools
 import numpy as np
+import cupy as cp
 import scipy.linalg
 from pyscf import gto
 from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
@@ -22,6 +23,11 @@ from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
 from gpu4pyscf.lib import logger
 
 PTR_BAS_COORD = 7
+
+@functools.lru_cache(20)
+def cart2sph_by_l(l, normalized='sp'):
+    c2s = gto.mole.cart2sph(l, normalized='sp')
+    return cp.asarray(c2s, order='C')
 
 @functools.lru_cache(20)
 def get_cart2sph(lmax=12):
@@ -257,3 +263,37 @@ def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size, align=1):
     uniq_l_ctr = np.vstack(_l_ctrs)
     l_ctr_counts = np.hstack(_l_ctr_counts)
     return uniq_l_ctr, l_ctr_counts
+
+# This function is only available in pyscf-2.8 or later
+def extract_pgto_params(mol, op='diffused'):
+    '''A helper function to extract exponents and contraction coefficients for
+    estimate_xxx function
+    '''
+    es = []
+    cs = []
+    if op == 'diffused':
+        precision = 1e-8
+        for i in range(mol.nbas):
+            e = mol.bas_exp(i)
+            c = abs(mol._libcint_ctr_coeff(i)).max(axis=1)
+            l = mol.bas_angular(i)
+            # A quick estimation for the radius that each primitive GTO vanishes
+            r2 = np.log(c**2 / precision * 10**l) / e
+            idx = r2.argmax()
+            es.append(e[idx])
+            cs.append(c[idx].max())
+    elif op == 'compact':
+        precision = 1e-8
+        for i in range(mol.nbas):
+            e = mol.bas_exp(i)
+            c = abs(mol._libcint_ctr_coeff(i)).max(axis=1)
+            l = mol.bas_angular(i)
+            # A quick estimation for the resolution of planewaves that each
+            # primitive GTO requires
+            ke = np.log(c**2 / precision * 50**l) * e
+            idx = ke.argmax()
+            es.append(e[idx])
+            cs.append(c[idx].max())
+    else:
+        raise RuntimeError(f'Unsupported operation {op}')
+    return np.array(es), np.array(cs)
