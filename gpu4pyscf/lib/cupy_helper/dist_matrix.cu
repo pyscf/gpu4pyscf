@@ -18,6 +18,12 @@
 #include <stdio.h>
 #define THREADS        32
 
+#include <cmath> // For std::sqrt
+
+// inline double calculatenorm3d(double x, double y, double z) {
+//     return std::sqrt(x * x + y * y + z * z);
+// }
+
 __global__
 static void _calc_distances(double *dist, const double *x, const double *y, int m, int n)
 {
@@ -30,7 +36,8 @@ static void _calc_distances(double *dist, const double *x, const double *y, int 
     double dx = x[3*i]   - y[3*j];
     double dy = x[3*i+1] - y[3*j+1];
     double dz = x[3*i+2] - y[3*j+2];
-    dist[i*n+j] = norm3d(dx, dy, dz);
+    dist[i*n+j] = std::sqrt(dx * dx + dy * dy + dz * dz);
+    // dist[i*n+j] = calculatenorm3d(dx, dy, dz);
 }
 
 extern "C" {

@@ -28,7 +28,7 @@ __attribute__((always_inline))
 static void GINTkernel_int3c2e_ip1_getjk(JKMatrix jk, double* __restrict__ gout,
                        int ish, int jsh, int ksh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     int i1 = ao_loc[ish+1] - jk.ao_offsets_i;
     int j0 = ao_loc[jsh  ] - jk.ao_offsets_j;
@@ -90,7 +90,7 @@ __attribute__((always_inline))
 static void GINTkernel_int3c2e_ip2_getjk(JKMatrix jk, double* __restrict__ gout,
                        int ish, int jsh, int ksh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     int i1 = ao_loc[ish+1] - jk.ao_offsets_i;
     int j0 = ao_loc[jsh  ] - jk.ao_offsets_j;
@@ -155,7 +155,7 @@ template <int NROOTS> __attribute__((always_inline))
 static void GINTkernel_int3c2e_getj_pass1(GINTEnvVars envs, JKMatrix jk, double* g,
                        int ish, int jsh, int ksh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     int i1 = ao_loc[ish+1] - jk.ao_offsets_i;
     int j0 = ao_loc[jsh  ] - jk.ao_offsets_j;
@@ -201,9 +201,7 @@ static void GINTkernel_int3c2e_getj_pass1(GINTEnvVars envs, JKMatrix jk, double*
                 rhoj_tmp += dm[off_dm] * s;
             }
         }
-	sycl::atomic_ref<double, sycl::memory_order::relaxed,
-			 sycl::memory_scope::device, sycl::access::address_space::global_space> ref(rhoj+k);
-	ref.fetch_add(rhoj_tmp);
+        atomicAdd(rhoj+k, rhoj_tmp);
     }
 }
 
@@ -212,7 +210,7 @@ template <int NROOTS> __attribute__((always_inline))
 static void GINTkernel_int3c2e_getj_pass2(GINTEnvVars envs, JKMatrix jk, double* g,
                        int ish, int jsh, int ksh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     int i1 = ao_loc[ish+1] - jk.ao_offsets_i;
     int j0 = ao_loc[jsh  ] - jk.ao_offsets_j;
@@ -260,9 +258,7 @@ static void GINTkernel_int3c2e_getj_pass2(GINTEnvVars envs, JKMatrix jk, double*
                 }
                 vj_tmp += rhoj[k-k0] * s;
             }
-	    sycl::atomic_ref<double, sycl::memory_order::relaxed,
-			     sycl::memory_scope::device, sycl::access::address_space::global_space> ref(vj+j+nao*i);
-	    ref.fetch_add(vj_tmp);
+        atomicAdd(vj+j+nao*i, vj_tmp);
         }
     }
 }
@@ -279,7 +275,7 @@ template <int NROOTS> __attribute__((always_inline))
 static void GINTkernel_int3c2e_ip1_getjk_direct(GINTEnvVars envs, JKMatrix jk, double* j3, double* k3, double* f, double* g,
                        int ish, int jsh, int ksh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     int i1 = ao_loc[ish+1] - jk.ao_offsets_i;
     int j0 = ao_loc[jsh  ] - jk.ao_offsets_j;
@@ -453,7 +449,7 @@ template <int NROOTS> __attribute__((always_inline))
 static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk, double* j3, double* k3, double* f, double *g,
                        int ish, int jsh, int ksh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     int i1 = ao_loc[ish+1] - jk.ao_offsets_i;
     int j0 = ao_loc[jsh  ] - jk.ao_offsets_j;
@@ -617,8 +613,8 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk, d
 }
 
 __attribute__((always_inline))
-static void write_int3c2e_ip1_jk(JKMatrix jk, double* j3, double* k3, int ish){
-    int *ao_loc = c_bpcache.ao_loc;
+static void write_int3c2e_ip1_jk(JKMatrix jk, double* j3, double* k3, int ish, sycl::nd_item<2>& item){
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     int i1 = ao_loc[ish+1] - jk.ao_offsets_i;
     double *vj = jk.vj;
@@ -639,11 +635,7 @@ static void write_int3c2e_ip1_jk(JKMatrix jk, double* j3, double* k3, int ish){
                 if(ty<4) sdata[tx][ty] += sdata[tx][ty+4]; item.barrier(sycl::access::fence_space::local_space);
                 if(ty<2) sdata[tx][ty] += sdata[tx][ty+2]; item.barrier(sycl::access::fence_space::local_space);
                 if(ty<1) sdata[tx][ty] += sdata[tx][ty+1]; item.barrier(sycl::access::fence_space::local_space);
-                if (ty == 0) {
-		    sycl::atomic_ref<double, sycl::memory_order::relaxed,
-			 sycl::memory_scope::device, sycl::access::address_space::global_space> ref(vj+i+j*nao);
-		    ref.fetch_add(sdata[tx][0]);
-		}
+                if (ty == 0) atomicAdd(vj+i+j*nao, sdata[tx][0]);
             }
         }
     }
@@ -657,19 +649,15 @@ static void write_int3c2e_ip1_jk(JKMatrix jk, double* j3, double* k3, int ish){
                 if(ty<4) sdata[tx][ty] += sdata[tx][ty+4]; item.barrier(sycl::access::fence_space::local_space);
                 if(ty<2) sdata[tx][ty] += sdata[tx][ty+2]; item.barrier(sycl::access::fence_space::local_space);
                 if(ty<1) sdata[tx][ty] += sdata[tx][ty+1]; item.barrier(sycl::access::fence_space::local_space);
-                if (ty == 0) {
-		    sycl::atomic_ref<double, sycl::memory_order::relaxed,
-			 sycl::memory_scope::device, sycl::access::address_space::global_space> ref(vk+i+j*nao);
-		    ref.fetch_add(sdata[tx][0]);
-		}
+                if (ty == 0) atomicAdd(vk+i+j*nao, sdata[tx][0]);
             }
         }
     }
 }
 
 __attribute__((always_inline))
-static void write_int3c2e_ip2_jk(JKMatrix jk, double *j3, double* k3, int ksh){
-    int *ao_loc = c_bpcache.ao_loc;
+static void write_int3c2e_ip2_jk(JKMatrix jk, double *j3, double* k3, int ksh, sycl::nd_item<2>& item){
+    int *ao_loc = c_bpcache.get().ao_loc;
     int k0 = ao_loc[ksh  ] - jk.ao_offsets_k;
     int k1 = ao_loc[ksh+1] - jk.ao_offsets_k;
     double *vj = jk.vj;
@@ -690,12 +678,7 @@ static void write_int3c2e_ip2_jk(JKMatrix jk, double *j3, double* k3, int ksh){
                 if(tx<4) sdata[tx][ty] += sdata[tx+4][ty]; item.barrier(sycl::access::fence_space::local_space);
                 if(tx<2) sdata[tx][ty] += sdata[tx+2][ty]; item.barrier(sycl::access::fence_space::local_space);
                 if(tx<1) sdata[tx][ty] += sdata[tx+1][ty]; item.barrier(sycl::access::fence_space::local_space);
-                if (tx == 0) {
-		    sycl::atomic_ref<double, sycl::memory_order::relaxed,
-			 sycl::memory_scope::device, sycl::access::address_space::global_space> ref(vj+k+j*naux);
-		    ref.fetch_add(sdata[0][ty]);
-		    atomicAdd(vj+k+j*naux, sdata[0][ty]);
-		}
+                if (tx == 0) atomicAdd(vj+k+j*naux, sdata[0][ty]);
             }
         }
     }
@@ -708,11 +691,7 @@ static void write_int3c2e_ip2_jk(JKMatrix jk, double *j3, double* k3, int ksh){
                 if(tx<4) sdata[tx][ty] += sdata[tx+4][ty]; item.barrier(sycl::access::fence_space::local_space);
                 if(tx<2) sdata[tx][ty] += sdata[tx+2][ty]; item.barrier(sycl::access::fence_space::local_space);
                 if(tx<1) sdata[tx][ty] += sdata[tx+1][ty]; item.barrier(sycl::access::fence_space::local_space);
-                if (tx == 0) {
-		    sycl::atomic_ref<double, sycl::memory_order::relaxed,
-			 sycl::memory_scope::device, sycl::access::address_space::global_space> ref(vk+k+j*naux);
-		    ref.fetch_add(sdata[0][ty]);
-		}
+                if (tx == 0) atomicAdd(vk+k+j*naux, sdata[0][ty]);
             }
         }
     }

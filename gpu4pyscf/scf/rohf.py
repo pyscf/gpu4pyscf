@@ -15,11 +15,20 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import numpy as np
-import cupy
+import numpy 
 from pyscf.scf import rohf
 from gpu4pyscf.scf import hf, uhf
-from gpu4pyscf.lib.cupy_helper import tag_array
+
+from importlib.util import find_spec
+
+has_dpctl = find_spec("dpctl")
+
+if not has_dpctl:
+    import cupy as np 
+    from gpu4pyscf.lib.cupy_helper import tag_array
+else:
+    import dpnp as np
+    from gpu4pyscf.lib.dpnp_helper import tag_array
 
 
 class ROHF(rohf.ROHF, hf.RHF):
@@ -29,12 +38,12 @@ class ROHF(rohf.ROHF, hf.RHF):
     _eigh = hf.RHF._eigh
     scf = kernel = hf.RHF.kernel
     # FIXME: Needs more tests for get_fock and get_occ
-    get_fock = hf.return_cupy_array(rohf.ROHF.get_fock)
-    get_occ = hf.return_cupy_array(rohf.ROHF.get_occ)
+    get_fock = hf.return_np_array(rohf.ROHF.get_fock)
+    get_occ = hf.return_np_array(rohf.ROHF.get_occ)
     get_hcore = hf.RHF.get_hcore
     get_ovlp = hf.RHF.get_ovlp
     get_init_guess = uhf.UHF.get_init_guess
-    make_rdm1 = hf.return_cupy_array(rohf.ROHF.make_rdm1)
+    make_rdm1 = hf.return_np_array(rohf.ROHF.make_rdm1)
     make_rdm2 = NotImplemented
     dump_chk = NotImplemented
     newton = NotImplemented
@@ -62,8 +71,8 @@ class ROHF(rohf.ROHF, hf.RHF):
         if dm_last is None or not self.direct_scf:
             if getattr(dm, 'mo_coeff', None) is not None:
                 mo_coeff = dm.mo_coeff
-                mo_occ_a = (dm.mo_occ > 0).astype(np.double)
-                mo_occ_b = (dm.mo_occ ==2).astype(np.double)
+                mo_occ_a = (dm.mo_occ > 0).astype(numpy.double)
+                mo_occ_b = (dm.mo_occ ==2).astype(numpy.double)
                 dm = tag_array(dm, mo_coeff=(mo_coeff,mo_coeff),
                                mo_occ=(mo_occ_a,mo_occ_b))
             vj, vk = self.get_jk(mol, dm, hermi)

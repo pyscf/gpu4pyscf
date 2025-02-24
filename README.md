@@ -126,3 +126,8 @@ Speedup with GPU4PySCF v0.6.0 on A100-80G over Q-Chem 6.1 on 32-cores CPU (Desit
 
 Find more benchmarks in [gpu4pyscf/benchmarks](https://github.com/pyscf/gpu4pyscf/tree/master/benchmarks)
 
+
+SYCL Contributions and Intel DPNP support 
+--------
+* Abhishek Bagusetty - @abagusetty
+* Alvaro V Mayagoitia - @alvarovm

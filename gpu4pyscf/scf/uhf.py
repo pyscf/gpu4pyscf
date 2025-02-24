@@ -16,16 +16,29 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from functools import reduce
-import numpy as np
-import cupy
+import numpy 
 from pyscf.scf import uhf
 from pyscf import lib as pyscf_lib
 from gpu4pyscf.scf.hf import _get_jk, eigh, damping, level_shift, _kernel
 from gpu4pyscf.scf import hf
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf import lib
 from gpu4pyscf.scf import diis
+
+from importlib.util import find_spec
+
+has_dpctl = find_spec("dpctl")
+
+if not has_dpctl:
+    import cupy as np
+    from gpu4pyscf.lib.cupy_helper import tag_array
+    from gpu4pyscf.lib.cupy_helper import (eigh, load_library, tag_array,
+                                       return_cupy_array, cond)
+else:
+    import dpnp as np
+    from gpu4pyscf.lib.dpnp_helper import tag_array
+    from gpu4pyscf.lib.dpnp_helper import (eigh, load_library, tag_array,
+                                       return_np_array, cond)
 
 def make_rdm1(mo_coeff, mo_occ, **kwargs):
     '''One-particle density matrix in AO representation
@@ -40,8 +53,8 @@ def make_rdm1(mo_coeff, mo_occ, **kwargs):
     '''
     mo_a = mo_coeff[0]
     mo_b = mo_coeff[1]
-    dm_a = cupy.dot(mo_a*mo_occ[0], mo_a.conj().T)
-    dm_b = cupy.dot(mo_b*mo_occ[1], mo_b.conj().T)
+    dm_a = np.dot(mo_a*mo_occ[0], mo_a.conj().T)
+    dm_b = np.dot(mo_b*mo_occ[1], mo_b.conj().T)
 # DO NOT make tag_array for DM here because the DM arrays may be modified and
 # passed to functions like get_jk, get_vxc.  These functions may take the tags
 # (mo_coeff, mo_occ) to compute the potential if tags were found in the DM
@@ -58,23 +71,23 @@ def spin_square(mo, s=1):
     mo_a, mo_b = mo
     nocc_a = mo_a.shape[1]
     nocc_b = mo_b.shape[1]
-    s = reduce(cupy.dot, (mo_a.conj().T, cupy.asarray(s), mo_b))
-    ssxy = (nocc_a+nocc_b) * .5 - cupy.einsum('ij,ij->', s.conj(), s)
+    s = reduce(np.dot, (mo_a.conj().T, np.asarray(s), mo_b))
+    ssxy = (nocc_a+nocc_b) * .5 - np.einsum('ij,ij->', s.conj(), s)
     ssz = (nocc_b-nocc_a)**2 * .25
     ss = (ssxy + ssz).real
-    s = cupy.sqrt(ss+.25) - .5
+    s = np.sqrt(ss+.25) - .5
     return ss, s*2+1
 
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
     if dm is None: dm = mf.make_rdm1()
-    if h1e is None: h1e = cupy.asarray(mf.get_hcore())
+    if h1e is None: h1e = np.asarray(mf.get_hcore())
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
-    if not isinstance(s1e, cupy.ndarray): s1e = cupy.asarray(s1e)
-    if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
-    if not isinstance(h1e, cupy.ndarray): h1e = cupy.asarray(h1e)
-    if not isinstance(vhf, cupy.ndarray): vhf = cupy.asarray(vhf)
+    if not isinstance(s1e, np.ndarray): s1e = np.asarray(s1e)
+    if not isinstance(dm, np.ndarray): dm = np.asarray(dm)
+    if not isinstance(h1e, np.ndarray): h1e = np.asarray(h1e)
+    if not isinstance(vhf, np.ndarray): vhf = np.asarray(vhf)
     f = h1e + vhf
     if f.ndim == 2:
         f = (f, f)
@@ -90,11 +103,11 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if s1e is None: s1e = mf.get_ovlp()
     if dm is None: dm = mf.make_rdm1()
 
-    if isinstance(level_shift_factor, (tuple, list, np.ndarray)):
+    if isinstance(level_shift_factor, (tuple, list, numpy.ndarray)):
         shifta, shiftb = level_shift_factor
     else:
         shifta = shiftb = level_shift_factor
-    if isinstance(damp_factor, (tuple, list, np.ndarray)):
+    if isinstance(damp_factor, (tuple, list, numpy.ndarray)):
         dampa, dampb = damp_factor
     else:
         dampa = dampb = damp_factor
@@ -118,7 +131,7 @@ def get_grad(mo_coeff, mo_occ, fock_ao):
 
     ga = mo_coeff[0][:,viridxa].conj().T.dot(fock_ao[0].dot(mo_coeff[0][:,occidxa]))
     gb = mo_coeff[1][:,viridxb].conj().T.dot(fock_ao[1].dot(mo_coeff[1][:,occidxb]))
-    return cupy.hstack((ga.ravel(), gb.ravel()))
+    return np.hstack((ga.ravel(), gb.ravel()))
 
 def energy_elec(mf, dm=None, h1e=None, vhf=None):
     '''Electronic energy of Unrestricted Hartree-Fock
@@ -131,16 +144,16 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
     if dm is None: dm = mf.make_rdm1()
     if h1e is None:
         h1e = mf.get_hcore()
-    if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
-        dm = cupy.array((dm*.5, dm*.5))
+    if isinstance(dm, np.ndarray) and dm.ndim == 2:
+        dm = np.array((dm*.5, dm*.5))
     if vhf is None:
         vhf = mf.get_veff(mf.mol, dm)
     if h1e[0].ndim < dm[0].ndim:  # get [0] because h1e and dm may not be ndarrays
         h1e = (h1e, h1e)
-    e1 = cupy.einsum('ij,ji->', h1e[0], dm[0])
-    e1+= cupy.einsum('ij,ji->', h1e[1], dm[1])
-    e_coul =(cupy.einsum('ij,ji->', vhf[0], dm[0]) +
-             cupy.einsum('ij,ji->', vhf[1], dm[1])) * .5
+    e1 = np.einsum('ij,ji->', h1e[0], dm[0])
+    e1+= np.einsum('ij,ji->', h1e[1], dm[1])
+    e_coul =(np.einsum('ij,ji->', vhf[0], dm[0]) +
+             np.einsum('ij,ji->', vhf[1], dm[1])) * .5
     e1 = e1.get()[()]
     e_coul = e_coul.get()[()]
     e_elec = (e1 + e_coul).real
@@ -193,7 +206,7 @@ class UHF(hf.SCF):
 
     make_rdm2                = NotImplemented
     energy_elec              = energy_elec
-    get_init_guess           = hf.return_cupy_array(uhf.UHF.get_init_guess)
+    get_init_guess           = hf.return_np_array(uhf.UHF.get_init_guess)
     init_guess_by_minao      = uhf.UHF.init_guess_by_minao
     init_guess_by_atom       = uhf.UHF.init_guess_by_atom
     init_guess_by_huckel     = uhf.UHF.init_guess_by_huckel
@@ -218,7 +231,7 @@ class UHF(hf.SCF):
 
     get_hcore = hf.RHF.get_hcore
     get_ovlp = hf.RHF.get_ovlp
-    get_init_guess = hf.return_cupy_array(uhf.UHF.get_init_guess)
+    get_init_guess = hf.return_np_array(uhf.UHF.get_init_guess)
     density_fit = hf.RHF.density_fit
     energy_tot = hf.RHF.energy_tot
     energy_elec = energy_elec
@@ -254,23 +267,23 @@ class UHF(hf.SCF):
     def eig(self, fock, s):
         e_a, c_a = self._eigh(fock[0], s)
         e_b, c_b = self._eigh(fock[1], s)
-        return cupy.array((e_a,e_b)), cupy.array((c_a,c_b))
+        return np.array((e_a,e_b)), np.array((c_a,c_b))
 
     def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
 
-        if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
-            dm = cupy.asarray((dm*.5,dm*.5))
+        if isinstance(dm, np.ndarray) and dm.ndim == 2:
+            dm = np.asarray((dm*.5,dm*.5))
 
         if self._eri is not None or not self.direct_scf:
-            vj, vk = self.get_jk(mol, cupy.asarray(dm), hermi)
+            vj, vk = self.get_jk(mol, np.asarray(dm), hermi)
             vhf = vj[0] + vj[1] - vk
         else:
-            ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
+            ddm = np.asarray(dm) - np.asarray(dm_last)
             vj, vk = self.get_jk(mol, ddm, hermi)
             vhf = vj[0] + vj[1] - vk
-            vhf += cupy.asarray(vhf_last)
+            vhf += np.asarray(vhf_last)
         return vhf
 
     scf = hf.scf

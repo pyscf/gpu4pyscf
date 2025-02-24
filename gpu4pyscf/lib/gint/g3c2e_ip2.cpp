@@ -16,13 +16,13 @@ void GINTfill_int3c2e_ip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffse
     int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    double* __restrict__ exp = c_bpcache.a1;
+    double* __restrict__ exp = c_bpcache.get().a1;
     double g[2*GSIZE];
     double *f = g + GSIZE;
 

@@ -333,7 +333,7 @@ int GDFTscale_ao(sycl::queue& stream, double *out, double *ket, double *wv,
 {
     sycl::range<2> threads(BLKSIZEY, BLKSIZEX);
     sycl::range<2> blocks((nao+BLKSIZEY-1)/BLKSIZEY, (ngrids+BLKSIZEX-1)/BLKSIZEX);
-    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GDFTscale_ao_kernel(out, ket, wv, ngrids, nao, nvar); });
+    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GDFTscale_ao_kernel(out, ket, wv, ngrids, nao, nvar, item); });
     return 0;
 }
 

@@ -19,7 +19,7 @@
 
 extern "C" {
 
-int async_d2h_2d(sycl::queue& stream, double *dst, int dstride, const double *src, int sstride, 
+int async_d2h_2d(sycl::queue stream, double *dst, int dstride, const double *src, int sstride, 
                 int rows, int cols)
 {
     void* host_ptr = (void *)dst;

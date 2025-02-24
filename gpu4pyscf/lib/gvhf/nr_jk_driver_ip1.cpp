@@ -125,7 +125,7 @@ static int GINTrun_tasks_ip1_jk(JKMatrix *jk,
 
 extern "C" {
 
-int GINTbuild_ip1_jk(BasisProdCache *bpcache,
+int GINTbuild_ip1_jk(sycl::queue stream, BasisProdCache *bpcache,
                      double *vj, double *vk, double *dm, int nao, int n_dm,
                      int *bins_locs_ij, int *bins_locs_kl,
                      double *bins_floor_ij, double *bins_floor_kl,
@@ -153,6 +153,7 @@ int GINTbuild_ip1_jk(BasisProdCache *bpcache,
     GINTinit_2c_gidx(idx_kl, cp_kl->l_bra, cp_kl->l_ket);
     GINTinit_4c_idx(idx4c, idx_ij, idx_kl, &envs);
     if (envs.nf > NFffff) {
+      sycl::queue q = stream;
       DEVICE_INIT(int16_t, d_idx4c, idx4c, envs.nf * 3);
       envs.idx = d_idx4c;
     } else {

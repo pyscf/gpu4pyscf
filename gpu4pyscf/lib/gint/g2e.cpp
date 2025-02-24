@@ -29,11 +29,12 @@
 template <int NROOTS> __attribute__((always_inline))
 static void GINTg0_2e_2d4d(GINTEnvVars envs, double* __restrict__ g, double norm, int ish, int jsh, int ksh, int lsh, int prim_ij, int prim_kl)
 {
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
     double aij = a12[prim_ij];
     double xij = x12[prim_ij];
     double yij = y12[prim_ij];
@@ -67,8 +68,8 @@ static void GINTg0_2e_2d4d(GINTEnvVars envs, double* __restrict__ g, double norm
     double* __restrict__ gy = g + envs.g_size;
     double* __restrict__ gz = g + envs.g_size * 2;
 
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
     double xixj, yiyj, zizj, xkxl, ykyl, zkzl;

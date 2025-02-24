@@ -19,18 +19,27 @@ import time
 import copy
 import ctypes
 import contextlib
-import numpy as np
-import cupy
+import numpy 
 import scipy.linalg
 from functools import reduce
 from pyscf import gto
 from pyscf import lib as pyscf_lib
 from pyscf.scf import hf, jk, _vhf
 from gpu4pyscf import lib
-from gpu4pyscf.lib.cupy_helper import (eigh, load_library, tag_array,
-                                       return_cupy_array, cond)
 from gpu4pyscf.scf import diis
 from gpu4pyscf.lib import logger
+from importlib.util import find_spec
+
+has_dpctl = find_spec("dpctl")
+
+if not has_dpctl:
+    import cupy as np
+    from gpu4pyscf.lib.cupy_helper import (eigh, load_library, tag_array,
+                                       return_cupy_array, cond)
+else:
+    import dpnp as np
+    from gpu4pyscf.lib.dpnp_helper import (eigh, load_library, tag_array,
+                                       return_np_array, cond)
 
 __all__ = [
     'get_jk', 'get_occ', 'get_grad', 'damping', 'level_shift', 'get_fock',
@@ -54,24 +63,24 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         omega = 0.0
     if vhfopt is None:
         vhfopt = _VHFOpt(mol, 'int2e').build()
-    out_cupy = isinstance(dm, cupy.ndarray)
-    if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
-    coeff = cupy.asarray(vhfopt.coeff)
+    out_cupy = isinstance(dm, np.ndarray)
+    if not isinstance(dm, np.ndarray): dm = np.asarray(dm)
+    coeff = np.asarray(vhfopt.coeff)
     nao, nao0 = coeff.shape
     dm0 = dm
     dms = dm0.reshape(-1,nao0,nao0)
-    dms = cupy.einsum('pi,xij,qj->xpq', coeff, dms, coeff.conj())
-    dms = cupy.asarray(dms, order='C')
+    dms = np.einsum('pi,xij,qj->xpq', coeff, dms, coeff.conj())
+    dms = np.asarray(dms, order='C')
     n_dm = dms.shape[0]
     scripts = []
     vj = vk = None
     vj_ptr = vk_ptr = pyscf_lib.c_null_ptr()
     if with_j:
-        vj = cupy.zeros(dms.shape).transpose(0, 2, 1)
+        vj = np.zeros(dms.shape).transpose(0, 2, 1)
         vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
         scripts.append('ji->s2kl')
     if with_k:
-        vk = cupy.zeros(dms.shape).transpose(0, 2, 1)
+        vk = np.zeros(dms.shape).transpose(0, 2, 1)
         vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
         if hermi == 1:
             scripts.append('jk->s2il')
@@ -81,15 +90,15 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     l_symb = pyscf_lib.param.ANGULAR
     log_qs = vhfopt.log_qs
     direct_scf_tol = vhfopt.direct_scf_tol
-    cp_idx, cp_jdx = np.tril_indices(len(vhfopt.uniq_l_ctr))
+    cp_idx, cp_jdx = numpy.tril_indices(len(vhfopt.uniq_l_ctr))
     l_ctr_shell_locs = vhfopt.l_ctr_offsets
     l_ctr_ao_locs = vhfopt.mol.ao_loc[l_ctr_shell_locs]
-    dm_ctr_cond = np.max(
+    dm_ctr_cond = numpy.max(
         [pyscf_lib.condense('absmax', x, l_ctr_ao_locs) for x in dms.get()], axis=0)
 
-    dm_shl = cupy.zeros([n_dm, l_ctr_shell_locs[-1], l_ctr_shell_locs[-1]])
+    dm_shl = np.zeros([n_dm, l_ctr_shell_locs[-1], l_ctr_shell_locs[-1]])
     assert dms.flags.c_contiguous
-    size_l = np.array([1,3,6,10,15,21,28])
+    size_l = numpy.array([1,3,6,10,15,21,28])
     l_ctr = vhfopt.uniq_l_ctr[:,0]
     r = 0
     for i, li in enumerate(l_ctr):
@@ -103,11 +112,11 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             nj_shls = (j1-j0)//size_l[lj]
             for idm in range(n_dm):
                 sub_dm = dms[idm][i0:i1,j0:j1].reshape([ni_shls, size_l[li], nj_shls, size_l[lj]])
-                dm_shl[idm, r:r+ni_shls, c:c+nj_shls] = cupy.max(cupy.abs(sub_dm), axis=[1,3])
+                dm_shl[idm, r:r+ni_shls, c:c+nj_shls] = np.max(np.abs(sub_dm), axis=[1,3])
             c += nj_shls
         r += ni_shls
-    dm_shl = cupy.max(dm_shl, axis=0)
-    dm_shl = cupy.log(dm_shl)
+    dm_shl = np.max(dm_shl, axis=0)
+    dm_shl = np.log(dm_shl)
     nshls = dm_shl.shape[1]
     if hermi != 1:
         dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
@@ -135,15 +144,15 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             if sub_dm_cond < direct_scf_tol * 1e3:
                 continue
 
-            #log_cutoff = np.log(direct_scf_tol / sub_dm_cond)
-            log_cutoff = np.log(direct_scf_tol)
-            sub_dm_cond = np.log(sub_dm_cond)
+            #log_cutoff = numpy.log(direct_scf_tol / sub_dm_cond)
+            log_cutoff = numpy.log(direct_scf_tol)
+            sub_dm_cond = numpy.log(sub_dm_cond)
 
             bins_locs_ij = vhfopt.bins[cp_ij_id]
             bins_locs_kl = vhfopt.bins[cp_kl_id]
 
-            log_q_ij = cupy.asarray(log_q_ij, dtype=np.float64)
-            log_q_kl = cupy.asarray(log_q_kl, dtype=np.float64)
+            log_q_ij = np.asarray(log_q_ij, dtype=numpy.float64)
+            log_q_kl = np.asarray(log_q_kl, dtype=numpy.float64)
 
             bins_floor_ij = vhfopt.bins_floor[cp_ij_id]
             bins_floor_kl = vhfopt.bins_floor[cp_kl_id]
@@ -181,10 +190,10 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
 
     if with_j:
         vj_ao = []
-        #vj = [cupy.einsum('pi,pq,qj->ij', coeff, x, coeff) for x in vj]
+        #vj = [np.einsum('pi,pq,qj->ij', coeff, x, coeff) for x in vj]
         for x in vj:
-            #x = cupy.einsum('pi,pq->iq', coeff, x)
-            #x = cupy.einsum('iq,qj->ij', x, coeff)
+            #x = np.einsum('pi,pq->iq', coeff, x)
+            #x = np.einsum('iq,qj->ij', x, coeff)
             x = coeff.T @ x @ coeff
             vj_ao.append(2.0*(x + x.T))
         vj = vj_ao
@@ -192,8 +201,8 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     if with_k:
         vk_ao = []
         for x in vk:
-            #x = cupy.einsum('pi,pq->iq', coeff, x)
-            #x = cupy.einsum('iq,qj->ij', x, coeff)
+            #x = np.einsum('pi,pq->iq', coeff, x)
+            #x = np.einsum('iq,qj->ij', x, coeff)
             x = coeff.T @ x @ coeff
             vk_ao.append(x + x.T)
         vk = vk_ao
@@ -208,7 +217,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
                                  dms.get(), 1, pmol._atm, pmol._bas, pmol._env,
                                  vhfopt=vhfopt, shls_excludes=shls_excludes)
         coeff = vhfopt.coeff
-        idx, idy = np.tril_indices(nao, -1)
+        idx, idy = numpy.tril_indices(nao, -1)
         if with_j and with_k:
             vj1 = vs_h[0].reshape(n_dm,nao,nao)
             vk1 = vs_h[1].reshape(n_dm,nao,nao)
@@ -219,20 +228,20 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
 
         if with_j:
             vj1[:,idy,idx] = vj1[:,idx,idy]
-            vj1 = cupy.asarray(vj1)
+            vj1 = np.asarray(vj1)
             for i, v in enumerate(vj1):
                 vj[i] += coeff.T.dot(v).dot(coeff)
         if with_k:
             if hermi:
                 vk1[:,idy,idx] = vk1[:,idx,idy]
-            vk1 = cupy.asarray(vk1)
+            vk1 = np.asarray(vk1)
             for i, v in enumerate(vk1):
                 vk[i] += coeff.T.dot(v).dot(coeff)
         cput0 = log.timer_debug1('get_jk pass 2 for l>4 basis on cpu', *cput0)
 
-    if FREE_CUPY_CACHE:
+    if FREE_CUPY_CACHE: #vama pending
         coeff = dms = None
-        cupy.get_default_memory_pool().free_all_blocks()
+        np.get_default_memory_pool().free_all_blocks()
 
     if dm0.ndim == 2:
         if with_j:
@@ -241,9 +250,9 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
             vk = vk[0]
     else:
         if with_j:
-            vj = cupy.asarray(vj).reshape(dm0.shape)
+            vj = np.asarray(vj).reshape(dm0.shape)
         if with_k:
-            vk = cupy.asarray(vk).reshape(dm0.shape)
+            vk = np.asarray(vk).reshape(dm0.shape)
     if out_cupy:
         return vj, vk
     else:
@@ -289,19 +298,19 @@ def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
 def make_rdm1(mf, mo_coeff=None, mo_occ=None, **kwargs):
     if mo_occ is None: mo_occ = mf.mo_occ
     if mo_coeff is None: mo_coeff = mf.mo_coeff
-    mo_coeff = cupy.asarray(mo_coeff)
-    mo_occ = cupy.asarray(mo_occ)
+    mo_coeff = np.asarray(mo_coeff)
+    mo_occ = np.asarray(mo_occ)
     is_occ = mo_occ > 0
     mocc = mo_coeff[:, is_occ]
-    dm = cupy.dot(mocc*mo_occ[is_occ], mocc.conj().T)
+    dm = np.dot(mocc*mo_occ[is_occ], mocc.conj().T)
     occ_coeff = mo_coeff[:, mo_occ>1.0]
     return tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
 
 def get_occ(mf, mo_energy=None, mo_coeff=None):
     if mo_energy is None: mo_energy = mf.mo_energy
-    e_idx = cupy.argsort(mo_energy)
+    e_idx = np.argsort(mo_energy)
     nmo = mo_energy.size
-    mo_occ = cupy.zeros(nmo)
+    mo_occ = np.zeros(nmo)
     nocc = mf.mol.nelectron // 2
     mo_occ[e_idx[:nocc]] = 2
     return mo_occ
@@ -312,25 +321,25 @@ def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1, vhfopt=No
         vj, vk = mf.get_jk(mol, dm, hermi)
         return vj - vk * .5
     else:
-        ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
+        ddm = np.asarray(dm) - np.asarray(dm_last)
         vj, vk = mf.get_jk(mol, ddm, hermi)
         return vj - vk * .5 + vhf_last
 
 def get_grad(mo_coeff, mo_occ, fock_ao):
     occidx = mo_occ > 0
     viridx = ~occidx
-    g = reduce(cupy.dot, (mo_coeff[:,viridx].conj().T, fock_ao,
+    g = reduce(np.dot, (mo_coeff[:,viridx].conj().T, fock_ao,
                            mo_coeff[:,occidx])) * 2
     return g.ravel()
 
 def damping(s, d, f, factor):
-    dm_vir = cupy.eye(s.shape[0]) - cupy.dot(s, d)
-    f0 = reduce(cupy.dot, (dm_vir, f, d, s))
+    dm_vir = np.eye(s.shape[0]) - np.dot(s, d)
+    f0 = reduce(np.dot, (dm_vir, f, d, s))
     f0 = (f0+f0.conj().T) * (factor/(factor+1.))
     return f - f0
 
 def level_shift(s, d, f, factor):
-    dm_vir = s - reduce(cupy.dot, (s, d, s))
+    dm_vir = s - reduce(np.dot, (s, d, s))
     return f + dm_vir * factor
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
@@ -339,10 +348,10 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if dm is None: dm = mf.make_rdm1()
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
-    if not isinstance(s1e, cupy.ndarray): s1e = cupy.asarray(s1e)
-    if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
-    if not isinstance(h1e, cupy.ndarray): h1e = cupy.asarray(h1e)
-    if not isinstance(vhf, cupy.ndarray): vhf = cupy.asarray(vhf)
+    if not isinstance(s1e, np.ndarray): s1e = np.asarray(s1e)
+    if not isinstance(dm, np.ndarray): dm = np.asarray(dm)
+    if not isinstance(h1e, np.ndarray): h1e = np.asarray(h1e)
+    if not isinstance(vhf, np.ndarray): vhf = np.asarray(vhf)
     f = h1e + vhf
     if cycle < 0 and diis is None:  # Not inside the SCF iteration
         return f
@@ -369,8 +378,8 @@ def energy_elec(self, dm=None, h1e=None, vhf=None):
     if dm is None: dm = self.make_rdm1()
     if h1e is None: h1e = self.get_hcore()
     if vhf is None: vhf = self.get_veff(self.mol, dm)
-    e1 = cupy.einsum('ij,ji->', h1e, dm).real
-    e_coul = cupy.einsum('ij,ji->', vhf, dm).real * .5
+    e1 = np.einsum('ij,ji->', h1e, dm).real
+    e_coul = np.einsum('ij,ji->', vhf, dm).real * .5
     e1 = e1.get()[()]
     e_coul = e_coul.get()[()]
     self.scf_summary['e1'] = e1
@@ -392,16 +401,16 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     if(dm0 is None):
         dm0 = mf.get_init_guess(mol, mf.init_guess)
 
-    dm = cupy.asarray(dm0, order='C')
+    dm = np.asarray(dm0, order='C')
     if hasattr(dm0, 'mo_coeff') and hasattr(dm0, 'mo_occ'):
         if dm0.ndim == 2:
-            mo_coeff = cupy.asarray(dm0.mo_coeff)
-            mo_occ = cupy.asarray(dm0.mo_occ)
-            occ_coeff = cupy.asarray(mo_coeff[:,mo_occ>0])
+            mo_coeff = np.asarray(dm0.mo_coeff)
+            mo_occ = np.asarray(dm0.mo_occ)
+            occ_coeff = np.asarray(mo_coeff[:,mo_occ>0])
             dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
 
-    h1e = cupy.asarray(mf.get_hcore(mol))
-    s1e = cupy.asarray(mf.get_ovlp(mol))
+    h1e = np.asarray(mf.get_hcore(mol))
+    s1e = np.asarray(mf.get_ovlp(mol))
     
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
@@ -437,12 +446,12 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         e_tot = mf.energy_tot(dm, h1e, vhf)
         t1 = log.timer_debug1('energy', *t1)
 
-        norm_ddm = cupy.linalg.norm(dm-dm_last)
+        norm_ddm = np.linalg.norm(dm-dm_last)
         t1 = log.timer_debug1('total', *t0)
         logger.info(mf, 'cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
                     cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
         e_diff = abs(e_tot-last_hf_e)
-        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, f))
+        norm_gorb = np.linalg.norm(mf.get_grad(mo_coeff, mo_occ, f))
         if(e_diff < conv_tol and norm_gorb < conv_tol_grad):
             scf_conv = True
             break
@@ -461,12 +470,12 @@ def _quad_moment(mf, mol=None, dm=None, unit='Debye-Ang'):
     with mol.with_common_orig((0,0,0)):
         ao_quad = mol.intor_symmetric('int1e_rr').reshape(3,3,nao,nao)
 
-    el_quad = np.einsum('xyij,ji->xy', ao_quad, dm).real
+    el_quad = numpy.einsum('xyij,ji->xy', ao_quad, dm).real
 
     # Nuclear contribution
     charges = mol.atom_charges()
     coords  = mol.atom_coords()
-    nucl_quad = np.einsum('i,ix,iy->xy', charges, coords, coords)
+    nucl_quad = numpy.einsum('i,ix,iy->xy', charges, coords, coords)
 
     mol_quad = nucl_quad - el_quad
 
@@ -491,7 +500,7 @@ def energy_tot(mf, dm=None, h1e=None, vhf=None):
             mf.scf_summary['dispersion'] = e_disp
             e_tot += e_disp
     mf.scf_summary['nuc'] = nuc.real
-    if isinstance(e_tot, cupy.ndarray):
+    if isinstance(e_tot, np.ndarray):
         e_tot = e_tot.get()
     return e_tot
 
@@ -547,7 +556,7 @@ class SCF_Scanner(pyscf_lib.SinglePointScanner):
             dm0 = None
         else:
             dm0 = None
-            if cupy.array_equal(self._last_mol_fp, mol.ao_loc):
+            if np.array_equal(self._last_mol_fp, mol.ao_loc):
                 dm0 = self.make_rdm1()
             else:
                 raise NotImplementedError
@@ -585,14 +594,14 @@ class SCF(pyscf_lib.StreamObject):
 
     def check_sanity(self):
         s1e = self.get_ovlp()
-        if isinstance(s1e, cupy.ndarray) and s1e.ndim == 2:
+        if isinstance(s1e, np.ndarray) and s1e.ndim == 2:
             c = cond(s1e)
         else:
-            c = cupy.asarray([cond(xi) for xi in s1e])
+            c = np.asarray([cond(xi) for xi in s1e])
         logger.debug(self, 'cond(S) = %s', c)
-        if cupy.max(c)*1e-17 > self.conv_tol:
+        if np.max(c)*1e-17 > self.conv_tol:
             logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
-                        'SCF may be inaccurate and hard to converge.', cupy.max(c))
+                        'SCF may be inaccurate and hard to converge.', np.max(c))
         return super().check_sanity()
 
     build                    = hf.SCF.build
@@ -678,9 +687,9 @@ class RHF(SCF):
     quad_moment = _quad_moment
     energy_tot = energy_tot
 
-    get_hcore = return_cupy_array(hf.RHF.get_hcore)
-    get_ovlp = return_cupy_array(hf.RHF.get_ovlp)
-    get_init_guess = return_cupy_array(hf.RHF.get_init_guess)
+    get_hcore = return_np_array(hf.RHF.get_hcore)
+    get_ovlp = return_np_array(hf.RHF.get_ovlp)
+    get_init_guess = return_np_array(hf.RHF.get_init_guess)
     init_direct_scf = NotImplemented
     make_rdm2 = NotImplemented
     dump_chk = NotImplemented
@@ -722,7 +731,7 @@ class _VHFOpt:
     def __init__(self, mol, intor, prescreen='CVHFnoscreen',
                  qcondname='CVHFsetnr_direct_scf', dmcondname=None):
         self.mol, self.coeff = basis_seg_contraction(mol)
-        self.coeff = cupy.asarray(self.coeff)
+        self.coeff = np.asarray(self.coeff)
         # Note mol._bas will be sorted in .build() method. VHFOpt should be
         # initialized after mol._bas updated.
         self._intor = intor
@@ -735,8 +744,8 @@ class _VHFOpt:
         cput0 = logger.init_timer(mol)
         # Sort basis according to angular momentum and contraction patterns so
         # as to group the basis functions to blocks in GPU kernel.
-        l_ctrs = mol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
-        uniq_l_ctr, _, inv_idx, l_ctr_counts = np.unique(
+        l_ctrs = mol._bas[:,[gto.ANG_OF, gto.numpy.IM_OF]]
+        uniq_l_ctr, _, inv_idx, l_ctr_counts = numpy.unique(
             l_ctrs, return_index=True, return_inverse=True, return_counts=True, axis=0)
 
         # Limit the number of AOs in each group
@@ -749,14 +758,14 @@ class _VHFOpt:
             for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
                 logger.debug(mol, '    %s : %s', l_ctr, n)
 
-        sorted_idx = np.argsort(inv_idx, kind='stable').astype(np.int32)
+        sorted_idx = numpy.argsort(inv_idx, kind='stable').astype(np.int32)
         # Sort contraction coefficients before updating self.mol
         ao_loc = mol.ao_loc_nr(cart=True)
         nao = ao_loc[-1]
         # Some addressing problems in GPU kernel code
         assert nao < 32768
-        ao_idx = np.array_split(np.arange(nao), ao_loc[1:-1])
-        ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
+        ao_idx = numpy.array_split(np.arange(nao), ao_loc[1:-1])
+        ao_idx = numpy.hstack([ao_idx[i] for i in sorted_idx])
         self.coeff = self.coeff[ao_idx]
         # Sort basis inplace
         mol._bas = mol._bas[sorted_idx]
@@ -768,7 +777,7 @@ class _VHFOpt:
 
         lmax = uniq_l_ctr[:,0].max()
         nbas_by_l = [l_ctr_counts[uniq_l_ctr[:,0]==l].sum() for l in range(lmax+1)]
-        l_slices = np.append(0, np.cumsum(nbas_by_l))
+        l_slices = numpy.append(0, np.cumsum(nbas_by_l))
         if lmax >= LMAX_ON_GPU:
             self.g_shls = l_slices[LMAX_ON_GPU:LMAX_ON_GPU+2].tolist()
         else:
@@ -786,7 +795,7 @@ class _VHFOpt:
         pair2ket = []
         bins = []
         bins_floor = []
-        l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+        l_ctr_offsets = numpy.append(0, np.cumsum(l_ctr_counts))
         for i, (p0, p1) in enumerate(zip(l_ctr_offsets[:-1], l_ctr_offsets[1:])):
             if uniq_l_ctr[i,0] > LMAX_ON_GPU:
                 # no integrals with h functions should be evaluated on GPU
@@ -794,16 +803,16 @@ class _VHFOpt:
 
             for q0, q1 in zip(l_ctr_offsets[:i], l_ctr_offsets[1:i+1]):
                 q_sub = q_cond[p0:p1,q0:q1]
-                idx = np.argwhere(q_sub > cutoff)
+                idx = numpy.argwhere(q_sub > cutoff)
                 q_sub = q_sub[idx[:,0], idx[:,1]]
-                log_q = np.log(q_sub)
+                log_q = numpy.log(q_sub)
                 log_q[log_q > 0] = 0
                 nbins = (len(log_q) + BINSIZE)//BINSIZE
                 s_index, bin_floor = _make_s_index(log_q, nbins=nbins, cutoff=cutoff)
 
                 ishs = idx[:,0]
                 jshs = idx[:,1]
-                idx = np.lexsort((ishs, jshs, s_index), axis=-1)
+                idx = numpy.lexsort((ishs, jshs, s_index), axis=-1)
                 ishs = ishs[idx]
                 jshs = jshs[idx]
                 s_index = s_index[idx]
@@ -814,23 +823,23 @@ class _VHFOpt:
                 pair2ket.append(jshs)
                 bins.append(_make_bins(s_index, nbins=nbins))
                 bins_floor.append(bin_floor)
-                log_qs.append(cupy.asarray(log_q[idx]))
+                log_qs.append(np.asarray(log_q[idx]))
 
             q_sub = q_cond[p0:p1,p0:p1]
-            idx = np.argwhere(q_sub > cutoff)
+            idx = numpy.argwhere(q_sub > cutoff)
             if not diag_block_with_triu:
                 # Drop the shell pairs in the upper triangle for diagonal blocks
                 mask = idx[:,0] >= idx[:,1]
                 idx = idx[mask,:]
 
             q_sub = q_sub[idx[:,0], idx[:,1]]
-            log_q = np.log(q_sub)
+            log_q = numpy.log(q_sub)
             log_q[log_q > 0] = 0
             nbins = (len(log_q) + BINSIZE)//BINSIZE
             s_index, bin_floor = _make_s_index(log_q, nbins=nbins, cutoff=cutoff)
             ishs = idx[:,0]
             jshs = idx[:,1]
-            idx = np.lexsort((ishs, jshs, s_index), axis=-1)
+            idx = numpy.lexsort((ishs, jshs, s_index), axis=-1)
             ishs = ishs[idx]
             jshs = jshs[idx]
             s_index = s_index[idx]
@@ -841,18 +850,18 @@ class _VHFOpt:
             pair2ket.append(jshs)
             bins.append(_make_bins(s_index, nbins=nbins))
             bins_floor.append(bin_floor)
-            log_qs.append(cupy.asarray(log_q[idx]))
+            log_qs.append(np.asarray(log_q[idx]))
 
         # TODO
         self.pair2bra = pair2bra
         self.pair2ket = pair2ket
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_offsets = l_ctr_offsets
-        self.bas_pair2shls = np.hstack(
-            pair2bra + pair2ket).astype(np.int32).reshape(2,-1)
+        self.bas_pair2shls = numpy.hstack(
+            pair2bra + pair2ket).astype(numpy.int32).reshape(2,-1)
 
-        self.bas_pairs_locs = np.append(
-            0, np.cumsum([x.size for x in pair2bra])).astype(np.int32)
+        self.bas_pairs_locs = numpy.append(
+            0, numpy.cumsum([x.size for x in pair2bra])).astype(np.int32)
         self.bins = bins
         self.bins_floor = bins_floor
         self.log_qs = log_qs
@@ -920,35 +929,35 @@ def basis_seg_contraction(mol, allow_replica=False):
                 nctr = shell[gto.NCTR_OF]
                 if nctr == 1:
                     bas_of_ia.append(shell)
-                    coeff.append(np.eye(nf))
+                    coeff.append(numpy.eye(nf))
                     continue
                 # Only basis with nctr > 1 needs to be decontracted
-                nprim = shell[gto.NPRIM_OF]
+                numpy.im = shell[gto.NPRIM_OF]
                 pcoeff = shell[gto.PTR_COEFF]
                 if allow_replica:
-                    coeff.extend([np.eye(nf)] * nctr)
-                    bs = np.repeat(shell[np.newaxis], nctr, axis=0)
+                    coeff.extend([numpy.eye(nf)] * nctr)
+                    bs = numpy.repeat(shell[np.newaxis], nctr, axis=0)
                     bs[:,gto.NCTR_OF] = 1
-                    bs[:,gto.PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr, nprim)
+                    bs[:,gto.PTR_COEFF] = numpy.arange(pcoeff, pcoeff+nprim*nctr, nprim)
                     bas_of_ia.append(bs)
                 else:
                     pexp = shell[gto.PTR_EXP]
-                    exps = _env[pexp:pexp+nprim]
+                    exps = _env[pexp:pexp+numpy.im]
                     norm = gto.gto_norm(l, exps)
                     # remove normalization from contraction coefficients
-                    c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
-                    c = np.einsum('ip,p,ef->iepf', c, 1/norm, np.eye(nf))
-                    coeff.append(c.reshape(nf*nctr, nf*nprim).T)
+                    c = _env[pcoeff:pcoeff+numpy.im*nctr].reshape(nctr,nprim)
+                    c = numpy.einsum('ip,p,ef->iepf', c, 1/norm, np.eye(nf))
+                    coeff.append(c.reshape(nf*nctr, nf*numpy.im).T)
 
-                    _env[pcoeff:pcoeff+nprim] = norm
-                    bs = np.repeat(shell[np.newaxis], nprim, axis=0)
-                    bs[:,gto.NPRIM_OF] = 1
+                    _env[pcoeff:pcoeff+numpy.im] = norm
+                    bs = numpy.repeat(shell[np.newaxis], nprim, axis=0)
+                    bs[:,gto.numpy.IM_OF] = 1
                     bs[:,gto.NCTR_OF] = 1
-                    bs[:,gto.PTR_EXP] = np.arange(pexp, pexp+nprim)
-                    bs[:,gto.PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim)
+                    bs[:,gto.PTR_EXP] = numpy.arange(pexp, pexp+nprim)
+                    bs[:,gto.PTR_COEFF] = numpy.arange(pcoeff, pcoeff+nprim)
                     bas_of_ia.append(bs)
 
-            bas_of_ia = np.vstack(bas_of_ia)
+            bas_of_ia = numpy.vstack(bas_of_ia)
             bas_templates[key] = (bas_of_ia, coeff)
 
         _bas.append(bas_of_ia)
@@ -956,7 +965,7 @@ def basis_seg_contraction(mol, allow_replica=False):
 
     pmol = copy.copy(mol)
     pmol.cart = True
-    pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
+    pmol._bas = numpy.asarray(np.vstack(_bas), dtype=np.int32)
     pmol._env = _env
     contr_coeff = scipy.linalg.block_diag(*contr_coeff)
 
@@ -966,31 +975,31 @@ def basis_seg_contraction(mol, allow_replica=False):
 
 def _make_s_index_offsets(log_q, nbins=10, cutoff=1e-12):
     '''Divides the shell pairs to "nbins" collections down to "cutoff"'''
-    scale = nbins / np.log(min(cutoff, .1))
-    s_index = np.floor(scale * log_q).astype(np.int32)
-    bins = np.bincount(s_index)
+    scale = nbins / numpy.log(min(cutoff, .1))
+    s_index = numpy.floor(scale * log_q).astype(np.int32)
+    bins = numpy.bincount(s_index)
     if bins.size < nbins:
-        bins = np.append(bins, np.zeros(nbins-bins.size, dtype=np.int32))
+        bins = numpy.append(bins, np.zeros(nbins-bins.size, dtype=np.int32))
     else:
         bins = bins[:nbins]
     assert bins.max() < 65536 * 8
-    return np.append(0, np.cumsum(bins)).astype(np.int32)
+    return numpy.append(0, np.cumsum(bins)).astype(np.int32)
 
 def _make_s_index(log_q, nbins=10, cutoff=1e-12):
     '''Divides the shell pairs to "nbins" collections down to "cutoff"'''
-    scale = nbins / np.log(min(cutoff, .1))
-    s_index = np.floor(scale * log_q).astype(np.int32)
-    bins_floor = np.arange(nbins) / scale
+    scale = nbins / numpy.log(min(cutoff, .1))
+    s_index = numpy.floor(scale * log_q).astype(np.int32)
+    bins_floor = numpy.arange(nbins) / scale
     return s_index, bins_floor
 
 def _make_bins(s_index, nbins=10):
-    bins = np.bincount(s_index)
+    bins = numpy.bincount(s_index)
     if bins.size < nbins:
-        bins = np.append(bins, np.zeros(nbins-bins.size, dtype=np.int32))
+        bins = numpy.append(bins, np.zeros(nbins-bins.size, dtype=np.int32))
     else:
         bins = bins[:nbins]
     assert bins.max() < 65536 * 8
-    return np.append(0, np.cumsum(bins)).astype(np.int32)
+    return numpy.append(0, np.cumsum(bins)).astype(np.int32)
 
 def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size):
     '''Splits l_ctr patterns into small groups with group_size the maximum
@@ -1015,6 +1024,6 @@ def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size):
         if rests > 0:
             _l_ctrs.append(l_ctr)
             _l_ctr_counts.append(rests)
-    uniq_l_ctr = np.vstack(_l_ctrs)
-    l_ctr_counts = np.hstack(_l_ctr_counts)
+    uniq_l_ctr = numpy.vstack(_l_ctrs)
+    l_ctr_counts = numpy.hstack(_l_ctr_counts)
     return uniq_l_ctr, l_ctr_counts

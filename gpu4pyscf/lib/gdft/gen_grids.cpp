@@ -56,7 +56,7 @@ void GDFTgen_grid_kernel(double *pbecke, const double *coords, const double *atm
             dx = xg - xi;
             dy = yg - yi;
             dz = zg - zi;
-            dig = norm3d(dx, dy, dz);
+            dig = std::sqrt(dx * dx + dy * dy + dz * dz);
         }
         for (int j = 0; j < natm; j+=static_cast<int>( thread_block.get_local_range(0) )){
             int atom_idx = j + tx;
@@ -69,7 +69,8 @@ void GDFTgen_grid_kernel(double *pbecke, const double *coords, const double *atm
                 dx = xi - xj_t;
                 dy = yi - yj_t;
                 dz = zi - zj_t;
-                double dij = rnorm3d(dx, dy, dz);
+                // double dij = rnorm3d(dx, dy, dz);
+                double dij = std::sqrt(dx * dx + dy * dy + dz * dz);
 
                 // distance between atom i and atom j
                 dij_smem[tx] = dij;
@@ -80,13 +81,14 @@ void GDFTgen_grid_kernel(double *pbecke, const double *coords, const double *atm
             }
             item.barrier(sycl::access::fence_space::local_space);
 
-            for (int l = 0, M = min(NATOM_PER_BLOCK, natm-j); l < M; ++l){
+            for (int l = 0, M = std::min(NATOM_PER_BLOCK, natm-j); l < M; ++l){
                 int atom_j = j + l;
                 // distance between grids and atom j
                 dx = xg - xj[l];
                 dy = yg - yj[l];
                 dz = zg - zj[l];
-                double djg = norm3d(dx, dy, dz);
+                // double djg = norm3d(dx, dy, dz);
+                double djg = std::sqrt(dx * dx + dy * dy + dz * dz);
 
                 double dij = dij_smem[l];
                 double aij = a_smem[l];
@@ -123,7 +125,7 @@ void GDFTgroup_grids_kernel(int* group_ids, const double* atom_coords, const dou
 
     double r2min = 1e30;
     int idx = 0;
-    const int tx = static_cast<int>( item.get_lcoal_id(0) );
+    const int tx = static_cast<int>( item.get_local_id(0) );
     sycl::group thread_block = item.get_group();
     using tile_t             = double[NATOM_PER_BLOCK];
     tile_t& x_atom = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
@@ -139,7 +141,7 @@ void GDFTgroup_grids_kernel(int* group_ids, const double* atom_coords, const dou
         }
         item.barrier(sycl::access::fence_space::local_space);
 
-        for (int l = 0, M = min(NATOM_PER_BLOCK, natm-j); l < M; ++l){
+        for (int l = 0, M = std::min(NATOM_PER_BLOCK, natm-j); l < M; ++l){
             int atom_j = j + l;
             double xa = x_atom[l] - xg;
             double ya = y_atom[l] - yg;

@@ -21,7 +21,7 @@
 #include <math.h>
 #include <assert.h>
 #include "g2e.h"
-#include "cint2e.hpp"
+// #include "cint2e.hpp"
 
 template <int NROOTS> __attribute__((always_inline))
 static void GINTgout3c2e_ip(GINTEnvVars envs, double* __restrict__ gout, double* __restrict__ f, double* __restrict__ g)
@@ -181,7 +181,7 @@ static void GINTgout3c2e(GINTEnvVars envs, double* __restrict__ gout, double* __
 template <int NROOTS> __attribute__((always_inline))
 static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, double* g0, double* g1, double* g2, double* g3, int ish, int jsh, int ksh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     size_t jstride = eri.stride_j;
     size_t kstride = eri.stride_k;
     size_t lstride = eri.stride_l;
@@ -267,7 +267,7 @@ static void GINTwrite_int3c2e_ipip_direct(GINTEnvVars envs, ERITensor eri, doubl
 template <int NROOTS> __attribute__((always_inline))
 static void GINTwrite_int3c2e_ip_direct(GINTEnvVars envs, ERITensor eri, double* f, double* g, int ish, int jsh, int ksh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     size_t jstride = eri.stride_j;
     size_t kstride = eri.stride_k;
     size_t lstride = eri.stride_l;
@@ -320,7 +320,7 @@ static void GINTwrite_int3c2e_ip_direct(GINTEnvVars envs, ERITensor eri, double*
 template <int NROOTS> __attribute__((always_inline))
 static void GINTmemset_int3c2e(GINTEnvVars envs, ERITensor eri, int ish, int jsh, int ksh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     size_t jstride = eri.stride_j;
     size_t kstride = eri.stride_k;
     int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
@@ -346,7 +346,7 @@ static void GINTmemset_int3c2e(GINTEnvVars envs, ERITensor eri, int ish, int jsh
 template <int NROOTS> __attribute__((always_inline))
 static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, double* g, int ish, int jsh, int ksh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     size_t jstride = eri.stride_j;
     size_t kstride = eri.stride_k;
     int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
@@ -389,7 +389,7 @@ __attribute__((always_inline))
 static void GINTwrite_int3c2e(ERITensor eri, double* __restrict__ gout,
                        int ish, int jsh, int ksh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     size_t jstride = eri.stride_j;
     size_t kstride = eri.stride_k;
     size_t lstride = eri.stride_l;
@@ -418,7 +418,7 @@ __attribute__((always_inline))
 static void GINTwrite_int3c2e_ip(ERITensor eri, double* __restrict__ gout,
                        int ish, int jsh, int ksh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     size_t jstride = eri.stride_j;
     size_t kstride = eri.stride_k;
     size_t lstride = eri.stride_l;
@@ -458,7 +458,7 @@ __attribute__((always_inline))
 static void GINTwrite_int3c2e_ipip(ERITensor eri, double* __restrict__ gout,
                        int ish, int jsh, int ksh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     size_t jstride = eri.stride_j;
     size_t kstride = eri.stride_k;
     size_t lstride = eri.stride_l;

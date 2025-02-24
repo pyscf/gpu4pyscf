@@ -14,8 +14,9 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <cuda_runtime.h>
+// #include <cuda_runtime.h>
 #include <stdio.h>
+#include <sycl/sycl.hpp>
 
 #define THREADS        32
 #define SQRT2_PI       0.7978845608028654
@@ -37,7 +38,7 @@ static void _pcm_d_s(double *matrix_d, double *matrix_s,
     // calculate xi
     double ei = charge_exp[i];
     double ej = charge_exp[j];
-    double xi_ij = ei * ej / sqrt(ei*ei + ej*ej);
+    double xi_ij = ei * ej / sycl::sqrt(ei*ei + ej*ej);
 
     // calculate r
     double xi = coords[3*i];
@@ -49,11 +50,12 @@ static void _pcm_d_s(double *matrix_d, double *matrix_s,
     double dx = xi - xj;
     double dy = yi - yj;
     double dz = zi - zj;
-    double rij = norm3d(dx, dy, dz);
+    // double rij = norm3d(dx, dy, dz);
+    double rij = sycl::sqrt(dx * dx + dy * dy + dz * dz);
 
     double xi_r_ij = xi_ij * rij;
     if (i == j) rij = 1.0;
-    double s = erf(xi_r_ij) / rij;
+    double s = sycl::erf(xi_r_ij) / rij;
     if (i == j) s = charge_exp[i] * SQRT2_PI / switch_fun[i];
     matrix_s[i*n+j] = s;
 
@@ -70,7 +72,7 @@ static void _pcm_d_s(double *matrix_d, double *matrix_s,
         double rij2 = rij*rij;
         double rij3 = rij2*rij;
         double xi_r2_ij = xi_r_ij * xi_r_ij;
-        double d = s * nrij / rij2 - 2.0*xi_r_ij/SQRT_PI*exp(-xi_r2_ij)*nrij/rij3;
+        double d = s * nrij / rij2 - 2.0*xi_r_ij/SQRT_PI*sycl::exp(-xi_r2_ij)*nrij/rij3;
         if (i == j) d = -charge_exp[i] * SQRT2_PI / (2.0*r_vdw[i]);
         matrix_d[i*n+j] = d;
     }
@@ -91,20 +93,21 @@ static void _pcm_dD_dS(double *matrix_dd, double *matrix_ds,
     // calculate xi
     double ei = charge_exp[i];
     double ej = charge_exp[j];
-    double xi_ij = ei * ej / sqrt(ei*ei + ej*ej);
+    double xi_ij = ei * ej / sycl::sqrt(ei*ei + ej*ej);
 
     // calculate r
     double dx = coords[3*i]   - coords[3*j];
     double dy = coords[3*i+1] - coords[3*j+1];
     double dz = coords[3*i+2] - coords[3*j+2];
-    double rij = norm3d(dx, dy, dz);
+    // double rij = norm3d(dx, dy, dz);
+    double rij = sycl::sqrt(dx * dx + dy * dy + dz * dz);
 
     double xi_r_ij = xi_ij * rij;
     double xi_r2_ij = xi_r_ij * xi_r_ij;
     if (i == j) rij = 1.0;
     double rij2 = rij*rij;
 
-    double dS_dr = -(erf(xi_r_ij) -  2.0*xi_r_ij/ SQRT_PI * exp(-xi_r2_ij)) / rij2;
+    double dS_dr = -(sycl::erf(xi_r_ij) -  2.0*xi_r_ij/ SQRT_PI * sycl::exp(-xi_r2_ij)) / rij2;
     if (i == j) dS_dr = 0.0;
     double dx_rij = dx / rij;
     double dy_rij = dy / rij;
@@ -120,7 +123,7 @@ static void _pcm_dD_dS(double *matrix_dd, double *matrix_ds,
         double nzj = norm_vec[3*j+2];
         double nj_rij = dx*nxj + dy*nyj + dz*nzj;
         double rij3 = rij2*rij;
-        double dD_dri = 4.0*xi_r2_ij*xi_ij / SQRT_PI*exp(-xi_r2_ij)*nj_rij/rij3;
+        double dD_dri = 4.0*xi_r2_ij*xi_ij / SQRT_PI*sycl::exp(-xi_r2_ij)*nj_rij/rij3;
         if (i == j) dD_dri = 0.0;
 
         matrix_dd[3*(i*n+j)]   = dD_dri*dx_rij + dS_dr*(-nxj/rij + 3.0*nj_rij/rij2*dx_rij);
@@ -130,7 +133,7 @@ static void _pcm_dD_dS(double *matrix_dd, double *matrix_ds,
 }
 
 extern "C" {
-int pcm_d_s(sycl::queue& stream, double *matrix_d, double *matrix_s,
+int pcm_d_s(sycl::queue stream, double *matrix_d, double *matrix_s,
                     const double *coords, const double *norm_vec, const double *r_vdw,
                     const double *charge_exp, const double *switch_fun,
                     int n)
@@ -139,7 +142,7 @@ int pcm_d_s(sycl::queue& stream, double *matrix_d, double *matrix_s,
     int ntiley = (n + THREADS - 1) / THREADS;
     sycl::range<2> threads(THREADS, THREADS);
     sycl::range<2> blocks(ntiley, ntilex);
-    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _pcm_d_s<<<blocks, threads, 0, stream>>>(matrix_d, matrix_s, coords, norm_vec, r_vdw, charge_exp, switch_fun, n, item); });
+    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _pcm_d_s(matrix_d, matrix_s, coords, norm_vec, r_vdw, charge_exp, switch_fun, n, item); });
     // cudaError_t err = cudaGetLastError();
     // if (err != cudaSuccess) {
     //     return 1;
@@ -147,7 +150,7 @@ int pcm_d_s(sycl::queue& stream, double *matrix_d, double *matrix_s,
     return 0;
 }
 
-int pcm_dd_ds(sycl::queue& stream, double *matrix_dD, double *matrix_dS,
+int pcm_dd_ds(sycl::queue stream, double *matrix_dD, double *matrix_dS,
                     const double *coords, const double *norm_vec, const double *r_vdw,
                     const double *charge_exp, const double *switch_fun,
                     int n)

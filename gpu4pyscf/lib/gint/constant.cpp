@@ -16,9 +16,10 @@
 
 #include "gint.h"
 #include "sycl_device.hpp"
+#include "constant.hpp"
 
 //SYCL_EXTERNAL sycl_device_global< GINTEnvVars c_envs;
-SYCL_EXTERNAL sycl_device_global<BasisProdCache> c_bpcache;
-SYCL_EXTERNAL sycl_device_global<int16_t[NFffff*3]> c_idx4c;
-SYCL_EXTERNAL sycl_device_global<int[TOT_NF*3]> c_idx; 
-SYCL_EXTERNAL sycl_device_global<int[GPU_LMAX+1]> c_l_locs;
+// SYCL_EXTERNAL sycl_device_global<BasisProdCache> c_bpcache;
+// SYCL_EXTERNAL sycl_device_global<int16_t[NFffff*3]> c_idx4c;
+// SYCL_EXTERNAL sycl_device_global<int[TOT_NF*3]> c_idx; 
+// SYCL_EXTERNAL sycl_device_global<int[GPU_LMAX+1]> c_l_locs;

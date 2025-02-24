@@ -19,20 +19,41 @@
 
 #include "sycl_device.hpp"
 
-template <typename T>
-void MALLOC(void*& var, size_t size) {
-    var = sycl::malloc_device<T>(size, *(sycl_get_queue()));
-}
+// sycl::queue q;
 
-void FREE(void* ptr) {
-    sycl::free(ptr, *sycl_get_queue());
-}
-void MEMSET(void* addr, int value, size_t size) {
-    sycl_get_queue()->memset(addr, value, size).wait();
-}
-
+// Function to check SYCL errors
 template <typename T>
-void DEVICE_INIT(void*& dst, const void* src, size_t size) {
-    MALLOC<T>(dst, size);
-    sycl_get_queue()->memcpy(dst, src, sizeof(T) * (size)).wait();
+void check(T result, char const *const func, const char *const file, int const line) {
+    if (result) {
+        std::cerr << "SYCL error at " << file << ":" << line << " code=" << result << " \"" << func << "\" \n";
+        std::exit(EXIT_FAILURE);
+    }
 }
+#define checkSyclErrors(val) check((val), #val, __FILE__, __LINE__)
+
+
+#define MALLOC(type, var, size) \
+    type *var = sycl::malloc_device<type>(size, q); \
+    if (var == nullptr) { \
+        std::cerr << "Memory allocation failed for " #var " at " __FILE__ ":" << __LINE__ << std::endl; \
+        std::exit(EXIT_FAILURE); \
+    }
+    
+#define FREE(var) \
+    sycl::free(var, *(sycl_get_queue()))
+
+#define MEMSET(addr, val, size) \
+    { \
+        q.submit([&](sycl::handler& cgh) { \
+            cgh.memset(addr, val, size); \
+        }).wait(); \
+    }
+
+#define DEVICE_INIT(type, dst, src, size) \
+    MALLOC(type, dst, size); \
+    { \
+        q.submit([&](sycl::handler& cgh) { \
+            cgh.memcpy(dst, src, sizeof(type) * (size)); \
+        }).wait(); \
+    }
+

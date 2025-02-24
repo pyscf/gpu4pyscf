@@ -16,12 +16,12 @@
 
 
 template <int NROOTS, int GSIZE> __attribute__((always_inline))
-void GINTint3c2e_pass1_j_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
+void GINTint3c2e_pass1_j_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets, sycl::nd_item<2>& item)
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    int task_ij = static_cast<int>(item.get_global_id(1));
+    int task_kl = static_cast<int>(item.get_global_id(0));
 
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
@@ -33,8 +33,8 @@ void GINTint3c2e_pass1_j_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets 
     int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];

@@ -83,7 +83,8 @@ void GINTinit_basis_prod(BasisProdCache **pbp, double diag_fac, int *ao_loc,
     bpcache->aexyz = aexyz;
     bpcache->bas_pair2shls = bas_pair2shls;
 
-    // initialize ao_loc on GPU
+    sycl::queue q = *sycl_get_queue();
+    // // initialize ao_loc on GPU
     DEVICE_INIT(int, d_ao_loc, ao_loc, nbas+1);
     bpcache->ao_loc = d_ao_loc;
 
@@ -95,7 +96,7 @@ void GINTinit_basis_prod(BasisProdCache **pbp, double diag_fac, int *ao_loc,
     bpcache->bas_coords = d_bas_coords;
     free(bas_coords);
 
-    // initialize pair data on GPU memory
+    // // initialize pair data on GPU memory
     DEVICE_INIT(double, d_aexyz, aexyz, n_primitive_pairs * 7);
     DEVICE_INIT(int, d_bas_pair2shls, bas_pair2shls, n_bas_pairs * 2);
     bpcache->a12 = d_aexyz;

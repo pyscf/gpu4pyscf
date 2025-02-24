@@ -22,13 +22,21 @@ DIIS
 """
 
 from functools import reduce
-import numpy
-import cupy
 import scipy.linalg
 import scipy.optimize
 import pyscf.scf.diis as cpu_diis
 import gpu4pyscf.lib as lib
 from gpu4pyscf.lib import logger
+
+from importlib.util import find_spec
+
+has_dpctl = find_spec("dpctl")
+
+if not has_dpctl:
+    import cupy as np
+else:
+    import dpnp as np
+
 
 DEBUG = False
 
@@ -64,11 +72,11 @@ SCFDIIS = SCF_DIIS = DIIS = CDIIS
 
 def get_err_vec(s, d, f):
     '''error vector = SDF - FDS'''
-    if isinstance(f, cupy.ndarray) and f.ndim == 2:
-        sdf = reduce(cupy.dot, (s,d,f))
+    if isinstance(f, np.ndarray) and f.ndim == 2:
+        sdf = reduce(np.dot, (s,d,f))
         errvec = (sdf.conj().T - sdf).ravel()
     elif f.ndim == s.ndim+1 and f.shape[0] == 2:  # for UHF
-        errvec = cupy.hstack([
+        errvec = np.hstack([
             get_err_vec(s, d[0], f[0]).ravel(),
             get_err_vec(s, d[1], f[1]).ravel()])
     else:

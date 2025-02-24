@@ -69,17 +69,17 @@ void _unpack_sparse(const double *cderi_sparse, const long *row, const long *col
 }
 
 extern "C" {
-int unpack_tril(sycl::queue& stream, const double *eri_tril, double *eri, int nao, int blk_size){
+int unpack_tril(sycl::queue stream, const double *eri_tril, double *eri, int nao, int blk_size){
     sycl::range<3> threads(1, THREADS, THREADS);
-    int nx = (nao + item.get_local_id(2) - 1) / item.get_local_id(2);
-    int ny = (nao + item.get_local_id(1) - 1) / item.get_local_id(1);
+    int nx = (nao + threads[2] - 1) / threads[2];
+    int ny = (nao + threads[1] - 1) / threads[1];
     sycl::range<3> blocks(blk_size, ny, nx);
     stream.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { _unpack_tril(eri_tril, eri, nao, item); });
     stream.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { _unpack_triu(eri_tril, eri, nao, item); });
     return 0;
 }
 
-int unpack_sparse(sycl::queue& stream, const double *cderi_sparse, const long *row, const long *col,
+int unpack_sparse(sycl::queue stream, const double *cderi_sparse, const long *row, const long *col,
                 double *eri, int nao, int nij, int naux, int p0, int p1){
     int blockx = (nij + THREADS - 1) / THREADS;
     int blocky = (p1 - p0 + THREADS - 1) / THREADS;

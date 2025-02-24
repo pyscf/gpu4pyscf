@@ -16,9 +16,17 @@
 
 import os
 import numpy as np
-import cupy
+# import cupy
 import functools
 from pyscf import gto
+
+# from importlib.util import find_spec
+# has_dpctl = find_spec("dpctl")
+# if not has_dpctl:
+#     import cupy as gpunp
+# else:
+#     import dpctl
+#     import dpnp as gpunp
 
 @functools.lru_cache(20)
 def get_cart2sph(lmax=12):

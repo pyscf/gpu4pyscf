@@ -13,8 +13,9 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-
+#include <cstdint>
 #include <sycl/sycl.hpp>
+#include <iostream>
 #include <stdio.h>
 
 #define THREADS 128
@@ -272,7 +273,7 @@ static void _cart2sph_ang7(double *cart, double *sph, int stride, int count, syc
 }
 
 extern "C" {
-int cart2sph(sycl::queue& stream, double *cart_gto, double *sph_gto, int stride, int count, int ang)
+int cart2sph(sycl::queue stream, double *cart_gto, double *sph_gto, int stride, int count, int ang)
 {
     sycl::range<1> threads(THREADS);
     sycl::range<1> blocks((count + THREADS - 1)/THREADS);

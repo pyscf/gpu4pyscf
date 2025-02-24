@@ -17,8 +17,8 @@ void GINTfill_int3c2e_ipip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOff
     int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -28,7 +28,7 @@ void GINTfill_int3c2e_ipip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOff
     double *g1 = g0 + GSIZE;
     double *g2 = g1 + GSIZE;
     double *g3 = g2 + GSIZE;
-    double* __restrict__ exp_bra = c_bpcache.a1;
+    double* __restrict__ exp_bra = c_bpcache.get().a1;
     int ij, kl;
     int as_ish, as_jsh, as_ksh, as_lsh;
     if (envs.ibase) {

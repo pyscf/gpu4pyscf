@@ -20,11 +20,15 @@
 #define COUNT_BLOCK     80
 
 __attribute__((always_inline))
-static void _take_last2d(double *a, const double *b, int *indices, int n. sycl::nd_item<3>& item)
+static void _take_last2d(double *a, const double *b, int *indices, int n, sycl::nd_item<3>& item)
 {
-    size_t i = item.get_group(0);
-    int j = static_cast<int>(item.get_global_id(2));
-    int k = static_cast<int>(item.get_global_id(1));
+    size_t i = item.get_group(2);
+    // size_t i = item.get_group(0);
+    // int j = static_cast<int>(item.get_global_id(2));
+    // int k = static_cast<int>(item.get_global_id(1));
+    int j = item.get_group(0) * item.get_local_range(0) + item.get_local_id(0);
+    int k = item.get_group(1) * item.get_local_range(1) + item.get_local_id(1);
+
     if (j >= n || k >= n) {
         return;
     }
@@ -37,11 +41,11 @@ static void _take_last2d(double *a, const double *b, int *indices, int n. sycl::
 }
 
 __attribute__((always_inline))
-static void _takebak(double *out, double *a, int *indices,
-                     int count, int n_o, int n_a, sycl::nd_item<2>& item)
+static void _takebak(double *out, double *a, int *indices, int count, int n_o, int n_a, sycl::nd_item<2>& item)
 {
-    int i0 = item.get_group(0) * COUNT_BLOCK;
-    int j = static_cast<int>(item.get_global_id(1));
+    int i0 = item.get_group(1) * COUNT_BLOCK;
+    int j = item.get_group(0) * item.get_local_range(0) + item.get_local_id(0);
+    // int j = static_cast<int>(item.get_global_id(1));
     if (j >= n_a) {
         return;
     }
@@ -58,7 +62,7 @@ static void _takebak(double *out, double *a, int *indices,
 }
 
 extern "C" {
-int take_last2d(sycl::queue& stream, double *a, const double *b, int *indices, int blk_size, int n)
+int take_last2d(sycl::queue stream, double *a, const double *b, int *indices, int blk_size, int n)
 {
     // reorder j and k in a[i,j,k] with indicies
     int ntile = (n + THREADS - 1) / THREADS;
@@ -68,16 +72,18 @@ int take_last2d(sycl::queue& stream, double *a, const double *b, int *indices, i
     return 0;
 }
 
-int takebak(sycl::queue& stream, double *out, double *a_h, int *indices,
-            int count, int n_o, int n_a)
+int takebak(sycl::queue stream, double *out, double *a_h, int *indices, int count, int n_o, int n_a)
 {
-    double *a_d = a_h;
+    // double *a_d = a_h;
+    double *a_d = sycl::malloc_device<double>(n_o * n_a, stream);
+    stream.memcpy(a_d, a_h, sizeof(double) * n_o * n_a).wait();
 
     int ntile = (n_a + THREADS*THREADS - 1) / (THREADS*THREADS);
     int ncount = (count + COUNT_BLOCK - 1) / COUNT_BLOCK;
     sycl::range<2> threads(1, THREADS*THREADS);
     sycl::range<2> blocks(ncount, ntile);
-    _takebak<<<blocks, threads, 0, stream>>>(out, a_d, indices, count, n_o, n_a);
+    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _takebak(out, a_d, indices, count, n_o, n_a, item); });
+    // _takebak<<<blocks, threads, 0, stream>>>(out, a_d, indices, count, n_o, n_a);
     return 0;
 }
 }

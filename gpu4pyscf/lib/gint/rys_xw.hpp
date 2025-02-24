@@ -1,5 +1,7 @@
  
-static double DATA_X[] = {
+static 
+const
+double DATA_X[] = {
 /* root=6 base[0]=0.0 */
    2.89997626587128951e-02,
   -1.38283203321371549e-03,
@@ -39342,7 +39344,9 @@ static double DATA_X[] = {
 };
 
  
-static double DATA_W[] = {
+static 
+const
+double DATA_W[] = {
 /* root=6 base[0]=0.0 */
    4.68191818023631134e-01,
   -1.45170048876671811e-02,

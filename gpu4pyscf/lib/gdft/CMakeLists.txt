@@ -15,13 +15,23 @@
 
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80 --ptxas-options=-v")
 
-add_library(gdft SHARED
-  nr_eval_gto.cu
-  contract_rho.cu
-  gen_grids.cu
-  nr_numint_sparse.cu
-  vv10.cu
-)
+if (USE_SYCL)
+  add_library(gdft SHARED
+    nr_eval_gto.cpp
+    contract_rho.cpp
+    gen_grids.cpp
+    nr_numint_sparse.cpp
+    vv10.cpp
+  )
+else()
+    add_library(gdft SHARED
+  # nr_eval_gto.cu
+  #   contract_rho.cu
+  #   gen_grids.cu
+  #   nr_numint_sparse.cu
+    # vv10.cu
+  )
 
-set_target_properties(gdft PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+# set_target_properties(gdft PROPERTIES
+#   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+endif()

@@ -665,7 +665,7 @@ static void write_int3c2e_ip2_jk(JKMatrix jk, double *j3, double* k3, int ksh){
 
     int tx = threadIdx.x;
     int ty = threadIdx.y;
-    __shared__ double sdata[THREADSX][THREADSY];
+    double sdata[THREADSX][THREADSY];
 
     if (vj != NULL){
         for (int k = k0; k < k1; ++k){

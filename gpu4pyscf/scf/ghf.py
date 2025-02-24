@@ -15,17 +15,25 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import cupy
 from pyscf.scf import ghf
 from gpu4pyscf.scf import hf
+
+from importlib.util import find_spec
+
+has_dpctl = find_spec("dpctl")
+
+if not has_dpctl:
+    import cupy as np 
+else:
+    import dpnp as np
 
 class GHF(ghf.GHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     _eigh = hf.RHF._eigh
     scf = kernel = hf.RHF.kernel
-    get_hcore = hf.return_cupy_array(ghf.GHF.get_hcore)
-    get_ovlp = hf.return_cupy_array(ghf.GHF.get_ovlp)
+    get_hcore = hf.return_np_array(ghf.GHF.get_hcore)
+    get_ovlp = hf.return_np_array(ghf.GHF.get_ovlp)
     get_init_guess = hf.RHF.get_init_guess
     make_rdm2 = NotImplemented
     dump_chk = NotImplemented

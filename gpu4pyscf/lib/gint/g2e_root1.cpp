@@ -30,8 +30,8 @@ static void GINTfill_int2e_kernel0000(GINTEnvVars envs, ERITensor eri, BasisProd
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -40,11 +40,11 @@ static void GINTfill_int2e_kernel0000(GINTEnvVars envs, ERITensor eri, BasisProd
     int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
     int ij, kl;
     double gout0 = 0;
     for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
@@ -78,7 +78,7 @@ static void GINTfill_int2e_kernel0000(GINTEnvVars envs, ERITensor eri, BasisProd
     int jstride = eri.stride_j;
     int kstride = eri.stride_k;
     int lstride = eri.stride_l;
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
     int k0 = ao_loc[ksh] - eri.ao_offsets_k;
@@ -100,8 +100,8 @@ static void GINTfill_int2e_kernel0010(GINTEnvVars envs, ERITensor eri, BasisProd
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -110,15 +110,15 @@ static void GINTfill_int2e_kernel0010(GINTEnvVars envs, ERITensor eri, BasisProd
     int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -187,7 +187,7 @@ static void GINTfill_int2e_kernel0010(GINTEnvVars envs, ERITensor eri, BasisProd
     int jstride = eri.stride_j;
     int kstride = eri.stride_k;
     int lstride = eri.stride_l;
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
     int k0 = ao_loc[ksh] - eri.ao_offsets_k;
@@ -215,8 +215,8 @@ static void GINTfill_int2e_kernel1000(GINTEnvVars envs, ERITensor eri, BasisProd
     int bas_ij = offsets.bas_ij + task_ij;
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -225,15 +225,15 @@ static void GINTfill_int2e_kernel1000(GINTEnvVars envs, ERITensor eri, BasisProd
     int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -299,7 +299,7 @@ static void GINTfill_int2e_kernel1000(GINTEnvVars envs, ERITensor eri, BasisProd
     int jstride = eri.stride_j;
     int kstride = eri.stride_k;
     int lstride = eri.stride_l;
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
     int j0 = ao_loc[jsh] - eri.ao_offsets_j;
     int k0 = ao_loc[ksh] - eri.ao_offsets_k;

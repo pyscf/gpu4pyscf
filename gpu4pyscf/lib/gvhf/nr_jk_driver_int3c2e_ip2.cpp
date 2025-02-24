@@ -28,7 +28,7 @@
 #include "contract_jk.cpp"
 #include "gint/rys_roots.cpp"
 #include "gint/g2e.cpp"
-#include "g3c2e.cuh"
+#include "g3c2e.hpp"
 #include "g3c2e_ip2.cpp"
 
 static int GINTrun_tasks_int3c2e_ip2_jk(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars *envs, sycl::queue& stream)
@@ -63,7 +63,7 @@ static int GINTrun_tasks_int3c2e_ip2_jk(JKMatrix *jk, BasisProdOffsets *offsets,
 }
 
 
-extern "C" { __host__
+extern "C" { 
 int GINTbuild_int3c2e_ip2_jk(BasisProdCache *bpcache,
                  double *vj, double *vk, double *dm, double *rhoj, double *rhok,
                  int *ao_offsets, int nao, int naux, int n_dm,

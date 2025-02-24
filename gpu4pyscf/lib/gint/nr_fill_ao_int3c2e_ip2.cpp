@@ -27,7 +27,7 @@
 
 #include "rys_roots.cpp"
 #include "g2e.cpp"
-#include "cint2e.hpp"
+// #include "cint2e.hpp"
 #include "gout3c2e.cpp"
 #include "g3c2e_ip2_root1.cpp"
 #include "g3c2e_ip2.cpp"
@@ -41,24 +41,24 @@ static int GINTfill_int3c2e_ip2_tasks(ERITensor *eri, BasisProdOffsets *offsets,
     sycl::range<2> threads(THREADSY, THREADSX);
     sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
     switch (envs->nrys_roots) {
-        case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel0010(*envs, *eri, *offset); }); break;
-        case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<2, GSIZE2_INT3C> (*envs, *eri, *offset); }); break;
-        case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<3, GSIZE3_INT3C> (*envs, *eri, *offset); }); break;
-        case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<4, GSIZE4_INT3C> (*envs, *eri, *offset); }); break;
-        case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<5, GSIZE5_INT3C> (*envs, *eri, *offset); }); break;
-        case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<6, GSIZE6_INT3C> (*envs, *eri, *offset); }); break;
-        case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<7, GSIZE7_INT3C> (*envs, *eri, *offset); }); break;
-        case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<8, GSIZE8_INT3C> (*envs, *eri, *offset); }); break;
-        case 9: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<9, GSIZE9_INT3C> (*envs, *eri, *offset); }); break;
+        case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel0010(*envs, *eri, *offsets, item);}); break;
+        case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<2, GSIZE2_INT3C> (*envs, *eri, *offsets, item);}); break;
+        case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<3, GSIZE3_INT3C> (*envs, *eri, *offsets, item);}); break;
+        case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<4, GSIZE4_INT3C> (*envs, *eri, *offsets, item);}); break;
+        case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<5, GSIZE5_INT3C> (*envs, *eri, *offsets, item);}); break;
+        case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<6, GSIZE6_INT3C> (*envs, *eri, *offsets, item);}); break;
+        case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<7, GSIZE7_INT3C> (*envs, *eri, *offsets, item);}); break;
+        case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<8, GSIZE8_INT3C> (*envs, *eri, *offsets, item);}); break;
+        case 9: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip2_kernel<9, GSIZE9_INT3C> (*envs, *eri, *offsets, item);}); break;
         default: fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
     }
 
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error of GINTfill_int3c2e_ip2_kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
+    // cudaError_t err = cudaGetLastError();
+    // if (err != cudaSuccess) {
+    //     fprintf(stderr, "CUDA Error of GINTfill_int3c2e_ip2_kernel: %s\n", cudaGetErrorString(err));
+    //     return 1;
+    // }
     return 0;
 }
 

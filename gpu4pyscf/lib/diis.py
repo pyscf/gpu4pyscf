@@ -22,7 +22,14 @@ DIIS
 """
 
 import sys
-import cupy
+
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as gpunp
+else:
+    import dpctl
+    import dpnp as gpunp
 from pyscf.lib import logger
 from pyscf.lib import misc
 from pyscf import __config__
@@ -178,7 +185,7 @@ class DIIS(object):
             xkey = 'x%d'%self._head
             self._store(xkey, x)
             if x.size < INCORE_SIZE or self.incore:
-                self._store(ekey, x - cupy.asarray(self._xprev))
+                self._store(ekey, x - gpunp.asarray(self._xprev))
             else:  # not call _store to reduce memory footprint
                 if ekey not in self._diisfile:
                     self._diisfile.create_dataset(ekey, (x.size,), x.dtype)
@@ -221,15 +228,15 @@ class DIIS(object):
         if nd < self.min_space:
             return x
 
-        dt = cupy.array(self.get_err_vec(self._head-1), copy=False)
+        dt = gpunp.array(self.get_err_vec(self._head-1), copy=False)
         if self._H is None:
-            self._H = cupy.zeros((self.space+1,self.space+1), dt.dtype)
+            self._H = gpunp.zeros((self.space+1,self.space+1), dt.dtype)
             self._H[0,1:] = self._H[1:,0] = 1
         for i in range(nd):
             tmp = 0
             dti = self.get_err_vec(i)
             for p0, p1 in misc.prange(0, dt.size, BLOCK_SIZE):
-                tmp += cupy.dot(dt[p0:p1].conj(), dti[p0:p1])
+                tmp += gpunp.dot(dt[p0:p1].conj(), dti[p0:p1])
             self._H[self._head,i+1] = tmp
             self._H[i+1,self._head] = tmp.conjugate()
         dt = None
@@ -252,18 +259,18 @@ class DIIS(object):
             raise RuntimeError('No vector found in DIIS object.')
 
         h = self._H[:nd+1,:nd+1]
-        g = cupy.zeros(nd+1, h.dtype)
+        g = gpunp.zeros(nd+1, h.dtype)
         g[0] = 1
 
-        w, v = cupy.linalg.eigh(h)
-        if cupy.any(abs(w)<1e-14):
+        w, v = gpunp.linalg.eigh(h)
+        if gpunp.any(abs(w)<1e-14):
             logger.debug(self, 'Linear dependence found in DIIS error vectors.')
             idx = abs(w)>1e-14
-            c = cupy.dot(v[:,idx]*(1./w[idx]), cupy.dot(v[:,idx].T.conj(), g))
+            c = gpunp.dot(v[:,idx]*(1./w[idx]), cupy.dot(v[:,idx].T.conj(), g))
         else:
             try:
-                c = cupy.linalg.solve(h, g)
-            except cupy.linalg.linalg.LinAlgError as e:
+                c = gpunp.linalg.solve(h, g)
+            except gpunp.linalg.linalg.LinAlgError as e:
                 logger.warn(self, ' diis singular, eigh(h) %s', w)
                 raise e
         logger.debug1(self, 'diis-c %s', c)
@@ -272,7 +279,7 @@ class DIIS(object):
         for i, ci in enumerate(c[1:]):
             xi = self.get_vec(i)
             if xnew is None:
-                xnew = cupy.zeros(xi.size, c.dtype)
+                xnew = gpunp.zeros(xi.size, c.dtype)
             for p0, p1 in misc.prange(0, xi.size, BLOCK_SIZE):
                 xnew[p0:p1] += xi[p0:p1] * ci
         return xnew

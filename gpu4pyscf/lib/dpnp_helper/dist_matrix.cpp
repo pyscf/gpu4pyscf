@@ -16,7 +16,12 @@
 
 #include <sycl/sycl.hpp>
 #include <stdio.h>
+#include <cmath> // For std::sqrt
 #define THREADS 32
+
+// inline double calculatenorm3d(double x, double y, double z) {
+//     return std::sqrt(x * x + y * y + z * z);
+// }
 
 __attribute__((always_inline))
 static void _calc_distances(double *dist, const double *x, const double *y, int m, int n, sycl::nd_item<2>& item)
@@ -30,11 +35,12 @@ static void _calc_distances(double *dist, const double *x, const double *y, int 
     double dx = x[3*i]   - y[3*j];
     double dy = x[3*i+1] - y[3*j+1];
     double dz = x[3*i+2] - y[3*j+2];
-    dist[i*n+j] = norm3d(dx, dy, dz);
+    dist[i*n+j] = std::sqrt(dx * dx + dy * dy + dz * dz);
+    // dist[i*n+j] = norm3d(dx, dy, dz);
 }
 
 extern "C" {
-int dist_matrix(sycl::queue& stream, double *dist, const double *x, const double *y, int m, int n)
+int dist_matrix(sycl::queue stream, double *dist, const double *x, const double *y, int m, int n)
 {
     int ntilex = (m + THREADS - 1) / THREADS;
     int ntiley = (n + THREADS - 1) / THREADS;

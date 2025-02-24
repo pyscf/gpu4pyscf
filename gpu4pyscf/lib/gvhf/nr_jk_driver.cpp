@@ -115,7 +115,7 @@ static int GINTrun_tasks_jk(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars
 }
 
 extern "C" {
-int GINTbuild_jk(BasisProdCache *bpcache,
+int GINTbuild_jk(sycl::queue stream, BasisProdCache *bpcache,
                  double *vj, double *vk, double *dm, int nao, int n_dm,
                  int *bins_locs_ij, int *bins_locs_kl,
                  double *bins_floor_ij, double *bins_floor_kl,
@@ -150,6 +150,7 @@ int GINTbuild_jk(BasisProdCache *bpcache,
         // }
 
         if (envs.nf > NFffff) {
+            sycl::queue q = stream;
             DEVICE_INIT(int16_t, d_idx4c, idx4c, envs.nf * 3);
             envs.idx = d_idx4c;
         } else {

@@ -18,14 +18,14 @@
  */
 
 #include <stdio.h>
-#include "gint/gint.h"
-#include "gint/cint2e.hpp"
+#include "gint.h"
+#include "cint2e.hpp"
 
 __attribute__((always_inline))
 void GINTwrite_ints_s2(ERITensor eri, double* __restrict__ gout,
                        int ish, int jsh, int ksh, int lsh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     size_t jstride = eri.stride_j;
     size_t kstride = eri.stride_k;
     size_t lstride = eri.stride_l;
@@ -59,7 +59,7 @@ __attribute__((always_inline))
 void GINTwrite_ints_sph_s2(ERITensor eri, double* __restrict__ gout,
                        int ish, int jsh, int ksh, int lsh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     size_t jstride = eri.stride_j;
     size_t kstride = eri.stride_k;
     size_t lstride = eri.stride_l;

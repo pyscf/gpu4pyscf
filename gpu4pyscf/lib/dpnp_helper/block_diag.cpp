@@ -38,11 +38,11 @@ static void _block_diag(double *out, int m, int n, double *diags, int ndiags, in
 }
 
 extern "C" {
-int block_diag(sycl::queue& stream, double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols)
+int block_diag(sycl::queue stream, double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols)
 {
     sycl::range<2> threads(THREADS, THREADS);
     sycl::range<2> blocks(1, ndiags);
-    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { stream._block_diag(out, m, n, diags, ndiags, offsets, rows, cols, item); });
+    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _block_diag(out, m, n, diags, ndiags, offsets, rows, cols, item); });
     return 0;
 }
 }

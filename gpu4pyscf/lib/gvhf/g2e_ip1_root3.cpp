@@ -17,8 +17,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-
-#define atomicAdd((addr), (val)) (sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space>(addr).fetch_add(val)) 
+#include "gvhf.h"
+//#define atomicAdd((addr), (val)) (sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space>(addr).fetch_add(val)) 
 
 __attribute__((always_inline))
 static void GINTint2e_ip1_jk_kernel_0021(GINTEnvVars envs, JKMatrix jk,
@@ -35,8 +35,8 @@ static void GINTint2e_ip1_jk_kernel_0021(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -46,18 +46,18 @@ static void GINTint2e_ip1_jk_kernel_0021(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -412,7 +412,7 @@ static void GINTint2e_ip1_jk_kernel_0021(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -551,8 +551,8 @@ static void GINTint2e_ip1_jk_kernel_0022(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -562,18 +562,18 @@ static void GINTint2e_ip1_jk_kernel_0022(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -1197,7 +1197,7 @@ static void GINTint2e_ip1_jk_kernel_0022(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -1378,8 +1378,8 @@ static void GINTint2e_ip1_jk_kernel_0030(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -1389,18 +1389,18 @@ static void GINTint2e_ip1_jk_kernel_0030(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -1629,7 +1629,7 @@ static void GINTint2e_ip1_jk_kernel_0030(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -1776,8 +1776,8 @@ static void GINTint2e_ip1_jk_kernel_0031(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -1787,18 +1787,18 @@ static void GINTint2e_ip1_jk_kernel_0031(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -2342,7 +2342,7 @@ static void GINTint2e_ip1_jk_kernel_0031(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -2525,8 +2525,8 @@ static void GINTint2e_ip1_jk_kernel_1011(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -2536,18 +2536,18 @@ static void GINTint2e_ip1_jk_kernel_1011(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -3016,7 +3016,7 @@ static void GINTint2e_ip1_jk_kernel_1011(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -3182,8 +3182,8 @@ static void GINTint2e_ip1_jk_kernel_1020(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -3193,18 +3193,18 @@ static void GINTint2e_ip1_jk_kernel_1020(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -3538,7 +3538,7 @@ static void GINTint2e_ip1_jk_kernel_1020(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -3717,8 +3717,8 @@ static void GINTint2e_ip1_jk_kernel_1021(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -3728,18 +3728,18 @@ static void GINTint2e_ip1_jk_kernel_1021(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -4593,7 +4593,7 @@ static void GINTint2e_ip1_jk_kernel_1021(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -4816,8 +4816,8 @@ static void GINTint2e_ip1_jk_kernel_1030(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -4827,18 +4827,18 @@ static void GINTint2e_ip1_jk_kernel_1030(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -5349,7 +5349,7 @@ static void GINTint2e_ip1_jk_kernel_1030(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -5596,8 +5596,8 @@ static void GINTint2e_ip1_jk_kernel_1110(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -5607,18 +5607,18 @@ static void GINTint2e_ip1_jk_kernel_1110(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -6062,7 +6062,7 @@ static void GINTint2e_ip1_jk_kernel_1110(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -6258,8 +6258,8 @@ static void GINTint2e_ip1_jk_kernel_1111(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -6269,18 +6269,18 @@ static void GINTint2e_ip1_jk_kernel_1111(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -7464,7 +7464,7 @@ static void GINTint2e_ip1_jk_kernel_1111(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -7714,8 +7714,8 @@ static void GINTint2e_ip1_jk_kernel_1120(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -7725,18 +7725,18 @@ static void GINTint2e_ip1_jk_kernel_1120(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -8549,7 +8549,7 @@ static void GINTint2e_ip1_jk_kernel_1120(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -8820,8 +8820,8 @@ static void GINTint2e_ip1_jk_kernel_2010(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -8831,18 +8831,18 @@ static void GINTint2e_ip1_jk_kernel_2010(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -9170,7 +9170,7 @@ static void GINTint2e_ip1_jk_kernel_2010(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -9364,8 +9364,8 @@ static void GINTint2e_ip1_jk_kernel_2011(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -9375,18 +9375,18 @@ static void GINTint2e_ip1_jk_kernel_2011(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -10227,7 +10227,7 @@ static void GINTint2e_ip1_jk_kernel_2011(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -10483,8 +10483,8 @@ static void GINTint2e_ip1_jk_kernel_2020(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -10494,18 +10494,18 @@ static void GINTint2e_ip1_jk_kernel_2020(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -11091,7 +11091,7 @@ static void GINTint2e_ip1_jk_kernel_2020(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -11372,8 +11372,8 @@ static void GINTint2e_ip1_jk_kernel_2100(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -11383,18 +11383,18 @@ static void GINTint2e_ip1_jk_kernel_2100(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -11709,7 +11709,7 @@ static void GINTint2e_ip1_jk_kernel_2100(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -11933,8 +11933,8 @@ static void GINTint2e_ip1_jk_kernel_2110(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -11944,18 +11944,18 @@ static void GINTint2e_ip1_jk_kernel_2110(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -12758,7 +12758,7 @@ static void GINTint2e_ip1_jk_kernel_2110(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -13056,8 +13056,8 @@ static void GINTint2e_ip1_jk_kernel_2200(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -13067,18 +13067,18 @@ static void GINTint2e_ip1_jk_kernel_2200(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -13633,7 +13633,7 @@ static void GINTint2e_ip1_jk_kernel_2200(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -13989,8 +13989,8 @@ static void GINTint2e_ip1_jk_kernel_3000(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -14000,18 +14000,18 @@ static void GINTint2e_ip1_jk_kernel_3000(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -14223,7 +14223,7 @@ static void GINTint2e_ip1_jk_kernel_3000(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -14415,8 +14415,8 @@ static void GINTint2e_ip1_jk_kernel_3010(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -14426,18 +14426,18 @@ static void GINTint2e_ip1_jk_kernel_3010(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -14935,7 +14935,7 @@ static void GINTint2e_ip1_jk_kernel_3010(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
@@ -15217,8 +15217,8 @@ static void GINTint2e_ip1_jk_kernel_3100(GINTEnvVars envs, JKMatrix jk,
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -15228,18 +15228,18 @@ static void GINTint2e_ip1_jk_kernel_3100(GINTEnvVars envs, JKMatrix jk,
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
 
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double * __restrict__ i_exponent = c_bpcache.a1;
-    double * __restrict__ j_exponent = c_bpcache.a2;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double * __restrict__ i_exponent = c_bpcache.get().a1;
+    double * __restrict__ j_exponent = c_bpcache.get().a2;
 
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -15712,7 +15712,7 @@ static void GINTint2e_ip1_jk_kernel_3100(GINTEnvVars envs, JKMatrix jk,
         }
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     int k0 = ao_loc[ksh];
