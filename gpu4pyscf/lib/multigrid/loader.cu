@@ -112,3 +112,33 @@ void init_orth_data(double *pool, int *grid_start,
     }
     __syncthreads();
 }
+
+__device__ inline
+int load_xs(double *xs_cache, double *xs_exp, int ix0, int ngridx,
+            int l, int batch_size, int xs_stride, int warp_id)
+{
+    int nx = MIN(ngridx - ix0, batch_size);
+    double *_xs_exp = xs_exp + ix0 * WARP_SIZE;
+    for (int i = warp_id; i < nx; i += WARPS) {
+        for (int m = 0; m <= l; ++m) {
+            xs_cache[(m*batch_size+i)*WARP_SIZE] = _xs_exp[(m*xs_stride+i)*WARP_SIZE];
+        }
+    }
+    __syncthreads();
+    return nx;
+}
+
+__device__ static
+double reduce_warps(double val, int ngridx, int thread_id, int sp_id, int warp_id)
+{
+    __shared__ double cache[THREADS];
+    cache[thread_id] = val;
+    __syncthreads();
+    for (int stride = 4; stride > 0; stride /= 2) {
+        if (warp_id < stride && warp_id + stride < ngridx) {
+            cache[thread_id] += cache[thread_id + stride*WARP_SIZE];
+        }
+        __syncthreads();
+    }
+    return cache[sp_id];
+}

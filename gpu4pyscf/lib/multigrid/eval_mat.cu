@@ -22,36 +22,6 @@
 #include "cart2xyz.cu"
 #include "loader.cu"
 
-__device__ inline
-int load_xs(double *xs_cache, double *xs_exp, int ix0, int ngridx,
-            int l, int batch_size, int xs_stride, int warp_id)
-{
-    int nx = MIN(ngridx - ix0, batch_size);
-    double *_xs_exp = xs_exp + ix0 * WARP_SIZE;
-    for (int i = warp_id; i < nx; i += WARPS) {
-        for (int m = 0; m <= l; ++m) {
-            xs_cache[(m*batch_size+i)*WARP_SIZE] = _xs_exp[(m*xs_stride+i)*WARP_SIZE];
-        }
-    }
-    __syncthreads();
-    return nx;
-}
-
-__device__ static
-double reduce_warps(double val, int ngridx, int thread_id, int sp_id, int warp_id)
-{
-    __shared__ double cache[THREADS];
-    cache[thread_id] = val;
-    __syncthreads();
-    for (int stride = 4; stride > 0; stride /= 2) {
-        if (warp_id < stride && warp_id + stride < ngridx) {
-            cache[thread_id] += cache[thread_id + stride*WARP_SIZE];
-        }
-        __syncthreads();
-    }
-    return cache[sp_id];
-}
-
 template <int L, int TILE> __device__ static
 void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
                           MGridBounds bounds, double *pool, uint32_t pair_idx0)
@@ -90,6 +60,8 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
         cicj = 0.;
     }
 
+    int nf2 = (L+1)*(L+2)/2;
+    int nf3 = nf2*(L+3)/3;
     int *mesh = bounds.mesh;
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -97,11 +69,11 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     int mesh_yz = mesh_y * mesh_z;
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = ngrid_span * (L+1) * WARP_SIZE;
-    double *xs_exp = pool + sp_id;
+    int *grid_start = (int *)pool + sp_id;
+    double *xs_exp = pool + WARP_SIZE*3 + sp_id;
     double *ys_exp = xs_exp + xs_size;
     double *zs_exp = ys_exp + xs_size;
     double *gx_dmyz = zs_exp + xs_size;
-    int *grid_start = (int *)(pool + xs_size*3 + ngrid_span*(L+1)*(L+2)/2*WARP_SIZE) + sp_id;
     init_orth_data(xs_exp, grid_start, envs, bounds,
                    ri, rj, ai, aj, L+1, warp_id);
 
@@ -110,6 +82,10 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     extern __shared__ double cache[];
     double *ys_cache = cache + sp_id;
     double *zs_cache = ys_cache + TILE * (L+1) * WARP_SIZE;
+    double *dm_xyz = gx_dmyz + ngrid_span * nf2 * WARP_SIZE;
+    if (L < 5) {
+        dm_xyz = cache + (L+1)*(L+1)*3*WARP_SIZE + sp_id;
+    }
 
     int nx0 = grid_start[0*WARP_SIZE];
     int ny0 = grid_start[1*WARP_SIZE];
@@ -132,7 +108,7 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
         ngridz = mesh_z;
     }
 
-    for (int n = warp_id; n < ngridx*(L+1)*(L+2)/2; n += WARPS) {
+    for (int n = warp_id; n < ngridx*nf2; n += WARPS) {
         gx_dmyz[n*WARP_SIZE] = 0.;
     }
 
@@ -145,7 +121,7 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
             for (int ix = warp_id; ix < ngridx; ix += WARPS) {
                 int tx = (ix + nx0) % mesh_x;
 #pragma unroll
-                for (int m = 0; m < (L+1)*(L+2)/2; ++m) {
+                for (int m = 0; m < nf2; ++m) {
                     r2[m] = 0.;
                 }
                 for (int iy = 0; iy < ny; ++iy) {
@@ -164,15 +140,16 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
                     }
 #pragma unroll
                     for (int my = 0; my <= L; ++my) {
+                        double fac = ys_cache[(my*TILE+iy)*WARP_SIZE];
 #pragma unroll
                         for (int mz = 0; mz <= L-my; ++mz) {
-                            r2[ADDR2(L,my,mz)] += ys_cache[(my*TILE+iy)*WARP_SIZE] * r1[mz];
+                            r2[ADDR2(L,my,mz)] += fac * r1[mz];
                         }
                     }
                 }
-                double *pgx = gx_dmyz + ix * (L+1)*(L+2)/2*WARP_SIZE;
+                double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
 #pragma unroll
-                for (int m = 0; m < (L+1)*(L+2)/2; ++m) {
+                for (int m = 0; m < nf2; ++m) {
                     pgx[m*WARP_SIZE] += r2[m];
                 }
             }
@@ -181,7 +158,7 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     __syncthreads();
 
 #pragma unroll
-    for (int m = 0; m < (L+1)*(L+2)*(L+3)/6; ++m) {
+    for (int m = 0; m < nf3; ++m) {
         r2[m] = 0.;
     }
     for (int ix = warp_id; ix < ngridx; ix += WARPS) {
@@ -189,7 +166,7 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
         for (int mx = 0; mx <= L; ++mx) {
             r1[mx] = xs_exp[(mx*ngrid_span+ix)*WARP_SIZE];
         }
-        double *pgx = gx_dmyz + ix * (L+1)*(L+2)/2*WARP_SIZE;
+        double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
 #pragma unroll
         for (int my = 0; my <= L; ++my) {
 #pragma unroll
@@ -202,7 +179,6 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
             }
         }
     }
-    double *dm_xyz = cache + sp_id;
 #pragma unroll
     for (int mx = 0; mx <= L; ++mx) {
 #pragma unroll
@@ -212,7 +188,7 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
                 int n = ADDR3(L,mx,my,mz);
                 r2[n] = reduce_warps(r2[n], ngridx, thread_id, sp_id, warp_id);
                 if (warp_id == 0) {
-                    dm_xyz[n*WARP_SIZE] = r2[n];
+                    dm_xyz[(ADDR2(L,mx,my)*(L+1)+mz)*WARP_SIZE] = r2[n];
                 }
             }
         }
@@ -223,8 +199,7 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     int nao = envs.nao;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
-    _dm_xyz_to_dm(out+i0*nao+j0, dm_xyz, nao, li, lj, L, ri, rj, cicj,
-                  cache+(L+1)*(L+2)*(L+3)/6*WARP_SIZE,
+    _dm_xyz_to_dm(out+i0*nao+j0, dm_xyz, nao, li, lj, L, ri, rj, cicj, cache,
                   sp_id, warp_id, npairs_this_block);
 }
 
@@ -267,6 +242,8 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
         cicj = 0.;
     }
 
+    int nf2 = (L+1)*(L+2)/2;
+    int nf3 = nf2*(L+3)/3;
     int *mesh = bounds.mesh;
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -274,11 +251,12 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
     int mesh_yz = mesh_y * mesh_z;
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = ngrid_span * (L+1) * WARP_SIZE;
-    double *xs_exp = pool + sp_id;
+    int *grid_start = (int *)pool + sp_id;
+    double *xs_exp = pool + WARP_SIZE*3 + sp_id;
     double *ys_exp = xs_exp + xs_size;
     double *zs_exp = ys_exp + xs_size;
     double *gx_dmyz = zs_exp + xs_size;
-    int *grid_start = (int *)(pool + xs_size*3 + ngrid_span*(L+1)*(L+2)/2*WARP_SIZE) + sp_id;
+    double *dm_xyz = gx_dmyz + nf2 * WARP_SIZE;
     init_orth_data(xs_exp, grid_start, envs, bounds,
                    ri, rj, ai, aj, L+1, warp_id);
 
@@ -309,7 +287,7 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
         ngridz = mesh_z;
     }
 
-    for (int n = warp_id; n < ngridx*(L+1)*(L+2)/2; n += WARPS) {
+    for (int n = warp_id; n < ngridx*nf2; n += WARPS) {
         gx_dmyz[n*WARP_SIZE] = 0.;
     }
 
@@ -322,7 +300,7 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
             for (int ix = warp_id; ix < ngridx; ix += WARPS) {
                 int tx = (ix + nx0) % mesh_x;
 #pragma unroll
-                for (int m = 0; m < (L+1)*(L+2)/2; ++m) {
+                for (int m = 0; m < nf2; ++m) {
                     r2[m] = 0.;
                 }
                 for (int iy = 0; iy < ny; ++iy) {
@@ -341,15 +319,16 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
                     }
 #pragma unroll
                     for (int my = 0; my <= L; ++my) {
+                        double fac = ys_cache[(my*TILE+iy)*WARP_SIZE];
 #pragma unroll
                         for (int mz = 0; mz <= L-my; ++mz) {
-                            r2[ADDR2(L,my,mz)] += ys_cache[(my*TILE+iy)*WARP_SIZE] * r1[mz];
+                            r2[ADDR2(L,my,mz)] += fac * r1[mz];
                         }
                     }
                 }
-                double *pgx = gx_dmyz + ix * (L+1)*(L+2)/2*WARP_SIZE;
+                double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
 #pragma unroll
-                for (int m = 0; m < (L+1)*(L+2)/2; ++m) {
+                for (int m = 0; m < nf2; ++m) {
                     pgx[m*WARP_SIZE] += r2[m];
                 }
             }
@@ -359,7 +338,6 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
 
     // reuse the global memory in pool. (L+1)*(L+2)*(L+3)/6 is generally smaller
     // than (ngrid_span * (L+1) * 2) occupied by ys_exp and zs_exp
-    double *dm_xyz = ys_exp;
     int offset = (L+1)*(L+2)/2 + L*(L+1)/2;
 #pragma unroll
     for (int m = 0; m < offset; ++m) {
@@ -370,7 +348,7 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
         for (int mx = 0; mx <= 1; ++mx) {
             r1[mx] = xs_exp[(mx*ngrid_span+ix)*WARP_SIZE];
         }
-        double *pgx = gx_dmyz + ix * (L+1)*(L+2)/2*WARP_SIZE;
+        double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
 #pragma unroll
         for (int my = 0; my <= L; ++my) {
 #pragma unroll
@@ -392,14 +370,14 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
                 int n = ADDR3(L,mx,my,mz);
                 r2[n] = reduce_warps(r2[n], ngridx, thread_id, sp_id, warp_id);
                 if (warp_id == 0) {
-                    dm_xyz[n*WARP_SIZE] = r2[n];
+                    dm_xyz[(ADDR2(L,mx,my)*(L+1)+mz)*WARP_SIZE] = r2[n];
                 }
             }
         }
     }
 
 #pragma unroll
-    for (int m = 0; m < (L+1)*(L+2)*(L+3)/6-offset; ++m) {
+    for (int m = 0; m < nf3-offset; ++m) {
         r2[m] = 0.;
     }
     for (int ix = warp_id; ix < ngridx; ix += WARPS) {
@@ -407,7 +385,7 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
         for (int mx = 2; mx <= L; ++mx) {
             r1[mx] = xs_exp[(mx*ngrid_span+ix)*WARP_SIZE];
         }
-        double *pgx = gx_dmyz + ix * (L+1)*(L+2)/2*WARP_SIZE;
+        double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
 #pragma unroll
         for (int my = 0; my <= L-2; ++my) {
 #pragma unroll
@@ -429,7 +407,7 @@ void _eval_mat_lda_kernel<7, 8>(double *out, double *rho, MGridEnvVars envs,
                 int n = ADDR3(L,mx,my,mz);
                 r2[n-offset] = reduce_warps(r2[n-offset], ngridx, thread_id, sp_id, warp_id);
                 if (warp_id == 0) {
-                    dm_xyz[n*WARP_SIZE] = r2[n-offset];
+                    dm_xyz[(ADDR2(L,mx,my)*(L+1)+mz)*WARP_SIZE] = r2[n-offset];
                 }
             }
         }
@@ -483,6 +461,8 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
         cicj = 0.;
     }
 
+    int nf2 = (L+1)*(L+2)/2;
+    int nf3 = nf2*(L+3)/3;
     int *mesh = bounds.mesh;
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -490,11 +470,12 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
     int mesh_yz = mesh_y * mesh_z;
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = ngrid_span * (L+1) * WARP_SIZE;
-    double *xs_exp = pool + sp_id;
+    int *grid_start = (int *)pool + sp_id;
+    double *xs_exp = pool + WARP_SIZE*3 + sp_id;
     double *ys_exp = xs_exp + xs_size;
     double *zs_exp = ys_exp + xs_size;
     double *gx_dmyz = zs_exp + xs_size;
-    int *grid_start = (int *)(pool + xs_size*3 + ngrid_span*(L+1)*(L+2)/2*WARP_SIZE) + sp_id;
+    double *dm_xyz = gx_dmyz + nf2 * WARP_SIZE;
     init_orth_data(xs_exp, grid_start, envs, bounds,
                    ri, rj, ai, aj, L+1, warp_id);
 
@@ -525,7 +506,7 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
         ngridz = mesh_z;
     }
 
-    for (int n = warp_id; n < ngridx*(L+1)*(L+2)/2; n += WARPS) {
+    for (int n = warp_id; n < ngridx*nf2; n += WARPS) {
         gx_dmyz[n*WARP_SIZE] = 0.;
     }
 
@@ -538,7 +519,7 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
             for (int ix = warp_id; ix < ngridx; ix += WARPS) {
                 int tx = (ix + nx0) % mesh_x;
 #pragma unroll
-                for (int m = 0; m < (L+1)*(L+2)/2; ++m) {
+                for (int m = 0; m < nf2; ++m) {
                     r2[m] = 0.;
                 }
                 for (int iy = 0; iy < ny; ++iy) {
@@ -557,15 +538,16 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
                     }
 #pragma unroll
                     for (int my = 0; my <= L; ++my) {
+                        double fac = ys_cache[(my*TILE+iy)*WARP_SIZE];
 #pragma unroll
                         for (int mz = 0; mz <= L-my; ++mz) {
-                            r2[ADDR2(L,my,mz)] += ys_cache[(my*TILE+iy)*WARP_SIZE] * r1[mz];
+                            r2[ADDR2(L,my,mz)] += fac * r1[mz];
                         }
                     }
                 }
-                double *pgx = gx_dmyz + ix * (L+1)*(L+2)/2*WARP_SIZE;
+                double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
 #pragma unroll
-                for (int m = 0; m < (L+1)*(L+2)/2; ++m) {
+                for (int m = 0; m < nf2; ++m) {
                     pgx[m*WARP_SIZE] += r2[m];
                 }
             }
@@ -575,7 +557,6 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
 
     // reuse the global memory in pool. (L+1)*(L+2)*(L+3)/6 is generally smaller
     // than (ngrid_span * (L+1) * 2) occupied by ys_exp and zs_exp
-    double *dm_xyz = ys_exp;
     int offset = (L+1)*(L+2)/2;
 #pragma unroll
     for (int m = 0; m < offset; ++m) {
@@ -583,7 +564,7 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
     }
     for (int ix = warp_id; ix < ngridx; ix += WARPS) {
         r1[0] = xs_exp[ix*WARP_SIZE];
-        double *pgx = gx_dmyz + ix * (L+1)*(L+2)/2*WARP_SIZE;
+        double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
 #pragma unroll
         for (int my = 0; my <= L; ++my) {
 #pragma unroll
@@ -600,7 +581,7 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
             int n = ADDR3(L,0,my,mz);
             r2[n] = reduce_warps(r2[n], ngridx, thread_id, sp_id, warp_id);
             if (warp_id == 0) {
-                dm_xyz[n*WARP_SIZE] = r2[n];
+                dm_xyz[(my*(L+1)+mz)*WARP_SIZE] = r2[n];
             }
         }
     }
@@ -614,7 +595,7 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
         for (int mx = 1; mx <= 2; ++mx) {
             r1[mx] = xs_exp[(mx*ngrid_span+ix)*WARP_SIZE];
         }
-        double *pgx = gx_dmyz + ix * (L+1)*(L+2)/2*WARP_SIZE;
+        double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
 #pragma unroll
         for (int my = 0; my <= L-1; ++my) {
 #pragma unroll
@@ -636,7 +617,7 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
                 int n = ADDR3(L,mx,my,mz);
                 r2[n-offset] = reduce_warps(r2[n-offset], ngridx, thread_id, sp_id, warp_id);
                 if (warp_id == 0) {
-                    dm_xyz[n*WARP_SIZE] = r2[n-offset];
+                    dm_xyz[(ADDR2(L,mx,my)*(L+1)+mz)*WARP_SIZE] = r2[n-offset];
                 }
             }
         }
@@ -644,7 +625,7 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
 
     offset = (L+1)*(L+2)/2 + L*(L+1)/2 + (L-1)*L/2;
 #pragma unroll
-    for (int m = 0; m < (L+1)*(L+2)*(L+3)/6 - offset; ++m) {
+    for (int m = 0; m < nf3 - offset; ++m) {
         r2[m] = 0.;
     }
     for (int ix = warp_id; ix < ngridx; ix += WARPS) {
@@ -652,7 +633,7 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
         for (int mx = 3; mx <= L; ++mx) {
             r1[mx] = xs_exp[(mx*ngrid_span+ix)*WARP_SIZE];
         }
-        double *pgx = gx_dmyz + ix * (L+1)*(L+2)/2*WARP_SIZE;
+        double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
 #pragma unroll
         for (int my = 0; my <= L-3; ++my) {
 #pragma unroll
@@ -674,7 +655,7 @@ void _eval_mat_lda_kernel<8, 8>(double *out, double *rho, MGridEnvVars envs,
                 int n = ADDR3(L,mx,my,mz);
                 r2[n-offset] = reduce_warps(r2[n-offset], ngridx, thread_id, sp_id, warp_id);
                 if (warp_id == 0) {
-                    dm_xyz[n*WARP_SIZE] = r2[n-offset];
+                    dm_xyz[(ADDR2(L,mx,my)*(L+1)+mz)*WARP_SIZE] = r2[n-offset];
                 }
             }
         }
@@ -698,7 +679,8 @@ void eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = (L+1) * ngrid_span;
     int nf2 = (L+1)*(L+2)/2;
-    pool += (xs_size*3 + nf2*ngrid_span + 3) * WARP_SIZE * b_id;
+    int l3 = nf2*(L+1);
+    pool += (xs_size*3 + nf2*ngrid_span + 3 + l3) * WARP_SIZE * b_id;
 
     __shared__ uint32_t pair_idx0;
     if (thread_id == 0) {
@@ -714,13 +696,13 @@ void eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     }
 }
 
-static size_t buflen2(int l, int tile)
+static size_t buflen_lda(int l, int tile)
 {
     int lj = MIN(l, LMAX);
     size_t len1 = WARP_SIZE * tile * (l+1) * 2;
     size_t len2 = WARP_SIZE * (lj+1)*(lj+1) * 3;
-    if (l < 7) {
-        len2 += WARP_SIZE * (l+1)*(l+2)*(l+3)/6;
+    if (l < 5) {
+        len2 += WARP_SIZE * (l+1)*(l+2)/2*(l+1);
     }
     return MAX(len1, len2) * sizeof(double);
 }
@@ -728,15 +710,15 @@ int eval_mat_lda_orth(double *out, double *rho, MGridEnvVars *envs, MGridBounds 
                       int l, double *pool, uint32_t *batch_head, int workers)
 {
     switch (l) {
-    case 0: eval_mat_lda_kernel<0,32> <<<workers, THREADS, buflen2(0,32)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
-    case 1: eval_mat_lda_kernel<1,32> <<<workers, THREADS, buflen2(1,32)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
-    case 2: eval_mat_lda_kernel<2,16> <<<workers, THREADS, buflen2(2,16)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
-    case 3: eval_mat_lda_kernel<3,16> <<<workers, THREADS, buflen2(3,16)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
-    case 4: eval_mat_lda_kernel<4,16> <<<workers, THREADS, buflen2(4,16)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
-    case 5: eval_mat_lda_kernel<5, 8> <<<workers, THREADS, buflen2(5, 8)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
-    case 6: eval_mat_lda_kernel<6, 8> <<<workers, THREADS, buflen2(6, 8)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
-    case 7: eval_mat_lda_kernel<7, 8> <<<workers, THREADS, buflen2(7, 8)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
-    case 8: eval_mat_lda_kernel<8, 8> <<<workers, THREADS, buflen2(8, 8)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
+    case 0: eval_mat_lda_kernel<0,32> <<<workers, THREADS, buflen_lda(0,32)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
+    case 1: eval_mat_lda_kernel<1,32> <<<workers, THREADS, buflen_lda(1,32)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
+    case 2: eval_mat_lda_kernel<2,16> <<<workers, THREADS, buflen_lda(2,16)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
+    case 3: eval_mat_lda_kernel<3,16> <<<workers, THREADS, buflen_lda(3,16)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
+    case 4: eval_mat_lda_kernel<4,16> <<<workers, THREADS, buflen_lda(4,16)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
+    case 5: eval_mat_lda_kernel<5, 8> <<<workers, THREADS, buflen_lda(5, 8)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
+    case 6: eval_mat_lda_kernel<6, 8> <<<workers, THREADS, buflen_lda(6, 8)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
+    case 7: eval_mat_lda_kernel<7, 8> <<<workers, THREADS, buflen_lda(7, 8)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
+    case 8: eval_mat_lda_kernel<8, 8> <<<workers, THREADS, buflen_lda(8, 8)>>>(out, rho, *envs, *bounds, pool, batch_head); break;
     default: return 1;
     }
     return 0;

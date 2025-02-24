@@ -17,7 +17,7 @@
 #include <stdint.h>
 #include "multigrid.cuh"
 
-__device__ static
+__device__ inline
 void dm_xyz_coeff(double *cx, double xi, double xj, int lmax)
 {
     double xij = xi - xj;
@@ -36,15 +36,15 @@ void dm_xyz_coeff(double *cx, double xi, double xj, int lmax)
     }
 }
 
-__device__
-inline int cart_address(int l, int x, int y, int z)
+__device__ inline
+int cart_address(int l, int x, int y, int z)
 {
     // (l-x)*(l-x+1)/2+l-x-y
     int yz = l - x;
     return yz * (yz + 3) / 2 - y;
 }
 
-__device__ static
+__device__ inline
 double sub_dm_xyz(int lx, int ly, int lz, int li, int lj, int nao,
                   double *cx, double *cy, double *cz, double *dm)
 {
@@ -73,7 +73,7 @@ double sub_dm_xyz(int lx, int ly, int lz, int li, int lj, int nao,
     return out;
 }
 
-__device__ static
+__device__ inline
 void _dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
                    double *ri, double *rj, double cicj, int sp_id, int warp_id)
 {
@@ -101,12 +101,13 @@ void _dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
     __syncthreads();
 }
 
-__device__ static
+__device__ inline
 void _dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj, int lij,
                    double *ri, double *rj, double cicj, double *cache,
                    int sp_id, int warp_id, int npairs_per_block)
 {
     int lj1 = lj + 1;
+    int l1 = lij + 1;
     double *cx = cache + sp_id;
     double *cy = cx + lj1 * lj1 * WARP_SIZE;
     double *cz = cy + lj1 * lj1 * WARP_SIZE;
@@ -144,7 +145,7 @@ void _dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj, int lij,
                 for (int jz = 0; jz <= lz_j; ++jz) {
                     int lz = lz_i + jz;
                     double cxyz = cxy * cz[(jz+lz_j*lj1)*WARP_SIZE];
-                    dm_ij += cxyz * dm_xyz[ADDR3(lij,lx,ly,lz)*WARP_SIZE];
+                    dm_ij += cxyz * dm_xyz[(ADDR2(lij,lx,ly)*l1+lz)*WARP_SIZE];
                 }
             }
         }
