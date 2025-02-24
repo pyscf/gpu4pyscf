@@ -25,7 +25,7 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, tag_array, contract, sandwich_dot, block_diag)
+    load_library, tag_array, contract, sandwich_dot, block_diag, transpose_sum)
 from gpu4pyscf.gto.mole import cart2sph_by_l
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
@@ -99,6 +99,12 @@ def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, deriv=0):
     lmax = cell._bas[:,ANG_OF].max()
     nao = dms.shape[-1]
 
+    # The hermitian symmetry in Coulomb matrix
+    dms = transpose_sum(dms.copy())
+    idx = cp.arange(nao)
+    dms[:,idx[:,None] < idx] = 0.
+    dms[:,idx,idx] *= .5
+
     assert (deriv < 2)
     #hermi = hermi and abs(dms - dms.transpose(0,1,3,2).conj()).max() < 1e-9
     gga_high_order = False
@@ -131,7 +137,7 @@ def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, deriv=0):
     tasks = ni.tasks
     workers = gpu_specs['multiProcessorCount']
     nf2 = (lmax*2+1)*(lmax*2+2)//2
-    nf3 = (lmax*2+1)*(lmax*2+2)*(lmax*2+3)//6
+    nf3 = nf2*(lmax*2+3)//3
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
     cache_size = ((lmax*2+1)*ngrid_span*3 + nf3 + nf2*ngrid_span + 3) * WARP_SIZE
     pool = cp.empty((workers, cache_size))
@@ -208,7 +214,7 @@ def _get_j_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
     tasks = ni.tasks
     nf2 = (lmax*2+1)*(lmax*2+2)//2
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
-    cache_size = ((lmax*2+1)*ngrid_span*3 + nf2*ngrid_span + 3) * WARP_SIZE
+    cache_size = ((lmax*2+1)*ngrid_span*3 + nf2*ngrid_span + 3 + (lmax*2+1)**3) * WARP_SIZE
     pool = cp.empty((workers, cache_size))
 
     mesh_largest = tasks[0][0].mesh
@@ -244,6 +250,11 @@ def _get_j_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
                      ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                      ctypes.c_int(workers))
 
+    # The hermitian symmetry in Coulomb matrix
+    idx = cp.arange(nao)
+    vj[:,idx[:,None] < idx] = 0
+    vj[:,idx,idx] *= .5
+    vj = transpose_sum(vj)
     # TODO: for diffused basis functions lower than minimal Ecut, compute the
     # vj using normal FFTDF code
     vj = ni.unsort_orbitals(vj)
@@ -599,7 +610,7 @@ class Task:
     l: int
     shl_pair_idx: np.ndarray
 
-def create_tasks(cell, prim_bas, supmol_bas, supmol_env):
+def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
     a = cell.lattice_vectors()
@@ -636,6 +647,8 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env):
     fl = cp.where(surface > 1, surface, 1)
     fac_norm = norm[:cell0_nprims,None]*norm * (np.pi/aij)**1.5
     ovlp = fac_norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj * fl
+    # The hermitian symmetry in Coulomb matrix
+    ovlp[ao_loc_in_cell0[:cell0_nprims,None] < ao_loc_in_cell0] = 0.
     ovlp[ovlp > 1.] = 1.
 
     # Ecut estimation based on pyscf.pbc.gto.cell.estimate_ke_cutoff
@@ -819,7 +832,8 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         # A list of integral meshgrids for each task
         #self.tasks = multigrid_tasks(cell)
         prim_bas = supmol_bas[:self.primitive_nbas]
-        self.tasks = create_tasks(cell, prim_bas, supmol_bas, supmol_env)
+        self.tasks = create_tasks(cell, prim_bas, supmol_bas, supmol_env,
+                                  ao_loc_in_cell0)
         logger.debug(cell, 'Multigrid ntasks %s', len(self.tasks))
 
     def reset(self, cell=None):
