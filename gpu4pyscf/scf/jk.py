@@ -26,12 +26,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
 from pyscf import lib
 from pyscf.scf import _vhf
-from pyscf import __config__
 from gpu4pyscf.lib.cupy_helper import (load_library, condense, sandwich_dot, transpose_sum,
                                        reduce_to_device)
+from gpu4pyscf.__config__ import _streams, num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.__config__ import _streams, _num_devices
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.gto.mole import group_basis
 
 __all__ = [
@@ -49,115 +49,16 @@ PTR_BAS_COORD = 7
 LMAX = 4
 TILE = 2
 QUEUE_DEPTH = 262144
-UNROLL_ORDER = ctypes.c_int.in_dll(libvhf_rys, 'rys_jk_unrolled_max_order').value
-UNROLL_LMAX = ctypes.c_int.in_dll(libvhf_rys, 'rys_jk_unrolled_lmax').value
-UNROLL_NFMAX = ctypes.c_int.in_dll(libvhf_rys, 'rys_jk_unrolled_max_nf').value
-UNROLL_J_LMAX = ctypes.c_int.in_dll(libvhf_rys, 'rys_j_unrolled_lmax').value
-UNROLL_J_MAX_ORDER = ctypes.c_int.in_dll(libvhf_rys, 'rys_j_unrolled_max_order').value
+SHM_SIZE = shm_size - 1024
+del shm_size
 GOUT_WIDTH = 42
-SHM_SIZE = getattr(__config__, 'GPU_SHM_SIZE',
-                   int(gpu_specs['sharedMemPerBlockOptin']//9)*8)
 THREADS = 256
 GROUP_SIZE = 256
-
-def _jk_task(mol, dms, vhfopt, task_list, hermi=0,
-             device_id=0, with_j=True, with_k=True, verbose=None):
-    n_dm = dms.shape[0]
-    nao, _ = vhfopt.coeff.shape
-    uniq_l_ctr = vhfopt.uniq_l_ctr
-    uniq_l = uniq_l_ctr[:,0]
-    l_ctr_bas_loc = vhfopt.l_ctr_offsets
-    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
-    kern = libvhf_rys.RYS_build_jk
-
-    timing_counter = Counter()
-    kern_counts = 0
-    with cp.cuda.Device(device_id), _streams[device_id]:
-        log = logger.new_logger(mol, verbose)
-        cput0 = log.init_timer()
-        dms = cp.asarray(dms)
-
-        if hermi == 0:
-            # Contract the tril and triu parts separately
-            dms = cp.vstack([dms, dms.transpose(0,2,1)])
-        n_dm = dms.shape[0]
-        tile_q_ptr = ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p)
-        q_ptr = ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p)
-        s_ptr = lib.c_null_ptr()
-        if mol.omega < 0:
-            s_ptr = ctypes.cast(vhfopt.s_estimator.data.ptr, ctypes.c_void_p)
-
-        vj = vk = None
-        vj_ptr = vk_ptr = lib.c_null_ptr()
-        assert with_j or with_k
-        if with_k:
-            vk = cp.zeros(dms.shape)
-            vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
-        if with_j:
-            vj = cp.zeros(dms.shape)
-            vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
-
-        ao_loc = mol.ao_loc
-        dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-        log_max_dm = dm_cond.max()
-        log_cutoff = math.log(vhfopt.direct_scf_tol)
-        tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
-                                                 log_cutoff-log_max_dm)
-        workers = gpu_specs['multiProcessorCount']
-        pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
-        info = cp.empty(2, dtype=np.uint32)
-        t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
-
-        for i, j, k, l in task_list:
-            ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
-                       l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
-            tile_ij_mapping = tile_mappings[i,j]
-            llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-            kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
-                        l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
-            tile_kl_mapping = tile_mappings[k,l]
-            scheme = quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
-            err = kern(
-                vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(n_dm), ctypes.c_int(nao),
-                vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
-                (ctypes.c_int*8)(*ij_shls, *kl_shls),
-                ctypes.c_int(tile_ij_mapping.size),
-                ctypes.c_int(tile_kl_mapping.size),
-                ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
-                ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
-                tile_q_ptr, q_ptr, s_ptr,
-                ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                ctypes.c_float(log_cutoff),
-                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                ctypes.cast(info.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(workers),
-                mol._atm.ctypes, ctypes.c_int(mol.natm),
-                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-            if err != 0:
-                raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
-            if log.verbose >= logger.DEBUG1:
-                msg = f'processing {llll}, tasks = {info[1].get()} on Device {device_id}'
-                t1, t1p = log.timer_debug1(msg, *t1), t1
-                timing_counter[llll] += t1[1] - t1p[1]
-                kern_counts += 1
-        if with_j:
-            if hermi == 1:
-                vj *= 2.
-            else:
-                vj, vjT = vj[:n_dm//2], vj[n_dm//2:]
-                vj += vjT.transpose(0,2,1)
-        if with_k:
-            if hermi == 1:
-                vk = transpose_sum(vk)
-            else:
-                vk, vkT = vk[:n_dm//2], vk[n_dm//2:]
-                vk += vkT.transpose(0,2,1)
-    return vj, vk, kern_counts, timing_counter
 
 def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None):
     '''Compute J, K matrices
     '''
+    assert with_j or with_k
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
 
@@ -173,47 +74,132 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     dms = sandwich_dot(dms, vhfopt.coeff.T)
     dms = cp.asarray(dms, order='C')
 
-    n_dm = dms.shape[0]
-
-    assert with_j or with_k
-
-    init_constant(mol)
-
+    ao_loc = mol.ao_loc
+    nao = ao_loc[-1]
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
+    l_ctr_bas_loc = vhfopt.l_ctr_offsets
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     n_groups = np.count_nonzero(uniq_l <= LMAX)
 
-    tasks = []
-    for i in range(n_groups):
-        for j in range(i+1):
-            for k in range(i+1):
-                for l in range(k+1): 
-                    tasks.append((i,j,k,l))
-    tasks = np.array(tasks)
-    task_list = []
-    for device_id in range(_num_devices):
-        task_list.append(tasks[device_id::_num_devices])
+    dm_cond = condense('absmax', dms, ao_loc)
+    if hermi == 0:
+        # Wrap the triu contribution to tril
+        dm_cond = dm_cond + dm_cond.T
+    dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
+    log_max_dm = float(dm_cond.max())
+    log_cutoff = math.log(vhfopt.direct_scf_tol)
 
-    cp.cuda.get_current_stream().synchronize()
-    futures = []
-    with ThreadPoolExecutor(max_workers=_num_devices) as executor:
-        for device_id in range(_num_devices):
-            future = executor.submit(
-                _jk_task,
-                mol, dms, vhfopt, task_list[device_id], hermi=hermi,
-                with_j=with_j, with_k=with_k, verbose=verbose, 
-                device_id=device_id)
-            futures.append(future)
+    tasks = [(i,j,k,l)
+             for i in range(n_groups)
+             for j in range(i+1)
+             for k in range(i+1)
+             for l in range(k+1)]
+    schemes = {t: quartets_scheme(mol, uniq_l_ctr[list(t)]) for t in tasks}
 
+    def proc(dms, dm_cond):
+        device_id = cp.cuda.device.get_device_id()
+        stream = cp.cuda.stream.get_current_stream()
+        log = logger.new_logger(mol, verbose)
+        t0 = log.init_timer()
+        dms = cp.asarray(dms) # transfer to current device
+        dm_cond = cp.asarray(dm_cond)
+
+        if hermi == 0:
+            # Contract the tril and triu parts separately
+            dms = cp.vstack([dms, dms.transpose(0,2,1)])
+        n_dm = dms.shape[0]
+        tile_q_cond = vhfopt.tile_q_cond
+        tile_q_ptr = ctypes.cast(tile_q_cond.data.ptr, ctypes.c_void_p)
+        q_ptr = ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p)
+        s_ptr = lib.c_null_ptr()
+        if mol.omega < 0:
+            s_ptr = ctypes.cast(vhfopt.s_estimator.data.ptr, ctypes.c_void_p)
+
+        vj = vk = None
+        vj_ptr = vk_ptr = lib.c_null_ptr()
+        assert with_j or with_k
+        if with_k:
+            vk = cp.zeros(dms.shape)
+            vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
+        if with_j:
+            vj = cp.zeros(dms.shape)
+            vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
+
+        tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond,
+                                                 log_cutoff-log_max_dm)
+        workers = gpu_specs['multiProcessorCount']
+        pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
+        info = cp.empty(2, dtype=np.uint32)
+        t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
+
+        init_constant(mol)
+        timing_counter = Counter()
+        kern_counts = 0
+        kern = libvhf_rys.RYS_build_jk
+
+        while tasks:
+            try:
+                task = tasks.pop()
+            except IndexError:
+                break
+
+            i, j, k, l = task
+            shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
+            tile_ij_mapping = tile_mappings[i,j]
+            tile_kl_mapping = tile_mappings[k,l]
+            scheme = schemes[task]
+            err = kern(
+                vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_dm), ctypes.c_int(nao),
+                vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
+                (ctypes.c_int*8)(*shls_slice),
+                ctypes.c_int(tile_ij_mapping.size),
+                ctypes.c_int(tile_kl_mapping.size),
+                ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
+                tile_q_ptr, q_ptr, s_ptr,
+                ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff),
+                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(info.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(workers),
+                mol._atm.ctypes, ctypes.c_int(mol.natm),
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+            if err != 0:
+                llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+            if log.verbose >= logger.DEBUG1:
+                llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                msg = f'processing {llll}, tasks = {info[1].get()} on Device {device_id}'
+                t1, t1p = log.timer_debug1(msg, *t1), t1
+                timing_counter[llll] += t1[1] - t1p[1]
+                kern_counts += 1
+            if num_devices > 1:
+                stream.synchronize()
+
+        if with_j:
+            if hermi == 1:
+                vj *= 2.
+            else:
+                vj, vjT = vj[:n_dm//2], vj[n_dm//2:]
+                vj += vjT.transpose(0,2,1)
+        if with_k:
+            if hermi == 1:
+                vk = transpose_sum(vk)
+            else:
+                vk, vkT = vk[:n_dm//2], vk[n_dm//2:]
+                vk += vkT.transpose(0,2,1)
+        return vj, vk, kern_counts, timing_counter
+
+    results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
     kern_counts = 0
     timing_collection = Counter()
     vj_dist = []
     vk_dist = []
-    for future in futures:
-        vj, vk, counts, counter = future.result()
+    for vj, vk, counts, t_counter in results:
         kern_counts += counts
-        timing_collection += counter
+        timing_collection += t_counter
         vj_dist.append(vj)
         vk_dist.append(vk)
 
@@ -222,17 +208,14 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
         for llll, t in timing_collection.items():
             log.debug1('%s wall time %.2f', llll, t)
 
-    for s in _streams:
-        s.synchronize()
-    cp.cuda.get_current_stream().synchronize()
     vj = vk = None
     if with_k:
-        vk = reduce_to_device(vk_dist, inplace=True)
+        vk = multi_gpu.array_reduce(vk_dist, inplace=True)
         #:vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
         vk = sandwich_dot(vk, vhfopt.coeff)
-        
+
     if with_j:
-        vj = reduce_to_device(vj_dist, inplace=True)
+        vj = multi_gpu.array_reduce(vj_dist, inplace=True)
         vj = transpose_sum(vj)
         #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vj, vhfopt.coeff)
         vj = sandwich_dot(vj, vhfopt.coeff)
@@ -251,10 +234,7 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
             else:
                 scripts.append('jk->s1il')
         shls_excludes = [0, h_shls[0]] * 4
-        if hermi == 1:
-            dms = dms.get()
-        else:
-            dms = dms[:n_dm//2].get()
+        dms = dms.get()
         vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
                                  dms, 1, mol._atm, mol._bas, mol._env,
                                  shls_excludes=shls_excludes)
@@ -310,28 +290,8 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
 
     ao_loc = mol.ao_loc
     dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-    log_max_dm = dm_cond.max()
+    log_max_dm = float(dm_cond.max())
     log_cutoff = math.log(vhfopt.direct_scf_tol)
-
-    dms = dms.get()
-    pair_loc = _make_j_engine_pair_locs(mol)
-    dm_xyz = np.empty(pair_loc[-1])
-    libvhf_rys.transform_cart_to_xyz(
-        dm_xyz.ctypes, dms.ctypes, ao_loc.ctypes, pair_loc.ctypes,
-        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-    dm_xyz = cp.asarray(dm_xyz)
-    vj_xyz = cp.zeros_like(dm_xyz)
-
-    pair_loc_on_gpu = cp.asarray(pair_loc)
-    rys_envs = RysIntEnvVars(
-        mol.natm, mol.nbas,
-        vhfopt.rys_envs.atm, vhfopt.rys_envs.bas, vhfopt.rys_envs.env,
-        pair_loc_on_gpu.data.ptr,
-    )
-
-    err = libvhf_rys.RYS_init_rysj_constant(ctypes.c_int(SHM_SIZE))
-    if err != 0:
-        raise RuntimeError('CUDA kernel initialization')
 
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
@@ -339,92 +299,139 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     n_groups = np.count_nonzero(uniq_l <= LMAX)
     ntiles = mol.nbas // TILE
-    tile_mappings = {}
-    workers = gpu_specs['multiProcessorCount']
-    pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
-    info = cp.empty(2, dtype=np.uint32)
 
-    for i in range(n_groups):
-        for j in range(i+1):
-            ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
-            jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
-            ij_shls = (ish0, ish1, jsh0, jsh1)
-            i0 = ish0 // TILE
-            i1 = ish1 // TILE
-            j0 = jsh0 // TILE
-            j1 = jsh1 // TILE
-            sub_tile_q = vhfopt.tile_q_cond[i0:i1,j0:j1]
-            mask = sub_tile_q > log_cutoff - log_max_dm
-            if i == j:
-                mask = cp.tril(mask)
-            t_ij = (cp.arange(i0, i1, dtype=np.int32)[:,None] * ntiles +
-                    cp.arange(j0, j1, dtype=np.int32))
-            idx = cp.argsort(sub_tile_q[mask])[::-1]
-            tile_mappings[i,j] = t_ij[mask][idx]
-    t1 = t2 = log.timer_debug1('q_cond and dm_cond', *cput0)
+    dms = dms.get()
+    pair_loc = _make_j_engine_pair_locs(mol)
+    dm_xyz = np.empty(pair_loc[-1])
+    libvhf_rys.transform_cart_to_xyz(
+        dm_xyz.ctypes, dms.ctypes, ao_loc.ctypes, pair_loc.ctypes,
+        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
 
-    timing_collection = {}
-    kern_counts = 0
-    kern = libvhf_rys.RYS_build_j
+    tasks = [(i,j,k,l)
+             for i in range(n_groups)
+             for j in range(i+1)
+             for k in range(i+1)
+             for l in range(k+1)]
+    schemes = {t: _j_engine_quartets_scheme(mol, uniq_l_ctr[list(t)]) for t in tasks}
 
-    for i in range(n_groups):
-        for j in range(i+1):
-            ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
-                       l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
+    def proc(dm_xyz, dm_cond):
+        device_id = cp.cuda.device.get_device_id()
+        stream = cp.cuda.stream.get_current_stream()
+        log = logger.new_logger(mol, verbose)
+        t0 = log.init_timer()
+        dm_xyz = cp.asarray(dm_xyz) # transfer to current device
+        dm_cond = cp.asarray(dm_cond)
+        vj_xyz = cp.zeros_like(dm_xyz)
+        pair_loc_on_gpu = cp.asarray(pair_loc)
+        _atm, _bas, _env, _ = vhfopt.rys_envs._env_ref_holder
+        rys_envs = RysIntEnvVars(
+            mol.natm, mol.nbas,
+            _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
+            pair_loc_on_gpu.data.ptr,
+        )
+        tile_q_cond = vhfopt.tile_q_cond
+        q_cond = vhfopt.q_cond
+
+        err = libvhf_rys.RYS_init_rysj_constant(ctypes.c_int(SHM_SIZE))
+        if err != 0:
+            raise RuntimeError('CUDA kernel initialization')
+
+        tile_mappings = {}
+        workers = gpu_specs['multiProcessorCount']
+        pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
+        info = cp.empty(2, dtype=np.uint32)
+
+        for i in range(n_groups):
+            for j in range(i+1):
+                ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
+                jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
+                i0 = ish0 // TILE
+                i1 = ish1 // TILE
+                j0 = jsh0 // TILE
+                j1 = jsh1 // TILE
+                sub_tile_q = tile_q_cond[i0:i1,j0:j1]
+                mask = sub_tile_q > log_cutoff - log_max_dm
+                if i == j:
+                    mask = cp.tril(mask)
+                t_ij = (cp.arange(i0, i1, dtype=np.int32)[:,None] * ntiles +
+                        cp.arange(j0, j1, dtype=np.int32))
+                idx = cp.argsort(sub_tile_q[mask])[::-1]
+                tile_mappings[i,j] = t_ij[mask][idx]
+        t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
+
+        timing_collection = {}
+        kern_counts = 0
+        kern = libvhf_rys.RYS_build_j
+
+        while tasks:
+            try:
+                task = tasks.pop()
+            except IndexError:
+                break
+
+            i, j, k, l = task
+            shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
             tile_ij_mapping = tile_mappings[i,j]
-            for k in range(i+1):
-                for l in range(k+1):
-                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                    kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
-                               l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
-                    tile_kl_mapping = tile_mappings[k,l]
-                    scheme = _j_engine_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
-                    err = kern(
-                        ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(n_dm), ctypes.c_int(nao),
-                        rys_envs, (ctypes.c_int*3)(*scheme),
-                        (ctypes.c_int*8)(*ij_shls, *kl_shls),
-                        ctypes.c_int(tile_ij_mapping.size),
-                        ctypes.c_int(tile_kl_mapping.size),
-                        ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p),
-                        lib.c_null_ptr(),
-                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.c_float(log_cutoff),
-                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(info.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(workers),
-                        mol._atm.ctypes, ctypes.c_int(mol.natm),
-                        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                    if err != 0:
-                        raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
-                    if log.verbose >= logger.DEBUG1:
-                        t1, t1p = log.timer_debug1(f'processing {llll}, tasks = {info[1]}', *t1), t1
-                        if llll not in timing_collection:
-                            timing_collection[llll] = 0
-                        timing_collection[llll] += t1[1] - t1p[1]
-                        kern_counts += 1
+            tile_kl_mapping = tile_mappings[k,l]
+            scheme = schemes[task]
+            err = kern(
+                ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_dm), ctypes.c_int(nao),
+                rys_envs, (ctypes.c_int*3)(*scheme),
+                (ctypes.c_int*8)(*shls_slice),
+                ctypes.c_int(tile_ij_mapping.size),
+                ctypes.c_int(tile_kl_mapping.size),
+                ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(tile_q_cond.data.ptr, ctypes.c_void_p),
+                ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+                lib.c_null_ptr(),
+                ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff),
+                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(info.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(workers),
+                mol._atm.ctypes, ctypes.c_int(mol.natm),
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+            if err != 0:
+                llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                raise RuntimeError(f'RYS_build_j kernel for {llll} failed')
+            if log.verbose >= logger.DEBUG1:
+                llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                t1, t1p = log.timer_debug1(f'processing {llll}, tasks = {info[1]}', *t1), t1
+                if llll not in timing_collection:
+                    timing_collection[llll] = 0
+                timing_collection[llll] += t1[1] - t1p[1]
+                kern_counts += 1
+            if num_devices > 1:
+                stream.synchronize()
+        return vj_xyz, kern_counts, timing_collection
+
+    results = multi_gpu.run(proc, args=(dm_xyz, dm_cond), non_blocking=True)
+    kern_counts = 0
+    timing_collection = Counter()
+    vj_dist = []
+    for vj, counts, t_counter in results:
+        kern_counts += counts
+        timing_collection += t_counter
+        vj_dist.append(vj)
 
     if log.verbose >= logger.DEBUG1:
         log.debug1('kernel launches %d', kern_counts)
         for llll, t in timing_collection.items():
             log.debug1('%s wall time %.2f', llll, t)
-        cp.cuda.Stream.null.synchronize()
-        log.timer_debug1('cuda kernel', *t2)
 
+    vj_xyz = multi_gpu.array_reduce(vj_dist, inplace=True)
     vj_xyz = vj_xyz.get()
     vj = np.empty_like(dms)
     libvhf_rys.transform_xyz_to_cart(
         vj.ctypes, vj_xyz.ctypes, ao_loc.ctypes, pair_loc.ctypes,
         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
     #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
-    vj = sandwich_dot(vj, vhfopt.coeff)
+    vj = sandwich_dot(cp.asarray(vj), vhfopt.coeff)
     vj = transpose_sum(vj)
     vj *= 2.
-    vj = vj.reshape(dm.shape)
 
     h_shls = vhfopt.h_shls
     if h_shls:
@@ -433,7 +440,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
         scripts = ['ji->s2kl']
         shls_excludes = [0, h_shls[0]] * 4
         vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
-                                 dms.get(), 1, mol._atm, mol._bas, mol._env,
+                                 dms, 1, mol._atm, mol._bas, mol._env,
                                  shls_excludes=shls_excludes)
         vj1 = vs_h[0].reshape(n_dm,nao,nao)
         coeff = vhfopt.coeff
@@ -443,6 +450,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
             vj[i] += coeff.T.dot(cp.asarray(v)).dot(coeff)
         log.timer_debug1('get_j pass 2 for h functions on cpu', *cput1)
 
+    vj = vj.reshape(dm.shape)
     log.timer('vj', *cput0)
     return vj
 
@@ -457,7 +465,6 @@ class _VHFOpt:
 
         # Hold cache on GPU devices
         self._rys_envs = {}
-        self._mol_gpu = {}
         self._q_cond = {}
         self._tile_q_cond = {}
         self._s_estimator = {}
@@ -550,11 +557,11 @@ class _VHFOpt:
                 _bas = cp.array(mol._bas)
                 _env = cp.array(_scale_sp_ctr_coeff(mol))
                 ao_loc = cp.array(mol.ao_loc)
-                self._mol_gpu[device_id] = (_atm, _bas, _env, ao_loc)
-                self._rys_envs[device_id] = RysIntEnvVars(
+                self._rys_envs[device_id] = rys_envs = RysIntEnvVars(
                     mol.natm, mol.nbas,
                     _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
                     ao_loc.data.ptr)
+                rys_envs._env_ref_holder = (_atm, _bas, _env, ao_loc)
         return self._rys_envs[device_id]
 
 class RysIntEnvVars(ctypes.Structure):
@@ -600,13 +607,12 @@ def g_pair_idx(ij_inc=None):
 
 def init_constant(mol):
     g_idx, offsets = g_pair_idx()
-    for device_id in range(_num_devices):
-        with cp.cuda.Device(device_id), _streams[device_id]:
-            err = libvhf_rys.RYS_init_constant(
-                g_idx.ctypes, offsets.ctypes, mol._env.ctypes,
-                ctypes.c_int(mol._env.size), ctypes.c_int(SHM_SIZE))
-            if err != 0:
-                raise RuntimeError(f'CUDA kernel initialization on device {device_id}')
+    err = libvhf_rys.RYS_init_constant(
+        g_idx.ctypes, offsets.ctypes, mol._env.ctypes,
+        ctypes.c_int(mol._env.size), ctypes.c_int(SHM_SIZE))
+    if err != 0:
+        device_id = cp.cuda.device.get_device_id()
+        raise RuntimeError(f'CUDA kernel initialization on device {device_id}')
 
 def _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond, cutoff, tile=TILE):
     n_groups = len(l_ctr_bas_loc) - 1
@@ -644,17 +650,11 @@ def quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nfk = (lk + 1) * (lk + 2) // 2
     nfl = (ll + 1) * (ll + 2) // 2
     gout_size = nfi * nfj * nfk * nfl
-    if (gout_size <= UNROLL_NFMAX or order <= UNROLL_ORDER) and all(ls <= UNROLL_LMAX):
-        if (CUDA_VERSION >= 12040 and
-            order <= 3 and (li,lj,lk,ll) != (1,1,1,0) and (li,lj,lk,ll) != (1,0,1,1)):
-            return 512, 1
-        return 256, 1
-
     g_size = (li+1)*(lj+1)*(lk+1)*(ll+1)
     nps = l_ctr_pattern[:,1]
     ij_prims = nps[0] * nps[1]
     nroots = order // 2 + 1
-    unit = nroots*2 + g_size*3 + ij_prims*4
+    unit = nroots*2 + g_size*3 + ij_prims + 9
     if mol.omega < 0: # SR
         unit += nroots * 2
     counts = shm_size // (unit*8)
@@ -678,13 +678,8 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nf3_ij = (lij+1)*(lij+2)*(lij+3)//6
     nf3_kl = (lkl+1)*(lkl+2)*(lkl+3)//6
     nroots = order // 2 + 1
-    # UNROLL_J_LMAX is different to UNROLL_LMAX of orbital basis. see rys_contract_j kernel
-    if order <= UNROLL_J_MAX_ORDER and lij <= UNROLL_J_LMAX and lkl <= UNROLL_J_LMAX:
-        if CUDA_VERSION >= 12040 and order <= 2:
-            return 512, 1, False
-        return 256, 1, False
 
-    unit = nroots*2 + g_size*3 + ij_prims*4
+    unit = nroots*2 + g_size*3 + ij_prims + 9
     dm_cache_size = nf3_ij + nf3_kl*2 + (lij+1)*(lkl+1)*(nmax+2)
     gout_size = nf3_ij * nf3_kl
     if dm_cache_size < gout_size:
@@ -700,8 +695,6 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     counts = shm_size // (unit*8)
     n = min(THREADS, _nearest_power2(counts))
     gout_stride = THREADS // n
-    if CUDA_VERSION >= 12040:
-        gout_stride *= 2
     return n, gout_stride, with_gout
 
 def _nearest_power2(n, return_leq=True):

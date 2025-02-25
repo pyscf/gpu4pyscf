@@ -90,17 +90,17 @@ def eval_rho(cell, ao, dm, non0tab=None, xctype='LDA', hermi=0, with_lapl=False,
         pyscf.dft.numint.eval_rho
 
     '''
-    if np.iscomplexobj(ao) or np.iscomplexobj(dm):
+    if cp.iscomplexobj(ao) or cp.iscomplexobj(dm):
         ngrids, nao = ao.shape[-2:]
         ao_loc = cell.ao_loc_nr()
         assert nao == ao_loc[-1]
         dm = cp.asarray(dm, dtype=np.complex128)
+        ao = cp.asarray(ao, dtype=np.complex128)
 
         if hermi == 1:
             def dot_bra(bra, aodm):
-                rho = contract('pi,pi->p', bra.real, aodm.real)
-                rho += contract('pi,pi->p', bra.imag, aodm.imag)
-                return rho
+                rho = contract('pi,pi->p', bra.conj(), aodm).real
+                return cp.asarray(rho, order='C')
             dtype = np.float64
         else:
             def dot_bra(bra, aodm):
@@ -147,6 +147,7 @@ def eval_rho(cell, ao, dm, non0tab=None, xctype='LDA', hermi=0, with_lapl=False,
         ngrids, nao = ao.shape[-2:]
         ao_loc = cell.ao_loc_nr()
         assert nao == ao_loc[-1]
+        assert ao.dtype == dm.dtype
 
         def dot_bra(bra, aodm):
             return contract('pi,pi->p', bra, aodm)
@@ -378,13 +379,12 @@ def _tau_dot(bra, ket, wv):
     return mat
 
 
-#TODO: put NumInt and KNumInt into one
 class KNumInt(lib.StreamObject, numint.LibXCMixin):
     eval_ao = staticmethod(eval_ao_kpts)
 
     make_mask = NotImplemented
 
-    def get_rho(self, cell, dm, grids, kpts=np.zeros((1,3)), max_memory=2000):
+    def get_rho(self, cell, dm, grids, kpts=np.zeros((1,3))):
         '''Density in real space
         '''
         kpts = kpts.reshape(-1, 3)
@@ -445,7 +445,7 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
         for ip0, ip1 in lib.prange(0, ngrids, blksize):
             coords = grids_coords[ip0:ip1]
             weight = grids_weights[ip0:ip1]
-            ao_ks = eval_ao_kpts(cell, coords, kpts, deriv=deriv)
+            ao_ks = self.eval_ao(cell, coords, kpts, deriv=deriv)
             yield ao_ks, weight, coords
             ao_ks = None
 

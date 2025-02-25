@@ -88,7 +88,7 @@ def vdw_surface(mol, scales=[1.0], density=1.0*radii.BOHR**2, rad=R_VDW):
     Generate vdw surface of molecules, in Bohr
     '''
     coords = mol.atom_coords(unit='B')
-    charges = mol.atom_charges()
+    charges = [gto.charge(sym) for sym in mol.elements]
     atom_radii = rad[charges]
 
     surface_points = []
@@ -196,7 +196,7 @@ def resp_solve(mol, dm, grid_density=1.0*radii.BOHR**2,
     q[u] = q[v] = q[w]
     '''
 
-    charges = mol.atom_charges()
+    charges = np.asarray([gto.charge(sym) for sym in mol.elements])
     natm = mol.natm
     is_restraint = charges > 1
     is_restraint[charges == 1] = not hfree

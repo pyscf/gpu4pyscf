@@ -52,7 +52,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
         n, exc, vxc = multigrid.nr_uks(ks.with_df, ks.xc, dm, hermi,
                                        kpt.reshape(1,3), kpts_band,
                                        with_j=True, return_j=False)
-        log.info('nelec by numeric integration = %s', n)
+        log.debug('nelec by numeric integration = %s', n)
         t0 = log.timer('vxc', *t0)
         return vxc
 
@@ -79,7 +79,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
                                           0, hermi, kpt, max_memory=max_memory)
             exc += enlc
             vxc += vnlc
-        log.info('nelec by numeric integration = %s', n)
+        log.debug('nelec by numeric integration = %s', n)
         t0 = log.timer('vxc', *t0)
 
     if not hybrid:
@@ -134,9 +134,12 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
 
     dump_flags = uks_cpu.UKS.dump_flags
 
-    get_rho = return_cupy_array(uks_cpu.get_rho)
     get_veff = get_veff
     energy_elec = mol_uks.energy_elec
+
+    def get_rho(self, dm=None, grids=None, kpt=None):
+        if dm is None: dm = self.make_rdm1()
+        return rks.get_rho(self, dm[0]+dm[1], grids, kpt)
 
     nuc_grad_method = NotImplemented
     to_hf = NotImplemented

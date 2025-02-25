@@ -13,10 +13,9 @@
 # limitations under the License.
 
 import numpy as np
-from gpu4pyscf.scf import cphf
 import cupy
+from gpu4pyscf.scf import hf, cphf, _response_functions
 from gpu4pyscf.lib.cupy_helper import contract
-
 
 def gen_vind(mf, mo_coeff, mo_occ):
     """get the induced potential. This is the same as contract the mo1 with the kernel.
@@ -59,6 +58,7 @@ def eval_polarizability(mf):
     Returns:
         polarizability (numpy.array): polarizability in au
     """
+    assert isinstance(mf, hf.RHF), "Unrestricted mf object is not supported."
 
     polarizability = np.empty((3, 3))
 
