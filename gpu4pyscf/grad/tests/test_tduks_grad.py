@@ -156,8 +156,6 @@ def benchmark_with_finite_diff(mol_input, xc, delta=0.1, nstates=3, lindep=1.0E-
     mf.grids.level=9
     mf.grids.prune = None
     mf.run()
-    mo_coeff = mf.mo_coeff
-
     mo_occ = mf.mo_occ
     occidxa = np.where(mo_occ[0]>0)[0]
     occidxb = np.where(mo_occ[1]>0)[0]
