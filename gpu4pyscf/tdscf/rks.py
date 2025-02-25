@@ -26,8 +26,15 @@ __all__ = [
     'TDA', 'TDDFT', 'TDRKS', 'CasidaTDDFT', 'TDDFTNoHybrid',
 ]
 
-TDA = tdhf_gpu.TDA
-TDDFT = tdhf_gpu.TDHF
+class TDA(tdhf_gpu.TDA):
+    def nuc_grad_method(self):
+        from gpu4pyscf.grad import tdrks
+        return tdrks.Gradients(self)
+
+class TDDFT(tdhf_gpu.TDHF):
+    def nuc_grad_method(self):
+        from gpu4pyscf.grad import tdrks
+        return tdrks.Gradients(self)
 TDRKS = TDDFT
 
 class CasidaTDDFT(TDDFT):
@@ -132,7 +139,7 @@ class CasidaTDDFT(TDDFT):
         return self.e, self.xy
 
     def nuc_grad_method(self):
-        from pyscf.grad import tdrks
+        from gpu4pyscf.grad import tdrks
         return tdrks.Gradients(self)
 
 TDDFTNoHybrid = CasidaTDDFT

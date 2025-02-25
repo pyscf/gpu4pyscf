@@ -105,7 +105,7 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
         if not isinstance(vk, cp.ndarray): vk = cp.asarray(vk)
         vk *= hyb
         if omega != 0:
-            vk += mf.get_k(mol, dm, hermi=0, omega=omega) * (alpha-hyb)
+            vk += cp.asarray(mf.get_k(mol, dm, hermi=0, omega=omega)) * (alpha-hyb)
         vj = vj.reshape(2,3,nao,nao)
         vk = vk.reshape(2,3,nao,nao)
 
@@ -388,13 +388,16 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
             ao0 = ao[0]
         else:
             ao0 = ao
-        rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao0, mo_coeff[0], mo_occ[0], mask, xctype, with_lapl=False),
-               ni.eval_rho2(_sorted_mol, ao0, mo_coeff[1], mo_occ[1], mask, xctype, with_lapl=False)))
+        mo_coeff_mask_a = mo_coeff[0, mask]
+        mo_coeff_mask_b = mo_coeff[1, mask]
+        rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao0, mo_coeff_mask_a, mo_occ[0], mask, xctype, with_lapl=False),
+               ni.eval_rho2(_sorted_mol, ao0, mo_coeff_mask_b, mo_occ[1], mask, xctype, with_lapl=False)))
         vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
-
+        dmvo_mask_a = dmvo[0, mask[:,None],mask]
+        dmvo_mask_b = dmvo[1, mask[:,None],mask]
         rho1 = cp.asarray((
-            ni.eval_rho(_sorted_mol, ao0, dmvo[0], mask, xctype, hermi=1, with_lapl=False),
-            ni.eval_rho(_sorted_mol, ao0, dmvo[1], mask, xctype, hermi=1, with_lapl=False)))
+            ni.eval_rho(_sorted_mol, ao0, dmvo_mask_a, mask, xctype, hermi=1, with_lapl=False),
+            ni.eval_rho(_sorted_mol, ao0, dmvo_mask_b, mask, xctype, hermi=1, with_lapl=False)))
         if xctype == 'LDA':
             rho1 = rho1[:,cp.newaxis]
         wv = cp.einsum('axg,axbyg,g->byg', rho1, fxc, weight)
@@ -402,9 +405,11 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
         fmat_(_sorted_mol, f1vo[1], ao, wv[1], mask, shls_slice, ao_loc)
 
         if dmoo is not None:
+            dmoo_mask_a = dmoo[0, mask[:,None],mask]
+            dmoo_mask_b = dmoo[1, mask[:,None],mask]
             rho2 = cp.asarray((
-                ni.eval_rho(_sorted_mol, ao0, dmoo[0], mask, xctype, hermi=1, with_lapl=False),
-                ni.eval_rho(_sorted_mol, ao0, dmoo[1], mask, xctype, hermi=1, with_lapl=False)))
+                ni.eval_rho(_sorted_mol, ao0, dmoo_mask_a, mask, xctype, hermi=1, with_lapl=False),
+                ni.eval_rho(_sorted_mol, ao0, dmoo_mask_b, mask, xctype, hermi=1, with_lapl=False)))
             if xctype == 'LDA':
                 rho2 = rho2[:,cp.newaxis]
             wv = cp.einsum('axg,axbyg,g->byg', rho2, fxc, weight)

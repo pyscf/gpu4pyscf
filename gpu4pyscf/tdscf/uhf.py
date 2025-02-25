@@ -43,6 +43,8 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
     B_bbaa = B_aabb.transpose(2,3,0,1).
     '''
     from pyscf import ao2mo
+    if hasattr(mf, 'with_df'):
+        raise NotImplementedError('DF-TDDFT is not implemented')
     
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_coeff is None: mo_coeff = mf.mo_coeff
@@ -171,16 +173,21 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
             ao_deriv = 0
             for ao, mask, weight, coords \
                     in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv):
-                rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao, mo_coeff[0], mo_occ[0], mask, xctype, with_lapl=False),
-                                  ni.eval_rho2(_sorted_mol, ao, mo_coeff[1], mo_occ[1], mask, xctype, with_lapl=False)))
+                mo_coeff_mask_a = mo_coeff[0, mask]
+                mo_coeff_mask_b = mo_coeff[1, mask]
+                rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_a, mo_occ[0], mask, xctype, with_lapl=False),
+                                  ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b, mo_occ[1], mask, xctype, with_lapl=False)))
                 
                 fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
                 wfxc = fxc[:,0,:,0] * weight
-
-                rho_o_a = cp.einsum('pr,pi->ri', ao, orbo_a)
-                rho_v_a = cp.einsum('pr,pi->ri', ao, orbv_a)
-                rho_o_b = cp.einsum('pr,pi->ri', ao, orbo_b)
-                rho_v_b = cp.einsum('pr,pi->ri', ao, orbv_b)
+                orbo_a_mask = orbo_a[mask]
+                orbv_a_mask = orbv_a[mask]
+                orbo_b_mask = orbo_b[mask]
+                orbv_b_mask = orbv_b[mask]
+                rho_o_a = cp.einsum('pr,pi->ri', ao, orbo_a_mask)
+                rho_v_a = cp.einsum('pr,pi->ri', ao, orbv_a_mask)
+                rho_o_b = cp.einsum('pr,pi->ri', ao, orbo_b_mask)
+                rho_v_b = cp.einsum('pr,pi->ri', ao, orbv_b_mask)
                 rho_ov_a = cp.einsum('ri,ra->ria', rho_o_a, rho_v_a)
                 rho_ov_b = cp.einsum('ri,ra->ria', rho_o_b, rho_v_b)
 
@@ -203,14 +210,20 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
             ao_deriv = 1
             for ao, mask, weight, coords \
                     in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv):
-                rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao, mo_coeff[0], mo_occ[0], mask, xctype, with_lapl=False),
-                                  ni.eval_rho2(_sorted_mol, ao, mo_coeff[1], mo_occ[1], mask, xctype, with_lapl=False)))
+                mo_coeff_mask_a = mo_coeff[0, mask]
+                mo_coeff_mask_b = mo_coeff[1, mask]
+                rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_a, mo_occ[0], mask, xctype, with_lapl=False),
+                                  ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b, mo_occ[1], mask, xctype, with_lapl=False)))
                 fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
                 wfxc = fxc * weight
-                rho_o_a = cp.einsum('xpr,pi->xri', ao, orbo_a)
-                rho_v_a = cp.einsum('xpr,pi->xri', ao, orbv_a)
-                rho_o_b = cp.einsum('xpr,pi->xri', ao, orbo_b)
-                rho_v_b = cp.einsum('xpr,pi->xri', ao, orbv_b)
+                orbo_a_mask = orbo_a[mask]
+                orbv_a_mask = orbv_a[mask]
+                orbo_b_mask = orbo_b[mask]
+                orbv_b_mask = orbv_b[mask]
+                rho_o_a = cp.einsum('xpr,pi->xri', ao, orbo_a_mask)
+                rho_v_a = cp.einsum('xpr,pi->xri', ao, orbv_a_mask)
+                rho_o_b = cp.einsum('xpr,pi->xri', ao, orbo_b_mask)
+                rho_v_b = cp.einsum('xpr,pi->xri', ao, orbv_b_mask)
                 rho_ov_a = cp.einsum('xri,ra->xria', rho_o_a, rho_v_a[0])
                 rho_ov_b = cp.einsum('xri,ra->xria', rho_o_b, rho_v_b[0])
                 rho_ov_a[1:4] += cp.einsum('ri,xra->xria', rho_o_a[0], rho_v_a[1:4])
@@ -241,14 +254,20 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
             ao_deriv = 1
             for ao, mask, weight, coords \
                     in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv):
-                rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao, mo_coeff[0], mo_occ[0], mask, xctype, with_lapl=False),
-                                  ni.eval_rho2(_sorted_mol, ao, mo_coeff[1], mo_occ[1], mask, xctype, with_lapl=False)))
+                mo_coeff_mask_a = mo_coeff[0, mask]
+                mo_coeff_mask_b = mo_coeff[1, mask]
+                rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_a, mo_occ[0], mask, xctype, with_lapl=False),
+                                  ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b, mo_occ[1], mask, xctype, with_lapl=False)))
                 fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
                 wfxc = fxc * weight
-                rho_oa = cp.einsum('xpr,pi->xri', ao, orbo_a)
-                rho_ob = cp.einsum('xpr,pi->xri', ao, orbo_b)
-                rho_va = cp.einsum('xpr,pi->xri', ao, orbv_a)
-                rho_vb = cp.einsum('xpr,pi->xri', ao, orbv_b)
+                orbo_a_mask = orbo_a[mask]
+                orbv_a_mask = orbv_a[mask]
+                orbo_b_mask = orbo_b[mask]
+                orbv_b_mask = orbv_b[mask]
+                rho_oa = cp.einsum('xpr,pi->xri', ao, orbo_a_mask)
+                rho_ob = cp.einsum('xpr,pi->xri', ao, orbo_b_mask)
+                rho_va = cp.einsum('xpr,pi->xri', ao, orbv_a_mask)
+                rho_vb = cp.einsum('xpr,pi->xri', ao, orbv_b_mask)
                 rho_ov_a = cp.einsum('xri,ra->xria', rho_oa, rho_va[0])
                 rho_ov_b = cp.einsum('xri,ra->xria', rho_ob, rho_vb[0])
                 rho_ov_a[1:4] += cp.einsum('ri,xra->xria', rho_oa[0], rho_va[1:4])
@@ -347,6 +366,10 @@ class TDBase(tdhf_gpu.TDBase):
     def get_ab(self, mf=None):
         if mf is None: mf = self._scf
         return get_ab(mf)
+    
+    def nuc_grad_method(self):
+        from gpu4pyscf.grad import tduhf
+        return tduhf.Gradients(self)
     
     def _contract_multipole(tdobj, ints, hermi=True, xy=None):
         if xy is None: xy = tdobj.xy

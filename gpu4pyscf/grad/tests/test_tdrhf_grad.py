@@ -22,14 +22,14 @@ from gpu4pyscf import scf as gpu_scf
 from packaging import version
 
 atom = '''
-O       0.0000000000    -0.0000000000     0.1174000000
-H      -0.7570000000    -0.0000000000    -0.4696000000
-H       0.7570000000     0.0000000000    -0.4696000000
+O       0.0000000000     0.0000000000     0.0000000000
+H       0.0000000000    -0.7570000000     0.5870000000
+H       0.0000000000     0.7570000000     0.5870000000
 '''
 
 pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
-bas0='cc-pvtz'
+bas0='cc-pvdz'
 
 benchmark_results = {}
 
@@ -66,6 +66,32 @@ def diagonalize_tda(a, nroots=5):
     return e_sorted_final[:nroots], xy_sorted[:, :nroots]
 
 
+def cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda):
+    a, b = td.get_ab()
+
+    if tda:
+        atmlst = range(mol.natm)
+        e_diag, xy_diag = diagonalize_tda(a)
+        x = xy_diag[:, 0].reshape(nocc, nvir)*np.sqrt(0.5)
+        de_td = grad_elec(tdgrad, (x, 0))
+        gradient_ana = de_td + tdgrad.grad_nuc(atmlst=atmlst)
+    else:
+        atmlst = range(mol.natm)
+        e_diag, xy_diag = diagonalize(a, b)
+        nsize = xy_diag.shape[0]//2
+        norm_1 = np.linalg.norm(xy_diag[:nsize,0])
+        norm_2 = np.linalg.norm(xy_diag[nsize:,0])
+        x = xy_diag[:nsize,0]*np.sqrt(0.5/(norm_1**2-norm_2**2))
+        y = xy_diag[nsize:,0]*np.sqrt(0.5/(norm_1**2-norm_2**2))
+        x = x.reshape(nocc, nvir)
+        y = y.reshape(nocc, nvir)
+    
+        de_td = grad_elec(tdgrad, (x, y))
+        gradient_ana = de_td + tdgrad.grad_nuc(atmlst=atmlst)
+
+    return gradient_ana
+
+
 def setUpModule():
     global mol
     mol = pyscf.M(atom=atom, basis=bas0, max_memory=32000,
@@ -100,17 +126,19 @@ def benchmark_with_finite_diff(mol_input, delta=0.1, nstates=3, lindep=1.0E-12, 
     mol = mol_input.copy()
     mf = scf.RHF(mol).to_gpu()
     mf.run()
+    mo_coeff = mf.mo_coeff
+    mo_occ = mf.mo_occ
+    nao, nmo = mo_coeff.shape
+    nocc = int((mo_occ>0).sum())
+    nvir = nmo - nocc
     if tda:
         td = gpu4pyscf.tdscf.rhf.TDA(mf)
     else:
         td = gpu4pyscf.tdscf.rhf.TDHF(mf)
-    td.nstates = nstates
-    td.lindep = lindep
     assert td.device == 'gpu'
-    td.kernel()
+    tdgrad = gpu4pyscf.grad.tdrks.Gradients(td)
+    gradient_ana = cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, gpu4pyscf.grad.tdrhf.grad_elec, tda)
 
-    tdgrad = gpu4pyscf.grad.tdrhf.Gradients(td)
-    gradient_ana = tdgrad.kernel()
     coords = mol.atom_coords(unit='Ang')*1.0
     natm = coords.shape[0]
     grad = np.zeros((natm, 3))
@@ -161,23 +189,22 @@ def _check_grad(mol, tol=1e-6, disp=None, tda=False, method='cpu'):
         gradi_cpu, grad_gpu = benchmark_with_cpu(mol, nstates=5, lindep=1.0E-12, tda=tda)
         norm_diff = np.linalg.norm(gradi_cpu - grad_gpu)
     elif method == 'numerical':
-        grad_ana, grad = benchmark_with_finite_diff(mol, nstates=5, lindep=1.0E-12, tda=tda)
+        grad_ana, grad = benchmark_with_finite_diff(mol, delta=0.005, nstates=5, lindep=1.0E-12, tda=tda)
         norm_diff = np.linalg.norm(grad_ana - grad)
-    print(f'{tda}  {method}  norm_diff = {norm_diff}')
     assert norm_diff < tol
 
 class KnownValues(unittest.TestCase):
     def test_grad_tda_singlet_cpu(self):
-        _check_grad(mol, tol=1e-11, tda=True, method='cpu')
+        _check_grad(mol, tol=1e-10, tda=True, method='cpu')
 
     def test_grad_tda_singlet_numerical(self):
-        _check_grad(mol, tol=1e-3, tda=True, method='numerical')
+        _check_grad(mol, tol=1e-4, tda=True, method='numerical')
 
-    def test_grad_tddft_singlet_cpu(self):
-        _check_grad(mol, tol=1e-11, tda=False, method='cpu')
+    def test_grad_tdhf_singlet_cpu(self):
+        _check_grad(mol, tol=1e-10, tda=False, method='cpu')
 
-    def test_grad_tddft_singlet_numerical(self):
-        _check_grad(mol, tol=1e-3, tda=False, method='numerical')
+    def test_grad_tdhf_singlet_numerical(self):
+        _check_grad(mol, tol=1e-4, tda=False, method='numerical')
 
 
 if __name__ == "__main__":

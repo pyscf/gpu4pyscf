@@ -42,6 +42,8 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
 
     Ref: Chem Phys Lett, 256, 454
     '''
+    if hasattr(mf, 'with_df'):
+        raise NotImplementedError('DF-TDDFT is not implemented')
     from pyscf import ao2mo
     if not singlet:
         raise NotImplementedError('Only singlet is implemented')
@@ -83,6 +85,7 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
         b -= cp.einsum('jaib->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * hyb
 
     if isinstance(mf, scf.hf.KohnShamDFT):
+        grids = mf.grids
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
         if mf.do_nlc():
@@ -109,7 +112,7 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
         xctype = ni._xc_type(mf.xc)
         opt = getattr(ni, 'gdftopt', None)
         if opt is None:
-            ni.build(mol, mf.grids.coords)
+            ni.build(mol, grids.coords)
             opt = ni.gdftopt
         _sorted_mol = opt._sorted_mol
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
@@ -118,14 +121,15 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
         if xctype == 'LDA':
             ao_deriv = 0
             for ao, mask, weight, coords \
-                    in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv):
-
-                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff, mo_occ, mask, xctype, with_lapl=False)
+                    in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, blksize=67200):
+                mo_coeff_mask = mo_coeff[mask]
+                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
                 fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
                 wfxc = fxc[0,0] * weight
-
-                rho_o = cp.einsum('pr,pi->ri', ao, orbo)
-                rho_v = cp.einsum('pr,pi->ri', ao, orbv)
+                orbo_mask = orbo[mask]
+                orbv_mask = orbv[mask]
+                rho_o = cp.einsum('pr,pi->ri', ao, orbo_mask)
+                rho_v = cp.einsum('pr,pi->ri', ao, orbv_mask)
                 rho_ov = cp.einsum('ri,ra->ria', rho_o, rho_v)
                 w_ov = cp.einsum('ria,r->ria', rho_ov, wfxc)
                 iajb = cp.einsum('ria,rjb->iajb', rho_ov, w_ov) * 2
@@ -135,12 +139,15 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
         elif xctype == 'GGA':
             ao_deriv = 1
             for ao, mask, weight, coords \
-                    in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv):
-                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff, mo_occ, mask, xctype, with_lapl=False)
+                    in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+                mo_coeff_mask = mo_coeff[mask]
+                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
                 fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
                 wfxc = fxc * weight
-                rho_o = cp.einsum('xpr,pi->xri', ao, orbo)
-                rho_v = cp.einsum('xpr,pi->xri', ao, orbv)
+                orbo_mask = orbo[mask]
+                orbv_mask = orbv[mask]
+                rho_o = cp.einsum('xpr,pi->xri', ao, orbo_mask)
+                rho_v = cp.einsum('xpr,pi->xri', ao, orbv_mask)
                 rho_ov = cp.einsum('xri,ra->xria', rho_o, rho_v[0])
                 rho_ov[1:4] += cp.einsum('ri,xra->xria', rho_o[0], rho_v[1:4])
                 w_ov = cp.einsum('xyr,xria->yria', wfxc, rho_ov)
@@ -157,12 +164,15 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
         elif xctype == 'MGGA':
             ao_deriv = 1
             for ao, mask, weight, coords \
-                    in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv):
-                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff, mo_occ, mask, xctype, with_lapl=False)
+                    in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+                mo_coeff_mask = mo_coeff[mask]
+                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
                 fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
                 wfxc = fxc * weight
-                rho_o = cp.einsum('xpr,pi->xri', ao, orbo)
-                rho_v = cp.einsum('xpr,pi->xri', ao, orbv)
+                orbo_mask = orbo[mask]
+                orbv_mask = orbv[mask]
+                rho_o = cp.einsum('xpr,pi->xri', ao, orbo_mask)
+                rho_v = cp.einsum('xpr,pi->xri', ao, orbv_mask)
                 rho_ov = cp.einsum('xri,ra->xria', rho_o, rho_v[0])
                 rho_ov[1:4] += cp.einsum('ri,xra->xria', rho_o[0], rho_v[1:4])
                 tau_ov = cp.einsum('xri,xra->ria', rho_o[1:4], rho_v[1:4]) * .5

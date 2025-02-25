@@ -18,7 +18,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.lib import logger
 from gpu4pyscf import lib as lib_gpu
-from gpu4pyscf.lib.cupy_helper import  contract
+from gpu4pyscf.lib.cupy_helper import  contract, add_sparse
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.dft import numint
 from gpu4pyscf.scf import cphf
@@ -80,7 +80,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         if not isinstance(vk, cp.ndarray): vk = cp.asarray(vk)
         vk *= hyb
         if omega != 0:
-            vk += mf.get_k(mol, dm, hermi=0, omega=omega) * (alpha-hyb)
+            vk += cp.asarray(mf.get_k(mol, dm, hermi=0, omega=omega) * (alpha-hyb))
         veff0doo = vj[0] * 2 - vk[0] + f1oo[0] + k1ao[0] * 2
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
         if singlet:
@@ -303,10 +303,11 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
                 ao0 = ao[0]
             else:
                 ao0 = ao
-            rho = ni.eval_rho2(_sorted_mol, ao0, mo_coeff, mo_occ, mask, xctype, with_lapl=False)
+            mo_coeff_mask = mo_coeff[mask,:]
+            rho = ni.eval_rho2(_sorted_mol, ao0, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
             vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
-
-            rho1 = ni.eval_rho(_sorted_mol, ao0, dmvo, mask, xctype, hermi=1,
+            dmvo_mask = dmvo[mask[:,None],mask]
+            rho1 = ni.eval_rho(_sorted_mol, ao0, dmvo_mask, mask, xctype, hermi=1,
                                with_lapl=False) * 2  # *2 for alpha + beta
             if xctype == 'LDA':
                 rho1 = rho1[cp.newaxis]
@@ -314,7 +315,8 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
             fmat_(_sorted_mol, f1vo, ao, wv, mask, shls_slice, ao_loc)
 
             if dmoo is not None:
-                rho2 = ni.eval_rho(_sorted_mol, ao0, dmoo, mask, xctype, hermi=1, with_lapl=False) * 2
+                dmoo_mask = dmoo[mask[:,None],mask]
+                rho2 = ni.eval_rho(_sorted_mol, ao0, dmoo_mask, mask, xctype, hermi=1, with_lapl=False) * 2
                 if xctype == 'LDA':
                     rho2 = rho2[cp.newaxis]
                 wv = cp.einsum('yg,xyg,g->xg', rho2, fxc, weight)
@@ -331,7 +333,8 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
                 ao0 = ao[0]
             else:
                 ao0 = ao
-            rho = ni.eval_rho2(_sorted_mol, ao0, mo_coeff, mo_occ, mask, xctype, with_lapl=False)
+            mo_coeff_mask = mo_coeff[mask,:]
+            rho = ni.eval_rho2(_sorted_mol, ao0, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
             rho *= .5
             rho = cp.repeat(rho[cp.newaxis], 2, axis=0)
             vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
@@ -339,8 +342,8 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
             # 1/2 int (tia - tIA) fxc (tjb - tJB) = tia fxc_t tjb
             fxc_t = fxc[:,:,0] - fxc[:,:,1]
             fxc_t = fxc_t[0] - fxc_t[1]
-
-            rho1 = ni.eval_rho(_sorted_mol, ao0, dmvo, mask, xctype, hermi=1, with_lapl=False)
+            dmvo_mask = dmvo[mask[:,None],mask]
+            rho1 = ni.eval_rho(_sorted_mol, ao0, dmvo_mask, mask, xctype, hermi=1, with_lapl=False)
             if xctype == 'LDA':
                 rho1 = rho1[cp.newaxis]
             wv = cp.einsum('yg,xyg,g->xg', rho1, fxc_t, weight)
@@ -351,7 +354,8 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
                 # provides f1oo to couple the interaction between first order MO
                 # and density response of tddft amplitudes, which is described by dmoo
                 fxc_s = fxc[0,:,0] + fxc[0,:,1]
-                rho2 = ni.eval_rho(_sorted_mol, ao0, dmoo, mask, xctype, hermi=1, with_lapl=False)
+                dmoo_mask = dmoo[mask[:,None],mask]
+                rho2 = ni.eval_rho(_sorted_mol, ao0, dmoo_mask, mask, xctype, hermi=1, with_lapl=False)
                 if xctype == 'LDA':
                     rho2 = rho2[cp.newaxis]
                 wv = cp.einsum('yg,xyg,g->xg', rho2, fxc_s, weight)
@@ -384,29 +388,36 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
 def _lda_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
     aow = numint._scale_ao(ao[0], wv[0])
     for k in range(4):
-        vmat[k] += numint._dot_ao_ao(mol, ao[k], aow, mask, shls_slice, ao_loc)
+        vtmp = numint._dot_ao_ao(mol, ao[k], aow, mask, shls_slice, ao_loc)
+        add_sparse(vmat[k], vtmp, mask)
+        # vmat[k] += numint._dot_ao_ao(mol, ao[k], aow, mask, shls_slice, ao_loc)
     return vmat
 
 def _gga_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
     wv[0] *= .5  # *.5 because vmat + vmat.T at the end
     aow = numint._scale_ao(ao[:4], wv[:4])
     tmp = numint._dot_ao_ao(mol, ao[0], aow, mask, shls_slice, ao_loc)
-    vmat[0] += tmp + tmp.T
+    vtmp = tmp + tmp.T
+    add_sparse(vmat[0], vtmp, mask)
     wv = cp.asarray(wv, order='C')
-    vmat[1:]+= rks_grad._gga_grad_sum_(ao, wv)
+    vtmp = rks_grad._gga_grad_sum_(ao, wv)
+    add_sparse(vmat[1:], vtmp, mask)
     return vmat
 
 def _mgga_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
     wv[0] *= .5  # *.5 because vmat + vmat.T at the end
     aow = numint._scale_ao(ao[:4], wv[:4])
     tmp = numint._dot_ao_ao(mol, ao[0], aow, mask, shls_slice, ao_loc)
-    vmat[0] += tmp + tmp.T
-    vmat[0] += numint._tau_dot(ao, ao, wv[4])
+    vtmp = tmp + tmp.T
+    add_sparse(vmat[0], vtmp, mask)
+    vtmp = numint._tau_dot(ao, ao, wv[4])
+    add_sparse(vmat[0], vtmp, mask)
     # ! The following line should only be here, because the tau is *0.5 in the _tau_dot function
     wv[4] *= .5  # *.5 for 1/2 in tau
     wv = cp.asarray(wv, order='C')
-    vmat[1:] += rks_grad._gga_grad_sum_(ao, wv[:4])
-    vmat[1:] += rks_grad._tau_grad_dot_(ao, wv[4])
+    vtmp = rks_grad._gga_grad_sum_(ao, wv[:4])
+    vtmp+= rks_grad._tau_grad_dot_(ao, wv[4])
+    add_sparse(vmat[1:], vtmp, mask)
     return vmat
 
 
