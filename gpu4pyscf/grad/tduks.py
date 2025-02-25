@@ -294,30 +294,17 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
     delec = 2.0*(dh_ground + dh_td - ds)
     aoslices = mol.aoslice_by_atom()
     delec= cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
-    de = 2.0 * (dvhf_DD_DP + dvhf_xpy + dvhf_xmy) + dh1e_ground + dh1e_td + delec + extra_force
-    
-    offsetdic = mol.offset_nr_by_atom()
-
-    for k, ia in enumerate(atmlst):
-        shl0, shl1, p0, p1 = offsetdic[ia]
-        
-        de[k] += cp.einsum('xpq,pq->x', veff1_0_a[:,p0:p1], oo0a[p0:p1])
-        de[k] += cp.einsum('xpq,pq->x', veff1_0_b[:,p0:p1], oo0b[p0:p1])
-        de[k] += cp.einsum('xpq,qp->x', veff1_0_a[:,p0:p1], oo0a[:,p0:p1])
-        de[k] += cp.einsum('xpq,qp->x', veff1_0_b[:,p0:p1], oo0b[:,p0:p1])
-
-        de[k] += cp.einsum('xpq,pq->x', veff1_0_a[:,p0:p1], dmz1dooa[p0:p1]) * .5
-        de[k] += cp.einsum('xpq,pq->x', veff1_0_b[:,p0:p1], dmz1doob[p0:p1]) * .5
-        de[k] += cp.einsum('xpq,qp->x', veff1_0_a[:,p0:p1], dmz1dooa[:,p0:p1]) * .5
-        de[k] += cp.einsum('xpq,qp->x', veff1_0_b[:,p0:p1], dmz1doob[:,p0:p1]) * .5
-
-
-        de[k] += cp.einsum('xij,ij->x', veff1_1_a[:,p0:p1], oo0a[p0:p1]) * .5
-        de[k] += cp.einsum('xij,ij->x', veff1_1_b[:,p0:p1], oo0b[p0:p1]) * .5
-        de[k] += cp.einsum('xij,ij->x', veff1_2_a[:,p0:p1], dmxpya[p0:p1,:])
-        de[k] += cp.einsum('xij,ij->x', veff1_2_b[:,p0:p1], dmxpyb[p0:p1,:])
-        de[k] += cp.einsum('xji,ij->x', veff1_2_a[:,p0:p1], dmxpya[:,p0:p1])
-        de[k] += cp.einsum('xji,ij->x', veff1_2_b[:,p0:p1], dmxpyb[:,p0:p1])
+    dveff1_0 = cp.asarray([cp.einsum('xpq,pq->x', veff1_0_a[:,p0:p1], oo0a[p0:p1]+dmz1dooa[p0:p1]*0.5) for p0, p1 in aoslices[:,2:]])
+    dveff1_0+= cp.asarray([cp.einsum('xpq,pq->x', veff1_0_b[:,p0:p1], oo0b[p0:p1]+dmz1doob[p0:p1]*0.5) for p0, p1 in aoslices[:,2:]])
+    dveff1_0+= cp.asarray([cp.einsum('xpq,qp->x', veff1_0_a[:,p0:p1], oo0a[:,p0:p1]+dmz1dooa[:,p0:p1]*0.5) for p0, p1 in aoslices[:,2:]])
+    dveff1_0+= cp.asarray([cp.einsum('xpq,qp->x', veff1_0_b[:,p0:p1], oo0b[:,p0:p1]+dmz1doob[:,p0:p1]*0.5) for p0, p1 in aoslices[:,2:]])
+    dveff1_1 = cp.asarray([cp.einsum('xpq,pq->x', veff1_1_a[:,p0:p1], oo0a[p0:p1]*0.5) for p0, p1 in aoslices[:,2:]])
+    dveff1_1+= cp.asarray([cp.einsum('xpq,pq->x', veff1_1_b[:,p0:p1], oo0b[p0:p1]*0.5) for p0, p1 in aoslices[:,2:]])
+    dveff1_2 = cp.asarray([cp.einsum('xpq,pq->x', veff1_2_a[:,p0:p1], dmxpya[p0:p1]) for p0, p1 in aoslices[:,2:]])
+    dveff1_2+= cp.asarray([cp.einsum('xqp,pq->x', veff1_2_a[:,p0:p1], dmxpya[:, p0:p1]) for p0, p1 in aoslices[:,2:]])
+    dveff1_2+= cp.asarray([cp.einsum('xpq,pq->x', veff1_2_b[:,p0:p1], dmxpyb[p0:p1]) for p0, p1 in aoslices[:,2:]])
+    dveff1_2+= cp.asarray([cp.einsum('xqp,pq->x', veff1_2_b[:,p0:p1], dmxpyb[:, p0:p1]) for p0, p1 in aoslices[:,2:]])
+    de = 2.0 * (dvhf_DD_DP + dvhf_xpy + dvhf_xmy) + dh1e_ground + dh1e_td + delec + extra_force + dveff1_0 + dveff1_1 + dveff1_2
 
     log.timer('TDRKS nuclear gradients', *time0)
     return de.get()

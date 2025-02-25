@@ -103,13 +103,20 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     # in the following, all should be doubled, due to double occupancy
     # and 0.5 for i<=j and a<= b
     # but this is reduced.
-    im0[:nocc,:nocc] = reduce(cp.dot, (orbo.T, veff0doo+veff, orbo)) # H_{ij}^+[T] + H_{ij}^+[Z] # 
-    im0[:nocc,:nocc]+= cp.einsum('ak,ai->ki', veff0mop[nocc:,:nocc], xpy) # H_{ij}^+[T] + H_{ij}^+[Z] + sum_{a} (X+Y)_{aj}H_{ai}^+[(X+Y)]
-    im0[:nocc,:nocc]+= cp.einsum('ak,ai->ki', veff0mom[nocc:,:nocc], xmy) # H_{ij}^+[T] + H_{ij}^+[Z] + sum_{a} (X+Y)_{aj}H_{ai}^+[(X+Y)] + sum_{a} (X-Y)_{aj}H_{ai}^-[(X-Y)]
-    im0[nocc:,nocc:] = cp.einsum('ci,ai->ac', veff0mop[nocc:,:nocc], xpy) #  sum_{i} (X+Y)_{ci}H_{ai}^+[(X+Y)]
-    im0[nocc:,nocc:]+= cp.einsum('ci,ai->ac', veff0mom[nocc:,:nocc], xmy) #  sum_{i} (X+Y)_{ci}H_{ai}^+[(X+Y)] + sum_{i} (X-Y)_{cj}H_{ai}^-[(X-Y)]
-    im0[nocc:,:nocc] = cp.einsum('ki,ai->ak', veff0mop[:nocc,:nocc], xpy)*2 #  sum_{i} (X+Y)_{ki}H_{ai}^+[(X+Y)] * 2
-    im0[nocc:,:nocc]+= cp.einsum('ki,ai->ak', veff0mom[:nocc,:nocc], xmy)*2 #  sum_{i} (X+Y)_{ki}H_{ai}^+[(X+Y)] + sum_{i} (X-Y)_{ki}H_{ai}^-[(X-Y)] * 2
+    # H_{ij}^+[T] + H_{ij}^+[Z] # 
+    im0[:nocc,:nocc] = reduce(cp.dot, (orbo.T, veff0doo+veff, orbo)) 
+    # H_{ij}^+[T] + H_{ij}^+[Z] + sum_{a} (X+Y)_{aj}H_{ai}^+[(X+Y)]
+    im0[:nocc,:nocc]+= cp.einsum('ak,ai->ki', veff0mop[nocc:,:nocc], xpy) 
+    # H_{ij}^+[T] + H_{ij}^+[Z] + sum_{a} (X+Y)_{aj}H_{ai}^+[(X+Y)] + sum_{a} (X-Y)_{aj}H_{ai}^-[(X-Y)]
+    im0[:nocc,:nocc]+= cp.einsum('ak,ai->ki', veff0mom[nocc:,:nocc], xmy)
+    #  sum_{i} (X+Y)_{ci}H_{ai}^+[(X+Y)]
+    im0[nocc:,nocc:] = cp.einsum('ci,ai->ac', veff0mop[nocc:,:nocc], xpy)
+    #  sum_{i} (X+Y)_{ci}H_{ai}^+[(X+Y)] + sum_{i} (X-Y)_{cj}H_{ai}^-[(X-Y)]
+    im0[nocc:,nocc:]+= cp.einsum('ci,ai->ac', veff0mom[nocc:,:nocc], xmy) 
+    #  sum_{i} (X+Y)_{ki}H_{ai}^+[(X+Y)] * 2
+    im0[nocc:,:nocc] = cp.einsum('ki,ai->ak', veff0mop[:nocc,:nocc], xpy)*2
+    #  sum_{i} (X+Y)_{ki}H_{ai}^+[(X+Y)] + sum_{i} (X-Y)_{ki}H_{ai}^-[(X-Y)] * 2
+    im0[nocc:,:nocc]+= cp.einsum('ki,ai->ak', veff0mom[:nocc,:nocc], xmy)*2
 
     zeta = lib_gpu.cupy_helper.direct_sum('i+j->ij', mo_energy, mo_energy) * .5 
     zeta[nocc:,:nocc] = mo_energy[:nocc] 
@@ -161,76 +168,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
 
     log.timer('TDHF nuclear gradients', *time0)
     return de.get()
-
-
-# def as_scanner(td_grad, state=1):
-#     '''Generating a nuclear gradients scanner/solver (for geometry optimizer).
-
-#     The returned solver is a function. This function requires one argument
-#     "mol" as input and returns energy and first order nuclear derivatives.
-
-#     The solver will automatically use the results of last calculation as the
-#     initial guess of the new calculation.  All parameters assigned in the
-#     nuc-grad object and SCF object (DIIS, conv_tol, max_memory etc) are
-#     automatically applied in the solver.
-
-#     Note scanner has side effects.  It may change many underlying objects
-#     (_scf, with_df, with_x2c, ...) during calculation.
-
-#     Examples::
-
-#     >>> from pyscf import gto, scf, tdscf, grad
-#     >>> mol = gto.M(atom='H 0 0 0; F 0 0 1')
-#     >>> td_grad_scanner = scf.RHF(mol).apply(tdscf.TDA).nuc_grad_method().as_scanner()
-#     >>> e_tot, grad = td_grad_scanner(gto.M(atom='H 0 0 0; F 0 0 1.1'))
-#     >>> e_tot, grad = td_grad_scanner(gto.M(atom='H 0 0 0; F 0 0 1.5'))
-#     '''
-#     from pyscf import gto
-#     if isinstance(td_grad, lib.GradScanner):
-#         return td_grad
-
-#     if state == 0:
-#         return td_grad.base._scf.nuc_grad_method().as_scanner()
-
-#     logger.info(td_grad, 'Create scanner for %s', td_grad.__class__)
-#     name = td_grad.__class__.__name__ + TDSCF_GradScanner.__name_mixin__
-#     return lib.set_class(TDSCF_GradScanner(td_grad, state),
-#                          (TDSCF_GradScanner, td_grad.__class__), name)
-
-# class TDSCF_GradScanner(lib.GradScanner):
-#     _keys = {'e_tot'}
-
-#     def __init__(self, g, state):
-#         lib.GradScanner.__init__(self, g)
-#         if state is not None:
-#             self.state = state
-
-#     def __call__(self, mol_or_geom, state=None, **kwargs):
-#         if isinstance(mol_or_geom, gto.MoleBase):
-#             assert mol_or_geom.__class__ == gto.Mole
-#             mol = mol_or_geom
-#         else:
-#             mol = self.mol.set_geom_(mol_or_geom, inplace=False)
-#         self.reset(mol)
-
-#         if state is None:
-#             state = self.state
-#         else:
-#             self.state = state
-
-#         td_scanner = self.base
-#         td_scanner(mol)
-# # TODO: Check root flip.  Maybe avoid the initial guess in TDHF otherwise
-# # large error may be found in the excited states amplitudes
-#         de = self.kernel(state=state, **kwargs)
-#         e_tot = self.e_tot[state-1]
-#         return e_tot, de
-
-#     @property
-#     def converged(self):
-#         td_scanner = self.base
-#         return all((td_scanner._scf.converged,
-#                     td_scanner.converged[self.state]))
 
 
 class Gradients(rhf_grad.GradientsBase):

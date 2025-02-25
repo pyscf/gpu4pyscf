@@ -157,7 +157,7 @@ def benchmark_with_finite_diff(mol_input, xc, delta=0.1, nstates=3, lindep=1.0E-
     mf.grids.prune = None
     mf.run()
     mo_coeff = mf.mo_coeff
-    mo_energy = mf.mo_energy
+
     mo_occ = mf.mo_occ
     occidxa = np.where(mo_occ[0]>0)[0]
     occidxb = np.where(mo_occ[1]>0)[0]
@@ -167,13 +167,7 @@ def benchmark_with_finite_diff(mol_input, xc, delta=0.1, nstates=3, lindep=1.0E-
     noccb = len(occidxb)
     nvira = len(viridxa)
     nvirb = len(viridxb)
-    orboa = mo_coeff[0][:,occidxa]
-    orbob = mo_coeff[1][:,occidxb]
-    orbva = mo_coeff[0][:,viridxa]
-    orbvb = mo_coeff[1][:,viridxb]
     nao = mo_coeff[0].shape[0]
-    nmoa = nocca + nvira
-    nmob = noccb + nvirb
 
     if tda:
         td = gpu4pyscf.tdscf.uks.TDA(mf)
