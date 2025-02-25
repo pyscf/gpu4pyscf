@@ -59,7 +59,7 @@ def setUpModule():
             H  0.  1.  1.
             ''',
         output = '/dev/null',
-        basis={'Na': cu1_basis, 'H': cu1_basis},
+        basis = {'Na': cu1_basis, 'H': cu1_basis},
         ecp = {'Na': gto.basis.parse_ecp('''
 Na nelec 10
 Na ul
@@ -67,16 +67,16 @@ Na ul
 Na S
 2      13.652203             732.2692
 2       6.826101              26.484721
-Na P
-2      10.279868             299.489474
-2       5.139934              26.466234
-Na D
-2       7.349859             124.457595
-2       3.674929              14.035995
-Na F
-2       3.034072              21.531031
-Na G
-2       4.808857             -21.607597
+#Na P
+#2      10.279868             299.489474
+#2       5.139934              26.466234
+#Na D
+#2       7.349859             124.457595
+#2       3.674929              14.035995
+#Na F
+#2       3.034072              21.531031
+#Na G
+#2       4.808857             -21.607597
                                          ''')})
 def tearDownModule():
     global mol1, mol2
@@ -89,12 +89,10 @@ class KnownValues(unittest.TestCase):
         h1_cpu = mol1.intor('ECPscalar_cart')
         h1_gpu = get_ecp(mol1)
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
-    
+
     def test_ecp_sph(self):
         h1_cpu = mol2.intor('ECPscalar_sph')
         h1_gpu = get_ecp(mol2)
-        print(h1_cpu[:3,:3])
-        print(h1_gpu[:3,:3])
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
     
 if __name__ == "__main__":

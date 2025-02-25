@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-template <int L> __device__
-static void cart2sph(double *gsph, double *gcart){
+__device__
+static void cart2sph(double *gsph, int L, double *gcart){
     if (L == 0) {
         gsph[0] = 0.282094791773878143 * gcart[0];
     }
@@ -219,8 +219,8 @@ static void cart2sph(double *gsph, double *gcart){
     }
 }
 
-template <int L> __device__
-static void sph2cart(double *gcart, double *gsph){
+__device__
+static void sph2cart(double *gcart, int L, double *gsph){
     if (L == 0) {
         gcart[0] = 0.282094791773878143 * gsph[0];
     }

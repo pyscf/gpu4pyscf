@@ -22,6 +22,7 @@
 
 #define ECP_LMAX        4
 #define AO_LMAX         4
+#define NF_MAX          15
 
 // Thread number has to be the same as qudrature points
 #define THREADS        128

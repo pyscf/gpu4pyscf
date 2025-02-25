@@ -41,23 +41,21 @@ static double _factorial2[] = {
     6.3777066403145712e+22, 3.1983098677287775e+23,
 };
 
-__device__
+__device__ __forceinline__
 static double factorial2(int n){
-    if (n < 0) {
-        return 1;
-    } else {
-        return _factorial2[n];
-    }
+    return (n < 0) ? 1.0 : _factorial2[n];
 }
 
 __device__
 static double int_unit_xyz(int i, int j, int k){
-    if (i % 2 || j % 2 || k % 2) {
-        return 0;
-    } else {
-        return (factorial2(i-1) * factorial2(j-1) *
-        factorial2(k-1) / factorial2(i+j+k+1));
-    }
+    // i % 2 and j % 2 and k % 2
+    const int even = 1 - (((i & 1) | (j & 1)) | (k & 1));
+    const int ijk = i + j + k;
+    const double fi = factorial2(i-1);
+    const double fj = factorial2(j-1);
+    const double fk = factorial2(k-1);
+    const double fijk = factorial2(ijk+1);
+    return even * (fi * fj * fk) / fijk;
 }
 
 
@@ -67,8 +65,8 @@ static double int_unit_xyz(int i, int j, int k){
  *
  * JCC, 27, 1009
  */
-template <int order> __device__
-static void _ine(double *out, double z)
+__device__
+static void _ine(double *out, int order, double z)
 {
     if (z < 1e-7) {
         // (1-z) * z^l / (2l+1)!!
@@ -110,9 +108,9 @@ static void _ine(double *out, double z)
             out[i] = s;
         }
     }
-
 }
 
+/*
 template <int order> __global__
 void _ine_kernel(double *out, double *zs, int n)
 {
@@ -123,3 +121,4 @@ void _ine_kernel(double *out, double *zs, int n)
     int offset = idx * (order + 1);
     _ine<order>(out+offset, zs[idx]);
 }
+*/

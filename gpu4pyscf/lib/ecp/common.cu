@@ -34,12 +34,12 @@ static void ang_nuc_l(double *omega, double rx, double ry, double rz){
     }
 
     double c[2*l+1];
-    cart2sph<l>(c, g);
-    sph2cart<l>(omega, c);
+    cart2sph(c, l, g);
+    sph2cart(omega, l, c);
 }
 
-template <int l> __device__
-static void ang_nuc_part(double *omega_cum, double rx, double ry, double rz){
+__device__
+static void ang_nuc_part(double *omega_cum, int l, double rx, double ry, double rz){
     /*
     Accumulated angular ECP part in Cartesian
     Angular momentum L = 0, 1, ... LMAX
@@ -69,8 +69,8 @@ static void ang_nuc_part(double *omega_cum, double rx, double ry, double rz){
         g[4] = ry * rz;
         g[5] = rz * rz;
         double c[5];
-        cart2sph<2>(c, g);
-        sph2cart<2>(omega, c);
+        cart2sph(c, 2, g);
+        sph2cart(omega, 2, c);
         omega += 6;
     }
 
@@ -117,18 +117,15 @@ double rad_part(int ish, const int *ecpbas, const double *env){
     for (int kp = 0; kp < npk; kp++){
         const double ak = env[exp_ptr+kp];
         const double ck = env[coeff_ptr+kp];
-        if (threadIdx.x == 0){
-            printf("%d %d %f %f\n", ish, kp, ak, ck);
-        }
         u1 += ck * exp(-ak * r * r);
     }
     return u1 * pow(r, r_order) * w128[threadIdx.x];
 }
 
-template <int LI> __device__
-void cache_fac(double *fx, double *ri){
-    constexpr int LI1 = LI + 1;
-    double xx[LI1], yy[LI1], zz[LI1];
+__device__
+void cache_fac(double *fx, int LI, double *ri){
+    const int LI1 = LI + 1;
+    double xx[AO_LMAX+1], yy[AO_LMAX+1], zz[AO_LMAX+1];
     xx[0] = 1; yy[0] = 1; zz[0] = 1;
     for (int i = 1; i <= LI; i++){
         xx[i] = xx[i-1] * ri[0];
@@ -136,7 +133,7 @@ void cache_fac(double *fx, double *ri){
         zz[i] = zz[i-1] * ri[2];
     }
 
-    constexpr int nfi = (LI1+1)*LI1/2;
+    const int nfi = (LI1+1)*LI1/2;
     double *fy = fx + nfi;
     double *fz = fy + nfi;
     for (int i = 0; i <= LI; i++){
