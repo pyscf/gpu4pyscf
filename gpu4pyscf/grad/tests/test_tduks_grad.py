@@ -167,7 +167,6 @@ def benchmark_with_finite_diff(mol_input, xc, delta=0.1, nstates=3, lindep=1.0E-
     noccb = len(occidxb)
     nvira = len(viridxa)
     nvirb = len(viridxb)
-    nao = mo_coeff[0].shape[0]
 
     if tda:
         td = gpu4pyscf.tdscf.uks.TDA(mf)
