@@ -39,7 +39,7 @@ mf.kernel() # -76.4666495331835
 print('------------------- TDDFT -----------------------------')
 td = mf.TDDFT().set(nstates=5)
 assert td.device == 'gpu'
-e_tddft = td.kernel()[0] # [ 7.51061148  9.42243504  9.76601005 11.74384344 13.5974535 ]
+e_tddft = td.kernel()[0] # [ 7.51061679  9.42244054  9.76601486 11.7438481  13.59746126]
 print('5 TDDFT excitation energy by GPU4PySCF')
 
 print('------------------- TDA -----------------------------')
