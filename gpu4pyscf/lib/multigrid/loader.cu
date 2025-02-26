@@ -23,8 +23,10 @@
 __device__ static
 void init_orth_data(double *pool, int *grid_start,
                     MGridEnvVars envs, MGridBounds bounds, double *ri, double *rj,
-                    double ai, double aj, int l1, int warp_id)
+                    double ai, double aj, int l1)
 {
+    int thread_id = threadIdx.x;
+    int warp_id = thread_id / WARP_SIZE;
     int ngrid_span = bounds.ngrid_radius * 2;
     int nl_gridx = ngrid_span * l1;
     int xs_size = nl_gridx * WARP_SIZE;
@@ -141,4 +143,281 @@ double reduce_warps(double val, int ngridx, int thread_id, int sp_id, int warp_i
         __syncthreads();
     }
     return cache[sp_id];
+}
+
+template <int L> __device__ static
+void fill_dm_xyz(double *dm_xyz, double *gx_dmyz, double *xs_exp,
+                 int ngridx, int ngrid_span)
+{
+    int thread_id = threadIdx.x;
+    int sp_id = thread_id % WARP_SIZE;
+    int warp_id = thread_id / WARP_SIZE;
+    int L1 = L + 1;
+    int nf2 = (L+1)*(L+2)/2;
+#if 0
+    double r3[((L+1)*(L+1)*(L+2)/2+WARPS-1)/WARPS];
+#pragma unroll
+    for (int n = 0; n < (L1*nf2+WARPS-1)/WARPS; ++n) {
+        r3[n] = 0.;
+    }
+    extern __shared__ double cache[];
+    double *xs_cache = cache + sp_id;
+    double *yz_cache = cache + L1 * WARP_SIZE + sp_id;
+    for (int ix = 0; ix < ngridx; ++ix) {
+        __syncthreads();
+        double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
+        for (int m = warp_id; m < nf2; m += WARPS) {
+            yz_cache[m*WARP_SIZE] = pgx[m*WARP_SIZE];
+        }
+        for (int m = warp_id; m <= L; m += WARPS) {
+            xs_cache[m*WARP_SIZE] = xs_exp[(m*ngrid_span+ix)*WARP_SIZE];
+        }
+        __syncthreads();
+#pragma unroll
+        for (int n = 0; n < (L1*nf2+WARPS-1)/WARPS; ++n) {
+            int m = n * WARPS + warp_id;
+            if (m < nf2*L1) {
+                int myz = m / L1;
+                int mx  = m % L1;
+                r3[n] += yz_cache[myz*WARP_SIZE] * xs_cache[mx*WARP_SIZE];
+            }
+        }
+    }
+#pragma unroll
+    for (int n = 0; n < (L1*nf2+WARPS-1)/WARPS; ++n) {
+        int m = n * WARPS + warp_id;
+        if (m < nf2*L1) {
+            dm_xyz[m*WARP_SIZE] = r3[n];
+        }
+    }
+#else
+    int nf3 = nf2*(L+3)/3;
+    if (L <= 6) {
+        double r2[(L+1)*(L+2)*(L+3)/6];
+        double r1[L+1];
+#pragma unroll
+        for (int m = 0; m < nf3; ++m) {
+            r2[m] = 0.;
+        }
+        for (int ix = warp_id; ix < ngridx; ix += WARPS) {
+#pragma unroll
+            for (int mx = 0; mx <= L; ++mx) {
+                r1[mx] = xs_exp[(mx*ngrid_span+ix)*WARP_SIZE];
+            }
+            double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
+#pragma unroll
+            for (int my = 0; my <= L; ++my) {
+#pragma unroll
+                for (int mz = 0; mz <= L-my; ++mz) {
+                    double t = pgx[ADDR2(L,my,mz)*WARP_SIZE];
+#pragma unroll
+                    for (int mx = 0; mx <= L-my-mz; ++mx) {
+                        r2[ADDR3(L,mx,my,mz)] += r1[mx] * t;
+                    }
+                }
+            }
+        }
+#pragma unroll
+        for (int mx = 0; mx <= L; ++mx) {
+#pragma unroll
+            for (int my = 0; my <= L-mx; ++my) {
+#pragma unroll
+                for (int mz = 0; mz <= L-mx-my; ++mz) {
+                    int n = ADDR3(L,mx,my,mz);
+                    r2[n] = reduce_warps(r2[n], ngridx, thread_id, sp_id, warp_id);
+                    if (warp_id == 0) {
+                        dm_xyz[(ADDR2(L,my,mz)*L1+mx)*WARP_SIZE] = r2[n];
+                    }
+                }
+            }
+        }
+    } else if (L == 7) {
+        double r2[64];
+        double r1[8];
+        // reuse the global memory in pool. (L+1)*(L+2)*(L+3)/6 is generally smaller
+        // than (ngrid_span * (L+1) * 2) occupied by ys_exp and zs_exp
+        int offset = (L+1)*(L+2)/2 + L*(L+1)/2;
+#pragma unroll
+        for (int m = 0; m < offset; ++m) {
+            r2[m] = 0.;
+        }
+        for (int ix = warp_id; ix < ngridx; ix += WARPS) {
+#pragma unroll
+            for (int mx = 0; mx <= 1; ++mx) {
+                r1[mx] = xs_exp[(mx*ngrid_span+ix)*WARP_SIZE];
+            }
+            double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
+#pragma unroll
+            for (int my = 0; my <= L; ++my) {
+#pragma unroll
+                for (int mz = 0; mz <= L-my; ++mz) {
+                    double t = pgx[ADDR2(L,my,mz)*WARP_SIZE];
+#pragma unroll
+                    for (int mx = 0; mx <= MIN(1, L-my-mz); ++mx) {
+                        r2[ADDR3(L,mx,my,mz)] += r1[mx] * t;
+                    }
+                }
+            }
+        }
+#pragma unroll
+        for (int mx = 0; mx <= 1; ++mx) {
+#pragma unroll
+            for (int my = 0; my <= L-mx; ++my) {
+#pragma unroll
+                for (int mz = 0; mz <= L-mx-my; ++mz) {
+                    int n = ADDR3(L,mx,my,mz);
+                    r2[n] = reduce_warps(r2[n], ngridx, thread_id, sp_id, warp_id);
+                    if (warp_id == 0) {
+                        dm_xyz[(ADDR2(L,my,mz)*L1+mx)*WARP_SIZE] = r2[n];
+                    }
+                }
+            }
+        }
+
+#pragma unroll
+        for (int m = 0; m < nf3-offset; ++m) {
+            r2[m] = 0.;
+        }
+        for (int ix = warp_id; ix < ngridx; ix += WARPS) {
+#pragma unroll
+            for (int mx = 2; mx <= L; ++mx) {
+                r1[mx] = xs_exp[(mx*ngrid_span+ix)*WARP_SIZE];
+            }
+            double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
+#pragma unroll
+            for (int my = 0; my <= L-2; ++my) {
+#pragma unroll
+                for (int mz = 0; mz <= L-2-my; ++mz) {
+                    double t = pgx[ADDR2(L,my,mz)*WARP_SIZE];
+#pragma unroll
+                    for (int mx = 2; mx <= L-my-mz; ++mx) {
+                        r2[ADDR3(L,mx,my,mz)-offset] += r1[mx] * t;
+                    }
+                }
+            }
+        }
+#pragma unroll
+        for (int mx = 2; mx <= L; ++mx) {
+#pragma unroll
+            for (int my = 0; my <= L-mx; ++my) {
+#pragma unroll
+                for (int mz = 0; mz <= L-mx-my; ++mz) {
+                    int n = ADDR3(L,mx,my,mz);
+                    r2[n-offset] = reduce_warps(r2[n-offset], ngridx, thread_id, sp_id, warp_id);
+                    if (warp_id == 0) {
+                        dm_xyz[(ADDR2(L,my,mz)*L1+mx)*WARP_SIZE] = r2[n-offset];
+                    }
+                }
+            }
+        }
+    } else if (L == 8) {
+        double r2[64];
+        double r1[9];
+        // reuse the global memory in pool. (L+1)*(L+2)*(L+3)/6 is generally smaller
+        // than (ngrid_span * (L+1) * 2) occupied by ys_exp and zs_exp
+        int offset = (L+1)*(L+2)/2;
+#pragma unroll
+        for (int m = 0; m < offset; ++m) {
+            r2[m] = 0.;
+        }
+        for (int ix = warp_id; ix < ngridx; ix += WARPS) {
+            r1[0] = xs_exp[ix*WARP_SIZE];
+            double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
+#pragma unroll
+            for (int my = 0; my <= L; ++my) {
+#pragma unroll
+                for (int mz = 0; mz <= L-my; ++mz) {
+                    double t = pgx[ADDR2(L,my,mz)*WARP_SIZE];
+                    r2[ADDR3(L,0,my,mz)] += r1[0] * t;
+                }
+            }
+        }
+#pragma unroll
+        for (int my = 0; my <= L; ++my) {
+#pragma unroll
+            for (int mz = 0; mz <= L-my; ++mz) {
+                int n = ADDR3(L,0,my,mz);
+                r2[n] = reduce_warps(r2[n], ngridx, thread_id, sp_id, warp_id);
+                if (warp_id == 0) {
+                    dm_xyz[ADDR2(L,my,mz)*L1*WARP_SIZE] = r2[n];
+                }
+            }
+        }
+
+#pragma unroll
+        for (int m = 0; m < L*(L+1)/2 + (L-1)*L/2; ++m) {
+            r2[m] = 0.;
+        }
+        for (int ix = warp_id; ix < ngridx; ix += WARPS) {
+#pragma unroll
+            for (int mx = 1; mx <= 2; ++mx) {
+                r1[mx] = xs_exp[(mx*ngrid_span+ix)*WARP_SIZE];
+            }
+            double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
+#pragma unroll
+            for (int my = 0; my <= L-1; ++my) {
+#pragma unroll
+                for (int mz = 0; mz <= L-1-my; ++mz) {
+                    double t = pgx[ADDR2(L,my,mz)*WARP_SIZE];
+#pragma unroll
+                    for (int mx = 1; mx <= MIN(2, L-my-mz); ++mx) {
+                        r2[ADDR3(L,mx,my,mz)-offset] += r1[mx] * t;
+                    }
+                }
+            }
+        }
+#pragma unroll
+        for (int mx = 1; mx <= 2; ++mx) {
+#pragma unroll
+            for (int my = 0; my <= L-mx; ++my) {
+#pragma unroll
+                for (int mz = 0; mz <= L-mx-my; ++mz) {
+                    int n = ADDR3(L,mx,my,mz);
+                    r2[n-offset] = reduce_warps(r2[n-offset], ngridx, thread_id, sp_id, warp_id);
+                    if (warp_id == 0) {
+                        dm_xyz[(ADDR2(L,my,mz)*L1+mx)*WARP_SIZE] = r2[n-offset];
+                    }
+                }
+            }
+        }
+
+        offset = (L+1)*(L+2)/2 + L*(L+1)/2 + (L-1)*L/2;
+#pragma unroll
+        for (int m = 0; m < nf3 - offset; ++m) {
+            r2[m] = 0.;
+        }
+        for (int ix = warp_id; ix < ngridx; ix += WARPS) {
+#pragma unroll
+            for (int mx = 3; mx <= L; ++mx) {
+                r1[mx] = xs_exp[(mx*ngrid_span+ix)*WARP_SIZE];
+            }
+            double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
+#pragma unroll
+            for (int my = 0; my <= L-3; ++my) {
+#pragma unroll
+                for (int mz = 0; mz <= L-3-my; ++mz) {
+                    double t = pgx[ADDR2(L,my,mz)*WARP_SIZE];
+#pragma unroll
+                    for (int mx = 3; mx <= L-my-mz; ++mx) {
+                        r2[ADDR3(L,mx,my,mz)-offset] += r1[mx] * t;
+                    }
+                }
+            }
+        }
+#pragma unroll
+        for (int mx = 3; mx <= L; ++mx) {
+#pragma unroll
+            for (int my = 0; my <= L-mx; ++my) {
+#pragma unroll
+                for (int mz = 0; mz <= L-mx-my; ++mz) {
+                    int n = ADDR3(L,mx,my,mz);
+                    r2[n-offset] = reduce_warps(r2[n-offset], ngridx, thread_id, sp_id, warp_id);
+                    if (warp_id == 0) {
+                        dm_xyz[(ADDR2(L,my,mz)*L1+mx)*WARP_SIZE] = r2[n-offset];
+                    }
+                }
+            }
+        }
+    }
+#endif
 }

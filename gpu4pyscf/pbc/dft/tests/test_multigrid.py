@@ -115,6 +115,20 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
         self.assertAlmostEqual(abs(ref-vxc.get()).max(), 0, 8)
 
+    def test_get_vxc_gga(self):
+        nao = cell_orth.nao
+        np.random.seed(2)
+        xc = 'pbe,'
+        dm = np.random.random((nao,nao)) - .5
+        dm = dm.dot(dm.T)
+        pcell = cell_orth.copy()
+        pcell.precision = 1e-10
+        n0, exc0, ref = multigrid_cpu.nr_rks(multigrid_cpu.MultiGridFFTDF(pcell), xc, dm, with_j=True)
+        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_rks(cell_orth, None, xc, dm, with_j=True)
+        self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
+        self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
+        self.assertAlmostEqual(abs(ref-vxc.get()).max(), 0, 8)
+
     def test_rks_lda(self):
         cell = gto.M(
             a = np.eye(3)*3.5668,
@@ -130,7 +144,7 @@ class KnownValues(unittest.TestCase):
             pseudo = 'gth-pbe',
             precision = 1e-9,
         )
-        mf = cell.RKS().to_gpu()
+        mf = cell.RKS(xc='svwn').to_gpu()
         mf._numint = multigrid.MultiGridNumInt(cell)
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -44.777337612, 8)
@@ -139,9 +153,25 @@ class KnownValues(unittest.TestCase):
     def test_uks_lda(self):
         pass
 
-    @unittest.skip('MultiGrid for GGA not implemented')
     def test_rks_gga(self):
-        pass
+        cell = gto.M(
+            a = np.eye(3)*3.5668,
+            atom = '''C     0.      0.      0.
+                      C     0.8917  0.8917  0.8917
+                      C     1.7834  1.7834  0.
+                      C     2.6751  2.6751  0.8917
+                      C     1.7834  0.      1.7834
+                      C     2.6751  0.8917  2.6751
+                      C     0.      1.7834  1.7834
+                      C     0.8917  2.6751  2.6751''',
+            basis = 'gth-dzv',
+            pseudo = 'gth-pbe',
+            precision = 1e-9,
+        )
+        mf = cell.RKS(xc='pbe').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -44.87059063524272, 8)
 
     @unittest.skip('MultiGrid for GGA not implemented')
     def test_uks_gga(self):

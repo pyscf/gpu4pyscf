@@ -78,14 +78,14 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     double *gy_dmxz = dm_xyz + nf3*WARP_SIZE;
     int *grid_start = (int *)(gy_dmxz + nf2*ngrid_span*WARP_SIZE);
     init_orth_data(xs_exp+sp_id, grid_start+sp_id, envs, bounds,
-                   ri, rj, ai, aj, L+1, warp_id);
+                   ri, rj, ai, aj, L+1);
 
     int nao = envs.nao;
     int *ao_loc = envs.ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     // TODO: multiple dms
-    _dm_to_dm_xyz(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, cicj, sp_id, warp_id);
+    _dm_to_dm_xyz<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, cicj);
 
     double r1[L+1];
     double dmx_gyz[L+1];
@@ -264,20 +264,39 @@ static size_t buflen1(int l, MGridBounds *bounds)
     len2 = MAX(len2, len3);
     return MAX(len1, len2) * sizeof(double);
 }
-int eval_rho_orth(double *rho, double *dm, MGridEnvVars *envs, MGridBounds *bounds,
-                  int l, double *pool, uint32_t *batch_head, int workers)
+
+extern "C" {
+int MG_eval_rho_orth(double *rho, double *dm, MGridEnvVars envs,
+                     int l, int n_radius, int *mesh, int nshl_pair,
+                     int *bas_ij_idx, double *pool, int workers)
 {
+    MGridBounds bounds = {
+        nshl_pair, bas_ij_idx, n_radius, {mesh[0], mesh[1], mesh[2]},
+    };
+    uint32_t *batch_head;
+    cudaMalloc(reinterpret_cast<void **>(&batch_head), sizeof(uint32_t) * 1);
+    cudaMemset(batch_head, 0, sizeof(uint32_t));
+
     switch (l) {
-    case 0: eval_rho_orth_kernel<0> <<<workers, THREADS, buflen1(0, bounds)>>>(rho, dm, *envs, *bounds, pool, batch_head); break;
-    case 1: eval_rho_orth_kernel<1> <<<workers, THREADS, buflen1(1, bounds)>>>(rho, dm, *envs, *bounds, pool, batch_head); break;
-    case 2: eval_rho_orth_kernel<2> <<<workers, THREADS, buflen1(2, bounds)>>>(rho, dm, *envs, *bounds, pool, batch_head); break;
-    case 3: eval_rho_orth_kernel<3> <<<workers, THREADS, buflen1(3, bounds)>>>(rho, dm, *envs, *bounds, pool, batch_head); break;
-    case 4: eval_rho_orth_kernel<4> <<<workers, THREADS, buflen1(4, bounds)>>>(rho, dm, *envs, *bounds, pool, batch_head); break;
-    case 5: eval_rho_orth_kernel<5> <<<workers, THREADS, buflen1(5, bounds)>>>(rho, dm, *envs, *bounds, pool, batch_head); break;
-    case 6: eval_rho_orth_kernel<6> <<<workers, THREADS, buflen1(6, bounds)>>>(rho, dm, *envs, *bounds, pool, batch_head); break;
-    case 7: eval_rho_orth_kernel<7> <<<workers, THREADS, buflen1(7, bounds)>>>(rho, dm, *envs, *bounds, pool, batch_head); break;
-    case 8: eval_rho_orth_kernel<8> <<<workers, THREADS, buflen1(8, bounds)>>>(rho, dm, *envs, *bounds, pool, batch_head); break;
+    case 0: eval_rho_orth_kernel<0> <<<workers, THREADS, buflen1(0, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 1: eval_rho_orth_kernel<1> <<<workers, THREADS, buflen1(1, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 2: eval_rho_orth_kernel<2> <<<workers, THREADS, buflen1(2, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 3: eval_rho_orth_kernel<3> <<<workers, THREADS, buflen1(3, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 4: eval_rho_orth_kernel<4> <<<workers, THREADS, buflen1(4, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 5: eval_rho_orth_kernel<5> <<<workers, THREADS, buflen1(5, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 6: eval_rho_orth_kernel<6> <<<workers, THREADS, buflen1(6, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 7: eval_rho_orth_kernel<7> <<<workers, THREADS, buflen1(7, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 8: eval_rho_orth_kernel<8> <<<workers, THREADS, buflen1(8, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
     default: return 1;
     }
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in MG_eval_rho_orth: %s\n", cudaGetErrorString(err));
+        cudaFree(batch_head);
+        return 1;
+    }
+    cudaFree(batch_head);
     return 0;
+}
 }

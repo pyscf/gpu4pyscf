@@ -73,12 +73,14 @@ double sub_dm_xyz(int lx, int ly, int lz, int li, int lj, int nao,
     return out;
 }
 
-__device__ inline
+template <int L> __device__ static
 void _dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
-                   double *ri, double *rj, double cicj, int sp_id, int warp_id)
+                   double *ri, double *rj, double cicj)
 {
+    int thread_id = threadIdx.x;
+    int sp_id = thread_id % WARP_SIZE;
+    int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
-    int lij = li + lj;
     extern __shared__ double cache[];
     double *cx = cache + sp_id;
     double *cy = cx + lj1 * lj1 * WARP_SIZE;
@@ -89,8 +91,8 @@ void _dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
     }
     __syncthreads();
 
-    int nf3 = (lij+1)*(lij+2)*(lij+3)/6;
-    Fold3Index *fold3idx = c_i_in_fold3idx + lij*nf3/4;
+    int nf3 = (L+1)*(L+2)*(L+3)/6;
+    Fold3Index *fold3idx = c_i_in_fold3idx + L*nf3/4;
     for (int n = warp_id; n < nf3; n += WARPS) {
         int lx = fold3idx[n].x;
         int ly = fold3idx[n].y;
@@ -101,13 +103,16 @@ void _dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
     __syncthreads();
 }
 
-__device__ inline
-void _dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj, int lij,
+template <int L> __device__ static
+void _dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj,
                    double *ri, double *rj, double cicj, double *cache,
-                   int sp_id, int warp_id, int npairs_per_block)
+                   int npairs_per_block)
 {
+    int thread_id = threadIdx.x;
+    int sp_id = thread_id % WARP_SIZE;
+    int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
-    int l1 = lij + 1;
+    int L1 = L + 1;
     double *cx = cache + sp_id;
     double *cy = cx + lj1 * lj1 * WARP_SIZE;
     double *cz = cy + lj1 * lj1 * WARP_SIZE;
@@ -145,7 +150,7 @@ void _dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj, int lij,
                 for (int jz = 0; jz <= lz_j; ++jz) {
                     int lz = lz_i + jz;
                     double cxyz = cxy * cz[(jz+lz_j*lj1)*WARP_SIZE];
-                    dm_ij += cxyz * dm_xyz[(ADDR2(lij,lx,ly)*l1+lz)*WARP_SIZE];
+                    dm_ij += cxyz * dm_xyz[(ADDR2(L,ly,lz)*L1+lx)*WARP_SIZE];
                 }
             }
         }
