@@ -40,6 +40,17 @@ cell = pyscf.M(
 # To enable the multi-grid integral algorithm, we can overwrite the _numint
 # attribute of the DFT object
 #
-mf = cell.RKS(xc='lda,vwn').to_gpu()
+mf = cell.RKS(xc='pbe').to_gpu()
+mf._numint = MultiGridNumInt(cell)
+mf.run()
+
+# Build a 2x2x2 super cell, its energy is equal to 8x of the k-point calculation
+# below
+#    kpts = cell.make_kpts([2,2,2])
+#    mf = cell.KRKS(xc='pbe', kpts=kpts).run()
+
+from pyscf.pbc.tools.pbc import super_cell
+cell = super_cell(cell, [2,2,2])
+mf = cell.RKS(xc='pbe').to_gpu()
 mf._numint = MultiGridNumInt(cell)
 mf.run()
