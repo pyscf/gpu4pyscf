@@ -377,13 +377,10 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     xctype = ni._xc_type(xc_code)
     if xctype == 'LDA':
-        deriv = 0
         nvar = 1
     elif xctype == 'GGA':
-        deriv = 1
         nvar = 4
     elif xctype == 'MGGA':
-        deriv = 1
         nvar = 5
         raise NotImplementedError
 
@@ -751,7 +748,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     fac_norm = norm[:cell0_nprims,None]*norm * (np.pi/aij)**1.5
     ovlp = fac_norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj * fl
     # The hermitian symmetry in Coulomb matrix.
-    # FIXME: hermitian symmetry might not be available in methods like TDDFT 
+    # FIXME: hermitian symmetry might not be available in methods like TDDFT
     ovlp[ao_loc_in_cell0[:cell0_nprims,None] < ao_loc_in_cell0] = 0.
     ovlp[ovlp > 1.] = 1.
 

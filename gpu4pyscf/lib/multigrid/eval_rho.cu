@@ -234,7 +234,7 @@ static size_t buflen1(int l, MGridBounds *bounds)
     int lj = MIN(l, LMAX);
     int nf2 = (l+1)*(l+2)/2;
     int nf3 = nf2*(l+3)/3;
-    size_t len1 = nf3 * WARP_SIZE; 
+    size_t len1 = nf3 * WARP_SIZE;
     size_t len2 = (lj+1)*(lj+1) * 3 * WARP_SIZE;
     size_t len3 = (l+1) * ngrid_span * 2 + nf2 * ngrid_span;
     len2 = MAX(len2, len3);
