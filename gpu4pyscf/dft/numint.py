@@ -30,7 +30,7 @@ from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, num_devices
 
-LMAX_ON_GPU = 6
+LMAX_ON_GPU = 8
 BAS_ALIGNED = 1
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 64*64)
 ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
@@ -2085,7 +2085,7 @@ class _GDFTOpt:
                 logger.debug(mol, '    %s : %s', l_ctr, n)
 
         if uniq_l_ctr[:,0].max() > LMAX_ON_GPU:
-            raise ValueError('High angular basis not supported')
+            raise ValueError(f'High angular basis (L>{LMAX_ON_GPU}) not supported')
 
         # Paddings to make basis aligned in each angular momentum group
         inv_idx_padding = []
