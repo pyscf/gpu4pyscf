@@ -22,8 +22,6 @@
 #include "cart2xyz.cu"
 #include "loader.cu"
 
-#define SHARED_RHO_SIZE 8000000
-
 template <int L> __device__ static
 void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
                            MGridBounds bounds, double *pool, uint32_t pair_idx0)
@@ -66,7 +64,6 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     int mesh_y = mesh[1];
     int mesh_z = mesh[2];
     int mesh_yz = mesh_y * mesh_z;
-    int mesh_xyz = mesh_x * mesh_yz;
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = (L+1) * ngrid_span * WARP_SIZE;
     int nf2 = (L+1)*(L+2)/2;
@@ -192,26 +189,14 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
             int tz = (iz + nz0) % mesh_z;
             int addr_yz = ty * mesh_z + tz;
             double *rho_local = rho + addr_yz;
-            if (mesh_xyz <= SHARED_RHO_SIZE) {
-                for (int ix = ix_inc; ix < ngridx; ix += ix_stride) {
-                    int tx = (ix + nx0) % mesh_x;
-                    double val = 0.;
+            for (int ix = ix_inc; ix < ngridx; ix += ix_stride) {
+                int tx = (ix + nx0) % mesh_x;
+                double val = 0.;
 #pragma unroll
-                    for (int mx = 0; mx <= L; ++mx) {
-                        val += xs_cache[mx*ngridx+ix] * dmx_gyz[mx];
-                    }
-                    rho_local[tx * mesh_yz] += val;
+                for (int mx = 0; mx <= L; ++mx) {
+                    val += xs_cache[mx*ngridx+ix] * dmx_gyz[mx];
                 }
-            } else {
-                for (int ix = ix_inc; ix < ngridx; ix += ix_stride) {
-                    int tx = (ix + nx0) % mesh_x;
-                    double val = 0.;
-#pragma unroll
-                    for (int mx = 0; mx <= L; ++mx) {
-                        val += xs_cache[mx*ngridx+ix] * dmx_gyz[mx];
-                    }
-                    atomicAdd(rho_local+tx*mesh_yz, val);
-                }
+                atomicAdd(rho_local+tx*mesh_yz, val);
             }
         }
     }
@@ -223,15 +208,6 @@ void eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
 {
     int thread_id = threadIdx.x;
     int b_id = blockIdx.x;
-    int *mesh = bounds.mesh;
-    int mesh_x = mesh[0];
-    int mesh_y = mesh[1];
-    int mesh_z = mesh[2];
-    int mesh_yz = mesh_y * mesh_z;
-    int mesh_xyz = mesh_x * mesh_yz;
-    if (mesh_xyz <= SHARED_RHO_SIZE) {
-        rho += mesh_xyz * b_id;
-    }
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = (L+1) * ngrid_span;
     int nf2 = (L+1)*(L+2)/2;

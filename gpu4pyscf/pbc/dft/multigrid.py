@@ -152,15 +152,11 @@ def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
         task = sub_tasks[0]
         mesh = task.mesh
         ngrids = np.prod(mesh)
-        rhoR = cp.empty((nset, *mesh))
+        rhoR = cp.zeros((nset, *mesh))
         for i in range(nset):
-            if ngrids <= SHARED_RHO_SIZE:
-                rho_local = cp.zeros((workers, *mesh))
-            else:
-                rho_local = cp.zeros(mesh)
             for task in sub_tasks:
                 err = kern(
-                    ctypes.cast(rho_local.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(rhoR[i].data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms[i].data.ptr, ctypes.c_void_p),
                     mg_envs, ctypes.c_int(task.l), ctypes.c_int(task.n_radius),
                     (ctypes.c_int*3)(*task.mesh),
@@ -170,9 +166,6 @@ def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
                     ctypes.c_int(workers))
                 if err != 0:
                     raise RuntimeError(f'MG_eval_rho_orth kernel for l={task.l} failed')
-            if ngrids < SHARED_RHO_SIZE:
-                rho_local = rho_local.sum(axis=0)
-            rhoR[i] = rho_local
 
         weight = 1./nkpts * cell.vol/ngrids
         rho_freq = tools.fft(rhoR.reshape(nset*nvar, *mesh), mesh)
