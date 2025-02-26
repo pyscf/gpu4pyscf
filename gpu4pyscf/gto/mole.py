@@ -16,6 +16,7 @@
 import functools
 import numpy as np
 import cupy as cp
+import scipy.linalg
 from pyscf import gto
 from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
                        PTR_EXP)
