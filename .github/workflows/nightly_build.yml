@@ -46,3 +46,8 @@ jobs:
         echo $GITHUB_WORKSPACE
         export PYTHONPATH="${PYTHONPATH}:$(pwd)"
         pytest gpu4pyscf/tests/test_benchmark_uks.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_uks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/
+    - name: Test TDDFT
+      run: |
+        echo $GITHUB_WORKSPACE
+        export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+        pytest gpu4pyscf/tests/test_benchmark_tddft.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_tddft_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/

@@ -23,6 +23,7 @@ from pyscf.df import df, addons, incore
 from gpu4pyscf.lib.cupy_helper import (cholesky, tag_array, get_avail_mem, 
                                        cart2sph, p2p_transfer, copy_array)
 from gpu4pyscf.df import int3c2e, df_jk
+from gpu4pyscf.df import int3c2e_bdiv
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
 from gpu4pyscf.__config__ import _streams, num_devices
@@ -30,6 +31,7 @@ from gpu4pyscf.__config__ import _streams, num_devices
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
 GB = 1024*1024*1024
+INT3C2E_V2 = False
 
 LINEAR_DEP_THR = incore.LINEAR_DEP_THR
 GROUP_SIZE = 256
@@ -81,6 +83,42 @@ class DF(lib.StreamObject):
         t0 = log.init_timer()
         if auxmol is None:
             self.auxmol = auxmol = addons.make_auxmol(mol, self.auxbasis)
+
+        if INT3C2E_V2:
+            self.intopt = intopt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol)
+            self._cderi = {}
+            self._cderi[0] = _cholesky_eri_bdiv(intopt, omega=omega)
+            ao_pair_mapping = intopt.create_ao_pair_mapping(cart=mol.cart)
+            rows, cols = divmod(cupy.asarray(ao_pair_mapping), mol.nao)
+            intopt.cderi_row = rows
+            intopt.cderi_col = cols
+
+            # intopt.cderi_diag stores the indices for cderi_row that
+            # corresponds to the diagonal blocks. Note this index array can
+            # contain some of the off-diagonal elements which happen to be the
+            # off-diagonal elements while within the diagonal blocks.
+            uniq_l = intopt.uniq_l_ctr[:,0]
+            if mol.cart:
+                nf = (uniq_l + 1) * (uniq_l + 2) // 2
+            else:
+                nf = uniq_l * 2 + 1
+            n_groups = len(uniq_l)
+            ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
+            nbas = intopt.sorted_mol.nbas
+            offset = 0
+            cderi_diag = []
+            for (i, j), bas_ij_idx in zip(ij_tasks, intopt.shl_pair_idx):
+                nfi = nf[i]
+                nfj = nf[j]
+                if i == j: # the diagonal blocks
+                    ish, jsh = divmod(bas_ij_idx, nbas)
+                    idx = np.where(ish == jsh)[0]
+                    addr = offset + idx[:,None] * (nfi*nfi) + np.arange(nfi*nfi)
+                    cderi_diag.append(addr.ravel())
+                offset += bas_ij_idx.size * nfi * nfj
+            intopt.cderi_diag = cupy.asarray(np.hstack(cderi_diag))
+            log.timer_debug1('cholesky_eri', *t0)
+            return self
 
         if omega and omega > 1e-10:
             with auxmol.with_range_coulomb(omega):
@@ -364,3 +402,18 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
                 _cderi[0][:,ij0:ij1] = cderi_block
             t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)    
     return
+
+# Generate CDERI using the new int3c2e_bdiv algorithm
+def _cholesky_eri_bdiv(intopt, omega=None):
+    assert isinstance(intopt, int3c2e_bdiv.Int3c2eOpt)
+    assert omega is None
+    eri3c = intopt.int3c2e_bdiv_kernel()
+    if intopt.mol.cart:
+        eri3c = intopt.orbital_pair_cart2sph(eri3c)
+    auxmol = intopt.auxmol
+    j2c = cupy.asarray(auxmol.intor('int2c2e', hermi=1), order='C')
+    cd_low = cholesky(j2c)
+    aux_coeff = cupy.array(intopt.aux_coeff, copy=True)
+    cd_low = solve_triangular(cd_low, aux_coeff.T, lower=True, overwrite_b=True)
+    cderi = cd_low.dot(eri3c.T)
+    return cderi

@@ -287,7 +287,8 @@ class SRInt3c2eOpt:
         gen_img_idx = create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs)
 
         uniq_l = uniq_l_ctr[:,0]
-        n_groups = np.count_nonzero(uniq_l <= LMAX)
+        assert uniq_l.max() <= LMAX
+        n_groups = len(uniq_l)
         init_constant(cell)
         kern = libpbc.fill_int3c2e
         cp.cuda.Stream.null.synchronize()
