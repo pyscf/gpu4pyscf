@@ -25,7 +25,8 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, tag_array, contract, sandwich_dot, block_diag, transpose_sum)
+    load_library, tag_array, contract, sandwich_dot, block_diag, transpose_sum,
+    dist_matrix)
 from gpu4pyscf.gto.mole import cart2sph_by_l
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
@@ -665,23 +666,47 @@ def to_primitive_bas(cell):
     nimgs = len(Ls)
     ptr_coords = prim_bas[:,PRIMBAS_COORD]
     bas_coords = cell._env[ptr_coords[:,None] + np.arange(3)]
+
+    es = prim_env[prim_bas[:,PRIMBAS_EXP]]
+    es_min = es.min()
+    theta = es * es_min / (es + es_min)
+    # rcut for each basis
+    raw_rcut = (np.log(1e6/cell.precision) / theta)**.5
+    raw_rcut[raw_rcut > cell.rcut] = cell.rcut
+
     # Keep the unit cell at the beginning
-    basLr = (bas_coords + Ls[1:,None]).reshape(-1, 3)
-    dr = np.linalg.norm(bas_coords[:,None,:] - basLr, axis=2)
-    # TODO: optimize the rcut for each basis
-    idx = np.where(dr.min(axis=0) < cell.rcut)[0]
-    _env = np.hstack([prim_env, basLr[idx].ravel()])
-    extended_bas = _repeat(prim_bas, nimgs-1)[idx]
-    extended_bas[:,PRIMBAS_COORD] = len(prim_env) + np.arange(idx.size) * 3
+    basLr = bas_coords + Ls[1:,None]
+
+    # Filter very remote basis
+    #:atom_coords = cell.atom_coords()
+    #:dr = np.linalg.norm(atom_coords[:,None,None,:] - basLr, axis=3)
+    #:mask = (dr.min(axis=0) < raw_rcut).ravel()
+    # This code is slow, approximate dr.min() below by shifting the basis one
+    # image in the left and right.
+    # TODO: optimize this slow basis filtering code
+    atom_coords = cell.atom_coords()
+    shift = bas_coords[:,None] - atom_coords
+    shift_left = shift.min(axis=1)
+    shift_zero = abs(bas_coords[:,None] - atom_coords).min(axis=1)
+    shift_right = shift.max(axis=1)
+
+    r2 = np.min([(shift_left + Ls[1:,None])**2,
+                 (shift_zero + Ls[1:,None])**2,
+                 (shift_right + Ls[1:,None])**2], axis=0).sum(axis=2)
+    mask = (r2 < raw_rcut**2).ravel()
+    basLr = basLr.reshape(-1, 3)[mask]
+    _env = np.hstack([prim_env, basLr.ravel()])
+    extended_bas = _repeat(prim_bas, nimgs-1)[mask]
+    extended_bas[:,PRIMBAS_COORD] = len(prim_env) + np.arange(len(basLr)) * 3
     supmol_bas = np.vstack([prim_bas, extended_bas])
 
     ao_loc_in_cell0 = np.append(
-        ao_loc_in_cell0, np.hstack([ao_loc_in_cell0]*(nimgs-1))[idx])
+        ao_loc_in_cell0, _repeat(ao_loc_in_cell0, nimgs-1)[mask])
     ao_loc_in_cell0 = np.asarray(ao_loc_in_cell0, dtype=np.int32)
     return supmol_bas, _env, ao_loc_in_cell0
 
 def _repeat(a, repeats):
-    '''repeats vertically'''
+    '''repeats vertically. For 2D array, like np.vstack([a]*repeats)'''
     ap = np.repeat(a[np.newaxis], repeats, axis=0)
     return ap.reshape(-1, *a.shape[1:])
 
@@ -709,6 +734,8 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     norm = cs * ((2*ls+1)/(4*np.pi))**.5
     ptr_coords = supmol_bas[:,PRIMBAS_COORD]
     bas_coords = cp.asarray(supmol_env[ptr_coords[:,None] + np.arange(3)])
+    log.debug1('%d primitive shells in cell0, %d shells in supmol',
+               cell0_nprims, len(supmol_bas))
 
     # Estimate <cell0|supmol> overlap
     li = ls[:cell0_nprims,None]
@@ -718,8 +745,9 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     fi = es[:cell0_nprims,None] / aij
     fj = es[None,:] / aij
     theta = es[:cell0_nprims,None] * fj
-    rirj = bas_coords[:cell0_nprims,None,:] - bas_coords
-    dr = cp.linalg.norm(rirj, axis=2)
+    #:rirj = bas_coords[:cell0_nprims,None,:] - bas_coords
+    #:dr = cp.linalg.norm(rirj, axis=2)
+    dr = dist_matrix(bas_coords[:cell0_nprims], bas_coords)
     dri = fj * dr
     drj = fi * dr
     fac_dri = (li * .5/aij + dri**2) ** (li*.5)

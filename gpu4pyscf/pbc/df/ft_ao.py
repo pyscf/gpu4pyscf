@@ -30,7 +30,8 @@ from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import load_library, contract, get_avail_mem
+from gpu4pyscf.lib.cupy_helper import (
+    load_library, contract, get_avail_mem, dist_matrix)
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import (
     g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
@@ -94,9 +95,10 @@ def _bas_overlap_mask(cell, bvkmesh_Ls, Ls):
     Ls = cp.asarray(Ls)
     # rj format: (bvk_cell_id, bas_id, lattice_img_id)
     rj = bvkmesh_Ls[:,None,None,:] + bas_coords[:,None,:] + Ls
-    rirj = bas_coords[:,None,None,None,:] - rj
-
-    dr = cp.linalg.norm(rirj, axis=4)
+    #:rirj = bas_coords[:,None,None,None,:] - rj
+    #:dr = cp.linalg.norm(rirj, axis=4)
+    dr = dist_matrix(bas_coords, rj.reshape(-1,3))
+    dr = dr.reshape(len(bas_coords), *rj.shape[:3])
 
     dri = fj[:,None,:,None] * dr
     drj = fi[:,None,:,None] * dr
