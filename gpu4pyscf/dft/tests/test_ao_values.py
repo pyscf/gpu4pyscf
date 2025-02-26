@@ -27,14 +27,14 @@ C   0.73685281,  0.61123287, -0.00800148
 '''
     mol_sph = pyscf.M(
         atom=atom,
-        basis='ccpvqz',
+        basis='cc-pv6z',
         spin=None,
         cart = 0,
         output = '/dev/null')
 
     mol_cart = pyscf.M(
         atom=atom,
-        basis='ccpvqz',
+        basis='cc-pv6z',
         spin=None,
         cart=1,
         output = '/dev/null')

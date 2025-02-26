@@ -89,15 +89,8 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     stream = cupy.cuda.get_current_stream()
 
-    # ao must be set to zero due to implementation
-    if deriv > 1:
-        if out is None:
-            out = cupy.zeros((comp, nao_slice, ngrids), order='C')
-        else:
-            out[:] = 0
-    else:
-        if out is None:
-            out = cupy.empty((comp, nao_slice, ngrids), order='C')
+    if out is None:
+        out = cupy.empty((comp, nao_slice, ngrids), order='C')
 
     err = libgdft.GDFTeval_gto(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
