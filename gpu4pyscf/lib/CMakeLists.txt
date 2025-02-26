@@ -144,9 +144,20 @@ if(BUILD_SOLVENT)
   add_subdirectory(solvent)
 endif()
 
-add_subdirectory(gvhf-rys)
-add_subdirectory(gvhf-md)
-add_subdirectory(pbc)
+option(BUILD_GVHF_RYS "Using gvhf-rys" ON)
+if(BUILD_GVHF_RYS)
+  add_subdirectory(gvhf-rys)
+endif()
+
+option(BUILD_GVHF_MD "Using gvhf-md" ON)
+if(BUILD_GVHF_MD)
+  add_subdirectory(gvhf-md)
+endif()
+
+option(BUILD_PBC "Using PBC" ON)
+if(BUILD_PBC)
+  add_subdirectory(pbc)
+endif()
 
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
