@@ -30,7 +30,7 @@ from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, num_devices
 
-LMAX_ON_GPU = 6
+LMAX_ON_GPU = 8
 BAS_ALIGNED = 1
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 64*64)
 ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
@@ -89,15 +89,8 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     stream = cupy.cuda.get_current_stream()
 
-    # ao must be set to zero due to implementation
-    if deriv > 1:
-        if out is None:
-            out = cupy.zeros((comp, nao_slice, ngrids), order='C')
-        else:
-            out[:] = 0
-    else:
-        if out is None:
-            out = cupy.empty((comp, nao_slice, ngrids), order='C')
+    if out is None:
+        out = cupy.empty((comp, nao_slice, ngrids), order='C')
 
     err = libgdft.GDFTeval_gto(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -2092,7 +2085,7 @@ class _GDFTOpt:
                 logger.debug(mol, '    %s : %s', l_ctr, n)
 
         if uniq_l_ctr[:,0].max() > LMAX_ON_GPU:
-            raise ValueError('High angular basis not supported')
+            raise ValueError(f'High angular basis (L>{LMAX_ON_GPU}) not supported')
 
         # Paddings to make basis aligned in each angular momentum group
         inv_idx_padding = []
