@@ -42,8 +42,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
     """
-    if singlet is not True and singlet is not None:
-        raise NotImplementedError("Only for Singlet-Singlet TDDFT")
     log = logger.new_logger(td_grad, verbose)
     time0 = logger.process_clock(), logger.perf_counter()
 
@@ -222,6 +220,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
+    if singlet:
+        j_factor=1.0
+    else:
+        j_factor=0.0
     dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, j_factor, k_factor) * 2
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
