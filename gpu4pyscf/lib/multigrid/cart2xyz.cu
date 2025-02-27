@@ -59,8 +59,9 @@ double sub_dm_xyz(int lx, int ly, int lz, int li, int lj, int nao,
         int jy = ly - ly_i;
         int jz = lz - lz_i;
         int i = cart_address(li, lx_i, ly_i, lz_i);
-        for (int j = 0, lx_j = lj; lx_j >= jx; lx_j--) {
-        for (int ly_j = lj-lx_j; ly_j >= jy; ly_j--, j++) {
+        // TODO: precomputing index
+        for (int lx_j = lj; lx_j >= jx; lx_j--) {
+        for (int ly_j = lj-lx_j; ly_j >= jy; ly_j--) {
             int lz_j = lj - lx_j - ly_j;
             if (lz_j < jz) continue;
             int j = cart_address(lj, lx_j, ly_j, lz_j);
@@ -141,6 +142,7 @@ void _dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj,
         int ly_j = j_fold2idx[j].y;
         int lz_j = lj - lx_j - ly_j;
         double dm_ij = 0.;
+        // TODO: precomputing index
         for (int jx = 0; jx <= lx_j; ++jx) {
             double fac = cicj * cx[(jx+lx_j*lj1)*WARP_SIZE];
             int lx = lx_i + jx;

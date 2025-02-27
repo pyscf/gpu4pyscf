@@ -4,6 +4,7 @@ add_library(mgrid SHARED
   mg_driver.cu
   eval_rho.cu
   eval_mat_lda.cu eval_mat_gga.cu
+  eval_tau.cu eval_mat_tau.cu
 )
 
 set_target_properties(mgrid PROPERTIES

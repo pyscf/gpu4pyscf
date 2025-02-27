@@ -707,6 +707,11 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
     if (sp_id >= npairs_this_block) {
         cicj = 0.;
     }
+    int *ao_loc = envs.ao_loc;
+    int nao = envs.nao;
+    int i0 = ao_loc[ish];
+    int j0 = ao_loc[jsh];
+    out += i0*nao+j0;
 
     constexpr int L1 = L + 1;
     constexpr int nf2 = (L+1)*(L+2)/2;
@@ -726,10 +731,8 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
     double *ys_exp = xs_exp + xs_size;
     double *zs_exp = ys_exp + xs_size;
     double *gx_dmyz = zs_exp + xs_size;
-    init_orth_data(xs_exp, grid_start, envs, bounds, ri, rj, ai, aj, L1+1);
+    init_orth_data(xs_exp, grid_start, envs, bounds, ri, rj, ai, aj, L+1);
 
-    double r2[nf2];
-    double r1[L1];
     extern __shared__ double cache[];
     double *xs_cache, *ys_cache, *zs_cache;
     double *dm_xyz = gx_dmyz + nf2 * ngrid_span * WARP_SIZE;
@@ -771,6 +774,8 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
             int ny = load_xs(ys_cache, ys_exp, iy0, ngridy, L, TILE, ngrid_span, warp_id);
             for (int ix = warp_id; ix < ngridx; ix += WARPS) {
                 int tx = (ix + nx0) % mesh_x;
+                double r2[(L+1)*(L+2)/2];
+                double r1[L+1];
 #pragma unroll
                 for (int m = 0; m < nf2; ++m) {
                     r2[m] = 0.;
@@ -809,11 +814,7 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
     __syncthreads();
 
     fill_dm_xyz<L>(dm_xyz, gx_dmyz, xs_exp, ngridx, ngrid_span);
-    int *ao_loc = envs.ao_loc;
-    int nao = envs.nao;
-    int i0 = ao_loc[ish];
-    int j0 = ao_loc[jsh];
-    _dm_xyz_to_dm<L>(out+i0*nao+j0, dm_xyz, nao, li, lj, ri, rj, cicj, cache,
+    _dm_xyz_to_dm<L>(out, dm_xyz, nao, li, lj, ri, rj, cicj, cache,
                      npairs_this_block);
     __syncthreads();
 
@@ -829,6 +830,8 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
             int ny = load_xs(ys_cache, ys_exp, iy0, ngridy, L, TILE, ngrid_span, warp_id);
             for (int ix = warp_id; ix < ngridx; ix += WARPS) {
                 int tx = (ix + nx0) % mesh_x;
+                double r2[(L+1)*(L+2)/2];
+                double r1[L+1];
 #pragma unroll
                 for (int m = 0; m < nf2; ++m) {
                     r2[m] = 0.;
@@ -867,7 +870,7 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
     __syncthreads();
 
     fill_dm_xyz_ip1<L>(dm_xyz, gx_dmyz, xs_exp, ngridx, ngrid_span);
-    _dm_xyz_to_dm_sigmax<L>(out+i0*nao+j0, dm_xyz, nao, li, lj, ri, rj, ai, aj,
+    _dm_xyz_to_dm_sigmax<L>(out, dm_xyz, nao, li, lj, ri, rj, ai, aj,
                             cicj, cache, npairs_this_block);
     __syncthreads();
 
@@ -885,6 +888,8 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
             int nx = load_xs(xs_cache, xs_exp, ix0, ngridx, L, TILE, ngrid_span, warp_id);
             for (int iy = warp_id; iy < ngridy; iy += WARPS) {
                 int ty = (iy + ny0) % mesh_y;
+                double r2[(L+1)*(L+2)/2];
+                double r1[L+1];
 #pragma unroll
                 for (int m = 0; m < nf2; ++m) {
                     r2[m] = 0.;
@@ -923,7 +928,7 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
     __syncthreads();
 
     fill_dm_xyz_ip1<L>(dm_xyz, gx_dmyz, ys_exp, ngridy, ngrid_span);
-    _dm_xyz_to_dm_sigmay<L>(out+i0*nao+j0, dm_xyz, nao, li, lj, ri, rj, ai, aj,
+    _dm_xyz_to_dm_sigmay<L>(out, dm_xyz, nao, li, lj, ri, rj, ai, aj,
                             cicj, cache, npairs_this_block);
     __syncthreads();
 
@@ -941,6 +946,8 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
             int ny = load_xs(ys_cache, ys_exp, iy0, ngridy, L, TILE, ngrid_span, warp_id);
             for (int iz = warp_id; iz < ngridz; iz += WARPS) {
                 int tz = (iz + nz0) % mesh_z;
+                double r2[(L+1)*(L+2)/2];
+                double r1[L+1];
 #pragma unroll
                 for (int m = 0; m < nf2; ++m) {
                     r2[m] = 0.;
@@ -979,7 +986,7 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
     __syncthreads();
 
     fill_dm_xyz_ip1<L>(dm_xyz, gx_dmyz, zs_exp, ngridz, ngrid_span);
-    _dm_xyz_to_dm_sigmaz<L>(out+i0*nao+j0, dm_xyz, nao, li, lj, ri, rj, ai, aj,
+    _dm_xyz_to_dm_sigmaz<L>(out, dm_xyz, nao, li, lj, ri, rj, ai, aj,
                             cicj, cache, npairs_this_block);
 }
 

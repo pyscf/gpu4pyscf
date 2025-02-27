@@ -72,7 +72,7 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     double *ys_exp = xs_exp + xs_size;
     double *zs_exp = ys_exp + xs_size;
     double *gx_dmyz = zs_exp + xs_size;
-    init_orth_data(xs_exp, grid_start, envs, bounds, ri, rj, ai, aj, L+1);
+    init_orth_data(xs_exp, grid_start, envs, bounds, ri, rj, ai, aj, L);
 
     double r2[nf2];
     double r1[L+1];
