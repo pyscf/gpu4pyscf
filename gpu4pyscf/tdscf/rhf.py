@@ -16,6 +16,7 @@
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf import ao2mo
 from pyscf.tdscf import rhf as tdhf_cpu
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, real_eig
 from gpu4pyscf import scf
@@ -44,12 +45,14 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
     '''
     if hasattr(mf, 'with_df'):
         raise NotImplementedError('DF-TDDFT is not implemented')
-    from pyscf import ao2mo
     if not singlet:
         raise NotImplementedError('Only singlet is implemented')
-    if mo_energy is None: mo_energy = mf.mo_energy
-    if mo_coeff is None: mo_coeff = mf.mo_coeff
-    if mo_occ is None: mo_occ = mf.mo_occ
+    if mo_energy is None:
+        mo_energy = mf.mo_energy
+    if mo_coeff is None:
+        mo_coeff = mf.mo_coeff
+    if mo_occ is None:
+        mo_occ = mf.mo_occ
     # assert (mo_coeff.dtype == numpy.double)
 
     mo_energy = cp.asarray(mo_energy)
@@ -123,7 +126,8 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
             for ao, mask, weight, coords \
                     in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, blksize=67200):
                 mo_coeff_mask = mo_coeff[mask]
-                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
+                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
+                                    mo_occ, mask, xctype, with_lapl=False)
                 fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
                 wfxc = fxc[0,0] * weight
                 orbo_mask = orbo[mask]
@@ -141,7 +145,8 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
             for ao, mask, weight, coords \
                     in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
                 mo_coeff_mask = mo_coeff[mask]
-                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
+                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
+                                   mo_occ, mask, xctype, with_lapl=False)
                 fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
                 wfxc = fxc * weight
                 orbo_mask = orbo[mask]
@@ -166,7 +171,8 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
             for ao, mask, weight, coords \
                     in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
                 mo_coeff_mask = mo_coeff[mask]
-                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
+                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
+                                   mo_occ, mask, xctype, with_lapl=False)
                 fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
                 wfxc = fxc * weight
                 orbo_mask = orbo[mask]
@@ -249,7 +255,8 @@ class TDBase(lib.StreamObject):
 
     gen_vind = NotImplemented
     def get_ab(self, mf=None, singlet=True):
-        if mf is None: mf = self._scf
+        if mf is None:
+            mf = self._scf
         return get_ab(mf, singlet=singlet)
 
     def get_precond(self, hdiag):
@@ -268,7 +275,7 @@ class TDBase(lib.StreamObject):
     def nuc_grad_method(self):
         from gpu4pyscf.grad import tdrhf
         return tdrhf.Gradients(self)
-    
+
     as_scanner = tdhf_cpu.as_scanner
 
     oscillator_strength = tdhf_cpu.oscillator_strength

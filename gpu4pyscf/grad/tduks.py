@@ -16,15 +16,14 @@
 from functools import reduce
 import cupy as cp
 from pyscf import lib
-from gpu4pyscf import lib as lib_gpu
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.dft import numint
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import tdrhf as tdrhf_grad
 from gpu4pyscf.grad import tdrks as tdrks_grad
 from gpu4pyscf.scf import ucphf
+from gpu4pyscf import tdscf
 
 
 #
@@ -41,6 +40,9 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
     """
+    if singlet is not True and singlet is not None:
+        raise NotImplementedError("Only for spin-conserving TDDFT")
+
     log = logger.new_logger(td_grad, verbose)
     time0 = logger.process_clock(), logger.perf_counter()
 
@@ -287,7 +289,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dvhf_all -= dvhf
     dvhf = td_grad.get_veff(mol, cp.stack(((dmxpya + dmxpya.T), (dmxpyb + dmxpyb.T))) * 0.5,
             j_factor, k_factor) * 2
-    
+
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
@@ -355,7 +357,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dveff1_0 += cp.asarray(
         [cp.einsum("xpq,pq->x", veff1_0_b[:, p0:p1], oo0b[p0:p1] + dmz1doob[p0:p1] * 0.5) for p0, p1 in aoslices[:, 2:]])
     dveff1_0 += cp.asarray(
-        [cp.einsum("xpq,qp->x", veff1_0_a[:, p0:p1], oo0a[:, p0:p1] + dmz1dooa[:, p0:p1] * 0.5) 
+        [cp.einsum("xpq,qp->x", veff1_0_a[:, p0:p1], oo0a[:, p0:p1] + dmz1dooa[:, p0:p1] * 0.5)
             for p0, p1 in aoslices[:, 2:]])
     dveff1_0 += cp.asarray(
         [cp.einsum("xpq,qp->x", veff1_0_b[:, p0:p1], oo0b[:, p0:p1] + dmz1doob[:, p0:p1] * 0.5)
@@ -493,12 +495,10 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
 
 class Gradients(tdrhf_grad.Gradients):
     @lib.with_doc(grad_elec.__doc__)
-    def grad_elec(self, xy, singlet=None, atmlst=None):
+    def grad_elec(self, xy, singlet=None, atmlst=None, verbose=logger.info):
         return grad_elec(self, xy, singlet, atmlst, self.verbose)
 
 
 Grad = Gradients
-
-from gpu4pyscf import tdscf
 
 tdscf.uks.TDA.Gradients = tdscf.uks.TDDFT.Gradients = lib.class_as_method(Gradients)

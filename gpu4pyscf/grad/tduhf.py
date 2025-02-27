@@ -23,6 +23,7 @@ from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import ucphf
 from pyscf import __config__
 from gpu4pyscf.lib import utils
+from gpu4pyscf import tdscf
 
 
 def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
@@ -36,6 +37,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
     """
+    if singlet is not True and singlet is not None:
+        raise NotImplementedError("Only for spin-conserving TDHF")
     log = logger.new_logger(td_grad, verbose)
     time0 = logger.process_clock(), logger.perf_counter()
 
@@ -262,12 +265,10 @@ class Gradients(tdrhf_grad.Gradients):
     device = utils.device
 
     @lib.with_doc(grad_elec.__doc__)
-    def grad_elec(self, xy, singlet=None, atmlst=None):
+    def grad_elec(self, xy, singlet=None, atmlst=None, verbose=logger.info):
         return grad_elec(self, xy, singlet, atmlst, self.verbose)
 
 
 Grad = Gradients
-
-from gpu4pyscf import tdscf
 
 tdscf.uhf.TDA.Gradients = tdscf.uhf.TDHF.Gradients = lib.class_as_method(Gradients)

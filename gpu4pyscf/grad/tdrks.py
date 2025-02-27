@@ -25,6 +25,7 @@ from gpu4pyscf.scf import cphf
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.grad import tdrhf
+from gpu4pyscf import tdscf
 
 
 #
@@ -41,6 +42,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
     """
+    if singlet is not True and singlet is not None:
+        raise NotImplementedError("Only for Singlet-Singlet TDDFT")
     log = logger.new_logger(td_grad, verbose)
     time0 = logger.process_clock(), logger.perf_counter()
 
@@ -255,8 +258,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals())
         dvhf_all += dvhf
-    time1 = log.timer('Z-vector using CPHF solver', *time0)
-    
+    time1 = log.timer('2e AO integral derivatives', *time1)
     fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
 
     veff1_0 = vxc1[1:]
@@ -280,7 +282,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         [cp.einsum("xqp,pq->x", veff1_2[:, p0:p1], dmxpy[:, p0:p1] * 2) for p0, p1 in aoslices[:, 2:]])
     de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force + dveff1_0 + dveff1_1 + dveff1_2
 
-    log.timer('TDRKS nuclear gradients', *time0)
     return de.get()
 
 
@@ -468,12 +469,10 @@ def _mgga_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
 
 class Gradients(tdrhf.Gradients):
     @lib.with_doc(grad_elec.__doc__)
-    def grad_elec(self, xy, singlet, atmlst=None):
+    def grad_elec(self, xy, singlet, atmlst=None, verbose=logger.info):
         return grad_elec(self, xy, singlet, atmlst, self.verbose)
 
 
 Grad = Gradients
-
-from gpu4pyscf import tdscf
 
 tdscf.rks.TDA.Gradients = tdscf.rks.TDDFT.Gradients = lib.class_as_method(Gradients)

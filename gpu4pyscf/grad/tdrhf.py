@@ -15,8 +15,6 @@
 
 from functools import reduce
 import cupy as cp
-import numpy as np
-from pyscf import gto
 from pyscf import lib
 from pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
@@ -25,8 +23,8 @@ from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import cphf
 from gpu4pyscf import lib as lib_gpu
 from pyscf import __config__
-from pyscf.scf import _vhf
 from gpu4pyscf.lib import utils
+from gpu4pyscf import tdscf
 
 
 def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
@@ -47,12 +45,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     mo_coeff = cp.asarray(mf.mo_coeff)
     mo_energy = cp.asarray(mf.mo_energy)
     mo_occ = cp.asarray(mf.mo_occ)
-    nao, nmo = mo_coeff.shape
+    nmo = mo_coeff.shape[1]
     nocc = int((mo_occ > 0).sum())
     nvir = nmo - nocc
     x, y = x_y
-    # if y != 0:
-    #     raise NotImplementedError('TDDFT is not perfectly supported')
     x = cp.asarray(x)
     y = cp.asarray(y)
     xpy = (x + y).reshape(nocc, nvir).T
@@ -182,7 +178,13 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
-    dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T) * 2
+    if singlet:
+        j_factor=1.0
+        k_factor=1.0
+    else:
+        j_factor=0.0
+        k_factor=1.0
+    dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, j_factor, k_factor) * 2
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
@@ -222,12 +224,12 @@ class Gradients(rhf_grad.GradientsBase):
     }
 
     def __init__(self, td):
+        super().__init__(td)
         self.verbose = td.verbose
         self.stdout = td.stdout
         self.mol = td.mol
         self.base = td
         self.chkfile = td.chkfile
-        self.max_memory = td.max_memory
         self.state = 1  # of which the gradients to be computed.
         self.atmlst = None
         self.de = None
@@ -248,8 +250,8 @@ class Gradients(rhf_grad.GradientsBase):
         return self
 
     @lib.with_doc(grad_elec.__doc__)
-    def grad_elec(self, xy, singlet, atmlst=None):
-        return grad_elec(self, xy, singlet, atmlst, self.verbose)
+    def grad_elec(self, xy, singlet, atmlst=None, verbose=logger.INFO):
+        return grad_elec(self, xy, singlet, atmlst, verbose)
 
     def kernel(self, xy=None, state=None, singlet=None, atmlst=None):
         """
@@ -266,7 +268,7 @@ class Gradients(rhf_grad.GradientsBase):
             if state == 0:
                 logger.warn(
                     self,
-                    "state=0 found in the input. " "Gradients of ground state is computed.",
+                    "state=0 found in the input. Gradients of ground state is computed.",
                 )
                 return self.base._scf.nuc_grad_method().kernel(atmlst=atmlst)
 
@@ -284,7 +286,7 @@ class Gradients(rhf_grad.GradientsBase):
         if self.verbose >= logger.INFO:
             self.dump_flags()
 
-        de = self.grad_elec(xy, singlet, atmlst)
+        de = self.grad_elec(xy, singlet, atmlst, verbose=self.verbose)
         self.de = de = de + self.grad_nuc(atmlst=atmlst)
         if self.mol.symmetry:
             self.de = self.symmetrize(self.de, atmlst)
@@ -341,7 +343,5 @@ class Gradients(rhf_grad.GradientsBase):
 
 
 Grad = Gradients
-
-from gpu4pyscf import tdscf
 
 tdscf.rhf.TDA.Gradients = tdscf.rhf.TDHF.Gradients = lib.class_as_method(Gradients)

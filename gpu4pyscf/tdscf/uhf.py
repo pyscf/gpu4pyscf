@@ -17,7 +17,7 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.tdscf import uhf as tdhf_cpu
-from pyscf.data.nist import HARTREE2EV, HARTREE2WAVENUMBER
+from pyscf import ao2mo
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, eig as lr_eig, real_eig
 from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
@@ -42,13 +42,15 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
     B has three items: (B_aaaa, B_aabb, B_bbbb).
     B_bbaa = B_aabb.transpose(2,3,0,1).
     '''
-    from pyscf import ao2mo
     if hasattr(mf, 'with_df'):
         raise NotImplementedError('DF-TDDFT is not implemented')
-    
-    if mo_energy is None: mo_energy = mf.mo_energy
-    if mo_coeff is None: mo_coeff = mf.mo_coeff
-    if mo_occ is None: mo_occ = mf.mo_occ
+
+    if mo_energy is None:
+        mo_energy = mf.mo_energy
+    if mo_coeff is None:
+        mo_coeff = mf.mo_coeff
+    if mo_occ is None:
+        mo_occ = mf.mo_occ
 
     mo_energy = cp.asarray(mo_energy)
     mo_coeff = cp.asarray(mo_coeff)
@@ -123,7 +125,6 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
         b_ab += cp.einsum('iajb->iajb', eri_ab[:nocc_a,nocc_a:,:nocc_b,nocc_b:])
 
     if isinstance(mf, scf.hf.KohnShamDFT):
-        from pyscf.dft import xc_deriv
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
         if mf.do_nlc():
@@ -175,9 +176,11 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
                     in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv):
                 mo_coeff_mask_a = mo_coeff[0, mask]
                 mo_coeff_mask_b = mo_coeff[1, mask]
-                rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_a, mo_occ[0], mask, xctype, with_lapl=False),
-                                  ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b, mo_occ[1], mask, xctype, with_lapl=False)))
-                
+                rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_a,
+                                               mo_occ[0], mask, xctype, with_lapl=False),
+                                  ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b,
+                                               mo_occ[1], mask, xctype, with_lapl=False)))
+
                 fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
                 wfxc = fxc[:,0,:,0] * weight
                 orbo_a_mask = orbo_a[mask]
@@ -212,8 +215,10 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
                     in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv):
                 mo_coeff_mask_a = mo_coeff[0, mask]
                 mo_coeff_mask_b = mo_coeff[1, mask]
-                rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_a, mo_occ[0], mask, xctype, with_lapl=False),
-                                  ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b, mo_occ[1], mask, xctype, with_lapl=False)))
+                rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_a,
+                                               mo_occ[0], mask, xctype, with_lapl=False),
+                                  ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b,
+                                               mo_occ[1], mask, xctype, with_lapl=False)))
                 fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
                 wfxc = fxc * weight
                 orbo_a_mask = orbo_a[mask]
@@ -256,8 +261,10 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
                     in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv):
                 mo_coeff_mask_a = mo_coeff[0, mask]
                 mo_coeff_mask_b = mo_coeff[1, mask]
-                rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_a, mo_occ[0], mask, xctype, with_lapl=False),
-                                  ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b, mo_occ[1], mask, xctype, with_lapl=False)))
+                rho = cp.asarray((ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_a,
+                                               mo_occ[0], mask, xctype, with_lapl=False),
+                                  ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b,
+                                               mo_occ[1], mask, xctype, with_lapl=False)))
                 fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
                 wfxc = fxc * weight
                 orbo_a_mask = orbo_a[mask]
@@ -318,7 +325,6 @@ def gen_tda_operation(mf, fock_ao=None, wfnsym=None):
     assert mo_coeff[0].dtype == cp.float64
     mo_energy = cp.asarray(mf.mo_energy)
     mo_occ = cp.asarray(mf.mo_occ)
-    nao, nmo = mo_coeff[0].shape
     occidxa = mo_occ[0] > 0
     occidxb = mo_occ[1] > 0
     viridxa = mo_occ[0] ==0
@@ -366,11 +372,11 @@ class TDBase(tdhf_gpu.TDBase):
     def get_ab(self, mf=None):
         if mf is None: mf = self._scf
         return get_ab(mf)
-    
+
     def nuc_grad_method(self):
         from gpu4pyscf.grad import tduhf
         return tduhf.Gradients(self)
-    
+
     def _contract_multipole(tdobj, ints, hermi=True, xy=None):
         if xy is None: xy = tdobj.xy
         mo_coeff = tdobj._scf.mo_coeff
@@ -838,7 +844,6 @@ class SpinFlipTDHF(TDBase):
         assert mo_coeff[0].dtype == cp.float64
         mo_energy = cp.asarray(mf.mo_energy)
         mo_occ = cp.asarray(mf.mo_occ)
-        nao, nmo = mo_coeff[0].shape
 
         occidxa = mo_occ[0] > 0
         occidxb = mo_occ[1] > 0
