@@ -41,8 +41,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
     '''
-    log = logger.new_logger(td_grad, verbose)
-    time0 = logger.process_clock(), logger.perf_counter()
 
     mol = td_grad.mol
     mf = td_grad.base._scf
@@ -72,15 +70,28 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     f1vo, f1oo, vxc1, k1ao = \
             _contract_xc_kernel(td_grad, mf.xc, dmxpy,
                                 dmzoo, True, True, singlet)
-
-    if ni.libxc.is_hybrid_xc(mf.xc):
-        dm = (dmzoo, dmxpy+dmxpy.T, dmxmy-dmxmy.T)
-        vj, vk = mf.get_jk(mol, dm, hermi=0)
-        if not isinstance(vj, cp.ndarray): vj = cp.asarray(vj)
-        if not isinstance(vk, cp.ndarray): vk = cp.asarray(vk)
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
+    if with_k:
+        vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=0)
+        vj1, vk1 = mf.get_jk(mol, dmxpy+dmxpy.T, hermi=0)
+        vj2, vk2 = mf.get_jk(mol, dmxmy-dmxmy.T, hermi=0)
+        if not isinstance(vj0, cp.ndarray): vj0 = cp.asarray(vj0)
+        if not isinstance(vk0, cp.ndarray): vk0 = cp.asarray(vk0)
+        if not isinstance(vj1, cp.ndarray): vj1 = cp.asarray(vj1)
+        if not isinstance(vk1, cp.ndarray): vk1 = cp.asarray(vk1)
+        if not isinstance(vj2, cp.ndarray): vj2 = cp.asarray(vj2)
+        if not isinstance(vk2, cp.ndarray): vk2 = cp.asarray(vk2)
+        vj = cp.stack((vj0, vj1, vj2))
+        vk = cp.stack((vk0, vk1, vk2))
         vk *= hyb
         if omega != 0:
-            vk += cp.asarray(mf.get_k(mol, dm, hermi=0, omega=omega) * (alpha-hyb))
+            vk0 = mf.get_k(mol, dmzoo, hermi=0, omega=omega)
+            vk1 = mf.get_k(mol, dmxpy+dmxpy.T, hermi=0, omega=omega)
+            vk2 = mf.get_k(mol, dmxmy-dmxmy.T, hermi=0, omega=omega)
+            if not isinstance(vk0, cp.ndarray): vk0 = cp.asarray(vk0)
+            if not isinstance(vk1, cp.ndarray): vk1 = cp.asarray(vk1)
+            if not isinstance(vk2, cp.ndarray): vk2 = cp.asarray(vk2)
+            vk += cp.stack((vk0, vk1, vk2)) * (alpha-hyb)
         veff0doo = vj[0] * 2 - vk[0] + f1oo[0] + k1ao[0] * 2
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
         if singlet:
@@ -95,8 +106,12 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         wvo -= cp.einsum('ki,ai->ak', veff0mom[:nocc,:nocc], xmy) * 2
         wvo += cp.einsum('ac,ai->ci', veff0mom[nocc:,nocc:], xmy) * 2
     else:
-        vj = mf.get_j(mol, (dmzoo, dmxpy+dmxpy.T), hermi=1)
-        if not isinstance(vj, cp.ndarray): vj = cp.asarray(vj)
+        vj0 = mf.get_j(mol, dmzoo, hermi=1)
+        vj1 = mf.get_j(mol, dmxpy+dmxpy.T, hermi=1)
+        if not isinstance(vj0, cp.ndarray): vj0 = cp.asarray(vj0)
+        if not isinstance(vj1, cp.ndarray): vj1 = cp.asarray(vj1)
+        vj = cp.stack((vj0, vj1))
+
         veff0doo = vj[0] * 2 + f1oo[0] + k1ao[0] * 2
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
         if singlet:
@@ -118,7 +133,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
                     max_cycle=td_grad.cphf_max_cycle,
                     tol=td_grad.cphf_conv_tol)[0]
     z1 = z1.reshape(nvir,nocc)
-    time1 = log.timer('Z-vector using CPHF solver', *time0)
 
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
     veff = vresp(z1ao+z1ao.T)
@@ -165,11 +179,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     if mol.has_ecp():
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo+dmz1doo.T)*0.5) # 1/r like terms
 
-    with_k = ni.libxc.is_hybrid_xc(mf.xc)
-    vhfopt = mf._opt_gpu.get(None, None)
     j_factor = 1.
     k_factor = 0.
-    
     if with_k:
         if omega == 0:
             k_factor = hyb
@@ -179,11 +190,26 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             k_factor = alpha
         else: # SR and LR exchange with different ratios
             k_factor = alpha
-    dvhf_DD_DP = rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5 + oo0*2, vhfopt, j_factor, k_factor, verbose=verbose)
-    dvhf_DD_DP-= rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5, vhfopt, j_factor, k_factor, verbose=verbose)
-    dvhf_xpy = rhf_grad._jk_energy_per_atom(mol, dmxpy+dmxpy.T, vhfopt, j_factor, k_factor, verbose=verbose)*2
-    dvhf_xmy = rhf_grad._jk_energy_per_atom(mol, dmxmy-dmxmy.T, vhfopt, j_factor=0.0, k_factor=k_factor)*2
     
+    extra_force = cp.zeros((len(atmlst),3))
+    dvhf_all = 0
+    dvhf = td_grad.get_veff(mol, (dmz1doo+dmz1doo.T)*0.5 + oo0*2, j_factor, k_factor)
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all += dvhf
+    dvhf = td_grad.get_veff(mol, (dmz1doo+dmz1doo.T)*0.5, j_factor, k_factor)
+    for k, ia in enumerate(atmlst):
+        extra_force[k] -= mf_grad.extra_force(ia, locals())
+    dvhf_all -= dvhf
+    dvhf = td_grad.get_veff(mol, dmxpy+dmxpy.T, j_factor, k_factor)*2
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all += dvhf
+    dvhf = td_grad.get_veff(mol, dmxmy-dmxmy.T, 0.0, k_factor)*2
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all += dvhf
+        
     if with_k and omega != 0:
         j_factor = 0.
         omega = -omega # Prefer computing the SR part
@@ -194,13 +220,23 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             k_factor = -alpha
         else: # SR and LR exchange with different ratios
             k_factor = hyb - alpha # =beta
-        vhfopt = mf._opt_gpu.get(omega, None)
-        with mol.with_range_coulomb(omega):
-            dvhf_DD_DP += rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5 + oo0*2, vhfopt, j_factor, k_factor, verbose=verbose)
-            dvhf_DD_DP -= rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5, vhfopt, j_factor, k_factor, verbose=verbose)
-            dvhf_xpy += rhf_grad._jk_energy_per_atom(mol, dmxpy+dmxpy.T, vhfopt, j_factor, k_factor, verbose=verbose)*2
-            dvhf_xmy += rhf_grad._jk_energy_per_atom(mol, dmxmy-dmxmy.T, vhfopt, j_factor=0.0, k_factor=k_factor)*2
-
+            
+        dvhf = td_grad.get_veff(mol, (dmz1doo+dmz1doo.T)*0.5 + oo0*2, j_factor, k_factor, omega)
+        for k, ia in enumerate(atmlst):
+            extra_force[k] += mf_grad.extra_force(ia, locals())
+        dvhf_all += dvhf
+        dvhf = td_grad.get_veff(mol, (dmz1doo+dmz1doo.T)*0.5, j_factor, k_factor, omega)
+        for k, ia in enumerate(atmlst):
+            extra_force[k] -= mf_grad.extra_force(ia, locals())
+        dvhf_all -= dvhf
+        dvhf = td_grad.get_veff(mol, dmxpy+dmxpy.T, j_factor, k_factor, omega)*2
+        for k, ia in enumerate(atmlst):
+            extra_force[k] += mf_grad.extra_force(ia, locals())
+        dvhf_all += dvhf
+        dvhf = td_grad.get_veff(mol, dmxmy-dmxmy.T, j_factor, k_factor, omega)*2
+        for k, ia in enumerate(atmlst):
+            extra_force[k] += mf_grad.extra_force(ia, locals())
+        dvhf_all += dvhf
     fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None,
                                 False, False, True)[0]
 
@@ -210,10 +246,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         veff1_2 = f1vo[1:] * 2
     else:
         veff1_2 = f1vo[1:]
-    time1 = log.timer('2e AO integral derivatives', *time1)
-    extra_force = cp.zeros((len(atmlst),3))
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
 
     delec = 2.0*(dh_ground + dh_td - ds)
     aoslices = mol.aoslice_by_atom()
@@ -223,9 +255,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dveff1_1 = cp.asarray([cp.einsum('xpq,pq->x', veff1_1[:,p0:p1], oo0[p0:p1]) for p0, p1 in aoslices[:,2:]])
     dveff1_2 = cp.asarray([cp.einsum('xpq,pq->x', veff1_2[:,p0:p1], dmxpy[p0:p1]*2) for p0, p1 in aoslices[:,2:]])
     dveff1_2+= cp.asarray([cp.einsum('xqp,pq->x', veff1_2[:,p0:p1], dmxpy[:,p0:p1]*2) for p0, p1 in aoslices[:,2:]])
-    de = 2.0 * (dvhf_DD_DP + dvhf_xpy + dvhf_xmy) + dh1e_ground + dh1e_td + delec + extra_force + dveff1_0 + dveff1_1 + dveff1_2
+    de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force + dveff1_0 + dveff1_1 + dveff1_2
 
-    log.timer('TDRKS nuclear gradients', *time0)
     return de.get()
 
 
@@ -380,7 +411,6 @@ def _lda_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
     for k in range(4):
         vtmp = numint._dot_ao_ao(mol, ao[k], aow, mask, shls_slice, ao_loc)
         add_sparse(vmat[k], vtmp, mask)
-        # vmat[k] += numint._dot_ao_ao(mol, ao[k], aow, mask, shls_slice, ao_loc)
     return vmat
 
 def _gga_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):

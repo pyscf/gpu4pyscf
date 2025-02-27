@@ -40,9 +40,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
     '''
-    log = logger.new_logger(td_grad, verbose)
-    time0 = logger.process_clock(), logger.perf_counter()
-
     mol = td_grad.mol
     mf = td_grad.base._scf
     mo_coeff = cp.asarray(mf.mo_coeff)
@@ -67,9 +64,17 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dmzoo = reduce(cp.dot, (orbo, doo, orbo.T)) # T_{ij}*2 in ao basis
     dmzoo+= reduce(cp.dot, (orbv, dvv, orbv.T)) # T_{ij}*2 + T_{ab}*2 in ao basis
 
-    vj, vk = mf.get_jk(mol, (dmzoo, dmxpy+dmxpy.T, dmxmy-dmxmy.T), hermi=0)
-    if not isinstance(vj, cp.ndarray): vj = cp.asarray(vj)
-    if not isinstance(vk, cp.ndarray): vk = cp.asarray(vk)
+    vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=0)
+    vj1, vk1 = mf.get_jk(mol, dmxpy+dmxpy.T, hermi=0)
+    vj2, vk2 = mf.get_jk(mol, dmxmy-dmxmy.T, hermi=0)
+    if not isinstance(vj0, cp.ndarray): vj0 = cp.asarray(vj0)
+    if not isinstance(vk0, cp.ndarray): vk0 = cp.asarray(vk0)
+    if not isinstance(vj1, cp.ndarray): vj1 = cp.asarray(vj1)
+    if not isinstance(vk1, cp.ndarray): vk1 = cp.asarray(vk1)
+    if not isinstance(vj2, cp.ndarray): vj2 = cp.asarray(vj2)
+    if not isinstance(vk2, cp.ndarray): vk2 = cp.asarray(vk2)
+    vj = cp.stack((vj0, vj1, vj2))
+    vk = cp.stack((vk0, vk1, vk2))
     veff0doo = vj[0] * 2 - vk[0] # 2 for alpha and beta
     wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
     if singlet:
@@ -94,7 +99,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
                     max_cycle=td_grad.cphf_max_cycle,
                     tol=td_grad.cphf_conv_tol)[0]
     z1 = z1.reshape(nvir,nocc)
-    time1 = log.timer('Z-vector using CPHF solver', *time0)
 
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
     veff = vresp(z1ao+z1ao.T)
@@ -151,22 +155,31 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo+dmz1doo.T)*0.5) # 1/r like terms
     if mol.has_ecp():
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo+dmz1doo.T)*0.5) # 1/r like terms
-    vhfopt = mf._opt_gpu.get(None, None)
-    dvhf_DD_DP  = rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5 + oo0*2, vhfopt)
-    dvhf_DD_DP -= rhf_grad._jk_energy_per_atom(mol, (dmz1doo+dmz1doo.T)*0.5, vhfopt)
-    dvhf_xpy = rhf_grad._jk_energy_per_atom(mol, dmxpy+dmxpy.T, vhfopt)*2
-    dvhf_xmy = rhf_grad._jk_energy_per_atom(mol, dmxmy-dmxmy.T, vhfopt, j_factor=0.0)*2
-
     extra_force = cp.zeros((len(atmlst),3))
+
+    dvhf_all = 0
+    dvhf = td_grad.get_veff(mol, (dmz1doo+dmz1doo.T)*0.5 + oo0*2)
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all += dvhf
+    dvhf = td_grad.get_veff(mol, (dmz1doo+dmz1doo.T)*0.5)
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all -= dvhf
+    dvhf = td_grad.get_veff(mol, dmxpy+dmxpy.T)*2
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all += dvhf
+    dvhf = td_grad.get_veff(mol, dmxmy-dmxmy.T, 0.0)*2
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all += dvhf
     
     delec = 2.0*(dh_ground + dh_td - ds)
     aoslices = mol.aoslice_by_atom()
     delec= cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
-    de = 2.0 * (dvhf_DD_DP + dvhf_xpy + dvhf_xmy) + dh1e_ground + dh1e_td + delec + extra_force
+    de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force
 
-    log.timer('TDHF nuclear gradients', *time0)
     return de.get()
 
 
@@ -204,8 +217,6 @@ class Gradients(rhf_grad.GradientsBase):
         log.info('cphf_max_cycle = %d', self.cphf_max_cycle)
         log.info('chkfile = %s', self.chkfile)
         log.info('State ID = %d', self.state)
-        log.info('max_memory %d MB (current use %d MB)',
-                 self.max_memory, lib.current_memory()[0])
         log.info('\n')
         return self
 
@@ -255,6 +266,25 @@ class Gradients(rhf_grad.GradientsBase):
     def grad_nuc(self, mol=None, atmlst=None):
         mf_grad = self.base._scf.nuc_grad_method()
         return mf_grad.grad_nuc(mol, atmlst)
+    
+    def get_veff(self, mol=None, dm=None, j_factor=1., k_factor=1., omega=0., verbose=None):
+        '''
+        Computes the first-order derivatives of the energy contributions from
+        Veff per atom.
+
+        NOTE: This function is incompatible to the one implemented in PySCF CPU version.
+        In the CPU version, get_veff returns the first order derivatives of Veff matrix.
+        '''
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.base.make_rdm1()
+        if omega == 0.0:
+            vhfopt = self.base._scf._opt_gpu.get(None, None)
+            return rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
+        else:
+            vhfopt = self.base._scf._opt_gpu.get(omega, None)
+            with mol.with_range_coulomb(omega):
+                return rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
+
 
     def _finalize(self):
         if self.verbose >= logger.NOTE:

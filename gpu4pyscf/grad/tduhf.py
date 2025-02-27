@@ -83,12 +83,20 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
     dmzooa+= reduce(cp.dot, (orbva, dvva, orbva.T))
     dmzoob+= reduce(cp.dot, (orbvb, dvvb, orbvb.T))
 
-    vj, vk = mf.get_jk(mol, (dmzooa, dmxpya+dmxpya.T, dmxmya-dmxmya.T,
-                             dmzoob, dmxpyb+dmxpyb.T, dmxmyb-dmxmyb.T), hermi=0)
-    if not isinstance(vj, cp.ndarray): vj = cp.asarray(vj)
-    if not isinstance(vk, cp.ndarray): vk = cp.asarray(vk)
+    vj0, vk0 = mf.get_jk(mol, cp.stack((dmzooa, dmzoob)), hermi=0)
+    vj1, vk1 = mf.get_jk(mol, cp.stack((dmxpya+dmxpya.T, dmxpyb+dmxpyb.T)), hermi=0)
+    vj2, vk2 = mf.get_jk(mol, cp.stack((dmxmya-dmxmya.T, dmxmyb-dmxmyb.T)), hermi=0)
+    if not isinstance(vj0, cp.ndarray): vj0 = cp.asarray(vj0)
+    if not isinstance(vk0, cp.ndarray): vk0 = cp.asarray(vk0)
+    if not isinstance(vj1, cp.ndarray): vj1 = cp.asarray(vj1)
+    if not isinstance(vk1, cp.ndarray): vk1 = cp.asarray(vk1)
+    if not isinstance(vj2, cp.ndarray): vj2 = cp.asarray(vj2)
+    if not isinstance(vk2, cp.ndarray): vk2 = cp.asarray(vk2)
+    vj = cp.stack((vj0, vj1, vj2), axis=1)
+    vk = cp.stack((vk0, vk1, vk2), axis=1)
     vj = vj.reshape(2,3,nao,nao)
     vk = vk.reshape(2,3,nao,nao)
+
     veff0doo = vj[0,0]+vj[1,0] - vk[:,0]
     wvoa = reduce(cp.dot, (orbva.T, veff0doo[0], orboa)) * 2
     wvob = reduce(cp.dot, (orbvb.T, veff0doo[1], orbob)) * 2
@@ -189,26 +197,37 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
     if mol.has_ecp():
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1dooa + dmz1doob) * .25 
                                                 + (dmz1dooa + dmz1doob).T * .25) # 1/r like terms
-    vhfopt = mf._opt_gpu.get(None, None)
-    dvhf_DD_DP = rhf_grad._jk_energy_per_atom(mol, ((dmz1dooa+dmz1dooa.T)*0.25 + oo0a,
-                                        (dmz1doob+dmz1doob.T)*0.25 + oo0b), vhfopt)
-    dvhf_DD_DP -= rhf_grad._jk_energy_per_atom(mol, ((dmz1dooa+dmz1dooa.T)*0.25,
-                                         (dmz1doob+dmz1doob.T)*0.25), vhfopt)
-    dvhf_xpy = rhf_grad._jk_energy_per_atom(mol, ((dmxpya+dmxpya.T)*0.5,
-                                      (dmxpyb+dmxpyb.T)*0.5), vhfopt)*2
-    dvhf_xmy = rhf_grad._jk_energy_per_atom(mol, ((dmxmya-dmxmya.T)*0.5,
-                                      (dmxmyb-dmxmyb.T)*0.5), vhfopt, j_factor=0.0)*2
     
     if atmlst is None:
         atmlst = range(mol.natm)
     extra_force = cp.zeros((len(atmlst),3))
+
+    dvhf_all = 0
+    dvhf = td_grad.get_veff(mol, cp.stack((((dmz1dooa+dmz1dooa.T)*0.25 + oo0a,
+                                            (dmz1doob+dmz1doob.T)*0.25 + oo0b))))
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all += dvhf
+    dvhf = td_grad.get_veff(mol, cp.stack((((dmz1dooa+dmz1dooa.T)*0.25,
+                                            (dmz1doob+dmz1doob.T)*0.25))))
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all -= dvhf
+    dvhf = td_grad.get_veff(mol, cp.stack((((dmxpya+dmxpya.T)*0.5,
+                                            (dmxpyb+dmxpyb.T)*0.5))))*2
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all += dvhf
+    dvhf = td_grad.get_veff(mol, cp.stack((((dmxmya-dmxmya.T)*0.5,
+                                         (dmxmyb-dmxmyb.T)*0.5))), 0.0)*2
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all += dvhf
     
     delec = 2.0*(dh_ground + dh_td - ds)
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
-    de = 2.0 * (dvhf_DD_DP + dvhf_xpy + dvhf_xmy) + dh1e_ground + dh1e_td + delec + extra_force
+    de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force
     
     log.timer('TDUHF nuclear gradients', *time0)
     return de.get()
