@@ -25,7 +25,7 @@ from pyscf import __config__
 from gpu4pyscf.lib import utils
 
 
-def grad_elec(td_grad, x_y, singlet, atmlst=None, verbose=logger.INFO):
+def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     """
     Electronic part of TDA, TDHF nuclear gradients
 
@@ -142,8 +142,8 @@ def grad_elec(td_grad, x_y, singlet, atmlst=None, verbose=logger.INFO):
         mo_occ,
         (wvoa, wvob),
         max_cycle=td_grad.cphf_max_cycle,
-        tol=td_grad.cphf_conv_tol,
-    )[0]
+        tol=td_grad.cphf_conv_tol)[0]
+    time1 = log.timer('Z-vector using UCPHF solver', *time0)
 
     z1ao = cp.empty((2, nao, nao))
     z1ao[0] = reduce(cp.dot, (orbva, z1a, orboa.T))
@@ -244,6 +244,7 @@ def grad_elec(td_grad, x_y, singlet, atmlst=None, verbose=logger.INFO):
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
+    time1 = log.timer('2e AO integral derivatives', *time1)
 
     delec = 2.0 * (dh_ground + dh_td - ds)
     aoslices = mol.aoslice_by_atom()

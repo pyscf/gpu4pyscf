@@ -40,6 +40,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
     """
+    log = logger.new_logger(td_grad, verbose)
+    time0 = logger.process_clock(), logger.perf_counter()
     mol = td_grad.mol
     mf = td_grad.base._scf
     mo_coeff = cp.asarray(mf.mo_coeff)
@@ -109,9 +111,9 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         mo_occ,
         wvo,
         max_cycle=td_grad.cphf_max_cycle,
-        tol=td_grad.cphf_conv_tol,
-    )[0]
+        tol=td_grad.cphf_conv_tol)[0]
     z1 = z1.reshape(nvir, nocc)
+    time1 = log.timer('Z-vector using CPHF solver', *time0)
 
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
     veff = vresp(z1ao + z1ao.T)
@@ -188,12 +190,14 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
+    time1 = log.timer('2e AO integral derivatives', *time1)
 
     delec = 2.0 * (dh_ground + dh_td - ds)
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
     de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force
 
+    log.timer('TDHF nuclear gradients', *time0)
     return de.get()
 
 

@@ -30,7 +30,7 @@ from gpu4pyscf.scf import ucphf
 #
 # Given Y = 0, TDHF gradients (XAX+XBY+YBX+YAY)^1 turn to TDA gradients (XAX)^1
 #
-def grad_elec(td_grad, x_y, singlet, atmlst=None, verbose=logger.INFO):
+def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     """
     Electronic part of TDA, TDDFT nuclear gradients
 
@@ -41,6 +41,9 @@ def grad_elec(td_grad, x_y, singlet, atmlst=None, verbose=logger.INFO):
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
     """
+    log = logger.new_logger(td_grad, verbose)
+    time0 = logger.process_clock(), logger.perf_counter()
+
     mol = td_grad.mol
     mf = td_grad.base._scf
     mo_coeff = cp.asarray(mf.mo_coeff)
@@ -189,9 +192,8 @@ def grad_elec(td_grad, x_y, singlet, atmlst=None, verbose=logger.INFO):
         mo_occ,
         (wvoa, wvob),
         max_cycle=td_grad.cphf_max_cycle,
-        tol=td_grad.cphf_conv_tol,
-    )[0]
-
+        tol=td_grad.cphf_conv_tol)[0]
+    time1 = log.timer('Z-vector using UCPHF solver', *time0)
     z1ao = cp.empty((2, nao, nao))
     z1ao[0] = reduce(cp.dot, (orbva, z1a, orboa.T))
     z1ao[1] = reduce(cp.dot, (orbvb, z1b, orbob.T))
@@ -334,6 +336,7 @@ def grad_elec(td_grad, x_y, singlet, atmlst=None, verbose=logger.INFO):
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals())
         dvhf_all += dvhf
+    time1 = log.timer('2e AO integral derivatives', *time1)
 
     fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False)[0]
 
@@ -369,6 +372,7 @@ def grad_elec(td_grad, x_y, singlet, atmlst=None, verbose=logger.INFO):
         [cp.einsum("xqp,pq->x", veff1_2_b[:, p0:p1], dmxpyb[:, p0:p1]) for p0, p1 in aoslices[:, 2:]])
     de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force + dveff1_0 + dveff1_1 + dveff1_2
 
+    log.timer('TDUKS nuclear gradients', *time0)
     return de.get()
 
 
