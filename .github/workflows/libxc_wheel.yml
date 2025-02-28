@@ -5,7 +5,7 @@ on:
 
 jobs:
   release-pypi-linux:
-    runs-on: [self-hosted, Linux, X64, v100]
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
