@@ -109,7 +109,6 @@ def get_ecp(mol):
                 ntasks = len(tasks)
                 li = uniq_l_ctr[i,0]
                 lj = uniq_l_ctr[j,0]
-
                 lk = uniq_lecp[k]
                 err = libecp.ECP_cart(
                     mat1.data.ptr, ao_loc.data.ptr, nao, 

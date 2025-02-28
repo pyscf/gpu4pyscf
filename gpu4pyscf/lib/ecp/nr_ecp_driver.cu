@@ -33,6 +33,7 @@ int ECP_cart(double *gctr,
     // one task per thread block
     dim3 threads(THREADS);
     dim3 blocks(ntasks);
+
     if (lc >= 0){
         int task_type = li * 100 + lj * 10 + lc;
         switch (task_type)
@@ -109,22 +110,19 @@ int ECP_cart(double *gctr,
         //case 44: type1_cart<4,4><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
         default: {
-            const int li1 = li+1;
-            const int lj1 = lj+1;
-            const int li3 = li1*li1*li1;
-            const int lj3 = lj1*lj1*lj1;
-            const int nfi = (li+1)*(li+2)/2;
-            const int nfj = (lj+1)*(lj+2)/2;
+            //const int li1 = li+1;
+            //const int lj1 = lj+1;
+            //const int li3 = li1*li1*li1;
+            //const int lj3 = lj1*lj1*lj1;
             const int lij1 = li+lj+1;
             const int lij3 = lij1*lij1*lij1;
 
             int smem_size = 0;
             smem_size += lij3;      // rad_ang
             smem_size += lij1*lij1; // rad_all
-            smem_size += nfi*li3;   // ifac
-            smem_size += nfj*lj3;   // jfac
-
-            type1_cart<<<blocks, threads, smem_size*sizeof(double)>>>(
+            //smem_size += nfi*li3;   // ifac
+            //smem_size += nfj*lj3;   // jfac
+            type1_general_cart<<<blocks, threads, smem_size*sizeof(double)>>>(
                 gctr, li, lj,
                 ao_loc, nao,
                 tasks, ntasks,

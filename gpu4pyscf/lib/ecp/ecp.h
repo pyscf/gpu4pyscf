@@ -23,6 +23,7 @@
 #define ECP_LMAX        4
 #define AO_LMAX         4
 #define NF_MAX          15
+#define XYZ_MAX         27    // max xyz such x+y+z <= LMAX
 
 // Thread number has to be the same as qudrature points
 #define THREADS        128

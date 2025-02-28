@@ -236,7 +236,7 @@ void type2_cart(double *gctr,
     const int BLKI = (LIC1+1)/2 * LCC1;
     const int BLKJ = (LJC1+1)/2 * LCC1;
 
-    double* omegai = smem + (LI+LJ+1) * LIC1 * LJC1; //LI1*(LI1+1)*(LI1+2)/6 * BLKI]; // up to 12600 Bytes
+    double* omegai = smem + (LI+LJ+1) * LIC1 * LJC1; //LI1*(LI1+1)*(LI1+2)/6 * BLKI];
     double* omegaj = omegai + LI1*(LI1+1)*(LI1+2)/6 * BLKI; //[LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ];
 
     type2_facs_omega(omegai, LI, LC, rca);
@@ -269,8 +269,8 @@ void type2_cart(double *gctr,
                 double *pangj = angj + l*nfj*LJC1 + j*LJC1;
                 double *prad = rad_all + (k+l)*LIC1*LJC1;
                 // TODO: cache angi and angj in registers
-                double reg_angi[AO_LMAX+1];
-                double reg_angj[AO_LMAX+1];
+                double reg_angi[AO_LMAX+ECP_LMAX+1];
+                double reg_angj[AO_LMAX+ECP_LMAX+1];
                 for (int p = 0; p < LIC1; p++){reg_angi[p] = pangi[p];}
                 for (int q = 0; q < LJC1; q++){reg_angj[q] = pangj[q];}
                 for (int p = 0; p < LIC1; p++){
@@ -436,3 +436,4 @@ void type2_cart(double *gctr,
     }
     return;
 }
+
