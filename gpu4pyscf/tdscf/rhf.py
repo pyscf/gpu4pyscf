@@ -45,8 +45,8 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
     '''
     if hasattr(mf, 'with_df'):
         raise NotImplementedError('DF-TDDFT is not implemented')
-    if not singlet:
-        raise NotImplementedError('Only singlet is implemented')
+    # if not singlet:
+    #     raise NotImplementedError('Only singlet is implemented')
     if mo_energy is None:
         mo_energy = mf.mo_energy
     if mo_coeff is None:
@@ -81,11 +81,15 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
         eri_mo = cp.einsum('ijpl,pk->ijkl', eri_mo, mo.conj())
         eri_mo = cp.einsum('ijkp,pl->ijkl', eri_mo, mo)
         eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
-        a += cp.einsum('iabj->iajb', eri_mo[:nocc,nocc:,nocc:,:nocc]) * 2
-        a -= cp.einsum('ijba->iajb', eri_mo[:nocc,:nocc,nocc:,nocc:]) * hyb
+        if singlet:
+            a += cp.einsum('iabj->iajb', eri_mo[:nocc,nocc:,nocc:,:nocc]) * 2
+            a -= cp.einsum('ijba->iajb', eri_mo[:nocc,:nocc,nocc:,nocc:]) * hyb
 
-        b += cp.einsum('iajb->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * 2
-        b -= cp.einsum('jaib->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * hyb
+            b += cp.einsum('iajb->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * 2
+            b -= cp.einsum('jaib->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * hyb
+        else:
+            a -= cp.einsum('ijba->iajb', eri_mo[:nocc,:nocc,nocc:,nocc:]) * hyb
+            b -= cp.einsum('jaib->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * hyb
 
     if isinstance(mf, scf.hf.KohnShamDFT):
         grids = mf.grids
@@ -128,8 +132,12 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
                 mo_coeff_mask = mo_coeff[mask]
                 rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
                                     mo_occ, mask, xctype, with_lapl=False)
-                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
-                wfxc = fxc[0,0] * weight
+                if singlet or singlet is None:
+                    fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                    wfxc = fxc[0,0] * weight
+                else:
+                    fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho)) * 0.5, deriv=2, xctype=xctype)[2]
+                    wfxc = (fxc[0, 0, 0, 0] - fxc[1, 0, 0, 0]) * 0.5 * weight
                 orbo_mask = orbo[mask]
                 orbv_mask = orbv[mask]
                 rho_o = cp.einsum('pr,pi->ri', ao, orbo_mask)
@@ -147,8 +155,12 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
                 mo_coeff_mask = mo_coeff[mask]
                 rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
                                    mo_occ, mask, xctype, with_lapl=False)
-                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
-                wfxc = fxc * weight
+                if singlet or singlet is None:
+                    fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                    wfxc = fxc * weight
+                else:
+                    fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho)) * 0.5, deriv=2, xctype=xctype)[2]
+                    wfxc = (fxc[0, :, 0, :] - fxc[1, :, 0, :]) * 0.5 * weight
                 orbo_mask = orbo[mask]
                 orbv_mask = orbv[mask]
                 rho_o = cp.einsum('xpr,pi->xri', ao, orbo_mask)
@@ -173,8 +185,12 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
                 mo_coeff_mask = mo_coeff[mask]
                 rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
                                    mo_occ, mask, xctype, with_lapl=False)
-                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
-                wfxc = fxc * weight
+                if singlet or singlet is None:
+                    fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                    wfxc = fxc * weight
+                else:
+                    fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho))*0.5, deriv=2, xctype=xctype)[2]
+                    wfxc = (fxc[0, :, 0, :] - fxc[1, :, 0, :]) * 0.5 * weight
                 orbo_mask = orbo[mask]
                 orbv_mask = orbv[mask]
                 rho_o = cp.einsum('xpr,pi->xri', ao, orbo_mask)
@@ -254,10 +270,10 @@ class TDBase(lib.StreamObject):
     _finalize = tdhf_cpu.TDBase._finalize
 
     gen_vind = NotImplemented
-    def get_ab(self, mf=None, singlet=True):
+    def get_ab(self, mf=None):
         if mf is None:
             mf = self._scf
-        return get_ab(mf, singlet=singlet)
+        return get_ab(mf, singlet=self.singlet)
 
     def get_precond(self, hdiag):
         threshold_t=1.0e-4

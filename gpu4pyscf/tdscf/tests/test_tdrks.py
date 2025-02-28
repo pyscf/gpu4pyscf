@@ -33,6 +33,16 @@ def diagonalize(a, b, nroots=4):
     return lowest_e
 
 
+def diagonalize_tda(a, nroots=5):
+    nocc, nvir = a.shape[:2]
+    nov = nocc * nvir
+    a = a.reshape(nov, nov)
+    e = np.linalg.eig(np.asarray(a))[0]
+    lowest_e = np.sort(e[e.real > 0].real)[:nroots]
+    lowest_e = lowest_e[lowest_e > 1e-3]
+    return lowest_e
+
+
 class KnownValues(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -214,6 +224,17 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(es), -1.4707787881198082, 6)
         td.analyze()
 
+        mf_b3lyp_nodf = self.mf_b3lyp_nodf
+        td = mf_b3lyp_nodf.TDA()
+        assert td.device == 'gpu'
+        td.singlet = False
+        td.lindep=1.0E-6
+        es = td.kernel(nstates=5)[0]
+        a, b = td.get_ab()
+        ref = diagonalize_tda(a, nroots=5)
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
+
+
     def test_tda_lda_triplet(self):
         mf_lda = self.mf_lda
         td = mf_lda.TDA()
@@ -225,6 +246,16 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
         self.assertAlmostEqual(lib.fp(es[[0,1,2,4,5]]), -1.4695846533898422, 6)
 
+        mf_lda_nodf = self.mf_lda_nodf
+        td = mf_lda_nodf.TDA()
+        assert td.device == 'gpu'
+        td.singlet = False
+        td.lindep=1.0E-6
+        es = td.kernel(nstates=5)[0]
+        a, b = td.get_ab()
+        ref = diagonalize_tda(a, nroots=5)
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
+
     def test_tddft_b88p86_triplet(self):
         mf_bp86 = self.mf_bp86
         td = mf_bp86.TDDFT()
@@ -235,6 +266,16 @@ class KnownValues(unittest.TestCase):
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
         self.assertAlmostEqual(lib.fp(es), -1.4412243124430528, 6)
+
+        mf_bp86_nodf = self.mf_bp86_nodf
+        td = mf_bp86_nodf.TDA()
+        assert td.device == 'gpu'
+        td.singlet = False
+        td.lindep=1.0E-6
+        es = td.kernel(nstates=5)[0]
+        a, b = td.get_ab()
+        ref = diagonalize_tda(a, nroots=5)
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
 
     def test_tda_rsh(self):
         mol = gto.M(atom='H 0 0 0.6; H 0 0 0', basis = "6-31g")
