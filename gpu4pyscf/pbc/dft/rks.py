@@ -24,12 +24,12 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.pbc.dft import rks as rks_cpu
-from pyscf.pbc.dft import multigrid
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.dft import rks as mol_ks
 from gpu4pyscf.pbc.scf import hf as pbchf, khf
 from gpu4pyscf.pbc.dft import gen_grid
 from gpu4pyscf.pbc.dft import numint
+from gpu4pyscf.pbc.dft import multigrid
 from gpu4pyscf.lib.cupy_helper import return_cupy_array, tag_array
 from pyscf import __config__
 
@@ -60,9 +60,33 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)
 
-    if isinstance(ks.with_df, multigrid.MultiGridFFTDF):
+    if isinstance(ni, multigrid.MultiGridNumInt):
         if ks.do_nlc():
             raise NotImplementedError(f'MultiGrid for NLC functional {ks.xc} + {ks.nlc}')
+        n, exc, vxc = ni.nr_rks(
+            cell, ks.grids, ks.xc, dm, 0, hermi, kpt, kpts_band, with_j=True)
+        log.debug('nelec by numeric integration = %s', n)
+        if hybrid:
+            omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=cell.spin)
+            if omega == 0:
+                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band)
+                vk *= hyb
+            elif alpha == 0: # LR=0, only SR exchange
+                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=-omega)
+                vk *= hyb
+            elif hyb == 0: # SR=0, only LR exchange
+                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
+                vk *= alpha
+            else: # SR and LR exchange with different ratios
+                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band)
+                vk *= hyb
+                vklr = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
+                vklr *= (alpha - hyb)
+                vk += vklr
+            vxc -= vk * .5
+            exc -= cp.einsum('ij,ji->', dm, vk).real * .5 * .5
+        t0 = log.timer('veff', *t0)
+        return vxc
 
     ground_state = (isinstance(dm, cp.ndarray) and dm.ndim == 2
                     and kpts_band is None)
@@ -84,7 +108,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
             exc += enlc
             vxc += vnlc
             log.debug('nelec with nlc grids = %s', n)
-        t0 = log.timer('vxc', *t0)
+        log.timer('vxc', *t0)
 
     if not hybrid:
         vj = ks.get_j(cell, dm, hermi, kpt, kpts_band)
@@ -119,6 +143,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     else:
         ecoul = None
 
+    log.timer('veff', *t0)
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=None, vk=None)
     return vxc
 
@@ -230,6 +255,21 @@ class RKS(KohnShamDFT, pbchf.RHF):
         pbchf.RHF.dump_flags(self, verbose)
         KohnShamDFT.dump_flags(self, verbose)
         return self
+
+    def get_hcore(self, cell=None, kpt=None):
+        if cell is None: cell = self.cell
+        if kpt is None: kpt = self.kpt
+        if isinstance(self._numint, multigrid.MultiGridNumInt):
+            ni = self._numint
+        else:
+            ni = self.with_df
+        if cell.pseudo:
+            nuc = ni.get_pp(kpt)
+        else:
+            nuc = ni.get_nuc(kpt)
+        if len(cell._ecpbas) > 0:
+            raise NotImplementedError('ECP in PBC SCF')
+        return nuc + cp.asarray(cell.pbc_intor('int1e_kin', 1, 1, kpt))
 
     get_veff = get_veff
     energy_elec = mol_ks.energy_elec

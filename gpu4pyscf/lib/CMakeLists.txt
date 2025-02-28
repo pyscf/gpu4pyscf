@@ -164,6 +164,8 @@ if(BUILD_PBC)
   add_subdirectory(pbc)
 endif()
 
+add_subdirectory(multigrid)
+
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
   include(ExternalProject)
