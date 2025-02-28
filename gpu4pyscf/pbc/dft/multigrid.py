@@ -199,9 +199,10 @@ def _eval_tauG(ni, dm_kpts, hermi=1, kpts=None):
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     workers = gpu_specs['multiProcessorCount']
+    workers = 1
     tasks = ni.tasks
     nf2 = (lmax*2+1)*(lmax*2+2)//2
-    nf3 = nf2*(lmax*2+3)//3
+    nf3 = nf2*(lmax*2+3)
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
     cache_size = ((lmax*2+1)*ngrid_span*3 + nf3 + nf2*ngrid_span + 3) * WARP_SIZE
     pool = cp.empty((workers, cache_size))
@@ -229,6 +230,7 @@ def _eval_tauG(ni, dm_kpts, hermi=1, kpts=None):
                     ctypes.c_int(workers))
                 if err != 0:
                     raise RuntimeError(f'MG_eval_tau_orth kernel for l={task.l} failed')
+            print('tau\n',tauR)
 
         weight = 1./nkpts * cell.vol/ngrids
         tau_freq = tools.fft(tauR.reshape(nset, *mesh), mesh)
@@ -267,6 +269,7 @@ def _get_j_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
     cache_size = ((lmax*2+1)*ngrid_span*3 + nf2*ngrid_span + 3 + nf2*(lmax*2+1)) * WARP_SIZE
     pool = cp.empty((workers, cache_size))
 
+    assert vG.ndim == 3
     mesh_largest = tasks[0][0].mesh
     vG = vG.reshape(-1, *mesh_largest)
 
@@ -417,10 +420,10 @@ def _get_tau_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
     cache_size = ((lmax*2+3)*ngrid_span*3 + nf2*ngrid_span + 3 + nf2*(lmax*2+3)) * WARP_SIZE
     pool = cp.empty((workers, cache_size))
 
-    assert vG.ndim == 3
+    assert vG.ndim == 2
     nset = len(vG)
     mesh_largest = tasks[0][0].mesh
-    vG = vG.reshape(nset*4, *mesh_largest)
+    vG = vG.reshape(nset, *mesh_largest)
 
     init_constant(cell)
     kern = libmgrid.MG_eval_mat_tau_orth
@@ -433,7 +436,7 @@ def _get_tau_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
         mesh = task.mesh
         ngrids = np.prod(mesh)
         sub_vG = _take_4d(vG, mesh)
-        v_rs = tools.ifft(sub_vG, mesh).reshape(nset,4,ngrids)
+        v_rs = tools.ifft(sub_vG, mesh).reshape(nset,ngrids)
         imag_max = abs(v_rs.imag).max()
         if imag_max > 1e-5:
             msg = f'Imaginary values {imag_max} in potential. mesh {mesh} might be insufficient'
@@ -554,9 +557,9 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     else:
         if with_j:
             wv_freq[:,0] += vG
-        veff = _get_gga_pass2(ni, wv_freq, hermi, kpts_band, verbose=log)
+        veff = _get_gga_pass2(ni, wv_freq[:,:4], hermi, kpts_band, verbose=log)
         if xctype == 'MGGA':
-            veff += _get_tau_pass2(ni, wv_freq, hermi, kpts_band, verbose=log)
+            veff += _get_tau_pass2(ni, wv_freq[:,4], hermi, kpts_band, verbose=log)
     veff = _format_jks(veff, dm_kpts, input_band, kpts)
 
     shape = list(dm_kpts.shape)
