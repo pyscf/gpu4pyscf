@@ -180,6 +180,7 @@ class KnownValues(unittest.TestCase):
     def test_tddft_b3lyp(self):
         mf_b3lyp = self.mf_b3lyp
         td = mf_b3lyp.TDDFT()
+        td.lindep=1.0E-6
         assert td.device == 'gpu'
         es = td.kernel(nstates=4)[0]
         ref = td.to_cpu().kernel(nstates=4)[0]
@@ -191,6 +192,7 @@ class KnownValues(unittest.TestCase):
         mf = mol1.UKS(xc='camb3lyp').run()
         mf.cphf_grids = mf.grids
         td = mf.TDDFT().to_gpu()
+        td.lindep=1.0E-6
         assert td.device == 'gpu'
         es = td.kernel(nstates=4)[0]
         e_ref = td.to_cpu().kernel(nstates=4)[0]
