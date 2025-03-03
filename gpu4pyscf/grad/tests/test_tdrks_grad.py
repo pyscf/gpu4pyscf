@@ -104,7 +104,7 @@ def tearDownModule():
 
 
 def benchmark_with_cpu(mol, xc, nstates=3, lindep=1.0e-12, tda=False):
-    mf = dft.RKS(mol, xc=xc).run()
+    mf = dft.RKS(mol, xc=xc).to_gpu().run()
     if tda:
         td = mf.TDA()
     else:
@@ -113,11 +113,11 @@ def benchmark_with_cpu(mol, xc, nstates=3, lindep=1.0e-12, tda=False):
     td.nstates = nstates
     td.kernel()
 
-    tdgrad_cpu = pyscf.grad.tdrks.Gradients(td)
+    td_cpu = td.to_cpu()
+    tdgrad_cpu = pyscf.grad.tdrks.Gradients(td_cpu)
     tdgrad_cpu.kernel()
 
-    td_gpu = td.to_gpu()
-    tdgrad_gpu = gpu4pyscf.grad.tdrks.Gradients(td_gpu)
+    tdgrad_gpu = gpu4pyscf.grad.tdrks.Gradients(td)
     tdgrad_gpu.kernel()
 
     return tdgrad_cpu.de, tdgrad_gpu.de
@@ -191,14 +191,14 @@ def benchmark_with_finite_diff(
     return gradient_ana, grad
 
 
-def _check_grad(mol, xc, tol=1e-6, disp=None, tda=False, method="cpu"):
+def _check_grad(mol, xc, tol=1e-6, lindep=1.0e-12, disp=None, tda=False, method="cpu"):
     if method == "cpu":
         gradi_cpu, grad_gpu = benchmark_with_cpu(
-            mol, xc, nstates=5, lindep=1.0e-12, tda=tda)
+            mol, xc, nstates=5, lindep=lindep, tda=tda)
         norm_diff = np.linalg.norm(gradi_cpu - grad_gpu)
     elif method == "numerical":
         grad_ana, grad = benchmark_with_finite_diff(
-            mol, xc, delta=0.005, nstates=5, lindep=1.0e-12, tda=tda)
+            mol, xc, delta=0.005, nstates=5, lindep=lindep, tda=tda)
         norm_diff = np.linalg.norm(grad_ana - grad)
     assert norm_diff < tol
 
@@ -211,10 +211,10 @@ class KnownValues(unittest.TestCase):
         _check_grad(mol, xc="svwn", tol=1e-4, tda=True, method="numerical")
 
     def test_grad_svwn_tddft_singlet_cpu(self):
-        _check_grad(mol, xc="svwn", tol=5e-10, tda=False, method="cpu")
+        _check_grad(mol, xc="svwn", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
 
     def test_grad_svwn_tddft_singlet_numerical(self):
-        _check_grad(mol, xc="svwn", tol=1e-4, tda=False, method="numerical")
+        _check_grad(mol, xc="svwn", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
 
     def test_grad_b3lyp_tda_singlet_cpu(self):
         _check_grad(mol, xc="b3lyp", tol=5e-10, tda=True, method="cpu")
@@ -223,10 +223,10 @@ class KnownValues(unittest.TestCase):
         _check_grad(mol, xc="b3lyp", tol=1e-4, tda=True, method="numerical")
 
     def test_grad_b3lyp_tddft_singlet_cpu(self):
-        _check_grad(mol, xc="b3lyp", tol=5e-10, tda=False, method="cpu")
+        _check_grad(mol, xc="b3lyp", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
 
     def test_grad_b3lyp_tddft_singlet_numerical(self):
-        _check_grad(mol, xc="b3lyp", tol=1e-4, tda=False, method="numerical")
+        _check_grad(mol, xc="b3lyp", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
 
     def test_grad_camb3lyp_tda_singlet_cpu(self):
         _check_grad(mol, xc="camb3lyp", tol=5e-10, tda=True, method="cpu")
@@ -235,10 +235,10 @@ class KnownValues(unittest.TestCase):
         _check_grad(mol, xc="camb3lyp", tol=1e-4, tda=True, method="numerical")
 
     def test_grad_camb3lyp_tddft_singlet_cpu(self):
-        _check_grad(mol, xc="camb3lyp", tol=5e-10, tda=False, method="cpu")
+        _check_grad(mol, xc="camb3lyp", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
 
     def test_grad_camb3lyp_tddft_singlet_numerical(self):
-        _check_grad(mol, xc="camb3lyp", tol=1e-4, tda=False, method="numerical")
+        _check_grad(mol, xc="camb3lyp", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
 
     def test_grad_tpss_tda_singlet_cpu(self):
         _check_grad(mol, xc="tpss", tol=5e-10, tda=True, method="cpu")
@@ -247,10 +247,10 @@ class KnownValues(unittest.TestCase):
         _check_grad(mol, xc="tpss", tol=1e-4, tda=True, method="numerical")
 
     def test_grad_tpss_tddft_singlet_cpu(self):
-        _check_grad(mol, xc="tpss", tol=5e-10, tda=False, method="cpu")
+        _check_grad(mol, xc="tpss", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
 
     def test_grad_tpss_tddft_singlet_numerical(self):
-        _check_grad(mol, xc="tpss", tol=1e-4, tda=False, method="numerical")
+        _check_grad(mol, xc="tpss", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
 
 
 if __name__ == "__main__":

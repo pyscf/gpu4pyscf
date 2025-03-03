@@ -138,7 +138,7 @@ def tearDownModule():
 
 
 def benchmark_with_cpu(mol, nstates=3, lindep=1.0e-12, tda=False):
-    mf = scf.UHF(mol).run()
+    mf = scf.UHF(mol).to_gpu().run()
     if tda:
         td = mf.TDA()
     else:
@@ -147,11 +147,11 @@ def benchmark_with_cpu(mol, nstates=3, lindep=1.0e-12, tda=False):
     td.nstates = nstates
     td.kernel()
 
-    tdgrad_cpu = pyscf.grad.tduhf.Gradients(td)
+    td_cpu = td.to_cpu()
+    tdgrad_cpu = pyscf.grad.tduhf.Gradients(td_cpu)
     tdgrad_cpu.kernel()
 
-    td_gpu = td.to_gpu()
-    tdgrad_gpu = gpu4pyscf.grad.tduhf.Gradients(td_gpu)
+    tdgrad_gpu = gpu4pyscf.grad.tduhf.Gradients(td)
     tdgrad_gpu.kernel()
 
     return tdgrad_cpu.de, tdgrad_gpu.de
@@ -226,14 +226,14 @@ def benchmark_with_finite_diff(
     return gradient_ana, grad
 
 
-def _check_grad(mol, tol=1e-6, disp=None, tda=False, method="cpu"):
+def _check_grad(mol, tol=1e-6, lindep=1.0e-12, disp=None, tda=False, method="cpu"):
     if method == "cpu":
         gradi_cpu, grad_gpu = benchmark_with_cpu(
-            mol, nstates=5, lindep=1.0e-12, tda=tda)
+            mol, nstates=5, lindep=lindep, tda=tda)
         norm_diff = np.linalg.norm(gradi_cpu - grad_gpu)
     elif method == "numerical":
         grad_ana, grad = benchmark_with_finite_diff(
-            mol, delta=0.005, nstates=5, lindep=1.0e-12, tda=tda)
+            mol, delta=0.005, nstates=5, lindep=lindep, tda=tda)
         norm_diff = np.linalg.norm(grad_ana - grad)
     assert norm_diff < tol
 
@@ -246,10 +246,10 @@ class KnownValues(unittest.TestCase):
         _check_grad(mol, tol=1e-4, tda=True, method="numerical")
 
     def test_grad_tdhf_spinconserve_cpu(self):
-        _check_grad(mol, tol=5e-10, tda=False, method="cpu")
+        _check_grad(mol, tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
 
     def test_grad_tdhf_spinconserve_numerical(self):
-        _check_grad(mol, tol=1e-4, tda=False, method="numerical")
+        _check_grad(mol, tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
 
 
 if __name__ == "__main__":
