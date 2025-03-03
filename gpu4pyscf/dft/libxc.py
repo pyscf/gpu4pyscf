@@ -28,8 +28,6 @@ import site
 path_list = [os.path.abspath(os.path.join(__file__, '..', '..', '..'))] + site.getsitepackages()
 path_list.append(site.USER_SITE)    # Search for the directory where user-specific packages are installed
 
-__version__ = '6.1' # hard coded
-
 # monkey patch libxc reference due to a bug in nvcc
 __reference__ = 'unable to decode the reference due to https://github.com/NVIDIA/cuda-python/issues/29'
 
@@ -84,6 +82,9 @@ if _libxc is None:
         OR \n \
         `pip3 install gpu4pyscf-libxc-cuda12x`"
     )
+
+_libxc.xc_version_string.restype = ctypes.c_char_p
+__version__ = _libxc.xc_version_string().decode() + ' (CUDA)'
 
 LDA_OUTPUT_LABELS = [
                 "zk",       # 1, 1
