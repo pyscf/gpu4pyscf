@@ -874,7 +874,7 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
     // sigmay: contract mesh_x, mesh_z
     xs_cache = cache + sp_id;
     zs_cache = xs_cache + TILE * (L+1) * WARP_SIZE;
-    for (int n = warp_id; n < ngridx*nf2; n += WARPS) {
+    for (int n = warp_id; n < ngridy*nf2; n += WARPS) {
         gx_dmyz[n*WARP_SIZE] = 0.;
     }
     for (int iz0 = 0; iz0 < ngridz; iz0 += TILE) {
@@ -930,7 +930,7 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
     // sigmaz: contract mesh_x, mesh_y
     xs_cache = cache + sp_id;
     ys_cache = xs_cache + TILE * (L+1) * WARP_SIZE;
-    for (int n = warp_id; n < ngridx*nf2; n += WARPS) {
+    for (int n = warp_id; n < ngridz*nf2; n += WARPS) {
         gx_dmyz[n*WARP_SIZE] = 0.;
     }
     for (int ix0 = 0; ix0 < ngridx; ix0 += TILE) {
