@@ -76,10 +76,9 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
 
     cell = ni.cell
     dm_kpts = cp.asarray(dm_kpts)
-    rhoG = _eval_rhoG(ni, dm_kpts, hermi, kpts)
+    rhoG = vG = _eval_rhoG(ni, dm_kpts, hermi, kpts)
     coulG = tools.get_coulG(cell, mesh=cell.mesh)
-    #:vG = np.einsum('ng,g->ng', rhoG[:,0], coulG)
-    vG = rhoG[:,0]
+    #:vG = np.einsum('ng,g->ng', rhoG, coulG)
     vG *= coulG
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
@@ -246,6 +245,7 @@ def _get_j_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
     t0 = log.init_timer()
     nkpts = len(kpts)
     assert nkpts == 1, 'gamma point only'
+    assert vG.ndim == 2
     nao = cell.nao_nr(cart=True)
     nset = vG.shape[0]
     lmax = cell._bas[:,ANG_OF].max()
@@ -267,7 +267,6 @@ def _get_j_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
     cache_size = ((lmax*2+1)*ngrid_span*3 + nf2*ngrid_span + 3 + nf2*(lmax*2+1)) * WARP_SIZE
     pool = cp.empty((workers, cache_size))
 
-    assert vG.ndim == 3
     mesh_largest = tasks[0][0].mesh
     vG = vG.reshape(-1, *mesh_largest)
 
@@ -290,7 +289,6 @@ def _get_j_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
             logger.warn(cell, msg)
 
         vR = cp.asarray(v_rs.real, order='C')
-        vR[:]=.025*4
         for i in range(nset):
             for task in sub_tasks:
                 err = kern(
@@ -552,7 +550,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if xctype == 'LDA':
         if with_j:
             wv_freq[:,0] += vG
-        veff = _get_j_pass2(ni, wv_freq, hermi, kpts_band, verbose=log)
+            veff = _get_j_pass2(ni, wv_freq[:,0], hermi, kpts_band, verbose=log)
     else:
         if with_j:
             wv_freq[:,0] += vG
@@ -850,7 +848,6 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
 
     vol = cell.vol
-    # Additional weight_penalty may be required for GGA and MGGA
     weight_penalty = vol
     precision = cell.precision / max(weight_penalty, 1)
 
@@ -859,8 +856,8 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     es = cp.asarray(supmol_env[supmol_bas[:,PRIMBAS_EXP]])
     cs = cp.asarray(abs(supmol_env[supmol_bas[:,PRIMBAS_COEFF]]))
     norm = cs * ((2*ls+1)/(4*np.pi))**.5
-    #:if MGGA:
-    #:    norm *= es*2
+    #TODO: create different task plans for LDA, GGA and MGGA
+    norm *= es*2
     ptr_coords = supmol_bas[:,PRIMBAS_COORD]
     bas_coords = cp.asarray(supmol_env[ptr_coords[:,None] + np.arange(3)])
     log.debug1('%d primitive shells in cell0, %d shells in supmol',
@@ -908,9 +905,10 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     # rho[r-Rp] = fl*norm[:cell0_nprims,None]*norm * exp(-theta*dr**2)
     #             * r**lij * exp(-aij*r**2)
     radius = 2.
-    # lij+1, lij+2 may be required for GGA and MGGA as they raise anuglar momentum
-    radius = (cp.log(ovlp/precision * radius**(lij) + 1.) / aij)**.5
-    radius = (cp.log(ovlp/precision * radius**(lij) + 1.) / aij)**.5
+    #TODO: create different task plans for LDA, GGA and MGGA
+    # lij+2 may be required for MGGA as it raises anuglar momentum on both bra and ket
+    radius = (cp.log(ovlp/precision * radius**(lij+1) + 1.) / aij)**.5
+    radius = (cp.log(ovlp/precision * radius**(lij+1) + 1.) / aij)**.5
     log.timer_debug1('Ecut and radius estimation in create_tasks', *t0)
 
     lmax = cell._bas[:,ANG_OF].max()

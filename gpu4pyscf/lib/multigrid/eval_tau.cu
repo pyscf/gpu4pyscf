@@ -40,7 +40,6 @@ void fill_gx_dmyz(double *gx_dmyz, double *dm_xyz, double *xs_exp,
     dm_xyz += sp_id;
     xs_exp += sp_id;
     if (L <= 6) {
-        __syncthreads();
         for (int n = warp_id; n < nf3+nf2*2; n += WARPS) {
             dm_cache[n*WARP_SIZE] = dm_xyz[n*WARP_SIZE];
         }
@@ -70,8 +69,11 @@ void fill_gx_dmyz(double *gx_dmyz, double *dm_xyz, double *xs_exp,
             }
         }
     } else {
+        if (sp_id >= npairs_this_block) {
+            return;
+        }
         for (int ix = warp_id; ix < ngridx; ix += WARPS) {
-            if (ix < ngridx && sp_id < npairs_this_block) {
+            if (ix < ngridx) {
                 double *xs_local = xs_exp + ix * WARP_SIZE;
 #pragma unroll
                 for (int m = 0; m <= L2; ++m) {
@@ -614,6 +616,7 @@ void _eval_tau_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     // dx * dx
     _dm_to_dm_xyz_derivx<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, ai2, aj2,
                             cicj, npairs_this_block);
+    __syncthreads();
     fill_gx_dmyz<L>(gx_dmyz, dm_xyz, xs_exp, ngridx, ngrid_span, npairs_this_block);
     int ngridxz = ngridx * ngridz;
     int iy_stride = 1;
@@ -687,6 +690,7 @@ void _eval_tau_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     double *gy_dmxz = gx_dmyz;
     _dm_to_dm_xyz_derivy<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, ai2, aj2,
                             cicj, npairs_this_block);
+    __syncthreads();
     fill_gx_dmyz<L>(gy_dmxz, dm_xyz, ys_exp, ngridy, ngrid_span, npairs_this_block);
     int ngridyz = ngridy * ngridz;
     int ix_stride = 1;
@@ -761,6 +765,7 @@ void _eval_tau_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     double *gz_dmxy = gx_dmyz;
     _dm_to_dm_xyz_derivz<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, ai2, aj2,
                             cicj, npairs_this_block);
+    __syncthreads();
     fill_gx_dmyz<L>(gz_dmxy, dm_xyz, zs_exp, ngridz, ngrid_span, npairs_this_block);
     for (int sp_id = 0; sp_id < npairs_this_block; ++sp_id) {
         int nx0 = grid_start[0*WARP_SIZE+sp_id];
@@ -859,7 +864,10 @@ static size_t buflen(int l, MGridBounds *bounds)
     size_t len2 = (lj+3)*(lj+3) * 3 * WARP_SIZE;
     size_t len3 = (l+1) * ngrid_span * 2 + nf2 * ngrid_span;
     len2 = MAX(len2, len3);
-    return MAX(len1, len2) * sizeof(double);
+    if (l <= 6) {
+        len2 = MAX(len1, len2);
+    }
+    return len2 * sizeof(double);
 }
 
 extern "C" {
