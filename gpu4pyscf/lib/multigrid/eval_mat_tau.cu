@@ -170,14 +170,15 @@ double sub_dm_xyz_to_dm(int lx_i, int ly_i, int lz_i, int lx_j, int ly_j, int lz
 
 template <int L> __device__ static
 void _dm_xyz_to_dm_derivx(double *dm, double *dm_yzx, int nao, int li, int lj,
-                          double *ri, double *rj, double ai, double aj, double cicj,
-                          double *cache, int npairs_per_block)
+                          double *ri, double *rj, double ai2, double aj2,
+                          double cicj, int npairs_per_block)
 {
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj2 = lj + 2;
     int lj3 = lj + 3;
+    extern __shared__ double cache[];
     double *cx = cache + sp_id;
     double *cy = cx + lj3 * lj3 * WARP_SIZE;
     double *cz = cy + lj3 * lj3 * WARP_SIZE;
@@ -191,8 +192,6 @@ void _dm_xyz_to_dm_derivx(double *dm, double *dm_yzx, int nao, int li, int lj,
         return;
     }
 
-    double ai2 = -2. * ai;
-    double aj2 = -2. * aj;
     int nfi = (li + 1) * (li + 2) / 2;
     int nfj = (lj + 1) * (lj + 2) / 2;
     int nfij = nfi * nfj;
@@ -260,14 +259,15 @@ void _dm_xyz_to_dm_derivx(double *dm, double *dm_yzx, int nao, int li, int lj,
 
 template <int L> __device__ static
 void _dm_xyz_to_dm_derivy(double *dm, double *dm_xzy, int nao, int li, int lj,
-                          double *ri, double *rj, double ai, double aj, double cicj,
-                          double *cache, int npairs_per_block)
+                          double *ri, double *rj, double ai2, double aj2,
+                          double cicj, int npairs_per_block)
 {
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj2 = lj + 2;
     int lj3 = lj + 3;
+    extern __shared__ double cache[];
     double *cx = cache + sp_id;
     double *cy = cx + lj3 * lj3 * WARP_SIZE;
     double *cz = cy + lj3 * lj3 * WARP_SIZE;
@@ -281,8 +281,6 @@ void _dm_xyz_to_dm_derivy(double *dm, double *dm_xzy, int nao, int li, int lj,
         return;
     }
 
-    double ai2 = -2. * ai;
-    double aj2 = -2. * aj;
     int nfi = (li + 1) * (li + 2) / 2;
     int nfj = (lj + 1) * (lj + 2) / 2;
     int nfij = nfi * nfj;
@@ -350,14 +348,15 @@ void _dm_xyz_to_dm_derivy(double *dm, double *dm_xzy, int nao, int li, int lj,
 
 template <int L> __device__ static
 void _dm_xyz_to_dm_derivz(double *dm, double *dm_xyz, int nao, int li, int lj,
-                          double *ri, double *rj, double ai, double aj, double cicj,
-                          double *cache, int npairs_per_block)
+                          double *ri, double *rj, double ai2, double aj2,
+                          double cicj, int npairs_per_block)
 {
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj2 = lj + 2;
     int lj3 = lj + 3;
+    extern __shared__ double cache[];
     double *cx = cache + sp_id;
     double *cy = cx + lj3 * lj3 * WARP_SIZE;
     double *cz = cy + lj3 * lj3 * WARP_SIZE;
@@ -371,8 +370,6 @@ void _dm_xyz_to_dm_derivz(double *dm, double *dm_xyz, int nao, int li, int lj,
         return;
     }
 
-    double ai2 = -2. * ai;
-    double aj2 = -2. * aj;
     int nfi = (li + 1) * (li + 2) / 2;
     int nfj = (lj + 1) * (lj + 2) / 2;
     int nfij = nfi * nfj;
@@ -474,6 +471,8 @@ void _eval_mat_tau_kernel(double *out, double *vR, MGridEnvVars envs,
     if (sp_id >= npairs_this_block) {
         cicj = 0.;
     }
+    double ai2 = -2. * ai;
+    double aj2 = -2. * aj;
     int *ao_loc = envs.ao_loc;
     int nao = envs.nao;
     int i0 = ao_loc[ish];
@@ -577,8 +576,8 @@ void _eval_mat_tau_kernel(double *out, double *vR, MGridEnvVars envs,
     __syncthreads();
 
     fill_dm_xyz_ipip<L>(dm_xyz, gx_dmyz, xs_exp, ngridx, ngrid_span);
-    _dm_xyz_to_dm_derivx<L>(out, dm_xyz, nao, li, lj, ri, rj, ai, aj,
-                            cicj, cache, npairs_this_block);
+    _dm_xyz_to_dm_derivx<L>(out, dm_xyz, nao, li, lj, ri, rj, ai2, aj2,
+                            cicj, npairs_this_block);
     __syncthreads();
 
     // derivy: contract mesh_x, mesh_z
@@ -636,8 +635,8 @@ void _eval_mat_tau_kernel(double *out, double *vR, MGridEnvVars envs,
     __syncthreads();
 
     fill_dm_xyz_ipip<L>(dm_xyz, gy_dmxz, ys_exp, ngridy, ngrid_span);
-    _dm_xyz_to_dm_derivy<L>(out, dm_xyz, nao, li, lj, ri, rj, ai, aj,
-                            cicj, cache, npairs_this_block);
+    _dm_xyz_to_dm_derivy<L>(out, dm_xyz, nao, li, lj, ri, rj, ai2, aj2,
+                            cicj, npairs_this_block);
     __syncthreads();
 
     // derivz: contract mesh_x, mesh_y
@@ -695,8 +694,8 @@ void _eval_mat_tau_kernel(double *out, double *vR, MGridEnvVars envs,
     __syncthreads();
 
     fill_dm_xyz_ipip<L>(dm_xyz, gz_dmxy, zs_exp, ngridz, ngrid_span);
-    _dm_xyz_to_dm_derivz<L>(out, dm_xyz, nao, li, lj, ri, rj, ai, aj,
-                            cicj, cache, npairs_this_block);
+    _dm_xyz_to_dm_derivz<L>(out, dm_xyz, nao, li, lj, ri, rj, ai2, aj2,
+                            cicj, npairs_this_block);
 }
 
 template <int L, int TILE> __global__

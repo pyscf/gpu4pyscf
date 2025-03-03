@@ -424,13 +424,6 @@ def _get_tau_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
     mesh_largest = tasks[0][0].mesh
     vG = vG.reshape(nset, *mesh_largest)
 
-    #ngrids = np.prod(mesh_largest)
-    #weight = cell.vol / ngrids
-    #v_rs = tools.ifft(vG, mesh_largest).reshape(nset,ngrids).real/4
-    #print(v_rs)
-    #wv = np.load('wv.npy')
-    #vG = tools.fft(wv, mesh_largest).reshape(1,*mesh_largest)*4
-
     init_constant(cell)
     kern = libmgrid.MG_eval_mat_tau_orth
     # TODO: might be complex array when tddft amplitudes are complex
@@ -866,6 +859,8 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     es = cp.asarray(supmol_env[supmol_bas[:,PRIMBAS_EXP]])
     cs = cp.asarray(abs(supmol_env[supmol_bas[:,PRIMBAS_COEFF]]))
     norm = cs * ((2*ls+1)/(4*np.pi))**.5
+    #:if MGGA:
+    #:    norm *= es*2
     ptr_coords = supmol_bas[:,PRIMBAS_COORD]
     bas_coords = cp.asarray(supmol_env[ptr_coords[:,None] + np.arange(3)])
     log.debug1('%d primitive shells in cell0, %d shells in supmol',
@@ -913,7 +908,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     # rho[r-Rp] = fl*norm[:cell0_nprims,None]*norm * exp(-theta*dr**2)
     #             * r**lij * exp(-aij*r**2)
     radius = 2.
-    # lij+1 may be required as GGA functionals raise anuglar momentum
+    # lij+1, lij+2 may be required for GGA and MGGA as they raise anuglar momentum
     radius = (cp.log(ovlp/precision * radius**(lij) + 1.) / aij)**.5
     radius = (cp.log(ovlp/precision * radius**(lij) + 1.) / aij)**.5
     log.timer_debug1('Ecut and radius estimation in create_tasks', *t0)

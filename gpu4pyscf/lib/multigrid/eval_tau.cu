@@ -183,8 +183,8 @@ void fill_gx_dmyz(double *gx_dmyz, double *dm_xyz, double *xs_exp,
 
 template <int L> __device__ static
 void _dm_to_dm_xyz_derivx(double *dm_xyz, double *dm, int nao, int li, int lj,
-                          double *ri, double *rj, double ai, double aj, double cicj,
-                          int npairs_per_block)
+                          double *ri, double *rj, double ai2, double aj2,
+                          double cicj, int npairs_per_block)
 {
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
@@ -210,8 +210,6 @@ void _dm_to_dm_xyz_derivx(double *dm_xyz, double *dm, int nao, int li, int lj,
     }
 
     dm_xyz += sp_id;
-    double ai2 = -2. * ai;
-    double aj2 = -2. * aj;
     for (int n = 0, ly = 0; ly <= L; ++ly) {
     for (int lz = 0; lz <= L-ly; ++lz) {
     for (int lx = 0; lx <= L2-ly-lz; ++lx, ++n) {
@@ -267,13 +265,13 @@ void _dm_to_dm_xyz_derivx(double *dm_xyz, double *dm, int nao, int li, int lj,
             int jy = ly - ly_i;
             int jz = lz - lz_i;
             int i = cart_address(li, lx_i, ly_i, lz_i);
-            for (int lx_j = lj; lx_j >= MIN(jx-1, 0); --lx_j) {
+            for (int lx_j = lj; lx_j >= MAX(jx-1, 0); --lx_j) {
             for (int ly_j = lj-lx_j; ly_j >= jy; --ly_j) {
                 int lz_j = lj - lx_j - ly_j;
                 if (lz_j < jz) continue;
                 int j = cart_address(lj, lx_j, ly_j, lz_j);
                 double cyz = cy[(jy+ly_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
-                double cxyz = lx_i * aj * cyz * cx[(jx+(lx_j+1)*lj3)*WARP_SIZE];
+                double cxyz = lx_i * aj2 * cyz * cx[(jx+(lx_j+1)*lj3)*WARP_SIZE];
                 out += cxyz * dm[i*nao+j];
             } }
         } }
@@ -303,8 +301,8 @@ void _dm_to_dm_xyz_derivx(double *dm_xyz, double *dm, int nao, int li, int lj,
 
 template <int L> __device__ static
 void _dm_to_dm_xyz_derivy(double *dm_xyz, double *dm, int nao, int li, int lj,
-                          double *ri, double *rj, double ai, double aj, double cicj,
-                          int npairs_per_block)
+                          double *ri, double *rj, double ai2, double aj2,
+                          double cicj, int npairs_per_block)
 {
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
@@ -330,8 +328,6 @@ void _dm_to_dm_xyz_derivy(double *dm_xyz, double *dm, int nao, int li, int lj,
     }
 
     dm_xyz += sp_id;
-    double ai2 = -2. * ai;
-    double aj2 = -2. * aj;
     for (int n = 0, lx = 0; lx <= L; ++lx) {
     for (int lz = 0; lz <= L-lx; ++lz) {
     for (int ly = 0; ly <= L2-lx-lz; ++ly, ++n) {
@@ -393,7 +389,7 @@ void _dm_to_dm_xyz_derivy(double *dm_xyz, double *dm, int nao, int li, int lj,
                 if (lz_j < jz) continue;
                 int j = cart_address(lj, lx_j, ly_j, lz_j);
                 double cxz = cx[(jx+lx_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
-                double cxyz = ly_i * aj * cxz * cy[(jy+(ly_j+1)*lj3)*WARP_SIZE];
+                double cxyz = ly_i * aj2 * cxz * cy[(jy+(ly_j+1)*lj3)*WARP_SIZE];
                 out += cxyz * dm[i*nao+j];
             } }
         } }
@@ -423,8 +419,8 @@ void _dm_to_dm_xyz_derivy(double *dm_xyz, double *dm, int nao, int li, int lj,
 
 template <int L> __device__ static
 void _dm_to_dm_xyz_derivz(double *dm_xyz, double *dm, int nao, int li, int lj,
-                          double *ri, double *rj, double ai, double aj, double cicj,
-                          int npairs_per_block)
+                          double *ri, double *rj, double ai2, double aj2,
+                          double cicj, int npairs_per_block)
 {
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
@@ -450,8 +446,6 @@ void _dm_to_dm_xyz_derivz(double *dm_xyz, double *dm, int nao, int li, int lj,
     }
 
     dm_xyz += sp_id;
-    double ai2 = -2. * ai;
-    double aj2 = -2. * aj;
     for (int n = 0, lx = 0; lx <= L; ++lx) {
     for (int ly = 0; ly <= L-lx; ++ly) {
     for (int lz = 0; lz <= L2-lx-ly; ++lz, ++n) {
@@ -513,7 +507,7 @@ void _dm_to_dm_xyz_derivz(double *dm_xyz, double *dm, int nao, int li, int lj,
                 if (ly_j < jy) continue;
                 int j = cart_address(lj, lx_j, ly_j, lz_j);
                 double cxy = cx[(jx+lx_j*lj3)*WARP_SIZE] * cy[(jy+ly_j*lj3)*WARP_SIZE];
-                double cxyz = lz_i * aj * cxy * cz[(jz+(lz_j+1)*lj3)*WARP_SIZE];
+                double cxyz = lz_i * aj2 * cxy * cz[(jz+(lz_j+1)*lj3)*WARP_SIZE];
                 out += cxyz * dm[i*nao+j];
             } }
         } }
@@ -576,6 +570,12 @@ void _eval_tau_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     if (sp_id >= npairs_this_block) {
         cicj = 0.;
     }
+    double ai2 = -2. * ai;
+    double aj2 = -2. * aj;
+    int *ao_loc = envs.ao_loc;
+    int nao = envs.nao;
+    int i0 = ao_loc[ish];
+    int j0 = ao_loc[jsh];
 
     int L3 = L + 3;
     int *mesh = bounds.mesh;
@@ -593,11 +593,6 @@ void _eval_tau_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     double *dm_xyz = zs_exp + xs_size;
     double *gx_dmyz = dm_xyz + nf2*L3 * WARP_SIZE;
     init_orth_data(xs_exp+sp_id, grid_start+sp_id, envs, bounds, ri, rj, ai, aj, L+2);
-
-    int nao = envs.nao;
-    int *ao_loc = envs.ao_loc;
-    int i0 = ao_loc[ish];
-    int j0 = ao_loc[jsh];
 
     double r1[L+1];
     double r2[L+1];
@@ -617,7 +612,7 @@ void _eval_tau_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     }
 
     // dx * dx
-    _dm_to_dm_xyz_derivx<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, ai, aj,
+    _dm_to_dm_xyz_derivx<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, ai2, aj2,
                             cicj, npairs_this_block);
     fill_gx_dmyz<L>(gx_dmyz, dm_xyz, xs_exp, ngridx, ngrid_span, npairs_this_block);
     int ngridxz = ngridx * ngridz;
@@ -690,7 +685,7 @@ void _eval_tau_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
 
     // dy * dy
     double *gy_dmxz = gx_dmyz;
-    _dm_to_dm_xyz_derivy<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, ai, aj,
+    _dm_to_dm_xyz_derivy<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, ai2, aj2,
                             cicj, npairs_this_block);
     fill_gx_dmyz<L>(gy_dmxz, dm_xyz, ys_exp, ngridy, ngrid_span, npairs_this_block);
     int ngridyz = ngridy * ngridz;
@@ -764,7 +759,7 @@ void _eval_tau_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
 
     // dz * dz
     double *gz_dmxy = gx_dmyz;
-    _dm_to_dm_xyz_derivz<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, ai, aj,
+    _dm_to_dm_xyz_derivz<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, ai2, aj2,
                             cicj, npairs_this_block);
     fill_gx_dmyz<L>(gz_dmxy, dm_xyz, zs_exp, ngridz, ngrid_span, npairs_this_block);
     for (int sp_id = 0; sp_id < npairs_this_block; ++sp_id) {
