@@ -94,6 +94,93 @@ void fill_gx_dmyz(double *gx_dmyz, double *dm_xyz, double *xs_exp,
     }
 }
 
+//template <int L> __device__ inline
+//double sub_dm_to_dm_xyz(int lx, int ly, int lz, int li, int lj, int nao,
+//                        double ai2, double aj2,
+//                        double *cx, double *cy, double *cz, double *dm)
+//{
+//    int L3 = L + 3;
+//    int lj3 = lj + 3;
+//    double out = 0.;
+//    // -2*ai xi, -2*aj xj
+//    for (int lx_i = MIN(lx-1, li); lx_i >= 0; --lx_i) {
+//    for (int ly_i = MIN(ly, li-lx_i); ly_i >= 0; --ly_i) {
+//        int lz_i = li - lx_i - ly_i;
+//        if (lz < lz_i) continue;
+//        int jx = lx - (lx_i+1);
+//        int jy = ly - ly_i;
+//        int jz = lz - lz_i;
+//        int i = cart_address(li, lx_i, ly_i, lz_i);
+//        for (int lx_j = lj; lx_j >= MAX(jx-1, 0); --lx_j) {
+//        for (int ly_j = lj-lx_j; ly_j >= jy; --ly_j) {
+//            int lz_j = lj - lx_j - ly_j;
+//            if (lz_j < jz) continue;
+//            int j = cart_address(lj, lx_j, ly_j, lz_j);
+//            double cyz = cy[(jy+ly_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
+//            double cxyz = ai2 * aj2 * cyz * cx[(jx+(lx_j+1)*lj3)*WARP_SIZE];
+//            out += cxyz * dm[i*nao+j];
+//        } }
+//    } }
+//    // -2*ai xi, lj/xj
+//    for (int lx_i = MIN(lx-1, li); lx_i >= 0; --lx_i) {
+//    for (int ly_i = MIN(ly, li-lx_i); ly_i >= 0; --ly_i) {
+//        int lz_i = li - lx_i - ly_i;
+//        if (lz < lz_i) continue;
+//        int jx = lx - (lx_i+1);
+//        int jy = ly - ly_i;
+//        int jz = lz - lz_i;
+//        int i = cart_address(li, lx_i, ly_i, lz_i);
+//        for (int lx_j = lj; lx_j-1 >= jx; --lx_j) {
+//        for (int ly_j = lj-lx_j; ly_j >= jy; --ly_j) {
+//            int lz_j = lj - lx_j - ly_j;
+//            if (lz_j < jz) continue;
+//            int j = cart_address(lj, lx_j, ly_j, lz_j);
+//            double cyz = cy[(jy+ly_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
+//            double cxyz = ai2 * lx_j * cyz * cx[(jx+(lx_j-1)*lj3)*WARP_SIZE];
+//            out += cxyz * dm[i*nao+j];
+//        } }
+//    } }
+//    // li/xi, -2*aj xj
+//    for (int lx_i = MIN(lx+1, li); lx_i >= 1; --lx_i) {
+//    for (int ly_i = MIN(ly, li-lx_i); ly_i >= 0; --ly_i) {
+//        int lz_i = li - lx_i - ly_i;
+//        if (lz < lz_i) continue;
+//        int jx = lx - (lx_i-1);
+//        int jy = ly - ly_i;
+//        int jz = lz - lz_i;
+//        int i = cart_address(li, lx_i, ly_i, lz_i);
+//        for (int lx_j = lj; lx_j >= MIN(jx-1, 0); --lx_j) {
+//        for (int ly_j = lj-lx_j; ly_j >= jy; --ly_j) {
+//            int lz_j = lj - lx_j - ly_j;
+//            if (lz_j < jz) continue;
+//            int j = cart_address(lj, lx_j, ly_j, lz_j);
+//            double cyz = cy[(jy+ly_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
+//            double cxyz = lx_i * aj2 * cyz * cx[(jx+(lx_j+1)*lj3)*WARP_SIZE];
+//            out += cxyz * dm[i*nao+j];
+//        } }
+//    } }
+//    // li/xi, lj/xj
+//    for (int lx_i = MIN(lx+1, li); lx_i >= 1; --lx_i) {
+//    for (int ly_i = MIN(ly, li-lx_i); ly_i >= 0; --ly_i) {
+//        int lz_i = li - lx_i - ly_i;
+//        if (lz < lz_i) continue;
+//        int jx = lx - (lx_i-1);
+//        int jy = ly - ly_i;
+//        int jz = lz - lz_i;
+//        int i = cart_address(li, lx_i, ly_i, lz_i);
+//        for (int lx_j = lj; lx_j-1 >= jx; --lx_j) {
+//        for (int ly_j = lj-lx_j; ly_j >= jy; --ly_j) {
+//            int lz_j = lj - lx_j - ly_j;
+//            if (lz_j < jz) continue;
+//            int j = cart_address(lj, lx_j, ly_j, lz_j);
+//            double cyz = cy[(jy+ly_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
+//            double cxyz = lx_i * lx_j * cyz * cx[(jx+(lx_j-1)*lj3)*WARP_SIZE];
+//            out += cxyz * dm[i*nao+j];
+//        } }
+//    } }
+//    return out;
+//}
+
 template <int L> __device__ static
 void _dm_to_dm_xyz_derivx(double *dm_xyz, double *dm, int nao, int li, int lj,
                           double *ri, double *rj, double ai, double aj, double cicj,
@@ -127,89 +214,91 @@ void _dm_to_dm_xyz_derivx(double *dm_xyz, double *dm, int nao, int li, int lj,
     double aj2 = -2. * aj;
     for (int n = 0, ly = 0; ly <= L; ++ly) {
     for (int lz = 0; lz <= L-ly; ++lz) {
-        for (int lx = 0; lx <= L2-ly-lz; ++lx, ++n) {
-            double out = 0.;
-            // -2*ai xi, -2*aj xj
-            for (int lx_i = MIN(lx-1, li); lx_i >= 0; --lx_i) {
-            for (int ly_i = MIN(ly, li-lx_i); ly_i >= 0; --ly_i) {
-                int lz_i = li - lx_i - ly_i;
-                if (lz < lz_i) continue;
-                int jx = lx - (lx_i+1);
-                if (jx < 1) continue;
-                int jy = ly - ly_i;
-                int jz = lz - lz_i;
-                int i = cart_address(li, lx_i, ly_i, lz_i);
-                for (int lx_j = lj; lx_j+1 >= jx; --lx_j) {
-                for (int ly_j = lj-lx_j; ly_j >= jy; --ly_j) {
-                    int lz_j = lj - lx_j - ly_j;
-                    if (lz_j < jz) continue;
-                    int j = cart_address(lj, lx_j, ly_j, lz_j);
-                    double cyz = cy[(jy+ly_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
-                    double cxyz = ai2 * aj2 * cyz * cx[(jx+(lx_j+1)*lj3)*WARP_SIZE];
-                    out += cxyz * dm[i*nao+j];
-                } }
+    for (int lx = 0; lx <= L2-ly-lz; ++lx, ++n) {
+#if 0
+        double out = sub_dm_to_dm_xyz<L>(lx, ly, lz, li, lj, nao,
+                                         ai2, aj2, cx, cy, cz, dm);
+#else
+        double out = 0.;
+        // -2*ai xi, -2*aj xj
+        for (int lx_i = MIN(lx-1, li); lx_i >= 0; --lx_i) {
+        for (int ly_i = MIN(ly, li-lx_i); ly_i >= 0; --ly_i) {
+            int lz_i = li - lx_i - ly_i;
+            if (lz < lz_i) continue;
+            int jx = lx - (lx_i+1);
+            int jy = ly - ly_i;
+            int jz = lz - lz_i;
+            int i = cart_address(li, lx_i, ly_i, lz_i);
+            for (int lx_j = lj; lx_j >= MAX(jx-1, 0); --lx_j) {
+            for (int ly_j = lj-lx_j; ly_j >= jy; --ly_j) {
+                int lz_j = lj - lx_j - ly_j;
+                if (lz_j < jz) continue;
+                int j = cart_address(lj, lx_j, ly_j, lz_j);
+                double cyz = cy[(jy+ly_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
+                double cxyz = ai2 * aj2 * cyz * cx[(jx+(lx_j+1)*lj3)*WARP_SIZE];
+                out += cxyz * dm[i*nao+j];
             } }
-            // -2*ai xi, lj/xj
-            for (int lx_i = MIN(lx-1, li); lx_i >= 0; --lx_i) {
-            for (int ly_i = MIN(ly, li-lx_i); ly_i >= 0; --ly_i) {
-                int lz_i = li - lx_i - ly_i;
-                if (lz < lz_i) continue;
-                int jx = lx - (lx_i+1);
-                int jy = ly - ly_i;
-                int jz = lz - lz_i;
-                int i = cart_address(li, lx_i, ly_i, lz_i);
-                for (int lx_j = lj; lx_j-1 >= jx; --lx_j) {
-                for (int ly_j = lj-lx_j; ly_j >= jy; --ly_j) {
-                    int lz_j = lj - lx_j - ly_j;
-                    if (lz_j < jz) continue;
-                    int j = cart_address(lj, lx_j, ly_j, lz_j);
-                    double cyz = cy[(jy+ly_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
-                    double cxyz = ai2 * lx_j * cyz * cx[(jx+(lx_j-1)*lj3)*WARP_SIZE];
-                    out += cxyz * dm[i*nao+j];
-                } }
+        } }
+        // -2*ai xi, lj/xj
+        for (int lx_i = MIN(lx-1, li); lx_i >= 0; --lx_i) {
+        for (int ly_i = MIN(ly, li-lx_i); ly_i >= 0; --ly_i) {
+            int lz_i = li - lx_i - ly_i;
+            if (lz < lz_i) continue;
+            int jx = lx - (lx_i+1);
+            int jy = ly - ly_i;
+            int jz = lz - lz_i;
+            int i = cart_address(li, lx_i, ly_i, lz_i);
+            for (int lx_j = lj; lx_j-1 >= jx; --lx_j) {
+            for (int ly_j = lj-lx_j; ly_j >= jy; --ly_j) {
+                int lz_j = lj - lx_j - ly_j;
+                if (lz_j < jz) continue;
+                int j = cart_address(lj, lx_j, ly_j, lz_j);
+                double cyz = cy[(jy+ly_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
+                double cxyz = ai2 * lx_j * cyz * cx[(jx+(lx_j-1)*lj3)*WARP_SIZE];
+                out += cxyz * dm[i*nao+j];
             } }
-            // li/xi, -2*aj xj
-            for (int lx_i = MIN(lx+1, li); lx_i >= 1; --lx_i) {
-            for (int ly_i = MIN(ly, li-lx_i); ly_i >= 0; --ly_i) {
-                int lz_i = li - lx_i - ly_i;
-                if (lz < lz_i) continue;
-                int jx = lx - (lx_i-1);
-                if (jx < 1) continue;
-                int jy = ly - ly_i;
-                int jz = lz - lz_i;
-                int i = cart_address(li, lx_i, ly_i, lz_i);
-                for (int lx_j = lj; lx_j+1 >= jx; --lx_j) {
-                for (int ly_j = lj-lx_j; ly_j >= jy; --ly_j) {
-                    int lz_j = lj - lx_j - ly_j;
-                    if (lz_j < jz) continue;
-                    int j = cart_address(lj, lx_j, ly_j, lz_j);
-                    double cyz = cy[(jy+ly_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
-                    double cxyz = lx_i * aj * cyz * cx[(jx+(lx_j+1)*lj3)*WARP_SIZE];
-                    out += cxyz * dm[i*nao+j];
-                } }
+        } }
+        // li/xi, -2*aj xj
+        for (int lx_i = MIN(lx+1, li); lx_i >= 1; --lx_i) {
+        for (int ly_i = MIN(ly, li-lx_i); ly_i >= 0; --ly_i) {
+            int lz_i = li - lx_i - ly_i;
+            if (lz < lz_i) continue;
+            int jx = lx - (lx_i-1);
+            int jy = ly - ly_i;
+            int jz = lz - lz_i;
+            int i = cart_address(li, lx_i, ly_i, lz_i);
+            for (int lx_j = lj; lx_j >= MIN(jx-1, 0); --lx_j) {
+            for (int ly_j = lj-lx_j; ly_j >= jy; --ly_j) {
+                int lz_j = lj - lx_j - ly_j;
+                if (lz_j < jz) continue;
+                int j = cart_address(lj, lx_j, ly_j, lz_j);
+                double cyz = cy[(jy+ly_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
+                double cxyz = lx_i * aj * cyz * cx[(jx+(lx_j+1)*lj3)*WARP_SIZE];
+                out += cxyz * dm[i*nao+j];
             } }
-            // li/xi, lj/xj
-            for (int lx_i = MIN(lx+1, li); lx_i >= 1; --lx_i) {
-            for (int ly_i = MIN(ly, li-lx_i); ly_i >= 0; --ly_i) {
-                int lz_i = li - lx_i - ly_i;
-                if (lz < lz_i) continue;
-                int jx = lx - (lx_i-1);
-                int jy = ly - ly_i;
-                int jz = lz - lz_i;
-                int i = cart_address(li, lx_i, ly_i, lz_i);
-                for (int lx_j = lj; lx_j-1 >= jx; --lx_j) {
-                for (int ly_j = lj-lx_j; ly_j >= jy; --ly_j) {
-                    int lz_j = lj - lx_j - ly_j;
-                    if (lz_j < jz) continue;
-                    int j = cart_address(lj, lx_j, ly_j, lz_j);
-                    double cyz = cy[(jy+ly_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
-                    double cxyz = lx_i * lx_j * cyz * cx[(jx+(lx_j-1)*lj3)*WARP_SIZE];
-                    out += cxyz * dm[i*nao+j];
-                } }
+        } }
+        // li/xi, lj/xj
+        for (int lx_i = MIN(lx+1, li); lx_i >= 1; --lx_i) {
+        for (int ly_i = MIN(ly, li-lx_i); ly_i >= 0; --ly_i) {
+            int lz_i = li - lx_i - ly_i;
+            if (lz < lz_i) continue;
+            int jx = lx - (lx_i-1);
+            int jy = ly - ly_i;
+            int jz = lz - lz_i;
+            int i = cart_address(li, lx_i, ly_i, lz_i);
+            for (int lx_j = lj; lx_j-1 >= jx; --lx_j) {
+            for (int ly_j = lj-lx_j; ly_j >= jy; --ly_j) {
+                int lz_j = lj - lx_j - ly_j;
+                if (lz_j < jz) continue;
+                int j = cart_address(lj, lx_j, ly_j, lz_j);
+                double cyz = cy[(jy+ly_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
+                double cxyz = lx_i * lx_j * cyz * cx[(jx+(lx_j-1)*lj3)*WARP_SIZE];
+                out += cxyz * dm[i*nao+j];
             } }
+        } }
+#endif
             dm_xyz[n*WARP_SIZE] = out * cicj;
-        }
-    } }
+    } } }
 }
 
 template <int L> __device__ static
@@ -245,89 +334,91 @@ void _dm_to_dm_xyz_derivy(double *dm_xyz, double *dm, int nao, int li, int lj,
     double aj2 = -2. * aj;
     for (int n = 0, lx = 0; lx <= L; ++lx) {
     for (int lz = 0; lz <= L-lx; ++lz) {
-        for (int ly = 0; ly <= L2-lx-lz; ++ly, ++n) {
-            double out = 0.;
-            // -2*ai yi, -2*aj yj
-            for (int ly_i = MIN(ly-1, li); ly_i >= 0; --ly_i) {
-            for (int lx_i = MIN(lx, li-ly_i); lx_i >= 0; --lx_i) {
-                int lz_i = li - ly_i - lx_i;
-                if (lz < lz_i) continue;
-                int jy = ly - (ly_i+1);
-                if (jy < 1) continue;
-                int jx = lx - lx_i;
-                int jz = lz - lz_i;
-                int i = cart_address(li, lx_i, ly_i, lz_i);
-                for (int ly_j = lj; ly_j+1 >= jy; --ly_j) {
-                for (int lx_j = lj-ly_j; lx_j >= jx; --lx_j) {
-                    int lz_j = lj - ly_j - lx_j;
-                    if (lz_j < jz) continue;
-                    int j = cart_address(lj, lx_j, ly_j, lz_j);
-                    double cxz = cx[(jx+lx_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
-                    double cxyz = ai2 * aj2 * cxz * cy[(jy+(ly_j+1)*lj3)*WARP_SIZE];
-                    out += cxyz * dm[i*nao+j];
-                } }
+    for (int ly = 0; ly <= L2-lx-lz; ++ly, ++n) {
+#if 0
+        double out = sub_dm_to_dm_xyz<L>(ly, lx, lz, li, lj, nao,
+                                         ai2, aj2, cy, cz, cx, dm);
+#else
+        double out = 0.;
+        // -2*ai yi, -2*aj yj
+        for (int ly_i = MIN(ly-1, li); ly_i >= 0; --ly_i) {
+        for (int lx_i = MIN(lx, li-ly_i); lx_i >= 0; --lx_i) {
+            int lz_i = li - ly_i - lx_i;
+            if (lz < lz_i) continue;
+            int jy = ly - (ly_i+1);
+            int jx = lx - lx_i;
+            int jz = lz - lz_i;
+            int i = cart_address(li, lx_i, ly_i, lz_i);
+            for (int ly_j = lj; ly_j >= MAX(jy-1, 0); --ly_j) {
+            for (int lx_j = lj-ly_j; lx_j >= jx; --lx_j) {
+                int lz_j = lj - ly_j - lx_j;
+                if (lz_j < jz) continue;
+                int j = cart_address(lj, lx_j, ly_j, lz_j);
+                double cxz = cx[(jx+lx_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
+                double cxyz = ai2 * aj2 * cxz * cy[(jy+(ly_j+1)*lj3)*WARP_SIZE];
+                out += cxyz * dm[i*nao+j];
             } }
-            // -2*ai yi, lj/yj
-            for (int ly_i = MIN(ly-1, li); ly_i >= 0; --ly_i) {
-            for (int lx_i = MIN(lx, li-ly_i); lx_i >= 0; --lx_i) {
-                int lz_i = li - ly_i - lx_i;
-                if (lz < lz_i) continue;
-                int jy = ly - (ly_i+1);
-                int jx = lx - lx_i;
-                int jz = lz - lz_i;
-                int i = cart_address(li, lx_i, ly_i, lz_i);
-                for (int ly_j = lj; ly_j-1 >= jy; --ly_j) {
-                for (int lx_j = lj-ly_j; lx_j >= jx; --lx_j) {
-                    int lz_j = lj - ly_j - lx_j;
-                    if (lz_j < jz) continue;
-                    int j = cart_address(lj, lx_j, ly_j, lz_j);
-                    double cxz = cx[(jx+lx_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
-                    double cxyz = ai2 * ly_j * cxz * cy[(jy+(ly_j-1)*lj3)*WARP_SIZE];
-                    out += cxyz * dm[i*nao+j];
-                } }
+        } }
+        // -2*ai yi, lj/yj
+        for (int ly_i = MIN(ly-1, li); ly_i >= 0; --ly_i) {
+        for (int lx_i = MIN(lx, li-ly_i); lx_i >= 0; --lx_i) {
+            int lz_i = li - ly_i - lx_i;
+            if (lz < lz_i) continue;
+            int jy = ly - (ly_i+1);
+            int jx = lx - lx_i;
+            int jz = lz - lz_i;
+            int i = cart_address(li, lx_i, ly_i, lz_i);
+            for (int ly_j = lj; ly_j-1 >= jy; --ly_j) {
+            for (int lx_j = lj-ly_j; lx_j >= jx; --lx_j) {
+                int lz_j = lj - ly_j - lx_j;
+                if (lz_j < jz) continue;
+                int j = cart_address(lj, lx_j, ly_j, lz_j);
+                double cxz = cx[(jx+lx_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
+                double cxyz = ai2 * ly_j * cxz * cy[(jy+(ly_j-1)*lj3)*WARP_SIZE];
+                out += cxyz * dm[i*nao+j];
             } }
-            // li/yi, -2*aj yj
-            for (int ly_i = MIN(ly+1, li); ly_i >= 1; --ly_i) {
-            for (int lx_i = MIN(lx, li-ly_i); lx_i >= 0; --lx_i) {
-                int lz_i = li - ly_i - lx_i;
-                if (lz < lz_i) continue;
-                int jy = ly - (ly_i-1);
-                if (jy < 1) continue;
-                int jx = lx - lx_i;
-                int jz = lz - lz_i;
-                int i = cart_address(li, lx_i, ly_i, lz_i);
-                for (int ly_j = lj; ly_j+1 >= jy; --ly_j) {
-                for (int lx_j = lj-ly_j; lx_j >= jx; --lx_j) {
-                    int lz_j = lj - ly_j - lx_j;
-                    if (lz_j < jz) continue;
-                    int j = cart_address(lj, lx_j, ly_j, lz_j);
-                    double cxz = cx[(jx+lx_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
-                    double cxyz = ly_i * aj * cxz * cy[(jy+(ly_j+1)*lj3)*WARP_SIZE];
-                    out += cxyz * dm[i*nao+j];
-                } }
+        } }
+        // li/yi, -2*aj yj
+        for (int ly_i = MIN(ly+1, li); ly_i >= 1; --ly_i) {
+        for (int lx_i = MIN(lx, li-ly_i); lx_i >= 0; --lx_i) {
+            int lz_i = li - ly_i - lx_i;
+            if (lz < lz_i) continue;
+            int jy = ly - (ly_i-1);
+            int jx = lx - lx_i;
+            int jz = lz - lz_i;
+            int i = cart_address(li, lx_i, ly_i, lz_i);
+            for (int ly_j = lj; ly_j >= MAX(jy-1, 0); --ly_j) {
+            for (int lx_j = lj-ly_j; lx_j >= jx; --lx_j) {
+                int lz_j = lj - ly_j - lx_j;
+                if (lz_j < jz) continue;
+                int j = cart_address(lj, lx_j, ly_j, lz_j);
+                double cxz = cx[(jx+lx_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
+                double cxyz = ly_i * aj * cxz * cy[(jy+(ly_j+1)*lj3)*WARP_SIZE];
+                out += cxyz * dm[i*nao+j];
             } }
-            // li/yi, lj/yj
-            for (int ly_i = MIN(ly+1, li); ly_i >= 1; --ly_i) {
-            for (int lx_i = MIN(lx, li-ly_i); lx_i >= 0; --lx_i) {
-                int lz_i = li - ly_i - lx_i;
-                if (lz < lz_i) continue;
-                int jy = ly - (ly_i-1);
-                int jx = lx - lx_i;
-                int jz = lz - lz_i;
-                int i = cart_address(li, lx_i, ly_i, lz_i);
-                for (int ly_j = lj; ly_j-1 >= jy; --ly_j) {
-                for (int lx_j = lj-ly_j; lx_j >= jx; --lx_j) {
-                    int lz_j = lj - ly_j - lx_j;
-                    if (lz_j < jz) continue;
-                    int j = cart_address(lj, lx_j, ly_j, lz_j);
-                    double cxz = cx[(jx+lx_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
-                    double cxyz = ly_i * ly_j * cxz * cy[(jy+(ly_j-1)*lj3)*WARP_SIZE];
-                    out += cxyz * dm[i*nao+j];
-                } }
+        } }
+        // li/yi, lj/yj
+        for (int ly_i = MIN(ly+1, li); ly_i >= 1; --ly_i) {
+        for (int lx_i = MIN(lx, li-ly_i); lx_i >= 0; --lx_i) {
+            int lz_i = li - ly_i - lx_i;
+            if (lz < lz_i) continue;
+            int jy = ly - (ly_i-1);
+            int jx = lx - lx_i;
+            int jz = lz - lz_i;
+            int i = cart_address(li, lx_i, ly_i, lz_i);
+            for (int ly_j = lj; ly_j-1 >= jy; --ly_j) {
+            for (int lx_j = lj-ly_j; lx_j >= jx; --lx_j) {
+                int lz_j = lj - ly_j - lx_j;
+                if (lz_j < jz) continue;
+                int j = cart_address(lj, lx_j, ly_j, lz_j);
+                double cxz = cx[(jx+lx_j*lj3)*WARP_SIZE] * cz[(jz+lz_j*lj3)*WARP_SIZE];
+                double cxyz = ly_i * ly_j * cxz * cy[(jy+(ly_j-1)*lj3)*WARP_SIZE];
+                out += cxyz * dm[i*nao+j];
             } }
-            dm_xyz[n*WARP_SIZE+sp_id] = out * cicj;
-        }
-    } }
+        } }
+#endif
+        dm_xyz[n*WARP_SIZE] = out * cicj;
+    } } }
 }
 
 template <int L> __device__ static
@@ -363,89 +454,91 @@ void _dm_to_dm_xyz_derivz(double *dm_xyz, double *dm, int nao, int li, int lj,
     double aj2 = -2. * aj;
     for (int n = 0, lx = 0; lx <= L; ++lx) {
     for (int ly = 0; ly <= L-lx; ++ly) {
-        for (int lz = 0; lz <= L2-lx-ly; ++lz, ++n) {
-            double out = 0.;
-            // -2*ai zi, -2*aj zj
-            for (int lz_i = MIN(lz-1, li); lz_i >= 0; --lz_i) {
-            for (int lx_i = MIN(lx, li-lz_i); lx_i >= 0; --lx_i) {
-                int ly_i = li - lz_i - lx_i;
-                if (ly < ly_i) continue;
-                int jz = lz - (lz_i+1);
-                if (jz < 1) continue;
-                int jx = lx - lx_i;
-                int jy = ly - ly_i;
-                int i = cart_address(li, lx_i, ly_i, lz_i);
-                for (int lz_j = lj; lz_j+1 >= jz; --lz_j) {
-                for (int lx_j = lj-lz_j; lx_j >= jx; --lx_j) {
-                    int ly_j = lj - lz_j - lx_j;
-                    if (ly_j < jy) continue;
-                    int j = cart_address(lj, lx_j, ly_j, lz_j);
-                    double cxy = cx[(jx+lx_j*lj3)*WARP_SIZE] * cy[(jy+ly_j*lj3)*WARP_SIZE];
-                    double cxyz = ai2 * aj2 * cxy * cz[(jz+(lz_j+1)*lj3)*WARP_SIZE];
-                    out += cxyz * dm[i*nao+j];
-                } }
+    for (int lz = 0; lz <= L2-lx-ly; ++lz, ++n) {
+#if 0
+        double out = sub_dm_to_dm_xyz<L>(lz, lx, ly, li, lj, nao,
+                                         ai2, aj2, cz, cx, cy, dm);
+#else
+        double out = 0.;
+        // -2*ai zi, -2*aj zj
+        for (int lz_i = MIN(lz-1, li); lz_i >= 0; --lz_i) {
+        for (int lx_i = MIN(lx, li-lz_i); lx_i >= 0; --lx_i) {
+            int ly_i = li - lz_i - lx_i;
+            if (ly < ly_i) continue;
+            int jz = lz - (lz_i+1);
+            int jx = lx - lx_i;
+            int jy = ly - ly_i;
+            int i = cart_address(li, lx_i, ly_i, lz_i);
+            for (int lz_j = lj; lz_j >= MAX(jz-1, 0); --lz_j) {
+            for (int lx_j = lj-lz_j; lx_j >= jx; --lx_j) {
+                int ly_j = lj - lz_j - lx_j;
+                if (ly_j < jy) continue;
+                int j = cart_address(lj, lx_j, ly_j, lz_j);
+                double cxy = cx[(jx+lx_j*lj3)*WARP_SIZE] * cy[(jy+ly_j*lj3)*WARP_SIZE];
+                double cxyz = ai2 * aj2 * cxy * cz[(jz+(lz_j+1)*lj3)*WARP_SIZE];
+                out += cxyz * dm[i*nao+j];
             } }
-            // -2*ai zi, lj/zj
-            for (int lz_i = MIN(lz-1, li); lz_i >= 0; --lz_i) {
-            for (int lx_i = MIN(lx, li-lz_i); lx_i >= 0; --lx_i) {
-                int ly_i = li - lz_i - lx_i;
-                if (ly < ly_i) continue;
-                int jz = lz - (lz_i+1);
-                int jx = lx - lx_i;
-                int jy = ly - ly_i;
-                int i = cart_address(li, lx_i, ly_i, lz_i);
-                for (int lz_j = lj; lz_j-1 >= jz; --lz_j) {
-                for (int lx_j = lj-lz_j; lx_j >= jx; --lx_j) {
-                    int ly_j = lj - lz_j - lx_j;
-                    if (ly_j < jy) continue;
-                    int j = cart_address(lj, lx_j, ly_j, lz_j);
-                    double cxy = cx[(jx+lx_j*lj3)*WARP_SIZE] * cy[(jy+ly_j*lj3)*WARP_SIZE];
-                    double cxyz = ai2 * lz_j * cxy * cz[(jz+(lz_j-1)*lj3)*WARP_SIZE];
-                    out += cxyz * dm[i*nao+j];
-                } }
+        } }
+        // -2*ai zi, lj/zj
+        for (int lz_i = MIN(lz-1, li); lz_i >= 0; --lz_i) {
+        for (int lx_i = MIN(lx, li-lz_i); lx_i >= 0; --lx_i) {
+            int ly_i = li - lz_i - lx_i;
+            if (ly < ly_i) continue;
+            int jz = lz - (lz_i+1);
+            int jx = lx - lx_i;
+            int jy = ly - ly_i;
+            int i = cart_address(li, lx_i, ly_i, lz_i);
+            for (int lz_j = lj; lz_j-1 >= jz; --lz_j) {
+            for (int lx_j = lj-lz_j; lx_j >= jx; --lx_j) {
+                int ly_j = lj - lz_j - lx_j;
+                if (ly_j < jy) continue;
+                int j = cart_address(lj, lx_j, ly_j, lz_j);
+                double cxy = cx[(jx+lx_j*lj3)*WARP_SIZE] * cy[(jy+ly_j*lj3)*WARP_SIZE];
+                double cxyz = ai2 * lz_j * cxy * cz[(jz+(lz_j-1)*lj3)*WARP_SIZE];
+                out += cxyz * dm[i*nao+j];
             } }
-            // li/zi, -2*aj zj
-            for (int lz_i = MIN(lz+1, li); lz_i >= 1; --lz_i) {
-            for (int lx_i = MIN(lx, li-lz_i); lx_i >= 0; --lx_i) {
-                int ly_i = li - lz_i - lx_i;
-                if (ly < ly_i) continue;
-                int jz = lz - (lz_i-1);
-                if (jz < 1) continue;
-                int jx = lx - lx_i;
-                int jy = ly - ly_i;
-                int i = cart_address(li, lx_i, ly_i, lz_i);
-                for (int lz_j = lj; lz_j+1 >= jz; --lz_j) {
-                for (int lx_j = lj-lz_j; lx_j >= jx; --lx_j) {
-                    int ly_j = lj - lz_j - lx_j;
-                    if (ly_j < jy) continue;
-                    int j = cart_address(lj, lx_j, ly_j, lz_j);
-                    double cxy = cx[(jx+lx_j*lj3)*WARP_SIZE] * cy[(jy+ly_j*lj3)*WARP_SIZE];
-                    double cxyz = lz_i * aj * cxy * cz[(jz+(lz_j+1)*lj3)*WARP_SIZE];
-                    out += cxyz * dm[i*nao+j];
-                } }
+        } }
+        // li/zi, -2*aj zj
+        for (int lz_i = MIN(lz+1, li); lz_i >= 1; --lz_i) {
+        for (int lx_i = MIN(lx, li-lz_i); lx_i >= 0; --lx_i) {
+            int ly_i = li - lz_i - lx_i;
+            if (ly < ly_i) continue;
+            int jz = lz - (lz_i-1);
+            int jx = lx - lx_i;
+            int jy = ly - ly_i;
+            int i = cart_address(li, lx_i, ly_i, lz_i);
+            for (int lz_j = lj; lz_j >= MAX(jz-1, 0); --lz_j) {
+            for (int lx_j = lj-lz_j; lx_j >= jx; --lx_j) {
+                int ly_j = lj - lz_j - lx_j;
+                if (ly_j < jy) continue;
+                int j = cart_address(lj, lx_j, ly_j, lz_j);
+                double cxy = cx[(jx+lx_j*lj3)*WARP_SIZE] * cy[(jy+ly_j*lj3)*WARP_SIZE];
+                double cxyz = lz_i * aj * cxy * cz[(jz+(lz_j+1)*lj3)*WARP_SIZE];
+                out += cxyz * dm[i*nao+j];
             } }
-            // li/zi, lj/zj
-            for (int lz_i = MIN(lz+1, li); lz_i >= 1; --lz_i) {
-            for (int lx_i = MIN(lx, li-lz_i); lx_i >= 0; --lx_i) {
-                int ly_i = li - lz_i - lx_i;
-                if (ly < ly_i) continue;
-                int jz = lz - (lz_i-1);
-                int jx = lx - lx_i;
-                int jy = ly - ly_i;
-                int i = cart_address(li, lx_i, ly_i, lz_i);
-                for (int lz_j = lj; lz_j-1 >= jz; --lz_j) {
-                for (int lx_j = lj-lz_j; lx_j >= jx; --lx_j) {
-                    int ly_j = lj - lz_j - lx_j;
-                    if (ly_j < jy) continue;
-                    int j = cart_address(lj, lx_j, ly_j, lz_j);
-                    double cxy = cx[(jx+lx_j*lj3)*WARP_SIZE] * cy[(jy+ly_j*lj3)*WARP_SIZE];
-                    double cxyz = lz_i * lz_j * cxy * cz[(jz+(lz_j-1)*lj3)*WARP_SIZE];
-                    out += cxyz * dm[i*nao+j];
-                } }
+        } }
+        // li/zi, lj/zj
+        for (int lz_i = MIN(lz+1, li); lz_i >= 1; --lz_i) {
+        for (int lx_i = MIN(lx, li-lz_i); lx_i >= 0; --lx_i) {
+            int ly_i = li - lz_i - lx_i;
+            if (ly < ly_i) continue;
+            int jz = lz - (lz_i-1);
+            int jx = lx - lx_i;
+            int jy = ly - ly_i;
+            int i = cart_address(li, lx_i, ly_i, lz_i);
+            for (int lz_j = lj; lz_j-1 >= jz; --lz_j) {
+            for (int lx_j = lj-lz_j; lx_j >= jx; --lx_j) {
+                int ly_j = lj - lz_j - lx_j;
+                if (ly_j < jy) continue;
+                int j = cart_address(lj, lx_j, ly_j, lz_j);
+                double cxy = cx[(jx+lx_j*lj3)*WARP_SIZE] * cy[(jy+ly_j*lj3)*WARP_SIZE];
+                double cxyz = lz_i * lz_j * cxy * cz[(jz+(lz_j-1)*lj3)*WARP_SIZE];
+                out += cxyz * dm[i*nao+j];
             } }
-            dm_xyz[n*WARP_SIZE+sp_id] = out * cicj;
-        }
-    } }
+        } }
+#endif
+        dm_xyz[n*WARP_SIZE] = out * cicj;
+    } } }
 }
 
 template <int L> __device__ static
@@ -538,9 +631,9 @@ void _eval_tau_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
         int nx0 = grid_start[0*WARP_SIZE+sp_id];
         int ny0 = grid_start[1*WARP_SIZE+sp_id];
         int nz0 = grid_start[2*WARP_SIZE+sp_id];
-        double *xs_cache = cache;
-        double *zs_cache = xs_cache + (L+1)*ngridx;
-        double *ys_cache = zs_cache + (L+1)*ngridz;
+        double *ys_cache = cache;
+        double *zs_cache = ys_cache + (L+1)*ngridy;
+        double *xs_cache = zs_cache + (L+1)*ngridz;
         __syncthreads();
         for (int n = thread_id; n < ngridy*(L+1); n += THREADS) {
             int m = n / ngridy;
@@ -679,8 +772,8 @@ void _eval_tau_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
         int ny0 = grid_start[1*WARP_SIZE+sp_id];
         int nz0 = grid_start[2*WARP_SIZE+sp_id];
         double *xs_cache = cache;
-        double *zs_cache = xs_cache + (L+1)*ngridx;
-        double *ys_cache = zs_cache + (L+1)*ngridz;
+        double *ys_cache = xs_cache + (L+1)*ngridx;
+        double *zs_cache = ys_cache + (L+1)*ngridy;
         __syncthreads();
         for (int n = thread_id; n < ngridx*(L+1); n += THREADS) {
             int m = n / ngridx;
@@ -742,7 +835,7 @@ void eval_tau_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     int thread_id = threadIdx.x;
     int b_id = blockIdx.x;
     int ngrid_span = bounds.ngrid_radius * 2;
-    int xs_size = (L+1) * ngrid_span;
+    int xs_size = (L+3) * ngrid_span;
     int nf2 = (L+1)*(L+2)/2;
     int nf3 = nf2 * (L+3);
     pool += (xs_size*3 + nf3 + nf2*ngrid_span + 3) * WARP_SIZE * b_id;
@@ -788,14 +881,14 @@ int MG_eval_tau_orth(double *rho, double *dm, MGridEnvVars envs,
 
     switch (l) {
     case 0: eval_tau_orth_kernel<0> <<<workers, THREADS, buflen(0, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-//    case 1: eval_tau_orth_kernel<1> <<<workers, THREADS, buflen(1, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-//    case 2: eval_tau_orth_kernel<2> <<<workers, THREADS, buflen(2, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-//    case 3: eval_tau_orth_kernel<3> <<<workers, THREADS, buflen(3, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-//    case 4: eval_tau_orth_kernel<4> <<<workers, THREADS, buflen(4, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-//    case 5: eval_tau_orth_kernel<5> <<<workers, THREADS, buflen(5, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-//    case 6: eval_tau_orth_kernel<6> <<<workers, THREADS, buflen(6, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-//    case 7: eval_tau_orth_kernel<7> <<<workers, THREADS, buflen(7, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-//    case 8: eval_tau_orth_kernel<8> <<<workers, THREADS, buflen(8, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 1: eval_tau_orth_kernel<1> <<<workers, THREADS, buflen(1, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 2: eval_tau_orth_kernel<2> <<<workers, THREADS, buflen(2, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 3: eval_tau_orth_kernel<3> <<<workers, THREADS, buflen(3, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 4: eval_tau_orth_kernel<4> <<<workers, THREADS, buflen(4, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 5: eval_tau_orth_kernel<5> <<<workers, THREADS, buflen(5, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 6: eval_tau_orth_kernel<6> <<<workers, THREADS, buflen(6, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 7: eval_tau_orth_kernel<7> <<<workers, THREADS, buflen(7, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 8: eval_tau_orth_kernel<8> <<<workers, THREADS, buflen(8, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
     default: return 1;
     }
 

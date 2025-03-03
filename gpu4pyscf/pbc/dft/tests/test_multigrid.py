@@ -29,7 +29,7 @@ def setUpModule():
     cell_orth = gto.M(
         verbose = 7,
         output = '/dev/null',
-        a = np.eye(3)*3.5668,
+        a = np.diag([3.6, 3.2, 4.5]),
         atom = '''C     0.      0.      0.
                   C     1.8     1.8     1.8   ''',
         basis = ('gth-dzv', [[3, [2., 1.]], [4, [1., 1.]]]),

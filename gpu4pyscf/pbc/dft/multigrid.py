@@ -199,12 +199,11 @@ def _eval_tauG(ni, dm_kpts, hermi=1, kpts=None):
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     workers = gpu_specs['multiProcessorCount']
-    workers = 1
     tasks = ni.tasks
     nf2 = (lmax*2+1)*(lmax*2+2)//2
     nf3 = nf2*(lmax*2+3)
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
-    cache_size = ((lmax*2+1)*ngrid_span*3 + nf3 + nf2*ngrid_span + 3) * WARP_SIZE
+    cache_size = ((lmax*2+3)*ngrid_span*3 + nf3 + nf2*ngrid_span + 3) * WARP_SIZE
     pool = cp.empty((workers, cache_size))
 
     init_constant(cell)
@@ -230,7 +229,6 @@ def _eval_tauG(ni, dm_kpts, hermi=1, kpts=None):
                     ctypes.c_int(workers))
                 if err != 0:
                     raise RuntimeError(f'MG_eval_tau_orth kernel for l={task.l} failed')
-            print('tau\n',tauR)
 
         weight = 1./nkpts * cell.vol/ngrids
         tau_freq = tools.fft(tauR.reshape(nset, *mesh), mesh)
@@ -292,6 +290,7 @@ def _get_j_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
             logger.warn(cell, msg)
 
         vR = cp.asarray(v_rs.real, order='C')
+        vR[:]=.025*4
         for i in range(nset):
             for task in sub_tasks:
                 err = kern(
@@ -424,6 +423,13 @@ def _get_tau_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
     nset = len(vG)
     mesh_largest = tasks[0][0].mesh
     vG = vG.reshape(nset, *mesh_largest)
+
+    #ngrids = np.prod(mesh_largest)
+    #weight = cell.vol / ngrids
+    #v_rs = tools.ifft(vG, mesh_largest).reshape(nset,ngrids).real/4
+    #print(v_rs)
+    #wv = np.load('wv.npy')
+    #vG = tools.fft(wv, mesh_largest).reshape(1,*mesh_largest)*4
 
     init_constant(cell)
     kern = libmgrid.MG_eval_mat_tau_orth
@@ -851,6 +857,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
 
     vol = cell.vol
+    # Additional weight_penalty may be required for GGA and MGGA
     weight_penalty = vol
     precision = cell.precision / max(weight_penalty, 1)
 
@@ -898,6 +905,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     #     fac_drj = (lj * .5/aij + drj**2 + Ecut/2/aij**2)**(lj*.5)
     #             ~= (lj * .5/aij + drj**2 + log(1./precision)/aij)**(lj*.5)
     # Here, this fac is approximately derived from the overlap integral
+    #fac = fac_norm * fac_dri * fac_drj * fl / precision
     fac = ovlp / precision
     Ecut = cp.log(fac + 1.) * 2*aij
 

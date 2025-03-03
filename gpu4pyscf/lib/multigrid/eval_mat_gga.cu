@@ -814,8 +814,8 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
     __syncthreads();
 
     fill_dm_xyz<L>(dm_xyz, gx_dmyz, xs_exp, ngridx, ngrid_span);
-    _dm_xyz_to_dm<L>(out, dm_xyz, nao, li, lj, ri, rj, cicj, cache,
-                     npairs_this_block);
+    dm_xyz_to_dm<L>(out, dm_xyz, nao, li, lj, ri, rj, cicj, cache,
+                    npairs_this_block);
     __syncthreads();
 
     // sigmax: contract mesh_y, mesh_z

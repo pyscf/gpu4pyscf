@@ -29,7 +29,6 @@ void fill_dm_xyz_ipip(double *dm_xyz, double *gx_dmyz, double *xs_exp,
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
-    int L1 = L + 1;
     int L2 = L + 2;
     int L3 = L + 3;
     int nf2 = (L+1)*(L+2)/2;
@@ -43,7 +42,7 @@ void fill_dm_xyz_ipip(double *dm_xyz, double *gx_dmyz, double *xs_exp,
         }
         for (int ix = warp_id; ix < ngridx; ix += WARPS) {
 #pragma unroll
-            for (int mx = 0; mx <= L1; ++mx) {
+            for (int mx = 0; mx <= L2; ++mx) {
                 r1[mx] = xs_exp[(mx*ngrid_span+ix)*WARP_SIZE];
             }
             double *pgx = gx_dmyz + ix * nf2*WARP_SIZE;
@@ -116,7 +115,57 @@ void fill_dm_xyz_ipip(double *dm_xyz, double *gx_dmyz, double *xs_exp,
         if (m < nf2*L3) {
             dm_xyz[m*WARP_SIZE] = r3[n];
         }
+        __syncthreads();
     }
+}
+
+template <int L> __device__ inline
+double sub_dm_xyz_to_dm(int lx_i, int ly_i, int lz_i, int lx_j, int ly_j, int lz_j,
+                        int lj3, double ai2, double aj2,
+                        double *cx, double *cy, double *cz, double *dm_xyz)
+{
+    int L3 = L + 3;
+    double dm_ij = 0.;
+    for (int jx = 0; jx <= lx_j; ++jx) {
+        double fac_cx = cx[(jx+lx_j*lj3)*WARP_SIZE];
+        int lx = lx_i + jx;
+        for (int jy = 0; jy <= ly_j; ++jy) {
+            double cxy = fac_cx * cy[(jy+ly_j*lj3)*WARP_SIZE];
+            int ly = ly_i + jy;
+            int xy_idx = ADDR2(L, lx, ly);
+            if (lz_i > 0) {
+                if (lz_j > 0) {
+                    double fac = lz_i * lz_j * cxy;
+                    for (int jz = 0; jz <= lz_j-1; ++jz) {
+                        int lz = lz_i - 1 + jz;
+                        double cxyz = fac * cz[(jz+(lz_j-1)*lj3)*WARP_SIZE];
+                        dm_ij += cxyz * dm_xyz[(xy_idx*L3+lz)*WARP_SIZE];
+                    }
+                }
+                double fac = lz_i * aj2 * cxy;
+                for (int jz = 0; jz <= lz_j+1; ++jz) {
+                    int lz = lz_i - 1 + jz;
+                    double cxyz = fac * cz[(jz+(lz_j+1)*lj3)*WARP_SIZE];
+                    dm_ij += cxyz * dm_xyz[(xy_idx*L3+lz)*WARP_SIZE];
+                }
+            }
+            if (lz_j > 0) {
+                double fac = ai2 * lz_j * cxy;
+                for (int jz = 0; jz <= lz_j-1; ++jz) {
+                    int lz = lz_i + 1 + jz;
+                    double cxyz = fac * cz[(jz+(lz_j-1)*lj3)*WARP_SIZE];
+                    dm_ij += cxyz * dm_xyz[(xy_idx*L3+lz)*WARP_SIZE];
+                }
+            }
+            double fac = ai2 * aj2 * cxy;
+            for (int jz = 0; jz <= lz_j+1; ++jz) {
+                int lz = lz_i + 1 + jz;
+                double cxyz = fac * cz[(jz+(lz_j+1)*lj3)*WARP_SIZE];
+                dm_ij += cxyz * dm_xyz[(xy_idx*L3+lz)*WARP_SIZE];
+            }
+        }
+    }
+    return dm_ij;
 }
 
 template <int L> __device__ static
@@ -129,7 +178,6 @@ void _dm_xyz_to_dm_derivx(double *dm, double *dm_yzx, int nao, int li, int lj,
     int warp_id = thread_id / WARP_SIZE;
     int lj2 = lj + 2;
     int lj3 = lj + 3;
-    int L3 = L + 3;
     double *cx = cache + sp_id;
     double *cy = cx + lj3 * lj3 * WARP_SIZE;
     double *cz = cy + lj3 * lj3 * WARP_SIZE;
@@ -159,10 +207,15 @@ void _dm_xyz_to_dm_derivx(double *dm, double *dm_yzx, int nao, int li, int lj,
         int lx_j = j_fold2idx[j].x;
         int ly_j = j_fold2idx[j].y;
         int lz_j = lj - lx_j - ly_j;
+#if 1
+        double dm_ij = sub_dm_xyz_to_dm<L>(ly_i, lz_i, lx_i, ly_j, lz_j, lx_j,
+                                           lj3, ai2, aj2, cy, cz, cx, dm_yzx);
+#else
+        int L3 = L + 3;
         double dm_ij = 0.;
         double fac;
         for (int jy = 0; jy <= ly_j; ++jy) {
-            double fac_cy = cicj * cy[(jy+ly_j*lj3)*WARP_SIZE];
+            double fac_cy = cy[(jy+ly_j*lj3)*WARP_SIZE];
             int ly = ly_i + jy;
             for (int jz = 0; jz <= lz_j; ++jz) {
                 double cyz = fac_cy * cz[(jz+lz_j*lj3)*WARP_SIZE];
@@ -200,7 +253,8 @@ void _dm_xyz_to_dm_derivx(double *dm, double *dm_yzx, int nao, int li, int lj,
                 }
             }
         }
-        atomicAdd(dm+i*nao+j, dm_ij);
+#endif
+        atomicAdd(dm+i*nao+j, cicj * dm_ij);
     }
 }
 
@@ -214,7 +268,6 @@ void _dm_xyz_to_dm_derivy(double *dm, double *dm_xzy, int nao, int li, int lj,
     int warp_id = thread_id / WARP_SIZE;
     int lj2 = lj + 2;
     int lj3 = lj + 3;
-    int L3 = L + 3;
     double *cx = cache + sp_id;
     double *cy = cx + lj3 * lj3 * WARP_SIZE;
     double *cz = cy + lj3 * lj3 * WARP_SIZE;
@@ -244,10 +297,15 @@ void _dm_xyz_to_dm_derivy(double *dm, double *dm_xzy, int nao, int li, int lj,
         int lx_j = j_fold2idx[j].x;
         int ly_j = j_fold2idx[j].y;
         int lz_j = lj - lx_j - ly_j;
+#if 1
+        double dm_ij = sub_dm_xyz_to_dm<L>(lx_i, lz_i, ly_i, lx_j, lz_j, ly_j,
+                                           lj3, ai2, aj2, cx, cz, cy, dm_xzy);
+#else
+        int L3 = L + 3;
         double dm_ij = 0.;
         double fac;
         for (int jx = 0; jx <= lx_j; ++jx) {
-            double fac_cx = cicj * cx[(jx+lx_j*lj3)*WARP_SIZE];
+            double fac_cx = cx[(jx+lx_j*lj3)*WARP_SIZE];
             int lx = lx_i + jx;
             for (int jz = 0; jz <= lz_j; ++jz) {
                 double cxz = fac_cx * cz[(jz+lz_j*lj3)*WARP_SIZE];
@@ -285,7 +343,8 @@ void _dm_xyz_to_dm_derivy(double *dm, double *dm_xzy, int nao, int li, int lj,
                 }
             }
         }
-        atomicAdd(dm+i*nao+j, dm_ij);
+#endif
+        atomicAdd(dm+i*nao+j, cicj * dm_ij);
     }
 }
 
@@ -299,7 +358,6 @@ void _dm_xyz_to_dm_derivz(double *dm, double *dm_xyz, int nao, int li, int lj,
     int warp_id = thread_id / WARP_SIZE;
     int lj2 = lj + 2;
     int lj3 = lj + 3;
-    int L3 = L + 3;
     double *cx = cache + sp_id;
     double *cy = cx + lj3 * lj3 * WARP_SIZE;
     double *cz = cy + lj3 * lj3 * WARP_SIZE;
@@ -329,10 +387,15 @@ void _dm_xyz_to_dm_derivz(double *dm, double *dm_xyz, int nao, int li, int lj,
         int lx_j = j_fold2idx[j].x;
         int ly_j = j_fold2idx[j].y;
         int lz_j = lj - lx_j - ly_j;
+#if 1
+        double dm_ij = sub_dm_xyz_to_dm<L>(lx_i, ly_i, lz_i, lx_j, ly_j, lz_j,
+                                           lj3, ai2, aj2, cx, cy, cz, dm_xyz);
+#else
+        int L3 = L + 3;
         double dm_ij = 0.;
         double fac;
         for (int jx = 0; jx <= lx_j; ++jx) {
-            double fac_cx = cicj * cx[(jx+lx_j*lj3)*WARP_SIZE];
+            double fac_cx = cx[(jx+lx_j*lj3)*WARP_SIZE];
             int lx = lx_i + jx;
             for (int jy = 0; jy <= ly_j; ++jy) {
                 double cxy = fac_cx * cy[(jy+ly_j*lj3)*WARP_SIZE];
@@ -370,12 +433,13 @@ void _dm_xyz_to_dm_derivz(double *dm, double *dm_xyz, int nao, int li, int lj,
                 }
             }
         }
-        atomicAdd(dm+i*nao+j, dm_ij);
+#endif
+        atomicAdd(dm+i*nao+j, cicj * dm_ij);
     }
 }
 
 template <int L, int TILE> __device__ static
-void _eval_mat_tau_kernel(double *out, double *rho, MGridEnvVars envs,
+void _eval_mat_tau_kernel(double *out, double *vR, MGridEnvVars envs,
                           MGridBounds bounds, double *pool, uint32_t pair_idx0)
 {
     int thread_id = threadIdx.x;
@@ -422,10 +486,6 @@ void _eval_mat_tau_kernel(double *out, double *rho, MGridEnvVars envs,
     int mesh_y = mesh[1];
     int mesh_z = mesh[2];
     int mesh_yz = mesh_y * mesh_z;
-    int mesh_xyz = mesh_x * mesh_yz;
-    double *vx = rho + mesh_xyz;
-    double *vy = vx + mesh_xyz;
-    double *vz = vy + mesh_xyz;
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = ngrid_span * (L+3) * WARP_SIZE;
     int *grid_start = (int *)pool + sp_id;
@@ -439,7 +499,7 @@ void _eval_mat_tau_kernel(double *out, double *rho, MGridEnvVars envs,
     double *xs_cache, *ys_cache, *zs_cache;
     double *dm_xyz = gx_dmyz + nf2 * ngrid_span * WARP_SIZE;
     if (L < 4) {
-        dm_xyz = cache + (MIN(LMAX,L)+2)*(MIN(LMAX,L)+2)*3*WARP_SIZE + sp_id;
+        dm_xyz = cache + (MIN(LMAX,L)+3)*(MIN(LMAX,L)+3)*3*WARP_SIZE + sp_id;
     }
 
     int nx0 = grid_start[0*WARP_SIZE];
@@ -491,7 +551,7 @@ void _eval_mat_tau_kernel(double *out, double *rho, MGridEnvVars envs,
                     }
                     for (int iz = 0; iz < nz; ++iz) {
                         int tz = (iz + iz0 + nz0) % mesh_z;
-                        double r = vx[tx*mesh_yz+ty*mesh_z+tz];
+                        double r = vR[tx*mesh_yz+ty*mesh_z+tz];
 #pragma unroll
                         for (int mz = 0; mz <= L; ++mz) {
                             r1[mz] += zs_cache[(mz*TILE+iz)*WARP_SIZE] * r;
@@ -522,10 +582,11 @@ void _eval_mat_tau_kernel(double *out, double *rho, MGridEnvVars envs,
     __syncthreads();
 
     // derivy: contract mesh_x, mesh_z
+    double *gy_dmxz = gx_dmyz;
     xs_cache = cache + sp_id;
     zs_cache = xs_cache + TILE * (L+1) * WARP_SIZE;
-    for (int n = warp_id; n < ngridx*nf2; n += WARPS) {
-        gx_dmyz[n*WARP_SIZE] = 0.;
+    for (int n = warp_id; n < ngridy*nf2; n += WARPS) {
+        gy_dmxz[n*WARP_SIZE] = 0.;
     }
     for (int iz0 = 0; iz0 < ngridz; iz0 += TILE) {
         __syncthreads();
@@ -549,7 +610,7 @@ void _eval_mat_tau_kernel(double *out, double *rho, MGridEnvVars envs,
                     }
                     for (int iz = 0; iz < nz; ++iz) {
                         int tz = (iz + iz0 + nz0) % mesh_z;
-                        double r = vy[tx*mesh_yz+ty*mesh_z+tz];
+                        double r = vR[tx*mesh_yz+ty*mesh_z+tz];
 #pragma unroll
                         for (int mz = 0; mz <= L; ++mz) {
                             r1[mz] += zs_cache[(mz*TILE+iz)*WARP_SIZE] * r;
@@ -564,7 +625,7 @@ void _eval_mat_tau_kernel(double *out, double *rho, MGridEnvVars envs,
                         }
                     }
                 }
-                double *pgy = gx_dmyz + iy * nf2*WARP_SIZE;
+                double *pgy = gy_dmxz + iy * nf2*WARP_SIZE;
 #pragma unroll
                 for (int m = 0; m < nf2; ++m) {
                     pgy[m*WARP_SIZE] += r2[m];
@@ -574,16 +635,17 @@ void _eval_mat_tau_kernel(double *out, double *rho, MGridEnvVars envs,
     }
     __syncthreads();
 
-    fill_dm_xyz_ipip<L>(dm_xyz, gx_dmyz, ys_exp, ngridy, ngrid_span);
+    fill_dm_xyz_ipip<L>(dm_xyz, gy_dmxz, ys_exp, ngridy, ngrid_span);
     _dm_xyz_to_dm_derivy<L>(out, dm_xyz, nao, li, lj, ri, rj, ai, aj,
                             cicj, cache, npairs_this_block);
     __syncthreads();
 
     // derivz: contract mesh_x, mesh_y
+    double *gz_dmxy = gx_dmyz;
     xs_cache = cache + sp_id;
     ys_cache = xs_cache + TILE * (L+1) * WARP_SIZE;
-    for (int n = warp_id; n < ngridx*nf2; n += WARPS) {
-        gx_dmyz[n*WARP_SIZE] = 0.;
+    for (int n = warp_id; n < ngridz*nf2; n += WARPS) {
+        gz_dmxy[n*WARP_SIZE] = 0.;
     }
     for (int ix0 = 0; ix0 < ngridx; ix0 += TILE) {
         __syncthreads();
@@ -607,7 +669,7 @@ void _eval_mat_tau_kernel(double *out, double *rho, MGridEnvVars envs,
                     }
                     for (int iy = 0; iy < ny; ++iy) {
                         int ty = (iy + iy0 + ny0) % mesh_y;
-                        double r = vz[tx*mesh_yz+ty*mesh_z+tz];
+                        double r = vR[tx*mesh_yz+ty*mesh_z+tz];
 #pragma unroll
                         for (int my = 0; my <= L; ++my) {
                             r1[my] += ys_cache[(my*TILE+iy)*WARP_SIZE] * r;
@@ -622,7 +684,7 @@ void _eval_mat_tau_kernel(double *out, double *rho, MGridEnvVars envs,
                         }
                     }
                 }
-                double *pgz = gx_dmyz + iz * nf2*WARP_SIZE;
+                double *pgz = gz_dmxy + iz * nf2*WARP_SIZE;
 #pragma unroll
                 for (int m = 0; m < nf2; ++m) {
                     pgz[m*WARP_SIZE] += r2[m];
@@ -632,7 +694,7 @@ void _eval_mat_tau_kernel(double *out, double *rho, MGridEnvVars envs,
     }
     __syncthreads();
 
-    fill_dm_xyz_ipip<L>(dm_xyz, gx_dmyz, zs_exp, ngridz, ngrid_span);
+    fill_dm_xyz_ipip<L>(dm_xyz, gz_dmxy, zs_exp, ngridz, ngrid_span);
     _dm_xyz_to_dm_derivz<L>(out, dm_xyz, nao, li, lj, ri, rj, ai, aj,
                             cicj, cache, npairs_this_block);
 }
@@ -646,8 +708,8 @@ void eval_mat_tau_kernel(double *out, double *rho, MGridEnvVars envs,
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = (L+3) * ngrid_span;
     int nf2 = (L+1)*(L+2)/2;
-    int l3 = nf2*(L+3);
-    pool += (xs_size*3 + nf2*ngrid_span + 3 + l3) * WARP_SIZE * b_id;
+    int nf3 = nf2 * (L+3);
+    pool += (xs_size*3 + nf3 + nf2*ngrid_span + 3) * WARP_SIZE * b_id;
 
     __shared__ uint32_t pair_idx0;
     if (thread_id == 0) {

@@ -157,8 +157,8 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     int nao = envs.nao;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
-    _dm_xyz_to_dm<L>(out+i0*nao+j0, dm_xyz, nao, li, lj, ri, rj, cicj, cache,
-                     npairs_this_block);
+    dm_xyz_to_dm<L>(out+i0*nao+j0, dm_xyz, nao, li, lj, ri, rj, cicj, cache,
+                    npairs_this_block);
 }
 
 template <int L, int TILE> __global__

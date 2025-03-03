@@ -82,7 +82,7 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     // TODO: multiple dms
-    _dm_to_dm_xyz<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, cicj);
+    dm_to_dm_xyz<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, cicj);
 
     double r1[L+1];
     double dmx_gyz[L+1];
@@ -174,6 +174,8 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
             int iyz = xyz % ngridyz;
             int iy = iyz / ngridz;
             int iz = iyz % ngridz;
+            int ty = (iy + ny0) % mesh_y;
+            int tz = (iz + nz0) % mesh_z;
 #pragma unroll
             for (int mz = 0; mz <= L; ++mz) {
                 r1[mz] = zs_cache[mz*ngridz+iz];
@@ -186,8 +188,6 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
                     dmx_gyz[mx] += ys_cache[iy*nf2+ADDR2(L,mx,mz)] * r1[mz];
                 }
             }
-            int ty = (iy + ny0) % mesh_y;
-            int tz = (iz + nz0) % mesh_z;
             int addr_yz = ty * mesh_z + tz;
             double *rho_local = rho + addr_yz;
             for (int ix = ix_inc; ix < ngridx; ix += ix_stride) {

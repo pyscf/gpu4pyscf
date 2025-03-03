@@ -75,8 +75,8 @@ double sub_dm_xyz(int lx, int ly, int lz, int li, int lj, int nao,
 }
 
 template <int L> __device__ static
-void _dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
-                   double *ri, double *rj, double cicj)
+void dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
+                  double *ri, double *rj, double cicj)
 {
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
@@ -105,9 +105,9 @@ void _dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
 }
 
 template <int L> __device__ static
-void _dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj,
-                   double *ri, double *rj, double cicj, double *cache,
-                   int npairs_per_block)
+void dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj,
+                  double *ri, double *rj, double cicj, double *cache,
+                  int npairs_per_block)
 {
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
