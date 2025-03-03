@@ -289,8 +289,12 @@ class TDBase(lib.StreamObject):
         return precond
 
     def nuc_grad_method(self):
-        from gpu4pyscf.grad import tdrhf
-        return tdrhf.Gradients(self)
+        if hasattr(self._scf,'with_df'):
+            from gpu4pyscf.df.grad import tdrhf
+            return tdrhf.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tdrhf
+            return tdrhf.Gradients(self)
 
     as_scanner = tdhf_cpu.as_scanner
 

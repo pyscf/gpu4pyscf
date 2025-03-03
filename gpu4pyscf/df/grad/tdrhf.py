@@ -1,0 +1,214 @@
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import copy
+import numpy
+import cupy
+from cupyx.scipy.linalg import solve_triangular
+from pyscf import scf, gto
+from gpu4pyscf.df import int3c2e, df
+from gpu4pyscf.lib.cupy_helper import tag_array, contract, cholesky
+from gpu4pyscf.df.grad import rhf as rhf_grad_df
+from gpu4pyscf.tdscf import rhf as tdrhf
+from gpu4pyscf.grad import tdrhf as tdrhf_grad
+from gpu4pyscf import __config__
+from gpu4pyscf.lib import logger
+from gpu4pyscf.df.grad.jk import get_rhojk, get_grad_vjk
+
+
+LINEAR_DEP_THRESHOLD = df.LINEAR_DEP_THR
+MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
+ALIGNED = getattr(__config__, 'ao_aligned', 64)
+
+
+def get_jk(tdgrad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega=None):
+    '''
+    Computes the first-order derivatives of the energy contributions from
+    J and K terms per atom.
+
+    NOTE: This function is incompatible to the one implemented in PySCF CPU version.
+    In the CPU version, get_jk returns the first order derivatives of J/K matrices.
+    '''
+    if mol is None: mol = tdgrad.mol
+    #TODO: dm has to be the SCF density matrix in this version.  dm should be
+    # extended to any 1-particle density matrix
+    mf = tdgrad.base._scf
+    assert dm0 is not None
+    if omega is None:
+        with_df = mf.with_df
+    else:
+        key = '%.6f' % omega
+        if key in mf.with_df._rsh_df:
+            with_df = mf.with_df._rsh_df[key]
+        else:
+            dfobj = mf.with_df
+            with_df = dfobj._rsh_df[key] = dfobj.copy().reset()
+
+    auxmol = with_df.auxmol
+    if not hasattr(with_df, 'intopt') or with_df._cderi is None:
+        with_df.build(omega=omega)
+    intopt = with_df.intopt
+    naux = with_df.naux
+
+    log = logger.new_logger(mol, mol.verbose)
+    t0 = (logger.process_clock(), logger.perf_counter())
+
+    if isinstance(mf, scf.rohf.ROHF):
+        raise NotImplementedError()
+    mo_coeff = cupy.asarray(mf.mo_coeff)
+    mo_occ = cupy.asarray(mf.mo_occ)
+
+    dm = intopt.sort_orbitals(dm0, axis=[0,1])
+    orbo = mo_coeff[:,mo_occ>0] * mo_occ[mo_occ>0] ** 0.5
+    mo_coeff = None
+    orbo = intopt.sort_orbitals(orbo, axis=[0])
+
+    rhoj, rhok = get_rhojk(with_df, dm, orbo, with_j=with_j, with_k=with_k)
+    
+    # (d/dX P|Q) contributions
+    if omega and omega > 1e-10:
+        with auxmol.with_range_coulomb(omega):
+            int2c_e1 = auxmol.intor('int2c2e_ip1')
+    else:
+        int2c_e1 = auxmol.intor('int2c2e_ip1')
+    int2c_e1 = cupy.asarray(int2c_e1)
+
+    rhoj_cart = rhok_cart = None
+    auxslices = auxmol.aoslice_by_atom()
+    aux_cart2sph = intopt.aux_cart2sph
+    low = with_df.cd_low
+    low_t = low.T.copy()
+    if with_j:
+        if low.tag == 'eig':
+            rhoj = cupy.dot(low_t.T, rhoj)
+        elif low.tag == 'cd':
+            #rhoj = solve_triangular(low_t, rhoj, lower=False)
+            rhoj = solve_triangular(low_t, rhoj, lower=False, overwrite_b=True)
+        if not auxmol.cart:
+            rhoj_cart = contract('pq,q->p', aux_cart2sph, rhoj)
+        else:
+            rhoj_cart = rhoj
+
+        rhoj = intopt.unsort_orbitals(rhoj, aux_axis=[0])
+        tmp = contract('xpq,q->xp', int2c_e1, rhoj)
+        vjaux = -contract('xp,p->xp', tmp, rhoj)
+        vjaux_2c = cupy.array([-vjaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
+        rhoj = vjaux = tmp = None
+    if with_k:
+        nocc = orbo.shape[-1]
+        if low.tag == 'eig':
+            rhok = contract('pq,qij->pij', low_t.T, rhok)
+        elif low.tag == 'cd':
+            #rhok = solve_triangular(low_t, rhok, lower=False)
+            rhok = solve_triangular(low_t, rhok.reshape(naux, -1), lower=False, overwrite_b=True).reshape(naux, nocc, nocc)
+            rhok = rhok.copy(order='C')
+        tmp = contract('pij,qij->pq', rhok, rhok)
+        tmp = intopt.unsort_orbitals(tmp, aux_axis=[0,1])
+        vkaux = -contract('xpq,pq->xp', int2c_e1, tmp)
+        vkaux_2c = cupy.array([-vkaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
+        vkaux = tmp = None
+        if not auxmol.cart:
+            rhok_cart = contract('pq,qkl->pkl', aux_cart2sph, rhok)
+        else:
+            rhok_cart = rhok
+        rhok = None
+    low_t = None
+    t0 = log.timer_debug1('rhoj and rhok', *t0)
+    int2c_e1 = None
+
+    dm_cart = dm
+    orbo_cart = orbo
+    if not mol.cart:
+        # sph2cart for ao
+        cart2sph = intopt.cart2sph
+        orbo_cart = cart2sph @ orbo
+        dm_cart = cart2sph @ dm @ cart2sph.T
+        
+    with_df._cderi = None # release GPU memory
+    vj, vk, vjaux, vkaux = get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbo_cart,
+                                        with_j=with_j, with_k=with_k, omega=omega)
+    # NOTE: vj and vk are still in cartesian
+    _sorted_mol = intopt._sorted_mol
+    natm = _sorted_mol.natm
+    nao_cart = _sorted_mol.nao
+    ao2atom = numpy.zeros([nao_cart, natm])
+    ao_loc = _sorted_mol.ao_loc
+    for ibas, iatm in enumerate(_sorted_mol._bas[:,gto.ATOM_OF]):
+        ao2atom[ao_loc[ibas]:ao_loc[ibas+1],iatm] = 1
+    ao2atom = cupy.asarray(ao2atom)
+    if with_j:
+        vj = -ao2atom.T @ vj.T
+    if with_k:
+        vk = -ao2atom.T @ vk.T
+    t0 = log.timer_debug1('(di,j|P) and (i,j|dP)', *t0)
+
+    _sorted_auxmol = intopt._sorted_auxmol
+    natm = _sorted_auxmol.natm
+    naux_cart = _sorted_auxmol.nao
+    aux2atom = numpy.zeros([naux_cart, natm])
+    ao_loc = _sorted_auxmol.ao_loc
+    for ibas, iatm in enumerate(_sorted_auxmol._bas[:,gto.ATOM_OF]):
+        aux2atom[ao_loc[ibas]:ao_loc[ibas+1],iatm] = 1
+    aux2atom = cupy.asarray(aux2atom)
+    if with_j:
+        vjaux_3c = aux2atom.T @ vjaux.T
+        vjaux = vjaux_2c - vjaux_3c
+
+    if with_k:
+        vkaux_3c = aux2atom.T @ vkaux.T
+        vkaux = vkaux_2c - vkaux_3c
+    return vj, vk, vjaux, vkaux
+
+
+class Gradients(tdrhf_grad.Gradients):
+    from gpu4pyscf.lib.utils import to_gpu, device
+
+    _keys = {'with_df', 'auxbasis_response'}
+    def __init__(self, td):
+        # Whether to include the response of DF auxiliary basis when computing
+        # nuclear gradients of J/K matrices
+        tdrhf_grad.Gradients.__init__(self, td)
+
+    auxbasis_response = True
+    get_jk = get_jk
+
+    def check_sanity(self):
+        assert isinstance(self.base._scf, df.df_jk._DFHF)
+        assert isinstance(self.base, tdrhf.TDHF) or isinstance(self.base, tdrhf.TDA)
+
+    def get_j(self, mol=None, dm=None, hermi=0):
+        vj, _, vjaux, _ = self.get_jk(mol, dm, with_k=False)
+        return vj, vjaux
+
+    def get_k(self, mol=None, dm=None, hermi=0):
+        _, vk, _, vkaux = self.get_jk(mol, dm, with_j=False)
+        return vk, vkaux
+
+    def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, verbose=None):
+        if omega != 0.0:
+            vj, vk, vjaux, vkaux = self.get_jk(mol, dm, omega=omega)
+        else:
+            vj, vk, vjaux, vkaux = self.get_jk(mol, dm)
+        vhf = vj * j_factor - vk * .5 * k_factor
+        if self.auxbasis_response:
+            e1_aux = vjaux * j_factor - vkaux * .5 * k_factor
+            logger.debug1(self, 'sum(auxbasis response) %s', e1_aux.sum(axis=0))
+        else:
+            e1_aux = None
+
+        vhf = tag_array(vhf, aux=e1_aux)
+        
+        return vhf
+
+Grad = Gradients
