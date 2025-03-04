@@ -56,8 +56,7 @@ def _hk_ip1_ip1(rhok1_Pko, dm0, mocc_2):
     hk_ao_ao = cupy.zeros([nao,nao,3,3])
     cupy.get_default_memory_pool().free_all_blocks()
     mem_avail = get_avail_mem()
-    blksize = int(((mem_avail-hk_ao_ao.nbytes)*0.24/(nao*nao*3*8)/ALIGNED))*ALIGNED
-    assert blksize > 1, 'Insufficient GPU memory'
+    blksize = int(((mem_avail-hk_ao_ao.nbytes)*0.4/(nao*nao*3*8)/ALIGNED))*ALIGNED
     for k0, k1 in lib.prange(0,nnz,blksize):
         #rhok1_Pko_kslice = cupy.asarray(rhok1_Pko[k0:k1])
         rhok1_Pko_kslice = copy_array(rhok1_Pko[k0:k1])
@@ -69,8 +68,9 @@ def _hk_ip1_ip1(rhok1_Pko, dm0, mocc_2):
 
         # (10|0)(0|01) without response of RI basis
         rhok1_Pkl_kslice = contract('piox,ko->pikx', rhok1_Pko_kslice, mocc_2)
+        rhok1_Pko_kslice = None
         hk_ao_ao += contract('pikx,pkiy->ikxy', rhok1_Pkl_kslice, rhok1_Pkl_kslice)
-        rhok1_Pkl_kslice = rhok1_Pko_kslice = None
+        rhok1_Pkl_kslice = None
     return hk_ao_ao
 
 def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None,
