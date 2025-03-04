@@ -299,8 +299,9 @@ def _jk_ip_task_mo(intopt, rhoj_cart, dm_cart, rhok_cart, orbo_cart, orbv_cart, 
             int3c_ip = buf[:size].reshape([3,k1-k0,nao_cart,nao_cart], order='C')
             rhoj_tmp0 = contract('xpji,ij->xip', int3c_ip, dm_cart)
             vj_outcore = contract('xip,p->xi', rhoj_tmp0, rhoj_cart[k0:k1])
-            int3c_ip_mo = cupy.einsum('xpuv,ui,vb->xpib', int3c_ip, orbo_cart, orbv_cart)
-            vk_outcore = contract('pbi,xpib->xi', rhok_tmp, int3c_ip_mo)
+            rhok_tmp = contract('pbi,ub->pui', rhok_tmp, orbv_cart)
+            rhok_tmp = contract('pui,vi->puv', rhok_tmp, orbo_cart)
+            vk_outcore = contract('puv,xpuv->xu', rhok_tmp, int3c_ip)
             if with_j: vj += vj_outcore
             if with_k: vk += vk_outcore
 
