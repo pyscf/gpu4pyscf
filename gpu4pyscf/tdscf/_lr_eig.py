@@ -722,7 +722,7 @@ def real_eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=Non
         Y_new = XY_new[:,A_size:].T
         if x0sym is None:
             V, W = VW_Gram_Schmidt_fill_holder(
-                V_holder[:,:m1], W_holder[:,:m1], X_new, Y_new, lindep)
+                V_holder[:,:m1], W_holder[:,:m1], X_new, Y_new, lindep**.5)
         else:
             xt_ir = xt_ir[r_index]
             xt_orth_ir = []
@@ -731,7 +731,7 @@ def real_eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=Non
             for ir in set(xt_ir):
                 idx = cp.nonzero(xt_ir == ir)[0]
                 _V, _W = VW_Gram_Schmidt_fill_holder(
-                    V_holder[:,:m1], W_holder[:,:m1], X_new[:,idx], Y_new[:,idx], lindep)
+                    V_holder[:,:m1], W_holder[:,:m1], X_new[:,idx], Y_new[:,idx], lindep**.5)
                 V.append(_V)
                 W.append(_W)
                 xt_orth_ir.append([ir] * len(_V))
@@ -805,19 +805,18 @@ def _qr(xs, lindep=1e-14):
     return xs[:nv], idx
 
 
-def _symmetric_orth(xt, lindep=1e-12):
+def _symmetric_orth(xt, lindep_sqrt=1e-6):
     xt = np.asarray(xt)
     if xt.dtype == np.float64:
-        return _symmetric_orth_real(xt, lindep)
+        return _symmetric_orth_real(xt, lindep_sqrt)
     else:
-        return _symmetric_orth_cmplx(xt, lindep)
+        return _symmetric_orth_cmplx(xt, lindep_sqrt)
 
-def _symmetric_orth_real(xt, lindep=1e-12):
+def _symmetric_orth_real(xt, lindep_sqrt=1e-6):
     '''
     Symmetric orthogonalization for xt = {[X, Y]},
     and its dual basis vectors {[Y, X]}
     '''
-    lindep_sqrt = lindep**0.5
     x0_size = xt.shape[1]
     s11 = xt.dot(xt.T)
     s21 = _conj_dot(xt, xt)
@@ -825,7 +824,7 @@ def _symmetric_orth_real(xt, lindep=1e-12):
     # s = [[s11, s21.conj().T],
     #      [s21, s11.conj()  ]]
     e, c = np.linalg.eigh(s11)
-    mask = e > lindep
+    mask = e > lindep_sqrt
     e = e[mask]
     if e.size == 0:
         return np.zeros([0, x0_size], dtype=xt.dtype)
@@ -876,8 +875,7 @@ def _symmetric_orth_real(xt, lindep=1e-12):
     x_orth[:,m:] += (c_orth * b).T.dot(xt[:,:m])
     return x_orth
 
-def _symmetric_orth_cmplx(xt, lindep=1e-12):
-    lindep_sqrt = lindep**0.5
+def _symmetric_orth_cmplx(xt, lindep_sqrt=1e-6):
     n, m = xt.shape
     if n == 0:
         raise RuntimeError('Linear dependency in trial bases')
@@ -961,12 +959,11 @@ def TDDFT_subspace_eigen_solver(a, b, sigma, pi, nroots):
     return omega, x, y
 
 
-def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, X_new, Y_new, lindep=1e-12):
+def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, X_new, Y_new, lindep_sqrt=1e-6):
     '''
     QR orthogonalization for (X_new, Y_new) basis vectors, then apply symmetric
     orthogonalization for {[X, Y]}, and its dual basis vectors {[Y, X]}
     '''
-    lindep_sqrt = lindep**0.5
     _x  = V_holder.T.dot(X_new)
     _x += W_holder.T.dot(Y_new)
     _y  = V_holder.T.dot(Y_new)
