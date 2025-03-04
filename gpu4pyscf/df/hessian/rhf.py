@@ -185,22 +185,22 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
                 #rhok1_Pko = contract('pq,qiox->piox', int2c_inv, wk1_Pko_islice)
                 rhok1_Pko = solve_j2c(wk1_Pko_islice)
                 wk1_Pko_islice = None
-                if hessobj.auxbasis_response:
-                    # (10|0)(1|00)
-                    wk_ip2_Ipo = contract('porx,io->pirx', wk_ip2_P__, mocc_2[i0:i1])
-                    hk_ao_aux[i0:i1] += contract('piox,pioy->ipxy', rhok1_Pko, wk_ip2_Ipo)
-                    wk_ip2_Ipo = None
 
-                    # (10|0)(1|0)(0|00)
-                    rhok0_P_I = contract('qor,ir->qoi', rhok0_P__, mocc_2[i0:i1])
-                    wk1_P_I = contract('ypq,qoi->pioy', int2c_ip1, rhok0_P_I)
-                    hk_ao_aux[i0:i1] -= contract("piox,pioy->ipxy", rhok1_Pko, wk1_P_I)
-                    wk1_P_I = None
+                # (10|0)(1|00)
+                wk_ip2_Ipo = contract('porx,io->pirx', wk_ip2_P__, mocc_2[i0:i1])
+                hk_ao_aux[i0:i1] += contract('piox,pioy->ipxy', rhok1_Pko, wk_ip2_Ipo)
+                wk_ip2_Ipo = None
 
-                    # (10|0)(0|1)(0|00)
-                    wk1_I = contract('yqp,piox->qioxy', int2c_ip1, rhok1_Pko)
-                    hk_ao_aux[i0:i1] -= contract('qoi,qioxy->iqxy', rhok0_P_I, wk1_I)
-                    wk1_I = rhok0_P_I = None
+                # (10|0)(1|0)(0|00)
+                rhok0_P_I = contract('qor,ir->qoi', rhok0_P__, mocc_2[i0:i1])
+                wk1_P_I = contract('ypq,qoi->pioy', int2c_ip1, rhok0_P_I)
+                hk_ao_aux[i0:i1] -= contract("piox,pioy->ipxy", rhok1_Pko, wk1_P_I)
+                wk1_P_I = None
+
+                # (10|0)(0|1)(0|00)
+                wk1_I = contract('yqp,piox->qioxy', int2c_ip1, rhok1_Pko)
+                hk_ao_aux[i0:i1] -= contract('qoi,qioxy->iqxy', rhok0_P_I, wk1_I)
+                wk1_I = rhok0_P_I = None
                 rhok1_Pko = None
         t1 = log.timer_debug1('contract int3c2e_ip1 with int2c_ip1', *t1)
         
