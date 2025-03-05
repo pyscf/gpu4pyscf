@@ -56,7 +56,7 @@ def _hk_ip1_ip1(rhok1_Pko, dm0, mocc_2):
     hk_ao_ao = cupy.zeros([nao,nao,3,3])
     cupy.get_default_memory_pool().free_all_blocks()
     mem_avail = get_avail_mem()
-    blksize = int((mem_avail*0.4/(nao*nao*3*8)/ALIGNED))*ALIGNED
+    blksize = int(((mem_avail-hk_ao_ao.nbytes)*0.4/(nao*nao*3*8)/ALIGNED))*ALIGNED
     for k0, k1 in lib.prange(0,nnz,blksize):
         #rhok1_Pko_kslice = cupy.asarray(rhok1_Pko[k0:k1])
         rhok1_Pko_kslice = copy_array(rhok1_Pko[k0:k1])
@@ -68,8 +68,9 @@ def _hk_ip1_ip1(rhok1_Pko, dm0, mocc_2):
 
         # (10|0)(0|01) without response of RI basis
         rhok1_Pkl_kslice = contract('piox,ko->pikx', rhok1_Pko_kslice, mocc_2)
+        rhok1_Pko_kslice = None
         hk_ao_ao += contract('pikx,pkiy->ikxy', rhok1_Pkl_kslice, rhok1_Pkl_kslice)
-        rhok1_Pkl_kslice = rhok1_Pko_kslice = None
+        rhok1_Pkl_kslice = None
     return hk_ao_ao
 
 def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None,
@@ -177,14 +178,14 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
         assert blksize > 0
         if hessobj.auxbasis_response:
             hk_ao_aux = cupy.zeros([nao,naux,3,3])
-        for i0, i1 in lib.prange(0,nao,blksize):
-            #wk1_Pko_islice = cupy.asarray(wk1_Pko[:,i0:i1])
-            wk1_Pko_islice = copy_array(wk1_Pko[:,i0:i1])
+            for i0, i1 in lib.prange(0,nao,blksize):
+                #wk1_Pko_islice = cupy.asarray(wk1_Pko[:,i0:i1])
+                wk1_Pko_islice = copy_array(wk1_Pko[:,i0:i1])
 
-            #rhok1_Pko = contract('pq,qiox->piox', int2c_inv, wk1_Pko_islice)
-            rhok1_Pko = solve_j2c(wk1_Pko_islice)
-            wk1_Pko_islice = None
-            if hessobj.auxbasis_response:
+                #rhok1_Pko = contract('pq,qiox->piox', int2c_inv, wk1_Pko_islice)
+                rhok1_Pko = solve_j2c(wk1_Pko_islice)
+                wk1_Pko_islice = None
+
                 # (10|0)(1|00)
                 wk_ip2_Ipo = contract('porx,io->pirx', wk_ip2_P__, mocc_2[i0:i1])
                 hk_ao_aux[i0:i1] += contract('piox,pioy->ipxy', rhok1_Pko, wk_ip2_Ipo)
@@ -200,7 +201,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
                 wk1_I = contract('yqp,piox->qioxy', int2c_ip1, rhok1_Pko)
                 hk_ao_aux[i0:i1] -= contract('qoi,qioxy->iqxy', rhok0_P_I, wk1_I)
                 wk1_I = rhok0_P_I = None
-        rhok1_Pko = None
+                rhok1_Pko = None
         t1 = log.timer_debug1('contract int3c2e_ip1 with int2c_ip1', *t1)
         
         rho2c_0 = contract('pij,qji->pq', rhok0_P__, rhok0_P__)
