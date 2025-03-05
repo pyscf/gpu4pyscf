@@ -178,20 +178,20 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
-    # if singlet:
-    #     j_factor=1.0
-    #     k_factor=1.0
-    # else:
-    #     j_factor=0.0
-    #     k_factor=1.0
-    # dvhf = td_grad.get_veff(mol, (dmxpy + dmxpy.T), j_factor * 2, k_factor * 2)
-    # for k, ia in enumerate(atmlst):
-    #     extra_force[k] += mf_grad.extra_force(ia, locals())
-    # dvhf_all += dvhf
-    # dvhf = td_grad.get_veff(mol, (dmxmy - dmxmy.T), 0.0, k_factor * 2)
-    # for k, ia in enumerate(atmlst):
-    #     extra_force[k] += mf_grad.extra_force(ia, locals())
-    # dvhf_all += dvhf
+    if singlet:
+        j_factor=1.0
+        k_factor=1.0
+    else:
+        j_factor=0.0
+        k_factor=1.0
+    dvhf = td_grad.get_veff(mol, (dmxpy + dmxpy.T), j_factor * 2, k_factor * 2)
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all += dvhf
+    dvhf = td_grad.get_veff(mol, (dmxmy - dmxmy.T), 0.0, k_factor * 2)
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all += dvhf
     time1 = log.timer('2e AO integral derivatives', *time1)
 
     delec = 2.0 * (dh_ground + dh_td - ds)
