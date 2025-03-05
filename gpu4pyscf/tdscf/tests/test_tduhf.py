@@ -61,7 +61,6 @@ class KnownValues(unittest.TestCase):
     def test_tdhf(self):
         mf = self.mf
         td = mf.TDHF()
-        td.lindep = 1e-6
         assert td.device == 'gpu'
         td.nstates = 5
         td.conv_tol = 1e-5
@@ -85,7 +84,6 @@ class KnownValues(unittest.TestCase):
     def test_tdhf1(self):
         mf1 = self.mf1
         td = mf1.TDHF()
-        td.lindep = 1e-6
         assert td.device == 'gpu'
         td.nstates = 4
         e = td.kernel()[0]
