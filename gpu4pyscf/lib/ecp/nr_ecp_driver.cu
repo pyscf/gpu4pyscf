@@ -99,30 +99,14 @@ int ECP_cart(double *gctr,
         case 13: type1_cart<1,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
         case 22: type1_cart<2,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
-        //case 14: type1_cart<1,4><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        //case 23: type1_cart<2,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-
-        //case 24: type1_cart<2,4><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        //case 33: type1_cart<3,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-
-        //case 34: type1_cart<3,4><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-
-        //case 44: type1_cart<4,4><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-
         default: {
-            //const int li1 = li+1;
-            //const int lj1 = lj+1;
-            //const int li3 = li1*li1*li1;
-            //const int lj3 = lj1*lj1*lj1;
             const int lij1 = li+lj+1;
             const int lij3 = lij1*lij1*lij1;
 
             int smem_size = 0;
             smem_size += lij3;      // rad_ang
             smem_size += lij1*lij1; // rad_all
-            //smem_size += nfi*li3;   // ifac
-            //smem_size += nfj*lj3;   // jfac
-            type1_general_cart<<<blocks, threads, smem_size*sizeof(double)>>>(
+            type1_cart_general<0,0><<<blocks, threads, smem_size*sizeof(double)>>>(
                 gctr, li, lj,
                 ao_loc, nao,
                 tasks, ntasks,
@@ -140,4 +124,29 @@ int ECP_cart(double *gctr,
     }
     return 0;
     }
+
+int ECP_ip1_cart(double *gctr, 
+            const int *ao_loc, const int nao, 
+            const int *tasks, const int ntasks,
+            const int *ecpbas, const int *ecploc, 
+            const int *atm, const int *bas, const double *env, 
+            const int li, const int lj, const int lc){
+    // one task per thread block
+    dim3 threads(THREADS);
+    dim3 blocks(ntasks);
+
+    if (lc < 0){
+        int task_type = li * 100 + lj * 10 + lc;
+        type1_cart_general<1,0><<<blocks, threads>>>(gctr, li+1, lj, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env);
+        type1_cart_general<0,0><<<blocks, threads>>>(gctr, li-1, lj, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env);
+        }
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+    }
 }
+

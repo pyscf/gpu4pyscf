@@ -121,3 +121,46 @@ def get_ecp(mol):
 
     coeff = cp.asarray(coeff)
     return coeff.T @ mat1 @ coeff
+
+
+def get_ecp_ip(mol):
+    _sorted_mol, coeff, uniq_l_ctr, l_ctr_counts = group_basis(mol)
+    _sorted_mol, uniq_lecp, lecp_counts, ecp_loc= sort_ecp(_sorted_mol)
+
+    l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+    lecp_offsets = np.append(0, np.cumsum(lecp_counts))
+
+    tasks_all = make_tasks(l_ctr_offsets, lecp_offsets)
+
+    atm = cp.asarray(_sorted_mol._atm, dtype=np.int32)
+    bas = cp.asarray(_sorted_mol._bas, dtype=np.int32)
+    env = cp.asarray(_sorted_mol._env, dtype=np.float64)
+
+    ecpbas = cp.asarray(_sorted_mol._ecpbas, dtype=np.int32)
+    ecploc = cp.asarray(ecp_loc, dtype=np.int32)
+    n_groups = len(uniq_l_ctr)
+    n_ecp_groups = len(uniq_lecp)
+    ao_loc = _sorted_mol.ao_loc_nr(cart=True)
+    nao = ao_loc[-1]
+    ao_loc = cp.asarray(ao_loc, dtype=np.int32)
+
+    mat1 = cp.zeros([nao, nao])
+    for i in range(n_groups):
+        for j in range(i,n_groups):
+            for k in range(n_ecp_groups):
+                tasks = cp.asarray(tasks_all[i,j,k], dtype=np.int32, order='F')
+                ntasks = len(tasks)
+                li = uniq_l_ctr[i,0]
+                lj = uniq_l_ctr[j,0]
+                lk = uniq_lecp[k]
+                err = libecp.ECP_cart(
+                    mat1.data.ptr, ao_loc.data.ptr, nao, 
+                    tasks.data.ptr, ntasks,
+                    ecpbas.data.ptr, ecploc.data.ptr,
+                    atm.data.ptr, bas.data.ptr, env.data.ptr,
+                    li, lj, lk)
+                if err != 0:
+                    raise RuntimeError('ECP CUDA kernel')
+
+    coeff = cp.asarray(coeff)
+    return coeff.T @ mat1 @ coeff

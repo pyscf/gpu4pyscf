@@ -211,7 +211,7 @@ void type2_cart(double *gctr,
     type2_facs_rad(radi, LI+LC, npi, dca, ci, ai);
     type2_facs_rad(radj, LJ+LC, npj, dcb, cj, aj);
 
-    __shared__ double rad_all[(LI+LJ+1) * LIC1 * LJC1]; // up to 5832 Bytes
+    __shared__ double rad_all[(LI+LJ+1) * LIC1 * LJC1];
     for (int i = threadIdx.x; i < (LI+LJ+1)*LIC1*LJC1; i+=blockDim.x){
         rad_all[i] = 0.0;
     }
@@ -222,7 +222,6 @@ void type2_cart(double *gctr,
         double *prad = rad_all + p*LIC1*LJC1;
         for (int i = 0; i <= LI+LC; i++){
         for (int j = 0; j <= LJ+LC; j++){
-            // TODO: block reduction
             block_reduce(radi[i]*radj[j]*ur, prad+i*LJC1+j);
         }}
         ur *= r128[ir];
@@ -264,7 +263,6 @@ void type2_cart(double *gctr,
                 double *pangi = angi + k*nfi*LIC1 + i*LIC1;
                 double *pangj = angj + l*nfj*LJC1 + j*LJC1;
                 double *prad = rad_all + (k+l)*LIC1*LJC1;
-                // TODO: cache angi and angj in registers
                 double reg_angi[LIC1];
                 double reg_angj[LJC1];
                 for (int p = 0; p < LIC1; p++){reg_angi[p] = pangi[p];}
@@ -390,7 +388,8 @@ void type2_cart(double *gctr,
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
 
-    double reg_gctr[NF_MAX*NF_MAX/THREADS+1] = {0.0};
+    constexpr int nreg = (NF_MAX*NF_MAX + THREADS - 1)/THREADS;
+    double reg_gctr[nreg] = {0.0};
 
     // (k+l)pq,kimp,ljmq->ij
     for (int m = 0; m < LCC1; m++){
@@ -406,7 +405,7 @@ void type2_cart(double *gctr,
                 double *pangi = angi + k*nfi*LIC1 + i*LIC1;
                 double *pangj = angj + l*nfj*LJC1 + j*LJC1;
                 double *prad = rad_all + (k+l)*LIC1*LJC1;
-                // TODO: cache angi and angj in registers
+                
                 double reg_angi[AO_LMAX+ECP_LMAX+1];
                 double reg_angj[AO_LMAX+ECP_LMAX+1];
                 for (int p = 0; p < LIC1; p++){reg_angi[p] = pangi[p];}
