@@ -245,8 +245,8 @@ def _jk_ip_task_dmonly(intopt, rhoj_cart, dm_cart, rhok_cart, orbor_cart, orbol_
             if with_j:
                 rhoj_tmp = rhoj_cart[k0:k1]
             if with_k:
-                rhok_tmp = contract('por,ir->pio', rhok_cart[k0:k1], orbol_cart)
-                rhok_tmp = contract('pio,jo->pji', rhok_tmp, orbor_cart)
+                rhok_tmp = contract('por,ir->pio', rhok_cart[k0:k1], orbor_cart)
+                rhok_tmp = contract('pio,jo->pji', rhok_tmp, orbol_cart)
             '''
             if(rhoj_tmp.flags['C_CONTIGUOUS'] == False):
                 rhoj_tmp = rhoj_tmp.astype(cupy.float64, order='C')
