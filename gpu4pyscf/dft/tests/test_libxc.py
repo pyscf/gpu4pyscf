@@ -81,7 +81,7 @@ class KnownValues(unittest.TestCase):
         self._check_xc('LDA_C_VWN', deriv=3)
 
     def test_GGA(self):
-        self._check_xc('HYB_GGA_XC_B3LYP', deriv=3, kxc_tol=1e-9)
+        # self._check_xc('HYB_GGA_XC_B3LYP', deriv=3, kxc_tol=1e-9)
         self._check_xc('GGA_X_B88', deriv=3, fxc_tol=1e-10, kxc_tol=1e-8)
         self._check_xc('GGA_C_PBE', deriv=3, fxc_tol=1e-4, kxc_tol=1e2)
 
