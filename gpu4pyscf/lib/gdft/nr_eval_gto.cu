@@ -53,7 +53,7 @@ static void _screen_index(int *non0shl_idx, double cutoff, int ang, int nprim, d
     const bool active = grid_id < ngrids;
 
     int natm = c_envs.natm;
-    int atm_id = c_bas_atom[ish];
+    int atm_id = c_envs.bas_atom[ish];
     double* atm_coords = c_envs.atom_coordx;
     double gridx, gridy, gridz;
     if (active) {
@@ -71,8 +71,8 @@ static void _screen_index(int *non0shl_idx, double cutoff, int ang, int nprim, d
     double rr = rx * rx + ry * ry + rz * rz;
     double r = sqrt(rr);
 
-    double *exps = c_envs.env + c_bas_exp[ish];
-    double *coeffs = c_envs.env + c_bas_coeff[ish];
+    double *exps = c_envs.env + c_envs.bas_exp[ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[ish];
     /*
     double maxc = 0.0;
     double min_exp = 1e9;
@@ -313,7 +313,7 @@ static void _cart_kernel_deriv0(BasOffsets offsets)
     int natm = c_envs.natm;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto = offsets.data + i0 * ngrids;
 
@@ -327,8 +327,8 @@ static void _cart_kernel_deriv0(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double ce = 0;
     for (int ip = 0; ip < offsets.nprim; ++ip) {
@@ -414,7 +414,7 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto = offsets.data + i0 * ngrids;
     double* __restrict__ gtox = offsets.data + (nao * 1 + i0) * ngrids;
@@ -431,8 +431,8 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double ce = 0;
     double ce_2a = 0;
@@ -665,7 +665,7 @@ static void _cart_kernel_deriv2(BasOffsets offsets)
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto = offsets.data + i0 * ngrids;
     double* __restrict__ gtox = offsets.data + (nao * 1 + i0) * ngrids;
@@ -688,8 +688,8 @@ static void _cart_kernel_deriv2(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+3], fy0[ANG+3], fz0[ANG+3];
     double fx1[ANG+2], fy1[ANG+2], fz1[ANG+2];
@@ -743,7 +743,7 @@ static void _cart_kernel_deriv3(BasOffsets offsets)
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto    = offsets.data + i0 * ngrids;
     double* __restrict__ gtox   = offsets.data + (nao * 1 + i0) * ngrids;
@@ -776,8 +776,8 @@ static void _cart_kernel_deriv3(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+4], fy0[ANG+4], fz0[ANG+4];
     double fx1[ANG+3], fy1[ANG+3], fz1[ANG+3];
@@ -843,7 +843,7 @@ static void _cart_kernel_deriv4(BasOffsets offsets)
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto     = offsets.data + i0 * ngrids;
     double* __restrict__ gtox    = offsets.data + (nao * 1 + i0) * ngrids;
@@ -891,8 +891,8 @@ static void _cart_kernel_deriv4(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+5], fy0[ANG+5], fz0[ANG+5];
     double fx1[ANG+4], fy1[ANG+4], fz1[ANG+4];
@@ -972,7 +972,7 @@ static void _sph_kernel_deriv0(BasOffsets offsets)
     int natm = c_envs.natm;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto = offsets.data + i0 * ngrids;
 
@@ -986,8 +986,8 @@ static void _sph_kernel_deriv0(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double ce = 0;
     for (int ip = 0; ip < offsets.nprim; ++ip) {
@@ -1111,7 +1111,7 @@ static void _sph_kernel_deriv1(BasOffsets offsets)
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
 
     double* __restrict__ gto = offsets.data + i0 * ngrids;
@@ -1129,8 +1129,8 @@ static void _sph_kernel_deriv1(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double ce = 0;
     double ce_2a = 0;
@@ -1433,7 +1433,7 @@ static void _sph_kernel_deriv2(BasOffsets offsets)
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto = offsets.data + i0 * ngrids;
     double* __restrict__ gtox = offsets.data + (nao * 1 + i0) * ngrids;
@@ -1456,8 +1456,8 @@ static void _sph_kernel_deriv2(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+3], fy0[ANG+3], fz0[ANG+3];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
@@ -1506,7 +1506,7 @@ static void _sph_kernel_deriv3(BasOffsets offsets)
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto    = offsets.data + i0 * ngrids;
     double* __restrict__ gtox   = offsets.data + (nao * 1 + i0) * ngrids;
@@ -1539,8 +1539,8 @@ static void _sph_kernel_deriv3(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+4], fy0[ANG+4], fz0[ANG+4];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
@@ -1601,7 +1601,7 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto     = offsets.data + i0 * ngrids;
     double* __restrict__ gtox    = offsets.data + (nao * 1 + i0) * ngrids;
@@ -1649,8 +1649,8 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+5], fy0[ANG+5], fz0[ANG+5];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
@@ -1715,47 +1715,19 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
 
 extern "C" {
 __host__
-void GDFTinit_envs(GTOValEnvVars **envs_cache, int *ao_loc,
-                   int *atm, int natm, int *bas, int nbas, double *env, int nenv)
+void GDFTinit_envs(GTOValEnvVars **envs_cache, int *bas_atom, int *bas_exp, int *bas_coeff,
+                    double *atom_coords, double *env, int natm, int nbas)
 {
-    assert(nbas < NBAS_MAX);
-
     GTOValEnvVars *envs = (GTOValEnvVars *)malloc(sizeof(GTOValEnvVars));
     *envs_cache = envs;
     envs->natm = natm;
     envs->nbas = nbas;
-
-    DEVICE_INIT(int, d_ao_loc, ao_loc, nbas+1);
-    envs->ao_loc = d_ao_loc;
-
-    DEVICE_INIT(double, d_env, env, nenv);
-    envs->env = d_env;
-
-    double *atom_coords = (double *)malloc(sizeof(double) * natm * 3);
-    int ia, ptr;
-    for (ia = 0; ia < natm; ++ia) {
-        ptr = atm[PTR_COORD + ATM_SLOTS*ia];
-        atom_coords[       ia] = env[ptr+0];
-        atom_coords[  natm+ia] = env[ptr+1];
-        atom_coords[2*natm+ia] = env[ptr+2];
-    }
-    DEVICE_INIT(double, d_atom_coords, atom_coords, natm * 3);
-    envs->atom_coordx = d_atom_coords;
-    free(atom_coords);
-
-    uint16_t bas_atom[NBAS_MAX];
-    uint16_t bas_exp[NBAS_MAX];
-    uint16_t bas_coeff[NBAS_MAX];
-    int ish;
-    for (ish = 0; ish < nbas; ++ish) {
-        bas_atom[ish] = bas[ATOM_OF + ish * BAS_SLOTS];
-        bas_exp[ish] = bas[PTR_EXP + ish * BAS_SLOTS];
-        bas_coeff[ish] = bas[PTR_COEFF + ish * BAS_SLOTS];
-    }
+    envs->atom_coordx = atom_coords;
+    envs->env = env;
+    envs->bas_atom = bas_atom;
+    envs->bas_exp = bas_exp;
+    envs->bas_coeff = bas_coeff;
     checkCudaErrors(cudaMemcpyToSymbol(c_envs, envs, sizeof(GTOValEnvVars)));
-    checkCudaErrors(cudaMemcpyToSymbol(c_bas_atom, bas_atom, sizeof(uint16_t)*NBAS_MAX));
-    checkCudaErrors(cudaMemcpyToSymbol(c_bas_exp, bas_exp, sizeof(uint16_t)*NBAS_MAX));
-    checkCudaErrors(cudaMemcpyToSymbol(c_bas_coeff, bas_coeff, sizeof(uint16_t)*NBAS_MAX));
 }
 
 void GDFTdel_envs(GTOValEnvVars **envs_cache)
@@ -1764,11 +1736,6 @@ void GDFTdel_envs(GTOValEnvVars **envs_cache)
     if (envs == NULL) {
         return;
     }
-
-    FREE(envs->ao_loc);
-    FREE(envs->env);
-    FREE(envs->atom_coordx);
-
     free(envs);
     *envs_cache = NULL;
 }
