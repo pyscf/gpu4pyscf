@@ -69,7 +69,7 @@ def opt_mol(config):
     lib.num_threads(config['threads'])
     mol = pyscf.M(
         atom=f'{input_dir}/{mol_name}',
-        basis=config['bas'],
+        basis=config['basis'],
         max_memory=float(config['max_memory']),
         verbose=config['verbose'],
         charge=config['charge'],
