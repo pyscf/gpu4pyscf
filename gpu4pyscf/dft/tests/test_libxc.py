@@ -69,6 +69,7 @@ class KnownValues(unittest.TestCase):
         exc_cpu, vxc_cpu, fxc_cpu, kxc_cpu = ni_cpu.eval_xc_eff(xc, rho, deriv=deriv, xctype=xctype)
         exc_gpu, vxc_gpu, fxc_gpu, kxc_gpu = ni_gpu.eval_xc_eff(xc, cupy.array(rho), deriv=deriv, xctype=xctype)
 
+
         assert _diff(exc_gpu[:,0].get(), exc_cpu).max() < 1e-10
         assert _diff(vxc_gpu.get(), vxc_cpu).max() < 1e-10
         if fxc_gpu is not None:
