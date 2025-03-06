@@ -394,20 +394,10 @@ void type1_cart(double *gctr,
 template <int orderi, int orderj> __device__
 void type1_cart_kernel(double *gctr, 
                 const int LI, const int LJ,
-                const int *ao_loc, const int nao, 
-                const int *tasks, const int ntasks,
+                int ish, int jsh, int ksh,
                 const int *ecpbas, const int *ecploc, 
                 const int *atm, const int *bas, const double *env)
 {
-    const int task_id = blockIdx.x;
-    if (task_id >= ntasks){
-        return;
-    }
-
-    const int ish = tasks[task_id];
-    const int jsh = tasks[task_id + ntasks];
-    const int ksh = tasks[task_id + 2*ntasks];
-
     extern __shared__ double smem[];
 
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
@@ -475,8 +465,6 @@ void type1_cart_kernel(double *gctr,
     cache_fac(fi, LI, rca);
     cache_fac(fj, LJ, rcb);
 
-    constexpr int nreg = (NF_MAX*NF_MAX+THREADS-1)/THREADS;
-    double reg_gctr[nreg] = {0.0};
     for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
         const int mi = ij%nfi;
         const int mj = ij/nfi;
@@ -510,7 +498,7 @@ void type1_cart_kernel(double *gctr,
                 tmp += ifac * jfac * rad_ang[ijr];
             }}}
         }}}
-        reg_gctr[ij] += tmp;
+        gctr[ij] += tmp;
     }
     return;
 }
@@ -529,7 +517,20 @@ void type1_cart_ip1(double *gctr,
     if (task_id >= ntasks){
         return;
     }
+
+    const int ish = tasks[task_id];
+    const int jsh = tasks[task_id + ntasks];
+    const int ksh = tasks[task_id + 2*ntasks];
     
+    __shared__ double buf[NF_MAX*NF_MAX];
+    type1_cart_kernel<1,0>(gctr, LI+1, LJ, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
+    if (LI > 0){
+        __shared__ double buf2[NF_MAX*NF_MAX];
+        type1_cart_kernel<0,0>(gctr, LI-1, LJ, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
+    }
+
+    const int nfi = (LI+1) * (LI+2) / 2;
+    const int nfj = (LJ+1) * (LJ+2) / 2;
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
     for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
@@ -537,9 +538,6 @@ void type1_cart_ip1(double *gctr,
         const int j = ij/nfi;
         double tmp = reg_gctr[ij/THREADS];
         atomicAdd(gctr + i+ioff + (j+joff)*nao, tmp);
-        if (ish != jsh){
-            atomicAdd(gctr + (i+ioff)*nao + j+joff, tmp);
-        }
     }
     return;
 }

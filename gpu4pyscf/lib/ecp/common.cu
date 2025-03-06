@@ -182,3 +182,32 @@ void block_reduce(double val, double *d_out) {
     }
     __syncthreads();
 }
+
+
+__device__
+void _l_up(double *out, double *buf, double fac, int li, int lj){
+    const int nfi = (li+1) * (li+2) / 2;
+    const int nfi0 = li * (lj+1) / 2;
+    double *outx = out;
+    double *outy = out + nfi*nfj;
+    double *outz = outy + nfi*nfj;
+    for (int ij = threadIdx.x; ij < nfi*nfi0; ij+=blockDim.x){
+        const int i = ij % nfi;
+        const int j = ij / nfi;
+        double yfac = fac * (_cart_pow_y[i] + 1);
+        double zfac = fac * (_cart_pow_z[i] + 1);
+        double xfac = fac * (li-1 - _cart_pow_y[i] - _cart_pow_z[i]);
+
+        outx[i*nfj + j] += yfac * buf[i*nfj + j];
+        outy[i*nfj + j] += zfac * buf[i*nfj + j];
+        outz[i*nfj + j] += xfac * buf[i*nfj + j];
+    }
+    __syncthreads();
+}
+
+__device__
+void _l_down(double *gctr, double *buf, double fac, int li, int lj){
+    const int nfi = (li+1) * (li+2) / 2;
+    const int nfj = (lj+1) * (lj+2) / 2;
+    
+}
