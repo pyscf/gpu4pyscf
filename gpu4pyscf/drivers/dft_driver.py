@@ -305,7 +305,6 @@ def run_dft(config):
     return mf
 
 if __name__ == '__main__':
-    import argparse
     parser = argparse.ArgumentParser(description='Run DFT with GPU4PySCF for molecules')
     parser.add_argument(
         "config",
