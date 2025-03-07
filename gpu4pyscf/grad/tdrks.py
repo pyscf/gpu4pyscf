@@ -15,12 +15,14 @@
 
 from functools import reduce
 import cupy as cp
+import numpy as np
 from pyscf import lib
 from pyscf.lib import logger
 from gpu4pyscf import lib as lib_gpu
 from gpu4pyscf.lib.cupy_helper import contract, add_sparse
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.dft import numint
+from pyscf.dft.numint import NumInt as numint_cpu
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
@@ -351,7 +353,15 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
                 ao0 = ao
             mo_coeff_mask = mo_coeff[mask, :]
             rho = ni.eval_rho2(_sorted_mol, ao0, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
-            vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
+            # quick fix
+            if deriv > 2:
+                ni_cpu = numint_cpu()
+                vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
+                if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
+                if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
+                if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
+            else:
+                vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
             dmvo_mask = dmvo[mask[:, None], mask]
             rho1 = (
                 ni.eval_rho(_sorted_mol, ao0, dmvo_mask, mask, xctype, hermi=1, with_lapl=False) * 2
@@ -383,7 +393,15 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
             rho = ni.eval_rho2(_sorted_mol, ao0, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
             rho *= 0.5
             rho = cp.repeat(rho[cp.newaxis], 2, axis=0)
-            vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
+            # quick fix
+            if deriv > 2:
+                ni_cpu = numint_cpu()
+                vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
+                if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
+                if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
+                if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
+            else:
+                vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
             # fxc_t couples triplet excitation amplitudes
             # 1/2 int (tia - tIA) fxc (tjb - tJB) = tia fxc_t tjb
             fxc_t = fxc[:, :, 0] - fxc[:, :, 1]
