@@ -109,7 +109,6 @@ class KnownValues(unittest.TestCase):
         mf_lda = self.mf_lda
         td = mf_lda.CasidaTDDFT()
         assert td.device == 'gpu'
-        td.lindep=1.0E-6
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 5)
@@ -119,7 +118,6 @@ class KnownValues(unittest.TestCase):
         mf_bp86 = self.mf_bp86
         td = mf_bp86.CasidaTDDFT()
         assert td.device == 'gpu'
-        td.lindep=1.0E-6
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel()[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
@@ -136,7 +134,6 @@ class KnownValues(unittest.TestCase):
         mf_lda = self.mf_lda
         td = mf_lda.TDDFT()
         assert td.device == 'gpu'
-        td.lindep=1.0E-6
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
@@ -147,7 +144,6 @@ class KnownValues(unittest.TestCase):
         td = mf_bp86.TDDFT()
         assert td.device == 'gpu'
         td.conv_tol = 1e-5
-        td.lindep=1.0E-6
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
@@ -157,7 +153,6 @@ class KnownValues(unittest.TestCase):
         mf_b3lyp = self.mf_b3lyp
         td = mf_b3lyp.TDDFT()
         assert td.device == 'gpu'
-        td.lindep=1.0E-6
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
@@ -178,7 +173,6 @@ class KnownValues(unittest.TestCase):
         td = mf.TDDFT().to_gpu()
         assert td.device == 'gpu'
         td.conv_tol = 1e-5
-        td.lindep=1.0E-6
         es = td.kernel(nstates=4)[0]
         e_ref = td.to_cpu().kernel(nstates=4)[0]
         self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 8)
@@ -196,7 +190,6 @@ class KnownValues(unittest.TestCase):
         mf.scf()
         td = mf.TDA().to_gpu()
         assert td.device == 'gpu'
-        td.lindep=1.0E-6
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
@@ -206,7 +199,6 @@ class KnownValues(unittest.TestCase):
         mf_lda = self.mf_lda
         td = mf_lda.TDA()
         assert td.device == 'gpu'
-        td.lindep=1.0E-6
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
@@ -217,7 +209,6 @@ class KnownValues(unittest.TestCase):
         td = mf_b3lyp.TDA()
         assert td.device == 'gpu'
         td.singlet = False
-        td.lindep=1.0E-6
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
@@ -240,7 +231,6 @@ class KnownValues(unittest.TestCase):
         td = mf_lda.TDA()
         assert td.device == 'gpu'
         td.singlet = False
-        td.lindep=1.0E-6
         es = td.kernel(nstates=6)[0]
         ref = td.to_cpu().kernel(nstates=6)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
@@ -261,7 +251,6 @@ class KnownValues(unittest.TestCase):
         td = mf_bp86.TDDFT()
         assert td.device == 'gpu'
         td.singlet = False
-        td.lindep=1.0E-6
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
@@ -284,7 +273,6 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
         mf.cphf_grids = mf.grids
         td = mf.TDA().to_gpu()
-        td.lindep=1.0E-6
         assert td.device == 'gpu'
         e_td = td.set(nstates=5).kernel()[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
@@ -295,7 +283,6 @@ class KnownValues(unittest.TestCase):
         mf_m06l = self.mf_m06l
         td = mf_m06l.TDA()
         assert td.device == 'gpu'
-        td.lindep=1.0E-6
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
@@ -304,7 +291,6 @@ class KnownValues(unittest.TestCase):
     def test_analyze(self):
         td_hf = self.td_hf
         assert td_hf.device == 'gpu'
-        td_hf.lindep=1.0E-6
         f = td_hf.oscillator_strength(gauge='length')
         self.assertAlmostEqual(lib.fp(f), -0.13908774016795605, 5)
         f = td_hf.oscillator_strength(gauge='velocity', order=2)
@@ -348,7 +334,6 @@ class KnownValues(unittest.TestCase):
         mol = self.mol
         td = mol.RHF().newton().TDHF().to_gpu()
         assert td.device == 'gpu'
-        td.lindep=1.0E-6
         td.reset(mol1)
         self.assertTrue(td.mol is mol1)
         self.assertTrue(td._scf.mol is mol1)

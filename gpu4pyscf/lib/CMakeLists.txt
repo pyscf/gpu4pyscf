@@ -24,7 +24,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(DEFINED CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCHITECTURES}")
 else()
-  set(CMAKE_CUDA_ARCHITECTURES "60-real;70-real;80-real;90-real")
+  set(CMAKE_CUDA_ARCHITECTURES "70-real;80-real;90-real")
 endif()
 message("CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 
@@ -163,6 +163,8 @@ option(BUILD_PBC "Using pbc" ON)
 if(BUILD_PBC)
   add_subdirectory(pbc)
 endif()
+
+add_subdirectory(multigrid)
 
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)

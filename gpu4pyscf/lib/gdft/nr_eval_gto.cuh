@@ -19,7 +19,9 @@
 typedef struct {
     int natm;
     int nbas;
-    int *ao_loc;
+    int *bas_atom;
+    int *bas_exp;
+    int *bas_coeff;
     double *env;
     double *atom_coordx;
 } GTOValEnvVars;
@@ -43,7 +45,4 @@ typedef struct {
 #define C_BAS_SLOTS     3
 #define NBAS_MAX        6000
 
-__constant__ uint16_t c_bas_atom[NBAS_MAX];
-__constant__ uint16_t c_bas_exp[NBAS_MAX];
-__constant__ uint16_t c_bas_coeff[NBAS_MAX];
 __constant__ GTOValEnvVars c_envs;

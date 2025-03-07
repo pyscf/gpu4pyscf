@@ -71,76 +71,96 @@ H                 -3.93210821    0.28874990   -1.89865997
 
     return
 
-def run_dft(mol_name, config, charge=None, spin=0):
+default_config = {
+    'input_dir': './',
+    'output_dir': './',
+    'molecule': 'molecule.xyz',
+    'threads': 8,
+    'max_memory': 32000,
+
+    'charge': 0,
+    'spin': None,
+    'xc': 'b3lyp',
+    'disp': None,
+    'grids': {'atom_grid': (99,590)},
+    'nlcgrids': {'atom_grid': (50,194)},
+    'basis': 'def2-tzvpp',
+    'verbose': 4,
+    'scf_conv_tol': 1e-10,
+    'direct_scf_tol': 1e-14,
+    'with_df': True,
+    'auxbasis': None,
+    'with_gpu': True,
+
+    'with_grad': True,
+    'with_hess': True,
+    'with_thermo': False,
+    'save_density': False,
+
+    'with_solvent': False,
+    'solvent': {'method': 'iefpcm', 'eps': 78.3553, 'solvent': 'water'},
+}
+
+def run_dft(config):
     ''' Perform DFT calculations based on the configuration file.
     Saving the results, timing, and log to a HDF5 file.
     '''
-    xc             = config.get('xc',             'b3lyp')
-    disp           = config.get('disp',            None)
-    grids          = config.get('grids',          {'atom_grid': (99,590)})
-    nlcgrids       = config.get('nlcgrids',       {'atom_grid': (50,194)})
-    bas            = config.get('basis',          'def2-tzvpp')
-    verbose        = config.get('verbose',        4)
-    scf_conv_tol   = config.get('scf_conv_tol',   1e-10)
-    direct_scf_tol = config.get('direct_scf_tol', 1e-14)
-    with_df        = config.get('with_df',        True)
-    auxbasis       = config.get('auxbasis',       None)
-    with_gpu       = config.get('with_gpu',       True)
+    config = {**default_config, **config}
 
-    with_grad      = config.get('with_grad',      True)
-    with_hess      = config.get('with_hess',      True)
-    with_thermo    = config.get('with_thermo',    False) 
-    save_density   = config.get('save_density',   False)
-    input_dir      = config.get('input_dir',      './')
-    
-    default_solvent = {'method': 'iefpcm', 'eps': 78.3553, 'solvent': 'water'}
-    with_solvent   = config.get('with_solvent',   False)
-    solvent        = config.get('solvent',        default_solvent)
+    mol_name = config['molecule']
+    assert isinstance(mol_name, str)
+    assert mol_name.endswith('.xyz')
+    input_dir = config['input_dir']
+    output_dir = config['output_dir']
+    if not os.path.exists(f'{input_dir}/{mol_name}'):
+        raise RuntimeError(f'Input file {input_dir}/{mol_name} does not exist.')
 
     # I/O
-    fp = tempfile.TemporaryDirectory()
-    local_dir = f'{fp.name}/'
-    logfile = f'{mol_name[:-4]}_pyscf.log'
-    shutil.copyfile(f'{input_dir}/{mol_name}', local_dir+mol_name)
-    cupy.get_default_memory_pool().free_all_blocks()
-    lib.num_threads(8)
+    logfile = mol_name[:-4] + '_pyscf.log'
+    data_file = mol_name[:-4] + '_pyscf.h5'
+    os.makedirs(output_dir, exist_ok=True)
+
+    lib.num_threads(config['threads'])
     start_time = time.time()
     mol = pyscf.M(
-        atom=local_dir+mol_name,
-        basis=bas,
-        max_memory=32000,
-        verbose=verbose,
-        charge=charge,
-        spin=spin,
-        output=f'{local_dir}/{logfile}')
-    mol.build()
+        atom=f'{input_dir}/{mol_name}',
+        basis=config['basis'],
+        max_memory=float(config['max_memory']),
+        verbose=config['verbose'],
+        charge=config['charge'],
+        spin=config['spin'],
+        output=f'{output_dir}/{logfile}')
 
     # To match default LDA in Q-Chem
+    xc = config['xc']
     if xc == 'LDA':
-        pyscf_xc = 'LDA,VWN5'
-    else:
-        pyscf_xc = xc
+        xc = 'LDA,VWN5'
 
     if xc.lower() == 'hf':
         mf = scf.HF(mol)
     else:
-        mf = dft.KS(mol, xc=pyscf_xc)
+        mf = dft.KS(mol, xc=xc)
+        grids = config['grids']
+        nlcgrids = config['nlcgrids']
         if 'atom_grid' in grids: mf.grids.atom_grid = grids['atom_grid']
         if 'level' in grids:     mf.grids.level     = grids['level']
         if mf._numint.libxc.is_nlc(mf.xc):
             if 'atom_grid' in nlcgrids: mf.nlcgrids.atom_grid = nlcgrids['atom_grid']
             if 'level' in nlcgrids:     mf.nlcgrids.level     = nlcgrids['level']
-    mf.disp = disp
-    if with_df:
-        pyscf_auxbasis = auxbasis
+    mf.disp = config['disp']
+    if config['with_df']:
+        auxbasis = config['auxbasis']
         if auxbasis == "RIJK-def2-tzvp":
-            pyscf_auxbasis = 'def2-tzvp-jkfit'
-        mf = mf.density_fit(auxbasis=pyscf_auxbasis)
-    if with_gpu:
+            auxbasis = 'def2-tzvp-jkfit'
+        mf = mf.density_fit(auxbasis=auxbasis)
+
+    if config['with_gpu']:
+        cupy.get_default_memory_pool().free_all_blocks()
         mf = mf.to_gpu()
 
     mf.chkfile = None
-    if with_solvent:
+    if config['with_solvent']:
+        solvent = config['solvent']
         if solvent['method'].endswith(('PCM', 'pcm')):
             mf = mf.PCM()
             mf.with_solvent.lebedev_order = 29
@@ -154,9 +174,9 @@ def run_dft(mol_name, config, charge=None, spin=0):
         else:
             raise NotImplementedError
 
-    mf.direct_scf_tol = direct_scf_tol
+    mf.direct_scf_tol = config['direct_scf_tol']
     mf.chkfile = None
-    mf.conv_tol = scf_conv_tol
+    mf.conv_tol = float(config['scf_conv_tol'])
     e_tot = mf.kernel()
 
     if not mf.converged:
@@ -171,9 +191,7 @@ def run_dft(mol_name, config, charge=None, spin=0):
     e_disp    = mf.scf_summary.get('dispersion', 0.0)
     e_solvent = mf.scf_summary.get('e_solvent',  0.0)
 
-    data_file = mol_name[:-4] + '_pyscf.h5'
-
-    with h5py.File(f'{local_dir}/{data_file}', 'w') as h5f:
+    with h5py.File(f'{output_dir}/{data_file}', 'w') as h5f:
         h5f.create_dataset('e_tot',     data=e_tot)
         h5f.create_dataset('e1',        data=e1)
         h5f.create_dataset('e_coul',    data=e_coul)
@@ -181,12 +199,12 @@ def run_dft(mol_name, config, charge=None, spin=0):
         h5f.create_dataset('e_disp',    data=e_disp)
         h5f.create_dataset('e_solvent', data=e_solvent)
         h5f.create_dataset('scf_time',  data=scf_time)
-    
+
         dm = mf.make_rdm1()
         if isinstance(dm, cupy.ndarray): dm = dm.get()
         h5f.create_dataset('dm',       data=dm)
 
-        if save_density and xc.lower() != 'hf':
+        if config['save_density'] and xc.lower() != 'hf':
             weights = mf.grids.weights
             coords = mf.grids.coords
             dm0 = dm[0] + dm[1] if dm.ndim == 3 else dm
@@ -219,66 +237,53 @@ def run_dft(mol_name, config, charge=None, spin=0):
             nocc = mf.mol.nelectron // 2
             h5f.create_dataset('e_lumo',     data=mo_energy[nocc])
             h5f.create_dataset('e_homo',     data=mo_energy[nocc-1])
-    
+
     ##################### Gradient Calculation ###############################
     g = None
-    if with_grad:
-        try:
-            start_time = time.time()
-            g = mf.nuc_grad_method()
-            if with_df:
-                g.auxbasis_response = True
-            f = g.kernel()
-            g = None
-            grad_time = time.time() - start_time
-            print(f'compute time for gradient: {grad_time:.3f} s')
-        except Exception as exc:
-            print(traceback.format_exc())
-            print(exc)
-            f = -1
-            grad_time = -1
-        
-        with h5py.File(f'{local_dir}/{data_file}', 'a') as h5f:
+    if config['with_grad']:
+        start_time = time.time()
+        g = mf.nuc_grad_method()
+        if config['with_df']:
+            g.auxbasis_response = True
+        f = g.kernel()
+        g = None
+        grad_time = time.time() - start_time
+        print(f'compute time for gradient: {grad_time:.3f} s')
+
+        with h5py.File(f'{output_dir}/{data_file}', 'a') as h5f:
             h5f.create_dataset('grad', data=f)
             h5f.create_dataset('grad_time', data=grad_time)
 
     #################### Hessian Calculation ###############################
     h = None
-    if with_hess:
-        try:
-            natm = mol.natm
+    if config['with_hess']:
+        natm = mol.natm
+        start_time = time.time()
+        h = mf.Hessian()
+        h.auxbasis_response = 2
+        _h_dft = h.kernel()
+        h_dft = _h_dft.transpose([0,2,1,3]).reshape([3*natm, 3*natm])
+        hess_time = time.time() - start_time
+        print(f'compute time for hessian: {hess_time:.3f} s')
+
+        if config['with_thermo']:
+            # harmonic analysis
             start_time = time.time()
-            h = mf.Hessian()
-            h.auxbasis_response = 2
-            _h_dft = h.kernel()
-            h_dft = _h_dft.transpose([0,2,1,3]).reshape([3*natm, 3*natm])
-            hess_time = time.time() - start_time
-            print(f'compute time for hessian: {hess_time:.3f} s')
+            normal_mode = thermo.harmonic_analysis(mol, _h_dft)
 
-            if with_thermo:
-                # harmonic analysis
-                start_time = time.time()
-                normal_mode = thermo.harmonic_analysis(mol, _h_dft)
+            thermo_dat = thermo.thermo(
+                mf,                            # GPU4PySCF object
+                normal_mode['freq_au'],
+                298.15,                            # room temperature
+                101325)                            # standard atmosphere
+            thermo_time = time.time() - start_time
+            print(f'compute time for harmonic analysis: {thermo_time:.3f} s')
 
-                thermo_dat = thermo.thermo(
-                    mf,                            # GPU4PySCF object
-                    normal_mode['freq_au'],
-                    298.15,                            # room temperature
-                    101325)                            # standard atmosphere
-                thermo_time = time.time() - start_time
-                print(f'compute time for harmonic analysis: {thermo_time:.3f} s')
-
-        except Exception as exc:
-            print(traceback.format_exc())
-            print(exc)
-            h_dft = -1
-            hess_time = -1
-
-        with h5py.File(f'{local_dir}/{data_file}', 'a') as h5f:
+        with h5py.File(f'{output_dir}/{data_file}', 'a') as h5f:
             h5f.create_dataset('hess', data=h_dft)
             h5f.create_dataset('hess_time', data=hess_time)
 
-            if with_thermo: 
+            if config['with_thermo']:
                 h5f.create_dataset('freq_au',         data=normal_mode['freq_au'])
                 h5f.create_dataset('freq_wavenumber', data=normal_mode['freq_wavenumber'])
                 h5f.create_dataset('E_tot',           data=thermo_dat['E_tot'][0])
@@ -297,28 +302,18 @@ def run_dft(mol_name, config, charge=None, spin=0):
                 h5f.create_dataset('G_trans',         data=thermo_dat['G_trans'][0])
                 h5f.create_dataset('G_rot',           data=thermo_dat['G_rot'][0])
                 h5f.create_dataset('G_vib',           data=thermo_dat['G_vib'][0])
-
-    # copy the files to destination folder
-    output_dir = config['output_dir']
-    isExist = os.path.exists(output_dir)
-    if not isExist:
-        os.makedirs(output_dir)
-
-    shutil.copyfile(f'{local_dir}/{data_file}', f'{output_dir}/{data_file}')
-    shutil.copyfile(f'{local_dir}/{logfile}', f'{output_dir}/{logfile}')
-
     return mf
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run DFT with GPU4PySCF for molecules')
-    parser.add_argument("--config", type=str, default='example.json')
-    parser.add_argument("--charge", type=int, default=None)
-    parser.add_argument("--spin",   type=int, default=0)
+    parser.add_argument(
+        "config",
+        type=str,
+        help="Path to the configuration file (e.g., example.json)"
+    )
     args = parser.parse_args()
-
     with open(args.config) as f:
         config = json.load(f)
         if isinstance(config, list):
             config = config[0]
-    for mol_name in config['molecules']:
-        run_dft(mol_name, config, charge=args.charge, spin=args.spin)
+    run_dft(config)
