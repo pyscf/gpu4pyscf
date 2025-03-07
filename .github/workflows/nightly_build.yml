@@ -28,7 +28,6 @@ jobs:
         pip3 install cupy-cuda12x --upgrade
         pip3 install gpu4pyscf-libxc-cuda12x --upgrade
         git config --global core.compression 9
-        python3 -m cupyx.tools.install_library --cuda 12.x --library cutensor
     - name: Run RKS tests
       run: |
         export CUDA_HOME=/usr/local/cuda
@@ -53,7 +52,6 @@ jobs:
         pip3 install cupy-cuda12x --upgrade
         pip3 install gpu4pyscf-libxc-cuda12x --upgrade
         git config --global core.compression 9
-        python3 -m cupyx.tools.install_library --cuda 12.x --library cutensor
     - name: Run UKS tests
       run: |
         export CUDA_HOME=/usr/local/cuda
@@ -78,7 +76,6 @@ jobs:
         pip3 install cupy-cuda12x --upgrade
         pip3 install gpu4pyscf-libxc-cuda12x --upgrade
         git config --global core.compression 9
-        python3 -m cupyx.tools.install_library --cuda 12.x --library cutensor
     - name: Run TDDFT tests
       run: |
         export CUDA_HOME=/usr/local/cuda

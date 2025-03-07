@@ -57,7 +57,6 @@ jobs:
         pip3 install h5py --upgrade
         pip3 install gpu4pyscf-libxc-cuda12x --upgrade
         pip3 install cupy-cuda12x --upgrade
-        python3 -m cupyx.tools.install_library --cuda 12.x --library cutensor
         git config --global core.compression 9
     - name: Build GPU4PySCF
       run: |
