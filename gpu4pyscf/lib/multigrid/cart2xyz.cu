@@ -112,7 +112,7 @@ void _dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj,
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
-    int L1 = L + 1;
+    constexpr int L1 = L + 1;
     double *cx = cache + sp_id;
     double *cy = cx + lj1 * lj1 * WARP_SIZE;
     double *cz = cy + lj1 * lj1 * WARP_SIZE;

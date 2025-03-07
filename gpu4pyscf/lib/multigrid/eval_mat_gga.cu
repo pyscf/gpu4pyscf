@@ -29,9 +29,9 @@ void fill_dm_xyz_ip1(double *dm_xyz, double *gx_dmyz, double *xs_exp,
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
-    int L1 = L + 1;
-    int L2 = L + 2;
-    int nf2 = (L+1)*(L+2)/2;
+    constexpr int L1 = L + 1;
+    constexpr int L2 = L + 2;
+    constexpr int nf2 = (L+1)*(L+2)/2;
 #if 0
     // this algorithm seems more efficient for large L
     double r3[((L+2)*(L+1)*(L+2)/2+WARPS-1)/WARPS];
@@ -78,9 +78,9 @@ void fill_dm_xyz_ip1(double *dm_xyz, double *gx_dmyz, double *xs_exp,
         dm_xyz[m*WARP_SIZE] = r3[n];
     }
 #else
-    int nf3 = nf2*(L+3)/3;
+    constexpr int nf3 = nf2*(L+3)/3;
     if (L <= 3) {
-        double r2[(L+1)*(L+2)*(L+3)/6 + (L+1)*(L+2)/2];
+        double r2[nf3 + nf2];
         double r1[L+2];
 #pragma unroll
         for (int m = 0; m < nf3+nf2; ++m) {
@@ -432,7 +432,7 @@ void _dm_xyz_to_dm_sigmax(double *dm, double *dm_yzx, int nao, int li, int lj,
     int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
     int lj2 = lj + 2;
-    int L2 = L + 2;
+    constexpr int L2 = L + 2;
     double *cx = cache + sp_id;
     double *cy = cx + lj2 * lj2 * WARP_SIZE;
     double *cz = cy + lj2 * lj2 * WARP_SIZE;
@@ -515,7 +515,7 @@ void _dm_xyz_to_dm_sigmay(double *dm, double *dm_xzy, int nao, int li, int lj,
     int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
     int lj2 = lj + 2;
-    int L2 = L + 2;
+    constexpr int L2 = L + 2;
     double *cx = cache + sp_id;
     double *cy = cx + lj2 * lj2 * WARP_SIZE;
     double *cz = cy + lj2 * lj2 * WARP_SIZE;
@@ -598,7 +598,7 @@ void _dm_xyz_to_dm_sigmaz(double *dm, double *dm_xyz, int nao, int li, int lj,
     int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
     int lj2 = lj + 2;
-    int L2 = L + 2;
+    constexpr int L2 = L + 2;
     double *cx = cache + sp_id;
     double *cy = cx + lj2 * lj2 * WARP_SIZE;
     double *cz = cy + lj2 * lj2 * WARP_SIZE;
@@ -708,8 +708,8 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
         cicj = 0.;
     }
 
-    int L1 = L + 1;
-    int nf2 = (L+1)*(L+2)/2;
+    constexpr int L1 = L + 1;
+    constexpr int nf2 = (L+1)*(L+2)/2;
     int *mesh = bounds.mesh;
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -728,8 +728,8 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
     double *gx_dmyz = zs_exp + xs_size;
     init_orth_data(xs_exp, grid_start, envs, bounds, ri, rj, ai, aj, L1+1);
 
-    double r2[(L+1)*(L+2)/2];
-    double r1[L+1];
+    double r2[nf2];
+    double r1[L1];
     extern __shared__ double cache[];
     double *xs_cache, *ys_cache, *zs_cache;
     double *dm_xyz = gx_dmyz + nf2 * ngrid_span * WARP_SIZE;

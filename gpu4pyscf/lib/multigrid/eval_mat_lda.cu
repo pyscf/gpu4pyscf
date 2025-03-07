@@ -59,7 +59,7 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
         cicj = 0.;
     }
 
-    int nf2 = (L+1)*(L+2)/2;
+    constexpr int nf2 = (L+1)*(L+2)/2;
     int *mesh = bounds.mesh;
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -74,7 +74,7 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     double *gx_dmyz = zs_exp + xs_size;
     init_orth_data(xs_exp, grid_start, envs, bounds, ri, rj, ai, aj, L+1);
 
-    double r2[(L+1)*(L+2)/2];
+    double r2[nf2];
     double r1[L+1];
     extern __shared__ double cache[];
     double *ys_cache = cache + sp_id;
