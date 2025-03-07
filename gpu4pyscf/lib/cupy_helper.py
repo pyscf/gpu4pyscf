@@ -166,6 +166,16 @@ def tag_array(a, **kwargs):
     t.__dict__.update(kwargs)
     return t
 
+def asarray(a, **kwargs):
+    '''Similar to cupy.asarray, when the object is an instance of
+    CPArrayWithTag, this function will remove the attributes within
+    the tagged array'''
+    if isinstance(a, CPArrayWithTag):
+        a = a.view(cp.ndarray)
+    if kwargs:
+        a = cupy.asarray(a, **kwargs)
+    return a
+
 def to_cupy(a):
     '''Converts a numpy (and subclass) object to a cupy object'''
     if isinstance(a, lib.NPArrayWithTag):

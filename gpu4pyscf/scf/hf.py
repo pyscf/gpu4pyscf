@@ -21,7 +21,8 @@ from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
 from gpu4pyscf import lib
 from gpu4pyscf.lib import utils
-from gpu4pyscf.lib.cupy_helper import eigh, tag_array, return_cupy_array, cond
+from gpu4pyscf.lib.cupy_helper import (
+    eigh, tag_array, return_cupy_array, cond, asarray)
 from gpu4pyscf.scf import diis, jk
 from gpu4pyscf.lib import logger
 
@@ -141,6 +142,20 @@ def energy_elec(self, dm=None, h1e=None, vhf=None):
     logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
     return e1+e_coul, e_coul
 
+def _init_diis(mf, h1e, s1e, vhf, dm):
+    if isinstance(mf.diis, lib.diis.DIIS):
+        mf_diis = mf.diis
+    elif mf.diis:
+        assert issubclass(mf.DIIS, lib.diis.DIIS)
+        mf_diis = mf.DIIS(mf, mf.diis_file)
+        mf_diis.space = mf.diis_space
+        mf_diis.rollback = mf.diis_space_rollback
+        fock = mf.get_fock(h1e, s1e, vhf, dm)
+        _, mf_diis.Corth = mf.eig(fock, s1e)
+    else:
+        mf_diis = None
+    return mf_diis
+
 def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
            dump_chk=True, dm0=None, callback=None, conv_check=True, **kwargs):
     conv_tol = mf.conv_tol
@@ -167,6 +182,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     s1e = cupy.asarray(mf.get_ovlp(mol))
 
     vhf = mf.get_veff(mol, dm)
+    dm = asarray(dm) # Remove the attached attributes
     e_tot = mf.energy_tot(dm, h1e, vhf)
     logger.info(mf, 'init E= %.15g', e_tot)
     t1 = log.timer_debug1('total prep', *t0)
@@ -179,17 +195,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
-    if isinstance(mf.diis, lib.diis.DIIS):
-        mf_diis = mf.diis
-    elif mf.diis:
-        assert issubclass(mf.DIIS, lib.diis.DIIS)
-        mf_diis = mf.DIIS(mf, mf.diis_file)
-        mf_diis.space = mf.diis_space
-        mf_diis.rollback = mf.diis_space_rollback
-        fock = mf.get_fock(h1e, s1e, vhf, dm)
-        _, mf_diis.Corth = mf.eig(fock, s1e)
-    else:
-        mf_diis = None
+    mf_diis = _init_diis(mf, h1e, s1e, vhf, dm)
 
     dump_chk = dump_chk and mf.chkfile is not None
     if dump_chk:
@@ -202,14 +208,15 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         dm_last = dm
         last_hf_e = e_tot
 
-        f = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis)
+        fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis)
         t1 = log.timer_debug1('DIIS', *t0)
-        mo_energy, mo_coeff = mf.eig(f, s1e)
+        mo_energy, mo_coeff = mf.eig(fock, s1e)
         t1 = log.timer_debug1('eig', *t1)
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         dm = mf.make_rdm1(mo_coeff, mo_occ)
         t1 = log.timer_debug1('dm', *t1)
         vhf = mf.get_veff(mol, dm, dm_last, vhf)
+        dm = asarray(dm) # Remove the attached attributes
         t1 = log.timer_debug1('veff', *t1)
         e_tot = mf.energy_tot(dm, h1e, vhf)
         t1 = log.timer_debug1('energy', *t1)
@@ -223,7 +230,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
             mf.dump_chk(locals())
 
         e_diff = abs(e_tot-last_hf_e)
-        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, f))
+        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
         if(e_diff < conv_tol and norm_gorb < conv_tol_grad):
             scf_conv = True
             break
