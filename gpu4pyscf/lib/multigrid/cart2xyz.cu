@@ -91,7 +91,7 @@ void _dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
     }
     __syncthreads();
 
-    int nf3 = (L+1)*(L+2)*(L+3)/6;
+    constexpr int nf3 = (L+1)*(L+2)*(L+3)/6;
     Fold3Index *fold3idx = c_i_in_fold3idx + L*nf3/4;
     for (int n = warp_id; n < nf3; n += WARPS) {
         int lx = fold3idx[n].x;
