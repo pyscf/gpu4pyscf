@@ -212,7 +212,7 @@ void eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = (L+1) * ngrid_span;
     int nf2 = (L+1)*(L+2)/2;
-    int nf3 = (L+1)*(L+2)*(L+3)/6;
+    int nf3 = nf2*(L+3)/3;
     pool += (xs_size*3 + nf3 + nf2*ngrid_span + 3) * WARP_SIZE * b_id;
 
     __shared__ uint32_t pair_idx0;

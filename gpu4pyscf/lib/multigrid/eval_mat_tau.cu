@@ -29,13 +29,13 @@ void fill_dm_xyz_ipip(double *dm_xyz, double *gx_dmyz, double *xs_exp,
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
-    int L2 = L + 2;
-    int L3 = L + 3;
-    int nf2 = (L+1)*(L+2)/2;
-    int nf3 = nf2*(L+3)/3;
+    constexpr int L2 = L + 2;
+    constexpr int L3 = L + 3;
+    constexpr int nf2 = (L+1)*(L+2)/2;
+    constexpr int nf3 = nf2*(L+3)/3;
     if (L <= 3) {
-        double r2[(L+1)*(L+2)*(L+3)/6 + (L+1)*(L+2)];
-        double r1[L+3];
+        double r2[nf3 + nf2*2];
+        double r1[L3];
 #pragma unroll
         for (int m = 0; m < nf3+nf2*2; ++m) {
             r2[m] = 0.;
@@ -72,7 +72,7 @@ void fill_dm_xyz_ipip(double *dm_xyz, double *gx_dmyz, double *xs_exp,
             }
         }
     } else {
-        double r3[((L+3)*(L+1)*(L+2)/2+WARPS-1)/WARPS];
+        double r3[(L3*nf2+WARPS-1)/WARPS];
 #pragma unroll
         for (int n = 0; n < (L3*nf2+WARPS-1)/WARPS; ++n) {
             r3[n] = 0.;
@@ -124,7 +124,7 @@ double sub_dm_xyz_to_dm(int lx_i, int ly_i, int lz_i, int lx_j, int ly_j, int lz
                         int lj3, double ai2, double aj2,
                         double *cx, double *cy, double *cz, double *dm_xyz)
 {
-    int L3 = L + 3;
+    constexpr int L3 = L + 3;
     double dm_ij = 0.;
     for (int jx = 0; jx <= lx_j; ++jx) {
         double fac_cx = cx[(jx+lx_j*lj3)*WARP_SIZE];
@@ -210,7 +210,7 @@ void _dm_xyz_to_dm_derivx(double *dm, double *dm_yzx, int nao, int li, int lj,
         double dm_ij = sub_dm_xyz_to_dm<L>(ly_i, lz_i, lx_i, ly_j, lz_j, lx_j,
                                            lj3, ai2, aj2, cy, cz, cx, dm_yzx);
 #else
-        int L3 = L + 3;
+        constexpr int L3 = L + 3;
         double dm_ij = 0.;
         double fac;
         for (int jy = 0; jy <= ly_j; ++jy) {
@@ -299,7 +299,7 @@ void _dm_xyz_to_dm_derivy(double *dm, double *dm_xzy, int nao, int li, int lj,
         double dm_ij = sub_dm_xyz_to_dm<L>(lx_i, lz_i, ly_i, lx_j, lz_j, ly_j,
                                            lj3, ai2, aj2, cx, cz, cy, dm_xzy);
 #else
-        int L3 = L + 3;
+        constexpr int L3 = L + 3;
         double dm_ij = 0.;
         double fac;
         for (int jx = 0; jx <= lx_j; ++jx) {
@@ -388,7 +388,7 @@ void _dm_xyz_to_dm_derivz(double *dm, double *dm_xyz, int nao, int li, int lj,
         double dm_ij = sub_dm_xyz_to_dm<L>(lx_i, ly_i, lz_i, lx_j, ly_j, lz_j,
                                            lj3, ai2, aj2, cx, cy, cz, dm_xyz);
 #else
-        int L3 = L + 3;
+        constexpr int L3 = L + 3;
         double dm_ij = 0.;
         double fac;
         for (int jx = 0; jx <= lx_j; ++jx) {
@@ -479,7 +479,7 @@ void _eval_mat_tau_kernel(double *out, double *vR, MGridEnvVars envs,
     int j0 = ao_loc[jsh];
     out += i0*nao+j0;
 
-    int nf2 = (L+1)*(L+2)/2;
+    constexpr int nf2 = (L+1)*(L+2)/2;
     int *mesh = bounds.mesh;
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -536,7 +536,7 @@ void _eval_mat_tau_kernel(double *out, double *vR, MGridEnvVars envs,
             int ny = load_xs(ys_cache, ys_exp, iy0, ngridy, L, TILE, ngrid_span, warp_id);
             for (int ix = warp_id; ix < ngridx; ix += WARPS) {
                 int tx = (ix + nx0) % mesh_x;
-                double r2[(L+1)*(L+2)/2];
+                double r2[nf2];
                 double r1[L+1];
 #pragma unroll
                 for (int m = 0; m < nf2; ++m) {
@@ -595,7 +595,7 @@ void _eval_mat_tau_kernel(double *out, double *vR, MGridEnvVars envs,
             int nx = load_xs(xs_cache, xs_exp, ix0, ngridx, L, TILE, ngrid_span, warp_id);
             for (int iy = warp_id; iy < ngridy; iy += WARPS) {
                 int ty = (iy + ny0) % mesh_y;
-                double r2[(L+1)*(L+2)/2];
+                double r2[nf2];
                 double r1[L+1];
 #pragma unroll
                 for (int m = 0; m < nf2; ++m) {
@@ -654,7 +654,7 @@ void _eval_mat_tau_kernel(double *out, double *vR, MGridEnvVars envs,
             int ny = load_xs(ys_cache, ys_exp, iy0, ngridy, L, TILE, ngrid_span, warp_id);
             for (int iz = warp_id; iz < ngridz; iz += WARPS) {
                 int tz = (iz + nz0) % mesh_z;
-                double r2[(L+1)*(L+2)/2];
+                double r2[nf2];
                 double r1[L+1];
 #pragma unroll
                 for (int m = 0; m < nf2; ++m) {

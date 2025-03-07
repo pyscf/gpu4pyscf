@@ -157,7 +157,7 @@ void fill_dm_xyz(double *dm_xyz, double *gx_dmyz, double *xs_exp,
     constexpr int nf2 = (L+1)*(L+2)/2;
 #if 0
     // this algorithm seems more efficient for large L
-    double r3[((L+1)*(L+1)*(L+2)/2+WARPS-1)/WARPS];
+    double r3[(L1*nf2+WARPS-1)/WARPS];
 #pragma unroll
     for (int n = 0; n < (L1*nf2+WARPS-1)/WARPS; ++n) {
         r3[n] = 0.;
@@ -242,7 +242,7 @@ void fill_dm_xyz(double *dm_xyz, double *gx_dmyz, double *xs_exp,
             }
         }
     } else {
-        double r3[((L+1)*(L+1)*(L+2)/2+WARPS-1)/WARPS];
+        double r3[(L1*nf2+WARPS-1)/WARPS];
 #pragma unroll
         for (int n = 0; n < (L1*nf2+WARPS-1)/WARPS; ++n) {
             r3[n] = 0.;

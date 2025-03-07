@@ -29,9 +29,9 @@ void fill_gx_dmyz(double *gx_dmyz, double *dm_xyz, double *xs_exp,
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
-    int L2 = L + 2;
-    int nf2 = (L+1)*(L+2)/2;
-    int nf3 = nf2*(L+3)/3;
+    constexpr int L2 = L + 2;
+    constexpr int nf2 = (L+1)*(L+2)/2;
+    constexpr int nf3 = nf2*(L+3)/3;
     int xs_stride = ngrid_span * WARP_SIZE;
     double r1[L+3];
     extern __shared__ double cache[];
@@ -101,7 +101,7 @@ void fill_gx_dmyz(double *gx_dmyz, double *dm_xyz, double *xs_exp,
 //                        double ai2, double aj2,
 //                        double *cx, double *cy, double *cz, double *dm)
 //{
-//    int L3 = L + 3;
+//    constexpr int L3 = L + 3;
 //    int lj3 = lj + 3;
 //    double out = 0.;
 //    // -2*ai xi, -2*aj xj
@@ -193,7 +193,7 @@ void _dm_to_dm_xyz_derivx(double *dm_xyz, double *dm, int nao, int li, int lj,
     int warp_id = thread_id / WARP_SIZE;
     int lj2 = lj + 2;
     int lj3 = lj + 3;
-    int L2 = L + 2;
+    constexpr int L2 = L + 2;
     extern __shared__ double cache[];
     double *cx = cache + sp_id;
     double *cy = cx + lj3 * lj3 * WARP_SIZE;
@@ -311,7 +311,7 @@ void _dm_to_dm_xyz_derivy(double *dm_xyz, double *dm, int nao, int li, int lj,
     int warp_id = thread_id / WARP_SIZE;
     int lj2 = lj + 2;
     int lj3 = lj + 3;
-    int L2 = L + 2;
+    constexpr int L2 = L + 2;
     extern __shared__ double cache[];
     double *cx = cache + sp_id;
     double *cy = cx + lj3 * lj3 * WARP_SIZE;
@@ -429,7 +429,7 @@ void _dm_to_dm_xyz_derivz(double *dm_xyz, double *dm, int nao, int li, int lj,
     int warp_id = thread_id / WARP_SIZE;
     int lj2 = lj + 2;
     int lj3 = lj + 3;
-    int L2 = L + 2;
+    constexpr int L2 = L + 2;
     extern __shared__ double cache[];
     double *cx = cache + sp_id;
     double *cy = cx + lj3 * lj3 * WARP_SIZE;
@@ -579,7 +579,7 @@ void _eval_tau_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
 
-    int L3 = L + 3;
+    constexpr int L3 = L + 3;
     int *mesh = bounds.mesh;
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -587,7 +587,7 @@ void _eval_tau_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     int mesh_yz = mesh_y * mesh_z;
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = L3 * ngrid_span * WARP_SIZE;
-    int nf2 = (L+1)*(L+2)/2;
+    constexpr int nf2 = (L+1)*(L+2)/2;
     int *grid_start = (int *)pool;
     double *xs_exp = pool + WARP_SIZE*3;
     double *ys_exp = xs_exp + xs_size;

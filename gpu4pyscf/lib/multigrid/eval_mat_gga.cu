@@ -34,7 +34,7 @@ void fill_dm_xyz_ip1(double *dm_xyz, double *gx_dmyz, double *xs_exp,
     constexpr int nf2 = (L+1)*(L+2)/2;
 #if 0
     // this algorithm seems more efficient for large L
-    double r3[((L+2)*(L+1)*(L+2)/2+WARPS-1)/WARPS];
+    double r3[(L2*nf2+WARPS-1)/WARPS];
 #pragma unroll
     for (int n = 0; n < (L2*nf2+WARPS-1)/WARPS; ++n) {
         r3[n] = 0.;
@@ -81,7 +81,7 @@ void fill_dm_xyz_ip1(double *dm_xyz, double *gx_dmyz, double *xs_exp,
     constexpr int nf3 = nf2*(L+3)/3;
     if (L <= 3) {
         double r2[nf3 + nf2];
-        double r1[L+2];
+        double r1[L2];
 #pragma unroll
         for (int m = 0; m < nf3+nf2; ++m) {
             r2[m] = 0.;
@@ -118,7 +118,7 @@ void fill_dm_xyz_ip1(double *dm_xyz, double *gx_dmyz, double *xs_exp,
             }
         }
     } else {
-        double r3[((L+2)*(L+1)*(L+2)/2+WARPS-1)/WARPS];
+        double r3[(L2*nf2+WARPS-1)/WARPS];
 #pragma unroll
         for (int n = 0; n < (L2*nf2+WARPS-1)/WARPS; ++n) {
             r3[n] = 0.;
@@ -163,7 +163,7 @@ void fill_dm_xyz_ip1(double *dm_xyz, double *gx_dmyz, double *xs_exp,
         }
 //    } else if (L == 6) {
 //        double r2[62];
-//        double r1[L+2];
+//        double r1[L2];
 //        int offset = 62; // corresponding to my=0..1, mz=0..L-my, mx=0..L1-my-mz
 //#pragma unroll
 //        for (int m = 0; m < offset; ++m) {
@@ -238,7 +238,7 @@ void fill_dm_xyz_ip1(double *dm_xyz, double *gx_dmyz, double *xs_exp,
 //        }
 //    } else if (L == 7) {
 //        double r2[79];
-//        double r1[L+2];
+//        double r1[L2];
 //        int offset = 79; // corresponding to my=0..1, mz=0..L-my, mx=0..L1-my-mz
 //#pragma unroll
 //        for (int m = 0; m < offset; ++m) {
@@ -313,7 +313,7 @@ void fill_dm_xyz_ip1(double *dm_xyz, double *gx_dmyz, double *xs_exp,
 //        }
 //    } else if (L == 8) {
 //        double r2[79];
-//        double r1[L+2];
+//        double r1[L2];
 //        int offset = 54; // corresponding to my=0, mz=0..L-my, mx=0..L1-my-mz
 //#pragma unroll
 //        for (int m = 0; m < offset; ++m) {
@@ -508,51 +508,8 @@ void _dm_xyz_to_dm_sigmax(double *dm, double *dm_yzx, int nao, int li, int lj,
         int lx_j = j_fold2idx[j].x;
         int ly_j = j_fold2idx[j].y;
         int lz_j = lj - lx_j - ly_j;
-#if 1
         double dm_ij = sub_dm_xyz_to_dm<L>(ly_i, lz_i, lx_i, ly_j, lz_j, lx_j,
                                            lj2, ai2, aj2, cy, cz, cx, dm_yzx);
-#else
-        constexpr int L2 = L + 2;
-        double dm_ij = 0.;
-        double fac;
-        for (int jy = 0; jy <= ly_j; ++jy) {
-            double fac_cy = cy[(jy+ly_j*lj2)*WARP_SIZE];
-            int ly = ly_i + jy;
-            for (int jz = 0; jz <= lz_j; ++jz) {
-                double cyz = fac_cy * cz[(jz+lz_j*lj2)*WARP_SIZE];
-                int lz = lz_i + jz;
-                int yz_idx = ADDR2(L, ly, lz);
-                if (lx_i > 0) {
-                    fac = lx_i * cyz;
-                    for (int jx = 0; jx <= lx_j; ++jx) {
-                        int lx = lx_i - 1 + jx;
-                        double cyzx = fac * cx[(jx+lx_j*lj2)*WARP_SIZE];
-                        dm_ij += cyzx * dm_yzx[(yz_idx*L2+lx)*WARP_SIZE];
-                    }
-                }
-                fac = ai2 * cyz;
-                for (int jx = 0; jx <= lx_j; ++jx) {
-                    int lx = lx_i + 1 + jx;
-                    double cyzx = fac * cx[(jx+lx_j*lj2)*WARP_SIZE];
-                    dm_ij += cyzx * dm_yzx[(yz_idx*L2+lx)*WARP_SIZE];
-                }
-                if (lx_j > 0) {
-                    fac = lx_j * cyz;
-                    for (int jx = 0; jx <= lx_j-1; ++jx) {
-                        int lx = lx_i + jx;
-                        double cyzx = fac * cx[(jx+(lx_j-1)*lj2)*WARP_SIZE];
-                        dm_ij += cyzx * dm_yzx[(yz_idx*L2+lx)*WARP_SIZE];
-                    }
-                }
-                fac = aj2 * cyz;
-                for (int jx = 0; jx <= lx_j+1; ++jx) {
-                    int lx = lx_i + jx;
-                    double cyzx = fac * cx[(jx+(lx_j+1)*lj2)*WARP_SIZE];
-                    dm_ij += cyzx * dm_yzx[(yz_idx*L2+lx)*WARP_SIZE];
-                }
-            }
-        }
-#endif
         atomicAdd(dm+i*nao+j, cicj * dm_ij);
     }
 }
@@ -595,51 +552,8 @@ void _dm_xyz_to_dm_sigmay(double *dm, double *dm_xzy, int nao, int li, int lj,
         int lx_j = j_fold2idx[j].x;
         int ly_j = j_fold2idx[j].y;
         int lz_j = lj - lx_j - ly_j;
-#if 1
         double dm_ij = sub_dm_xyz_to_dm<L>(lx_i, lz_i, ly_i, lx_j, lz_j, ly_j,
                                            lj2, ai2, aj2, cx, cz, cy, dm_xzy);
-#else
-        constexpr int L2 = L + 2;
-        double dm_ij = 0.;
-        double fac;
-        for (int jx = 0; jx <= lx_j; ++jx) {
-            double fac_cx = cx[(jx+lx_j*lj2)*WARP_SIZE];
-            int lx = lx_i + jx;
-            for (int jz = 0; jz <= lz_j; ++jz) {
-                double cxz = fac_cx * cz[(jz+lz_j*lj2)*WARP_SIZE];
-                int lz = lz_i + jz;
-                int xz_idx = ADDR2(L, lx, lz);
-                if (ly_i > 0) {
-                    fac = ly_i * cxz;
-                    for (int jy = 0; jy <= ly_j; ++jy) {
-                        int ly = ly_i - 1 + jy;
-                        double cxzy = fac * cy[(jy+ly_j*lj2)*WARP_SIZE];
-                        dm_ij += cxzy * dm_xzy[(xz_idx*L2+ly)*WARP_SIZE];
-                    }
-                }
-                fac = ai2 * cxz;
-                for (int jy = 0; jy <= ly_j; ++jy) {
-                    int ly = ly_i + 1 + jy;
-                    double cxzy = fac * cy[(jy+ly_j*lj2)*WARP_SIZE];
-                    dm_ij += cxzy * dm_xzy[(xz_idx*L2+ly)*WARP_SIZE];
-                }
-                if (ly_j > 0) {
-                    fac = ly_j * cxz;
-                    for (int jy = 0; jy <= ly_j-1; ++jy) {
-                        int ly = ly_i + jy;
-                        double cxzy = fac * cy[(jy+(ly_j-1)*lj2)*WARP_SIZE];
-                        dm_ij += cxzy * dm_xzy[(xz_idx*L2+ly)*WARP_SIZE];
-                    }
-                }
-                fac = aj2 * cxz;
-                for (int jy = 0; jy <= ly_j+1; ++jy) {
-                    int ly = ly_i + jy;
-                    double cxzy = fac * cy[(jy+(ly_j+1)*lj2)*WARP_SIZE];
-                    dm_ij += cxzy * dm_xzy[(xz_idx*L2+ly)*WARP_SIZE];
-                }
-            }
-        }
-#endif
         atomicAdd(dm+i*nao+j, cicj * dm_ij);
     }
 }
@@ -682,51 +596,8 @@ void _dm_xyz_to_dm_sigmaz(double *dm, double *dm_xyz, int nao, int li, int lj,
         int lx_j = j_fold2idx[j].x;
         int ly_j = j_fold2idx[j].y;
         int lz_j = lj - lx_j - ly_j;
-#if 1
         double dm_ij = sub_dm_xyz_to_dm<L>(lx_i, ly_i, lz_i, lx_j, ly_j, lz_j,
                                            lj2, ai2, aj2, cx, cy, cz, dm_xyz);
-#else
-        constexpr int L2 = L + 2;
-        double dm_ij = 0.;
-        double fac;
-        for (int jx = 0; jx <= lx_j; ++jx) {
-            double fac_cx = cx[(jx+lx_j*lj2)*WARP_SIZE];
-            int lx = lx_i + jx;
-            for (int jy = 0; jy <= ly_j; ++jy) {
-                double cxy = fac_cx * cy[(jy+ly_j*lj2)*WARP_SIZE];
-                int ly = ly_i + jy;
-                int xy_idx = ADDR2(L, lx, ly);
-                if (lz_i > 0) {
-                    fac = lz_i * cxy;
-                    for (int jz = 0; jz <= lz_j; ++jz) {
-                        int lz = lz_i - 1 + jz;
-                        double cxyz = fac * cz[(jz+lz_j*lj2)*WARP_SIZE];
-                        dm_ij += cxyz * dm_xyz[(xy_idx*L2+lz)*WARP_SIZE];
-                    }
-                }
-                fac = ai2 * cxy;
-                for (int jz = 0; jz <= lz_j; ++jz) {
-                    int lz = lz_i + 1 + jz;
-                    double cxyz = fac * cz[(jz+lz_j*lj2)*WARP_SIZE];
-                    dm_ij += cxyz * dm_xyz[(xy_idx*L2+lz)*WARP_SIZE];
-                }
-                if (lz_j > 0) {
-                    fac = lz_j * cxy;
-                    for (int jz = 0; jz <= lz_j-1; ++jz) {
-                        int lz = lz_i + jz;
-                        double cxyz = fac * cz[(jz+(lz_j-1)*lj2)*WARP_SIZE];
-                        dm_ij += cxyz * dm_xyz[(xy_idx*L2+lz)*WARP_SIZE];
-                    }
-                }
-                fac = aj2 * cxy;
-                for (int jz = 0; jz <= lz_j+1; ++jz) {
-                    int lz = lz_i + jz;
-                    double cxyz = fac * cz[(jz+(lz_j+1)*lj2)*WARP_SIZE];
-                    dm_ij += cxyz * dm_xyz[(xy_idx*L2+lz)*WARP_SIZE];
-                }
-            }
-        }
-#endif
         atomicAdd(dm+i*nao+j, cicj * dm_ij);
     }
 }
@@ -835,7 +706,7 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
             int ny = load_xs(ys_cache, ys_exp, iy0, ngridy, L, TILE, ngrid_span, warp_id);
             for (int ix = warp_id; ix < ngridx; ix += WARPS) {
                 int tx = (ix + nx0) % mesh_x;
-                double r2[(L+1)*(L+2)/2];
+                double r2[nf2];
                 double r1[L+1];
 #pragma unroll
                 for (int m = 0; m < nf2; ++m) {
@@ -891,7 +762,7 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
             int ny = load_xs(ys_cache, ys_exp, iy0, ngridy, L, TILE, ngrid_span, warp_id);
             for (int ix = warp_id; ix < ngridx; ix += WARPS) {
                 int tx = (ix + nx0) % mesh_x;
-                double r2[(L+1)*(L+2)/2];
+                double r2[nf2];
                 double r1[L+1];
 #pragma unroll
                 for (int m = 0; m < nf2; ++m) {
@@ -950,7 +821,7 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
             int nx = load_xs(xs_cache, xs_exp, ix0, ngridx, L, TILE, ngrid_span, warp_id);
             for (int iy = warp_id; iy < ngridy; iy += WARPS) {
                 int ty = (iy + ny0) % mesh_y;
-                double r2[(L+1)*(L+2)/2];
+                double r2[nf2];
                 double r1[L+1];
 #pragma unroll
                 for (int m = 0; m < nf2; ++m) {
@@ -1009,7 +880,7 @@ void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
             int ny = load_xs(ys_cache, ys_exp, iy0, ngridy, L, TILE, ngrid_span, warp_id);
             for (int iz = warp_id; iz < ngridz; iz += WARPS) {
                 int tz = (iz + nz0) % mesh_z;
-                double r2[(L+1)*(L+2)/2];
+                double r2[nf2];
                 double r1[L+1];
 #pragma unroll
                 for (int m = 0; m < nf2; ++m) {
