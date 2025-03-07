@@ -35,7 +35,7 @@ URL = None
 DOWNLOAD_URL = None
 CLASSIFIERS = None
 PLATFORMS = None
-VERSION = '0.6'
+VERSION = '0.7'
 
 def get_cuda_version():
     nvcc_out = subprocess.check_output(["nvcc", "--version"]).decode('utf-8')

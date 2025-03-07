@@ -91,7 +91,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
 
     if out is None:
         out = cupy.empty((comp, nao_slice, ngrids), order='C')
-
+    
     err = libgdft.GDFTeval_gto(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
@@ -103,7 +103,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
         ctr_offsets.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(nctr),
         ctr_offsets_slice.ctypes.data_as(ctypes.c_void_p),
         _sorted_mol._bas.ctypes.data_as(ctypes.c_void_p))
-
+    
     if err != 0:
         raise RuntimeError('CUDA Error in evaluating AO')
 
@@ -2139,14 +2139,25 @@ class _GDFTOpt:
     @contextlib.contextmanager
     def gdft_envs_cache(self):
         _sorted_mol = self._sorted_mol
-        ao_loc = _sorted_mol.ao_loc_nr()
         device_id = cupy.cuda.Device().id
         envs_cache = ctypes.POINTER(_GDFTEnvsCache)()
+
+        bas_atom = cupy.asarray(_sorted_mol._bas[:,[gto.ATOM_OF]], dtype=np.int32)
+        bas_exp = cupy.asarray(_sorted_mol._bas[:,[gto.PTR_EXP]], dtype=np.int32)
+        bas_coeff = cupy.asarray(_sorted_mol._bas[:,[gto.PTR_COEFF]], dtype=np.int32)
+        atom_coords = cupy.asarray(_sorted_mol.atom_coords(), dtype=np.double, order='F')
+        env = cupy.asarray(_sorted_mol._env, dtype=np.double, order='C')
+
         libgdft.GDFTinit_envs(
-            ctypes.byref(envs_cache), ao_loc.ctypes.data_as(ctypes.c_void_p),
-            _sorted_mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_sorted_mol.natm),
-            _sorted_mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_sorted_mol.nbas),
-            _sorted_mol._env.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_sorted_mol._env.size))
+            ctypes.byref(envs_cache), 
+            ctypes.cast(bas_atom.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_exp.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_coeff.data.ptr, ctypes.c_void_p),
+            ctypes.cast(atom_coords.data.ptr, ctypes.c_void_p),
+            ctypes.cast(env.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(_sorted_mol.natm),
+            ctypes.c_int(_sorted_mol.nbas)
+        )
         self.envs_cache[device_id] = envs_cache
         try:
             yield
