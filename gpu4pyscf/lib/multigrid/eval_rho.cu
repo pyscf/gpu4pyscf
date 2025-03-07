@@ -66,8 +66,8 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     int mesh_yz = mesh_y * mesh_z;
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = (L+1) * ngrid_span * WARP_SIZE;
-    int nf2 = (L+1)*(L+2)/2;
-    int nf3 = (L+1)*(L+2)*(L+3)/6;
+    constexpr int nf2 = (L+1)*(L+2)/2;
+    constexpr int nf3 = nf2*(L+3)/3;
     double *xs_exp = pool;
     double *ys_exp = xs_exp + xs_size;
     double *zs_exp = ys_exp + xs_size;

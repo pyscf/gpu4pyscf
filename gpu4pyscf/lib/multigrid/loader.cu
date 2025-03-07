@@ -152,8 +152,8 @@ void fill_dm_xyz(double *dm_xyz, double *gx_dmyz, double *xs_exp,
     int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
-    int L1 = L + 1;
-    int nf2 = (L+1)*(L+2)/2;
+    constexpr int L1 = L + 1;
+    constexpr int nf2 = (L+1)*(L+2)/2;
 #if 0
     // this algorithm seems more efficient for large L
     double r3[((L+1)*(L+1)*(L+2)/2+WARPS-1)/WARPS];
@@ -200,10 +200,10 @@ void fill_dm_xyz(double *dm_xyz, double *gx_dmyz, double *xs_exp,
         dm_xyz[m*WARP_SIZE] = r3[n];
     }
 #else
-    int nf3 = nf2*(L+3)/3;
+    constexpr int nf3 = nf2*(L+3)/3;
     if (L <= 3) {
-        double r2[(L+1)*(L+2)*(L+3)/6];
-        double r1[L+1];
+        double r2[nf3];
+        double r1[L1];
 #pragma unroll
         for (int m = 0; m < nf3; ++m) {
             r2[m] = 0.;
