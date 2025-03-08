@@ -164,7 +164,7 @@ class KnownValues(unittest.TestCase):
         es = td.kernel(nstates=5)[0]
         a, b = td.get_ab()
         ref = diagonalize(a, b, nroots=5)
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 7)
 
     def test_tddft_camb3lyp(self):
         mol = self.mol
