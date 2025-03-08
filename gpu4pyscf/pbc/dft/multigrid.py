@@ -531,7 +531,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
     # computing rhoR with IFFT, the weight factor is not needed.
     rhoR = tools.ifft(rhoG.reshape(-1,ngrids), mesh).real * (1./weight)
-    rhoR = cp.asarray(rhoR.reshape(nset,-1,ngrids), order='C')
+    rhoR = cp.asarray(rhoR.reshape(nset,nvar,ngrids), order='C')
     nelec = float(rhoR[0,0].sum()) * weight
 
     wv_freq = cp.empty((nset,nvar,ngrids), dtype=np.complex128)
@@ -572,7 +572,107 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 # each call (nr_rks supports multiple sets of KRKS density matrices)
 def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
            kpts=None, kpts_band=None, with_j=False, verbose=None):
-    raise NotImplementedError
+    '''Compute the XC energy and UKS XC matrix at sampled k-points.
+    multigrid version of function pbc.dft.numint.nr_rks.
+
+    Args:
+        dm_kpts : (nkpts, nao, nao) ndarray or a list of (nkpts,nao,nao) ndarray
+            Density matrix at each k-point.
+        kpts : (nkpts, 3) ndarray
+
+    Kwargs:
+        kpts_band : ``(3,)`` ndarray or ``(*,3)`` ndarray
+            A list of arbitrary "band" k-points at which to evalute the matrix.
+        with_j : bool
+            Whether to add the Coulomb matrix into the XC matrix.
+
+    Returns:
+        exc : XC energy
+        nelec : number of electrons obtained from the numerical integration
+        veff : (nkpts, nao, nao) ndarray
+            or list of veff if the input dm_kpts is a list of DMs
+    '''
+    assert kpts is None or all(kpts == 0)
+    kpts = np.zeros((1, 3))
+
+    cell = ni.cell
+    log = logger.new_logger(cell, verbose)
+    dm_kpts = cp.asarray(dm_kpts, order='C')
+    dms = _format_dms(dm_kpts, kpts)
+    nset, nkpts, nao = dms.shape[:3]
+    nset //= 2
+    # Disable GKS
+    assert nset == 1
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+
+    xctype = ni._xc_type(xc_code)
+    if xctype == 'LDA':
+        nvar = 1
+    elif xctype == 'GGA':
+        nvar = 4
+    elif xctype == 'MGGA':
+        nvar = 5
+
+    vol = cell.vol
+    mesh = ni.mesh
+    ngrids = np.prod(mesh)
+    rhoG = _eval_rhoG(ni, dms, hermi, kpts)
+    rhoG = rhoG.reshape(nset,2,1,ngrids)
+    if xctype != 'LDA':
+        Gv = cp.asarray(cell.get_Gv(mesh))
+        rhoG = cp.repeat(rhoG, nvar, axis=2)
+        rhoG[:,:,1:4] *= 1j
+        rhoG[:,:,1:4] *= Gv.T
+        if xctype == 'MGGA':
+            rhoG[:,:,4] = _eval_tauG(ni, dms, hermi, kpts)
+
+    coulG = tools.get_coulG(cell, mesh=mesh)
+    rho_tot = rhoG[0,0,0] + rhoG[0,1,0]
+    vG = rho_tot * coulG
+    ecoul = .5 * float(rho_tot.conj().dot(vG).real) / vol
+    log.debug('Multigrid Coulomb energy %s', ecoul)
+
+    weight = vol / ngrids
+    # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
+    # computing rhoR with IFFT, the weight factor is not needed.
+    rhoR = tools.ifft(rhoG.reshape(-1,ngrids), mesh).real * (1./weight)
+    rhoR = cp.asarray(rhoR.reshape(nset,2,nvar,ngrids), order='C')
+    nelec = rhoR[0,:,0].sum(axis=-1).get() * weight
+
+    wv_freq = cp.empty((nset,2,nvar,ngrids), dtype=np.complex128)
+    excsum = 0
+    for i in range(nset):
+        if xctype == 'LDA':
+            exc, vxc = ni.eval_xc_eff(xc_code, rhoR[i,:,0], deriv=1, xctype=xctype)[:2]
+        else:
+            exc, vxc = ni.eval_xc_eff(xc_code, rhoR[i], deriv=1, xctype=xctype)[:2]
+        if i == 0:
+            rhoa, rhob = rhoR[0,:,0]
+            excsum += float(rhoa.dot(exc[:,0]) + rhob.dot(exc[:,1])) * weight
+        wv = weight * vxc
+        wv_freq[i] = tools.fft(wv, mesh).reshape(2,nvar,ngrids)
+    rhoR = rhoG = None
+    log.debug('Multigrid exc %s  nelec %s', excsum, nelec)
+
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    if xctype == 'LDA':
+        if with_j:
+            wv_freq[:,0] += vG
+            veff = _get_j_pass2(ni, wv_freq[:,0], hermi, kpts_band, verbose=log)
+    else:
+        if with_j:
+            wv_freq[:,0] += vG
+        veff = _get_gga_pass2(ni, wv_freq[:,:4], hermi, kpts_band, verbose=log)
+        if xctype == 'MGGA':
+            veff += _get_tau_pass2(ni, wv_freq[:,4], hermi, kpts_band, verbose=log)
+    veff = _format_jks(veff, dm_kpts, input_band, kpts)
+
+    shape = list(dm_kpts.shape)
+    if len(shape) == 3 and shape[0] != kpts_band.shape[0]:
+        shape[0] = kpts_band.shape[0]
+    veff = veff.reshape(shape)
+    veff = tag_array(veff, ecoul=ecoul, exc=excsum, vj=None, vk=None)
+    return nelec, excsum, veff
 
 def get_rho(ni, dm, kpts=None):
     '''Density in real space
@@ -857,9 +957,8 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     ls = cp.asarray(supmol_bas[:,PRIMBAS_ANG])
     es = cp.asarray(supmol_env[supmol_bas[:,PRIMBAS_EXP]])
     cs = cp.asarray(abs(supmol_env[supmol_bas[:,PRIMBAS_COEFF]]))
-    norm = cs * ((2*ls+1)/(4*np.pi))**.5
     #TODO: create different task plans for LDA, GGA and MGGA
-    norm *= es*2
+    cs *= es*2
     ptr_coords = supmol_bas[:,PRIMBAS_COORD]
     bas_coords = cp.asarray(supmol_env[ptr_coords[:,None] + np.arange(3)])
     log.debug1('%d primitive shells in cell0, %d shells in supmol',
@@ -883,7 +982,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     rad = cell.vol**(-1./3) * dr + 1
     surface = 4*np.pi * rad**2
     fl = cp.where(surface > 1, surface, 1)
-    fac_norm = norm[:cell0_nprims,None]*norm * (np.pi/aij)**1.5
+    fac_norm = cs[:cell0_nprims,None]*cs * (np.pi/aij)**1.5
     ovlp = fac_norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj * fl
     # The hermitian symmetry in Coulomb matrix.
     # FIXME: hermitian symmetry might not be available in methods like TDDFT
@@ -892,7 +991,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
 
     # Ecut estimation based on pyscf.pbc.gto.cell.estimate_ke_cutoff
     # Factors for Ecut estimation should be
-    #     fac = norm[:,None]*norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj * fl
+    #     fac = cs[:,None]*cs * cp.exp(-theta*dr**2) * fac_dri * fac_drj * fl
     # where
     #     fac_dri = (li * .5/aij + dri**2 + Ecut/2/aij**2)**(li*.5)
     #             ~= (li * .5/aij + dri**2 + log(1./precision)/aij)**(li*.5)
@@ -904,7 +1003,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     Ecut = cp.log(fac + 1.) * 2*aij
 
     # Estimate radius:
-    # rho[r-Rp] = fl*norm[:cell0_nprims,None]*norm * exp(-theta*dr**2)
+    # rho[r-Rp] = fl*cs[:cell0_nprims,None]*cs * exp(-theta*dr**2)
     #             * r**lij * exp(-aij*r**2)
     radius = 2.
     #TODO: create different task plans for LDA, GGA and MGGA

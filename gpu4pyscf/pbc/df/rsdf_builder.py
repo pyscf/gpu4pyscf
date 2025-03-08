@@ -382,7 +382,6 @@ def _int3c2e_overlap_mask(int3c2e_opt, cutoff):
     ovlp_img_counts = cp.zeros((p_nbas,p_nbas), dtype=np.int32)
     ls = pcell._bas[:,ANG_OF]
     exps, cs = extract_pgto_params(pcell, 'diffused')
-    cs *= ((2*ls+1)/(4*np.pi))**.5
     exps = cp.asarray(exps, dtype=np.float32)
     log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
     log_cutoff = math.log(cutoff)
@@ -474,7 +473,6 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
 
     ls = sorted_cell._bas[:,ANG_OF]
     exps, cs = extract_pgto_params(sorted_cell, 'diffused')
-    cs *= ((2*ls+1)/(4*np.pi))**.5
     exps = cp.asarray(exps, dtype=np.float32)
     log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
     log_cutoff = math.log(cutoff)

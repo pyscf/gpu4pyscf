@@ -74,6 +74,9 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
     float zj = rj[2];
     // log(ci*cj * (pi/aij)**1.5)
     float log_fac = log_cicj + 1.717f - 1.5f*logf(aij);
+    // An addiitonal factor for Coulomb integrals
+    // log_fac += .25 * logf(2./pi * aij)
+    log_fac += .25f * logf(0.6366f * aij);
     log_cutoff = log_cutoff - log_fac;
 
     int counts = 0;
@@ -148,6 +151,9 @@ void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
     float zj = rj[2];
     // log(ci*cj * (pi/aij)**1.5)
     float log_fac = log_cicj + 1.717f - 1.5f*logf(aij);
+    // An addiitonal factor for Coulomb integrals
+    // log_fac += .25 * logf(2./pi * aij)
+    log_fac += .25f * logf(0.6366f * aij);
     log_cutoff = log_cutoff - log_fac;
 
     int counts = 0;
@@ -240,6 +246,9 @@ void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_ij_map
     float fac_guess = .5f - logf(omega2)/4;
     // log(ci*cj * (pi/aij)**1.5)
     float log_fac = log_cicj + 1.717f - 1.5f*logf(aij) + fac_guess;
+    // An addiitonal factor for Coulomb integrals
+    // log_fac += .25 * logf(2./pi * aij)
+    log_fac += .25f * logf(0.6366f * aij);
     log_cutoff = log_cutoff - log_fac;
     float theta = (omega2 * aij) / (omega2 + aij);
     double *ri = env + atm[bas[ish*BAS_SLOTS+ATOM_OF] * ATM_SLOTS + PTR_COORD];
