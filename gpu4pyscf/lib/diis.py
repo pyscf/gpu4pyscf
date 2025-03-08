@@ -27,7 +27,7 @@ from pyscf.lib import misc
 from pyscf import __config__
 
 # TODO: should be different for GPU?
-INCORE_SIZE = getattr(__config__, 'lib_diis_incore_size', 1000000000)  # 8000 MB
+INCORE_SIZE = getattr(__config__, 'lib_diis_incore_size', 300000000)  # 2400 MB
 BLOCK_SIZE  = getattr(__config__, 'lib_diis_block_size', 20000000)  # ~ 160/320 MB
 
 # PCCP, 4, 11 (2002); DOI:10.1039/B108658H
