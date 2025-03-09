@@ -71,7 +71,7 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = sandwich_dot(dms, vhfopt.coeff.T)
+    dms = sandwich_dot(dms, cp.asarray(vhfopt.coeff).T)
     dms = cp.asarray(dms, order='C')
 
     ao_loc = mol.ao_loc
@@ -245,7 +245,7 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
             vj1 = vs_h[0]
         else:
             vk1 = vs_h[0]
-        coeff = vhfopt.coeff
+        coeff = cp.asarray(vhfopt.coeff)
         idx, idy = np.tril_indices(nao, -1)
         if with_j:
             vj1[:,idy,idx] = vj1[:,idx,idy]
@@ -257,7 +257,7 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
             for i, v in enumerate(vk1):
                 vk[i] += coeff.T.dot(cp.asarray(v)).dot(coeff)
         log.timer_debug1('get_jk pass 2 for h functions on cpu', *cput1)
-    
+
     if with_j:
         vj = vj.reshape(dm.shape)
     if with_k:
@@ -282,7 +282,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     n_dm = dms.shape[0]
     assert n_dm == 1
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = sandwich_dot(dms, vhfopt.coeff.T)
+    dms = sandwich_dot(dms, cp.asarray(vhfopt.coeff).T)
     dms = cp.asarray(dms, order='C')
     if hermi != 1:
         dms = transpose_sum(dms)

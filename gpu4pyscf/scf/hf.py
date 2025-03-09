@@ -151,8 +151,6 @@ def _init_diis(mf, h1e, s1e, vhf, dm):
         mf_diis = mf.DIIS(mf, mf.diis_file)
         mf_diis.space = mf.diis_space
         mf_diis.rollback = mf.diis_space_rollback
-        fock = mf.get_fock(h1e, s1e, vhf, dm)
-        _, mf_diis.Corth = mf.eig(fock, s1e)
     else:
         mf_diis = None
     return mf_diis
