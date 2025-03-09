@@ -76,7 +76,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
 
     cell = ni.cell
     dm_kpts = cp.asarray(dm_kpts)
-    vG = _eval_rhoG(ni, dm_kpts, hermi, kpts)
+    rhoG = _eval_rhoG(ni, dm_kpts, hermi, kpts)
     coulG = tools.get_coulG(cell, mesh=cell.mesh)
     #:vG = np.einsum('ng,g->ng', rhoG, coulG)
     vG = rhoG
