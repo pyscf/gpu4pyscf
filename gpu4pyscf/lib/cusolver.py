@@ -105,7 +105,6 @@ def eigh(h, s):
     assert h.dtype == s.dtype
     assert h.dtype in (np.float64, np.complex128)
     n = h.shape[0]
-    w = cupy.zeros(n)
     if h.dtype == np.complex128 and h.flags.c_contiguous:
         # zhegvd requires the matrices in F-order. For hermitian matrices,
         # .T.copy() is equivalent to .conj()
@@ -118,24 +117,26 @@ def eigh(h, s):
 
     # TODO: reuse workspace
     if (h.dtype, n) in _buffersize:
-        lwork = _buffersize[h.dtype, n]
+        lwork, w = _buffersize[h.dtype, n]
     else:
         lwork = ctypes.c_int(0)
+        w = cupy.zeros(n)
+        _buffersize[h.dtype, n] = lwork, w
         if h.dtype == np.float64:
             fn = libcusolver.cusolverDnDsygvd_bufferSize
         else:
             fn = libcusolver.cusolverDnZhegvd_bufferSize
         status = fn(
             _handle,
-            CUSOLVER_EIG_TYPE_1,
-            CUSOLVER_EIG_MODE_VECTOR,
+            ctype.c_int(CUSOLVER_EIG_TYPE_1),
+            ctype.c_int(CUSOLVER_EIG_MODE_VECTOR),
             cublas.CUBLAS_FILL_MODE_LOWER,
-            n,
-            A.data.ptr,
-            n,
-            B.data.ptr,
-            n,
-            w.data.ptr,
+            ctypes.c_int(n),
+            ctypes.cast(A.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n),
+            ctypes.cast(B.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n),
+            ctypes.cast(w.data.ptr, ctypes.c_void_p),
             ctypes.byref(lwork)
         )
         lwork = lwork.value
@@ -151,18 +152,18 @@ def eigh(h, s):
     devInfo = cupy.empty(1, dtype=np.int32)
     status = fn(
         _handle,
-        CUSOLVER_EIG_TYPE_1,
-        CUSOLVER_EIG_MODE_VECTOR,
+        ctype.c_int(CUSOLVER_EIG_TYPE_1),
+        ctype.c_int(CUSOLVER_EIG_MODE_VECTOR),
         cublas.CUBLAS_FILL_MODE_LOWER,
-        n,
-        A.data.ptr,
-        n,
-        B.data.ptr,
-        n,
-        w.data.ptr,
-        work.data.ptr,
+        ctypes.c_int(n),
+        ctypes.cast(A.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n),
+        ctypes.cast(B.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n),
+        ctypes.cast(w.data.ptr, ctypes.c_void_p),
+        ctypes.cast(work.data.ptr, ctypes.c_void_p),
         lwork,
-        devInfo.data.ptr
+        ctypes.cast(devInfo.data.ptr, ctypes.c_void_p),
     )
 
     if status != 0:
