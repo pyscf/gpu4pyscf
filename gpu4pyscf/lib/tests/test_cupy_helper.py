@@ -215,6 +215,10 @@ class KnownValues(unittest.TestCase):
         ref[:,idx,idy] = atril
         assert abs(a - ref).max() < 1e-12
 
+        ref = atril
+        atril = cupy_helper.pack_tril(a)
+        assert abs(atril - ref).max() < 1e-12
+
     def test_copy_host2dev(self):
         host_array = cupy.cuda.alloc_pinned_memory(10*10*10 * 8)
         host_data = numpy.ndarray(10**3, dtype=cupy.float64, buffer=host_array)

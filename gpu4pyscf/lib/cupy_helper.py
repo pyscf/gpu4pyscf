@@ -171,7 +171,7 @@ def asarray(a, **kwargs):
     CPArrayWithTag, this function will remove the attributes within
     the tagged array'''
     if isinstance(a, CPArrayWithTag):
-        a = a.view(cp.ndarray)
+        a = a.view(cupy.ndarray)
     if kwargs:
         a = cupy.asarray(a, **kwargs)
     return a
@@ -195,16 +195,31 @@ def return_cupy_array(fn):
         return to_cupy(ret)
     return filter_ret
 
-def pack_tril(a):
+def pack_tril(a, stream=None):
+    assert a.flags.c_contiguous
     if a.ndim == 2:
         a = a[None]
-    n = a.shape[-1]
-    idx = cupy.arange(n)
-    mask = idx[:,None] >= idx
-    return a[:,mask]
+    counts, n = a.shape[:2]
+    if a.dtype != np.float64:
+        idx = cupy.arange(n)
+        mask = idx[:,None] >= idx
+        return a[:,mask]
 
-def unpack_tril(cderi_tril, cderi=None, stream=None):
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    a_tril = cupy.empty((counts, n*(n+1)//2), dtype=np.float64)
+    err = libcupy_helper.pack_tril(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(a_tril.data.ptr, ctypes.c_void_p),
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n), ctypes.c_int(count))
+    if err != 0:
+        raise RuntimeError('pack_tril kernel failed')
+    return a_tril
+
+def unpack_tril(cderi_tril, cderi=None, stream=None, hermi=1):
     assert cderi_tril.flags.c_contiguous
+    assert hermi in (1, 2)
     if cderi_tril.ndim == 1:
         cderi_tril = cderi_tril[None]
     count = cderi_tril.shape[0]
@@ -218,7 +233,10 @@ def unpack_tril(cderi_tril, cderi=None, stream=None):
         idx = cupy.arange(nao)
         mask = idx[:,None] >= idx
         cderiT = cderi.transpose(0,2,1)
-        cderiT[:,mask] = cderi_tril.conj()
+        if hermi == 1:
+            cderiT[:,mask] = cderi_tril.conj()
+        else:
+            raise NotImplementedError
         cderi [:,mask] = cderi_tril
         return cderi
 
@@ -229,7 +247,8 @@ def unpack_tril(cderi_tril, cderi=None, stream=None):
         ctypes.cast(cderi_tril.data.ptr, ctypes.c_void_p),
         ctypes.cast(cderi.data.ptr, ctypes.c_void_p),
         ctypes.c_int(nao),
-        ctypes.c_int(count))
+        ctypes.c_int(count),
+        ctypes.c_int(hermi))
     if err != 0:
         raise RuntimeError('failed in unpack_tril kernel')
     return cderi
