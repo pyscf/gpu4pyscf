@@ -152,26 +152,27 @@ int ECP_ip1_cart(double *gctr,
             ecpbas, ecploc, 
             atm, bas, env);
     } else {
-        const int li_1 = li+1;
-        const int li1 = li_1+1;
+        const int li1 = li+2;
         const int lj1 = lj+1;
-        const int nfi = (li_1+1)*(li_1+2)/2;
+        const int lij1 = (li+1)+lj+1;
+        const int nfi = (li+2)*(li+3)/2;
         const int nfj = (lj+1)*(lj+2)/2;
-        const int lic1 = li_1+lc+1;
+        const int lic1 = (li+1)+lc+1;
         const int ljc1 = lj+lc+1;
         const int lcc1 = 2*lc+1;
         const int blki = (lic1+1)/2 * lcc1;
         const int blkj = (ljc1+1)/2 * lcc1;
         
-        int smem_size = 0; 
-        int smem_size0 = (li_1+lj+1) * lic1 * ljc1; // rad_all
+        int smem_size0 = lij1 * lic1 * ljc1; // rad_all
         int smem_size1 = li1*(li1+1)*(li1+2)/6 * blki; // omegai
         int smem_size2 = lj1*(lj1+1)*(lj1+2)/6 * blkj; // omegaj
         int smem_size3 = li1*lic1*nfi; // angi
         int smem_size4 = lj1*ljc1*nfj; // angj
 
+        int NFI_MAX = (AO_LMAX+2)*(AO_LMAX+3)/2;
+        int NFJ_MAX = (AO_LMAX+1)*(AO_LMAX+2)/2;
         int smem_size5 = NF_MAX*NF_MAX*3 + NFI_MAX*NFJ_MAX;
-        smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4 + smem_size5;
+        int smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4 + smem_size5;
 
         type2_cart_ip1<<<blocks, threads, smem_size*sizeof(double)>>>(
             gctr, li, lj, lc,

@@ -22,21 +22,21 @@ from gpu4pyscf.gto.ecp import get_ecp, get_ecp_ip
 def setUpModule():
     global mol, mol1, mol2, cu1_basis
     cu1_basis = gto.basis.parse('''
-#     H    S
-#          1.8000000              1.0000000
-#     H    S
-#           2.8000000              0.0210870             -0.0045400              0.0000000
-#           1.3190000              0.3461290             -0.1703520              0.0000000
-#           0.9059000              0.0393780              0.1403820              1.0000000
+     H    S
+          1.8000000              1.0000000
+     H    S
+           2.8000000              0.0210870             -0.0045400              0.0000000
+           1.3190000              0.3461290             -0.1703520              0.0000000
+           0.9059000              0.0393780              0.1403820              1.0000000
      H    P
            2.1330000              0.0868660              0.0000000
            1.2000000              0.0000000              0.5000000
            0.3827000              0.5010080              1.0000000
-#     H    D
-#           0.3827000              1.0000000
-#     H    F
-#           2.1330000              0.1868660              0.0000000
-#           0.3827000              0.2010080              1.0000000
+     H    D
+           0.3827000              1.0000000
+     H    F
+           2.1330000              0.1868660              0.0000000
+           0.3827000              0.2010080              1.0000000
 #     H    G
 #            6.491000E-01           1.0000000   
                                 ''')
@@ -45,7 +45,7 @@ def setUpModule():
         atom="""
         Cu 0.0 0.0 0.0
         """,
-        basis="sto3g",
+        basis="sto-3g",
         ecp="crenbl",
         spin=1,          
         charge=0,
@@ -56,23 +56,23 @@ def setUpModule():
     mol2 = gto.M(
         atom='''
             Na 0.5 0.5 0.
-            H  0.  1.  1.
+            Na  0.  1.  1.
             ''',
         output = '/dev/null',
         basis = {'Na': cu1_basis, 'H': cu1_basis},
         ecp = {'Na': gto.basis.parse_ecp('''
 Na nelec 10
-#Na ul
-#2       1.0                   0.5
+Na ul
+2       1.0                   0.5
 Na S
 2      13.652203             732.2692
 2       6.826101              26.484721
-#Na P
-#2      10.279868             299.489474
-#2       5.139934              26.466234
-#Na D
-#2       7.349859             124.457595
-#2       3.674929              14.035995
+Na P
+2      10.279868             299.489474
+2       5.139934              26.466234
+Na D
+2       7.349859             124.457595
+2       3.674929              14.035995
 #Na F
 #2       3.034072              21.531031
 #Na G
@@ -85,29 +85,36 @@ def tearDownModule():
     del mol1, mol2
 
 class KnownValues(unittest.TestCase):
-    #def test_ecp_cart(self):
-    #    h1_cpu = mol1.intor('ECPscalar_cart')
-    #    h1_gpu = get_ecp(mol1)
-    #    assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
-
+    def test_ecp_cart(self):
+        h1_cpu = mol1.intor('ECPscalar_cart')
+        h1_gpu = get_ecp(mol1)
+        assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
+    
     def test_ecp_sph(self):
         h1_cpu = mol2.intor('ECPscalar_sph')
         h1_gpu = get_ecp(mol2)
-        print(np.linalg.norm(h1_cpu - h1_gpu.get()))
-        print(h1_cpu[-3:,-3:])
-        print(h1_gpu.get()[-3:,-3:])
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
-    '''
+    
     def test_ecp_cart_ip1(self):
         h1_cpu = mol1.intor('ECPscalar_iprinv_cart')
         h1_gpu = get_ecp_ip(mol1)
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
     
-    def test_ecp_sph_ip1(self):
-        h1_cpu = mol2.intor('ECPscalar_iprinv_sph')
+    def test_ecp_sph_iprinv(self):
+        nao = mol2.nao
+        h1_cpu = np.zeros((3,nao,nao))
+        ecp_atoms = set(mol2._ecpbas[:,gto.ATOM_OF])
+        for atm_id in ecp_atoms:
+            with mol2.with_rinv_at_nucleus(atm_id):
+                h1_cpu += mol2.intor('ECPscalar_iprinv_sph')
         h1_gpu = get_ecp_ip(mol2)
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
-    '''
+    
+    def test_ecp_sph_ipnuc(self):
+        h1_cpu = mol2.intor('ECPscalar_ipnuc_sph')
+        h1_gpu = get_ecp_ip(mol2)
+        assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
+
 if __name__ == "__main__":
     print("Full Tests for ECP Integrals")
     unittest.main()

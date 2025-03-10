@@ -21,11 +21,10 @@
 #define ATM_SLOTS       6
 
 #define ECP_LMAX        4
-#define AO_LMAX         6     // Up to G, and its second derivative
+#define AO_LMAX         4     // Up to G
+#define AO_LMAX_IP      6    // Up to G, and its second derivative
 #define NF_MAX          15
 #define NF_MAX_LIJ      45    // Up to l=8
-#define NFI_MAX         28    // Up to second derivative
-#define NFJ_MAX         21    // Up to first derivative
 #define XYZ_MAX         27    // max xyz such x+y+z <= LMAX
 
 // Thread number has to be the same as qudrature points

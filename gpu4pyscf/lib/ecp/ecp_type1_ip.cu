@@ -84,6 +84,8 @@ void type1_cart_kernel(double *gctr,
         }
     }
     
+    constexpr int NFI_MAX = (AO_LMAX+orderi+1)*(AO_LMAX+orderi+2)/2;
+    constexpr int NFJ_MAX = (AO_LMAX+orderj+1)*(AO_LMAX+orderj+2)/2;
     double fi[3*NFI_MAX];
     double fj[3*NFJ_MAX];
     cache_fac(fi, LI, rca);
@@ -151,6 +153,10 @@ void type1_cart_ip1(double *gctr,
     }
     __syncthreads();
     
+    constexpr int orderi = 1;
+    constexpr int orderj = 0;
+    constexpr int NFI_MAX = (AO_LMAX+orderi+1)*(AO_LMAX+orderi+2)/2;
+    constexpr int NFJ_MAX = (AO_LMAX+orderj+1)*(AO_LMAX+orderj+2)/2;
     __shared__ double buf[NFI_MAX*NFJ_MAX];
     type1_cart_kernel<1,0>(buf, LI+1, LJ, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
     __syncthreads();
@@ -174,6 +180,80 @@ void type1_cart_ip1(double *gctr,
         atomicAdd(gx + (i+ioff)*nao + (j+joff), gctr_smem[ij]);
         atomicAdd(gy + (i+ioff)*nao + (j+joff), gctr_smem[ij+nfi*nfj]);
         atomicAdd(gz + (i+ioff)*nao + (j+joff), gctr_smem[ij+2*nfi*nfj]);
+    }
+    return;
+}
+
+__global__
+void type1_cart_ipipv(double *gctr, 
+                const int LI, const int LJ,
+                const int *ao_loc, const int nao, 
+                const int *tasks, const int ntasks,
+                const int *ecpbas, const int *ecploc, 
+                const int *atm, const int *bas, const double *env)
+{
+    const int task_id = blockIdx.x;
+    if (task_id >= ntasks){
+        return;
+    }
+
+    const int ish = tasks[task_id];
+    const int jsh = tasks[task_id + ntasks];
+    const int ksh = tasks[task_id + 2*ntasks];
+    
+    __shared__ double gctr_smem[NF_MAX*NF_MAX*9];
+    for (int ij = threadIdx.x; ij < NF_MAX*NF_MAX*3; ij+=blockDim.x){
+        gctr_smem[ij] = 0.0;
+    }
+    __syncthreads();
+    
+    constexpr int orderi = 2;
+    constexpr int orderj = 0;
+    constexpr int NFI_MAX = (AO_LMAX+orderi+1)*(AO_LMAX+orderi+2)/2;
+    constexpr int NFJ_MAX = (AO_LMAX+orderj+1)*(AO_LMAX+orderj+2)/2;
+    __shared__ double buf[NFI_MAX*NFJ_MAX];
+    type1_cart_kernel<2,0>(buf, LI+1, LJ, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
+    __syncthreads();
+    _l_down(gctr_smem, buf, LI+1, LJ);
+
+    type1_cart_kernel<0,0>(buf, LI, LJ, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
+    __syncthreads();
+    _l_up(gctr_smem, buf, LI+1, LJ);
+    _l_down(gctr_smem, buf, LI+1, LJ);
+    if (LI > 0){
+        if (LI > 1){
+            type1_cart_kernel<0,0>(buf, LI-1, LJ, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
+            __syncthreads();
+            _l_up(gctr_smem, buf, LI, LJ);
+        }
+        _l_up(gctr_smem, buf, LI, LJ);
+    }
+
+    const int nfi = (LI+1) * (LI+2) / 2;
+    const int nfj = (LJ+1) * (LJ+2) / 2;
+    const int ioff = ao_loc[ish];
+    const int joff = ao_loc[jsh];
+    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+        const int i = ij%nfi;
+        const int j = ij/nfi;
+        double *gxx = gctr;
+        double *gxy = gxx + nao*nao;
+        double *gxz = gxy + nao*nao;
+        double *gyx = gxz + nao*nao;
+        double *gyy = gyx + nao*nao;
+        double *gyz = gyy + nao*nao;
+        double *gzx = gyz + nao*nao;
+        double *gzy = gzx + nao*nao;
+        double *gzz = gzy + nao*nao;
+        atomicAdd(gxx + (i+ioff)*nao + (j+joff), gctr_smem[ij]);
+        atomicAdd(gxy + (i+ioff)*nao + (j+joff), gctr_smem[ij+nfi*nfj]);
+        atomicAdd(gxz + (i+ioff)*nao + (j+joff), gctr_smem[ij+2*nfi*nfj]);
+        atomicAdd(gyx + (i+ioff)*nao + (j+joff), gctr_smem[ij+3*nfi*nfj]);
+        atomicAdd(gyy + (i+ioff)*nao + (j+joff), gctr_smem[ij+4*nfi*nfj]);
+        atomicAdd(gyz + (i+ioff)*nao + (j+joff), gctr_smem[ij+5*nfi*nfj]);
+        atomicAdd(gzx + (i+ioff)*nao + (j+joff), gctr_smem[ij+6*nfi*nfj]);
+        atomicAdd(gzy + (i+ioff)*nao + (j+joff), gctr_smem[ij+7*nfi*nfj]);
+        atomicAdd(gzz + (i+ioff)*nao + (j+joff), gctr_smem[ij+8*nfi*nfj]);
     }
     return;
 }

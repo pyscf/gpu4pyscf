@@ -27,7 +27,7 @@ void type2_facs_rad(double* facs, const int LIC, const int np, double rca,
         const double ka = 2.0 * ai[ip] * rca;
         const double ar2 = ai[ip] * r2;
         
-        double buf[AO_LMAX+ECP_LMAX+1];
+        double buf[AO_LMAX+ECP_LMAX+order+1];
         if (ar2 > EXPCUTOFF + 6.0){
             for (int j = 0; j <= LIC; j++){
                 buf[j] = 0.0;
@@ -80,7 +80,7 @@ void type2_facs_omega(double* omega, int LI, int LC, double *r){
         const int ioff = (LI_i)*(LI_i+1)*(LI_i+2)/6;
         const int joff = (LI_i-j)*(LI_i-j+1)/2;
         double *pomega = omega + (ioff+joff+k)*BLK;
-        printf("%d %d %d %d\n", i, j, k, (ioff+joff+k)*BLK);
+
         for (int lmb = need_even; lmb <= LI+LC; lmb+=2){
             //double *pnuc = omega_nuc + _offset_cart[lmb];
             double pnuc[NF_MAX_LIJ];
@@ -128,7 +128,7 @@ void type2_ang(double *facs, const int LI, const int LC, double *fi, double *ome
         double *fy = fi + (iy+1)*iy/2 + nfi;
         double *fz = fi + (iz+1)*iz/2 + nfi*2;
         
-        double ang_pmn[AO_LMAX+1] = {0.0};
+        double ang_pmn[AO_LMAX_IP+1] = {0.0};
         for (int i = 0; i <= ix; i++){
         for (int j = 0; j <= iy; j++){
         for (int k = 0; k <= iz; k++){
@@ -212,7 +212,6 @@ void type2_cart(double *gctr,
         rad_all[i] = 0.0;
     }
     __syncthreads();
-    //////////////////////////////////////////////////////////////
 
     double ur = 0.0;
     // Each ECP shell has multiple powers and primitive basis
@@ -231,38 +230,6 @@ void type2_cart(double *gctr,
     }
     __syncthreads();
     
-    /*
-    //////////////////////////////////////////////////////////////
-    __shared__ double rad_all_tmp[(LI+LJ+1) * LIC1 * LJC1];
-    for (int i = threadIdx.x; i < (LI+LJ+1)*LIC1*LJC1; i+=blockDim.x){
-        rad_all_tmp[i] = 0.0;
-    }
-
-    for (int ip = 0; ip < npi; ip++){
-    for (int jp = 0; jp < npj; jp++){
-        double radi[LIC1];
-        double radj[LJC1];
-        type2_facs_rad<0>(radi, LI+LC, 1, dca, ci+ip, ai+ip);
-        type2_facs_rad<0>(radj, LJ+LC, 1, dcb, cj+jp, aj+jp);
-
-        double ur_tmp = ur;
-        for (int p = 0; p <= LI+LJ; p++){
-            double *prad = rad_all_tmp + p*LIC1*LJC1;
-            for (int i = 0; i <= LI+LC; i++){
-            for (int j = 0; j <= LJ+LC; j++){
-                block_reduce(radi[i]*radj[j]*ur_tmp, prad+i*LJC1+j);
-            }}
-            const int ir = threadIdx.x;
-            ur_tmp *= r128[ir];
-        }
-        __syncthreads();
-    }}
-    */
-    //if (threadIdx.x == 0){
-    //    for (int i = 0; i < (LI+LJ+1)*LIC1*LJC1; i++){
-    //        printf("%d %d %f %f %e\n", task_id, ntasks, rad_all[i], rad_all_tmp[i], rad_all[i] - rad_all_tmp[i]);
-    //    }
-    //}
     double fi[nfi*3];
     double fj[nfj*3];
     cache_fac(fi, LI, rca);
@@ -271,12 +238,9 @@ void type2_cart(double *gctr,
     constexpr int BLKI = (LIC1+1)/2 * LCC1;
     constexpr int BLKJ = (LJC1+1)/2 * LCC1;
 
-    __shared__ double omegai[LI1*(LI1+1)*(LI1+2)/6 * BLKI+10]; // up to 12600 Bytes
-    __shared__ double omegaj[LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ+10];
-    if (threadIdx.x == 0){
-        printf("%d %d %d %d\n", LI, LJ, LC, LI1*(LI1+1)*(LI1+2)/6 * BLKI);
-        printf("%d %d %d %d\n", LI, LJ, LC, LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ);
-    }
+    __shared__ double omegai[LI1*(LI1+1)*(LI1+2)/6 * BLKI]; // up to 12600 Bytes
+    __shared__ double omegaj[LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ];
+
     type2_facs_omega(omegai, LI, LC, rca);
     type2_facs_omega(omegaj, LJ, LC, rcb);
 
@@ -289,22 +253,8 @@ void type2_cart(double *gctr,
 
     // (k+l)pq,kimp,ljmq->ij
     for (int m = 0; m < LCC1; m++){
-
         type2_ang(angi, LI, LC, fi, omegai+m);
-        if (threadIdx.x == 0){
-            printf("==============\n");
-            for (int i = 0; i < LI1*nfi*LIC1; i++){
-                printf("%d %d %f %f\n", LI, LJ, angi[i], angj[i]);
-            }
-        }
-        
         type2_ang(angj, LJ, LC, fj, omegaj+m);
-        if (threadIdx.x == 0){
-            printf("==============\n");
-            for (int i = 0; i < LI1*nfi*LIC1; i++){
-                printf("%d %d %f %f\n", LI, LJ, angi[i], angj[i]);
-            }
-        }
         
         __syncthreads();
         for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){

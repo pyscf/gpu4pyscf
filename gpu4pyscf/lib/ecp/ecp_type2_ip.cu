@@ -26,8 +26,6 @@ void type2_cart_kernel(double *gctr,
 
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
     const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
-    const int nfi = (LI+1) * (LI+2) / 2;
-    const int nfj = (LJ+1) * (LJ+2) / 2;
     const double *ai = env + bas[PTR_EXP+ish*BAS_SLOTS];
     const double *aj = env + bas[PTR_EXP+jsh*BAS_SLOTS];
     const double *ci = env + bas[PTR_COEFF+ish*BAS_SLOTS];
@@ -54,39 +52,33 @@ void type2_cart_kernel(double *gctr,
     const int LJC1 = LJ+LC+1;
     const int LCC1 = (2*LC+1);
 
+    double* rad_all = smem;
+    for (int i = threadIdx.x; i < (LI+LJ+1)*LIC1*LJC1; i+=blockDim.x){
+        rad_all[i] = 0.0;
+    }
+    __syncthreads();
+    
+    double radi[AO_LMAX+ECP_LMAX+orderi+1];
+    double radj[AO_LMAX+ECP_LMAX+orderj+1];
+    type2_facs_rad<orderi>(radi, LI+LC, npi, dca, ci, ai);
+    type2_facs_rad<orderj>(radj, LJ+LC, npj, dcb, cj, aj);
+
     double ur = 0.0;
     // Each ECP shell has multiple powers and primitive basis
     for (int kbas = ecploc[ksh]; kbas < ecploc[ksh+1]; kbas++){
         ur += rad_part(kbas, ecpbas, env);
     }
-
-    double* rad_all = smem;
-
-    for (int i = threadIdx.x; i < (LI+LJ+1)*LIC1*LJC1; i+=blockDim.x){
-        rad_all[i] = 0.0;
+    double ur_tmp = ur;
+    for (int p = 0; p <= LI+LJ; p++){
+        double *prad = rad_all + p*LIC1*LJC1;
+        for (int i = 0; i <= LI+LC; i++){
+        for (int j = 0; j <= LJ+LC; j++){
+            block_reduce(radi[i]*radj[j]*ur_tmp, prad+i*LJC1+j);
+        }}
+        const int ir = threadIdx.x;
+        ur_tmp *= r128[ir];
     }
     __syncthreads();
-
-    for (int ip = 0; ip < npi; ip++){
-    for (int jp = 0; jp < npj; jp++){
-        double radi[AO_LMAX+ECP_LMAX+1];
-        double radj[AO_LMAX+ECP_LMAX+1];
-        type2_facs_rad<orderi>(radi, LI+LC, 1, dca, ci+ip, ai+ip);
-        type2_facs_rad<orderj>(radj, LJ+LC, 1, dcb, cj+jp, aj+jp);
-
-        double ur_tmp = ur;
-        for (int p = 0; p <= LI+LJ; p++){
-            double *prad = rad_all + p*LIC1*LJC1;
-            for (int i = 0; i <= LI+LC; i++){
-            for (int j = 0; j <= LJ+LC; j++){
-                block_reduce(radi[i]*radj[j]*ur_tmp, prad+i*LJC1+j);
-            }}
-            const int ir = threadIdx.x;
-            ur_tmp *= r128[ir];
-        }
-        __syncthreads();
-    }
-    }
 
     const int BLKI = (LIC1+1)/2 * LCC1;
     const int BLKJ = (LJC1+1)/2 * LCC1;
@@ -97,13 +89,10 @@ void type2_cart_kernel(double *gctr,
     type2_facs_omega(omegai, LI, LC, rca);
     type2_facs_omega(omegaj, LJ, LC, rcb);
 
-    double fi[3*NFI_MAX];
-    double fj[3*NFJ_MAX];
-    cache_fac(fi, LI, rca);
-    cache_fac(fj, LJ, rcb);
-
+    const int nfi = (LI+1) * (LI+2) / 2;
+    const int nfj = (LJ+1) * (LJ+2) / 2;
     double* angi = omegaj + LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ;
-    double* angj = angi + LI1*nfi*LIC1; 
+    double* angj = angi + LI1*nfi*LIC1;
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
 
@@ -112,6 +101,12 @@ void type2_cart_kernel(double *gctr,
     }
     __syncthreads();
 
+    constexpr int NFI_MAX = (AO_LMAX+orderi+1)*(AO_LMAX+orderi+2)/2;
+    constexpr int NFJ_MAX = (AO_LMAX+orderj+1)*(AO_LMAX+orderj+2)/2;
+    double fi[3*NFI_MAX];
+    double fj[3*NFJ_MAX];
+    cache_fac(fi, LI, rca);
+    cache_fac(fj, LJ, rcb);
     // (k+l)pq,kimp,ljmq->ij
     for (int m = 0; m < LCC1; m++){
         type2_ang(angi, LI, LC, fi, omegai+m);
@@ -127,8 +122,8 @@ void type2_cart_kernel(double *gctr,
                 double *pangj = angj + l*nfj*LJC1 + j*LJC1;
                 double *prad = rad_all + (k+l)*LIC1*LJC1;
                 
-                double reg_angi[AO_LMAX+ECP_LMAX+1];
-                double reg_angj[AO_LMAX+ECP_LMAX+1];
+                double reg_angi[AO_LMAX+ECP_LMAX+orderi+1];
+                double reg_angj[AO_LMAX+ECP_LMAX+orderj+1];
                 for (int p = 0; p < LIC1; p++){reg_angi[p] = pangi[p];}
                 for (int q = 0; q < LJC1; q++){reg_angj[q] = pangj[q];}
                 for (int p = 0; p < LIC1; p++){
@@ -166,6 +161,10 @@ void type2_cart_ip1(double *gctr,
     }
     __syncthreads();
     
+    const int orderi = 1;
+    const int orderj = 0;
+    constexpr int NFI_MAX = (AO_LMAX+orderi+1)*(AO_LMAX+orderi+2)/2;
+    constexpr int NFJ_MAX = (AO_LMAX+orderj+1)*(AO_LMAX+orderj+2)/2;
     __shared__ double buf[NFI_MAX*NFJ_MAX];
     type2_cart_kernel<1,0>(buf, LI+1, LJ, LC, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
     __syncthreads();

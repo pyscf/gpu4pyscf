@@ -150,7 +150,7 @@ void cache_fac(double *fx, int LI, double *ri){
     double *fy = fx + nfi;
     double *fz = fy + nfi;
     for (int i = 0; i <= LI; i++){
-        int ioffset = i*(i+1)/2;
+        const int ioffset = i*(i+1)/2;
         for (int j = 0; j <= i; j++){
             const double bfac = _binom[ioffset+j]; // binom(i,j)
             fx[ioffset+j] = bfac * xx[i-j];
@@ -198,21 +198,20 @@ void block_reduce(double val, double *d_out) {
 
 
 __device__
-void _l_up(double *out, double *buf, int li, int lj){
+void _l_up(double *out, double *buf, const int li, const int lj){
     const int nfi = (li+1) * (li+2) / 2;
     const int nfj = (lj+1) * (lj+2) / 2;
     const int nfi0 = li * (li+1) / 2;
     double *outx = out;
     double *outy = outx + nfi*nfj;
     double *outz = outy + nfi*nfj;
-    double fac = 1.0 / _ecp_fac[li-1];
+    const double fac = 1.0 / _ecp_fac[li-1];
     for (int ij = threadIdx.x; ij < nfi0*nfj; ij+=blockDim.x){
         const int i = ij % nfi0;
         const int j = ij / nfi0;
-        double yfac = fac * (_cart_pow_y[i] + 1);
-        double zfac = fac * (_cart_pow_z[i] + 1);
-        
-        double xfac = fac * (li-1 - _cart_pow_y[i] - _cart_pow_z[i] + 1);
+        const double yfac = fac * (_cart_pow_y[i] + 1);
+        const double zfac = fac * (_cart_pow_z[i] + 1);
+        const double xfac = fac * (li-1 - _cart_pow_y[i] - _cart_pow_z[i] + 1);
 
         outx[j*nfi +          i] += xfac * buf[j*nfi0 + i];
         outy[j*nfi + _y_addr[i]] += yfac * buf[j*nfi0 + i];
@@ -222,14 +221,14 @@ void _l_up(double *out, double *buf, int li, int lj){
 }
 
 __device__
-void _l_down(double *out, double *buf, int li, int lj){
+void _l_down(double *out, double *buf, const int li, const int lj){
     const int nfi = (li+1) * (li+2) / 2;
     const int nfj = (lj+1) * (lj+2) / 2;
     const int nfi1= (li+2) * (li+3) / 2;
     double *outx = out;
     double *outy = outx + nfi*nfj;
     double *outz = outy + nfi*nfj;
-    double fac = _ecp_fac[li];
+    const double fac = _ecp_fac[li];
 
     for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
         const int i = ij % nfi;

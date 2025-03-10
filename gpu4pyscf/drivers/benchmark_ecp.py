@@ -2,7 +2,7 @@ import os
 import time
 import numpy as np
 import cupy as cp
-from pyscf import gto, lib
+from pyscf import gto, lib, scf
 from gpu4pyscf.gto.ecp import get_ecp, get_ecp_ip
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -13,6 +13,7 @@ lib.num_threads(8)
 mol = gto.M(
     atom='../../benchmarks/molecules/organic/020_Vitamin_C.xyz',
     basis=basis,
+    cart=1,
     ecp=ecp)
 
 runs = 20
@@ -50,7 +51,7 @@ times = []
 for i in range(runs):
     print(f'{i}th run on CPU ...')
     start_time = time.perf_counter()
-    h1_cpu = mol.intor('ECPscalar_iprinv')
+    h1_cpu = mol.intor('ECPscalar_ipnuc')
     end_time = time.perf_counter()
     times.append(end_time - start_time)
 print(f"average time with CPU: {sum(times[warmup:])}")
