@@ -190,7 +190,7 @@ class RHF(hf.RHF):
     def get_k(self, mol=None, dm=None, hermi=1, omega=None):
         raise NotImplementedError
 
-    def get_veff(self, mol, dm, dm_last=None, vhf_last=0, hermi=1, vhfopt=None):
+    def get_veff(self, mol, dm, dm_last=None, vhf_last=0, hermi=1):
         '''Constructus the lower-triangular part of the Fock matrix.'''
         log = logger.new_logger(mol, self.verbose)
         cput0 = log.init_timer()
@@ -202,6 +202,22 @@ class RHF(hf.RHF):
             if isinstance(vhfopt.coeff, cp.ndarray):
                 vhfopt.coeff = vhfopt.coeff.get()
 
+        dm = self._delta_rdm1(dm, dm_last, vhfopt)
+        vj, vk = vhfopt.get_jk(dm, hermi, True, True, log)
+        dm = None
+        vk *= -.5
+        vj += vk
+        vj = sandwich_dot(vj, cp.asarray(vhfopt.coeff))
+        vk = None
+        if isinstance(vhf_last, cp.ndarray):
+            vhf_last = asarray(vhf_last) # remove attributes if vhf_last is a tag_array
+            vhf_last += pack_tril(vj)
+        else:
+            vhf_last = pack_tril(vj)
+        log.timer('vj and vk', *cput0)
+        return vhf_last
+
+    def _delta_rdm1(self, dm, dm_last, vhfopt):
         if dm is None:
             if isinstance(dm, WaveFunction):
                 mo_coeff = dm.mo_coeff
@@ -210,23 +226,23 @@ class RHF(hf.RHF):
                 mo_coeff = self.mo_coeff
                 mo_occ = self.mo_occ
             mask = mo_occ > 0
-            occ_coeff = cp.asarray(vhfopt.coeff).dot(mo_coeff[:,mask])
-            occ_coeff *= mo_occ[mask]
-            dm = occ_coeff.dot(occ_coeff.T)
-            mo_coeff = mo_occ = mask = None
+            occ_coeff = mo_coeff[:,mask]
+            occ_coeff *= mo_occ[mask]**.5
+            c2s_coeff = cp.asarray(vhfopt.coeff)
+
+            if dm_last is None:
+                occ_coeff = c2s_coeff.dot(occ_coeff)
+                dm = occ_coeff.dot(occ_coeff.T)
+            else:
+                dm = occ_coeff.dot(occ_coeff.T)
+                dm -= dm_last
+                dm = sandwich_dot(dm, c2s_coeff.T)
         else:
+            if dm_last is not None:
+                dm = dm.copy()
+                dm -= dm_last
             dm = sandwich_dot(dm, cp.asarray(vhfopt.coeff).T)
-        dm -= cp.asarray(dm_last)
-        vj, vk = vhfopt.get_jk(dm, hermi, True, True, log)
-        dm = None
-        coeff = cp.asarray(vhfopt.coeff)
-        vk = sandwich_dot(vk, coeff)
-        vhf_last -= pack_tril(vk) * .5
-        vk = None
-        vj = sandwich_dot(vj, cp.asarray(vhfopt.coeff))
-        vhf_last += pack_tril(vj)
-        log.timer('vj and vk', *cput0)
-        return vhf_last
+        return dm
 
     def make_rdm1(self, mo_coeff, mo_occ):
         return RHFWfn(mo_coeff, mo_occ).make_rdm1()

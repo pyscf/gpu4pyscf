@@ -30,6 +30,6 @@ def RHF(mol, *args):
     mem = get_avail_mem()
     nao = mol.nao
     if nao**2*30*8 > mem:
-        return hf_low_memory.RHF(mol, *args)
+        return hf_lowmem.RHF(mol, *args)
     else:
         return hf.RHF(mol, *args)
