@@ -1,5 +1,5 @@
 /*
- * Copyright 2024-2025 The PySCF Developers. All Rights Reserved.
+ * Copyright 2025 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 #include <stdint.h>
 #include "multigrid.cuh"
 
-__device__ static
+__device__ inline
 void dm_xyz_coeff(double *cx, double xi, double xj, int lmax)
 {
     double xij = xi - xj;
@@ -36,15 +36,15 @@ void dm_xyz_coeff(double *cx, double xi, double xj, int lmax)
     }
 }
 
-__device__
-inline int cart_address(int l, int x, int y, int z)
+__device__ inline
+int cart_address(int l, int x, int y, int z)
 {
     // (l-x)*(l-x+1)/2+l-x-y
     int yz = l - x;
     return yz * (yz + 3) / 2 - y;
 }
 
-__device__ static
+__device__ inline
 double sub_dm_xyz(int lx, int ly, int lz, int li, int lj, int nao,
                   double *cx, double *cy, double *cz, double *dm)
 {
@@ -73,12 +73,14 @@ double sub_dm_xyz(int lx, int ly, int lz, int li, int lj, int nao,
     return out;
 }
 
-__device__ static
+template <int L> __device__ static
 void _dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
-                   double *ri, double *rj, double cicj, int sp_id, int warp_id)
+                   double *ri, double *rj, double cicj)
 {
+    int thread_id = threadIdx.x;
+    int sp_id = thread_id % WARP_SIZE;
+    int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
-    int lij = li + lj;
     extern __shared__ double cache[];
     double *cx = cache + sp_id;
     double *cy = cx + lj1 * lj1 * WARP_SIZE;
@@ -89,8 +91,8 @@ void _dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
     }
     __syncthreads();
 
-    int nf3 = (lij+1)*(lij+2)*(lij+3)/6;
-    Fold3Index *fold3idx = c_i_in_fold3idx + lij*nf3/4;
+    constexpr int nf3 = (L+1)*(L+2)*(L+3)/6;
+    Fold3Index *fold3idx = c_i_in_fold3idx + L*nf3/4;
     for (int n = warp_id; n < nf3; n += WARPS) {
         int lx = fold3idx[n].x;
         int ly = fold3idx[n].y;
@@ -101,12 +103,16 @@ void _dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
     __syncthreads();
 }
 
-__device__ static
-void _dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj, int lij,
+template <int L> __device__ static
+void _dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj,
                    double *ri, double *rj, double cicj, double *cache,
-                   int sp_id, int warp_id, int npairs_per_block)
+                   int npairs_per_block)
 {
+    int thread_id = threadIdx.x;
+    int sp_id = thread_id % WARP_SIZE;
+    int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
+    constexpr int L1 = L + 1;
     double *cx = cache + sp_id;
     double *cy = cx + lj1 * lj1 * WARP_SIZE;
     double *cz = cy + lj1 * lj1 * WARP_SIZE;
@@ -144,7 +150,7 @@ void _dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj, int lij,
                 for (int jz = 0; jz <= lz_j; ++jz) {
                     int lz = lz_i + jz;
                     double cxyz = cxy * cz[(jz+lz_j*lj1)*WARP_SIZE];
-                    dm_ij += cxyz * dm_xyz[ADDR3(lij,lx,ly,lz)*WARP_SIZE];
+                    dm_ij += cxyz * dm_xyz[(ADDR2(L,ly,lz)*L1+lx)*WARP_SIZE];
                 }
             }
         }
