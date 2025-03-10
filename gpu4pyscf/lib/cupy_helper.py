@@ -212,7 +212,7 @@ def pack_tril(a, stream=None):
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(a_tril.data.ptr, ctypes.c_void_p),
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n), ctypes.c_int(count))
+        ctypes.c_int(n), ctypes.c_int(counts))
     if err != 0:
         raise RuntimeError('pack_tril kernel failed')
     return a_tril
@@ -293,7 +293,7 @@ def add_sparse(a, b, indices):
         count = 1
     else:
         raise RuntimeError('add_sparse only supports 2d or 3d tensor')
-    
+
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.add_sparse(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -488,14 +488,13 @@ def transpose_sum(a, stream=None):
         raise RuntimeError('failed in transpose_sum kernel')
     return out
 
-# for i > j of 2d mat, mat[j,i] = mat[i,j]
-def hermi_triu(mat, hermi=1, inplace=True):
+def hermi_triu(mat, hermi=1, inplace=True, stream=None):
     '''
     Use the elements of the lower triangular part to fill the upper triangular part.
     See also pyscf.lib.hermi_triu
     '''
-    if not inplace:
-        mat = mat.copy('C')
+    assert hermi in (1, 2)
+    assert mat.dtype == np.float64
     assert mat.flags.c_contiguous
 
     if mat.ndim == 2:
@@ -506,12 +505,14 @@ def hermi_triu(mat, hermi=1, inplace=True):
     else:
         raise ValueError(f'dimension not supported {mat.ndim}')
 
-    err = libcupy_helper.CPdsymm_triu(
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.fill_triu(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n), ctypes.c_int(counts))
+        ctypes.c_int(n), ctypes.c_int(counts), ctypes.c_int(hermi))
     if err != 0:
-        raise RuntimeError('failed in symm_triu kernel')
-
+        raise RuntimeError('hermi_triu kernel failed')
     return mat
 
 def cart2sph_cutensor(t, axis=0, ang=1, out=None):
@@ -919,6 +920,7 @@ def grouped_gemm(As, Bs, Cs=None):
 def condense(opname, a, loc_x, loc_y=None):
     assert opname in ('sum', 'max', 'min', 'abssum', 'absmax', 'norm')
     assert a.dtype == np.float64
+    a = cp.asarray(a, order='C')
     if loc_y is None:
         loc_y = loc_x
     do_transpose = False

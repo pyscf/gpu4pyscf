@@ -96,6 +96,24 @@ void _unpack_sparse(const double *cderi_sparse, const long *row, const long *col
 }
 
 extern "C" {
+int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi)
+{
+    dim3 threads(THREADS, THREADS);
+    int nx = (n + threads.x - 1) / threads.x;
+    int ny = (n + threads.y - 1) / threads.y;
+    dim3 blocks(nx, ny, counts);
+    if (hermi == 1) {
+        _fill_triu_sym<<<blocks, threads, 0, stream>>>(a, n);
+    } else if (hermi == 2) {
+        _fill_triu_antisym<<<blocks, threads, 0, stream>>>(a, n);
+    }
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        return 1;
+    }
+    return 0;
+}
+
 int pack_tril(cudaStream_t stream, double *a_tril, double *a, int n, int counts)
 {
     dim3 threads(THREADS, THREADS);
