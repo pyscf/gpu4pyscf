@@ -12,6 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = '1.3.1'
+__version__ = '1.3.2'
 
 from . import lib, grad, hessian, solvent, scf, dft
