@@ -39,6 +39,19 @@ static void ang_nuc_l(double *omega, double rx, double ry, double rz){
 }
 
 __device__
+static void ang_nuc_part_l(double *omega, int l, double rx, double ry, double rz){
+    if (l == 0) ang_nuc_l<0>(omega, rx, ry, rz);
+    else if (l == 1) ang_nuc_l<1>(omega, rx, ry, rz);
+    else if (l == 2) ang_nuc_l<2>(omega, rx, ry, rz);
+    else if (l == 3) ang_nuc_l<3>(omega, rx, ry, rz);
+    else if (l == 4) ang_nuc_l<4>(omega, rx, ry, rz);
+    else if (l == 5) ang_nuc_l<5>(omega, rx, ry, rz);
+    else if (l == 6) ang_nuc_l<6>(omega, rx, ry, rz);
+    else if (l == 7) ang_nuc_l<7>(omega, rx, ry, rz);
+    else ang_nuc_l<8>(omega, rx, ry, rz);
+}
+
+__device__
 static void ang_nuc_part(double *omega_cum, int l, double rx, double ry, double rz){
     /*
     Accumulated angular ECP part in Cartesian
@@ -142,7 +155,7 @@ void cache_fac(double *fx, int LI, double *ri){
             const double bfac = _binom[ioffset+j]; // binom(i,j)
             fx[ioffset+j] = bfac * xx[i-j];
             fy[ioffset+j] = bfac * yy[i-j];
-            fz[ioffset+j] = bfac * zz[i-j];
+            fz[ioffset+j] = bfac * zz[i-j];           
         }
     }
 }
@@ -178,36 +191,53 @@ void block_reduce(double val, double *d_out) {
 
     // The first thread writes the block's final result to global memory.
     if (tid == 0) {
-        d_out[0] = sdata[0];
+        d_out[0] += sdata[0];
     }
     __syncthreads();
 }
 
 
 __device__
-void _l_up(double *out, double *buf, double fac, int li, int lj){
-    const int nfi = (li+1) * (li+2) / 2;
-    const int nfi0 = li * (lj+1) / 2;
-    double *outx = out;
-    double *outy = out + nfi*nfj;
-    double *outz = outy + nfi*nfj;
-    for (int ij = threadIdx.x; ij < nfi*nfi0; ij+=blockDim.x){
-        const int i = ij % nfi;
-        const int j = ij / nfi;
-        double yfac = fac * (_cart_pow_y[i] + 1);
-        double zfac = fac * (_cart_pow_z[i] + 1);
-        double xfac = fac * (li-1 - _cart_pow_y[i] - _cart_pow_z[i]);
-
-        outx[i*nfj + j] += yfac * buf[i*nfj + j];
-        outy[i*nfj + j] += zfac * buf[i*nfj + j];
-        outz[i*nfj + j] += xfac * buf[i*nfj + j];
-    }
-    __syncthreads();
-}
-
-__device__
-void _l_down(double *gctr, double *buf, double fac, int li, int lj){
+void _l_up(double *out, double *buf, int li, int lj){
     const int nfi = (li+1) * (li+2) / 2;
     const int nfj = (lj+1) * (lj+2) / 2;
-    
+    const int nfi0 = li * (li+1) / 2;
+    double *outx = out;
+    double *outy = outx + nfi*nfj;
+    double *outz = outy + nfi*nfj;
+    double fac = 1.0 / _ecp_fac[li-1];
+    for (int ij = threadIdx.x; ij < nfi0*nfj; ij+=blockDim.x){
+        const int i = ij % nfi0;
+        const int j = ij / nfi0;
+        double yfac = fac * (_cart_pow_y[i] + 1);
+        double zfac = fac * (_cart_pow_z[i] + 1);
+        
+        double xfac = fac * (li-1 - _cart_pow_y[i] - _cart_pow_z[i] + 1);
+
+        outx[j*nfi +          i] += xfac * buf[j*nfi0 + i];
+        outy[j*nfi + _y_addr[i]] += yfac * buf[j*nfi0 + i];
+        outz[j*nfi + _z_addr[i]] += zfac * buf[j*nfi0 + i];
+    }
+    __syncthreads();
+}
+
+__device__
+void _l_down(double *out, double *buf, int li, int lj){
+    const int nfi = (li+1) * (li+2) / 2;
+    const int nfj = (lj+1) * (lj+2) / 2;
+    const int nfi1= (li+2) * (li+3) / 2;
+    double *outx = out;
+    double *outy = outx + nfi*nfj;
+    double *outz = outy + nfi*nfj;
+    double fac = _ecp_fac[li];
+
+    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+        const int i = ij % nfi;
+        const int j = ij / nfi;
+        
+        outx[j*nfi+i] += fac * buf[j*nfi1+i];
+        outy[j*nfi+i] += fac * buf[j*nfi1+_y_addr[i]];
+        outz[j*nfi+i] += fac * buf[j*nfi1+_z_addr[i]];
+    }
+    __syncthreads();
 }

@@ -22,6 +22,8 @@
 #include "common.cu"
 #include "ecp_type1.cu"
 #include "ecp_type2.cu"
+#include "ecp_type1_ip.cu"
+#include "ecp_type2_ip.cu"
 
 extern "C" {
 int ECP_cart(double *gctr, 
@@ -106,7 +108,7 @@ int ECP_cart(double *gctr,
             int smem_size = 0;
             smem_size += lij3;      // rad_ang
             smem_size += lij1*lij1; // rad_all
-            type1_cart_general<0,0><<<blocks, threads, smem_size*sizeof(double)>>>(
+            type1_cart<<<blocks, threads, smem_size*sizeof(double)>>>(
                 gctr, li, lj,
                 ao_loc, nao,
                 tasks, ntasks,
@@ -137,10 +139,47 @@ int ECP_ip1_cart(double *gctr,
 
     if (lc < 0){
         int task_type = li * 100 + lj * 10 + lc;
-        type1_cart_general<1,0><<<blocks, threads>>>(gctr, li+1, lj, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env);
-        type1_cart_general<0,0><<<blocks, threads>>>(gctr, li-1, lj, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env);
-        }
+        const int lij1 = li+lj+2; // 
+        const int lij3 = lij1*lij1*lij1;
 
+        int smem_size = 0;
+        smem_size += lij3;      // rad_ang
+        smem_size += lij1*lij1; // rad_all
+        type1_cart_ip1<<<blocks, threads, smem_size*sizeof(double)>>>(
+            gctr, li, lj, 
+            ao_loc, nao, 
+            tasks, ntasks, 
+            ecpbas, ecploc, 
+            atm, bas, env);
+    } else {
+        const int li_1 = li+1;
+        const int li1 = li_1+1;
+        const int lj1 = lj+1;
+        const int nfi = (li_1+1)*(li_1+2)/2;
+        const int nfj = (lj+1)*(lj+2)/2;
+        const int lic1 = li_1+lc+1;
+        const int ljc1 = lj+lc+1;
+        const int lcc1 = 2*lc+1;
+        const int blki = (lic1+1)/2 * lcc1;
+        const int blkj = (ljc1+1)/2 * lcc1;
+        
+        int smem_size = 0; 
+        int smem_size0 = (li_1+lj+1) * lic1 * ljc1; // rad_all
+        int smem_size1 = li1*(li1+1)*(li1+2)/6 * blki; // omegai
+        int smem_size2 = lj1*(lj1+1)*(lj1+2)/6 * blkj; // omegaj
+        int smem_size3 = li1*lic1*nfi; // angi
+        int smem_size4 = lj1*ljc1*nfj; // angj
+
+        int smem_size5 = NF_MAX*NF_MAX*3 + NFI_MAX*NFJ_MAX;
+        smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4 + smem_size5;
+
+        type2_cart_ip1<<<blocks, threads, smem_size*sizeof(double)>>>(
+            gctr, li, lj, lc,
+            ao_loc, nao, 
+            tasks, ntasks, 
+            ecpbas, ecploc, 
+            atm, bas, env);
+    }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
