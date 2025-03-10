@@ -99,18 +99,18 @@ def level_shift(s, d, f, factor):
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
-    if s1e is None: s1e = mf.get_ovlp()
-    if dm is None: dm = mf.make_rdm1()
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
-    if not isinstance(s1e, cupy.ndarray): s1e = cupy.asarray(s1e)
-    if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
     if not isinstance(h1e, cupy.ndarray): h1e = cupy.asarray(h1e)
     if not isinstance(vhf, cupy.ndarray): vhf = cupy.asarray(vhf)
     f = h1e + vhf
     if cycle < 0 and diis is None:  # Not inside the SCF iteration
         return f
 
+    if s1e is None: s1e = mf.get_ovlp()
+    if dm is None: dm = mf.make_rdm1()
+    if not isinstance(s1e, cupy.ndarray): s1e = cupy.asarray(s1e)
+    if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
     if diis_start_cycle is None:
         diis_start_cycle = mf.diis_start_cycle
     if level_shift_factor is None:
@@ -142,18 +142,6 @@ def energy_elec(self, dm=None, h1e=None, vhf=None):
     self.scf_summary['e2'] = e_coul
     logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
     return e1+e_coul, e_coul
-
-def _init_diis(mf, h1e, s1e, vhf, dm):
-    if isinstance(mf.diis, lib.diis.DIIS):
-        mf_diis = mf.diis
-    elif mf.diis:
-        assert issubclass(mf.DIIS, lib.diis.DIIS)
-        mf_diis = mf.DIIS(mf, mf.diis_file)
-        mf_diis.space = mf.diis_space
-        mf_diis.rollback = mf.diis_space_rollback
-    else:
-        mf_diis = None
-    return mf_diis
 
 def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
            dump_chk=True, dm0=None, callback=None, conv_check=True, **kwargs):
@@ -196,7 +184,15 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
-    mf_diis = _init_diis(mf, h1e, s1e, vhf, dm)
+    if isinstance(mf.diis, lib.diis.DIIS):
+        mf_diis = mf.diis
+    elif mf.diis:
+        assert issubclass(mf.DIIS, lib.diis.DIIS)
+        mf_diis = mf.DIIS(mf, mf.diis_file)
+        mf_diis.space = mf.diis_space
+        mf_diis.rollback = mf.diis_space_rollback
+    else:
+        mf_diis = None
 
     dump_chk = dump_chk and mf.chkfile is not None
     if dump_chk:
@@ -218,15 +214,13 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         dm = mf.make_rdm1(mo_coeff, mo_occ)
-        t1 = log.timer_debug1('dm', *t1)
         vhf = mf.get_veff(mol, dm, dm_last, vhf)
         dm = asarray(dm) # Remove the attached attributes
-
-        fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
-        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
         t1 = log.timer_debug1('veff', *t1)
+
+        fock = mf.get_fock(h1e, None, vhf)  # = h1e + vhf, no DIIS
+        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
         e_tot = mf.energy_tot(dm, h1e, vhf)
-        t1 = log.timer_debug1('energy', *t1)
 
         norm_ddm = cupy.linalg.norm(dm-dm_last)
         t1 = log.timer_debug1('total', *t0)
@@ -445,7 +439,7 @@ class SCF(pyscf_lib.StreamObject):
     kernel = scf             = scf
     as_scanner               = hf_cpu.SCF.as_scanner
     _finalize                = hf_cpu.SCF._finalize
-    init_direct_scf          = hf_cpu.SCF.init_direct_scf
+    init_direct_scf          = NotImplemented
     get_jk                   = _get_jk
     get_j                    = hf_cpu.SCF.get_j
     get_k                    = hf_cpu.SCF.get_k

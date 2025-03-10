@@ -495,7 +495,10 @@ def hermi_triu(mat, hermi=1, inplace=True, stream=None):
     '''
     assert hermi in (1, 2)
     assert mat.dtype == np.float64
-    assert mat.flags.c_contiguous
+    if inplace:
+        assert mat.flags.c_contiguous
+    else:
+        mat = mat.copy('C')
 
     if mat.ndim == 2:
         n = mat.shape[0]

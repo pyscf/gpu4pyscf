@@ -26,7 +26,8 @@ import scipy.optimize
 import pyscf.scf.diis as cpu_diis
 import gpu4pyscf.lib as lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, eigh, sandwich_dot
+from gpu4pyscf.lib.cupy_helper import (
+    contract, eigh, sandwich_dot, pack_tril, unpack_tril)
 
 # J. Mol. Struct. 114, 31-34 (1984); DOI:10.1016/S0022-2860(84)87198-7
 # PCCP, 4, 11 (2002); DOI:10.1039/B108658H
@@ -45,10 +46,13 @@ class CDIIS(lib.diis.DIIS):
 
     def update(self, s, d, f, *args, **kwargs):
         errvec = self.get_err_vec(s, d, f)
-        xnew = lib.diis.DIIS.update(self, f, xerr=errvec)
+        nao = self.Corth.shape[1]
+        errvec = pack_tril(errvec.reshape(-1,nao,nao))
+        f_tril = pack_tril(f.reshape(-1,nao,nao))
+        xnew = lib.diis.DIIS.update(self, f_tril, xerr=errvec)
         if self.rollback > 0 and len(self._bookkeep) == self.space:
             self._bookkeep = self._bookkeep[-self.rollback:]
-        return xnew
+        return unpack_tril(xnew).reshape(f.shape)
 
     def get_num_vec(self):
         if self.rollback:

@@ -66,7 +66,6 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
 
-    mol = vhfopt.sorted_mol
     coeff = cp.asarray(vhfopt.coeff)
     nao_orig = coeff.shape[1]
     dm = cp.asarray(dm, order='C')
@@ -93,7 +92,6 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
 
-    mol = vhfopt.sorted_mol
     nao_orig = vhfopt.coeff.shape[1]
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
