@@ -159,12 +159,11 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(es), -1.5175884245769546, 6)
 
         td = self.mf_b3lyp_nodf.TDDFT()
-        td.lindep=1.0e-6
         assert td.device == 'gpu'
         es = td.kernel(nstates=5)[0]
         a, b = td.get_ab()
         ref = diagonalize(a, b, nroots=5)
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 7)
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
 
     def test_tddft_camb3lyp(self):
         mol = self.mol
