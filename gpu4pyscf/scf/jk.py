@@ -17,6 +17,7 @@ Compute J/K matrices
 '''
 
 import ctypes
+import warnings
 import math
 import numpy as np
 import cupy as cp
@@ -26,7 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
 from pyscf import lib
 from pyscf.scf import _vhf
-from gpu4pyscf.lib.cupy_helper import (load_library, condense, sandwich_dot, transpose_sum,
+from gpu4pyscf.lib.cupy_helper import (load_library, condense, transpose_sum,
                                        reduce_to_device)
 from gpu4pyscf.__config__ import _streams, num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
@@ -66,12 +67,13 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
         vhfopt = _VHFOpt(mol).build()
 
     mol = vhfopt.sorted_mol
-    nao, nao_orig = vhfopt.coeff.shape
+    nao = mol.nao
+    nao_orig = vhfopt.mol.nao
 
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = sandwich_dot(dms, vhfopt.coeff.T)
+    dms = vhfopt.apply_coeff_C_D_CT(dms)
     dms = cp.asarray(dms, order='C')
 
     ao_loc = mol.ao_loc
@@ -212,13 +214,13 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     if with_k:
         vk = multi_gpu.array_reduce(vk_dist, inplace=True)
         #:vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
-        vk = sandwich_dot(vk, vhfopt.coeff)
+        vk = vhfopt.apply_coeff_CT_F_C(vk)
 
     if with_j:
         vj = multi_gpu.array_reduce(vj_dist, inplace=True)
         vj = transpose_sum(vj)
         #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vj, vhfopt.coeff)
-        vj = sandwich_dot(vj, vhfopt.coeff)
+        vj = vhfopt.apply_coeff_CT_F_C(vj)
 
     h_shls = vhfopt.h_shls
 
@@ -245,17 +247,16 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
             vj1 = vs_h[0]
         else:
             vk1 = vs_h[0]
-        coeff = vhfopt.coeff
         idx, idy = np.tril_indices(nao, -1)
         if with_j:
             vj1[:,idy,idx] = vj1[:,idx,idy]
             for i, v in enumerate(vj1):
-                vj[i] += coeff.T.dot(cp.asarray(v)).dot(coeff)
+                vj[i] += vhfopt.apply_coeff_CT_F_C(cp.asarray(v))
         if with_k:
             if hermi:
                 vk1[:,idy,idx] = vk1[:,idx,idy]
             for i, v in enumerate(vk1):
-                vk[i] += coeff.T.dot(cp.asarray(v)).dot(coeff)
+                vk[i] += vhfopt.apply_coeff_CT_F_C(cp.asarray(v))
         log.timer_debug1('get_jk pass 2 for h functions on cpu', *cput1)
     
     if with_j:
@@ -275,14 +276,15 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
         vhfopt = _VHFOpt(mol).build()
 
     mol = vhfopt.sorted_mol
-    nao, nao_orig = vhfopt.coeff.shape
+    nao = mol.nao
+    nao_orig = vhfopt.mol.nao
 
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
     n_dm = dms.shape[0]
     assert n_dm == 1
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = sandwich_dot(dms, vhfopt.coeff.T)
+    dms = vhfopt.apply_coeff_C_D_CT(dms)
     dms = cp.asarray(dms, order='C')
     if hermi != 1:
         dms = transpose_sum(dms)
@@ -429,7 +431,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
         vj.ctypes, vj_xyz.ctypes, ao_loc.ctypes, pair_loc.ctypes,
         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
     #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
-    vj = sandwich_dot(cp.asarray(vj), vhfopt.coeff)
+    vj = vhfopt.apply_coeff_CT_F_C(cp.asarray(vj))
     vj = transpose_sum(vj)
     vj *= 2.
 
@@ -443,11 +445,10 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
                                  dms, 1, mol._atm, mol._bas, mol._env,
                                  shls_excludes=shls_excludes)
         vj1 = vs_h[0].reshape(n_dm,nao,nao)
-        coeff = vhfopt.coeff
         idx, idy = np.tril_indices(nao, -1)
         vj1[:,idy,idx] = vj1[:,idx,idy]
         for i, v in enumerate(vj1):
-            vj[i] += coeff.T.dot(cp.asarray(v)).dot(coeff)
+            vj[i] += vhfopt.apply_coeff_CT_F_C(cp.asarray(v))
         log.timer_debug1('get_j pass 2 for h functions on cpu', *cput1)
 
     vj = vj.reshape(dm.shape)
@@ -473,9 +474,10 @@ class _VHFOpt:
         mol = self.mol
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
-        mol, coeff, uniq_l_ctr, l_ctr_counts = group_basis(mol, self.tile, group_size)
+        mol, (coeff_sparse, coeff_sparse_offset), uniq_l_ctr, l_ctr_counts = group_basis(mol, self.tile, group_size, True)
         self.sorted_mol = mol
-        self.coeff = cp.asarray(coeff)
+        self.coeff_sparse = [cp.asarray(c) for c in coeff_sparse]
+        self.coeff_sparse_offset = coeff_sparse_offset
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
 
@@ -518,6 +520,113 @@ class _VHFOpt:
             self.s_estimator_cpu = s_estimator
         log.timer('Initialize q_cond', *cput0)
         return self
+
+    def apply_coeff_C_D_CT(self, spherical_matrix):
+        spherical_matrix = cp.asarray(spherical_matrix)
+        spherical_matrix_ndim = spherical_matrix.ndim
+        if spherical_matrix_ndim == 2:
+            spherical_matrix = spherical_matrix[None]
+        counts = spherical_matrix.shape[0]
+        n_spherical = spherical_matrix.shape[1]
+        assert n_spherical == self.mol.nao
+        n_cartesian = self.sorted_mol.nao
+        out = cp.empty((counts, n_cartesian, n_cartesian))
+        allow_n2_tmp = True
+        if allow_n2_tmp:
+            tmp = cp.empty((n_spherical, n_cartesian))
+            for i in range(counts):
+                # D @ C.T
+                i_spherical = 0
+                for i_sparse in range(self.sorted_mol.nbas):
+                    coeff_sparse_block = self.coeff_sparse[i_sparse]
+                    i_cartesian = self.coeff_sparse_offset[i_sparse]
+                    tmp[:, i_cartesian : i_cartesian + coeff_sparse_block.shape[0]] = \
+                        spherical_matrix[i, :, i_spherical : i_spherical + coeff_sparse_block.shape[1]] @ coeff_sparse_block.T
+                    i_spherical += coeff_sparse_block.shape[1]
+                # C @ DCT
+                i_spherical = 0
+                for i_sparse in range(self.sorted_mol.nbas):
+                    coeff_sparse_block = self.coeff_sparse[i_sparse]
+                    i_cartesian = self.coeff_sparse_offset[i_sparse]
+                    out[i, i_cartesian : i_cartesian + coeff_sparse_block.shape[0], :] = \
+                        coeff_sparse_block @ tmp[i_spherical : i_spherical + coeff_sparse_block.shape[1], :]
+                    i_spherical += coeff_sparse_block.shape[1]
+            tmp = None
+        else:
+            for i in range(counts):
+                i_spherical_right = 0
+                for i_sparse_right in range(self.sorted_mol.nbas):
+                    coeff_sparse_block_right = self.coeff_sparse[i_sparse_right]
+                    i_cartesian_right = self.coeff_sparse_offset[i_sparse_right]
+                    tmp = spherical_matrix[i, :, i_spherical_right : i_spherical_right + coeff_sparse_block_right.shape[1]] @ coeff_sparse_block_right.T
+
+                    i_spherical_left = 0
+                    for i_sparse_left in range(self.sorted_mol.nbas):
+                        coeff_sparse_block_left = self.coeff_sparse[i_sparse_left]
+                        i_cartesian_left = self.coeff_sparse_offset[i_sparse_left]
+                        out[i, i_cartesian_left  : i_cartesian_left  +  coeff_sparse_block_left.shape[0],
+                               i_cartesian_right : i_cartesian_right + coeff_sparse_block_right.shape[0]] = \
+                            coeff_sparse_block_left @ tmp[i_spherical_left : i_spherical_left + coeff_sparse_block_left.shape[1], :]
+                        i_spherical_left += coeff_sparse_block_left.shape[1]
+
+                    i_spherical_right += coeff_sparse_block_right.shape[1]
+
+        if spherical_matrix_ndim == 2:
+            out = out[0]
+        return out
+
+    def apply_coeff_CT_F_C(self, cartesian_matrix):
+        cartesian_matrix = cp.asarray(cartesian_matrix)
+        cartesian_matrix_ndim = cartesian_matrix.ndim
+        if cartesian_matrix_ndim == 2:
+            cartesian_matrix = cartesian_matrix[None]
+        counts = cartesian_matrix.shape[0]
+        n_cartesian = cartesian_matrix.shape[1]
+        assert n_cartesian == self.sorted_mol.nao
+        n_spherical = self.mol.nao
+        out = cp.empty((counts, n_spherical, n_spherical))
+        allow_n2_tmp = True
+        if allow_n2_tmp:
+            tmp = cp.empty((n_cartesian, n_spherical))
+            for i in range(counts):
+                # F @ C
+                i_spherical = 0
+                for i_sparse in range(self.sorted_mol.nbas):
+                    coeff_sparse_block = self.coeff_sparse[i_sparse]
+                    i_cartesian = self.coeff_sparse_offset[i_sparse]
+                    tmp[:, i_spherical : i_spherical + coeff_sparse_block.shape[1]] = \
+                        cartesian_matrix[i, :, i_cartesian : i_cartesian + coeff_sparse_block.shape[0]] @ coeff_sparse_block
+                    i_spherical += coeff_sparse_block.shape[1]
+                # C.T @ FC
+                i_spherical = 0
+                for i_sparse in range(self.sorted_mol.nbas):
+                    coeff_sparse_block = self.coeff_sparse[i_sparse]
+                    i_cartesian = self.coeff_sparse_offset[i_sparse]
+                    out[i, i_spherical : i_spherical + coeff_sparse_block.shape[1], :] = \
+                        coeff_sparse_block.T @ tmp[i_cartesian : i_cartesian + coeff_sparse_block.shape[0], :]
+                    i_spherical += coeff_sparse_block.shape[1]
+            tmp = None
+        else:
+            for i in range(counts):
+                i_spherical_right = 0
+                for i_sparse_right in range(self.sorted_mol.nbas):
+                    coeff_sparse_block_right = self.coeff_sparse[i_sparse_right]
+                    i_cartesian_right = self.coeff_sparse_offset[i_sparse_right]
+                    tmp = cartesian_matrix[i, :, i_cartesian_right : i_cartesian_right + coeff_sparse_block_right.shape[0]] @ coeff_sparse_block_right
+
+                    i_spherical_left = 0
+                    for i_sparse_left in range(self.sorted_mol.nbas):
+                        coeff_sparse_block_left = self.coeff_sparse[i_sparse_left]
+                        i_cartesian_left = self.coeff_sparse_offset[i_sparse_left]
+                        out[i, i_spherical_left  : i_spherical_left  +  coeff_sparse_block_left.shape[1],
+                               i_spherical_right : i_spherical_right + coeff_sparse_block_right.shape[1]] = \
+                            coeff_sparse_block_left.T @ tmp[i_cartesian_left : i_cartesian_left + coeff_sparse_block_left.shape[0], :]
+                        i_spherical_left += coeff_sparse_block_left.shape[1]
+
+                    i_spherical_right += coeff_sparse_block_right.shape[1]
+        if cartesian_matrix_ndim == 2:
+            out = out[0]
+        return out
 
     @property
     def q_cond(self):
@@ -563,6 +672,20 @@ class _VHFOpt:
                     ao_loc.data.ptr)
                 rys_envs._env_ref_holder = (_atm, _bas, _env, ao_loc)
         return self._rys_envs[device_id]
+
+    @property
+    def coeff(self):
+        warnings.warn('vhfopt.coeff is deprecated, and this property is left only for debug purpose.',
+            DeprecationWarning)
+        coeff = cp.zeros((self.sorted_mol.nao, self.mol.nao))
+        i_spherical_offset = 0
+        for i in range(self.sorted_mol.nbas):
+            coeff_sparse_block = self.coeff_sparse[i]
+            i_cartesian_offset = self.coeff_sparse_offset[i]
+            coeff[i_cartesian_offset : i_cartesian_offset + coeff_sparse_block.shape[0],
+                  i_spherical_offset : i_spherical_offset + coeff_sparse_block.shape[1]] = coeff_sparse_block
+            i_spherical_offset += coeff_sparse_block.shape[1]
+        return coeff
 
 class RysIntEnvVars(ctypes.Structure):
     _fields_ = [
