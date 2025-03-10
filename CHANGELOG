@@ -1,3 +1,15 @@
+v1.3.2 (2025-03-10)
+-------------------
+* New Features
+  - Accelerate Multigrids integration for LDA and GGA functionals
+* Improvements
+  - Dump xc info and grids into to log file
+  - Optimize int3c2e integrals with block divergent CUDA kernels
+  - Support up to I orbitals in DFT
+  - Fix out-of-bound issue in DFT hessian for heavy atoms (>=19)
+* Deprecation
+  - SM60 is not supported in PyPi package
+
 v1.3.1 (2025-02-04)
 -------------------
 * New Features
