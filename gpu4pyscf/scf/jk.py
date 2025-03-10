@@ -225,6 +225,7 @@ class _VHFOpt:
         '''Build JK for the sorted_mol. Density matrices dms and the return JK
         matrices are all corresponding to the sorted_mol
         '''
+        assert dms.ndim == 3
         mol = self.sorted_mol
         log = logger.new_logger(mol, verbose)
         ao_loc = mol.ao_loc
@@ -401,6 +402,7 @@ class _VHFOpt:
         return vj, vk
 
     def get_j(self, dms, verbose):
+        assert dms.ndim == 3
         mol = self.sorted_mol
         log = logger.new_logger(mol, verbose)
         ao_loc = mol.ao_loc
@@ -546,7 +548,7 @@ class _VHFOpt:
         libvhf_rys.transform_xyz_to_cart(
             vj.ctypes, vj_xyz.ctypes, ao_loc.ctypes, pair_loc.ctypes,
             mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-        vj = transpose_sum(vj)
+        vj = transpose_sum(cp.asarray(vj))
         vj *= 2.
 
         h_shls = self.h_shls

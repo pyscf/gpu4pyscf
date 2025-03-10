@@ -121,15 +121,14 @@ def eigh(h, s):
     else:
         lwork = ctypes.c_int(0)
         w = cupy.zeros(n)
-        _buffersize[h.dtype, n] = lwork, w
         if h.dtype == np.float64:
             fn = libcusolver.cusolverDnDsygvd_bufferSize
         else:
             fn = libcusolver.cusolverDnZhegvd_bufferSize
         status = fn(
             _handle,
-            ctype.c_int(CUSOLVER_EIG_TYPE_1),
-            ctype.c_int(CUSOLVER_EIG_MODE_VECTOR),
+            ctypes.c_int(CUSOLVER_EIG_TYPE_1),
+            ctypes.c_int(CUSOLVER_EIG_MODE_VECTOR),
             cublas.CUBLAS_FILL_MODE_LOWER,
             ctypes.c_int(n),
             ctypes.cast(A.data.ptr, ctypes.c_void_p),
@@ -140,6 +139,7 @@ def eigh(h, s):
             ctypes.byref(lwork)
         )
         lwork = lwork.value
+        _buffersize[h.dtype, n] = lwork, w
 
         if status != 0:
             raise RuntimeError("failed in buffer size")
@@ -152,8 +152,8 @@ def eigh(h, s):
     devInfo = cupy.empty(1, dtype=np.int32)
     status = fn(
         _handle,
-        ctype.c_int(CUSOLVER_EIG_TYPE_1),
-        ctype.c_int(CUSOLVER_EIG_MODE_VECTOR),
+        ctypes.c_int(CUSOLVER_EIG_TYPE_1),
+        ctypes.c_int(CUSOLVER_EIG_MODE_VECTOR),
         cublas.CUBLAS_FILL_MODE_LOWER,
         ctypes.c_int(n),
         ctypes.cast(A.data.ptr, ctypes.c_void_p),

@@ -197,30 +197,38 @@ def return_cupy_array(fn):
 
 def pack_tril(a, stream=None):
     assert a.flags.c_contiguous
-    if a.ndim == 2:
+    ndim = a.ndim
+    assert ndim in (2, 3)
+    if ndim == 2:
         a = a[None]
+
     counts, n = a.shape[:2]
     if a.dtype != np.float64:
         idx = cupy.arange(n)
         mask = idx[:,None] >= idx
-        return a[:,mask]
+        a_tril = a[:,mask]
+    else:
+        if stream is None:
+            stream = cupy.cuda.get_current_stream()
+        a_tril = cupy.empty((counts, n*(n+1)//2), dtype=np.float64)
+        err = libcupy_helper.pack_tril(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(a_tril.data.ptr, ctypes.c_void_p),
+            ctypes.cast(a.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n), ctypes.c_int(counts))
+        if err != 0:
+            raise RuntimeError('pack_tril kernel failed')
 
-    if stream is None:
-        stream = cupy.cuda.get_current_stream()
-    a_tril = cupy.empty((counts, n*(n+1)//2), dtype=np.float64)
-    err = libcupy_helper.pack_tril(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(a_tril.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n), ctypes.c_int(counts))
-    if err != 0:
-        raise RuntimeError('pack_tril kernel failed')
+    if ndim == 2:
+        a_tril = a_tril[0]
     return a_tril
 
 def unpack_tril(cderi_tril, cderi=None, stream=None, hermi=1):
     assert cderi_tril.flags.c_contiguous
     assert hermi in (1, 2)
-    if cderi_tril.ndim == 1:
+    ndim = cderi_tril.ndim
+    assert ndim in (1, 2)
+    if ndim == 1:
         cderi_tril = cderi_tril[None]
     count = cderi_tril.shape[0]
     if cderi is None:
@@ -251,6 +259,8 @@ def unpack_tril(cderi_tril, cderi=None, stream=None, hermi=1):
         ctypes.c_int(hermi))
     if err != 0:
         raise RuntimeError('failed in unpack_tril kernel')
+    if ndim == 1:
+        cderi = cderi[0]
     return cderi
 
 def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
@@ -470,13 +480,15 @@ def transpose_sum(a, stream=None):
     '''
     return a + a.transpose(0,2,1)
     '''
+    assert isinstance(a, cupy.ndarray)
     assert a.flags.c_contiguous
-    out = a
-    if a.ndim == 2:
+    assert a.ndim in (2, 3)
+    ndim = a.ndim
+    if ndim == 2:
         a = a[None]
-    assert a.ndim == 3
     count, m, n = a.shape
     assert m == n
+    out = a
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.transpose_sum(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -486,6 +498,8 @@ def transpose_sum(a, stream=None):
     )
     if err != 0:
         raise RuntimeError('failed in transpose_sum kernel')
+    if ndim == 2:
+        out = out[0]
     return out
 
 def hermi_triu(mat, hermi=1, inplace=True, stream=None):
@@ -923,7 +937,7 @@ def grouped_gemm(As, Bs, Cs=None):
 def condense(opname, a, loc_x, loc_y=None):
     assert opname in ('sum', 'max', 'min', 'abssum', 'absmax', 'norm')
     assert a.dtype == np.float64
-    a = cp.asarray(a, order='C')
+    a = cupy.asarray(a, order='C')
     if loc_y is None:
         loc_y = loc_x
     do_transpose = False
@@ -1028,6 +1042,7 @@ void {fn_name}(double *out, double *a, int *loc_x, int *loc_y,
 def sandwich_dot(a, c, out=None):
     '''Performs c.T.dot(a).dot(c)'''
     a = cupy.asarray(a)
+    c = cupy.asarray(c)
     a_ndim = a.ndim
     if a_ndim == 2:
         a = a[None]

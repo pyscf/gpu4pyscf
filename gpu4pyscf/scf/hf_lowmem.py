@@ -129,8 +129,8 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
 
 class WaveFunction:
     def __init__(self, mo_coeff, mo_occ):
-        self.mo_coeff
-        self.mo_occ
+        self.mo_coeff = mo_coeff
+        self.mo_occ = mo_occ
 
     def make_rdm1(self):
         raise NotImplementedError
@@ -149,7 +149,7 @@ class CDIIS(diis.CDIIS):
     def update(self, s, d, f, *args, **kwargs):
         out = super().update(s, d, f, *args, **kwargs)
         if isinstance(self.Corth, cp.ndarray):
-            # Store Corth on host memory to reduce GPU memory pressure
+            # Store Corth on host to reduce GPU memory pressure
             self.Corth = self.Corth.get()
         return out
 
@@ -174,9 +174,9 @@ class RHF(hf.RHF):
                 f'Invalid number of electrons {mol.nelectron} for RHF method.')
         return self
 
-    def get_hcore(self):
+    def get_hcore(self, mol=None):
         '''The lower triangular part of Hcore'''
-        hcore = hf_cpu.RHF.get_hcore(self)
+        hcore = hf_cpu.RHF.get_hcore(self, mol)
         nao = hcore.shape[0]
         idx = np.arange(nao)
         return cp.asarray(hcore[idx[:,None] >= idx])
@@ -204,20 +204,23 @@ class RHF(hf.RHF):
 
         dm = self._delta_rdm1(dm, dm_last, vhfopt)
         vj, vk = vhfopt.get_jk(dm, hermi, True, True, log)
+        assert vj.ndim == 3
         dm = None
         vk *= -.5
         vj += vk
         vj = sandwich_dot(vj, cp.asarray(vhfopt.coeff))
         vk = None
         if isinstance(vhf_last, cp.ndarray):
-            vhf_last = asarray(vhf_last) # remove attributes if vhf_last is a tag_array
-            vhf_last += pack_tril(vj)
+            vhf = asarray(vhf_last) # remove attributes if vhf_last is a tag_array
+            vhf_last = None
+            vhf += pack_tril(vj[0]) # Reuse the memory of previous Veff
         else:
-            vhf_last = pack_tril(vj)
+            vhf = pack_tril(vj[0])
         log.timer('vj and vk', *cput0)
-        return vhf_last
+        return vhf
 
     def _delta_rdm1(self, dm, dm_last, vhfopt):
+        '''Construct dm-dm_last suitable for the vhfopt.get_jk method'''
         if dm is None:
             if isinstance(dm, WaveFunction):
                 mo_coeff = dm.mo_coeff
@@ -242,9 +245,11 @@ class RHF(hf.RHF):
                 dm = dm.copy()
                 dm -= dm_last
             dm = sandwich_dot(dm, cp.asarray(vhfopt.coeff).T)
-        return dm
+        return dm[None]
 
-    def make_rdm1(self, mo_coeff, mo_occ):
+    def make_rdm1(self, mo_coeff=None, mo_occ=None):
+        if mo_coeff is None: mo_coeff = self.mo_coeff
+        if mo_occ is None: mo_occ = self.mo_occ
         return RHFWfn(mo_coeff, mo_occ).make_rdm1()
 
     def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
@@ -256,6 +261,7 @@ class RHF(hf.RHF):
         if not isinstance(vhf, cp.ndarray): vhf = cp.asarray(vhf)
         # h1e and vhf must be both in tril storage or square-matrix storage
         assert h1e.shape[-1] == vhf.shape[-1]
+        assert h1e.ndim == vhf.ndim == 1
         f = unpack_tril(h1e + vhf)
         if cycle < 0 and diis is None:  # Not inside the SCF iteration
             return f

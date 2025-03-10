@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import h5py
+import numpy as np
 import cupy
+import h5py
 from functools import reduce
 from pyscf import gto
 from pyscf import lib as pyscf_lib
@@ -161,7 +162,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         if dm0.ndim == 2:
             mo_coeff = cupy.asarray(dm0.mo_coeff[:,dm0.mo_occ>0])
             mo_occ = cupy.asarray(dm0.mo_occ[dm0.mo_occ>0])
-            dm = tag_array(dm, mo_occ=mo_occ, mo_coeff=mo_coeff)
+            dm0 = tag_array(dm0, mo_occ=mo_occ, mo_coeff=mo_coeff)
         else:
             # Drop attributes like mo_coeff, mo_occ for UHF and other methods.
             # The get_veff function supports density matrices as input.

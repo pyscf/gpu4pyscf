@@ -45,7 +45,7 @@ class CDIIS(lib.diis.DIIS):
         self.space = 8
 
     def update(self, s, d, f, *args, **kwargs):
-        errvec = self.get_err_vec(s, d, f)
+        errvec = self._sdf_err_vec(s, d, f)
         nao = self.Corth.shape[1]
         errvec = pack_tril(errvec.reshape(-1,nao,nao))
         f_tril = pack_tril(f.reshape(-1,nao,nao))
@@ -60,7 +60,7 @@ class CDIIS(lib.diis.DIIS):
         else:
             return len(self._bookkeep)
 
-    def get_err_vec(self, s, d, f, Corth):
+    def _sdf_err_vec(self, s, d, f):
         '''error vector = SDF - FDS'''
         if f.ndim == s.ndim+1: # UHF
             assert len(f) == 2

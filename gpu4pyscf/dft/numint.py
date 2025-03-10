@@ -1673,7 +1673,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[lookup_key]
             if len(idx) == 0: 
                 continue
-            
+
             ao_mask = eval_ao(
                 _sorted_mol, coords, deriv,
                 nao_slice=len(idx),
