@@ -31,19 +31,6 @@ def get_cart2sph(lmax=12):
         cart2sph.append(np.asarray(c2s, order='C'))
     return cart2sph
 
-def cart2sph_coeff_sparse(mol, normalized='sp'):
-    '''
-    Copied from /mlx_devbox/users/henry.wang1/repo/pyscf/pyscf/gto/mole.py
-            cart2sph_coeff() function
-    '''
-    c2s_l = [gto.mole.cart2sph(l, normalized=normalized) for l in range(12)]
-    c2s = []
-    for ib in range(mol.nbas):
-        l = mol.bas_angular(ib)
-        for n in range(mol.bas_nctr(ib)):
-            c2s.append(c2s_l[l])
-    return c2s
-
 def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
     '''transform generally contracted basis to segment contracted basis
     Kwargs:
@@ -52,8 +39,6 @@ def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
             the generally contracted basis to replicated segment-contracted basis.
             By default, high angular momentum functions (d, f shells) are fully
             uncontracted.
-        sparse_coeff:
-            if True, return the coeff in sparse form.
     '''
     # Ensure backward compatibility. When allow_replica is True, decontraction
     # to primitive functions is disabled. When allow_replica is False, all
@@ -119,7 +104,8 @@ def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
                 continue
 
         _bas.append(bas_of_ia)
-        contr_coeff.extend(coeff)
+        if not sparse_coeff:
+            contr_coeff.extend(coeff)
 
     pmol = mol.copy()
     pmol.cart = True
@@ -130,15 +116,9 @@ def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
 
         if not mol.cart:
             contr_coeff = contr_coeff.dot(mol.cart2sph_coeff())
+        return pmol, contr_coeff
     else:
-        if not mol.cart:
-            cart2sph_coeff = cart2sph_coeff_sparse(mol)
-            assert len(contr_coeff) == pmol.nbas
-            assert len(cart2sph_coeff) == pmol.nbas
-            for i in range(pmol.nbas):
-                contr_coeff[i] = contr_coeff[i].dot(cart2sph_coeff[i])
-
-    return pmol, contr_coeff
+        return pmol, None
 
 def sort_atoms(mol):
     """
@@ -186,6 +166,8 @@ def sort_atoms(mol):
 
 def group_basis(mol, tile=1, group_size=None, sparse_coeff=False):
     '''Group basis functions according to their [l, nprim] patterns'''
+    original_mol = mol
+
     mol, coeff = basis_seg_contraction(mol, sparse_coeff = sparse_coeff)
     # Sort basis according to angular momentum and contraction patterns so
     # as to group the basis functions to blocks in GPU kernel.
@@ -201,8 +183,11 @@ def group_basis(mol, tile=1, group_size=None, sparse_coeff=False):
         nao_orig = coeff.shape[1]
         ao_loc = mol.ao_loc
         coeff = np.split(coeff, ao_loc[1:-1], axis=0)
-    # else:
-    #     nao_orig = sum([c.shape[1] for c in coeff])
+    else:
+        ao_loc = mol.ao_loc_nr(cart=original_mol.cart)
+        ao_idx = np.array_split(np.arange(original_mol.nao), ao_loc[1:-1])
+        sorted_idx = np.argsort(inv_idx.ravel(), kind='stable').astype(np.int32)
+        ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
 
     pad_bas = []
     if tile > 1:
@@ -225,27 +210,12 @@ def group_basis(mol, tile=1, group_size=None, sparse_coeff=False):
             nf = (l + 1) * (l + 2) // 2
             if not sparse_coeff:
                 coeff.extend([np.zeros((nf, nao_orig))] * padding)
-            else:
-                coeff.extend([np.zeros((nf, 0))] * padding)
 
         inv_idx = np.hstack([inv_idx.ravel(), pad_inv_idx])
 
     sorted_idx = np.argsort(inv_idx.ravel(), kind='stable').astype(np.int32)
-    if not sparse_coeff:
-        coeff = np.vstack([coeff[i] for i in sorted_idx])
-        n_cartesian = coeff.shape[0]
-    else:
-        n_cartesian_per_block = np.array([c.shape[0] for c in coeff])
-        n_cartesian_per_block = n_cartesian_per_block[sorted_idx]
-        coeff_cartesian_offset_sorted = np.cumsum(n_cartesian_per_block)
-        n_cartesian = coeff_cartesian_offset_sorted[-1]
-        coeff_cartesian_offset_sorted = np.concatenate(([0], coeff_cartesian_offset_sorted[:-1]))
-        coeff_cartesian_offset_original_order = np.empty_like(coeff_cartesian_offset_sorted)
-        coeff_cartesian_offset_original_order[sorted_idx] = coeff_cartesian_offset_sorted
-        coeff_cartesian_offset = coeff_cartesian_offset_original_order
 
-        coeff = (coeff, coeff_cartesian_offset)
-    assert n_cartesian < 32768
+    if_pad_bas = np.array([False] * mol.nbas + [True] * len(pad_bas))[sorted_idx]
 
     max_nprims = uniq_l_ctr[:,1].max()
     mol._env = np.append(mol._env, np.zeros(max_nprims))
@@ -271,7 +241,18 @@ def group_basis(mol, tile=1, group_size=None, sparse_coeff=False):
 
     # PTR_BAS_COORD is required by various CUDA kernels
     mol._bas[:,PTR_BAS_COORD] = mol._atm[mol._bas[:,ATOM_OF],PTR_COORD]
-    return mol, coeff, uniq_l_ctr, l_ctr_counts
+
+    if not sparse_coeff:
+        coeff = np.vstack([coeff[i] for i in sorted_idx])
+        assert coeff.shape[0] < 32768
+        return mol, coeff, uniq_l_ctr, l_ctr_counts
+    else:
+        n_cartesian = sum([(l+1)*(l+2)//2 for l in mol._bas[:,ANG_OF]])
+        assert n_cartesian < 32768
+        l_ctr_offsets = np.cumsum(l_ctr_counts)[:-1]
+        if_pad_bas_per_l_ctr = np.split(if_pad_bas, l_ctr_offsets)
+        l_ctr_pad_counts = np.array([np.sum(if_pad) for if_pad in if_pad_bas_per_l_ctr])
+        return mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts
 
 def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size, align=1):
     '''Splits l_ctr patterns into small groups with group_size the maximum

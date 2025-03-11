@@ -33,7 +33,7 @@ from gpu4pyscf.__config__ import _streams, num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
-from gpu4pyscf.gto.mole import group_basis
+from gpu4pyscf.gto.mole import group_basis, get_cart2sph
 
 __all__ = [
     'get_jk', 'get_j',
@@ -73,7 +73,7 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = vhfopt.apply_coeff_C_D_CT(dms)
+    dms = vhfopt.apply_coeff_C_mat_CT(dms)
     dms = cp.asarray(dms, order='C')
 
     ao_loc = mol.ao_loc
@@ -214,13 +214,13 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     if with_k:
         vk = multi_gpu.array_reduce(vk_dist, inplace=True)
         #:vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
-        vk = vhfopt.apply_coeff_CT_F_C(vk)
+        vk = vhfopt.apply_coeff_CT_mat_C(vk)
 
     if with_j:
         vj = multi_gpu.array_reduce(vj_dist, inplace=True)
         vj = transpose_sum(vj)
         #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vj, vhfopt.coeff)
-        vj = vhfopt.apply_coeff_CT_F_C(vj)
+        vj = vhfopt.apply_coeff_CT_mat_C(vj)
 
     h_shls = vhfopt.h_shls
 
@@ -251,12 +251,12 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
         if with_j:
             vj1[:,idy,idx] = vj1[:,idx,idy]
             for i, v in enumerate(vj1):
-                vj[i] += vhfopt.apply_coeff_CT_F_C(cp.asarray(v))
+                vj[i] += vhfopt.apply_coeff_CT_mat_C(cp.asarray(v))
         if with_k:
             if hermi:
                 vk1[:,idy,idx] = vk1[:,idx,idy]
             for i, v in enumerate(vk1):
-                vk[i] += vhfopt.apply_coeff_CT_F_C(cp.asarray(v))
+                vk[i] += vhfopt.apply_coeff_CT_mat_C(cp.asarray(v))
         log.timer_debug1('get_jk pass 2 for h functions on cpu', *cput1)
     
     if with_j:
@@ -284,7 +284,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     n_dm = dms.shape[0]
     assert n_dm == 1
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = vhfopt.apply_coeff_C_D_CT(dms)
+    dms = vhfopt.apply_coeff_C_mat_CT(dms)
     dms = cp.asarray(dms, order='C')
     if hermi != 1:
         dms = transpose_sum(dms)
@@ -431,7 +431,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
         vj.ctypes, vj_xyz.ctypes, ao_loc.ctypes, pair_loc.ctypes,
         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
     #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
-    vj = vhfopt.apply_coeff_CT_F_C(cp.asarray(vj))
+    vj = vhfopt.apply_coeff_CT_mat_C(cp.asarray(vj))
     vj = transpose_sum(vj)
     vj *= 2.
 
@@ -448,7 +448,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
         idx, idy = np.tril_indices(nao, -1)
         vj1[:,idy,idx] = vj1[:,idx,idy]
         for i, v in enumerate(vj1):
-            vj[i] += vhfopt.apply_coeff_CT_F_C(cp.asarray(v))
+            vj[i] += vhfopt.apply_coeff_CT_mat_C(cp.asarray(v))
         log.timer_debug1('get_j pass 2 for h functions on cpu', *cput1)
 
     vj = vj.reshape(dm.shape)
@@ -474,10 +474,10 @@ class _VHFOpt:
         mol = self.mol
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
-        mol, (coeff_sparse, coeff_sparse_offset), uniq_l_ctr, l_ctr_counts = group_basis(mol, self.tile, group_size, True)
+        mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(mol, self.tile, group_size, True)
         self.sorted_mol = mol
-        self.coeff_sparse = [cp.asarray(c) for c in coeff_sparse]
-        self.coeff_sparse_offset = coeff_sparse_offset
+        self.ao_idx = ao_idx
+        self.l_ctr_pad_counts = l_ctr_pad_counts
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
 
@@ -521,7 +521,39 @@ class _VHFOpt:
         log.timer('Initialize q_cond', *cput0)
         return self
 
-    def apply_coeff_C_D_CT(self, spherical_matrix):
+    def sort_orbitals(self, mat, axis=[]):
+        ''' Transform given axis of a matrix into sorted AO '''
+        idx = self.ao_idx
+        shape_ones = (1,) * mat.ndim
+        fancy_index = []
+        for dim, n in enumerate(mat.shape):
+            if dim in axis:
+                assert n == len(idx)
+                indices = idx
+            else:
+                indices = np.arange(n)
+            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
+            fancy_index.append(indices.reshape(idx_shape))
+        return mat[tuple(fancy_index)]
+
+    def unsort_orbitals(self, sorted_mat, axis=[]):
+        ''' Transform given axis of a matrix into sorted AO '''
+        idx = self.ao_idx
+        shape_ones = (1,) * sorted_mat.ndim
+        fancy_index = []
+        for dim, n in enumerate(sorted_mat.shape):
+            if dim in axis:
+                assert n == len(idx)
+                indices = idx
+            else:
+                indices = np.arange(n)
+            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
+            fancy_index.append(indices.reshape(idx_shape))
+        mat = cp.empty_like(sorted_mat)
+        mat[tuple(fancy_index)] = sorted_mat
+        return mat
+
+    def apply_coeff_C_mat_CT(self, spherical_matrix):
         spherical_matrix = cp.asarray(spherical_matrix)
         spherical_matrix_ndim = spherical_matrix.ndim
         if spherical_matrix_ndim == 2:
@@ -530,52 +562,71 @@ class _VHFOpt:
         n_spherical = spherical_matrix.shape[1]
         assert n_spherical == self.mol.nao
         n_cartesian = self.sorted_mol.nao
-        out = cp.empty((counts, n_cartesian, n_cartesian))
-        allow_n2_tmp = True
-        if allow_n2_tmp:
-            tmp = cp.empty((n_spherical, n_cartesian))
-            for i in range(counts):
-                # D @ C.T
-                i_spherical = 0
-                for i_sparse in range(self.sorted_mol.nbas):
-                    coeff_sparse_block = self.coeff_sparse[i_sparse]
-                    i_cartesian = self.coeff_sparse_offset[i_sparse]
-                    tmp[:, i_cartesian : i_cartesian + coeff_sparse_block.shape[0]] = \
-                        spherical_matrix[i, :, i_spherical : i_spherical + coeff_sparse_block.shape[1]] @ coeff_sparse_block.T
-                    i_spherical += coeff_sparse_block.shape[1]
-                # C @ DCT
-                i_spherical = 0
-                for i_sparse in range(self.sorted_mol.nbas):
-                    coeff_sparse_block = self.coeff_sparse[i_sparse]
-                    i_cartesian = self.coeff_sparse_offset[i_sparse]
-                    out[i, i_cartesian : i_cartesian + coeff_sparse_block.shape[0], :] = \
-                        coeff_sparse_block @ tmp[i_spherical : i_spherical + coeff_sparse_block.shape[1], :]
-                    i_spherical += coeff_sparse_block.shape[1]
-            tmp = None
+
+        l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
+        if self.mol.cart:
+            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
         else:
-            for i in range(counts):
-                i_spherical_right = 0
-                for i_sparse_right in range(self.sorted_mol.nbas):
-                    coeff_sparse_block_right = self.coeff_sparse[i_sparse_right]
-                    i_cartesian_right = self.coeff_sparse_offset[i_sparse_right]
-                    tmp = spherical_matrix[i, :, i_spherical_right : i_spherical_right + coeff_sparse_block_right.shape[1]] @ coeff_sparse_block_right.T
+            cart2sph_per_l = get_cart2sph(l_max + 1)
 
-                    i_spherical_left = 0
-                    for i_sparse_left in range(self.sorted_mol.nbas):
-                        coeff_sparse_block_left = self.coeff_sparse[i_sparse_left]
-                        i_cartesian_left = self.coeff_sparse_offset[i_sparse_left]
-                        out[i, i_cartesian_left  : i_cartesian_left  +  coeff_sparse_block_left.shape[0],
-                               i_cartesian_right : i_cartesian_right + coeff_sparse_block_right.shape[0]] = \
-                            coeff_sparse_block_left @ tmp[i_spherical_left : i_spherical_left + coeff_sparse_block_left.shape[1], :]
-                        i_spherical_left += coeff_sparse_block_left.shape[1]
+        ref_out = self.coeff @ spherical_matrix @ self.coeff.T
 
-                    i_spherical_right += coeff_sparse_block_right.shape[1]
+        spherical_matrix = self.sort_orbitals(spherical_matrix, axis = [1,2])
+        out = cp.zeros((counts, n_cartesian, n_cartesian))
+        tmp = cp.zeros((n_spherical, n_cartesian))
+        for i_dm in range(counts):
+            # tmp = M @ C^T
+            i_spherical_offset = 0
+            i_cartesian_offset = 0
+            for i_l_ctr, (l, _) in enumerate(self.uniq_l_ctr):
+                cart2sph = cart2sph_per_l[l]
+                l_ctr_count = self.l_ctr_offsets[i_l_ctr + 1] - self.l_ctr_offsets[i_l_ctr]
+                l_ctr_pad_count = self.l_ctr_pad_counts[i_l_ctr]
 
+                n_bas_of_l = l_ctr_count - l_ctr_pad_count
+                n_cartesian_of_l = n_bas_of_l * cart2sph.shape[0]
+                n_spherical_of_l = n_bas_of_l * cart2sph.shape[1]
+                if self.mol.cart or l <= 1:
+                    tmp[:, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l] = \
+                        spherical_matrix[i_dm, :, i_spherical_offset : i_spherical_offset + n_spherical_of_l]
+                else:
+                    cart2sph = cp.asarray(cart2sph)
+                    tmp[:, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l] = \
+                        (spherical_matrix[i_dm, :, i_spherical_offset : i_spherical_offset + n_spherical_of_l]\
+                            .reshape(n_spherical * n_bas_of_l, cart2sph.shape[1], order = "C") @ cart2sph.T)\
+                        .reshape(n_spherical, n_cartesian_of_l, order = "C")
+                i_spherical_offset += n_spherical_of_l
+                i_cartesian_offset += n_cartesian_of_l + l_ctr_pad_count * cart2sph.shape[0]
+            # out = C @ tmp
+            i_spherical_offset = 0
+            i_cartesian_offset = 0
+            for i_l_ctr, (l, _) in enumerate(self.uniq_l_ctr):
+                cart2sph = cart2sph_per_l[l]
+                l_ctr_count = self.l_ctr_offsets[i_l_ctr + 1] - self.l_ctr_offsets[i_l_ctr]
+                l_ctr_pad_count = self.l_ctr_pad_counts[i_l_ctr]
+
+                n_bas_of_l = l_ctr_count - l_ctr_pad_count
+                n_cartesian_of_l = n_bas_of_l * cart2sph.shape[0]
+                n_spherical_of_l = n_bas_of_l * cart2sph.shape[1]
+                if self.mol.cart or l <= 1:
+                    out[i_dm, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :] = \
+                        tmp[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]
+                else:
+                    cart2sph = cp.asarray(cart2sph)
+                    out[i_dm, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :] = \
+                        (cart2sph @ tmp[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]\
+                            .reshape(cart2sph.shape[1], n_bas_of_l * n_cartesian, order = "F"))\
+                        .reshape(n_cartesian_of_l, n_cartesian, order = "F")
+
+                i_spherical_offset += n_spherical_of_l
+                i_cartesian_offset += n_cartesian_of_l + l_ctr_pad_count * cart2sph.shape[0]
+
+        tmp = None
         if spherical_matrix_ndim == 2:
             out = out[0]
         return out
 
-    def apply_coeff_CT_F_C(self, cartesian_matrix):
+    def apply_coeff_CT_mat_C(self, cartesian_matrix):
         cartesian_matrix = cp.asarray(cartesian_matrix)
         cartesian_matrix_ndim = cartesian_matrix.ndim
         if cartesian_matrix_ndim == 2:
@@ -584,46 +635,63 @@ class _VHFOpt:
         n_cartesian = cartesian_matrix.shape[1]
         assert n_cartesian == self.sorted_mol.nao
         n_spherical = self.mol.nao
-        out = cp.empty((counts, n_spherical, n_spherical))
-        allow_n2_tmp = True
-        if allow_n2_tmp:
-            tmp = cp.empty((n_cartesian, n_spherical))
-            for i in range(counts):
-                # F @ C
-                i_spherical = 0
-                for i_sparse in range(self.sorted_mol.nbas):
-                    coeff_sparse_block = self.coeff_sparse[i_sparse]
-                    i_cartesian = self.coeff_sparse_offset[i_sparse]
-                    tmp[:, i_spherical : i_spherical + coeff_sparse_block.shape[1]] = \
-                        cartesian_matrix[i, :, i_cartesian : i_cartesian + coeff_sparse_block.shape[0]] @ coeff_sparse_block
-                    i_spherical += coeff_sparse_block.shape[1]
-                # C.T @ FC
-                i_spherical = 0
-                for i_sparse in range(self.sorted_mol.nbas):
-                    coeff_sparse_block = self.coeff_sparse[i_sparse]
-                    i_cartesian = self.coeff_sparse_offset[i_sparse]
-                    out[i, i_spherical : i_spherical + coeff_sparse_block.shape[1], :] = \
-                        coeff_sparse_block.T @ tmp[i_cartesian : i_cartesian + coeff_sparse_block.shape[0], :]
-                    i_spherical += coeff_sparse_block.shape[1]
-            tmp = None
+
+        l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
+        if self.mol.cart:
+            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
         else:
-            for i in range(counts):
-                i_spherical_right = 0
-                for i_sparse_right in range(self.sorted_mol.nbas):
-                    coeff_sparse_block_right = self.coeff_sparse[i_sparse_right]
-                    i_cartesian_right = self.coeff_sparse_offset[i_sparse_right]
-                    tmp = cartesian_matrix[i, :, i_cartesian_right : i_cartesian_right + coeff_sparse_block_right.shape[0]] @ coeff_sparse_block_right
+            cart2sph_per_l = get_cart2sph(l_max + 1)
 
-                    i_spherical_left = 0
-                    for i_sparse_left in range(self.sorted_mol.nbas):
-                        coeff_sparse_block_left = self.coeff_sparse[i_sparse_left]
-                        i_cartesian_left = self.coeff_sparse_offset[i_sparse_left]
-                        out[i, i_spherical_left  : i_spherical_left  +  coeff_sparse_block_left.shape[1],
-                               i_spherical_right : i_spherical_right + coeff_sparse_block_right.shape[1]] = \
-                            coeff_sparse_block_left.T @ tmp[i_cartesian_left : i_cartesian_left + coeff_sparse_block_left.shape[0], :]
-                        i_spherical_left += coeff_sparse_block_left.shape[1]
+        out = cp.zeros((counts, n_spherical, n_spherical))
+        tmp = cp.zeros((n_cartesian, n_spherical))
+        for i_dm in range(counts):
+            # tmp = M @ C
+            i_spherical_offset = 0
+            i_cartesian_offset = 0
+            for i_l_ctr, (l, _) in enumerate(self.uniq_l_ctr):
+                cart2sph = cart2sph_per_l[l]
+                l_ctr_count = self.l_ctr_offsets[i_l_ctr + 1] - self.l_ctr_offsets[i_l_ctr]
+                l_ctr_pad_count = self.l_ctr_pad_counts[i_l_ctr]
 
-                    i_spherical_right += coeff_sparse_block_right.shape[1]
+                n_bas_of_l = l_ctr_count - l_ctr_pad_count
+                n_cartesian_of_l = n_bas_of_l * cart2sph.shape[0]
+                n_spherical_of_l = n_bas_of_l * cart2sph.shape[1]
+                if self.mol.cart or l <= 1:
+                    tmp[:, i_spherical_offset : i_spherical_offset + n_spherical_of_l] = \
+                        cartesian_matrix[i_dm, :, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l]
+                else:
+                    cart2sph = cp.asarray(cart2sph)
+                    tmp[:, i_spherical_offset : i_spherical_offset + n_spherical_of_l] = \
+                        (cartesian_matrix[i_dm, :, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l]\
+                            .reshape(n_cartesian * n_bas_of_l, cart2sph.shape[0], order = "C") @ cart2sph)\
+                        .reshape(n_cartesian, n_spherical_of_l, order = "C")
+                i_spherical_offset += n_spherical_of_l
+                i_cartesian_offset += n_cartesian_of_l + l_ctr_pad_count * cart2sph.shape[0]
+            # out = C.T @ tmp
+            i_spherical_offset = 0
+            i_cartesian_offset = 0
+            for i_l_ctr, (l, _) in enumerate(self.uniq_l_ctr):
+                cart2sph = cart2sph_per_l[l]
+                l_ctr_count = self.l_ctr_offsets[i_l_ctr + 1] - self.l_ctr_offsets[i_l_ctr]
+                l_ctr_pad_count = self.l_ctr_pad_counts[i_l_ctr]
+
+                n_bas_of_l = l_ctr_count - l_ctr_pad_count
+                n_cartesian_of_l = n_bas_of_l * cart2sph.shape[0]
+                n_spherical_of_l = n_bas_of_l * cart2sph.shape[1]
+                if self.mol.cart or l <= 1:
+                    out[i_dm, i_spherical_offset : i_spherical_offset + n_spherical_of_l, :] = \
+                        tmp[i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :]
+                else:
+                    cart2sph = cp.asarray(cart2sph)
+                    out[i_dm, i_spherical_offset : i_spherical_offset + n_spherical_of_l, :] = \
+                        (cart2sph.T @ tmp[i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :]\
+                            .reshape(cart2sph.shape[0], n_bas_of_l * n_spherical, order = "F"))\
+                        .reshape(n_spherical_of_l, n_spherical, order = "F")
+                i_spherical_offset += n_spherical_of_l
+                i_cartesian_offset += n_cartesian_of_l + l_ctr_pad_count * cart2sph.shape[0]
+
+        out = self.unsort_orbitals(out, axis = [1,2])
+        tmp = None
         if cartesian_matrix_ndim == 2:
             out = out[0]
         return out
@@ -675,16 +743,31 @@ class _VHFOpt:
 
     @property
     def coeff(self):
-        warnings.warn('vhfopt.coeff is deprecated, and this property is left only for debug purpose.',
-            DeprecationWarning)
-        coeff = cp.zeros((self.sorted_mol.nao, self.mol.nao))
+        # warnings.warn('vhfopt.coeff is deprecated, and this property is left only for debug purpose.',
+        #     DeprecationWarning)
+        coeff = np.zeros((self.sorted_mol.nao, self.mol.nao))
+
+        l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
+        if self.mol.cart:
+            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
+        else:
+            cart2sph_per_l = get_cart2sph(l_max + 1)
         i_spherical_offset = 0
-        for i in range(self.sorted_mol.nbas):
-            coeff_sparse_block = self.coeff_sparse[i]
-            i_cartesian_offset = self.coeff_sparse_offset[i]
-            coeff[i_cartesian_offset : i_cartesian_offset + coeff_sparse_block.shape[0],
-                  i_spherical_offset : i_spherical_offset + coeff_sparse_block.shape[1]] = coeff_sparse_block
-            i_spherical_offset += coeff_sparse_block.shape[1]
+        i_cartesian_offset = 0
+        for i, (l, _) in enumerate(self.uniq_l_ctr):
+            cart2sph = cart2sph_per_l[l]
+            l_ctr_count = self.l_ctr_offsets[i + 1] - self.l_ctr_offsets[i]
+            l_ctr_pad_count = self.l_ctr_pad_counts[i]
+            for _ in range(l_ctr_count - l_ctr_pad_count):
+                coeff[i_cartesian_offset : i_cartesian_offset + cart2sph.shape[0],
+                      i_spherical_offset : i_spherical_offset + cart2sph.shape[1]] = cart2sph
+                i_cartesian_offset += cart2sph.shape[0]
+                i_spherical_offset += cart2sph.shape[1]
+            for _ in range(l_ctr_pad_count):
+                i_cartesian_offset += cart2sph.shape[0]
+        assert len(self.ao_idx) == self.mol.nao
+        coeff[:,self.ao_idx] = coeff[:,:]
+        coeff = cp.asarray(coeff)
         return coeff
 
 class RysIntEnvVars(ctypes.Structure):
