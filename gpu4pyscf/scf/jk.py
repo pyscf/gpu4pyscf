@@ -589,7 +589,7 @@ class _VHFOpt:
                         spherical_matrix[i_dm, :, i_spherical_offset : i_spherical_offset + n_spherical_of_l]
                 else:
                     tmp[:, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l] = \
-                        (spherical_matrix[i_dm, :, i_spherical_offset : i_spherical_offset + n_spherical_of_l]\
+                        (spherical_matrix[i_dm, :, i_spherical_offset : i_spherical_offset + n_spherical_of_l]
                             .reshape(n_spherical * n_bas_of_l, cart2sph.shape[1], order = "C") @ cart2sph.T)\
                         .reshape(n_spherical, n_cartesian_of_l, order = "C")
                 i_spherical_offset += n_spherical_of_l
@@ -610,7 +610,7 @@ class _VHFOpt:
                         tmp[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]
                 else:
                     out[i_dm, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :] = \
-                        (cart2sph @ tmp[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]\
+                        (cart2sph @ tmp[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]
                             .reshape(cart2sph.shape[1], n_bas_of_l * n_cartesian, order = "F"))\
                         .reshape(n_cartesian_of_l, n_cartesian, order = "F")
 
@@ -657,7 +657,7 @@ class _VHFOpt:
                         cartesian_matrix[i_dm, :, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l]
                 else:
                     tmp[:, i_spherical_offset : i_spherical_offset + n_spherical_of_l] = \
-                        (cartesian_matrix[i_dm, :, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l]\
+                        (cartesian_matrix[i_dm, :, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l]
                             .reshape(n_cartesian * n_bas_of_l, cart2sph.shape[0], order = "C") @ cart2sph)\
                         .reshape(n_cartesian, n_spherical_of_l, order = "C")
                 i_spherical_offset += n_spherical_of_l
@@ -678,7 +678,7 @@ class _VHFOpt:
                         tmp[i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :]
                 else:
                     out[i_dm, i_spherical_offset : i_spherical_offset + n_spherical_of_l, :] = \
-                        (cart2sph.T @ tmp[i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :]\
+                        (cart2sph.T @ tmp[i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :]
                             .reshape(cart2sph.shape[0], n_bas_of_l * n_spherical, order = "F"))\
                         .reshape(n_spherical_of_l, n_spherical, order = "F")
                 i_spherical_offset += n_spherical_of_l
@@ -721,7 +721,7 @@ class _VHFOpt:
                     right_matrix[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]
             else:
                 out[i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :] = \
-                    (cart2sph @ right_matrix[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]\
+                    (cart2sph @ right_matrix[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]
                         .reshape(cart2sph.shape[1], n_bas_of_l * n_second, order = "F"))\
                     .reshape(n_cartesian_of_l, n_second, order = "F")
 
