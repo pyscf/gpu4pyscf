@@ -24,7 +24,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(DEFINED CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCHITECTURES}")
 else()
-  set(CMAKE_CUDA_ARCHITECTURES "60-real;70-real;80-real;90-real")
+  set(CMAKE_CUDA_ARCHITECTURES "70-real;80-real;90-real")
 endif()
 message("CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 
@@ -144,9 +144,27 @@ if(BUILD_SOLVENT)
   add_subdirectory(solvent)
 endif()
 
-add_subdirectory(gvhf-rys)
-add_subdirectory(gvhf-md)
-add_subdirectory(pbc)
+option(BUILD_GINT_RYS "Using gint-rys" ON)
+if(BUILD_GINT_RYS)
+  add_subdirectory(gint-rys)
+endif()
+
+option(BUILD_GVHF_RYS "Using gvhf-rys" ON)
+if(BUILD_GVHF_RYS)
+  add_subdirectory(gvhf-rys)
+endif()
+
+option(BUILD_GVHF_MD "Using gvhf-md" ON)
+if(BUILD_GVHF_MD)
+  add_subdirectory(gvhf-md)
+endif()
+
+option(BUILD_PBC "Using pbc" ON)
+if(BUILD_PBC)
+  add_subdirectory(pbc)
+endif()
+
+add_subdirectory(multigrid)
 
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
@@ -157,7 +175,7 @@ if(BUILD_LIBXC)
     PREFIX ${PROJECT_BINARY_DIR}/deps
     INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
     CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON
-            -DENABLE_FORTRAN=OFF -DDISABLE_KXC=ON -DDISABLE_LXC=ON -DDISABLE_FHC=ON
+            -DENABLE_FORTRAN=OFF -DDISABLE_KXC=OFF -DDISABLE_LXC=ON -DDISABLE_FHC=ON
             -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
             -DCMAKE_INSTALL_LIBDIR:PATH=lib
             -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}

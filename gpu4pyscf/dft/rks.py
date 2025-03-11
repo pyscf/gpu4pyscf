@@ -266,8 +266,31 @@ class KohnShamDFT(rks.KohnShamDFT):
         self._numint.omega = float(v)
 
     def dump_flags(self, verbose=None):
+        log = logger.new_logger(self, verbose)
+        log.info('XC library %s version %s\n    %s',
+                 self._numint.libxc.__name__,
+                 self._numint.libxc.__version__,
+                 self._numint.libxc.__reference__)
+        
         # TODO: add this later
-        return
+        '''
+        if log.verbose >= logger.INFO:
+            log.info('XC functionals = %s', self.xc)
+            if hasattr(self._numint.libxc, 'xc_reference'):
+                log.info(textwrap.indent('\n'.join(self._numint.libxc.xc_reference(self.xc)), '    '))
+        '''
+        self.grids.dump_flags(verbose)
+
+        if self.do_nlc():
+            log.info('** Following is NLC and NLC Grids **')
+            if self.nlc:
+                log.info('NLC functional = %s', self.nlc)
+            else:
+                log.info('NLC functional = %s', self.xc)
+            self.nlcgrids.dump_flags(verbose)
+
+        log.info('small_rho_cutoff = %g', self.small_rho_cutoff)
+        return self
 
     reset = rks.KohnShamDFT.reset
     do_nlc = rks.KohnShamDFT.do_nlc

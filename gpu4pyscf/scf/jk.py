@@ -33,7 +33,7 @@ from gpu4pyscf.__config__ import _streams, num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
-from gpu4pyscf.gto.mole import group_basis, get_cart2sph
+from gpu4pyscf.gto.mole import group_basis, cart2sph_by_l
 
 __all__ = [
     'get_jk', 'get_j',
@@ -474,7 +474,7 @@ class _VHFOpt:
         mol = self.mol
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
-        mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(mol, self.tile, group_size, True)
+        mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(mol, self.tile, group_size, sparse_coeff = True)
         self.sorted_mol = mol
         self.ao_idx = ao_idx
         self.l_ctr_pad_counts = l_ctr_pad_counts
@@ -567,9 +567,7 @@ class _VHFOpt:
         if self.mol.cart:
             cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
         else:
-            cart2sph_per_l = get_cart2sph(l_max + 1)
-
-        ref_out = self.coeff @ spherical_matrix @ self.coeff.T
+            cart2sph_per_l = [cart2sph_by_l(l) for l in range(l_max + 1)]
 
         spherical_matrix = self.sort_orbitals(spherical_matrix, axis = [1,2])
         out = cp.zeros((counts, n_cartesian, n_cartesian))
@@ -590,7 +588,6 @@ class _VHFOpt:
                     tmp[:, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l] = \
                         spherical_matrix[i_dm, :, i_spherical_offset : i_spherical_offset + n_spherical_of_l]
                 else:
-                    cart2sph = cp.asarray(cart2sph)
                     tmp[:, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l] = \
                         (spherical_matrix[i_dm, :, i_spherical_offset : i_spherical_offset + n_spherical_of_l]\
                             .reshape(n_spherical * n_bas_of_l, cart2sph.shape[1], order = "C") @ cart2sph.T)\
@@ -612,7 +609,6 @@ class _VHFOpt:
                     out[i_dm, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :] = \
                         tmp[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]
                 else:
-                    cart2sph = cp.asarray(cart2sph)
                     out[i_dm, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :] = \
                         (cart2sph @ tmp[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]\
                             .reshape(cart2sph.shape[1], n_bas_of_l * n_cartesian, order = "F"))\
@@ -640,7 +636,7 @@ class _VHFOpt:
         if self.mol.cart:
             cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
         else:
-            cart2sph_per_l = get_cart2sph(l_max + 1)
+            cart2sph_per_l = [cart2sph_by_l(l) for l in range(l_max + 1)]
 
         out = cp.zeros((counts, n_spherical, n_spherical))
         tmp = cp.zeros((n_cartesian, n_spherical))
@@ -660,7 +656,6 @@ class _VHFOpt:
                     tmp[:, i_spherical_offset : i_spherical_offset + n_spherical_of_l] = \
                         cartesian_matrix[i_dm, :, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l]
                 else:
-                    cart2sph = cp.asarray(cart2sph)
                     tmp[:, i_spherical_offset : i_spherical_offset + n_spherical_of_l] = \
                         (cartesian_matrix[i_dm, :, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l]\
                             .reshape(n_cartesian * n_bas_of_l, cart2sph.shape[0], order = "C") @ cart2sph)\
@@ -682,7 +677,6 @@ class _VHFOpt:
                     out[i_dm, i_spherical_offset : i_spherical_offset + n_spherical_of_l, :] = \
                         tmp[i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :]
                 else:
-                    cart2sph = cp.asarray(cart2sph)
                     out[i_dm, i_spherical_offset : i_spherical_offset + n_spherical_of_l, :] = \
                         (cart2sph.T @ tmp[i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :]\
                             .reshape(cart2sph.shape[0], n_bas_of_l * n_spherical, order = "F"))\
