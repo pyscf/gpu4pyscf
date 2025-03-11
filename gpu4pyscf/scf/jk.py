@@ -690,6 +690,46 @@ class _VHFOpt:
             out = out[0]
         return out
 
+    def apply_coeff_C_mat(self, right_matrix):
+        right_matrix = cp.asarray(right_matrix)
+        assert right_matrix.ndim == 2
+        n_spherical = right_matrix.shape[0]
+        assert n_spherical == self.mol.nao
+        n_cartesian = self.sorted_mol.nao
+        n_second = right_matrix.shape[1]
+
+        l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
+        if self.mol.cart:
+            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
+        else:
+            cart2sph_per_l = [cart2sph_by_l(l) for l in range(l_max + 1)]
+
+        right_matrix = self.sort_orbitals(right_matrix, axis = [0])
+        out = cp.zeros((n_cartesian, n_second))
+        i_spherical_offset = 0
+        i_cartesian_offset = 0
+        for i_l_ctr, (l, _) in enumerate(self.uniq_l_ctr):
+            cart2sph = cart2sph_per_l[l]
+            l_ctr_count = self.l_ctr_offsets[i_l_ctr + 1] - self.l_ctr_offsets[i_l_ctr]
+            l_ctr_pad_count = self.l_ctr_pad_counts[i_l_ctr]
+
+            n_bas_of_l = l_ctr_count - l_ctr_pad_count
+            n_cartesian_of_l = n_bas_of_l * cart2sph.shape[0]
+            n_spherical_of_l = n_bas_of_l * cart2sph.shape[1]
+            if self.mol.cart or l <= 1:
+                out[i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :] = \
+                    right_matrix[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]
+            else:
+                out[i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :] = \
+                    (cart2sph @ right_matrix[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]\
+                        .reshape(cart2sph.shape[1], n_bas_of_l * n_second, order = "F"))\
+                    .reshape(n_cartesian_of_l, n_second, order = "F")
+
+            i_spherical_offset += n_spherical_of_l
+            i_cartesian_offset += n_cartesian_of_l + l_ctr_pad_count * cart2sph.shape[0]
+
+        return out
+
     @property
     def q_cond(self):
         device_id = cp.cuda.Device().id
