@@ -739,13 +739,13 @@ class _VHFOpt:
     def coeff(self):
         # warnings.warn('vhfopt.coeff is deprecated, and this property is left only for debug purpose.',
         #     DeprecationWarning)
-        coeff = np.zeros((self.sorted_mol.nao, self.mol.nao))
+        coeff = cp.zeros((self.sorted_mol.nao, self.mol.nao))
 
         l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
         if self.mol.cart:
-            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
+            cart2sph_per_l = [cp.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
         else:
-            cart2sph_per_l = get_cart2sph(l_max + 1)
+            cart2sph_per_l = [cart2sph_by_l(l) for l in range(l_max + 1)]
         i_spherical_offset = 0
         i_cartesian_offset = 0
         for i, (l, _) in enumerate(self.uniq_l_ctr):
@@ -760,8 +760,7 @@ class _VHFOpt:
             for _ in range(l_ctr_pad_count):
                 i_cartesian_offset += cart2sph.shape[0]
         assert len(self.ao_idx) == self.mol.nao
-        coeff[:,self.ao_idx] = coeff[:,:]
-        coeff = cp.asarray(coeff)
+        coeff = self.unsort_orbitals(coeff, axis = [1])
         return coeff
 
 class RysIntEnvVars(ctypes.Structure):
