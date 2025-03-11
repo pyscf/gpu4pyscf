@@ -17,6 +17,7 @@ import numpy
 import cupy
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import scf, gto
+from gpu4pyscf import scf as scf_gpu
 from gpu4pyscf.df import int3c2e, df
 from gpu4pyscf.lib.cupy_helper import tag_array, contract, cholesky
 from gpu4pyscf.grad import rhf as rhf_grad
@@ -27,6 +28,25 @@ from gpu4pyscf.df.grad.jk import get_rhojk, get_grad_vjk
 LINEAR_DEP_THRESHOLD = df.LINEAR_DEP_THR
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 64)
+
+
+def _decompose_rdm1_svd(dm):
+    '''Decompose density matrix as U.Vh using SVD
+
+    Args:
+        dm : ndarray or sequence of ndarrays of shape (nao,nao)
+            Density matrices
+
+    Returns:
+        orbol : list of ndarrays of shape (nao,*)
+            Contains non-null eigenvectors of density matrix
+        orbor : list of ndarrays of shape (nao,*)
+            Contains orbol * eigenvalues (occupancies)
+    '''
+    u, s, vh = cupy.linalg.svd(dm)
+    idx = cupy.abs(s)>1e-8
+    return cupy.asfortranarray(u[:,idx]), cupy.asfortranarray(contract('i,ip->pi', s[idx], vh[idx]))
+
 
 def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=LINEAR_DEP_THRESHOLD):
     ''' generate a solver to solve Ax = b, RHS must be in (n,....) '''
@@ -49,7 +69,7 @@ def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=LINEAR_DEP_THRESHOLD):
         return j2c.dot(b.reshape(j2c.shape[0],-1)).reshape(b.shape)
     return j2c_solver
 
-def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega=None):
+def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega=None, dm_scf=True):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
@@ -58,18 +78,22 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     In the CPU version, get_jk returns the first order derivatives of J/K matrices.
     '''
     if mol is None: mol = mf_grad.mol
-    #TODO: dm has to be the SCF density matrix in this version.  dm should be
-    # extended to any 1-particle density matrix
+    if isinstance(mf_grad.base, scf.rohf.ROHF):
+        raise NotImplementedError()
+    elif isinstance(mf_grad.base, scf_gpu.uhf.UHF) or isinstance(mf_grad.base, scf_gpu.hf.RHF):
+        mf = mf_grad.base # SCF gradient
+    else:
+        mf = mf_grad.base._scf # TD gradient
 
-    if(dm0 is None): dm0 = mf_grad.base.make_rdm1()
+    if(dm0 is None): dm0 = mf.make_rdm1()
     if omega is None:
-        with_df = mf_grad.base.with_df
+        with_df = mf.with_df
     else:
         key = '%.6f' % omega
-        if key in mf_grad.base.with_df._rsh_df:
-            with_df = mf_grad.base.with_df._rsh_df[key]
+        if key in mf.with_df._rsh_df:
+            with_df = mf.with_df._rsh_df[key]
         else:
-            dfobj = mf_grad.base.with_df
+            dfobj = mf.with_df
             with_df = dfobj._rsh_df[key] = dfobj.copy().reset()
 
     auxmol = with_df.auxmol
@@ -80,18 +104,25 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
 
     log = logger.new_logger(mol, mol.verbose)
     t0 = (logger.process_clock(), logger.perf_counter())
-
-    if isinstance(mf_grad.base, scf.rohf.ROHF):
-        raise NotImplementedError()
-    mo_coeff = cupy.asarray(mf_grad.base.mo_coeff)
-    mo_occ = cupy.asarray(mf_grad.base.mo_occ)
-
+    
     dm = intopt.sort_orbitals(dm0, axis=[0,1])
-    orbo = mo_coeff[:,mo_occ>0] * mo_occ[mo_occ>0] ** 0.5
-    mo_coeff = None
-    orbo = intopt.sort_orbitals(orbo, axis=[0])
 
-    rhoj, rhok = get_rhojk(with_df, dm, orbo, with_j=with_j, with_k=with_k)
+    factor = 1.0 # This factor uses for orbol, orbor conctraction
+    if dm_scf:
+        mo_coeff = cupy.asarray(mf.mo_coeff)
+        mo_occ = cupy.asarray(mf.mo_occ)
+        orbo = mo_coeff[:,mo_occ>0] * mo_occ[mo_occ>0] ** 0.5
+        mo_coeff = None
+        orbol = intopt.sort_orbitals(orbo, axis=[0])
+        orbor = orbol
+        orbo = None
+    else:
+        orbol, orbor = _decompose_rdm1_svd(dm)
+        if hermi == 2:
+            factor = -1.0 # The symmetry is used, thus -1 needed
+    nl = orbol.shape[-1]
+    nr = orbor.shape[-1]
+    rhoj, rhok = get_rhojk(with_df, dm, orbol, orbor, with_j=with_j, with_k=with_k)
     
     # (d/dX P|Q) contributions
     if omega and omega > 1e-10:
@@ -123,14 +154,13 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         vjaux_2c = cupy.array([-vjaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
         rhoj = vjaux = tmp = None
     if with_k:
-        nocc = orbo.shape[-1]
         if low.tag == 'eig':
             rhok = contract('pq,qij->pij', low_t.T, rhok)
         elif low.tag == 'cd':
             #rhok = solve_triangular(low_t, rhok, lower=False)
-            rhok = solve_triangular(low_t, rhok.reshape(naux, -1), lower=False, overwrite_b=True).reshape(naux, nocc, nocc)
+            rhok = solve_triangular(low_t, rhok.reshape(naux, -1), lower=False, overwrite_b=True).reshape(naux, nl, nr)
             rhok = rhok.copy(order='C')
-        tmp = contract('pij,qij->pq', rhok, rhok)
+        tmp = contract('pij,qji->pq', rhok, rhok)
         tmp = intopt.unsort_orbitals(tmp, aux_axis=[0,1])
         vkaux = -contract('xpq,pq->xp', int2c_e1, tmp)
         vkaux_2c = cupy.array([-vkaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
@@ -145,15 +175,17 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     int2c_e1 = None
 
     dm_cart = dm
-    orbo_cart = orbo
+    orbol_cart = orbol
+    orbor_cart = orbor
     if not mol.cart:
         # sph2cart for ao
         cart2sph = intopt.cart2sph
-        orbo_cart = cart2sph @ orbo
+        orbol_cart = cart2sph @ orbol
+        orbor_cart = cart2sph @ orbor
         dm_cart = cart2sph @ dm @ cart2sph.T
         
     with_df._cderi = None # release GPU memory
-    vj, vk, vjaux, vkaux = get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbo_cart,
+    vj, vk, vjaux, vkaux = get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbol_cart, orbor_cart,
                                         with_j=with_j, with_k=with_k, omega=omega)
     # NOTE: vj and vk are still in cartesian
     _sorted_mol = intopt._sorted_mol
@@ -185,6 +217,9 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     if with_k:
         vkaux_3c = aux2atom.T @ vkaux.T
         vkaux = vkaux_2c - vkaux_3c
+        if vkaux is not None:
+            vkaux *= factor
+        vk *= factor
     return vj, vk, vjaux, vkaux
 
 

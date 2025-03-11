@@ -17,18 +17,20 @@ import cupy
 import copy
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import scf, gto
+from gpu4pyscf import scf as scf_gpu
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import tag_array, contract
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df.grad.jk import get_rhojk, get_grad_vjk
+from gpu4pyscf.df.grad.rhf import _decompose_rdm1_svd
 
 FREE_CUPY_CACHE = True
 BINSIZE = 128
 
 def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, 
-           omega=None, mo_coeff=None, mo_occ=None, dm2 = None):
+           omega=None, mo_coeff=None, mo_occ=None, dm2 = None, dm_scf=True):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
@@ -37,19 +39,24 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
     In the CPU version, get_jk returns the first order derivatives of J/K matrices.
     '''
     if mol is None: mol = mf_grad.mol
+    if isinstance(mf_grad.base, scf.rohf.ROHF):
+        raise NotImplementedError()
+    elif isinstance(mf_grad.base, scf_gpu.uhf.UHF) or isinstance(mf_grad.base, scf_gpu.hf.RHF):
+        mf = mf_grad.base # SCF gradient
+    else:
+        mf = mf_grad.base._scf # TD gradient
     #TODO: dm has to be the SCF density matrix in this version.  dm should be
     # extended to any 1-particle density matrix
 
-    if(dm0 is None): dm0 = mf_grad.base.make_rdm1()
-    mf = mf_grad.base
+    if(dm0 is None): dm0 = mf.make_rdm1()
     if omega is None:
-        with_df = mf_grad.base.with_df
+        with_df =mf.with_df
     else:
         key = '%.6f' % omega
-        if key in mf_grad.base.with_df._rsh_df:
-            with_df = mf_grad.base.with_df._rsh_df[key]
+        if key in mf.with_df._rsh_df:
+            with_df = mf.with_df._rsh_df[key]
         else:
-            dfobj = mf_grad.base.with_df
+            dfobj = mf.with_df
             with_df = dfobj._rsh_df[key] = dfobj.copy().reset()
 
     auxmol = with_df.auxmol
@@ -62,27 +69,31 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
     log = logger.new_logger(mol, mol.verbose)
     t0 = (logger.process_clock(), logger.perf_counter())
 
-    if isinstance(mf_grad.base, scf.rohf.ROHF):
-        raise NotImplementedError()
-    if mo_coeff is None:
-        mo_coeff = cupy.asarray(mf_grad.base.mo_coeff)
-    if mo_occ is None:
-        mo_occ = cupy.asarray(mf_grad.base.mo_occ)
-
     dm = intopt.sort_orbitals(dm0, axis=[0,1])
-    if dm2 is not None:
-        dm2_tmp = intopt.sort_orbitals(dm2, axis=[0,1])
-
-    # (L|ij) -> rhoj: (L), rhok: (L|oo)
-    orbo = mo_coeff[:,mo_occ>0] * mo_occ[mo_occ>0] ** 0.5
-    orbo = intopt.sort_orbitals(orbo, axis=[0])
-    nocc = orbo.shape[-1]
-
+    factor = 1.0 # This factor uses for orbol, orbor conctraction
+    if dm_scf:
+        if mo_coeff is None:
+            mo_coeff = cupy.asarray(mf_grad.base.mo_coeff)
+        if mo_occ is None:
+            mo_occ = cupy.asarray(mf_grad.base.mo_occ)
+        if dm2 is not None:
+            dm2_tmp = intopt.sort_orbitals(dm2, axis=[0,1])
+        # (L|ij) -> rhoj: (L), rhok: (L|oo)
+        orbo = mo_coeff[:,mo_occ>0] * mo_occ[mo_occ>0] ** 0.5
+        orbol = intopt.sort_orbitals(orbo, axis=[0])
+        orbor = orbol
+        orbo = None
+    else:
+        orbol, orbor = _decompose_rdm1_svd(dm)
+        if hermi == 2:
+            factor = -1.0 # The symmetry is used, thus -1 needed
+    nl = orbol.shape[-1]
+    nr = orbor.shape[-1]
     # (L|ij) -> rhoj: (L), rhok: (L|oo)
     low = with_df.cd_low
-    rhoj, rhok = get_rhojk(with_df, dm, orbo, with_j=with_j, with_k=with_k)
+    rhoj, rhok = get_rhojk(with_df, dm, orbol, orbor, with_j=with_j, with_k=with_k)
     if dm2 is not None:
-        rhoj2, _   = get_rhojk(with_df, dm2_tmp, orbo, with_j=with_j, with_k=False)
+        rhoj2, _   = get_rhojk(with_df, dm2_tmp, orbol, orbor, with_j=with_j, with_k=False)
 
     # (d/dX P|Q) contributions
     if omega and omega > 1e-10:
@@ -125,9 +136,9 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
         if low.tag == 'eig':
             rhok = contract('pq,qij->pij', low_t.T, rhok)
         elif low.tag == 'cd':
-            rhok = solve_triangular(low_t, rhok.reshape(naux, -1), lower=False, overwrite_b=True).reshape(naux, nocc, nocc)
+            rhok = solve_triangular(low_t, rhok.reshape(naux, -1), lower=False, overwrite_b=True).reshape(naux, nl, nr)
             rhok = rhok.copy(order='C')
-        tmp = contract('pij,qij->pq', rhok, rhok)
+        tmp = contract('pij,qji->pq', rhok, rhok)
         tmp = intopt.unsort_orbitals(tmp, aux_axis=[0,1])
         vkaux = -contract('xpq,pq->xp', int2c_e1, tmp)
         vkaux_2c = cupy.array([-vkaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
@@ -151,7 +162,8 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
     if not mol.cart:
         # sph2cart for ao
         cart2sph = intopt.cart2sph
-        orbo_cart = cart2sph @ orbo
+        orbol_cart = cart2sph @ orbol
+        orbor_cart = cart2sph @ orbor
         if dm2 is None:
             dm_cart = cart2sph @ dm @ cart2sph.T
         else:
@@ -162,11 +174,12 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
             dm_cart = dm
         else:
             dm_cart = intopt.sort_orbitals(dm2, axis=[0,1])
-        orbo_cart = orbo
+        orbol_cart = orbol
+        orbor_cart = orbor
     dm = orbo = None
 
     with_df._cderi = None  # release GPU memory
-    vj, vk, vjaux, vkaux = get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbo_cart,
+    vj, vk, vjaux, vkaux = get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbol_cart, orbor_cart,
                                         with_j=with_j, with_k=with_k, omega=omega)
     
     # NOTE: vj and vk are still in cartesian
@@ -198,6 +211,9 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
     if with_k:
         vkaux_3c = aux2atom.T @ vkaux.T
         vkaux = vkaux_2c - vkaux_3c
+        if vkaux is not None:
+            vkaux *= factor
+        vk *= factor
     return vj, vk, vjaux, vkaux
 
 class Gradients(uhf_grad.Gradients):
