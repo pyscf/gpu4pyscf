@@ -114,13 +114,13 @@ def eigh(h, s):
         A = h.copy()
         B = s.copy()
     _handle = device.get_cusolver_handle()
+    w = cupy.zeros(n)
 
     # TODO: reuse workspace
     if (h.dtype, n) in _buffersize:
-        lwork, w = _buffersize[h.dtype, n]
+        lwork = _buffersize[h.dtype, n]
     else:
         lwork = ctypes.c_int(0)
-        w = cupy.zeros(n)
         if h.dtype == np.float64:
             fn = libcusolver.cusolverDnDsygvd_bufferSize
         else:
@@ -139,7 +139,7 @@ def eigh(h, s):
             ctypes.byref(lwork)
         )
         lwork = lwork.value
-        _buffersize[h.dtype, n] = lwork, w
+        _buffersize[h.dtype, n] = lwork
 
         if status != 0:
             raise RuntimeError("failed in buffer size")
