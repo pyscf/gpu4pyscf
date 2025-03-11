@@ -134,8 +134,8 @@ class RKS(rks.RKS):
                 vklr *= (alpha - hyb)
                 vk += vklr
             _dm = None
-            assert vj.ndim == 3
 
+            assert vj.ndim == 3
             vj_last = getattr(vhf_last, 'vj', None)
             vk_last = getattr(vhf_last, 'vk', None)
             coeff = cp.asarray(vhfopt.coeff)

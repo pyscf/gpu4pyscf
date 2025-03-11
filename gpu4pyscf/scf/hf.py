@@ -102,16 +102,16 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
-    if not isinstance(h1e, cupy.ndarray): h1e = cupy.asarray(h1e)
-    if not isinstance(vhf, cupy.ndarray): vhf = cupy.asarray(vhf)
+    h1e = cupy.asarray(h1e)
+    vhf = cupy.asarray(vhf)
     f = h1e + vhf
     if cycle < 0 and diis is None:  # Not inside the SCF iteration
         return f
 
     if s1e is None: s1e = mf.get_ovlp()
     if dm is None: dm = mf.make_rdm1()
-    if not isinstance(s1e, cupy.ndarray): s1e = cupy.asarray(s1e)
-    if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
+    s1e = cupy.asarray(s1e)
+    dm = cupy.asarray(dm)
     if diis_start_cycle is None:
         diis_start_cycle = mf.diis_start_cycle
     if level_shift_factor is None:
@@ -218,7 +218,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         dm = asarray(dm) # Remove the attached attributes
         t1 = log.timer_debug1('veff', *t1)
 
-        fock = mf.get_fock(h1e, None, vhf)  # = h1e + vhf, no DIIS
+        fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
         norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
         e_tot = mf.energy_tot(dm, h1e, vhf)
 

@@ -60,28 +60,26 @@ def spin_square(mo, s=1):
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
-    if dm is None: dm = mf.make_rdm1()
     if h1e is None: h1e = mf.get_hcore()
-    if s1e is None: s1e = mf.get_ovlp()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
-    if not isinstance(s1e, cupy.ndarray): s1e = cupy.asarray(s1e)
-    if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
-    if not isinstance(h1e, cupy.ndarray): h1e = cupy.asarray(h1e)
-    if not isinstance(vhf, cupy.ndarray): vhf = cupy.asarray(vhf)
+    h1e = cupy.asarray(h1e)
+    vhf = cupy.asarray(vhf)
     f = h1e + vhf
     if f.ndim == 2:
         f = (f, f)
     if cycle < 0 and diis is None:  # Not inside the SCF iteration
         return f
 
+    if s1e is None: s1e = mf.get_ovlp()
+    if dm is None: dm = mf.make_rdm1()
+    s1e = cupy.asarray(s1e)
+    dm = cupy.asarray(dm)
     if diis_start_cycle is None:
         diis_start_cycle = mf.diis_start_cycle
     if level_shift_factor is None:
         level_shift_factor = mf.level_shift
     if damp_factor is None:
         damp_factor = mf.damp
-    if s1e is None: s1e = mf.get_ovlp()
-    if dm is None: dm = mf.make_rdm1()
 
     if isinstance(level_shift_factor, (tuple, list, np.ndarray)):
         shifta, shiftb = level_shift_factor
