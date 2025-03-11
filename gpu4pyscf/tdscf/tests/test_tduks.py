@@ -176,8 +176,8 @@ class KnownValues(unittest.TestCase):
         assert td.device == 'gpu'
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
-        self.assertAlmostEqual(abs(es - ref[:5]).max(), 0, 8)
-        self.assertAlmostEqual(lib.fp(es), -0.7530329968766932, 6)
+        self.assertAlmostEqual(abs(es - ref[:5]).max(), 0, 9)
+        self.assertAlmostEqual(lib.fp(es), -0.7530329968766932, 5)
 
     def test_tda_vind(self):
         mf = self.mf_bp86

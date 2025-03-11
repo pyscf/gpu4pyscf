@@ -11,7 +11,7 @@ def KS(mol, xc='LDA,VWN'):
     else:
         return UKS(mol, xc)
 
-def RKS(mol, xc):
+def RKS(mol, xc='LDA,VWN'):
     from gpu4pyscf.lib.cupy_helper import get_avail_mem
     from . import rks_lowmem
     mem = get_avail_mem()

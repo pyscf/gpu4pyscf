@@ -196,14 +196,13 @@ def return_cupy_array(fn):
     return filter_ret
 
 def pack_tril(a, stream=None):
-    assert a.flags.c_contiguous
     ndim = a.ndim
     assert ndim in (2, 3)
     if ndim == 2:
         a = a[None]
 
     counts, n = a.shape[:2]
-    if a.dtype != np.float64:
+    if a.dtype != np.float64 or not a.flags.c_contiguous:
         idx = cupy.arange(n)
         mask = idx[:,None] >= idx
         a_tril = a[:,mask]
