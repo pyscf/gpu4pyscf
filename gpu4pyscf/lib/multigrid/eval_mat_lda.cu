@@ -72,7 +72,7 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     double *ys_exp = xs_exp + xs_size;
     double *zs_exp = ys_exp + xs_size;
     double *gx_dmyz = zs_exp + xs_size;
-    init_orth_data(xs_exp, grid_start, envs, bounds, ri, rj, ai, aj, L+1);
+    init_orth_data(xs_exp, grid_start, envs, bounds, ri, rj, ai, aj, L);
 
     double r2[nf2];
     double r1[L+1];
@@ -157,8 +157,8 @@ void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
     int nao = envs.nao;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
-    _dm_xyz_to_dm<L>(out+i0*nao+j0, dm_xyz, nao, li, lj, ri, rj, cicj, cache,
-                     npairs_this_block);
+    dm_xyz_to_dm<L>(out+i0*nao+j0, dm_xyz, nao, li, lj, ri, rj, cicj, cache,
+                    npairs_this_block);
 }
 
 template <int L, int TILE> __global__
