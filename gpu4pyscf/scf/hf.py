@@ -60,7 +60,7 @@ def make_rdm1(mo_coeff, mo_occ):
     mocc = mo_coeff[:, is_occ]
     dm = cupy.dot(mocc*mo_occ[is_occ], mocc.conj().T)
     occ_coeff = mo_coeff[:, is_occ]
-    return dm
+    return tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
 
 def get_occ(mf, mo_energy=None, mo_coeff=None):
     if mo_energy is None: mo_energy = mf.mo_energy
@@ -165,7 +165,6 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
             dm0 = tag_array(dm0, mo_occ=mo_occ, mo_coeff=mo_coeff)
         else:
             # Drop attributes like mo_coeff, mo_occ for UHF and other methods.
-            # The get_veff function supports density matrices as input.
             dm0 = asarray(dm0, order='C')
 
     dm, dm0 = asarray(dm0, order='C'), None
