@@ -33,6 +33,7 @@ def setUpModule():
     )
 
 def tearDownModule():
+    global mol_sph
     del mol_sph
 
 def run_dft(xc, mol, disp=None):
