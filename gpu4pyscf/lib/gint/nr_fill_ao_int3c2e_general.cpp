@@ -24,7 +24,7 @@
 #include "config.h"
 #include "sycl_alloc.hpp"
 #include "g2e.h"
-#include "cint2e.hpp"
+// #include "cint2e.hpp"
 
 #include "rys_roots.cpp"
 #include "g2e.cpp"

@@ -20,7 +20,11 @@
 #pragma once
 
 #include "rys_xw.hpp"
-#include "roots_for_x0.hpp"
+#include "roots_for_x0.cuh"
+
+#include <cmath>
+using namespace std;
+
 
 #define SQRTPIE4        .8862269254527580136
 #define PIE4            .7853981633974483096
@@ -83,8 +87,10 @@
 #define POLY5_RBASE  (POLY5_59    + 170)
 #define POLY5_WBASE  (POLY5_RBASE + 5  )
 
-__attribute__((always_inline))
-static double FITTING_DATA[] = {
+//__attribute__((always_inline))
+inline
+const
+double FITTING_DATA[] = {
 //static double POLY2_1[] = {
 // FT0
 +0                   ,
@@ -3509,7 +3515,7 @@ template<> __attribute__((always_inline))
 inline void GINTrys_root<2>(double x, double *rw)
 {
     double rt0, rt1, wt0, wt1, y, z, cw, cr, ex, x1, x2, sx, f1;
-    double *p;
+    const double *p;
 
     if (x < 3e-7) {
         rt0 = 1.30693606237085E-01 -2.90430236082028E-02 *x;
@@ -3597,7 +3603,7 @@ inline void GINTrys_root<3>(double x, double *rw)
 {
     double rt0, rt1, rt2, wt0, wt1, wt2, t1, t2, t3, a1, a2, f1, f2;
     double y, z, cw, cr, ex, x1, sx;
-    double *p;
+    const double *p;
 
     if (x < 3.e-7) {
         rt0 = 6.03769246832797E-02 -9.28875764357368E-03 *x;
@@ -3709,7 +3715,7 @@ inline void GINTrys_root<4>(double x, double *rw)
 {
     double rt0, rt1, rt2, rt3, wt0, wt1, wt2, wt3;
     double y, z, cr, cw, ex, x1, sx;
-    double *p;
+    const double *p;
 
     if (x <= 3.0e-7) {
         rt0 = 3.48198973061471E-02 -4.09645850660395E-03 *x;
@@ -3811,7 +3817,7 @@ inline void GINTrys_root<5>(double x, double *rw)
 {
     double rt0, rt1, rt2, rt3, rt4, wt0, wt1, wt2, wt3, wt4;
     double y, cr, ex, sx;
-    double *p;
+    const double *p;
 
     if (x < 3.e-7){
         rt0 = 2.26659266316985E-02 -2.15865967920897E-03 *x;

@@ -16,18 +16,18 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-
-#define atomicAdd((addr), (val)) (sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space>(addr).fetch_add(val)) 
+#include "gvhf.h"
+//#define atomicAdd((addr), (val)) (sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space>(addr).fetch_add(val)) 
 
 template <int NROOTS> __attribute__((always_inline))
 static void GINTg0_2e_2d4d_ip1(GINTEnvVars envs, double* __restrict__ g, double norm,
                                int ish, int jsh, int ksh, int lsh, int prim_ij, int prim_kl)
 {
-  double* __restrict__ a12 = c_bpcache.a12;
-  double* __restrict__ e12 = c_bpcache.e12;
-  double* __restrict__ x12 = c_bpcache.x12;
-  double* __restrict__ y12 = c_bpcache.y12;
-  double* __restrict__ z12 = c_bpcache.z12;
+  double* __restrict__ a12 = c_bpcache.get().a12;
+  double* __restrict__ e12 = c_bpcache.get().e12;
+  double* __restrict__ x12 = c_bpcache.get().x12;
+  double* __restrict__ y12 = c_bpcache.get().y12;
+  double* __restrict__ z12 = c_bpcache.get().z12;
   double aij = a12[prim_ij];
   double xij = x12[prim_ij];
   double yij = y12[prim_ij];
@@ -61,8 +61,8 @@ static void GINTg0_2e_2d4d_ip1(GINTEnvVars envs, double* __restrict__ g, double 
   double* __restrict__ gy = g + envs.g_size;
   double* __restrict__ gz = g + envs.g_size * 2;
 
-  int nbas = c_bpcache.nbas;
-  double* __restrict__ bas_x = c_bpcache.bas_coords;
+  int nbas = c_bpcache.get().nbas;
+  double* __restrict__ bas_x = c_bpcache.get().bas_coords;
   double* __restrict__ bas_y = bas_x + nbas;
   double* __restrict__ bas_z = bas_y + nbas;
   double xixj, yiyj, zizj, xkxl, ykyl, zkzl;
@@ -518,7 +518,7 @@ __attribute__((always_inline))
 static
 void GINTkernel_ip1_getjk(GINTEnvVars envs, JKMatrix jk, double * __restrict__ gout,
                           int ish, int jsh, int ksh, int lsh) {
-  int * ao_loc = c_bpcache.ao_loc;
+  int * ao_loc = c_bpcache.get().ao_loc;
   int i0 = ao_loc[ish];
   int i1 = ao_loc[ish + 1];
   int j0 = ao_loc[jsh];
@@ -789,7 +789,7 @@ void GINTkernel_ip1_getjk(GINTEnvVars envs, JKMatrix jk, double * __restrict__ g
 }
 
 template<int NROOTS, int GOUTSIZE>
-__global__
+// __global__
 static void GINTint2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets, sycl::nd_item<2>& item) {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
@@ -800,7 +800,7 @@ static void GINTint2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     return;
   }
 
-  int * ao_loc = c_bpcache.ao_loc;
+  int * ao_loc = c_bpcache.get().ao_loc;
   int bas_ij = offsets.bas_ij + task_ij;
   int bas_kl = offsets.bas_kl + task_kl;
 
@@ -817,8 +817,8 @@ static void GINTint2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
   int nprim_kl = envs.nprim_kl;
   int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
   int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-  int * bas_pair2bra = c_bpcache.bas_pair2bra;
-  int * bas_pair2ket = c_bpcache.bas_pair2ket;
+  int * bas_pair2bra = c_bpcache.get().bas_pair2bra;
+  int * bas_pair2ket = c_bpcache.get().bas_pair2ket;
 
   int ish = bas_pair2bra[bas_ij];
   int jsh = bas_pair2ket[bas_ij];
@@ -854,8 +854,8 @@ static void GINTint2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
       gout + (3 * nfik + 3 * nfjk + 3 * nfil + 3 * nfjl + 6 * nfij) * n_dm;
 
   memset(gout, 0, sizeof(double) * GOUTSIZE);
-  double * __restrict__ i_exponent = c_bpcache.a1;
-  double * __restrict__ j_exponent = c_bpcache.a2;
+  double * __restrict__ i_exponent = c_bpcache.get().a1;
+  double * __restrict__ j_exponent = c_bpcache.get().a2;
 
   int ij, kl;
   int as_ish, as_jsh, as_ksh, as_lsh;
@@ -1214,7 +1214,7 @@ static void GINTint2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 
 }
 
-__global__
+// __global__
 static void
 GINTint2e_ip1_jk_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets, sycl::nd_item<2>& item) {
   int ntasks_ij = offsets.ntasks_ij;
@@ -1232,9 +1232,9 @@ GINTint2e_ip1_jk_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets off
   int nprim_kl = envs.nprim_kl;
   int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
   int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-  int * bas_pair2bra = c_bpcache.bas_pair2bra;
-  int * bas_pair2ket = c_bpcache.bas_pair2ket;
-  int * ao_loc = c_bpcache.ao_loc;
+  int * bas_pair2bra = c_bpcache.get().bas_pair2bra;
+  int * bas_pair2ket = c_bpcache.get().bas_pair2ket;
+  int * ao_loc = c_bpcache.get().ao_loc;
   int ish = bas_pair2bra[bas_ij];
   int jsh = bas_pair2ket[bas_ij];
   int ksh = bas_pair2bra[bas_kl];
@@ -1248,8 +1248,8 @@ GINTint2e_ip1_jk_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets off
 //    norm *= 0.5;
 //  }
 
-  int nbas = c_bpcache.nbas;
-  double * __restrict__ bas_x = c_bpcache.bas_coords;
+  int nbas = c_bpcache.get().nbas;
+  double * __restrict__ bas_x = c_bpcache.get().bas_coords;
   double * __restrict__ bas_y = bas_x + nbas;
   double * __restrict__ bas_z = bas_y + nbas;
 
@@ -1261,13 +1261,13 @@ GINTint2e_ip1_jk_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets off
   double yj = bas_y[jsh];
   double zj = bas_z[jsh];
 
-  double * __restrict__ a12 = c_bpcache.a12;
-  double * __restrict__ e12 = c_bpcache.e12;
-  double * __restrict__ x12 = c_bpcache.x12;
-  double * __restrict__ y12 = c_bpcache.y12;
-  double * __restrict__ z12 = c_bpcache.z12;
-  double * __restrict__ i_exponent = c_bpcache.a1;
-  double * __restrict__ j_exponent = c_bpcache.a2;
+  double * __restrict__ a12 = c_bpcache.get().a12;
+  double * __restrict__ e12 = c_bpcache.get().e12;
+  double * __restrict__ x12 = c_bpcache.get().x12;
+  double * __restrict__ y12 = c_bpcache.get().y12;
+  double * __restrict__ z12 = c_bpcache.get().z12;
+  double * __restrict__ i_exponent = c_bpcache.get().a1;
+  double * __restrict__ j_exponent = c_bpcache.get().a2;
 
   int ij, kl, i_dm;
   double gout0 = 0, gout0_prime = 0;

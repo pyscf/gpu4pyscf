@@ -18,7 +18,7 @@
  */
 
 #include <stdio.h>
-#include "gint/gint.h"
+// #include "gint/gint.h"
 #include "gint/cint2e.hpp"
 #include "gint/reduction.cpp"
 #include "gvhf.h"
@@ -27,7 +27,7 @@ template <int NROOTS, int GSIZE> __attribute__((always_inline))
 static void GINTkernel_direct_getjk(GINTEnvVars envs, JKMatrix jk, double* __restrict__ g,
                       int ish, int jsh, int ksh, int lsh)
 {
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish  ];
     int i1 = ao_loc[ish+1];
     int j0 = ao_loc[jsh  ];
@@ -230,7 +230,7 @@ static void GINTkernel_getjk(JKMatrix jk, double* __restrict__ gout,
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int task_id = ty * THREADSX + tx;
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish  ];
     int i1 = ao_loc[ish+1];
     int j0 = ao_loc[jsh  ];

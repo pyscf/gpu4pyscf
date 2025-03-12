@@ -14,7 +14,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#define atomicAdd((addr), (val)) (sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space>(addr).fetch_add(val))
+#include "gvhf.h"
+//#define atomicAdd((addr), (val)) (sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space>(addr).fetch_add(val))
 
 template <int NROOTS, int GSIZE> __attribute__((always_inline))
 void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets, sycl::nd_item<2>& item)
@@ -36,13 +37,13 @@ void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
     int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     int lsh = bas_pair2ket[bas_kl];
-    double* __restrict__ exp = c_bpcache.a1;
+    double* __restrict__ exp = c_bpcache.get().a1;
     double g[2*GSIZE];
     double *f = g + GSIZE;
 
@@ -80,7 +81,7 @@ void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
         }
     }
 
-    write_int3c2e_ip1_jk(jk, j3, k3, ish);
+    write_int3c2e_ip1_jk(jk, j3, k3, ish, item);
 }
 
 __attribute__((always_inline))
@@ -100,8 +101,8 @@ static void GINTrun_int3c2e_ip1_jk_kernel1000(GINTEnvVars envs, JKMatrix jk, Bas
     int bas_kl = offsets.bas_kl + task_kl;
     double norm = envs.fac;
     double omega = envs.omega;
-    int *bas_pair2bra = c_bpcache.bas_pair2bra;
-    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    int *bas_pair2bra = c_bpcache.get().bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.get().bas_pair2ket;
     int ish = bas_pair2bra[bas_ij];
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
@@ -109,16 +110,16 @@ static void GINTrun_int3c2e_ip1_jk_kernel1000(GINTEnvVars envs, JKMatrix jk, Bas
     int nprim_kl = envs.nprim_kl;
     int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
     int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-    double* __restrict__ a12 = c_bpcache.a12;
-    double* __restrict__ e12 = c_bpcache.e12;
-    double* __restrict__ x12 = c_bpcache.x12;
-    double* __restrict__ y12 = c_bpcache.y12;
-    double* __restrict__ z12 = c_bpcache.z12;
-    double* __restrict__ a1 = c_bpcache.a1;
+    double* __restrict__ a12 = c_bpcache.get().a12;
+    double* __restrict__ e12 = c_bpcache.get().e12;
+    double* __restrict__ x12 = c_bpcache.get().x12;
+    double* __restrict__ y12 = c_bpcache.get().y12;
+    double* __restrict__ z12 = c_bpcache.get().z12;
+    double* __restrict__ a1 = c_bpcache.get().a1;
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    int nbas = c_bpcache.get().nbas;
+    double* __restrict__ bas_x = c_bpcache.get().bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
 
@@ -190,7 +191,7 @@ static void GINTrun_int3c2e_ip1_jk_kernel1000(GINTEnvVars envs, JKMatrix jk, Bas
         gout2 += g_0 * g_2 * f_5;
     } }
 
-    int *ao_loc = c_bpcache.ao_loc;
+    int *ao_loc = c_bpcache.get().ao_loc;
     int i0 = ao_loc[ish] - jk.ao_offsets_i;
     int j0 = ao_loc[jsh] - jk.ao_offsets_j;
     int k0 = ao_loc[ksh] - jk.ao_offsets_k;
@@ -202,9 +203,9 @@ static void GINTrun_int3c2e_ip1_jk_kernel1000(GINTEnvVars envs, JKMatrix jk, Bas
     double* __restrict__ vj = jk.vj;
     double* __restrict__ vk = jk.vk;
 
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    __shared__ double sdata[THREADSX][THREADSY];
+    int tx = item.get_local_id(1);
+    int ty = item.get_local_id(0);
+    double sdata[THREADSX][THREADSY];
     if (!active){
         gout0 = 0.0; gout1 = 0.0; gout2 = 0.0;
     }

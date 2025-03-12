@@ -21,6 +21,7 @@
 #include <assert.h>
 #include <sycl/sycl.hpp>
 #include "gint/sycl_alloc.hpp"
+#include "gint/sycl_device.hpp"
 
 #define THREADSX        32
 #define THREADSY        4
@@ -197,8 +198,8 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
     int j0 = ao_loc[jsh0];
     int ish4 = ish0 / THREADSY;
     int jsh4 = jsh0 / THREADSY;
-    int degen_i = gridDim.y;
-    int degen_j = gridDim.z;
+    int degen_i = item.get_group_range(1);
+    int degen_j = item.get_group_range(2);
     int ip = static_cast<int>(item.get_group(1));
     int jp = static_cast<int>(item.get_group(0));
 
@@ -228,9 +229,10 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
                 double s1 = bra[i*Ngrids+grid_id];
                 double s2 = ket[j*Ngrids+grid_id];
                 double s = abs(s1 * s2);
-                if (s > 1e-3 && si+sj < nbins){
-                    printf("%f %f %f %d %d %d %d %d %d %d %d\n", s, s1, s2, si, sj, si+sj, grid_id, ish0, jsh0, i, j);
-                }
+                // vama
+                // if (s > 1e-3 && si+sj < nbins){
+                //     printf("%f %f %f %d %d %d %d %d %d %d %d\n", s, s1, s2, si, sj, si+sj, grid_id, ish0, jsh0, i, j);
+                // }
             }
             item.barrier(sycl::access::fence_space::local_space);
             val += s_bra[ty*THREADSX+       +tx] * s_ket[tz*THREADSX+       +tx];
@@ -292,8 +294,8 @@ static void _dot_ao_ao(double *out, double *bra, double *ket,
     int j0 = ao_loc[jsh0];
     int ish4 = ish0 / THREADSY;
     int jsh4 = jsh0 / THREADSY;
-    int degen_i = gridDim.y;
-    int degen_j = gridDim.z;
+    int degen_i = item.get_group_range(1);
+    int degen_j = item.get_group_range(2);
     int ip = static_cast<int>(item.get_group(1));
     int jp = static_cast<int>(item.get_group(0));
 
@@ -428,7 +430,8 @@ int GDFTdot_ao_dm_sparse(double *out, double *ao, double *dm, int trans_dm,
     int grid_blocks = (ngrids + THREADSX - 1) / THREADSX;
     int bas_blocks = (nbas + THREADSY - 1) / THREADSY;
     int nao = ao_loc[nbas];
-    sycl_default_queue()->memset(out, 0, sizeof(double)*ngrids*nao).wait();
+    sycl_get_queue()->memset(out, 0, sizeof(double)*ngrids*nao).wait();
+    sycl::queue q = *sycl_get_queue();
     DEVICE_INIT(uint8_t, d_sindex, screen_index, grid_blocks * bas_blocks);
     DEVICE_INIT(uint8_t, d_pair_mask, pair_mask, bas_blocks * bas_blocks);
     DEVICE_INIT(int, d_ao_loc, ao_loc, (nbas + 1));
@@ -444,19 +447,20 @@ int GDFTdot_ao_dm_sparse(double *out, double *ao, double *dm, int trans_dm,
         sycl::range<3> threads(1, THREADSY, THREADSX);
         sycl::range<3> blocks(degen, (nsh+THREADSY-1)/THREADSY, (ngrids+THREADSX-1)/THREADSX);
         if (trans_dm) {
-            sycl_default_queue()->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+            sycl_get_queue()->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
                 _dot_ao_dmT(out, ao, dm, ish0, ish1, ngrids, nbas,
                             nbins, nsegs, d_seg_loc, d_sindex,
                             d_pair_mask, d_ao_loc, item);
             });
         } else {
-            sycl_default_queue()->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+            sycl_get_queue()->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
                 _dot_ao_dm(out, ao, dm, ish0, ish1, ngrids, nbas,
                            nbins, nsegs, d_seg_loc, d_sindex,
                            d_pair_mask, d_ao_loc, item);
             });
         }
     }
+    return 0;
 }
 
 int GDFTdot_aow_ao_sparse(double *out, double *bra, double *ket, double *wv,
@@ -470,6 +474,7 @@ int GDFTdot_aow_ao_sparse(double *out, double *bra, double *ket, double *wv,
     int tot_pairs = bas_pairs_locs[npair_segs];
     int *pair2bra = bas_pair2shls;
     int *pair2ket = bas_pair2shls + tot_pairs;
+    sycl::queue q = *sycl_get_queue();
     DEVICE_INIT(uint8_t, d_sindex, screen_index, grid_blocks * bas_blocks);
     DEVICE_INIT(int, d_pair2bra, bas_pair2shls, tot_pairs * 2);
     DEVICE_INIT(int, d_ao_loc, ao_loc, (nbas + 1));
@@ -488,11 +493,12 @@ int GDFTdot_aow_ao_sparse(double *out, double *bra, double *ket, double *wv,
         int degen_j = ao_loc[jsh0+1] - ao_loc[jsh0];
         sycl::range<3> threads(THREADSY, THREADSY, DIVXY);
         sycl::range<3> blocks(degen_j, degen_i, ntasks);
-        sycl_default_queue()->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+        sycl_get_queue()->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
             _dot_aow_ao(out, bra, ket, wv, ngrids, nbas, nbins, d_sindex,
                                              d_pair2bra+task0, d_pair2ket+task0, d_ao_loc, item);
         });
     }
+    return 0;
 }
 
 int GDFTdot_ao_ao_sparse(double *out, double *bra, double *ket,
@@ -506,6 +512,7 @@ int GDFTdot_ao_ao_sparse(double *out, double *bra, double *ket,
     int tot_pairs = bas_pairs_locs[npair_segs];
     int *pair2bra = bas_pair2shls;
     int *pair2ket = bas_pair2shls + tot_pairs;
+    sycl::queue q = *sycl_get_queue();
     DEVICE_INIT(uint8_t, d_sindex, screen_index, grid_blocks * bas_blocks);
     DEVICE_INIT(int, d_pair2bra, bas_pair2shls, tot_pairs * 2);
     DEVICE_INIT(int, d_ao_loc, ao_loc, (nbas + 1));
@@ -523,10 +530,11 @@ int GDFTdot_ao_ao_sparse(double *out, double *bra, double *ket,
         int degen_j = ao_loc[jsh0+1] - ao_loc[jsh0];
         sycl::range<3> threads(THREADSY, THREADSY, DIVXY);
         sycl::range<3> blocks(degen_j, degen_i, ntasks);
-        sycl_default_queue()->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+        sycl_get_queue()->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
             _dot_ao_ao(out, bra, ket, ngrids, nbas, nbins, d_sindex,
                        d_pair2bra+task0, d_pair2ket+task0, d_ao_loc, item);
         });
     }
+    return 0;
 }
 }

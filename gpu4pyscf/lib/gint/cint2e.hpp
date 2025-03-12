@@ -21,11 +21,13 @@
 
 #include "gint.h"
 #include "sycl_device.hpp"
+#include <sycl/sycl.hpp>
+// #include "constant.hpp"
 
 
-//extern __constant__ GINTEnvVars c_envs;
-SYCL_EXTERNAL sycl_device_global<BasisProdCache> c_bpcache;
-SYCL_EXTERNAL sycl_device_global<int16_t[NFffff*3]> c_idx4c;
+//extern GINTEnvVars c_envs;
+extern SYCL_EXTERNAL sycl_device_global<BasisProdCache> c_bpcache;
+extern SYCL_EXTERNAL sycl_device_global<int16_t[NFffff*3]> c_idx4c;
 
 /*
 __constant__ GINTEnvVars c_envs;

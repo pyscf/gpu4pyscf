@@ -25,8 +25,9 @@ import dpctl
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
-from gpu4pyscf.lib.cutensor import contract
-from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
+
+from gpu4pyscf.lib.dptensor import contract
+# from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
@@ -38,11 +39,26 @@ _data = {'c2s': None}
 def load_library(libname):
     try:
         _loaderpath = os.path.dirname(__file__)
-        return np.ctypeslib.load_library(libname, _loaderpath)
+        # return np.ctypeslib.load_library(libname, _loaderpath)
+        return ctypes.CDLL(f"{_loaderpath}/{libname}.so") # np.ctypeslib.load_library(libname, _loaderpath)
     except OSError:
         raise
 
-libdpnp_helper = load_library('libdpnp_helper')
+# libdpnp_helper = load_library('libdpnp_helper')
+print(f"###{os.getcwd()}##")
+print(f"###{os.path.dirname(__file__)}##")
+
+path = os.path.dirname(__file__)
+libdpnp_helper = ctypes.CDLL(f"{path}/libdpnp_helper.so")  # Adjust the path as needed
+
+
+def eigh():
+    return
+
+# libdpnp_helper.cart2sph.argtypes=[c_void_p, ctypes.POINTER(c_double), ctypes.POINTER(c_double), c_int,  c_int,  c_int]
+# libdpnp_helper.unpack_tril.argtypes=[c_void_p, ctypes.POINTER(c_double), ctypes.POINTER(c_double), c_int,  c_int,  c_int]
+libdpnp_helper.cart2sph.restype = int
+libdpnp_helper.unpack_tril.restype = int
 
 def pin_memory(array):
     mem = dpctl.memory.MemoryUSMHost(array.nbytes)
@@ -51,7 +67,8 @@ def pin_memory(array):
     return ret
 
 def release_gpu_stack():
-    dpnp.cuda.runtime.deviceSetLimit(0x00, 128)
+    print('release_gpu_stack place holder')
+    # dpnp.cuda.runtime.deviceSetLimit(0x00, 128)
 
 def print_mem_info():
     dev = dpctl.SyclDevice()
@@ -111,7 +128,7 @@ def to_dpnp(a):
         return dpnp.asarray(a)
     return a
 
-def return_cupy_array(fn):
+def return_np_array(fn):
     '''Ensure that arrays in returns are dpnp objects'''
     @functools.wraps(fn)
     def filter_ret(*args, **kwargs):
@@ -121,44 +138,61 @@ def return_cupy_array(fn):
         return to_dpnp(ret)
     return filter_ret
 
-def unpack_tril(cderi_tril, cderi, stream=None):
-    nao = cderi.shape[1]
-    count = cderi_tril.shape[0]
-    if stream is None:
-        stream = dpctl.get_current_queue()
-    err = libdpnp_helper.unpack_tril(
-        ctypes.cast(stream.get_queue_ref(), ctypes.c_void_p),
-        ctypes.cast(cderi_tril.data.ptr, ctypes.c_void_p),
-        ctypes.cast(cderi.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(nao),
-        ctypes.c_int(count))
-    if err != 0:
-        raise RuntimeError('failed in unpack_tril kernel')
-    return
+# def unpack_tril(cderi_tril, cderi, stream=None):
+#     nao = cderi.shape[1]
+#     count = cderi_tril.shape[0]
+#     blk = 32
+#     if stream is None:
+#         stream = cderil_tril.sycl_queue
+    
+#     cderi_tril_usm_interface = cderi_tril.__sycl_usm_array_interface__
+#     cderi_tril_data_ptr = cderi_tril_usm_interface['data'][0]
 
-def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
-    if stream is None:
-        stream = dpctl.get_current_queue()
-    if out is None:
-        out = dpnp.zeros([nao,nao,p1-p0])
-    nij = len(row)
-    naux = cderi_sparse.shape[1]
-    nao = out.shape[1]
-    err = libdpnp_helper.unpack_sparse(
-        ctypes.cast(stream.get_queue_ref(), ctypes.c_void_p),
-        ctypes.cast(cderi_sparse.data.ptr, ctypes.c_void_p),
-        ctypes.cast(row.data.ptr, ctypes.c_void_p),
-        ctypes.cast(col.data.ptr, ctypes.c_void_p),
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(nao),
-        ctypes.c_int(nij),
-        ctypes.c_int(naux),
-        ctypes.c_int(p0),
-        ctypes.c_int(p1)
-    )
-    if err != 0:
-        raise RuntimeError('failed in unpack_sparse')
-    return out
+#     cderi_usm_interface = cderi.__sycl_usm_array_interface__
+#     cderi_data_ptr = cderi_usm_interface['data'][0]
+
+#     err = libdpnp_helper.unpack_tril(
+#         ctypes.cast(stream.addressof_ref(), ctypes.POINTER(ctypes.c_size_t)), # stream
+#         ctypes.cast(cderi_tril_data_ptr, ctypes.POINTER(ctypes.c_double)),
+#         ctypes.cast(cderi_data_ptr, ctypes.POINTER(ctypes.c_double)),
+#         ctypes.c_int(nao),
+#         ctypes.c_int(count),
+#         ctypes.c_int(blk))
+#     if err != 0:
+#         raise RuntimeError('failed in unpack_tril kernel')
+#     return
+
+# def get_ptr(val):
+#     _usm_interface = val.__sycl_usm_array_interface__
+#     return _usm_interface['data'][0]
+     
+# def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
+#     if stream is None:
+#         stream = cderi_sparse.sycl_queue
+#     if out is None:
+#         out = dpnp.zeros([nao,nao,p1-p0])
+#     nij = len(row)
+#     naux = cderi_sparse.shape[1]
+#     nao = out.shape[1]
+#     cderi_sparse_usm_interface = cderi_sparse.__sycl_usm_array_interface__
+#     cderi_sparse_data_ptr = cderi_sparse_usm_interface['data'][0]
+#     out_usm_interface = out.__sycl_usm_array_interface__
+#     out_data_ptr = out_usm_interface['data'][0]
+#     err = libdpnp_helper.unpack_sparse(
+#         ctypes.cast(stream.addressof_ref(), ctypes.POINTER(ctypes.c_size_t)), # stream
+#         ctypes.cast(cderi_sparse_data_ptr, ctypes.POINTER(ctypes.c_double)),
+#         ctypes.cast(row.data.ptr, ctypes.c_void_p), #alvarom unsure
+#         ctypes.cast(col.data.ptr, ctypes.c_void_p),
+#         ctypes.cast(out_data_ptr, ctypes.POINTER(ctypes.c_double)),
+#         ctypes.c_int(nao),
+#         ctypes.c_int(nij),
+#         ctypes.c_int(naux),
+#         ctypes.c_int(p0),
+#         ctypes.c_int(p1)
+#     )
+#     if err != 0:
+#         raise RuntimeError('failed in unpack_sparse')
+#     return out
 
 def add_sparse(a, b, indices):
     '''
@@ -175,12 +209,15 @@ def add_sparse(a, b, indices):
         count = 1
     else:
         raise RuntimeError('add_sparse only supports 2d or 3d tensor')
-    stream = dpctl.get_current_queue()
+    stream = a.sycl_queue
+    a_ptr = a.__sycl_usm_array_interface__['data'][0]
+    b_ptr = b.__sycl_usm_array_interface__['data'][0]
+    indices_ptr = indices.__sycl_usm_array_interface__['data'][0]
     err = libdpnp_helper.add_sparse(
-        ctypes.cast(stream.get_queue_ref(), ctypes.c_void_p),
-        ctypes.cast(a.data.ptr, ctypes.c_void_p),
-        ctypes.cast(b.data.ptr, ctypes.c_void_p),
-        ctypes.cast(indices.data.ptr, ctypes.c_void_p),
+        ctypes.cast(stream.addressof_ref(), ctypes.POINTER(ctypes.c_size_t)), # stream
+        ctypes.cast(a_ptr, ctypes.POINTER(ctypes.c_double)),
+        ctypes.cast(b_ptr, ctypes.POINTER(ctypes.c_double)),
+        ctypes.cast(indices_ptr, ctypes.POINTER(ctypes.c_int)),
         ctypes.c_int(n),
         ctypes.c_int(m),
         ctypes.c_int(count)
@@ -189,21 +226,25 @@ def add_sparse(a, b, indices):
         raise RuntimeError('failed in sparse_add2d')
     return a
 
-def dist_matrix(x, y, out=None):
+def dist_matrix(x, y, out=None, stream=None):
     assert x.flags.c_contiguous
     assert y.flags.c_contiguous
 
     m = x.shape[0]
     n = y.shape[0]
-    if out is None:
-        out = dpnp.empty([m,n])
 
-    stream = dpctl.get_current_queue()
+    if stream is None:
+        stream = x.sycl_queue
+    if out is None:
+        out = dpnp.empty([m,n], sycl_queue=stream)
+    x_ptr = x.__sycl_usm_array_interface__['data'][0]
+    y_ptr = y.__sycl_usm_array_interface__['data'][0]
+    out_ptr = out.__sycl_usm_array_interface__['data'][0]
     err = libdpnp_helper.dist_matrix(
-        ctypes.cast(stream.get_queue_ref(), ctypes.c_void_p),
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.cast(x.data.ptr, ctypes.c_void_p),
-        ctypes.cast(y.data.ptr, ctypes.c_void_p),
+        ctypes.cast(stream.addressof_ref(), ctypes.POINTER(ctypes.c_size_t)),
+        ctypes.cast(out_ptr, ctypes.POINTER(ctypes.c_double)),
+        ctypes.cast(x_ptr, ctypes.POINTER(ctypes.c_double)),
+        ctypes.cast(y_ptr, ctypes.POINTER(ctypes.c_double)),
         ctypes.c_int(m),
         ctypes.c_int(n)
     )
@@ -211,7 +252,7 @@ def dist_matrix(x, y, out=None):
         raise RuntimeError('failed in calculating distance matrix')
     return out
 
-def block_c2s_diag(ncart, nsph, angular, counts):
+def block_c2s_diag(ncart, nsph, angular, counts, stream=None):
     '''
     constract a cartesian to spherical transformation of n shells
     '''
@@ -229,29 +270,37 @@ def block_c2s_diag(ncart, nsph, angular, counts):
         rows.append(rows[-1][-1] + np.arange(1,count+1, dtype='int32') * r)
         cols.append(cols[-1][-1] + np.arange(1,count+1, dtype='int32') * c)
         offsets += [c2s_offset[l]] * count
+    if stream is None:
+        stream = dpctl.SyclQueue()
     rows = dpnp.hstack(rows)
     cols = dpnp.hstack(cols)
 
-    cart2sph = dpnp.zeros([ncart, nsph])
-    offsets = dpnp.asarray(offsets, dtype='int32')
+    cart2sph = dpnp.zeros([ncart, nsph],sycl_queue=stream)
+    offsets = dpnp.asarray(offsets, dtype='int32', sycl_queue=stream)
 
-    stream = dpctl.get_current_queue()
+    cart2sph_prt = cart2sph.__sycl_usm_array_interface__['data'][0]
+    offsets_prt = offsets.__sycl_usm_array_interface__['data'][0]
+    c2s_data_prt = c2s_data.__sycl_usm_array_interface__['data'][0]
+    rows_prt = rows.__sycl_usm_array_interface__['data'][0]
+    cols_prt = cols.__sycl_usm_array_interface__['data'][0]
+
     err = libdpnp_helper.block_diag(
-        ctypes.cast(stream.get_queue_ref(), ctypes.c_void_p),
-        ctypes.cast(cart2sph.data.ptr, ctypes.c_void_p),
+        ctypes.cast(stream.addressof_ref(), ctypes.POINTER(ctypes.c_size_t)),
+        ctypes.cast(cart2sph_prt, ctypes.POINTER(ctypes.c_double)),
         ctypes.c_int(ncart),
         ctypes.c_int(nsph),
-        ctypes.cast(c2s_data.data.ptr, ctypes.c_void_p),
+        ctypes.cast(c2s_data_prt, ctypes.POINTER(ctypes.c_double)),
         ctypes.c_int(nshells),
-        ctypes.cast(offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rows.data.ptr, ctypes.c_void_p),
-        ctypes.cast(cols.data.ptr, ctypes.c_void_p),
+        ctypes.cast(offsets_prt, ctypes.POINTER(ctypes.c_int)),
+        ctypes.cast(rows_prt, ctypes.POINTER(ctypes.c_int)),
+        ctypes.cast(cols_prt, ctypes.POINTER(ctypes.c_int)),
     )
     if err != 0:
         raise RuntimeError('failed in block_diag kernel')
+    print('vama careful with queue')
     return cart2sph
 
-def block_diag(blocks, out=None):
+def block_diag(blocks, out=None,stream=None):
     '''
     each block size is up to 16x16
     '''
@@ -265,23 +314,30 @@ def block_diag(blocks, out=None):
     cols = dpnp.asarray(cols, dtype='int32')
     offsets = dpnp.asarray(offsets, dtype='int32')
     data = dpnp.concatenate([x.ravel() for x in blocks])
-    stream = dpctl.get_current_queue()
+    if stream is None:
+        stream = dpctl.SyclQueue()
+
+    cart2sph_ptr = cart2sph.__sycl_usm_array_interface__['data'][0]
+    offsets_ptr = offsets.__sycl_usm_array_interface__['data'][0]
+    data_ptr = data.__sycl_usm_array_interface__['data'][0]
+    rows_ptr = rows.__sycl_usm_array_interface__['data'][0]
+    cols_ptr = cols.__sycl_usm_array_interface__['data'][0]
     err = libdpnp_helper.block_diag(
-        ctypes.cast(stream.get_queue_ref(), ctypes.c_void_p),
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.cast(stream.addressof_ref(), ctypes.POINTER(ctypes.c_size_t)),
+        ctypes.cast(cart2sph_ptr, ctypes.POINTER(ctypes.c_double)),
         ctypes.c_int(m),
         ctypes.c_int(n),
-        ctypes.cast(data.data.ptr, ctypes.c_void_p),
+        ctypes.cast(data_ptr, ctypes.POINTER(ctypes.c_double)),
         ctypes.c_int(len(blocks)),
-        ctypes.cast(offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rows.data.ptr, ctypes.c_void_p),
-        ctypes.cast(cols.data.ptr, ctypes.c_void_p),
+        ctypes.cast(offsets_ptr, ctypes.POINTER(ctypes.c_int)),
+        ctypes.cast(rows_ptr, ctypes.POINTER(ctypes.c_int)),
+        ctypes.cast(cols_ptr, ctypes.POINTER(ctypes.c_int)),
     )
     if err != 0:
         raise RuntimeError('failed in block_diag kernel')
     return out
 
-def take_last2d(a, indices, out=None):
+def take_last2d(a, indices, out=None, stream=None):
     '''
     Reorder the last 2 dimensions as a[..., indices[:,None], indices]
     '''
@@ -293,15 +349,20 @@ def take_last2d(a, indices, out=None):
         count = 1
     else:
         count = np.prod(a.shape[:-2])
+    if stream is None:
+        stream = a.sycl_queue
     if out is None:
-        out = dpnp.zeros_like(a)
-    indices_int32 = dpnp.asarray(indices, dtype='int32')
-    stream = dpctl.get_current_queue()
+        out = dpnp.zeros_like(a, sycl_queue=stream)
+    indices_int32 = dpnp.asarray(indices, dtype='int32', sycl_queue=stream)
+    a_ptr = a.__sycl_usm_array_interface__['data'][0]
+    out_ptr = out.__sycl_usm_array_interface__['data'][0]
+    indices_int32_ptr = indices_int32.__sycl_usm_array_interface__['data'][0]
     err = libdpnp_helper.take_last2d(
-        ctypes.cast(stream.get_queue_ref(), ctypes.c_void_p),
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a.data.ptr, ctypes.c_void_p),
-        ctypes.cast(indices_int32.data.ptr, ctypes.c_void_p),
+        ctypes.cast(stream.addressof_ref(), ctypes.POINTER(ctypes.c_size_t)), # stream
+        ctypes.cast(out_ptr, ctypes.POINTER(ctypes.c_double)),
+        ctypes.cast(a_ptr, ctypes.POINTER(ctypes.c_double)),
+        ctypes.cast(a_ptr, ctypes.POINTER(ctypes.c_double)),
+        ctypes.cast(indices_int32_ptr, ctypes.c_void_p),
         ctypes.c_int(count),
         ctypes.c_int(nao)
     )
@@ -309,7 +370,7 @@ def take_last2d(a, indices, out=None):
         raise RuntimeError('failed in take_last2d kernel')
     return out
 
-def takebak(out, a, indices, axis=-1):
+def takebak(out, a, indices, axis=-1, stream=None):
     '''(experimental)
     Take elements from a NumPy array along an axis and write to dpnp array.
     out[..., indices] = a
@@ -326,12 +387,16 @@ def takebak(out, a, indices, axis=-1):
         count = np.prod(a.shape[:-1])
     n_a = a.shape[-1]
     n_o = out.shape[-1]
-    indices_int32 = dpnp.asarray(indices, dtype=dpnp.int32)
-    stream = dpctl.get_current_queue()
+    indices_int32 = dpnp.asarray(indices, dtype=dpnp.int32, sycl_queue=stream)
+    if stream is None:
+        stream = out.sycl_queue
+    out_ptr = out.__sycl_usm_array_interface__['data'][0]
+    indices_int32_ptr = indices_int32.__sycl_usm_array_interface__['data'][0]
     err = libdpnp_helper.takebak(
-        ctypes.c_void_p(stream.get_queue_ref()),
-        ctypes.c_void_p(out.data.ptr), a.ctypes,
-        ctypes.c_void_p(indices_int32.data.ptr),
+        ctypes.cast(stream.addressof_ref(), ctypes.POINTER(ctypes.c_size_t)),
+        ctypes.cast(out_ptr, ctypes.POINTER(ctypes.c_double)),
+        a.ctypes,
+        ctypes.cast(indices_int32_ptr, ctypes.POINTER(ctypes.c_int32)),
         ctypes.c_int(count), ctypes.c_int(n_o), ctypes.c_int(n_a)
     )
     if err != 0: # Not the mapped host memory
@@ -348,10 +413,12 @@ def transpose_sum(a, stream=None):
         a = a.reshape([-1,n,n])
     assert a.ndim == 3
     count = a.shape[0]
-    stream = dpctl.get_current_queue()
+    if stream is None:
+        stream = a.sycl_queue
+    a_ptr = a.__sycl_usm_array_interface__['data'][0]
     err = libdpnp_helper.transpose_sum(
-        ctypes.cast(stream.get_queue_ref(), ctypes.c_void_p),
-        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.cast(stream.addressof_ref(), ctypes.POINTER(ctypes.c_size_t)),
+        ctypes.cast(a_ptr, ctypes.POINTER(ctypes.c_double)),
         ctypes.c_int(n),
         ctypes.c_int(count)
     )
@@ -377,8 +444,12 @@ def hermi_triu(mat, hermi=1, inplace=True):
     else:
         raise ValueError(f'dimension not supported {mat.ndim}')
 
+    if stream is None:
+        stream = mat.sycl_queue
+    mat_ptr = mat.__sycl_usm_array_interface__['data'][0]
     err = libdpnp_helper.CPdsymm_triu(
-        ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+        ctypes.cast(stream.addressof_ref(), ctypes.POINTER(ctypes.c_size_t)),
+        ctypes.cast(mat_ptr, ctypes.POINTER(ctypes.c_double)),
         ctypes.c_int(n), ctypes.c_int(counts))
     if err != 0:
         raise RuntimeError('failed in symm_triu kernel')
@@ -430,14 +501,21 @@ def cart2sph(t, axis=0, ang=1, out=None, stream=None):
         out = dpnp.empty(out_shape)
     count = i0*nli*i3
     if stream is None:
-        stream = dpctl.get_current_queue()
-    err = libdpnp_helper.cart2sph(
-        ctypes.cast(stream.get_queue_ref(), ctypes.c_void_p),
-        ctypes.cast(t_cart.data.ptr, ctypes.c_void_p),
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(i3),
-        ctypes.c_int(count),
-        ctypes.c_int(ang)
+        stream = t.sycl_queue
+
+    t_cart_usm_interface = t_cart.__sycl_usm_array_interface__
+    out_usm_interface = out.__sycl_usm_array_interface__
+
+    t_cart_data_ptr = t_cart_usm_interface['data'][0]
+    out_data_ptr = out_usm_interface['data'][0]
+
+    err = dpnp_helper.cart2sph(
+        ctypes.cast(stream.addressof_ref(), ctypes.POINTER(c_size_t)), # stream
+        ctypes.cast(t_cart_data_ptr, ctypes.POINTER(c_double)),
+        ctypes.cast(out_data_ptr, ctypes.POINTER(c_double)),
+        c_int(i3),
+        c_int(count),
+        c_int(ang),
     )
     if err != 0:
         raise RuntimeError('failed in cart2sph kernel')
@@ -627,10 +705,11 @@ def empty_mapped(shape, dtype=float, order='C'):
     except that the underlying buffer is a pinned and mapped memory.
     This array can be used as the buffer of zero-copy memory.
     '''
-    nbytes = np.prod(shape) * np.dtype(dtype).itemsize
-    mem = dpnp.cuda.PinnedMemoryPointer(
-        dpnp.cuda.PinnedMemory(nbytes, dpnp.cuda.runtime.hostAllocMapped), 0)
-    out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)
+    # nbytes = np.prod(shape) * np.dtype(dtype).itemsize
+    # mem = dpnp.cuda.PinnedMemoryPointer(
+    #     dpnp.cuda.PinnedMemory(nbytes, dpnp.cuda.runtime.hostAllocMapped), 0)
+    # out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)
+    out = np.ndarray(shape, dtype=dtype,  order=order)
     return out
 
 def pinv(a, lindep=1e-10):
@@ -646,7 +725,7 @@ def pinv(a, lindep=1e-10):
 def cond(a):
     return dpnp.linalg.norm(a,2)*dpnp.linalg.norm(dpnp.linalg.inv(a),2)
 
-def grouped_dot(As, Bs, Cs=None):
+def grouped_dot(As, Bs, Cs=None, stream=None):
     '''
     todo: layout of cutlass kernel
     As: dpnp 2D array list.
@@ -665,16 +744,22 @@ def grouped_dot(As, Bs, Cs=None):
         Ns.append(b.shape[0])
         Ks.append(a.shape[1])
 
+    if stream is None:
+        stream = As[0].sycl_queue
+
     if Cs is None:
         Cs = []
         for i in range(groups):
-            Cs.append(dpnp.empty((Ms[i], Ns[i])))
+            Cs.append(dpnp.empty((Ms[i], Ns[i]), sycl_queue=stream))
 
     As_ptr, Bs_ptr, Cs_ptr = [], [], []
     for a, b, c in zip(As, Bs, Cs):
-        As_ptr.append(a.data.ptr)
-        Bs_ptr.append(b.data.ptr)
-        Cs_ptr.append(c.data.ptr)
+        a_ptr = a.__sycl_usm_array_interface__['data'][0]
+        b_ptr = b.__sycl_usm_array_interface__['data'][0]
+        c_ptr = c.__sycl_usm_array_interface__['data'][0]
+        As_ptr.append(a_ptr)
+        Bs_ptr.append(b_ptr)
+        Cs_ptr.append(c_ptr)
 
     As_ptr = np.array(As_ptr)
     Bs_ptr = np.array(Bs_ptr)
@@ -695,18 +780,19 @@ def grouped_dot(As, Bs, Cs=None):
     '''
     padding = 8 - (total_size % 8)
     total_size += padding
-    cutlass_space = dpnp.empty(total_size, dtype=dpnp.uint8)
+    dptlass_space = dpnp.empty(total_size, dtype=dpnp.uint8, sycl_queue=stream)
+    dptlass_space_ptr = dptlass_space.__sycl_usm_array_interface__['data'][0]
 
     stream = dpctl.get_current_queue()
     err = libdpnp_helper.grouped_dot(
-        ctypes.cast(stream.get_queue_ref(), ctypes.c_void_p),
+        ctypes.cast(stream.addressof_ref(), ctypes.POINTER(ctypes.c_size_t)),
         ctypes.cast(Cs_ptr.ctypes.data, ctypes.c_void_p),
         ctypes.cast(As_ptr.ctypes.data, ctypes.c_void_p),
         ctypes.cast(Bs_ptr.ctypes.data, ctypes.c_void_p),
         ctypes.cast(Ms.ctypes.data, ctypes.c_void_p),
         ctypes.cast(Ns.ctypes.data, ctypes.c_void_p),
         ctypes.cast(Ks.ctypes.data, ctypes.c_void_p),
-        ctypes.cast(cutlass_space.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dptlass_space_ptr, ctypes.c_void_p),
         ctypes.c_int(groups)
     )
     if err != 0:
@@ -727,6 +813,8 @@ def grouped_gemm(As, Bs, Cs=None):
     assert As[0].flags.c_contiguous
     assert Bs[0].flags.c_contiguous
     groups = len(As)
+    if stream is None:
+        stream = As[0].sycl_queue
     Ms, Ns, Ks = [], [], []
     for a, b in zip(As, Bs):
         Ms.append(a.shape[1])
@@ -740,9 +828,12 @@ def grouped_gemm(As, Bs, Cs=None):
 
     As_ptr, Bs_ptr, Cs_ptr = [], [], []
     for a, b, c in zip(As, Bs, Cs):
-        As_ptr.append(a.data.ptr)
-        Bs_ptr.append(b.data.ptr)
-        Cs_ptr.append(c.data.ptr)
+        a_ptr = a.__sycl_usm_array_interface__['data'][0]
+        b_ptr = b.__sycl_usm_array_interface__['data'][0]
+        c_ptr = c.__sycl_usm_array_interface__['data'][0]
+        As_ptr.append(a_ptr)
+        Bs_ptr.append(b_ptr)
+        Cs_ptr.append(c_ptr)
     As_ptr = np.array(As_ptr)
     Bs_ptr = np.array(Bs_ptr)
     Cs_ptr = np.array(Cs_ptr)
@@ -751,9 +842,8 @@ def grouped_gemm(As, Bs, Cs=None):
     Ns = np.array(Ns)
     Ks = np.array(Ks)
 
-    stream = dpctl.get_current_queue()
     err = libdpnp_helper.grouped_gemm(
-        ctypes.cast(stream.get_queue_ref(), ctypes.c_void_p),
+        ctypes.cast(stream.addressof_ref(), ctypes.POINTER(ctypes.c_size_t)),
         ctypes.cast(Cs_ptr.ctypes.data, ctypes.c_void_p),
         ctypes.cast(As_ptr.ctypes.data, ctypes.c_void_p),
         ctypes.cast(Bs_ptr.ctypes.data, ctypes.c_void_p),

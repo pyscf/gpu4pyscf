@@ -17,4 +17,8 @@
 
 #pragma once
 
-#include "constant.cuh"
+#include "constant.hpp"
+
+#if USE_SYCL
+#define atomicAdd(addr, val) (sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space>(*(addr)).fetch_add(val)) 
+#endif

@@ -28,7 +28,7 @@
 #include "contract_jk.cpp"
 #include "gint/rys_roots.cpp"
 #include "gint/g2e.cpp"
-#include "g3c2e.cuh"
+#include "g3c2e.hpp"
 #include "g3c2e_ip1.cpp"
 
 static int GINTrun_tasks_int3c2e_ip1_jk(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars *envs, sycl::queue& stream)

@@ -23,7 +23,7 @@
 #define BLOCK_DIM 32
 
 __attribute__((always_inline))
-void _add_sparse(double *a, double *b, int *indices, int n, int m, int count, sycl::nd_item<2>& item)
+void _add_sparse(double *a, double *b, int *indices, int n, int m, int count, sycl::nd_item<3>& item)
 {
     int row = item.get_group(2) * BLOCK_DIM + item.get_local_id(2);
     int col = item.get_group(1) * BLOCK_DIM + item.get_local_id(1);
@@ -38,7 +38,7 @@ void _add_sparse(double *a, double *b, int *indices, int n, int m, int count, sy
 }
 
 extern "C" {
-    int add_sparse(sycl::queue& stream, double *a, double *b, int *indices, int n, int m, int count){
+    int add_sparse(sycl::queue stream, double *a, double *b, int *indices, int n, int m, int count){
 	int ntile = (m + THREADS - 1) / THREADS;
 	sycl::range<3> threads(1, THREADS, THREADS);
 	sycl::range<3> blocks(1, ntile, ntile);

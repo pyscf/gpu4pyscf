@@ -17,7 +17,6 @@
 
 # modified by Xiaojie Wu (wxj6000@gmail.com)
 import numpy
-import cupy
 
 from pyscf import lib
 from pyscf.dft import rks
@@ -25,14 +24,25 @@ from pyscf.dft import rks
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
 from gpu4pyscf.scf import hf
-from gpu4pyscf.lib.cupy_helper import load_library, tag_array
 from pyscf import __config__
+
+from importlib.util import find_spec
+
+has_dpctl = find_spec("dpctl")
+
+if not has_dpctl:
+    import cupy as np 
+    from gpu4pyscf.lib.cupy_helper import load_library, tag_array
+    libnp_helper = load_library('libcupy_helper')
+else:
+    import dpnp as np
+    from gpu4pyscf.lib.dpnp_helper import load_library, tag_array
+    libnp_helper = load_library('libcupy_helper')
 
 __all__ = [
     'get_veff', 'RKS'
 ]
 
-libcupy_helper = load_library('libcupy_helper')
 
 LINEAR_DEP_THR = 1e-12
 
@@ -45,22 +55,22 @@ def prune_small_rho_grids_(ks, mol, dm, grids):
         return grids
     mol = grids.mol
 
-    n = cupy.dot(rho, grids.weights)
+    n = np.dot(rho, grids.weights)
     if abs(n-mol.nelectron) < gen_grid.NELEC_ERROR_TOL*n:
         rho *= grids.weights
-        idx = cupy.abs(rho) > threshold / grids.weights.size
+        idx = np.abs(rho) > threshold / grids.weights.size
 
-        logger.debug(grids, 'Drop grids %d', grids.weights.size - cupy.count_nonzero(idx))
-        grids.coords  = cupy.asarray(grids.coords [idx], order='C')
-        grids.weights = cupy.asarray(grids.weights[idx], order='C')
+        logger.debug(grids, 'Drop grids %d', grids.weights.size - np.count_nonzero(idx))
+        grids.coords  = np.asarray(grids.coords [idx], order='C')
+        grids.weights = np.asarray(grids.weights[idx], order='C')
         if grids.alignment:
             padding = gen_grid._padding_size(grids.size, grids.alignment)
             logger.debug(ks, 'prune_by_density_: %d padding grids', padding)
             if padding > 0:
-                pad = cupy.array(padding * [[1e4, 1e4, 1e4]])
-                grids.coords = cupy.vstack(
+                pad = np.array(padding * [[1e4, 1e4, 1e4]])
+                grids.coords = np.vstack(
                         [grids.coords, pad])
-                grids.weights = cupy.hstack([grids.weights, cupy.zeros(padding)])
+                grids.weights = np.hstack([grids.weights, np.zeros(padding)])
 
         # make_mask has to be executed on cpu for now.
         #grids.non0tab = grids.make_mask(mol, grids.coords)
@@ -76,8 +86,8 @@ def initialize_grids(ks, mol=None, dm=None):
         t0 = logger.init_timer(ks)
         ks.grids.build()
         #ks.grids.build(with_non0tab=True)
-        ks.grids.weights = cupy.asarray(ks.grids.weights)
-        ks.grids.coords = cupy.asarray(ks.grids.coords)
+        ks.grids.weights = np.asarray(ks.grids.weights)
+        ks.grids.coords = np.asarray(ks.grids.coords)
         ground_state = getattr(dm, 'ndim', 0) == 2
         if ks.small_rho_cutoff > 1e-20 and ground_state:
             # Filter grids the first time setup grids
@@ -89,8 +99,8 @@ def initialize_grids(ks, mol=None, dm=None):
                 t0 = logger.init_timer(ks)
                 #ks.nlcgrids.build(with_non0tab=True)
                 ks.nlcgrids.build()
-                ks.nlcgrids.weights = cupy.asarray(ks.nlcgrids.weights)
-                ks.nlcgrids.coords = cupy.asarray(ks.nlcgrids.coords)
+                ks.nlcgrids.weights = np.asarray(ks.nlcgrids.weights)
+                ks.nlcgrids.coords = np.asarray(ks.nlcgrids.coords)
                 if ks.small_rho_cutoff > 1e-20 and ground_state:
                     # Filter grids the first time setup grids
                     ks.nlcgrids = prune_small_rho_grids_(ks, ks.mol, dm, ks.nlcgrids)
@@ -158,7 +168,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         vk = None
         if (ks._eri is None and ks.direct_scf and
             getattr(vhf_last, 'vj', None) is not None):
-            ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
+            ddm = np.asarray(dm) - np.asarray(dm_last)
             vj = ks.get_j(mol, ddm, hermi)
             vj += vhf_last.vj
         else:
@@ -168,7 +178,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     else:
         if (ks._eri is None and ks.direct_scf and
             getattr(vhf_last, 'vk', None) is not None):
-            ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
+            ddm = np.asarray(dm) - np.asarray(dm_last)
             vj, vk = ks.get_jk(mol, ddm, hermi)
             vk *= hyb
             if abs(omega) > 1e-10:  # For range separated Coulomb operator
@@ -186,10 +196,10 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
                 vk += vklr
         vxc += vj - vk * .5
         if ground_state:
-            exc -= cupy.einsum('ij,ji', dm, vk).real * .5 * .5
+            exc -= np.einsum('ij,ji', dm, vk).real * .5 * .5
 
     if ground_state:
-        ecoul = cupy.einsum('ij,ji', dm, vj).real * .5
+        ecoul = np.einsum('ij,ji', dm, vj).real * .5
     else:
         ecoul = None
     t0 = logger.timer_debug1(ks, 'jk total', *t0)
@@ -215,14 +225,14 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     if dm is None: dm = ks.make_rdm1()
     if h1e is None: h1e = ks.get_hcore()
     if vhf is None: vhf = ks.get_veff(ks.mol, dm)
-    e1 = cupy.einsum('ij,ji->', h1e, dm).real
+    e1 = np.einsum('ij,ji->', h1e, dm).real
     ecoul = vhf.ecoul.real
     exc = vhf.exc.real
-    if isinstance(ecoul, cupy.ndarray):
+    if isinstance(ecoul, np.ndarray):
         ecoul = ecoul.get()[()]
-    if isinstance(exc, cupy.ndarray):
+    if isinstance(exc, np.ndarray):
         exc = exc.get()[()]
-    if isinstance(e1, cupy.ndarray):
+    if isinstance(e1, np.ndarray):
         e1 = e1.get()[()]
     e2 = ecoul + exc
     ks.scf_summary['e1'] = e1

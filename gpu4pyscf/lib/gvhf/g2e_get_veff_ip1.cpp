@@ -17,10 +17,11 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#define atomicAdd((addr), (val)) (sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space>(addr).fetch_add(val))
+#include "gvhf.h"
+//#define atomicAdd((addr), (val)) (sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space>(addr).fetch_add(val))
 
 template<int NROOTS, int GOUTSIZE>
-__global__
+// __global__
 static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
                                           JKMatrix jk,
                                           BasisProdOffsets offsets, sycl::nd_item<2>& item) {
@@ -34,7 +35,7 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
     return;
   }
 
-  int * ao_loc = c_bpcache.ao_loc;
+  int * ao_loc = c_bpcache.get().ao_loc;
   int bas_ij = offsets.bas_ij + task_ij;
   int bas_kl = offsets.bas_kl + task_kl;
 
@@ -48,8 +49,8 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
   int nprim_kl = envs.nprim_kl;
   int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
   int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-  int * bas_pair2bra = c_bpcache.bas_pair2bra;
-  int * bas_pair2ket = c_bpcache.bas_pair2ket;
+  int * bas_pair2bra = c_bpcache.get().bas_pair2bra;
+  int * bas_pair2ket = c_bpcache.get().bas_pair2ket;
 
   int ish = bas_pair2bra[bas_ij];
   int jsh = bas_pair2ket[bas_ij];
@@ -74,8 +75,8 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
   // memset(local_cache, 0, sizeof(double) * (NROOTS * GPU_AO_LMAX + GOUTSIZE));
   double * __restrict__ g = local_cache + NROOTS * GPU_AO_LMAX;
 
-  double * __restrict__ i_exponent = c_bpcache.a1;
-  double * __restrict__ j_exponent = c_bpcache.a2;
+  double * __restrict__ i_exponent = c_bpcache.get().a1;
+  double * __restrict__ j_exponent = c_bpcache.get().a2;
 
   int ij, kl;
   int as_ish, as_jsh, as_ksh, as_lsh;
@@ -292,7 +293,7 @@ static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,
 }
 
 
-__global__
+// __global__
 static void
 GINTint2e_get_veff_ip1_kernel_0000(GINTEnvVars envs,
                                    JKMatrix jk,
@@ -312,9 +313,9 @@ GINTint2e_get_veff_ip1_kernel_0000(GINTEnvVars envs,
   int nprim_kl = envs.nprim_kl;
   int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
   int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
-  int * bas_pair2bra = c_bpcache.bas_pair2bra;
-  int * bas_pair2ket = c_bpcache.bas_pair2ket;
-  int * ao_loc = c_bpcache.ao_loc;
+  int * bas_pair2bra = c_bpcache.get().bas_pair2bra;
+  int * bas_pair2ket = c_bpcache.get().bas_pair2ket;
+  int * ao_loc = c_bpcache.get().ao_loc;
   int ish = bas_pair2bra[bas_ij];
   int jsh = bas_pair2ket[bas_ij];
   int ksh = bas_pair2bra[bas_kl];
@@ -324,8 +325,8 @@ GINTint2e_get_veff_ip1_kernel_0000(GINTEnvVars envs,
   int k = ao_loc[ksh];
   int l = ao_loc[lsh];
 
-  int nbas = c_bpcache.nbas;
-  double * __restrict__ bas_x = c_bpcache.bas_coords;
+  int nbas = c_bpcache.get().nbas;
+  double * __restrict__ bas_x = c_bpcache.get().bas_coords;
   double * __restrict__ bas_y = bas_x + nbas;
   double * __restrict__ bas_z = bas_y + nbas;
 
@@ -337,13 +338,13 @@ GINTint2e_get_veff_ip1_kernel_0000(GINTEnvVars envs,
   double yj = bas_y[jsh];
   double zj = bas_z[jsh];
 
-  double * __restrict__ a12 = c_bpcache.a12;
-  double * __restrict__ e12 = c_bpcache.e12;
-  double * __restrict__ x12 = c_bpcache.x12;
-  double * __restrict__ y12 = c_bpcache.y12;
-  double * __restrict__ z12 = c_bpcache.z12;
-  double * __restrict__ i_exponent = c_bpcache.a1;
-  double * __restrict__ j_exponent = c_bpcache.a2;
+  double * __restrict__ a12 = c_bpcache.get().a12;
+  double * __restrict__ e12 = c_bpcache.get().e12;
+  double * __restrict__ x12 = c_bpcache.get().x12;
+  double * __restrict__ y12 = c_bpcache.get().y12;
+  double * __restrict__ z12 = c_bpcache.get().z12;
+  double * __restrict__ i_exponent = c_bpcache.get().a1;
+  double * __restrict__ j_exponent = c_bpcache.get().a2;
 
   int ij, kl;
   double gout0 = 0, gout0_prime = 0;

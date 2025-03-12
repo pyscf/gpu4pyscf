@@ -13,11 +13,20 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from importlib.util import find_spec
+
 import os
 import numpy
 from gpu4pyscf.lib import diis
-from gpu4pyscf.lib import cupy_helper
-from gpu4pyscf.lib import cutensor
+
+
+has_dpctl = find_spec("dpctl")
+
+if not has_dpctl:
+    from gpu4pyscf.lib import cupy_helper
+    from gpu4pyscf.lib import cutensor
+else:
+    from gpu4pyscf.lib import dpnp_helper
 
 try:
     from gpu4pyscf.lib import dftd3

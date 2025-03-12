@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <math.h>
 #include <sycl/sycl.hpp>
 #include "gint/gint.h"
 #include "gint/sycl_alloc.hpp"
@@ -70,7 +71,7 @@ static void vv10_kernel(double *Fvec, double *Uvec, double *Wvec,
 
     const int tx = item.get_local_id(0);
 
-    for (int j = 0; j < vvngrids; j+=blockDim.x) {
+    for (int j = 0; j < vvngrids; j+=item.get_group_range(0)) {
         int idx = j + tx;
         if (idx < vvngrids){
             //xj_smem[tx] = xj[idx];
@@ -85,27 +86,27 @@ static void vv10_kernel(double *Fvec, double *Uvec, double *Wvec,
         }
         item.barrier(sycl::access::fence_space::local_space);
 
-        for (int l = 0, M = min(NG_PER_BLOCK, vvngrids - j); l < M; ++l){
+        for (int l = 0, M = std::min(NG_PER_BLOCK, vvngrids - j); l < M; ++l){
             // about 24 operations for each pair
             //double DX = xj_smem[l] - xi;//xj_tmp.x - xi;
             //double DY = yj_smem[l] - yi;//xj_tmp.y - yi;
             //double DZ = zj_smem[l] - zi;//xj_tmp.z - zi;
 
-            double3 xj_tmp = xj_t[l];
-            double DX = xj_tmp.x - xi;
-            double DY = xj_tmp.y - yi;
-            double DZ = xj_tmp.z - zi;
+            sycl::double3 xj_tmp = xj_t[l];
+            double DX = xj_tmp[0] - xi;
+            double DY = xj_tmp[1] - yi;
+            double DZ = xj_tmp[2] - zi;
             double R2 = DX*DX + DY*DY + DZ*DZ;
 
-            double3 kp_tmp = kp_t[l]; // (Kpj, W0pj, RpWj)
-            double gp = R2*kp_tmp.y + kp_tmp.x;
+            sycl::double3 kp_tmp = kp_t[l]; // (Kpj, W0pj, RpWj)
+            double gp = R2*kp_tmp[1] + kp_tmp[0];
             //double gp = R2 * W0p_smem[l] + Kp_smem[l];//R2*kp_tmp.y + kp_tmp.x;
             double g  = R2*W0i + Ki;
             double gt = g + gp;
             double ggt = g*gt;
             double g_gt = g + gt;
             //double T = RpW_smem[l] / (gp*ggt*ggt);//kp_tmp.z / (gp*ggt*ggt);
-            double T = kp_tmp.z / (gp*ggt*ggt);
+            double T = kp_tmp[2] / (gp*ggt*ggt);
 
             F += T * ggt;
             U += T * g_gt;
@@ -163,29 +164,29 @@ static void vv10_grad_kernel(double *Fvec, const double *vvcoords, const double 
     tile_t& kp_t = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
 
     const int tx = item.get_local_id(0);
-    for (int j = 0; j < vvngrids; j+=blockDim.x) {
+    for (int j = 0; j < vvngrids; j+=item.get_group_range(0)) {
         int idx = j + item.get_local_id(0);
         if (idx < vvngrids){
             xj_t[tx] = {xj[idx], yj[idx], zj[idx]};
             kp_t[tx] = {Kp[idx], W0p[idx], RpW[idx]};
         }
         item.barrier(sycl::access::fence_space::local_space);
-        for (int l = 0, M = min(NG_PER_BLOCK, vvngrids - j); l < M; ++l){
-            double3 xj_tmp = xj_t[l];
+        for (int l = 0, M = std::min(NG_PER_BLOCK, vvngrids - j); l < M; ++l){
+            sycl::double3 xj_tmp = xj_t[l];
             // about 23 operations for each pair
-            double DX = xj_tmp.x - xi;
-            double DY = xj_tmp.y - yi;
-            double DZ = xj_tmp.z - zi;
+            double DX = xj_tmp[0] - xi;
+            double DY = xj_tmp[1] - yi;
+            double DZ = xj_tmp[2] - zi;
             double R2 = DX*DX + DY*DY + DZ*DZ;
 
-            double3 kp_tmp = kp_t[l];
-            double gp = R2*kp_tmp.y + kp_tmp.x;
+            sycl::double3 kp_tmp = kp_t[l];
+            double gp = R2*kp_tmp[1] + kp_tmp[0];
             double g  = R2*W0i + Ki;
             double gt = g + gp;
             double ggp = g * gp;
             double ggt_gp = gt * ggp;
-            double T = kp_tmp.z / (ggt_gp * ggt_gp);
-            double Q = T * ((W0i*gp + kp_tmp.y*g)*gt + (W0i+kp_tmp.y)*ggp);
+            double T = kp_tmp[2] / (ggt_gp * ggt_gp);
+            double Q = T * ((W0i*gp + kp_tmp[1]*g)*gt + (W0i+kp_tmp[1])*ggp);
 
             FX += Q * DX;
             FY += Q * DY;

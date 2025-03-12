@@ -24,12 +24,30 @@ from pyscf import gto, lib, dft
 from pyscf.dft import numint
 from pyscf.gto.eval_gto import NBINS, CUTOFF, make_screen_index
 from gpu4pyscf.scf.hf import basis_seg_contraction
-from gpu4pyscf.lib.cupy_helper import (
-    contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, take_last2d, transpose_sum,
-    grouped_dot, grouped_gemm)
 from gpu4pyscf.dft import xc_deriv, xc_alias, libxc
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
+
+from importlib.util import find_spec
+
+has_dpctl = find_spec("dpctl")
+
+if not has_dpctl:
+    import cupy as np 
+    libnp_helper = load_library('libcupy_helper')
+    from gpu4pyscf.lib.cupy_helper import (
+        contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, take_last2d, transpose_sum,
+        grouped_gemm, grouped_dot)
+else:
+    import dpnp as np
+    libnp_helper = load_library('libdnpn_helper')
+    from gpu4pyscf.lib.cupy_helper import (
+        contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, take_last2d, transpose_sum,
+        grouped_gemm)
+    def grouped_dot (a,b): #vama
+        dpnp.dot(x, x_t.conj())
+    #vama grouped_dot, grouped_gemm)
+
 
 LMAX_ON_GPU = 6
 BAS_ALIGNED = 1

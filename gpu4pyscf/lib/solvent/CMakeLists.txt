@@ -27,7 +27,7 @@ if (USE_SYCL)
     mnsol_interface.f90
     mnsol_mem.F
     mnsol.F
-    pcm.cu
+    pcm.cpp
   )
 else()
   add_library(solvent SHARED

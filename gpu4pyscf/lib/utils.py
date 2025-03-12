@@ -17,10 +17,24 @@
 
 import sys
 import functools
-import cupy
 import numpy
 from pyscf import lib
 from pyscf.lib import parameters as param
+
+
+from importlib.util import find_spec
+
+
+has_dpctl = find_spec("dpctl")
+
+if not has_dpctl:
+    import cupy as np
+    from gpu4pyscf.lib.cupy_helper import tag_array, contract, take_last2d
+    from gpu4pyscf.lib.cupy_helper import load_library
+else:
+    import dpnp as np
+    from gpu4pyscf.lib.dpnp_helper import tag_array, contract, take_last2d
+    from gpu4pyscf.lib.dpnp_helper import load_library
 
 def patch_cpu_kernel(cpu_kernel):
     '''Generate a decorator to patch cpu function to gpu function'''
@@ -79,7 +93,7 @@ def to_cpu(method, out=None):
     keys = set(method.__dict__).intersection(out_keys)
     for key in keys:
         val = getattr(method, key)
-        if isinstance(val, cupy.ndarray):
+        if isinstance(val, np.ndarray):
             val = val.get()
         elif hasattr(val, 'to_cpu'):
             val = val.to_cpu()

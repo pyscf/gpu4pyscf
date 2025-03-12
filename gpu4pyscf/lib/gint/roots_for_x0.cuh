@@ -1,5 +1,11 @@
-__device__
-static double POLY_SMALLX_R0[] = {
+
+
+#ifdef USE_SYCL
+static const double
+#else
+__device__ static double
+#endif
+POLY_SMALLX_R0[] = {
 // nroots = 1
 5.0000000000000000e-01,
 // nroots = 2
@@ -67,8 +73,12 @@ static double POLY_SMALLX_R0[] = {
 7.2016228580573340e+01,
 };
 
-__device__
-static double POLY_SMALLX_R1[] = {
+#ifdef USE_SYCL
+static const double
+#else
+__device__ static double
+#endif
+POLY_SMALLX_R1[] = {
 // nroots = 1
 -2.0000000000000001e-01,
 // nroots = 2
@@ -136,8 +146,12 @@ static double POLY_SMALLX_R1[] = {
 -3.5129867600279674e+00,
 };
 
-__device__
-static double POLY_SMALLX_W0[] = {
+#ifdef USE_SYCL
+static const double
+#else
+__device__ static double
+#endif
+POLY_SMALLX_W0[] = {
 // nroots = 1
 1.0000000000000000e+00,
 // nroots = 2
@@ -205,8 +219,12 @@ static double POLY_SMALLX_W0[] = {
 1.7614007139152118e-02,
 };
 
-__device__
-static double POLY_SMALLX_W1[] = {
+#ifdef USE_SYCL
+static const double
+#else
+__device__ static double
+#endif
+POLY_SMALLX_W1[] = {
 // nroots = 1
 -3.3333333333333331e-01,
 // nroots = 2
@@ -274,8 +292,12 @@ static double POLY_SMALLX_W1[] = {
 -1.6531204416842745e-02,
 };
 
-__device__
-static double POLY_LARGEX_RT[] = {
+#ifdef USE_SYCL
+static const double
+#else
+__device__ static double
+#endif 
+POLY_LARGEX_RT[] = {
 // nroots = 1
 5.0000000000000000e-01,
 // nroots = 2
@@ -343,8 +365,12 @@ static double POLY_LARGEX_RT[] = {
 2.9024950340236227e+01,
 };
 
-__device__
-static double POLY_LARGEX_WW[] = {
+#ifdef USE_SYCL
+static const double
+#else
+__device__ static double
+#endif
+POLY_LARGEX_WW[] = {
 // nroots = 1
 1.0000000000000000e+00,
 // nroots = 2

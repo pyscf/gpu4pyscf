@@ -37,11 +37,13 @@ DOWNLOAD_URL = None
 CLASSIFIERS = None
 PLATFORMS = None
 
-# def get_cuda_version():
-#     nvcc_out = subprocess.check_output(["nvcc", "--version"]).decode('utf-8')
-#     m = re.search(r"V[0-9]+.[0-9]+", nvcc_out)
-#     str_version = m.group(0)[1:]
-#     return str_version[:2]+'x'
+
+def get_sycl_version():
+    nvcc_out = subprocess.check_output(["icpx", "--version"]).decode('utf-8')
+    m = re.search(r"[0-9]+\.[0-9]+\.[0-9]+", nvcc_out)
+    str_version = m.group(0)[:]
+    return str_version[:]
+
 
 def get_version():
     topdir = os.path.abspath(os.path.join(__file__, '..'))
@@ -71,6 +73,8 @@ class CMakeBuildPy(build_py):
         src_dir = os.path.abspath(os.path.join(__file__, '..', 'gpu4pyscf', 'lib'))
         dest_dir = os.path.join(self.build_temp, 'gpu4pyscf')
         cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}', '-DBUILD_LIBXC=OFF']
+        # cmd.append('-DBUILD_LIBXC=OFF')
+        # cmd.append('-DUSE_SYCL=ON')
         configure_args = os.getenv('CMAKE_CONFIGURE_ARGS')
         if configure_args:
             cmd.extend(configure_args.split(' '))
@@ -97,14 +101,21 @@ def initialize_with_default_plat_name(self):
     self.plat_name = get_platform()
 bdist_wheel.initialize_options = initialize_with_default_plat_name
 
+print(sys.argv)
+
+CUDA_VERSION= '11x'
+
+SYCL_VERSION='2025'
+
 if 'sdist' in sys.argv:
     # The sdist release
     package_name = NAME
     CUDA_VERSION = '11x'
 else:
-    CUDA_VERSION = get_cuda_version()
-    package_name = NAME + '-cuda' + CUDA_VERSION
+    SYCL_VERSION = get_sycl_version()
+    package_name = NAME + '-sycl' + SYCL_VERSION
 
+print(package_name)
 setup(
     name=package_name,
     version=VERSION,
@@ -125,8 +136,10 @@ setup(
     cmdclass={'build_py': CMakeBuildPy},
     install_requires=[
         'pyscf~=2.6.0',
-        f'cupy-cuda{CUDA_VERSION}',
+        # f'cupy-cuda{CUDA_VERSION}',
+        f'dpnp',
         'geometric',
-        f'gpu4pyscf-libxc-cuda{CUDA_VERSION}',
+        # f'gpu4pyscf-libxc-cuda{CUDA_VERSION}',
+#        f'gpu4pyscf-libxc-sycl',
     ]
 )

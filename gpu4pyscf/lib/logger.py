@@ -15,7 +15,13 @@
 
 import sys
 import time
-import cupy
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as gpunp
+else:
+    import dpctl
+    import dpnp as gpunp
 from pyscf import lib
 
 from pyscf.lib import parameters as param
@@ -39,8 +45,13 @@ else:
 
 def init_timer(rec):
     if rec.verbose >= TIMER_LEVEL:
-        e0 = cupy.cuda.Event()
-        e0.record()
+        if not has_dpctl:
+            e0 = cupy.cuda.Event()
+            e0.record()
+        else:
+            def timer0():
+                return 0
+            e0 = timer0()
         return (process_clock(), perf_counter(), e0)
     elif rec.verbose >= DEBUG:
         return (process_clock(), perf_counter())

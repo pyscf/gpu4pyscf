@@ -76,7 +76,7 @@ void _transpose_sum(double *a, int n, sycl::nd_item<3>& item)
 
 extern "C" {
 
-int CPdsymm_triu(double *a, int n, int counts)
+int CPdsymm_triu(sycl::queue stream, double *a, int n, int counts)
 {
     int ntile = (n + THREADS - 1) / THREADS;
     sycl::range<3> threads(1, THREADS, THREADS);
@@ -85,7 +85,7 @@ int CPdsymm_triu(double *a, int n, int counts)
     return 0;
 }
 
-int transpose_sum(sycl::queue& stream, double *a, int n, int counts){
+int transpose_sum(sycl::queue stream, double *a, int n, int counts){
     int ntile = (n + THREADS - 1) / THREADS;
     sycl::range<3> threads(1, THREADS, THREADS);
     sycl::range<3> blocks(counts, ntile, ntile);

@@ -24,7 +24,7 @@
 #include "config.h"
 #include "sycl_alloc.hpp"
 #include "g2e.h"
-#include "cint2e.hpp"
+// #include "cint2e.hpp"
 
 #include "rys_roots.cpp"
 #include "g2e.cpp"
@@ -40,14 +40,14 @@ static int GINTfill_int3c2e_ip1ip2_tasks(ERITensor *eri, BasisProdOffsets *offse
     sycl::range<2> threads(THREADSY, THREADSX);
     sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
     switch (envs->nrys_roots) {
-        case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<2, GSIZE2_INT3C> (*envs, *eri, *offset); }); break;
-        case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<3, GSIZE3_INT3C> (*envs, *eri, *offset); }); break;
-        case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<4, GSIZE4_INT3C> (*envs, *eri, *offset); }); break;
-        case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<5, GSIZE5_INT3C> (*envs, *eri, *offset); }); break;
-        case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<6, GSIZE6_INT3C> (*envs, *eri, *offset); }); break;
-        case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<7, GSIZE7_INT3C> (*envs, *eri, *offset); }); break;
-        case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<8, GSIZE8_INT3C> (*envs, *eri, *offset); }); break;
-        case 9: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<9, GSIZE9_INT3C> (*envs, *eri, *offset); }); break;
+        case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<2, GSIZE2_INT3C> (*envs, *eri, *offsets, item);}); break;
+        case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<3, GSIZE3_INT3C> (*envs, *eri, *offsets, item);}); break;
+        case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<4, GSIZE4_INT3C> (*envs, *eri, *offsets, item);}); break;
+        case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<5, GSIZE5_INT3C> (*envs, *eri, *offsets, item);}); break;
+        case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<6, GSIZE6_INT3C> (*envs, *eri, *offsets, item);}); break;
+        case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<7, GSIZE7_INT3C> (*envs, *eri, *offsets, item);}); break;
+        case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<8, GSIZE8_INT3C> (*envs, *eri, *offsets, item);}); break;
+        case 9: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_ip1ip2_kernel<9, GSIZE9_INT3C> (*envs, *eri, *offsets, item);}); break;
         default: fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
     }
