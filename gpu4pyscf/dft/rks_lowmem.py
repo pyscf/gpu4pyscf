@@ -29,6 +29,9 @@ __all__ = [
 ]
 
 class RKS(rks.RKS):
+    '''The low-memory RKS class for large systems. Not fully compatible with the
+    default RKS class in rks.py.
+    '''
 
     DIIS = hf_lowmem.CDIIS
 
