@@ -25,7 +25,7 @@ import scipy.linalg
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
-from pyscf import lib
+from pyscf import lib, gto
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import (load_library, condense, transpose_sum,
                                        reduce_to_device)
@@ -559,65 +559,17 @@ class _VHFOpt:
         if spherical_matrix_ndim == 2:
             spherical_matrix = spherical_matrix[None]
         counts = spherical_matrix.shape[0]
-        n_spherical = spherical_matrix.shape[1]
-        assert n_spherical == self.mol.nao
+        n_spherical = self.mol.nao
+        assert spherical_matrix.shape[1] == n_spherical
+        assert spherical_matrix.shape[2] == n_spherical
         n_cartesian = self.sorted_mol.nao
 
-        l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
-        if self.mol.cart:
-            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
-        else:
-            cart2sph_per_l = [cart2sph_by_l(l) for l in range(l_max + 1)]
-
-        spherical_matrix = self.sort_orbitals(spherical_matrix, axis = [1,2])
+        coeff = self.coeff
         out = cp.zeros((counts, n_cartesian, n_cartesian))
-        tmp = cp.zeros((n_spherical, n_cartesian))
         for i_dm in range(counts):
-            # tmp = M @ C^T
-            i_spherical_offset = 0
-            i_cartesian_offset = 0
-            for i_l_ctr, (l, _) in enumerate(self.uniq_l_ctr):
-                cart2sph = cart2sph_per_l[l]
-                l_ctr_count = self.l_ctr_offsets[i_l_ctr + 1] - self.l_ctr_offsets[i_l_ctr]
-                l_ctr_pad_count = self.l_ctr_pad_counts[i_l_ctr]
+            out[i_dm] = coeff @ spherical_matrix[i_dm] @ coeff.T
 
-                n_bas_of_l = l_ctr_count - l_ctr_pad_count
-                n_cartesian_of_l = n_bas_of_l * cart2sph.shape[0]
-                n_spherical_of_l = n_bas_of_l * cart2sph.shape[1]
-                if self.mol.cart or l <= 1:
-                    tmp[:, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l] = \
-                        spherical_matrix[i_dm, :, i_spherical_offset : i_spherical_offset + n_spherical_of_l]
-                else:
-                    tmp[:, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l] = \
-                        (spherical_matrix[i_dm, :, i_spherical_offset : i_spherical_offset + n_spherical_of_l]
-                            .reshape(n_spherical * n_bas_of_l, cart2sph.shape[1], order = "C") @ cart2sph.T)\
-                        .reshape(n_spherical, n_cartesian_of_l, order = "C")
-                i_spherical_offset += n_spherical_of_l
-                i_cartesian_offset += n_cartesian_of_l + l_ctr_pad_count * cart2sph.shape[0]
-            # out = C @ tmp
-            i_spherical_offset = 0
-            i_cartesian_offset = 0
-            for i_l_ctr, (l, _) in enumerate(self.uniq_l_ctr):
-                cart2sph = cart2sph_per_l[l]
-                l_ctr_count = self.l_ctr_offsets[i_l_ctr + 1] - self.l_ctr_offsets[i_l_ctr]
-                l_ctr_pad_count = self.l_ctr_pad_counts[i_l_ctr]
-
-                n_bas_of_l = l_ctr_count - l_ctr_pad_count
-                n_cartesian_of_l = n_bas_of_l * cart2sph.shape[0]
-                n_spherical_of_l = n_bas_of_l * cart2sph.shape[1]
-                if self.mol.cart or l <= 1:
-                    out[i_dm, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :] = \
-                        tmp[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]
-                else:
-                    out[i_dm, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :] = \
-                        (cart2sph @ tmp[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]
-                            .reshape(cart2sph.shape[1], n_bas_of_l * n_cartesian, order = "F"))\
-                        .reshape(n_cartesian_of_l, n_cartesian, order = "F")
-
-                i_spherical_offset += n_spherical_of_l
-                i_cartesian_offset += n_cartesian_of_l + l_ctr_pad_count * cart2sph.shape[0]
-
-        tmp = None
+        coeff = None
         if spherical_matrix_ndim == 2:
             out = out[0]
         return out
@@ -628,64 +580,17 @@ class _VHFOpt:
         if cartesian_matrix_ndim == 2:
             cartesian_matrix = cartesian_matrix[None]
         counts = cartesian_matrix.shape[0]
-        n_cartesian = cartesian_matrix.shape[1]
-        assert n_cartesian == self.sorted_mol.nao
+        n_cartesian = self.sorted_mol.nao
+        assert cartesian_matrix.shape[1] == n_cartesian
+        assert cartesian_matrix.shape[2] == n_cartesian
         n_spherical = self.mol.nao
 
-        l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
-        if self.mol.cart:
-            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
-        else:
-            cart2sph_per_l = [cart2sph_by_l(l) for l in range(l_max + 1)]
-
+        coeff = self.coeff
         out = cp.zeros((counts, n_spherical, n_spherical))
-        tmp = cp.zeros((n_cartesian, n_spherical))
         for i_dm in range(counts):
-            # tmp = M @ C
-            i_spherical_offset = 0
-            i_cartesian_offset = 0
-            for i_l_ctr, (l, _) in enumerate(self.uniq_l_ctr):
-                cart2sph = cart2sph_per_l[l]
-                l_ctr_count = self.l_ctr_offsets[i_l_ctr + 1] - self.l_ctr_offsets[i_l_ctr]
-                l_ctr_pad_count = self.l_ctr_pad_counts[i_l_ctr]
+            out[i_dm] = coeff.T @ cartesian_matrix[i_dm] @ coeff
 
-                n_bas_of_l = l_ctr_count - l_ctr_pad_count
-                n_cartesian_of_l = n_bas_of_l * cart2sph.shape[0]
-                n_spherical_of_l = n_bas_of_l * cart2sph.shape[1]
-                if self.mol.cart or l <= 1:
-                    tmp[:, i_spherical_offset : i_spherical_offset + n_spherical_of_l] = \
-                        cartesian_matrix[i_dm, :, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l]
-                else:
-                    tmp[:, i_spherical_offset : i_spherical_offset + n_spherical_of_l] = \
-                        (cartesian_matrix[i_dm, :, i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l]
-                            .reshape(n_cartesian * n_bas_of_l, cart2sph.shape[0], order = "C") @ cart2sph)\
-                        .reshape(n_cartesian, n_spherical_of_l, order = "C")
-                i_spherical_offset += n_spherical_of_l
-                i_cartesian_offset += n_cartesian_of_l + l_ctr_pad_count * cart2sph.shape[0]
-            # out = C.T @ tmp
-            i_spherical_offset = 0
-            i_cartesian_offset = 0
-            for i_l_ctr, (l, _) in enumerate(self.uniq_l_ctr):
-                cart2sph = cart2sph_per_l[l]
-                l_ctr_count = self.l_ctr_offsets[i_l_ctr + 1] - self.l_ctr_offsets[i_l_ctr]
-                l_ctr_pad_count = self.l_ctr_pad_counts[i_l_ctr]
-
-                n_bas_of_l = l_ctr_count - l_ctr_pad_count
-                n_cartesian_of_l = n_bas_of_l * cart2sph.shape[0]
-                n_spherical_of_l = n_bas_of_l * cart2sph.shape[1]
-                if self.mol.cart or l <= 1:
-                    out[i_dm, i_spherical_offset : i_spherical_offset + n_spherical_of_l, :] = \
-                        tmp[i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :]
-                else:
-                    out[i_dm, i_spherical_offset : i_spherical_offset + n_spherical_of_l, :] = \
-                        (cart2sph.T @ tmp[i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :]
-                            .reshape(cart2sph.shape[0], n_bas_of_l * n_spherical, order = "F"))\
-                        .reshape(n_spherical_of_l, n_spherical, order = "F")
-                i_spherical_offset += n_spherical_of_l
-                i_cartesian_offset += n_cartesian_of_l + l_ctr_pad_count * cart2sph.shape[0]
-
-        out = self.unsort_orbitals(out, axis = [1,2])
-        tmp = None
+        coeff = None
         if cartesian_matrix_ndim == 2:
             out = out[0]
         return out
@@ -693,42 +598,8 @@ class _VHFOpt:
     def apply_coeff_C_mat(self, right_matrix):
         right_matrix = cp.asarray(right_matrix)
         assert right_matrix.ndim == 2
-        n_spherical = right_matrix.shape[0]
-        assert n_spherical == self.mol.nao
-        n_cartesian = self.sorted_mol.nao
-        n_second = right_matrix.shape[1]
-
-        l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
-        if self.mol.cart:
-            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
-        else:
-            cart2sph_per_l = [cart2sph_by_l(l) for l in range(l_max + 1)]
-
-        right_matrix = self.sort_orbitals(right_matrix, axis = [0])
-        out = cp.zeros((n_cartesian, n_second))
-        i_spherical_offset = 0
-        i_cartesian_offset = 0
-        for i_l_ctr, (l, _) in enumerate(self.uniq_l_ctr):
-            cart2sph = cart2sph_per_l[l]
-            l_ctr_count = self.l_ctr_offsets[i_l_ctr + 1] - self.l_ctr_offsets[i_l_ctr]
-            l_ctr_pad_count = self.l_ctr_pad_counts[i_l_ctr]
-
-            n_bas_of_l = l_ctr_count - l_ctr_pad_count
-            n_cartesian_of_l = n_bas_of_l * cart2sph.shape[0]
-            n_spherical_of_l = n_bas_of_l * cart2sph.shape[1]
-            if self.mol.cart or l <= 1:
-                out[i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :] = \
-                    right_matrix[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]
-            else:
-                out[i_cartesian_offset : i_cartesian_offset + n_cartesian_of_l, :] = \
-                    (cart2sph @ right_matrix[i_spherical_offset : i_spherical_offset + n_spherical_of_l, :]
-                        .reshape(cart2sph.shape[1], n_bas_of_l * n_second, order = "F"))\
-                    .reshape(n_cartesian_of_l, n_second, order = "F")
-
-            i_spherical_offset += n_spherical_of_l
-            i_cartesian_offset += n_cartesian_of_l + l_ctr_pad_count * cart2sph.shape[0]
-
-        return out
+        assert right_matrix.shape[0] == self.mol.nao
+        return self.coeff @ right_matrix
 
     @property
     def q_cond(self):
@@ -777,15 +648,14 @@ class _VHFOpt:
 
     @property
     def coeff(self):
-        # warnings.warn('vhfopt.coeff is deprecated, and this property is left only for debug purpose.',
-        #     DeprecationWarning)
-        coeff = cp.zeros((self.sorted_mol.nao, self.mol.nao))
+        print("Here")
+        coeff = np.zeros((self.sorted_mol.nao, self.mol.nao))
 
         l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
         if self.mol.cart:
-            cart2sph_per_l = [cp.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
+            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
         else:
-            cart2sph_per_l = [cart2sph_by_l(l) for l in range(l_max + 1)]
+            cart2sph_per_l = [gto.mole.cart2sph(l, normalized = "sp") for l in range(l_max + 1)]
         i_spherical_offset = 0
         i_cartesian_offset = 0
         for i, (l, _) in enumerate(self.uniq_l_ctr):
@@ -801,6 +671,7 @@ class _VHFOpt:
                 i_cartesian_offset += cart2sph.shape[0]
         assert len(self.ao_idx) == self.mol.nao
         coeff = self.unsort_orbitals(coeff, axis = [1])
+        coeff = cp.asarray(coeff)
         return coeff
 
 class RysIntEnvVars(ctypes.Structure):
