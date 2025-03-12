@@ -127,15 +127,15 @@ def eigh(h, s):
             fn = libcusolver.cusolverDnZhegvd_bufferSize
         status = fn(
             _handle,
-            ctypes.c_int(CUSOLVER_EIG_TYPE_1),
-            ctypes.c_int(CUSOLVER_EIG_MODE_VECTOR),
+            CUSOLVER_EIG_TYPE_1,
+            CUSOLVER_EIG_MODE_VECTOR,
             cublas.CUBLAS_FILL_MODE_LOWER,
-            ctypes.c_int(n),
-            ctypes.cast(A.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(n),
-            ctypes.cast(B.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(n),
-            ctypes.cast(w.data.ptr, ctypes.c_void_p),
+            n,
+            A.data.ptr,
+            n,
+            B.data.ptr,
+            n,
+            w.data.ptr,
             ctypes.byref(lwork)
         )
         lwork = lwork.value
@@ -152,18 +152,18 @@ def eigh(h, s):
     devInfo = cupy.empty(1, dtype=np.int32)
     status = fn(
         _handle,
-        ctypes.c_int(CUSOLVER_EIG_TYPE_1),
-        ctypes.c_int(CUSOLVER_EIG_MODE_VECTOR),
+        CUSOLVER_EIG_TYPE_1,
+        CUSOLVER_EIG_MODE_VECTOR,
         cublas.CUBLAS_FILL_MODE_LOWER,
-        ctypes.c_int(n),
-        ctypes.cast(A.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n),
-        ctypes.cast(B.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n),
-        ctypes.cast(w.data.ptr, ctypes.c_void_p),
-        ctypes.cast(work.data.ptr, ctypes.c_void_p),
+        n,
+        A.data.ptr,
+        n,
+        B.data.ptr,
+        n,
+        w.data.ptr,
+        work.data.ptr,
         lwork,
-        ctypes.cast(devInfo.data.ptr, ctypes.c_void_p),
+        devInfo.data.ptr,
     )
 
     if status != 0:

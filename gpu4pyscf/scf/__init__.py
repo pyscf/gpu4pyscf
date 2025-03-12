@@ -13,6 +13,8 @@
 # limitations under the License.
 
 from . import hf
+from .hf import RHF
+from .hf_lowmem import RHF as LRHF
 from .uhf import UHF
 from .ghf import GHF
 from .rohf import ROHF
@@ -23,13 +25,3 @@ def HF(mol, *args):
         return RHF(mol, *args)
     else:
         return UHF(mol, *args)
-
-def RHF(mol, *args):
-    from gpu4pyscf.lib.cupy_helper import get_avail_mem
-    from . import hf_lowmem
-    mem = get_avail_mem()
-    nao = mol.nao
-    if nao**2*30*8 > mem:
-        return hf_lowmem.RHF(mol, *args)
-    else:
-        return hf.RHF(mol, *args)

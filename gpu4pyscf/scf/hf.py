@@ -23,7 +23,7 @@ from pyscf.scf import chkfile
 from gpu4pyscf import lib
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
-    eigh, tag_array, return_cupy_array, cond, asarray)
+    eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem)
 from gpu4pyscf.scf import diis, jk
 from gpu4pyscf.lib import logger
 
@@ -524,6 +524,11 @@ class RHF(SCF):
         if mol.nelectron != 1 and mol.spin != 0:
             logger.warn(self, 'Invalid number of electrons %d for RHF method.',
                         mol.nelectron)
+        mem = get_avail_mem()
+        nao = mol.nao
+        if nao**2*20*8 > mem:
+            logger.warn(self, 'GPU memory may be insufficient for SCF of this system. '
+                        'It is recommended to use the scf.LRHF or dft.LRKS class for this system.')
         return SCF.check_sanity(self)
 
     def energy_elec(self, dm=None, h1e=None, vhf=None):

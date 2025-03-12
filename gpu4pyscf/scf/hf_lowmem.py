@@ -154,9 +154,10 @@ class CDIIS(diis.CDIIS):
         return out
 
 class RHF(hf.RHF):
-    '''RHF class for large systems. Not fully compatible with the default RHF
-    class in hf.py . Some methods return the lower-triangular part of the square
-    matrix; some methods are simplified.'''
+    '''The low-memory RHF class for large systems. Not fully compatible with the
+    default RHF class in hf.py . Some methods return the lower-triangular part
+    of the square matrix; some methods are simplified.
+    '''
 
     DIIS = CDIIS
 
