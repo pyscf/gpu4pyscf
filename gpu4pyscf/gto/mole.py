@@ -23,9 +23,9 @@ from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
 
 PTR_BAS_COORD = 7
 
-@functools.lru_cache(20)
+# @functools.lru_cache(20) # This cache introduces a bug in mutli-gpu mode
 def cart2sph_by_l(l, normalized='sp'):
-    c2s = gto.mole.cart2sph(l, normalized='sp')
+    c2s = gto.mole.cart2sph(l, normalized=normalized)
     return cp.asarray(c2s, order='C')
 
 def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
