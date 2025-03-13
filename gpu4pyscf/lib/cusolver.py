@@ -105,7 +105,6 @@ def eigh(h, s):
     assert h.dtype == s.dtype
     assert h.dtype in (np.float64, np.complex128)
     n = h.shape[0]
-    w = cupy.zeros(n)
     if h.dtype == np.complex128 and h.flags.c_contiguous:
         # zhegvd requires the matrices in F-order. For hermitian matrices,
         # .T.copy() is equivalent to .conj()
@@ -115,6 +114,7 @@ def eigh(h, s):
         A = h.copy()
         B = s.copy()
     _handle = device.get_cusolver_handle()
+    w = cupy.zeros(n)
 
     # TODO: reuse workspace
     if (h.dtype, n) in _buffersize:
@@ -139,6 +139,7 @@ def eigh(h, s):
             ctypes.byref(lwork)
         )
         lwork = lwork.value
+        _buffersize[h.dtype, n] = lwork
 
         if status != 0:
             raise RuntimeError("failed in buffer size")
@@ -162,7 +163,7 @@ def eigh(h, s):
         w.data.ptr,
         work.data.ptr,
         lwork,
-        devInfo.data.ptr
+        devInfo.data.ptr,
     )
 
     if status != 0:

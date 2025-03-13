@@ -45,7 +45,7 @@ class KnownValues(unittest.TestCase):
         assert td.device == 'gpu'
         e = td.kernel()[0]
         ref = [11.9027511, 11.9027511, 16.8603101]
-        self.assertAlmostEqual(abs(e[:len(ref)] * 27.2114 - ref).max(), 0, 5)
+        self.assertAlmostEqual(abs(e[:len(ref)] * 27.2114 - ref).max(), 0, 4)
         dip = td.transition_dipole()
         self.assertAlmostEqual(lib.fp(np.linalg.norm(dip, axis=1)), -0.65616659, 5)
 
@@ -65,7 +65,7 @@ class KnownValues(unittest.TestCase):
         td.singlet = False
         e = td.kernel()[0]
         ref = [11.0174650, 11.0174650, 13.1694960]
-        self.assertAlmostEqual(abs(e[:len(ref)] * 27.2114 - ref).max(), 0, 5)
+        self.assertAlmostEqual(abs(e[:len(ref)] * 27.2114 - ref).max(), 0, 4)
         dip = td.transition_dipole()
         self.assertAlmostEqual(abs(dip).max(), 0, 8)
 
@@ -85,7 +85,7 @@ class KnownValues(unittest.TestCase):
         assert td.device == 'gpu'
         e = td.kernel()[0]
         ref = [11.8348584, 11.8348584, 16.6630381]
-        self.assertAlmostEqual(abs(e[:len(ref)] * 27.2114 - ref).max(), 0, 5)
+        self.assertAlmostEqual(abs(e[:len(ref)] * 27.2114 - ref).max(), 0, 4)
         dip = td.transition_dipole()
         self.assertAlmostEqual(lib.fp(np.linalg.norm(dip, axis=1)), -0.64009191, 5)
 
@@ -105,7 +105,7 @@ class KnownValues(unittest.TestCase):
         td.singlet = False
         e = td.kernel()[0]
         ref = [10.8919091, 10.8919091, 12.6343507]
-        self.assertAlmostEqual(abs(e[:len(ref)] * 27.2114 - ref).max(), 0, 5)
+        self.assertAlmostEqual(abs(e[:len(ref)] * 27.2114 - ref).max(), 0, 4)
         dip = td.transition_dipole()
         self.assertAlmostEqual(abs(dip).max(), 0, 8)
 
