@@ -25,7 +25,6 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, transpose_sum, reduce_to_device
 from gpu4pyscf.dft import rks, uks, numint
 from gpu4pyscf.scf import hf, uhf
-from gpu4pyscf.tdscf import rhf as tdrhf
 from gpu4pyscf.df import df, int3c2e
 from gpu4pyscf.__config__ import _streams, num_devices
 

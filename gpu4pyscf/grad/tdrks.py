@@ -224,14 +224,14 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         j_factor=1.0
     else:
         j_factor=0.0
-    dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, j_factor, k_factor) * 2
+    dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, j_factor, k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
-    dvhf_all += dvhf
-    dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, 0.0, k_factor) * 2
+        extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+    dvhf_all += dvhf * 2
+    dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, 0.0, k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
-    dvhf_all += dvhf
+        extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+    dvhf_all += dvhf * 2
 
     if with_k and omega != 0:
         j_factor = 0.0
@@ -252,14 +252,14 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         for k, ia in enumerate(atmlst):
             extra_force[k] -= mf_grad.extra_force(ia, locals())
         dvhf_all -= dvhf
-        dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, j_factor, k_factor, omega) * 2
+        dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, j_factor, k_factor, omega)
         for k, ia in enumerate(atmlst):
-            extra_force[k] += mf_grad.extra_force(ia, locals())
-        dvhf_all += dvhf
-        dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, j_factor, k_factor, omega) * 2
+            extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+        dvhf_all += dvhf * 2
+        dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, j_factor, k_factor, omega, hermi=2, dm_scf=False)
         for k, ia in enumerate(atmlst):
-            extra_force[k] += mf_grad.extra_force(ia, locals())
-        dvhf_all += dvhf
+            extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+        dvhf_all += dvhf * 2
     time1 = log.timer('2e AO integral derivatives', *time1)
     fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
 

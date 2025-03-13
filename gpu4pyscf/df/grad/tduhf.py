@@ -15,9 +15,9 @@
 
 from gpu4pyscf.df import int3c2e, df
 from gpu4pyscf.lib.cupy_helper import tag_array
-from gpu4pyscf.df.grad import rhf as rhf_grad_df
-from gpu4pyscf.tdscf import rhf as tdrhf
-from gpu4pyscf.grad import tdrhf as tdrhf_grad
+from gpu4pyscf.df.grad import uhf as uhf_grad_df
+from gpu4pyscf.tdscf import uhf as tduhf
+from gpu4pyscf.grad import tduhf as tduhf_grad
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
 from functools import reduce
@@ -25,10 +25,20 @@ import cupy as cp
 
 
 def get_veff(td_grad, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, dm_scf=False, verbose=None):
-    if omega != 0.0:
-        vj, vk, vjaux, vkaux = td_grad.get_jk(mol, dm, omega=omega, hermi=hermi, dm_scf=dm_scf)
+    
+    vj0, vk0, vjaux0, vkaux0 = td_grad.get_jk(mol, dm[0])
+    vj1, vk1, vjaux1, vkaux1 = td_grad.get_jk(mol, dm[1])
+    vj0_m1, vjaux0_m1 = td_grad.get_j(mol, dm[0], dm2=dm[1])
+    vj1_m0, vjaux1_m0 = td_grad.get_j(mol, dm[1], dm2=dm[0])
+    vhf = vj0 + vj1 + vj0_m1 + vj1_m0 - vk0 - vk1
+    if td_grad.auxbasis_response:
+        e1_aux = vjaux0 + vjaux1 + vjaux0_m1 + vjaux1_m0 - vkaux0 - vkaux1
+        logger.debug1(td_grad, 'sum(auxbasis response) %s', e1_aux.sum(axis=0))
     else:
-        vj, vk, vjaux, vkaux = td_grad.get_jk(mol, dm, hermi=hermi, dm_scf=dm_scf)
+        e1_aux = None
+    vhf = tag_array(vhf, aux=e1_aux)
+    return vhf
+
     vhf = vj * j_factor - vk * .5 * k_factor
     if td_grad.auxbasis_response:
         e1_aux = vjaux * j_factor - vkaux * .5 * k_factor
@@ -40,21 +50,21 @@ def get_veff(td_grad, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, 
     return vhf
 
 
-class Gradients(tdrhf_grad.Gradients):
+class Gradients(tduhf_grad.Gradients):
     from gpu4pyscf.lib.utils import to_gpu, device
 
     _keys = {'with_df', 'auxbasis_response'}
     def __init__(self, td):
         # Whether to include the response of DF auxiliary basis when computing
         # nuclear gradients of J/K matrices
-        tdrhf_grad.Gradients.__init__(self, td)
+        tduhf_grad.Gradients.__init__(self, td)
 
     auxbasis_response = True
-    get_jk = rhf_grad_df.get_jk
+    get_jk = uhf_grad_df.get_jk
 
     def check_sanity(self):
         assert isinstance(self.base._scf, df.df_jk._DFHF)
-        assert isinstance(self.base, tdrhf.TDHF) or isinstance(self.base, tdrhf.TDA)
+        assert isinstance(self.base, tduhf.TDHF) or isinstance(self.base, tduhf.TDA)
 
     get_veff = get_veff
 
