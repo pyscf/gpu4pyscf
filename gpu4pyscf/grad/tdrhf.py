@@ -188,7 +188,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())*2
     dvhf_all += dvhf*2
-    dvhf = td_grad.get_veff(mol, (dmxmy - dmxmy.T), 0.0, k_factor, hermi=2, dm_scf=False)
+    dvhf = td_grad.get_veff(mol, (dmxmy - dmxmy.T), 0.0, k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())*2
     dvhf_all += dvhf*2
@@ -299,7 +299,7 @@ class Gradients(rhf_grad.GradientsBase):
         mf_grad = self.base._scf.nuc_grad_method()
         return mf_grad.grad_nuc(mol, atmlst)
 
-    def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, dm_scf=False, verbose=None):
+    def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
         """
         Computes the first-order derivatives of the energy contributions from
         Veff per atom.

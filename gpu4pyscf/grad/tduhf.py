@@ -220,40 +220,31 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dvhf_all = 0
     dvhf = td_grad.get_veff(
         mol,
-        cp.stack(
-            (
-                (
-                    (dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
-                    (dmz1doob + dmz1doob.T) * 0.25 + oo0b,
-                )
-            )
-        ),
-    )
+        cp.stack((((dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
+                   (dmz1doob + dmz1doob.T) * 0.25 + oo0b))))
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
     dvhf = td_grad.get_veff(
         mol,
-        cp.stack((((dmz1dooa + dmz1dooa.T) * 0.25, (dmz1doob + dmz1doob.T) * 0.25))),
-    )
+        cp.stack((((dmz1dooa + dmz1dooa.T) * 0.25, (dmz1doob + dmz1doob.T) * 0.25))))
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
-    dvhf = td_grad.get_veff(mol, cp.stack((((dmxpya + dmxpya.T) * 0.5, (dmxpyb + dmxpyb.T) * 0.5)))) * 2
+    dvhf = td_grad.get_veff(mol, cp.stack((((dmxpya + dmxpya.T) * 0.5, (dmxpyb + dmxpyb.T) * 0.5))))
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
-    dvhf_all += dvhf
-    dvhf = td_grad.get_veff(mol, cp.stack((((dmxmya - dmxmya.T) * 0.5, (dmxmyb - dmxmyb.T) * 0.5))), 0.0) * 2
+        extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+    dvhf_all += dvhf * 2
+    dvhf = td_grad.get_veff(mol, cp.stack((((dmxmya - dmxmya.T) * 0.5, (dmxmyb - dmxmyb.T) * 0.5))), j_factor = 0.0, hermi=2)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
-    dvhf_all += dvhf
+        extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+    dvhf_all += dvhf * 2
     time1 = log.timer('2e AO integral derivatives', *time1)
 
     delec = 2.0 * (dh_ground + dh_td - ds)
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
     de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force
-
     log.timer("TDUHF nuclear gradients", *time0)
     return de.get()
 

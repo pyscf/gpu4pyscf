@@ -374,8 +374,12 @@ class TDBase(tdhf_gpu.TDBase):
         return get_ab(mf)
 
     def nuc_grad_method(self):
-        from gpu4pyscf.grad import tduhf
-        return tduhf.Gradients(self)
+        if hasattr(self._scf,'with_df'):
+            from gpu4pyscf.df.grad import tduhf
+            return tduhf.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tduhf
+            return tduhf.Gradients(self)
 
     def _contract_multipole(tdobj, ints, hermi=True, xy=None):
         if xy is None: xy = tdobj.xy

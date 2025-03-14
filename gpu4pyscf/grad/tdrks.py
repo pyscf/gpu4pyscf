@@ -228,7 +228,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
     dvhf_all += dvhf * 2
-    dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, 0.0, k_factor)
+    dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, j_factor=0.0, k_factor=k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
     dvhf_all += dvhf * 2
@@ -256,7 +256,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
         dvhf_all += dvhf * 2
-        dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, j_factor, k_factor, omega, hermi=2, dm_scf=False)
+        dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, 
+                                j_factor=j_factor, k_factor=k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
         dvhf_all += dvhf * 2
