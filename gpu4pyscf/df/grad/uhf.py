@@ -87,6 +87,8 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
         orbol, orbor = _decompose_rdm1_svd(dm)
         if hermi == 2:
             factor = -1.0 # The symmetry is used, thus -1 needed
+        if dm2 is not None:
+            dm2_tmp = intopt.sort_orbitals(dm2, axis=[0,1])
     nl = orbol.shape[-1]
     nr = orbor.shape[-1]
     # (L|ij) -> rhoj: (L), rhok: (L|oo)

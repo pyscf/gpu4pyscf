@@ -24,29 +24,19 @@ from functools import reduce
 import cupy as cp
 
 
-def get_veff(td_grad, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, dm_scf=False, verbose=None):
-    
-    vj0, vk0, vjaux0, vkaux0 = td_grad.get_jk(mol, dm[0])
-    vj1, vk1, vjaux1, vkaux1 = td_grad.get_jk(mol, dm[1])
-    vj0_m1, vjaux0_m1 = td_grad.get_j(mol, dm[0], dm2=dm[1])
-    vj1_m0, vjaux1_m0 = td_grad.get_j(mol, dm[1], dm2=dm[0])
-    vhf = vj0 + vj1 + vj0_m1 + vj1_m0 - vk0 - vk1
+def get_veff(td_grad, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
+    dm_scf=False
+    vj0, vk0, vjaux0, vkaux0 = td_grad.get_jk(mol, dm[0], dm_scf=dm_scf, hermi=hermi)
+    vj1, vk1, vjaux1, vkaux1 = td_grad.get_jk(mol, dm[1], dm_scf=dm_scf, hermi=hermi)
+    vj0_m1, _, vjaux0_m1, _ = td_grad.get_jk(mol, dm[0], dm2=dm[1], dm_scf=dm_scf, hermi=hermi)
+    vj1_m0, _, vjaux1_m0, _ = td_grad.get_jk(mol, dm[1], dm2=dm[0], dm_scf=dm_scf, hermi=hermi)
+    vhf = (vj0 + vj1 + vj0_m1 + vj1_m0) * j_factor - (vk0 + vk1) * k_factor
     if td_grad.auxbasis_response:
-        e1_aux = vjaux0 + vjaux1 + vjaux0_m1 + vjaux1_m0 - vkaux0 - vkaux1
+        e1_aux = (vjaux0 + vjaux1 + vjaux0_m1 + vjaux1_m0) * j_factor - (vkaux0 + vkaux1) * k_factor
         logger.debug1(td_grad, 'sum(auxbasis response) %s', e1_aux.sum(axis=0))
     else:
         e1_aux = None
     vhf = tag_array(vhf, aux=e1_aux)
-    return vhf
-
-    vhf = vj * j_factor - vk * .5 * k_factor
-    if td_grad.auxbasis_response:
-        e1_aux = vjaux * j_factor - vkaux * .5 * k_factor
-        logger.debug1(td_grad, 'sum(auxbasis response) %s', e1_aux.sum(axis=0))
-    else:
-        e1_aux = None
-    vhf = tag_array(vhf, aux=e1_aux)
-    
     return vhf
 
 
