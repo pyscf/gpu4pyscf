@@ -62,9 +62,6 @@ void type2_facs_omega(double* omega, int LI, int LC, double *r){
     const int LIC1 = LI+LC+1;
     const int LCC1 = LC*2+1;
 
-    //double omega_nuc[CART_CUM];
-    //ang_nuc_part(omega_nuc, LI+LC, unitr[0], unitr[1], unitr[2]);
-
     const int BLK = (LIC1+1)/2 * LCC1;
     const int LI1 = LI + 1;
     for (int nijk = threadIdx.x; nijk < LI1*LI1*LI1; nijk+=blockDim.x){
@@ -91,7 +88,7 @@ void type2_facs_omega(double* omega, int LI, int LC, double *r){
                 const int ps = _cart_pow_y[n];
                 const int pt = _cart_pow_z[n];
                 const int pr = lmb - ps - pt;
-                double nuc = pnuc[n];
+                const double nuc = pnuc[n];
                 for (int m = 0; m < (LC+1)*(LC+2)/2; m++){
                     const int pv = _cart_pow_y[m];
                     const int pw = _cart_pow_z[m];
@@ -140,12 +137,8 @@ void type2_ang(double *facs, const int LI, const int LC, double *fi, double *ome
             const int joff = (LI_i-j)*(LI_i-j+1)/2;
             double *pomega = omega + (ioff+joff+k)*BLK;
 
-            //double is_even = 
             if ((LC+ijk)%2 == m%2){
                 ang_pmn[ijk] += fac * pomega[m/2*LCC1];
-                //printf("%d %d %d %d %d %d %d %f %f %f\n", ix, iy, iz, i, j, k, nfi, fx[0], fy[0], fz[0]);
-                //printf("xoffset=%d yoffset=%d zoffset=%d\n", xoffset+i, yoffset+j, zoffset+k);
-                //printf("%d %d %d %d fx=%f fy=%f fz=%f omega=%f\n", ijk, xoffset+i, yoffset+j, zoffset+k, fx[xoffset+i], fy[yoffset+j], fz[zoffset+k], pomega[m/2*LCC1]);
             }
         }}}
 
@@ -174,8 +167,6 @@ void type2_cart(double *gctr,
 
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
     const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
-    constexpr int nfi = (LI+1) * (LI+2) / 2;
-    constexpr int nfj = (LJ+1) * (LJ+2) / 2;
     const double *ai = env + bas[PTR_EXP+ish*BAS_SLOTS];
     const double *aj = env + bas[PTR_EXP+jsh*BAS_SLOTS];
     const double *ci = env + bas[PTR_COEFF+ish*BAS_SLOTS];
@@ -229,7 +220,9 @@ void type2_cart(double *gctr,
         ur_tmp *= r128[ir];
     }
     __syncthreads();
-    
+
+    constexpr int nfi = (LI+1) * (LI+2) / 2;
+    constexpr int nfj = (LJ+1) * (LJ+2) / 2;
     double fi[nfi*3];
     double fj[nfj*3];
     cache_fac(fi, LI, rca);

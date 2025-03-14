@@ -127,7 +127,7 @@ int ECP_cart(double *gctr,
     return 0;
     }
 
-int ECP_ip1_cart(double *gctr, 
+int ECP_ip_cart(double *gctr, 
             const int *ao_loc, const int nao, 
             const int *tasks, const int ntasks,
             const int *ecpbas, const int *ecploc, 
@@ -138,8 +138,7 @@ int ECP_ip1_cart(double *gctr,
     dim3 blocks(ntasks);
 
     if (lc < 0){
-        int task_type = li * 100 + lj * 10 + lc;
-        const int lij1 = li+lj+2; // 
+        const int lij1 = li+lj+2;
         const int lij3 = lij1*lij1*lij1;
 
         int smem_size = 0;
@@ -157,8 +156,8 @@ int ECP_ip1_cart(double *gctr,
         const int lij1 = (li+1)+lj+1;
         const int nfi = (li+2)*(li+3)/2;
         const int nfj = (lj+1)*(lj+2)/2;
-        const int lic1 = (li+1)+lc+1;
-        const int ljc1 = lj+lc+1;
+        const int lic1 = li1+lc+1;
+        const int ljc1 = lj1+lc+1;
         const int lcc1 = 2*lc+1;
         const int blki = (lic1+1)/2 * lcc1;
         const int blkj = (ljc1+1)/2 * lcc1;
@@ -169,12 +168,17 @@ int ECP_ip1_cart(double *gctr,
         int smem_size3 = li1*lic1*nfi; // angi
         int smem_size4 = lj1*ljc1*nfj; // angj
 
-        int NFI_MAX = (AO_LMAX+2)*(AO_LMAX+3)/2;
-        int NFJ_MAX = (AO_LMAX+1)*(AO_LMAX+2)/2;
-        int smem_size5 = NF_MAX*NF_MAX*3 + NFI_MAX*NFJ_MAX;
-        int smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4 + smem_size5;
+        int dynamic_smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
+        cudaError_t err = cudaFuncSetAttribute(type2_cart_ip1,
+                                         cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                         (dynamic_smem_size+1024)*sizeof(double));
 
-        type2_cart_ip1<<<blocks, threads, smem_size*sizeof(double)>>>(
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s: %s\n", __func__, cudaGetErrorString(err));
+            return 1;
+        }
+
+        type2_cart_ip1<<<blocks, threads, dynamic_smem_size*sizeof(double)>>>(
             gctr, li, lj, lc,
             ao_loc, nao, 
             tasks, ntasks, 
@@ -188,5 +192,153 @@ int ECP_ip1_cart(double *gctr,
     }
     return 0;
     }
-}
 
+int ECP_ipipv_cart(double *gctr, 
+            const int *ao_loc, const int nao, 
+            const int *tasks, const int ntasks,
+            const int *ecpbas, const int *ecploc, 
+            const int *atm, const int *bas, const double *env, 
+            const int li, const int lj, const int lc){
+    // one task per thread block
+    dim3 threads(THREADS);
+    dim3 blocks(ntasks);
+
+    if (lc < 0){
+        const int lij1 = li+lj+3; // 
+        const int lij3 = lij1*lij1*lij1;
+
+        int smem_size = 0;
+        smem_size += lij3;      // rad_ang
+        smem_size += lij1*lij1; // rad_all
+        type1_cart_ipipv<<<blocks, threads, smem_size*sizeof(double)>>>(
+            gctr, li, lj, 
+            ao_loc, nao, 
+            tasks, ntasks, 
+            ecpbas, ecploc, 
+            atm, bas, env);
+    } else {
+        const int li1 = li+3;
+        const int lj1 = lj+1;
+        const int lij1 = li1+lj;
+        const int nfi =  li1*(li1+1)/2;
+        const int nfj = lj1*(lj1+1)/2;
+        const int lic1 = li1+lc;
+        const int ljc1 = lj1+lc;
+        const int lcc1 = 2*lc+1;
+        const int blki = (lic1+1)/2 * lcc1;
+        const int blkj = (ljc1+1)/2 * lcc1;
+        
+        int smem_size0 = lij1 * lic1 * ljc1; // rad_all
+        int smem_size1 = li1*(li1+1)*(li1+2)/6 * blki; // omegai
+        int smem_size2 = lj1*(lj1+1)*(lj1+2)/6 * blkj; // omegaj
+        int smem_size3 = li1*lic1*nfi; // angi
+        int smem_size4 = lj1*ljc1*nfj; // angj
+
+        int NF2_MAX = (AO_LMAX+3)*(AO_LMAX+4)/2;
+        int NF1_MAX = (AO_LMAX+2)*(AO_LMAX+3)/2;
+        int NF0_MAX = (AO_LMAX+1)*(AO_LMAX+2)/2;
+        int static_smem_size = NF2_MAX*NF0_MAX;
+        int dynamic_smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
+        dynamic_smem_size = max(dynamic_smem_size, 3*NF1_MAX*NF0_MAX);
+
+        int total_smem_size = static_smem_size + dynamic_smem_size;
+        printf("ECP_ipipv_cart, type2 (%d %d %d): smem_size = %d, %d, %d, %d, %d, %d\n", li, lj, lc, static_smem_size, smem_size0, smem_size1, smem_size2, smem_size3, smem_size4);
+        
+        printf("total_smem_size = %d\n", total_smem_size * sizeof(double));
+        cudaError_t err = cudaFuncSetAttribute(type2_cart_ipipv,
+                                         cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                         (dynamic_smem_size+1024)*sizeof(double));
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s: %s\n", __func__, cudaGetErrorString(err));
+            return 1;
+        }
+       
+        type2_cart_ipipv<<<blocks, threads, dynamic_smem_size*sizeof(double)>>>(
+            gctr, li, lj, lc,
+            ao_loc, nao, 
+            tasks, ntasks, 
+            ecpbas, ecploc, 
+            atm, bas, env);
+    }
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+    }
+
+int ECP_ipvip_cart(double *gctr, 
+            const int *ao_loc, const int nao, 
+            const int *tasks, const int ntasks,
+            const int *ecpbas, const int *ecploc, 
+            const int *atm, const int *bas, const double *env, 
+            const int li, const int lj, const int lc){
+    // one task per thread block
+    dim3 threads(THREADS);
+    dim3 blocks(ntasks);
+
+    if (lc < 0){
+        const int lij1 = li+lj+3; // 
+        const int lij3 = lij1*lij1*lij1;
+
+        int smem_size = 0;
+        smem_size += lij3;      // rad_ang
+        smem_size += lij1*lij1; // rad_all
+        type1_cart_ipvip<<<blocks, threads, smem_size*sizeof(double)>>>(
+            gctr, li, lj, 
+            ao_loc, nao, 
+            tasks, ntasks, 
+            ecpbas, ecploc, 
+            atm, bas, env);
+    } else {
+        const int li1 = li+2;
+        const int lj1 = lj+2;
+        const int lij1 = li1+lj1-1;
+        const int nfi = li1*(li1+1)/2;
+        const int nfj = lj1*(lj1+1)/2;
+        const int lic1 = li1+lc;
+        const int ljc1 = lj1+lc;
+        const int lcc1 = 2*lc+1;
+        const int blki = (lic1+1)/2 * lcc1;
+        const int blkj = (ljc1+1)/2 * lcc1;
+        
+        int smem_size0 = lij1 * lic1 * ljc1; // rad_all
+        int smem_size1 = li1*(li1+1)*(li1+2)/6 * blki; // omegai
+        int smem_size2 = lj1*(lj1+1)*(lj1+2)/6 * blkj; // omegaj
+        int smem_size3 = li1*lic1*nfi; // angi
+        int smem_size4 = lj1*ljc1*nfj; // angj
+
+        int NF1_MAX = (AO_LMAX+2)*(AO_LMAX+3)/2;
+        int NF0_MAX = (AO_LMAX+1)*(AO_LMAX+2)/2;
+        int static_smem_size = NF1_MAX*NF1_MAX;
+        int dynamic_smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
+        dynamic_smem_size = max(dynamic_smem_size, 3*NF0_MAX*NF1_MAX);
+
+        int total_smem_size = static_smem_size + dynamic_smem_size;
+        printf("ECP_ipvip_cart, type2 (%d %d %d): smem_size = %d, %d, %d, %d, %d, %d\n", li, lj, lc, static_smem_size, smem_size0, smem_size1, smem_size2, smem_size3, smem_size4);
+        
+        printf("total_smem_size = %d\n", total_smem_size * sizeof(double));
+        cudaError_t err = cudaFuncSetAttribute(type2_cart_ipvip,
+                                         cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                         (dynamic_smem_size+1024)*sizeof(double));
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s: %s\n", __func__, cudaGetErrorString(err));
+            return 1;
+        }
+
+        type2_cart_ipvip<<<blocks, threads, dynamic_smem_size*sizeof(double)>>>(
+            gctr, li, lj, lc,
+            ao_loc, nao, 
+            tasks, ntasks, 
+            ecpbas, ecploc, 
+            atm, bas, env);
+    }
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+    }
+    }

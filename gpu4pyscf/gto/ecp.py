@@ -9,7 +9,7 @@ from gpu4pyscf.gto.mole import group_basis
 
 libecp = load_library('libgecp')
 
-libecp.ECP_cart.argtypes = [
+ecp_cart_argtypes = [
     ctypes.c_void_p,
     ctypes.c_void_p,
     ctypes.c_int,
@@ -25,21 +25,10 @@ libecp.ECP_cart.argtypes = [
     ctypes.c_int
 ]
 
-libecp.ECP_ip1_cart.argtypes = [
-    ctypes.c_void_p,
-    ctypes.c_void_p,
-    ctypes.c_int,
-    ctypes.c_void_p,
-    ctypes.c_int,
-    ctypes.c_void_p,
-    ctypes.c_void_p,
-    ctypes.c_void_p,
-    ctypes.c_void_p,
-    ctypes.c_void_p,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int
-]
+libecp.ECP_cart.argtypes = ecp_cart_argtypes
+libecp.ECP_ip_cart.argtypes = ecp_cart_argtypes
+libecp.ECP_ipipv_cart.argtypes = ecp_cart_argtypes
+libecp.ECP_ipvip_cart.argtypes = ecp_cart_argtypes
 
 def sort_ecp(mol0, cart=True, log=None):
     '''
@@ -158,7 +147,19 @@ def get_ecp(mol):
     return coeff.T @ mat1 @ coeff
 
 
-def get_ecp_ip(mol):
+def get_ecp_ip(mol, ip_type='ip'):
+    if ip_type == 'ip':
+        fn = libecp.ECP_ip_cart
+        comp = 3
+    elif ip_type == 'ipipv':
+        fn = libecp.ECP_ipipv_cart
+        comp = 9
+    elif ip_type == 'ipvip':
+        fn = libecp.ECP_ipvip_cart
+        comp = 9
+    else:
+        raise ValueError('Invalid IP type')
+
     _sorted_mol, coeff, uniq_l_ctr, l_ctr_counts = group_basis(mol)
     _sorted_mol, uniq_lecp, lecp_counts, ecp_loc= sort_ecp(_sorted_mol)
 
@@ -179,7 +180,7 @@ def get_ecp_ip(mol):
     nao = ao_loc[-1]
     ao_loc = cp.asarray(ao_loc, dtype=np.int32)
 
-    mat1 = cp.zeros([3, nao, nao])
+    mat1 = cp.zeros([comp, nao, nao])
     for i in range(n_groups):
         for j in range(n_groups):
             for k in range(n_ecp_groups):
@@ -188,7 +189,7 @@ def get_ecp_ip(mol):
                 li = uniq_l_ctr[i,0]
                 lj = uniq_l_ctr[j,0]
                 lk = uniq_lecp[k]
-                err = libecp.ECP_ip1_cart(
+                err = fn(
                     mat1.data.ptr, ao_loc.data.ptr, nao, 
                     tasks.data.ptr, ntasks,
                     ecpbas.data.ptr, ecploc.data.ptr,

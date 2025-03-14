@@ -168,11 +168,11 @@ void type2_cart_ip1(double *gctr,
     __shared__ double buf[NFI_MAX*NFJ_MAX];
     type2_cart_kernel<1,0>(buf, LI+1, LJ, LC, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
     __syncthreads();
-    _l_down(gctr_smem, buf, LI, LJ);
+    _li_down(gctr_smem, buf, LI, LJ);
     if (LI > 0){
         type2_cart_kernel<0,0>(buf, LI-1, LJ, LC, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
         __syncthreads();
-        _l_up(gctr_smem, buf, LI, LJ);
+        _li_up(gctr_smem, buf, LI, LJ);
     }
 
     const int nfi = (LI+1) * (LI+2) / 2;
@@ -188,6 +188,121 @@ void type2_cart_ip1(double *gctr,
         atomicAdd(gx + (i+ioff)*nao + (j+joff), gctr_smem[ij]);
         atomicAdd(gy + (i+ioff)*nao + (j+joff), gctr_smem[ij+nfi*nfj]);
         atomicAdd(gz + (i+ioff)*nao + (j+joff), gctr_smem[ij+2*nfi*nfj]);
+    }
+    return;
+}
+
+
+__global__
+void type2_cart_ipipv(double *gctr, 
+                const int LI, const int LJ, const int LC,
+                const int *ao_loc, const int nao, 
+                const int *tasks, const int ntasks,
+                const int *ecpbas, const int *ecploc, 
+                const int *atm, const int *bas, const double *env)
+{
+    const int task_id = blockIdx.x;
+    if (task_id >= ntasks){
+        return;
+    }
+
+    const int ish = tasks[task_id];
+    const int jsh = tasks[task_id + ntasks];
+    const int ksh = tasks[task_id + 2*ntasks];
+    
+    const int ioff = ao_loc[ish];
+    const int joff = ao_loc[jsh];
+    gctr += ioff*nao + joff;
+    
+    constexpr int nfi2_max = (AO_LMAX+3)*(AO_LMAX+4)/2;
+    constexpr int nfj_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
+    __shared__ double buf1[nfi2_max*nfj_max];
+    type2_cart_kernel<2,0>(buf1, LI+2, LJ, LC, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
+    __syncthreads();
+    
+    constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
+    extern __shared__ double smem[];
+    double *buf = smem;
+    set_shared_memory(buf, 3*nfi1_max*nfj_max);
+    _li_down(buf, buf1, LI+1, LJ);
+    _li_down_and_write(gctr, buf, LI, LJ, nao);
+
+    type2_cart_kernel<1,0>(buf1, LI, LJ, LC, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
+    __syncthreads();
+    set_shared_memory(buf, 3*nfi1_max*nfj_max);
+    _li_up(buf, buf1, LI+1, LJ);
+    _li_down_and_write(gctr, buf, LI, LJ, nao);
+
+    if (LI > 0){
+        set_shared_memory(buf, 3*nfi1_max*nfj_max);
+        _li_down(buf, buf1, LI-1, LJ);
+        _li_up_and_write(gctr, buf, LI, LJ, nao);
+        if (LI > 1){
+            type2_cart_kernel<0,0>(buf1, LI-2, LJ, LC, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
+            __syncthreads();
+            set_shared_memory(buf, 3*nfi1_max*nfj_max);
+            _li_up(buf, buf1, LI-1, LJ);
+            _li_up_and_write(gctr, buf, LI, LJ, nao);
+        }
+    }
+    return;
+}
+
+__global__
+void type2_cart_ipvip(double *gctr, 
+                const int LI, const int LJ, const int LC,
+                const int *ao_loc, const int nao, 
+                const int *tasks, const int ntasks,
+                const int *ecpbas, const int *ecploc, 
+                const int *atm, const int *bas, const double *env)
+{
+    const int task_id = blockIdx.x;
+    if (task_id >= ntasks){
+        return;
+    }
+
+    const int ish = tasks[task_id];
+    const int jsh = tasks[task_id + ntasks];
+    const int ksh = tasks[task_id + 2*ntasks];
+    
+    const int ioff = ao_loc[ish];
+    const int joff = ao_loc[jsh];
+    gctr += ioff*nao + joff;
+    
+    constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
+    constexpr int nfj1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
+    __shared__ double buf1[nfi1_max*nfj1_max];
+    type2_cart_kernel<1,1>(buf1, LI+1, LJ+1, LC, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
+    __syncthreads();
+
+    constexpr int nfi_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
+    extern __shared__ double smem[];
+    double *buf = smem;
+    set_shared_memory(buf, 3*nfi_max*nfj1_max);
+    _li_down(buf, buf1, LI, LJ+1);
+    _lj_down_and_write(gctr, buf, LI, LJ, nao);
+
+    if (LI > 0){
+        type2_cart_kernel<0,1>(buf1, LI-1, LJ+1, LC, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
+        __syncthreads();
+        set_shared_memory(buf, 3*nfi_max*nfj1_max);
+        _li_up(buf, buf1, LI, LJ+1);
+        _lj_down_and_write(gctr, buf, LI, LJ, nao);
+    }
+    
+    if (LJ > 0){
+        type2_cart_kernel<1,0>(buf1, LI+1, LJ-1, LC, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
+        __syncthreads();
+        set_shared_memory(buf, 3*nfi_max*nfj1_max);
+        _li_down(buf, buf1, LI, LJ-1);
+         _lj_up_and_write(gctr, buf, LI, LJ, nao);
+        if (LI > 0){
+            type2_cart_kernel<0,0>(buf1, LI-1, LJ-1, LC, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
+            __syncthreads();
+            set_shared_memory(buf, 3*nfi_max*nfj1_max);
+            _li_up(buf, buf1, LI, LJ-1);
+            _lj_up_and_write(gctr, buf, LI, LJ, nao);
+        }
     }
     return;
 }

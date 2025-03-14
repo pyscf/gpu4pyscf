@@ -16,7 +16,8 @@ gen_cart2sph(5)
 gen_cart2sph(6)
 gen_cart2sph(7)
 gen_cart2sph(8)
-
+gen_cart2sph(9)
+gen_cart2sph(10)
 
 def gen_sph2cart(l):
     c2s = cart2sph(l)
@@ -35,3 +36,5 @@ gen_sph2cart(5)
 gen_sph2cart(6)
 gen_sph2cart(7)
 gen_sph2cart(8)
+gen_sph2cart(9)
+gen_sph2cart(10)
