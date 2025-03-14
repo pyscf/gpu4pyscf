@@ -2,14 +2,14 @@
     "input_dir": "./",
     "output_dir": "./",
     "molecules": [
-        "h2o.xyz",
+        "MR_100001_2_H9.xyz",
         "h2o.xyz",
         "h2o.xyz",
         "h2o.xyz",
         "h2o.xyz"
     ],
     "xc": "r2scan3c",
-    "auxbasis": "def2-universal-JFIT",
+    "auxbasis": "def2-mtzvpp-rij",
     "verbose": 4,
     "with_solvent": false,
     "with_thermo": false,
