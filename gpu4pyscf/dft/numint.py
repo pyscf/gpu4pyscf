@@ -30,7 +30,7 @@ from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, num_devices
 
-LMAX_ON_GPU = 6
+LMAX_ON_GPU = 8
 BAS_ALIGNED = 1
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 64*64)
 ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
@@ -89,16 +89,9 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     stream = cupy.cuda.get_current_stream()
 
-    # ao must be set to zero due to implementation
-    if deriv > 1:
-        if out is None:
-            out = cupy.zeros((comp, nao_slice, ngrids), order='C')
-        else:
-            out[:] = 0
-    else:
-        if out is None:
-            out = cupy.empty((comp, nao_slice, ngrids), order='C')
-
+    if out is None:
+        out = cupy.empty((comp, nao_slice, ngrids), order='C')
+    
     err = libgdft.GDFTeval_gto(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
@@ -110,7 +103,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
         ctr_offsets.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(nctr),
         ctr_offsets_slice.ctypes.data_as(ctypes.c_void_p),
         _sorted_mol._bas.ctypes.data_as(ctypes.c_void_p))
-
+    
     if err != 0:
         raise RuntimeError('CUDA Error in evaluating AO')
 
@@ -1680,7 +1673,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[lookup_key]
             if len(idx) == 0: 
                 continue
-            
+
             ao_mask = eval_ao(
                 _sorted_mol, coords, deriv,
                 nao_slice=len(idx),
@@ -2092,7 +2085,7 @@ class _GDFTOpt:
                 logger.debug(mol, '    %s : %s', l_ctr, n)
 
         if uniq_l_ctr[:,0].max() > LMAX_ON_GPU:
-            raise ValueError('High angular basis not supported')
+            raise ValueError(f'High angular basis (L>{LMAX_ON_GPU}) not supported')
 
         # Paddings to make basis aligned in each angular momentum group
         inv_idx_padding = []
@@ -2146,14 +2139,25 @@ class _GDFTOpt:
     @contextlib.contextmanager
     def gdft_envs_cache(self):
         _sorted_mol = self._sorted_mol
-        ao_loc = _sorted_mol.ao_loc_nr()
         device_id = cupy.cuda.Device().id
         envs_cache = ctypes.POINTER(_GDFTEnvsCache)()
+
+        bas_atom = cupy.asarray(_sorted_mol._bas[:,[gto.ATOM_OF]], dtype=np.int32)
+        bas_exp = cupy.asarray(_sorted_mol._bas[:,[gto.PTR_EXP]], dtype=np.int32)
+        bas_coeff = cupy.asarray(_sorted_mol._bas[:,[gto.PTR_COEFF]], dtype=np.int32)
+        atom_coords = cupy.asarray(_sorted_mol.atom_coords(), dtype=np.double, order='F')
+        env = cupy.asarray(_sorted_mol._env, dtype=np.double, order='C')
+
         libgdft.GDFTinit_envs(
-            ctypes.byref(envs_cache), ao_loc.ctypes.data_as(ctypes.c_void_p),
-            _sorted_mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_sorted_mol.natm),
-            _sorted_mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_sorted_mol.nbas),
-            _sorted_mol._env.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_sorted_mol._env.size))
+            ctypes.byref(envs_cache), 
+            ctypes.cast(bas_atom.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_exp.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_coeff.data.ptr, ctypes.c_void_p),
+            ctypes.cast(atom_coords.data.ptr, ctypes.c_void_p),
+            ctypes.cast(env.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(_sorted_mol.natm),
+            ctypes.c_int(_sorted_mol.nbas)
+        )
         self.envs_cache[device_id] = envs_cache
         try:
             yield

@@ -25,16 +25,24 @@ def setUpModule():
 C  -0.65830719,  0.61123287, -0.00800148
 C   0.73685281,  0.61123287, -0.00800148
 '''
+
+    basis = ('ccpvqz', 
+             [[5, [1.2, 1.]], 
+               [6, [1.2, 1.]], 
+               [7, [1.6, 1.]],
+               [8, [1.3, 1.]]
+               ])
+    
     mol_sph = pyscf.M(
         atom=atom,
-        basis='ccpvqz',
+        basis=basis,
         spin=None,
         cart = 0,
         output = '/dev/null')
 
     mol_cart = pyscf.M(
         atom=atom,
-        basis='ccpvqz',
+        basis=basis,
         spin=None,
         cart=1,
         output = '/dev/null')

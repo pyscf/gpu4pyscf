@@ -20,7 +20,6 @@ import numpy as np
 import cupy
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.gto import mole
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
@@ -28,10 +27,6 @@ from gpu4pyscf.__config__ import _streams, num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
-
-c2s_l = mole.get_cart2sph(lmax=LMAX_ON_GPU)
-c2s_offset = np.cumsum([0] + [x.shape[0]*x.shape[1] for x in c2s_l])
-_data = {'c2s': None}
 
 _kernel_registery = {}
 
@@ -171,6 +166,16 @@ def tag_array(a, **kwargs):
     t.__dict__.update(kwargs)
     return t
 
+def asarray(a, **kwargs):
+    '''Similar to cupy.asarray, when the object is an instance of
+    CPArrayWithTag, this function will remove the attributes within
+    the tagged array'''
+    if isinstance(a, CPArrayWithTag):
+        a = a.view(cupy.ndarray)
+    if kwargs:
+        a = cupy.asarray(a, **kwargs)
+    return a
+
 def to_cupy(a):
     '''Converts a numpy (and subclass) object to a cupy object'''
     if isinstance(a, lib.NPArrayWithTag):
@@ -190,17 +195,39 @@ def return_cupy_array(fn):
         return to_cupy(ret)
     return filter_ret
 
-def pack_tril(a):
-    if a.ndim == 2:
+def pack_tril(a, stream=None):
+    ndim = a.ndim
+    assert ndim in (2, 3)
+    if ndim == 2:
         a = a[None]
-    n = a.shape[-1]
-    idx = cupy.arange(n)
-    mask = idx[:,None] >= idx
-    return a[:,mask]
 
-def unpack_tril(cderi_tril, cderi=None, stream=None):
+    counts, n = a.shape[:2]
+    if a.dtype != np.float64 or not a.flags.c_contiguous:
+        idx = cupy.arange(n)
+        mask = idx[:,None] >= idx
+        a_tril = a[:,mask]
+    else:
+        if stream is None:
+            stream = cupy.cuda.get_current_stream()
+        a_tril = cupy.empty((counts, n*(n+1)//2), dtype=np.float64)
+        err = libcupy_helper.pack_tril(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(a_tril.data.ptr, ctypes.c_void_p),
+            ctypes.cast(a.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n), ctypes.c_int(counts))
+        if err != 0:
+            raise RuntimeError('pack_tril kernel failed')
+
+    if ndim == 2:
+        a_tril = a_tril[0]
+    return a_tril
+
+def unpack_tril(cderi_tril, cderi=None, stream=None, hermi=1):
     assert cderi_tril.flags.c_contiguous
-    if cderi_tril.ndim == 1:
+    assert hermi in (1, 2)
+    ndim = cderi_tril.ndim
+    assert ndim in (1, 2)
+    if ndim == 1:
         cderi_tril = cderi_tril[None]
     count = cderi_tril.shape[0]
     if cderi is None:
@@ -213,7 +240,10 @@ def unpack_tril(cderi_tril, cderi=None, stream=None):
         idx = cupy.arange(nao)
         mask = idx[:,None] >= idx
         cderiT = cderi.transpose(0,2,1)
-        cderiT[:,mask] = cderi_tril.conj()
+        if hermi == 1:
+            cderiT[:,mask] = cderi_tril.conj()
+        else:
+            raise NotImplementedError
         cderi [:,mask] = cderi_tril
         return cderi
 
@@ -224,9 +254,12 @@ def unpack_tril(cderi_tril, cderi=None, stream=None):
         ctypes.cast(cderi_tril.data.ptr, ctypes.c_void_p),
         ctypes.cast(cderi.data.ptr, ctypes.c_void_p),
         ctypes.c_int(nao),
-        ctypes.c_int(count))
+        ctypes.c_int(count),
+        ctypes.c_int(hermi))
     if err != 0:
         raise RuntimeError('failed in unpack_tril kernel')
+    if ndim == 1:
+        cderi = cderi[0]
     return cderi
 
 def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
@@ -269,7 +302,7 @@ def add_sparse(a, b, indices):
         count = 1
     else:
         raise RuntimeError('add_sparse only supports 2d or 3d tensor')
-    
+
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.add_sparse(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -306,6 +339,14 @@ def dist_matrix(x, y, out=None):
         raise RuntimeError('failed in calculating distance matrix')
     return out
 
+@functools.lru_cache(1)
+def _initialize_c2s_data():
+    from gpu4pyscf.gto import mole
+    c2s_l = [mole.cart2sph_by_l(l) for l in range(LMAX_ON_GPU)]
+    c2s_data = cupy.concatenate([x.ravel() for x in c2s_l])
+    c2s_offset = np.cumsum([0] + [x.shape[0]*x.shape[1] for x in c2s_l])
+    return c2s_l, c2s_data, c2s_offset
+
 def block_c2s_diag(angular, counts):
     '''
     Diagonal blocked cartesian to spherical transformation
@@ -313,10 +354,7 @@ def block_c2s_diag(angular, counts):
         angular (list): angular momentum type, e.g. [0,1,2,3]
         counts (list): count of each angular momentum
     '''
-    if _data['c2s'] is None:
-        c2s_data = cupy.concatenate([cupy.asarray(x.ravel()) for x in c2s_l])
-        _data['c2s'] = c2s_data
-    c2s_data = _data['c2s']
+    c2s_l, c2s_data, c2s_offset = _initialize_c2s_data()
 
     nshells = np.sum(counts)
     rows = [np.array([0], dtype='int32')]
@@ -441,13 +479,15 @@ def transpose_sum(a, stream=None):
     '''
     return a + a.transpose(0,2,1)
     '''
+    assert isinstance(a, cupy.ndarray)
     assert a.flags.c_contiguous
-    out = a
-    if a.ndim == 2:
+    assert a.ndim in (2, 3)
+    ndim = a.ndim
+    if ndim == 2:
         a = a[None]
-    assert a.ndim == 3
     count, m, n = a.shape
     assert m == n
+    out = a
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.transpose_sum(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -457,17 +497,21 @@ def transpose_sum(a, stream=None):
     )
     if err != 0:
         raise RuntimeError('failed in transpose_sum kernel')
+    if ndim == 2:
+        out = out[0]
     return out
 
-# for i > j of 2d mat, mat[j,i] = mat[i,j]
-def hermi_triu(mat, hermi=1, inplace=True):
+def hermi_triu(mat, hermi=1, inplace=True, stream=None):
     '''
     Use the elements of the lower triangular part to fill the upper triangular part.
     See also pyscf.lib.hermi_triu
     '''
-    if not inplace:
+    assert hermi in (1, 2)
+    assert mat.dtype == np.float64
+    if inplace:
+        assert mat.flags.c_contiguous
+    else:
         mat = mat.copy('C')
-    assert mat.flags.c_contiguous
 
     if mat.ndim == 2:
         n = mat.shape[0]
@@ -477,23 +521,26 @@ def hermi_triu(mat, hermi=1, inplace=True):
     else:
         raise ValueError(f'dimension not supported {mat.ndim}')
 
-    err = libcupy_helper.CPdsymm_triu(
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.fill_triu(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n), ctypes.c_int(counts))
+        ctypes.c_int(n), ctypes.c_int(counts), ctypes.c_int(hermi))
     if err != 0:
-        raise RuntimeError('failed in symm_triu kernel')
-
+        raise RuntimeError('hermi_triu kernel failed')
     return mat
 
 def cart2sph_cutensor(t, axis=0, ang=1, out=None):
     '''
     transform 'axis' of a tensor from cartesian basis into spherical basis with cutensor
     '''
+    from gpu4pyscf.gto import mole
     if(ang <= 1):
         if(out is not None): out[:] = t
         return t
     size = list(t.shape)
-    c2s = cupy.asarray(c2s_l[ang])
+    c2s = mole.cart2sph_by_l(ang)
     if(not t.flags['C_CONTIGUOUS']): t = cupy.asarray(t, order='C')
     li_size = c2s.shape
     nli = size[axis] // li_size[0]
@@ -511,11 +558,12 @@ def cart2sph(t, axis=0, ang=1, out=None, stream=None):
     '''
     transform 'axis' of a tensor from cartesian basis into spherical basis
     '''
+    from gpu4pyscf.gto import mole
     if(ang <= 1):
         if(out is not None): out[:] = t
         return t
     size = list(t.shape)
-    c2s = c2s_l[ang]
+    c2s = mole.cart2sph_by_l(ang)
     if(not t.flags['C_CONTIGUOUS']): t = cupy.asarray(t, order='C')
     li_size = c2s.shape
     nli = size[axis] // li_size[0]
@@ -888,6 +936,7 @@ def grouped_gemm(As, Bs, Cs=None):
 def condense(opname, a, loc_x, loc_y=None):
     assert opname in ('sum', 'max', 'min', 'abssum', 'absmax', 'norm')
     assert a.dtype == np.float64
+    a = cupy.asarray(a, order='C')
     if loc_y is None:
         loc_y = loc_x
     do_transpose = False
@@ -992,6 +1041,7 @@ void {fn_name}(double *out, double *a, int *loc_x, int *loc_y,
 def sandwich_dot(a, c, out=None):
     '''Performs c.T.dot(a).dot(c)'''
     a = cupy.asarray(a)
+    c = cupy.asarray(c)
     a_ndim = a.ndim
     if a_ndim == 2:
         a = a[None]

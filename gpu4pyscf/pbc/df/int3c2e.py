@@ -31,7 +31,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
-from gpu4pyscf.pbc.gto.cell import extract_pgto_params
+from gpu4pyscf.gto.mole import extract_pgto_params
 from gpu4pyscf.pbc.df.ft_ao import libpbc, init_constant
 
 __all__ = [
@@ -287,7 +287,8 @@ class SRInt3c2eOpt:
         gen_img_idx = create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs)
 
         uniq_l = uniq_l_ctr[:,0]
-        n_groups = np.count_nonzero(uniq_l <= LMAX)
+        assert uniq_l.max() <= LMAX
+        n_groups = len(uniq_l)
         init_constant(cell)
         kern = libpbc.fill_int3c2e
         cp.cuda.Stream.null.synchronize()

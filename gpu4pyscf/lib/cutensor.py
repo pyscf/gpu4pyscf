@@ -111,7 +111,6 @@ def contraction(
                              alpha.ctypes.data, a.data.ptr, b.data.ptr,
                              beta.ctypes.data, c.data.ptr, out.data.ptr,
                              ws.data.ptr, ws_size)
-    
     return out
 
 import os
@@ -136,15 +135,22 @@ if contract_engine is not None:
     import warnings
     warnings.warn(f'using {contract_engine} as the tensor contraction engine.')
     def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
-        if out is None:
-            out = einsum(pattern, a, b)
-            out *= alpha
-        elif beta == 0.:
-            out[:] = einsum(pattern, a, b)
-            out *= alpha
-        else:
-            out *= beta
-            out += alpha*einsum(pattern, a, b)
+        try:
+            if out is None:
+                out = einsum(pattern, a, b)
+                out *= alpha
+            elif beta == 0.:
+                out[:] = einsum(pattern, a, b)
+                out *= alpha
+            else:
+                out *= beta
+                tmp = einsum(pattern, a, b)
+                tmp *= alpha
+                out += tmp
+        except cupy.cuda.memory.OutOfMemoryError:
+            print('Out of memory error caused by cupy.einsum. '
+                  'It is recommended to install cutensor to resolve this.')
+            raise
         return cupy.asarray(out, order='C')
 else:
     def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
