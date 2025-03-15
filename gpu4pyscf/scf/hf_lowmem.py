@@ -21,7 +21,7 @@ import numpy as np
 import cupy as cp
 from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
-from gpu4pyscf.lib.cupy_helper import asarray, pack_tril, unpack_tril, sandwich_dot
+from gpu4pyscf.lib.cupy_helper import asarray, pack_tril, unpack_tril
 from gpu4pyscf.scf import diis, jk, hf
 from gpu4pyscf.lib import logger
 
@@ -200,8 +200,6 @@ class RHF(hf.RHF):
         vhfopt = self._opt_gpu.get(omega)
         if vhfopt is None:
             vhfopt = self._opt_gpu[omega] = jk._VHFOpt(mol, self.direct_scf_tol).build()
-            if isinstance(vhfopt.coeff, cp.ndarray):
-                vhfopt.coeff = vhfopt.coeff.get()
 
         dm = self._delta_rdm1(dm, dm_last, vhfopt)
         vj, vk = vhfopt.get_jk(dm, hermi, True, True, log)
@@ -209,7 +207,7 @@ class RHF(hf.RHF):
         dm = None
         vk *= -.5
         vj += vk
-        vj = sandwich_dot(vj, cp.asarray(vhfopt.coeff))
+        vj = vhfopt.apply_coeff_CT_mat_C(vj)
         vk = None
         if isinstance(vhf_last, cp.ndarray):
             vhf = asarray(vhf_last) # remove attributes if vhf_last is a tag_array
@@ -232,20 +230,19 @@ class RHF(hf.RHF):
             mask = mo_occ > 0
             occ_coeff = mo_coeff[:,mask]
             occ_coeff *= mo_occ[mask]**.5
-            c2s_coeff = cp.asarray(vhfopt.coeff)
 
             if dm_last is None:
-                occ_coeff = c2s_coeff.dot(occ_coeff)
+                occ_coeff = vhfopt.apply_coeff_C_mat(occ_coeff)
                 dm = occ_coeff.dot(occ_coeff.T)
             else:
                 dm = occ_coeff.dot(occ_coeff.T)
                 dm -= dm_last
-                dm = sandwich_dot(dm, c2s_coeff.T)
+                dm = vhfopt.apply_coeff_C_mat_CT(dm)
         else:
             if dm_last is not None:
                 dm = dm.copy()
                 dm -= dm_last
-            dm = sandwich_dot(dm, cp.asarray(vhfopt.coeff).T)
+            dm = vhfopt.apply_coeff_C_mat_CT(dm)
         return dm[None]
 
     def make_rdm1(self, mo_coeff=None, mo_occ=None):

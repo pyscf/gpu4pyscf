@@ -17,6 +17,7 @@ Compute J/K matrices
 '''
 
 import ctypes
+import warnings
 import math
 import numpy as np
 import cupy as cp
@@ -24,16 +25,15 @@ import scipy.linalg
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
-from pyscf import lib
+from pyscf import lib, gto
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, condense, sandwich_dot, transpose_sum, reduce_to_device,
-    hermi_triu)
+    load_library, condense, transpose_sum, reduce_to_device, hermi_triu)
 from gpu4pyscf.__config__ import _streams, num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
-from gpu4pyscf.gto.mole import group_basis
+from gpu4pyscf.gto.mole import group_basis, cart2sph_by_l
 
 __all__ = [
     'get_jk', 'get_j',
@@ -45,6 +45,7 @@ libvhf_rys.RYS_init_constant.restype = ctypes.c_int
 libvhf_rys.RYS_init_rysj_constant.restype = ctypes.c_int
 libvhf_rys.cuda_version.restype = ctypes.c_int
 CUDA_VERSION = libvhf_rys.cuda_version()
+libgint = load_library('libgint')
 
 PTR_BAS_COORD = 7
 LMAX = 4
@@ -66,21 +67,25 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
 
-    coeff = cp.asarray(vhfopt.coeff)
-    nao_orig = coeff.shape[1]
+    mol = vhfopt.sorted_mol
+    nao_orig = vhfopt.mol.nao
+
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = sandwich_dot(dms, coeff.T)
+    dms = vhfopt.apply_coeff_C_mat_CT(dms)
     dms = cp.asarray(dms, order='C')
 
     vj, vk = vhfopt.get_jk(dms, hermi, with_j, with_k, log)
     if with_k:
         #:vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
-        vk = sandwich_dot(vk, coeff).reshape(dm.shape)
+        vk = vhfopt.apply_coeff_CT_mat_C(vk)
+        vk = vk.reshape(dm.shape)
+
     if with_j:
         #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vj, vhfopt.coeff)
-        vj = sandwich_dot(vj, coeff).reshape(dm.shape)
+        vj = vhfopt.apply_coeff_CT_mat_C(vj)
+        vj = vj.reshape(dm.shape)
     log.timer('vj and vk', *cput0)
     return vj, vk
 
@@ -92,13 +97,14 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
 
-    nao_orig = vhfopt.coeff.shape[1]
+    nao_orig = vhfopt.mol.nao
+
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
     n_dm = dms.shape[0]
     assert n_dm == 1
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = sandwich_dot(dms, vhfopt.coeff.T)
+    dms = vhfopt.apply_coeff_C_mat_CT(dms)
     dms = cp.asarray(dms, order='C')
     if hermi != 1:
         dms = transpose_sum(dms)
@@ -106,7 +112,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
 
     vj = vhfopt.get_j(dms, log)
     #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
-    vj = sandwich_dot(cp.asarray(vj), vhfopt.coeff)
+    vj = vhfopt.apply_coeff_CT_mat_C(cp.asarray(vj))
     vj = vj.reshape(dm.shape)
     log.timer('vj', *cput0)
     return vj
@@ -130,9 +136,10 @@ class _VHFOpt:
         mol = self.mol
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
-        mol, coeff, uniq_l_ctr, l_ctr_counts = group_basis(mol, self.tile, group_size)
+        mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(mol, self.tile, group_size, sparse_coeff = True)
         self.sorted_mol = mol
-        self.coeff = cp.asarray(coeff)
+        self.ao_idx = ao_idx
+        self.l_ctr_pad_counts = l_ctr_pad_counts
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
 
@@ -175,6 +182,146 @@ class _VHFOpt:
             self.s_estimator_cpu = s_estimator
         log.timer('Initialize q_cond', *cput0)
         return self
+
+    def sort_orbitals(self, mat, axis=[]):
+        ''' Transform given axis of a matrix into sorted AO '''
+        idx = self.ao_idx
+        shape_ones = (1,) * mat.ndim
+        fancy_index = []
+        for dim, n in enumerate(mat.shape):
+            if dim in axis:
+                assert n == len(idx)
+                indices = idx
+            else:
+                indices = np.arange(n)
+            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
+            fancy_index.append(indices.reshape(idx_shape))
+        return mat[tuple(fancy_index)]
+
+    def unsort_orbitals(self, sorted_mat, axis=[]):
+        ''' Transform given axis of a matrix into sorted AO '''
+        idx = self.ao_idx
+        shape_ones = (1,) * sorted_mat.ndim
+        fancy_index = []
+        for dim, n in enumerate(sorted_mat.shape):
+            if dim in axis:
+                assert n == len(idx)
+                indices = idx
+            else:
+                indices = np.arange(n)
+            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
+            fancy_index.append(indices.reshape(idx_shape))
+        mat = cp.empty_like(sorted_mat)
+        mat[tuple(fancy_index)] = sorted_mat
+        return mat
+
+    def apply_coeff_C_mat_CT(self, spherical_matrix):
+        spherical_matrix = cp.asarray(spherical_matrix)
+        spherical_matrix_ndim = spherical_matrix.ndim
+        if spherical_matrix_ndim == 2:
+            spherical_matrix = spherical_matrix[None]
+        counts = spherical_matrix.shape[0]
+        n_spherical = self.mol.nao
+        assert spherical_matrix.shape[1] == n_spherical
+        assert spherical_matrix.shape[2] == n_spherical
+        n_cartesian = self.sorted_mol.nao
+
+        l_ctr_count = np.asarray(self.l_ctr_offsets[1:] - self.l_ctr_offsets[:-1], dtype = np.int32)
+        l_ctr_l = np.asarray(self.uniq_l_ctr[:,0].copy(), dtype = np.int32)
+        self.l_ctr_pad_counts = np.asarray(self.l_ctr_pad_counts, dtype = np.int32)
+        stream = cp.cuda.get_current_stream()
+
+        # ref = cp.einsum("ij,qjk,kl->qil", self.coeff, spherical_matrix, self.coeff.T)
+
+        spherical_matrix = self.sort_orbitals(spherical_matrix, [1,2])
+        out = cp.zeros((counts, n_cartesian, n_cartesian), order = "C")
+        for i_dm in range(counts):
+            libgint.cart2sph_C_mat_CT_with_padding(
+                ctypes.cast(stream.ptr, ctypes.c_void_p),
+                ctypes.cast(out[i_dm].data.ptr, ctypes.c_void_p),
+                ctypes.cast(spherical_matrix[i_dm].data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_cartesian),
+                ctypes.c_int(n_spherical),
+                ctypes.c_int(l_ctr_l.shape[0]),
+                l_ctr_l.ctypes.data_as(ctypes.c_void_p),
+                l_ctr_count.ctypes.data_as(ctypes.c_void_p),
+                self.l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
+                ctypes.c_bool(self.mol.cart),
+            )
+
+        if spherical_matrix_ndim == 2:
+            out = out[0]
+        return out
+
+    def apply_coeff_CT_mat_C(self, cartesian_matrix):
+        cartesian_matrix = cp.asarray(cartesian_matrix)
+        cartesian_matrix_ndim = cartesian_matrix.ndim
+        if cartesian_matrix_ndim == 2:
+            cartesian_matrix = cartesian_matrix[None]
+        counts = cartesian_matrix.shape[0]
+        n_cartesian = self.sorted_mol.nao
+        assert cartesian_matrix.shape[1] == n_cartesian
+        assert cartesian_matrix.shape[2] == n_cartesian
+        n_spherical = self.mol.nao
+
+        l_ctr_count = np.asarray(self.l_ctr_offsets[1:] - self.l_ctr_offsets[:-1], dtype = np.int32)
+        l_ctr_l = np.asarray(self.uniq_l_ctr[:,0].copy(), dtype = np.int32)
+        self.l_ctr_pad_counts = np.asarray(self.l_ctr_pad_counts, dtype = np.int32)
+        stream = cp.cuda.get_current_stream()
+
+        # ref = cp.einsum("ij,qjk,kl->qil", self.coeff.T, cartesian_matrix, self.coeff)
+
+        out = cp.empty((counts, n_spherical, n_spherical), order = "C")
+        for i_dm in range(counts):
+            libgint.cart2sph_CT_mat_C_with_padding(
+                ctypes.cast(stream.ptr, ctypes.c_void_p),
+                ctypes.cast(cartesian_matrix[i_dm].data.ptr, ctypes.c_void_p),
+                ctypes.cast(out[i_dm].data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_cartesian),
+                ctypes.c_int(n_spherical),
+                ctypes.c_int(l_ctr_l.shape[0]),
+                l_ctr_l.ctypes.data_as(ctypes.c_void_p),
+                l_ctr_count.ctypes.data_as(ctypes.c_void_p),
+                self.l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
+                ctypes.c_bool(self.mol.cart),
+            )
+        out = self.unsort_orbitals(out, [1,2])
+
+        if cartesian_matrix_ndim == 2:
+            out = out[0]
+        return out
+
+    def apply_coeff_C_mat(self, right_matrix):
+        right_matrix = cp.asarray(right_matrix)
+        assert right_matrix.ndim == 2
+        assert right_matrix.shape[0] == self.mol.nao
+        n_cartesian = self.sorted_mol.nao
+        n_second = right_matrix.shape[1]
+
+        l_ctr_count = np.asarray(self.l_ctr_offsets[1:] - self.l_ctr_offsets[:-1], dtype = np.int32)
+        l_ctr_l = np.asarray(self.uniq_l_ctr[:,0].copy(), dtype = np.int32)
+        self.l_ctr_pad_counts = np.asarray(self.l_ctr_pad_counts, dtype = np.int32)
+        stream = cp.cuda.get_current_stream()
+
+        # ref = self.coeff @ right_matrix
+
+        right_matrix = self.sort_orbitals(right_matrix, [0])
+        right_matrix = cp.ascontiguousarray(right_matrix)
+
+        out = cp.zeros((n_cartesian, n_second), order = "C")
+        libgint.cart2sph_C_mat_with_padding(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(right_matrix.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n_second),
+            ctypes.c_int(l_ctr_l.shape[0]),
+            l_ctr_l.ctypes.data_as(ctypes.c_void_p),
+            l_ctr_count.ctypes.data_as(ctypes.c_void_p),
+            self.l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
+            ctypes.c_bool(self.mol.cart),
+        )
+
+        return out
 
     @property
     def q_cond(self):
@@ -220,6 +367,33 @@ class _VHFOpt:
                     ao_loc.data.ptr)
                 rys_envs._env_ref_holder = (_atm, _bas, _env, ao_loc)
         return self._rys_envs[device_id]
+
+    @property
+    def coeff(self):
+        coeff = np.zeros((self.sorted_mol.nao, self.mol.nao))
+
+        l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
+        if self.mol.cart:
+            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
+        else:
+            cart2sph_per_l = [gto.mole.cart2sph(l, normalized = "sp") for l in range(l_max + 1)]
+        i_spherical_offset = 0
+        i_cartesian_offset = 0
+        for i, (l, _) in enumerate(self.uniq_l_ctr):
+            cart2sph = cart2sph_per_l[l]
+            l_ctr_count = self.l_ctr_offsets[i + 1] - self.l_ctr_offsets[i]
+            l_ctr_pad_count = self.l_ctr_pad_counts[i]
+            for _ in range(l_ctr_count - l_ctr_pad_count):
+                coeff[i_cartesian_offset : i_cartesian_offset + cart2sph.shape[0],
+                      i_spherical_offset : i_spherical_offset + cart2sph.shape[1]] = cart2sph
+                i_cartesian_offset += cart2sph.shape[0]
+                i_spherical_offset += cart2sph.shape[1]
+            for _ in range(l_ctr_pad_count):
+                i_cartesian_offset += cart2sph.shape[0]
+        assert len(self.ao_idx) == self.mol.nao
+        coeff = self.unsort_orbitals(coeff, axis = [1])
+        coeff = cp.asarray(coeff)
+        return coeff
 
     def get_jk(self, dms, hermi, with_j, with_k, verbose):
         '''Build JK for the sorted_mol. Density matrices dms and the return JK

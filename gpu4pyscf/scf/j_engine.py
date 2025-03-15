@@ -61,13 +61,13 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
 
     mol = vhfopt.sorted_mol
     nbas = mol.nbas
-    nao, nao_orig = vhfopt.coeff.shape
+    nao, nao_orig = vhfopt.decontract_coeff.shape
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
     n_dm = dms.shape[0]
     assert n_dm == 1
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = sandwich_dot(dms, vhfopt.coeff.T)
+    dms = sandwich_dot(dms, vhfopt.decontract_coeff.T)
     dms = cp.asarray(dms, order='C')
     if hermi != 1:
         dms = transpose_sum(dms)
@@ -186,7 +186,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
         vj.ctypes, vj_xyz.ctypes, ao_loc.ctypes, pair_loc.ctypes,
         mol._bas.ctypes, ctypes.c_int(mol.nbas), _env.ctypes)
     #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
-    vj = sandwich_dot(vj, vhfopt.coeff)
+    vj = sandwich_dot(vj, vhfopt.decontract_coeff)
     vj = transpose_sum(vj)
     vj = vj.reshape(dm.shape)
     log.timer('vj', *cput0)
@@ -199,10 +199,11 @@ class _VHFOpt(jk._VHFOpt):
 
     def build(self, group_size=None, verbose=None):
         orig_mol = self.mol
-        self.mol, coeff = orig_mol.decontract_basis(to_cart=True, aggregate=True)
+        self.mol, decontract_coeff = orig_mol.decontract_basis(to_cart=True, aggregate=True)
         jk._VHFOpt.build(self, group_size, verbose)
+        jk_coeff = self.coeff
         self.mol = orig_mol
-        self.coeff = self.coeff.dot(cp.asarray(coeff))
+        self.decontract_coeff = jk_coeff.dot(cp.asarray(decontract_coeff))
         return self
 
 def _md_j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
