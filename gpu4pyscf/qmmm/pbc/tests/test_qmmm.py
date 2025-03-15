@@ -86,12 +86,12 @@ class KnownValues(unittest.TestCase):
     def test_rks_pbe0(self):
         print('-------- RKS PBE0 -------------')
         e_tot, g_qm, g_mm = run_dft('PBE0')
-        assert np.allclose(e_tot, -76.00178807)
-        assert np.allclose(g_qm, np.array([[ 0.03002572,  0.13947702, -0.09234864],
-                                           [-0.00462601, -0.04602809,  0.02750759],
-                                           [-0.01821532, -0.18473378,  0.04189843]]))
-        assert np.allclose(g_mm, np.array([[-0.00914559,  0.08992359,  0.02114633],
-                                           [ 0.00196155,  0.00136132,  0.00179565]]))
+        assert abs(e_tot - -76.00178807) < 1e-7
+        assert abs(g_qm - np.array([[ 0.03002572,  0.13947702, -0.09234864],
+                                    [-0.00462601, -0.04602809,  0.02750759],
+                                    [-0.01821532, -0.18473378, 0.04189843]])).max() < 1e-6
+        assert abs(g_mm - np.array([[-0.00914559,  0.08992359,  0.02114633],
+                                    [ 0.00196155,  0.00136132, 0.00179565]])).max() < 1e-6
 
 if __name__ == "__main__":
     print("Full Tests for QMMM PBC")

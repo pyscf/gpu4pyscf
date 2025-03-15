@@ -71,6 +71,8 @@ def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
     with cp.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
+        init_constant(mol)
+
         dms = cp.asarray(dms)
 
         tile_q_ptr = ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p)
@@ -83,7 +85,7 @@ def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
 
         ao_loc = mol.ao_loc
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-        log_max_dm = dm_cond.max()
+        log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(vhfopt.direct_scf_tol)
         tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
                                                  log_cutoff-log_max_dm)
@@ -154,8 +156,6 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
     dms = cp.asarray(dms, order='C')
-
-    init_constant(mol)
 
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]

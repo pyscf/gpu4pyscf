@@ -1,5 +1,6 @@
 from . import rks
 from .rks import RKS, KohnShamDFT
+from .rks_lowmem import RKS as LRKS
 from .uks import UKS
 from .gks import GKS
 from .roks import ROKS
