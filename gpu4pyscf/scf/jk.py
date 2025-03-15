@@ -45,6 +45,7 @@ libvhf_rys.RYS_init_constant.restype = ctypes.c_int
 libvhf_rys.RYS_init_rysj_constant.restype = ctypes.c_int
 libvhf_rys.cuda_version.restype = ctypes.c_int
 CUDA_VERSION = libvhf_rys.cuda_version()
+libgint = load_library('libgint')
 
 PTR_BAS_COORD = 7
 LMAX = 4
@@ -225,12 +226,29 @@ class _VHFOpt:
         assert spherical_matrix.shape[2] == n_spherical
         n_cartesian = self.sorted_mol.nao
 
-        coeff = self.coeff
-        out = cp.zeros((counts, n_cartesian, n_cartesian))
-        for i_dm in range(counts):
-            out[i_dm] = coeff @ spherical_matrix[i_dm] @ coeff.T
+        l_ctr_count = np.asarray(self.l_ctr_offsets[1:] - self.l_ctr_offsets[:-1], dtype = np.int32)
+        l_ctr_l = np.asarray(self.uniq_l_ctr[:,0].copy(), dtype = np.int32)
+        self.l_ctr_pad_counts = np.asarray(self.l_ctr_pad_counts, dtype = np.int32)
+        stream = cp.cuda.get_current_stream()
 
-        coeff = None
+        # ref = cp.einsum("ij,qjk,kl->qil", self.coeff, spherical_matrix, self.coeff.T)
+
+        spherical_matrix = self.sort_orbitals(spherical_matrix, [1,2])
+        out = cp.zeros((counts, n_cartesian, n_cartesian), order = "C")
+        for i_dm in range(counts):
+            libgint.cart2sph_C_mat_CT_with_padding(
+                ctypes.cast(stream.ptr, ctypes.c_void_p),
+                ctypes.cast(out[i_dm].data.ptr, ctypes.c_void_p),
+                ctypes.cast(spherical_matrix[i_dm].data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_cartesian),
+                ctypes.c_int(n_spherical),
+                ctypes.c_int(l_ctr_l.shape[0]),
+                l_ctr_l.ctypes.data_as(ctypes.c_void_p),
+                l_ctr_count.ctypes.data_as(ctypes.c_void_p),
+                self.l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
+                ctypes.c_bool(self.mol.cart),
+            )
+
         if spherical_matrix_ndim == 2:
             out = out[0]
         return out
@@ -246,12 +264,29 @@ class _VHFOpt:
         assert cartesian_matrix.shape[2] == n_cartesian
         n_spherical = self.mol.nao
 
-        coeff = self.coeff
-        out = cp.zeros((counts, n_spherical, n_spherical))
-        for i_dm in range(counts):
-            out[i_dm] = coeff.T @ cartesian_matrix[i_dm] @ coeff
+        l_ctr_count = np.asarray(self.l_ctr_offsets[1:] - self.l_ctr_offsets[:-1], dtype = np.int32)
+        l_ctr_l = np.asarray(self.uniq_l_ctr[:,0].copy(), dtype = np.int32)
+        self.l_ctr_pad_counts = np.asarray(self.l_ctr_pad_counts, dtype = np.int32)
+        stream = cp.cuda.get_current_stream()
 
-        coeff = None
+        # ref = cp.einsum("ij,qjk,kl->qil", self.coeff.T, cartesian_matrix, self.coeff)
+
+        out = cp.empty((counts, n_spherical, n_spherical), order = "C")
+        for i_dm in range(counts):
+            libgint.cart2sph_CT_mat_C_with_padding(
+                ctypes.cast(stream.ptr, ctypes.c_void_p),
+                ctypes.cast(cartesian_matrix[i_dm].data.ptr, ctypes.c_void_p),
+                ctypes.cast(out[i_dm].data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_cartesian),
+                ctypes.c_int(n_spherical),
+                ctypes.c_int(l_ctr_l.shape[0]),
+                l_ctr_l.ctypes.data_as(ctypes.c_void_p),
+                l_ctr_count.ctypes.data_as(ctypes.c_void_p),
+                self.l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
+                ctypes.c_bool(self.mol.cart),
+            )
+        out = self.unsort_orbitals(out, [1,2])
+
         if cartesian_matrix_ndim == 2:
             out = out[0]
         return out
@@ -260,7 +295,33 @@ class _VHFOpt:
         right_matrix = cp.asarray(right_matrix)
         assert right_matrix.ndim == 2
         assert right_matrix.shape[0] == self.mol.nao
-        return self.coeff @ right_matrix
+        n_cartesian = self.sorted_mol.nao
+        n_second = right_matrix.shape[1]
+
+        l_ctr_count = np.asarray(self.l_ctr_offsets[1:] - self.l_ctr_offsets[:-1], dtype = np.int32)
+        l_ctr_l = np.asarray(self.uniq_l_ctr[:,0].copy(), dtype = np.int32)
+        self.l_ctr_pad_counts = np.asarray(self.l_ctr_pad_counts, dtype = np.int32)
+        stream = cp.cuda.get_current_stream()
+
+        # ref = self.coeff @ right_matrix
+
+        right_matrix = self.sort_orbitals(right_matrix, [0])
+        right_matrix = cp.ascontiguousarray(right_matrix)
+
+        out = cp.zeros((n_cartesian, n_second), order = "C")
+        libgint.cart2sph_C_mat_with_padding(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(right_matrix.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n_second),
+            ctypes.c_int(l_ctr_l.shape[0]),
+            l_ctr_l.ctypes.data_as(ctypes.c_void_p),
+            l_ctr_count.ctypes.data_as(ctypes.c_void_p),
+            self.l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
+            ctypes.c_bool(self.mol.cart),
+        )
+
+        return out
 
     @property
     def q_cond(self):
@@ -309,7 +370,6 @@ class _VHFOpt:
 
     @property
     def coeff(self):
-        print("Here")
         coeff = np.zeros((self.sorted_mol.nao, self.mol.nao))
 
         l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
