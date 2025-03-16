@@ -88,6 +88,7 @@ void type2_cart_kernel(double *gctr,
 
     type2_facs_omega(omegai, LI, LC, rca);
     type2_facs_omega(omegaj, LJ, LC, rcb);
+    __syncthreads();
 
     const int nfi = (LI+1) * (LI+2) / 2;
     const int nfj = (LJ+1) * (LJ+2) / 2;
@@ -111,7 +112,7 @@ void type2_cart_kernel(double *gctr,
     for (int m = 0; m < LCC1; m++){
         type2_ang(angi, LI, LC, fi, omegai+m);
         type2_ang(angj, LJ, LC, fj, omegaj+m);
-
+        __syncthreads();
         for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
             const int i = ij%nfi;
             const int j = ij/nfi;

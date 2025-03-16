@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
-template <int l> __device__
-static void ang_nuc_l(double *omega, double rx, double ry, double rz){
+/*
+template <int l> __device__ __host__
+Cartesian<(l+1)*(l+2)/2> ang_nuc_l(double rx, double ry, double rz){
     double rxPow[l+1], ryPow[l+1], rzPow[l+1];
     rxPow[0] = ryPow[0] = rzPow[0] = 1.0;
     for (int i = 1; i <= l; i++) {
@@ -35,24 +36,41 @@ static void ang_nuc_l(double *omega, double rx, double ry, double rz){
 
     double c[2*l+1];
     cart2sph(c, l, g);
-    sph2cart(omega, l, c);
+    Cartesian<(l+1)*(l+2)/2> omega;
+    sph2cart(omega.data, l, c);
+    return omega;
 }
+*/
 
+/*
 __device__
-static void ang_nuc_part_l(double *omega, int l, double rx, double ry, double rz){
-    if (l == 0) ang_nuc_l<0>(omega, rx, ry, rz);
-    else if (l == 1) ang_nuc_l<1>(omega, rx, ry, rz);
-    else if (l == 2) ang_nuc_l<2>(omega, rx, ry, rz);
-    else if (l == 3) ang_nuc_l<3>(omega, rx, ry, rz);
-    else if (l == 4) ang_nuc_l<4>(omega, rx, ry, rz);
-    else if (l == 5) ang_nuc_l<5>(omega, rx, ry, rz);
-    else if (l == 6) ang_nuc_l<6>(omega, rx, ry, rz);
-    else if (l == 7) ang_nuc_l<7>(omega, rx, ry, rz);
-    else if (l == 8) ang_nuc_l<8>(omega, rx, ry, rz);
-    else if (l == 9) ang_nuc_l<9>(omega, rx, ry, rz);
-    else if (l == 10) ang_nuc_l<10>(omega, rx, ry, rz);
-    else printf("l = %d is not supported\n", l);
+static void ang_nuc_part_l(int l, double rx, double ry, double rz){
+    switch(l){
+        case 0:{
+            Cartesian<1> omega;
+            omega.data[0] = 0.282094791773878143 * 0.282094791773878143;
+            return omega;
+        }
+        case 1: {
+            Cartesian<3> omega;
+            omega.data[0] = 0.488602511902919921 * 0.488602511902919921 * rx;
+            omega.data[1] = 0.488602511902919921 * 0.488602511902919921 * ry;
+            omega.data[2] = 0.488602511902919921 * 0.488602511902919921 * rz;
+            return omega;
+        }
+        case 2: {Cartesian<6> omega = ang_nuc_l<2>(rx, ry, rz); return omega;}
+        case 3: {auto omega = ang_nuc_l<3>(rx, ry, rz); return omega;}
+        case 4: {auto omega = ang_nuc_l<4>(rx, ry, rz); return omega;}
+        case 5: {auto omega = ang_nuc_l<5>(rx, ry, rz); return omega;}
+        case 6: {auto omega = ang_nuc_l<6>(rx, ry, rz); return omega;}
+        case 7: {auto omega = ang_nuc_l<7>(rx, ry, rz); return omega;}
+        case 8: {auto omega = ang_nuc_l<8>(rx, ry, rz); return omega;}
+        case 9: {auto omega = ang_nuc_l<9>(rx, ry, rz); return omega;}
+        case 10: {auto omega = ang_nuc_l<10>(rx, ry, rz); return omega;}
+        default: printf("l = %d is not supported\n", l);
+    }
 }
+*/
 
 /*
 __device__
@@ -123,7 +141,7 @@ static void ang_nuc_part(double *omega_cum, int l, double rx, double ry, double 
 }
 */
 __device__
-double rad_part(int ish, const int *ecpbas, const double *env){
+double rad_part(const int ish, const int *ecpbas, const double *env){
     const int npk = ecpbas[ish*BAS_SLOTS+NPRIM_OF];
     const int r_order = ecpbas[ish*BAS_SLOTS+RADI_POWER];
     const int exp_ptr = ecpbas[ish*BAS_SLOTS+PTR_EXP];
@@ -200,7 +218,7 @@ void block_reduce(double val, double *d_out) {
     __syncthreads();
 }
 
-__device__ 
+__device__ __forceinline__
 void set_shared_memory(double *smem, const int size) {
     for (int i = threadIdx.x; i < size; i += blockDim.x) {
         smem[i] = 0.0;

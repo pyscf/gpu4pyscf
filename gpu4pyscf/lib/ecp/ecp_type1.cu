@@ -50,6 +50,62 @@ void type1_rad_part(double* __restrict__ rad_all, const int LIJ, double k, doubl
     __syncthreads();
 }
 
+template <int l> __device__
+double type1_ang_nuc_l(const int i, const int j, const int k, double *unitr){
+    double rxPow[l+1], ryPow[l+1], rzPow[l+1];
+    rxPow[0] = ryPow[0] = rzPow[0] = 1.0;
+    for (int li = 1; li <= l; li++) {
+        rxPow[li] = rxPow[li - 1] * unitr[0];
+        ryPow[li] = ryPow[li - 1] * unitr[1];
+        rzPow[li] = rzPow[li - 1] * unitr[2];
+    }
+
+    double g[(l+1)*(l+2)/2];
+    int index = 0;
+    for (int li = l; li >= 0; li--) {
+        for (int lj = l - li; lj >= 0; lj--) {
+            int lk = l - li - lj;
+            g[index++] = rxPow[li] * ryPow[lj] * rzPow[lk];
+        }
+    }
+
+    double c[2*l+1];
+    cart2sph(c, l, g);
+    double nuc[(l+1)*(l+2)/2];
+    sph2cart(nuc, l, c);
+
+    double tmp = 0.0;
+    for (int n = 0; n < (l+1)*(l+2)/2; n++){
+        const int ps = _cart_pow_y[n];
+        const int pt = _cart_pow_z[n];
+        const int pr = l - ps - pt;
+        if ((i+pr)%2 || (j+ps)%2 || (k+pt)%2){
+            continue;
+        }
+        tmp += nuc[n] * int_unit_xyz(i+pr, j+ps, k+pt);
+    }
+    return tmp;
+}
+
+__device__ 
+double type1_ang_nuc(int lmb, int i, int j, int k, double *unitr){
+    //auto nuc = ang_nuc_part_l(lmb, unitr[0], unitr[1], unitr[2]);
+    switch(lmb){
+        case 0: {return type1_ang_nuc_l<0>(i, j, k, unitr);}
+        case 1: {return type1_ang_nuc_l<1>(i, j, k, unitr);}
+        case 2: {return type1_ang_nuc_l<2>(i, j, k, unitr);}
+        case 3: {return type1_ang_nuc_l<3>(i, j, k, unitr);}
+        case 4: {return type1_ang_nuc_l<4>(i, j, k, unitr);}
+        case 5: {return type1_ang_nuc_l<5>(i, j, k, unitr);}
+        case 6: {return type1_ang_nuc_l<6>(i, j, k, unitr);}
+        case 7: {return type1_ang_nuc_l<7>(i, j, k, unitr);}
+        case 8: {return type1_ang_nuc_l<8>(i, j, k, unitr);}
+        case 9: {return type1_ang_nuc_l<9>(i, j, k, unitr);}
+        case 10: {return type1_ang_nuc_l<10>(i, j, k, unitr);}
+        default: { printf("l = %d is not supported\n", lmb);}
+    }
+}
+
 __device__
 void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, double fac)
 {
@@ -83,19 +139,8 @@ void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, d
         // need_even to ensure (a+b+c+lmb) is even
         const int need_even = (i+j+k)%2;
         for (int lmb = need_even; lmb <= LIJ; lmb+=2) {
-            double tmp = 0;
-            //double *pnuc = omega_nuc + _offset_cart[lmb];
-            double pnuc[NF_MAX_LIJ];
-            ang_nuc_part_l(pnuc, lmb, unitr[0], unitr[1], unitr[2]);
-            for (int n = 0; n < (lmb+1)*(lmb+2)/2; n++){
-                const int ps = _cart_pow_y[n];
-                const int pt = _cart_pow_z[n];
-                const int pr = lmb - ps - pt;
-                if ((i+pr)%2 || (j+ps)%2 || (k+pt)%2){
-                    continue;
-                }
-                tmp += pnuc[n] * int_unit_xyz(i+pr, j+ps, k+pt);
-            }
+            double tmp = type1_ang_nuc(lmb, i, j, k, unitr);
+
             //*pout += fac * prad[lmb] * tmp;
             atomicAdd(pout, fac*prad[lmb]*tmp);
         }
