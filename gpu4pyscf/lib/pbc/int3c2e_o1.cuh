@@ -44,18 +44,12 @@ typedef struct {
     uint8_t lj;
     uint8_t lk;
     uint8_t nroots;
-    uint8_t nfi;
     uint8_t nfij;
     uint8_t nfk;
-    uint8_t iprim;
-    uint8_t jprim;
     uint8_t kprim;
-    uint8_t stride_i;
     uint8_t stride_j;
     uint8_t stride_k;
     uint8_t g_size;
-    uint16_t nrow;
-    uint16_t ncol;
     uint16_t naux;
     uint16_t nksh;
     uint16_t ish0;
@@ -63,9 +57,10 @@ typedef struct {
     uint16_t ksh0;
     int npairs_ij;
     int *bas_ij_idx;
+    int *ao_pair_loc;
+    int *img_offsets; // offset img_idx for each shell-pair
 // TODO: change to uint16_t
     int *img_idx; // indices of img_coords in each shell-pair
-    int *img_offsets; // offset img_idx for each shell-pair
 } PBCInt3c2eBounds;
 
 #ifdef __CUDACC__
