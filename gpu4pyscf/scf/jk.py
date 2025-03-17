@@ -131,6 +131,7 @@ class _VHFOpt:
         self._q_cond = {}
         self._tile_q_cond = {}
         self._s_estimator = {}
+        self._cupy_ao_idx = {}
 
     def build(self, group_size=None, verbose=None):
         mol = self.mol
@@ -229,11 +230,11 @@ class _VHFOpt:
         l_ctr_count = np.asarray(self.l_ctr_offsets[1:] - self.l_ctr_offsets[:-1], dtype = np.int32)
         l_ctr_l = np.asarray(self.uniq_l_ctr[:,0].copy(), dtype = np.int32)
         self.l_ctr_pad_counts = np.asarray(self.l_ctr_pad_counts, dtype = np.int32)
+        cupy_ao_idx = self.cupy_ao_idx
         stream = cp.cuda.get_current_stream()
 
         # ref = cp.einsum("ij,qjk,kl->qil", self.coeff, spherical_matrix, self.coeff.T)
 
-        spherical_matrix = self.sort_orbitals(spherical_matrix, [1,2])
         out = cp.zeros((counts, n_cartesian, n_cartesian), order = "C")
         for i_dm in range(counts):
             libgint.cart2sph_C_mat_CT_with_padding(
@@ -246,6 +247,7 @@ class _VHFOpt:
                 l_ctr_l.ctypes.data_as(ctypes.c_void_p),
                 l_ctr_count.ctypes.data_as(ctypes.c_void_p),
                 self.l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
+                ctypes.cast(cupy_ao_idx.data.ptr, ctypes.c_void_p),
                 ctypes.c_bool(self.mol.cart),
             )
 
@@ -267,6 +269,7 @@ class _VHFOpt:
         l_ctr_count = np.asarray(self.l_ctr_offsets[1:] - self.l_ctr_offsets[:-1], dtype = np.int32)
         l_ctr_l = np.asarray(self.uniq_l_ctr[:,0].copy(), dtype = np.int32)
         self.l_ctr_pad_counts = np.asarray(self.l_ctr_pad_counts, dtype = np.int32)
+        cupy_ao_idx = self.cupy_ao_idx
         stream = cp.cuda.get_current_stream()
 
         # ref = cp.einsum("ij,qjk,kl->qil", self.coeff.T, cartesian_matrix, self.coeff)
@@ -283,9 +286,9 @@ class _VHFOpt:
                 l_ctr_l.ctypes.data_as(ctypes.c_void_p),
                 l_ctr_count.ctypes.data_as(ctypes.c_void_p),
                 self.l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
+                ctypes.cast(cupy_ao_idx.data.ptr, ctypes.c_void_p),
                 ctypes.c_bool(self.mol.cart),
             )
-        out = self.unsort_orbitals(out, [1,2])
 
         if cartesian_matrix_ndim == 2:
             out = out[0]
@@ -301,11 +304,11 @@ class _VHFOpt:
         l_ctr_count = np.asarray(self.l_ctr_offsets[1:] - self.l_ctr_offsets[:-1], dtype = np.int32)
         l_ctr_l = np.asarray(self.uniq_l_ctr[:,0].copy(), dtype = np.int32)
         self.l_ctr_pad_counts = np.asarray(self.l_ctr_pad_counts, dtype = np.int32)
+        cupy_ao_idx = self.cupy_ao_idx
         stream = cp.cuda.get_current_stream()
 
         # ref = self.coeff @ right_matrix
 
-        right_matrix = self.sort_orbitals(right_matrix, [0])
         right_matrix = cp.ascontiguousarray(right_matrix)
 
         out = cp.zeros((n_cartesian, n_second), order = "C")
@@ -318,6 +321,7 @@ class _VHFOpt:
             l_ctr_l.ctypes.data_as(ctypes.c_void_p),
             l_ctr_count.ctypes.data_as(ctypes.c_void_p),
             self.l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
+            ctypes.cast(cupy_ao_idx.data.ptr, ctypes.c_void_p),
             ctypes.c_bool(self.mol.cart),
         )
 
@@ -350,6 +354,15 @@ class _VHFOpt:
                 s_cpu = self.s_estimator_cpu
                 self._s_estimator[device_id] = cp.asarray(s_cpu)
         return self._s_estimator[device_id]
+
+    @property
+    def cupy_ao_idx(self):
+        device_id = cp.cuda.Device().id
+        if device_id not in self._cupy_ao_idx:
+            with cp.cuda.Device(device_id), _streams[device_id]:
+                ao_idx_cpu = self.ao_idx
+                self._cupy_ao_idx[device_id] = cp.asarray(ao_idx_cpu, dtype = cp.int32)
+        return self._cupy_ao_idx[device_id]
 
     @property
     def rys_envs(self):

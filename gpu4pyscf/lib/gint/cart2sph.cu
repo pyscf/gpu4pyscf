@@ -503,7 +503,8 @@ static void left_sph2cart_inplace(double* cartesian_matrix, const int n_ao_carte
 template <int L>
 __global__
 static void left_sph2cart(double* cartesian_matrix, const double* spherical_matrix,
-                          const int n_right, const int n_bas, const int i_cartesian_offset, const int i_spherical_offset)
+                          const int n_right, const int n_bas, const int i_cartesian_offset, const int i_spherical_offset,
+                          const int* d_ao_idx)
 {
     constexpr int n_cartesian_of_l = (L + 1) * (L + 2) / 2;
     constexpr int n_spherical_of_l = 2 * L + 1;
@@ -516,7 +517,7 @@ static void left_sph2cart(double* cartesian_matrix, const double* spherical_matr
 
     double spherical_cache[n_spherical_of_l];
     for (int i = 0; i < n_spherical_of_l; i++)
-        spherical_cache[i] = spherical_matrix[(i_spherical_offset + i_bas * n_spherical_of_l + i) * n_right + i_ao];
+        spherical_cache[i] = spherical_matrix[d_ao_idx[i_spherical_offset + i_bas * n_spherical_of_l + i] * n_right + i_ao];
 
     sph2cart<L>(cartesian_matrix + (i_cartesian_offset + i_bas * n_cartesian_of_l) * n_right + i_ao, spherical_cache, n_right);
 }
@@ -565,7 +566,8 @@ __global__
 static void copy_spherical_cart2sph(const double* cartesian_matrix, double* spherical_matrix,
                                     const int n_ao_cartesian, const int n_ao_spherical,
                                     const int l_i, const int n_bas_i, const int cartesian_offset_i, const int spherical_offset_i,
-                                    const int l_j, const int n_bas_j, const int cartesian_offset_j, const int spherical_offset_j)
+                                    const int l_j, const int n_bas_j, const int cartesian_offset_j, const int spherical_offset_j,
+                                    const int* d_ao_idx)
 {
     const int i_bas = blockIdx.x * blockDim.x + threadIdx.x;
     const int j_bas = blockIdx.y * blockDim.y + threadIdx.y;
@@ -580,8 +582,8 @@ static void copy_spherical_cart2sph(const double* cartesian_matrix, double* sphe
 
     for (int i_spherical = 0; i_spherical < n_spherical_of_l_i; i_spherical++) {
         for (int j_spherical = 0; j_spherical < n_spherical_of_l_j; j_spherical++) {
-            spherical_matrix[(spherical_offset_i + i_bas * n_spherical_of_l_i + i_spherical) * n_ao_spherical
-                           + (spherical_offset_j + j_bas * n_spherical_of_l_j + j_spherical)]
+            spherical_matrix[d_ao_idx[spherical_offset_i + i_bas * n_spherical_of_l_i + i_spherical] * n_ao_spherical
+                           + d_ao_idx[spherical_offset_j + j_bas * n_spherical_of_l_j + j_spherical]]
             = cartesian_matrix[(cartesian_offset_i + i_bas * n_cartesian_of_l_i + i_spherical) * n_ao_cartesian
                              + (cartesian_offset_j + j_bas * n_cartesian_of_l_j + j_spherical)];
         }
@@ -592,7 +594,8 @@ __global__
 static void copy_spherical_sph2cart(double* cartesian_matrix, const double* spherical_matrix,
                                     const int n_ao_cartesian, const int n_ao_spherical,
                                     const int l_i, const int n_bas_i, const int cartesian_offset_i, const int spherical_offset_i,
-                                    const int l_j, const int n_bas_j, const int cartesian_offset_j, const int spherical_offset_j)
+                                    const int l_j, const int n_bas_j, const int cartesian_offset_j, const int spherical_offset_j,
+                                    const int* d_ao_idx)
 {
     const int i_bas = blockIdx.x * blockDim.x + threadIdx.x;
     const int j_bas = blockIdx.y * blockDim.y + threadIdx.y;
@@ -609,8 +612,8 @@ static void copy_spherical_sph2cart(double* cartesian_matrix, const double* sphe
         for (int j_spherical = 0; j_spherical < n_spherical_of_l_j; j_spherical++) {
             cartesian_matrix[(cartesian_offset_i + i_bas * n_cartesian_of_l_i + i_spherical) * n_ao_cartesian
                            + (cartesian_offset_j + j_bas * n_cartesian_of_l_j + j_spherical)]
-            = spherical_matrix[(spherical_offset_i + i_bas * n_spherical_of_l_i + i_spherical) * n_ao_spherical
-                             + (spherical_offset_j + j_bas * n_spherical_of_l_j + j_spherical)];
+            = spherical_matrix[d_ao_idx[spherical_offset_i + i_bas * n_spherical_of_l_i + i_spherical] * n_ao_spherical
+                             + d_ao_idx[spherical_offset_j + j_bas * n_spherical_of_l_j + j_spherical]];
         }
     }
 }
@@ -619,7 +622,8 @@ __global__
 static void copy_cartesian_pad_to_unpad(const double* cartesian_matrix, double* spherical_matrix,
                                         const int n_ao_cartesian, const int n_ao_spherical,
                                         const int l_i, const int n_bas_i, const int i_pad_offset, const int i_unpad_offset,
-                                        const int l_j, const int n_bas_j, const int j_pad_offset, const int j_unpad_offset)
+                                        const int l_j, const int n_bas_j, const int j_pad_offset, const int j_unpad_offset,
+                                        const int* d_ao_idx)
 {
     const int i_bas = blockIdx.x * blockDim.x + threadIdx.x;
     const int j_bas = blockIdx.y * blockDim.y + threadIdx.y;
@@ -632,8 +636,8 @@ static void copy_cartesian_pad_to_unpad(const double* cartesian_matrix, double* 
 
     for (int i = 0; i < n_cartesian_of_l_i; i++) {
         for (int j = 0; j < n_cartesian_of_l_j; j++) {
-            spherical_matrix[(i_unpad_offset + i_bas * n_cartesian_of_l_i + i) * n_ao_spherical
-                           + (j_unpad_offset + j_bas * n_cartesian_of_l_j + j)]
+            spherical_matrix[d_ao_idx[i_unpad_offset + i_bas * n_cartesian_of_l_i + i] * n_ao_spherical
+                           + d_ao_idx[j_unpad_offset + j_bas * n_cartesian_of_l_j + j]]
             = cartesian_matrix[(i_pad_offset + i_bas * n_cartesian_of_l_i + i) * n_ao_cartesian
                              + (j_pad_offset + j_bas * n_cartesian_of_l_j + j)];
         }
@@ -644,7 +648,8 @@ __global__
 static void copy_cartesian_unpad_to_pad(double* cartesian_matrix, const double* spherical_matrix,
                                         const int n_ao_cartesian, const int n_ao_spherical,
                                         const int l_i, const int n_bas_i, const int i_pad_offset, const int i_unpad_offset,
-                                        const int l_j, const int n_bas_j, const int j_pad_offset, const int j_unpad_offset)
+                                        const int l_j, const int n_bas_j, const int j_pad_offset, const int j_unpad_offset,
+                                        const int* d_ao_idx)
 {
     const int i_bas = blockIdx.x * blockDim.x + threadIdx.x;
     const int j_bas = blockIdx.y * blockDim.y + threadIdx.y;
@@ -659,10 +664,25 @@ static void copy_cartesian_unpad_to_pad(double* cartesian_matrix, const double* 
         for (int j = 0; j < n_cartesian_of_l_j; j++) {
             cartesian_matrix[(i_pad_offset + i_bas * n_cartesian_of_l_i + i) * n_ao_cartesian
                            + (j_pad_offset + j_bas * n_cartesian_of_l_j + j)]
-            = spherical_matrix[(i_unpad_offset + i_bas * n_cartesian_of_l_i + i) * n_ao_spherical
-                             + (j_unpad_offset + j_bas * n_cartesian_of_l_j + j)];
+            = spherical_matrix[d_ao_idx[i_unpad_offset + i_bas * n_cartesian_of_l_i + i] * n_ao_spherical
+                             + d_ao_idx[j_unpad_offset + j_bas * n_cartesian_of_l_j + j]];
         }
     }
+}
+
+__global__
+static void left_cart2cart(double* destination_matrix, const double* source_matrix,
+                           const int n_right, const int n_ao_copy, const int i_destination_offset, const int i_source_offset,
+                           const int* d_ao_idx)
+{
+    const int i_right = blockIdx.x * blockDim.x + threadIdx.x;
+    const int i_left = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (i_right >= n_right || i_left >= n_ao_copy)
+        return;
+
+    destination_matrix[(i_destination_offset + i_left) * n_right + i_right]
+        = source_matrix[d_ao_idx[i_source_offset + i_left] * n_right + i_right];
 }
 
 extern "C" {
@@ -670,6 +690,7 @@ extern "C" {
     int cart2sph_CT_mat_C_with_padding(const cudaStream_t stream, double* cartesian_matrix, double* spherical_matrix,
                                        const int n_ao_cartesian, const int n_ao_spherical,
                                        const int n_l_ctr_group, const int* l_of_group, const int* n_total_bas_of_group, const int* n_pad_bas_of_group,
+                                       const int* d_ao_idx,
                                        const bool if_no_cart2sph)
     {
         if (!if_no_cart2sph) {
@@ -745,7 +766,8 @@ extern "C" {
                     const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
                     copy_spherical_cart2sph<<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
                                                                             l_i, n_bas_i, i_cartesian_offset, i_spherical_offset,
-                                                                            l_j, n_bas_j, j_cartesian_offset, j_spherical_offset);
+                                                                            l_j, n_bas_j, j_cartesian_offset, j_spherical_offset,
+                                                                            d_ao_idx);
 
                     j_cartesian_offset += n_total_bas_of_group[j_group] * ((l_j + 1) * (l_j + 2) / 2);
                     j_spherical_offset += n_bas_j * (l_j * 2 + 1);
@@ -770,7 +792,8 @@ extern "C" {
                     const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
                     copy_cartesian_pad_to_unpad<<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
                                                                                 l_i, n_bas_i, i_pad_offset, i_unpad_offset,
-                                                                                l_j, n_bas_j, j_pad_offset, j_unpad_offset);
+                                                                                l_j, n_bas_j, j_pad_offset, j_unpad_offset,
+                                                                                d_ao_idx);
 
                     j_pad_offset += n_total_bas_of_group[j_group] * ((l_j + 1) * (l_j + 2) / 2);
                     j_unpad_offset += n_bas_j * ((l_j + 1) * (l_j + 2) / 2);
@@ -786,6 +809,7 @@ extern "C" {
     int cart2sph_C_mat_CT_with_padding(const cudaStream_t stream, double* cartesian_matrix, const double* spherical_matrix,
                                        const int n_ao_cartesian, const int n_ao_spherical,
                                        const int n_l_ctr_group, const int* l_of_group, const int* n_total_bas_of_group, const int* n_pad_bas_of_group,
+                                       const int* d_ao_idx,
                                        const bool if_no_cart2sph)
     {
         if (!if_no_cart2sph) {
@@ -805,7 +829,8 @@ extern "C" {
                     const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
                     copy_spherical_sph2cart<<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
                                                                             l_i, n_bas_i, i_cartesian_offset, i_spherical_offset,
-                                                                            l_j, n_bas_j, j_cartesian_offset, j_spherical_offset);
+                                                                            l_j, n_bas_j, j_cartesian_offset, j_spherical_offset,
+                                                                            d_ao_idx);
 
                     j_cartesian_offset += n_total_bas_of_group[j_group] * ((l_j + 1) * (l_j + 2) / 2);
                     j_spherical_offset += n_bas_j * (l_j * 2 + 1);
@@ -886,7 +911,8 @@ extern "C" {
                     const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
                     copy_cartesian_unpad_to_pad<<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
                                                                                 l_i, n_bas_i, i_pad_offset, i_unpad_offset,
-                                                                                l_j, n_bas_j, j_pad_offset, j_unpad_offset);
+                                                                                l_j, n_bas_j, j_pad_offset, j_unpad_offset,
+                                                                                d_ao_idx);
 
                     j_pad_offset += n_total_bas_of_group[j_group] * ((l_j + 1) * (l_j + 2) / 2);
                     j_unpad_offset += n_bas_j * ((l_j + 1) * (l_j + 2) / 2);
@@ -902,6 +928,7 @@ extern "C" {
     int cart2sph_C_mat_with_padding(const cudaStream_t stream, double* cartesian_matrix, const double* spherical_matrix,
                                     const int n_right,
                                     const int n_l_ctr_group, const int* l_of_group, const int* n_total_bas_of_group, const int* n_pad_bas_of_group,
+                                    const int* d_ao_idx,
                                     const bool if_no_cart2sph)
     {
         if (!if_no_cart2sph) {
@@ -914,17 +941,17 @@ extern "C" {
                 const dim3 threads(16, 16);
                 const dim3 blocks((n_right + threads.x - 1) / threads.x, (n_bas + threads.y - 1) / threads.y);
                 switch (l_i) {
-                    case  0: left_sph2cart< 0> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset); break;
-                    case  1: left_sph2cart< 1> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset); break;
-                    case  2: left_sph2cart< 2> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset); break;
-                    case  3: left_sph2cart< 3> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset); break;
-                    case  4: left_sph2cart< 4> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset); break;
-                    case  5: left_sph2cart< 5> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset); break;
-                    case  6: left_sph2cart< 6> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset); break;
-                    case  7: left_sph2cart< 7> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset); break;
-                    case  8: left_sph2cart< 8> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset); break;
-                    case  9: left_sph2cart< 9> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset); break;
-                    case 10: left_sph2cart<10> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset); break;
+                    case  0: left_sph2cart< 0> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
+                    case  1: left_sph2cart< 1> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
+                    case  2: left_sph2cart< 2> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
+                    case  3: left_sph2cart< 3> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
+                    case  4: left_sph2cart< 4> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
+                    case  5: left_sph2cart< 5> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
+                    case  6: left_sph2cart< 6> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
+                    case  7: left_sph2cart< 7> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
+                    case  8: left_sph2cart< 8> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
+                    case  9: left_sph2cart< 9> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
+                    case 10: left_sph2cart<10> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
                     default:
                         printf("l_i = %d not supported for cart2sph_C_mat_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_C_mat_with_padding(), max_L = 10\n", l_i);
@@ -942,8 +969,10 @@ extern "C" {
                 const int n_bas = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
                 const int n_cartesian_of_l = (l_i + 1) * (l_i + 2) / 2;
 
-                cudaMemcpy(cartesian_matrix + i_pad_offset * n_right, spherical_matrix + i_unpad_offset * n_right,
-                           n_bas * n_cartesian_of_l * n_right * sizeof(double), cudaMemcpyDeviceToDevice);
+                const dim3 threads(16, 16);
+                const dim3 blocks((n_right + threads.x - 1) / threads.x, (n_bas * n_cartesian_of_l + threads.y - 1) / threads.y);
+                left_cart2cart<<<threads, blocks>>>(cartesian_matrix, spherical_matrix,
+                                                    n_right, n_bas * n_cartesian_of_l, i_pad_offset, i_unpad_offset, d_ao_idx);
 
                 i_pad_offset += n_total_bas_of_group[i_group] * n_cartesian_of_l;
                 i_unpad_offset += n_bas * n_cartesian_of_l;
