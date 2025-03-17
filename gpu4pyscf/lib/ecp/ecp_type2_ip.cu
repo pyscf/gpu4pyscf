@@ -16,10 +16,10 @@
 
 
 template <int orderi, int orderj> __device__
-void type2_cart_kernel(double *gctr, 
+void type2_cart_kernel(double *gctr,
                 const int LI, const int LJ, const int LC,
                 const int ish, const int jsh, const int ksh,
-                const int *ecpbas, const int *ecploc, 
+                const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
     extern __shared__ double smem[];
@@ -57,7 +57,7 @@ void type2_cart_kernel(double *gctr,
         rad_all[i] = 0.0;
     }
     __syncthreads();
-    
+
     double radi[AO_LMAX+ECP_LMAX+orderi+1];
     double radj[AO_LMAX+ECP_LMAX+orderj+1];
     type2_facs_rad<orderi>(radi, LI+LC, npi, dca, ci, ai);
@@ -104,12 +104,12 @@ void type2_cart_kernel(double *gctr,
 
     constexpr int NFI_MAX = (AO_LMAX+orderi+1)*(AO_LMAX+orderi+2)/2;
     constexpr int NFJ_MAX = (AO_LMAX+orderj+1)*(AO_LMAX+orderj+2)/2;
-    double fi[3*NFI_MAX];
-    double fj[3*NFJ_MAX];
-    cache_fac(fi, LI, rca);
-    cache_fac(fj, LJ, rcb);
     // (k+l)pq,kimp,ljmq->ij
     for (int m = 0; m < LCC1; m++){
+        double fi[3*NFI_MAX];
+        double fj[3*NFJ_MAX];
+        cache_fac(fi, LI, rca);
+        cache_fac(fj, LJ, rcb);
         type2_ang(angi, LI, LC, fi, omegai+m);
         type2_ang(angj, LJ, LC, fj, omegaj+m);
         __syncthreads();
@@ -122,7 +122,7 @@ void type2_cart_kernel(double *gctr,
                 double *pangi = angi + k*nfi*LIC1 + i*LIC1;
                 double *pangj = angj + l*nfj*LJC1 + j*LJC1;
                 double *prad = rad_all + (k+l)*LIC1*LJC1;
-                
+
                 double reg_angi[AO_LMAX+ECP_LMAX+orderi+1];
                 double reg_angj[AO_LMAX+ECP_LMAX+orderj+1];
                 for (int p = 0; p < LIC1; p++){reg_angi[p] = pangi[p];}
@@ -132,19 +132,19 @@ void type2_cart_kernel(double *gctr,
                     s += prad[p*LJC1+q] * reg_angi[p] * reg_angj[q];
                 }}
             }}
-            //gctr[ij] += fac*s;
-            atomicAdd(gctr+ij, fac*s);
+            gctr[ij] += fac*s;
+            //atomicAdd(gctr+ij, fac*s);
         }
         __syncthreads();
     }
 }
 
 __global__
-void type2_cart_ip1(double *gctr, 
+void type2_cart_ip1(double *gctr,
                 const int LI, const int LJ, const int LC,
-                const int *ao_loc, const int nao, 
+                const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
-                const int *ecpbas, const int *ecploc, 
+                const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
     const int task_id = blockIdx.x;
@@ -155,13 +155,13 @@ void type2_cart_ip1(double *gctr,
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
     const int ksh = tasks[task_id + 2*ntasks];
-    
+
     __shared__ double gctr_smem[NF_MAX*NF_MAX*3];
     for (int ij = threadIdx.x; ij < NF_MAX*NF_MAX*3; ij+=blockDim.x){
         gctr_smem[ij] = 0.0;
     }
     __syncthreads();
-    
+
     const int orderi = 1;
     const int orderj = 0;
     constexpr int NFI_MAX = (AO_LMAX+orderi+1)*(AO_LMAX+orderi+2)/2;
@@ -195,11 +195,11 @@ void type2_cart_ip1(double *gctr,
 
 
 __global__
-void type2_cart_ipipv(double *gctr, 
+void type2_cart_ipipv(double *gctr,
                 const int LI, const int LJ, const int LC,
-                const int *ao_loc, const int nao, 
+                const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
-                const int *ecpbas, const int *ecploc, 
+                const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
     const int task_id = blockIdx.x;
@@ -210,17 +210,17 @@ void type2_cart_ipipv(double *gctr,
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
     const int ksh = tasks[task_id + 2*ntasks];
-    
+
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
     gctr += ioff*nao + joff;
-    
+
     constexpr int nfi2_max = (AO_LMAX+3)*(AO_LMAX+4)/2;
     constexpr int nfj_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
     __shared__ double buf1[nfi2_max*nfj_max];
     type2_cart_kernel<2,0>(buf1, LI+2, LJ, LC, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
     __syncthreads();
-    
+
     constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
     extern __shared__ double smem[];
     double *buf = smem;
@@ -250,11 +250,11 @@ void type2_cart_ipipv(double *gctr,
 }
 
 __global__
-void type2_cart_ipvip(double *gctr, 
+void type2_cart_ipvip(double *gctr,
                 const int LI, const int LJ, const int LC,
-                const int *ao_loc, const int nao, 
+                const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
-                const int *ecpbas, const int *ecploc, 
+                const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
     const int task_id = blockIdx.x;
@@ -265,11 +265,11 @@ void type2_cart_ipvip(double *gctr,
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
     const int ksh = tasks[task_id + 2*ntasks];
-    
+
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
     gctr += ioff*nao + joff;
-    
+
     constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
     constexpr int nfj1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
     __shared__ double buf1[nfi1_max*nfj1_max];
@@ -290,7 +290,7 @@ void type2_cart_ipvip(double *gctr,
         _li_up(buf, buf1, LI, LJ+1);
         _lj_down_and_write(gctr, buf, LI, LJ, nao);
     }
-    
+
     if (LJ > 0){
         type2_cart_kernel<1,0>(buf1, LI+1, LJ-1, LC, ish, jsh, ksh, ecpbas, ecploc, atm, bas, env);
         __syncthreads();

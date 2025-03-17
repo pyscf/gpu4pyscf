@@ -38,7 +38,7 @@ def setUpModule():
 #           2.1330000              0.1868660              0.0000000
 #           0.3827000              0.2010080              1.0000000
 #     H    G
-#            6.491000E-01           1.0000000   
+#            6.491000E-01           1.0000000
                                 ''')
 
     mol1 = gto.M(
@@ -47,7 +47,7 @@ def setUpModule():
         """,
         basis="sto-3g",
         ecp="crenbl",
-        spin=1,          
+        spin=1,
         charge=0,
         cart=1,
         output = '/dev/null'
@@ -85,24 +85,23 @@ def tearDownModule():
     del mol1, mol2
 
 class KnownValues(unittest.TestCase):
-    '''
-    def test_ecp_cart(self):
-        h1_cpu = mol1.intor('ECPscalar_cart')
-        h1_gpu = get_ecp(mol1)
-        assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
-    '''
+    #def test_ecp_cart(self):
+    #    h1_cpu = mol1.intor('ECPscalar_cart')
+    #    h1_gpu = get_ecp(mol1)
+    #    assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
+
     def test_ecp_sph(self):
         h1_cpu = mol2.intor('ECPscalar_sph')
         h1_gpu = get_ecp(mol2)
-        print(h1_cpu[:3,:3])
-        print(h1_gpu[:3,:3])
+        print(h1_cpu)
+        print(h1_gpu.get())
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
     '''
     def test_ecp_cart_ip1(self):
         h1_cpu = mol1.intor('ECPscalar_iprinv_cart')
         h1_gpu = get_ecp_ip(mol1)
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
-    
+
     def test_ecp_sph_iprinv(self):
         nao = mol2.nao
         h1_cpu = np.zeros((3,nao,nao))
@@ -112,7 +111,7 @@ class KnownValues(unittest.TestCase):
                 h1_cpu += mol2.intor('ECPscalar_iprinv_sph')
         h1_gpu = get_ecp_ip(mol2)
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
-    
+
     def test_ecp_sph_ipnuc(self):
         h1_cpu = mol2.intor('ECPscalar_ipnuc_sph')
         h1_gpu = get_ecp_ip(mol2)

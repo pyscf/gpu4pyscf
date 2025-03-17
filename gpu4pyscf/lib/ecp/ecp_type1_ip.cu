@@ -16,10 +16,10 @@
 
 
 template <int orderi, int orderj> __device__
-void type1_cart_kernel(double *gctr, 
+void type1_cart_kernel(double *gctr,
                 const int LI, const int LJ,
                 const int ish, const int jsh, const int ksh,
-                const int *ecpbas, const int *ecploc, 
+                const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
     extern __shared__ double smem[];
@@ -50,7 +50,7 @@ void type1_cart_kernel(double *gctr,
     for (int kbas = ecploc[ksh]; kbas < ecploc[ksh+1]; kbas++){
         ur += rad_part(kbas, ecpbas, env);
     }
-    
+
     const int LIJ1 = LI+LJ+1;
     const int LIJ3 = LIJ1*LIJ1*LIJ1;
 
@@ -59,7 +59,7 @@ void type1_cart_kernel(double *gctr,
         rad_ang[i] = 0;
     }
     __syncthreads();
-    
+
     double *rad_all = rad_ang + LIJ3;
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
     for (int ip = 0; ip < npi; ip++){
@@ -81,7 +81,7 @@ void type1_cart_kernel(double *gctr,
             __syncthreads();
         }
     }
-    
+
     constexpr int NFI_MAX = (AO_LMAX+orderi+1)*(AO_LMAX+orderi+2)/2;
     constexpr int NFJ_MAX = (AO_LMAX+orderj+1)*(AO_LMAX+orderj+2)/2;
     double fi[3*NFI_MAX];
@@ -131,11 +131,11 @@ void type1_cart_kernel(double *gctr,
 
 
 __global__
-void type1_cart_ip1(double *gctr, 
+void type1_cart_ip1(double *gctr,
                 const int LI, const int LJ,
-                const int *ao_loc, const int nao, 
+                const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
-                const int *ecpbas, const int *ecploc, 
+                const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
     const int task_id = blockIdx.x;
@@ -146,11 +146,11 @@ void type1_cart_ip1(double *gctr,
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
     const int ksh = tasks[task_id + 2*ntasks];
-    
+
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
     gctr += ioff*nao + joff;
-    
+
     __shared__ double gctr_smem[NF_MAX*NF_MAX*3];
     for (int ij = threadIdx.x; ij < NF_MAX*NF_MAX*3; ij+=blockDim.x){
         gctr_smem[ij] = 0.0;
@@ -187,11 +187,11 @@ void type1_cart_ip1(double *gctr,
 }
 
 __global__
-void type1_cart_ipipv(double *gctr, 
+void type1_cart_ipipv(double *gctr,
                 const int LI, const int LJ,
-                const int *ao_loc, const int nao, 
+                const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
-                const int *ecpbas, const int *ecploc, 
+                const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
     const int task_id = blockIdx.x;
@@ -202,7 +202,7 @@ void type1_cart_ipipv(double *gctr,
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
     const int ksh = tasks[task_id + 2*ntasks];
-    
+
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
     gctr += ioff*nao + joff;
@@ -243,11 +243,11 @@ void type1_cart_ipipv(double *gctr,
 }
 
 __global__
-void type1_cart_ipvip(double *gctr, 
+void type1_cart_ipvip(double *gctr,
                 const int LI, const int LJ,
-                const int *ao_loc, const int nao, 
+                const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
-                const int *ecpbas, const int *ecploc, 
+                const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
     const int task_id = blockIdx.x;
@@ -258,7 +258,7 @@ void type1_cart_ipvip(double *gctr,
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
     const int ksh = tasks[task_id + 2*ntasks];
-    
+
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
     gctr += ioff*nao + joff;

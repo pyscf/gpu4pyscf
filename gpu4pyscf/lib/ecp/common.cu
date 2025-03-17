@@ -42,104 +42,6 @@ Cartesian<(l+1)*(l+2)/2> ang_nuc_l(double rx, double ry, double rz){
 }
 */
 
-/*
-__device__
-static void ang_nuc_part_l(int l, double rx, double ry, double rz){
-    switch(l){
-        case 0:{
-            Cartesian<1> omega;
-            omega.data[0] = 0.282094791773878143 * 0.282094791773878143;
-            return omega;
-        }
-        case 1: {
-            Cartesian<3> omega;
-            omega.data[0] = 0.488602511902919921 * 0.488602511902919921 * rx;
-            omega.data[1] = 0.488602511902919921 * 0.488602511902919921 * ry;
-            omega.data[2] = 0.488602511902919921 * 0.488602511902919921 * rz;
-            return omega;
-        }
-        case 2: {Cartesian<6> omega = ang_nuc_l<2>(rx, ry, rz); return omega;}
-        case 3: {auto omega = ang_nuc_l<3>(rx, ry, rz); return omega;}
-        case 4: {auto omega = ang_nuc_l<4>(rx, ry, rz); return omega;}
-        case 5: {auto omega = ang_nuc_l<5>(rx, ry, rz); return omega;}
-        case 6: {auto omega = ang_nuc_l<6>(rx, ry, rz); return omega;}
-        case 7: {auto omega = ang_nuc_l<7>(rx, ry, rz); return omega;}
-        case 8: {auto omega = ang_nuc_l<8>(rx, ry, rz); return omega;}
-        case 9: {auto omega = ang_nuc_l<9>(rx, ry, rz); return omega;}
-        case 10: {auto omega = ang_nuc_l<10>(rx, ry, rz); return omega;}
-        default: printf("l = %d is not supported\n", l);
-    }
-}
-*/
-
-/*
-__device__
-static void ang_nuc_part(double *omega_cum, int l, double rx, double ry, double rz){
-    
-    Accumulated angular ECP part in Cartesian
-    Angular momentum L = 0, 1, ... LMAX
-    Cartesian xyz --> Spherical --> Cartesian
-
-    The code is generated with generate_ang_nuc.py
-    
-    double *omega = omega_cum;
-    if (l >= 0){
-        omega[0] = 0.07957747154594767;
-        omega += 1;
-    }
-
-    if (l >= 1){
-        omega[0] = 0.2387324146378430 * rx;
-        omega[1] = 0.2387324146378430 * ry;
-        omega[2] = 0.2387324146378430 * rz;
-        omega += 3;
-    }
-
-    if (l >= 2){
-        double g[6];
-        g[0] = rx * rx;
-        g[1] = rx * ry;
-        g[2] = rx * rz;
-        g[3] = ry * ry;
-        g[4] = ry * rz;
-        g[5] = rz * rz;
-        double c[5];
-        cart2sph(c, 2, g);
-        sph2cart(omega, 2, c);
-        omega += 6;
-    }
-
-    if (l >= 3){
-        ang_nuc_l<3>(omega, rx, ry, rz);
-        omega += 10;
-    }
-
-    if (l >= 4){
-        ang_nuc_l<4>(omega, rx, ry, rz);
-        omega += 15;
-    }
-
-    if (l >= 5){
-        ang_nuc_l<5>(omega, rx, ry, rz);
-        omega += 21;
-    }
-
-    if (l >= 6) {
-        ang_nuc_l<6>(omega, rx, ry, rz);
-        omega += 28;
-    }
-
-    if (l >= 7) {
-        ang_nuc_l<7>(omega, rx, ry, rz);
-        omega += 36;
-    }
-
-    if (l >= 8) {
-        ang_nuc_l<8>(omega, rx, ry, rz);
-        omega += 45;
-    }
-}
-*/
 __device__
 double rad_part(const int ish, const int *ecpbas, const double *env){
     const int npk = ecpbas[ish*BAS_SLOTS+NPRIM_OF];
@@ -148,13 +50,20 @@ double rad_part(const int ish, const int *ecpbas, const double *env){
     const int coeff_ptr = ecpbas[ish*BAS_SLOTS+PTR_COEFF];
 
     double u1 = 0.0;
-    const double r = r128[threadIdx.x];
+    double r = 0.0;
+    if (threadIdx.x < NGAUSS){
+        r = r128[threadIdx.x];
+    }
     for (int kp = 0; kp < npk; kp++){
         const double ak = env[exp_ptr+kp];
         const double ck = env[coeff_ptr+kp];
         u1 += ck * exp(-ak * r * r);
     }
-    return u1 * pow(r, r_order) * w128[threadIdx.x];
+    double w = 0.0;
+    if (threadIdx.x < NGAUSS){
+        w = w128[threadIdx.x];
+    }
+    return u1 * pow(r, r_order) * w;
 }
 
 __device__
@@ -177,12 +86,12 @@ void cache_fac(double *fx, int LI, double *ri){
             const double bfac = _binom[ioffset+j]; // binom(i,j)
             fx[ioffset+j] = bfac * xx[i-j];
             fy[ioffset+j] = bfac * yy[i-j];
-            fz[ioffset+j] = bfac * zz[i-j];           
+            fz[ioffset+j] = bfac * zz[i-j];
         }
     }
 }
 
-__device__ 
+__device__
 void block_reduce(double val, double *d_out) {
     __shared__ double sdata[THREADS];
     unsigned int tid = threadIdx.x;
@@ -296,7 +205,7 @@ void _li_down(double *out, double *buf, const int li, const int lj){
     double *outy = outx + nfi*nfj;
     double *outz = outy + nfi*nfj;
     const double fac = _ecp_fac[li];
-    
+
     for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
         const int i = ij % nfi;
         const int j = ij / nfi;
@@ -365,7 +274,7 @@ void _lj_up_and_write(double *out, double *buf, const int li, const int lj, cons
         const double zfac = fac * (_cart_pow_z[j] + 1);
         const double xfac = fac * (lj-1 - _cart_pow_y[j] - _cart_pow_z[j] + 1);
         const int j_addr[3] = {j, _y_addr[j], _z_addr[j]};
-        
+
         atomicAdd(outxx + j_addr[0] + nao*i, xfac * buf[j*nfi + i]);
         atomicAdd(outxy + j_addr[1] + nao*i, yfac * buf[j*nfi + i]);
         atomicAdd(outxz + j_addr[2] + nao*i, zfac * buf[j*nfi + i]);

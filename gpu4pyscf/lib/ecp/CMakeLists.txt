@@ -15,7 +15,6 @@
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
 
 add_library(gecp SHARED
-  #test.cu
   nr_ecp_driver.cu
 )
 

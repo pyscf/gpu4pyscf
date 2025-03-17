@@ -25,6 +25,7 @@ static double _factorial[] = {
     1.1240007277776077e+21, 2.5852016738884978e+22,
 };
 
+// ijk+1 < LI+LC (<=10) + LI(<=6) + LC (<=4) + 1 <= 21
 __constant__
 static double _factorial2[] = {
     1., 1., 2., 3., 8.,
@@ -32,13 +33,13 @@ static double _factorial2[] = {
     3840., 10395., 46080., 135135., 645120.,
     2027025., 10321920., 34459425., 185794560., 654729075.,
     3715891200., 13749310575., 81749606400., 316234143225., 1961990553600.,
-    7905853580625., 51011754393600., 213458046676875.,
-    1428329123020800., 6190283353629376.,
-    42849873690624000., 1.9189878396251069e+17,
-    1.371195958099968e+18, 6.3326598707628524e+18,
-    4.6620662575398912e+19, 2.2164309547669976e+20,
-    1.6783438527143608e+21, 8.2007945326378929e+21,
-    6.3777066403145712e+22, 3.1983098677287775e+23,
+    //7905853580625., 51011754393600., 213458046676875.,
+    //1428329123020800., 6190283353629376.,
+    //42849873690624000., 1.9189878396251069e+17,
+    //1.371195958099968e+18, 6.3326598707628524e+18,
+    //4.6620662575398912e+19, 2.2164309547669976e+20,
+    //1.6783438527143608e+21, 8.2007945326378929e+21,
+    //6.3777066403145712e+22, 3.1983098677287775e+23,
 };
 
 __device__ __forceinline__
@@ -46,18 +47,18 @@ static double factorial2(int n){
     return (n < 0) ? 1.0 : _factorial2[n];
 }
 
-__device__
-static double int_unit_xyz(int i, int j, int k){
+
+__device__ __forceinline__
+static double int_unit_xyz(const int i, const int j, const int k){
     // i % 2 and j % 2 and k % 2
     const int even = 1 - (((i & 1) | (j & 1)) | (k & 1));
-    const int ijk = i + j + k;
     const double fi = factorial2(i-1);
     const double fj = factorial2(j-1);
     const double fk = factorial2(k-1);
+    const int ijk = i + j + k;
     const double fijk = factorial2(ijk+1);
     return even * (fi * fj * fk) / fijk;
 }
-
 
 /*
  * exponentially scaled modified spherical Bessel function of the first kind
@@ -110,15 +111,3 @@ static void _ine(double *out, int order, double z)
     }
 }
 
-/*
-template <int order> __global__
-void _ine_kernel(double *out, double *zs, int n)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n){
-        return;
-    }
-    int offset = idx * (order + 1);
-    _ine<order>(out+offset, zs[idx]);
-}
-*/

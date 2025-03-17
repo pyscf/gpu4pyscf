@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-__device__
-static void cart2sph(double *gsph, int L, double *gcart){
+template <int L>__device__
+static void cart2sph(double *gsph, double *gcart){
     if (L == 0) {
         gsph[0] = 0.282094791773878143 * gcart[0];
     }
@@ -265,8 +265,8 @@ static void cart2sph(double *gsph, int L, double *gcart){
 
 }
 
-__device__
-static void sph2cart(double *gcart, int L, double *gsph){
+template <int L> __device__
+static void sph2cart(double *gcart, double *gsph){
     if (L == 0) {
         gcart[0] = 0.282094791773878143 * gsph[0];
     }
@@ -575,5 +575,18 @@ static void sph2cart(double *gcart, int L, double *gsph){
         gcart[63] = -29.08621657027356*gsph[10] + -24.9079477785725*gsph[12];
         gcart[64] = 9.587073569946648*gsph[9];
         gcart[65] = 1.292720736456603*gsph[10];
+    }
+}
+
+__device__
+void cart2sph(double *gcart, int l, double *gsph){
+    switch (l){
+        case 0: cart2sph<0>(gcart, gsph); break;
+        case 1: cart2sph<1>(gcart, gsph); break;
+        case 2: cart2sph<2>(gcart, gsph); break;
+        case 3: cart2sph<3>(gcart, gsph); break;
+        case 4: cart2sph<4>(gcart, gsph); break;
+        case 5: cart2sph<5>(gcart, gsph); break;
+        default: break;
     }
 }
