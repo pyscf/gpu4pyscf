@@ -148,7 +148,7 @@ void type2_ang_nuc_l<{{ l }}>(double * __restrict__ omega, const int lc,
 
 template = Template(template_string)
 
-with open(f'type2_ang_nuc.cu', 'w') as f:
+with open('type2_ang_nuc.cu', 'w') as f:
     f.write(header)
     for l in range(0, 11):
         c_scripts = calculate_c(l)
