@@ -188,7 +188,6 @@ def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False):
     tdgrad = td.nuc_grad_method()
     assert hasattr(tdgrad.base._scf, 'with_df')
 
-    mo_coeff = mf.mo_coeff
     mo_occ = mf.mo_occ
     occidxa = np.where(mo_occ[0]>0)[0]
     occidxb = np.where(mo_occ[1]>0)[0]
