@@ -176,7 +176,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dvhf_all += dvhf
     dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
+        extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
     if singlet:
         j_factor=1.0
@@ -184,14 +184,14 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     else:
         j_factor=0.0
         k_factor=1.0
-    dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, j_factor, k_factor) * 2
+    dvhf = td_grad.get_veff(mol, (dmxpy + dmxpy.T), j_factor, k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
-    dvhf_all += dvhf
-    dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, 0.0) * 2
+        extra_force[k] += mf_grad.extra_force(ia, locals())*2
+    dvhf_all += dvhf*2
+    dvhf = td_grad.get_veff(mol, (dmxmy - dmxmy.T), 0.0, k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
-    dvhf_all += dvhf
+        extra_force[k] += mf_grad.extra_force(ia, locals())*2
+    dvhf_all += dvhf*2
     time1 = log.timer('2e AO integral derivatives', *time1)
 
     delec = 2.0 * (dh_ground + dh_td - ds)
@@ -299,7 +299,7 @@ class Gradients(rhf_grad.GradientsBase):
         mf_grad = self.base._scf.nuc_grad_method()
         return mf_grad.grad_nuc(mol, atmlst)
 
-    def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, verbose=None):
+    def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
         """
         Computes the first-order derivatives of the energy contributions from
         Veff per atom.

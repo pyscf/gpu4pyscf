@@ -20,8 +20,9 @@ from gpu4pyscf.lib.cupy_helper import contract, concatenate, reduce_to_device
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, num_devices
 
-def _jk_task(with_df, dm, orbo, with_j=True, with_k=True, device_id=0):
-    '''  # (L|ij) -> rhoj: (L), rhok: (L|oo)
+def _jk_task(with_df, dm, orbol, orbor, with_j=True, with_k=True, device_id=0):
+    '''  
+    (L|ij) -> rhoj: (L), rhok: (L|lr), for dm0 from scf, rhok is (L|oo) 
     '''
     rhoj = rhok = None
     with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -29,9 +30,10 @@ def _jk_task(with_df, dm, orbo, with_j=True, with_k=True, device_id=0):
         assert isinstance(with_df.verbose, int)
         t0 = log.init_timer()
         dm = cupy.asarray(dm)
-        orbo = cupy.asarray(orbo)
         naux_slice = with_df._cderi[device_id].shape[0]
-        nocc = orbo.shape[-1]
+        nl = orbol.shape[-1]
+        nr = orbor.shape[-1]
+
         rows = with_df.intopt.cderi_row
         cols = with_df.intopt.cderi_col
         dm_sparse = dm[rows, cols]
@@ -41,7 +43,7 @@ def _jk_task(with_df, dm, orbo, with_j=True, with_k=True, device_id=0):
         if with_j:
             rhoj = cupy.empty([naux_slice])
         if with_k:
-            rhok = cupy.empty([naux_slice, nocc, nocc], order='C')
+            rhok = cupy.empty([naux_slice, nl, nr], order='C')
         p0 = p1 = 0
 
         for cderi, cderi_sparse in with_df.loop(blksize=blksize):
@@ -49,14 +51,16 @@ def _jk_task(with_df, dm, orbo, with_j=True, with_k=True, device_id=0):
             if with_j:
                 rhoj[p0:p1] = 2.0*dm_sparse.dot(cderi_sparse)
             if with_k:
-                tmp = contract('Lij,jk->Lki', cderi, orbo)
-                contract('Lki,il->Lkl', tmp, orbo, out=rhok[p0:p1])
+                rhok[p0:p1] = 0
+                tmp = contract('Lij,jk->Lki', cderi, orbol)
+                contract('Lki,il->Lkl', tmp, orbor, out=rhok[p0:p1])
             p0 = p1
             cupy.cuda.get_current_stream().synchronize()
         t0 = log.timer_debug1(f'rhoj and rhok on Device {device_id}', *t0)
     return rhoj, rhok
 
-def get_rhojk(with_df, dm, orbo, with_j=True, with_k=True):
+
+def get_rhojk(with_df, dm, orbol, orbor, with_j=True, with_k=True):
     ''' Calculate rhoj and rhok on Multi-GPU system
     '''
     futures = []
@@ -64,7 +68,7 @@ def get_rhojk(with_df, dm, orbo, with_j=True, with_k=True):
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
         for device_id in range(num_devices):
             future = executor.submit(
-                _jk_task, with_df, dm, orbo,
+                _jk_task, with_df, dm, orbol, orbor,
                 with_j=with_j, with_k=with_k, device_id=device_id)
             futures.append(future)
 
@@ -83,14 +87,14 @@ def get_rhojk(with_df, dm, orbo, with_j=True, with_k=True):
 
     return rhoj, rhok
 
-def _jk_ip_task(intopt, rhoj_cart, dm_cart, rhok_cart, orbo_cart, task_list,
+
+def _jk_ip_task(intopt, rhoj_cart, dm_cart, rhok_cart, orbol_cart, orbor_cart, task_list,
                 with_j=True, with_k=True, device_id=0, omega=None):
     mol = intopt.mol
     with cupy.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(mol, mol.verbose)
         t0 = (logger.process_clock(), logger.perf_counter())
 
-        orbo_cart = cupy.asarray(orbo_cart)
         cart_aux_loc = intopt.cart_aux_loc
         nao_cart = dm_cart.shape[0]
         naux_cart = intopt._sorted_auxmol.nao
@@ -111,8 +115,8 @@ def _jk_ip_task(intopt, rhoj_cart, dm_cart, rhok_cart, orbo_cart, task_list,
             if with_j:
                 rhoj_tmp = rhoj_cart[k0:k1]
             if with_k:
-                rhok_tmp = contract('por,ir->pio', rhok_cart[k0:k1], orbo_cart)
-                rhok_tmp = contract('pio,jo->pji', rhok_tmp, orbo_cart)
+                rhok_tmp = contract('por,ir->pio', rhok_cart[k0:k1], orbol_cart)
+                rhok_tmp = contract('pio,jo->pji', rhok_tmp, orbor_cart)
             '''
             if(rhoj_tmp.flags['C_CONTIGUOUS'] == False):
                 rhoj_tmp = rhoj_tmp.astype(cupy.float64, order='C')
@@ -146,7 +150,8 @@ def _jk_ip_task(intopt, rhoj_cart, dm_cart, rhok_cart, orbo_cart, task_list,
             t0 = log.timer_debug1(f'calculate {cp_kl_id:3d} / {len(intopt.aux_log_qs):3d}, {k1-k0:3d} slices', *t0)
     return vj, vk, vjaux, vkaux
 
-def get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbo_cart, 
+
+def get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbol_cart, orbor_cart, 
                  with_j=True, with_k=True, omega=None):
     '''
     Calculate vj    = (i'j|L)(L|kl)(ij)(kl), vk    = (i'j|L)(L|kl)(ik)(jl)
@@ -168,7 +173,7 @@ def get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbo_cart,
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
         for device_id in range(num_devices):
             future = executor.submit(
-                _jk_ip_task, intopt, rhoj_cart, dm_cart, rhok_cart, orbo_cart, task_list[device_id],
+                _jk_ip_task, intopt, rhoj_cart, dm_cart, rhok_cart, orbol_cart, orbor_cart, task_list[device_id],
                 with_j=with_j, with_k=with_k, device_id=device_id, omega=omega)
             futures.append(future)
 

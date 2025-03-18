@@ -30,13 +30,21 @@ __all__ = [
 
 class TDA(tdhf_gpu.TDA):
     def nuc_grad_method(self):
-        from gpu4pyscf.grad import tduks
-        return tduks.Gradients(self)
+        if hasattr(self._scf,'with_df'):
+            from gpu4pyscf.df.grad import tduks
+            return tduks.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tduks
+            return tduks.Gradients(self)
 
 class TDDFT(tdhf_gpu.TDHF):
     def nuc_grad_method(self):
-        from gpu4pyscf.grad import tduks
-        return tduks.Gradients(self)
+        if hasattr(self._scf,'with_df'):
+            from gpu4pyscf.df.grad import tduks
+            return tduks.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tduks
+            return tduks.Gradients(self)
 
 TDUKS = TDDFT
 SpinFlipTDA = tdhf_gpu.SpinFlipTDA
@@ -108,10 +116,6 @@ class CasidaTDDFT(TDDFT):
             return hx
 
         return vind, hdiag
-    
-    def nuc_grad_method(self):
-        from gpu4pyscf.grad import tduks
-        return tduks.Gradients(self)
 
     def kernel(self, x0=None, nstates=None):
         '''TDDFT diagonalization solver

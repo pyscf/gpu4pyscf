@@ -116,6 +116,9 @@ class KnownValues(unittest.TestCase):
         e_ref = td.to_cpu().kernel(nstates=4)[0]
         self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 8)
         self.assertAlmostEqual(lib.fp(es[:3]), 0.0476763425122965, 6)
+        a,b = td.get_ab()
+        e_ref = diagonalize(a, b, 4)
+        self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 8)
 
         td = self.mf_lda_nodf.CasidaTDDFT()
         assert td.device == 'gpu'
@@ -142,6 +145,9 @@ class KnownValues(unittest.TestCase):
         e_ref = td.to_cpu().kernel(nstates=4)[0]
         self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 8)
         self.assertAlmostEqual(lib.fp(es[:3]), 0.05383891686210346, 6)
+        a,b = td.get_ab()
+        e_ref = diagonalize(a, b, 4)
+        self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 6)
 
         td = self.mf_bp86_nodf.CasidaTDDFT()
         assert td.device == 'gpu'
@@ -198,6 +204,9 @@ class KnownValues(unittest.TestCase):
         e_ref = td.to_cpu().kernel(nstates=4)[0]
         self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 7)
         self.assertAlmostEqual(lib.fp(es[:3]), 0.2827429269753051, 6)
+        a,b = td.get_ab()
+        e_ref = diagonalize(a, b, 5)
+        self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 6)
 
         a,b = td.get_ab()
         e_ref = diagonalize(a, b, 5)
@@ -365,6 +374,52 @@ class KnownValues(unittest.TestCase):
         abxy_ref = ftdhf(cp.asarray([xy])).get()
         self.assertAlmostEqual(abs(ab12 - abxy_ref).max(), 0, 9)
 
+    def test_ab_lda_df(self):
+        mf = self.mf_lda
+        a, b = tdscf.uks.TDDFT(mf).get_ab()
+        ftda = tdscf.uhf.gen_tda_operation(mf)[0]
+        ftdhf = tdscf.uhf.gen_tdhf_operation(mf)[0]
+        nocc_a = int(np.count_nonzero(mf.mo_occ[0] == 1))
+        nvir_a = int(np.count_nonzero(mf.mo_occ[0] == 0))
+        nocc_b = int(np.count_nonzero(mf.mo_occ[1] == 1))
+        nvir_b = int(np.count_nonzero(mf.mo_occ[1] == 0))
+        np.random.seed(2)
+        xa, ya = np.random.random((2,nocc_a,nvir_a))
+        xb, yb = np.random.random((2,nocc_b,nvir_b))
+        x = np.hstack((xa.ravel(), xb.ravel()))
+        y = np.hstack((ya.ravel(), yb.ravel()))
+        xy = np.hstack((x, y))
+        ax_a = np.einsum('iajb,jb->ia', a[0], xa)
+        ax_a+= np.einsum('iajb,jb->ia', a[1], xb)
+        ax_b = np.einsum('jbia,jb->ia', a[1], xa)
+        ax_b+= np.einsum('iajb,jb->ia', a[2], xb)
+        ax = np.hstack((ax_a.ravel(), ax_b.ravel()))
+        self.assertAlmostEqual(abs(ax - ftda([x]).get()).max(), 0, 9)
+
+        ay_a = np.einsum('iajb,jb->ia', a[0], ya)
+        ay_a+= np.einsum('iajb,jb->ia', a[1], yb)
+        ay_b = np.einsum('jbia,jb->ia', a[1], ya)
+        ay_b+= np.einsum('iajb,jb->ia', a[2], yb)
+        ay = np.hstack((ay_a.ravel(), ay_b.ravel()))
+
+        bx_a = np.einsum('iajb,jb->ia', b[0], xa)
+        bx_a+= np.einsum('iajb,jb->ia', b[1], xb)
+        bx_b = np.einsum('jbia,jb->ia', b[1], xa)
+        bx_b+= np.einsum('iajb,jb->ia', b[2], xb)
+        bx = np.hstack((bx_a.ravel(), bx_b.ravel()))
+
+        by_a = np.einsum('iajb,jb->ia', b[0], ya)
+        by_a+= np.einsum('iajb,jb->ia', b[1], yb)
+        by_b = np.einsum('jbia,jb->ia', b[1], ya)
+        by_b+= np.einsum('iajb,jb->ia', b[2], yb)
+        by = np.hstack((by_a.ravel(), by_b.ravel()))
+
+        ab1 = ax + by
+        ab2 =-bx - ay
+        ab12 = np.hstack((ab1.ravel(),ab2.ravel()))
+        abxy_ref = ftdhf(cp.asarray([xy])).get()
+        self.assertAlmostEqual(abs(ab12 - abxy_ref).max(), 0, 9)
+
     def test_ab_b3lyp(self):
         mf = self.mf_b3lyp_nodf
         a, b = tdscf.uks.TDDFT(mf).get_ab()
@@ -411,8 +466,100 @@ class KnownValues(unittest.TestCase):
         abxy_ref = ftdhf(cp.asarray([xy])).get()
         self.assertAlmostEqual(abs(ab12 - abxy_ref).max(), 0, 9)
 
+    def test_ab_b3lyp_df(self):
+        mf = self.mf_b3lyp
+        a, b = tdscf.uks.TDDFT(mf).get_ab()
+        ftda = tdscf.uhf.gen_tda_operation(mf)[0]
+        ftdhf = tdscf.uhf.gen_tdhf_operation(mf)[0]
+        nocc_a = int(np.count_nonzero(mf.mo_occ[0] == 1))
+        nvir_a = int(np.count_nonzero(mf.mo_occ[0] == 0))
+        nocc_b = int(np.count_nonzero(mf.mo_occ[1] == 1))
+        nvir_b = int(np.count_nonzero(mf.mo_occ[1] == 0))
+        np.random.seed(2)
+        xa, ya = np.random.random((2,nocc_a,nvir_a))
+        xb, yb = np.random.random((2,nocc_b,nvir_b))
+        x = np.hstack((xa.ravel(), xb.ravel()))
+        y = np.hstack((ya.ravel(), yb.ravel()))
+        xy = np.hstack((x, y))
+        ax_a = np.einsum('iajb,jb->ia', a[0], xa)
+        ax_a+= np.einsum('iajb,jb->ia', a[1], xb)
+        ax_b = np.einsum('jbia,jb->ia', a[1], xa)
+        ax_b+= np.einsum('iajb,jb->ia', a[2], xb)
+        ax = np.hstack((ax_a.ravel(), ax_b.ravel()))
+        self.assertAlmostEqual(abs(ax - ftda([x]).get()).max(), 0, 9)
+
+        ay_a = np.einsum('iajb,jb->ia', a[0], ya)
+        ay_a+= np.einsum('iajb,jb->ia', a[1], yb)
+        ay_b = np.einsum('jbia,jb->ia', a[1], ya)
+        ay_b+= np.einsum('iajb,jb->ia', a[2], yb)
+        ay = np.hstack((ay_a.ravel(), ay_b.ravel()))
+
+        bx_a = np.einsum('iajb,jb->ia', b[0], xa)
+        bx_a+= np.einsum('iajb,jb->ia', b[1], xb)
+        bx_b = np.einsum('jbia,jb->ia', b[1], xa)
+        bx_b+= np.einsum('iajb,jb->ia', b[2], xb)
+        bx = np.hstack((bx_a.ravel(), bx_b.ravel()))
+
+        by_a = np.einsum('iajb,jb->ia', b[0], ya)
+        by_a+= np.einsum('iajb,jb->ia', b[1], yb)
+        by_b = np.einsum('jbia,jb->ia', b[1], ya)
+        by_b+= np.einsum('iajb,jb->ia', b[2], yb)
+        by = np.hstack((by_a.ravel(), by_b.ravel()))
+
+        ab1 = ax + by
+        ab2 =-bx - ay
+        ab12 = np.hstack((ab1.ravel(),ab2.ravel()))
+        abxy_ref = ftdhf(cp.asarray([xy])).get()
+        self.assertAlmostEqual(abs(ab12 - abxy_ref).max(), 0, 9)
+
     def test_ab_mgga(self):
         mf = self.mf_m06l_nodf
+        a, b = tdscf.uks.TDDFT(mf).get_ab()
+        ftda = tdscf.uhf.gen_tda_operation(mf)[0]
+        ftdhf = tdscf.uhf.gen_tdhf_operation(mf)[0]
+        nocc_a = int(np.count_nonzero(mf.mo_occ[0] == 1))
+        nvir_a = int(np.count_nonzero(mf.mo_occ[0] == 0))
+        nocc_b = int(np.count_nonzero(mf.mo_occ[1] == 1))
+        nvir_b = int(np.count_nonzero(mf.mo_occ[1] == 0))
+        np.random.seed(2)
+        xa, ya = np.random.random((2,nocc_a,nvir_a))
+        xb, yb = np.random.random((2,nocc_b,nvir_b))
+        x = np.hstack((xa.ravel(), xb.ravel()))
+        y = np.hstack((ya.ravel(), yb.ravel()))
+        xy = np.hstack((x, y))
+        ax_a = np.einsum('iajb,jb->ia', a[0], xa)
+        ax_a+= np.einsum('iajb,jb->ia', a[1], xb)
+        ax_b = np.einsum('jbia,jb->ia', a[1], xa)
+        ax_b+= np.einsum('iajb,jb->ia', a[2], xb)
+        ax = np.hstack((ax_a.ravel(), ax_b.ravel()))
+        self.assertAlmostEqual(abs(ax - ftda([x]).get()).max(), 0, 9)
+
+        ay_a = np.einsum('iajb,jb->ia', a[0], ya)
+        ay_a+= np.einsum('iajb,jb->ia', a[1], yb)
+        ay_b = np.einsum('jbia,jb->ia', a[1], ya)
+        ay_b+= np.einsum('iajb,jb->ia', a[2], yb)
+        ay = np.hstack((ay_a.ravel(), ay_b.ravel()))
+
+        bx_a = np.einsum('iajb,jb->ia', b[0], xa)
+        bx_a+= np.einsum('iajb,jb->ia', b[1], xb)
+        bx_b = np.einsum('jbia,jb->ia', b[1], xa)
+        bx_b+= np.einsum('iajb,jb->ia', b[2], xb)
+        bx = np.hstack((bx_a.ravel(), bx_b.ravel()))
+
+        by_a = np.einsum('iajb,jb->ia', b[0], ya)
+        by_a+= np.einsum('iajb,jb->ia', b[1], yb)
+        by_b = np.einsum('jbia,jb->ia', b[1], ya)
+        by_b+= np.einsum('iajb,jb->ia', b[2], yb)
+        by = np.hstack((by_a.ravel(), by_b.ravel()))
+
+        ab1 = ax + by
+        ab2 =-bx - ay
+        ab12 = np.hstack((ab1.ravel(),ab2.ravel()))
+        abxy_ref = ftdhf(cp.asarray([xy])).get()
+        self.assertAlmostEqual(abs(ab12 - abxy_ref).max(), 0, 9)
+
+    def test_ab_mgga_df(self):
+        mf = self.mf_m06l
         a, b = tdscf.uks.TDDFT(mf).get_ab()
         ftda = tdscf.uhf.gen_tda_operation(mf)[0]
         ftdhf = tdscf.uhf.gen_tdhf_operation(mf)[0]

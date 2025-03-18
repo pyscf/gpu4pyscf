@@ -43,17 +43,12 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
 
     Ref: Chem Phys Lett, 256, 454
     '''
-    if hasattr(mf, 'with_df'):
-        raise NotImplementedError('DF-TDDFT is not implemented')
-    # if not singlet:
-    #     raise NotImplementedError('Only singlet is implemented')
     if mo_energy is None:
         mo_energy = mf.mo_energy
     if mo_coeff is None:
         mo_coeff = mf.mo_coeff
     if mo_occ is None:
         mo_occ = mf.mo_occ
-    # assert (mo_coeff.dtype == numpy.double)
 
     mo_energy = cp.asarray(mo_energy)
     mo_coeff = cp.asarray(mo_coeff)
@@ -73,9 +68,21 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
     b = cp.zeros_like(a)
 
     def add_hf_(a, b, hyb=1):
-        eri = mol.intor('int2e_sph', aosym='s8')
-        eri= ao2mo.restore(1, eri, nao)
-        eri = cp.asarray(eri)
+        if hasattr(mf, 'with_df'):
+            from gpu4pyscf.df import int3c2e
+            auxmol = mf.with_df.auxmol
+            naux = auxmol.nao
+            int3c = int3c2e.get_int3c2e(mol, auxmol)
+            int2c2e = auxmol.intor('int2c2e')
+            int3c = cp.asarray(int3c)
+            int2c2e = cp.asarray(int2c2e)
+            df_coef = cp.linalg.solve(int2c2e, int3c.reshape(nao*nao, naux).T)
+            df_coef = df_coef.reshape(naux, nao, nao)
+            eri = cp.einsum('ijP,Pkl->ijkl', int3c, df_coef)
+        else:
+            eri = mol.intor('int2e_sph', aosym='s8')
+            eri= ao2mo.restore(1, eri, nao)
+            eri = cp.asarray(eri)
         eri_mo = cp.einsum('pjkl,pi->ijkl', eri, orbo.conj())
         eri_mo = cp.einsum('ipkl,pj->ijkl', eri_mo, mo)
         eri_mo = cp.einsum('ijpl,pk->ijkl', eri_mo, mo.conj())
@@ -84,7 +91,6 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
         if singlet:
             a += cp.einsum('iabj->iajb', eri_mo[:nocc,nocc:,nocc:,:nocc]) * 2
             a -= cp.einsum('ijba->iajb', eri_mo[:nocc,:nocc,nocc:,nocc:]) * hyb
-
             b += cp.einsum('iajb->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * 2
             b -= cp.einsum('jaib->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * hyb
         else:
@@ -103,18 +109,31 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
 
         add_hf_(a, b, hyb)
         if omega != 0:  # For RSH
-            with mol.with_range_coulomb(omega):
-                eri = mol.intor('int2e_sph', aosym='s8')
-                eri= ao2mo.restore(1, eri, nao)
-                eri = cp.asarray(eri)
-                eri_mo = cp.einsum('pjkl,pi->ijkl', eri, orbo.conj())
-                eri_mo = cp.einsum('ipkl,pj->ijkl', eri_mo, mo)
-                eri_mo = cp.einsum('ijpl,pk->ijkl', eri_mo, mo.conj())
-                eri_mo = cp.einsum('ijkp,pl->ijkl', eri_mo, mo)
-                eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
-                k_fac = alpha - hyb
-                a -= cp.einsum('ijba->iajb', eri_mo[:nocc,:nocc,nocc:,nocc:]) * k_fac
-                b -= cp.einsum('jaib->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * k_fac
+            if hasattr(mf, 'with_df'):
+                from gpu4pyscf.df import int3c2e
+                auxmol = mf.with_df.auxmol
+                naux = auxmol.nao
+                int3c = int3c2e.get_int3c2e(mol, auxmol, omega=omega)
+                with auxmol.with_range_coulomb(omega):
+                    int2c2e = auxmol.intor('int2c2e')
+                int3c = cp.asarray(int3c)
+                int2c2e = cp.asarray(int2c2e)
+                df_coef = cp.linalg.solve(int2c2e, int3c.reshape(nao*nao, naux).T)
+                df_coef = df_coef.reshape(naux, nao, nao)
+                eri = cp.einsum('ijP,Pkl->ijkl', int3c, df_coef)
+            else:
+                with mol.with_range_coulomb(omega):
+                    eri = mol.intor('int2e_sph', aosym='s8')
+                    eri= ao2mo.restore(1, eri, nao)
+                    eri = cp.asarray(eri)
+            eri_mo = cp.einsum('pjkl,pi->ijkl', eri, orbo.conj())
+            eri_mo = cp.einsum('ipkl,pj->ijkl', eri_mo, mo)
+            eri_mo = cp.einsum('ijpl,pk->ijkl', eri_mo, mo.conj())
+            eri_mo = cp.einsum('ijkp,pl->ijkl', eri_mo, mo)
+            eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
+            k_fac = alpha - hyb
+            a -= cp.einsum('ijba->iajb', eri_mo[:nocc,:nocc,nocc:,nocc:]) * k_fac
+            b -= cp.einsum('jaib->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * k_fac
 
         xctype = ni._xc_type(mf.xc)
         opt = getattr(ni, 'gdftopt', None)
@@ -289,8 +308,12 @@ class TDBase(lib.StreamObject):
         return precond
 
     def nuc_grad_method(self):
-        from gpu4pyscf.grad import tdrhf
-        return tdrhf.Gradients(self)
+        if hasattr(self._scf,'with_df'):
+            from gpu4pyscf.df.grad import tdrhf
+            return tdrhf.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tdrhf
+            return tdrhf.Gradients(self)
 
     as_scanner = tdhf_cpu.as_scanner
 

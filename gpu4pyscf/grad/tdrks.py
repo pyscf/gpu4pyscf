@@ -203,14 +203,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     j_factor = 1.0
     k_factor = 0.0
     if with_k:
-        if omega == 0:
-            k_factor = hyb
-        elif alpha == 0:  # LR=0, only SR exchange
-            pass
-        elif hyb == 0:  # SR=0, only LR exchange
-            k_factor = alpha
-        else:  # SR and LR exchange with different ratios
-            k_factor = alpha
+        k_factor = hyb
 
     extra_force = cp.zeros((len(atmlst), 3))
     dvhf_all = 0
@@ -226,42 +219,39 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         j_factor=1.0
     else:
         j_factor=0.0
-    dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, j_factor, k_factor) * 2
+    dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, j_factor, k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
-    dvhf_all += dvhf
-    dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, 0.0, k_factor) * 2
+        extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+    dvhf_all += dvhf * 2
+    dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, j_factor=0.0, k_factor=k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
-    dvhf_all += dvhf
+        extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+    dvhf_all += dvhf * 2
 
     if with_k and omega != 0:
         j_factor = 0.0
-        omega = -omega  # Prefer computing the SR part
-        if alpha == 0:  # LR=0, only SR exchange
-            k_factor = hyb
-        elif hyb == 0:  # SR=0, only LR exchange
-            # full range exchange was computed in the previous step
-            k_factor = -alpha
-        else:  # SR and LR exchange with different ratios
-            k_factor = hyb - alpha  # =beta
+        k_factor = alpha-hyb  # =beta
 
-        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2, j_factor, k_factor, omega)
+        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2, 
+                                j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals())
         dvhf_all += dvhf
-        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, j_factor, k_factor, omega)
+        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, 
+                                j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= mf_grad.extra_force(ia, locals())
         dvhf_all -= dvhf
-        dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, j_factor, k_factor, omega) * 2
+        dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, 
+                                j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
-            extra_force[k] += mf_grad.extra_force(ia, locals())
-        dvhf_all += dvhf
-        dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, j_factor, k_factor, omega) * 2
+            extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+        dvhf_all += dvhf * 2
+        dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, 
+                                j_factor=j_factor, k_factor=k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
-            extra_force[k] += mf_grad.extra_force(ia, locals())
-        dvhf_all += dvhf
+            extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+        dvhf_all += dvhf * 2
     time1 = log.timer('2e AO integral derivatives', *time1)
     fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
 
