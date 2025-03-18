@@ -99,7 +99,9 @@ def level_shift(s, d, f, factor):
     dm_vir = s - reduce(cupy.dot, (s, d, s))
     return f + dm_vir * factor
 
-def get_hcore(mf, mol):
+def get_hcore(mf, mol=None):
+    if mol is None:
+        mol = mf.mol
     h = mol.intor_symmetric('int1e_kin')
 
     if mol._pseudo:
