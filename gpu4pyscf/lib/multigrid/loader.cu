@@ -23,11 +23,12 @@
 __device__ static
 void init_orth_data(double *pool, int *grid_start,
                     MGridEnvVars envs, MGridBounds bounds, double *ri, double *rj,
-                    double ai, double aj, int l1)
+                    double ai, double aj, int l)
 {
     int thread_id = threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int ngrid_span = bounds.ngrid_radius * 2;
+    int l1 = l + 1;
     int nl_gridx = ngrid_span * l1;
     int xs_size = nl_gridx * WARP_SIZE;
     int z = warp_id % 3;
@@ -86,7 +87,7 @@ void init_orth_data(double *pool, int *grid_start,
         for (int i = warp_id; i < ngrid_span; i += WARPS) {
             double gridx = x0xi + i * dx;
             double s1 = xs_exp[i*WARP_SIZE];
-            for (int m = 1; m < l1; m++) {
+            for (int m = 1; m <= l; m++) {
                 s1 *= gridx;
                 xs_exp[(m*ngrid_span+i)*WARP_SIZE] = s1;
             }
@@ -156,7 +157,7 @@ void fill_dm_xyz(double *dm_xyz, double *gx_dmyz, double *xs_exp,
     constexpr int nf2 = (L+1)*(L+2)/2;
 #if 0
     // this algorithm seems more efficient for large L
-    double r3[((L+1)*(L+1)*(L+2)/2+WARPS-1)/WARPS];
+    double r3[(L1*nf2+WARPS-1)/WARPS];
 #pragma unroll
     for (int n = 0; n < (L1*nf2+WARPS-1)/WARPS; ++n) {
         r3[n] = 0.;
@@ -241,7 +242,7 @@ void fill_dm_xyz(double *dm_xyz, double *gx_dmyz, double *xs_exp,
             }
         }
     } else {
-        double r3[((L+1)*(L+1)*(L+2)/2+WARPS-1)/WARPS];
+        double r3[(L1*nf2+WARPS-1)/WARPS];
 #pragma unroll
         for (int n = 0; n < (L1*nf2+WARPS-1)/WARPS; ++n) {
             r3[n] = 0.;

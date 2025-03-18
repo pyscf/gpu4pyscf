@@ -20,19 +20,6 @@
 #define BLOCK_DIM   32
 
 __global__
-static void _dsymm_triu(double *a, int n)
-{
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y * blockDim.y + threadIdx.y;
-    if (i < j || i >= n || j >= n) {
-        return;
-    }
-    size_t N = n;
-    size_t off = N * N * blockIdx.z;
-    a[off + j * N + i] = a[off + i * N + j];
-}
-
-__global__
 void _transpose_sum(double *a, int n)
 {
     if(blockIdx.x > blockIdx.y){
@@ -70,20 +57,6 @@ void _transpose_sum(double *a, int n)
 }
 
 extern "C" {
-__host__
-int CPdsymm_triu(double *a, int n, int counts)
-{
-    int ntile = (n + THREADS - 1) / THREADS;
-    dim3 threads(THREADS, THREADS);
-    dim3 blocks(ntile, ntile, counts);
-    _dsymm_triu<<<blocks, threads>>>(a, n);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        return 1;
-    }
-    return 0;
-}
-
 __host__
 int transpose_sum(cudaStream_t stream, double *a, int n, int counts){
     int ntile = (n + THREADS - 1) / THREADS;

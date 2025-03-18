@@ -75,14 +75,14 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     double *gy_dmxz = dm_xyz + nf3*WARP_SIZE;
     int *grid_start = (int *)(gy_dmxz + nf2*ngrid_span*WARP_SIZE);
     init_orth_data(xs_exp+sp_id, grid_start+sp_id, envs, bounds,
-                   ri, rj, ai, aj, L+1);
+                   ri, rj, ai, aj, L);
 
     int nao = envs.nao;
     int *ao_loc = envs.ao_loc;
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     // TODO: multiple dms
-    _dm_to_dm_xyz<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, cicj);
+    dm_to_dm_xyz<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, cicj);
 
     double r1[L+1];
     double dmx_gyz[L+1];
@@ -111,10 +111,10 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     for (int iy = warp_id; iy < ngridy; iy += WARPS) {
         if (iy < ngridy && sp_id < npairs_this_block) {
             double *gy_local = gy_dmxz + sp_id * nf2*ngridy;
-            double *_ys_exp = ys_exp + iy * WARP_SIZE + sp_id;
+            double *ys_local = ys_exp + iy * WARP_SIZE + sp_id;
 #pragma unroll
             for (int m = 0; m <= L; ++m) {
-                r1[m] = _ys_exp[m*xs_stride];
+                r1[m] = ys_local[m*xs_stride];
             }
 #pragma unroll
             for (int mx = 0; mx <= L; ++mx) {
@@ -126,7 +126,7 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
                         int n = ADDR3(L,mx,my,mz);
                         val += r1[my] * dm_cache[n*WARP_SIZE+sp_id];
                     }
-                    gy_local[ADDR2(L,mx,mz)*ngridy+iy] = val;
+                    gy_local[iy*nf2+ADDR2(L,mx,mz)] = val;
                 }
             }
         }
@@ -167,26 +167,27 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
 
         for (int xyz = thread_id; xyz < x_ngridyz; xyz += THREADS) {
             int ix_inc = xyz / ngridyz;
+            if (ix_inc >= ngridx) {
+                continue;
+            }
+
             int iyz = xyz % ngridyz;
             int iy = iyz / ngridz;
             int iz = iyz % ngridz;
-            if (ix_inc < ngridx) {
-#pragma unroll
-                for (int mz = 0; mz <= L; ++mz) {
-                    r1[mz] = zs_cache[mz*ngridz+iz];
-                }
-#pragma unroll
-                for (int mx = 0; mx <= L; ++mx) {
-                    dmx_gyz[mx] = 0.;
-#pragma unroll
-                    for (int mz = 0; mz <= L-mx; ++mz) {
-                        dmx_gyz[mx] += ys_cache[ADDR2(L,mx,mz)*ngridy+iy] * r1[mz];
-                    }
-                }
-            }
-
             int ty = (iy + ny0) % mesh_y;
             int tz = (iz + nz0) % mesh_z;
+#pragma unroll
+            for (int mz = 0; mz <= L; ++mz) {
+                r1[mz] = zs_cache[mz*ngridz+iz];
+            }
+#pragma unroll
+            for (int mx = 0; mx <= L; ++mx) {
+                dmx_gyz[mx] = 0.;
+#pragma unroll
+                for (int mz = 0; mz <= L-mx; ++mz) {
+                    dmx_gyz[mx] += ys_cache[iy*nf2+ADDR2(L,mx,mz)] * r1[mz];
+                }
+            }
             int addr_yz = ty * mesh_z + tz;
             double *rho_local = rho + addr_yz;
             for (int ix = ix_inc; ix < ngridx; ix += ix_stride) {
@@ -211,7 +212,7 @@ void eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = (L+1) * ngrid_span;
     int nf2 = (L+1)*(L+2)/2;
-    int nf3 = (L+1)*(L+2)*(L+3)/6;
+    int nf3 = nf2*(L+3)/3;
     pool += (xs_size*3 + nf3 + nf2*ngrid_span + 3) * WARP_SIZE * b_id;
 
     __shared__ uint32_t pair_idx0;
@@ -228,7 +229,7 @@ void eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     }
 }
 
-static size_t buflen1(int l, MGridBounds *bounds)
+static size_t buflen(int l, MGridBounds *bounds)
 {
     int ngrid_span = bounds->ngrid_radius * 2;
     int lj = MIN(l, LMAX);
@@ -254,15 +255,15 @@ int MG_eval_rho_orth(double *rho, double *dm, MGridEnvVars envs,
     cudaMemset(batch_head, 0, sizeof(uint32_t));
 
     switch (l) {
-    case 0: eval_rho_orth_kernel<0> <<<workers, THREADS, buflen1(0, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 1: eval_rho_orth_kernel<1> <<<workers, THREADS, buflen1(1, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 2: eval_rho_orth_kernel<2> <<<workers, THREADS, buflen1(2, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 3: eval_rho_orth_kernel<3> <<<workers, THREADS, buflen1(3, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 4: eval_rho_orth_kernel<4> <<<workers, THREADS, buflen1(4, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 5: eval_rho_orth_kernel<5> <<<workers, THREADS, buflen1(5, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 6: eval_rho_orth_kernel<6> <<<workers, THREADS, buflen1(6, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 7: eval_rho_orth_kernel<7> <<<workers, THREADS, buflen1(7, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 8: eval_rho_orth_kernel<8> <<<workers, THREADS, buflen1(8, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 0: eval_rho_orth_kernel<0> <<<workers, THREADS, buflen(0, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 1: eval_rho_orth_kernel<1> <<<workers, THREADS, buflen(1, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 2: eval_rho_orth_kernel<2> <<<workers, THREADS, buflen(2, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 3: eval_rho_orth_kernel<3> <<<workers, THREADS, buflen(3, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 4: eval_rho_orth_kernel<4> <<<workers, THREADS, buflen(4, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 5: eval_rho_orth_kernel<5> <<<workers, THREADS, buflen(5, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 6: eval_rho_orth_kernel<6> <<<workers, THREADS, buflen(6, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 7: eval_rho_orth_kernel<7> <<<workers, THREADS, buflen(7, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 8: eval_rho_orth_kernel<8> <<<workers, THREADS, buflen(8, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
     default: return 1;
     }
 

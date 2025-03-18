@@ -55,6 +55,8 @@ def _jk_task(mol, dms, mo_coeff, mo_occ, vhfopt, task_list, hermi=0,
     with cp.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
+        init_constant(mol)
+
         dms = cp.asarray(dms)
         coeff = cp.asarray(vhfopt.coeff)
 
@@ -82,7 +84,7 @@ def _jk_task(mol, dms, mo_coeff, mo_occ, vhfopt, task_list, hermi=0,
 
         ao_loc = mol.ao_loc
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-        log_max_dm = dm_cond.max()
+        log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(vhfopt.direct_scf_tol)
         tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
                                                  log_cutoff-log_max_dm)
@@ -186,8 +188,6 @@ def get_jk(mol, dm, mo_coeff, mo_occ, hermi=0, vhfopt=None,
     n_dm = dms.shape[0]
 
     assert with_j or with_k
-
-    init_constant(mol)
 
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]

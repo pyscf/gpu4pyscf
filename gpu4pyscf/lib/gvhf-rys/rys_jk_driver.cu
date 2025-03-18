@@ -23,6 +23,8 @@
 
 #include "vhf.cuh"
 
+#define CHECK_SHARED_MEMORY_ATTRIBUTES true
+
 __constant__ int c_g_pair_idx[3675];
 __constant__ int c_g_pair_offsets[LMAX1*LMAX1];
 // Putting _env in c_env reduces performance. Reason unclear
@@ -125,16 +127,48 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
         int buflen = (nroots*2 + g_size*3 + iprim*jprim + 9) * quartets_per_block;
         if (with_gout) {
             buflen += nf3_ij*nf3_kl * quartets_per_block;
+
+            if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
+                cudaFuncAttributes attributes;
+                const cudaError_t err_get_attribute = cudaFuncGetAttributes(&attributes, rys_j_with_gout_kernel);
+                if (err_get_attribute != cudaSuccess) {
+                    printf("Failed in cudaFuncGetAttributes(), attribute value is not reliable\n"); fflush(stdout);
+                }
+                if (buflen*sizeof(double) > attributes.maxDynamicSharedSizeBytes) {
+                    printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                    fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                }
+            }
+
             rys_j_with_gout_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
         } else {
             buflen += (nf3_ij+nf3_kl*2+(lij+1)*(lkl+1)*(nmax+2)) * quartets_per_block;
             buflen += nf3_ij * TILE2; // dm_ij_cache
+
+            if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
+                cudaFuncAttributes attributes;
+                const cudaError_t err_get_attribute = cudaFuncGetAttributes(&attributes, rys_j_kernel);
+                if (err_get_attribute != cudaSuccess) {
+                    printf("Failed in cudaFuncGetAttributes(), attribute value is not reliable\n"); fflush(stdout);
+                }
+                if (buflen*sizeof(double) > attributes.maxDynamicSharedSizeBytes) {
+                    printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                    fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                }
+            }
+
             rys_j_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
         }
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in RYS_build_j: %s\n", cudaGetErrorString(err));
+        int device_id = -1;
+        const cudaError_t err_get_device_id = cudaGetDevice(&device_id);
+        if (err_get_device_id != cudaSuccess) {
+            printf("Failed also in cudaGetDevice(), device_id value is not reliable\n"); fflush(stdout);
+        }
+        printf("CUDA Error in RYS_build_j, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stdout);
+        fprintf(stderr, "CUDA Error in RYS_build_j, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stdout);
         return 1;
     }
     return 0;
@@ -192,11 +226,30 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;// + ij_prims*4*TILE2;
+
+        if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
+            cudaFuncAttributes attributes;
+            const cudaError_t err_get_attribute = cudaFuncGetAttributes(&attributes, rys_jk_kernel);
+            if (err_get_attribute != cudaSuccess) {
+                printf("Failed in cudaFuncGetAttributes(), attribute value is not reliable\n"); fflush(stdout);
+            }
+            if (buflen*sizeof(double) > attributes.maxDynamicSharedSizeBytes) {
+                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+            }
+        }
+
         rys_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in RYS_build_jk: %s\n", cudaGetErrorString(err));
+        int device_id = -1;
+        const cudaError_t err_get_device_id = cudaGetDevice(&device_id);
+        if (err_get_device_id != cudaSuccess) {
+            printf("Failed also in cudaGetDevice(), device_id value is not reliable\n"); fflush(stdout);
+        }
+        printf("CUDA Error in RYS_build_jk, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stdout);
+        fprintf(stderr, "CUDA Error in RYS_build_jk, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stdout);
         return 1;
     }
     return 0;
@@ -253,11 +306,30 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
         dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
         buflen += ij_prims*6;
+
+        if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
+            cudaFuncAttributes attributes;
+            const cudaError_t err_get_attribute = cudaFuncGetAttributes(&attributes, rys_jk_ip1_kernel);
+            if (err_get_attribute != cudaSuccess) {
+                printf("Failed in cudaFuncGetAttributes(), attribute value is not reliable\n"); fflush(stdout);
+            }
+            if (buflen*sizeof(double) > attributes.maxDynamicSharedSizeBytes) {
+                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+            }
+        }
+
         rys_jk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in RYS_build_jk_ip1: %s\n", cudaGetErrorString(err));
+        int device_id = -1;
+        const cudaError_t err_get_device_id = cudaGetDevice(&device_id);
+        if (err_get_device_id != cudaSuccess) {
+            printf("Failed also in cudaGetDevice(), device_id value is not reliable\n"); fflush(stdout);
+        }
+        printf("CUDA Error in RYS_build_jk_ip1, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stdout);
+        fprintf(stderr, "CUDA Error in RYS_build_jk_ip1, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stdout);
         return 1;
     }
     return 0;
@@ -320,12 +392,31 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;
         buflen = MAX(buflen, 12*gout_stride*quartets_per_block);
+
+        if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
+            cudaFuncAttributes attributes;
+            const cudaError_t err_get_attribute = cudaFuncGetAttributes(&attributes, rys_ejk_ip1_kernel);
+            if (err_get_attribute != cudaSuccess) {
+                printf("Failed in cudaFuncGetAttributes(), attribute value is not reliable\n"); fflush(stdout);
+            }
+            if (buflen*sizeof(double) > attributes.maxDynamicSharedSizeBytes) {
+                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+            }
+        }
+
         rys_ejk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, pool, dd_pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in RYS_ejk_ip1: %s\n", cudaGetErrorString(err));
+        int device_id = -1;
+        const cudaError_t err_get_device_id = cudaGetDevice(&device_id);
+        if (err_get_device_id != cudaSuccess) {
+            printf("Failed also in cudaGetDevice(), device_id value is not reliable\n"); fflush(stdout);
+        }
+        printf("CUDA Error in RYS_per_atom_jk_ip1, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stdout);
+        fprintf(stderr, "CUDA Error in RYS_per_atom_jk_ip1, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stdout);
         return 1;
     }
     return 0;
@@ -387,12 +478,31 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;
+
+        if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
+            cudaFuncAttributes attributes;
+            const cudaError_t err_get_attribute = cudaFuncGetAttributes(&attributes, rys_ejk_ip2_type12_kernel);
+            if (err_get_attribute != cudaSuccess) {
+                printf("Failed in cudaFuncGetAttributes(), attribute value is not reliable\n"); fflush(stdout);
+            }
+            if (buflen*sizeof(double) > attributes.maxDynamicSharedSizeBytes) {
+                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+            }
+        }
+
         rys_ejk_ip2_type12_kernel<<<workers, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, pool, dd_pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in RYS_ejk_ip2_type12: %s\n", cudaGetErrorString(err));
+        int device_id = -1;
+        const cudaError_t err_get_device_id = cudaGetDevice(&device_id);
+        if (err_get_device_id != cudaSuccess) {
+            printf("Failed also in cudaGetDevice(), device_id value is not reliable\n"); fflush(stdout);
+        }
+        printf("CUDA Error in RYS_per_atom_jk_ip2_type12, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stdout);
+        fprintf(stderr, "CUDA Error in RYS_per_atom_jk_ip2_type12, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stdout);
         return 1;
     }
     return 0;
@@ -455,12 +565,31 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
         dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;
         buflen = MAX(buflen, 9*gout_stride*quartets_per_block);
+
+        if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
+            cudaFuncAttributes attributes;
+            const cudaError_t err_get_attribute = cudaFuncGetAttributes(&attributes, rys_ejk_ip2_type3_kernel);
+            if (err_get_attribute != cudaSuccess) {
+                printf("Failed in cudaFuncGetAttributes(), attribute value is not reliable\n"); fflush(stdout);
+            }
+            if (buflen*sizeof(double) > attributes.maxDynamicSharedSizeBytes) {
+                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+            }
+        }
+
         rys_ejk_ip2_type3_kernel<<<workers, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, pool, dd_pool, batch_head);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in RYS_ejk_ip2_type3: %s\n", cudaGetErrorString(err));
+        int device_id = -1;
+        const cudaError_t err_get_device_id = cudaGetDevice(&device_id);
+        if (err_get_device_id != cudaSuccess) {
+            printf("Failed also in cudaGetDevice(), device_id value is not reliable\n"); fflush(stdout);
+        }
+        printf("CUDA Error in RYS_per_atom_jk_ip2_type3, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stdout);
+        fprintf(stderr, "CUDA Error in RYS_per_atom_jk_ip2_type3, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stdout);
         return 1;
     }
     return 0;

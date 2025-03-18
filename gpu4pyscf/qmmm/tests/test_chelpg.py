@@ -55,14 +55,14 @@ def run_dft_chelpg(xc, deltaR):
     mf.grids.level = grids_level
     e_dft = mf.kernel()
     q = chelpg.eval_chelpg_layer_gpu(mf, deltaR=deltaR)
-    return e_dft, q
+    return e_dft, q.get()
 
 def run_udft_chelpg(xc, deltaR):
     mf = uks.UKS(molu, xc=xc)
     mf.grids.level = grids_level
     e_dft = mf.kernel()
     q = chelpg.eval_chelpg_layer_gpu(mf, deltaR=deltaR)
-    return e_dft, q
+    return e_dft, q.get()
 
 class KnownValues(unittest.TestCase):
     '''
@@ -96,14 +96,14 @@ class KnownValues(unittest.TestCase):
     def test_rks_b3lyp(self):
         print('-------- RKS B3LYP -------------')
         e_tot, q = run_dft_chelpg('B3LYP', 0.1)
-        assert np.allclose(e_tot, -76.4666495181)
-        assert np.allclose(q, np.array([-0.712558, 0.356292, 0.356266]))
+        assert abs(e_tot - -76.4666495181) < 1e-6
+        assert abs(q - np.array([-0.712558, 0.356292, 0.356266])).max() < 1e-5
 
     def test_uks_b3lyp(self):
         print('-------- UKS B3LYP -------------')
         e_tot, q = run_udft_chelpg('B3LYP', 0.1)
-        assert np.allclose(e_tot, -75.9987351018)
-        assert np.allclose(q, np.array([0.046042, 0.476984, 0.476974]), rtol=5.0E-5)
+        assert abs(e_tot - -75.9987351018) < 1e-6
+        assert abs(q - np.array([0.046042, 0.476984, 0.476974])).max() < 1e-5
 
 
 if __name__ == "__main__":

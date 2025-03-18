@@ -178,6 +178,8 @@ def _ejk_ip2_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
     with cp.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
+        init_constant(mol)
+
         dms = cp.asarray(dms)
         coeff = cp.asarray(vhfopt.coeff)
 
@@ -196,7 +198,7 @@ def _ejk_ip2_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
 
         ao_loc = mol.ao_loc
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-        log_max_dm = dm_cond.max()
+        log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(vhfopt.direct_scf_tol)
         tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
                                                  log_cutoff-log_max_dm)
@@ -287,8 +289,6 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
 
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
-
-    init_constant(mol)
 
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
@@ -431,6 +431,8 @@ def _build_jk_ip1_task(mol, dms, vhfopt, task_list, atoms_slice,
     with cp.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
+        init_constant(mol)
+
         dms = cp.asarray(dms)
 
         vj = vk = None
@@ -445,7 +447,7 @@ def _build_jk_ip1_task(mol, dms, vhfopt, task_list, atoms_slice,
 
         ao_loc = mol.ao_loc
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-        log_max_dm = dm_cond.max()
+        log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(vhfopt.direct_scf_tol)
         tril_tile_mappings = _make_tril_tile_mappings(
             l_ctr_bas_loc, vhfopt.tile_q_cond, log_cutoff-log_max_dm, 1)
@@ -536,8 +538,6 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
     if atoms_slice is None:
         atoms_slice = 0, natm
     atom0, atom1 = atoms_slice
-
-    init_constant(mol)
 
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]

@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import h5py
+import numpy as np
 import cupy
+import h5py
 from functools import reduce
 from pyscf import gto
 from pyscf import lib as pyscf_lib
@@ -21,7 +22,8 @@ from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
 from gpu4pyscf import lib
 from gpu4pyscf.lib import utils
-from gpu4pyscf.lib.cupy_helper import eigh, tag_array, return_cupy_array, cond
+from gpu4pyscf.lib.cupy_helper import (
+    eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem)
 from gpu4pyscf.scf import diis, jk
 from gpu4pyscf.lib import logger
 
@@ -98,18 +100,18 @@ def level_shift(s, d, f, factor):
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
-    if s1e is None: s1e = mf.get_ovlp()
-    if dm is None: dm = mf.make_rdm1()
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
-    if not isinstance(s1e, cupy.ndarray): s1e = cupy.asarray(s1e)
-    if not isinstance(dm, cupy.ndarray): dm = cupy.asarray(dm)
-    if not isinstance(h1e, cupy.ndarray): h1e = cupy.asarray(h1e)
-    if not isinstance(vhf, cupy.ndarray): vhf = cupy.asarray(vhf)
+    h1e = cupy.asarray(h1e)
+    vhf = cupy.asarray(vhf)
     f = h1e + vhf
     if cycle < 0 and diis is None:  # Not inside the SCF iteration
         return f
 
+    if s1e is None: s1e = mf.get_ovlp()
+    if dm is None: dm = mf.make_rdm1()
+    s1e = cupy.asarray(s1e)
+    dm = cupy.asarray(dm)
     if diis_start_cycle is None:
         diis_start_cycle = mf.diis_start_cycle
     if level_shift_factor is None:
@@ -121,6 +123,7 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         f = damping(s1e, dm*.5, f, damp_factor)
     if diis is not None and cycle >= diis_start_cycle:
         f = diis.update(s1e, dm, f, mf, h1e, vhf)
+
     if abs(level_shift_factor) > 1e-4:
         f = level_shift(s1e, dm*.5, f, level_shift_factor)
     return f
@@ -152,17 +155,19 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         conv_tol_grad = conv_tol**.5
         logger.info(mf, 'Set gradient conv threshold to %g', conv_tol_grad)
 
-    if(dm0 is None):
+    if dm0 is None:
         dm0 = mf.get_init_guess(mol, mf.init_guess)
 
-    dm = cupy.asarray(dm0, order='C')
     if hasattr(dm0, 'mo_coeff') and hasattr(dm0, 'mo_occ'):
         if dm0.ndim == 2:
-            mo_coeff = cupy.asarray(dm0.mo_coeff)
-            mo_occ = cupy.asarray(dm0.mo_occ)
-            occ_coeff = cupy.asarray(mo_coeff[:,mo_occ>0])
-            dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
+            mo_coeff = cupy.asarray(dm0.mo_coeff[:,dm0.mo_occ>0])
+            mo_occ = cupy.asarray(dm0.mo_occ[dm0.mo_occ>0])
+            dm0 = tag_array(dm0, mo_occ=mo_occ, mo_coeff=mo_coeff)
+        else:
+            # Drop attributes like mo_coeff, mo_occ for UHF and other methods.
+            dm0 = asarray(dm0, order='C')
 
+    dm, dm0 = asarray(dm0, order='C'), None
     h1e = cupy.asarray(mf.get_hcore(mol))
     s1e = cupy.asarray(mf.get_ovlp(mol))
 
@@ -186,8 +191,6 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         mf_diis = mf.DIIS(mf, mf.diis_file)
         mf_diis.space = mf.diis_space
         mf_diis.rollback = mf.diis_space_rollback
-        fock = mf.get_fock(h1e, s1e, vhf, dm)
-        _, mf_diis.Corth = mf.eig(fock, s1e)
     else:
         mf_diis = None
 
@@ -199,20 +202,25 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     for cycle in range(mf.max_cycle):
         t0 = log.init_timer()
+        mo_coeff = mo_occ = mo_energy = fock = None
         dm_last = dm
         last_hf_e = e_tot
 
-        f = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis)
+        fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis)
         t1 = log.timer_debug1('DIIS', *t0)
-        mo_energy, mo_coeff = mf.eig(f, s1e)
+        mo_energy, mo_coeff = mf.eig(fock, s1e)
+        fock = None
         t1 = log.timer_debug1('eig', *t1)
+
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         dm = mf.make_rdm1(mo_coeff, mo_occ)
-        t1 = log.timer_debug1('dm', *t1)
         vhf = mf.get_veff(mol, dm, dm_last, vhf)
+        dm = asarray(dm) # Remove the attached attributes
         t1 = log.timer_debug1('veff', *t1)
+
+        fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
+        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
         e_tot = mf.energy_tot(dm, h1e, vhf)
-        t1 = log.timer_debug1('energy', *t1)
 
         norm_ddm = cupy.linalg.norm(dm-dm_last)
         t1 = log.timer_debug1('total', *t0)
@@ -223,7 +231,6 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
             mf.dump_chk(locals())
 
         e_diff = abs(e_tot-last_hf_e)
-        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, f))
         if(e_diff < conv_tol and norm_gorb < conv_tol_grad):
             scf_conv = True
             break
@@ -432,7 +439,7 @@ class SCF(pyscf_lib.StreamObject):
     kernel = scf             = scf
     as_scanner               = hf_cpu.SCF.as_scanner
     _finalize                = hf_cpu.SCF._finalize
-    init_direct_scf          = hf_cpu.SCF.init_direct_scf
+    init_direct_scf          = NotImplemented
     get_jk                   = _get_jk
     get_j                    = hf_cpu.SCF.get_j
     get_k                    = hf_cpu.SCF.get_k
@@ -517,7 +524,27 @@ class RHF(SCF):
         if mol.nelectron != 1 and mol.spin != 0:
             logger.warn(self, 'Invalid number of electrons %d for RHF method.',
                         mol.nelectron)
+        mem = get_avail_mem()
+        nao = mol.nao
+        if nao**2*20*8 > mem:
+            logger.warn(self, 'GPU memory may be insufficient for SCF of this system. '
+                        'It is recommended to use the scf.LRHF or dft.LRKS class for this system.')
         return SCF.check_sanity(self)
+
+    def energy_elec(self, dm=None, h1e=None, vhf=None):
+        '''
+        electronic energy
+        '''
+        if dm is None: dm = self.make_rdm1()
+        if h1e is None: h1e = self.get_hcore()
+        if vhf is None: vhf = self.get_veff(self.mol, dm)
+        assert dm.dtype == np.float64
+        e1 = float(h1e.ravel().dot(dm.ravel()))
+        e_coul = float(vhf.ravel().dot(dm.ravel())) * .5
+        self.scf_summary['e1'] = e1
+        self.scf_summary['e2'] = e_coul
+        logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
+        return e1+e_coul, e_coul
 
     def nuc_grad_method(self):
         from gpu4pyscf.grad import rhf
