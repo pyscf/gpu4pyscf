@@ -18,6 +18,7 @@ import cupy as cp
 import pyscf
 from pyscf import lib, gto, df
 from gpu4pyscf.gto.ecp import get_ecp, get_ecp_ip
+from gpu4pyscf.__config__ import shm_size
 
 def setUpModule():
     global mol, mol1, mol2, cu1_basis
@@ -95,11 +96,13 @@ class KnownValues(unittest.TestCase):
         h1_gpu = get_ecp(mol2)
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
     
+    @unittest.skipIf(shm_size < 64*1024, "Not enough shared memory")
     def test_ecp_cart_ip1(self):
         h1_cpu = mol1.intor('ECPscalar_iprinv_cart')
         h1_gpu = get_ecp_ip(mol1)
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
     
+    @unittest.skipIf(shm_size < 64*1024, "Not enough shared memory")
     def test_ecp_sph_iprinv(self):
         nao = mol2.nao
         h1_cpu = np.zeros((3,nao,nao))
@@ -110,16 +113,19 @@ class KnownValues(unittest.TestCase):
         h1_gpu = get_ecp_ip(mol2)
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
 
+    @unittest.skipIf(shm_size < 64*1024, "Not enough shared memory")
     def test_ecp_sph_ipnuc(self):
         h1_cpu = mol2.intor('ECPscalar_ipnuc_sph')
         h1_gpu = get_ecp_ip(mol2)
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
 
+    @unittest.skipIf(shm_size < 64*1024, "Not enough shared memory")
     def test_ecp_cart_ipipv(self):
         h1_cpu = mol2.intor('ECPscalar_ipipnuc', comp=9)
         h1_gpu = get_ecp_ip(mol2, 'ipipv')
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
 
+    @unittest.skipIf(shm_size < 64*1024, "Not enough shared memory")
     def test_ecp_cart_ipvip_cart(self):
         h1_cpu = mol2.intor('ECPscalar_ipnucip', comp=9)
         h1_gpu = get_ecp_ip(mol2, 'ipvip')

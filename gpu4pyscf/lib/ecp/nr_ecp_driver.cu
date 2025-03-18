@@ -232,7 +232,7 @@ int ECP_ipipv_cart(double *gctr,
         int smem_size3 = li1*lic1*nfi; // angi
         int smem_size4 = lj1*ljc1*nfj; // angj
 
-        int NF2_MAX = (AO_LMAX+3)*(AO_LMAX+4)/2;
+        //int NF2_MAX = (AO_LMAX+3)*(AO_LMAX+4)/2;
         int NF1_MAX = (AO_LMAX+2)*(AO_LMAX+3)/2;
         int NF0_MAX = (AO_LMAX+1)*(AO_LMAX+2)/2;
         //int static_smem_size = NF2_MAX*NF0_MAX;
@@ -307,7 +307,7 @@ int ECP_ipvip_cart(double *gctr,
 
         int NF1_MAX = (AO_LMAX+2)*(AO_LMAX+3)/2;
         int NF0_MAX = (AO_LMAX+1)*(AO_LMAX+2)/2;
-        int static_smem_size = NF1_MAX*NF1_MAX;
+        //int static_smem_size = NF1_MAX*NF1_MAX;
         int dynamic_smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
         dynamic_smem_size = max(dynamic_smem_size, 3*NF0_MAX*NF1_MAX);
 
