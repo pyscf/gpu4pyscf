@@ -15,7 +15,7 @@
  */
 
 template <int order> __device__
-void type2_facs_rad(double* facs, const int LIC, const int np, double rca,
+void type2_facs_rad(double* facs, const int LIC, const int np, const double rca,
                     const double *ci, const double *ai){
     double root = 0.0;
     if (threadIdx.x < NGAUSS){
@@ -30,7 +30,7 @@ void type2_facs_rad(double* facs, const int LIC, const int np, double rca,
     for (int ip = 0; ip < np; ip++){
         const double ka = 2.0 * ai[ip] * rca;
         const double ar2 = ai[ip] * r2;
-
+        
         double buf[AO_LMAX+ECP_LMAX+order+1];
         if (ar2 > EXPCUTOFF + 6.0){
             for (int j = 0; j <= LIC; j++){
@@ -49,54 +49,9 @@ void type2_facs_rad(double* facs, const int LIC, const int np, double rca,
         }
     }
 }
-/*
-template <int l> __device__
-void type2_ang_nuc_l(double * __restrict__ omega, const int lc,
-                    const int i, const int j, const int k,
-                    double * __restrict__ unitr){
-    double rxPow[l+1], ryPow[l+1], rzPow[l+1];
-    rxPow[0] = ryPow[0] = rzPow[0] = 1.0;
-    for (int li = 1; li <= l; li++) {
-        rxPow[li] = rxPow[li - 1] * unitr[0];
-        ryPow[li] = ryPow[li - 1] * unitr[1];
-        rzPow[li] = rzPow[li - 1] * unitr[2];
-    }
 
-    double g[(l+1)*(l+2)/2];
-    int index = 0;
-    for (int li = l; li >= 0; li--) {
-        for (int lj = l - li; lj >= 0; lj--) {
-            int lk = l - li - lj;
-            g[index++] = rxPow[li] * ryPow[lj] * rzPow[lk];
-        }
-    }
-
-    double c[2*l+1];
-    cart2sph<l>(c, g);
-    double nuc_cart[(l+1)*(l+2)/2];
-    sph2cart<l>(nuc_cart, c);
-
-    double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
-    for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] = 0.0;
-    for (int n = 0; n < (l+1)*(l+2)/2; n++){
-        const int ps = _cart_pow_y[n];
-        const int pt = _cart_pow_z[n];
-        const int pr = l - ps - pt;
-        const double nuc = nuc_cart[n];
-        for (int m = 0; m < (lc+1)*(lc+2)/2; m++){
-            const int pv = _cart_pow_y[m];
-            const int pw = _cart_pow_z[m];
-            const int pu = lc - pv - pw;
-            buf[m] += nuc * int_unit_xyz(i+pu+pr, j+pv+ps, k+pw+pt);
-        }
-    }
-
-    for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] *= 4.0 * M_PI;
-    cart2sph(omega, lc, buf);
-}
-*/
 __device__
-void type2_facs_omega(double* omega, const int LI, const int LC, double *r){
+void type2_facs_omega(double* __restrict__ omega, const int LI, const int LC, double *r){
     double unitr[3];
     if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
         unitr[0] = 0;
@@ -109,52 +64,69 @@ void type2_facs_omega(double* omega, const int LI, const int LC, double *r){
         unitr[2] = r[2] * norm_r;
     }
 
-    const int LIC1 = LI+LC+1;
-    const int LCC1 = LC*2+1;
-
-    const int BLK = (LIC1+1)/2 * LCC1;
-    const int LI1 = LI + 1;
-    for (int nijk = threadIdx.x; nijk < LI1*LI1*LI1; nijk+=blockDim.x){
-        const int i = nijk/LI1/LI1;
-        const int j = nijk/LI1%LI1;
-        const int k = nijk%LI1;
-        const int ijk = i+j+k;
-        if (ijk > LI){
+    // LC + (i+j+k) + (LI + LC) needs to be even
+    // When i+j+k + LC is even
+    for (int n = threadIdx.x; n < (LI+1)*(LI+1)*(LI+1); n+=blockDim.x){
+        const int i = n/(LI+1)/(LI+1);
+        const int j = n/(LI+1)%(LI+1);
+        const int k = n%(LI+1);
+        if (i+j+k > LI || (i+j+k+LC)%2 == 1){
             continue;
         }
-        const int need_even = (LC+ijk)%2;
+
         const int LI_i = LI-i;
         const int ioff = (LI_i)*(LI_i+1)*(LI_i+2)/6;
         const int joff = (LI_i-j)*(LI_i-j+1)/2;
-        double *pomega = omega + (ioff+joff+k)*BLK;
+        const int blk = (LI+LC+2)/2 * (LC*2+1);
+        double *pomega = omega + (ioff+joff+k)*blk;
 
         // TODO: reduce branching
         //for (int lmb = need_even; lmb <= LI+LC; lmb+=2){
         const int lmb = LI+LC;
-        if (need_even == 0){
-            if (lmb >= 0)  {type2_ang_nuc_l<0>(pomega, LC, i, j, k, unitr);  pomega+=LCC1;}
-            if (lmb >= 2)  {type2_ang_nuc_l<2>(pomega, LC, i, j, k, unitr);  pomega+=LCC1;}
-            if (lmb >= 4)  {type2_ang_nuc_l<4>(pomega, LC, i, j, k, unitr);  pomega+=LCC1;}
-            if (lmb >= 6)  {type2_ang_nuc_l<6>(pomega, LC, i, j, k, unitr);  pomega+=LCC1;}
-            if (lmb >= 8)  {type2_ang_nuc_l<8>(pomega, LC, i, j, k, unitr);  pomega+=LCC1;}
-            if (lmb >= 10) {type2_ang_nuc_l<10>(pomega, LC, i, j, k, unitr); pomega+=LCC1;}
-        } else {
-            if (lmb >= 1)  {type2_ang_nuc_l<1>(pomega, LC, i, j, k, unitr);  pomega+=LCC1;}
-            if (lmb >= 3)  {type2_ang_nuc_l<3>(pomega, LC, i, j, k, unitr);  pomega+=LCC1;}
-            if (lmb >= 5)  {type2_ang_nuc_l<5>(pomega, LC, i, j, k, unitr);  pomega+=LCC1;}
-            if (lmb >= 7)  {type2_ang_nuc_l<7>(pomega, LC, i, j, k, unitr);  pomega+=LCC1;}
-            if (lmb >= 9)  {type2_ang_nuc_l<9>(pomega, LC, i, j, k, unitr);  pomega+=LCC1;}
+        if (lmb >= 0)  {type2_ang_nuc_l<0>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (lmb >= 2)  {type2_ang_nuc_l<2>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (lmb >= 4)  {type2_ang_nuc_l<4>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (lmb >= 6)  {type2_ang_nuc_l<6>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (lmb >= 8)  {type2_ang_nuc_l<8>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (lmb >= 10) {type2_ang_nuc_l<10>(pomega, LC, i, j, k, unitr); pomega+=(2*LC+1);}
+    }
+
+    // When i+j+k + LC is odd
+    for (int n = threadIdx.x; n < (LI+1)*(LI+1)*(LI+1); n+=blockDim.x){
+        const int i = n/(LI+1)/(LI+1);
+        const int j = n/(LI+1)%(LI+1);
+        const int k = n%(LI+1);
+        if (i+j+k > LI || (i+j+k+LC)%2 == 0){
+            continue;
         }
+        const int LI_i = LI-i;
+        const int ioff = (LI_i)*(LI_i+1)*(LI_i+2)/6;
+        const int joff = (LI_i-j)*(LI_i-j+1)/2;
+        const int blk = (LI+LC+2)/2 * (LC*2+1);
+        double *pomega = omega + (ioff+joff+k)*blk;
+
+        // TODO: reduce branching
+        //for (int lmb = need_even; lmb <= LI+LC; lmb+=2){
+        const int lmb = LI+LC;
+        if (lmb >= 1)  {type2_ang_nuc_l<1>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (lmb >= 3)  {type2_ang_nuc_l<3>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (lmb >= 5)  {type2_ang_nuc_l<5>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (lmb >= 7)  {type2_ang_nuc_l<7>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (lmb >= 9)  {type2_ang_nuc_l<9>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
     }
 }
 
 __device__
-void type2_ang(double *facs, const int LI, const int LC, double *fi, double *omega){
+void type2_ang(double * __restrict__ facs, const int LI, const int LC, double *rca, double *omega){
     const int LI1 = LI+1;
     const int nfi = LI1*(LI1+1)/2;
     const int LCC1 = (2*LC+1);
     const int LIC1 = LI+LC+1;
     const int BLK = (LIC1+1)/2 * LCC1;
+
+    constexpr int NF_MAX_IP = (AO_LMAX_IP+1)*(AO_LMAX_IP+2)/2;
+    double fi[NF_MAX_IP*3];
+    cache_fac(fi, LI, rca);
 
     // i,j,k,ijkmn->(i+j+k)pmn
     for (int pmn = threadIdx.x; pmn < nfi*LIC1; pmn+=blockDim.x){
@@ -170,16 +142,15 @@ void type2_ang(double *facs, const int LI, const int LC, double *fi, double *ome
         double *fz = fi + (iz+1)*iz/2 + nfi*2;
 
         double ang_pmn[AO_LMAX_IP+1];
-        for (int i = 0; i <= LI; i++){
+        for (int i = 0; i < AO_LMAX_IP+1; i++){
             ang_pmn[i] = 0.0;
         }
-
+        
         for (int i = 0; i <= ix; i++){
         for (int j = 0; j <= iy; j++){
         for (int k = 0; k <= iz; k++){
             const int ijk = i+j+k;
             const double fac = fx[i] * fy[j] * fz[k];
-            printf("%f %f %f\n", fx[i], fy[j], fz[k]);
             const int LI_i = LI-i;
             const int ioff = (LI_i)*(LI_i+1)*(LI_i+2)/6;
             const int joff = (LI_i-j)*(LI_i-j+1)/2;
@@ -197,7 +168,7 @@ void type2_ang(double *facs, const int LI, const int LC, double *fi, double *ome
 }
 
 template <int LI, int LJ, int LC> __global__
-void type2_cart(double *gctr,
+void type2_cart(double * __restrict__ gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
@@ -212,12 +183,6 @@ void type2_cart(double *gctr,
     const int jsh = tasks[task_id + ntasks];
     const int ksh = tasks[task_id + 2*ntasks];
 
-    const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
-    const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
-    const double *ai = env + bas[PTR_EXP+ish*BAS_SLOTS];
-    const double *aj = env + bas[PTR_EXP+jsh*BAS_SLOTS];
-    const double *ci = env + bas[PTR_COEFF+ish*BAS_SLOTS];
-    const double *cj = env + bas[PTR_COEFF+jsh*BAS_SLOTS];
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
 
@@ -231,8 +196,6 @@ void type2_cart(double *gctr,
     rcb[0] = rc[0] - rj[0];
     rcb[1] = rc[1] - rj[1];
     rcb[2] = rc[2] - rj[2];
-    const double dca = norm3d(rca[0], rca[1], rca[2]);
-    const double dcb = norm3d(rcb[0], rcb[1], rcb[2]);
 
     constexpr int LI1 = LI+1;
     constexpr int LJ1 = LJ+1;
@@ -250,8 +213,17 @@ void type2_cart(double *gctr,
     type2_facs_omega(omegaj, LJ, LC, rcb);
     __syncthreads();
 
+    const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
+    const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
+    const double *ai = env + bas[PTR_EXP+ish*BAS_SLOTS];
+    const double *aj = env + bas[PTR_EXP+jsh*BAS_SLOTS];
+    const double *ci = env + bas[PTR_COEFF+ish*BAS_SLOTS];
+    const double *cj = env + bas[PTR_COEFF+jsh*BAS_SLOTS];
+
     double radi[LIC1];
     double radj[LJC1];
+    const double dca = norm3d(rca[0], rca[1], rca[2]);
+    const double dcb = norm3d(rcb[0], rcb[1], rcb[2]);
     type2_facs_rad<0>(radi, LI+LC, npi, dca, ci, ai);
     type2_facs_rad<0>(radj, LJ+LC, npj, dcb, cj, aj);
 
@@ -263,7 +235,7 @@ void type2_cart(double *gctr,
     for (int kbas = ecploc[ksh]; kbas < ecploc[ksh+1]; kbas++){
         ur += rad_part(kbas, ecpbas, env);
     }
-    double ur_tmp = ur;
+    
     double root = 0.0;
     if (threadIdx.x < NGAUSS){
         root = r128[threadIdx.x];
@@ -272,19 +244,14 @@ void type2_cart(double *gctr,
         double *prad = rad_all + p*LIC1*LJC1;
         for (int i = 0; i <= LI+LC; i++){
         for (int j = 0; j <= LJ+LC; j++){
-            block_reduce(radi[i]*radj[j]*ur_tmp, prad+i*LJC1+j);
+            block_reduce(radi[i]*radj[j]*ur, prad+i*LJC1+j);
         }}
-        int ir = threadIdx.x;
-        ur_tmp *= root;
+        ur *= root;
     }
     __syncthreads();
 
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
-    double fi[nfi*3];
-    double fj[nfj*3];
-    cache_fac(fi, LI, rca);
-    cache_fac(fj, LJ, rcb);
 
     __shared__ double angi[LI1*nfi*LIC1]; // up to 5400 Bytes, further compression
     __shared__ double angj[LJ1*nfj*LJC1];
@@ -299,8 +266,8 @@ void type2_cart(double *gctr,
 
     // (k+l)pq,kimp,ljmq->ij
     for (int m = 0; m < LCC1; m++){
-        type2_ang(angi, LI, LC, fi, omegai+m);
-        type2_ang(angj, LJ, LC, fj, omegaj+m);
+        type2_ang(angi, LI, LC, rca, omegai+m);
+        type2_ang(angj, LJ, LC, rcb, omegaj+m);
         __syncthreads();
         for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
             const int i = ij%nfi;
@@ -340,7 +307,7 @@ void type2_cart(double *gctr,
 }
 
 __global__
-void type2_cart(double *gctr,
+void type2_cart(double * __restrict__ gctr,
                 const int LI, const int LJ, const int LC,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
@@ -355,19 +322,9 @@ void type2_cart(double *gctr,
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
     const int ksh = tasks[task_id + 2*ntasks];
-    const int ioff = ao_loc[ish];
-    const int joff = ao_loc[jsh];
-    double *gctr_ij = gctr + ioff + joff*nao;
-    double *gctr_ji = gctr + joff + ioff*nao;
 
     extern __shared__ double smem[];
 
-    const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
-    const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
-    const double *ai = env + bas[PTR_EXP+ish*BAS_SLOTS];
-    const double *aj = env + bas[PTR_EXP+jsh*BAS_SLOTS];
-    const double *ci = env + bas[PTR_COEFF+ish*BAS_SLOTS];
-    const double *cj = env + bas[PTR_COEFF+jsh*BAS_SLOTS];
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
 
@@ -394,6 +351,13 @@ void type2_cart(double *gctr,
     type2_facs_omega(omegai, LI, LC, rca);
     type2_facs_omega(omegaj, LJ, LC, rcb);
     __syncthreads();
+
+    const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
+    const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
+    const double *ai = env + bas[PTR_EXP+ish*BAS_SLOTS];
+    const double *aj = env + bas[PTR_EXP+jsh*BAS_SLOTS];
+    const double *ci = env + bas[PTR_COEFF+ish*BAS_SLOTS];
+    const double *cj = env + bas[PTR_COEFF+jsh*BAS_SLOTS];
 
     double radi[AO_LMAX+ECP_LMAX+1];
     double radj[AO_LMAX+ECP_LMAX+1];
@@ -432,21 +396,10 @@ void type2_cart(double *gctr,
 
     // (k+l)pq,kimp,ljmq->ij
     for (int m = 0; m < 2*LC+1; m++){
-        double fi[NF_MAX*3];
-        cache_fac(fi, LI, rca);
-        type2_ang(angi, LI, LC, fi, omegai+m);
-
-        double fj[NF_MAX*3];
-        cache_fac(fj, LJ, rcb);
-        type2_ang(angj, LJ, LC, fj, omegaj+m);
-
+        type2_ang(angi, LI, LC, rca, omegai+m);
+        type2_ang(angj, LJ, LC, rcb, omegaj+m);
         __syncthreads();
-        if (threadIdx.x == 0){
-            printf("%f %f %f %f %f %f\n", fi[0], fi[1], fi[2], fj[0], fj[1], fj[2]);
-            printf("%f %f %f %f\n", angi[0], omegai[0], angj[0], omegaj[0]);
-        }
-        double reg_angi[AO_LMAX+ECP_LMAX+1];
-        double reg_angj[AO_LMAX+ECP_LMAX+1];
+        
         for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
             const int i = ij%nfi;
             const int j = ij/nfi;
@@ -458,6 +411,8 @@ void type2_cart(double *gctr,
                 double *pangi = angi + k*nfi*LIC1 + i*LIC1;
                 double *pangj = angj + l*nfj*LJC1 + j*LJC1;
                 double *prad = rad_all + (k+l)*LIC1*LJC1;
+                double reg_angi[AO_LMAX+ECP_LMAX+1];
+                double reg_angj[AO_LMAX+ECP_LMAX+1];
                 for (int p = 0; p < LIC1; p++){reg_angi[p] = pangi[p];}
                 for (int q = 0; q < LJC1; q++){reg_angj[q] = pangj[q];}
                 for (int p = 0; p < LIC1; p++){
@@ -469,7 +424,11 @@ void type2_cart(double *gctr,
         }
         __syncthreads();
     }
-
+    
+    const int ioff = ao_loc[ish];
+    const int joff = ao_loc[jsh];
+    double *gctr_ij = gctr + ioff + joff*nao;
+    double *gctr_ji = gctr + joff + ioff*nao;
     for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
         const int i = ij%nfi;
         const int j = ij/nfi;
@@ -479,5 +438,6 @@ void type2_cart(double *gctr,
             atomicAdd(gctr_ji + i*nao + j, tmp);
         }
     }
+    
     return;
 }

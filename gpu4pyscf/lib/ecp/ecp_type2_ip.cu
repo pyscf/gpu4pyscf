@@ -24,12 +24,6 @@ void type2_cart_kernel(double *gctr,
 {
     extern __shared__ double smem[];
 
-    const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
-    const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
-    const double *ai = env + bas[PTR_EXP+ish*BAS_SLOTS];
-    const double *aj = env + bas[PTR_EXP+jsh*BAS_SLOTS];
-    const double *ci = env + bas[PTR_COEFF+ish*BAS_SLOTS];
-    const double *cj = env + bas[PTR_COEFF+jsh*BAS_SLOTS];
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
 
@@ -43,23 +37,28 @@ void type2_cart_kernel(double *gctr,
     rcb[0] = rc[0] - rj[0];
     rcb[1] = rc[1] - rj[1];
     rcb[2] = rc[2] - rj[2];
-    const double dca = norm3d(rca[0], rca[1], rca[2]);
-    const double dcb = norm3d(rcb[0], rcb[1], rcb[2]);
 
-    const int LI1 = LI+1;
-    const int LJ1 = LJ+1;
-    const int LIC1 = LI+LC+1;
-    const int LJC1 = LJ+LC+1;
-    const int LCC1 = (2*LC+1);
+    double* omegai = smem + (LI+LJ+1) * (LI+LC+1) * (LJ+LC+1);
+    double* omegaj = omegai + (LI+LC+2)/2 * (LI+1)*(LI+2)*(LI+3)/6 * (2*LC+1);
+
+    type2_facs_omega(omegai, LI, LC, rca);
+    type2_facs_omega(omegaj, LJ, LC, rcb);
+    __syncthreads();
 
     double* rad_all = smem;
-    for (int i = threadIdx.x; i < (LI+LJ+1)*LIC1*LJC1; i+=blockDim.x){
-        rad_all[i] = 0.0;
-    }
-    __syncthreads();
+    set_shared_memory(rad_all, (LI+LJ+1)*(LI+LC+1)*(LJ+LC+1));
+
+    const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
+    const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
+    const double *ai = env + bas[PTR_EXP+ish*BAS_SLOTS];
+    const double *aj = env + bas[PTR_EXP+jsh*BAS_SLOTS];
+    const double *ci = env + bas[PTR_COEFF+ish*BAS_SLOTS];
+    const double *cj = env + bas[PTR_COEFF+jsh*BAS_SLOTS];
 
     double radi[AO_LMAX+ECP_LMAX+orderi+1];
     double radj[AO_LMAX+ECP_LMAX+orderj+1];
+    const double dca = norm3d(rca[0], rca[1], rca[2]);
+    const double dcb = norm3d(rcb[0], rcb[1], rcb[2]);
     type2_facs_rad<orderi>(radi, LI+LC, npi, dca, ci, ai);
     type2_facs_rad<orderj>(radj, LJ+LC, npj, dcb, cj, aj);
 
@@ -70,30 +69,20 @@ void type2_cart_kernel(double *gctr,
     }
     double ur_tmp = ur;
     for (int p = 0; p <= LI+LJ; p++){
-        double *prad = rad_all + p*LIC1*LJC1;
+        double *prad = rad_all + p*(LI+LC+1)*(LJ+LC+1);
         for (int i = 0; i <= LI+LC; i++){
         for (int j = 0; j <= LJ+LC; j++){
-            block_reduce(radi[i]*radj[j]*ur_tmp, prad+i*LJC1+j);
+            block_reduce(radi[i]*radj[j]*ur_tmp, prad+i*(LJ+LC+1)+j);
         }}
         const int ir = threadIdx.x;
         ur_tmp *= r128[ir];
     }
     __syncthreads();
 
-    const int BLKI = (LIC1+1)/2 * LCC1;
-    const int BLKJ = (LJC1+1)/2 * LCC1;
-
-    double* omegai = smem + (LI+LJ+1) * LIC1 * LJC1;
-    double* omegaj = omegai + LI1*(LI1+1)*(LI1+2)/6 * BLKI;
-
-    type2_facs_omega(omegai, LI, LC, rca);
-    type2_facs_omega(omegaj, LJ, LC, rcb);
-    __syncthreads();
-
     const int nfi = (LI+1) * (LI+2) / 2;
     const int nfj = (LJ+1) * (LJ+2) / 2;
-    double* angi = omegaj + LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ;
-    double* angj = angi + LI1*nfi*LIC1;
+    double* angi = omegaj + (LJ+LC+2)/2 * (LJ+1)*(LJ+2)*(LJ+3)/6 * (2*LC+1);
+    double* angj = angi + (LI+1)*nfi*(LI+LC+1);
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
 
@@ -102,16 +91,10 @@ void type2_cart_kernel(double *gctr,
     }
     __syncthreads();
 
-    constexpr int NFI_MAX = (AO_LMAX+orderi+1)*(AO_LMAX+orderi+2)/2;
-    constexpr int NFJ_MAX = (AO_LMAX+orderj+1)*(AO_LMAX+orderj+2)/2;
     // (k+l)pq,kimp,ljmq->ij
-    for (int m = 0; m < LCC1; m++){
-        double fi[3*NFI_MAX];
-        double fj[3*NFJ_MAX];
-        cache_fac(fi, LI, rca);
-        cache_fac(fj, LJ, rcb);
-        type2_ang(angi, LI, LC, fi, omegai+m);
-        type2_ang(angj, LJ, LC, fj, omegaj+m);
+    for (int m = 0; m < 2*LC+1; m++){
+        type2_ang(angi, LI, LC, rca, omegai+m);
+        type2_ang(angj, LJ, LC, rcb, omegaj+m);
         __syncthreads();
         for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
             const int i = ij%nfi;
@@ -119,6 +102,8 @@ void type2_cart_kernel(double *gctr,
             double s = 0;
             for (int k = 0; k <= LI; k++){
             for (int l = 0; l <= LJ; l++){
+                const int LIC1 = LI+LC+1;
+                const int LJC1 = LJ+LC+1;
                 double *pangi = angi + k*nfi*LIC1 + i*LIC1;
                 double *pangj = angj + l*nfj*LJC1 + j*LJC1;
                 double *prad = rad_all + (k+l)*LIC1*LJC1;

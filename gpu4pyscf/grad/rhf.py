@@ -226,6 +226,8 @@ def get_dh1e_ecp(mol, dm):
     if not with_ecp:
         return dh1e_ecp
     ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
+    #h1_ecp = get_ecp_ip(mol)
+    #dh1e_ecp = contract('xij,ij->x')
     for ia in ecp_atoms:
         with mol.with_rinv_at_nucleus(ia):
             ecp = mol.intor('ECPscalar_iprinv', comp=3)

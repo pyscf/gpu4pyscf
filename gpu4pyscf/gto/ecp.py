@@ -4,7 +4,6 @@ import cupy as cp
 from pyscf import gto
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import load_library, contract
-from gpu4pyscf.df.int3c2e import sort_mol, basis_seg_contraction
 from gpu4pyscf.gto.mole import group_basis
 
 libecp = load_library('libgecp')

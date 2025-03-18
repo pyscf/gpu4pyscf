@@ -67,7 +67,7 @@ static double int_unit_xyz(const int i, const int j, const int k){
  * JCC, 27, 1009
  */
 __device__
-static void _ine(double *out, int order, double z)
+static void _ine(double *out, const int order, const double z)
 {
     if (z < 1e-7) {
         // (1-z) * z^l / (2l+1)!!
@@ -77,11 +77,10 @@ static void _ine(double *out, int order, double z)
         }
     } else if (z > 16) {
         // R_l(z) = \sum_k (l+k)!/(k!(l-k)!(2x)^k)
-        double z2 = -.5 / z;
-        double ti, s;
+        const double z2 = -.5 / z;
         for (int i = 0; i <= order; i++) {
-            ti = .5 / z;
-            s = ti;
+            double ti = .5 / z;
+            double s = ti;
             for (int k = 1; k <= i; k++) {
                 ti *= z2;
                 s += ti * _factorial[i+k] / (_factorial[k] * _factorial[i-k]);
@@ -90,15 +89,14 @@ static void _ine(double *out, int order, double z)
         }
     } else {
         // z^l e^{-z} \sum (z^2/2)^k/(k!(2k+2l+1)!!)
-        double z2 = .5 * z * z;
+        const double z2 = .5 * z * z;
         double t0 = exp(-z);
-        double ti, s, next;
         for (int i = 0; i <= order; i++) {
-            ti = t0;
-            s = ti;
+            double ti = t0;
+            double s = ti;
             for (int k = 1;; k++) {
                 ti *= z2 / (k * (k*2+i*2+1));
-                next = s + ti;
+                double next = s + ti;
                 if (next == s) {
                     break;
                 } else {

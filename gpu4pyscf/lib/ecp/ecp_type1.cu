@@ -91,26 +91,7 @@ double type1_ang_nuc_l(const int i, const int j, const int k, double *unitr){
 }
 
 __device__
-double type1_ang_nuc(int lmb, int i, int j, int k, double *unitr){
-    //auto nuc = ang_nuc_part_l(lmb, unitr[0], unitr[1], unitr[2]);
-    switch(lmb){
-        case 0: {return type1_ang_nuc_l<0>(i, j, k, unitr);}
-        case 1: {return type1_ang_nuc_l<1>(i, j, k, unitr);}
-        case 2: {return type1_ang_nuc_l<2>(i, j, k, unitr);}
-        case 3: {return type1_ang_nuc_l<3>(i, j, k, unitr);}
-        case 4: {return type1_ang_nuc_l<4>(i, j, k, unitr);}
-        case 5: {return type1_ang_nuc_l<5>(i, j, k, unitr);}
-        case 6: {return type1_ang_nuc_l<6>(i, j, k, unitr);}
-        case 7: {return type1_ang_nuc_l<7>(i, j, k, unitr);}
-        case 8: {return type1_ang_nuc_l<8>(i, j, k, unitr);}
-        case 9: {return type1_ang_nuc_l<9>(i, j, k, unitr);}
-        case 10: {return type1_ang_nuc_l<10>(i, j, k, unitr);}
-        default: { printf("l = %d is not supported\n", lmb);}
-    }
-}
-
-__device__
-void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, double fac)
+void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, const double fac)
 {
     double unitr[3];
     if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
@@ -124,60 +105,48 @@ void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, d
         unitr[2] = r[2] * norm_r;
     }
 
-    const int LIJ1 = LIJ + 1;
-    const int LIJ2 = LIJ1 * LIJ1;
-
     // loop over i+j+k<=LIJ
     // TODO: find a closed form?
-    for (int nijk = threadIdx.x; nijk < LIJ1*LIJ1*LIJ1; nijk+=blockDim.x){
-        const int i = nijk/LIJ1/LIJ1;
-        const int j = nijk/LIJ1%LIJ1;
-        const int k = nijk%LIJ1;
-        if (i+j+k > LIJ){
+    for (int n = threadIdx.x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim.x){
+        const int i = n/(LIJ+1)/(LIJ+1);
+        const int j = n/(LIJ+1)%(LIJ+1);
+        const int k = n%(LIJ+1);
+        if (i+j+k > LIJ || (i+j+k)%2 == 1){
             continue;
         }
+        // need_even to ensure (i+j+k+lmb) is even
+        double s = 0.0;
+        double *prad = rad_all + (i+j+k)*(LIJ+1);
+        if (LIJ >= 0) s += prad[0] * type1_ang_nuc_l<0>(i, j, k, unitr);
+        if (LIJ >= 2) s += prad[2] * type1_ang_nuc_l<2>(i, j, k, unitr);
+        if (LIJ >= 4) s += prad[4] * type1_ang_nuc_l<4>(i, j, k, unitr);
+        if (LIJ >= 6) s += prad[6] * type1_ang_nuc_l<6>(i, j, k, unitr);
+        if (LIJ >= 8) s += prad[8] * type1_ang_nuc_l<8>(i, j, k, unitr);
+        if (LIJ >= 10)s += prad[10]* type1_ang_nuc_l<10>(i, j, k, unitr);
+        rad_ang[i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k] += fac*s;
+        //atomicAdd(rad_ang + i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k, fac*s);
+    }
 
-        double *pout = rad_ang + i*LIJ2+j*LIJ1+k;
-        double *prad = rad_all + (i+j+k)*LIJ1;
-        // need_even to ensure (a+b+c+lmb) is even
-        const int need_even = (i+j+k)%2;
-        for (int lmb = need_even; lmb <= LIJ; lmb+=2) {
-            double tmp = type1_ang_nuc(lmb, i, j, k, unitr);
-
-            //*pout += fac * prad[lmb] * tmp;
-            atomicAdd(pout, fac*prad[lmb]*tmp);
+    for (int n = threadIdx.x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim.x){
+        const int i = n/(LIJ+1)/(LIJ+1);
+        const int j = n/(LIJ+1)%(LIJ+1);
+        const int k = n%(LIJ+1);
+        if (i+j+k > LIJ || (i+j+k)%2 == 0){
+            continue;
         }
+        // need_even to ensure (i+j+k+lmb) is even
+        double s = 0.0;
+        double *prad = rad_all + (i+j+k)*(LIJ+1);
+        if (LIJ >= 1) s += prad[1] * type1_ang_nuc_l<1>(i, j, k, unitr);
+        if (LIJ >= 3) s += prad[3] * type1_ang_nuc_l<3>(i, j, k, unitr);
+        if (LIJ >= 5) s += prad[5] * type1_ang_nuc_l<5>(i, j, k, unitr);
+        if (LIJ >= 7) s += prad[7] * type1_ang_nuc_l<7>(i, j, k, unitr);
+        if (LIJ >= 9) s += prad[9] * type1_ang_nuc_l<9>(i, j, k, unitr);
+        rad_ang[i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k] += fac*s;
+        //atomicAdd(rad_ang + i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k, fac*s);
     }
 }
 
-/*
-__device__
-void type1_cache_fac(double* __restrict__ ifac, const int LI, double *ri){
-    const int LI1 = LI + 1;
-    const int nfi = (LI1+1)*LI1/2;
-    double fx[NF_MAX*3];
-    cache_fac(fx, LI, ri);
-
-    double *fy = fx + nfi;
-    double *fz = fy + nfi;
-    const int LI2 = LI1 * LI1;
-    const int LI3 = LI2 * LI1;
-    for (int mi = threadIdx.x; mi < nfi; mi+=blockDim.x){
-        int iy = _cart_pow_y[mi];
-        int iz = _cart_pow_z[mi];
-        int ix = LI - iy - iz;
-        for (int i1 = 0; i1 <= ix; i1++){
-        for (int i2 = 0; i2 <= iy; i2++){
-        for (int i3 = 0; i3 <= iz; i3++){
-            const int idx = mi*LI3 + i1*LI2 + i2*LI1 + i3;
-            const int xoffset = (ix+1)*ix/2;
-            const int yoffset = (iy+1)*iy/2;
-            const int zoffset = (iz+1)*iz/2;
-            ifac[idx] = fx[xoffset+i1] * fy[yoffset+i2] * fz[zoffset+i3];
-        }}}
-    }
-}
-*/
 template <int LI, int LJ> __global__
 void type1_cart(double *gctr,
                 const int *ao_loc, const int nao,
@@ -222,12 +191,8 @@ void type1_cart(double *gctr,
     }
 
     constexpr int LIJ1 = LI+LJ+1;
-    constexpr int LIJ3 = LIJ1*LIJ1*LIJ1;
-    __shared__ double rad_ang[LIJ3];
-    for (int i = threadIdx.x; i < LIJ3; i+=blockDim.x) {
-        rad_ang[i] = 0;
-    }
-    __syncthreads();
+    __shared__ double rad_ang[LIJ1*LIJ1*LIJ1];
+    set_shared_memory(rad_ang, LIJ1*LIJ1*LIJ1);
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
     for (int ip = 0; ip < npi; ip++){
@@ -322,8 +287,6 @@ void type1_cart(double *gctr,
 
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
     const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
-    const int nfi = (LI+1) * (LI+2) / 2;
-    const int nfj = (LJ+1) * (LJ+2) / 2;
     const double *ai = env + bas[PTR_EXP+ish*BAS_SLOTS];
     const double *aj = env + bas[PTR_EXP+jsh*BAS_SLOTS];
     const double *ci = env + bas[PTR_COEFF+ish*BAS_SLOTS];
@@ -349,16 +312,10 @@ void type1_cart(double *gctr,
         ur += rad_part(kbas, ecpbas, env);
     }
 
-    const int LIJ1 = LI+LJ+1;
-    const int LIJ3 = LIJ1*LIJ1*LIJ1;
-
     double *rad_ang = smem;
-    for (int i = threadIdx.x; i < LIJ3; i+=blockDim.x) {
-        rad_ang[i] = 0;
-    }
-    __syncthreads();
+    set_shared_memory(rad_ang, (LI+LJ+1)*(LI+LJ+1)*(LI+LJ+1));
 
-    double *rad_all = rad_ang + LIJ3;
+    double *rad_all = rad_ang + (LI+LJ+1)*(LI+LJ+1)*(LI+LJ+1);
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
     for (int ip = 0; ip < npi; ip++){
         for (int jp = 0; jp < npj; jp++){
@@ -379,17 +336,19 @@ void type1_cart(double *gctr,
         }
     }
 
-    double fi[3*NF_MAX];
-    double fj[3*NF_MAX];
-    cache_fac(fi, LI, rca);
-    cache_fac(fj, LJ, rcb);
-
     constexpr int nreg = (NF_MAX*NF_MAX+THREADS-1)/THREADS;
     double reg_gctr[nreg];
-    for (int i = threadIdx.x; i < nreg; i++){
+    for (int i = 0; i < nreg; i++){
         reg_gctr[i] = 0.0;
     }
+    const int nfi = (LI+1) * (LI+2) / 2;
+    const int nfj = (LJ+1) * (LJ+2) / 2;
     for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+        double fi[3*NF_MAX];
+        double fj[3*NF_MAX];
+        cache_fac(fi, LI, rca);
+        cache_fac(fj, LJ, rcb);
+
         const int mi = ij%nfi;
         const int mj = ij/nfi;
 
@@ -413,11 +372,12 @@ void type1_cart(double *gctr,
         for (int i1 = 0; i1 <= ix; i1++){
         for (int i2 = 0; i2 <= iy; i2++){
         for (int i3 = 0; i3 <= iz; i3++){
-            double ifac = fx_i[i1] * fy_i[i2] * fz_i[i3];
+            const double ifac = fx_i[i1] * fy_i[i2] * fz_i[i3];
             for (int jr = 0, j1 = 0; j1 <= jx; j1++){
             for (int j2 = 0; j2 <= jy; j2++){
             for (int j3 = 0; j3 <= jz; j3++, jr++){
-                double jfac = fx_j[j1] * fy_j[j2] * fz_j[j3];
+                const int LIJ1 = LI+LJ+1;
+                const double jfac = fx_j[j1] * fy_j[j2] * fz_j[j3];
                 const int ijr = (i1+j1)*LIJ1*LIJ1 + (i2+j2)*LIJ1 + (i3+j3);
                 tmp += ifac * jfac * rad_ang[ijr];
             }}}

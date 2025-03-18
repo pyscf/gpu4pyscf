@@ -41,8 +41,7 @@ int ECP_cart(double *gctr,
         int task_type = li * 100 + lj * 10 + lc;
         switch (task_type)
         {
-        //case 0:  type2_cart<0,0,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        /*
+        case 0:  type2_cart<0,0,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
         case 1:  type2_cart<0,0,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
         case 2:  type2_cart<0,0,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
         case 3:  type2_cart<0,0,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
@@ -57,8 +56,6 @@ int ECP_cart(double *gctr,
         case 30:  type2_cart<0,3,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
         case 120: type2_cart<1,2,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
 
-        case 220: type2_cart<2,2,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        */
         // General kernel
         default: {
             const int li1 = li+1;
@@ -77,16 +74,6 @@ int ECP_cart(double *gctr,
             int smem_size3 = li1*nfi*lic1; // angi
             int smem_size4 = lj1*nfj*ljc1; // angj
             int smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
-            printf("ECP_cart, type2 (%d %d %d): smem_size = %d, %d, %d, %d, %d\n", li, lj, lc, smem_size0, smem_size1, smem_size2, smem_size3, smem_size4);
-
-            //cudaError_t err = cudaFuncSetAttribute(type2_cart,
-            //    cudaFuncAttributeMaxDynamicSharedMemorySize,
-            //    (smem_size+1024)*sizeof(double));
-
-            //if (err != cudaSuccess) {
-            //    fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s: %s\n", __func__, cudaGetErrorString(err));
-            //    return 1;
-            //}
 
             type2_cart<<<blocks, threads, smem_size*sizeof(double)>>>(
                 gctr,
@@ -99,23 +86,17 @@ int ECP_cart(double *gctr,
         }
     } else {
         int task_type = li * 10 + lj;
-        /*
         switch (task_type)
         {
         case 0:  type1_cart<0,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-
         case 1:  type1_cart<0,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-
         case 11: type1_cart<1,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
         case 2:  type1_cart<0,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-
         case 3:  type1_cart<0,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
         case 12: type1_cart<1,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-
         case 4:  type1_cart<0,4><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
         case 13: type1_cart<1,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
         case 22: type1_cart<2,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-
         default: {
             const int lij1 = li+lj+1;
             const int lij3 = lij1*lij1*lij1;
@@ -131,7 +112,6 @@ int ECP_cart(double *gctr,
                 atm, bas, env);
         }
         }
-        */
     }
 
     cudaError_t err = cudaGetLastError();
@@ -155,7 +135,7 @@ int ECP_ip_cart(double *gctr,
     if (lc < 0){
         const int lij1 = li+lj+2;
         const int lij3 = lij1*lij1*lij1;
-        /*
+        
         int smem_size = 0;
         smem_size += lij3;      // rad_ang
         smem_size += lij1*lij1; // rad_all
@@ -165,7 +145,7 @@ int ECP_ip_cart(double *gctr,
             tasks, ntasks,
             ecpbas, ecploc,
             atm, bas, env);
-        */
+        
     } else {
         const int li1 = li+2;
         const int lj1 = lj+1;
@@ -183,7 +163,7 @@ int ECP_ip_cart(double *gctr,
         int smem_size2 = lj1*(lj1+1)*(lj1+2)/6 * blkj; // omegaj
         int smem_size3 = li1*lic1*nfi; // angi
         int smem_size4 = lj1*ljc1*nfj; // angj
-        /*
+        
         int dynamic_smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
         cudaError_t err = cudaFuncSetAttribute(type2_cart_ip1,
                                          cudaFuncAttributeMaxDynamicSharedMemorySize,
@@ -200,7 +180,7 @@ int ECP_ip_cart(double *gctr,
             tasks, ntasks,
             ecpbas, ecploc,
             atm, bas, env);
-        */
+        
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -223,7 +203,7 @@ int ECP_ipipv_cart(double *gctr,
     if (lc < 0){
         const int lij1 = li+lj+3; //
         const int lij3 = lij1*lij1*lij1;
-        /*
+        
         int smem_size = 0;
         smem_size += lij3;      // rad_ang
         smem_size += lij1*lij1; // rad_all
@@ -233,7 +213,7 @@ int ECP_ipipv_cart(double *gctr,
             tasks, ntasks,
             ecpbas, ecploc,
             atm, bas, env);
-        */
+        
     } else {
         const int li1 = li+3;
         const int lj1 = lj+1;
@@ -245,7 +225,7 @@ int ECP_ipipv_cart(double *gctr,
         const int lcc1 = 2*lc+1;
         const int blki = (lic1+1)/2 * lcc1;
         const int blkj = (ljc1+1)/2 * lcc1;
-        /*
+        
         int smem_size0 = lij1 * lic1 * ljc1; // rad_all
         int smem_size1 = li1*(li1+1)*(li1+2)/6 * blki; // omegai
         int smem_size2 = lj1*(lj1+1)*(lj1+2)/6 * blkj; // omegaj
@@ -255,14 +235,11 @@ int ECP_ipipv_cart(double *gctr,
         int NF2_MAX = (AO_LMAX+3)*(AO_LMAX+4)/2;
         int NF1_MAX = (AO_LMAX+2)*(AO_LMAX+3)/2;
         int NF0_MAX = (AO_LMAX+1)*(AO_LMAX+2)/2;
-        int static_smem_size = NF2_MAX*NF0_MAX;
+        //int static_smem_size = NF2_MAX*NF0_MAX;
         int dynamic_smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
         dynamic_smem_size = max(dynamic_smem_size, 3*NF1_MAX*NF0_MAX);
+        //int total_smem_size = static_smem_size + dynamic_smem_size;
 
-        int total_smem_size = static_smem_size + dynamic_smem_size;
-        //printf("ECP_ipipv_cart, type2 (%d %d %d): smem_size = %d, %d, %d, %d, %d, %d\n", li, lj, lc, static_smem_size, smem_size0, smem_size1, smem_size2, smem_size3, smem_size4);
-
-        //printf("total_smem_size = %d\n", total_smem_size * sizeof(double));
         cudaError_t err = cudaFuncSetAttribute(type2_cart_ipipv,
                                          cudaFuncAttributeMaxDynamicSharedMemorySize,
                                          (dynamic_smem_size+1024)*sizeof(double));
@@ -277,7 +254,7 @@ int ECP_ipipv_cart(double *gctr,
             tasks, ntasks,
             ecpbas, ecploc,
             atm, bas, env);
-        */
+        
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -300,7 +277,7 @@ int ECP_ipvip_cart(double *gctr,
     if (lc < 0){
         const int lij1 = li+lj+3; //
         const int lij3 = lij1*lij1*lij1;
-        /*
+        
         int smem_size = 0;
         smem_size += lij3;      // rad_ang
         smem_size += lij1*lij1; // rad_all
@@ -310,7 +287,6 @@ int ECP_ipvip_cart(double *gctr,
             tasks, ntasks,
             ecpbas, ecploc,
             atm, bas, env);
-        */
     } else {
         const int li1 = li+2;
         const int lj1 = lj+2;
@@ -322,7 +298,7 @@ int ECP_ipvip_cart(double *gctr,
         const int lcc1 = 2*lc+1;
         const int blki = (lic1+1)/2 * lcc1;
         const int blkj = (ljc1+1)/2 * lcc1;
-        /*
+
         int smem_size0 = lij1 * lic1 * ljc1; // rad_all
         int smem_size1 = li1*(li1+1)*(li1+2)/6 * blki; // omegai
         int smem_size2 = lj1*(lj1+1)*(lj1+2)/6 * blkj; // omegaj
@@ -335,10 +311,7 @@ int ECP_ipvip_cart(double *gctr,
         int dynamic_smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
         dynamic_smem_size = max(dynamic_smem_size, 3*NF0_MAX*NF1_MAX);
 
-        int total_smem_size = static_smem_size + dynamic_smem_size;
-        //printf("ECP_ipvip_cart, type2 (%d %d %d): smem_size = %d, %d, %d, %d, %d, %d\n", li, lj, lc, static_smem_size, smem_size0, smem_size1, smem_size2, smem_size3, smem_size4);
-
-        //printf("total_smem_size = %d\n", total_smem_size * sizeof(double));
+        //int total_smem_size = static_smem_size + dynamic_smem_size;
         cudaError_t err = cudaFuncSetAttribute(type2_cart_ipvip,
                                          cudaFuncAttributeMaxDynamicSharedMemorySize,
                                          (dynamic_smem_size+1024)*sizeof(double));
@@ -353,7 +326,6 @@ int ECP_ipvip_cart(double *gctr,
             tasks, ntasks,
             ecpbas, ecploc,
             atm, bas, env);
-        */
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

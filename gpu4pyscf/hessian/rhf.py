@@ -27,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pyscf.hessian import rhf as rhf_hess_cpu
 from pyscf import lib, gto
 from pyscf.gto import ATOM_OF
+from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib.cupy_helper import (reduce_to_device,
     contract, tag_array, sandwich_dot, transpose_sum, get_avail_mem, condense,
@@ -632,9 +633,13 @@ def get_hcore(mol):
     else:
         h1aa+= mol.intor('int1e_ipipnuc', comp=9)
         h1ab+= mol.intor('int1e_ipnucip', comp=9)
+    h1aa = cupy.asarray(h1aa)
+    h1ab = cupy.asarray(h1ab)
     if mol.has_ecp():
-        h1aa += mol.intor('ECPscalar_ipipnuc', comp=9)
-        h1ab += mol.intor('ECPscalar_ipnucip', comp=9)
+        #h1aa += mol.intor('ECPscalar_ipipnuc', comp=9)
+        #h1ab += mol.intor('ECPscalar_ipnucip', comp=9)
+        h1aa += get_ecp_ip(mol, 'ipipv')
+        h1ab += get_ecp_ip(mol, 'ipvip')
     nao = h1aa.shape[-1]
     return h1aa.reshape(3,3,nao,nao), h1ab.reshape(3,3,nao,nao)
 
