@@ -122,13 +122,16 @@ class KnownValues(unittest.TestCase):
         ref = td.to_cpu().kernel()[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
         self.assertAlmostEqual(lib.fp(es), -1.4869180666784665, 6)
+        a, b = td.get_ab()
+        ref = diagonalize(a, b, nroots=5)
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
 
         td = self.mf_bp86_nodf.CasidaTDDFT()
         assert td.device == 'gpu'
         es = td.kernel(nstates=5)[0]
         a, b = td.get_ab()
         ref = diagonalize(a, b, nroots=5)
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
 
     def test_tddft_lda(self):
         mf_lda = self.mf_lda
@@ -157,9 +160,11 @@ class KnownValues(unittest.TestCase):
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
         self.assertAlmostEqual(lib.fp(es), -1.5175884245769546, 6)
+        a, b = td.get_ab()
+        ref = diagonalize(a, b, nroots=5)
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
 
         td = self.mf_b3lyp_nodf.TDDFT()
-        td.lindep=1.0e-6
         assert td.device == 'gpu'
         es = td.kernel(nstates=5)[0]
         a, b = td.get_ab()
@@ -214,6 +219,9 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
         self.assertAlmostEqual(lib.fp(es), -1.4707787881198082, 6)
         td.analyze()
+        a, b = td.get_ab()
+        ref = diagonalize_tda(a, nroots=5)
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
 
         mf_b3lyp_nodf = self.mf_b3lyp_nodf
         td = mf_b3lyp_nodf.TDA()
@@ -235,6 +243,9 @@ class KnownValues(unittest.TestCase):
         ref = td.to_cpu().kernel(nstates=6)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
         self.assertAlmostEqual(lib.fp(es[[0,1,2,4,5]]), -1.4695846533898422, 6)
+        a, b = td.get_ab()
+        ref = diagonalize_tda(a, nroots=6)
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
 
         mf_lda_nodf = self.mf_lda_nodf
         td = mf_lda_nodf.TDA()
@@ -255,6 +266,9 @@ class KnownValues(unittest.TestCase):
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
         self.assertAlmostEqual(lib.fp(es), -1.4412243124430528, 6)
+        a, b = td.get_ab()
+        ref = diagonalize(a, b, nroots=5)
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
 
         mf_bp86_nodf = self.mf_bp86_nodf
         td = mf_bp86_nodf.TDA()
@@ -406,6 +420,25 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(ab1 - abxy_ref[0]).max(), 0, 9)
         self.assertAlmostEqual(abs(ab2 - abxy_ref[1]).max(), 0, 9)
 
+    def test_ab_lda_df(self):
+        mf = self.mf_lda
+        a, b = rhf.get_ab(mf)
+        ftda = rhf.gen_tda_operation(mf, singlet=True)[0]
+        ftdhf = rhf.gen_tdhf_operation(mf, singlet=True)[0]
+        nocc = int(np.count_nonzero(mf.mo_occ == 2))
+        nvir = int(np.count_nonzero(mf.mo_occ == 0))
+        np.random.seed(2)
+        x, y = xy = np.random.random((2,nocc,nvir))
+        ax = np.einsum('iajb,jb->ia', a, x)
+        self.assertAlmostEqual(abs(ax - ftda([x]).get().reshape(nocc,nvir)).max(), 0, 9)
+
+        ab1 = ax + np.einsum('iajb,jb->ia', b, y)
+        ab2 =-np.einsum('iajb,jb->ia', b, x)
+        ab2-= np.einsum('iajb,jb->ia', a, y)
+        abxy_ref = ftdhf(cp.asarray([xy])).get().reshape(2,nocc,nvir)
+        self.assertAlmostEqual(abs(ab1 - abxy_ref[0]).max(), 0, 9)
+        self.assertAlmostEqual(abs(ab2 - abxy_ref[1]).max(), 0, 9)
+
     def test_ab_b3lyp(self):
         mf = self.mf_b3lyp_nodf
         a, b = rks.TDDFT(mf).get_ab()
@@ -425,8 +458,46 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(ab1 - abxy_ref[0]).max(), 0, 9)
         self.assertAlmostEqual(abs(ab2 - abxy_ref[1]).max(), 0, 9)
 
+    def test_ab_b3lyp_df(self):
+        mf = self.mf_b3lyp
+        a, b = rks.TDDFT(mf).get_ab()
+        ftda = rhf.gen_tda_operation(mf, singlet=None)[0]
+        ftdhf = rhf.gen_tdhf_operation(mf, singlet=True)[0]
+        nocc = int(np.count_nonzero(mf.mo_occ == 2))
+        nvir = int(np.count_nonzero(mf.mo_occ == 0))
+        np.random.seed(2)
+        x, y = xy = np.random.random((2,nocc,nvir))
+        ax = np.einsum('iajb,jb->ia', a, x)
+        self.assertAlmostEqual(abs(ax - ftda([x]).get().reshape(nocc,nvir)).max(), 0, 9)
+
+        ab1 = ax + np.einsum('iajb,jb->ia', b, y)
+        ab2 =-np.einsum('iajb,jb->ia', b, x)
+        ab2-= np.einsum('iajb,jb->ia', a, y)
+        abxy_ref = ftdhf(cp.asarray([xy])).get().reshape(2,nocc,nvir)
+        self.assertAlmostEqual(abs(ab1 - abxy_ref[0]).max(), 0, 9)
+        self.assertAlmostEqual(abs(ab2 - abxy_ref[1]).max(), 0, 9)
+
     def test_ab_mgga(self):
         mf = self.mf_m06l_nodf
+        a, b = rks.TDDFT(mf).get_ab()
+        ftda = rhf.gen_tda_operation(mf, singlet=None)[0]
+        ftdhf = rhf.gen_tdhf_operation(mf, singlet=True)[0]
+        nocc = int(np.count_nonzero(mf.mo_occ == 2))
+        nvir = int(np.count_nonzero(mf.mo_occ == 0))
+        np.random.seed(2)
+        x, y = xy = np.random.random((2,nocc,nvir))
+        ax = np.einsum('iajb,jb->ia', a, x)
+        self.assertAlmostEqual(abs(ax - ftda([x]).get().reshape(nocc,nvir)).max(), 0, 9)
+
+        ab1 = ax + np.einsum('iajb,jb->ia', b, y)
+        ab2 =-np.einsum('iajb,jb->ia', b, x)
+        ab2-= np.einsum('iajb,jb->ia', a, y)
+        abxy_ref = ftdhf(cp.asarray([xy])).get().reshape(2,nocc,nvir)
+        self.assertAlmostEqual(abs(ab1 - abxy_ref[0]).max(), 0, 9)
+        self.assertAlmostEqual(abs(ab2 - abxy_ref[1]).max(), 0, 9)
+
+    def test_ab_mgga_df(self):
+        mf = self.mf_m06l
         a, b = rks.TDDFT(mf).get_ab()
         ftda = rhf.gen_tda_operation(mf, singlet=None)[0]
         ftdhf = rhf.gen_tdhf_operation(mf, singlet=True)[0]

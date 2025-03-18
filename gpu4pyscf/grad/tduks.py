@@ -264,14 +264,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     k_factor = 0.0
 
     if with_k:
-        if omega == 0:
-            k_factor = hyb
-        elif alpha == 0:  # LR=0, only SR exchange
-            pass
-        elif hyb == 0:  # SR=0, only LR exchange
-            k_factor = alpha
-        else:  # SR and LR exchange with different ratios
-            k_factor = alpha
+        k_factor = hyb
 
     if atmlst is None:
         atmlst = range(mol.natm)
@@ -300,32 +293,25 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
 
     if with_k and omega != 0:
         j_factor = 0.0
-        omega = -omega  # Prefer computing the SR part
-        if alpha == 0:  # LR=0, only SR exchange
-            k_factor = hyb
-        elif hyb == 0:  # SR=0, only LR exchange
-            # full range exchange was computed in the previous step
-            k_factor = -alpha
-        else:  # SR and LR exchange with different ratios
-            k_factor = hyb - alpha  # =beta
+        k_factor = alpha-hyb  # =beta
 
         dvhf = td_grad.get_veff(
             mol,
             cp.stack(((dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
                       (dmz1doob + dmz1doob.T) * 0.25 + oo0b)),
-            0.0, k_factor, omega)
+            j_factor=0.0, k_factor = k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals())
         dvhf_all += dvhf
         dvhf = td_grad.get_veff(mol,
             cp.stack(((dmz1dooa + dmz1dooa.T) * 0.25, (dmz1doob + dmz1doob.T) * 0.25)),
-            0.0, k_factor, omega)
+            j_factor=0.0, k_factor = k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= mf_grad.extra_force(ia, locals())
         dvhf_all -= dvhf
         dvhf = td_grad.get_veff(mol,
                 cp.stack(((dmxpya + dmxpya.T) * 0.5, (dmxpyb + dmxpyb.T) * 0.5)),
-                0.0, k_factor, omega)
+                j_factor=0.0, k_factor = k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
         dvhf_all += dvhf * 2

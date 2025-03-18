@@ -42,8 +42,6 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
     B has three items: (B_aaaa, B_aabb, B_bbbb).
     B_bbaa = B_aabb.transpose(2,3,0,1).
     '''
-    if hasattr(mf, 'with_df'):
-        raise NotImplementedError('DF-TDDFT is not implemented')
 
     if mo_energy is None:
         mo_energy = mf.mo_energy
@@ -86,9 +84,21 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
     b = (b_aa, b_ab, b_bb)
 
     def add_hf_(a, b, hyb=1):
-        eri = mol.intor('int2e_sph', aosym='s8')
-        eri= ao2mo.restore(1, eri, nao)
-        eri = cp.asarray(eri)
+        if hasattr(mf, 'with_df'):
+            from gpu4pyscf.df import int3c2e
+            auxmol = mf.with_df.auxmol
+            naux = auxmol.nao
+            int3c = int3c2e.get_int3c2e(mol, auxmol)
+            int2c2e = auxmol.intor('int2c2e')
+            int3c = cp.asarray(int3c)
+            int2c2e = cp.asarray(int2c2e)
+            df_coef = cp.linalg.solve(int2c2e, int3c.reshape(nao*nao, naux).T)
+            df_coef = df_coef.reshape(naux, nao, nao)
+            eri = cp.einsum('ijP,Pkl->ijkl', int3c, df_coef)
+        else:
+            eri = mol.intor('int2e_sph', aosym='s8')
+            eri= ao2mo.restore(1, eri, nao)
+            eri = cp.asarray(eri)
 
         eri_aa = cp.einsum('pjkl,pi->ijkl', eri, orbo_a.conj())
         eri_aa = cp.einsum('ipkl,pj->ijkl', eri_aa, mo_a)
@@ -135,28 +145,41 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
 
         add_hf_(a, b, hyb)
         if omega != 0:  # For RSH
-            with mol.with_range_coulomb(omega):
-                eri = mol.intor('int2e_sph', aosym='s8')
-                eri= ao2mo.restore(1, eri, nao)
-                eri = cp.asarray(eri)
+            if hasattr(mf, 'with_df'):
+                from gpu4pyscf.df import int3c2e
+                auxmol = mf.with_df.auxmol
+                naux = auxmol.nao
+                int3c = int3c2e.get_int3c2e(mol, auxmol, omega=omega)
+                with auxmol.with_range_coulomb(omega):
+                    int2c2e = auxmol.intor('int2c2e')
+                int3c = cp.asarray(int3c)
+                int2c2e = cp.asarray(int2c2e)
+                df_coef = cp.linalg.solve(int2c2e, int3c.reshape(nao*nao, naux).T)
+                df_coef = df_coef.reshape(naux, nao, nao)
+                eri = cp.einsum('ijP,Pkl->ijkl', int3c, df_coef)
+            else:
+                with mol.with_range_coulomb(omega):
+                    eri = mol.intor('int2e_sph', aosym='s8')
+                    eri= ao2mo.restore(1, eri, nao)
+                    eri = cp.asarray(eri)
 
-                eri_aa = cp.einsum('pjkl,pi->ijkl', eri, orbo_a.conj())
-                eri_aa = cp.einsum('ipkl,pj->ijkl', eri_aa, mo_a)
-                eri_aa = cp.einsum('ijpl,pk->ijkl', eri_aa, mo_a.conj())
-                eri_aa = cp.einsum('ijkp,pl->ijkl', eri_aa, mo_a)
+            eri_aa = cp.einsum('pjkl,pi->ijkl', eri, orbo_a.conj())
+            eri_aa = cp.einsum('ipkl,pj->ijkl', eri_aa, mo_a)
+            eri_aa = cp.einsum('ijpl,pk->ijkl', eri_aa, mo_a.conj())
+            eri_aa = cp.einsum('ijkp,pl->ijkl', eri_aa, mo_a)
 
-                eri_bb = cp.einsum('pjkl,pi->ijkl', eri, orbo_b.conj())
-                eri_bb = cp.einsum('ipkl,pj->ijkl', eri_bb, mo_b)
-                eri_bb = cp.einsum('ijpl,pk->ijkl', eri_bb, mo_b.conj())
-                eri_bb = cp.einsum('ijkp,pl->ijkl', eri_bb, mo_b)
+            eri_bb = cp.einsum('pjkl,pi->ijkl', eri, orbo_b.conj())
+            eri_bb = cp.einsum('ipkl,pj->ijkl', eri_bb, mo_b)
+            eri_bb = cp.einsum('ijpl,pk->ijkl', eri_bb, mo_b.conj())
+            eri_bb = cp.einsum('ijkp,pl->ijkl', eri_bb, mo_b)
 
-                a_aa, a_ab, a_bb = a
-                b_aa, b_ab, b_bb = b
-                k_fac = alpha - hyb
-                a_aa -= cp.einsum('ijba->iajb', eri_aa[:nocc_a,:nocc_a,nocc_a:,nocc_a:]) * k_fac
-                b_aa -= cp.einsum('jaib->iajb', eri_aa[:nocc_a,nocc_a:,:nocc_a,nocc_a:]) * k_fac
-                a_bb -= cp.einsum('ijba->iajb', eri_bb[:nocc_b,:nocc_b,nocc_b:,nocc_b:]) * k_fac
-                b_bb -= cp.einsum('jaib->iajb', eri_bb[:nocc_b,nocc_b:,:nocc_b,nocc_b:]) * k_fac
+            a_aa, a_ab, a_bb = a
+            b_aa, b_ab, b_bb = b
+            k_fac = alpha - hyb
+            a_aa -= cp.einsum('ijba->iajb', eri_aa[:nocc_a,:nocc_a,nocc_a:,nocc_a:]) * k_fac
+            b_aa -= cp.einsum('jaib->iajb', eri_aa[:nocc_a,nocc_a:,:nocc_a,nocc_a:]) * k_fac
+            a_bb -= cp.einsum('ijba->iajb', eri_bb[:nocc_b,:nocc_b,nocc_b:,nocc_b:]) * k_fac
+            b_bb -= cp.einsum('jaib->iajb', eri_bb[:nocc_b,nocc_b:,:nocc_b,nocc_b:]) * k_fac
 
         xctype = ni._xc_type(mf.xc)
         opt = getattr(ni, 'gdftopt', None)

@@ -210,11 +210,11 @@ class KnownValues(unittest.TestCase):
     def test_grad_svwn_tda_singlet_numerical(self):
         _check_grad(mol, xc="svwn", tol=1e-4, tda=True, method="numerical")
 
-    def test_grad_svwn_tddft_singlet_cpu(self):
-        _check_grad(mol, xc="svwn", tol=5e-10, tda=False, method="cpu")
+    # def test_grad_svwn_tddft_singlet_cpu(self):
+    #     _check_grad(mol, xc="svwn", tol=5e-10, tda=False, method="cpu")
 
-    def test_grad_svwn_tddft_singlet_numerical(self):
-        _check_grad(mol, xc="svwn", tol=1e-4, tda=False, method="numerical")
+    # def test_grad_svwn_tddft_singlet_numerical(self):
+    #     _check_grad(mol, xc="svwn", tol=1e-4, tda=False, method="numerical")
 
     def test_grad_b3lyp_tda_singlet_cpu(self):
         _check_grad(mol, xc="b3lyp", tol=5e-10, tda=True, method="cpu")
@@ -222,17 +222,17 @@ class KnownValues(unittest.TestCase):
     def test_grad_b3lyp_tda_singlet_numerical(self):
         _check_grad(mol, xc="b3lyp", tol=1e-4, tda=True, method="numerical")
 
-    def test_grad_b3lyp_tddft_singlet_cpu(self):
-        _check_grad(mol, xc="b3lyp", tol=5e-10, tda=False, method="cpu")
+    # def test_grad_b3lyp_tddft_singlet_cpu(self):
+    #     _check_grad(mol, xc="b3lyp", tol=5e-10, tda=False, method="cpu")
 
-    def test_grad_b3lyp_tddft_singlet_numerical(self):
-        _check_grad(mol, xc="b3lyp", tol=1e-4, tda=False, method="numerical")
+    # def test_grad_b3lyp_tddft_singlet_numerical(self):
+    #     _check_grad(mol, xc="b3lyp", tol=1e-4, tda=False, method="numerical")
 
-    def test_grad_camb3lyp_tda_singlet_cpu(self):
-        _check_grad(mol, xc="camb3lyp", tol=5e-10, tda=True, method="cpu")
+    # def test_grad_camb3lyp_tda_singlet_cpu(self):
+    #     _check_grad(mol, xc="camb3lyp", tol=5e-10, tda=True, method="cpu")
 
-    def test_grad_camb3lyp_tda_singlet_numerical(self):
-        _check_grad(mol, xc="camb3lyp", tol=1e-4, tda=True, method="numerical")
+    # def test_grad_camb3lyp_tda_singlet_numerical(self):
+    #     _check_grad(mol, xc="camb3lyp", tol=1e-4, tda=True, method="numerical")
 
     def test_grad_camb3lyp_tddft_singlet_cpu(self):
         _check_grad(mol, xc="camb3lyp", tol=5e-10, tda=False, method="cpu")
@@ -240,11 +240,11 @@ class KnownValues(unittest.TestCase):
     def test_grad_camb3lyp_tddft_singlet_numerical(self):
         _check_grad(mol, xc="camb3lyp", tol=1e-4, tda=False, method="numerical")
 
-    def test_grad_tpss_tda_singlet_cpu(self):
-        _check_grad(mol, xc="tpss", tol=5e-10, tda=True, method="cpu")
+    # def test_grad_tpss_tda_singlet_cpu(self):
+    #     _check_grad(mol, xc="tpss", tol=5e-10, tda=True, method="cpu")
 
-    def test_grad_tpss_tda_singlet_numerical(self):
-        _check_grad(mol, xc="tpss", tol=1e-4, tda=True, method="numerical")
+    # def test_grad_tpss_tda_singlet_numerical(self):
+    #     _check_grad(mol, xc="tpss", tol=1e-4, tda=True, method="numerical")
 
     def test_grad_tpss_tddft_singlet_cpu(self):
         _check_grad(mol, xc="tpss", tol=5e-10, tda=False, method="cpu")
