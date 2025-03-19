@@ -17,7 +17,6 @@ import numpy as np
 import cupy
 import pyscf
 from pyscf import gto, lib
-from pyscf import grad, hessian
 from pyscf.hessian import rhf as rhf_cpu
 from gpu4pyscf import scf, hessian
 from gpu4pyscf.hessian import rhf as rhf_gpu
