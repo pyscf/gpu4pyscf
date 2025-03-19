@@ -62,17 +62,22 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
             # contributing to the finite-size effects in exchange matrix.
             rcut = estimate_rcut(cell, auxcell, omega).max()
             bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut)
-    bvk_kmesh, kmesh = guess_bvk_kmesh(cell, bvk_kmesh), bvk_kmesh
 
+    bvk_kmesh, kmesh = guess_bvk_kmesh(cell, bvk_kmesh), bvk_kmesh
     logger.debug(cell, 'BvK input %s, set to %s for sr_aux_e2', kmesh, bvk_kmesh)
+    gamma_point = kpts is None or (kpts.ndim == 1 and is_zero(kpts))
+    if gamma_point:
+        # Ensure that when generating ao_pair_loc in the gen_img_idx function,
+        # the expanded BvK images accumulated into one cell.
+        kmesh = np.array([1, 1, 1])
+
     int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh)
     nao = cell.nao
     naux = int3c2e_opt.aux_coeff.shape[1]
 
-    gamma_point = kpts is None or (kpts.ndim == 1 and is_zero(kpts))
     if gamma_point:
         out = cp.zeros((nao, nao, naux))
-        nL = 1
+        nL = nkpts = 1
     else:
         kpts = np.asarray(kpts).reshape(-1, 3)
         expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(kpts.T)))
@@ -95,20 +100,18 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     lmax = cell._bas[:,ANG_OF].max()
     c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
 
-    for li, lj, c_pair_idx, compressed_eri3c in \
-            int3c2e_opt.int3c2e_kernel(kmesh):
+    for li, lj, c_pair_idx, compressed_eri3c in int3c2e_opt.int3c2e_kernel(kmesh):
         compressed_eri3c = compressed_eri3c.dot(cp.asarray(int3c2e_opt.aux_coeff))
-        n_pairs = len(c_pair_idx)
         i0, i1 = c_l_offsets[li:li+2]
         j0, j1 = c_l_offsets[lj:lj+2]
         nctrj = c_shell_counts[lj]
         nfi = (li+1)*(li+2)//2
         nfj = (lj+1)*(lj+2)//2
         if not cell.cart:
+            n_pairs = len(c_pair_idx)
             compressed_eri3c = compressed_eri3c.reshape(n_pairs,nfi,nfj,naux)
             compressed_eri3c = contract('mpqr,pi->miqr', compressed_eri3c, c2s[li])
             compressed_eri3c = contract('miqr,qj->mijr', compressed_eri3c, c2s[lj])
-            compressed_eri3c = compressed_eri3c.reshape(-1,naux)
             nfi = li * 2 + 1
             nfj = lj * 2 + 1
 
@@ -122,7 +125,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         ao_pair_mapping = (iaddr[:,None,:] * ncol + jaddr[:,:,None]).ravel()
 
         eri3c = cp.zeros((nrow*ncol, naux))
-        eri3c[ao_pair_mapping] = compressed_eri3c
+        eri3c[ao_pair_mapping] = compressed_eri3c.reshape(-1,naux)
         eri3c = eri3c.reshape(nL,ni,nL,nj,naux)
         compressed_eri3c = None
 
@@ -352,7 +355,7 @@ class SRInt3c2eOpt:
             else:
                 # To strike load-balance for lattice-sum, multiple BvK cells can be
                 # mapped to one cell, leading to more bvk_ncells than num of kpts.
-                if all(kmesh == 1):
+                if all(np.asarray(kmesh) == 1):
                     c_pair_idx = cp.ravel_multi_index((ic, jc), (nctri, nctrj))
                     nrow = nctri
                     ncol = nctrj
@@ -376,6 +379,7 @@ class SRInt3c2eOpt:
             # c_pair_idx indicates the bas_ij indices of the contracted GTOS
             # within the sub-block (li,lj)
             c_pair_idx = cp.where(c_pair_mask)[0]
+            print(bas_ij)
             return img_idx, img_offsets, bas_ij, ao_pair_loc, c_pair_idx
         return gen_img_idx
 
@@ -495,9 +499,6 @@ class SRInt3c2eOpt:
             log.debug1('kernel launches %d', kern_counts)
             for lll, t in timing_collection.items():
                 log.debug1('%s wall time %.2f', lll, t)
-
-#X    sort_orbitals = int3c2e_bdiv.Int3c2eOpt.sort_orbitals
-#X    unsort_orbitals = int3c2e_bdiv.Int3c2eOpt.unsort_orbitals
 
 class Int3c2eEnvVars(ctypes.Structure):
     _fields_ = [

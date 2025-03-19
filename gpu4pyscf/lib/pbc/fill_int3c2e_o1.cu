@@ -318,7 +318,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                     int k  = ijk % nfk;
                     int ij = ijk / nfk;
                     if (ij >= nfij) break;
-                    eri_tensor[ij * naux + k] = gout[n];
+                    atomicAdd(eri_tensor + ij * naux + k, gout[n]);
                 }
             }
         }
@@ -354,15 +354,15 @@ void sr_int3c2e_img_counts_kernel(int *img_counts, PBCInt3c2eEnvVars envs,
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     extern __shared__ float xyz_cache[];
-    int li = bas[ANG_OF + ish0*BAS_SLOTS];
-    int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
-    float ai = env[bas[ish0*BAS_SLOTS+PTR_EXP]];
-    float aj = env[bas[jsh0*BAS_SLOTS+PTR_EXP]];
-    float ci = env[bas[ish0*BAS_SLOTS+PTR_COEFF]];
-    float cj = env[bas[jsh0*BAS_SLOTS+PTR_COEFF]];
+    int li = bas[ANG_OF + cell0_ish*BAS_SLOTS];
+    int lj = bas[ANG_OF + cell0_jsh*BAS_SLOTS];
+    float ai = env[bas[cell0_ish*BAS_SLOTS+PTR_EXP]];
+    float aj = env[bas[cell0_jsh*BAS_SLOTS+PTR_EXP]];
+    float ci = env[bas[cell0_ish*BAS_SLOTS+PTR_COEFF]];
+    float cj = env[bas[cell0_jsh*BAS_SLOTS+PTR_COEFF]];
     float aij = ai + aj;
     // log(ci*((2*li+1)/(4*pi))**.5 * cj*((2*lj+1)/(4*pi))**.5)
-    float log_cicj = logf(ci * cj) + .5f * logf((2*li+1) * (2*lj+1)) - 2.5310242f;
+    float log_cicj = logf(fabsf(ci * cj));
     float u = .5f / aij;
     float fi = ai / aij;
     float fj = aj / aij;
@@ -443,7 +443,7 @@ void sr_int3c2e_img_counts_kernel(int *img_counts, PBCInt3c2eEnvVars envs,
         // => r_guess > 5/omega
         // 1/(1/aij+1/ak+1/omega^2)*r_guess/aij in Eq 64 of arXiv:2302.11307
         //     ~ omega^2*r_guess/aij ~ omega/aij * 5.f
-        //float rt_aij = fabs(omega)/aij * 5.;
+        //float rt_aij = fabsf(omega)/aij * 5.;
         float rt_aij = omega2 * sqrtf(rr_min) / aij + 1e-9f;
         float dr = sqrtf(rr_ij);
         float dri = fj * dr + rt_aij;
@@ -512,7 +512,7 @@ void sr_int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_mapping,
     float cj = env[bas[jsh0*BAS_SLOTS+PTR_COEFF]];
     float aij = ai + aj;
     // log(ci*((2*li+1)/(4*pi))**.5 * cj*((2*lj+1)/(4*pi))**.5)
-    float log_cicj = logf(ci * cj) + .5f * logf((2*li+1) * (2*lj+1)) - 2.5310242f;
+    float log_cicj = logf(fabsf(ci * cj));
     float u = .5f / aij;
     float fi = ai / aij;
     float fj = aj / aij;
@@ -603,7 +603,7 @@ void sr_int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_mapping,
             // => r_guess > 5/omega
             // 1/(1/aij+1/ak+1/omega^2)*r_guess/aij in Eq 64 of arXiv:2302.11307
             //     ~ omega^2*r_guess/aij ~ omega/aij * 5.f
-            //float rt_aij = fabs(omega)/aij * 5.;
+            //float rt_aij = fabsf(omega)/aij * 5.;
             float rt_aij = omega2 * sqrtf(rr_min) / aij + 1e-9f;
             float dr = sqrtf(rr_ij);
             float dri = fj * dr + rt_aij;
