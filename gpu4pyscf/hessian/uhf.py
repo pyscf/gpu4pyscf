@@ -26,6 +26,7 @@ import cupy
 import cupy as cp
 from pyscf import lib
 from pyscf.scf import ucphf
+from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib.cupy_helper import (contract, transpose_sum, get_avail_mem,
                                        krylov, tag_array)
 from gpu4pyscf.lib import logger
@@ -221,8 +222,10 @@ def get_hcore(mol):
         h1aa+= mol.intor('int1e_ipipnuc', comp=9)
         h1ab+= mol.intor('int1e_ipnucip', comp=9)
     if mol.has_ecp():
-        h1aa += mol.intor('ECPscalar_ipipnuc', comp=9)
-        h1ab += mol.intor('ECPscalar_ipnucip', comp=9)
+        h1aa += get_ecp_ip(mol, 'ipipv')
+        h1ab += get_ecp_ip(mol, 'ipvip')
+        #h1aa += mol.intor('ECPscalar_ipipnuc', comp=9)
+        #h1ab += mol.intor('ECPscalar_ipnucip', comp=9)
     nao = h1aa.shape[-1]
     return h1aa.reshape(3,3,nao,nao), h1ab.reshape(3,3,nao,nao)
 

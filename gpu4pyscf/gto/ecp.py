@@ -164,7 +164,55 @@ def get_ecp_ip(mol, ip_type='ip'):
     if ip_type == 'ip':
         fn = libecp.ECP_ip_cart
         comp = 3
-    elif ip_type == 'ipipv':
+    else:
+        raise ValueError('Invalid IP type')
+
+    _sorted_mol, coeff, uniq_l_ctr, l_ctr_counts = group_basis(mol)
+    _sorted_mol, uniq_lecp, lecp_counts, ecp_loc= sort_ecp(_sorted_mol)
+
+    l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+    lecp_offsets = np.append(0, np.cumsum(lecp_counts))
+
+    tasks_all = make_full_tasks(l_ctr_offsets, lecp_offsets)
+
+    atm = cp.asarray(_sorted_mol._atm, dtype=np.int32)
+    bas = cp.asarray(_sorted_mol._bas, dtype=np.int32)
+    env = cp.asarray(_sorted_mol._env, dtype=np.float64)
+
+    ecpbas = cp.asarray(_sorted_mol._ecpbas, dtype=np.int32)
+    ecploc = cp.asarray(ecp_loc, dtype=np.int32)
+    n_groups = len(uniq_l_ctr)
+    n_ecp_groups = len(uniq_lecp)
+    ao_loc = _sorted_mol.ao_loc_nr(cart=True)
+    nao = ao_loc[-1]
+    ao_loc = cp.asarray(ao_loc, dtype=np.int32)
+    natm = mol.natm
+
+    mat1 = cp.zeros([natm, comp, nao, nao])
+    for i in range(n_groups):
+        for j in range(n_groups):
+            for k in range(n_ecp_groups):
+                tasks = cp.asarray(tasks_all[i,j,k], dtype=np.int32, order='F')
+                ntasks = len(tasks)
+                li = uniq_l_ctr[i,0]
+                lj = uniq_l_ctr[j,0]
+                lk = uniq_lecp[k]
+                err = fn(
+                    mat1.data.ptr, ao_loc.data.ptr, nao,
+                    tasks.data.ptr, ntasks,
+                    ecpbas.data.ptr, ecploc.data.ptr,
+                    atm.data.ptr, bas.data.ptr, env.data.ptr,
+                    li, lj, lk)
+                if err != 0:
+                    raise RuntimeError('ECP CUDA kernel')
+
+    coeff = cp.asarray(coeff)
+    mat1 = contract('axij,jq->axiq', mat1, coeff)
+    mat1 = contract('axiq,ip->axpq', mat1, coeff)
+    return mat1
+
+def get_ecp_ipip(mol, ip_type='ipipv'):
+    if ip_type == 'ipipv':
         fn = libecp.ECP_ipipv_cart
         comp = 9
     elif ip_type == 'ipvip':
@@ -192,8 +240,9 @@ def get_ecp_ip(mol, ip_type='ip'):
     ao_loc = _sorted_mol.ao_loc_nr(cart=True)
     nao = ao_loc[-1]
     ao_loc = cp.asarray(ao_loc, dtype=np.int32)
+    natm = mol.natm
 
-    mat1 = cp.zeros([comp, nao, nao])
+    mat1 = cp.zeros([natm, comp, nao, nao])
     for i in range(n_groups):
         for j in range(n_groups):
             for k in range(n_ecp_groups):
@@ -203,15 +252,15 @@ def get_ecp_ip(mol, ip_type='ip'):
                 lj = uniq_l_ctr[j,0]
                 lk = uniq_lecp[k]
                 err = fn(
-                    mat1.data.ptr, ao_loc.data.ptr, nao, 
+                    mat1.data.ptr, ao_loc.data.ptr, nao,
                     tasks.data.ptr, ntasks,
                     ecpbas.data.ptr, ecploc.data.ptr,
                     atm.data.ptr, bas.data.ptr, env.data.ptr,
                     li, lj, lk)
                 if err != 0:
                     raise RuntimeError('ECP CUDA kernel')
-
+                
     coeff = cp.asarray(coeff)
-    mat1 = contract('xij,jq->xiq', mat1, coeff)
-    mat1 = contract('xiq,ip->xpq', mat1, coeff)
+    mat1 = contract('axij,jq->axiq', mat1, coeff)
+    mat1 = contract('axiq,ip->axpq', mat1, coeff)
     return mat1

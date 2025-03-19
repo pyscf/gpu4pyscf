@@ -3,7 +3,7 @@ import time
 import numpy as np
 import cupy as cp
 from pyscf import gto, lib, scf
-from gpu4pyscf.gto.ecp import get_ecp, get_ecp_ip
+from gpu4pyscf.gto.ecp import get_ecp, get_ecp_ip, get_ecp_ipip
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 basis = os.path.join(CURRENT_DIR, '../../gpu4pyscf/drivers/basis_vDZP_NWCHEM.dat')
@@ -17,7 +17,7 @@ mol = gto.M(
     ecp=ecp)
 
 def measure_cpu_time(fn, mol):
-    runs = 20
+    runs = 10
     warmup = 3
     times = []
     for i in range(runs):
@@ -70,7 +70,7 @@ print()
 print("Benchmarking ECPscalar_ipnucip")
 fn = lambda x: x.intor('ECPscalar_ipnucip', comp=9)
 h1_cpu, cpu_time = measure_cpu_time(fn, mol)
-fn = lambda x: get_ecp_ip(x, ip_type='ipvip')
+fn = lambda x: get_ecp_ipip(x, ip_type='ipvip')
 h1_gpu, gpu_time = measure_gpu_time(fn, mol)
 assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-7
 print(f"cpu time: {cpu_time}")
@@ -82,7 +82,7 @@ print()
 print("Benchmarking ECPscalar_ipipnuc")
 fn = lambda x: x.intor('ECPscalar_ipipnuc', comp=9)
 h1_cpu, cpu_time = measure_cpu_time(fn, mol)
-fn = lambda x: get_ecp_ip(x, ip_type='ipipv')
+fn = lambda x: get_ecp_ipip(x, ip_type='ipipv')
 h1_gpu, gpu_time = measure_gpu_time(fn, mol)
 assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-7
 print(f"cpu time: {cpu_time}")

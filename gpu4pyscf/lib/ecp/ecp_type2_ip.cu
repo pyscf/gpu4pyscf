@@ -140,6 +140,8 @@ void type2_cart_ip1(double *gctr,
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
     const int ksh = tasks[task_id + 2*ntasks];
+    
+    const int ecp_id = ecpbas[ATOM_OF+ecploc[ksh]*BAS_SLOTS];
 
     __shared__ double gctr_smem[NF_MAX*NF_MAX*3];
     for (int ij = threadIdx.x; ij < NF_MAX*NF_MAX*3; ij+=blockDim.x){
@@ -168,9 +170,9 @@ void type2_cart_ip1(double *gctr,
     for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
         const int i = ij%nfi;
         const int j = ij/nfi;
-        double *gx = gctr;
-        double *gy = gx + nao*nao;
-        double *gz = gy + nao*nao;
+        double *gx = gctr + (3*ecp_id  )*nao*nao;
+        double *gy = gctr + (3*ecp_id+1)*nao*nao;
+        double *gz = gctr + (3*ecp_id+2)*nao*nao;
         atomicAdd(gx + (i+ioff)*nao + (j+joff), gctr_smem[ij]);
         atomicAdd(gy + (i+ioff)*nao + (j+joff), gctr_smem[ij+nfi*nfj]);
         atomicAdd(gz + (i+ioff)*nao + (j+joff), gctr_smem[ij+2*nfi*nfj]);
@@ -198,7 +200,8 @@ void type2_cart_ipipv(double *gctr,
 
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
-    gctr += ioff*nao + joff;
+    const int ecp_id = ecpbas[ATOM_OF+ecploc[ksh]*BAS_SLOTS];
+    gctr += ioff*nao + joff + 9*ecp_id*nao*nao;
 
     constexpr int nfi2_max = (AO_LMAX+3)*(AO_LMAX+4)/2;
     constexpr int nfj_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
@@ -253,7 +256,8 @@ void type2_cart_ipvip(double *gctr,
 
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
-    gctr += ioff*nao + joff;
+    const int ecp_id = ecpbas[ATOM_OF+ecploc[ksh]*BAS_SLOTS];
+    gctr += ioff*nao + joff + 9*ecp_id*nao*nao;
 
     constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
     constexpr int nfj1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;

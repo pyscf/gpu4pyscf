@@ -180,7 +180,6 @@ int ECP_ip_cart(double *gctr,
             tasks, ntasks,
             ecpbas, ecploc,
             atm, bas, env);
-        
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
