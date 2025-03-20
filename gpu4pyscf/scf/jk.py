@@ -243,7 +243,7 @@ class _VHFOpt:
 
         # ref = cp.einsum("ij,qjk,kl->qil", self.coeff, spherical_matrix, self.coeff.T)
 
-        out = cp.empty((counts, n_cartesian, n_cartesian), order = "C")
+        out = cp.zeros((counts, n_cartesian, n_cartesian), order = "C")
         for i_dm in range(counts):
             libgint.cart2sph_C_mat_CT_with_padding(
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
