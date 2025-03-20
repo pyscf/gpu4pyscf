@@ -376,6 +376,7 @@ void sr_int3c2e_img_counts_kernel(int *img_counts, PBCInt3c2eEnvVars envs,
     //           ~ between [0, 2]
     float fac_guess = .5f - logf(omega2)/4;
     float log_fac = log_cicj + 1.717f - 1.5f*logf(aij) + fac_guess;
+    float log_cutoff = envs.log_cutoff - log_fac;
 
     float theta = (omega2 * aij) / (omega2 + aij);
     for (int k = thread_id; k < cell0_natm; k += N_THREADS) {
@@ -396,7 +397,6 @@ void sr_int3c2e_img_counts_kernel(int *img_counts, PBCInt3c2eEnvVars envs,
     float xj = rj[0];
     float yj = rj[1];
     float zj = rj[2];
-    float log_cutoff = envs.log_cutoff - log_fac;
 
     int count = 0;
     for (int ijL = thread_id; ijL < nimgs2; ijL += N_THREADS) {
@@ -503,13 +503,13 @@ void sr_int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_mapping,
     double *img_coords = envs.img_coords;
     extern __shared__ int8_t mask[];
     uint16_t* cum_count = (uint16_t *)(mask + IMG_BLOCK);
-    float *xyz_cache = (float *)(cum_count + 512);
-    int li = bas[ANG_OF + ish0*BAS_SLOTS];
-    int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
-    float ai = env[bas[ish0*BAS_SLOTS+PTR_EXP]];
-    float aj = env[bas[jsh0*BAS_SLOTS+PTR_EXP]];
-    float ci = env[bas[ish0*BAS_SLOTS+PTR_COEFF]];
-    float cj = env[bas[jsh0*BAS_SLOTS+PTR_COEFF]];
+    float *xyz_cache = (float *)(cum_count + N_THREADS);
+    int li = bas[ANG_OF + cell0_ish*BAS_SLOTS];
+    int lj = bas[ANG_OF + cell0_jsh*BAS_SLOTS];
+    float ai = env[bas[cell0_ish*BAS_SLOTS+PTR_EXP]];
+    float aj = env[bas[cell0_jsh*BAS_SLOTS+PTR_EXP]];
+    float ci = env[bas[cell0_ish*BAS_SLOTS+PTR_COEFF]];
+    float cj = env[bas[cell0_jsh*BAS_SLOTS+PTR_COEFF]];
     float aij = ai + aj;
     // log(ci*((2*li+1)/(4*pi))**.5 * cj*((2*lj+1)/(4*pi))**.5)
     float log_cicj = logf(fabsf(ci * cj));
@@ -529,7 +529,7 @@ void sr_int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_mapping,
     float log_cutoff = envs.log_cutoff - log_fac;
 
     float theta = (omega2 * aij) / (omega2 + aij);
-    for (int k = thread_id; k < cell0_natm; k += 512) {
+    for (int k = thread_id; k < cell0_natm; k += N_THREADS) {
         double *rk = env + atm[k*ATM_SLOTS+PTR_COORD];
         xyz_cache[k*4+0] = rk[0];
         xyz_cache[k*4+1] = rk[1];
@@ -617,6 +617,7 @@ void sr_int3c2e_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_mapping,
             }
         }
 
+        __syncthreads();
         cum_count[thread_id] = count;
         // Up-sweep phase
         for (int stride = 1; stride < N_THREADS; stride *= 2) {
@@ -666,7 +667,7 @@ int int3c2e_img_counts(int *img_counts, PBCInt3c2eEnvVars *envs,
     int njsh = jsh1 - jsh0;
     dim3 blocks(bvk_ncells*nish, bvk_ncells*njsh);
     int buflen = cell0_natm * 4 * sizeof(float);
-    constexpr int threads = 512;
+    constexpr int threads = 256;
     buflen = MAX(buflen, threads*sizeof(int));
     sr_int3c2e_img_counts_kernel<threads><<<blocks, threads, buflen>>>(
         img_counts, *envs, aux_exps, ish0, jsh0, nish, njsh);
@@ -691,7 +692,7 @@ int int3c2e_img_idx(int *img_idx, int *img_offsets, int *bas_mapping, int nrow,
     int njsh = jsh1 - jsh0;
     dim3 blocks(bvk_ncells*nish, bvk_ncells*njsh);
     int buflen = cell0_natm * 4 * sizeof(float);
-    constexpr int threads = 512;
+    constexpr int threads = 256;
     buflen = buflen + threads*sizeof(uint16_t) + IMG_BLOCK;
     sr_int3c2e_img_idx_kernel<threads><<<nrow, threads, buflen>>>(
         img_idx, img_offsets, bas_mapping, *envs, aux_exps, ish0, jsh0, nish, njsh);

@@ -83,7 +83,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(kpts.T)))
         nL, nkpts = expLk.shape
         if j_only:
-            expLLk = contract('Lk,Mk->LMk', expLk.conj(), expLk)
+            expLLk = contract('Mk,Lk->MLk', expLk.conj(), expLk)
             expLLk = expLLk.view(np.float64).reshape(nL,nL,nkpts,2)
             out = cp.zeros((nkpts, nao, nao, naux), dtype=np.complex128)
         else:
@@ -109,9 +109,9 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         nfj = (lj+1)*(lj+2)//2
         if not cell.cart:
             n_pairs = len(c_pair_idx)
-            compressed_eri3c = compressed_eri3c.reshape(n_pairs,nfi,nfj,naux)
-            compressed_eri3c = contract('mpqr,pi->miqr', compressed_eri3c, c2s[li])
-            compressed_eri3c = contract('miqr,qj->mijr', compressed_eri3c, c2s[lj])
+            compressed_eri3c = compressed_eri3c.reshape(n_pairs,nfj,nfi,naux)
+            compressed_eri3c = contract('mqpr,qj->mjpr', compressed_eri3c, c2s[lj])
+            compressed_eri3c = contract('mjpr,pi->mjir', compressed_eri3c, c2s[li])
             nfi = li * 2 + 1
             nfj = lj * 2 + 1
 
@@ -137,7 +137,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
             if i0 != j0:
                 out[j[:,None],i] = eri3c.transpose(1,0,2)
         elif j_only:
-            eri3c = contract('LMkz,LpMqr->kpqrz', expLLk, eri3c)
+            eri3c = contract('MLkz,MpLqr->kpqrz', expLLk, eri3c)
             eri3c = eri3c.view(np.complex128)[...,0]
             out[:,i[:,None],j] = eri3c
             if i0 != j0:
@@ -376,10 +376,13 @@ class SRInt3c2eOpt:
             ao_pair_loc_lookup[c_pair_mask] = cp.arange(0, n_c_pair*nfij, nfij)
             ao_pair_loc = cp.asarray(ao_pair_loc_lookup[c_pair_idx], dtype=np.int32)
 
-            # c_pair_idx indicates the bas_ij indices of the contracted GTOS
-            # within the sub-block (li,lj)
+            # c_pair_idx indicates the address of the **contracted** pair GTOS
+            # within the (li,lj) sub-block. For each shell-pair, there are
+            # nfij elements. Note, the nfij elements are sorted as [nfj,nfi]
+            # (in F-order) while the shell indices within the c_pair_idx are
+            # composed as i*nbas+j (in C-order). c_pair_idx points to the
+            # address of the first element.
             c_pair_idx = cp.where(c_pair_mask)[0]
-            print(bas_ij)
             return img_idx, img_offsets, bas_ij, ao_pair_loc, c_pair_idx
         return gen_img_idx
 
@@ -462,6 +465,8 @@ class SRInt3c2eOpt:
             jsh0, jsh1 = p_shell_l_offsets[lj:lj+2]
             img_idx, img_offsets, bas_ij_idx, ao_pair_loc, c_pair_idx = gen_img_idx(li, lj)
             nfij = nfcart[li] * nfcart[lj]
+            # Note the storage order for ij_pair: i takes the smaller stride.
+            # eri3c ~ (c_pair_idx, nfj, nfi, naux)
             eri3c = cp.zeros((len(c_pair_idx)*nfij, naux))
 
             for k, lk in enumerate(self.uniq_l_ctr_aux[:,0]):
