@@ -185,7 +185,9 @@ class _VHFOpt:
         return self
 
     def sort_orbitals(self, mat, axis=[]):
-        ''' Transform given axis of a matrix into sorted AO '''
+        ''' 
+        Transform given axis of a matrix into sorted AO 
+        '''
         idx = self.ao_idx
         shape_ones = (1,) * mat.ndim
         fancy_index = []
@@ -200,7 +202,9 @@ class _VHFOpt:
         return mat[tuple(fancy_index)]
 
     def unsort_orbitals(self, sorted_mat, axis=[]):
-        ''' Transform given axis of a matrix into sorted AO '''
+        ''' 
+        Transform given axis of a matrix into sorted AO 
+        '''
         idx = self.ao_idx
         shape_ones = (1,) * sorted_mat.ndim
         fancy_index = []
@@ -217,6 +221,10 @@ class _VHFOpt:
         return mat
 
     def apply_coeff_C_mat_CT(self, spherical_matrix):
+        '''
+        Unsort AO and perform sph2cart transformation (if needed) for the last 2 axes
+        Fused kernel to perform 'ip,npq,qj->nij' 
+        '''
         spherical_matrix = cp.asarray(spherical_matrix)
         spherical_matrix_ndim = spherical_matrix.ndim
         if spherical_matrix_ndim == 2:
@@ -235,7 +243,7 @@ class _VHFOpt:
 
         # ref = cp.einsum("ij,qjk,kl->qil", self.coeff, spherical_matrix, self.coeff.T)
 
-        out = cp.zeros((counts, n_cartesian, n_cartesian), order = "C")
+        out = cp.empty((counts, n_cartesian, n_cartesian), order = "C")
         for i_dm in range(counts):
             libgint.cart2sph_C_mat_CT_with_padding(
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -256,6 +264,10 @@ class _VHFOpt:
         return out
 
     def apply_coeff_CT_mat_C(self, cartesian_matrix):
+        '''
+        Sort AO and perform cart2sph transformation (if needed) for the last 2 axes
+        Fused kernel to perform 'ip,npq,qj->nij' 
+        '''
         cartesian_matrix = cp.asarray(cartesian_matrix)
         cartesian_matrix_ndim = cartesian_matrix.ndim
         if cartesian_matrix_ndim == 2:
@@ -295,6 +307,10 @@ class _VHFOpt:
         return out
 
     def apply_coeff_C_mat(self, right_matrix):
+        '''
+        Sort AO and perform cart2sph transformation (if needed) for the second last axis
+        Fused kernel to perform 'ip,npq->niq' 
+        '''
         right_matrix = cp.asarray(right_matrix)
         assert right_matrix.ndim == 2
         assert right_matrix.shape[0] == self.mol.nao
@@ -409,7 +425,8 @@ class _VHFOpt:
         return coeff
 
     def get_jk(self, dms, hermi, with_j, with_k, verbose):
-        '''Build JK for the sorted_mol. Density matrices dms and the return JK
+        '''
+        Build JK for the sorted_mol. Density matrices dms and the return JK
         matrices are all corresponding to the sorted_mol
         '''
         assert dms.ndim == 3
