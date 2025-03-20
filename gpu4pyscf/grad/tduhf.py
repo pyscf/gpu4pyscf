@@ -229,7 +229,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         mol,
         cp.stack((((dmz1dooa + dmz1dooa.T) * 0.25, (dmz1doob + dmz1doob.T) * 0.25))))
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
+        extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
     dvhf = td_grad.get_veff(mol, cp.stack((((dmxpya + dmxpya.T) * 0.5, (dmxpyb + dmxpyb.T) * 0.5))))
     for k, ia in enumerate(atmlst):
