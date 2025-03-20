@@ -342,7 +342,6 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     # derivative w.r.t. atomic orbitals
     h1 = cupy.asarray(mf_grad.get_hcore(mol))
     aoslices = mol.aoslice_by_atom()
-    with_ecp = mol.has_ecp()
     h1_ecp = get_ecp_ip(mol)
     for atm_id in range(natm):
         p0, p1 = aoslices[atm_id][2:]

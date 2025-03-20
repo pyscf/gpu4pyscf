@@ -2,7 +2,7 @@
     "input_dir": "./",
     "output_dir": "./",
     "molecules": [
-        "MR_100001_2_H9.xyz",
+        "h2o.xyz",
         "h2o.xyz",
         "h2o.xyz",
         "h2o.xyz",

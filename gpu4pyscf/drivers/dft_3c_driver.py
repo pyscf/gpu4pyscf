@@ -244,7 +244,6 @@ def run_dft(mol_name, config, charge=None, spin=0):
     mf.chkfile = None
     mf.conv_tol = scf_conv_tol
     e_tot = mf.kernel()
-    print(e_tot)
     if not mf.converged:
         logger.warn(mf, 'SCF failed to converge')
 
