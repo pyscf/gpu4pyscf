@@ -52,7 +52,7 @@ void type1_rad_part(double* __restrict__ rad_all, const int LIJ, double k, doubl
     }
     __syncthreads();
 }
-
+/*
 template <int l> __device__
 double type1_ang_nuc_l(const int i, const int j, const int k, double *unitr){
     double rxPow[l+1], ryPow[l+1], rzPow[l+1];
@@ -89,6 +89,7 @@ double type1_ang_nuc_l(const int i, const int j, const int k, double *unitr){
     }
     return tmp;
 }
+*/
 
 __device__
 void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, const double fac)

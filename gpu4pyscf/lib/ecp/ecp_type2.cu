@@ -80,15 +80,13 @@ void type2_facs_omega(double* __restrict__ omega, const int LI, const int LC, do
         const int blk = (LI+LC+2)/2 * (LC*2+1);
         double *pomega = omega + (ioff+joff+k)*blk;
 
-        // TODO: reduce branching
         //for (int lmb = need_even; lmb <= LI+LC; lmb+=2){
-        const int lmb = LI+LC;
-        if (lmb >= 0)  {type2_ang_nuc_l<0>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
-        if (lmb >= 2)  {type2_ang_nuc_l<2>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
-        if (lmb >= 4)  {type2_ang_nuc_l<4>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
-        if (lmb >= 6)  {type2_ang_nuc_l<6>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
-        if (lmb >= 8)  {type2_ang_nuc_l<8>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
-        if (lmb >= 10) {type2_ang_nuc_l<10>(pomega, LC, i, j, k, unitr); pomega+=(2*LC+1);}
+        if (LI+LC >= 0)  {type2_ang_nuc_l<0>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (LI+LC >= 2)  {type2_ang_nuc_l<2>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (LI+LC >= 4)  {type2_ang_nuc_l<4>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (LI+LC >= 6)  {type2_ang_nuc_l<6>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (LI+LC >= 8)  {type2_ang_nuc_l<8>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (LI+LC >= 10) {type2_ang_nuc_l<10>(pomega, LC, i, j, k, unitr); pomega+=(2*LC+1);}
     }
 
     // When i+j+k + LC is odd
@@ -105,14 +103,12 @@ void type2_facs_omega(double* __restrict__ omega, const int LI, const int LC, do
         const int blk = (LI+LC+2)/2 * (LC*2+1);
         double *pomega = omega + (ioff+joff+k)*blk;
 
-        // TODO: reduce branching
         //for (int lmb = need_even; lmb <= LI+LC; lmb+=2){
-        const int lmb = LI+LC;
-        if (lmb >= 1)  {type2_ang_nuc_l<1>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
-        if (lmb >= 3)  {type2_ang_nuc_l<3>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
-        if (lmb >= 5)  {type2_ang_nuc_l<5>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
-        if (lmb >= 7)  {type2_ang_nuc_l<7>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
-        if (lmb >= 9)  {type2_ang_nuc_l<9>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (LI+LC >= 1)  {type2_ang_nuc_l<1>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (LI+LC >= 3)  {type2_ang_nuc_l<3>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (LI+LC >= 5)  {type2_ang_nuc_l<5>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (LI+LC >= 7)  {type2_ang_nuc_l<7>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
+        if (LI+LC >= 9)  {type2_ang_nuc_l<9>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
     }
 }
 

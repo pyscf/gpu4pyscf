@@ -20,6 +20,7 @@
 #include "cart2sph.cu"
 #include "gauss_chebyshev.cu"
 #include "common.cu"
+#include "type1_ang_nuc.cu"
 #include "type2_ang_nuc.cu"
 #include "ecp_type1.cu"
 #include "ecp_type2.cu"

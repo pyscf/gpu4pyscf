@@ -221,20 +221,30 @@ def _ejk_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     return n, gout_stride
 
 def get_dh1e_ecp(mol, dm):
-    #natom = mol.natm
-    #dh1e_ecp = cupy.zeros([natom,3])
+    '''
+    Nuclear gradients of core Hamiltonian
+    '''
     with_ecp = mol.has_ecp()
     if not with_ecp:
         natom = mol.natm
         return cupy.zeros([natom,3])
-    #ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
     h1_ecp = get_ecp_ip(mol)
     dh1e_ecp = contract('axij,ij->ax', h1_ecp, dm)
-    #for ia in ecp_atoms:
-    #    with mol.with_rinv_at_nucleus(ia):
-    #        ecp = mol.intor('ECPscalar_iprinv', comp=3)
-    #        dh1e_ecp[ia] = contract('xij,ij->x', cupy.asarray(ecp), dm)
     return 2.0 * dh1e_ecp
+
+def get_hcore(mf, mol):
+    '''
+    Nuclear gradients of core Hamiltonian
+    '''
+    h = mol.intor('int1e_ipkin', comp=3)
+    if mol._pseudo:
+        NotImplementedError('Nuclear gradients for GTH PP')
+    else:
+        h+= mol.intor('int1e_ipnuc', comp=3)
+    h = cupy.asarray(h)
+    if mol.has_ecp():
+        h += get_ecp_ip(mol).sum(axis=0)
+    return -h
 
 def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     '''
@@ -301,7 +311,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
 def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     '''
-    derivatives of Hcore in MO bases
+    Calculate derivatives of Hcore in MO bases
     '''
     mf = mf_grad.base
     mol = mf.mol
@@ -330,19 +340,13 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     dh1e = contract('kxjo,jp->kxpo', dh1e, mo_coeff_sorted)
 
     # derivative w.r.t. atomic orbitals
-    h1 = numpy.asarray(mf_grad.get_hcore(mol))
+    h1 = cupy.asarray(mf_grad.get_hcore(mol))
     aoslices = mol.aoslice_by_atom()
     with_ecp = mol.has_ecp()
-    if with_ecp:
-        ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
-    else:
-        ecp_atoms = ()
+    h1_ecp = get_ecp_ip(mol)
     for atm_id in range(natm):
-        shl0, shl1, p0, p1 = aoslices[atm_id]
-        h1ao = numpy.zeros([3,nao,nao])
-        with mol.with_rinv_at_nucleus(atm_id):
-            if with_ecp and atm_id in ecp_atoms:
-                h1ao += mol.intor('ECPscalar_iprinv', comp=3)
+        p0, p1 = aoslices[atm_id][2:]
+        h1ao = h1_ecp[atm_id]
         h1ao[:,p0:p1] += h1[:,p0:p1]
         h1ao += h1ao.transpose([0,2,1])
         h1ao = cupy.asarray(h1ao)
@@ -393,7 +397,7 @@ class GradientsBase(lib.StreamObject):
     dump_flags  = rhf_grad_cpu.GradientsBase.dump_flags
 
     reset       = rhf_grad_cpu.GradientsBase.reset
-    get_hcore   = rhf_grad_cpu.GradientsBase.get_hcore
+    get_hcore   = get_hcore
     get_ovlp    = rhf_grad_cpu.GradientsBase.get_ovlp
     get_jk      = NotImplemented
     get_j       = NotImplemented

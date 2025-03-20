@@ -45,10 +45,7 @@ libecp.ECP_ipvip_cart.argtypes = ecp_cart_argtypes
 
 def sort_ecp(mol0, cart=True, log=None):
     '''
-    # Sort basis according to angular momentum
-    # as to group the basis functions to blocks in GPU kernel.
-    
-    # Order ECP basis based on angular momentum
+    # Sort ECP basis based on angular momentum
     # Remove SO Type basis functions
     '''
     if log is None:

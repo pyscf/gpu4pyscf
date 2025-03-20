@@ -146,12 +146,10 @@ void type1_cart_ip1(double *gctr,
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
     const int ksh = tasks[task_id + 2*ntasks];
-
-    const int ecp_id = ecpbas[ATOM_OF+ecploc[ksh]*BAS_SLOTS];
-
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
-    gctr += ioff*nao + joff;
+    const int ecp_id = ecpbas[ATOM_OF+ecploc[ksh]*BAS_SLOTS];
+    gctr += 3*ecp_id*nao*nao + ioff*nao + joff;
 
     __shared__ double gctr_smem[NF_MAX*NF_MAX*3];
     for (int ij = threadIdx.x; ij < NF_MAX*NF_MAX*3; ij+=blockDim.x){
@@ -178,9 +176,9 @@ void type1_cart_ip1(double *gctr,
     for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
         const int i = ij%nfi;
         const int j = ij/nfi;
-        double *gx = gctr + (3*ecp_id  )*nao*nao;
-        double *gy = gctr + (3*ecp_id+1)*nao*nao;
-        double *gz = gctr + (3*ecp_id+2)*nao*nao;
+        double *gx = gctr;
+        double *gy = gctr +   nao*nao;
+        double *gz = gctr + 2*nao*nao;
         atomicAdd(gx+i*nao+j, gctr_smem[ij]);
         atomicAdd(gy+i*nao+j, gctr_smem[ij+nfi*nfj]);
         atomicAdd(gz+i*nao+j, gctr_smem[ij+2*nfi*nfj]);

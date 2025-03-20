@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-Code generator for type2_ang_nuc.cu
+Code generator for type1_an_nuc.cu
 """
 
 from pyscf.gto.mole import cart2sph
@@ -68,11 +68,11 @@ def calculate_cart(l):
     cart_scripts = []
     for i in range(m):
         nuc = [
-            f"""    // l = {l}, i = {i}""",
-            """    nuc = 0.0;"""]
+            f"""// l = {l}, i = {i}""",
+            """        double nuc = 0.0;"""]
         for j in range(n):
             if abs(c2s[i,j]) > 1e-16:
-                nuc.append(f"""    nuc += c[{j}]*{c2s[i,j]};""")
+                nuc.append(f"""        nuc += c[{j}]*{c2s[i,j]};""")
         cart_scripts.append('\n'.join(nuc))
     return cart_scripts
 
@@ -84,16 +84,14 @@ def calculate_nuc(l):
         ps = cart_pow_y[n]
         pt = cart_pow_z[n]
         pr = l - ps - pt
-        nuc_scripts.append(cart_scripts[n])
+        #nuc_scripts.append(cart_scripts[n])
 
-        loop = f"""
-    for (int m = 0; m < (lc+1)*(lc+2)/2; m++){{
-        const int pv = _cart_pow_y[m];
-        const int pw = _cart_pow_z[m];
-        const int pu = lc - pv - pw;
-        buf[m] += nuc * int_unit_xyz(i+pu+{pr}, j+pv+{ps}, k+pw+{pt});
+        contract_script = f""" 
+    if ((i+{pr})%2 == 0 && (j+{ps})%2 == 0 && (k+{pt})%2 == 0){{
+        {cart_scripts[n]}
+        tmp += nuc * int_unit_xyz(i+{pr}, j+{ps}, k+{pt});
     }}"""
-        nuc_scripts.append(loop)
+        nuc_scripts.append(contract_script)
     return '\n'.join(nuc_scripts)
 
 header = """/*
@@ -113,19 +111,17 @@ header = """/*
  */
 
 template <int l> __device__
-void type2_ang_nuc_l(double * __restrict__ omega, const int lc,
-                    const int i, const int j, const int k,
+double type1_ang_nuc_l(const int i, const int j, const int k,
                     double * __restrict__ unitr){
-return;
+return 0.0;
 }
 """
 
 from jinja2 import Template
 template_string = """
 template <> __device__
-void type2_ang_nuc_l<{{ l }}>(double * __restrict__ omega, const int lc,
-                    const int i, const int j, const int k,
-                    double * __restrict__ unitr){
+double type1_ang_nuc_l<{{ l }}>(const int i, const int j, const int k,
+                            double * __restrict__ unitr){
     constexpr int l = {{ l }};
     double rx[l+1], ry[l+1], rz[l+1];
     rx[0] = ry[0] = rz[0] = 1.0;
@@ -139,20 +135,17 @@ void type2_ang_nuc_l<{{ l }}>(double * __restrict__ omega, const int lc,
     for (int m = 0; m < 2*l+1; m++) c[m] = 0.0;
 {{ c_scripts }};
 
-    double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
-    for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] = 0.0;
-    double nuc;
+    double tmp = 0.0;
 
 {{ nuc_scripts }}
 
-    for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] *= 4.0 * M_PI;
-    cart2sph(omega, lc, buf);
+    return tmp;
 }
 """
 
 template = Template(template_string)
 
-with open('type2_ang_nuc.cu', 'w') as f:
+with open('type1_ang_nuc.cu', 'w') as f:
     f.write(header)
     for l in range(0, 11):
         c_scripts = calculate_c(l)

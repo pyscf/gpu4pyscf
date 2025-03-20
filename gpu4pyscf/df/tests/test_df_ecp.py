@@ -122,9 +122,7 @@ class KnownValues(unittest.TestCase):
         mf = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
         mf.conv_tol = 1e-12
         e_tot = mf.kernel()
-        print(e_tot)
         assert np.allclose(e_tot, -21.29853214867972)
-        #assert np.allclose(e_tot, -80.6305435235937)
 
     def test_rks_gradient(self):
         _check_grad()
