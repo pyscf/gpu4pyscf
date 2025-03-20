@@ -63,18 +63,11 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
             rcut = estimate_rcut(cell, auxcell, omega).max()
             bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut)
 
-    bvk_kmesh, kmesh = guess_bvk_kmesh(cell, bvk_kmesh), bvk_kmesh
-    logger.debug(cell, 'BvK input %s, set to %s for sr_aux_e2', kmesh, bvk_kmesh)
-    gamma_point = kpts is None or (kpts.ndim == 1 and is_zero(kpts))
-    if gamma_point:
-        # Ensure that when generating ao_pair_loc in the gen_img_idx function,
-        # the expanded BvK images accumulated into one cell.
-        kmesh = np.array([1, 1, 1])
-
     int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh)
     nao = cell.nao
     naux = int3c2e_opt.aux_coeff.shape[1]
 
+    gamma_point = kpts is None or (kpts.ndim == 1 and is_zero(kpts))
     if gamma_point:
         out = cp.zeros((nao, nao, naux))
         nL = nkpts = 1
@@ -100,7 +93,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     lmax = cell._bas[:,ANG_OF].max()
     c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
 
-    for li, lj, c_pair_idx, compressed_eri3c in int3c2e_opt.int3c2e_kernel(kmesh):
+    for li, lj, c_pair_idx, compressed_eri3c in int3c2e_opt.int3c2e_kernel():
         compressed_eri3c = compressed_eri3c.dot(cp.asarray(int3c2e_opt.aux_coeff))
         i0, i1 = c_l_offsets[li:li+2]
         j0, j1 = c_l_offsets[lj:lj+2]
@@ -257,7 +250,6 @@ class SRInt3c2eOpt:
         self.sorted_auxcell.omega = omega
 
         if bvk_kmesh is None:
-            #TODO: make a guess for the bvkcell, making the lattice sum idx <65536
             bvk_kmesh = np.ones(3, dtype=int)
         self.bvk_kmesh = bvk_kmesh
         self.bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True)
@@ -270,12 +262,23 @@ class SRInt3c2eOpt:
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
         self.bvkcell = bvkcell
 
-    def create_img_idx(self, int3c2e_envs, kmesh=None):
+        #Replicate bvkcell, making the lattice sum idx <65536
+        self.replica = guess_supercell_images(bvkcell)
+        logger.debug(cell, 'SRInt3c2eOpt sets %s BvK cells in the super cell', self.replica)
+        if np.prod(self.replica) == 1:
+            supcell = bvkcell
+        else:
+            supcell = pbctools.super_cell(bvkcell, self.replica)
+            supcell._bas[:,PTR_BAS_COORD] = supcell._atm[
+                supcell._bas[:,ATOM_OF],PTR_COORD]
+        self.supcell = supcell
+
+    def create_img_idx(self, int3c2e_envs):
         '''integral screening'''
         prim_cell = self.prim_cell
         nbas = prim_cell.nbas
-        bvkcell = self.bvkcell
-        bvk_ncells = bvkcell.nbas // nbas
+        supcell = self.supcell
+        sup_ncells = supcell.nbas // nbas
         auxcell = self.sorted_auxcell
 
         # Search the most diffused functions on each atom
@@ -292,7 +295,6 @@ class SRInt3c2eOpt:
                 atom_aux_exps[ia] = es[r2_aux[bas_mask].argmax()]
 
         c_shell_counts = self.cell0_ctr_l_counts
-        c_shell_offsets = np.append(0, np.cumsum(c_shell_counts))
         p_shell_l_offsets = np.append(0, np.cumsum(self.cell0_prim_l_counts))
         p2c_mapping = [cp.asarray(x) for x in self.prim_to_ctr_mapping]
 
@@ -306,13 +308,13 @@ class SRInt3c2eOpt:
 
             #TODO: only tril part when i == j
             img_counts = cp.zeros(
-                bvk_ncells*nprimi * bvk_ncells*nprimj, dtype=np.int32)
+                sup_ncells*nprimi * sup_ncells*nprimj, dtype=np.int32)
             err = libpbc.int3c2e_img_counts(
                 ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
                 ctypes.byref(int3c2e_envs),
                 (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
                 ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(bvk_ncells), ctypes.c_int(prim_cell.natm))
+                ctypes.c_int(sup_ncells), ctypes.c_int(auxcell.natm))
             if err != 0:
                 raise RuntimeError('int3c2e_img_counts failed')
 
@@ -334,42 +336,40 @@ class SRInt3c2eOpt:
                 ctypes.byref(int3c2e_envs),
                 (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
                 ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(bvk_ncells), ctypes.c_int(prim_cell.natm))
+                ctypes.c_int(sup_ncells), ctypes.c_int(auxcell.natm))
             if err != 0:
                 raise RuntimeError('int3c2e_img_idx failed')
+
+            n_replica = np.prod(self.replica)
+            bvk_ncells = np.prod(self.bvk_kmesh)
+            p_nbas = self.prim_cell.nbas
+            bvk_nbas = bvk_ncells * p_nbas
+            bvk_nprimi = bvk_ncells * nprimi
+            bvk_nprimj = bvk_ncells * nprimj
+            bvk_nctri = bvk_ncells * nctri
+            bvk_nctrj = bvk_ncells * nctrj
 
             # p_pair_idx stores the important primitive-pair indices.
             # p2c_mapping converts the p_pair_idx to contracted GTO-pair indices.
             p_pair_idx, remaining_idx = remaining_idx, None
             # Decode the p_pair_idx to kpt Id, primitive GTO Id.
-            Ki, i, Kj, j = cp.unravel_index(
-                p_pair_idx, (bvk_ncells, nprimi, bvk_ncells, nprimj))
-            ic = p2c_mapping[li][i]
-            jc = p2c_mapping[lj][j]
+            I, i, J, j = cp.unravel_index(
+                p_pair_idx, (n_replica, bvk_nprimi, n_replica, bvk_nprimj))
+            bvkI, _i = divmod(i, p_nbas)
+            bvkJ, _j = divmod(j, p_nbas)
+            ic = cp.ravel_multi_index((bvkI, p2c_mapping[li][_i]), (bvk_ncells, p_nbas))
+            jc = cp.ravel_multi_index((bvkJ, p2c_mapping[lj][_j]), (bvk_ncells, p_nbas))
             i += ish0
             j += jsh0
-            # one-dimensional indices corresponding to [Ki,i,Kj,j]
+            # one-dimensional indices corresponding to [I,i,J,j]
             bas_ij = cp.ravel_multi_index(
-                (Ki, i, Kj, j), (bvk_ncells, nbas, bvk_ncells, nbas))
+                (I, i, J, j), (n_replica, bvk_nbas, n_replica, bvk_nbas))
             bas_ij = cp.asarray(bas_ij, dtype=np.int32)
 
-            # Determine the ctr-GTO ao_pair offsets for each primitive pairs.
-            if kmesh is None or all(self.bvk_kmesh <= kmesh):
-                c_pair_idx = cp.ravel_multi_index(
-                    (Ki, ic, Kj, jc), (bvk_ncells, nctri, bvk_ncells, nctrj))
-                nrow = bvk_ncells * nctri
-                ncol = bvk_ncells * nctrj
-            else:
-                # To strike load-balance for lattice-sum, multiple BvK cells can be
-                # mapped to one cell, leading to more bvk_ncells than num of kpts.
-                if all(np.asarray(kmesh) == 1):
-                    c_pair_idx = cp.ravel_multi_index((ic, jc), (nctri, nctrj))
-                    nrow = nctri
-                    ncol = nctrj
-                else:
-                    raise NotImplementedError
-
-            c_pair_mask = cp.zeros(nrow*ncol, dtype=bool)
+            # To strike load-balance for lattice-sum, multiple BvK cells can be
+            # mapped to one cell, leading to more bvk_ncells than num of kpts.
+            c_pair_idx = cp.ravel_multi_index((ic, jc), (bvk_nctri, bvk_nctrj))
+            c_pair_mask = cp.zeros(bvk_nctri*bvk_nctrj, dtype=bool)
             c_pair_mask[c_pair_idx] = True
             n_c_pair = cp.count_nonzero(c_pair_mask)
 
@@ -379,7 +379,7 @@ class SRInt3c2eOpt:
             nfi = (li+1)*(li+2)//2
             nfj = (lj+1)*(lj+2)//2
             nfij = nfi * nfj
-            ao_pair_loc_lookup = cp.empty(nrow*ncol, dtype=np.int32)
+            ao_pair_loc_lookup = cp.empty(bvk_nctri*bvk_nctrj, dtype=np.int32)
             ao_pair_loc_lookup[c_pair_mask] = cp.arange(0, n_c_pair*nfij, nfij)
             ao_pair_loc = cp.asarray(ao_pair_loc_lookup[c_pair_idx], dtype=np.int32)
 
@@ -393,16 +393,16 @@ class SRInt3c2eOpt:
             return img_idx, img_offsets, bas_ij, ao_pair_loc, c_pair_idx
         return gen_img_idx
 
-    def int3c2e_kernel(self, kmesh=None, cutoff=None, verbose=None):
+    def int3c2e_kernel(self, cutoff=None, verbose=None):
         pcell = self.prim_cell
         auxcell = self.sorted_auxcell
-        bvkcell = self.bvkcell
+        supcell = self.supcell
         l_ctr_aux_offsets = self.l_ctr_aux_offsets
 
         log = logger.new_logger(pcell, verbose)
         cput0 = log.init_timer()
         rcut = estimate_rcut(pcell, auxcell, self.omega).max()
-        Ls = cp.asarray(bvkcell.get_lattice_Ls(rcut=rcut))
+        Ls = cp.asarray(supcell.get_lattice_Ls(rcut=rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
         log.debug('int3c2e_kernel rcut = %g, nimgs = %d', rcut, nimgs)
@@ -427,30 +427,30 @@ class SRInt3c2eOpt:
         # s and p orbitals. _scale_sp_ctr_coeff apply these special
         # normalization coefficients to the _env.
         _atm_cpu, _bas_cpu, _env_cpu = conc_env(
-            bvkcell._atm, bvkcell._bas, _scale_sp_ctr_coeff(bvkcell),
+            supcell._atm, supcell._bas, _scale_sp_ctr_coeff(supcell),
             auxcell._atm, auxcell._bas, _scale_sp_ctr_coeff(auxcell))
         #NOTE: PTR_BAS_COORD is not updated in conc_env()
-        off = _bas_cpu[bvkcell.nbas,PTR_EXP] - auxcell._bas[0,PTR_EXP]
-        _bas_cpu[bvkcell.nbas:,PTR_BAS_COORD] += off
+        off = _bas_cpu[supcell.nbas,PTR_EXP] - auxcell._bas[0,PTR_EXP]
+        _bas_cpu[supcell.nbas:,PTR_BAS_COORD] += off
 
-        bvk_ao_loc = bvkcell.ao_loc
+        sup_ao_loc = supcell.ao_loc
         aux_loc = auxcell.ao_loc
         naux = aux_loc[auxcell.nbas]
 
         _atm = cp.array(_atm_cpu, dtype=np.int32)
         _bas = cp.array(_bas_cpu, dtype=np.int32)
         _env = cp.array(_env_cpu, dtype=np.float64)
-        ao_loc = _conc_locs(bvk_ao_loc, aux_loc)
-        bvk_ncells = bvkcell.nbas // pcell.nbas
+        ao_loc = _conc_locs(sup_ao_loc, aux_loc)
+        sup_ncells = supcell.nbas // pcell.nbas
         int3c2e_envs = Int3c2eEnvVars(
-            pcell.natm, pcell.nbas, bvk_ncells, nimgs,
+            pcell.natm, pcell.nbas, sup_ncells, nimgs,
             _atm.data.ptr, _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr,
             Ls.data.ptr, math.log(cutoff),
         )
         # Keep a reference to these arrays, prevent releasing them upon returning the closure
         int3c2e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
 
-        gen_img_idx = self.create_img_idx(int3c2e_envs, kmesh)
+        gen_img_idx = self.create_img_idx(int3c2e_envs)
         l_counts = self.cell0_prim_l_counts
         p_shell_l_offsets = np.append(0, np.cumsum(l_counts))
 
@@ -487,14 +487,14 @@ class SRInt3c2eOpt:
                     ctypes.cast(eri3c[:,k0:].data.ptr, ctypes.c_void_p),
                     ctypes.byref(int3c2e_envs), (ctypes.c_int*3)(*scheme),
                     (ctypes.c_int*6)(*shls_slice),
-                    ctypes.c_int(bvk_ncells), ctypes.c_int(naux),
+                    ctypes.c_int(sup_ncells), ctypes.c_int(naux),
                     ctypes.c_int(len(bas_ij_idx)),
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
                     ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
-                    _atm_cpu.ctypes, ctypes.c_int(bvkcell.natm),
-                    _bas_cpu.ctypes, ctypes.c_int(bvkcell.nbas), _env_cpu.ctypes)
+                    _atm_cpu.ctypes, ctypes.c_int(supcell.natm),
+                    _bas_cpu.ctypes, ctypes.c_int(supcell.nbas), _env_cpu.ctypes)
                 if err != 0:
                     raise RuntimeError(f'fill_int3c2e kernel for {lll} failed')
                 if log.verbose >= logger.DEBUG1:
@@ -615,32 +615,25 @@ def estimate_rcut(cell, auxcell, omega):
     rcut = r0
     return rcut
 
-def guess_bvk_kmesh(cell, bvk_kmesh, target_size=BVK_CELL_SHELLS):
+def guess_supercell_images(cell, target_size=BVK_CELL_SHELLS):
     '''Generate a sufficient large bvk cell for fill_int3c2e kernel to achieve
     better load balance'''
-    if bvk_kmesh is None:
-        bvk_kmesh = np.ones(3, dtype=int)
-    else:
-        bvk_kmesh = bvk_kmesh.copy()
-    bvk_ncells = np.prod(bvk_kmesh)
+    n_replica = min(
+        # produce a cell with ~2000 shells
+        target_size / cell.nbas,
+        # no more than 256 images in lattice-sum
+        np.prod(cell.nimgs*2+1)//16+1)
+    if n_replica < 1:
+        return np.ones(3, dtype=int)
 
-    # produce a cell with ~2000 shells
-    replica = target_size / (bvk_ncells * cell.nbas)
-    if replica < 1:
-        return bvk_kmesh
-
-    mesh_max = cell.nimgs * 2 + 1
-    bvk_multiplier = mesh_max / bvk_kmesh
+    b = cell.reciprocal_vectors()
+    b_norm = np.linalg.norm(b, axis=1)
     if cell.dimension == 2:
-        fac = (replica / np.prod(bvk_multiplier[:2]))**.5
-        fac = min(fac, 1)
-        bvk_kmesh[:2] *= (fac * bvk_multiplier[:2]).astype(int)
+        b_norm = b_norm[:2]
+        replica = np.ones(3, dtype=int)
+        replica[:2] = np.ceil((n_replica/b_norm.prod())**.5 * b_norm).astype(int)
+        return replica
     else:
         # The replica on each axis should be proportional to the required nimg
         # along each direction.
-        fac = (replica / np.prod(bvk_multiplier))**(1./3)
-        # The replica is not necessary to be more than the required nimg.
-        fac = min(fac, 1)
-        bvk_kmesh *= (fac * bvk_multiplier).astype(int)
-
-    return bvk_kmesh
+        return np.ceil((n_replica/b_norm.prod())**(1./3) * b_norm).astype(int)
