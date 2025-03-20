@@ -213,7 +213,14 @@ def to_primitive_bas(cell):
     lmax = ls.max()
     sorted_idx = np.hstack([np.where(ls==l)[0] for l in range(lmax+1)])
     pcell._bas = pcell._bas[sorted_idx]
-    prim_to_ctr_mapping = prim_to_ctr_mapping[sorted_idx]
+
+    # prim shells are sorted. the mapping needs to be sorted accordingly.
+    # The lookup stores the mapping for each angular momentum
+    p2c_mapping_lookup = []
+    for l in range(lmax+1):
+        i, idx = np.unique(prim_to_ctr_mapping[ls==l], return_inverse=True)
+        assert all(i[:-1] < i[1:])
+        p2c_mapping_lookup.append(idx)
 
     # ao_idx transform the AOs in sorted cell into AOs in the original cell
     ls = cell._bas[:,ANG_OF]
@@ -221,7 +228,7 @@ def to_primitive_bas(cell):
     ao_loc = cell.ao_loc
     ao_idx = np.array_split(np.arange(cell.nao), ao_loc[1:-1])
     ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
-    return pcell, prim_to_ctr_mapping, ao_idx
+    return pcell, p2c_mapping_lookup, ao_idx
 
 class SRInt3c2eOpt:
     def __init__(self, cell, auxcell, omega, bvk_kmesh=None):
@@ -285,8 +292,9 @@ class SRInt3c2eOpt:
                 atom_aux_exps[ia] = es[r2_aux[bas_mask].argmax()]
 
         c_shell_counts = self.cell0_ctr_l_counts
+        c_shell_offsets = np.append(0, np.cumsum(c_shell_counts))
         p_shell_l_offsets = np.append(0, np.cumsum(self.cell0_prim_l_counts))
-        p2c_mapping = cp.asarray(self.prim_to_ctr_mapping)
+        p2c_mapping = [cp.asarray(x) for x in self.prim_to_ctr_mapping]
 
         def gen_img_idx(li, lj):
             ish0, ish1 = p_shell_l_offsets[li:li+2]
@@ -330,15 +338,14 @@ class SRInt3c2eOpt:
             if err != 0:
                 raise RuntimeError('int3c2e_img_idx failed')
 
-            # p_pair_idx stores the important primitive-pair indices. Using
-            # p2c_mapping to convert the p_pair_idx into contracted GTO-pair
-            # indices.
+            # p_pair_idx stores the important primitive-pair indices.
+            # p2c_mapping converts the p_pair_idx to contracted GTO-pair indices.
             p_pair_idx, remaining_idx = remaining_idx, None
             # Decode the p_pair_idx to kpt Id, primitive GTO Id.
             Ki, i, Kj, j = cp.unravel_index(
                 p_pair_idx, (bvk_ncells, nprimi, bvk_ncells, nprimj))
-            ic = p2c_mapping[i]
-            jc = p2c_mapping[j]
+            ic = p2c_mapping[li][i]
+            jc = p2c_mapping[lj][j]
             i += ish0
             j += jsh0
             # one-dimensional indices corresponding to [Ki,i,Kj,j]
