@@ -56,7 +56,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     if bvk_kmesh is None and kpts is not None:
         if j_only:
             # Coulomb integrals requires smaller kmesh to converge finite-size effects
-            bvk_kmesh = kpts_to_kmesh(cell, bvk_kmesh)
+            bvk_kmesh = kpts_to_kmesh(cell, kpts)
         else:
             # The remote images may contribute to certain k-point mesh,
             # contributing to the finite-size effects in exchange matrix.
@@ -320,7 +320,8 @@ class SRInt3c2eOpt:
 
             # remaining primitive pair indices
             remaining_idx = np.where(img_counts > 0)[0]
-            remaining_idx = remaining_idx[img_counts[remaining_idx].argsort()[::-1]]
+            # bas_ij with more images are placed at beginning
+            remaining_idx = remaining_idx[(-img_counts[remaining_idx]).argsort()]
             remaining_idx = cp.asarray(remaining_idx, dtype=np.int32, order='C')
             n_ij_pairs = remaining_idx.size
             img_offsets = cp.empty(n_ij_pairs+1, dtype=np.int32)
@@ -340,35 +341,30 @@ class SRInt3c2eOpt:
             if err != 0:
                 raise RuntimeError('int3c2e_img_idx failed')
 
-            n_replica = np.prod(self.replica)
             bvk_ncells = np.prod(self.bvk_kmesh)
             p_nbas = self.prim_cell.nbas
-            bvk_nbas = bvk_ncells * p_nbas
-            bvk_nprimi = bvk_ncells * nprimi
-            bvk_nprimj = bvk_ncells * nprimj
-            bvk_nctri = bvk_ncells * nctri
-            bvk_nctrj = bvk_ncells * nctrj
 
             # p_pair_idx stores the important primitive-pair indices.
             # p2c_mapping converts the p_pair_idx to contracted GTO-pair indices.
             p_pair_idx, remaining_idx = remaining_idx, None
-            # Decode the p_pair_idx to kpt Id, primitive GTO Id.
             I, i, J, j = cp.unravel_index(
-                p_pair_idx, (n_replica, bvk_nprimi, n_replica, bvk_nprimj))
-            bvkI, _i = divmod(i, p_nbas)
-            bvkJ, _j = divmod(j, p_nbas)
-            ic = cp.ravel_multi_index((bvkI, p2c_mapping[li][_i]), (bvk_ncells, p_nbas))
-            jc = cp.ravel_multi_index((bvkJ, p2c_mapping[lj][_j]), (bvk_ncells, p_nbas))
+                p_pair_idx, (sup_ncells, nprimi, sup_ncells, nprimj))
+            ic = p2c_mapping[li][i]
+            jc = p2c_mapping[lj][j]
+
             i += ish0
             j += jsh0
             # one-dimensional indices corresponding to [I,i,J,j]
             bas_ij = cp.ravel_multi_index(
-                (I, i, J, j), (n_replica, bvk_nbas, n_replica, bvk_nbas))
+                (I, i, J, j), (sup_ncells, p_nbas, sup_ncells, p_nbas))
             bas_ij = cp.asarray(bas_ij, dtype=np.int32)
 
-            # To strike load-balance for lattice-sum, multiple BvK cells can be
-            # mapped to one cell, leading to more bvk_ncells than num of kpts.
-            c_pair_idx = cp.ravel_multi_index((ic, jc), (bvk_nctri, bvk_nctrj))
+            I %= bvk_ncells
+            J %= bvk_ncells
+            c_pair_idx = cp.ravel_multi_index(
+                (I, ic, J, jc), (bvk_ncells, nctri, bvk_ncells, nctrj))
+            bvk_nctri = bvk_ncells * nctri
+            bvk_nctrj = bvk_ncells * nctrj
             c_pair_mask = cp.zeros(bvk_nctri*bvk_nctrj, dtype=bool)
             c_pair_mask[c_pair_idx] = True
             n_c_pair = cp.count_nonzero(c_pair_mask)
