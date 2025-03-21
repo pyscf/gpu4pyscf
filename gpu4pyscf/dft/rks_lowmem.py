@@ -21,7 +21,7 @@ import cupy as cp
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid, rks
 from gpu4pyscf.scf import hf_lowmem, jk
-from gpu4pyscf.lib.cupy_helper import tag_array, sandwich_dot, pack_tril
+from gpu4pyscf.lib.cupy_helper import tag_array, pack_tril
 from pyscf import __config__
 
 __all__ = [
@@ -66,8 +66,6 @@ class RKS(rks.RKS):
             vhfopt = self._opt_gpu.get(omega)
             if vhfopt is None:
                 vhfopt = self._opt_gpu[omega] = jk._VHFOpt(mol, self.direct_scf_tol).build()
-                if isinstance(vhfopt.coeff, cp.ndarray):
-                    vhfopt.coeff = vhfopt.coeff.get()
             return vhfopt.get_jk(dm, hermi, False, True, log)[1]
 
     def get_veff(self, mol, dm, dm_last=None, vhf_last=0, hermi=1):
@@ -102,15 +100,13 @@ class RKS(rks.RKS):
         vhfopt = self._opt_gpu.get(omega)
         if vhfopt is None:
             vhfopt = self._opt_gpu[omega] = jk._VHFOpt(mol, self.direct_scf_tol).build()
-            if isinstance(vhfopt.coeff, cp.ndarray):
-                vhfopt.coeff = vhfopt.coeff.get()
         _dm = self._delta_rdm1(dm, dm_last, vhfopt)
 
         vj = vk = None
         if not ni.libxc.is_hybrid_xc(self.xc):
             vj = vhfopt.get_j(_dm, log)
             _dm = None
-            vj = sandwich_dot(vj, cp.asarray(vhfopt.coeff))
+            vj = vhfopt.apply_coeff_CT_mat_C(vj)
             vj = pack_tril(vj[0])
             vj_last = getattr(vhf_last, 'vj', None)
             if isinstance(vj_last, cp.ndarray):
@@ -141,13 +137,12 @@ class RKS(rks.RKS):
             assert vj.ndim == 3
             vj_last = getattr(vhf_last, 'vj', None)
             vk_last = getattr(vhf_last, 'vk', None)
-            coeff = cp.asarray(vhfopt.coeff)
-            vj = sandwich_dot(vj, coeff)
+            vj = vhfopt.apply_coeff_CT_mat_C(vj)
             vj = pack_tril(vj[0])
             if isinstance(vj_last, cp.ndarray):
                 vj_last += vj
                 vj = vj_last
-            vk = sandwich_dot(vk, coeff)
+            vk = vhfopt.apply_coeff_CT_mat_C(vk)
             vk = pack_tril(vk[0])
             if isinstance(vk_last, cp.ndarray):
                 vk_last += vk
