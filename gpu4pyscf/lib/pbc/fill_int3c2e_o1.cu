@@ -57,6 +57,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
     int nroots = bounds.nroots;
     int nfij = bounds.nfij;
     int nfk = bounds.nfk;
+    int nf = nfij * nfk;
     int kprim = bounds.kprim;
     int stride_j = bounds.stride_j;
     int stride_k = bounds.stride_k;
@@ -95,7 +96,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -295,9 +296,9 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
 #pragma unroll
                         for (int n = 0; n < GOUT_WIDTH; ++n) {
                             int ijk = gout_start + n*gout_stride+gout_id;
-                            int k  = ijk % nfk;
-                            int ij = ijk / nfk;
-                            if (ij >= nfij) break;
+                            if (ijk >= nf) break;
+                            int k  = ijk / nfij;
+                            int ij = ijk % nfij;
                             int addrx = (idx_ij[ij] + idx_k[k] * stride_k) * nksp_per_block;
                             int addry = (idy_ij[ij] + idy_k[k] * stride_k) * nksp_per_block;
                             int addrz = (idz_ij[ij] + idz_k[k] * stride_k) * nksp_per_block;
@@ -307,18 +308,16 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                 }
             }
 
-            if (pair_ij_idx < bounds.npairs_ij) {
+            if (pair_ij_idx < bounds.n_prim_pairs) {
                 int *ao_loc = envs.ao_loc;
-                int *ao_pair_loc = bounds.ao_pair_loc;
-                int naux = bounds.naux;
+                int *pair_mapping = bounds.pair_mapping;
+                size_t n_ctr_pairs = bounds.n_ctr_pairs;
                 int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-                double *eri_tensor = out + ao_pair_loc[pair_ij_idx] * naux + k0;
+                double *eri_tensor = out + k0 * nfij*n_ctr_pairs + pair_mapping[pair_ij_idx];
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                     int ijk = gout_start + n*gout_stride+gout_id;
-                    int k  = ijk % nfk;
-                    int ij = ijk / nfk;
-                    if (ij >= nfij) break;
-                    atomicAdd(eri_tensor + ij * naux + k, gout[n]);
+                    if (ijk >= nf) break;
+                    atomicAdd(eri_tensor + ijk*n_ctr_pairs, gout[n]);
                 }
             }
         }

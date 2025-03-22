@@ -52,12 +52,11 @@ typedef struct {
     uint8_t g_size;
     uint16_t naux;
     uint16_t nksh;
-    uint16_t ish0;
-    uint16_t jsh0;
     uint16_t ksh0;
-    int npairs_ij;
+    int n_prim_pairs;
+    int n_ctr_pairs;
     int *bas_ij_idx;
-    int *ao_pair_loc;
+    int *pair_mapping;
     int *img_offsets; // offset img_idx for each shell-pair
 // TODO: change to uint16_t
     int *img_idx; // indices of img_coords in each shell-pair

@@ -94,9 +94,9 @@ int ft_aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_ncells,
     return 0;
 }
 
-int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
-                 int *scheme, int *shls_slice, int bvk_ncells, int naux, int npairs_ij,
-                 int *bas_ij_idx, int *ao_pair_loc, int *img_idx, int *img_offsets,
+int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs, int *scheme, int *shls_slice,
+                 int bvk_ncells, int naux, int n_prim_pairs, int n_ctr_pairs,
+                 int *bas_ij_idx, int *pair_mapping, int *img_idx, int *img_offsets,
                  int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
@@ -123,8 +123,9 @@ int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
     // up to (gg|i)
     uint8_t g_size = stride_k * (lk + 1);
     PBCInt3c2eBounds bounds = {li, lj, lk, nroots, nfij, nfk, kprim,
-        stride_j, stride_k, g_size, (uint16_t)naux, nksh, ish0, jsh0, ksh0,
-        npairs_ij, bas_ij_idx, ao_pair_loc, img_offsets, img_idx};
+        stride_j, stride_k, g_size, (uint16_t)naux, nksh, ksh0,
+        n_prim_pairs, n_ctr_pairs,
+        bas_ij_idx, pair_mapping, img_offsets, img_idx};
 
     if (1){//!int3c2e_unrolled(out, envs, &bounds)) {
         int nksh_per_block = scheme[0];
@@ -132,7 +133,7 @@ int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs,
         int nsp_per_block = scheme[2];
         dim3 threads(nksh_per_block, gout_stride, nsp_per_block);
         int tasks_per_block = SPTAKS_PER_BLOCK * nsp_per_block;
-        int sp_blocks = (npairs_ij + tasks_per_block - 1) / tasks_per_block;
+        int sp_blocks = (n_prim_pairs + tasks_per_block - 1) / tasks_per_block;
         int ksh_blocks = (nksh + nksh_per_block - 1) / nksh_per_block;
         dim3 blocks(sp_blocks, ksh_blocks);
         int buflen = (nroots*2+g_size*3+7) * (nksh_per_block * nsp_per_block) * sizeof(double);

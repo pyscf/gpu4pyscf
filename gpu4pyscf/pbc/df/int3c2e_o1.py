@@ -94,31 +94,29 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
 
     for li, lj, c_pair_idx, compressed_eri3c in int3c2e_opt.int3c2e_kernel():
-        compressed_eri3c = compressed_eri3c.dot(cp.asarray(int3c2e_opt.aux_coeff))
         i0, i1 = c_l_offsets[li:li+2]
         j0, j1 = c_l_offsets[lj:lj+2]
+        nctri = c_shell_counts[li]
         nctrj = c_shell_counts[lj]
         nfi = (li+1)*(li+2)//2
         nfj = (lj+1)*(lj+2)//2
+        nfij = nfi * nfj
+        n_pairs = len(c_pair_idx)
+        compressed_eri3c = compressed_eri3c.reshape(-1,nfij*n_pairs)
+        compressed_eri3c = compressed_eri3c.T.dot(cp.asarray(int3c2e_opt.aux_coeff))
         if not cell.cart:
-            n_pairs = len(c_pair_idx)
-            compressed_eri3c = compressed_eri3c.reshape(n_pairs,nfj,nfi,naux)
-            compressed_eri3c = contract('mqpr,qj->mjpr', compressed_eri3c, c2s[lj])
-            compressed_eri3c = contract('mjpr,pi->mjir', compressed_eri3c, c2s[li])
+            compressed_eri3c = compressed_eri3c.reshape(nfj,nfi,n_pairs,naux)
+            compressed_eri3c = contract('qj,qpmk->jpmk', c2s[lj], compressed_eri3c)
+            compressed_eri3c = contract('pi,jpmk->jimk', c2s[li], compressed_eri3c)
             nfi = li * 2 + 1
             nfj = lj * 2 + 1
 
         ni = i1 - i0
         nj = j1 - j0
-        nrow = nL * ni
-        ncol = nL * nj
         ish, jsh = divmod(c_pair_idx, nL*nctrj)
-        iaddr = ish[:,None] * nfi + cp.arange(nfi)
-        jaddr = jsh[:,None] * nfj + cp.arange(nfj)
-        ao_pair_mapping = (iaddr[:,None,:] * ncol + jaddr[:,:,None]).ravel()
-
-        eri3c = cp.zeros((nrow*ncol, naux))
-        eri3c[ao_pair_mapping] = compressed_eri3c.reshape(-1,naux)
+        eri3c = cp.zeros((nL*nctri,nfi, nL*nctrj,nfj, naux))
+        compressed_eri3c = compressed_eri3c.reshape(nfj,nfi,n_pairs,naux)
+        eri3c[ish,:,jsh] = compressed_eri3c.transpose(2,1,0,3)
         eri3c = eri3c.reshape(nL,ni,nL,nj,naux)
         compressed_eri3c = None
 
@@ -361,23 +359,12 @@ class SRInt3c2eOpt:
 
             I %= bvk_ncells
             J %= bvk_ncells
-            c_pair_idx = cp.ravel_multi_index(
+            reduced_pair_idx = cp.ravel_multi_index(
                 (I, ic, J, jc), (bvk_ncells, nctri, bvk_ncells, nctrj))
             bvk_nctri = bvk_ncells * nctri
             bvk_nctrj = bvk_ncells * nctrj
             c_pair_mask = cp.zeros(bvk_nctri*bvk_nctrj, dtype=bool)
-            c_pair_mask[c_pair_idx] = True
-            n_c_pair = cp.count_nonzero(c_pair_mask)
-
-            # GPU kernel is executed for all shells, given particular angular momentum.
-            # These shells form a sub-system, the ao_pair_loc is generated within the
-            # sub-system.
-            nfi = (li+1)*(li+2)//2
-            nfj = (lj+1)*(lj+2)//2
-            nfij = nfi * nfj
-            ao_pair_loc_lookup = cp.empty(bvk_nctri*bvk_nctrj, dtype=np.int32)
-            ao_pair_loc_lookup[c_pair_mask] = cp.arange(0, n_c_pair*nfij, nfij)
-            ao_pair_loc = cp.asarray(ao_pair_loc_lookup[c_pair_idx], dtype=np.int32)
+            c_pair_mask[reduced_pair_idx] = True
 
             # c_pair_idx indicates the address of the **contracted** pair GTOS
             # within the (li,lj) sub-block. For each shell-pair, there are
@@ -386,7 +373,16 @@ class SRInt3c2eOpt:
             # composed as i*nbas+j (in C-order). c_pair_idx points to the
             # address of the first element.
             c_pair_idx = cp.where(c_pair_mask)[0]
-            return img_idx, img_offsets, bas_ij, ao_pair_loc, c_pair_idx
+            n_ctr_pairs = len(c_pair_idx)
+
+            # pair_mapping maps the primitive pair to the contracted pair
+            nfi = (li+1)*(li+2)//2
+            nfj = (lj+1)*(lj+2)//2
+            nfij = nfi * nfj
+            pair_mapping_lookup = cp.empty(bvk_nctri*bvk_nctrj, dtype=np.int32)
+            pair_mapping_lookup[c_pair_idx] = cp.arange(n_ctr_pairs)
+            pair_mapping = cp.asarray(pair_mapping_lookup[reduced_pair_idx], dtype=np.int32)
+            return img_idx, img_offsets, bas_ij, pair_mapping, c_pair_idx
         return gen_img_idx
 
     def int3c2e_kernel(self, cutoff=None, verbose=None):
@@ -466,11 +462,13 @@ class SRInt3c2eOpt:
                 continue
             ish0, ish1 = p_shell_l_offsets[li:li+2]
             jsh0, jsh1 = p_shell_l_offsets[lj:lj+2]
-            img_idx, img_offsets, bas_ij_idx, ao_pair_loc, c_pair_idx = gen_img_idx(li, lj)
+            img_idx, img_offsets, bas_ij_idx, pair_mapping, c_pair_idx = gen_img_idx(li, lj)
             nfij = nfcart[li] * nfcart[lj]
             # Note the storage order for ij_pair: i takes the smaller stride.
-            # eri3c ~ (c_pair_idx, nfj, nfi, naux)
-            eri3c = cp.zeros((len(c_pair_idx)*nfij, naux))
+            n_ctr_pairs = len(c_pair_idx)
+            n_prim_pairs = len(bas_ij_idx)
+            # eri3c is sorted as (naux, nfj, nfi, n_ctr_pairs)
+            eri3c = cp.zeros((naux, nfij*n_ctr_pairs))
 
             for k, lk in enumerate(self.uniq_l_ctr_aux[:,0]):
                 ksh0, ksh1 = l_ctr_aux_offsets[k:k+2]
@@ -480,13 +478,13 @@ class SRInt3c2eOpt:
                 scheme = int3c2e_scheme(li, lj, lk)
                 log.debug2('int3c2e_scheme for %s: %s', lll, scheme)
                 err = kern(
-                    ctypes.cast(eri3c[:,k0:].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(eri3c[k0:].data.ptr, ctypes.c_void_p),
                     ctypes.byref(int3c2e_envs), (ctypes.c_int*3)(*scheme),
                     (ctypes.c_int*6)(*shls_slice),
                     ctypes.c_int(sup_ncells), ctypes.c_int(naux),
-                    ctypes.c_int(len(bas_ij_idx)),
+                    ctypes.c_int(n_prim_pairs), ctypes.c_int(n_ctr_pairs),
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(pair_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
                     _atm_cpu.ctypes, ctypes.c_int(supcell.natm),
