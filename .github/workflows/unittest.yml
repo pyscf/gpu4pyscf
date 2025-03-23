@@ -24,7 +24,9 @@ jobs:
 
     - name: Test with pytest
       run: |
-        docker run --gpus all -v $GITHUB_WORKSPACE:/workspace wxj6000/gpu4pyscf:latest \
+        docker run --gpus all \
+          -u "$(id -u):$(id -g)" \
+          -v $GITHUB_WORKSPACE:/workspace wxj6000/gpu4pyscf:latest \
           /bin/bash -c "cd /workspace && source build.sh && pytest -m 'not benchmark' --cov=/workspace && rm -rf .pytest_cache"
 
   multi-gpu:
@@ -38,5 +40,7 @@ jobs:
 
     - name: Test with pytest
       run: |
-        docker run --gpus all -v $GITHUB_WORKSPACE:/workspace wxj6000/gpu4pyscf:latest \
-            /bin/bash -c "cd /workspace && source build.sh && pytest -m 'not benchmark' --cov=/workspace && rm -rf .pytest_cache"
+        docker run --gpus all \
+          -u "$(id -u):$(id -g)" \
+          -v $GITHUB_WORKSPACE:/workspace wxj6000/gpu4pyscf:latest \
+          /bin/bash -c "cd /workspace && source build.sh && pytest -m 'not benchmark' --cov=/workspace && rm -rf .pytest_cache"
