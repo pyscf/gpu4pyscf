@@ -271,7 +271,7 @@ class SRInt3c2eOpt:
                 supcell._bas[:,ATOM_OF],PTR_COORD]
         self.supcell = supcell
 
-    def create_img_idx(self, int3c2e_envs):
+    def create_img_idx(self, int3c2e_envs, log):
         '''integral screening'''
         prim_cell = self.prim_cell
         nbas = prim_cell.nbas
@@ -292,11 +292,14 @@ class SRInt3c2eOpt:
             if len(es) > 0:
                 atom_aux_exps[ia] = es[r2_aux[bas_mask].argmax()]
 
+        log.debug1('prim_l_counts %s', self.cell0_prim_l_counts)
+        log.debug1('ctr_l_counts %s', self.cell0_ctr_l_counts)
         c_shell_counts = self.cell0_ctr_l_counts
         p_shell_l_offsets = np.append(0, np.cumsum(self.cell0_prim_l_counts))
         p2c_mapping = [cp.asarray(x) for x in self.prim_to_ctr_mapping]
 
         def gen_img_idx(li, lj):
+            cput0 = log.init_timer()
             ish0, ish1 = p_shell_l_offsets[li:li+2]
             jsh0, jsh1 = p_shell_l_offsets[lj:lj+2]
             nprimi = ish1 - ish0
@@ -315,6 +318,7 @@ class SRInt3c2eOpt:
                 ctypes.c_int(sup_ncells), ctypes.c_int(auxcell.natm))
             if err != 0:
                 raise RuntimeError('int3c2e_img_counts failed')
+            t1 = log.timer_debug1('int3c2e_img_counts', *cput0)
 
             # remaining primitive pair indices
             remaining_idx = np.where(img_counts > 0)[0]
@@ -323,8 +327,12 @@ class SRInt3c2eOpt:
             remaining_idx = cp.asarray(remaining_idx, dtype=np.int32, order='C')
             n_ij_pairs = remaining_idx.size
             img_offsets = cp.empty(n_ij_pairs+1, dtype=np.int32)
-            cp.cumsum(img_counts[remaining_idx], out=img_offsets[1:])
+            img_counts = img_counts[remaining_idx]
+            cp.cumsum(img_counts, out=img_offsets[1:])
             img_offsets[0] = 0
+            log.debug1('%d ij_pairs. img_counts: largest=%d, medium=%d',
+                       n_ij_pairs, img_counts[0], img_counts[n_ij_pairs//2])
+            img_counts = None
 
             img_idx = cp.empty(int(img_offsets[-1]), dtype=np.int32)
             err = libpbc.int3c2e_img_idx(
@@ -338,6 +346,7 @@ class SRInt3c2eOpt:
                 ctypes.c_int(sup_ncells), ctypes.c_int(auxcell.natm))
             if err != 0:
                 raise RuntimeError('int3c2e_img_idx failed')
+            t1 = log.timer_debug1('int3c2e_img_idx', *t1)
 
             bvk_ncells = np.prod(self.bvk_kmesh)
             p_nbas = self.prim_cell.nbas
@@ -382,6 +391,7 @@ class SRInt3c2eOpt:
             pair_mapping_lookup = cp.empty(bvk_nctri*bvk_nctrj, dtype=np.int32)
             pair_mapping_lookup[c_pair_idx] = cp.arange(n_ctr_pairs)
             pair_mapping = cp.asarray(pair_mapping_lookup[reduced_pair_idx], dtype=np.int32)
+            log.timer_debug1('pair_mapping', *t1)
             return img_idx, img_offsets, bas_ij, pair_mapping, c_pair_idx
         return gen_img_idx
 
@@ -442,7 +452,7 @@ class SRInt3c2eOpt:
         # Keep a reference to these arrays, prevent releasing them upon returning the closure
         int3c2e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
 
-        gen_img_idx = self.create_img_idx(int3c2e_envs)
+        gen_img_idx = self.create_img_idx(int3c2e_envs, log)
         l_counts = self.cell0_prim_l_counts
         p_shell_l_offsets = np.append(0, np.cumsum(l_counts))
 
@@ -469,6 +479,7 @@ class SRInt3c2eOpt:
             n_prim_pairs = len(bas_ij_idx)
             # eri3c is sorted as (naux, nfj, nfi, n_ctr_pairs)
             eri3c = cp.zeros((naux, nfij*n_ctr_pairs))
+            t1 = log.timer_debug1('gen_img_idx', *t1)
 
             for k, lk in enumerate(self.uniq_l_ctr_aux[:,0]):
                 ksh0, ksh1 = l_ctr_aux_offsets[k:k+2]
@@ -492,7 +503,7 @@ class SRInt3c2eOpt:
                 if err != 0:
                     raise RuntimeError(f'fill_int3c2e kernel for {lll} failed')
                 if log.verbose >= logger.DEBUG1:
-                    t1, t1p = log.timer_debug1(f'processing {lll}', *t1), t1
+                    t1, t1p = log.timer_debug1(f'processing {lll}, pairs={n_prim_pairs}', *t1), t1
                     if lll not in timing_collection:
                         timing_collection[lll] = 0
                     timing_collection[lll] += t1[1] - t1p[1]
