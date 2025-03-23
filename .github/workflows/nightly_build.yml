@@ -25,6 +25,7 @@ jobs:
       run: |
         docker run --gpus all \
           -u "$(id -u):$(id -g)" \
+          -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -v $GITHUB_WORKSPACE:/workspace wxj6000/gpu4pyscf:latest \
           /bin/bash -c "cd /workspace && source build.sh && pytest gpu4pyscf/tests/test_benchmark_rks.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_rks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
 
@@ -41,6 +42,7 @@ jobs:
       run: |
         docker run --gpus all \
           -u "$(id -u):$(id -g)" \
+          -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -v $GITHUB_WORKSPACE:/workspace wxj6000/gpu4pyscf:latest \
           /bin/bash -c "cd /workspace && source build.sh && pytest gpu4pyscf/tests/test_benchmark_uks.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_uks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
 
@@ -57,5 +59,6 @@ jobs:
       run: |
         docker run --gpus all \
           -u "$(id -u):$(id -g)" \
+          -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -v $GITHUB_WORKSPACE:/workspace wxj6000/gpu4pyscf:latest \
           /bin/bash -c "cd /workspace && source build.sh && pytest gpu4pyscf/tests/test_benchmark_tddft.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_tddft_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
