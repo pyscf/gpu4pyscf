@@ -36,6 +36,7 @@ add_library(gint SHARED
   nr_fill_ao_int3c2e_ipvip1.cu
   j_engine_matrix_reorder.c
   rys_roots_dat.cu
+  cart2sph.cu
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)

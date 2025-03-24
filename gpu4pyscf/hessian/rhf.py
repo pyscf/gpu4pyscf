@@ -30,7 +30,7 @@ from pyscf.gto import ATOM_OF
 from gpu4pyscf.gto.ecp import get_ecp_ip, get_ecp_ipip
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib.cupy_helper import (reduce_to_device,
-    contract, tag_array, sandwich_dot, transpose_sum, get_avail_mem, condense,
+    contract, tag_array, transpose_sum, get_avail_mem, condense,
     krylov)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.__config__ import _streams, num_devices
@@ -162,7 +162,7 @@ def _ejk_ip2_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
     n_dm = dms.shape[0]
     assert n_dm <= 2
     assert isinstance(verbose, int)
-    nao, _ = vhfopt.coeff.shape
+    nao = vhfopt.sorted_mol.nao
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
     l_ctr_bas_loc = vhfopt.l_ctr_offsets
@@ -179,10 +179,9 @@ def _ejk_ip2_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
         init_constant(mol)
 
         dms = cp.asarray(dms)
-        coeff = cp.asarray(vhfopt.coeff)
 
         #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-        dms = sandwich_dot(dms, coeff.T)
+        dms = vhfopt.apply_coeff_C_mat_CT(dms)
         dms = cp.asarray(dms, order='C')
 
         tile_q_ptr = ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p)
@@ -283,7 +282,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
         vhfopt = _VHFOpt(mol).build(group_size=group_size)
 
     mol = vhfopt.sorted_mol
-    nao, nao_orig = vhfopt.coeff.shape
+    nao_orig = vhfopt.mol.nao
 
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
@@ -410,7 +409,7 @@ def _build_jk_ip1_task(mol, dms, vhfopt, task_list, atoms_slice,
                        device_id=0, with_j=True, with_k=True, verbose=0):
     # TODO: compute JK in MO
     assert isinstance(verbose, int)
-    nao, _ = vhfopt.coeff.shape
+    nao = vhfopt.sorted_mol.nao
     natm = mol.natm
     nbas = mol.nbas
     n_dm = dms.shape[0]
@@ -522,13 +521,13 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
     vhfopt.build(group_size=group_size)
 
     mol = vhfopt.sorted_mol
-    nao, nao_orig = vhfopt.coeff.shape
+    nao_orig = vhfopt.mol.nao
 
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
     n_dm = dms.shape[0]
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = sandwich_dot(dms, vhfopt.coeff.T)
+    dms = vhfopt.apply_coeff_C_mat_CT(dms)
     dms = cp.asarray(dms, order='C')
     assert n_dm == 1
 
@@ -585,12 +584,12 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
 
     if with_k:
         vk = reduce_to_device(vk_dist, inplace=True)
-        vk = sandwich_dot(vk, vhfopt.coeff)
+        vk = vhfopt.apply_coeff_CT_mat_C(vk)
         vk = transpose_sum(vk)
         vk = vk.reshape(atom1-atom0, 3, nao_orig, nao_orig)
     if with_j:
         vj = reduce_to_device(vj_dist, inplace=True)
-        vj = sandwich_dot(vj, vhfopt.coeff)
+        vj = vhfopt.apply_coeff_CT_mat_C(vj)
         vj = transpose_sum(vj)
         vj *= 2.
         vj = vj.reshape(atom1-atom0, 3, nao_orig, nao_orig)

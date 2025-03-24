@@ -26,7 +26,7 @@ from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.hf import KohnShamDFT
-from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, sandwich_dot, reduce_to_device
+from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, reduce_to_device
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
@@ -60,7 +60,7 @@ def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
                  device_id=0, verbose=0):
     n_dm = dms.shape[0]
     assert n_dm <= 2
-    nao, _ = vhfopt.coeff.shape
+    nao = vhfopt.sorted_mol.nao
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
     l_ctr_bas_loc = vhfopt.l_ctr_offsets
@@ -149,13 +149,13 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
         vhfopt = _VHFOpt(mol).build(group_size=group_size)
 
     mol = vhfopt.sorted_mol
-    nao, nao_orig = vhfopt.coeff.shape
+    nao_orig = vhfopt.mol.nao
 
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
 
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = sandwich_dot(dms, vhfopt.coeff.T)
+    dms = vhfopt.apply_coeff_C_mat_CT(dms)
     dms = cp.asarray(dms, order='C')
 
     uniq_l_ctr = vhfopt.uniq_l_ctr
