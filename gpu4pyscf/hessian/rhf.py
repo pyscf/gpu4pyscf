@@ -148,11 +148,14 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         p0, p1 = aoslices[ia][2:]
         e1[i0,i0] -= contract('xypq,pq->xy', s1aa[:,:,p0:p1], dme0[p0:p1])*2
 
-        for j0, ja in enumerate(atmlst):
+        for j0, ja in enumerate(atmlst[:i0+1]):
             q0, q1 = aoslices[ja][2:]
             # *2 for +c.c.
             e1[i0,j0] -= contract('xypq,pq->xy', s1ab[:,:,p0:p1,q0:q1], dme0[p0:p1,q0:q1])*2
             e1[i0,j0] += de_hcore(ia, ja)
+        
+        for j0 in range(i0):
+            e1[j0,i0] = e1[i0,j0].T
 
     log.timer('RHF partial hessian', *time0)
     return e1, ejk

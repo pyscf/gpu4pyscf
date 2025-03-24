@@ -222,7 +222,7 @@ def _ejk_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
 
 def get_dh1e_ecp(mol, dm):
     '''
-    Nuclear gradients of core Hamiltonian
+    Nuclear gradients of core Hamiltonian due to ECP
     '''
     with_ecp = mol.has_ecp()
     if not with_ecp:
