@@ -1,8 +1,17 @@
+v1.3.3 (2025-03-27)
+-------------------
+* Improvements
+  - Reduce memory footprint in SCF driver.
+  - Utilize the sparsity in cart2sph coefficients in the cart2sph transformation in scf.jk kernel
+* Fixes
+  - LRU cached cart2sph under the multiple GPU environment.
+  - Bug of setting maxDynamicSharedMemorySize in gradient and hessian calculation under the multiple GPU environment.
+
 v1.3.2 (2025-03-10)
 -------------------
 * Improvements
   - Dump xc info and grids into to log file
-  - Optimize 4-center integral evalulation CUDA kernels using warp divergent algorithm
+  - Optimize 4-center integral evaluation CUDA kernels using warp divergent algorithm
   - Support up to I orbitals in DFT
   - Fix out-of-bound issue in DFT hessian for heavy atoms (>=19)
 * Deprecation
