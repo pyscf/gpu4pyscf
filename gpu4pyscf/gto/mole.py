@@ -23,10 +23,14 @@ from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
 
 PTR_BAS_COORD = 7
 
-# @functools.lru_cache(20) # This cache introduces a bug in mutli-gpu mode
+_c2s = {}
+
 def cart2sph_by_l(l, normalized='sp'):
-    c2s = gto.mole.cart2sph(l, normalized=normalized)
-    return cp.asarray(c2s, order='C')
+    device_id = cp.cuda.Device().id
+    if (l, device_id, normalized) not in _c2s:
+        c2s = gto.mole.cart2sph(l, normalized=normalized)
+        _c2s[l,device_id,normalized] = cp.asarray(c2s, order='C')
+    return _c2s[l,device_id,normalized]
 
 def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
     '''transform generally contracted basis to segment contracted basis
