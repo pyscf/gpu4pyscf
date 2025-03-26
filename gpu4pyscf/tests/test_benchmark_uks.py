@@ -78,7 +78,7 @@ def test_df_ub3lyp_grad(benchmark):
     g = benchmark(run_ub3lyp_grad, small_mol, 'def2-tzvpp', True, False)
     print('testing df ub3lyp grad')
     assert np.isclose(np.linalg.norm(g), 0.17435842214665462, atol=1e-5, rtol=1e-16)
-@pytest.mark.benchmark(warmup=False, min_rounds=1)
+@pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=1)
 def test_df_ub3lyp_hessian(benchmark):
     h = benchmark(run_ub3lyp_hessian, small_mol, 'def2-tzvpp', True, False)
     print('testing df ub3lyp hessian')

@@ -27,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pyscf.hessian import rhf as rhf_hess_cpu
 from pyscf import lib, gto
 from pyscf.gto import ATOM_OF
+from gpu4pyscf.gto.ecp import get_ecp_ip, get_ecp_ipip
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib.cupy_helper import (reduce_to_device,
     contract, tag_array, transpose_sum, get_avail_mem, condense,
@@ -152,7 +153,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             # *2 for +c.c.
             e1[i0,j0] -= contract('xypq,pq->xy', s1ab[:,:,p0:p1,q0:q1], dme0[p0:p1,q0:q1])*2
             e1[i0,j0] += de_hcore(ia, ja)
-
+        
         for j0 in range(i0):
             e1[j0,i0] = e1[i0,j0].T
 
@@ -631,9 +632,13 @@ def get_hcore(mol):
     else:
         h1aa+= mol.intor('int1e_ipipnuc', comp=9)
         h1ab+= mol.intor('int1e_ipnucip', comp=9)
+    h1aa = cupy.asarray(h1aa)
+    h1ab = cupy.asarray(h1ab)
     if mol.has_ecp():
-        h1aa += mol.intor('ECPscalar_ipipnuc', comp=9)
-        h1ab += mol.intor('ECPscalar_ipnucip', comp=9)
+        #h1aa += mol.intor('ECPscalar_ipipnuc', comp=9)
+        #h1ab += mol.intor('ECPscalar_ipnucip', comp=9)
+        h1aa += get_ecp_ipip(mol, 'ipipv').sum(axis=0)
+        h1ab += get_ecp_ipip(mol, 'ipvip').sum(axis=0)
     nao = h1aa.shape[-1]
     return h1aa.reshape(3,3,nao,nao), h1ab.reshape(3,3,nao,nao)
 
@@ -762,7 +767,7 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
 
 def hess_nuc_elec(mol, dm):
     '''
-    calculate hessian contribution due to (nuc, elec) pair
+    Calculate hessian contribution due to (nuc, elec) pair, w/o ECP
     '''
     from gpu4pyscf.df import int3c2e
     coords = mol.atom_coords()
@@ -808,6 +813,40 @@ def hess_nuc_elec(mol, dm):
     hcore[:,:,idx,idx] += hcore_diag
     return hcore * 2.0
 
+def hess_nuc_elec_ecp(mol, dm):
+    '''
+    Calculate hessian contribution due to (nuc, elec) pair with ECP
+    '''
+    nao = mol.nao
+    natm = mol.natm
+    aoslices = mol.aoslice_by_atom()
+    ecp_atoms = set(mol._ecpbas[:,ATOM_OF])
+    
+    de_ecp = cupy.zeros([3,3,natm,natm])
+    rinv2aa = -get_ecp_ipip(mol, ip_type='ipipv').reshape(natm,3,3,nao,nao)
+    for iatm in ecp_atoms:
+        de = contract('xypq,pq->xyp', rinv2aa[iatm], dm)
+        de = cupy.asarray([cupy.sum(de[:,:,p0:p1], axis=2) for p0,p1 in aoslices[:,2:]])
+        de_ecp[:,:,iatm] += de.transpose([1,2,0])
+        de_ecp[:,:,:,iatm] += de.transpose([2,1,0])
+        
+        # 2nd derivative on ECP basis
+        de = contract('xypq,pq->xy', rinv2aa[iatm], dm)
+        de_ecp[:,:,iatm,iatm] -= de
+    
+    rinv2ab = -get_ecp_ipip(mol, ip_type='ipvip').reshape(natm,3,3,nao,nao)
+    for iatm in ecp_atoms:
+        de = contract('xypq,pq->xyp', rinv2ab[iatm], dm).transpose(1,0,2)
+        de = cupy.asarray([cupy.sum(de[:,:,p0:p1], axis=2) for p0,p1 in aoslices[:,2:]])
+        de_ecp[:,:,iatm] += de.transpose([1,2,0])
+        de_ecp[:,:,:,iatm] += de.transpose([2,1,0])
+
+        # 2nd derivative on ECP basis
+        de = contract('xypq,pq->xy', rinv2ab[iatm], dm)
+        de_ecp[:,:,iatm,iatm] -= de
+
+    return de_ecp
+
 def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     cput0 = (logger.process_clock(), logger.perf_counter())
     if mo_energy is None: mo_energy = hessobj.base.mo_energy
@@ -851,13 +890,9 @@ def _e_hcore_generator(hessobj, dm):
     t1 = log.timer_debug1('hess_nuc_elec', *t1)
     dm = dm.get()
     with_ecp = mol.has_ecp()
-    if with_ecp:
-        ecp_atoms = set(mol._ecpbas[:,ATOM_OF])
-    else:
-        ecp_atoms = ()
     aoslices = mol.aoslice_by_atom()
-    nbas = mol.nbas
-    nao = mol.nao_nr()
+
+    de_ecp = hess_nuc_elec_ecp(mol, dm)
 
     # Move data to GPU, get_hcore is slow on CPU
     h1aa, h1ab = hessobj.get_hcore(mol)
@@ -866,52 +901,15 @@ def _e_hcore_generator(hessobj, dm):
 
     t1 = log.timer_debug1('get_hcore', *t1)
     def get_hcore(iatm, jatm):
-        ish0, ish1, i0, i1 = aoslices[iatm]
-        jsh0, jsh1, j0, j1 = aoslices[jatm]
-        rinv2aa = rinv2ab = None
+        i0, i1 = aoslices[iatm][2:]
+        j0, j1 = aoslices[jatm][2:]
         if iatm == jatm:
             de = contract('xypq,pq->xy', h1aa[:,:,i0:i1], dm[i0:i1])
             de+= contract('xypq,pq->xy', h1ab[:,:,i0:i1,i0:i1], dm[i0:i1,i0:i1])
-            with mol.with_rinv_at_nucleus(iatm):
-                # The remaining integrals like int1e_ipiprinv are computed in
-                # hess_nuc_elec(mol, dm)
-                if with_ecp and iatm in ecp_atoms:
-                    rinv2aa = -mol.intor('ECPscalar_ipiprinv', comp=9)
-                    rinv2ab = -mol.intor('ECPscalar_iprinvip', comp=9)
-                    rinv2aa = cupy.asarray(rinv2aa)
-                    rinv2ab = cupy.asarray(rinv2ab)
-                    rinv2aa = rinv2aa.reshape(3,3,nao,nao)
-                    rinv2ab = rinv2ab.reshape(3,3,nao,nao)
-            
-            if rinv2aa is not None or rinv2ab is not None:
-                hcore = -(rinv2aa + rinv2ab)
-                hcore[:,:,i0:i1] += rinv2aa[:,:,i0:i1]
-                hcore[:,:,i0:i1] += rinv2ab[:,:,i0:i1]
-                hcore[:,:,:,i0:i1] += rinv2aa[:,:,i0:i1].transpose(0,1,3,2)
-                hcore[:,:,:,i0:i1] += rinv2ab[:,:,:,i0:i1]
-                de += cupy.einsum('xypq,pq->xy', hcore, dm)
         else:
-            de = contract('xypq,pq->xy',h1ab[:,:,i0:i1,j0:j1],dm[i0:i1,j0:j1])
-            with mol.with_rinv_at_nucleus(iatm):
-                if with_ecp and iatm in ecp_atoms:
-                    shls_slice = (jsh0, jsh1, 0, nbas)
-                    rinv2aa = -mol.intor('ECPscalar_ipiprinv', comp=9, shls_slice=shls_slice)
-                    rinv2ab = -mol.intor('ECPscalar_iprinvip', comp=9, shls_slice=shls_slice)
-                    rinv2aa = cupy.asarray(rinv2aa)
-                    rinv2ab = cupy.asarray(rinv2ab)
-                    hcore = rinv2aa.reshape(3,3,j1-j0,nao)
-                    hcore+= rinv2ab.reshape(3,3,j1-j0,nao).transpose(1,0,2,3)
-                    de += contract('xypq,pq->xy', hcore, dm[j0:j1])
-            with mol.with_rinv_at_nucleus(jatm):
-                if with_ecp and jatm in ecp_atoms:
-                    shls_slice = (ish0, ish1, 0, nbas)
-                    rinv2aa = -mol.intor('ECPscalar_ipiprinv', comp=9, shls_slice=shls_slice)
-                    rinv2ab = -mol.intor('ECPscalar_iprinvip', comp=9, shls_slice=shls_slice)
-                    rinv2aa = cupy.asarray(rinv2aa)
-                    rinv2ab = cupy.asarray(rinv2ab)
-                    hcore = rinv2aa.reshape(3,3,i1-i0,nao)
-                    hcore+= rinv2ab.reshape(3,3,i1-i0,nao)
-                    de += contract('xypq,pq->xy', hcore, dm[i0:i1])
+            de = contract('xypq,pq->xy', h1ab[:,:,i0:i1,j0:j1],dm[i0:i1,j0:j1])
+        if with_ecp:
+            de += de_ecp[:,:,iatm,jatm]
         # 2.0* due to the symmetry
         return cp.asarray(2.0*de + de_nuc_elec[:,:,iatm,jatm])
     return get_hcore

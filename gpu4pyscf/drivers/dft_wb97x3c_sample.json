@@ -2,11 +2,11 @@
     "input_dir": "./",
     "output_dir": "./",
     "molecules": [
-        "h2o.xyz",
-        "h2o.xyz",
-        "h2o.xyz",
-        "h2o.xyz",
-        "h2o.xyz"
+        "Vitamin_C.xyz",
+        "Vitamin_C.xyz",
+        "Vitamin_C.xyz",
+        "Vitamin_C.xyz",
+        "Vitamin_C.xyz"
     ],
     "xc": "wb97x3c",
     "verbose": 4,
@@ -20,6 +20,6 @@
     "with_gpu": true,
     "with_df": true,
     "with_grad": true,
-    "with_hess": false,
+    "with_hess": true,
     "save_density": false
 }]

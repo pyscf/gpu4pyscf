@@ -17,9 +17,8 @@ import numpy as np
 import cupy
 import pyscf
 from pyscf import gto, lib
-from pyscf import grad, hessian
 from pyscf.hessian import rhf as rhf_cpu
-from gpu4pyscf import scf
+from gpu4pyscf import scf, hessian
 from gpu4pyscf.hessian import rhf as rhf_gpu
 from gpu4pyscf.hessian import jk
 
@@ -73,7 +72,7 @@ class KnownValues(unittest.TestCase):
                 H1 3.1 0.12 4.35
                 H2 2.1 1.31 6
             ''',
-            basis='6-31g**', unit='B')
+            basis='6-31g**', unit='B', output = '/dev/null')
         np.random.seed(9)
         nao = mol.nao
         mo_coeff = np.random.rand(nao, nao) - .5
@@ -102,7 +101,7 @@ class KnownValues(unittest.TestCase):
                 H1 3.1 0.12 4.35
                 H2 2.1 1.31 6
             ''',
-            basis='def2-tzvpp', unit='B')
+            basis='def2-tzvpp', unit='B', output = '/dev/null')
         np.random.seed(9)
         nao = mol.nao
         mo_coeff = np.random.rand(nao, nao)
@@ -195,6 +194,20 @@ class KnownValues(unittest.TestCase):
         vk_cpu = (mo_coeff.T @ vk @ mocc).reshape(1,-1)
         assert cupy.linalg.norm(vj_cpu - vj_mo) < 1e-5
         assert cupy.linalg.norm(vk_cpu - vk_mo) < 1e-5
+
+    def test_ecp_hess(self):
+        mol = gto.M(atom='Cu 0 0 0; H 0 0 1.5', basis='lanl2dz',
+                    ecp={'Cu':'lanl2dz'}, 
+                    verbose=0,
+                    output = '/dev/null')
+        mf = scf.RHF(mol).run(conv_tol=1e-14)
+        hess = hessian.RHF(mf).kernel()
+        self.assertAlmostEqual(lib.fp(hess), -0.20927804440983355, 6)
+
+        mfs = mf.nuc_grad_method().as_scanner()
+        e1 = mfs(mol.set_geom_('Cu 0 0  0.001; H 0 0 1.5'))[1]
+        e2 = mfs(mol.set_geom_('Cu 0 0 -0.001; H 0 0 1.5'))[1]
+        self.assertAlmostEqual(abs(hess[0,:,2] - (e1-e2)/0.002*lib.param.BOHR).max(), 0, 5)
 
 if __name__ == "__main__":
     print("Full Tests for RHF Hessian")
