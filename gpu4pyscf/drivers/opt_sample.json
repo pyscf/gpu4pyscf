@@ -1,20 +1,8 @@
 [{
     "input_dir": "./",
     "output_dir": "./",
-    "molecules": [
-        "ethane.xyz",
-        "ethane.xyz",
-        "ethane.xyz",
-        "ethane.xyz",
-        "ethane.xyz"
-    ],
-    "constraints": [
-        "constraints.txt",
-        "constraints.txt",
-        "constraints.txt",
-        "constraints.txt",
-        "constraints.txt"
-    ],
+    "molecule": "ethane.xyz",
+    "constraints": "constraints.txt",
     "basis": "def2-tzvpp",
     "xc": "b3lyp",
     "verbose": 4,
