@@ -40,7 +40,7 @@ def grad_switch_h(x):
     dy[x>1] = 0.0
     return dy
 
-def get_dF_dA(surface):
+def get_dF_dA(surface, with_dA = True):
     '''
     J. Chem. Phys. 133, 244111 (2010), Appendix C
     '''
@@ -54,7 +54,10 @@ def get_dF_dA(surface):
     ngrids = grid_coords.shape[0]
     natom = atom_coords.shape[0]
     dF = cupy.zeros([ngrids, natom, 3])
-    dA = cupy.zeros([ngrids, natom, 3])
+    if with_dA:
+        dA = cupy.zeros([ngrids, natom, 3])
+    else:
+        dA = None
 
     for ia in range(natom):
         p0,p1 = surface['gslice_by_atom'][ia]
@@ -72,23 +75,27 @@ def get_dF_dA(surface):
         dfiJ = cupy.expand_dims(dfiJ, axis=-1) * ri_rJ
 
         Fi = switch_fun[p0:p1]
-        Ai = area[p0:p1]
+        if with_dA:
+            Ai = area[p0:p1]
 
         # grids response
         Fi = cupy.expand_dims(Fi, axis=-1)
-        Ai = cupy.expand_dims(Ai, axis=-1)
         dFi_grid = cupy.sum(dfiJ, axis=1)
 
         dF[p0:p1,ia,:] += Fi * dFi_grid
-        dA[p0:p1,ia,:] += Ai * dFi_grid
+        if with_dA:
+            Ai = cupy.expand_dims(Ai, axis=-1)
+            dA[p0:p1,ia,:] += Ai * dFi_grid
 
         # atom response
         Fi = cupy.expand_dims(Fi, axis=-2)
-        Ai = cupy.expand_dims(Ai, axis=-2)
         dF[p0:p1,:,:] -= Fi * dfiJ
-        dA[p0:p1,:,:] -= Ai * dfiJ
+        if with_dA:
+            Ai = cupy.expand_dims(Ai, axis=-2)
+            dA[p0:p1,:,:] -= Ai * dfiJ
     dF = dF.transpose([2,0,1])
-    dA = dA.transpose([2,0,1])
+    if with_dA:
+        dA = dA.transpose([2,0,1])
     return dF, dA
 
 def get_dD_dS_slow(surface, with_S=True, with_D=False):
@@ -288,12 +295,12 @@ def grad_solver(pcmobj, dm):
     v_grids      = pcmobj._intermediates['v_grids']
     q            = pcmobj._intermediates['q']
     f_epsilon    = pcmobj._intermediates['f_epsilon']
-    if not pcmobj.if_K_equal_S:
+    if not pcmobj.if_method_in_CPCM_category:
         A = pcmobj._intermediates['A']
         D = pcmobj._intermediates['D']
         S = pcmobj._intermediates['S']
 
-    vK_1 = pcmobj.left_multiply_inverse_K(v_grids, K_transpose = True)
+    vK_1 = pcmobj.left_solve_K(v_grids, K_transpose = True)
 
     def contract_bra(a, B, c):
         ''' i,xij,j->jx '''
@@ -307,15 +314,12 @@ def grad_solver(pcmobj, dm):
 
     de = cupy.zeros([pcmobj.mol.natm,3])
     if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
-        dD, dS = get_dD_dS(pcmobj.surface, with_D=False, with_S=True)
-
         # dR = 0, dK = dS
         de_dS  = 0.5 * vK_1.reshape(-1, 1) * left_multiply_dS(pcmobj.surface, q, stream=None)
         de_dS -= 0.5 * q.reshape(-1, 1) * right_multiply_dS(pcmobj.surface, vK_1, stream=None)
         de -= cupy.asarray([cupy.sum(de_dS[p0:p1], axis=0) for p0,p1 in gridslice])
-        dD = dS = None
 
-        dF, dA = get_dF_dA(pcmobj.surface)
+        dF, _ = get_dF_dA(pcmobj.surface, with_dA = False)
         dSii = get_dSii(pcmobj.surface, dF)
         de -= 0.5*contract('i,xij->jx', vK_1*q, dSii) # 0.5*cupy.einsum('i,xij,i->jx', vK_1, dSii, q)
 

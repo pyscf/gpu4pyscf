@@ -306,7 +306,7 @@ class PCM(lib.StreamObject):
         self.surface = gen_surface(mol, rad=self.radii_table, ng=ng)
         self._intermediates = {}
         F, A = get_F_A(self.surface)
-        D, S = get_D_S(self.surface, with_S = True, with_D = not self.if_K_equal_S)
+        D, S = get_D_S(self.surface, with_S = True, with_D = not self.if_method_in_CPCM_category)
 
         epsilon = self.eps
         if self.method.upper() in ['C-PCM', 'CPCM']:
@@ -338,7 +338,7 @@ class PCM(lib.StreamObject):
         K_LU, K_LU_pivot = lu_factor(K, overwrite_a = True, check_finite = False)
         K = None
 
-        if self.if_K_equal_S:
+        if self.if_method_in_CPCM_category:
             intermediates = {
                 'K_LU': cupy.asarray(K_LU),
                 'K_LU_pivot': cupy.asarray(K_LU_pivot),
@@ -384,9 +384,9 @@ class PCM(lib.StreamObject):
         v_grids = self.v_grids_n - v_grids_e
 
         b = self.left_multiply_R(v_grids.T)
-        q = self.left_multiply_inverse_K(b).T
+        q = self.left_solve_K(b).T
 
-        vK_1 = self.left_multiply_inverse_K(v_grids.T, K_transpose = True)
+        vK_1 = self.left_solve_K(v_grids.T, K_transpose = True)
         qt = self.left_multiply_R(vK_1, R_transpose = True).T
         q_sym = (q + qt)/2.0
 
@@ -452,9 +452,9 @@ class PCM(lib.StreamObject):
         v_grids = -self._get_v(dms)
 
         b = self.left_multiply_R(v_grids.T)
-        q = self.left_multiply_inverse_K(b).T
+        q = self.left_solve_K(b).T
 
-        vK_1 = self.left_multiply_inverse_K(v_grids.T, K_transpose = True)
+        vK_1 = self.left_solve_K(v_grids.T, K_transpose = True)
         qt = self.left_multiply_R(vK_1, R_transpose = True).T
         q_sym = (q + qt)/2.0
 
@@ -462,12 +462,12 @@ class PCM(lib.StreamObject):
         return vmat.reshape(out_shape)
 
     @property
-    def if_K_equal_S(self):
+    def if_method_in_CPCM_category(self):
         return self.method.upper() in ['C-PCM', 'CPCM', "COSMO"]
 
     def left_multiply_R(self, right_vector, R_transpose = False):
         f_epsilon = self._intermediates['f_epsilon']
-        if self.if_K_equal_S:
+        if self.if_method_in_CPCM_category:
             # R = -f_epsilon * cupy.eye(K.shape[0])
             return -f_epsilon * right_vector
         else:
@@ -479,7 +479,8 @@ class PCM(lib.StreamObject):
                 DA = DA.T
             return -f_epsilon * (right_vector - 1.0/(2.0*PI) * cupy.dot(DA, right_vector))
 
-    def left_multiply_inverse_K(self, right_vector, K_transpose = False):
+    def left_solve_K(self, right_vector, K_transpose = False):
+        ''' K^{-1} @ right_vector '''
         K_LU       = self._intermediates['K_LU']
         K_LU_pivot = self._intermediates['K_LU_pivot']
         return lu_solve((K_LU, K_LU_pivot), right_vector, trans = K_transpose, overwrite_b = False, check_finite = False)
