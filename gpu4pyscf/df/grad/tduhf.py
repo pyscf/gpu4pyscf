@@ -159,7 +159,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
             dm_cart = intopt.sort_orbitals(dm2, axis=[0,1])
         orbol_cart = orbol
         orbor_cart = orbor
-    dm = orbo = None
+    dm = None
 
     with_df._cderi = None  # release GPU memory
     vj, vk, vjaux, vkaux = get_grad_vjk_td(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbol_cart, orbor_cart,
