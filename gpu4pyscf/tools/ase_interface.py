@@ -24,7 +24,10 @@ pip3 install ase
 import numpy as np
 import copy
 from pyscf import gto
+from pyscf.lib import logger
+from pyscf.data.nist import BOHR, HARTREE2EV
 from gpu4pyscf import scf, dft
+
 from gpu4pyscf.tools import method_from_config
 
 class PySCFCalculator(Calculator):
@@ -50,7 +53,7 @@ class PySCFCalculator(Calculator):
         # Extract geometry and atomic numbers from ASE
         positions = atoms.get_positions()  # in self.unit
         atomic_numbers = atoms.get_atomic_numbers()
-        atom = [(str(Z), tuple(pos)) for Z, pos in zip(atomic_numbers, positions)]
+        atom = [(Z, tuple(pos)) for Z, pos in zip(atomic_numbers, positions)]
 
         # Build the PySCF object
         self.pyscf_config['atom'] = atom
@@ -59,14 +62,16 @@ class PySCFCalculator(Calculator):
 
         # Run the SCF
         mf.run()
+        if not mf.converged:
+            logger.error(mf, 'SCF failed to converge')
 
         # Compute total energy
-        energy = mf.e_tot * units.Hartree
+        energy = mf.e_tot * HARTREE2EV
         
         gcalc = mf.nuc_grad_method()
 
         grad_mat = gcalc.kernel()  # shape (natm, 3)
-        forces = -grad_mat * (units.Hartree / units.Bohr)
+        forces = -grad_mat * (HARTREE2EV / BOHR)
 
         # Store results
         self.results = {
