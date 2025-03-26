@@ -333,14 +333,16 @@ def analytical_hess_qv(pcmobj, dm, verbose=None):
     t1 = log.timer_debug1('solvent hessian d(dI/dx * q)/dx contribution', *t1)
     return d2e
 
-def einsum_ij_Adj_Adi_inverseK(K, Adj_term):
+def einsum_ij_Adj_Adi_inverseK(pcmobj, Adj_term, K_transpose = False):
     nA, nd, nj = Adj_term.shape
     # return cupy.einsum('ij,Adj->Adi', cupy.linalg.inv(K), Adj_term)
-    return cupy.linalg.solve(K, Adj_term.reshape(nA * nd, nj).T).T.reshape(nA, nd, nj)
-def einsum_Adi_ij_Adj_inverseK(Adi_term, K):
+    # return cupy.linalg.solve(K, Adj_term.reshape(nA * nd, nj).T).T.reshape(nA, nd, nj)
+    return pcmobj.left_multiply_inverse_K(Adj_term.reshape(nA * nd, nj).T, K_transpose = K_transpose).T.reshape(nA, nd, nj)
+def einsum_Adi_ij_Adj_inverseK(Adi_term, pcmobj, K_transpose = False):
     nA, nd, nj = Adi_term.shape
     # return cupy.einsum('Adi,ij->Adj', Adi_term, cupy.linalg.inv(K))
-    return cupy.linalg.solve(K.T, Adi_term.reshape(nA * nd, nj).T).T.reshape(nA, nd, nj)
+    # return cupy.linalg.solve(K.T, Adi_term.reshape(nA * nd, nj).T).T.reshape(nA, nd, nj)
+    return pcmobj.left_multiply_inverse_K(Adi_term.reshape(nA * nd, nj).T, K_transpose = not K_transpose).T.reshape(nA, nd, nj)
 
 def get_dS_dot_q(dS, dSii, q, atmlst, gridslice):
     output = cupy.einsum('diA,i->Adi', dSii[:,:,atmlst], q)
@@ -417,17 +419,16 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
 
     gridslice    = pcmobj.surface['gslice_by_atom']
     v_grids      = pcmobj._intermediates['v_grids']
-    A            = pcmobj._intermediates['A']
-    D            = pcmobj._intermediates['D']
-    S            = pcmobj._intermediates['S']
-    K            = pcmobj._intermediates['K']
-    R            = pcmobj._intermediates['R']
     q            = pcmobj._intermediates['q']
     f_epsilon    = pcmobj._intermediates['f_epsilon']
+    if not pcmobj.if_K_equal_S:
+        A = pcmobj._intermediates['A']
+        D = pcmobj._intermediates['D']
+        S = pcmobj._intermediates['S']
 
     ngrids = q.shape[0]
 
-    vK_1 = cupy.linalg.solve(K.T, v_grids)
+    vK_1 = pcmobj.left_multiply_inverse_K(v_grids, K_transpose = True)
 
     if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
         _, dS = get_dD_dS(pcmobj.surface, with_D=False, with_S=True)
@@ -438,7 +439,7 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         # d(S-1 R) = - S-1 dS S-1 R
         # d2(S-1 R) = (S-1 dS S-1 dS S-1 R) + (S-1 dS S-1 dS S-1 R) - (S-1 d2S S-1 R)
         dSdx_dot_q = get_dS_dot_q(dS, dSii, q, atmlst, gridslice)
-        S_1_dSdx_dot_q = einsum_ij_Adj_Adi_inverseK(K, dSdx_dot_q)
+        S_1_dSdx_dot_q = einsum_ij_Adj_Adi_inverseK(pcmobj, dSdx_dot_q)
         dSdx_dot_q = None
         VS_1_dot_dSdx = get_dST_dot_q(dS, dSii, vK_1, atmlst, gridslice)
         dS = None
@@ -455,7 +456,8 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         d2Sii = None
 
         dK_1Rv = -S_1_dSdx_dot_q
-        dvK_1R = -einsum_Adi_ij_Adj_inverseK(VS_1_dot_dSdx, K) @ R
+        R = -f_epsilon
+        dvK_1R = -einsum_Adi_ij_Adj_inverseK(VS_1_dot_dSdx, pcmobj) * R
 
     elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SMD']:
         dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
@@ -486,7 +488,7 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         dKdx_dot_q -= f_eps_over_2pi * dDdx_dot_ASq
         dDdx_dot_ASq = None
 
-        K_1_dot_dKdx_dot_q = einsum_ij_Adj_Adi_inverseK(K, dKdx_dot_q)
+        K_1_dot_dKdx_dot_q = einsum_ij_Adj_Adi_inverseK(pcmobj, dKdx_dot_q)
         dKdx_dot_q = None
 
         vK_1_dot_dSdx = get_dST_dot_q(dS, dSii, vK_1, atmlst, gridslice)
@@ -539,7 +541,7 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + cupy.einsum('ij,Adj->Adi', D, dAdx_dot_V))
         dDdx_dot_AV = None
 
-        K_1_dot_dRdx_dot_V = einsum_ij_Adj_Adi_inverseK(K, dRdx_dot_V)
+        K_1_dot_dRdx_dot_V = einsum_ij_Adj_Adi_inverseK(pcmobj, dRdx_dot_V)
         dRdx_dot_V = None
 
         d2e_from_d2KR -= cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
@@ -557,7 +559,9 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         VK_1_dot_dDdx = get_dDT_dot_q(dD, vK_1, atmlst, gridslice, ngrids)
         VK_1_dot_dRdx = f_eps_over_2pi * (VK_1D_dot_dAdx + VK_1_dot_dDdx * A)
 
-        dvK_1R = -einsum_Adi_ij_Adj_inverseK(vK_1_dot_dKdx, K) @ R + VK_1_dot_dRdx
+        DA = D*A
+        R = -f_epsilon * (cupy.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
+        dvK_1R = -einsum_Adi_ij_Adj_inverseK(vK_1_dot_dKdx, pcmobj) @ R + VK_1_dot_dRdx
 
     elif pcmobj.method.upper() in ['SS(V)PE']:
         dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
@@ -592,7 +596,7 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         dKdx_dot_q -= f_eps_over_4pi * dSdxT_dot_AT_DT_q
         dSdxT_dot_AT_DT_q = None
 
-        K_1_dot_dKdx_dot_q = einsum_ij_Adj_Adi_inverseK(K, dKdx_dot_q)
+        K_1_dot_dKdx_dot_q = einsum_ij_Adj_Adi_inverseK(pcmobj, dKdx_dot_q)
         dKdx_dot_q = None
 
         vK_1_dot_dSdx = get_dST_dot_q(dS, dSii, vK_1, atmlst, gridslice)
@@ -661,7 +665,7 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + cupy.einsum('ij,Adj->Adi', D, dAdx_dot_V))
         dDdx_dot_AV = None
 
-        K_1_dot_dRdx_dot_V = einsum_ij_Adj_Adi_inverseK(K, dRdx_dot_V)
+        K_1_dot_dRdx_dot_V = einsum_ij_Adj_Adi_inverseK(pcmobj, dRdx_dot_V)
 
         d2e_from_d2KR -= cupy.einsum('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
         d2e_from_d2KR -= cupy.einsum('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
@@ -678,7 +682,9 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         VK_1_dot_dDdx = get_dDT_dot_q(dD, vK_1, atmlst, gridslice, ngrids)
         VK_1_dot_dRdx = f_eps_over_2pi * (VK_1D_dot_dAdx + VK_1_dot_dDdx * A)
 
-        dvK_1R = -einsum_Adi_ij_Adj_inverseK(vK_1_dot_dKdx, K) @ R + VK_1_dot_dRdx
+        DA = D*A
+        R = -f_epsilon * (cupy.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
+        dvK_1R = -einsum_Adi_ij_Adj_inverseK(vK_1_dot_dKdx, pcmobj) @ R + VK_1_dot_dRdx
 
     else:
         raise RuntimeError(f"Unknown implicit solvent model: {pcmobj.method}")
@@ -702,14 +708,13 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
 
     gridslice    = pcmobj.surface['gslice_by_atom']
     v_grids      = pcmobj._intermediates['v_grids']
-    A            = pcmobj._intermediates['A']
-    D            = pcmobj._intermediates['D']
-    S            = pcmobj._intermediates['S']
-    K            = pcmobj._intermediates['K']
-    R            = pcmobj._intermediates['R']
     q            = pcmobj._intermediates['q']
     q_sym        = pcmobj._intermediates['q_sym']
     f_epsilon    = pcmobj._intermediates['f_epsilon']
+    if not pcmobj.if_K_equal_S:
+        A = pcmobj._intermediates['A']
+        D = pcmobj._intermediates['D']
+        S = pcmobj._intermediates['S']
 
     ngrids = q_sym.shape[0]
 
@@ -722,7 +727,7 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
         # dR = 0, dK = dS
         dSdx_dot_q = get_dS_dot_q(dS, dSii, q_sym, atmlst, gridslice)
 
-        dqdx_fix_Vq = einsum_ij_Adj_Adi_inverseK(K, dSdx_dot_q)
+        dqdx_fix_Vq = einsum_ij_Adj_Adi_inverseK(pcmobj, dSdx_dot_q)
 
     elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SMD']:
         dF, dA = get_dF_dA(pcmobj.surface)
@@ -747,16 +752,16 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
         dDdx_dot_ASq = get_dD_dot_q(dD, AS @ q, atmlst, gridslice, ngrids)
         dKdx_dot_q -= f_eps_over_2pi * dDdx_dot_ASq
 
-        dqdx_fix_Vq = -einsum_ij_Adj_Adi_inverseK(K, dKdx_dot_q)
+        dqdx_fix_Vq = -einsum_ij_Adj_Adi_inverseK(pcmobj, dKdx_dot_q)
 
         dAdx_dot_V = get_dA_dot_q(dA, v_grids, atmlst)
 
         dDdx_dot_AV = get_dD_dot_q(dD, A * v_grids, atmlst, gridslice, ngrids)
 
         dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + cupy.einsum('ij,Adj->Adi', D, dAdx_dot_V))
-        dqdx_fix_Vq += einsum_ij_Adj_Adi_inverseK(K, dRdx_dot_V)
+        dqdx_fix_Vq += einsum_ij_Adj_Adi_inverseK(pcmobj, dRdx_dot_V)
 
-        invKT_V = cupy.linalg.solve(K.T, v_grids)
+        invKT_V = pcmobj.left_multiply_inverse_K(v_grids, K_transpose = True)
         dDdxT_dot_invKT_V = get_dDT_dot_q(dD, invKT_V, atmlst, gridslice, ngrids)
 
         DT_invKT_V = D.T @ invKT_V
@@ -771,8 +776,9 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
 
         dSdxT_dot_AT_DT_invKT_V = get_dST_dot_q(dS, dSii, DA.T @ invKT_V, atmlst, gridslice)
         dKdxT_dot_invKT_V -= f_eps_over_2pi * dSdxT_dot_AT_DT_invKT_V
-        invKT_dKdxT_dot_invKT_V = einsum_ij_Adj_Adi_inverseK(K.T, dKdxT_dot_invKT_V)
+        invKT_dKdxT_dot_invKT_V = einsum_ij_Adj_Adi_inverseK(pcmobj, dKdxT_dot_invKT_V, K_transpose = True)
 
+        R = -f_epsilon * (cupy.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
         dqdx_fix_Vq += -cupy.einsum('ij,Adj->Adi', R.T, invKT_dKdxT_dot_invKT_V)
 
         dqdx_fix_Vq *= -0.5
@@ -785,11 +791,11 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
         dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
 
         f_eps_over_4pi = f_epsilon/(4.0*PI)
+        DA = D*A
 
         def dK_dot_q(q):
             dSdx_dot_q = get_dS_dot_q(dS, dSii, q, atmlst, gridslice)
 
-            DA = D*A
             dKdx_dot_q = dSdx_dot_q - f_eps_over_4pi * cupy.einsum('ij,Adj->Adi', DA, dSdx_dot_q)
 
             dAdx_dot_Sq = get_dA_dot_q(dA, S @ q, atmlst)
@@ -813,16 +819,16 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
         f_eps_over_2pi = f_epsilon/(2.0*PI)
 
         dKdx_dot_q = dK_dot_q(q)
-        dqdx_fix_Vq = -einsum_ij_Adj_Adi_inverseK(K, dKdx_dot_q)
+        dqdx_fix_Vq = -einsum_ij_Adj_Adi_inverseK(pcmobj, dKdx_dot_q)
 
         dAdx_dot_V = get_dA_dot_q(dA, v_grids, atmlst)
 
         dDdx_dot_AV = get_dD_dot_q(dD, A * v_grids, atmlst, gridslice, ngrids)
 
         dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + cupy.einsum('ij,Adj->Adi', D, dAdx_dot_V))
-        dqdx_fix_Vq += einsum_ij_Adj_Adi_inverseK(K, dRdx_dot_V)
+        dqdx_fix_Vq += einsum_ij_Adj_Adi_inverseK(pcmobj, dRdx_dot_V)
 
-        invKT_V = cupy.linalg.solve(K.T, v_grids)
+        invKT_V = pcmobj.left_multiply_inverse_K(v_grids, K_transpose = True)
         dDdxT_dot_invKT_V = get_dDT_dot_q(dD, invKT_V, atmlst, gridslice, ngrids)
 
         DT_invKT_V = D.T @ invKT_V
@@ -830,8 +836,9 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
         dqdx_fix_Vq += f_eps_over_2pi * (cupy.einsum('i,Adi->Adi', A, dDdxT_dot_invKT_V) + dAdxT_dot_DT_invKT_V)
 
         dKdx_dot_invKT_V = dK_dot_q(invKT_V)
-        invKT_dKdx_dot_invKT_V = einsum_ij_Adj_Adi_inverseK(K.T, dKdx_dot_invKT_V)
+        invKT_dKdx_dot_invKT_V = einsum_ij_Adj_Adi_inverseK(pcmobj, dKdx_dot_invKT_V, K_transpose = True)
 
+        R = -f_epsilon * (cupy.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
         dqdx_fix_Vq += -cupy.einsum('ij,Adj->Adi', R.T, invKT_dKdx_dot_invKT_V)
 
         dqdx_fix_Vq *= -0.5
@@ -878,12 +885,26 @@ def get_dvgrids(pcmobj, dm, atmlst, intopt_derivative):
 
 def get_dqsym_dx_fix_K_R(pcmobj, dm, atmlst, intopt_derivative):
     dV_on_charge_dx = get_dvgrids(pcmobj, dm, atmlst, intopt_derivative)
-    K = pcmobj._intermediates['K']
-    R = pcmobj._intermediates['R']
-    R_dVdx = cupy.einsum('ij,Adj->Adi', R, dV_on_charge_dx)
-    K_1_R_dVdx = einsum_ij_Adj_Adi_inverseK(K, R_dVdx)
-    K_1T_dVdx = einsum_ij_Adj_Adi_inverseK(K.T, dV_on_charge_dx)
-    RT_K_1T_dVdx = cupy.einsum('ij,Adj->Adi', R.T, K_1T_dVdx)
+
+    f_epsilon = pcmobj._intermediates['f_epsilon']
+    if pcmobj.if_K_equal_S:
+        R = -f_epsilon
+        R_dVdx = R * dV_on_charge_dx
+    else:
+        A = pcmobj._intermediates['A']
+        D = pcmobj._intermediates['D']
+        DA = D * A
+        R = -f_epsilon * (cupy.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
+        R_dVdx = cupy.einsum('ij,Adj->Adi', R, dV_on_charge_dx)
+
+    K_1_R_dVdx = einsum_ij_Adj_Adi_inverseK(pcmobj, R_dVdx)
+    K_1T_dVdx = einsum_ij_Adj_Adi_inverseK(pcmobj, dV_on_charge_dx, K_transpose = True)
+
+    if pcmobj.if_K_equal_S:
+        RT_K_1T_dVdx = R * K_1T_dVdx
+    else:
+        RT_K_1T_dVdx = cupy.einsum('ij,Adj->Adi', R.T, K_1T_dVdx)
+
     dqdx_fix_K_R = 0.5 * (K_1_R_dVdx + RT_K_1T_dVdx)
 
     return dqdx_fix_K_R

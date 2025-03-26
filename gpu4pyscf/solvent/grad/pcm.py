@@ -160,6 +160,29 @@ def get_dD_dS(surface, with_S=True, with_D=False, stream=None):
         raise RuntimeError('Failed in generating PCM dD and dS matrices.')
     return dD, dS
 
+def left_multiply_dS(surface, right_vector, stream=None):
+    charge_exp  = surface['charge_exp']
+    grid_coords = surface['grid_coords']
+    n = charge_exp.shape[0]
+    output = cupy.empty([3,n], order = "C")
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    err = libsolvent.pcm_left_multiply_ds(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(output.data.ptr, ctypes.c_void_p),
+        ctypes.cast(right_vector.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n)
+    )
+    if err != 0:
+        raise RuntimeError('Failed in generating PCM dD and dS matrices.')
+    return output.T
+
+# Assuming S is symmetric and Sij depends only on ri and rj
+def right_multiply_dS(surface, right_vector, stream=None):
+    return -left_multiply_dS(surface, right_vector, stream)
+
 def get_dSii(surface, dF):
     ''' Derivative of S matrix (diagonal only)
     '''
@@ -231,10 +254,10 @@ def grad_qv(pcmobj, dm, q_sym = None):
 
     intopt = int3c1e.VHFOpt(mol)
     intopt.build(1e-14, aosym=False)
-    dvj = int1e_grids_ip1(mol, grid_coords, dm = dm, charges = q_sym, 
+    dvj = int1e_grids_ip1(mol, grid_coords, dm = dm, charges = q_sym,
                           direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
                           intopt=intopt)
-    dq  = int1e_grids_ip2(mol, grid_coords, dm = dm, charges = q_sym, 
+    dq  = int1e_grids_ip2(mol, grid_coords, dm = dm, charges = q_sym,
                           direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
                           intopt=intopt)
 
@@ -263,14 +286,14 @@ def grad_solver(pcmobj, dm):
 
     gridslice    = pcmobj.surface['gslice_by_atom']
     v_grids      = pcmobj._intermediates['v_grids']
-    A            = pcmobj._intermediates['A']
-    D            = pcmobj._intermediates['D']
-    S            = pcmobj._intermediates['S']
-    K            = pcmobj._intermediates['K']
     q            = pcmobj._intermediates['q']
+    f_epsilon    = pcmobj._intermediates['f_epsilon']
+    if not pcmobj.if_K_equal_S:
+        A = pcmobj._intermediates['A']
+        D = pcmobj._intermediates['D']
+        S = pcmobj._intermediates['S']
 
-    vK_1 = cupy.linalg.solve(K.T, v_grids)
-    epsilon = pcmobj.eps
+    vK_1 = pcmobj.left_multiply_inverse_K(v_grids, K_transpose = True)
 
     def contract_bra(a, B, c):
         ''' i,xij,j->jx '''
@@ -285,10 +308,10 @@ def grad_solver(pcmobj, dm):
     de = cupy.zeros([pcmobj.mol.natm,3])
     if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
         dD, dS = get_dD_dS(pcmobj.surface, with_D=False, with_S=True)
-        
+
         # dR = 0, dK = dS
-        de_dS  = 0.5 * contract_ket(vK_1, dS, q)
-        de_dS -= 0.5 * contract_bra(vK_1, dS, q)
+        de_dS  = 0.5 * vK_1.reshape(-1, 1) * left_multiply_dS(pcmobj.surface, q, stream=None)
+        de_dS -= 0.5 * q.reshape(-1, 1) * right_multiply_dS(pcmobj.surface, vK_1, stream=None)
         de -= cupy.asarray([cupy.sum(de_dS[p0:p1], axis=0) for p0,p1 in gridslice])
         dD = dS = None
 
@@ -305,7 +328,6 @@ def grad_solver(pcmobj, dm):
 
         # dR = f_eps/(2*pi) * (dD*A + D*dA),
         # dK = dS - f_eps/(2*pi) * (dD*A*S + D*dA*S + D*A*dS)
-        f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
         fac = f_epsilon/(2.0*PI)
 
         Av = A*v_grids
@@ -342,6 +364,7 @@ def grad_solver(pcmobj, dm):
 
         de_dK = de_dS0 - fac * (de_dD + de_dA + de_dS1)
         de += de_dR - de_dK
+
     elif pcmobj.method.upper() in [ 'SS(V)PE' ]:
         dF, dA = get_dF_dA(pcmobj.surface)
         dSii = get_dSii(pcmobj.surface, dF)
@@ -351,7 +374,6 @@ def grad_solver(pcmobj, dm):
 
         # dR = f_eps/(2*pi) * (dD*A + D*dA),
         # dK = dS - f_eps/(2*pi) * (dD*A*S + D*dA*S + D*A*dS)
-        f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
         fac = f_epsilon/(2.0*PI)
 
         Av = A*v_grids
@@ -403,6 +425,7 @@ def grad_solver(pcmobj, dm):
 
         de_dK = de_dS0 - 0.5 * fac * (de_dD + de_dA + de_dS1 + de_dD_T + de_dA_T + de_dS1_T)
         de += de_dR - de_dK
+
     else:
         raise RuntimeError(f"Unknown implicit solvent model: {pcmobj.method}")
     t1 = log.timer_debug1('grad solver', *t1)
