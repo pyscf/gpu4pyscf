@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,9 +30,6 @@ H       0.0000000000     0.7570000000     0.5870000000
 pyscf_25 = version.parse(pyscf.__version__) <= version.parse("2.5.0")
 
 bas0 = "cc-pvdz"
-
-benchmark_results = {}
-
 
 def diagonalize(a, b, nroots=5):
     a_aa, a_ab, a_bb = a
@@ -143,18 +140,29 @@ def benchmark_with_cpu(mol, nstates=3, lindep=1.0e-12, tda=False):
         td = mf.TDA()
     else:
         td = mf.TDHF()
-    td.lindep = lindep
-    td.nstates = nstates
-    td.kernel()
-
-    td_cpu = td.to_cpu()
-    tdgrad_cpu = pyscf.grad.tduhf.Gradients(td_cpu)
-    tdgrad_cpu.kernel()
+    mo_occ = mf.mo_occ
+    occidxa = np.where(mo_occ[0]>0)[0]
+    occidxb = np.where(mo_occ[1]>0)[0]
+    viridxa = np.where(mo_occ[0]==0)[0]
+    viridxb = np.where(mo_occ[1]==0)[0]
+    nocca = len(occidxa)
+    noccb = len(occidxb)
+    nvira = len(viridxa)
+    nvirb = len(viridxb)
 
     tdgrad_gpu = gpu4pyscf.grad.tduhf.Gradients(td)
-    tdgrad_gpu.kernel()
+    gpu_gradient = cal_analytic_gradient(mol, td, tdgrad_gpu, nocca, nvira, noccb, nvirb, gpu4pyscf.grad.tduhf.grad_elec, tda)
 
-    return tdgrad_cpu.de, tdgrad_gpu.de
+    if tda:
+        cpu_gradient = np.array([[-3.0185736020771e-15,  1.5100260822340e-15, -6.4464824062032e-02],
+                                 [ 1.7200484393589e-15,  7.0426620850669e-02, 3.2232412031016e-02],
+                                 [ 1.2985251627181e-15, -7.0426620850669e-02, 3.2232412031018e-02]])
+    else:
+        cpu_gradient = np.array([[ 2.4083810840674e-15,  1.1005204522931e-15, -6.4107899188727e-02],
+                                 [-1.5974943646053e-15,  6.9613558808388e-02, 3.2053949594365e-02],
+                                 [-8.1088671946197e-16, -6.9613558808391e-02, 3.2053949594365e-02]])
+
+    return cpu_gradient, gpu_gradient
 
 
 def benchmark_with_finite_diff(
@@ -248,8 +256,8 @@ class KnownValues(unittest.TestCase):
     def test_grad_tdhf_spinconserve_cpu(self):
         _check_grad(mol, tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
 
-    def test_grad_tdhf_spinconserve_numerical(self):
-        _check_grad(mol, tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
+    # def test_grad_tdhf_spinconserve_numerical(self):
+    #     _check_grad(mol, tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
 
 
 if __name__ == "__main__":

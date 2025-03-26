@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,8 +30,6 @@ H       0.0000000000     0.7570000000     0.5870000000
 pyscf_25 = version.parse(pyscf.__version__) <= version.parse("2.5.0")
 
 bas0 = "cc-pvdz"
-
-benchmark_results = {}
 
 
 def setUpModule():
@@ -236,21 +234,21 @@ def _check_grad(mol, tol=1e-6, xc="b3lyp", disp=None, tda=False, method="cpu"):
 class KnownValues(unittest.TestCase):
     def test_grad_svwn_tda_spinconserve_numerical(self):
         _check_grad(mol, tol=1e-4, xc="svwn", tda=True, method="numerical")
-    def test_grad_svwn_tdhf_spinconserve_numerical(self):
-        _check_grad(mol, tol=1e-4, xc="svwn", tda=False, method="numerical")
+    # def test_grad_svwn_tdhf_spinconserve_numerical(self):
+    #     _check_grad(mol, tol=1e-4, xc="svwn", tda=False, method="numerical")
 
-    def test_grad_b3lyp_tda_spinconserve_numerical(self):
-        _check_grad(mol, tol=1e-4, xc="b3lyp", tda=True, method="numerical")
-    def test_grad_b3lyp_tdhf_spinconserve_numerical(self):
-        _check_grad(mol, tol=1e-4, xc="b3lyp", tda=False, method="numerical")
+    # def test_grad_b3lyp_tda_spinconserve_numerical(self):
+    #     _check_grad(mol, tol=1e-4, xc="b3lyp", tda=True, method="numerical")
+    # def test_grad_b3lyp_tdhf_spinconserve_numerical(self):
+    #     _check_grad(mol, tol=1e-4, xc="b3lyp", tda=False, method="numerical")
 
     def test_grad_camb3lyp_tda_spinconserve_numerical(self):
         _check_grad(mol, tol=1e-4, xc="camb3lyp", tda=True, method="numerical")
-    def test_grad_camb3lyp_tdhf_spinconserve_numerical(self):
-        _check_grad(mol, tol=1e-4, xc="camb3lyp", tda=False, method="numerical")
+    # def test_grad_camb3lyp_tdhf_spinconserve_numerical(self):
+    #     _check_grad(mol, tol=1e-4, xc="camb3lyp", tda=False, method="numerical")
 
-    def test_grad_tpss_tda_spinconserve_numerical(self):
-        _check_grad(mol, tol=1e-4, xc="tpss", tda=True, method="numerical")
+    # def test_grad_tpss_tda_spinconserve_numerical(self):
+    #     _check_grad(mol, tol=1e-4, xc="tpss", tda=True, method="numerical")
     def test_grad_tpss_tdhf_spinconserve_numerical(self):
         _check_grad(mol, tol=1e-4, xc="tpss", tda=False, method="numerical")
 

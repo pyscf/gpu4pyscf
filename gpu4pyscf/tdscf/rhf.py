@@ -68,7 +68,7 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
     b = cp.zeros_like(a)
 
     def add_hf_(a, b, hyb=1):
-        if hasattr(mf, 'with_df'):
+        if getattr(mf, 'with_df', None):
             from gpu4pyscf.df import int3c2e
             auxmol = mf.with_df.auxmol
             naux = auxmol.nao
@@ -78,15 +78,15 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
             int2c2e = cp.asarray(int2c2e)
             df_coef = cp.linalg.solve(int2c2e, int3c.reshape(nao*nao, naux).T)
             df_coef = df_coef.reshape(naux, nao, nao)
-            eri = cp.einsum('ijP,Pkl->ijkl', int3c, df_coef)
+            eri = contract('ijP,Pkl->ijkl', int3c, df_coef)
         else:
             eri = mol.intor('int2e_sph', aosym='s8')
             eri= ao2mo.restore(1, eri, nao)
             eri = cp.asarray(eri)
-        eri_mo = cp.einsum('pjkl,pi->ijkl', eri, orbo.conj())
-        eri_mo = cp.einsum('ipkl,pj->ijkl', eri_mo, mo)
-        eri_mo = cp.einsum('ijpl,pk->ijkl', eri_mo, mo.conj())
-        eri_mo = cp.einsum('ijkp,pl->ijkl', eri_mo, mo)
+        eri_mo = contract('pjkl,pi->ijkl', eri, orbo.conj())
+        eri_mo = contract('ipkl,pj->ijkl', eri_mo, mo)
+        eri_mo = contract('ijpl,pk->ijkl', eri_mo, mo.conj())
+        eri_mo = contract('ijkp,pl->ijkl', eri_mo, mo)
         eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
         if singlet:
             a += cp.einsum('iabj->iajb', eri_mo[:nocc,nocc:,nocc:,:nocc]) * 2
@@ -100,7 +100,6 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
     if isinstance(mf, scf.hf.KohnShamDFT):
         grids = mf.grids
         ni = mf._numint
-        ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
         if mf.do_nlc():
             logger.warn(mf, 'NLC functional found in DFT object.  Its second '
                         'derivative is not available. Its contribution is '
@@ -109,7 +108,7 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
 
         add_hf_(a, b, hyb)
         if omega != 0:  # For RSH
-            if hasattr(mf, 'with_df'):
+            if getattr(mf, 'with_df', None):
                 from gpu4pyscf.df import int3c2e
                 auxmol = mf.with_df.auxmol
                 naux = auxmol.nao
@@ -120,16 +119,16 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
                 int2c2e = cp.asarray(int2c2e)
                 df_coef = cp.linalg.solve(int2c2e, int3c.reshape(nao*nao, naux).T)
                 df_coef = df_coef.reshape(naux, nao, nao)
-                eri = cp.einsum('ijP,Pkl->ijkl', int3c, df_coef)
+                eri = contract('ijP,Pkl->ijkl', int3c, df_coef)
             else:
                 with mol.with_range_coulomb(omega):
                     eri = mol.intor('int2e_sph', aosym='s8')
                     eri= ao2mo.restore(1, eri, nao)
                     eri = cp.asarray(eri)
-            eri_mo = cp.einsum('pjkl,pi->ijkl', eri, orbo.conj())
-            eri_mo = cp.einsum('ipkl,pj->ijkl', eri_mo, mo)
-            eri_mo = cp.einsum('ijpl,pk->ijkl', eri_mo, mo.conj())
-            eri_mo = cp.einsum('ijkp,pl->ijkl', eri_mo, mo)
+            eri_mo = contract('pjkl,pi->ijkl', eri, orbo.conj())
+            eri_mo = contract('ipkl,pj->ijkl', eri_mo, mo)
+            eri_mo = contract('ijpl,pk->ijkl', eri_mo, mo.conj())
+            eri_mo = contract('ijkp,pl->ijkl', eri_mo, mo)
             eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
             k_fac = alpha - hyb
             a -= cp.einsum('ijba->iajb', eri_mo[:nocc,:nocc,nocc:,nocc:]) * k_fac
@@ -159,11 +158,11 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
                     wfxc = (fxc[0, 0, 0, 0] - fxc[1, 0, 0, 0]) * 0.5 * weight
                 orbo_mask = orbo[mask]
                 orbv_mask = orbv[mask]
-                rho_o = cp.einsum('pr,pi->ri', ao, orbo_mask)
-                rho_v = cp.einsum('pr,pi->ri', ao, orbv_mask)
-                rho_ov = cp.einsum('ri,ra->ria', rho_o, rho_v)
-                w_ov = cp.einsum('ria,r->ria', rho_ov, wfxc)
-                iajb = cp.einsum('ria,rjb->iajb', rho_ov, w_ov) * 2
+                rho_o = contract('pr,pi->ri', ao, orbo_mask)
+                rho_v = contract('pr,pi->ri', ao, orbv_mask)
+                rho_ov = contract('ri,ra->ria', rho_o, rho_v)
+                w_ov = contract('ria,r->ria', rho_ov, wfxc)
+                iajb = contract('ria,rjb->iajb', rho_ov, w_ov) * 2
                 a += iajb
                 b += iajb
 
@@ -182,12 +181,12 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
                     wfxc = (fxc[0, :, 0, :] - fxc[1, :, 0, :]) * 0.5 * weight
                 orbo_mask = orbo[mask]
                 orbv_mask = orbv[mask]
-                rho_o = cp.einsum('xpr,pi->xri', ao, orbo_mask)
-                rho_v = cp.einsum('xpr,pi->xri', ao, orbv_mask)
-                rho_ov = cp.einsum('xri,ra->xria', rho_o, rho_v[0])
-                rho_ov[1:4] += cp.einsum('ri,xra->xria', rho_o[0], rho_v[1:4])
-                w_ov = cp.einsum('xyr,xria->yria', wfxc, rho_ov)
-                iajb = cp.einsum('xria,xrjb->iajb', w_ov, rho_ov) * 2
+                rho_o = contract('xpr,pi->xri', ao, orbo_mask)
+                rho_v = contract('xpr,pi->xri', ao, orbv_mask)
+                rho_ov = contract('xri,ra->xria', rho_o, rho_v[0])
+                rho_ov[1:4] += contract('ri,xra->xria', rho_o[0], rho_v[1:4])
+                w_ov = contract('xyr,xria->yria', wfxc, rho_ov)
+                iajb = contract('xria,xrjb->iajb', w_ov, rho_ov) * 2
                 a += iajb
                 b += iajb
 
@@ -212,14 +211,14 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
                     wfxc = (fxc[0, :, 0, :] - fxc[1, :, 0, :]) * 0.5 * weight
                 orbo_mask = orbo[mask]
                 orbv_mask = orbv[mask]
-                rho_o = cp.einsum('xpr,pi->xri', ao, orbo_mask)
-                rho_v = cp.einsum('xpr,pi->xri', ao, orbv_mask)
-                rho_ov = cp.einsum('xri,ra->xria', rho_o, rho_v[0])
-                rho_ov[1:4] += cp.einsum('ri,xra->xria', rho_o[0], rho_v[1:4])
-                tau_ov = cp.einsum('xri,xra->ria', rho_o[1:4], rho_v[1:4]) * .5
+                rho_o = contract('xpr,pi->xri', ao, orbo_mask)
+                rho_v = contract('xpr,pi->xri', ao, orbv_mask)
+                rho_ov = contract('xri,ra->xria', rho_o, rho_v[0])
+                rho_ov[1:4] += contract('ri,xra->xria', rho_o[0], rho_v[1:4])
+                tau_ov = contract('xri,xra->ria', rho_o[1:4], rho_v[1:4]) * .5
                 rho_ov = cp.vstack([rho_ov, tau_ov[cp.newaxis]])
-                w_ov = cp.einsum('xyr,xria->yria', wfxc, rho_ov)
-                iajb = cp.einsum('xria,xrjb->iajb', w_ov, rho_ov) * 2
+                w_ov = contract('xyr,xria->yria', wfxc, rho_ov)
+                iajb = contract('xria,xrjb->iajb', w_ov, rho_ov) * 2
                 a += iajb
                 b += iajb
 
@@ -308,7 +307,7 @@ class TDBase(lib.StreamObject):
         return precond
 
     def nuc_grad_method(self):
-        if hasattr(self._scf,'with_df'):
+        if getattr(self._scf, 'with_df', None):
             from gpu4pyscf.df.grad import tdrhf
             return tdrhf.Gradients(self)
         else:

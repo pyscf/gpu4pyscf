@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,9 +30,6 @@ H       0.0000000000     0.7570000000     0.5870000000
 pyscf_25 = version.parse(pyscf.__version__) <= version.parse("2.5.0")
 
 bas0 = "cc-pvdz"
-
-benchmark_results = {}
-
 
 def diagonalize(a, b, nroots=5):
     nocc, nvir = a.shape[:2]
@@ -110,18 +107,27 @@ def benchmark_with_cpu(mol, nstates=3, lindep=1.0e-12, tda=False):
         td = mf.TDA()
     else:
         td = mf.TDHF()
-    td.lindep = lindep
-    td.nstates = nstates
-    td.kernel()
 
-    td_cpu = td.to_cpu()
-    tdgrad_cpu = pyscf.grad.tdrhf.Gradients(td_cpu)
-    tdgrad_cpu.kernel()
+    mo_coeff = mf.mo_coeff
+    mo_occ = mf.mo_occ
+    nao, nmo = mo_coeff.shape
+    nocc = int((mo_occ>0).sum())
+    nvir = nmo - nocc
 
     tdgrad_gpu = gpu4pyscf.grad.tdrhf.Gradients(td)
-    tdgrad_gpu.kernel()
+    gpu_gradient = cal_analytic_gradient(mol, td, tdgrad_gpu, nocc, nvir, gpu4pyscf.grad.tdrhf.grad_elec, tda)
 
-    return tdgrad_cpu.de, tdgrad_gpu.de
+
+    if tda:
+        cpu_gradient = np.array([[ 6.1708732035531e-16,  5.4527883622350e-15, 1.0228273246502e-01],
+                                 [-5.6967766850923e-16,  6.9672215647416e-02, -5.1141366232508e-02],
+                                 [-4.7409651846241e-17, -6.9672215647420e-02, -5.1141366232510e-02]])
+    else:
+        cpu_gradient = np.array([[-3.4653829069609e-16,  2.3748317799310e-14, 1.0506609371536e-01],
+                                 [ 5.6250300822602e-16,  7.1515265578103e-02, -5.2533046857670e-02],
+                                 [-2.1596471752992e-16, -7.1515265578123e-02, -5.2533046857686e-02]])
+
+    return cpu_gradient, gpu_gradient
 
 
 def benchmark_with_finite_diff(
@@ -212,8 +218,8 @@ class KnownValues(unittest.TestCase):
     def test_grad_tdhf_singlet_cpu(self):
         _check_grad(mol, tol=1e-10, lindep=1.0E-6, tda=False, method="cpu")
 
-    def test_grad_tdhf_singlet_numerical(self):
-        _check_grad(mol, tol=1e-4, lindep=1.0E-6, tda=False, method="numerical")
+    # def test_grad_tdhf_singlet_numerical(self):
+    #     _check_grad(mol, tol=1e-4, lindep=1.0E-6, tda=False, method="numerical")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,12 +16,11 @@
 from functools import reduce
 import cupy as cp
 from pyscf import lib
-from pyscf.lib import logger
+from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import cphf
-from gpu4pyscf import lib as lib_gpu
 from pyscf import __config__
 from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
@@ -39,7 +38,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             TDA energy gradients.
     """
     log = logger.new_logger(td_grad, verbose)
-    time0 = logger.process_clock(), logger.perf_counter()
+    time0 = logger.init_timer(td_grad)
     mol = td_grad.mol
     mf = td_grad.base._scf
     mo_coeff = cp.asarray(mf.mo_coeff)
@@ -55,8 +54,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     xmy = (x - y).reshape(nocc, nvir).T
     orbv = mo_coeff[:, nocc:]
     orbo = mo_coeff[:, :nocc]
-    dvv = cp.einsum("ai,bi->ab", xpy, xpy) + cp.einsum("ai,bi->ab", xmy, xmy)  # 2 T_{ab}
-    doo = -cp.einsum("ai,aj->ij", xpy, xpy) - cp.einsum("ai,aj->ij", xmy, xmy)  # 2 T_{ij}
+    dvv = contract("ai,bi->ab", xpy, xpy) + contract("ai,bi->ab", xmy, xmy)  # 2 T_{ab}
+    doo = -contract("ai,aj->ij", xpy, xpy) - contract("ai,aj->ij", xmy, xmy)  # 2 T_{ij}
     dmxpy = reduce(cp.dot, (orbv, xpy, orbo.T))  # (X+Y) in ao basis
     dmxmy = reduce(cp.dot, (orbv, xmy, orbo.T))  # (X-Y) in ao basis
     dmzoo = reduce(cp.dot, (orbo, doo, orbo.T))  # T_{ij}*2 in ao basis
@@ -86,12 +85,12 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     else:
         veff = -vk[1]
     veff0mop = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
-    wvo -= cp.einsum("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2  # 2 for dm + dm.T
-    wvo += cp.einsum("ac,ai->ci", veff0mop[nocc:, nocc:], xpy) * 2
+    wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2  # 2 for dm + dm.T
+    wvo += contract("ac,ai->ci", veff0mop[nocc:, nocc:], xpy) * 2
     veff = -vk[2]
     veff0mom = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
-    wvo -= cp.einsum("ki,ai->ak", veff0mom[:nocc, :nocc], xmy) * 2
-    wvo += cp.einsum("ac,ai->ci", veff0mom[nocc:, nocc:], xmy) * 2
+    wvo -= contract("ki,ai->ak", veff0mom[:nocc, :nocc], xmy) * 2
+    wvo += contract("ac,ai->ci", veff0mom[nocc:, nocc:], xmy) * 2
 
     # set singlet=None, generate function for CPHF type response kernel
     vresp = mf.gen_response(singlet=None, hermi=1)
@@ -121,20 +120,20 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     # H_{ij}^+[T] + H_{ij}^+[Z] #
     im0[:nocc, :nocc] = reduce(cp.dot, (orbo.T, veff0doo + veff, orbo))
     # H_{ij}^+[T] + H_{ij}^+[Z] + sum_{a} (X+Y)_{aj}H_{ai}^+[(X+Y)]
-    im0[:nocc, :nocc] += cp.einsum("ak,ai->ki", veff0mop[nocc:, :nocc], xpy)
+    im0[:nocc, :nocc] += contract("ak,ai->ki", veff0mop[nocc:, :nocc], xpy)
     # H_{ij}^+[T] + H_{ij}^+[Z] + sum_{a} (X+Y)_{aj}H_{ai}^+[(X+Y)]
     #  + sum_{a} (X-Y)_{aj}H_{ai}^-[(X-Y)]
-    im0[:nocc, :nocc] += cp.einsum("ak,ai->ki", veff0mom[nocc:, :nocc], xmy)
+    im0[:nocc, :nocc] += contract("ak,ai->ki", veff0mom[nocc:, :nocc], xmy)
     #  sum_{i} (X+Y)_{ci}H_{ai}^+[(X+Y)]
-    im0[nocc:, nocc:] = cp.einsum("ci,ai->ac", veff0mop[nocc:, :nocc], xpy)
+    im0[nocc:, nocc:] = contract("ci,ai->ac", veff0mop[nocc:, :nocc], xpy)
     #  sum_{i} (X+Y)_{ci}H_{ai}^+[(X+Y)] + sum_{i} (X-Y)_{cj}H_{ai}^-[(X-Y)]
-    im0[nocc:, nocc:] += cp.einsum("ci,ai->ac", veff0mom[nocc:, :nocc], xmy)
+    im0[nocc:, nocc:] += contract("ci,ai->ac", veff0mom[nocc:, :nocc], xmy)
     #  sum_{i} (X+Y)_{ki}H_{ai}^+[(X+Y)] * 2
-    im0[nocc:, :nocc] = cp.einsum("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2
+    im0[nocc:, :nocc] = contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2
     #  sum_{i} (X+Y)_{ki}H_{ai}^+[(X+Y)] + sum_{i} (X-Y)_{ki}H_{ai}^-[(X-Y)] * 2
-    im0[nocc:, :nocc] += cp.einsum("ki,ai->ak", veff0mom[:nocc, :nocc], xmy) * 2
+    im0[nocc:, :nocc] += contract("ki,ai->ak", veff0mom[:nocc, :nocc], xmy) * 2
 
-    zeta = lib_gpu.cupy_helper.direct_sum("i+j->ij", mo_energy, mo_energy) * 0.5
+    zeta = (mo_energy[:,cp.newaxis] + mo_energy)*0.5
     zeta[nocc:, :nocc] = mo_energy[:nocc]
     zeta[:nocc, nocc:] = mo_energy[nocc:]
     dm1 = cp.zeros((nmo, nmo))
@@ -170,10 +169,12 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     extra_force = cp.zeros((len(atmlst), 3))
 
     dvhf_all = 0
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2)
+    # this term contributes the ground state contribution.
+    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2) 
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
+    # this term will remove the unused-part from PP density.
     dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
@@ -318,13 +319,7 @@ class Gradients(rhf_grad.GradientsBase):
             vhfopt = self.base._scf._opt_gpu.get(omega, None)
             with mol.with_range_coulomb(omega):
                 return rhf_grad._jk_energy_per_atom(
-                    mol,
-                    dm,
-                    vhfopt,
-                    j_factor=j_factor,
-                    k_factor=k_factor,
-                    verbose=verbose,
-                )
+                    mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
 
     def _finalize(self):
         if self.verbose >= logger.NOTE:
@@ -337,7 +332,7 @@ class Gradients(rhf_grad.GradientsBase):
             self._write(self.mol, self.de, self.atmlst)
             logger.note(self, "----------------------------------------------")
 
-    # as_scanner = as_scanner
+    as_scanner = NotImplemented
 
     to_gpu = lib.to_gpu
 

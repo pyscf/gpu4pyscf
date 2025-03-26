@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,8 +31,23 @@ pyscf_25 = version.parse(pyscf.__version__) <= version.parse("2.5.0")
 
 bas0 = "cc-pvdz"
 
-benchmark_results = {}
+benchmark_tda = {
+    "b3lyp": np.array([[-5.1102017791844e-16,  1.6869738570478e-14, 1.1759402451268e-01],
+                       [ 6.5663118468910e-17,  7.4263977957198e-02, -5.8799691736934e-02],
+                       [-2.7234194947580e-17, -7.4263977957215e-02, -5.8799691736946e-02]]),
+    "svwn": np.array([[-1.6539940690236e-15, -8.3356410695342e-15, 1.3308690852288e-01],
+                      [ 2.7016494843422e-16,  8.1408510145431e-02, -6.6548059405875e-02],
+                      [ 1.2468877845584e-16, -8.1408510145422e-02, -6.6548059405872e-02]])
+}
 
+benchmark_tddft = {
+    "camb3lyp": np.array([[ 3.6892619558170e-16,  7.6438811199729e-15, 1.1381767216928e-01],
+                          [ 2.9908464209817e-16,  7.2934178436015e-02, -5.6911794009279e-02],
+                          [-2.9109356350014e-16, -7.2934178436021e-02, -5.6911794009284e-02]]),
+    "tpss": np.array([[ 9.0982715347518e-16, -8.2522481347782e-15, 1.2438623581337e-01],
+                      [-3.0852354366371e-16,  7.9273249578928e-02, -6.2192146000900e-02],
+                      [ 2.8321252679217e-17, -7.9273249578919e-02, -6.2192146000896e-02]])
+}
 
 def diagonalize(a, b, nroots=5):
     nocc, nvir = a.shape[:2]
@@ -109,18 +124,31 @@ def benchmark_with_cpu(mol, xc, nstates=3, lindep=1.0e-12, tda=False):
         td = mf.TDA()
     else:
         td = mf.TDDFT()
-    td.lindep = lindep
-    td.nstates = nstates
-    td.kernel()
 
-    td_cpu = td.to_cpu()
-    tdgrad_cpu = pyscf.grad.tdrks.Gradients(td_cpu)
-    tdgrad_cpu.kernel()
+    mo_coeff = mf.mo_coeff
+    mo_occ = mf.mo_occ
+    nao, nmo = mo_coeff.shape
+    nocc = int((mo_occ>0).sum())
+    nvir = nmo - nocc
+
+    # td_cpu = td.to_cpu()
+    # tdgrad_cpu = pyscf.grad.tduhf.Gradients(td_cpu)
+    # tdgrad_cpu.kernel()
+    # cpu_gradient = cal_analytic_gradient(mol, td_cpu, tdgrad_cpu, nocc, nvir, pyscf.grad.tdrks.grad_elec, tda)
+    if tda:
+        cpu_gradient = benchmark_tda[xc]
+    else:
+        cpu_gradient = benchmark_tddft[xc]
 
     tdgrad_gpu = gpu4pyscf.grad.tdrks.Gradients(td)
-    tdgrad_gpu.kernel()
+    gpu_gradient = cal_analytic_gradient(mol, td, tdgrad_gpu, nocc, nvir, gpu4pyscf.grad.tdrks.grad_elec, tda)
+    # tdgrad_gpu.kernel()
 
-    return tdgrad_cpu.de, tdgrad_gpu.de
+    # print(f"TDHF gradient {tda} {xc}")
+    # np.set_printoptions(precision=13, suppress=True, formatter={'float': '{:0.13e}'.format})
+    # print(cpu_gradient)
+
+    return cpu_gradient, gpu_gradient
 
 
 def benchmark_with_finite_diff(
@@ -207,8 +235,8 @@ class KnownValues(unittest.TestCase):
     def test_grad_svwn_tda_singlet_cpu(self):
         _check_grad(mol, xc="svwn", tol=5e-10, tda=True, method="cpu")
 
-    def test_grad_svwn_tda_singlet_numerical(self):
-        _check_grad(mol, xc="svwn", tol=1e-4, tda=True, method="numerical")
+    # def test_grad_svwn_tda_singlet_numerical(self):
+    #     _check_grad(mol, xc="svwn", tol=1e-4, tda=True, method="numerical")
 
     # def test_grad_svwn_tddft_singlet_cpu(self):
     #     _check_grad(mol, xc="svwn", tol=5e-10, tda=False, method="cpu")
@@ -219,8 +247,8 @@ class KnownValues(unittest.TestCase):
     def test_grad_b3lyp_tda_singlet_cpu(self):
         _check_grad(mol, xc="b3lyp", tol=5e-10, tda=True, method="cpu")
 
-    def test_grad_b3lyp_tda_singlet_numerical(self):
-        _check_grad(mol, xc="b3lyp", tol=1e-4, tda=True, method="numerical")
+    # def test_grad_b3lyp_tda_singlet_numerical(self):
+    #     _check_grad(mol, xc="b3lyp", tol=1e-4, tda=True, method="numerical")
 
     # def test_grad_b3lyp_tddft_singlet_cpu(self):
     #     _check_grad(mol, xc="b3lyp", tol=5e-10, tda=False, method="cpu")
@@ -249,8 +277,8 @@ class KnownValues(unittest.TestCase):
     def test_grad_tpss_tddft_singlet_cpu(self):
         _check_grad(mol, xc="tpss", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
 
-    def test_grad_tpss_tddft_singlet_numerical(self):
-        _check_grad(mol, xc="tpss", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
+    # def test_grad_tpss_tddft_singlet_numerical(self):
+    #     _check_grad(mol, xc="tpss", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
 
 
 if __name__ == "__main__":

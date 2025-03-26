@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,8 +17,7 @@ from functools import reduce
 import cupy as cp
 import numpy as np
 from pyscf import lib
-from pyscf.lib import logger
-from gpu4pyscf import lib as lib_gpu
+from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, add_sparse
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.dft import numint
@@ -45,7 +44,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             TDA energy gradients.
     """
     log = logger.new_logger(td_grad, verbose)
-    time0 = logger.process_clock(), logger.perf_counter()
+    time0 = logger.init_timer(td_grad)
 
     mol = td_grad.mol
     mf = td_grad.base._scf
@@ -62,8 +61,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     xmy = (x - y).reshape(nocc, nvir).T
     orbv = mo_coeff[:, nocc:]
     orbo = mo_coeff[:, :nocc]
-    dvv = cp.einsum("ai,bi->ab", xpy, xpy) + cp.einsum("ai,bi->ab", xmy, xmy)  # 2 T_{ab}
-    doo = -cp.einsum("ai,aj->ij", xpy, xpy) - cp.einsum("ai,aj->ij", xmy, xmy)  # 2 T_{ij}
+    dvv = contract("ai,bi->ab", xpy, xpy) + contract("ai,bi->ab", xmy, xmy)  # 2 T_{ab}
+    doo = -contract("ai,aj->ij", xpy, xpy) - contract("ai,aj->ij", xmy, xmy)  # 2 T_{ij}
     dmxpy = reduce(cp.dot, (orbv, xpy, orbo.T))  # (X+Y) in ao basis
     dmxmy = reduce(cp.dot, (orbv, xmy, orbo.T))  # (X-Y) in ao basis
     dmzoo = reduce(cp.dot, (orbo, doo, orbo.T))  # T_{ij}*2 in ao basis
@@ -111,12 +110,12 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         else:
             veff = f1vo[0] - vk[1]
         veff0mop = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
-        wvo -= cp.einsum("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2
-        wvo += cp.einsum("ac,ai->ci", veff0mop[nocc:, nocc:], xpy) * 2
+        wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2
+        wvo += contract("ac,ai->ci", veff0mop[nocc:, nocc:], xpy) * 2
         veff = -vk[2]
         veff0mom = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
-        wvo -= cp.einsum("ki,ai->ak", veff0mom[:nocc, :nocc], xmy) * 2
-        wvo += cp.einsum("ac,ai->ci", veff0mom[nocc:, nocc:], xmy) * 2
+        wvo -= contract("ki,ai->ak", veff0mom[:nocc, :nocc], xmy) * 2
+        wvo += contract("ac,ai->ci", veff0mom[nocc:, nocc:], xmy) * 2
     else:
         vj0 = mf.get_j(mol, dmzoo, hermi=1)
         vj1 = mf.get_j(mol, dmxpy + dmxpy.T, hermi=1)
@@ -133,8 +132,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         else:
             veff = f1vo[0]
         veff0mop = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
-        wvo -= cp.einsum("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2
-        wvo += cp.einsum("ac,ai->ci", veff0mop[nocc:, nocc:], xpy) * 2
+        wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2
+        wvo += contract("ac,ai->ci", veff0mop[nocc:, nocc:], xpy) * 2
         veff0mom = cp.zeros((nmo, nmo))
 
     # set singlet=None, generate function for CPHF type response kernel
@@ -160,14 +159,14 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
 
     im0 = cp.zeros((nmo, nmo))
     im0[:nocc, :nocc] = reduce(cp.dot, (orbo.T, veff0doo + veff, orbo))
-    im0[:nocc, :nocc] += cp.einsum("ak,ai->ki", veff0mop[nocc:, :nocc], xpy)
-    im0[:nocc, :nocc] += cp.einsum("ak,ai->ki", veff0mom[nocc:, :nocc], xmy)
-    im0[nocc:, nocc:] = cp.einsum("ci,ai->ac", veff0mop[nocc:, :nocc], xpy)
-    im0[nocc:, nocc:] += cp.einsum("ci,ai->ac", veff0mom[nocc:, :nocc], xmy)
-    im0[nocc:, :nocc] = cp.einsum("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2
-    im0[nocc:, :nocc] += cp.einsum("ki,ai->ak", veff0mom[:nocc, :nocc], xmy) * 2
+    im0[:nocc, :nocc] += contract("ak,ai->ki", veff0mop[nocc:, :nocc], xpy)
+    im0[:nocc, :nocc] += contract("ak,ai->ki", veff0mom[nocc:, :nocc], xmy)
+    im0[nocc:, nocc:] =  contract("ci,ai->ac", veff0mop[nocc:, :nocc], xpy)
+    im0[nocc:, nocc:] += contract("ci,ai->ac", veff0mom[nocc:, :nocc], xmy)
+    im0[nocc:, :nocc] =  contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2
+    im0[nocc:, :nocc] += contract("ki,ai->ak", veff0mom[:nocc, :nocc], xmy) * 2
 
-    zeta = lib_gpu.cupy_helper.direct_sum("i+j->ij", mo_energy, mo_energy) * 0.5
+    zeta = (mo_energy[:,cp.newaxis] + mo_energy)*0.5
     zeta[nocc:, :nocc] = mo_energy[:nocc]
     zeta[:nocc, nocc:] = mo_energy[nocc:]
     dm1 = cp.zeros((nmo, nmo))
@@ -207,10 +206,12 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
 
     extra_force = cp.zeros((len(atmlst), 3))
     dvhf_all = 0
+    # this term contributes the ground state contribution.
     dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2, j_factor, k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
+    # this term will remove the unused-part from PP density.
     dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, j_factor, k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
@@ -266,14 +267,14 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
     dveff1_0 = cp.asarray(
-        [cp.einsum("xpq,pq->x", veff1_0[:, p0:p1], oo0[p0:p1] * 2 + dmz1doo[p0:p1]) for p0, p1 in aoslices[:, 2:]])
+        [contract("xpq,pq->x", veff1_0[:, p0:p1], oo0[p0:p1] * 2 + dmz1doo[p0:p1]) for p0, p1 in aoslices[:, 2:]])
     dveff1_0 += cp.asarray([
-            cp.einsum("xpq,pq->x", veff1_0[:, p0:p1].transpose(0, 2, 1), oo0[:, p0:p1] * 2 + dmz1doo[:, p0:p1],)
+            contract("xpq,pq->x", veff1_0[:, p0:p1].transpose(0, 2, 1), oo0[:, p0:p1] * 2 + dmz1doo[:, p0:p1],)
             for p0, p1 in aoslices[:, 2:]])
-    dveff1_1 = cp.asarray([cp.einsum("xpq,pq->x", veff1_1[:, p0:p1], oo0[p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    dveff1_2 = cp.asarray([cp.einsum("xpq,pq->x", veff1_2[:, p0:p1], dmxpy[p0:p1] * 2) for p0, p1 in aoslices[:, 2:]])
+    dveff1_1 = cp.asarray([contract("xpq,pq->x", veff1_1[:, p0:p1], oo0[p0:p1]) for p0, p1 in aoslices[:, 2:]])
+    dveff1_2 = cp.asarray([contract("xpq,pq->x", veff1_2[:, p0:p1], dmxpy[p0:p1] * 2) for p0, p1 in aoslices[:, 2:]])
     dveff1_2 += cp.asarray(
-        [cp.einsum("xqp,pq->x", veff1_2[:, p0:p1], dmxpy[:, p0:p1] * 2) for p0, p1 in aoslices[:, 2:]])
+        [contract("xqp,pq->x", veff1_2[:, p0:p1], dmxpy[:, p0:p1] * 2) for p0, p1 in aoslices[:, 2:]])
     de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force + dveff1_0 + dveff1_1 + dveff1_2
 
     return de.get()
@@ -346,6 +347,8 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
             # quick fix
             if deriv > 2:
                 ni_cpu = numint_cpu()
+                # TODO: If the libxc is stablized, this should be gpulized
+                # vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
                 vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
                 if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
                 if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
@@ -357,21 +360,28 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
                 ni.eval_rho(_sorted_mol, ao0, dmvo_mask, mask, xctype, hermi=1, with_lapl=False) * 2
             )  # *2 for alpha + beta
             if xctype == "LDA":
-                rho1 = rho1[cp.newaxis]
-            wv = cp.einsum("yg,xyg,g->xg", rho1, fxc, weight)
+                rho1 = rho1[cp.newaxis].copy()
+            tmp = contract("yg,xyg->xg", rho1, fxc)
+            wv = contract("xg,g->xg", tmp, weight)
+            tmp = None
             fmat_(_sorted_mol, f1vo, ao, wv, mask, shls_slice, ao_loc)
 
             if dmoo is not None:
                 dmoo_mask = dmoo[mask[:, None], mask]
                 rho2 = ni.eval_rho(_sorted_mol, ao0, dmoo_mask, mask, xctype, hermi=1, with_lapl=False) * 2
                 if xctype == "LDA":
-                    rho2 = rho2[cp.newaxis]
-                wv = cp.einsum("yg,xyg,g->xg", rho2, fxc, weight)
+                    rho2 = rho2[cp.newaxis].copy()
+                tmp = contract("yg,xyg->xg", rho2, fxc)
+                wv = contract("xg,g->xg", tmp, weight)
+                tmp = None
                 fmat_(_sorted_mol, f1oo, ao, wv, mask, shls_slice, ao_loc)
             if with_vxc:
                 fmat_(_sorted_mol, v1ao, ao, vxc * weight, mask, shls_slice, ao_loc)
             if with_kxc:
-                wv = cp.einsum("yg,zg,xyzg,g->xg", rho1, rho1, kxc, weight)
+                tmp = contract("yg,xyzg->xzg", rho1, kxc)
+                tmp = contract("zg,xzg->xg", rho1, tmp)
+                wv = contract("xg,g->xg", tmp, weight)
+                tmp = None
                 fmat_(_sorted_mol, k1ao, ao, wv, mask, shls_slice, ao_loc)
     else:
         for ao, mask, weight, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
@@ -399,8 +409,10 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
             dmvo_mask = dmvo[mask[:, None], mask]
             rho1 = ni.eval_rho(_sorted_mol, ao0, dmvo_mask, mask, xctype, hermi=1, with_lapl=False)
             if xctype == "LDA":
-                rho1 = rho1[cp.newaxis]
-            wv = cp.einsum("yg,xyg,g->xg", rho1, fxc_t, weight)
+                rho1 = rho1[cp.newaxis].copy()
+            tmp = contract("yg,xyg->xg", rho1, fxc_t)
+            wv = contract("xg,g->xg", tmp, weight)
+            tmp = None
             fmat_(_sorted_mol, f1vo, ao, wv, mask, shls_slice, ao_loc)
 
             if dmoo is not None:
@@ -411,8 +423,10 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
                 dmoo_mask = dmoo[mask[:, None], mask]
                 rho2 = ni.eval_rho(_sorted_mol, ao0, dmoo_mask, mask, xctype, hermi=1, with_lapl=False)
                 if xctype == "LDA":
-                    rho2 = rho2[cp.newaxis]
-                wv = cp.einsum("yg,xyg,g->xg", rho2, fxc_s, weight)
+                    rho2 = rho2[cp.newaxis].copy()
+                tmp = contract("yg,xyg->xg", rho2, fxc_s)
+                wv = contract("xg,g->xg", tmp, weight)
+                tmp = None
                 fmat_(_sorted_mol, f1oo, ao, wv, mask, shls_slice, ao_loc)
             if with_vxc:
                 vxc = vxc[0]
@@ -422,7 +436,10 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
                 # 1/2 int (tia - tIA) kxc (tjb - tJB) = tia kxc_t tjb
                 kxc = kxc[0, :, 0] - kxc[0, :, 1]
                 kxc = kxc[:, :, 0] - kxc[:, :, 1]
-                wv = cp.einsum("yg,zg,xyzg,g->xg", rho1, rho1, kxc, weight)
+                tmp = contract("yg,xyzg->xzg", rho1, kxc)
+                tmp = contract("zg,xzg->xg", rho1, tmp)
+                wv = contract("xg,g->xg", tmp, weight)
+                tmp = None
                 fmat_(_sorted_mol, k1ao, ao, wv, mask, shls_slice, ao_loc)
 
     f1vo[1:] *= -1

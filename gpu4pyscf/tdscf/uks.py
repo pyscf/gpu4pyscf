@@ -30,7 +30,7 @@ __all__ = [
 
 class TDA(tdhf_gpu.TDA):
     def nuc_grad_method(self):
-        if hasattr(self._scf,'with_df'):
+        if getattr(self._scf, 'with_df', None):
             from gpu4pyscf.df.grad import tduks
             return tduks.Gradients(self)
         else:
@@ -39,7 +39,7 @@ class TDA(tdhf_gpu.TDA):
 
 class TDDFT(tdhf_gpu.TDHF):
     def nuc_grad_method(self):
-        if hasattr(self._scf,'with_df'):
+        if getattr(self._scf, 'with_df', None):
             from gpu4pyscf.df.grad import tduks
             return tduks.Gradients(self)
         else:

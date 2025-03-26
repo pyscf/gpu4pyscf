@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,15 +14,10 @@
 
 
 from gpu4pyscf.df import int3c2e, df
-from gpu4pyscf.lib.cupy_helper import tag_array
-from gpu4pyscf.df.grad import uhf as uhf_grad_df
 from gpu4pyscf.df.grad import tduhf as tduhf_grad_df
 from gpu4pyscf.tdscf import uks as tduks
 from gpu4pyscf.grad import tduks as tduks_grad
 from gpu4pyscf import __config__
-from gpu4pyscf.lib import logger
-from functools import reduce
-import cupy as cp
 
 class Gradients(tduks_grad.Gradients):
     from gpu4pyscf.lib.utils import to_gpu, device
@@ -34,7 +29,7 @@ class Gradients(tduks_grad.Gradients):
         tduks_grad.Gradients.__init__(self, td)
 
     auxbasis_response = True
-    get_jk = uhf_grad_df.get_jk
+    get_jk = tduhf_grad_df.get_jk
 
     def check_sanity(self):
         assert isinstance(self.base._scf, df.df_jk._DFHF)

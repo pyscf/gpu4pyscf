@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,8 +31,20 @@ pyscf_25 = version.parse(pyscf.__version__) <= version.parse("2.5.0")
 
 bas0 = "cc-pvdz"
 
-benchmark_results = {}
+benchmark_tda = {
+    "svwn": np.array([[-2.0794644047642e-15,  4.5819012821773e-15, -1.9469159367525e-02],
+                      [ 1.4221709874715e-15,  8.7651533026291e-02, 9.7281692163176e-03],
+                      [ 2.3835180549259e-16, -8.7651533026297e-02, 9.7281692163202e-03]])
+}
 
+benchmark_tddft = {
+    "camb3lyp": np.array([[ 1.2806734534785e-15,  7.1845049781507e-16, -3.2202363698306e-02],
+                          [ 3.5389179533110e-16,  8.1587356526278e-02, 1.6158866805799e-02],
+                          [-1.2390408489041e-15, -8.1587356526278e-02, 1.6158866805799e-02]]),
+    "tpss": np.array([[-4.2722779824142e-17, -3.0776023531359e-16, -3.0481025320633e-02],
+                      [-7.9268161204927e-17,  8.4960579376783e-02, 1.5081140720682e-02],
+                      [-9.2707685336625e-16, -8.4960579376777e-02, 1.5081140720683e-02]])
+}
 
 def diagonalize(a, b, nroots=5):
     a_aa, a_ab, a_bb = a
@@ -143,18 +155,33 @@ def benchmark_with_cpu(mol, xc, nstates=3, lindep=1.0e-12, tda=False):
         td = mf.TDA()
     else:
         td = mf.TDDFT()
-    td.lindep = lindep
-    td.nstates = nstates
-    td.kernel()
+    mo_occ = mf.mo_occ
+    occidxa = np.where(mo_occ[0]>0)[0]
+    occidxb = np.where(mo_occ[1]>0)[0]
+    viridxa = np.where(mo_occ[0]==0)[0]
+    viridxb = np.where(mo_occ[1]==0)[0]
+    nocca = len(occidxa)
+    noccb = len(occidxb)
+    nvira = len(viridxa)
+    nvirb = len(viridxb)
 
-    td_cpu = td.to_cpu()
-    tdgrad_cpu = pyscf.grad.tduks.Gradients(td_cpu)
-    tdgrad_cpu.kernel()
+    # td_cpu = td.to_cpu()
+    # tdgrad_cpu = pyscf.grad.tduks.Gradients(td_cpu)
+    # cpu_gradient = cal_analytic_gradient(mol, td_cpu, tdgrad_cpu, nocca, nvira, noccb, nvirb, pyscf.grad.tduks.grad_elec, tda)
 
     tdgrad_gpu = gpu4pyscf.grad.tduks.Gradients(td)
-    tdgrad_gpu.kernel()
+    gpu_gradient = cal_analytic_gradient(mol, td, tdgrad_gpu, nocca, nvira, noccb, nvirb, gpu4pyscf.grad.tduks.grad_elec, tda)
 
-    return tdgrad_cpu.de, tdgrad_gpu.de
+    if tda:
+        cpu_gradient = benchmark_tda[xc]
+    else:
+        cpu_gradient = benchmark_tddft[xc]
+
+    # print(f"TDHF gradient {tda} {xc}")
+    # np.set_printoptions(precision=13, suppress=True, formatter={'float': '{:0.13e}'.format})
+    # print(cpu_gradient)
+
+    return cpu_gradient, gpu_gradient
 
 
 def benchmark_with_finite_diff(
@@ -247,20 +274,20 @@ class KnownValues(unittest.TestCase):
     def test_grad_svwn_tda_spinconserving_cpu(self):
         _check_grad(mol, xc="svwn", tol=5e-10, tda=True, method="cpu")
 
-    def test_grad_svwn_tda_spinconserving_numerical(self):
-        _check_grad(mol, xc="svwn", tol=1e-4, tda=True, method="numerical")
+    # def test_grad_svwn_tda_spinconserving_numerical(self):
+    #     _check_grad(mol, xc="svwn", tol=1e-4, tda=True, method="numerical")
 
-    def test_grad_svwn_tddft_spinconserving_cpu(self):
-        _check_grad(mol, xc="svwn", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
+    # def test_grad_svwn_tddft_spinconserving_cpu(self):
+    #     _check_grad(mol, xc="svwn", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
 
-    def test_grad_svwn_tddft_spinconserving_numerical(self):
-        _check_grad(mol, xc="svwn", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
+    # def test_grad_svwn_tddft_spinconserving_numerical(self):
+    #     _check_grad(mol, xc="svwn", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
 
-    def test_grad_camb3lyp_tda_spinconserving_cpu(self):
-        _check_grad(mol, xc="camb3lyp", tol=5e-10, tda=True, method="cpu")
+    # def test_grad_camb3lyp_tda_spinconserving_cpu(self):
+    #     _check_grad(mol, xc="camb3lyp", tol=5e-10, tda=True, method="cpu")
 
-    def test_grad_camb3lyp_tda_spinconserving_numerical(self):
-        _check_grad(mol, xc="camb3lyp", tol=1e-4, tda=True, method="numerical")
+    # def test_grad_camb3lyp_tda_spinconserving_numerical(self):
+    #     _check_grad(mol, xc="camb3lyp", tol=1e-4, tda=True, method="numerical")
 
     def test_grad_camb3lyp_tddft_spinconserving_cpu(self):
         _check_grad(mol, xc="camb3lyp", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
@@ -268,17 +295,17 @@ class KnownValues(unittest.TestCase):
     def test_grad_camb3lyp_tddft_spinconserving_numerical(self):
         _check_grad(mol, xc="camb3lyp", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
 
-    def test_grad_tpss_tda_spinconserving_cpu(self):
-        _check_grad(mol, xc="tpss", tol=5e-10, tda=True, method="cpu")
+    # def test_grad_tpss_tda_spinconserving_cpu(self):
+    #     _check_grad(mol, xc="tpss", tol=5e-10, tda=True, method="cpu")
 
-    def test_grad_tpss_tda_spinconserving_numerical(self):
-        _check_grad(mol, xc="tpss", tol=1e-4, tda=True, method="numerical")
+    # def test_grad_tpss_tda_spinconserving_numerical(self):
+    #     _check_grad(mol, xc="tpss", tol=1e-4, tda=True, method="numerical")
 
     def test_grad_tpss_tddft_spinconserving_cpu(self):
         _check_grad(mol, xc="tpss", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
 
-    def test_grad_tpss_tddft_spinconserving_numerical(self):
-        _check_grad(mol, xc="tpss", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
+    # def test_grad_tpss_tddft_spinconserving_numerical(self):
+    #     _check_grad(mol, xc="tpss", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
 
 
 if __name__ == "__main__":

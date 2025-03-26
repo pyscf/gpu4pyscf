@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 from functools import reduce
 import cupy as cp
 from pyscf import lib
-from pyscf.lib import logger
+from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
-from gpu4pyscf.grad import tdrhf as tdrhf_grad
+from gpu4pyscf.grad import tdrhf
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import ucphf
@@ -40,7 +40,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     if singlet is not True and singlet is not None:
         raise NotImplementedError("Only for spin-conserving TDHF")
     log = logger.new_logger(td_grad, verbose)
-    time0 = logger.process_clock(), logger.perf_counter()
+    time0 = logger.init_timer(td_grad)
 
     mol = td_grad.mol
     mf = td_grad.base._scf
@@ -73,10 +73,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     xmya = (xa - ya).reshape(nocca, nvira).T
     xmyb = (xb - yb).reshape(noccb, nvirb).T
 
-    dvva = cp.einsum("ai,bi->ab", xpya, xpya) + cp.einsum("ai,bi->ab", xmya, xmya)
-    dvvb = cp.einsum("ai,bi->ab", xpyb, xpyb) + cp.einsum("ai,bi->ab", xmyb, xmyb)
-    dooa = -cp.einsum("ai,aj->ij", xpya, xpya) - cp.einsum("ai,aj->ij", xmya, xmya)
-    doob = -cp.einsum("ai,aj->ij", xpyb, xpyb) - cp.einsum("ai,aj->ij", xmyb, xmyb)
+    dvva =  contract("ai,bi->ab", xpya, xpya) + contract("ai,bi->ab", xmya, xmya)
+    dvvb =  contract("ai,bi->ab", xpyb, xpyb) + contract("ai,bi->ab", xmyb, xmyb)
+    dooa = -contract("ai,aj->ij", xpya, xpya) - contract("ai,aj->ij", xmya, xmya)
+    doob = -contract("ai,aj->ij", xpyb, xpyb) - contract("ai,aj->ij", xmyb, xmyb)
     dmxpya = reduce(cp.dot, (orbva, xpya, orboa.T))
     dmxpyb = reduce(cp.dot, (orbvb, xpyb, orbob.T))
     dmxmya = reduce(cp.dot, (orbva, xmya, orboa.T))
@@ -112,17 +112,17 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     veff = vj[0, 1] + vj[1, 1] - vk[:, 1]
     veff0mopa = reduce(cp.dot, (mo_coeff[0].T, veff[0], mo_coeff[0]))
     veff0mopb = reduce(cp.dot, (mo_coeff[1].T, veff[1], mo_coeff[1]))
-    wvoa -= cp.einsum("ki,ai->ak", veff0mopa[:nocca, :nocca], xpya) * 2
-    wvob -= cp.einsum("ki,ai->ak", veff0mopb[:noccb, :noccb], xpyb) * 2
-    wvoa += cp.einsum("ac,ai->ci", veff0mopa[nocca:, nocca:], xpya) * 2
-    wvob += cp.einsum("ac,ai->ci", veff0mopb[noccb:, noccb:], xpyb) * 2
+    wvoa -= contract("ki,ai->ak", veff0mopa[:nocca, :nocca], xpya) * 2
+    wvob -= contract("ki,ai->ak", veff0mopb[:noccb, :noccb], xpyb) * 2
+    wvoa += contract("ac,ai->ci", veff0mopa[nocca:, nocca:], xpya) * 2
+    wvob += contract("ac,ai->ci", veff0mopb[noccb:, noccb:], xpyb) * 2
     veff = -vk[:, 2]
     veff0moma = reduce(cp.dot, (mo_coeff[0].T, veff[0], mo_coeff[0]))
     veff0momb = reduce(cp.dot, (mo_coeff[1].T, veff[1], mo_coeff[1]))
-    wvoa -= cp.einsum("ki,ai->ak", veff0moma[:nocca, :nocca], xmya) * 2
-    wvob -= cp.einsum("ki,ai->ak", veff0momb[:noccb, :noccb], xmyb) * 2
-    wvoa += cp.einsum("ac,ai->ci", veff0moma[nocca:, nocca:], xmya) * 2
-    wvob += cp.einsum("ac,ai->ci", veff0momb[noccb:, noccb:], xmyb) * 2
+    wvoa -= contract("ki,ai->ak", veff0moma[:nocca, :nocca], xmya) * 2
+    wvob -= contract("ki,ai->ak", veff0momb[:noccb, :noccb], xmyb) * 2
+    wvoa += contract("ac,ai->ci", veff0moma[nocca:, nocca:], xmya) * 2
+    wvob += contract("ac,ai->ci", veff0momb[noccb:, noccb:], xmyb) * 2
 
     vresp = mf.gen_response(hermi=1)
 
@@ -157,18 +157,18 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     im0b = cp.zeros((nmob, nmob))
     im0a[:nocca, :nocca] = reduce(cp.dot, (orboa.T, veff0doo[0] + veff[0], orboa)) * 0.5
     im0b[:noccb, :noccb] = reduce(cp.dot, (orbob.T, veff0doo[1] + veff[1], orbob)) * 0.5
-    im0a[:nocca, :nocca] += cp.einsum("ak,ai->ki", veff0mopa[nocca:, :nocca], xpya) * 0.5
-    im0b[:noccb, :noccb] += cp.einsum("ak,ai->ki", veff0mopb[noccb:, :noccb], xpyb) * 0.5
-    im0a[:nocca, :nocca] += cp.einsum("ak,ai->ki", veff0moma[nocca:, :nocca], xmya) * 0.5
-    im0b[:noccb, :noccb] += cp.einsum("ak,ai->ki", veff0momb[noccb:, :noccb], xmyb) * 0.5
-    im0a[nocca:, nocca:] = cp.einsum("ci,ai->ac", veff0mopa[nocca:, :nocca], xpya) * 0.5
-    im0b[noccb:, noccb:] = cp.einsum("ci,ai->ac", veff0mopb[noccb:, :noccb], xpyb) * 0.5
-    im0a[nocca:, nocca:] += cp.einsum("ci,ai->ac", veff0moma[nocca:, :nocca], xmya) * 0.5
-    im0b[noccb:, noccb:] += cp.einsum("ci,ai->ac", veff0momb[noccb:, :noccb], xmyb) * 0.5
-    im0a[nocca:, :nocca] = cp.einsum("ki,ai->ak", veff0mopa[:nocca, :nocca], xpya)
-    im0b[noccb:, :noccb] = cp.einsum("ki,ai->ak", veff0mopb[:noccb, :noccb], xpyb)
-    im0a[nocca:, :nocca] += cp.einsum("ki,ai->ak", veff0moma[:nocca, :nocca], xmya)
-    im0b[noccb:, :noccb] += cp.einsum("ki,ai->ak", veff0momb[:noccb, :noccb], xmyb)
+    im0a[:nocca, :nocca] += contract("ak,ai->ki", veff0mopa[nocca:, :nocca], xpya) * 0.5
+    im0b[:noccb, :noccb] += contract("ak,ai->ki", veff0mopb[noccb:, :noccb], xpyb) * 0.5
+    im0a[:nocca, :nocca] += contract("ak,ai->ki", veff0moma[nocca:, :nocca], xmya) * 0.5
+    im0b[:noccb, :noccb] += contract("ak,ai->ki", veff0momb[noccb:, :noccb], xmyb) * 0.5
+    im0a[nocca:, nocca:]  = contract("ci,ai->ac", veff0mopa[nocca:, :nocca], xpya) * 0.5
+    im0b[noccb:, noccb:]  = contract("ci,ai->ac", veff0mopb[noccb:, :noccb], xpyb) * 0.5
+    im0a[nocca:, nocca:] += contract("ci,ai->ac", veff0moma[nocca:, :nocca], xmya) * 0.5
+    im0b[noccb:, noccb:] += contract("ci,ai->ac", veff0momb[noccb:, :noccb], xmyb) * 0.5
+    im0a[nocca:, :nocca]  = contract("ki,ai->ak", veff0mopa[:nocca, :nocca], xpya)
+    im0b[noccb:, :noccb]  = contract("ki,ai->ak", veff0mopb[:noccb, :noccb], xpyb)
+    im0a[nocca:, :nocca] += contract("ki,ai->ak", veff0moma[:nocca, :nocca], xmya)
+    im0b[noccb:, :noccb] += contract("ki,ai->ak", veff0momb[:noccb, :noccb], xmyb)
 
     zeta_a = (mo_energy[0][:, None] + mo_energy[0]) * 0.5
     zeta_b = (mo_energy[1][:, None] + mo_energy[1]) * 0.5
@@ -218,16 +218,16 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     extra_force = cp.zeros((len(atmlst), 3))
 
     dvhf_all = 0
+    # this term contributes the ground state contribution.
     dvhf = td_grad.get_veff(
-        mol,
-        cp.stack((((dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
-                   (dmz1doob + dmz1doob.T) * 0.25 + oo0b))))
+            mol, cp.stack((((dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
+                            (dmz1doob + dmz1doob.T) * 0.25 + oo0b))))
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
+    # this term will remove the unused-part from PP density.
     dvhf = td_grad.get_veff(
-        mol,
-        cp.stack((((dmz1dooa + dmz1dooa.T) * 0.25, (dmz1doob + dmz1doob.T) * 0.25))))
+            mol, cp.stack((((dmz1dooa + dmz1dooa.T) * 0.25, (dmz1doob + dmz1doob.T) * 0.25))))
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
@@ -249,7 +249,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     return de.get()
 
 
-class Gradients(tdrhf_grad.Gradients):
+class Gradients(tdrhf.Gradients):
 
     to_cpu = utils.to_cpu
     to_gpu = utils.to_gpu
