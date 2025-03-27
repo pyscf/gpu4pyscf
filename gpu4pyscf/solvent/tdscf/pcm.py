@@ -43,3 +43,6 @@ class WithSolventTDSCF:
         name_mixin = self.base.with_solvent.__class__.__name__
         obj = lib.view(self, lib.drop_class(cls, WithSolventTDSCF, name_mixin))
         return obj
+
+    nuc_grad_method = NotImplemented
+
