@@ -245,7 +245,7 @@ class PCM(lib.StreamObject):
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
         'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
-        'equilibrium_solvation', 'e', 'v',
+        'equilibrium_solvation', 'e', 'v', 'eps_optical'
     }
     from gpu4pyscf.lib.utils import to_gpu, device
     kernel = ddcosmo.DDCOSMO.kernel
@@ -265,6 +265,7 @@ class PCM(lib.StreamObject):
         self.lebedev_order = 29
         self._intermediates = {}
         self.eps = 78.3553
+        self.eps_optical = None
 
         self.max_cycle = 20
         self.conv_tol = 1e-7
@@ -418,7 +419,25 @@ class PCM(lib.StreamObject):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
         if self.frozen:
             raise RuntimeError('Frozen solvent model is not supported')
-        return pcm_td.make_tda_object(td)
+        return pcm_td.make_tdscf_object(td)
+    
+    def TDHF(self, td):
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        if self.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
+        return pcm_td.make_tdscf_object(td)
+    
+    def TDDFT(self, td):
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        if self.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
+        return pcm_td.make_tdscf_object(td)
+    
+    def CasidaTDDFT(self, td):
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        if self.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
+        return pcm_td.make_tdscf_object(td)
 
     def Hessian(self, hess_method):
         from gpu4pyscf.solvent.hessian import pcm as pcm_hess
@@ -445,8 +464,39 @@ class PCM(lib.StreamObject):
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)
 
-        K = self._intermediates['K']
-        R = self._intermediates['R']
+        if self.eps_optical is not None:
+            assert not self.equilibrium_solvation
+            epsilon = self.eps_optical
+            logger.info(self, 'eps optical = %s', self.eps_optical)
+            S = self._intermediates['S']
+            D = self._intermediates['D']
+            A = self._intermediates['A']
+            epsilon = self.eps_optical
+            if self.method.upper() in ['C-PCM', 'CPCM']:
+                f_epsilon = (epsilon-1.)/epsilon
+                K = S
+                R = -f_epsilon * cupy.eye(K.shape[0])
+            elif self.method.upper() == 'COSMO':
+                f_epsilon = (epsilon - 1.0)/(epsilon + 1.0/2.0)
+                K = S
+                R = -f_epsilon * cupy.eye(K.shape[0])
+            elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
+                f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
+                DA = D*A
+                DAS = cupy.dot(DA, S)
+                K = S - f_epsilon/(2.0*PI) * DAS
+                R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
+            elif self.method.upper() == 'SS(V)PE':
+                f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
+                DA = D*A
+                DAS = cupy.dot(DA, S)
+                K = S - f_epsilon/(4.0*PI) * (DAS + DAS.T)
+                R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
+            else:
+                raise RuntimeError(f"Unknown implicit solvent model: {self.method}")
+        else:
+            K = self._intermediates['K']
+            R = self._intermediates['R']
         v_grids = -self._get_v(dms)
 
         b = cupy.dot(R, v_grids.T)

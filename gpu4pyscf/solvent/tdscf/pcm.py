@@ -16,39 +16,30 @@
 TD of PCM family solvent model
 '''
 
-import numpy
-import cupy
-import ctypes
-from cupyx import scipy
+import cupy as cp
 from pyscf import lib
-from pyscf import gto
-from pyscf.grad import rhf as rhf_grad
-from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent
 from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
-from pyscf import lib as pyscf_lib
+from gpu4pyscf import scf
 
-libdft = lib.load_library('libdft')
 
-def make_tda_object(tda_method):
+def make_tdscf_object(tda_method):
     '''For td_method in vacuum, add td of solvent pcmobj'''
     name = (tda_method._scf.with_solvent.__class__.__name__
             + tda_method.__class__.__name__)
-    return lib.set_class(WithSolventTDA(tda_method),
-                         (WithSolventTDA, tda_method.__class__), name)
+    return lib.set_class(WithSolventTDSCF(tda_method),
+                         (WithSolventTDSCF, tda_method.__class__), name)
 
-class WithSolventTDA:
+class WithSolventTDSCF:
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    def __init__(self, grad_method):
-        self.__dict__.update(grad_method.__dict__)
+    def __init__(self, tda_method):
+        self.__dict__.update(tda_method.__dict__)
 
     def undo_solvent(self):
         cls = self.__class__
         name_mixin = self.base.with_solvent.__class__.__name__
-        obj = lib.view(self, lib.drop_class(cls, WithSolventTDA, name_mixin))
+        obj = lib.view(self, lib.drop_class(cls, WithSolventTDSCF, name_mixin))
         return obj
-    
-    to_cpu = NotImplemented
