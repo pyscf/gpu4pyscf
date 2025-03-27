@@ -5,6 +5,7 @@ v1.4.0 (2025-03-27)
   - ECP integrals and its first and second derivatives accelerated on GPU.
   - Multigrid algorithm for Coulomb matrix and LDA, GGA, MGGA functionals computation.
   - PBC Gaussian density fitting integrals.
+  - ASE interface for molecular systems.
 * Improvements
   - Reduce memory footprint in SCF driver.
   - Reduce memory requirements in PCM energy and gradients.
