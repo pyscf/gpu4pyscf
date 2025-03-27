@@ -1,13 +1,7 @@
 [{
     "input_dir": "./",
     "output_dir": "./",
-    "molecules": [
-        "h2o.xyz",
-        "h2o.xyz",
-        "h2o.xyz",
-        "h2o.xyz",
-        "h2o.xyz"
-    ],
+    "molecule": "h2o.xyz",
     "basis": "def2-tzvpp",
     "xc": "b3lyp",
     "verbose": 4,
