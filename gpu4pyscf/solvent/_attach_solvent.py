@@ -16,7 +16,7 @@ import cupy
 from pyscf import lib
 from pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import tag_array
-from gpu4pyscf import scf
+from gpu4pyscf import scf, dft, tdscf
 
 def _for_scf(mf, solvent_obj, dm=None):
     '''Add solvent model to SCF (HF and DFT) method.
@@ -124,6 +124,12 @@ class SCFWithSolvent(_Solvation):
     def nuc_grad_method(self):
         grad_method = super().nuc_grad_method()
         return self.with_solvent.nuc_grad_method(grad_method)
+
+    def TDA(self):
+        # if isinstance(self, dft.rks.RKS):
+        #     tda_method = 
+        tda_method = super().TDA()
+        return self.with_solvent.TDA(tda_method)
 
     Gradients = nuc_grad_method
 

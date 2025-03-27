@@ -413,6 +413,12 @@ class PCM(lib.StreamObject):
             return pcm_grad.make_grad_object(grad_method)
         else:
             raise RuntimeError('Only SCF gradient is supported')
+        
+    def TDA(self, td):
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        if self.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
+        return pcm_td.make_tda_object(td)
 
     def Hessian(self, hess_method):
         from gpu4pyscf.solvent.hessian import pcm as pcm_hess
