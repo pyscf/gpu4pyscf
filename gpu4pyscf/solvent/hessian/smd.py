@@ -94,7 +94,7 @@ class WithSolventHess:
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         dm = kwargs.pop('dm', None)
         if dm is None:
-            dm = self.base.make_rdm1(ao_repr=True)
+            dm = self.base.make_rdm1()
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
         is_equilibrium = self.base.with_solvent.equilibrium_solvation
@@ -113,7 +113,7 @@ class WithSolventHess:
             atmlst = range(self.mol.natm)
         h1ao = super().make_h1(mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
         if isinstance(self.base, scf.hf.RHF):
-            dm = self.base.make_rdm1(ao_repr=True)
+            dm = self.base.make_rdm1()
             dv = pcm_hess.analytical_grad_vmat(self.base.with_solvent, dm, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
             for i0, ia in enumerate(atmlst):
                 h1ao[i0] += dv[i0]
@@ -121,7 +121,7 @@ class WithSolventHess:
         elif isinstance(self.base, scf.uhf.UHF):
             h1aoa, h1aob = h1ao
             solvent = self.base.with_solvent
-            dm = self.base.make_rdm1(ao_repr=True)
+            dm = self.base.make_rdm1()
             dm = dm[0] + dm[1]
             dva = pcm_hess.analytical_grad_vmat(solvent, dm, mo_coeff[0], mo_occ[0], atmlst=atmlst, verbose=verbose)
             dvb = pcm_hess.analytical_grad_vmat(solvent, dm, mo_coeff[1], mo_occ[1], atmlst=atmlst, verbose=verbose)
