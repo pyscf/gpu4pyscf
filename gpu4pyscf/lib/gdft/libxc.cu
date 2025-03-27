@@ -26,17 +26,22 @@
 
 #define THREADS 256
 
-// Up to order = 2, do_exc = True, do_vxc = True, do_fxc = True, do_kxc = False, do_lxc = False
+// Up to order = 3, do_exc = True, do_vxc = True, do_fxc = True, do_kxc = True, do_lxc = False
 #define ADD_LDA if(out->zk     != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->zk, out_lda->zk, coef, np, dim->zk); \
                 if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vrho, out_lda->vrho, coef, np, dim->vrho); \
-                if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rho2, out_lda->v2rho2, coef, np, dim->v2rho2);
+                if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rho2, out_lda->v2rho2, coef, np, dim->v2rho2);\
+                if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rho3, out_lda->v3rho3, coef, np, dim->v3rho3); \
 
 #define ADD_GGA if(out->zk     != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->zk, out_gga->zk, coef, np, dim->zk); \
                 if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vrho, out_gga->vrho, coef, np, dim->vrho); \
                 if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vsigma, out_gga->vsigma, coef, np, dim->vsigma); \
                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rho2, out_gga->v2rho2, coef, np, dim->v2rho2); \
                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2rhosigma, out_gga->v2rhosigma, coef, np, dim->v2rhosigma); \
-                if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2sigma2, out_gga->v2sigma2, coef, np, dim->v2sigma2);
+                if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2sigma2, out_gga->v2sigma2, coef, np, dim->v2sigma2); \
+                if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rho3, out_gga->v3rho3, coef, np, dim->v3rho3); \
+                if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rho2sigma, out_gga->v3rho2sigma, coef, np, dim->v3rho2sigma); \
+                if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rhosigma2, out_gga->v3rhosigma2, coef, np, dim->v3rhosigma2); \
+                if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigma3, out_gga->v3sigma3, coef, np, dim->v3sigma3); 
 
 #define ADD_MGGA if(out->zk     != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->zk, out_mgga->zk, coef, np, dim->zk); \
                  if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vrho, out_mgga->vrho, coef, np, dim->vrho); \
@@ -52,7 +57,27 @@
                  if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2sigmatau, out_mgga->v2sigmatau, coef, np, dim->v2sigmatau);\
                  if(out->v2rho2 != NULL && out->v2lapl2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2lapl2, out_mgga->v2lapl2, coef, np, dim->v2lapl2);\
                  if(out->v2rho2 != NULL && out->v2lapltau != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2lapltau, out_mgga->v2lapltau, coef, np, dim->v2lapltau);\
-                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2tau2, out_mgga->v2tau2, coef, np, dim->v2tau2);
+                 if(out->v2rho2 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v2tau2, out_mgga->v2tau2, coef, np, dim->v2tau2); \
+                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rho3        , out_mgga->v3rho3        , coef, np, dim->v3rho3        ); \
+                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rho2sigma   , out_mgga->v3rho2sigma   , coef, np, dim->v3rho2sigma   ); \
+                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rho2tau     , out_mgga->v3rho2tau     , coef, np, dim->v3rho2tau     ); \
+                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rhosigma2   , out_mgga->v3rhosigma2   , coef, np, dim->v3rhosigma2   ); \
+                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rhosigmatau , out_mgga->v3rhosigmatau , coef, np, dim->v3rhosigmatau ); \
+                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rhotau2     , out_mgga->v3rhotau2     , coef, np, dim->v3rhotau2     ); \
+                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigma3      , out_mgga->v3sigma3      , coef, np, dim->v3sigma3      ); \
+                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigma2tau   , out_mgga->v3sigma2tau   , coef, np, dim->v3sigma2tau   ); \
+                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigmatau2   , out_mgga->v3sigmatau2   , coef, np, dim->v3sigmatau2   ); \
+                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3tau3        , out_mgga->v3tau3        , coef, np, dim->v3tau3        ); \
+                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rho2lapl    , out_mgga->v3rho2lapl    , coef, np, dim->v3rho2lapl    ); \
+                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rhosigmalapl, out_mgga->v3rhosigmalapl, coef, np, dim->v3rhosigmalapl); \
+                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rholapl2    , out_mgga->v3rholapl2    , coef, np, dim->v3rholapl2    ); \
+                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rholapltau  , out_mgga->v3rholapltau  , coef, np, dim->v3rholapltau  ); \
+                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigma2lapl  , out_mgga->v3sigma2lapl  , coef, np, dim->v3sigma2lapl  ); \
+                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigmalapl2  , out_mgga->v3sigmalapl2  , coef, np, dim->v3sigmalapl2  ); \
+                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigmalapltau, out_mgga->v3sigmalapltau, coef, np, dim->v3sigmalapltau); \
+                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapl3       , out_mgga->v3lapl3       , coef, np, dim->v3lapl3       ); \
+                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapl2tau    , out_mgga->v3lapl2tau    , coef, np, dim->v3lapl2tau    ); \
+                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapltau2    , out_mgga->v3lapltau2    , coef, np, dim->v3lapltau2    ); 
 
 __global__
 static void _add_out(double *out, const double *buf, double coef, int np, int dim){

@@ -39,12 +39,25 @@ mf.kernel() # -76.4666495331835
 print('------------------- TDDFT -----------------------------')
 td = mf.TDDFT().set(nstates=5)
 assert td.device == 'gpu'
-e_tddft = td.kernel()[0] # [ 7.51061148  9.42243504  9.76601005 11.74384344 13.5974535 ]
-print('5 TDDFT excitation energy by GPU4PySCF')
+e_tddft = td.kernel()[0] # [ 7.51062554  9.42244962  9.76602191 11.74385565 13.59746453]
+# print('5 TDDFT excitation energy by GPU4PySCF')
+# print(e_tddft)
 
 print('------------------- TDA -----------------------------')
 td = mf.TDA().set(nstates=5)
 assert td.device == 'gpu'
-e_tda = td.kernel()[0] # [ 7.53380573  9.42804505  9.81320363 11.78176645 13.62814473]
-print('5 TDA excitation energy by GPU4PySCF')
+e_tda = td.kernel()[0] # [ 7.53381449  9.42805412  9.81321061 11.78177395 13.62814798]
+# print('5 TDA excitation energy by GPU4PySCF')
+# print(e_tda)
 
+print('The gradient of first TDA excitation energy by GPU4PySCF')
+g = td.nuc_grad_method()
+g.kernel()
+"""
+--------- TDA gradients for state 1 ----------
+         x                y                z
+0 O    -0.0000000000    -0.0000000000    -0.0901095287
+1 H     0.0598456498    -0.0000000000     0.0450549873
+2 H    -0.0598456498     0.0000000000     0.0450549873
+----------------------------------------------
+"""
