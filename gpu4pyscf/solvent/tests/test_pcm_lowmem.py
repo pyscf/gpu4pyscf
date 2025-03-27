@@ -16,22 +16,20 @@ import unittest
 import numpy
 import pyscf
 import pytest
-import cupy
 from pyscf import gto
 from gpu4pyscf import scf, dft
 from gpu4pyscf.dft import rks_lowmem
 from gpu4pyscf.scf import hf_lowmem
 from gpu4pyscf.solvent import pcm
-from packaging import version
 
 def setUpModule():
     global mol, epsilon, lebedev_order, e_tolerance
     mol = gto.Mole()
     mol.atom = '''
 O  0.0000   0.7375  -0.0528
-O  0.0000   -0.7375 -0.1528
-H  0.8190   0.8170  0.4220
-H  -0.8190 -0.8170  0.4220
+O  0.0000  -0.7375  -0.1528
+H  0.8190   0.8170   0.4220
+H  -0.8190 -0.8170   0.4220
     '''
     mol.basis = 'sto3g'
     mol.output = '/dev/null'
@@ -72,7 +70,7 @@ class KnownValues(unittest.TestCase):
         assert numpy.abs(e_test - e_reference) < e_tolerance
 
     def test_lowmem_RHF_SSVPE(self):
-        e_reference = _energy_with_solvent(scf.RHF(mol), 'SS(V)PE')
+        # e_reference = _energy_with_solvent(scf.RHF(mol), 'SS(V)PE')
         e_reference = -148.7566491351642
         e_test = _energy_with_solvent(hf_lowmem.RHF(mol), 'SS(V)PE')
         print(f"Energy error in lowmem RHF with SS(V)PE: {numpy.abs(e_test - e_reference)}")
@@ -100,7 +98,6 @@ class KnownValues(unittest.TestCase):
         assert numpy.abs(e_test - e_reference) < e_tolerance
 
     # TODO: Missing functionalities and tests for unrestricted HF and DFT
-    # TODO: Missing functionalities and tests for gradient
 
 if __name__ == "__main__":
     print("Tests for PCM with lowmem SCF and DFT modules")

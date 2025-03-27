@@ -50,6 +50,8 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     '''
     if mol is None: mol = ks_grad.mol
     if dm is None: dm = ks_grad.base.make_rdm1()
+    if not hasattr(dm, "mo_coeff"): dm = tag_array(dm, mo_coeff = ks_grad.base.mo_coeff)
+    if not hasattr(dm, "mo_occ"):   dm = tag_array(dm,   mo_occ = ks_grad.base.mo_occ)
     t0 = (logger.process_clock(), logger.perf_counter())
 
     mf = ks_grad.base

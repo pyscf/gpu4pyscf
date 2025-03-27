@@ -67,7 +67,7 @@ class WithSolventGrad:
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         dm = kwargs.pop('dm', None)
         if dm is None:
-            dm = self.base.make_rdm1(ao_repr=True)
+            dm = self.base.make_rdm1()
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
         self.de_solute  = super().kernel(*args, **kwargs)
