@@ -2070,6 +2070,7 @@ class _GDFTOpt:
         if hasattr(mol, '_decontracted') and mol._decontracted:
             raise RuntimeError('mol object is already decontracted')
 
+        mem_avail0 = get_avail_mem()
         pmol = basis_seg_contraction(mol, allow_replica=True)[0]
         pmol.cart = mol.cart
         coeff = cupy.eye(mol.nao)      # without cart2sph transformation
@@ -2130,6 +2131,8 @@ class _GDFTOpt:
         self.l_bas_offsets = np.append(0, np.cumsum(l_counts)).astype(np.int32)
         logger.debug2(mol, 'l_ctr_offsets = %s', self.l_ctr_offsets)
         logger.debug2(mol, 'l_bas_offsets = %s', self.l_bas_offsets)
+        mem_avail1 = get_avail_mem()
+        logger.debug1(mol, 'NumInt allocates GPU memory: %d B', mem_avail0 - mem_avail0)
         return self
 
     @classmethod
