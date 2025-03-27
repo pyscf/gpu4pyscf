@@ -2132,7 +2132,7 @@ class _GDFTOpt:
         logger.debug2(mol, 'l_ctr_offsets = %s', self.l_ctr_offsets)
         logger.debug2(mol, 'l_bas_offsets = %s', self.l_bas_offsets)
         mem_avail1 = get_avail_mem()
-        logger.debug1(mol, 'NumInt allocates GPU memory: %d B', mem_avail0 - mem_avail0)
+        logger.debug1(mol, 'NumInt allocates GPU memory: %d B', mem_avail0 - mem_avail1)
         return self
 
     @classmethod

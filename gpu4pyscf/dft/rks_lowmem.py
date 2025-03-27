@@ -21,7 +21,7 @@ import cupy as cp
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid, rks
 from gpu4pyscf.scf import hf_lowmem, jk
-from gpu4pyscf.lib.cupy_helper import tag_array, pack_tril
+from gpu4pyscf.lib.cupy_helper import tag_array, pack_tril, get_avail_mem
 from pyscf import __config__
 
 __all__ = [
