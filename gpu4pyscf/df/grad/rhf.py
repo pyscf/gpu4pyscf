@@ -59,7 +59,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     '''
     if mol is None: mol = mf_grad.mol
     #TODO: dm has to be the SCF density matrix in this version.  dm should be
-    # extended to any 1-particle density matrix
+    # extended to any 1-particle density matrix. The get_jk in tddft supports this function.
 
     if(dm0 is None): dm0 = mf_grad.base.make_rdm1()
     if omega is None:

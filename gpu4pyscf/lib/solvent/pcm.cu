@@ -131,6 +131,95 @@ static void _pcm_dD_dS(double *matrix_dd, double *matrix_ds,
 }
 
 __global__
+static void _pcm_left_multiply_dS(double *output, const double* right_vector,
+                                  const double *coords, const double *charge_exp,
+                                  int n)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) {
+        return;
+    }
+
+    const double rix = coords[3*i  ];
+    const double riy = coords[3*i+1];
+    const double riz = coords[3*i+2];
+    const double ei = charge_exp[i];
+
+    double sum_x = 0.0;
+    double sum_y = 0.0;
+    double sum_z = 0.0;
+    for (int j = threadIdx.y; j < n; j += blockDim.y) {
+        // calculate xi
+        const double ej = charge_exp[j];
+        const double xi_ij = ei * ej / sqrt(ei*ei + ej*ej);
+
+        // calculate r
+        const double dx = rix - coords[3*j  ];
+        const double dy = riy - coords[3*j+1];
+        const double dz = riz - coords[3*j+2];
+        double rij = norm3d(dx, dy, dz);
+
+        const double xi_r_ij = xi_ij * rij;
+        const double xi_r2_ij = xi_r_ij * xi_r_ij;
+        if (i == j) rij = 1.0;
+        const double rij2 = rij*rij;
+
+        double dS_dr = -(erf(xi_r_ij) -  2.0*xi_r_ij/ SQRT_PI * exp(-xi_r2_ij)) / rij2;
+        if (i == j) dS_dr = 0.0;
+        const double dx_rij = dx / rij;
+        const double dy_rij = dy / rij;
+        const double dz_rij = dz / rij;
+
+        const double dSx = dS_dr * dx_rij;
+        const double dSy = dS_dr * dy_rij;
+        const double dSz = dS_dr * dz_rij;
+
+        const double right_vector_j = right_vector[j];
+        sum_x += dSx * right_vector_j;
+        sum_y += dSy * right_vector_j;
+        sum_z += dSz * right_vector_j;
+    }
+
+    __shared__ double sum_shared[THREADS * THREADS];
+
+    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_x;
+    __syncthreads();
+    for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
+        if (threadIdx.y < stride) {
+            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        }
+        __syncthreads();
+    }
+    if (threadIdx.y == 0) {
+        output[        i] = sum_shared[threadIdx.x];
+    }
+
+    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_y;
+    __syncthreads();
+    for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
+        if (threadIdx.y < stride) {
+            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        }
+        __syncthreads();
+    }
+    if (threadIdx.y == 0) {
+        output[n     + i] = sum_shared[threadIdx.x];
+    }
+
+    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_z;
+    __syncthreads();
+    for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
+        if (threadIdx.y < stride) {
+            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        }
+        __syncthreads();
+    }
+    if (threadIdx.y == 0) {
+        output[n * 2 + i] = sum_shared[threadIdx.x];
+    }
+}
+
+__global__
 static void _pcm_d2D_d2S(double *matrix_d2D, double *matrix_d2S,
                          const double *coords, const double *norm_vec,
                          const double *charge_exp,
@@ -279,6 +368,21 @@ int pcm_dd_ds(cudaStream_t stream, double *matrix_dD, double *matrix_dS,
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ntilex, ntiley);
     _pcm_dD_dS<<<blocks, threads, 0, stream>>>(matrix_dD, matrix_dS, coords, norm_vec, charge_exp, n);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        return 1;
+    }
+    return 0;
+}
+
+int pcm_left_multiply_ds(const cudaStream_t stream, double *output, const double *right_vector,
+                         const double *coords, const double *charge_exp,
+                         int n)
+{
+    int ntilex = (n + THREADS - 1) / THREADS;
+    dim3 threads(THREADS, THREADS);
+    dim3 blocks(ntilex, 1);
+    _pcm_left_multiply_dS<<<blocks, threads, 0, stream>>>(output, right_vector, coords, charge_exp, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

@@ -1056,3 +1056,4 @@ def sandwich_dot(a, c, out=None):
     if a_ndim == 2:
         out = out[0]
     return out
+    

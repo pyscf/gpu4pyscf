@@ -144,6 +144,7 @@ if(BUILD_SOLVENT)
   add_subdirectory(solvent)
 endif()
 
+
 option(BUILD_GINT_RYS "Using gint-rys" ON)
 if(BUILD_GINT_RYS)
   add_subdirectory(gint-rys)
@@ -165,6 +166,7 @@ if(BUILD_PBC)
 endif()
 
 add_subdirectory(multigrid)
+add_subdirectory(ecp)
 
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
@@ -180,6 +182,6 @@ if(BUILD_LIBXC)
             -DCMAKE_INSTALL_LIBDIR:PATH=lib
             -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
             -DENABLE_XHOST:STRING=${BUILD_MARCH_NATIVE}
-    CMAKE_CACHE_ARGS -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}
+            -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}
   )
 endif()
