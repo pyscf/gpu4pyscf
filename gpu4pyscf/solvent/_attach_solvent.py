@@ -168,7 +168,7 @@ class SCFWithSolvent(_Solvation):
                     v_solvent = self.with_solvent._B_dot_x(dm1)
                     v += v_solvent[0] + v_solvent[1]
                 elif singlet:
-                    v += self.with_solvent._B
+                    v += self.with_solvent._B_dot_x(dm1)
                 else:
                     logger.warn(self, 'Singlet-Triplet has no LR-PCM contribution!')
             else:
