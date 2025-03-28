@@ -58,7 +58,6 @@ typedef struct {
     int *bas_ij_idx;
     int *pair_mapping;
     int *img_offsets; // offset img_idx for each shell-pair
-// TODO: change to uint16_t
     int *img_idx; // indices of img_coords in each shell-pair
 } PBCInt3c2eBounds;
 

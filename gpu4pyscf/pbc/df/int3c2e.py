@@ -119,6 +119,8 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         eri3c = cp.zeros((nL*nctri,nfi, nL*nctrj,nfj, naux))
         compressed_eri3c = compressed_eri3c.reshape(nfj,nfi,n_pairs,naux)
         eri3c[ish,:,jsh] = compressed_eri3c.transpose(2,1,0,3)
+        if i0 == j0:
+            eri3c[jsh,:,ish] = compressed_eri3c.transpose(2,0,1,3)
         eri3c = eri3c.reshape(nL,ni,nL,nj,naux)
         compressed_eri3c = None
 
@@ -336,13 +338,15 @@ class SRInt3c2eOpt:
         #NOTE: PTR_BAS_COORD is not updated in conc_env()
         off = _bas_cpu[s_nbas,PTR_EXP] - auxcell._bas[0,PTR_EXP]
         _bas_cpu[s_nbas:,PTR_BAS_COORD] += off
-
-        sup_ao_loc = supcell.ao_loc
-        aux_loc = auxcell.ao_loc
+        self._atm_cpu = _atm_cpu
+        self._bas_cpu = _bas_cpu
+        self._env_cpu = _env_cpu
 
         _atm = cp.array(_atm_cpu, dtype=np.int32)
         _bas = cp.array(_bas_cpu, dtype=np.int32)
         _env = cp.array(_env_cpu, dtype=np.float64)
+        sup_ao_loc = supcell.ao_loc
+        aux_loc = auxcell.ao_loc
         ao_loc = _conc_locs(sup_ao_loc, aux_loc)
         int3c2e_envs = Int3c2eEnvVars(
             pcell.natm, p_nbas, sup_ncells, nimgs,
@@ -352,25 +356,30 @@ class SRInt3c2eOpt:
         # Keep a reference to these arrays, prevent releasing them upon returning the closure
         int3c2e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
         self.int3c2e_envs = int3c2e_envs
+        p2c_mapping_lookup = [cp.asarray(x, dtype=np.int32) for x in self.prim_to_ctr_mapping]
 
-        _nimgs = int(4*np.pi/3 * pcell.rcut**3 / vol)
+        log.debug1('prim_l_counts %s', self.cell0_prim_l_counts)
+        log.debug1('ctr_l_counts %s', self.cell0_ctr_l_counts)
+        c_shell_counts = self.cell0_ctr_l_counts
+        c_shell_offsets = np.append(0, np.cumsum(c_shell_counts))
+        p_shell_l_offsets = np.append(0, np.cumsum(self.cell0_prim_l_counts))
+
+        p2c_mapping = [p2c + offset for offset, p2c in zip(c_shell_offsets, p2c_mapping_lookup)]
+        p2c_mapping = cp.asarray(cp.hstack(p2c_mapping), dtype=np.int32)
+        _nimgs = int(4*np.pi/3 * pcell.rcut**3 / vol + 1)
         ovlp_img_idx = cp.empty((_nimgs,s_nbas,s_nbas), dtype=np.int32)
         ovlp_img_counts = cp.zeros((sup_ncells,p_nbas,sup_ncells,p_nbas), dtype=np.int32)
         err = libpbc.overlap_img_counts(
             ctypes.cast(ovlp_img_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(ovlp_img_counts.data.ptr, ctypes.c_void_p),
+            ctypes.cast(p2c_mapping.data.ptr, ctypes.c_void_p),
             ctypes.byref(int3c2e_envs),
             ctypes.cast(exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p))
+        cp.cuda.stream.Stream.null.synchronize()
         if err != 0:
             raise RuntimeError('overlap_img_counts failed')
         log.timer_debug1('ovlp_img_counts', *cput0)
-
-        log.debug1('prim_l_counts %s', self.cell0_prim_l_counts)
-        log.debug1('ctr_l_counts %s', self.cell0_ctr_l_counts)
-        c_shell_counts = self.cell0_ctr_l_counts
-        p_shell_l_offsets = np.append(0, np.cumsum(self.cell0_prim_l_counts))
-        p2c_mapping = [cp.asarray(x) for x in self.prim_to_ctr_mapping]
 
         def gen_img_idx(li, lj):
             t0 = log.init_timer()
@@ -383,9 +392,13 @@ class SRInt3c2eOpt:
 
             counts = ovlp_img_counts[:,ish0:ish1,:,jsh0:jsh1].ravel()
             bas_ij = cp.where(counts > 0)[0]
+            ovlp_npairs = len(bas_ij)
+            if ovlp_npairs == 0:
+                img_idx = offsets = bas_ij = pair_mapping = c_pair_idx = np.zeros(0, dtype=np.int32)
+                return img_idx, offsets, bas_ij, pair_mapping, c_pair_idx
+
             counts = counts[bas_ij]
             counts_sorting = (-counts).argsort()
-            npairs = len(counts)
             bas_ij = bas_ij[counts_sorting]
             nimgs_J = int(counts[counts_sorting[0]])
             ish, jsh = cp.unravel_index(
@@ -402,13 +415,13 @@ class SRInt3c2eOpt:
                 # However, when cell is small, more images may involved in
                 # double lattice sum.
                 nimgs_IJ = nimgs + nimgs_J**2
-            img_idx_sparse = cp.empty((nimgs_IJ,npairs), dtype=np.int32)
-            img_counts = cp.zeros(npairs, dtype=np.int32)
+            img_idx_sparse = cp.empty((nimgs_IJ,ovlp_npairs), dtype=np.int32)
+            img_counts = cp.zeros(ovlp_npairs, dtype=np.int32)
             err = libpbc.sr_int3c2e_img_idx_sparse(
                 ctypes.cast(img_idx_sparse.data.ptr, ctypes.c_void_p),
                 ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(npairs),
+                ctypes.c_int(ovlp_npairs),
                 ctypes.cast(ovlp_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(ovlp_img_counts.data.ptr, ctypes.c_void_p),
                 ctypes.byref(int3c2e_envs),
@@ -419,11 +432,14 @@ class SRInt3c2eOpt:
             if err != 0:
                 raise RuntimeError('sr_int3c2e_img_idx failed')
 
-            img_counts = img_counts[img_counts > 0]
-            counts_sorting = (-img_counts).argsort()
+            npairs = int(cp.count_nonzero(img_counts))
+            if npairs == 0:
+                img_idx = offsets = bas_ij = pair_mapping = c_pair_idx = np.zeros(0, dtype=np.int32)
+                return img_idx, offsets, bas_ij, pair_mapping, c_pair_idx
+            counts_sorting = (-img_counts.ravel()).argsort()[:npairs]
+            counts_sorting = cp.asarray(counts_sorting, dtype=np.int32)
             bas_ij = bas_ij[counts_sorting]
             img_counts = img_counts[counts_sorting]
-            npairs = len(bas_ij)
             offsets = cp.empty(npairs+1, dtype=np.int32)
             cp.cumsum(img_counts, out=offsets[1:])
             offsets[0] = 0
@@ -433,8 +449,8 @@ class SRInt3c2eOpt:
                 ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(offsets.data.ptr, ctypes.c_void_p),
                 ctypes.cast(img_idx_sparse.data.ptr, ctypes.c_void_p),
-                ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(npairs))
+                ctypes.cast(counts_sorting.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(npairs), ctypes.c_int(ovlp_npairs))
             if err != 0:
                 raise RuntimeError('conc_img_idx failed')
             log.debug1('ovlp nimgs=%d pairs=%d tot_imgs=%d. '
@@ -448,8 +464,8 @@ class SRInt3c2eOpt:
                 bas_ij, (sup_ncells, p_nbas, sup_ncells, p_nbas))
             i -= ish0
             j -= jsh0
-            ic = p2c_mapping[li][i]
-            jc = p2c_mapping[lj][j]
+            ic = p2c_mapping_lookup[li][i]
+            jc = p2c_mapping_lookup[lj][j]
             I %= bvk_ncells
             J %= bvk_ncells
             reduced_pair_idx = cp.ravel_multi_index(
@@ -499,6 +515,9 @@ class SRInt3c2eOpt:
         aux_loc = auxcell.ao_loc
         naux = aux_loc[auxcell.nbas]
         sup_ncells = supcell.nbas // pcell.nbas
+        _atm_cpu = self._atm_cpu
+        _bas_cpu = self._bas_cpu
+        _env_cpu = self._env_cpu
 
         l_counts = self.cell0_prim_l_counts
         p_shell_l_offsets = np.append(0, np.cumsum(l_counts))
@@ -508,7 +527,6 @@ class SRInt3c2eOpt:
         nfcart = (uniq_l + 1) * (uniq_l + 2) // 2
         init_constant(pcell)
         kern = libpbc.fill_int3c2e
-        cp.cuda.Stream.null.synchronize()
         t1 = log.timer_debug1('initialize int3c2e_kernel', *cput0)
         timing_collection = {}
         kern_counts = 0
@@ -525,12 +543,14 @@ class SRInt3c2eOpt:
             # Note the storage order for ij_pair: i takes the smaller stride.
             n_ctr_pairs = len(c_pair_idx)
             n_prim_pairs = len(bas_ij_idx)
+            if n_prim_pairs == 0:
+                continue
             # eri3c is sorted as (naux, nfj, nfi, n_ctr_pairs)
             eri3c = cp.zeros((naux, nfij*n_ctr_pairs))
-            t1 = log.timer_debug1('gen_img_idx', *t1)
 
             for k, lk in enumerate(self.uniq_l_ctr_aux[:,0]):
                 ksh0, ksh1 = l_ctr_aux_offsets[k:k+2]
+                shls_slice = ish0, ish1, jsh0, jsh1, ksh0, ksh1
                 k0 = aux_loc[ksh0]
                 lll = f'({ANGULAR[li]}{ANGULAR[lj]}|{ANGULAR[lk]})'
                 scheme = int3c2e_scheme(li, lj, lk)
@@ -539,15 +559,16 @@ class SRInt3c2eOpt:
                     ctypes.cast(eri3c[k0:].data.ptr, ctypes.c_void_p),
                     ctypes.byref(self.int3c2e_envs),
                     (ctypes.c_int*3)(*scheme),
+                    (ctypes.c_int*6)(*shls_slice),
                     ctypes.c_int(sup_ncells), ctypes.c_int(naux),
                     ctypes.c_int(n_prim_pairs), ctypes.c_int(n_ctr_pairs),
-                    ctypes.c_int(li), ctypes.c_int(lj),
-                    ctypes.c_int(ksh0), ctypes.c_int(ksh1-ksh0),
-                    auxcell._bas.ctypes, auxcell._env.ctypes,
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pair_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p))
+                    ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+                    _atm_cpu.ctypes, ctypes.c_int(supcell.natm),
+                    _bas_cpu.ctypes, ctypes.c_int(supcell.nbas), _env_cpu.ctypes)
+
                 if err != 0:
                     raise RuntimeError(f'fill_int3c2e kernel for {lll} failed')
                 if log.verbose >= logger.DEBUG1:

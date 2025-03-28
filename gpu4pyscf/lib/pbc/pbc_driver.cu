@@ -94,13 +94,20 @@ int ft_aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_ncells,
     return 0;
 }
 
-int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs, int *scheme,
+int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs, int *scheme, int *shls_slice,
                  int bvk_ncells, int naux, int n_prim_pairs, int n_ctr_pairs,
-                 int li, int lj, int ksh0, int nksh, int *aux_bas, double *env,
-                 int *bas_ij_idx, int *pair_mapping, int *img_idx, int *img_offsets)
+                 int *bas_ij_idx, int *pair_mapping, int *img_idx, int *img_offsets,
+                 int *atm, int natm, int *bas, int nbas, double *env)
 {
-    uint8_t lk = aux_bas[ANG_OF + ksh0*BAS_SLOTS];
-    uint8_t kprim = aux_bas[NPRIM_OF + ksh0*BAS_SLOTS];
+    uint16_t ish0 = shls_slice[0];
+    uint16_t jsh0 = shls_slice[2];
+    uint16_t ksh0 = shls_slice[4] + nbas;
+    uint16_t ksh1 = shls_slice[5] + nbas;
+    uint16_t nksh = ksh1 - ksh0;
+    uint8_t li = bas[ANG_OF + ish0*BAS_SLOTS];
+    uint8_t lj = bas[ANG_OF + jsh0*BAS_SLOTS];
+    uint8_t lk = bas[ANG_OF + ksh0*BAS_SLOTS];
+    uint8_t kprim = bas[NPRIM_OF + ksh0*BAS_SLOTS];
     uint8_t nfi = (li+1)*(li+2)/2;
     uint8_t nfj = (lj+1)*(lj+2)/2;
     uint8_t nfk = (lk+1)*(lk+2)/2;
