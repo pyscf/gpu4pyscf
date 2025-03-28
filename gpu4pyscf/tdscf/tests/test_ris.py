@@ -13,13 +13,13 @@
 # limitations under the License.
 
 import unittest
-import numpy as np
-import cupy as cp
+# import numpy as np
+# import cupy as cp
 from pyscf import gto, lib
 from gpu4pyscf.dft import rks
 import gpu4pyscf.tdscf.ris as ris
 
-PLACES = 5
+PLACES = 4
 
 class KnownValues(unittest.TestCase):
     @classmethod

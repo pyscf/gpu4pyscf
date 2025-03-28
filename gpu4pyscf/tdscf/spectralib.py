@@ -95,7 +95,7 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
         '''
         2* because alpha and beta spin
         '''
-        oscillator_strength = 2/3 * energies * cp.sum(2 * trans_dipole_moment**2, axis=1)
+        fosc = 2/3 * energies * cp.sum(2 * trans_dipole_moment**2, axis=1)
 
     if isinstance(Y, cp.ndarray):
         trans_magnetic_moment = -cp.dot((X*2**0.5 - Y*2**0.5), mdpol.T )
@@ -105,7 +105,7 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
     rotatory_strength = 500*cp.sum(2*trans_dipole_moment * trans_magnetic_moment, axis=1)/2
 
     if spectra:
-        entry = [eV, nm, cm_1, oscillator_strength, rotatory_strength]
+        entry = [eV, nm, cm_1, fosc, rotatory_strength]
         data = cp.zeros((eV.shape[0],len(entry)))
         for i in range(len(entry)):
             data[:,i] = entry[i]
@@ -141,7 +141,7 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
             with open(filename, 'w') as f:
                 
                 for state in range(n_state):
-                    print(f" Excited State{state+1:4d}:      Singlet-A      {eV[state]:>.4f} eV  {nm[state]:>.2f} nm  f={oscillator_strength[state]:>.4f}   <S**2>=0.000")
+                    print(f" Excited State{state+1:4d}:      Singlet-A      {eV[state]:>.4f} eV  {nm[state]:>.2f} nm  f={fosc[state]:>.4f}   <S**2>=0.000")
                     f.write(f" Excited State{state+1:4d}   1    {eV[state]:>.4f} \n")
                     results = print_coeff(state, X, '->', n_occ=n_occ, n_vir=n_vir, print_threshold=print_threshold)
 
@@ -156,6 +156,6 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
 
 
 
-    return oscillator_strength, rotatory_strength
+    return fosc, rotatory_strength
 
 

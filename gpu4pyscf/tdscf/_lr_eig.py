@@ -1429,7 +1429,7 @@ def Davidson_Casida(matrix_vector_product,
 
         max_norm = cp.max(r_norms)
 
-        log.info(f'iter: {ii+1:<3d}, max|R|: {max_norm:<10.2e} new_vectors: {size_new - size_old}, subspace_size = {sub_A.shape[0]},  MVP: {MV_end - MV_start:.1f} seconds')
+        log.info(f'iter: {ii+1:<3d}, max|R|: {max_norm:<10.2e} subspace_size = {sub_A.shape[0]}, MVP: {MV_end - MV_start:.1f} seconds')
 
         if max_norm < conv_tol or ii == (max_iter -1):
             # math_helper.show_memory_info('After last Davidson iteration')

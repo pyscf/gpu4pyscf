@@ -423,7 +423,6 @@ def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, m, X_new, Y_new, double=Fals
     m: the amount of vectors that already on V or W
     nvec: amount of new vectors intended to put in the V and W
     '''
-    VWGSstart = time.time()
     nvec = X_new.shape[0]
 
 

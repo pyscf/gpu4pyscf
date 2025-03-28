@@ -236,7 +236,9 @@ def get_int3c2e(mol, auxmol, aosym=True, omega=None):
     int3c = intopt.unsort_orbitals(int3c, aux_axis=[0], axis=[1,2])
     return int3c
 
-def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c, calc='JK', aosym=True, omega=None, alpha=None, beta=None, group_size=BLKSIZE, group_size_aux=AUXBLKSIZE):
+def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c, 
+                                calc='JK', aosym=True, omega=None, alpha=None, beta=None, 
+                                group_size=BLKSIZE, group_size_aux=AUXBLKSIZE):
     """
     (3c2e_{Puv}, C_{up}, C_{vq} -> Ppq)。
 
