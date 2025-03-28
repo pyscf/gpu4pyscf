@@ -30,6 +30,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.gto.mole import cart2sph_by_l
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
+#from gpu4pyscf.pbc.df.int3c2e import libpbc
 from gpu4pyscf.pbc.df.fft import get_SI, _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
@@ -834,6 +835,49 @@ def _repeat(a, repeats):
     '''repeats vertically. For 2D array, like np.vstack([a]*repeats)'''
     ap = np.repeat(a[np.newaxis], repeats, axis=0)
     return ap.reshape(-1, *a.shape[1:])
+
+#def count_ovlp_img_idx(cell, Ls, cutoff=None):
+#    exps, cs = extract_pgto_params(cell, 'diffused')
+#    exps = cp.asarray(exps, dtype=np.float32)
+#    cs = cp.asarray(cs, dtype=np.float32)
+#    log_cs = cp.log(abs(cs))
+#
+#    if cutoff is None:
+#        ls = cp.asarray(cell._bas[:,ANG_OF])
+#        r2 = cp.log(cs**2 / cell.precision * 10**ls) / exps
+#        idx = r2.argmax()
+#        lsum = ls[idx] * 2 + 1
+#        vol = cell.vol
+#        rcut = cell.rcut
+#        rad = vol**(-1./3) * rcut + 1
+#        surface = 4*np.pi * rad**2
+#        lattice_sum_factor = 2*np.pi*rcut*lsum/(vol*exps[idx]) + surface
+#        cutoff = cell.precision / lattice_sum_factor
+#    log_cutoff = math.log(cutoff)
+#
+#    nbas = cell.nbas
+#    _atm = cp.array(cell._atm, dtype=np.int32)
+#    _bas = cp.array(cell._bas, dtype=np.int32)
+#    _env = cp.array(cell._env, dtype=np.float64)
+#    Ls = cp.asarray(Ls, order='C')
+#    nimgs = len(Ls)
+#    int3c2e_envs = Int3c2eEnvVars(
+#        cell.natm, nbas, 1, nimgs,
+#        _atm.data.ptr, _bas.data.ptr, _env.data.ptr, 0,
+#        Ls.data.ptr, log_cutoff,
+#    )
+#
+#    img_idx = cp.empty((nimgs,nbas,nbas), dtype=np.int32)
+#    img_counts = cp.zeros((nbas,nbas), dtype=np.int32)
+#    err = libpbc.overlap_img_counts(
+#        ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+#        ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
+#        ctypes.byref(int3c2e_envs),
+#        ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+#        ctypes.cast(log_cs.data.ptr, ctypes.c_void_p))
+#    if err != 0:
+#        raise RuntimeError('overlap_img_counts failed')
+#    return img_idx, img_counts
 
 @dataclass
 class Task:
