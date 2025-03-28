@@ -1,10 +1,22 @@
-#!/usr/bin/python
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-import numpy as np
+# import numpy as np
 import cupy as cp
 import scipy
 import time
-# import os, psutil
+
 cp.set_printoptions(linewidth=250, threshold=cp.inf, precision=3)
 
 
@@ -318,7 +330,7 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = False):
     for j in range(nvec):
         vec = vecs[j, :].reshape(1,-1)
         vec = Gram_Schmidt_bvec(V[:count, :], vec)   #single orthonormalize
-        if double == True:
+        if double:
             vec = Gram_Schmidt_bvec(V[:count, :], vec)   #double orthonormalize
         norm = cp.linalg.norm(vec)
         if  norm > 1e-14:
@@ -423,7 +435,7 @@ def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, m, X_new, Y_new, double=Fals
         y_tmp = Y_new[j,:].reshape(1,-1)
 
         x_tmp,y_tmp = VW_Gram_Schmidt(x_tmp, y_tmp, V, W)
-        if double == True:
+        if double:
             # print('double')
             x_tmp,y_tmp = VW_Gram_Schmidt(x_tmp, y_tmp, V, W)
 
@@ -706,18 +718,18 @@ def gen_VW_f_order(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetr
     W_new = W_holder[:,size_old:size_new]
     sub_A_holder[:size_new,size_old:size_new] = cp.dot(V_current.T, W_new)
 
-    if symmetry == True:
+    if symmetry:
         sub_A_holder = block_symmetrize(sub_A_holder,size_old,size_new)
-    elif symmetry == False:
-        if up_triangle == False:
+    elif not symmetry:
+        if not up_triangle:
             '''
-            up_triangle == False means also explicitly compute the lower triangle,
-                                        either equal upper triangle.T or recompute
+            also explicitly compute the lower triangle,
+            either equal upper triangle.T or recompute
             '''
             V_new = V_holder[:,size_old:size_new]
             W_old = W_holder[:,:size_old]
             sub_A_holder[size_old:size_new,:size_old] = cp.dot(V_new.T, W_old)
-        elif up_triangle == True:
+        elif up_triangle:
             '''
             otherwise juts let the lower triangle be zeros
             '''
