@@ -49,7 +49,7 @@ class CDIIS(lib.diis.DIIS):
         errvec = self._sdf_err_vec(s, d, f)
         if self.incore is None:
             mem_avail = get_avail_mem()
-            self.incore = errvec.size*2 * (20+self.space) * 8 < mem_avail
+            self.incore = errvec.nbytes*2 * (20+self.space) < mem_avail
         nao = self.Corth.shape[1]
         errvec = pack_tril(errvec.reshape(-1,nao,nao))
         f_tril = pack_tril(f.reshape(-1,nao,nao))
