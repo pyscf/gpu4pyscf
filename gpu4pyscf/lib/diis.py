@@ -120,6 +120,8 @@ class DIIS(object):
         self._err_vec_touched = False
 
     def _store(self, key, value):
+        if not self.incore and isinstance(value, cupy.ndarray):
+            value = value.get()
         self._buffer[key] = value
 
     def push_err_vec(self, xerr):
