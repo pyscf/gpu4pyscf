@@ -22,6 +22,7 @@ import cupy as cp
 from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
 from gpu4pyscf.lib.cupy_helper import asarray, pack_tril, unpack_tril, get_avail_mem
+from gpu4pyscf import lib
 from gpu4pyscf.scf import diis, jk, hf
 from gpu4pyscf.lib import logger
 
@@ -71,9 +72,14 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
             mf.converged = scf_conv
         return e_tot
 
-    mf_diis = mf.DIIS(mf, mf.diis_file)
-    mf_diis.space = mf.diis_space
-    mf_diis.rollback = mf.diis_space_rollback
+    if isinstance(mf.diis, lib.diis.DIIS):
+        mf_diis = mf.diis
+    elif mf.diis:
+        mf_diis = mf.DIIS(mf, mf.diis_file)
+        mf_diis.space = mf.diis_space
+        mf_diis.rollback = mf.diis_space_rollback
+    else:
+        mf_diis = None
 
     dump_chk = dump_chk and mf.chkfile is not None
     if dump_chk:

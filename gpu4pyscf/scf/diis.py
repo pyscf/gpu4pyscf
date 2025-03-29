@@ -38,12 +38,13 @@ from gpu4pyscf.lib.cupy_helper import (
 # error vector = SDF-FDS
 # error vector = F_ai ~ (S-SDS)*S^{-1}FDS = FDS - SDFDS ~ FDS-SDF in converge
 class CDIIS(lib.diis.DIIS):
+    incore = None
+
     def __init__(self, mf=None, filename=None):
         lib.diis.DIIS.__init__(self, mf, filename)
         self.rollback = False
         self.Corth = None
         self.space = 8
-        self.incore = None
 
     def update(self, s, d, f, *args, **kwargs):
         errvec = self._sdf_err_vec(s, d, f)
