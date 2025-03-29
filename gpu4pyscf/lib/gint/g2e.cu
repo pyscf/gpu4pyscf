@@ -426,7 +426,7 @@ static void GINTg0_2e_2d4d(GINTEnvVars envs, double* __restrict__ g, double norm
 }
 
 template <int NROOTS> __device__
-static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, 
+static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
     const double norm, const int ish, const int jsh, const int ksh,
     const int prim_ij, const int prim_kl)
 {
@@ -472,7 +472,7 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
     double* __restrict__ bas_x = c_bpcache.bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
-    
+
     const double xi = bas_x[ish];
     const double yi = bas_y[ish];
     const double zi = bas_z[ish];
@@ -483,7 +483,7 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
     int nmax = envs.li_ceil + envs.lj_ceil;
     int mmax = envs.lk_ceil + envs.ll_ceil;
     const int ijmin = envs.ijmin;
-    
+
     const int dm = envs.stride_klmax;
     const int dn = envs.stride_ijmax;
     const int di = envs.stride_ijmax;
@@ -741,8 +741,8 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
 
 
 template <int LI, int LJ, int LK> __device__
-static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g, 
-    const double norm, const int ish, const int jsh, const int ksh, 
+static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
+    const double norm, const int ish, const int jsh, const int ksh,
     const int prim_ij, const int prim_kl)
 {
     double* __restrict__ a12 = c_bpcache.a12;
@@ -773,7 +773,7 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
     const double ekl = e12[prim_kl];
     const double fac = eij * ekl * sqrt(a0 / (a1 * a1 * a1));
     const double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-    
+
     constexpr int NROOTS = (LI + LJ + LK)/2 + 1;
     double uw[NROOTS*2];
     GINTrys_root<NROOTS>(x, uw);
@@ -789,7 +789,7 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
     double* __restrict__ bas_x = c_bpcache.bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
-    
+
     const double xi = bas_x[ish];
     const double yi = bas_y[ish];
     const double zi = bas_z[ish];
@@ -812,7 +812,7 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
     constexpr int dn = NROOTS;//envs.stride_ijmax;
 
     constexpr int NMAX = LI + LJ;
-    constexpr int MMAX = LK; 
+    constexpr int MMAX = LK;
 
     for (int i = 0; i < NROOTS; ++i) {
         gx[i] = norm;
@@ -1094,11 +1094,11 @@ static void GINTnabla1i_2e(GINTEnvVars envs, double *f, double *g, const double 
     //double *p2z = gz + di;
 
     double g0, g1, g2;
-    
+
     for (int k = 0; k <= lk; k++)
     for (int j = 0; j <= lj; j++) {
         for (n = 0; n < NROOTS; n++){
-            ptr = dj * j + dk * k + n; 
+            ptr = dj * j + dk * k + n;
             // gx
             g0 = gx[ptr];
             g1 = gx[ptr + di];
@@ -1173,13 +1173,13 @@ static void GINTnabla1i_2e(GINTEnvVars envs, double *f, double *g, const double 
     //double *p2x = gx + di;
     //double *p2y = gy + di;
     //double *p2z = gz + di;
-    
+
     double gi[LI+2];
-    
+
     for (int k = 0; k <= LK; k++)
     for (int j = 0; j <= LJ; j++) {
         for (int n = 0; n < NROOTS; n++){
-            int ptr = dj * j + dk * k + n; 
+            int ptr = dj * j + dk * k + n;
             // gx
 #pragma unroll
             for (int i = 0; i <= LI+1; i++){
@@ -1253,13 +1253,13 @@ static void GINTnabla1j_2e(GINTEnvVars envs, double *f, double *g, const double 
     double * __restrict__ fx = f;
     double * __restrict__ fy = f + envs.g_size;
     double * __restrict__ fz = f + envs.g_size * 2;
-    
+
     double g0, g1, g2;
 
     for (int k = 0; k <= lk; k++){
     for (int i = 0; i <= li; i++){
         for (int n = 0; n < NROOTS; n++){
-            int ptr = di * i + dk * k + n; 
+            int ptr = di * i + dk * k + n;
             // gx
             g0 = gx[ptr];
             g1 = gx[ptr + dj];
@@ -1350,7 +1350,7 @@ static void GINTnabla1j_2e(GINTEnvVars envs, double *f, double *g, const double 
     for (int k = 0; k <= LK; k++){
     for (int i = 0; i <= LI; i++){
         for (int n = 0; n < NROOTS; n++){
-            int ptr = di * i + dk * k + n; 
+            int ptr = di * i + dk * k + n;
             // gx
 #pragma unroll
             for (int j = 0; j <= LJ+1; j++){
@@ -1413,7 +1413,7 @@ static void GINTnabla1k_2e(GINTEnvVars envs, double *f, double *g, const double 
     for (int j = 0; j <= lj; j++){
     for (int i = 0; i <= li; i++){
         for (int n = 0; n < NROOTS; n++){
-            int ptr = di * i + dj * j + n; 
+            int ptr = di * i + dj * j + n;
             // gx
             g0 = gx[ptr];
             g1 = gx[ptr + dk];
@@ -1499,7 +1499,7 @@ static void GINTnabla1k_2e(GINTEnvVars envs, double *f, double *g, const double 
     for (int j = 0; j <= LJ; j++){
     for (int i = 0; i <= LI; i++){
         for (int n = 0; n < NROOTS; n++){
-            int ptr = di * i + dj * j + n; 
+            int ptr = di * i + dj * j + n;
             // gx
 #pragma unroll
             for (int k = 0; k <= LK+1; k++){

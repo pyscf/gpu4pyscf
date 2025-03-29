@@ -45,7 +45,7 @@ static int GINTrun_tasks_int3c2e_ip1_jk(JKMatrix *jk, BasisProdOffsets *offsets,
     int lj = envs->j_l;
     int lk = envs->k_l;
     int type_ijk = li * 100 + lj * 10 + lk;
-    
+
     switch (type_ijk) {
         case   0: GINTint3c2e_ip1_jk_kernel000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
         // li+lj+lk=1

@@ -424,7 +424,6 @@ def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None, st
     fn = getattr(libgvhf, 'GINTbuild_int3c2e_' + ip_type + '_jk')
     nao = intopt._sorted_mol.nao
     n_dm = 1
-
     cp_kl_id = cp_aux_id + len(intopt.log_qs)
     log_q_kl = intopt.aux_log_qs[cp_aux_id]
 
