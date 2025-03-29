@@ -93,8 +93,10 @@ class DIIS(object):
     E_5 = -1.100153764878
     E_6 = -1.100153764878
     '''
-    def __init__(self, dev=None, filename=None,
-                 incore=getattr(__config__, 'lib_diis_DIIS_incore', True)):
+
+    incore = getattr(__config__, 'lib_diis_DIIS_incore', True)
+
+    def __init__(self, dev=None, filename=None, incore=None):
         '''
         use incore by default
         '''
@@ -107,7 +109,8 @@ class DIIS(object):
             self.stdout = sys.stdout
         self.space = 6
         self.min_space = 1
-        self.incore = incore # Whehter stored in GPU memory
+        if incore is not None:
+            self.incore = incore # Whehter stored in GPU memory
 
         # data stored in GPU memory or host memory, not on disk
         assert filename is None
@@ -120,6 +123,8 @@ class DIIS(object):
         self._err_vec_touched = False
 
     def _store(self, key, value):
+        if not self.incore and isinstance(value, cupy.ndarray):
+            value = value.get()
         self._buffer[key] = value
 
     def push_err_vec(self, xerr):
@@ -203,12 +208,13 @@ class DIIS(object):
         dt = None
 
         if self._xprev is None:
-            xnew = self.extrapolate(nd)
+            xnew = cupy.asarray(self.extrapolate(nd))
         else:
             self._xprev = None # release memory first
-            self._xprev = xnew = self.extrapolate(nd)
+            xnew = self.extrapolate(nd)
             self._store('xprev', xnew)
-        return cupy.asarray(xnew.reshape(x.shape))
+            self._xprev = xnew = cupy.asarray(xnew)
+        return xnew.reshape(x.shape)
 
     def extrapolate(self, nd=None):
         if nd is None:

@@ -27,10 +27,7 @@ import pyscf.scf.diis as cpu_diis
 import gpu4pyscf.lib as lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, eigh, sandwich_dot, pack_tril, unpack_tril)
-from gpu4pyscf.__config__ import props as gpu_specs
-
-tot_mem = gpu_specs['totalGlobalMem']
+    contract, eigh, sandwich_dot, pack_tril, unpack_tril, get_avail_mem)
 
 # J. Mol. Struct. 114, 31-34 (1984); DOI:10.1016/S0022-2860(84)87198-7
 # PCCP, 4, 11 (2002); DOI:10.1039/B108658H
@@ -41,17 +38,19 @@ tot_mem = gpu_specs['totalGlobalMem']
 # error vector = SDF-FDS
 # error vector = F_ai ~ (S-SDS)*S^{-1}FDS = FDS - SDFDS ~ FDS-SDF in converge
 class CDIIS(lib.diis.DIIS):
+    incore = None
+
     def __init__(self, mf=None, filename=None):
         lib.diis.DIIS.__init__(self, mf, filename)
         self.rollback = False
         self.Corth = None
         self.space = 8
-        self.incore = None
 
     def update(self, s, d, f, *args, **kwargs):
         errvec = self._sdf_err_vec(s, d, f)
         if self.incore is None:
-            self.incore = errvec.size < tot_mem // (8*(self.space*2+40))
+            mem_avail = get_avail_mem()
+            self.incore = errvec.nbytes*2 * (20+self.space) < mem_avail
         nao = self.Corth.shape[1]
         errvec = pack_tril(errvec.reshape(-1,nao,nao))
         f_tril = pack_tril(f.reshape(-1,nao,nao))
