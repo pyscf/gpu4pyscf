@@ -40,7 +40,6 @@ void GINTfill_int3c2e_ipip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOff
     const int jsh = bas_pair2ket[bas_ij];
     const int ksh = bas_pair2bra[bas_kl];
 
-    double* __restrict__ exp_bra = c_bpcache.a1;
     constexpr int LK_CEIL = LK + 2;
     constexpr int NROOTS = (LI+LJ+LK_CEIL)/2 + 1;
     constexpr int GSIZE = 3 * NROOTS * (LI+1)*(LJ+1)*(LK_CEIL+1);
@@ -61,7 +60,7 @@ void GINTfill_int3c2e_ipip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOff
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
         for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
             GINTg0_int3c2e<LI, LJ, LK_CEIL>(envs, g0, norm, as_ish, as_jsh, ksh, ij, kl);
-            const double ak2 = -2.0*exp_bra[kl];
+            const double ak2 = -2.0*c_bpcache.a1[kl];
             GINTnabla1k_2e<LI, LJ, LK+1, NROOTS>(envs, g1, g0, ak2);
             //GINTnabla1k_2e<LI, LJ, LK,   NROOTS>(envs, g2, g0, ak2);
             GINTnabla1k_2e<LI, LJ, LK,   NROOTS>(envs, g3, g1, ak2);
@@ -69,6 +68,112 @@ void GINTfill_int3c2e_ipip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOff
             GINTgout3c2e_ipip<LI,LJ,LK,NROOTS>(envs, gout, g0, g1, g1, g3);
     } }
     GINTwrite_int3c2e_ipip(eri, gout, as_ish, as_jsh, ksh);
+}
+
+template <int NROOTS> __device__
+static void GINTwrite_int3c2e_ipip2_direct(GINTEnvVars envs, ERITensor eri, 
+    double* __restrict__ g0, double ak2,
+    const int ish, const int jsh, const int ksh)
+{
+    int *ao_loc = c_bpcache.ao_loc;
+    const size_t jstride = eri.stride_j;
+    const size_t kstride = eri.stride_k;
+    const size_t lstride = eri.stride_l;
+    const int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
+    const int i1 = ao_loc[ish+1] - eri.ao_offsets_i;
+    const int j0 = ao_loc[jsh  ] - eri.ao_offsets_j;
+    const int j1 = ao_loc[jsh+1] - eri.ao_offsets_j;
+    const int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
+    const int k1 = ao_loc[ksh+1] - eri.ao_offsets_k;
+
+    int * __restrict__ c_idy = c_idx + TOT_NF;
+    int * __restrict__ c_idz = c_idx + TOT_NF * 2;
+
+    const int di = envs.stride_i;
+    const int dj = envs.stride_j;
+    const int dk = envs.stride_k;
+    const int g_size = envs.g_size;
+
+    const int li = envs.i_l;
+    const int lj = envs.j_l;
+    const int lk = envs.k_l;
+
+    for (int k = k0; k < k1; ++k) {
+    for (int j = j0; j < j1; ++j) {
+    for (int i = i0; i < i1; ++i) {
+        const int loc_k = c_l_locs[lk] + (k-k0);
+        const int loc_j = c_l_locs[lj] + (j-j0);
+        const int loc_i = c_l_locs[li] + (i-i0);
+
+        int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * c_idx[loc_i];
+        int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
+        int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * c_idz[loc_i] + g_size * 2;
+
+        int k_idx = c_idx[loc_k];
+        int k_idy = c_idy[loc_k];
+        int k_idz = c_idz[loc_k];
+
+        double eri_xx = 0;
+        double eri_xy = 0;
+        double eri_xz = 0;
+        double eri_yx = 0;
+        double eri_yy = 0;
+        double eri_yz = 0;
+        double eri_zx = 0;
+        double eri_zy = 0;
+        double eri_zz = 0;
+        for (int ir = 0; ir < NROOTS; ++ir, ++ix, ++iy, ++iz){
+            double g0_x = g0[ix];
+            double g0_y = g0[iy];
+            double g0_z = g0[iz];
+
+            // g2
+            double g2_x = ak2*g0[ix+dk];
+            double g2_y = ak2*g0[iy+dk];
+            double g2_z = ak2*g0[iz+dk];
+            g2_x += k_idx>0 ? k_idx*g0[ix-dk] : 0.0;
+            g2_y += k_idy>0 ? k_idy*g0[iy-dk] : 0.0;
+            g2_z += k_idz>0 ? k_idz*g0[iz-dk] : 0.0;
+
+            // g3 
+            double g3_x = ak2*g0[ix+2*dk];
+            double g3_y = ak2*g0[iy+2*dk];
+            double g3_z = ak2*g0[iz+2*dk];
+            g3_x += (k_idx+1)*g0[ix];
+            g3_y += (k_idy+1)*g0[iy];
+            g3_z += (k_idz+1)*g0[iz];
+            g3_x *= ak2;
+            g3_y *= ak2;
+            g3_z *= ak2;
+            if (k_idx > 0) { g3_x += ak2 * k_idx * g0[ix]; }
+            if (k_idy > 0) { g3_y += ak2 * k_idy * g0[iy]; }
+            if (k_idz > 0) { g3_z += ak2 * k_idz * g0[iz]; }
+            if (k_idx > 1) { g3_x += k_idx * (k_idx-1) * g0[ix-2*dk]; }
+            if (k_idy > 1) { g3_y += k_idy * (k_idy-1) * g0[iy-2*dk]; }
+            if (k_idz > 1) { g3_z += k_idz * (k_idz-1) * g0[iz-2*dk]; }
+
+            eri_xx += g3_x * g0_y * g0_z;
+            eri_xy += g2_x * g2_y * g0_z;
+            eri_xz += g2_x * g0_y * g2_z;
+            eri_yx += g2_x * g2_y * g0_z;
+            eri_yy += g0_x * g3_y * g0_z;
+            eri_yz += g0_x * g2_y * g2_z;
+            eri_zx += g2_x * g0_y * g2_z;
+            eri_zy += g0_x * g2_y * g2_z;
+            eri_zz += g0_x * g0_y * g3_z;
+        }
+        int off = i + jstride*j + kstride*k;
+        double *eri_data = eri.data + off;
+        eri_data[0 * lstride] += eri_xx;
+        eri_data[1 * lstride] += eri_xy;
+        eri_data[2 * lstride] += eri_xz;
+        eri_data[3 * lstride] += eri_yx;
+        eri_data[4 * lstride] += eri_yy;
+        eri_data[5 * lstride] += eri_yz;
+        eri_data[6 * lstride] += eri_zx;
+        eri_data[7 * lstride] += eri_zy;
+        eri_data[8 * lstride] += eri_zz;
+    }}}
 }
 
 // General version
@@ -97,11 +202,11 @@ void GINTfill_int3c2e_ipip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOff
     const int jsh = bas_pair2ket[bas_ij];
     const int ksh = bas_pair2bra[bas_kl];
 
-    double g0[3*GSIZE];
-    double * __restrict__ g1 = g0 + GSIZE;
+    double g0[GSIZE];
+    //double * __restrict__ g1 = g0 + GSIZE;
     //double *g2 = g1 + GSIZE;
-    double * __restrict__ g3 = g1 + GSIZE;
-    double* __restrict__ exp_bra = c_bpcache.a1;
+    //double * __restrict__ g3 = g1 + GSIZE;
+    //double* __restrict__ exp_bra = c_bpcache.a1;
     
     const int as_ish = envs.ibase ? ish: jsh; 
     const int as_jsh = envs.ibase ? jsh: ish; 
@@ -109,11 +214,11 @@ void GINTfill_int3c2e_ipip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOff
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
         for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
             GINTg0_int3c2e<NROOTS>(envs, g0, norm, as_ish, as_jsh, ksh, ij, kl);
-            const double ak2 = -2.0*exp_bra[kl];
-            GINTnabla1k_2e<NROOTS>(envs, g1, g0, ak2, envs.i_l,   envs.j_l, envs.k_l+1);
+            const double ak2 = -2.0*c_bpcache.a1[kl];
+            //GINTnabla1k_2e<NROOTS>(envs, g1, g0, ak2, envs.i_l,   envs.j_l, envs.k_l+1);
             //GINTnabla1k_2e<NROOTS>(envs, g2, g0, ak2, envs.i_l,   envs.j_l, envs.k_l);
-            GINTnabla1k_2e<NROOTS>(envs, g3, g1, ak2, envs.i_l,   envs.j_l, envs.k_l);
-            GINTwrite_int3c2e_ipip_direct<NROOTS>(envs, eri, g0, g1, g1, g3, ish, jsh, ksh);
+            //GINTnabla1k_2e<NROOTS>(envs, g3, g1, ak2, envs.i_l,   envs.j_l, envs.k_l);
+            GINTwrite_int3c2e_ipip2_direct<NROOTS>(envs, eri, g0, ak2, ish, jsh, ksh);
     } }
 }
 

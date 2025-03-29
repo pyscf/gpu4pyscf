@@ -319,18 +319,18 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
             double sy = 0.0;
             double sz = 0.0;
 #pragma unroll
-            for (int ir = 0; ir < NROOTS; ++ir){
-                double gx = g[ix+ir];
-                double gy = g[iy+ir];
-                double gz = g[iz+ir];
+            for (int ir = 0; ir < NROOTS; ++ir, ++ix, ++iy, ++iz){
+                double gx = g[ix];
+                double gy = g[iy];
+                double gz = g[iz];
 
-                double fx = ak2*g[ix+ir+dk];
-                double fy = ak2*g[iy+ir+dk];
-                double fz = ak2*g[iz+ir+dk];
+                double fx = ak2*g[ix+dk];
+                double fy = ak2*g[iy+dk];
+                double fz = ak2*g[iz+dk];
 
-                fx += k_idx>0 ? k_idx*g[ix+ir-dk] : 0.0;
-                fy += k_idy>0 ? k_idy*g[iy+ir-dk] : 0.0;
-                fz += k_idz>0 ? k_idz*g[iz+ir-dk] : 0.0;
+                fx += k_idx>0 ? k_idx*g[ix-dk] : 0.0;
+                fy += k_idy>0 ? k_idy*g[iy-dk] : 0.0;
+                fz += k_idz>0 ? k_idz*g[iz-dk] : 0.0;
 
                 sx += fx * gy * gz;
                 sy += gx * fy * gz;
