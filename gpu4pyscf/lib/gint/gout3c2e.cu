@@ -225,7 +225,7 @@ double* __restrict__ g3)
             szy += g0[ix] * g1[iy] * g2[iz];
             szz += g0[ix] * g0[iy] * g3[iz];
         }
-        
+
         gout[9*i + 0] = sxx;
         gout[9*i + 1] = sxy;
         gout[9*i + 2] = sxz;
@@ -478,44 +478,37 @@ static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, double* g,
     int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
     int k1 = ao_loc[ksh+1] - eri.ao_offsets_k;
 
-    double* __restrict__ p_eri;
-
     int *idx = c_idx;
     int *idy = c_idx + TOT_NF;
     int *idz = c_idx + TOT_NF * 2;
 
-    int di = envs.stride_i;
-    int dj = envs.stride_j;
-    int dk = envs.stride_k;
+    const int di = envs.stride_i;
+    const int dj = envs.stride_j;
+    const int dk = envs.stride_k;
     const int g_size = envs.g_size;
 
     const int li = envs.i_l;
     const int lj = envs.j_l;
     const int lk = envs.k_l;
 
-    for (int n = 0, k = k0; k < k1; ++k) {
-        p_eri = eri.data + k * kstride;
+    for (int k = k0; k < k1; ++k) {
+    for (int j = j0; j < j1; ++j) {
+    for (int i = i0; i < i1; ++i) {
+        const int loc_k = c_l_locs[lk] + (k-k0);
+        const int loc_j = c_l_locs[lj] + (j-j0);
+        const int loc_i = c_l_locs[li] + (i-i0);
 
-        for (int j = j0; j < j1; ++j) {
-            for (int i = i0; i < i1; ++i, ++n) {
-                const int loc_k = c_l_locs[lk] + (k-k0);
-                const int loc_j = c_l_locs[lj] + (j-j0);
-                const int loc_i = c_l_locs[li] + (i-i0);
+        const int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+        const int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+        const int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
 
-                int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
-                int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
-                int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
-
-                double eri = 0;
+        double eri_data = 0;
 #pragma unroll
-                for (int ir = 0; ir < NROOTS; ++ir){
-                    eri += g[ix + ir] * g[iy + ir] * g[iz + ir];
-                }
-                int off = i+jstride*j;
-                p_eri[off] += eri;
-            }
+        for (int ir = 0; ir < NROOTS; ++ir){
+            eri_data += g[ix + ir] * g[iy + ir] * g[iz + ir];
         }
-    }
+        eri.data[i + jstride*j + kstride*k] += eri_data;
+    }}}
 }
 
 __device__

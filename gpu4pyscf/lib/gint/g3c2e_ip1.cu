@@ -56,12 +56,11 @@ void GINTfill_int3c2e_ip1_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffse
     const int as_jsh = envs.ibase ? jsh: ish; 
 
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-            GINTg0_int3c2e<LI_CEIL, LJ, LK>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
-            double ai2 = -2.0*exp[ij];
-            GINTnabla1i_2e<LI, LJ, LK, NROOTS>(envs, f, g, ai2);
-            //GINTwrite_int3c2e_ip_direct<LI, LJ, LK>(envs, eri, f, g, ish, jsh, ksh);
-            GINTgout3c2e_ip<LI,LJ,LK,NROOTS>(envs, gout, f, g);
+    for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+        GINTg0_int3c2e<LI_CEIL, LJ, LK>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
+        double ai2 = -2.0*exp[ij];
+        GINTnabla1i_2e<LI, LJ, LK, NROOTS>(envs, f, g, ai2);
+        GINTgout3c2e_ip<LI,LJ,LK,NROOTS>(envs, gout, f, g);
     } }
     GINTwrite_int3c2e_ip(eri, gout, as_ish, as_jsh, ksh);
 }
@@ -103,18 +102,18 @@ static void GINTwrite_int3c2e_ip1_direct(GINTEnvVars envs, ERITensor eri, double
         int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
         int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * c_idz[loc_i] + g_size * 2;
         
-        int i_idx = c_idx[loc_i];
-        int i_idy = c_idy[loc_i];
-        int i_idz = c_idz[loc_i];
+        const int i_idx = c_idx[loc_i];
+        const int i_idy = c_idy[loc_i];
+        const int i_idz = c_idz[loc_i];
 
         double eri_x = 0;
         double eri_y = 0;
         double eri_z = 0;
 #pragma unroll
         for (int ir = 0; ir < NROOTS; ++ir, ++ix, ++iy, ++iz){
-            double gx = g[ix];
-            double gy = g[iy];
-            double gz = g[iz];
+            const double gx = g[ix];
+            const double gy = g[iy];
+            const double gz = g[iz];
             
             double fx = ai2*g[ix+di];
             double fy = ai2*g[iy+di];
@@ -128,7 +127,7 @@ static void GINTwrite_int3c2e_ip1_direct(GINTEnvVars envs, ERITensor eri, double
             eri_y += gx * fy * gz;
             eri_z += gx * gy * fz;
         }
-        int off = i + jstride * j + k * kstride;
+        const int off = i + jstride * j + k * kstride;
         double *eri_data = eri.data + off;
         eri_data[0*lstride] += eri_x;
         eri_data[1*lstride] += eri_y;

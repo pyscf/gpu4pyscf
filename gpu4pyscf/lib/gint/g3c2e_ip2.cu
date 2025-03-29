@@ -103,18 +103,18 @@ static void GINTwrite_int3c2e_ip2_direct(GINTEnvVars envs, ERITensor eri, double
         int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
         int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * c_idz[loc_i] + g_size * 2;
         
-        int k_idx = c_idx[loc_k];
-        int k_idy = c_idy[loc_k];
-        int k_idz = c_idz[loc_k];
+        const int k_idx = c_idx[loc_k];
+        const int k_idy = c_idy[loc_k];
+        const int k_idz = c_idz[loc_k];
 
         double eri_x = 0;
         double eri_y = 0;
         double eri_z = 0;
 #pragma unroll
         for (int ir = 0; ir < NROOTS; ++ir, ++ix, ++iy, ++iz){
-            double gx = g[ix];
-            double gy = g[iy];
-            double gz = g[iz];
+            const double gx = g[ix];
+            const double gy = g[iy];
+            const double gz = g[iz];
 
             double fx = ak2*g[ix+dk];
             double fy = ak2*g[iy+dk];
@@ -129,7 +129,7 @@ static void GINTwrite_int3c2e_ip2_direct(GINTEnvVars envs, ERITensor eri, double
             eri_z += gx * gy * fz;
         }
 
-        int off = i + jstride*j + k*kstride;
+        const int off = i + jstride*j + k*kstride;
         double *eri_data = eri.data + off;
         eri_data[0*lstride] += eri_x;
         eri_data[1*lstride] += eri_y;
@@ -163,19 +163,16 @@ void GINTfill_int3c2e_ip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffse
     const int jsh = bas_pair2ket[bas_ij];
     const int ksh = bas_pair2bra[bas_kl];
     
-    //double* __restrict__ exp = c_bpcache.a1;
     double g[GSIZE];
-    //double * __restrict__ f = g + GSIZE;
 
     const int as_ish = envs.ibase ? ish: jsh; 
     const int as_jsh = envs.ibase ? jsh: ish; 
 
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-            GINTg0_int3c2e<NROOTS>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
-            const double ak2 = -2.0*c_bpcache.a1[kl];
-            //GINTnabla1k_2e<NROOTS>(envs, f, g, ak2, envs.i_l, envs.j_l, envs.k_l);
-            GINTwrite_int3c2e_ip2_direct<NROOTS>(envs, eri, g, ak2, ish, jsh, ksh);
+    for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+        GINTg0_int3c2e<NROOTS>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
+        const double ak2 = -2.0*c_bpcache.a1[kl];
+        GINTwrite_int3c2e_ip2_direct<NROOTS>(envs, eri, g, ak2, ish, jsh, ksh);
     } }
 }
 

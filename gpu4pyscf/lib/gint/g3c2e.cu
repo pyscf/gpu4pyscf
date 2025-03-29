@@ -44,9 +44,9 @@ void GINTfill_int3c2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets o
 
     GINTmemset_int3c2e<NROOTS>(envs, eri, ish, jsh, ksh);
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-            GINTg0_int3c2e<NROOTS>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
-            GINTwrite_int3c2e_direct<NROOTS>(envs, eri, g, ish, jsh, ksh);
+    for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+        GINTg0_int3c2e<NROOTS>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
+        GINTwrite_int3c2e_direct<NROOTS>(envs, eri, g, ish, jsh, ksh);
     } }
 }
 
