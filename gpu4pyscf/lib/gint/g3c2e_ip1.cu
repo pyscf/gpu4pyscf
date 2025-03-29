@@ -14,6 +14,65 @@
  * limitations under the License.
  */
 
+template <int LI, int LJ, int LK, int NROOTS> __device__
+static void GINTgout3c2e_ip(GINTEnvVars envs, double* __restrict__ gout, double* __restrict__ g, const double ai2)
+{
+    int *idx = c_idx;
+    int *idy = c_idx + TOT_NF;
+    int *idz = c_idx + TOT_NF * 2;
+
+    const int di = envs.stride_i;
+    const int dj = envs.stride_j;
+    const int dk = envs.stride_k;
+    const int g_size = envs.g_size;
+
+    constexpr int nfi = (LI+1)*(LI+2)/2;
+    constexpr int nfj = (LJ+1)*(LJ+2)/2;
+    constexpr int nfk = (LK+1)*(LK+2)/2;
+
+    for (int ik = 0, i = 0; ik < nfk; ik++){
+    for (int ij = 0; ij < nfj; ij++){
+    for (int ii = 0; ii < nfi; ii++, i++){
+        const int loc_k = c_l_locs[LK] + ik;
+        const int loc_j = c_l_locs[LJ] + ij;
+        const int loc_i = c_l_locs[LI] + ii;
+
+        int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+        int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+        int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
+        const int i_idx = idx[loc_i];
+        const int i_idy = idy[loc_i];
+        const int i_idz = idz[loc_i];
+
+        double sx = gout[3*i + 0];
+        double sy = gout[3*i + 1];
+        double sz = gout[3*i + 2];
+#pragma unroll
+        for (int n = 0; n < NROOTS; ++n, ++ix, ++iy, ++iz) {
+            const double gx = g[ix];
+            const double gy = g[iy];
+            const double gz = g[iz];
+
+            double fx = ai2*g[ix+di];
+            double fy = ai2*g[iy+di];
+            double fz = ai2*g[iz+di];
+
+            fx += i_idx>0 ? i_idx*g[ix-di] : 0.0;
+            fy += i_idy>0 ? i_idy*g[iy-di] : 0.0;
+            fz += i_idz>0 ? i_idz*g[iz-di] : 0.0;
+
+            sx += fx * gy * gz;
+            sy += gx * fy * gz;
+            sz += gx * gy * fz;
+        }
+        gout[3*i + 0] = sx;
+        gout[3*i + 1] = sy;
+        gout[3*i + 2] = sz;
+    }}}
+}
+
+
 // Unrolled version
 template <int LI, int LJ, int LK> __global__
 void GINTfill_int3c2e_ip1_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
@@ -38,29 +97,26 @@ void GINTfill_int3c2e_ip1_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffse
     const int ish = bas_pair2bra[bas_ij];
     const int jsh = bas_pair2ket[bas_ij];
     const int ksh = bas_pair2bra[bas_kl];
-    
-    double* __restrict__ exp = c_bpcache.a1;
+
     constexpr int LI_CEIL = LI + 1;
     constexpr int NROOTS = (LI_CEIL+LJ+LK)/2 + 1;
     constexpr int GSIZE = 3 * NROOTS * (LI_CEIL+1)*(LJ+1)*(LK+1);
 
-    double g[2*GSIZE];
-    double * __restrict__ f = g + GSIZE;
+    double g[GSIZE];
 
     constexpr int nfi = (LI+1)*(LI+2)/2;
     constexpr int nfj = (LJ+1)*(LJ+2)/2;
     constexpr int nfk = (LK+1)*(LK+2)/2;
     double gout[3*nfi*nfj*nfk] = {0};
 
-    const int as_ish = envs.ibase ? ish: jsh; 
-    const int as_jsh = envs.ibase ? jsh: ish; 
+    const int as_ish = envs.ibase ? ish: jsh;
+    const int as_jsh = envs.ibase ? jsh: ish;
 
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
         GINTg0_int3c2e<LI_CEIL, LJ, LK>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
-        double ai2 = -2.0*exp[ij];
-        GINTnabla1i_2e<LI, LJ, LK, NROOTS>(envs, f, g, ai2);
-        GINTgout3c2e_ip<LI,LJ,LK,NROOTS>(envs, gout, f, g);
+        double ai2 = -2.0*c_bpcache.a1[ij];
+        GINTgout3c2e_ip<LI,LJ,LK,NROOTS>(envs, gout, g, ai2);
     } }
     GINTwrite_int3c2e_ip(eri, gout, as_ish, as_jsh, ksh);
 }
@@ -81,7 +137,7 @@ static void GINTwrite_int3c2e_ip1_direct(GINTEnvVars envs, ERITensor eri, double
 
     int * __restrict__ c_idy = c_idx + TOT_NF;
     int * __restrict__ c_idz = c_idx + TOT_NF * 2;
-    
+
     const int di = envs.stride_i;
     const int dj = envs.stride_j;
     const int dk = envs.stride_k;
@@ -101,7 +157,7 @@ static void GINTwrite_int3c2e_ip1_direct(GINTEnvVars envs, ERITensor eri, double
         int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * c_idx[loc_i];
         int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
         int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * c_idz[loc_i] + g_size * 2;
-        
+
         const int i_idx = c_idx[loc_i];
         const int i_idy = c_idy[loc_i];
         const int i_idz = c_idz[loc_i];
@@ -114,7 +170,7 @@ static void GINTwrite_int3c2e_ip1_direct(GINTEnvVars envs, ERITensor eri, double
             const double gx = g[ix];
             const double gy = g[iy];
             const double gz = g[iz];
-            
+
             double fx = ai2*g[ix+di];
             double fy = ai2*g[iy+di];
             double fz = ai2*g[iz+di];
@@ -159,18 +215,16 @@ void GINTfill_int3c2e_ip1_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffse
     const int ish = bas_pair2bra[bas_ij];
     const int jsh = bas_pair2ket[bas_ij];
     const int ksh = bas_pair2bra[bas_kl];
-    
-    double g[GSIZE];
-    //double * __restrict__ f = g + GSIZE;
 
-    const int as_ish = envs.ibase ? ish: jsh; 
-    const int as_jsh = envs.ibase ? jsh: ish; 
+    double g[GSIZE];
+
+    const int as_ish = envs.ibase ? ish: jsh;
+    const int as_jsh = envs.ibase ? jsh: ish;
 
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
         GINTg0_int3c2e<NROOTS>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
         double ai2 = -2.0*c_bpcache.a1[ij];
-        //GINTnabla1i_2e<NROOTS>(envs, f, g, ai2, envs.i_l, envs.j_l, envs.k_l);
         GINTwrite_int3c2e_ip1_direct<NROOTS>(envs, eri, g, ai2, ish, jsh, ksh);
     }}
 }
@@ -239,7 +293,7 @@ static void GINTfill_int3c2e_ip1_kernel000(GINTEnvVars envs, ERITensor eri, Basi
         const double aijkl = aij + akl;
         const double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         const double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         const double fac = eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -272,7 +326,7 @@ static void GINTfill_int3c2e_ip1_kernel000(GINTEnvVars envs, ERITensor eri, Basi
         const double f_1 = ai2 * g_1;
         const double f_3 = ai2 * g_3;
         const double f_5 = ai2 * g_5;
-        
+
         gout0 += f_1 * g_2 * g_4;
         gout1 += g_0 * f_3 * g_4;
         gout2 += g_0 * g_2 * f_5;
