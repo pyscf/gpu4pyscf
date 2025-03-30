@@ -47,7 +47,11 @@ exp = [1/(i*1.8897259885789)**2 for i in radii]
 ris_exp = dict(zip(elements_106,exp))
 
 '''
+Just for reference and debug, actually the parameters are retrieved from rsh_and_hybrid_coeff
+
 range-separated hybrid functionals, (omega, alpha, beta)
+'''
+
 '''
 rsh_func = {}
 rsh_func['wb97'] = (0.4, 0, 1.0)
@@ -59,9 +63,12 @@ rsh_func['wb97x-d3bj'] = (0.30, 0.167, 0.833)
 rsh_func['cam-b3lyp'] = (0.33, 0.19, 0.46) # a+b=65% Long-range HF exchange
 rsh_func['lc-blyp'] = (0.33, 0, 1.0)
 rsh_func['lc-PBE'] = (0.47, 0, 1.0)
+'''
+
 
 '''
 pure or hybrid functionals, hybrid component a_x
+'''
 '''
 hbd_func = {}
 hbd_func['pbe'] = 0
@@ -76,14 +83,21 @@ hbd_func['m06'] = 0.27
 hbd_func['m06-2x'] = 0.54
 hbd_func['hf'] = 1
 hbd_func[None] = 1
-
+'''
 
 
 
 ''' for sTDA
     a dictionary of chemical hardness, by mappig two lists:
    list of elements 1-94
-   list of hardness for elements 1-94, floats, in Hartree
+   list of hardness for elements 1-94, floats, in *Hartree*
+    https://github.com/grimme-lab/std2/blob/master/stda.f
+
+    Ghosh, Dulal C., and Nazmul Islam. 
+    "Semiempirical evaluation of the global hardness of the atoms of 103 elements 
+    of the periodic table using the most probable radii as their size descriptors." 
+    International Journal of Quantum Chemistry 110, no. 6 (2010): 1206-1213.
+    (paper data in *eV*)
 '''
 elements = ['H' , 'He', 'Li', 'Be', 'B' , 'C' , 'N' , 'O' , 'F' , 'Ne',
 'Na', 'Mg', 'Al', 'Si', 'P' , 'S' , 'Cl', 'Ar', 'K' , 'Ca','Sc', 'Ti',

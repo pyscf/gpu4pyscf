@@ -1128,8 +1128,8 @@ def Davidson(matrix_vector_product,
     
 
     V_holder = cp.zeros((max_N_mv, A_size),dtype=cp.float32 if single else cp.float64)
-    W_holder = cp.zeros_like(V_holder)
-    sub_A_holder = cp.zeros((max_N_mv,max_N_mv),dtype=cp.float32 if single else cp.float64)
+    W_holder = cp.empty_like(V_holder)
+    sub_A_holder = cp.empty((max_N_mv,max_N_mv),dtype=cp.float32 if single else cp.float64)
 
     '''
     generate the initial guesss and put into the basis holder V_holder
@@ -1149,7 +1149,7 @@ def Davidson(matrix_vector_product,
         '''
         log.info(citation)
         fill_holder = math_helper.nKs_fill_holder
-        s_holder = cp.zeros_like(sub_A_holder)
+        s_holder = cp.empty_like(sub_A_holder)
 
     subcost = 0
     MVcost = 0
@@ -1317,17 +1317,17 @@ def Davidson_Casida(matrix_vector_product,
     V_holder = cp.zeros((max_N_mv, A_size),dtype=cp.float32 if single else cp.float64)
     W_holder = cp.zeros_like(V_holder)
 
-    U1_holder = cp.zeros_like(V_holder)
-    U2_holder = cp.zeros_like(V_holder)
+    U1_holder = cp.empty_like(V_holder)
+    U2_holder = cp.empty_like(V_holder)
 
-    VU1_holder = cp.zeros((max_N_mv,max_N_mv),dtype=cp.float32 if single else cp.float64)
-    VU2_holder = cp.zeros_like(VU1_holder)
-    WU1_holder = cp.zeros_like(VU1_holder)
-    WU2_holder = cp.zeros_like(VU1_holder)
+    VU1_holder = cp.empty((max_N_mv,max_N_mv),dtype=cp.float32 if single else cp.float64)
+    VU2_holder = cp.empty_like(VU1_holder)
+    WU1_holder = cp.empty_like(VU1_holder)
+    WU2_holder = cp.empty_like(VU1_holder)
 
-    VV_holder = cp.zeros_like(VU1_holder)
-    VW_holder = cp.zeros_like(VU1_holder)
-    WW_holder = cp.zeros_like(VU1_holder)
+    VV_holder = cp.empty_like(VU1_holder)
+    VW_holder = cp.empty_like(VU1_holder)
+    WW_holder = cp.empty_like(VU1_holder)
 
     '''
     set up initial guess V= TDA initial guess, W=0

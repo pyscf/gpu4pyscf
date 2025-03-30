@@ -18,10 +18,11 @@ import time
 
 from pyscf import gto, lib
 from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
-from gpu4pyscf.lib.cupy_helper import cart2sph
+from gpu4pyscf.lib.cupy_helper import cart2sph, contract
 from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _lr_eig
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
+
 
 einsum = cp.einsum
 
@@ -157,42 +158,45 @@ def get_Ppq_to_Tpq(Ppq: cp.ndarray, lower_inv_eri2c: cp.ndarray):
     return T_pq 
 
 def get_PuvCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray):
-    '''    
-    eri3c : (P|pq) , P = auxnao or 3
-    C_p and C_q:  C[:, :n_occ] or C[:, n_occ:], can be both
+    # '''    
+    # eri3c : (P|pq) , P = auxnao or 3
+    # C_p and C_q:  C[:, :n_occ] or C[:, n_occ:], can be both
 
-    Ppq = einsum("Ppv,vq->Ppq", eri3c_Cp, C_q)
+    # Ppq = einsum("Puv,up,vq->Ppq", eri3c, Cp, C_q)
 
-    manually reshape and transpose is faster than einsum
+    # manually reshape and transpose is faster than einsum
 
-    '''
+    # '''
 
-    '''eri3c in shape (nauxao, nao, nao)'''
-    nao = eri3c.shape[1]
-    nauxao = eri3c.shape[0]
+    # '''eri3c in shape (nauxao, nao, nao)'''
+    # nao = eri3c.shape[1]
+    # nauxao = eri3c.shape[0]
 
-    n_p = C_p.shape[1]
-    n_q = C_q.shape[1]
+    # n_p = C_p.shape[1]
+    # n_q = C_q.shape[1]
 
 
-    '''eri3c (nauxao, nao, nao) -> (nauxao*nao, nao)
-       C_p (nao, n_p)
-       >> eri3c_C_p (nauxao*nao, n_p)'''
-    eri3c = eri3c.reshape(nauxao*nao, nao)
-    eri3c_C_p = cp.dot(eri3c, C_p)
+    # '''eri3c (nauxao, nao, nao) -> (nauxao*nao, nao)
+    #    C_p (nao, n_p)
+    #    >> eri3c_C_p (nauxao*nao, n_p)'''
+    # eri3c = eri3c.reshape(nauxao*nao, nao)
+    # eri3c_C_p = cp.dot(eri3c, C_p)
 
-    ''' eri3c_C_p (nauxao*nao, n_p) 
-        -> (nauxao, nao, n_p) 
-        -> (nauxao, n_p, nao) '''
-    eri3c_C_p = eri3c_C_p.reshape(nauxao, nao, n_p)
-    eri3c_C_p = eri3c_C_p.transpose(0,2,1)
+    # ''' eri3c_C_p (nauxao*nao, n_p) 
+    #     -> (nauxao, nao, n_p) 
+    #     -> (nauxao, n_p, nao) '''
+    # eri3c_C_p = eri3c_C_p.reshape(nauxao, nao, n_p)
+    # eri3c_C_p = eri3c_C_p.transpose(0,2,1)
 
-    ''' eri3c_C_p  (nauxao, n_p, nao) -> (nauxao*n_p, nao)
-        C_q  (nao, n_q)
-        >> Ppq (nauxao*n_p, n_q) >  (nauxao, n_p, n_q)  '''
-    eri3c_C_p = eri3c_C_p.reshape(nauxao*n_p, nao)
-    Ppq = cp.dot(eri3c_C_p, C_q)
-    Ppq = Ppq.reshape(nauxao, n_p, n_q)
+    # ''' eri3c_C_p  (nauxao, n_p, nao) -> (nauxao*n_p, nao)
+    #     C_q  (nao, n_q)
+    #     >> Ppq (nauxao*n_p, n_q) >  (nauxao, n_p, n_q)  '''
+    # eri3c_C_p = eri3c_C_p.reshape(nauxao*n_p, nao)
+    # Ppq = cp.dot(eri3c_C_p, C_q)
+    # Ppq = Ppq.reshape(nauxao, n_p, n_q)
+
+    tmp = contract('Puv,up->Ppv', eri3c, C_p)
+    Ppq = contract('Ppv,vq->Ppq', tmp, C_q)
 
     return Ppq
 
@@ -209,7 +213,7 @@ def get_int3c2e(mol, auxmol, aosym=True, omega=None):
     naux = auxmol.nao
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(diag_block_with_triu=True, aosym=aosym, group_size=BLKSIZE, group_size_aux=BLKSIZE)
-    int3c = cp.zeros([naux, nao, nao], order='C')
+    int3c = cp.empty([naux, nao, nao], order='C')
     for cp_ij_id, _ in enumerate(intopt.log_qs):
         cpi = intopt.cp_idx[cp_ij_id]
         cpj = intopt.cp_jdx[cp_ij_id]
@@ -218,7 +222,7 @@ def get_int3c2e(mol, auxmol, aosym=True, omega=None):
         i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
         j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
 
-        int3c_slice = cp.zeros([naux, j1-j0, i1-i0], order='C')
+        int3c_slice = cp.empty([naux, j1-j0, i1-i0], order='C')
         for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
             k0, k1 = intopt.aux_ao_loc[cp_kl_id], intopt.aux_ao_loc[cp_kl_id+1]
             get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=int3c_slice[k0:k1], omega=omega)
@@ -262,16 +266,16 @@ def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
     siz_q = C_q.shape[1]
 
     if 'J' in calc:
-        Ppq = cp.zeros((naux, siz_p, siz_q), dtype=cp.float32)
+        Ppq = cp.empty((naux, siz_p, siz_q), dtype=cp.float32)
 
     if 'K' in calc:
-        Ppp = cp.zeros((naux, siz_p, siz_p), dtype=cp.float32)
-        Pqq = cp.zeros((naux, siz_q, siz_q), dtype=cp.float32)
+        Ppp = cp.empty((naux, siz_p, siz_p), dtype=cp.float32)
+        Pqq = cp.empty((naux, siz_q, siz_q), dtype=cp.float32)
 
     for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
         k0, k1 = intopt.aux_ao_loc[cp_kl_id], intopt.aux_ao_loc[cp_kl_id+1]
 
-        int3c_slice = cp.zeros((k1 - k0, nao, nao), dtype=cp.float32, order='C')
+        int3c_slice = cp.empty((k1 - k0, nao, nao), dtype=cp.float32, order='C')
   
         for cp_ij_id, _ in enumerate(intopt.log_qs):
             cpi = intopt.cp_idx[cp_ij_id]
@@ -482,7 +486,7 @@ def gen_ijab_MVP(T_ij, T_ab):
         n_state, n_occ, n_vir = V.shape      # Dimensions of V
 
         # Initialize result tensor
-        ijab_V = cp.zeros((n_state, n_occ, n_vir), dtype=T_ab.dtype)
+        ijab_V = cp.empty((n_state, n_occ, n_vir), dtype=T_ab.dtype)
 
         # Get free memory and dynamically calculate chunk size
         available_gpu_memory = get_available_gpu_memory()
@@ -543,7 +547,7 @@ def get_ibja_MVP(T_ia):
         # assert n_occ == n_occ_v and n_vir == n_vir_v, "Shapes of V and T_ia must match"
 
         # Initialize result tensor
-        ibja_V = cp.zeros((n_state, n_occ, n_vir), dtype=T_ia.dtype)
+        ibja_V = cp.empty((n_state, n_occ, n_vir), dtype=T_ia.dtype)
 
         # Iterate over chunks of the n_occ dimension
         for occ_start in range(0, n_occ, occ_chunk_size):
@@ -589,7 +593,7 @@ class RisBase(lib.StreamObject):
                 print_threshold: float = 0.05,
                 GS: bool = False,
                 single: bool = True,
-                group_size: int = 10000,
+                group_size: int = 256,
                 group_size_aux: int = 256):
 
         self.single = single
