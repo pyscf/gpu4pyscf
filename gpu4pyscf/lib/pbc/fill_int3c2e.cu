@@ -109,7 +109,6 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
         }
         atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
-        gy[0] = 1.;
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
@@ -120,6 +119,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
         double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
         double aij = ai + aj;
         double cicj = ci * cj;
+        gy[0] = PI_FAC * cicj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -161,7 +161,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                 double aj_aij = aj / aij;
                 double theta_ij = ai * aj_aij;
                 double Kab = theta_ij * rr_ij;
-                double fac_ij = PI_FAC * cicj * exp(-Kab);
+                double fac_ij = exp(-Kab);
                 if (gout_id == 0) {
                     double xiL = img_coords[iL*3+0];
                     double yiL = img_coords[iL*3+1];

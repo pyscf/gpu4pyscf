@@ -43,11 +43,11 @@ void overlap_img_counts_kernel(int *img_idx, int *img_counts, int *p2c_mapping,
     double *img_coords = envs.img_coords;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
-    if (ish < jsh && p2c_mapping[ish] != p2c_mapping[jsh]) {
-        return;
-    }
     int cell0_ish = ish % envs.cell0_nbas;
     int cell0_jsh = jsh % envs.cell0_nbas;
+    if (cell0_ish < cell0_jsh && p2c_mapping[cell0_ish] != p2c_mapping[cell0_jsh]) {
+        return;
+    }
     int li = bas[ANG_OF + cell0_ish*BAS_SLOTS];
     int lj = bas[ANG_OF + cell0_jsh*BAS_SLOTS];
     float ai = exps[cell0_ish];
@@ -171,17 +171,17 @@ void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_mappin
     ovlp_img_idx += bas_ij;
     int nbas2 = nbas * nbas;
     int counts = 0;
-    for (int jL = 0; jL < ovlp_img_count; ++jL) {
-        int ptr = ovlp_img_idx[jL*nbas2];
+    for (int L = 0; L < ovlp_img_count; ++L) {
+        int jL = ovlp_img_idx[L*nbas2];
         float xi = ri[0];
         float yi = ri[1];
         float zi = ri[2];
         float xj = rj[0];
         float yj = rj[1];
         float zj = rj[2];
-        float xjL = xj + img_coords[ptr*3+0];
-        float yjL = yj + img_coords[ptr*3+1];
-        float zjL = zj + img_coords[ptr*3+2];
+        float xjL = xj + img_coords[jL*3+0];
+        float yjL = yj + img_coords[jL*3+1];
+        float zjL = zj + img_coords[jL*3+2];
         float xjxi = xjL - xi;
         float yjyi = yjL - yi;
         float zjzi = zjL - zi;

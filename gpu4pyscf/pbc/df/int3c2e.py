@@ -189,6 +189,52 @@ def to_primitive_bas(cell):
                 local_shell_mapping.append(idx)
                 off += nctr
 
+            '''TODO
+            # partition the contracted GTO into a compact subset and
+            # multiple primitive shells
+            for shell in cell._bas[ib0:ib1]:
+                l = shell[ANG_OF]
+                nprim = shell[NPRIM_OF]
+                nctr = shell[NCTR_OF]
+                pexp = shell[PTR_EXP]
+                es = prim_env[pexp:pexp+nprim]
+                diffused_idx = np.where(es < 2.)[0]
+                n_diffused = len(diffuse_idx)
+                for ic in range(nctr):
+                    pcoeff = shell[PTR_COEFF] + ic * nprim
+                    bs = shell.copy()
+                    bs[NCTR_OF] = 1
+                    bs[PTR_COEFF] = pcoeff
+                    bs[PTR_BAS_COORD] = ptr_coord
+                    if nprim == 1 or n_diffused == 0:
+                        bas_of_ia.append(bs)
+                        local_shell_mapping.append(off+ic)
+                        continue
+
+                    cs = prim_env[pcoeff:pcoeff+nprim]
+                    compact_idx = np.where(es >= 2)[0]
+                    n_compact = len(compact_idx)
+                    idx = np.hstack(compact_idx, diffuse_idx)
+                    prim_env[pexp:pexp+nprim] = es[idx]
+                    prim_env[pcoeff:pcoeff+n_compact] = cs[compact_idx]
+                    prim_env[pcoeff+n_compact:pcoeff+nprim] = cs[diffused_idx]
+                    if n_compact > 0:
+                        # put compact pGTOs in one shell
+                        bs[NPRIM_OF] = n_compact
+                        bas_of_ia.append(bs.copy())
+                        local_shell_mapping.append(off+ic)
+                        pexp += n_compact
+                        pcoeff += n_compact
+                    # each diffused pGTO as one shell
+                    bs[NPRIM_OF] = 1
+                    for m in range(n_diffused):
+                        bs[PTR_EXP] = pexp + m
+                        bs[PTR_COEFF] = pexp + m
+                        bas_of_ia.append(bs.copy())
+                        local_shell_mapping.append(off+ic)
+                off += nctr
+                '''
+
             if bas_of_ia:
                 bas_of_ia = np.vstack(bas_of_ia)
                 local_shell_mapping = np.hstack(local_shell_mapping)
@@ -366,8 +412,7 @@ class SRInt3c2eOpt:
 
         p2c_mapping = [p2c + offset for offset, p2c in zip(c_shell_offsets, p2c_mapping_lookup)]
         p2c_mapping = cp.asarray(cp.hstack(p2c_mapping), dtype=np.int32)
-        _nimgs = int(4*np.pi/3 * pcell.rcut**3 / vol + 1)
-        ovlp_img_idx = cp.empty((_nimgs,s_nbas,s_nbas), dtype=np.int32)
+        ovlp_img_idx = cp.empty((nimgs,s_nbas,s_nbas), dtype=np.int32)
         ovlp_img_counts = cp.zeros((sup_ncells,p_nbas,sup_ncells,p_nbas), dtype=np.int32)
         err = libpbc.overlap_img_counts(
             ctypes.cast(ovlp_img_idx.data.ptr, ctypes.c_void_p),
@@ -401,19 +446,19 @@ class SRInt3c2eOpt:
             counts_sorting = (-counts).argsort()
             bas_ij = bas_ij[counts_sorting]
             nimgs_J = int(counts[counts_sorting[0]])
-            ish, jsh = cp.unravel_index(
-                bas_ij, (sup_ncells*nprimi, sup_ncells*nprimj))
+            I, ish, J, jsh = cp.unravel_index(
+                bas_ij, (sup_ncells, nprimi, sup_ncells, nprimj))
             ish += ish0
             jsh += jsh0
             bas_ij = cp.ravel_multi_index(
-                (ish, jsh), (sup_ncells*p_nbas, sup_ncells*p_nbas))
+                (I, ish, J, jsh), (sup_ncells, p_nbas, sup_ncells, p_nbas))
             bas_ij = cp.asarray(bas_ij, dtype=np.int32, order='C')
 
             nimgs_IJ = nimgs + nimgs_J * 6
             if vol < 216:
-                # nimgs+nimgs_J*6 should be enough for the double lattice sum.
-                # However, when cell is small, more images may involved in
-                # double lattice sum.
+                # If cell is sufficiently large, nimgs+nimgs_J*6 should be
+                # enough for the double lattice sum.
+                # When cell is small, more images may be required in double lattice sum.
                 nimgs_IJ = nimgs + nimgs_J**2
             img_idx_sparse = cp.empty((nimgs_IJ,ovlp_npairs), dtype=np.int32)
             img_counts = cp.zeros(ovlp_npairs, dtype=np.int32)
