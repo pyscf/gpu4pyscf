@@ -37,12 +37,17 @@ class WithSolventTDSCF:
 
     def __init__(self, tda_method):
         self.__dict__.update(tda_method.__dict__)
+        tda_method._scf.with_solvent.tdscf = True
 
     def undo_solvent(self):
         cls = self.__class__
         name_mixin = self.base.with_solvent.__class__.__name__
         obj = lib.view(self, lib.drop_class(cls, WithSolventTDSCF, name_mixin))
         return obj
+    
+    def _finalize(self):
+        super()._finalize()
+        self._scf.with_solvent.tdscf = False
 
     nuc_grad_method = NotImplemented
 

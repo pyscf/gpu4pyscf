@@ -43,6 +43,8 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
 
     Ref: Chem Phys Lett, 256, 454
     '''
+    if getattr(mf, 'with_solvent', None):
+        raise NotImplementedError("PCM is not supported for get_ab")
     if mo_energy is None:
         mo_energy = mf.mo_energy
     if mo_coeff is None:

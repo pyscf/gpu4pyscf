@@ -246,7 +246,7 @@ class PCM(lib.StreamObject):
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
         'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
-        'equilibrium_solvation', 'e', 'v', 'eps_optical'
+        'equilibrium_solvation', 'e', 'v', 'eps_optical', 'tdscf'
     }
     from gpu4pyscf.lib.utils import to_gpu, device
     kernel = ddcosmo.DDCOSMO.kernel
@@ -266,7 +266,8 @@ class PCM(lib.StreamObject):
         self.lebedev_order = 29
         self._intermediates = {}
         self.eps = 78.3553
-        self.eps_optical = None
+        self.eps_optical = 1.78
+        self.tdscf = False
 
         self.max_cycle = 20
         self.conv_tol = 1e-7
@@ -478,35 +479,42 @@ class PCM(lib.StreamObject):
             assert not self.equilibrium_solvation
             epsilon = self.eps_optical
             logger.info(self, 'eps optical = %s', self.eps_optical)
-            S = self._intermediates['S']
-            D = self._intermediates['D']
-            A = self._intermediates['A']
+            F, A = get_F_A(self.surface)
+            D, S = get_D_S(self.surface, with_S = True, with_D = not self.if_method_in_CPCM_category)
             epsilon = self.eps_optical
             if self.method.upper() in ['C-PCM', 'CPCM']:
                 f_epsilon = (epsilon-1.)/epsilon
                 K = S
-                R = -f_epsilon * cupy.eye(K.shape[0])
             elif self.method.upper() == 'COSMO':
                 f_epsilon = (epsilon - 1.0)/(epsilon + 1.0/2.0)
                 K = S
-                R = -f_epsilon * cupy.eye(K.shape[0])
             elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
                 f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
                 DA = D*A
                 DAS = cupy.dot(DA, S)
                 K = S - f_epsilon/(2.0*PI) * DAS
-                R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
             elif self.method.upper() == 'SS(V)PE':
                 f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
                 DA = D*A
                 DAS = cupy.dot(DA, S)
                 K = S - f_epsilon/(4.0*PI) * (DAS + DAS.T)
-                R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
             else:
                 raise RuntimeError(f"Unknown implicit solvent model: {self.method}")
-        else:
-            K = self._intermediates['K']
-            R = self._intermediates['R']
+
+            K_LU, K_LU_pivot = lu_factor(K, overwrite_a = True, check_finite = False)
+            K = None
+            v_grids = -self._get_v(dms)
+
+            b = self.left_multiply_R(v_grids.T, f_epsilon = f_epsilon)
+            q = self.left_solve_K(b, K_LU=K_LU, K_LU_pivot=K_LU_pivot).T
+
+            vK_1 = self.left_solve_K(v_grids.T, K_LU=K_LU, K_LU_pivot=K_LU_pivot, K_transpose = True)
+            qt = self.left_multiply_R(vK_1, f_epsilon = f_epsilon, R_transpose = True).T
+            q_sym = (q + qt)/2.0
+
+            vmat = self._get_vmat(q_sym)
+            return vmat.reshape(out_shape)
+        
         v_grids = -self._get_v(dms)
 
         b = self.left_multiply_R(v_grids.T)
@@ -523,8 +531,9 @@ class PCM(lib.StreamObject):
     def if_method_in_CPCM_category(self):
         return self.method.upper() in ['C-PCM', 'CPCM', "COSMO"]
 
-    def left_multiply_R(self, right_vector, R_transpose = False):
-        f_epsilon = self._intermediates['f_epsilon']
+    def left_multiply_R(self, right_vector, f_epsilon = None, R_transpose = False):
+        if f_epsilon is None:
+            f_epsilon = self._intermediates['f_epsilon']
         if self.if_method_in_CPCM_category:
             # R = -f_epsilon * cupy.eye(K.shape[0])
             return -f_epsilon * right_vector
@@ -537,9 +546,11 @@ class PCM(lib.StreamObject):
                 DA = DA.T
             return -f_epsilon * (right_vector - 1.0/(2.0*PI) * cupy.dot(DA, right_vector))
 
-    def left_solve_K(self, right_vector, K_transpose = False):
+    def left_solve_K(self, right_vector, K_LU = None, K_LU_pivot = None, K_transpose = False):
         ''' K^{-1} @ right_vector '''
-        K_LU       = self._intermediates['K_LU']
-        K_LU_pivot = self._intermediates['K_LU_pivot']
+        if K_LU is None:
+            K_LU       = self._intermediates['K_LU']
+        if K_LU_pivot is None:
+            K_LU_pivot = self._intermediates['K_LU_pivot']
         return lu_solve((K_LU, K_LU_pivot), right_vector, trans = K_transpose, overwrite_b = False, check_finite = False)
 

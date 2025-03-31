@@ -163,14 +163,17 @@ class SCFWithSolvent(_Solvation):
         singlet = singlet or singlet is None
         def vind_with_solvent(dm1):
             v = vind(dm1)
-            if self.with_solvent.eps_optical is not None:
-                if is_uhf:
-                    v_solvent = self.with_solvent._B_dot_x(dm1)
-                    v += v_solvent[0] + v_solvent[1]
-                elif singlet:
-                    v += self.with_solvent._B_dot_x(dm1)
+            if self.with_solvent.tdscf:
+                if not self.with_solvent.equilibrium_solvation:
+                    if is_uhf:
+                        v_solvent = self.with_solvent._B_dot_x(dm1)
+                        v += v_solvent[0] + v_solvent[1]
+                    elif singlet:
+                        v += self.with_solvent._B_dot_x(dm1)
+                    else:
+                        logger.warn(self, 'Singlet-Triplet has no LR-PCM contribution!')
                 else:
-                    logger.warn(self, 'Singlet-Triplet has no LR-PCM contribution!')
+                    raise NotImplementedError('Equilibrium solvation TDDFT (SS) is not implemented!')
             else:
                 if self.with_solvent.equilibrium_solvation:
                     if is_uhf:
