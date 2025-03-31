@@ -400,6 +400,27 @@ class PCM(lib.StreamObject):
         self._intermediates['v_grids'] = v_grids[0]
         return epcm, vmat[0]
 
+    def _get_qsym(self, dms):
+        if not self._intermediates:
+            self.build()
+        nao = dms.shape[-1]
+        dms = dms.reshape(-1,nao,nao)
+        if dms.shape[0] == 2:
+            dms = (dms[0] + dms[1]).reshape(-1,nao,nao)
+        if not isinstance(dms, cupy.ndarray):
+            dms = cupy.asarray(dms)
+        v_grids_e = self._get_v(dms)
+        v_grids = self.v_grids_n - v_grids_e
+
+        b = self.left_multiply_R(v_grids.T)
+        q = self.left_solve_K(b).T
+
+        vK_1 = self.left_solve_K(v_grids.T, K_transpose = True)
+        qt = self.left_multiply_R(vK_1, R_transpose = True).T
+        q_sym = (q + qt)/2.0
+
+        return q_sym[0]
+
     def _get_v(self, dms):
         '''
         return electrostatic potential on surface
@@ -475,7 +496,7 @@ class PCM(lib.StreamObject):
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)
 
-        if self.eps_optical is not None:
+        if self.tdscf:
             assert not self.equilibrium_solvation
             epsilon = self.eps_optical
             logger.info(self, 'eps optical = %s', self.eps_optical)

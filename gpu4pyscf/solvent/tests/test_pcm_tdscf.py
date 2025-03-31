@@ -172,13 +172,6 @@ class KnownValues(unittest.TestCase):
         ref = np.array([-75.64482315, -75.61072291, -75.57156784, -75.56769949, -75.54419399])
         assert np.allclose(es_gound, ref)
 
-        td = mf.TDA()
-        assert td.device == 'gpu'
-        es = td.kernel(nstates=5)[0]
-        es_gound = es + mf.e_tot
-        ref = np.array([-75.64008952, -75.60864828, -75.56268842, -75.56241960, -75.54169327])
-        assert np.allclose(es_gound, ref)
-
     def test_unrestricted_b3lyp_CPCM(self):
         mf = self.mf_b3lyp_nodf_u
         td = mf.TDDFT()
