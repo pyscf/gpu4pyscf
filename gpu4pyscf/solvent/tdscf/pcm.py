@@ -19,6 +19,7 @@ TD of PCM family solvent model
 import cupy as cp
 from pyscf import lib
 from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent
+from gpu4pyscf.solvent.grad.pcm import left_multiply_dS, right_multiply_dS, get_dF_dA, get_dSii, get_dD_dS
 from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
@@ -62,43 +63,7 @@ class WithSolventTDSCF:
     def nuc_grad_method(self):
         grad_method = super().nuc_grad_method()
         return make_tdscf_gradient_object(grad_method)
-    
 
-def grad_qv(pcmobj, dm, q_sym = None):
-    '''
-    contributions due to integrals
-    '''
-    if not pcmobj._intermediates:
-        pcmobj.build()
-    dm_cache = pcmobj._intermediates.get('dm', None)
-    if dm_cache is not None and cp.linalg.norm(dm_cache - dm) < 1e-10:
-        pass
-    else:
-        pcmobj._get_vind(dm)
-    mol = pcmobj.mol
-    log = logger.new_logger(mol, mol.verbose)
-    t1 = log.init_timer()
-    gridslice   = pcmobj.surface['gslice_by_atom']
-    charge_exp  = pcmobj.surface['charge_exp']
-    grid_coords = pcmobj.surface['grid_coords']
-    if q_sym is None:
-        q_sym = pcmobj._intermediates['q_sym']
-
-    intopt = int3c1e.VHFOpt(mol)
-    intopt.build(1e-14, aosym=False)
-    dvj = int1e_grids_ip1(mol, grid_coords, dm = dm, charges = q_sym,
-                          direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
-                          intopt=intopt)
-    dq  = int1e_grids_ip2(mol, grid_coords, dm = dm, charges = q_sym,
-                          direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
-                          intopt=intopt)
-
-    aoslice = mol.aoslice_by_atom()
-    dvj = 2.0 * cp.asarray([cp.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
-    dq = cp.asarray([cp.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
-    de = dq + dvj
-    t1 = log.timer_debug1('grad qv', *t1)
-    return de.get()
 
 def grad_solver(pcmobj, dm):
     '''
@@ -268,8 +233,8 @@ class WithSolventTDSCFGradient:
         self.__dict__.update(tda_grad_method.__dict__)
         tda_grad_method.base._scf.with_solvent.tdscf = True
         
-    def grad_elec(self, xy, singlet, atmlst=None, verbose=logger.INFO):
-        de = super().grad_elec(self, xy, singlet, atmlst, verbose) 
+    # def grad_elec(self, xy, singlet, atmlst=None, verbose=logger.INFO):
+    #     de = super().grad_elec(self, xy, singlet, atmlst, verbose) 
 
 
     def _finalize(self):
