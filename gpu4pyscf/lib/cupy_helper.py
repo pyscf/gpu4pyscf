@@ -1056,3 +1056,21 @@ def sandwich_dot(a, c, out=None):
     if a_ndim == 2:
         out = out[0]
     return out
+
+class ConditionalMemoryPool(cupy.cuda.memory.MemoryPool):
+    '''
+    This allocator manages memory allocation based on the size of the requested memory.
+    For large memory allocations, the allocator directly uses the default CUDA malloc
+    without passing the request to the memory pool. Only small memory blocks are allocated
+    from the memory pool.  The large memory chunks will be directly released
+    back to the system when the associated object is destroyed.
+    '''
+    def __init__(self, n_bytes_threshold):
+        self.n_bytes_threshold = n_bytes_threshold
+        self.cuda_malloc = cupy.cuda.memory._malloc
+        super().__init__()
+
+    def malloc(self, size):
+        if size >= self.n_bytes_threshold:
+            return self.cuda_malloc(size)
+        return super().malloc(size)

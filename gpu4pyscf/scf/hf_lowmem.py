@@ -21,7 +21,8 @@ import numpy as np
 import cupy as cp
 from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
-from gpu4pyscf.lib.cupy_helper import asarray, pack_tril, unpack_tril
+from gpu4pyscf.lib.cupy_helper import (
+    asarray, pack_tril, unpack_tril, ConditionalMemoryPool)
 from gpu4pyscf.scf import diis, jk, hf
 from gpu4pyscf.lib import logger
 
@@ -161,7 +162,17 @@ class RHF(hf.RHF):
 
     DIIS = CDIIS
 
-    kernel = scf = kernel
+    def kernel(self, *args, **kwargs):
+        try:
+            default_allocator = cp.cuda.memory.get_allocator()
+            nao = self.mol.nao
+            thresh = nao**2 // 2 * 8
+            cp.cuda.memory.set_allocator(ConditionalMemoryPool(thresh).malloc)
+            return kernel(self, *args, **kwargs)
+        finally:
+            cp.cuda.memory.set_allocator(default_allocator)
+    scf = kernel
+
     density_fit              = NotImplemented
     as_scanner               = NotImplemented
     newton                   = NotImplemented
