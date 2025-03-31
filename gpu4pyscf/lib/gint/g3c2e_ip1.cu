@@ -79,8 +79,8 @@ void GINTfill_int3c2e_ip1_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffse
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
-    const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;

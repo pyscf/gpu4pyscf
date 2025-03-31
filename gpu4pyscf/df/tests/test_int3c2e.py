@@ -36,7 +36,7 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
     mol = pyscf.M(atom=atom,
-                  basis= 'def2-tzvpp',
+                  basis='def2-tzvpp',
                   verbose=1,
                   output='/dev/null')
     auxmol = df.addons.make_auxmol(mol, auxbasis='def2-tzvpp-jkfit')
