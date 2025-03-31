@@ -120,7 +120,7 @@ void GINTfill_int3c2e_ip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffse
     GINTwrite_int3c2e_ip(eri, gout, as_ish, as_jsh, ksh);
 }
 
-template <int NROOTS> __device__
+__device__
 static void GINTwrite_int3c2e_ip2_direct(GINTEnvVars envs, ERITensor eri, double* g, double ak2, int ish, int jsh, int ksh)
 {
     int *ao_loc = c_bpcache.ao_loc;
@@ -145,13 +145,16 @@ static void GINTwrite_int3c2e_ip2_direct(GINTEnvVars envs, ERITensor eri, double
     const int li = envs.i_l;
     const int lj = envs.j_l;
     const int lk = envs.k_l;
+    const int nrys_roots = envs.nrys_roots;
 
-    for (int k = k0; k < k1; ++k) {
-    for (int j = j0; j < j1; ++j) {
-    for (int i = i0; i < i1; ++i) {
-        const int loc_k = c_l_locs[lk] + (k-k0);
-        const int loc_j = c_l_locs[lj] + (j-j0);
-        const int loc_i = c_l_locs[li] + (i-i0);
+    for (int tx = threadIdx.x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim.x) {
+        const int k = tx / ((j1-j0)*(i1-i0));
+        const int j = (tx / (i1-i0)) % (j1-j0);
+        const int i = tx % (i1-i0);
+
+        const int loc_k = c_l_locs[lk] + k;
+        const int loc_j = c_l_locs[lj] + j;
+        const int loc_i = c_l_locs[li] + i;
 
         int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * c_idx[loc_i];
         int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
@@ -165,7 +168,7 @@ static void GINTwrite_int3c2e_ip2_direct(GINTEnvVars envs, ERITensor eri, double
         double eri_y = 0;
         double eri_z = 0;
 #pragma unroll
-        for (int ir = 0; ir < NROOTS; ++ir, ++ix, ++iy, ++iz){
+        for (int ir = 0; ir < nrys_roots; ++ir, ++ix, ++iy, ++iz){
             const double gx = g[ix];
             const double gy = g[iy];
             const double gz = g[iz];
@@ -183,23 +186,23 @@ static void GINTwrite_int3c2e_ip2_direct(GINTEnvVars envs, ERITensor eri, double
             eri_z += gx * gy * fz;
         }
 
-        const int off = i + jstride*j + k*kstride;
+        const int off = (i+i0) + jstride*(j+j0) + (k+k0)*kstride;
         double *eri_data = eri.data + off;
         eri_data[0*lstride] += eri_x;
         eri_data[1*lstride] += eri_y;
         eri_data[2*lstride] += eri_z;
-    }}}
+    }
 }
 
 
 // General version
-template <int NROOTS, int GSIZE> __global__
-void GINTfill_int3c2e_ip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
+__global__
+void GINTfill_int3c2e_ip2_general_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
 
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
@@ -217,16 +220,16 @@ void GINTfill_int3c2e_ip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffse
     const int jsh = bas_pair2ket[bas_ij];
     const int ksh = bas_pair2bra[bas_kl];
 
-    double g[GSIZE];
+    extern __shared__ double g[];
 
     const int as_ish = envs.ibase ? ish: jsh;
     const int as_jsh = envs.ibase ? jsh: ish;
 
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        GINTg0_int3c2e<NROOTS>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
+        GINTg0_int3c2e_shared(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
         const double ak2 = -2.0*c_bpcache.a1[kl];
-        GINTwrite_int3c2e_ip2_direct<NROOTS>(envs, eri, g, ak2, ish, jsh, ksh);
+        GINTwrite_int3c2e_ip2_direct(envs, eri, g, ak2, ish, jsh, ksh);
     } }
 }
 

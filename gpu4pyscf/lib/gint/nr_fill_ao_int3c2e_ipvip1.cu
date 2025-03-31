@@ -44,7 +44,7 @@ static int GINTfill_int3c2e_ipvip1(ERITensor *eri, BasisProdOffsets *offsets, GI
     int lj = envs->j_l;
     int lk = envs->k_l;
     int type_ijk = li * 100 + lj * 10 + lk;
-    
+
     switch (type_ijk) {
         // li+lj+lk=0
         case 0: GINTfill_int3c2e_ipvip1_kernel000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
@@ -110,17 +110,22 @@ static int GINTfill_int3c2e_ipvip1(ERITensor *eri, BasisProdOffsets *offsets, GI
         case 410: GINTfill_int3c2e_ipvip1_kernel<4,1,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 500: GINTfill_int3c2e_ipvip1_kernel<5,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
 #endif
-        default: switch (nrys_roots) {
-            case 2: GINTfill_int3c2e_ipvip1_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            case 3: GINTfill_int3c2e_ipvip1_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            case 4: GINTfill_int3c2e_ipvip1_kernel<4, GSIZE4_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            case 5: GINTfill_int3c2e_ipvip1_kernel<5, GSIZE5_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            case 6: GINTfill_int3c2e_ipvip1_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            case 7: GINTfill_int3c2e_ipvip1_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            case 8: GINTfill_int3c2e_ipvip1_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            case 9: GINTfill_int3c2e_ipvip1_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            default: fprintf(stderr, "rys roots %d\n", nrys_roots);
-            return 1;
+        default: {
+            dim3 threads(THREADSX*THREADSY);
+            dim3 blocks(ntasks_ij, ntasks_kl);
+            const int li_ceil = li + 1;
+            const int lj_ceil = lj + 1;
+            const int gsize = 3*nrys_roots*(li_ceil+1)*(lj_ceil+1)*(lk+1);
+            cudaError_t err = cudaFuncSetAttribute(
+                GINTfill_int3c2e_ipvip1_general_kernel,
+                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                (gsize+16)*sizeof(double));
+            if (err != cudaSuccess) {
+                fprintf(stderr, "CUDA Error of GINTfill_int3c2e_ipvip1_kernel: %s\n", cudaGetErrorString(err));
+                return 1;
+            }
+            const int shm_size = gsize*sizeof(double);
+            GINTfill_int3c2e_ipvip1_general_kernel<<<blocks, threads, shm_size, stream>>>(*envs, *eri, *offsets);
         }
     }
 

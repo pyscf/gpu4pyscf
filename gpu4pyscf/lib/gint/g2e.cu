@@ -425,6 +425,175 @@ static void GINTg0_2e_2d4d(GINTEnvVars envs, double* __restrict__ g, double norm
     }
 }
 
+__device__
+static void GINTg0_int3c2e_shared(GINTEnvVars envs, double* __restrict__ g0,
+    const double norm, const int ish, const int jsh, const int ksh,
+    const int prim_ij, const int prim_kl)
+{
+    double* __restrict__ a12 = c_bpcache.a12;
+    double* __restrict__ e12 = c_bpcache.e12;
+    double* __restrict__ x12 = c_bpcache.x12;
+    double* __restrict__ y12 = c_bpcache.y12;
+    double* __restrict__ z12 = c_bpcache.z12;
+    const double aij = a12[prim_ij];
+    const double xij = x12[prim_ij];
+    const double yij = y12[prim_ij];
+    const double zij = z12[prim_ij];
+    const double akl = a12[prim_kl];
+    const double xkl = x12[prim_kl];
+    const double ykl = y12[prim_kl];
+    const double zkl = z12[prim_kl];
+
+    const double xijxkl[3] = {xij-xkl, yij-ykl, zij-zkl};
+    const double aijkl = aij + akl;
+    const double a1 = aij * akl;
+    double a0 = a1 / aijkl;
+    const double omega = envs.omega;
+    const double omega2 = omega * omega;
+    const double theta = omega > 0.0 ? omega2 / (omega2 + a0) : 1.0;
+    a0 *= theta;
+
+    const double eij = e12[prim_ij];
+    const double ekl = e12[prim_kl];
+    const double fac = eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+    const double x = a0 * (xijxkl[0] * xijxkl[0] + xijxkl[1] * xijxkl[1] + xijxkl[2] * xijxkl[2]);
+    const int nrys_roots = envs.nrys_roots;
+    double uw[2];
+    GINTrys_root(nrys_roots, x, uw);
+    double root = uw[0];
+    const double weight = uw[1];
+    root /= root + 1 - root * theta;
+
+    const int nbas = c_bpcache.nbas;
+    double* __restrict__ bas_x = c_bpcache.bas_coords;
+    double* __restrict__ bas_y = bas_x + nbas;
+    double* __restrict__ bas_z = bas_y + nbas;
+
+    const double xi = bas_x[ish];
+    const double yi = bas_y[ish];
+    const double zi = bas_z[ish];
+    const double xijxi[3] = {xij-xi, yij-yi, zij-zi};
+
+    int nmax = envs.li_ceil + envs.lj_ceil;
+    int mmax = envs.lk_ceil + envs.ll_ceil;
+    const int ijmin = envs.ijmin;
+
+    const int dm = envs.stride_klmax;
+    const int dn = envs.stride_ijmax;
+    const int di = envs.stride_ijmax;
+    const int dj = envs.stride_ijmin;
+    const int dk = envs.stride_klmax;
+
+    const int gsize = envs.g_size;
+
+    __syncthreads();
+    for (int i = threadIdx.x; i < nrys_roots; i += blockDim.x) {
+        g0[i] = norm;
+        g0[i+gsize] = fac;
+        g0[i+2*gsize] = weight;
+    }
+    __syncthreads();
+
+    for (int tx = threadIdx.x; tx < nrys_roots*3; tx += blockDim.x) {
+        const int iroot = tx % nrys_roots;
+        const int ix = tx / nrys_roots;
+        double *gx = g0 + ix * envs.g_size + iroot;
+        const double u2 = a0 * root;
+        const double tmp4 = .5 / (u2 * aijkl + a1);
+        const double b00 = u2 * tmp4;
+        const double tmp1 = 2 * b00;
+        const double tmp2 = tmp1 * akl;
+        const double b10 = b00 + tmp4 * akl;
+        const double c00 = xijxi[ix] - tmp2 * xijxkl[ix];
+
+        if (nmax > 0) {
+            double s0 = gx[0];
+            double s1 = c00 * s0;
+            gx[dn] = s1;
+            for (int n = 1; n < nmax; ++n) {
+                double s2 = c00 * s1 + n * b10 * s0;
+                gx[(n+1)*dn] = s2;
+                s0 = s1; s1 = s2;
+            }
+        }
+        if (mmax > 0) {
+            const double tmp3 = tmp1 * aij;
+            const double b01 = b00 + tmp4 * aij;
+            const double c0p = tmp3 * xijxkl[ix];
+            double s0 = gx[0];
+            double s1 = c0p * s0;
+            gx[dm] = s1;
+            for (int m = 1; m < mmax; ++m) {
+                double s2 = c0p * s1 + m * b01 * s0;
+                gx[(m+1)*dm] = s2;
+                s0 = s1; s1 = s2;
+            }
+
+            if (nmax > 0) {
+                double s0 = gx[dn];
+                double s1 = c0p * s0 + b00 * gx[0];
+                gx[dn+dm] = s1;
+                for (int m = 1; m < mmax; ++m) {
+                    double s2 = c0p*s1 + m*b01*s0 + b00*gx[m*dm];
+                    gx[dn+(m+1)*dm] = s2;
+                    s0 = s1; s1 = s2;
+                }
+            }
+        }
+
+        // gx(irys,m,n+1) = c00(irys)*gx(irys,m,n)
+        // + n*b10(irys)*gx(irys,m,n-1)
+        // + m*b00(irys)*gx(irys,m-1,n)
+        for (int m = 1; m <= mmax; ++m) {
+            double s0 = gx[m*dm];
+            double s1 = gx[m*dm+ dn];
+            const double tmpb0 = m * b00;
+            for (int n = 1; n < nmax; ++n) {
+                double s2 = c00*s1 + n*b10*s0 + tmpb0*gx[m*dm+n*dn-dm];
+                gx[m*dm+(n+1)*dn] = s2;
+                s0 = s1;  s1 = s2;
+            }
+        }
+
+        if (ijmin > 0) {
+            // g(i,j) = rirj * g(i,j-1) +  g(i+1,j-1)
+            const double xixj[3] = {xi-bas_x[jsh], yi-bas_y[jsh], zi-bas_z[jsh]};
+
+            // unrolling j
+            int j;
+            for (j = 0; j < ijmin-1; j+=2, nmax-=2) {
+            for (int k = 0; k <= mmax; ++k) {
+                int n = k * dk + j * dj;
+                double s0 = gx[n+nmax*di-di];
+                double t1 = xixj[ix] * s0 + gx[n+nmax*di];
+                gx[dj+n+nmax*di-di] = t1;
+                double s1 = s0;
+                for (int i = nmax-2; i >= 0; i--) {
+                    s0 = gx[n+i*di];
+                    double t0 = xixj[ix] * s0 + s1;
+                    gx[dj+n+i*di] = t0;
+                    gx[dj+dj+n+i*di] = xixj[ix] * t0 + t1;
+                    s1 = s0; t1 = t0;
+                }
+            } }
+
+            if (j < ijmin) {
+                for (int k = 0; k <= mmax; ++k) {
+                    int n = k * dk + j * dj;
+                    double s1 = gx[n + nmax*di];
+                    for (int i = nmax-1; i >= 0; i--) {
+                        double s0 = gx[n+i*di];
+                        gx[dj+n+i*di] = xixj[ix] * s0 + s1;
+                        s1 = s0;
+                    }
+                }
+            }
+        }
+    }
+    __syncthreads();
+}
+
+
 template <int NROOTS> __device__
 static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
     const double norm, const int ish, const int jsh, const int ksh,

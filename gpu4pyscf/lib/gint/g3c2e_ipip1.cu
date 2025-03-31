@@ -67,7 +67,7 @@ static void GINTgout3c2e_ipip1(GINTEnvVars envs, double* __restrict__ gout, doub
             g2_y += i_idy>0 ? i_idy*g0[iy-di] : 0.0;
             g2_z += i_idz>0 ? i_idz*g0[iz-di] : 0.0;
 
-            // g3 
+            // g3
             double g3_x = ai2*g0[ix+2*di];
             double g3_y = ai2*g0[iy+2*di];
             double g3_z = ai2*g0[iz+2*di];
@@ -83,7 +83,7 @@ static void GINTgout3c2e_ipip1(GINTEnvVars envs, double* __restrict__ gout, doub
             if (i_idx > 1) { g3_x += i_idx * (i_idx-1) * g0[ix-2*di]; }
             if (i_idy > 1) { g3_y += i_idy * (i_idy-1) * g0[iy-2*di]; }
             if (i_idz > 1) { g3_z += i_idz * (i_idz-1) * g0[iz-2*di]; }
-            
+
             sxx += g3_x * g0_y * g0_z;
             sxy += g2_x * g2_y * g0_z;
             sxz += g2_x * g0_y * g2_z;
@@ -154,8 +154,8 @@ void GINTfill_int3c2e_ipip1_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOff
     GINTwrite_int3c2e_ipip(eri, gout, as_ish, as_jsh, ksh);
 }
 
-template <int NROOTS> __device__
-static void GINTwrite_int3c2e_ipip1_direct(GINTEnvVars envs, ERITensor eri, 
+__device__
+static void GINTwrite_int3c2e_ipip1_direct(GINTEnvVars envs, ERITensor eri,
     double* __restrict__ g0, double ai2,
     const int ish, const int jsh, const int ksh)
 {
@@ -181,13 +181,16 @@ static void GINTwrite_int3c2e_ipip1_direct(GINTEnvVars envs, ERITensor eri,
     const int li = envs.i_l;
     const int lj = envs.j_l;
     const int lk = envs.k_l;
+    const int nrys_roots = envs.nrys_roots;
 
-    for (int k = k0; k < k1; ++k) {
-    for (int j = j0; j < j1; ++j) {
-    for (int i = i0; i < i1; ++i) {
-        const int loc_k = c_l_locs[lk] + (k-k0);
-        const int loc_j = c_l_locs[lj] + (j-j0);
-        const int loc_i = c_l_locs[li] + (i-i0);
+    for (int tx = threadIdx.x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim.x) {
+        const int k = tx / ((j1-j0)*(i1-i0));
+        const int j = (tx / (i1-i0)) % (j1-j0);
+        const int i = tx % (i1-i0);
+
+        const int loc_k = c_l_locs[lk] + k;
+        const int loc_j = c_l_locs[lj] + j;
+        const int loc_i = c_l_locs[li] + i;
 
         int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * c_idx[loc_i];
         int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
@@ -206,7 +209,7 @@ static void GINTwrite_int3c2e_ipip1_direct(GINTEnvVars envs, ERITensor eri,
         double eri_zx = 0;
         double eri_zy = 0;
         double eri_zz = 0;
-        for (int ir = 0; ir < NROOTS; ++ir, ++ix, ++iy, ++iz){
+        for (int ir = 0; ir < nrys_roots; ++ir, ++ix, ++iy, ++iz){
             const double g0_x = g0[ix];
             const double g0_y = g0[iy];
             const double g0_z = g0[iz];
@@ -219,7 +222,7 @@ static void GINTwrite_int3c2e_ipip1_direct(GINTEnvVars envs, ERITensor eri,
             g2_y += i_idy>0 ? i_idy*g0[iy-di] : 0.0;
             g2_z += i_idz>0 ? i_idz*g0[iz-di] : 0.0;
 
-            // g3 
+            // g3
             double g3_x = ai2*g0[ix+2*di];
             double g3_y = ai2*g0[iy+2*di];
             double g3_z = ai2*g0[iz+2*di];
@@ -246,7 +249,7 @@ static void GINTwrite_int3c2e_ipip1_direct(GINTEnvVars envs, ERITensor eri,
             eri_zy += g0_x * g2_y * g2_z;
             eri_zz += g0_x * g0_y * g3_z;
         }
-        const int off = i + jstride*j + kstride*k;
+        const int off = (i+i0) + jstride*(j+j0) + kstride*(k+k0);
         double *eri_data = eri.data + off;
         eri_data[0 * lstride] += eri_xx;
         eri_data[1 * lstride] += eri_xy;
@@ -257,17 +260,17 @@ static void GINTwrite_int3c2e_ipip1_direct(GINTEnvVars envs, ERITensor eri,
         eri_data[6 * lstride] += eri_zx;
         eri_data[7 * lstride] += eri_zy;
         eri_data[8 * lstride] += eri_zz;
-    }}}
+    }
 }
 
 // General version
-template <int NROOTS, int GSIZE> __global__
-void GINTfill_int3c2e_ipip1_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
+__global__
+void GINTfill_int3c2e_ipip1_general_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
 
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
@@ -285,16 +288,16 @@ void GINTfill_int3c2e_ipip1_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOff
     const int jsh = bas_pair2ket[bas_ij];
     const int ksh = bas_pair2bra[bas_kl];
 
-    double g0[GSIZE];
+    extern __shared__ double g0[];
 
-    const int as_ish = envs.ibase ? ish: jsh; 
-    const int as_jsh = envs.ibase ? jsh: ish; 
+    const int as_ish = envs.ibase ? ish: jsh;
+    const int as_jsh = envs.ibase ? jsh: ish;
 
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        GINTg0_int3c2e<NROOTS>(envs, g0, norm, as_ish, as_jsh, ksh, ij, kl);
+        GINTg0_int3c2e_shared(envs, g0, norm, as_ish, as_jsh, ksh, ij, kl);
         const double ai2 = -2.0*c_bpcache.a1[ij];
-        GINTwrite_int3c2e_ipip1_direct<NROOTS>(envs, eri, g0, ai2, ish, jsh, ksh);
+        GINTwrite_int3c2e_ipip1_direct(envs, eri, g0, ai2, ish, jsh, ksh);
     } }
 }
 
@@ -367,7 +370,7 @@ static void GINTfill_int3c2e_ipip1_kernel000(GINTEnvVars envs, ERITensor eri, Ba
         const double aijkl = aij + akl;
         const double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         const double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         const double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -378,7 +381,7 @@ static void GINTfill_int3c2e_ipip1_kernel000(GINTEnvVars envs, ERITensor eri, Ba
         double rw[4];
         GINTrys_root<2>(x, rw);
         GINTscale_u<2>(rw, theta);
-        
+
         for (int irys = 0; irys < 2; ++irys) {
             const double root0 = rw[irys];
             const double weight0 = rw[irys+2];
@@ -400,14 +403,14 @@ static void GINTfill_int3c2e_ipip1_kernel000(GINTEnvVars envs, ERITensor eri, Ba
             const double g_6 = weight0 * fac;
             const double g_7 = c00z * g_6;
             const double g_8 = b10 * g_6 + c00z * g_7;
-            
+
             const double dgx_0 =       ai2 * g_1;
             const double dgx_1 = g_0 + ai2 * g_2;
             const double dgy_0 =       ai2 * g_4;
             const double dgy_1 = g_3 + ai2 * g_5;
             const double dgz_0 =       ai2 * g_7;
             const double dgz_1 = g_6 + ai2 * g_8;
-            
+
             const double d2gx_0 = ai2 * dgx_1;
             const double d2gy_0 = ai2 * dgy_1;
             const double d2gz_0 = ai2 * dgz_1;
@@ -417,7 +420,7 @@ static void GINTfill_int3c2e_ipip1_kernel000(GINTEnvVars envs, ERITensor eri, Ba
             //gout3 += g_0 * g_5 * g_6;
             //gout4 += g_0 * g_4 * g_7;
             //gout5 += g_0 * g_3 * g_8;
-            
+
             gxx += d2gx_0  * g_3     * g_6;
             gxy += dgx_0   * dgy_0   * g_6;
             gxz += dgx_0   * g_3     * dgz_0;

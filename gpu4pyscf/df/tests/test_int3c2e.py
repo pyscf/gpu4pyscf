@@ -76,7 +76,7 @@ class KnownValues(unittest.TestCase):
         int3c_pyscf = get_int3c((0, mol.nbas, 0, mol.nbas, 0, auxmol.nbas))
         int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym=True).get()
         assert np.linalg.norm(int3c_gpu - int3c_pyscf) < 1e-8
-        
+
         int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym=False).get()
         assert np.linalg.norm(int3c_gpu - int3c_pyscf) < 1e-8
 
