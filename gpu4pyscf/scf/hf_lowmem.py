@@ -29,12 +29,13 @@ __all__ = [
     'RHF',
 ]
 
+@profile
 def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
           dump_chk=True, callback=None, conv_check=True, **kwargs):
     mol = mf.mol
     verbose = mf.verbose
     log = logger.new_logger(mol, verbose)
-    cput0 = log.init_timer()
+    cput0 = cput1 = log.init_timer()
 
     mf.dump_flags()
     mf.build(mf.mol)
@@ -52,9 +53,11 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
             dm0 = mf.make_rdm1()
         else:
             dm0 = mf.get_init_guess(mol, mf.init_guess)
+        cput1 = log.timer_debug1('generating initial guess', *cput1)
 
-    dm, dm0 = asarray(dm0, order='C'), None
     h1e = cp.asarray(mf.get_hcore(mol))
+    cput1 = log.timer_debug1('hcore', *cput1)
+    dm, dm0 = asarray(dm0, order='C'), None
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     log.info('init E= %.15g', e_tot)

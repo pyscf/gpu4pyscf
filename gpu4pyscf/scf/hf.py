@@ -24,7 +24,8 @@ from gpu4pyscf.gto.ecp import get_ecp
 from gpu4pyscf import lib
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
-    eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem)
+    eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
+    block_diag)
 from gpu4pyscf.scf import diis, jk
 from gpu4pyscf.lib import logger
 
@@ -168,14 +169,15 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     conv_tol = mf.conv_tol
     mol = mf.mol
     verbose = mf.verbose
-    log = logger.new_logger(mol, verbose)
-    t0 = log.init_timer()
+    log = logger.new_logger(mf, verbose)
+    t0 = t1 = log.init_timer()
     if(conv_tol_grad is None):
         conv_tol_grad = conv_tol**.5
-        logger.info(mf, 'Set gradient conv threshold to %g', conv_tol_grad)
+        log.info('Set gradient conv threshold to %g', conv_tol_grad)
 
     if dm0 is None:
         dm0 = mf.get_init_guess(mol, mf.init_guess)
+        t1 = log.timer_debug1('generating initial guess', *t1)
 
     if hasattr(dm0, 'mo_coeff') and hasattr(dm0, 'mo_occ'):
         if dm0.ndim == 2:
@@ -186,13 +188,14 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
             # Drop attributes like mo_coeff, mo_occ for UHF and other methods.
             dm0 = asarray(dm0, order='C')
 
-    dm, dm0 = asarray(dm0, order='C'), None
     h1e = cupy.asarray(mf.get_hcore(mol))
     s1e = cupy.asarray(mf.get_ovlp(mol))
+    t1 = log.timer_debug1('hcore', *t1)
 
+    dm, dm0 = asarray(dm0, order='C'), None
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
-    logger.info(mf, 'init E= %.15g', e_tot)
+    log.info('init E= %.15g', e_tot)
     t1 = log.timer_debug1('total prep', *t0)
     scf_conv = False
 
@@ -243,8 +246,8 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
         norm_ddm = cupy.linalg.norm(dm-dm_last)
         t1 = log.timer_debug1('total', *t0)
-        logger.info(mf, 'cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
-                    cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
+        log.info('cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
+                 cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
 
         if dump_chk:
             mf.dump_chk(locals())
@@ -254,7 +257,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
             scf_conv = True
             break
     else:
-        logger.warn(mf, "SCF failed to converge")
+        log.warn("SCF failed to converge")
 
     return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
@@ -328,6 +331,153 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
             mo[:,idx] = orb.dot(c)
             mo_e[idx] = e
     return mo_e, mo
+
+def init_guess_by_minao(mol):
+    '''Generate initial guess density matrix based on ANO basis, then project
+    the density matrix to the basis set defined by ``mol``
+
+    Returns:
+        Density matrix, 2D ndarray
+
+    Examples:
+
+    >>> from pyscf import gto, scf
+    >>> mol = gto.M(atom='H 0 0 0; H 0 0 1.1')
+    >>> scf.hf.init_guess_by_minao(mol)
+    array([[ 0.94758917,  0.09227308],
+           [ 0.09227308,  0.94758917]])
+    '''
+    from pyscf.scf import atom_hf
+    from pyscf.scf import addons
+
+    def minao_basis(symb, nelec_ecp):
+        occ = []
+        basis_ano = []
+        if gto.is_ghost_atom(symb):
+            return occ, basis_ano
+
+        stdsymb = gto.mole._std_symbol(symb)
+        basis_add = gto.basis.load('ano', stdsymb)
+# coreshl defines the core shells to be removed in the initial guess
+        coreshl = gto.ecp.core_configuration(nelec_ecp, atom_symbol=stdsymb)
+        # coreshl = (0,0,0,0)  # it keeps all core electrons in the initial guess
+        for l in range(4):
+            ndocc, frac = atom_hf.frac_occ(stdsymb, l)
+            if ndocc >= coreshl[l]:
+                degen = l * 2 + 1
+                occ_l = [2, ]*(ndocc-coreshl[l]) + [frac, ]
+                occ.append(np.repeat(occ_l, degen))
+                basis_ano.append([l] + [b[:1] + b[1+coreshl[l]:ndocc+2]
+                                        for b in basis_add[l][1:]])
+            else:
+                logger.debug(mol, '*** ECP incorporates partially occupied '
+                             'shell of l = %d for atom %s ***', l, symb)
+        occ = np.hstack(occ)
+
+        if nelec_ecp > 0:
+            if symb in mol._basis:
+                input_basis = mol._basis[symb]
+            elif stdsymb in mol._basis:
+                input_basis = mol._basis[stdsymb]
+            else:
+                raise KeyError(symb)
+
+            basis4ecp = [[] for i in range(4)]
+            for bas in input_basis:
+                l = bas[0]
+                if l < 4:
+                    basis4ecp[l].append(bas)
+
+            occ4ecp = []
+            for l in range(4):
+                nbas_l = sum((len(bas[1]) - 1) for bas in basis4ecp[l])
+                ndocc, frac = atom_hf.frac_occ(stdsymb, l)
+                ndocc -= coreshl[l]
+                assert ndocc <= nbas_l
+
+                if nbas_l > 0:
+                    occ_l = np.zeros(nbas_l)
+                    occ_l[:ndocc] = 2
+                    if frac > 0:
+                        occ_l[ndocc] = frac
+                    occ4ecp.append(np.repeat(occ_l, l * 2 + 1))
+
+            occ4ecp = np.hstack(occ4ecp)
+            basis4ecp = lib.flatten(basis4ecp)
+
+# Compared to ANO valence basis, to check whether the ECP basis set has
+# reasonable AO-character contraction.  The ANO valence AO should have
+# significant overlap to ECP basis if the ECP basis has AO-character.
+            atm1 = gto.Mole()
+            atm2 = gto.Mole()
+            atom = [[symb, (0.,0.,0.)]]
+            atm1._atm, atm1._bas, atm1._env = atm1.make_env(atom, {symb:basis4ecp}, [])
+            atm2._atm, atm2._bas, atm2._env = atm2.make_env(atom, {symb:basis_ano}, [])
+            atm1._built = True
+            atm2._built = True
+            s12 = gto.intor_cross('int1e_ovlp', atm1, atm2)
+            if abs(np.linalg.det(s12[occ4ecp>0][:,occ>0])) > .1:
+                occ, basis_ano = occ4ecp, basis4ecp
+            else:
+                logger.debug(mol, 'Density of valence part of ANO basis '
+                             'will be used as initial guess for %s', symb)
+        return occ, basis_ano
+
+    # Issue 548
+    if any(gto.charge(mol.atom_symbol(ia)) > 96 for ia in range(mol.natm)):
+        logger.info(mol, 'MINAO initial guess is not available for super-heavy '
+                    'elements. "atom" initial guess is used.')
+        return init_guess_by_atom(mol)
+
+    nelec_ecp_dic = {mol.atom_symbol(ia): mol.atom_nelec_core(ia)
+                          for ia in range(mol.natm)}
+
+    basis = {}
+    occdic = {}
+    for symb, nelec_ecp in nelec_ecp_dic.items():
+        occ_add, basis_add = minao_basis(symb, nelec_ecp)
+        occdic[symb] = occ_add
+        basis[symb] = basis_add
+
+    mol1 = gto.Mole()
+    mol1._built = True
+    mol2 = mol.copy()
+
+    aoslice = mol.aoslice_by_atom()
+    atm_conf = {}
+    dm = []
+    mo_coeff = []
+    mo_occ = []
+    for ia in range(mol.natm):
+        symb = mol.atom_symbol(ia)
+        if gto.is_ghost_atom(symb):
+            TODO
+            dm.append()
+            continue
+
+        if symb not in atm_conf:
+            nelec_ecp = mol.atom_nelec_core(ia)
+            occ, basis = minao_basis(symb, nelec_ecp)
+            mol1._atm, mol1._bas, mol1._env = mol1.make_env(
+                [mol._atom[ia]], {symb: basis}, [])
+            i0, i1 = aoslice[ia,:2]
+            mol2._bas = mol._bas[i0:i1]
+            s22 = mol2.intor_symmetric('int1e_ovlp')
+            s21 = gto.mole.intor_cross('int1e_ovlp', mol2, mol1)
+            c = pyscf_lib.cho_solve(s22, s21, strict_sym_pos=False)
+            c = cupy.asarray(c[:,occ>0])
+            occ = cupy.asarray(occ[occ>0])
+            atm_conf[symb] = occ, c
+
+        occ, c = atm_conf[symb]
+        dm.append((c*occ).dot(c.conj().T))
+        mo_coeff.append(c)
+        mo_occ.append(occ)
+
+    dm = block_diag(dm)
+    mo_coeff = block_diag(mo_coeff)
+    mo_occ = cupy.hstack(mo_occ)
+    return tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
 def as_scanner(mf):
     if isinstance(mf, pyscf_lib.SinglePointScanner):
@@ -438,7 +588,7 @@ class SCF(pyscf_lib.StreamObject):
     get_fock                 = get_fock
     get_occ                  = get_occ
     get_grad                 = staticmethod(get_grad)
-    init_guess_by_minao      = hf_cpu.SCF.init_guess_by_minao
+    init_guess_by_minao      = staticmethod(init_guess_by_minao)
     init_guess_by_atom       = hf_cpu.SCF.init_guess_by_atom
     init_guess_by_huckel     = hf_cpu.SCF.init_guess_by_huckel
     init_guess_by_mod_huckel = hf_cpu.SCF.init_guess_by_mod_huckel

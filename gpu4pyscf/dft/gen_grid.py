@@ -285,6 +285,8 @@ def get_partition(mol, atom_grids_tab,
         grid_coord and grid_weight arrays.  grid_coord array has shape (N,3);
         weight 1D array has N elements.
     '''
+    log = logger.new_logger(mol)
+    t0 = log.init_timer()
     atm_coords = numpy.asarray(mol.atom_coords() , order='C')
     atm_coords = cupy.asarray(atm_coords)
     '''
@@ -347,6 +349,7 @@ def get_partition(mol, atom_grids_tab,
         weights = vol * pbecke[ia] * (1./pbecke.sum(axis=0))
         coords_all.append(coords)
         weights_all.append(weights)
+        t0 = log.timer_debug1(f'becke paritioning on atom {ia}', *t0)
     if concat:
         coords_all = cupy.vstack(coords_all)
         weights_all = cupy.hstack(weights_all)
@@ -503,13 +506,16 @@ class Grids(lib.StreamObject):
         if mol is None: mol = self.mol
         if self.verbose >= logger.WARN:
             self.check_sanity()
+        log = logger.new_logger(self)
+        t0 = log.init_timer()
         atom_grids_tab = self.gen_atomic_grids(
             mol, self.atom_grid, self.radi_method, self.level, self.prune, **kwargs)
         self.coords, self.weights = self.get_partition(
             mol, atom_grids_tab, self.radii_adjust, self.atomic_radii, self.becke_scheme)
+        t0 = log.timer_debug1('generating atomic grids', *t0)
         if self.alignment > 1:
             padding = _padding_size(self.size, self.alignment)
-            logger.debug(self, 'Padding %d grids', padding)
+            log.debug('Padding %d grids', padding)
             if padding > 0:
                 # cupy.vstack and cupy.hstack convert numpy array into cupy array first
                 self.coords = cupy.vstack(
@@ -520,13 +526,15 @@ class Grids(lib.StreamObject):
             idx = atomic_group_grids(mol, self.coords)
             self.coords = self.coords[idx]
             self.weights = self.weights[idx]
+            t0 = log.timer_debug1('sorting grids', *t0)
 
         if with_non0tab:
             self.non0tab = self.make_mask(mol, self.coords)
             self.screen_index = self.non0tab
+            t0 = log.timer_debug1('generating grids mask', *t0)
         else:
             self.screen_index = self.non0tab = None
-        logger.info(self, 'tot grids = %d', len(self.weights))
+        log.info('tot grids = %d', len(self.weights))
         return self
 
     def kernel(self, mol=None, with_non0tab=False):
