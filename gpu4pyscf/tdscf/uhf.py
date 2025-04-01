@@ -42,7 +42,8 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
     B has three items: (B_aaaa, B_aabb, B_bbbb).
     B_bbaa = B_aabb.transpose(2,3,0,1).
     '''
-
+    if getattr(mf, 'with_solvent', None):
+        raise NotImplementedError("PCM is not supported for get_ab")
     if mo_energy is None:
         mo_energy = mf.mo_energy
     if mo_coeff is None:
