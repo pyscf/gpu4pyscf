@@ -24,7 +24,7 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
     int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     int j0 = ao_loc[jsh  ] - jk.ao_offsets_j;
     int k0 = ao_loc[ksh  ] - jk.ao_offsets_k;
-
+    
     constexpr int LK_CEIL = LK + 1;
     constexpr int NROOTS = (LI+LJ+LK_CEIL)/2 + 1;
     constexpr int nfi = (LI+1)*(LI+2)/2;
@@ -84,12 +84,11 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
                 sz += gx * gy * fz;
             }
 
-            int kk = 3*kp;
             int off_rhok = (i0+ip) + nao*(j0+jp) + (k0+kp)*nao*nao;
             double rhok_tmp = rhok[off_rhok];
-            k3[kk + 0] += sx * rhok_tmp;
-            k3[kk + 1] += sy * rhok_tmp;
-            k3[kk + 2] += sz * rhok_tmp;
+            k3[0] += sx * rhok_tmp;
+            k3[1] += sy * rhok_tmp;
+            k3[2] += sz * rhok_tmp;
         }}}
         return;
     }
@@ -142,10 +141,9 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
                 jz += dm_ij * sz;
             }}
             double rhoj_k = rhoj[kp + k0];
-            int kk = 3*kp;
-            j3[kk + 0] += jx * rhoj_k;
-            j3[kk + 1] += jy * rhoj_k;
-            j3[kk + 2] += jz * rhoj_k;
+            j3[0] += jx * rhoj_k;
+            j3[1] += jy * rhoj_k;
+            j3[2] += jz * rhoj_k;
         }
         return;
     }
@@ -193,9 +191,9 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
 
             int off_rhok = (i0+ip) + nao*(j0+jp) + (k0+kp)*nao*nao;
             double rhok_tmp = rhok[off_rhok];
-            k3[3*kp + 0] += sx * rhok_tmp;
-            k3[3*kp + 1] += sy * rhok_tmp;
-            k3[3*kp + 2] += sz * rhok_tmp;
+            k3[0] += sx * rhok_tmp;
+            k3[1] += sy * rhok_tmp;
+            k3[2] += sz * rhok_tmp;
 
             int off_dm = (i0+ip) + nao*(j0+jp);
             double dm_ij = dm[off_dm];
@@ -205,9 +203,42 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
         }}
         
         double rhoj_k = rhoj[kp+k0];
-        j3[3*kp + 0] += jx * rhoj_k;
-        j3[3*kp + 1] += jy * rhoj_k;
-        j3[3*kp + 2] += jz * rhoj_k;
+        j3[0] += jx * rhoj_k;
+        j3[1] += jy * rhoj_k;
+        j3[2] += jz * rhoj_k;
+    }
+}
+
+__device__
+static void write_int3c2e_ip2_jk(JKMatrix jk, double *j3, double* k3, int ksh){
+    int *bas_atm = c_bpcache.bas_atm;
+    int atm_id = bas_atm[ksh];
+    double *vj = jk.vj;
+    double *vk = jk.vk;
+
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    __shared__ double sdata[THREADSX][THREADSY];
+
+    if (vj != NULL){
+        for (int j = 0; j < 3; j++){
+            sdata[tx][ty] = j3[j]; __syncthreads();
+            if(THREADSX >= 16 && tx<8) sdata[tx][ty] += sdata[tx+8][ty]; __syncthreads();
+            if(THREADSX >= 8  && tx<4) sdata[tx][ty] += sdata[tx+4][ty]; __syncthreads();
+            if(THREADSX >= 4  && tx<2) sdata[tx][ty] += sdata[tx+2][ty]; __syncthreads();
+            if(THREADSX >= 2  && tx<1) sdata[tx][ty] += sdata[tx+1][ty]; __syncthreads();
+            if (tx == 0) atomicAdd(vj + 3*atm_id+j, sdata[0][ty]);
+        }
+    }
+    if (vk != NULL){
+        for (int j = 0; j < 3; j++){
+            sdata[tx][ty] = k3[j]; __syncthreads();
+            if(THREADSX >= 16 && tx<8) sdata[tx][ty] += sdata[tx+8][ty]; __syncthreads();
+            if(THREADSX >= 8  && tx<4) sdata[tx][ty] += sdata[tx+4][ty]; __syncthreads();
+            if(THREADSX >= 4  && tx<2) sdata[tx][ty] += sdata[tx+2][ty]; __syncthreads();
+            if(THREADSX >= 2  && tx<1) sdata[tx][ty] += sdata[tx+1][ty]; __syncthreads();
+            if (tx == 0) atomicAdd(vk + 3*atm_id+j, sdata[0][ty]);
+        }
     }
 }
 
@@ -248,13 +279,9 @@ void GINTint3c2e_ip2_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
     const int as_ish = envs.ibase ? ish: jsh; 
     const int as_jsh = envs.ibase ? jsh: ish; 
 
-    constexpr int nfk = (LK+1)*(LK+2)/2;
-    double j3[nfk * 3];
-    double k3[nfk * 3];
-    for (int k = 0; k < nfk * 3; k++){
-        j3[k] = 0.0;
-        k3[k] = 0.0;
-    }
+    double j3[3] = {0.0};
+    double k3[3] = {0.0};
+
     if (active) {
         for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
         for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
@@ -336,9 +363,9 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
 
             const int off_rhok = (ip+i0) + nao*(jp+j0) + (kp+k0)*nao*nao;
             const double rhok_tmp = rhok[off_rhok];
-            k3[3*kp + 0] += sx * rhok_tmp;
-            k3[3*kp + 1] += sy * rhok_tmp;
-            k3[3*kp + 2] += sz * rhok_tmp;
+            k3[0] += sx * rhok_tmp;
+            k3[1] += sy * rhok_tmp;
+            k3[2] += sz * rhok_tmp;
         }}}
         return;
     }
@@ -391,9 +418,9 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
                 jz += dm_ij * sz;
             }}
             const double rhoj_k = rhoj[kp + k0];
-            j3[3*kp + 0] += jx * rhoj_k;
-            j3[3*kp + 1] += jy * rhoj_k;
-            j3[3*kp + 2] += jz * rhoj_k;
+            j3[0] += jx * rhoj_k;
+            j3[1] += jy * rhoj_k;
+            j3[2] += jz * rhoj_k;
         }
         return;
     }
@@ -441,9 +468,9 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
 
             const int off_rhok = (i0+ip) + nao*(j0+jp) + (k0+kp)*nao*nao;
             const double rhok_tmp = rhok[off_rhok];
-            k3[3*kp + 0] += sx * rhok_tmp;
-            k3[3*kp + 1] += sy * rhok_tmp;
-            k3[3*kp + 2] += sz * rhok_tmp;
+            k3[0] += sx * rhok_tmp;
+            k3[1] += sy * rhok_tmp;
+            k3[2] += sz * rhok_tmp;
 
             const int off_dm = (i0+ip) + nao*(jp+j0);
             const double dm_ij = dm[off_dm];
@@ -452,9 +479,9 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
             jz += dm_ij * sz;
         }}
         const double rhoj_k = rhoj[k0+kp];
-        j3[3*kp + 0] += jx * rhoj_k;
-        j3[3*kp + 1] += jy * rhoj_k;
-        j3[3*kp + 2] += jz * rhoj_k;
+        j3[0] += jx * rhoj_k;
+        j3[1] += jy * rhoj_k;
+        j3[2] += jz * rhoj_k;
     }
 }
 
@@ -487,19 +514,14 @@ void GINTint3c2e_ip2_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     
-    //double* __restrict__ exp = c_bpcache.a1;
     double g[GSIZE];
-    //double *f = g + GSIZE;
 
     const int as_ish = envs.ibase ? ish: jsh; 
     const int as_jsh = envs.ibase ? jsh: ish; 
 
-    double j3[GPU_AUX_NF * 3];
-    double k3[GPU_AUX_NF * 3];
-    for (int k = 0; k < GPU_AUX_NF * 3; k++){
-        j3[k] = 0.0;
-        k3[k] = 0.0;
-    }
+    double j3[3] = {0.0};
+    double k3[3] = {0.0};
+
     if (active) {
         for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
         for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
@@ -622,7 +644,6 @@ static void GINTint3c2e_ip2_jk_kernel001(GINTEnvVars envs, JKMatrix jk, BasisPro
     int k0 = ao_loc[ksh] - jk.ao_offsets_k;
 
     int nao = jk.nao;
-    int naux = jk.naux;
     double* __restrict__ dm = jk.dm;
     double* __restrict__ rhok = jk.rhok;
     double* __restrict__ rhoj = jk.rhoj;
@@ -635,10 +656,11 @@ static void GINTint3c2e_ip2_jk_kernel001(GINTEnvVars envs, JKMatrix jk, BasisPro
     if (!active){
         gout0 = 0.0; gout1 = 0.0; gout2 = 0.0;
     }
+    int *bas_atm = c_bpcache.bas_atm;
+    int atm_id = bas_atm[ksh];
     if (vj != NULL){
-        double rhoj_tmp;
         int off_dm = i0 + nao*j0;
-        rhoj_tmp = dm[off_dm] * rhoj[k0];
+        double rhoj_tmp = dm[off_dm] * rhoj[k0];
         double vj_tmp[3];
         vj_tmp[0] = gout0 * rhoj_tmp;
         vj_tmp[1] = gout1 * rhoj_tmp;
@@ -649,14 +671,13 @@ static void GINTint3c2e_ip2_jk_kernel001(GINTEnvVars envs, JKMatrix jk, BasisPro
             if(THREADSX >=  8 && tx<4) sdata[tx][ty] += sdata[tx+4][ty]; __syncthreads();
             if(THREADSX >=  4 && tx<2) sdata[tx][ty] += sdata[tx+2][ty]; __syncthreads();
             if(THREADSX >=  2 && tx<1) sdata[tx][ty] += sdata[tx+1][ty]; __syncthreads();
-            if (tx == 0) atomicAdd(vj+k0+j*naux, sdata[0][ty]);
+            if (tx == 0) atomicAdd(vj + 3*atm_id+j, sdata[0][ty]);
         }
     }
 
     if (vk != NULL){
-        double rhok_tmp;
         int off_rhok = i0 + nao*j0 + k0*nao*nao;
-        rhok_tmp = rhok[off_rhok];
+        double rhok_tmp = rhok[off_rhok];
         double vk_tmp[3];
         vk_tmp[0] = gout0 * rhok_tmp;
         vk_tmp[1] = gout1 * rhok_tmp;
@@ -667,7 +688,7 @@ static void GINTint3c2e_ip2_jk_kernel001(GINTEnvVars envs, JKMatrix jk, BasisPro
             if(THREADSX >=  8 && tx<4) sdata[tx][ty] += sdata[tx+4][ty]; __syncthreads();
             if(THREADSX >=  4 && tx<2) sdata[tx][ty] += sdata[tx+2][ty]; __syncthreads();
             if(THREADSX >=  2 && tx<1) sdata[tx][ty] += sdata[tx+1][ty]; __syncthreads();
-            if (tx == 0) atomicAdd(vk+k0+j*naux, sdata[0][ty]);
+            if (tx == 0) atomicAdd(vk + 3*atm_id+j, sdata[0][ty]);
         }
     }
 }

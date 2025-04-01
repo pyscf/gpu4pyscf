@@ -86,24 +86,23 @@ def get_rhojk(with_df, dm, orbo, with_j=True, with_k=True):
 def _jk_ip_task(intopt, rhoj_cart, dm_cart, rhok_cart, orbo_cart, task_list,
                 with_j=True, with_k=True, device_id=0, omega=None):
     mol = intopt.mol
+    natm = mol.natm
     with cupy.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(mol, mol.verbose)
         t0 = (logger.process_clock(), logger.perf_counter())
 
         orbo_cart = cupy.asarray(orbo_cart)
         cart_aux_loc = intopt.cart_aux_loc
-        nao_cart = dm_cart.shape[0]
-        naux_cart = intopt._sorted_auxmol.nao
-        vj = vk = vjaux = vkaux = None
+        ej = ek = ejaux = ekaux = None
         if with_j:
             rhoj_cart = cupy.asarray(rhoj_cart)
             dm_cart = cupy.asarray(dm_cart)
-            vj = cupy.zeros((3,nao_cart), order='C')
-            vjaux = cupy.zeros((3,naux_cart))
+            ej = cupy.zeros((natm,3), order='C')
+            ejaux = cupy.zeros((natm,3))
         if with_k:
             rhok_cart = cupy.asarray(rhok_cart)
-            vk = cupy.zeros((3,nao_cart), order='C')
-            vkaux = cupy.zeros((3,naux_cart))
+            ek = cupy.zeros((natm,3), order='C')
+            ekaux = cupy.zeros((natm,3))
         
         for cp_kl_id in task_list:
             k0, k1 = cart_aux_loc[cp_kl_id], cart_aux_loc[cp_kl_id+1]
@@ -135,16 +134,16 @@ def _jk_ip_task(intopt, rhoj_cart, dm_cart, rhok_cart, orbo_cart, task_list,
             vjaux_outcore = contract('xp,p->xp', rhoj_tmp0, rhoj_cart[k0:k1])
             vkaux_outcore = contract('xpji,pji->xp', int3c_ip, rhok_tmp)
             '''
-            vj_tmp, vk_tmp = get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip1', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
-            if with_j: vj += vj_tmp
-            if with_k: vk += vk_tmp
-            vj_tmp, vk_tmp = get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip2', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
-            if with_j: vjaux[:, k0:k1] = vj_tmp
-            if with_k: vkaux[:, k0:k1] = vk_tmp
+            ej_tmp, ek_tmp = get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip1', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
+            if with_j: ej += ej_tmp
+            if with_k: ek += ek_tmp
+            ej_tmp, ek_tmp = get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip2', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
+            if with_j: ejaux += ej_tmp
+            if with_k: ekaux += ek_tmp
 
-            rhoj_tmp = rhok_tmp = vj_tmp = vk_tmp = None
+            rhoj_tmp = rhok_tmp = ej_tmp = ek_tmp = None
             t0 = log.timer_debug1(f'calculate {cp_kl_id:3d} / {len(intopt.aux_log_qs):3d}, {k1-k0:3d} slices', *t0)
-    return vj, vk, vjaux, vkaux
+    return ej, ek, ejaux, ekaux
 
 def get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbo_cart, 
                  with_j=True, with_k=True, omega=None):
@@ -264,23 +263,22 @@ def get_rhojk_td(with_df, dm, orbol, orbor, with_j=True, with_k=True):
 def _jk_ip_task_td(intopt, rhoj_cart, dm_cart, rhok_cart, orbol_cart, orbor_cart, task_list,
                 with_j=True, with_k=True, device_id=0, omega=None):
     mol = intopt.mol
+    natm = mol.natm
     with cupy.cuda.Device(device_id), _streams[device_id]:
         log = logger.new_logger(mol, mol.verbose)
         t0 = (logger.process_clock(), logger.perf_counter())
 
         cart_aux_loc = intopt.cart_aux_loc
-        nao_cart = dm_cart.shape[0]
-        naux_cart = intopt._sorted_auxmol.nao
         vj = vk = vjaux = vkaux = None
         if with_j:
             rhoj_cart = cupy.asarray(rhoj_cart)
             dm_cart = cupy.asarray(dm_cart)
-            vj = cupy.zeros((3,nao_cart), order='C')
-            vjaux = cupy.zeros((3,naux_cart))
+            vj = cupy.zeros((natm,3), order='C')
+            vjaux = cupy.zeros((natm,3))
         if with_k:
             rhok_cart = cupy.asarray(rhok_cart)
-            vk = cupy.zeros((3,nao_cart), order='C')
-            vkaux = cupy.zeros((3,naux_cart))
+            vk = cupy.zeros((natm,3), order='C')
+            vkaux = cupy.zeros((natm,3))
         
         for cp_kl_id in task_list:
             k0, k1 = cart_aux_loc[cp_kl_id], cart_aux_loc[cp_kl_id+1]
@@ -290,34 +288,13 @@ def _jk_ip_task_td(intopt, rhoj_cart, dm_cart, rhok_cart, orbol_cart, orbor_cart
             if with_k:
                 rhok_tmp = contract('por,ir->pio', rhok_cart[k0:k1], orbol_cart)
                 rhok_tmp = contract('pio,jo->pji', rhok_tmp, orbor_cart)
-            '''
-            if(rhoj_tmp.flags['C_CONTIGUOUS'] == False):
-                rhoj_tmp = rhoj_tmp.astype(cupy.float64, order='C')
 
-            if(rhok_tmp.flags['C_CONTIGUOUS'] == False):
-                rhok_tmp = rhok_tmp.astype(cupy.float64, order='C')
-            '''
-            '''
-            # outcore implementation
-            buf = int3c2e.get_int3c2e_ip_slice(intopt, cp_kl_id, 1)
-            size = 3*(k1-k0)*nao_cart*nao_cart
-            int3c_ip = buf[:size].reshape([3,k1-k0,nao_cart,nao_cart], order='C')
-            rhoj_tmp0 = contract('xpji,ij->xip', int3c_ip, dm_cart)
-            vj_outcore = contract('xip,p->xi', rhoj_tmp0, rhoj_cart[k0:k1])
-            vk_outcore = contract('pji,xpji->xi', rhok_tmp, int3c_ip)
-
-            buf = int3c2e.get_int3c2e_ip_slice(intopt, cp_kl_id, 2)
-            int3c_ip = buf[:size].reshape([3,k1-k0,nao_cart,nao_cart], order='C')
-            rhoj_tmp0 = contract('xpji,ji->xp', int3c_ip, dm_cart)
-            vjaux_outcore = contract('xp,p->xp', rhoj_tmp0, rhoj_cart[k0:k1])
-            vkaux_outcore = contract('xpji,pji->xp', int3c_ip, rhok_tmp)
-            '''
             vj_tmp, vk_tmp = get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip1', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
             if with_j: vj += vj_tmp
             if with_k: vk += vk_tmp
             vj_tmp, vk_tmp = get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip2', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
-            if with_j: vjaux[:, k0:k1] = vj_tmp
-            if with_k: vkaux[:, k0:k1] = vk_tmp
+            if with_j: vjaux += vj_tmp
+            if with_k: vkaux += vk_tmp
 
             rhoj_tmp = rhok_tmp = vj_tmp = vk_tmp = None
             t0 = log.timer_debug1(f'calculate {cp_kl_id:3d} / {len(intopt.aux_log_qs):3d}, {k1-k0:3d} slices', *t0)
