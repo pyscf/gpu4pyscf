@@ -21,7 +21,7 @@ import cupy as cp
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid, rks
 from gpu4pyscf.scf import hf_lowmem, jk
-from gpu4pyscf.lib.cupy_helper import tag_array, pack_tril
+from gpu4pyscf.lib.cupy_helper import tag_array, pack_tril, get_avail_mem
 from pyscf import __config__
 
 __all__ = [
@@ -79,6 +79,8 @@ class RKS(rks.RKS):
         else:
             _dm = dm
         initialize_grids(self, mol, _dm)
+        mem_avail = get_avail_mem()
+        log.debug1('available GPU memory for rks.get_veff: %d B', mem_avail)
 
         ni = self._numint
         n, exc, vxc = ni.nr_rks(mol, self.grids, self.xc, _dm)
@@ -93,8 +95,8 @@ class RKS(rks.RKS):
             vxc += vnlc
         _dm = None
         vxc = pack_tril(vxc)
-        logger.debug(self, 'nelec by numeric integration = %s', n)
-        cput1 = logger.timer_debug1(self, 'vxc tot', *cput0)
+        log.debug('nelec by numeric integration = %s', n)
+        cput1 = log.timer_debug1('vxc tot', *cput0)
 
         omega = mol.omega
         vhfopt = self._opt_gpu.get(omega)
@@ -102,6 +104,9 @@ class RKS(rks.RKS):
             vhfopt = self._opt_gpu[omega] = jk._VHFOpt(mol, self.direct_scf_tol).build()
         _dm = self._delta_rdm1(dm, dm_last, vhfopt)
 
+        cp.get_default_memory_pool().free_all_blocks()
+        mem_avail = get_avail_mem()
+        log.debug1('available GPU memory for get_jk in rks.get_veff: %d B', mem_avail)
         vj = vk = None
         if not ni.libxc.is_hybrid_xc(self.xc):
             vj = vhfopt.get_j(_dm, log)
@@ -150,7 +155,7 @@ class RKS(rks.RKS):
             vxc += vj
             vxc -= vk * .5
 
-        logger.timer_debug1(self, 'jk total', *cput1)
+        log.timer_debug1('jk total', *cput1)
         vxc = tag_array(vxc, exc=exc, vj=vj, vk=vk)
         return vxc
 

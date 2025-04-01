@@ -25,34 +25,22 @@ import logging
 from pyscf import lib, gto
 from pyscf import dft, scf
 from pyscf.geomopt.geometric_solver import kernel
+from gpu4pyscf.tools import get_default_config, method_from_config
 
-default_config = {
-    'input_dir': './',
-    'output_dir': './',
-    'molecule': 'molecule.xyz',
-    'threads': 8,
-    'max_memory': 32000,
-
-    'charge': 0,
-    'spin': None,
-    'xc': 'b3lyp',
-    'disp': None,
-    'basis': 'def2-tzvpp',
-    'verbose': 4,
-    'scf_conv_tol': 1e-10,
-    'with_df': True,
-    'auxbasis': None,
-    'with_gpu': True,
+# Config for geometric
+optimizer_config = {
     'maxsteps': 50,
     'convergence_set': 'GAU',
     'constraints': None,
-
-    'with_solvent': False,
-    'solvent': {'method': 'iefpcm', 'eps': 78.3553, 'solvent': 'water'},
 }
 
 def opt_mol(config):
-    config = {**default_config, **config}
+    """
+    Operform geometry optimization based on the configuration file.
+    Saving the final xyz file, geomeTric log, historic geometries and pyscf log.  
+    """
+    pyscf_default_config = get_default_config()
+    config = {**pyscf_default_config, **optimizer_config, **config}
 
     mol_name = config['molecule']
     assert isinstance(mol_name, str)
@@ -61,64 +49,14 @@ def opt_mol(config):
     output_dir = config['output_dir']
     if not os.path.exists(f'{input_dir}/{mol_name}'):
         raise RuntimeError(f'Input file {input_dir}/{mol_name} does not exist.')
-
+    
     # I/O
-    logfile = mol_name[:-4] + '_pyscf.log'
     os.makedirs(output_dir, exist_ok=True)
-
-    lib.num_threads(config['threads'])
-    mol = pyscf.M(
-        atom=f'{input_dir}/{mol_name}',
-        basis=config['basis'],
-        max_memory=float(config['max_memory']),
-        verbose=config['verbose'],
-        charge=config['charge'],
-        spin=config['spin'],
-        output=f'{output_dir}/{logfile}')
-
-    # To match default LDA in Q-Chem
-    xc = config['xc']
-    if xc == 'LDA':
-        xc = 'LDA,VWN5'
-
-    if xc.lower() == 'hf':
-        mf = scf.HF(mol)
-    else:
-        mf = dft.KS(mol, xc=xc)
-        mf.grids.atom_grid = (99,590)
-        if mf._numint.libxc.is_nlc(mf.xc):
-            mf.nlcgrids.atom_grid = (50,194)
-    mf.disp = config['disp']
-    if config['with_df']:
-        auxbasis = config['auxbasis']
-        if auxbasis == "RIJK-def2-tzvp":
-            auxbasis = 'def2-tzvp-jkfit'
-        mf = mf.density_fit(auxbasis=auxbasis)
-
-    if config['with_gpu']:
-        cupy.get_default_memory_pool().free_all_blocks()
-        mf = mf.to_gpu()
-
-    mf.chkfile = None
-
-    if config['with_solvent']:
-        solvent = config['solvent']
-        if solvent['method'].endswith(('PCM', 'pcm')):
-            mf = mf.PCM()
-            mf.with_solvent.lebedev_order = 29
-            mf.with_solvent.method = solvent['method'].replace('PCM','-PCM')
-            mf.with_solvent.eps = solvent['eps']
-        elif solvent['method'].endswith(('smd', 'SMD')):
-            mf = mf.SMD()
-            mf.with_solvent.lebedev_order = 29
-            mf.with_solvent.method = 'SMD'
-            mf.with_solvent.solvent = solvent['solvent']
-        else:
-            raise NotImplementedError
-
-    mf.direct_scf_tol = 1e-14
-    mf.chkfile = None
-    mf.conv_tol = float(config['scf_conv_tol'])
+    
+    # Build PySCF object
+    config['logfile'] = mol_name[:-4] + '_pyscf.log'
+    config['atom'] = f'{input_dir}/{mol_name}'
+    mf = method_from_config(config)
 
     history = []
     def callback(envs):

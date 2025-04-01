@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import cupy
+import numpy, cupy
 from pyscf import lib
 from pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import tag_array
@@ -77,8 +77,15 @@ class SCFWithSolvent(_Solvation):
         vhf = super().get_veff(mol, dm, *args, **kwargs)
         with_solvent = self.with_solvent
         if not with_solvent.frozen:
+            if dm is None:
+                dm = self.make_rdm1()
             with_solvent.e, with_solvent.v = with_solvent.kernel(dm)
         e_solvent, v_solvent = with_solvent.e, with_solvent.v
+        if vhf.shape[-1] != v_solvent.shape[-1]:
+            # lowmem mode, only lower triangular part of Fock matrix is stored
+            nao = v_solvent.shape[-1]
+            assert vhf.ndim == 1 and vhf.shape[0] == nao * (nao + 1) // 2
+            v_solvent = v_solvent[numpy.tril_indices(nao)]
         return tag_array(vhf, e_solvent=e_solvent, v_solvent=v_solvent)
 
     def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1,

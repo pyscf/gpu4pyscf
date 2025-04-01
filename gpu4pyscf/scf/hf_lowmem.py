@@ -22,7 +22,7 @@ import cupy as cp
 from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
 from gpu4pyscf.lib.cupy_helper import (
-    asarray, pack_tril, unpack_tril, ConditionalMemoryPool)
+    asarray, pack_tril, unpack_tril, get_avail_mem, ConditionalMemoryPool)
 from gpu4pyscf.scf import diis, jk, hf
 from gpu4pyscf.lib import logger
 
@@ -39,11 +39,13 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
 
     mf.dump_flags()
     mf.build(mf.mol)
+    mem_avail0 = get_avail_mem()
+    log.debug1('available GPU memory for SCF: %d B', mem_avail0)
 
     conv_tol = mf.conv_tol
     if(conv_tol_grad is None):
         conv_tol_grad = conv_tol**.5
-        logger.info(mf, 'Set gradient conv threshold to %g', conv_tol_grad)
+        log.info('Set gradient conv threshold to %g', conv_tol_grad)
 
     if dm0 is None:
         if mf.mo_coeff is not None and mf.mo_occ is not None:
@@ -56,7 +58,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
     h1e = cp.asarray(mf.get_hcore(mol))
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
-    logger.info(mf, 'init E= %.15g', e_tot)
+    log.info('init E= %.15g', e_tot)
     scf_conv = False
 
     # Skip SCF iterations. Compute only the total energy of the initial density
@@ -76,9 +78,10 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
 
     dump_chk = dump_chk and mf.chkfile is not None
     if dump_chk:
-        # Explicit overwrite the mol object in chkfile
-        # Note in pbc.scf, mf.mol == mf.cell, cell is saved under key "mol"
-        chkfile.save_mol(mol, mf.chkfile)
+        log.warn('Low-mem SCF does not support dumping chkfile')
+    cp.get_default_memory_pool().free_all_blocks()
+    mem_avail1 = get_avail_mem()
+    log.debug1('available GPU memory after SCF initialization: %d B', mem_avail1)
 
     for cycle in range(mf.max_cycle):
         t0 = log.init_timer()
@@ -97,6 +100,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         mf.mo_coeff = mo_coeff
         mf.mo_occ = mo_occ
         vhf = mf.get_veff(mol, None, dm, vhf)
+        cp.get_default_memory_pool().free_all_blocks()
 
         fock = mf.get_fock(h1e, None, vhf)  # = h1e + vhf, no DIIS
         norm_gorb = cp.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
@@ -105,26 +109,26 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         e_tot = mf.energy_tot(dm, h1e, vhf)
         norm_ddm = cp.linalg.norm(dm-dm_last)
         dm_last = None
+        dm = asarray(dm) # Remove attached attributes
         t1 = log.timer_debug1('SCF iteration', *t0)
-        logger.info(mf, 'cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
-                    cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
-
-        if dump_chk:
-            mf.dump_chk(locals())
+        log.info('cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
+                 cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
+        mem_avail1 = get_avail_mem()
+        log.debug1('available GPU memory: %d B', mem_avail1)
 
         e_diff = abs(e_tot-last_hf_e)
-        if(e_diff < conv_tol and norm_gorb < conv_tol_grad):
+        if e_diff < conv_tol and norm_gorb < conv_tol_grad:
             scf_conv = True
             break
     else:
-        logger.warn(mf, "SCF failed to converge")
+        log.warn("SCF failed to converge")
 
     mf.converged = scf_conv
     mf.e_tot = e_tot
     mf.mo_energy = mo_energy
     mf.mo_coeff = mo_coeff
     mf.mo_occ = mo_occ
-    logger.timer(mf, 'SCF', *cput0)
+    log.timer('SCF', *cput0)
     mf._finalize()
     return e_tot
 
