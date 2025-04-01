@@ -539,7 +539,8 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     mol = hessobj.mol
     mf = hessobj.base
     ni = mf._numint
-    nao = mol.nao
+    nao, nmo = mo_coeff.shape
+    natm = mol.natm
     opt = ni.gdftopt
 
     _sorted_mol = opt._sorted_mol
@@ -560,7 +561,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
 
         log = logger.new_logger(mol, mol.verbose)
         v_ip = cupy.zeros((3,nao,nao))
-        vmat = cupy.zeros((_sorted_mol.natm,3,nao,nocc))
+        vmat = cupy.zeros((natm,3,nao,nocc))
         max_memory = max(2000, max_memory-vmat.size*8/1e6)
         t1 = t0 = log.init_timer()
         if xctype == 'LDA':
@@ -578,7 +579,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 mo = contract('xig,ip->xpg', ao, mocc)
                 ao_dm0 = numint._dot_ao_dm(mol, ao[0], dm0, mask, shls_slice, ao_loc)
                 wf = weight * fxc[0,0]
-                for ia in range(_sorted_mol.natm):
+                for ia in range(natm):
                     p0, p1 = aoslices[ia][2:]
     # First order density = rho1 * 2.  *2 is not applied because + c.c. in the end
                     rho1 = contract('xig,ig->xg', ao[1:,p0:p1,:], ao_dm0[p0:p1,:])
@@ -605,7 +606,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 ao_dm0 = [numint._dot_ao_dm(mol, ao[i], dm0, mask, shls_slice, ao_loc)
                         for i in range(4)]
                 wf = weight * fxc
-                for ia in range(_sorted_mol.natm):
+                for ia in range(natm):
                     dR_rho1 = _make_dR_rho1(ao, ao_dm0, ia, aoslices, xctype)
                     wv = contract('xyg,sxg->syg', wf, dR_rho1)
                     wv[:,0] *= .5
@@ -634,7 +635,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 mo = contract('xig,ip->xpg', ao, mocc)
                 ao_dm0 = [numint._dot_ao_dm(mol, ao[i], dm0, mask, shls_slice, ao_loc) for i in range(4)]
                 wf = weight * fxc
-                for ia in range(_sorted_mol.natm):
+                for ia in range(natm):
                     dR_rho1 = _make_dR_rho1(ao, ao_dm0, ia, aoslices, xctype)
                     wv = contract('xyg,sxg->syg', wf, dR_rho1)
                     wv[:,0] *= .5
@@ -651,19 +652,20 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                         vmat[ia] += rks_grad._d1_dot_(mow, ao[j].T).transpose([0,2,1])
                 ao_dm0 = aow = None
                 t1 = log.timer_debug2('integration', *t1)
-        vmat = -contract("kxiq,ip->kxpq", vmat, mo_coeff)
         t0 = log.timer_debug1(f'vxc_deriv1 on Device {device_id}', *t0)
 
-        for ia in range(_sorted_mol.natm):
+        # Inplace transform the AO to MO.
+        v_mo = cupy.ndarray((natm,3,nmo,nocc), dtype=vmat.dtype, memptr=vmat.data)
+        vmat_tmp = cupy.empty([3,nao,nao])
+        for ia in range(natm):
             p0, p1 = aoslices[ia][2:]
-            vmat_tmp = cupy.zeros([3,nao,nao])
+            vmat_tmp[:] = 0.
             vmat_tmp[:,p0:p1] += v_ip[:,p0:p1]
             vmat_tmp[:,:,p0:p1] += v_ip[:,p0:p1].transpose(0,2,1)
-
-            vmat_tmp = contract('xij,jq->xiq', vmat_tmp, mocc)
-            vmat_tmp = contract('xiq,ip->xpq', vmat_tmp, mo_coeff)
-            vmat[ia] -= vmat_tmp
-    return vmat
+            tmp = contract('xij,jq->xiq', vmat_tmp, mocc)
+            tmp += vmat[ia]
+            contract('xiq,ip->xpq', vmat_tmp, mo_coeff, alpha=-1., out=v_mo[ia])
+    return v_mo
 
 def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     '''

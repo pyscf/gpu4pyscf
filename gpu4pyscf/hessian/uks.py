@@ -668,6 +668,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     noccb = moccb.shape[1]
 
     nao, nmo = mo_coeff[0].shape
+    natm = mol.natm
     ni = mf._numint
     xctype = ni._xc_type(mf.xc)
     aoslices = mol.aoslice_by_atom()
@@ -684,8 +685,8 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
     vipa = cupy.zeros((3,nao,nao))
     vipb = cupy.zeros((3,nao,nao))
-    vmata = cupy.zeros((_sorted_mol.natm,3,nao,nocca))
-    vmatb = cupy.zeros((_sorted_mol.natm,3,nao,noccb))
+    vmata = cupy.zeros((natm,3,nao,nocca))
+    vmatb = cupy.zeros((natm,3,nao,noccb))
     max_memory = None
     if xctype == 'LDA':
         ao_deriv = 1
@@ -708,7 +709,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0a = numint._dot_ao_dm(mol, ao[0], dm0a, mask, shls_slice, ao_loc)
             ao_dm0b = numint._dot_ao_dm(mol, ao[0], dm0b, mask, shls_slice, ao_loc)
             wf = weight * fxc[:,0,:,0]
-            for ia in range(_sorted_mol.natm):
+            for ia in range(natm):
                 p0, p1 = aoslices[ia][2:]
 # First order density = rho1 * 2.  *2 is not applied because + c.c. in the end
                 rho1a = contract('xig,ig->xg', ao[1:,p0:p1,:], ao_dm0a[p0:p1,:])
@@ -748,7 +749,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0b = [numint._dot_ao_dm(mol, ao[i], dm0b, mask, shls_slice, ao_loc)
                       for i in range(4)]
             wf = weight * fxc
-            for ia in range(_sorted_mol.natm):
+            for ia in range(natm):
                 dR_rho1a = _make_dR_rho1(ao, ao_dm0a, ia, aoslices, xctype)
                 dR_rho1b = _make_dR_rho1(ao, ao_dm0b, ia, aoslices, xctype)
                 wv = contract('xbyg,sxg->bsyg', wf[0], dR_rho1a)
@@ -792,7 +793,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0a = [numint._dot_ao_dm(mol, ao[i], dm0a, mask, shls_slice, ao_loc) for i in range(4)]
             ao_dm0b = [numint._dot_ao_dm(mol, ao[i], dm0b, mask, shls_slice, ao_loc) for i in range(4)]
             wf = weight * fxc
-            for ia in range(_sorted_mol.natm):
+            for ia in range(natm):
                 dR_rho1a = _make_dR_rho1(ao, ao_dm0a, ia, aoslices, xctype)
                 dR_rho1b = _make_dR_rho1(ao, ao_dm0b, ia, aoslices, xctype)
                 wv = contract('xbyg,sxg->bsyg', wf[0], dR_rho1a)
@@ -822,27 +823,25 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0a = ao_dm0b = aow = None
             t1 = log.timer_debug2('integration', *t1)
 
-    vmata = -contract("kxiq,ip->kxpq", vmata, mo_coeff[0])
-    vmatb = -contract("kxiq,ip->kxpq", vmatb, mo_coeff[1])
-
-    for ia in range(_sorted_mol.natm):
+    va_mo = cupy.ndarray((natm,3,nmo,nocca), dtype=vmata.dtype, memptr=vmata.data)
+    vb_mo = cupy.ndarray((natm,3,nmo,noccb), dtype=vmatb.dtype, memptr=vmatb.data)
+    vmat_tmp = cupy.empty([3,nao,nao])
+    for ia in range(natm):
         p0, p1 = aoslices[ia][2:]
-        vmat_tmp = cupy.zeros([3,nao,nao])
+        vmat_tmp[:] = 0.
         vmat_tmp[:,p0:p1] += vipa[:,p0:p1]
         vmat_tmp[:,:,p0:p1] += vipa[:,p0:p1].transpose(0,2,1)
+        tmp = contract('xij,jq->xiq', vmat_tmp, mocca)
+        tmp += vmata[ia]
+        contract('xiq,ip->xpq', vmat_tmp, mo_coeff[0], alpha=-1., out=va_mo[ia])
 
-        vmat_tmp = contract('xij,jq->xiq', vmat_tmp, mocca)
-        vmat_tmp = contract('xiq,ip->xpq', vmat_tmp, mo_coeff[0])
-        vmata[ia] -= vmat_tmp
-
-        vmat_tmp = cupy.zeros([3,nao,nao])
+        vmat_tmp[:] = 0.
         vmat_tmp[:,p0:p1] += vipb[:,p0:p1]
         vmat_tmp[:,:,p0:p1] += vipb[:,p0:p1].transpose(0,2,1)
-
-        vmat_tmp = contract('xij,jq->xiq', vmat_tmp, moccb)
-        vmat_tmp = contract('xiq,ip->xpq', vmat_tmp, mo_coeff[1])
-        vmatb[ia] -= vmat_tmp
-    return vmata, vmatb
+        tmp = contract('xij,jq->xiq', vmat_tmp, moccb)
+        tmp += vmatb[ia]
+        contract('xiq,ip->xpq', vmat_tmp, mo_coeff[1], alpha=-1., out=vb_mo[ia])
+    return va_mo, vb_mo
 
 def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
     mol = hessobj.mol
