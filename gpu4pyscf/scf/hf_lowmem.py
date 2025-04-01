@@ -29,7 +29,6 @@ __all__ = [
     'RHF',
 ]
 
-@profile
 def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
           dump_chk=True, callback=None, conv_check=True, **kwargs):
     mol = mf.mol
@@ -184,10 +183,10 @@ class RHF(hf.RHF):
 
     def get_hcore(self, mol=None):
         '''The lower triangular part of Hcore'''
-        hcore = hf_cpu.RHF.get_hcore(self, mol)
+        hcore = hf.get_hcore(mol)
         nao = hcore.shape[0]
         idx = np.arange(nao)
-        return cp.asarray(hcore[idx[:,None] >= idx])
+        return hcore[idx[:,None] >= idx]
 
     def get_jk(self, mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None):
         raise NotImplementedError

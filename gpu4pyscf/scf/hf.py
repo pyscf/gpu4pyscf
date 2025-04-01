@@ -25,7 +25,7 @@ from gpu4pyscf import lib
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
     eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
-    block_diag)
+    block_diag, sandwich_dot)
 from gpu4pyscf.scf import diis, jk
 from gpu4pyscf.lib import logger
 
@@ -100,23 +100,40 @@ def level_shift(s, d, f, factor):
     dm_vir = s - reduce(cupy.dot, (s, d, s))
     return f + dm_vir * factor
 
-def get_hcore(mf, mol=None):
-    if mol is None:
-        mol = mf.mol
+def get_hcore(mol):
     h = mol.intor_symmetric('int1e_kin')
-
     if mol._pseudo:
         # Although mol._pseudo for GTH PP is only available in Cell, GTH PP
         # may exist if mol is converted from cell object.
         from pyscf.gto import pp_int
         h += pp_int.get_gth_pp(mol)
     else:
-        h+= mol.intor_symmetric('int1e_nuc')
+        #:h+= mol.intor_symmetric('int1e_nuc')
+        from gpu4pyscf.df.int3c2e_bdiv import Int3c2eOpt
+        from pyscf.pbc.df.aft import _fake_nuc
+        auxnuc = _fake_nuc(mol, with_pseudo=False)
+        Z = cupy.asarray(-mol.atom_charges())
+        int3c2e_opt = Int3c2eOpt(mol, auxnuc).build()
+        ao_pair_mapping = cupy.asarray(int3c2e_opt.create_ao_pair_mapping())
+        nao, nao_orig = int3c2e_opt.coeff.shape
+        naux = int3c2e_opt.aux_coeff.shape[0]
+        mat = cupy.zeros((nao*nao))
+        p0 = p1 = 0
+        for ij_shls, eri3c in int3c2e_opt.int3c2e_kernel():
+            eri3c = eri3c.dot(Z)
+            p0, p1 = p1, p1 + eri3c.shape[0]
+            addr = ao_pair_mapping[p0:p1]
+            mat[addr] = eri3c
+            i, j = divmod(addr, nao)
+            mat[j*nao+i] = eri3c
+        mat = mat.reshape(nao, nao)
+        h = cupy.asarray(h)
+        h += sandwich_dot(mat, int3c2e_opt.coeff)
+        mat = None
     h = cupy.asarray(h)
     if len(mol._ecpbas) > 0:
         h += get_ecp(mol)
     return h
-
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
@@ -583,7 +600,6 @@ class SCF(pyscf_lib.StreamObject):
     build                    = hf_cpu.SCF.build
     opt                      = NotImplemented
     dump_flags               = hf_cpu.SCF.dump_flags
-    get_hcore                = get_hcore
     get_ovlp                 = return_cupy_array(hf_cpu.SCF.get_ovlp)
     get_fock                 = get_fock
     get_occ                  = get_occ
@@ -633,6 +649,10 @@ class SCF(pyscf_lib.StreamObject):
     canonicalize             = NotImplemented
     mulliken_pop             = NotImplemented
     mulliken_meta            = NotImplemented
+
+    def get_hcore(self, mol=None):
+        if mol is None: mol = self.mol
+        return get_hcore(mol)
 
     def make_rdm1(self, mo_coeff=None, mo_occ=None, **kwargs):
         if mo_occ is None: mo_occ = self.mo_occ
