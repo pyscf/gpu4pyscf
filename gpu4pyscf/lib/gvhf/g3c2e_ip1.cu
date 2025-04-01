@@ -297,8 +297,7 @@ void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
 }
 
 
-
-template <int NROOTS> __device__
+__device__
 static void GINTkernel_int3c2e_ip1_getjk_direct(GINTEnvVars envs, JKMatrix jk, 
         double* j3, double* k3, double* g, double ai2,
         const int ish, const int jsh, const int ksh)
@@ -323,14 +322,18 @@ static void GINTkernel_int3c2e_ip1_getjk_direct(GINTEnvVars envs, JKMatrix jk,
     const int i_l = envs.i_l;
     const int j_l = envs.j_l;
     const int k_l = envs.k_l;
+    const int nrys_roots = envs.nrys_roots;
+
     int *idx = c_idx;
     int *idy = c_idx + TOT_NF;
     int *idz = c_idx + TOT_NF * 2;
 
     if (rhoj == NULL){
-        for (int kp = 0; kp < k1-k0; ++kp) {
-        for (int jp = 0; jp < j1-j0; ++jp) {
-        for (int ip = 0; ip < i1-i0; ++ip) {
+        for (int tx = threadIdx.x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim.x) {
+            const int kp = tx / ((j1-j0)*(i1-i0));
+            const int jp = (tx / (i1-i0)) % (j1-j0);
+            const int ip = tx % (i1-i0);
+            
             const int loc_k = c_l_locs[k_l] + kp;
             const int loc_j = c_l_locs[j_l] + jp;
             const int loc_i = c_l_locs[i_l] + ip;
@@ -347,7 +350,7 @@ static void GINTkernel_int3c2e_ip1_getjk_direct(GINTEnvVars envs, JKMatrix jk,
             double sy = 0.0;
             double sz = 0.0;
 #pragma unroll
-            for (int ir = 0; ir < NROOTS; ++ir){
+            for (int ir = 0; ir < nrys_roots; ++ir){
                 const double gx = g[ix+ir];
                 const double gy = g[iy+ir];
                 const double gz = g[iz+ir];
@@ -370,137 +373,119 @@ static void GINTkernel_int3c2e_ip1_getjk_direct(GINTEnvVars envs, JKMatrix jk,
             k3[0] += rhok_tmp * sx;
             k3[1] += rhok_tmp * sy;
             k3[2] += rhok_tmp * sz;
-        }}}
+        }
         return;
     }
 
     if (rhok == NULL){
-        for (int ip = 0; ip < i1-i0; ++ip) {
-            for (int jp = 0; jp < j1-j0; ++jp) {
-                double jx = 0.0;
-                double jy = 0.0;
-                double jz = 0.0;
-                for (int kp = 0; kp < k1-k0; ++kp) {
-                    const int loc_j = c_l_locs[j_l] + jp;
-                    const int loc_i = c_l_locs[i_l] + ip;
-                    const int loc_k = c_l_locs[k_l] + kp;
-                    
-                    const int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
-                    const int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
-                    const int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+        for (int tx = threadIdx.x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim.x) {
+            const int kp = tx / ((j1-j0)*(i1-i0));
+            const int jp = (tx / (i1-i0)) % (j1-j0);
+            const int ip = tx % (i1-i0);
+            
+            const int loc_j = c_l_locs[j_l] + jp;
+            const int loc_i = c_l_locs[i_l] + ip;
+            const int loc_k = c_l_locs[k_l] + kp;
+            
+            const int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+            const int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+            const int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
 
-                    const int i_idx = idx[loc_i];
-                    const int i_idy = idy[loc_i];
-                    const int i_idz = idz[loc_i];
+            const int i_idx = idx[loc_i];
+            const int i_idy = idy[loc_i];
+            const int i_idz = idz[loc_i];
 
-                    double sx = 0.0;
-                    double sy = 0.0;
-                    double sz = 0.0;
+            double sx = 0.0;
+            double sy = 0.0;
+            double sz = 0.0;
 #pragma unroll
-                    for (int ir = 0; ir < NROOTS; ++ir){
-                        const double gx = g[ix+ir];
-                        const double gy = g[iy+ir];
-                        const double gz = g[iz+ir];
-                        
-                        double fx = ai2*g[ix+ir+di];
-                        double fy = ai2*g[iy+ir+di];
-                        double fz = ai2*g[iz+ir+di];
+            for (int ir = 0; ir < nrys_roots; ++ir){
+                const double gx = g[ix+ir];
+                const double gy = g[iy+ir];
+                const double gz = g[iz+ir];
+                
+                double fx = ai2*g[ix+ir+di];
+                double fy = ai2*g[iy+ir+di];
+                double fz = ai2*g[iz+ir+di];
 
-                        fx += i_idx>0 ? i_idx*g[ix+ir-di] : 0.0;
-                        fy += i_idy>0 ? i_idy*g[iy+ir-di] : 0.0;
-                        fz += i_idz>0 ? i_idz*g[iz+ir-di] : 0.0;
-                        
-                        sx += fx * gy * gz;
-                        sy += gx * fy * gz;
-                        sz += gx * gy * fz;
-                    }
-
-                    const double rhoj_k = rhoj[kp+k0];
-                    jx += rhoj_k * sx;
-                    jy += rhoj_k * sy;
-                    jz += rhoj_k * sz;
-                }
-
-                const int off_dm = i0+ip + nao*(jp+j0);
-                //double rhoj_tmp = dm[off_dm] * rhoj_k;
-                const double dm_ij = dm[off_dm];
-                j3[0] += jx * dm_ij;
-                j3[1] += jy * dm_ij;
-                j3[2] += jz * dm_ij;
+                fx += i_idx>0 ? i_idx*g[ix+ir-di] : 0.0;
+                fy += i_idy>0 ? i_idy*g[iy+ir-di] : 0.0;
+                fz += i_idz>0 ? i_idz*g[iz+ir-di] : 0.0;
+                
+                sx += fx * gy * gz;
+                sy += gx * fy * gz;
+                sz += gx * gy * fz;
             }
+
+            const int off_dm = (ip+i0) + nao*(jp+j0);
+            const double rhoj_dm = dm[off_dm] * rhoj[kp+k0];
+            j3[0] += rhoj_dm * sx;
+            j3[1] += rhoj_dm * sy;
+            j3[2] += rhoj_dm * sz;
         }
         return;
     }
 
-    for (int ip = 0; ip < i1-i0; ++ip) {
-        for (int jp = 0; jp < j1-j0; ++jp) {
-            double jx = 0.0;
-            double jy = 0.0;
-            double jz = 0.0;
-            for (int kp = 0; kp < k1-k0; ++kp) {                
-                const int loc_k = c_l_locs[k_l] + kp;
-                const int loc_j = c_l_locs[j_l] + jp;
-                const int loc_i = c_l_locs[i_l] + ip;
+    for (int tx = threadIdx.x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim.x) {
+        const int kp = tx / ((j1-j0)*(i1-i0));
+        const int jp = (tx / (i1-i0)) % (j1-j0);
+        const int ip = tx % (i1-i0);
 
-                const int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
-                const int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
-                const int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+        const int loc_k = c_l_locs[k_l] + kp;
+        const int loc_j = c_l_locs[j_l] + jp;
+        const int loc_i = c_l_locs[i_l] + ip;
 
-                const int i_idx = idx[loc_i];
-                const int i_idy = idy[loc_i];
-                const int i_idz = idz[loc_i];
+        const int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+        const int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+        const int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
 
-                double sx = 0.0;
-                double sy = 0.0;
-                double sz = 0.0;
+        const int i_idx = idx[loc_i];
+        const int i_idy = idy[loc_i];
+        const int i_idz = idz[loc_i];
+
+        double sx = 0.0;
+        double sy = 0.0;
+        double sz = 0.0;
 #pragma unroll
-                for (int ir = 0; ir < NROOTS; ++ir){
-                    const double gx = g[ix+ir];
-                    const double gy = g[iy+ir];
-                    const double gz = g[iz+ir];
+        for (int ir = 0; ir < nrys_roots; ++ir){
+            const double gx = g[ix+ir];
+            const double gy = g[iy+ir];
+            const double gz = g[iz+ir];
 
-                    double fx = ai2*g[ix+ir+di];
-                    double fy = ai2*g[iy+ir+di];
-                    double fz = ai2*g[iz+ir+di];
-                    
-                    fx += i_idx>0 ? i_idx*g[ix+ir-di] : 0.0;
-                    fy += i_idy>0 ? i_idy*g[iy+ir-di] : 0.0;
-                    fz += i_idz>0 ? i_idz*g[iz+ir-di] : 0.0;
-
-                    sx += fx * gy * gz;
-                    sy += gx * fy * gz;
-                    sz += gx * gy * fz;
-                }
-
-                const int off_rhok = (ip+i0) + nao*(jp+j0) + (kp+k0)*nao*nao;
-                const double rhok_tmp = rhok[off_rhok];
-                k3[0] += rhok_tmp * sx;
-                k3[1] += rhok_tmp * sy;
-                k3[2] += rhok_tmp * sz;
-
-                const double rhoj_k = rhoj[kp+k0];
-                jx += rhoj_k * sx;
-                jy += rhoj_k * sy;
-                jz += rhoj_k * sz;
-            }
-            const int off_dm = (ip+i0) + nao*(jp+j0);
-            //double rhoj_tmp = dm[off_dm] * rhoj_k;
-            const double dm_ij = dm[off_dm];
+            double fx = ai2*g[ix+ir+di];
+            double fy = ai2*g[iy+ir+di];
+            double fz = ai2*g[iz+ir+di];
             
-            j3[0] += jx * dm_ij;
-            j3[1] += jy * dm_ij;
-            j3[2] += jz * dm_ij;
+            fx += i_idx>0 ? i_idx*g[ix+ir-di] : 0.0;
+            fy += i_idy>0 ? i_idy*g[iy+ir-di] : 0.0;
+            fz += i_idz>0 ? i_idz*g[iz+ir-di] : 0.0;
+
+            sx += fx * gy * gz;
+            sy += gx * fy * gz;
+            sz += gx * gy * fz;
         }
+
+        const int off_rhok = (ip+i0) + nao*(jp+j0) + (kp+k0)*nao*nao;
+        const double rhok_tmp = rhok[off_rhok];
+        k3[0] += rhok_tmp * sx;
+        k3[1] += rhok_tmp * sy;
+        k3[2] += rhok_tmp * sz;
+
+        const int off_dm = (ip+i0) + nao*(jp+j0);
+        const double rhoj_dm = dm[off_dm] * rhoj[kp+k0];
+        j3[0] += rhoj_dm * sx;
+        j3[1] += rhoj_dm * sy;
+        j3[2] += rhoj_dm * sz;
     }
 }
 
-template <int NROOTS, int GSIZE> __global__
-void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
+__global__
+void GINTint3c2e_ip1_jk_general_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
     bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         active = false;
@@ -520,7 +505,7 @@ void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     
-    double g[GSIZE];
+    extern __shared__ double g[];
 
     const int as_ish = envs.ibase ? ish: jsh; 
     const int as_jsh = envs.ibase ? jsh: ish; 
@@ -531,13 +516,25 @@ void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
     if (active) {
         for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
         for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-            GINTg0_int3c2e<NROOTS>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
+            GINTg0_int3c2e_shared(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
             double ai2 = -2.0*c_bpcache.a1[ij];
-            GINTkernel_int3c2e_ip1_getjk_direct<NROOTS>(envs, jk, j3, k3, g, ai2, ish, jsh, ksh);
+            GINTkernel_int3c2e_ip1_getjk_direct(envs, jk, j3, k3, g, ai2, ish, jsh, ksh);
         }}
     }
-
-    write_int3c2e_ip1_jk(jk, j3, k3, ish);
+    
+    constexpr int nthreads = THREADSX * THREADSY;
+    int *bas_atm = c_bpcache.bas_atm;
+    int atm_id = bas_atm[ish];
+    if (jk.vj != NULL){
+        block_reduce<nthreads>(jk.vj+3*atm_id,   j3[0]);
+        block_reduce<nthreads>(jk.vj+3*atm_id+1, j3[1]);
+        block_reduce<nthreads>(jk.vj+3*atm_id+2, j3[2]);
+    }
+    if (jk.vk != NULL){
+        block_reduce<nthreads>(jk.vk+3*atm_id,   k3[0]);
+        block_reduce<nthreads>(jk.vk+3*atm_id+1, k3[1]);
+        block_reduce<nthreads>(jk.vk+3*atm_id+2, k3[2]);
+    }
 }
 
 __global__

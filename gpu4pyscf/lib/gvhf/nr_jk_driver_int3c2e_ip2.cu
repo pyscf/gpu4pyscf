@@ -110,17 +110,21 @@ static int GINTrun_tasks_int3c2e_ip2_jk(JKMatrix *jk, BasisProdOffsets *offsets,
         case 410: GINTint3c2e_ip2_jk_kernel<4,1,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
         case 500: GINTint3c2e_ip2_jk_kernel<5,0,0><<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
 #endif
-        default: switch (nrys_roots) {
-            case 2: GINTint3c2e_ip2_jk_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-            case 3: GINTint3c2e_ip2_jk_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-            case 4: GINTint3c2e_ip2_jk_kernel<4, GSIZE4_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-            case 5: GINTint3c2e_ip2_jk_kernel<5, GSIZE5_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-            case 6: GINTint3c2e_ip2_jk_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-            case 7: GINTint3c2e_ip2_jk_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-            case 8: GINTint3c2e_ip2_jk_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-            case 9: GINTint3c2e_ip2_jk_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-            default: fprintf(stderr, "rys roots %d\n", nrys_roots);
-            return 1;
+        default: {
+            dim3 threads(THREADSX*THREADSY);
+            dim3 blocks(ntasks_ij, ntasks_kl);
+            const int lk_ceil = lk + 1;
+            const int gsize = 3*nrys_roots*(li+1)*(lj+1)*(lk_ceil+1);
+            cudaError_t err = cudaFuncSetAttribute(
+                GINTint3c2e_ip2_jk_general_kernel,
+                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                (gsize+16)*sizeof(double));
+            if (err != cudaSuccess) {
+                fprintf(stderr, "cudaFuncSetAttribute error: %s\n", cudaGetErrorString(err));
+                return 1;
+            }
+            const int shm_size = gsize*sizeof(double);
+            GINTint3c2e_ip2_jk_general_kernel<<<blocks, threads, shm_size, stream>>>(*envs, *jk, *offsets);
         }
     }
 

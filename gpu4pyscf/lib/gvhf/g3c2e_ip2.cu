@@ -294,7 +294,7 @@ void GINTint3c2e_ip2_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
     write_int3c2e_ip2_jk(jk, j3, k3, ksh);
 }
 
-template <int NROOTS> __device__
+__device__
 static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk, 
         double* j3, double* k3, double *g, const double ak2,
         const int ish, const int jsh, const int ksh)
@@ -319,14 +319,18 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
     const int i_l = envs.i_l;
     const int j_l = envs.j_l;
     const int k_l = envs.k_l;
+    const int nrys_roots = envs.nrys_roots;
+    
     int *idx = c_idx;
     int *idy = c_idx + TOT_NF;
     int *idz = c_idx + TOT_NF * 2;
 
     if (rhoj == NULL){
-        for (int kp = 0; kp < k1-k0; ++kp) {
-        for (int jp = 0; jp < j1-j0; ++jp) {
-        for (int ip = 0; ip < i1-i0; ++ip) {
+        for (int tx = threadIdx.x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim.x) {
+            const int kp = tx / ((j1-j0)*(i1-i0));
+            const int jp = (tx / (i1-i0)) % (j1-j0);
+            const int ip = tx % (i1-i0);
+
             const int loc_k = c_l_locs[k_l] + kp;
             const int loc_j = c_l_locs[j_l] + jp;
             const int loc_i = c_l_locs[i_l] + ip;
@@ -343,7 +347,7 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
             double sy = 0.0;
             double sz = 0.0;
 #pragma unroll
-            for (int ir = 0; ir < NROOTS; ++ir, ++ix, ++iy, ++iz){
+            for (int ir = 0; ir < nrys_roots; ++ir, ++ix, ++iy, ++iz){
                 const double gx = g[ix];
                 const double gy = g[iy];
                 const double gz = g[iz];
@@ -366,72 +370,16 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
             k3[0] += sx * rhok_tmp;
             k3[1] += sy * rhok_tmp;
             k3[2] += sz * rhok_tmp;
-        }}}
-        return;
-    }
-
-    if (rhok == NULL){
-        for (int kp = 0; kp < k1-k0; ++kp) {
-            double jx = 0.0;
-            double jy = 0.0;
-            double jz = 0.0;
-            
-            for (int jp = 0; jp < j1-j0; ++jp) {
-            for (int ip = 0; ip < i1-i0; ++ip) {
-                const int loc_k = c_l_locs[k_l] + kp;
-                const int loc_j = c_l_locs[j_l] + jp;
-                const int loc_i = c_l_locs[i_l] + ip;
-
-                const int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
-                const int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
-                const int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
-
-                const int k_idx = idx[loc_k];
-                const int k_idy = idy[loc_k];
-                const int k_idz = idz[loc_k];
-
-                double sx = 0.0;
-                double sy = 0.0;
-                double sz = 0.0;
-#pragma unroll
-                for (int ir = 0; ir < NROOTS; ++ir){
-                    const double gx = g[ix+ir];
-                    const double gy = g[iy+ir];
-                    const double gz = g[iz+ir];
-
-                    double fx = ak2*g[ix+ir+dk];
-                    double fy = ak2*g[iy+ir+dk];
-                    double fz = ak2*g[iz+ir+dk];
-
-                    fx += k_idx>0 ? k_idx*g[ix+ir-dk] : 0.0;
-                    fy += k_idy>0 ? k_idy*g[iy+ir-dk] : 0.0;
-                    fz += k_idz>0 ? k_idz*g[iz+ir-dk] : 0.0;
-
-                    sx += fx * gy * gz;
-                    sy += gx * fy * gz;
-                    sz += gx * gy * fz;
-                }
-                const int off_dm = (ip+i0) + nao*(jp+j0);
-                const double dm_ij = dm[off_dm];
-                jx += dm_ij * sx;
-                jy += dm_ij * sy;
-                jz += dm_ij * sz;
-            }}
-            const double rhoj_k = rhoj[kp + k0];
-            j3[0] += jx * rhoj_k;
-            j3[1] += jy * rhoj_k;
-            j3[2] += jz * rhoj_k;
         }
         return;
     }
 
-    for (int kp = 0; kp < k1-k0; ++kp) {
-        double jx = 0.0;
-        double jy = 0.0;
-        double jz = 0.0;
-        
-        for (int jp = 0; jp < j1-j0; ++jp) {
-        for (int ip = 0; ip < i1-i0; ++ip) {
+    if (rhok == NULL){
+        for (int tx = threadIdx.x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim.x) {
+            const int kp = tx / ((j1-j0)*(i1-i0));
+            const int jp = (tx / (i1-i0)) % (j1-j0);
+            const int ip = tx % (i1-i0);
+
             const int loc_k = c_l_locs[k_l] + kp;
             const int loc_j = c_l_locs[j_l] + jp;
             const int loc_i = c_l_locs[i_l] + ip;
@@ -448,7 +396,7 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
             double sy = 0.0;
             double sz = 0.0;
 #pragma unroll
-            for (int ir = 0; ir < NROOTS; ++ir){
+            for (int ir = 0; ir < nrys_roots; ++ir){
                 const double gx = g[ix+ir];
                 const double gy = g[iy+ir];
                 const double gz = g[iz+ir];
@@ -465,35 +413,77 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
                 sy += gx * fy * gz;
                 sz += gx * gy * fz;
             }
+            const int off_dm = (ip+i0) + nao*(jp+j0);
+            const double dm_rhoj = dm[off_dm] * rhoj[kp + k0];
+            j3[0] += dm_rhoj * sx;
+            j3[1] += dm_rhoj * sy;
+            j3[2] += dm_rhoj * sz;
+        }
+        return;
+    }
 
-            const int off_rhok = (i0+ip) + nao*(j0+jp) + (k0+kp)*nao*nao;
-            const double rhok_tmp = rhok[off_rhok];
-            k3[0] += sx * rhok_tmp;
-            k3[1] += sy * rhok_tmp;
-            k3[2] += sz * rhok_tmp;
+    for (int tx = threadIdx.x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim.x) {
+        const int kp = tx / ((j1-j0)*(i1-i0));
+        const int jp = (tx / (i1-i0)) % (j1-j0);
+        const int ip = tx % (i1-i0);
+        
+        const int loc_k = c_l_locs[k_l] + kp;
+        const int loc_j = c_l_locs[j_l] + jp;
+        const int loc_i = c_l_locs[i_l] + ip;
 
-            const int off_dm = (i0+ip) + nao*(jp+j0);
-            const double dm_ij = dm[off_dm];
-            jx += dm_ij * sx;
-            jy += dm_ij * sy;
-            jz += dm_ij * sz;
-        }}
-        const double rhoj_k = rhoj[k0+kp];
-        j3[0] += jx * rhoj_k;
-        j3[1] += jy * rhoj_k;
-        j3[2] += jz * rhoj_k;
+        const int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+        const int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+        const int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
+        const int k_idx = idx[loc_k];
+        const int k_idy = idy[loc_k];
+        const int k_idz = idz[loc_k];
+
+        double sx = 0.0;
+        double sy = 0.0;
+        double sz = 0.0;
+#pragma unroll
+        for (int ir = 0; ir < nrys_roots; ++ir){
+            const double gx = g[ix+ir];
+            const double gy = g[iy+ir];
+            const double gz = g[iz+ir];
+
+            double fx = ak2*g[ix+ir+dk];
+            double fy = ak2*g[iy+ir+dk];
+            double fz = ak2*g[iz+ir+dk];
+
+            fx += k_idx>0 ? k_idx*g[ix+ir-dk] : 0.0;
+            fy += k_idy>0 ? k_idy*g[iy+ir-dk] : 0.0;
+            fz += k_idz>0 ? k_idz*g[iz+ir-dk] : 0.0;
+
+            sx += fx * gy * gz;
+            sy += gx * fy * gz;
+            sz += gx * gy * fz;
+        }
+
+        const int off_rhok = (i0+ip) + nao*(j0+jp) + (k0+kp)*nao*nao;
+        const double rhok_tmp = rhok[off_rhok];
+        k3[0] += sx * rhok_tmp;
+        k3[1] += sy * rhok_tmp;
+        k3[2] += sz * rhok_tmp;
+
+        const int off_dm = (i0+ip) + nao*(jp+j0);
+        const double dm_rhoj = dm[off_dm] * rhoj[k0+kp];
+        j3[0] += dm_rhoj * sx;
+        j3[1] += dm_rhoj * sy;
+        j3[2] += dm_rhoj * sz;
     }
 }
 
 
 // General version
-template <int NROOTS, int GSIZE> __global__
-void GINTint3c2e_ip2_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
+__global__
+void GINTint3c2e_ip2_jk_general_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
     bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         active = false;
@@ -514,7 +504,7 @@ void GINTint3c2e_ip2_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
     int jsh = bas_pair2ket[bas_ij];
     int ksh = bas_pair2bra[bas_kl];
     
-    double g[GSIZE];
+    extern __shared__ double g[];
 
     const int as_ish = envs.ibase ? ish: jsh; 
     const int as_jsh = envs.ibase ? jsh: ish; 
@@ -525,14 +515,25 @@ void GINTint3c2e_ip2_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
     if (active) {
         for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
         for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-            GINTg0_int3c2e<NROOTS>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
+            GINTg0_int3c2e_shared(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
             double ak2 = -2.0* c_bpcache.a1[kl];
-            //GINTnabla1k_2e<NROOTS>(envs, f, g, ak2, envs.i_l, envs.j_l, envs.k_l);
-            GINTkernel_int3c2e_ip2_getjk_direct<NROOTS>(envs, jk, j3, k3, g, ak2, ish, jsh, ksh);
+            GINTkernel_int3c2e_ip2_getjk_direct(envs, jk, j3, k3, g, ak2, ish, jsh, ksh);
         }}
     }
-
-    write_int3c2e_ip2_jk(jk, j3, k3, ksh);
+    
+    constexpr int nthreads = THREADSX * THREADSY;
+    int *bas_atm = c_bpcache.bas_atm;
+    int atm_id = bas_atm[ksh];
+    if (jk.vj != NULL){
+        block_reduce<nthreads>(jk.vj+3*atm_id,   j3[0]);
+        block_reduce<nthreads>(jk.vj+3*atm_id+1, j3[1]);
+        block_reduce<nthreads>(jk.vj+3*atm_id+2, j3[2]);
+    }
+    if (jk.vk != NULL){
+        block_reduce<nthreads>(jk.vk+3*atm_id,   k3[0]);
+        block_reduce<nthreads>(jk.vk+3*atm_id+1, k3[1]);
+        block_reduce<nthreads>(jk.vk+3*atm_id+2, k3[2]);
+    }
 }
 
 __global__

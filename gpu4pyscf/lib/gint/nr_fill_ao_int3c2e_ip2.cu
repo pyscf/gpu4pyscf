@@ -120,8 +120,8 @@ static int GINTfill_int3c2e_ip2_tasks(ERITensor *eri, BasisProdOffsets *offsets,
                 (gsize+16)*sizeof(double));
             const int shm_size = gsize*sizeof(double);
             GINTfill_int3c2e_ip2_general_kernel<<<blocks, threads, shm_size, stream>>>(*envs, *eri, *offsets);
-            }
         }
+    }
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

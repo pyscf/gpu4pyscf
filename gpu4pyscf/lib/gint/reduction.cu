@@ -47,3 +47,27 @@ __device__ static void block_reduce_y(double val, double *addr, int tx, int ty){
     if (blocky >= 2)  if (ty < 1)  sdata[tx*stride+ty] += sdata[tx*stride+ty+1];  __syncthreads();
     if (ty == 0) atomicAdd(addr, sdata[tx*stride]);
  }
+
+template <int BLKSIZE> 
+__device__ void block_reduce(double *sum, double a){
+    const int tx = threadIdx.x;
+    __shared__ double as[BLKSIZE];
+    as[tx] = a;
+    __syncthreads();
+
+    if (BLKSIZE >= 512 && tx < 256) as[tx] += as[tx + 256]; __syncthreads();
+    if (BLKSIZE >= 256 && tx < 128) as[tx] += as[tx + 128]; __syncthreads();
+    if (BLKSIZE >= 128 && tx < 64)  as[tx] += as[tx + 64]; __syncthreads();
+    if (tx < 32){
+        volatile double* vs = as;
+        vs[tx] += vs[tx+32];
+        vs[tx] += vs[tx+16];
+        vs[tx] += vs[tx+8];
+        vs[tx] += vs[tx+4];
+        vs[tx] += vs[tx+2];
+        vs[tx] += vs[tx+1];
+    }
+    if (tx == 0){
+        atomicAdd(sum, as[0]);
+    }
+}

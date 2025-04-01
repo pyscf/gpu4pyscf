@@ -147,6 +147,7 @@ class KnownValues(unittest.TestCase):
             h1ao = mol.intor('int1e_iprinvip', comp=9) # <\nabla|1/r|>
             assert np.linalg.norm(int3c[:,:,:,i] - h1ao) < 1e-7
 
+    @unittest.skip("Skipping this test because the functionality is deprecated, replaced with int3c1e")    
     def test_int1e_edge_case(self):
         mol = gto.M(
             atom =
@@ -184,7 +185,6 @@ class KnownValues(unittest.TestCase):
         coeff = intopt.coeff
         dm_cart = coeff @ dm @ coeff.T
         dq_gpu, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip2', charges, None, dm_cart)
-
         cp.testing.assert_allclose(dq_cpu, dq_gpu, atol = 1e-10)
 
 if __name__ == "__main__":
