@@ -35,7 +35,7 @@ class RKS(rks.RKS):
 
     DIIS = hf_lowmem.CDIIS
 
-    kernel = scf = hf_lowmem.kernel
+    kernel = scf = hf_lowmem.RHF.kernel
     density_fit              = NotImplemented
     as_scanner               = NotImplemented
     newton                   = NotImplemented

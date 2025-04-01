@@ -167,14 +167,11 @@ class RHF(hf.RHF):
     DIIS = CDIIS
 
     def kernel(self, *args, **kwargs):
-        try:
-            default_allocator = cp.cuda.memory.get_allocator()
-            nao = self.mol.nao
-            thresh = nao**2 // 2 * 8
-            cp.cuda.memory.set_allocator(ConditionalMemoryPool(thresh).malloc)
-            return kernel(self, *args, **kwargs)
-        finally:
-            cp.cuda.memory.set_allocator(default_allocator)
+        default_allocator = cp.cuda.memory.get_allocator()
+        nao = self.mol.nao
+        thresh = nao**2 // 2 * 8
+        cp.cuda.memory.set_allocator(ConditionalMemoryPool(thresh).malloc)
+        return kernel(self, *args, **kwargs)
     scf = kernel
 
     density_fit              = NotImplemented
