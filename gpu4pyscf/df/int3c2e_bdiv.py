@@ -156,6 +156,8 @@ class Int3c2eOpt:
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
             jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
             ish, jsh = np.where(mask[ish0:ish1,jsh0:jsh1])
+            if len(ish) == 0:
+                continue
             ish += ish0
             jsh += jsh0
             idx = ish * nbas + jsh
@@ -216,9 +218,11 @@ class Int3c2eOpt:
         kern_counts = 0
 
         for (i, j), bas_ij_idx in zip(ij_tasks, self.shl_pair_idx):
+            npair_ij = len(bas_ij_idx)
+            if npair_ij == 0:
+                continue
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
             jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            npair_ij = len(bas_ij_idx)
             bas_ij_idx = cp.asarray(bas_ij_idx, dtype=np.int32)
             li = uniq_l[i]
             lj = uniq_l[j]
