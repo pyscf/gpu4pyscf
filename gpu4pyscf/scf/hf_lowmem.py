@@ -39,7 +39,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
     mf.dump_flags()
     mf.build(mf.mol)
     mem_avail0 = get_avail_mem()
-    log.debug1('available GPU memory for SCF: %d B', mem_avail0)
+    log.debug1('available GPU memory for SCF: %.3f GB', mem_avail0/1e9)
 
     conv_tol = mf.conv_tol
     if(conv_tol_grad is None):
@@ -82,7 +82,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         log.warn('Low-mem SCF does not support dumping chkfile')
     cp.get_default_memory_pool().free_all_blocks()
     mem_avail1 = get_avail_mem()
-    log.debug1('available GPU memory after SCF initialization: %d B', mem_avail1)
+    log.debug1('available GPU memory after SCF initialization: %.3f GB', mem_avail1/1e9)
 
     for cycle in range(mf.max_cycle):
         t0 = log.init_timer()
@@ -115,7 +115,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         log.info('cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
                  cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
         mem_avail1 = get_avail_mem()
-        log.debug1('available GPU memory: %d B', mem_avail1)
+        log.debug1('available GPU memory: %.3f GB', mem_avail1/1e9)
 
         e_diff = abs(e_tot-last_hf_e)
         if e_diff < conv_tol and norm_gorb < conv_tol_grad:
