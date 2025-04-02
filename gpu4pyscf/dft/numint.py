@@ -425,7 +425,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         ngrids_glob = grids.coords.shape[0]
         grid_start, grid_end = gen_grid_range(ngrids_glob, device_id)
         ngrids_local = grid_end - grid_start
-        log.debug(f"{ngrids_local} grids on Device {device_id}")
+        log.debug1(f"{ngrids_local} grids on Device {device_id}")
 
         weights = cupy.empty([ngrids_local])
         if xctype == 'LDA':
@@ -434,7 +434,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             rho_tot = cupy.empty([4,ngrids_local])
         else:
             rho_tot = cupy.empty([5,ngrids_local])
-        
+
         p0 = p1 = 0
         for ao_mask, idx, weight, _ in ni.block_loop(
                 _sorted_mol, grids, nao, ao_deriv, max_memory=None,
@@ -471,24 +471,24 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         exc = den = vxc = rho_tot = None
 
         vmat = cupy.zeros((nao, nao))
-        aow = None
+        buf = cupy.empty(MIN_BLK_SIZE * nao)
         p0 = p1 = 0
         for ao_mask, idx, weight, _ in ni.block_loop(
                 _sorted_mol, grids, nao, ao_deriv, max_memory=None,
                 grid_range=(grid_start, grid_end)):
             p1 = p0 + weight.size
             if xctype == 'LDA':
-                aow = _scale_ao(ao_mask, wv[0,p0:p1], out=aow)
+                aow = _scale_ao(ao_mask, wv[0,p0:p1], out=buf)
                 add_sparse(vmat, ao_mask.dot(aow.T), idx)
             elif xctype == 'GGA':
-                aow = _scale_ao(ao_mask, wv[:,p0:p1], out=aow)
+                aow = _scale_ao(ao_mask, wv[:,p0:p1], out=buf)
                 add_sparse(vmat, ao_mask[0].dot(aow.T), idx)
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             elif xctype == 'MGGA':
-                aow = _scale_ao(ao_mask, wv[:4,p0:p1], out=aow)
+                aow = _scale_ao(ao_mask, wv[:4,p0:p1], out=buf)
                 vtmp = ao_mask[0].dot(aow.T)
-                vtmp+= _tau_dot(ao_mask, ao_mask, wv[4,p0:p1])
+                vtmp+= _tau_dot(ao_mask, ao_mask, wv[4,p0:p1], buf=buf)
                 add_sparse(vmat, vtmp, idx)
             elif xctype == 'HF':
                 pass
@@ -515,7 +515,6 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     else:
         dms = cupy.asarray(dms)
-        dm_shape = dms.shape
         dms = opt.sort_orbitals(dms.reshape(-1,nao,nao), axis=[1,2])
         assert len(dms) == 1
         dms = dms[0]
@@ -936,7 +935,7 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     vmatb = reduce_to_device(vmatb_dist, inplace=True)
     vmata = opt.unsort_orbitals(vmata, axis=[1,2])
     vmatb = opt.unsort_orbitals(vmatb, axis=[1,2])
-    vmata_dist = vmbta_dist = None
+    vmata_dist = vmatb_dist = None
 
     nelec = np.sum(nelec_dist, axis=0)
     excsum = np.sum(excsum_dist, axis=0)
@@ -1257,7 +1256,7 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         opt = ni.gdftopt
 
     #nao, nao0 = opt.coeff.shape
-    nao = nao0 = mol.nao
+    nao0 = mol.nao
     dma, dmb = dms
     dm_shape = dma.shape
     # AO basis -> gdftopt AO basis
@@ -1609,8 +1608,6 @@ def _sparse_index(mol, coords, l_ctr_offsets, ao_loc):
     ctr_offsets_slice[0] = 0
 
     non0shl_mask = non0shl_idx == 1
-    non0ao_idx = []
-    zero_idx = []
     ao_seg_idx = np.split(np.arange(nao, dtype=np.int32), ao_loc[1:-1])
     idx = np.hstack(list(itertools.compress(ao_seg_idx, non0shl_mask)))
     zero_idx = np.hstack(list(itertools.compress(ao_seg_idx, ~non0shl_mask)))
@@ -1647,7 +1644,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     ngrids = grid_end - grid_start
 
     device_id = cupy.cuda.Device().id
-    log.debug(f'{grid_start} - {grid_end} grids are calculated on Device {device_id}.')
+    log.debug1(f'{grid_start} - {grid_end} grids are calculated on Device {device_id}.')
 
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     if blksize is None:
@@ -1655,7 +1652,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         mem_avail = get_avail_mem()
         blksize = int((mem_avail*.2/8/((comp+1)*nao + extra))/ ALIGNED) * ALIGNED
         blksize = min(blksize, MIN_BLK_SIZE)
-        log.debug(f'{mem_avail/1e6} MB memory is available on Device {device_id}, block_size {blksize}')
+        log.debug1(f'{mem_avail/1e6} MB memory is available on Device {device_id}, block_size {blksize}')
         if blksize < ALIGNED:
             raise RuntimeError('Not enough GPU memory')
 
@@ -2064,6 +2061,8 @@ def _scale_ao(ao, wv, out=None):
     wv = cupy.asarray(wv, order='C')
     if out is None:
         out = cupy.empty((nao, ngrids), order='C')
+    else:
+        out = cupy.ndarray((nao, ngrids), dtype=np.float64, memptr=out.data)
     stream = cupy.cuda.get_current_stream()
     err = libgdft.GDFTscale_ao(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -2075,12 +2074,12 @@ def _scale_ao(ao, wv, out=None):
         raise RuntimeError('CUDA Error')
     return out
 
-def _tau_dot(bra, ket, wv):
+def _tau_dot(bra, ket, wv, buf=None):
     '''1/2 <nabla i| v | nabla j>'''
     wv = cupy.asarray(.5 * wv)
-    mat  = bra[1].dot(_scale_ao(ket[1], wv).T)
-    mat += bra[2].dot(_scale_ao(ket[2], wv).T)
-    mat += bra[3].dot(_scale_ao(ket[3], wv).T)
+    mat  = bra[1].dot(_scale_ao(ket[1], wv, out=buf).T)
+    mat += bra[2].dot(_scale_ao(ket[2], wv, out=buf).T)
+    mat += bra[3].dot(_scale_ao(ket[3], wv, out=buf).T)
     return mat
 
 class _GDFTOpt:
