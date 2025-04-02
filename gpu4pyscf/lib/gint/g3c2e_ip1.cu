@@ -79,7 +79,6 @@ void GINTfill_int3c2e_ip1_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffse
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
-    const double norm = envs.fac;
     const int bas_ij = offsets.bas_ij + task_ij;
     const int bas_kl = offsets.bas_kl + task_kl;
     const int nprim_ij = envs.nprim_ij;
@@ -108,7 +107,7 @@ void GINTfill_int3c2e_ip1_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffse
 
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        GINTg0_int3c2e<LI_CEIL, LJ, LK>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
+        GINTg0_int3c2e<LI_CEIL, LJ, LK>(envs, g, as_ish, as_jsh, ksh, ij, kl);
         double ai2 = -2.0*c_bpcache.a1[ij];
         GINTgout3c2e_ip<LI,LJ,LK,NROOTS>(envs, gout, g, ai2);
     } }
@@ -192,15 +191,8 @@ static void GINTwrite_int3c2e_ip1_direct(GINTEnvVars envs, ERITensor eri, double
 __global__
 void GINTfill_int3c2e_ip1_general_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
 {
-    const int ntasks_ij = offsets.ntasks_ij;
-    const int ntasks_kl = offsets.ntasks_kl;
     const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
-
-    if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
-    }
-    const double norm = envs.fac;
     const int bas_ij = offsets.bas_ij + task_ij;
     const int bas_kl = offsets.bas_kl + task_kl;
     const int nprim_ij = envs.nprim_ij;
@@ -220,7 +212,7 @@ void GINTfill_int3c2e_ip1_general_kernel(GINTEnvVars envs, ERITensor eri, BasisP
 
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        GINTg0_int3c2e_shared(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
+        GINTg0_int3c2e_shared(envs, g, as_ish, as_jsh, ksh, ij, kl);
         double ai2 = -2.0*c_bpcache.a1[ij];
         GINTwrite_int3c2e_ip1_direct(envs, eri, g, ai2, ish, jsh, ksh);
     }}

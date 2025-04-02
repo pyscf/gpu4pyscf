@@ -111,7 +111,6 @@ void GINTfill_int3c2e_ip1ip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOf
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
-    const double norm = envs.fac;
     const int bas_ij = offsets.bas_ij + task_ij;
     const int bas_kl = offsets.bas_kl + task_kl;
     const int nprim_ij = envs.nprim_ij;
@@ -141,7 +140,7 @@ void GINTfill_int3c2e_ip1ip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOf
 
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        GINTg0_int3c2e<LI_CEIL, LJ, LK_CEIL>(envs, g0, norm, as_ish, as_jsh, ksh, ij, kl);
+        GINTg0_int3c2e<LI_CEIL, LJ, LK_CEIL>(envs, g0, as_ish, as_jsh, ksh, ij, kl);
         const double ai2 = -2.0*c_bpcache.a1[ij];
         const double ak2 = -2.0*c_bpcache.a1[kl];
         GINTgout3c2e_ip1ip2<LI,LJ,LK,NROOTS>(envs, gout, g0, ai2, ak2);
@@ -209,9 +208,9 @@ static void GINTwrite_int3c2e_ip1ip2_direct(GINTEnvVars envs, ERITensor eri,
         double eri_zy = 0;
         double eri_zz = 0;
         for (int ir = 0; ir < nrys_roots; ++ir, ++ix, ++iy, ++iz){
-            double g0_x = g0[ix];
-            double g0_y = g0[iy];
-            double g0_z = g0[iz];
+            const double g0_x = g0[ix];
+            const double g0_y = g0[iy];
+            const double g0_z = g0[iz];
 
             // g1
             double g1_x = ak2*g0[ix+dk];
@@ -275,15 +274,8 @@ static void GINTwrite_int3c2e_ip1ip2_direct(GINTEnvVars envs, ERITensor eri,
 __global__
 void GINTfill_int3c2e_ip1ip2_general_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
 {
-    const int ntasks_ij = offsets.ntasks_ij;
-    const int ntasks_kl = offsets.ntasks_kl;
     const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
-
-    if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        return;
-    }
-    const double norm = envs.fac;
     const int bas_ij = offsets.bas_ij + task_ij;
     const int bas_kl = offsets.bas_kl + task_kl;
     const int nprim_ij = envs.nprim_ij;
@@ -303,9 +295,9 @@ void GINTfill_int3c2e_ip1ip2_general_kernel(GINTEnvVars envs, ERITensor eri, Bas
 
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        GINTg0_int3c2e_shared(envs, g0, norm, as_ish, as_jsh, ksh, ij, kl);
-        double ai2 = -2.0*c_bpcache.a1[ij];
-        double ak2 = -2.0*c_bpcache.a1[kl];
+        GINTg0_int3c2e_shared(envs, g0, as_ish, as_jsh, ksh, ij, kl);
+        const double ai2 = -2.0*c_bpcache.a1[ij];
+        const double ak2 = -2.0*c_bpcache.a1[kl];
         GINTwrite_int3c2e_ip1ip2_direct(envs, eri, g0, ai2, ak2, ish, jsh, ksh);
     } }
 }

@@ -103,7 +103,6 @@ void GINTfill_int3c2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets o
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
-    const double norm = envs.fac;
     const int bas_ij = offsets.bas_ij + task_ij;
     const int bas_kl = offsets.bas_kl + task_kl;
     const int nprim_ij = envs.nprim_ij;
@@ -123,7 +122,7 @@ void GINTfill_int3c2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets o
     GINTmemset_int3c2e(envs, eri, ish, jsh, ksh);
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-        GINTg0_int3c2e_shared(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
+        GINTg0_int3c2e_shared(envs, g, as_ish, as_jsh, ksh, ij, kl);
         GINTwrite_int3c2e_direct(envs, eri, g, ish, jsh, ksh);
     } }
 }

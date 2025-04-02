@@ -319,7 +319,8 @@ class KnownValues(unittest.TestCase):
         h = hobj.kernel()
         _check_dft_hessian(mf, h, ix=0,iy=0)
         _check_dft_hessian(mf, h, ix=0,iy=1)
-    
+        mol.stdout.close()
+        
 if __name__ == "__main__":
     print("Full Tests for DF Hessian")
     unittest.main()

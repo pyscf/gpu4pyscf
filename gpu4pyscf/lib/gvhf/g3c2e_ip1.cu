@@ -140,7 +140,6 @@ static void GINTkernel_int3c2e_ip1_getjk_direct(GINTEnvVars envs, JKMatrix jk, d
                 jz += rhoj_k * sz;
             }
             const int off_dm = (ip + i0) + nao*(j0 + jp);
-            //double rhoj_tmp = dm[off_dm] * rhoj_k;
             const double dm_ij = dm[off_dm];
             j3[0] += jx * dm_ij;
             j3[1] += jy * dm_ij;
@@ -201,7 +200,6 @@ static void GINTkernel_int3c2e_ip1_getjk_direct(GINTEnvVars envs, JKMatrix jk, d
             jz += rhoj_k * sz;
         }
         const int off_dm = (i0 + ip) + nao*(j0 + jp);
-        //double rhoj_tmp = dm[off_dm] * rhoj_k;
         const double dm_ij = dm[off_dm];
         j3[0] += jx * dm_ij;
         j3[1] += jy * dm_ij;
@@ -212,21 +210,21 @@ static void GINTkernel_int3c2e_ip1_getjk_direct(GINTEnvVars envs, JKMatrix jk, d
 __device__
 static void write_int3c2e_ip1_jk(JKMatrix jk, double* j3, double* k3, int ish){
     int *bas_atm = c_bpcache.bas_atm;
-    int atm_id = bas_atm[ish];
+    const int atm_id = bas_atm[ish];
     double *vj = jk.vj;
     double *vk = jk.vk;
 
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
     __shared__ double sdata[THREADSX][THREADSY];
     
     if (vj != NULL){
         for (int j = 0; j < 3; j++){
             sdata[tx][ty] = j3[j]; __syncthreads();
-            if(THREADSY >= 16 && ty<8) sdata[tx][ty] += sdata[tx][ty+8]; __syncthreads();
-            if(THREADSY >= 8  && ty<4) sdata[tx][ty] += sdata[tx][ty+4]; __syncthreads();
-            if(THREADSY >= 4  && ty<2) sdata[tx][ty] += sdata[tx][ty+2]; __syncthreads();
-            if(THREADSY >= 2  && ty<1) sdata[tx][ty] += sdata[tx][ty+1]; __syncthreads();
+            if(THREADSX >= 16 && tx<8) sdata[ty][tx] += sdata[ty][tx+8]; __syncthreads();
+            if(THREADSX >= 8  && tx<4) sdata[ty][tx] += sdata[ty][tx+4]; __syncthreads();
+            if(THREADSX >= 4  && tx<2) sdata[ty][tx] += sdata[ty][tx+2]; __syncthreads();
+            if(THREADSX >= 2  && tx<1) sdata[ty][tx] += sdata[ty][tx+1]; __syncthreads();
             if (ty == 0) atomicAdd(vj + 3*atm_id+j, sdata[tx][0]);
         }
     }
@@ -234,10 +232,10 @@ static void write_int3c2e_ip1_jk(JKMatrix jk, double* j3, double* k3, int ish){
     if (vk != NULL){
         for (int j = 0; j < 3; j++){
             sdata[tx][ty] = k3[j]; __syncthreads();
-            if(THREADSY >= 16 && ty<8) sdata[tx][ty] += sdata[tx][ty+8]; __syncthreads();
-            if(THREADSY >= 8  && ty<4) sdata[tx][ty] += sdata[tx][ty+4]; __syncthreads();
-            if(THREADSY >= 4  && ty<2) sdata[tx][ty] += sdata[tx][ty+2]; __syncthreads();
-            if(THREADSY >= 2  && ty<1) sdata[tx][ty] += sdata[tx][ty+1]; __syncthreads();
+            if(THREADSX >= 16 && tx<8) sdata[ty][tx] += sdata[ty][tx+8]; __syncthreads();
+            if(THREADSX >= 8  && tx<4) sdata[ty][tx] += sdata[ty][tx+4]; __syncthreads();
+            if(THREADSX >= 4  && tx<2) sdata[ty][tx] += sdata[ty][tx+2]; __syncthreads();
+            if(THREADSX >= 2  && tx<1) sdata[ty][tx] += sdata[ty][tx+1]; __syncthreads();
             if (ty == 0) atomicAdd(vk + 3*atm_id+j, sdata[tx][0]);
         }
     }
@@ -247,8 +245,8 @@ static void write_int3c2e_ip1_jk(JKMatrix jk, double* j3, double* k3, int ish){
 template <int LI, int LJ, int LK> __global__
 void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
-    int ntasks_ij = offsets.ntasks_ij;
-    int ntasks_kl = offsets.ntasks_kl;
+    const int ntasks_ij = offsets.ntasks_ij;
+    const int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     bool active = true;
@@ -257,18 +255,17 @@ void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
         task_ij = 0;
         task_kl = 0;
     }
-    double norm = envs.fac;
-    int bas_ij = offsets.bas_ij + task_ij;
-    int bas_kl = offsets.bas_kl + task_kl;
-    int nprim_ij = envs.nprim_ij;
-    int nprim_kl = envs.nprim_kl;
-    int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-    int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
+    const int bas_ij = offsets.bas_ij + task_ij;
+    const int bas_kl = offsets.bas_kl + task_kl;
+    const int nprim_ij = envs.nprim_ij;
+    const int nprim_kl = envs.nprim_kl;
+    const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
+    const int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
-    int ish = bas_pair2bra[bas_ij];
-    int jsh = bas_pair2ket[bas_ij];
-    int ksh = bas_pair2bra[bas_kl];
+    const int ish = bas_pair2bra[bas_ij];
+    const int jsh = bas_pair2ket[bas_ij];
+    const int ksh = bas_pair2bra[bas_kl];
     
     double* __restrict__ exp = c_bpcache.a1;
     constexpr int LI_CEIL = LI + 1;
@@ -286,13 +283,11 @@ void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
     if (active) {
         for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
         for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-            GINTg0_int3c2e<LI_CEIL, LJ, LK>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
-            double ai2 = -2.0*exp[ij];
-            //GINTnabla1i_2e<LI, LJ, LK, NROOTS>(envs, f, g, ai2);
+            GINTg0_int3c2e<LI_CEIL, LJ, LK>(envs, g, as_ish, as_jsh, ksh, ij, kl);
+            const double ai2 = -2.0*exp[ij];
             GINTkernel_int3c2e_ip1_getjk_direct<LI, LJ, LK>(envs, jk, j3, k3, g, ai2, ish, jsh, ksh);
         }}
     }
-
     write_int3c2e_ip1_jk(jk, j3, k3, ish);
 }
 
@@ -482,28 +477,19 @@ static void GINTkernel_int3c2e_ip1_getjk_direct(GINTEnvVars envs, JKMatrix jk,
 __global__
 void GINTint3c2e_ip1_jk_general_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
-    int ntasks_ij = offsets.ntasks_ij;
-    int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
-    bool active = true;
-    if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
-        active = false;
-        task_ij = 0;
-        task_kl = 0;
-    }
-    double norm = envs.fac;
-    int bas_ij = offsets.bas_ij + task_ij;
-    int bas_kl = offsets.bas_kl + task_kl;
-    int nprim_ij = envs.nprim_ij;
-    int nprim_kl = envs.nprim_kl;
-    int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-    int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
+    const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
+    const int bas_ij = offsets.bas_ij + task_ij;
+    const int bas_kl = offsets.bas_kl + task_kl;
+    const int nprim_ij = envs.nprim_ij;
+    const int nprim_kl = envs.nprim_kl;
+    const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
+    const int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
-    int ish = bas_pair2bra[bas_ij];
-    int jsh = bas_pair2ket[bas_ij];
-    int ksh = bas_pair2bra[bas_kl];
+    const int ish = bas_pair2bra[bas_ij];
+    const int jsh = bas_pair2ket[bas_ij];
+    const int ksh = bas_pair2bra[bas_kl];
     
     extern __shared__ double g[];
 
@@ -513,14 +499,12 @@ void GINTint3c2e_ip1_jk_general_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdO
     double j3[3] = {0.0};
     double k3[3] = {0.0};
 
-    if (active) {
-        for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-            GINTg0_int3c2e_shared(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
-            double ai2 = -2.0*c_bpcache.a1[ij];
-            GINTkernel_int3c2e_ip1_getjk_direct(envs, jk, j3, k3, g, ai2, ish, jsh, ksh);
-        }}
-    }
+    for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+    for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+        GINTg0_int3c2e_shared(envs, g, as_ish, as_jsh, ksh, ij, kl);
+        double ai2 = -2.0*c_bpcache.a1[ij];
+        GINTkernel_int3c2e_ip1_getjk_direct(envs, jk, j3, k3, g, ai2, ish, jsh, ksh);
+    }}
     
     constexpr int nthreads = THREADSX * THREADSY;
     int *bas_atm = c_bpcache.bas_atm;
@@ -540,8 +524,8 @@ void GINTint3c2e_ip1_jk_general_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdO
 __global__
 static void GINTint3c2e_ip1_jk_kernel000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
-    int ntasks_ij = offsets.ntasks_ij;
-    int ntasks_kl = offsets.ntasks_kl;
+    const int ntasks_ij = offsets.ntasks_ij;
+    const int ntasks_kl = offsets.ntasks_kl;
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     bool active = true;
@@ -550,19 +534,19 @@ static void GINTint3c2e_ip1_jk_kernel000(GINTEnvVars envs, JKMatrix jk, BasisPro
         task_ij = 0;
         task_kl = 0;
     }
-    int bas_ij = offsets.bas_ij + task_ij;
-    int bas_kl = offsets.bas_kl + task_kl;
-    double norm = envs.fac;
-    double omega = envs.omega;
+    const int bas_ij = offsets.bas_ij + task_ij;
+    const int bas_kl = offsets.bas_kl + task_kl;
+    const double norm = envs.fac;
+    const double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
-    int ish = bas_pair2bra[bas_ij];
-    int jsh = bas_pair2ket[bas_ij];
-    int ksh = bas_pair2bra[bas_kl];
-    int nprim_ij = envs.nprim_ij;
-    int nprim_kl = envs.nprim_kl;
-    int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-    int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
+    const int ish = bas_pair2bra[bas_ij];
+    const int jsh = bas_pair2ket[bas_ij];
+    const int ksh = bas_pair2bra[bas_kl];
+    const int nprim_ij = envs.nprim_ij;
+    const int nprim_kl = envs.nprim_kl;
+    const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
+    const int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
@@ -571,7 +555,7 @@ static void GINTint3c2e_ip1_jk_kernel000(GINTEnvVars envs, JKMatrix jk, BasisPro
     double* __restrict__ a1 = c_bpcache.a1;
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
+    const int nbas = c_bpcache.nbas;
     double* __restrict__ bas_x = c_bpcache.bas_coords;
     double* __restrict__ bas_y = bas_x + nbas;
     double* __restrict__ bas_z = bas_y + nbas;
@@ -579,65 +563,65 @@ static void GINTint3c2e_ip1_jk_kernel000(GINTEnvVars envs, JKMatrix jk, BasisPro
     double gout0 = 0;
     double gout1 = 0;
     double gout2 = 0;
-    double xi = bas_x[ish];
-    double yi = bas_y[ish];
-    double zi = bas_z[ish];
+    const double xi = bas_x[ish];
+    const double yi = bas_y[ish];
+    const double zi = bas_z[ish];
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
     prim_kl1 = prim_kl + nprim_kl;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
     for (kl = prim_kl0; kl < prim_kl1; ++kl) {
-        double ai2 = -2.0*a1[ij];
-        double aij = a12[ij];
-        double eij = e12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
-        double akl = a12[kl];
-        double ekl = e12[kl];
-        double xkl = x12[kl];
-        double ykl = y12[kl];
-        double zkl = z12[kl];
-        double xijxkl = xij - xkl;
-        double yijykl = yij - ykl;
-        double zijzkl = zij - zkl;
-        double aijkl = aij + akl;
-        double a1 = aij * akl;
+        const double ai2 = -2.0*a1[ij];
+        const double aij = a12[ij];
+        const double eij = e12[ij];
+        const double xij = x12[ij];
+        const double yij = y12[ij];
+        const double zij = z12[ij];
+        const double akl = a12[kl];
+        const double ekl = e12[kl];
+        const double xkl = x12[kl];
+        const double ykl = y12[kl];
+        const double zkl = z12[kl];
+        const double xijxkl = xij - xkl;
+        const double yijykl = yij - ykl;
+        const double zijzkl = zij - zkl;
+        const double aijkl = aij + akl;
+        const double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
-        double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        const double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
+        const double fac = eij * ekl * sqrt(a0 / (a1 * a1 * a1));
         double root0, weight0;
         if (x < 3.e-7) {
             root0 = 0.5;
             weight0 = 1.;
         } else {
-            double tt = sqrt(x);
-            double fmt0 = SQRTPIE4 / tt * erf(tt);
+            const double tt = sqrt(x);
+            const double fmt0 = SQRTPIE4 / tt * erf(tt);
             weight0 = fmt0;
-            double e = exp(-x);
-            double b = .5 / x;
-            double fmt1 = b * (fmt0 - e);
+            const double e = exp(-x);
+            const double b = .5 / x;
+            const double fmt1 = b * (fmt0 - e);
             root0 = fmt1 / (fmt0 - fmt1);
         }
         root0 /= root0 + 1 - root0 * theta;
-        double u2 = a0 * root0;
-        double tmp2 = akl * u2 / (u2 * aijkl + a1);;
-        double c00x = xij - xi - tmp2 * xijxkl;
-        double c00y = yij - yi - tmp2 * yijykl;
-        double c00z = zij - zi - tmp2 * zijzkl;
-        double g_0 = 1;
-        double g_1 = c00x;
-        double g_2 = 1;
-        double g_3 = c00y;
-        double g_4 = norm * fac * weight0;
-        double g_5 = g_4 * c00z;
+        const double u2 = a0 * root0;
+        const double tmp2 = akl * u2 / (u2 * aijkl + a1);;
+        const double c00x = xij - xi - tmp2 * xijxkl;
+        const double c00y = yij - yi - tmp2 * yijykl;
+        const double c00z = zij - zi - tmp2 * zijzkl;
+        const double g_0 = 1;
+        const double g_1 = c00x;
+        const double g_2 = 1;
+        const double g_3 = c00y;
+        const double g_4 = norm * fac * weight0;
+        const double g_5 = g_4 * c00z;
 
-        double f_1 = ai2 * g_1;
-        double f_3 = ai2 * g_3;
-        double f_5 = ai2 * g_5;
+        const double f_1 = ai2 * g_1;
+        const double f_3 = ai2 * g_3;
+        const double f_5 = ai2 * g_5;
 
         gout0 += f_1 * g_2 * g_4;
         gout1 += g_0 * f_3 * g_4;
@@ -645,19 +629,19 @@ static void GINTint3c2e_ip1_jk_kernel000(GINTEnvVars envs, JKMatrix jk, BasisPro
     } }
 
     int *ao_loc = c_bpcache.ao_loc;
-    int i0 = ao_loc[ish] - jk.ao_offsets_i;
-    int j0 = ao_loc[jsh] - jk.ao_offsets_j;
-    int k0 = ao_loc[ksh] - jk.ao_offsets_k;
+    const int i0 = ao_loc[ish] - jk.ao_offsets_i;
+    const int j0 = ao_loc[jsh] - jk.ao_offsets_j;
+    const int k0 = ao_loc[ksh] - jk.ao_offsets_k;
 
-    int nao = jk.nao;
+    const int nao = jk.nao;
     double* __restrict__ dm = jk.dm;
     double* __restrict__ rhok = jk.rhok;
     double* __restrict__ rhoj = jk.rhoj;
     double* __restrict__ vj = jk.vj;
     double* __restrict__ vk = jk.vk;
 
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
     __shared__ double sdata[THREADSX][THREADSY];
     if (!active){
         gout0 = 0.0; gout1 = 0.0; gout2 = 0.0;
@@ -674,10 +658,10 @@ static void GINTint3c2e_ip1_jk_kernel000(GINTEnvVars envs, JKMatrix jk, BasisPro
         vj_tmp[2] = gout2*rhoj_tmp;
         for (int j = 0; j < 3; j++){
             sdata[tx][ty] = vj_tmp[j]; __syncthreads();
-            if(THREADSY >= 16 && ty<8) sdata[tx][ty] += sdata[tx][ty+8]; __syncthreads();
-            if(THREADSY >= 8  && ty<4) sdata[tx][ty] += sdata[tx][ty+4]; __syncthreads();
-            if(THREADSY >= 4  && ty<2) sdata[tx][ty] += sdata[tx][ty+2]; __syncthreads();
-            if(THREADSY >= 2  && ty<1) sdata[tx][ty] += sdata[tx][ty+1]; __syncthreads();
+            if(THREADSX >= 16 && tx<8) sdata[ty][tx] += sdata[ty][tx+8]; __syncthreads();
+            if(THREADSX >= 8  && tx<4) sdata[ty][tx] += sdata[ty][tx+4]; __syncthreads();
+            if(THREADSX >= 4  && tx<2) sdata[ty][tx] += sdata[ty][tx+2]; __syncthreads();
+            if(THREADSX >= 2  && tx<1) sdata[ty][tx] += sdata[ty][tx+1]; __syncthreads();
             if (ty == 0) atomicAdd(vj + 3*atm_id+j, sdata[tx][0]);
         }
     }
@@ -690,10 +674,10 @@ static void GINTint3c2e_ip1_jk_kernel000(GINTEnvVars envs, JKMatrix jk, BasisPro
         vk_tmp[2] = gout2 * rhok_tmp;
         for (int j = 0; j < 3; j++){
             sdata[tx][ty] = vk_tmp[j]; __syncthreads();
-            if(THREADSY >= 16 && ty<8) sdata[tx][ty] += sdata[tx][ty+8]; __syncthreads();
-            if(THREADSY >=  8 && ty<4) sdata[tx][ty] += sdata[tx][ty+4]; __syncthreads();
-            if(THREADSY >=  4 && ty<2) sdata[tx][ty] += sdata[tx][ty+2]; __syncthreads();
-            if(THREADSY >=  2 && ty<1) sdata[tx][ty] += sdata[tx][ty+1]; __syncthreads();
+            if(THREADSY >= 16 && tx<8) sdata[ty][tx] += sdata[ty][tx+8]; __syncthreads();
+            if(THREADSY >= 8  && tx<4) sdata[ty][tx] += sdata[ty][tx+4]; __syncthreads();
+            if(THREADSY >= 4  && tx<2) sdata[ty][tx] += sdata[ty][tx+2]; __syncthreads();
+            if(THREADSY >= 2  && tx<1) sdata[ty][tx] += sdata[ty][tx+1]; __syncthreads();
             if (ty == 0) atomicAdd(vk + 3*atm_id+j, sdata[tx][0]);
         }
     }
