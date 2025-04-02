@@ -107,30 +107,36 @@ def get_hcore(mol):
         # may exist if mol is converted from cell object.
         from pyscf.gto import pp_int
         h += pp_int.get_gth_pp(mol)
+        h = cupy.asarray(h)
     else:
+        assert not mol.nucmod
         #:h+= mol.intor_symmetric('int1e_nuc')
+        #TODO: from gpu4pyscf.int1e_grids import int1e_grids
+        #h += int1e_grids(mol, mol.atom_coords(), charges=-mol.atom_charges())
         from gpu4pyscf.df.int3c2e_bdiv import Int3c2eOpt
         from pyscf.pbc.df.aft import _fake_nuc
         auxnuc = _fake_nuc(mol, with_pseudo=False)
+        _auxnuc = auxnuc.copy()
         Z = cupy.asarray(-mol.atom_charges())
-        int3c2e_opt = Int3c2eOpt(mol, auxnuc).build()
-        ao_pair_mapping = cupy.asarray(int3c2e_opt.create_ao_pair_mapping())
-        nao, nao_orig = int3c2e_opt.coeff.shape
-        naux = int3c2e_opt.aux_coeff.shape[0]
-        mat = cupy.zeros((nao*nao))
-        p0 = p1 = 0
-        for ij_shls, eri3c in int3c2e_opt.int3c2e_kernel():
-            eri3c = eri3c.dot(Z)
-            p0, p1 = p1, p1 + eri3c.shape[0]
-            addr = ao_pair_mapping[p0:p1]
-            mat[addr] = eri3c
-            i, j = divmod(addr, nao)
-            mat[j*nao+i] = eri3c
-        mat = mat.reshape(nao, nao)
+        nao = h.shape[0]
+        nuc = cupy.zeros((nao*nao))
+        for i0, i1 in pyscf_lib.prange(0, mol.natm, 300):
+            _auxnuc._bas = auxnuc._bas[i0:i1]
+            int3c2e_opt = Int3c2eOpt(mol, _auxnuc).build()
+            ao_pair_mapping = cupy.asarray(int3c2e_opt.create_ao_pair_mapping())
+            mat = cupy.zeros((nao*nao))
+            p0 = p1 = 0
+            for ij_shls, eri3c in int3c2e_opt.int3c2e_kernel():
+                eri3c = eri3c.dot(Z[i0:i1])
+                p0, p1 = p1, p1 + eri3c.shape[0]
+                addr = ao_pair_mapping[p0:p1]
+                mat[addr] = eri3c
+                i, j = divmod(addr, nao)
+                mat[j*nao+i] = eri3c
+            nuc += mat
+            mat = None
         h = cupy.asarray(h)
-        h += sandwich_dot(mat, int3c2e_opt.coeff)
-        mat = None
-    h = cupy.asarray(h)
+        h += sandwich_dot(nuc.reshape(nao,nao), int3c2e_opt.coeff)
     if len(mol._ecpbas) > 0:
         h += get_ecp(mol)
     return h
@@ -442,6 +448,7 @@ def init_guess_by_minao(mol):
 
     # Issue 548
     if any(gto.charge(mol.atom_symbol(ia)) > 96 for ia in range(mol.natm)):
+        from pyscf.scf.hf import init_guess_by_atom
         logger.info(mol, 'MINAO initial guess is not available for super-heavy '
                     'elements. "atom" initial guess is used.')
         return init_guess_by_atom(mol)
@@ -468,8 +475,11 @@ def init_guess_by_minao(mol):
     for ia in range(mol.natm):
         symb = mol.atom_symbol(ia)
         if gto.is_ghost_atom(symb):
-            TODO
-            dm.append()
+            i0, i1 = aoslice[ia,:2]
+            n = i1 - i0
+            dm.append(cupy.zeros((n, n)))
+            mo_coeff.append(cupy.zeros((n, 0)))
+            mo_occ.append(cupy.zeros(0))
             continue
 
         if symb not in atm_conf:

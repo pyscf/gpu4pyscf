@@ -31,8 +31,6 @@ from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from pyscf import lib as pyscf_lib
 
-libdft = lib.load_library('libdft')
-
 def grad_switch_h(x):
     ''' first derivative of h(x)'''
     dy = 30.0*x**2 - 60.0*x**3 + 30.0*x**4
