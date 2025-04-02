@@ -41,6 +41,7 @@ from gpu4pyscf import __config__ as __gpu4pyscf_config__
 
 libdft = lib.load_library('libdft')
 libgdft = load_library('libgdft')
+libgdft.GDFTbecke_partition_weights.result_type = ctypes.c_int
 
 from pyscf.dft.gen_grid import GROUP_BOUNDARY_PENALTY, NELEC_ERROR_TOL, LEBEDEV_ORDER, LEBEDEV_NGRID
 
@@ -285,75 +286,46 @@ def get_partition(mol, atom_grids_tab,
         grid_coord and grid_weight arrays.  grid_coord array has shape (N,3);
         weight 1D array has N elements.
     '''
-    log = logger.new_logger(mol)
-    t0 = log.init_timer()
+    assert becke_scheme is original_becke
     atm_coords = numpy.asarray(mol.atom_coords() , order='C')
     atm_coords = cupy.asarray(atm_coords)
-    '''
-    if callable(radii_adjust) and atomic_radii is not None:
-        f_radii_adjust = radii_adjust(mol, atomic_radii)
-    else:
-        f_radii_adjust = None
-    atm_dist = gto.inter_distance(mol)
-    atm_dist = cupy.asarray(atm_dist)
+    atm_ngrids = numpy.array([atom_grids_tab[mol.atom_symbol(ia)][1].size
+                              for ia in range(mol.natm)])
+    ngrids = atm_ngrids.sum()
+    coords = cupy.empty((ngrids, 3))
+    weights = cupy.empty(ngrids)
+    atm_idx = cupy.empty(ngrids, dtype=numpy.int32)
+    p0 = p1 = 0
+    atm_coords = cupy.asarray(atm_coords)
+    for ia in range(mol.natm):
+        r, vol = atom_grids_tab[mol.atom_symbol(ia)]
+        p0, p1 = p1, p1 + vol.size
+        coords[p0:p1] = r
+        coords[p0:p1] += atm_coords[ia]
+        weights[p0:p1] = vol
+        atm_idx[p0:p1] = ia
 
-    if (becke_scheme is original_becke and
-        (radii_adjust is radi.treutler_atomic_radii_adjust or
-         radii_adjust is radi.becke_atomic_radii_adjust or
-         f_radii_adjust is None)):
-        def gen_grid_partition(coords):
-            grid_dist = cupy.linalg.norm(coords[None,:,:] - atm_coords[:,None,:], axis=-1)
-            r12 = grid_dist[:,None,:] - grid_dist[None,:,:]
-            rinv = 1.0/atm_dist
-            cupy.fill_diagonal(rinv, 0.0)
-            g = rinv[:,:,None] * r12
-
-            if f_radii_adjust is not None:
-                g = f_radii_adjust(g)
-
-            g = (3.0 - g*g) * g * .5
-            g = (3.0 - g*g) * g * .5
-            g = (3.0 - g*g) * g * .5
-
-            pbecke = cupy.prod(0.5 * (1.0 - g), axis=1) * 2
-            return pbecke
-    else:
-        def gen_grid_partition(coords):
-            ngrids = coords.shape[0]
-            grid_dist = numpy.empty((mol.natm,ngrids))
-            for ia in range(mol.natm):
-                dc = coords - atm_coords[ia]
-                grid_dist[ia] = numpy.sqrt(numpy.einsum('ij,ij->i',dc,dc))
-            pbecke = numpy.ones((mol.natm,ngrids))
-            for i in range(mol.natm):
-                for j in range(i):
-                    g = 1/atm_dist[i,j] * (grid_dist[i]-grid_dist[j])
-                    if f_radii_adjust is not None:
-                        g = f_radii_adjust(i, j, g)
-                    g = becke_scheme(g)
-                    pbecke[i] *= .5 * (1-g)
-                    pbecke[j] *= .5 * (1+g)
-            return pbecke
-    '''
-    coords_all = []
-    weights_all = []
     # support atomic_radii_adjust = None
     assert radii_adjust == radi.treutler_atomic_radii_adjust
     a = -radi.get_treutler_fac(mol, atomic_radii)
     #a = -radi.get_becke_fac(mol, atomic_radii)
     atm_coords = cupy.asarray(atm_coords, order='F')
-    for ia in range(mol.natm):
-        coords, vol = atom_grids_tab[mol.atom_symbol(ia)]
-        coords = coords + atm_coords[ia]
-        pbecke = gen_grids_partition(atm_coords, coords, a)
-        weights = vol * pbecke[ia] * (1./pbecke.sum(axis=0))
-        coords_all.append(coords)
-        weights_all.append(weights)
-        t0 = log.timer_debug1(f'becke paritioning on atom {ia}', *t0)
-    if concat:
-        coords_all = cupy.vstack(coords_all)
-        weights_all = cupy.hstack(weights_all)
-    return coords_all, weights_all
+    err = libgdft.GDFTbecke_partition_weights(
+        ctypes.cast(weights.data.ptr, ctypes.c_void_p),
+        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.cast(atm_idx.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+        ctypes.c_int(mol.natm)
+    )
+    if err != 0:
+        raise RuntimeError(f'GDFTbecke_partition_weights kernel failed')
+    if not concat:
+        offsets = numpy.cumsum(atm_ngrids)
+        coords = cupy.split(coords, offsets[:-1])
+        weights = cupy.split(weights, offsets[:-1])
+    return coords, weights
 gen_partition = get_partition
 
 def make_mask(mol, coords, relativity=0, shls_slice=None, cutoff=CUTOFF,
@@ -519,7 +491,7 @@ class Grids(lib.StreamObject):
             if padding > 0:
                 # cupy.vstack and cupy.hstack convert numpy array into cupy array first
                 self.coords = cupy.vstack(
-                    [self.coords, numpy.repeat([[1e4]*3], padding, axis=0)])
+                    [self.coords, numpy.repeat([[1e-4]*3], padding, axis=0)])
                 self.weights = cupy.hstack([self.weights, numpy.zeros(padding)])
         if sort_grids:
             #idx = arg_group_grids(mol, self.coords)
