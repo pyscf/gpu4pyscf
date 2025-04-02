@@ -123,7 +123,7 @@ def get_hcore(mol):
             _auxnuc._bas = auxnuc._bas[i0:i1]
             int3c2e_opt = Int3c2eOpt(mol, _auxnuc).build()
             ao_pair_mapping = cupy.asarray(int3c2e_opt.create_ao_pair_mapping())
-            nao = int3c2e_opt.coeff.shape[1]
+            nao = int3c2e_opt.coeff.shape[0]
             mat = cupy.zeros((nao*nao))
             p0 = p1 = 0
             for ij_shls, eri3c in int3c2e_opt.int3c2e_kernel():
