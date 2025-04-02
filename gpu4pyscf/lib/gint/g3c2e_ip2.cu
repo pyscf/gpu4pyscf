@@ -36,18 +36,15 @@ static void GINTgout3c2e_ip(GINTEnvVars envs, double* __restrict__ gout, double*
         const int loc_k = c_l_locs[LK] + ik;
         const int loc_j = c_l_locs[LJ] + ij;
         const int loc_i = c_l_locs[LI] + ii;
-
-        int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
-        int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
-        int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
-
+        
         const int k_idx = idx[loc_k];
         const int k_idy = idy[loc_k];
         const int k_idz = idz[loc_k];
 
-        double sx = gout[3*i + 0];
-        double sy = gout[3*i + 1];
-        double sz = gout[3*i + 2];
+        int ix = dk * k_idx + dj * idx[loc_j] + di * idx[loc_i];
+        int iy = dk * k_idy + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+        int iz = dk * k_idz + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
 #pragma unroll
         for (int n = 0; n < NROOTS; ++n, ++ix, ++iy, ++iz) {
             const double gx = g[ix];
@@ -62,13 +59,10 @@ static void GINTgout3c2e_ip(GINTEnvVars envs, double* __restrict__ gout, double*
             fy += k_idy>0 ? k_idy*g[iy-dk] : 0.0;
             fz += k_idz>0 ? k_idz*g[iz-dk] : 0.0;
 
-            sx += fx * gy * gz;
-            sy += gx * fy * gz;
-            sz += gx * gy * fz;
+            gout[3*i + 0] += fx * gy * gz;
+            gout[3*i + 1] += gx * fy * gz;
+            gout[3*i + 2] += gx * gy * fz;
         }
-        gout[3*i + 0] = sx;
-        gout[3*i + 1] = sy;
-        gout[3*i + 2] = sz;
     }}}
 }
 

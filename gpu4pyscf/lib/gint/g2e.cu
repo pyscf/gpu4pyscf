@@ -544,6 +544,7 @@ static void GINTg0_int3c2e_shared(GINTEnvVars envs, double* __restrict__ g0,
         // gx(irys,m,n+1) = c00(irys)*gx(irys,m,n)
         // + n*b10(irys)*gx(irys,m,n-1)
         // + m*b00(irys)*gx(irys,m-1,n)
+        // TODO: run m direction in parallel
         for (int m = 1; m <= mmax; ++m) {
             double s0 = gx[m*dm];
             double s1 = gx[m*dm+ dn];
@@ -562,6 +563,7 @@ static void GINTg0_int3c2e_shared(GINTEnvVars envs, double* __restrict__ g0,
             // unrolling j
             int j;
             for (j = 0; j < ijmin-1; j+=2, nmax-=2) {
+            // run k direction in parallel
             for (int k = 0; k <= mmax; ++k) {
                 int n = k * dk + j * dj;
                 double s0 = gx[n+nmax*di-di];
@@ -578,6 +580,7 @@ static void GINTg0_int3c2e_shared(GINTEnvVars envs, double* __restrict__ g0,
             } }
 
             if (j < ijmin) {
+                // run k direction in parallel
                 for (int k = 0; k <= mmax; ++k) {
                     int n = k * dk + j * dj;
                     double s1 = gx[n + nmax*di];

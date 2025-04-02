@@ -236,50 +236,12 @@ static void GINTwrite_int3c2e_ipip(ERITensor eri, double* __restrict__ gout,
     int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
     int k1 = ao_loc[ksh+1] - eri.ao_offsets_k;
 
-    double* __restrict__ pxx_eri;
-    double* __restrict__ pxy_eri;
-    double* __restrict__ pxz_eri;
-    double* __restrict__ pyx_eri;
-    double* __restrict__ pyy_eri;
-    double* __restrict__ pyz_eri;
-    double* __restrict__ pzx_eri;
-    double* __restrict__ pzy_eri;
-    double* __restrict__ pzz_eri;
-
     for (int n = 0, k = k0; k < k1; ++k) {
-        pxx_eri = eri.data + 0 * lstride + k * kstride;
-        pxy_eri = eri.data + 1 * lstride + k * kstride;
-        pxz_eri = eri.data + 2 * lstride + k * kstride;
-        pyx_eri = eri.data + 3 * lstride + k * kstride;
-        pyy_eri = eri.data + 4 * lstride + k * kstride;
-        pyz_eri = eri.data + 5 * lstride + k * kstride;
-        pzx_eri = eri.data + 6 * lstride + k * kstride;
-        pzy_eri = eri.data + 7 * lstride + k * kstride;
-        pzz_eri = eri.data + 8 * lstride + k * kstride;
-
-        for (int j = j0; j < j1; ++j) {
-            for (int i = i0; i < i1; ++i, ++n) {
-                double sxx = gout[9 * n];
-                double sxy = gout[9 * n + 1];
-                double sxz = gout[9 * n + 2];
-                double syx = gout[9 * n + 3];
-                double syy = gout[9 * n + 4];
-                double syz = gout[9 * n + 5];
-                double szx = gout[9 * n + 6];
-                double szy = gout[9 * n + 7];
-                double szz = gout[9 * n + 8];
-
-                int off = i + jstride * j;
-                pxx_eri[off] = sxx;
-                pxy_eri[off] = sxy;
-                pxz_eri[off] = sxz;
-                pyx_eri[off] = syx;
-                pyy_eri[off] = syy;
-                pyz_eri[off] = syz;
-                pzx_eri[off] = szx;
-                pzy_eri[off] = szy;
-                pzz_eri[off] = szz;
-            }
+    for (int j = j0; j < j1; ++j) {
+    for (int i = i0; i < i1; ++i, ++n) {
+        for (int ix = 0; ix < 9; ix++){
+            int off = ix*lstride + k*kstride + j*jstride + i;
+            eri.data[off] = gout[9*n + ix];
         }
-    }
+    }}}
 }

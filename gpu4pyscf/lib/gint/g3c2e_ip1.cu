@@ -37,17 +37,14 @@ static void GINTgout3c2e_ip(GINTEnvVars envs, double* __restrict__ gout, double*
         const int loc_j = c_l_locs[LJ] + ij;
         const int loc_i = c_l_locs[LI] + ii;
 
-        int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
-        int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
-        int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
-
         const int i_idx = idx[loc_i];
         const int i_idy = idy[loc_i];
         const int i_idz = idz[loc_i];
 
-        double sx = gout[3*i + 0];
-        double sy = gout[3*i + 1];
-        double sz = gout[3*i + 2];
+        int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * i_idx;
+        int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * i_idy + g_size;
+        int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * i_idz + g_size * 2;
+        
 #pragma unroll
         for (int n = 0; n < NROOTS; ++n, ++ix, ++iy, ++iz) {
             const double gx = g[ix];
@@ -62,13 +59,10 @@ static void GINTgout3c2e_ip(GINTEnvVars envs, double* __restrict__ gout, double*
             fy += i_idy>0 ? i_idy*g[iy-di] : 0.0;
             fz += i_idz>0 ? i_idz*g[iz-di] : 0.0;
 
-            sx += fx * gy * gz;
-            sy += gx * fy * gz;
-            sz += gx * gy * fz;
+            gout[3*i + 0] += fx * gy * gz;
+            gout[3*i + 1] += gx * fy * gz;
+            gout[3*i + 2] += gx * gy * fz;
         }
-        gout[3*i + 0] = sx;
-        gout[3*i + 1] = sy;
-        gout[3*i + 2] = sz;
     }}}
 }
 
@@ -156,14 +150,14 @@ static void GINTwrite_int3c2e_ip1_direct(GINTEnvVars envs, ERITensor eri, double
         const int loc_k = c_l_locs[lk] + k;
         const int loc_j = c_l_locs[lj] + j;
         const int loc_i = c_l_locs[li] + i;
-
-        int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * c_idx[loc_i];
-        int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
-        int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * c_idz[loc_i] + g_size * 2;
-
+        
         const int i_idx = c_idx[loc_i];
         const int i_idy = c_idy[loc_i];
         const int i_idz = c_idz[loc_i];
+
+        int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * i_idx;
+        int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * i_idy + g_size;
+        int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * i_idz + g_size * 2;
 
         double eri_x = 0;
         double eri_y = 0;

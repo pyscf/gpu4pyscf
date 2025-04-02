@@ -69,7 +69,6 @@ static int GINTfill_int3c2e_ip2_tasks(ERITensor *eri, BasisProdOffsets *offsets,
         case 201: GINTfill_int3c2e_ip2_kernel<2,0,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 210: GINTfill_int3c2e_ip2_kernel<2,1,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 300: GINTfill_int3c2e_ip2_kernel<3,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-#ifdef UNROLL_INT3C2E
         // li+lj+lk=4
         case 4: GINTfill_int3c2e_ip2_kernel<0,0,4><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 13: GINTfill_int3c2e_ip2_kernel<0,1,3><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
@@ -87,12 +86,12 @@ static int GINTfill_int3c2e_ip2_tasks(ERITensor *eri, BasisProdOffsets *offsets,
         case 310: GINTfill_int3c2e_ip2_kernel<3,1,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 400: GINTfill_int3c2e_ip2_kernel<4,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         // li+lj+lk=5
-        case 5: GINTfill_int3c2e_ip2_kernel<0,0,5><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        //case 5: GINTfill_int3c2e_ip2_kernel<0,0,5><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 14: GINTfill_int3c2e_ip2_kernel<0,1,4><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 23: GINTfill_int3c2e_ip2_kernel<0,2,3><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 32: GINTfill_int3c2e_ip2_kernel<0,3,2><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 41: GINTfill_int3c2e_ip2_kernel<0,4,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 50: GINTfill_int3c2e_ip2_kernel<0,5,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        //case 50: GINTfill_int3c2e_ip2_kernel<0,5,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 104: GINTfill_int3c2e_ip2_kernel<1,0,4><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 113: GINTfill_int3c2e_ip2_kernel<1,1,3><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 122: GINTfill_int3c2e_ip2_kernel<1,2,2><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
@@ -107,7 +106,8 @@ static int GINTfill_int3c2e_ip2_tasks(ERITensor *eri, BasisProdOffsets *offsets,
         case 320: GINTfill_int3c2e_ip2_kernel<3,2,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 401: GINTfill_int3c2e_ip2_kernel<4,0,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case 410: GINTfill_int3c2e_ip2_kernel<4,1,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 500: GINTfill_int3c2e_ip2_kernel<5,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        //case 500: GINTfill_int3c2e_ip2_kernel<5,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+#ifdef UNROLL_INT3C2E
 #endif
         default: {
             dim3 threads(THREADSX*THREADSY);

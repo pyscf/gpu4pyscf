@@ -35,24 +35,14 @@ static void GINTgout3c2e_ipip1(GINTEnvVars envs, double* __restrict__ gout, doub
         const int loc_k = c_l_locs[LK] + ik;
         const int loc_j = c_l_locs[LJ] + ij;
         const int loc_i = c_l_locs[LI] + ii;
-
-        int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * c_idx[loc_i];
-        int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
-        int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * c_idz[loc_i] + g_size * 2;
-
+        
         const int i_idx = c_idx[loc_i];
         const int i_idy = c_idy[loc_i];
         const int i_idz = c_idz[loc_i];
 
-        double sxx = gout[9*i + 0];
-        double sxy = gout[9*i + 1];
-        double sxz = gout[9*i + 2];
-        double syx = gout[9*i + 3];
-        double syy = gout[9*i + 4];
-        double syz = gout[9*i + 5];
-        double szx = gout[9*i + 6];
-        double szy = gout[9*i + 7];
-        double szz = gout[9*i + 8];
+        int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * i_idx;
+        int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * i_idy + g_size;
+        int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * i_idz + g_size * 2;
 #pragma unroll
         for (int n = 0; n < NROOTS; ++n, ++ix, ++iy, ++iz) {
             double g0_x = g0[ix];
@@ -84,26 +74,16 @@ static void GINTgout3c2e_ipip1(GINTEnvVars envs, double* __restrict__ gout, doub
             if (i_idy > 1) { g3_y += i_idy * (i_idy-1) * g0[iy-2*di]; }
             if (i_idz > 1) { g3_z += i_idz * (i_idz-1) * g0[iz-2*di]; }
 
-            sxx += g3_x * g0_y * g0_z;
-            sxy += g2_x * g2_y * g0_z;
-            sxz += g2_x * g0_y * g2_z;
-            syx += g2_x * g2_y * g0_z;
-            syy += g0_x * g3_y * g0_z;
-            syz += g0_x * g2_y * g2_z;
-            szx += g2_x * g0_y * g2_z;
-            szy += g0_x * g2_y * g2_z;
-            szz += g0_x * g0_y * g3_z;
+            gout[9*i + 0] += g3_x * g0_y * g0_z;
+            gout[9*i + 1] += g2_x * g2_y * g0_z;
+            gout[9*i + 2] += g2_x * g0_y * g2_z;
+            gout[9*i + 3] += g2_x * g2_y * g0_z;
+            gout[9*i + 4] += g0_x * g3_y * g0_z;
+            gout[9*i + 5] += g0_x * g2_y * g2_z;
+            gout[9*i + 6] += g2_x * g0_y * g2_z;
+            gout[9*i + 7] += g0_x * g2_y * g2_z;
+            gout[9*i + 8] += g0_x * g0_y * g3_z;
         }
-
-        gout[9*i + 0] = sxx;
-        gout[9*i + 1] = sxy;
-        gout[9*i + 2] = sxz;
-        gout[9*i + 3] = syx;
-        gout[9*i + 4] = syy;
-        gout[9*i + 5] = syz;
-        gout[9*i + 6] = szx;
-        gout[9*i + 7] = szy;
-        gout[9*i + 8] = szz;
     }}}
 }
 
@@ -192,13 +172,13 @@ static void GINTwrite_int3c2e_ipip1_direct(GINTEnvVars envs, ERITensor eri,
         const int loc_j = c_l_locs[lj] + j;
         const int loc_i = c_l_locs[li] + i;
 
-        int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * c_idx[loc_i];
-        int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * c_idy[loc_i] + g_size;
-        int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * c_idz[loc_i] + g_size * 2;
-
         const int i_idx = c_idx[loc_i];
         const int i_idy = c_idy[loc_i];
         const int i_idz = c_idz[loc_i];
+
+        int ix = dk * c_idx[loc_k] + dj * c_idx[loc_j] + di * i_idx;
+        int iy = dk * c_idy[loc_k] + dj * c_idy[loc_j] + di * i_idy + g_size;
+        int iz = dk * c_idz[loc_k] + dj * c_idz[loc_j] + di * i_idz + g_size * 2;
 
         double eri_xx = 0;
         double eri_xy = 0;
