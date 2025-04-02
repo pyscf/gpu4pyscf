@@ -23,6 +23,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
+from gpu4pyscf.lib.multi_gpu import lru_cache
 from gpu4pyscf.__config__ import _streams, num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
@@ -339,7 +340,7 @@ def dist_matrix(x, y, out=None):
         raise RuntimeError('failed in calculating distance matrix')
     return out
 
-@functools.lru_cache(1)
+@lru_cache(1)
 def _initialize_c2s_data():
     from gpu4pyscf.gto import mole
     c2s_l = [mole.cart2sph_by_l(l) for l in range(LMAX_ON_GPU)]

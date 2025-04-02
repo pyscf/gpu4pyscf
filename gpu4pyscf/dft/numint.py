@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import ctypes
-from functools import lru_cache
 import contextlib
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
@@ -26,8 +25,9 @@ from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, transpose_sum,
     grouped_dot, grouped_gemm, reduce_to_device)
 from gpu4pyscf.dft import xc_deriv, xc_alias, libxc
-from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.multi_gpu import lru_cache
+from gpu4pyscf import __config__
 from gpu4pyscf.__config__ import _streams, num_devices
 
 LMAX_ON_GPU = 8
