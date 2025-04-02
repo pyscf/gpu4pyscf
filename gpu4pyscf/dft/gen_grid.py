@@ -549,19 +549,24 @@ class Grids(lib.StreamObject):
         if abs(n-mol.nelectron) < NELEC_ERROR_TOL*n:
             rho *= self.weights
             idx = abs(rho) > threshold / self.weights.size
-            logger.debug(self, 'Drop grids %d',
-                         self.weights.size - cupy.count_nonzero(idx))
             self.coords  = cupy.asarray(self.coords [idx], order='C')
             self.weights = cupy.asarray(self.weights[idx], order='C')
+            logger.debug(self, 'Drop grids %d', rho.size - self.weights.size)
             if self.alignment > 1:
                 padding = _padding_size(self.size, self.alignment)
                 logger.debug(self, 'prune_by_density_: %d padding grids', padding)
                 if padding > 0:
                     self.coords = cupy.vstack(
-                        [self.coords, cupy.repeat([[1e4]*3], padding, axis=0)])
+                        [self.coords, cupy.repeat([[1e-4]*3], padding, axis=0)])
                     self.weights = cupy.hstack([self.weights, cupy.zeros(padding)])
-            self.non0tab = self.make_mask(mol, self.coords)
-            self.screen_index = self.non0tab
+            if self.non0tab is not None:
+                # with_non0tab is enalbed when initialling the grids. Update the
+                # screen_index for the pruned grids
+                self.non0tab = self.make_mask(mol, self.coords)
+                self.screen_index = self.non0tab
+        else:
+            logger.debug(self, 'Electron density is not accurate enough. '
+                         'Grids are not pruned.')
         return self
 
     def to_cpu(self):

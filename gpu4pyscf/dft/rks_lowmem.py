@@ -33,6 +33,8 @@ class RKS(rks.RKS):
     default RKS class in rks.py.
     '''
 
+    small_rho_cutoff = 0
+
     DIIS = hf_lowmem.CDIIS
 
     kernel = scf = hf_lowmem.kernel
@@ -80,7 +82,8 @@ class RKS(rks.RKS):
             _dm = dm
         initialize_grids(self, mol, _dm)
         mem_avail = get_avail_mem()
-        log.debug1('available GPU memory for rks.get_veff: %d B', mem_avail)
+        log.debug1('available GPU memory for rks.get_veff: %.3f GB',
+                   mem_avail/1e9)
 
         ni = self._numint
         n, exc, vxc = ni.nr_rks(mol, self.grids, self.xc, _dm)
@@ -106,7 +109,8 @@ class RKS(rks.RKS):
 
         cp.get_default_memory_pool().free_all_blocks()
         mem_avail = get_avail_mem()
-        log.debug1('available GPU memory for get_jk in rks.get_veff: %d B', mem_avail)
+        log.debug1('available GPU memory for get_jk in rks.get_veff: %.3f GB',
+                   mem_avail/1e9)
         vj = vk = None
         if not ni.libxc.is_hybrid_xc(self.xc):
             vj = vhfopt.get_j(_dm, log)

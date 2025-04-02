@@ -108,6 +108,11 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
         raise RuntimeError('CUDA Error in evaluating AO')
 
     if mol is not _sorted_mol:
+        # mol is identical _sorted_mol if eval_ao is evaluated within the
+        # NumInt.block_loop. AO sorting will be executed either on the density
+        # matrix or the final output of the Vxc matrix only.
+        # To allow eval_ao working with a general case, AOs are sorted for
+        # general mol objects.
         coeff = cupy.asarray(opt.coeff)
         out = contract('nig,ij->njg', out, coeff)
 
@@ -1616,6 +1621,9 @@ def _sparse_index(mol, coords, l_ctr_offsets):
     idx = np.hstack([idx, zero_idx[:pad]])
     pad = min(pad, len(zero_idx))
     non0shl_idx = cupy.asarray(np.where(non0shl_idx)[0], dtype=np.int32)
+    mem_avail = get_avail_mem()
+    log.debug2('available GPU memory after initialling _sparse_index: %.3f GB',
+               mem_avail/1e9)
     t1 = log.timer_debug2('init ao sparsity', *t1)
     return pad, cupy.asarray(idx), non0shl_idx, ctr_offsets_slice, ao_loc_slice
 
@@ -1689,6 +1697,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                     ao_mask[-pad:,:] = 0.0
                 else:
                     ao_mask[:,-pad:,:] = 0.0
+            mem_avail = get_avail_mem()
             yield ao_mask, idx, weight, coords
 
 def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
@@ -2073,7 +2082,7 @@ class _GDFTOpt:
         mem_avail0 = get_avail_mem()
         pmol = basis_seg_contraction(mol, allow_replica=True)[0]
         pmol.cart = mol.cart
-        coeff = cupy.eye(mol.nao)      # without cart2sph transformation
+        coeff = np.eye(mol.nao)      # without cart2sph transformation
         # Sort basis according to angular momentum and contraction patterns so
         # as to group the basis functions to blocks in GPU kernel.
         l_ctrs = pmol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
@@ -2132,7 +2141,8 @@ class _GDFTOpt:
         logger.debug2(mol, 'l_ctr_offsets = %s', self.l_ctr_offsets)
         logger.debug2(mol, 'l_bas_offsets = %s', self.l_bas_offsets)
         mem_avail1 = get_avail_mem()
-        logger.debug1(mol, 'NumInt allocates GPU memory: %d B', mem_avail0 - mem_avail1)
+        logger.debug1(mol, 'NumInt allocates GPU memory: %.3f GB',
+                      (mem_avail0 - mem_avail1)/1e9)
         return self
 
     @classmethod
