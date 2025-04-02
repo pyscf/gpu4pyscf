@@ -18,6 +18,7 @@ The RKS implemented in this module prioritizes a reduced GPU memory footprint.
 
 import numpy as np
 import cupy as cp
+from pyscf import lib as pyscf_lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid, rks
 from gpu4pyscf.scf import hf_lowmem, jk
@@ -76,8 +77,9 @@ class RKS(rks.RKS):
         log = logger.new_logger(mol, self.verbose)
         cput0 = log.init_timer()
         if dm is None:
-            _dm = tag_array(self.make_rdm1(),
-                            mo_coeff=self.mo_coeff, mo_occ=self.mo_occ)
+            # Avoid explicitly constructing density matrix. Use the RHFWfn
+            # instance to just pass mo_coeff and mo_occ to the nr_rks function.
+            _dm = hf_lowmem.RHFWfn(self.mo_coeff, self.mo_occ)
         else:
             _dm = dm
         initialize_grids(self, mol, _dm)
@@ -97,7 +99,7 @@ class RKS(rks.RKS):
             exc += enlc
             vxc += vnlc
         _dm = None
-        vxc = pack_tril(vxc)
+        vxc = pack_tril(vxc).get()
         log.debug('nelec by numeric integration = %s', n)
         cput1 = log.timer_debug1('vxc tot', *cput0)
 
@@ -116,11 +118,12 @@ class RKS(rks.RKS):
             vj = vhfopt.get_j(_dm, log)
             _dm = None
             vj = vhfopt.apply_coeff_CT_mat_C(vj)
-            vj = pack_tril(vj[0])
+            vj = pack_tril(vj[0]).get()
             vj_last = getattr(vhf_last, 'vj', None)
-            if isinstance(vj_last, cp.ndarray):
-                vj_last += vj # Reuse the memory of the previous Veff
-                vj = vj_last
+            if vj_last is not None:
+                if isinstance(vj_last, cp.ndarray):
+                    vj_last = vj_last.get()
+                vj += vj_last
             vxc += vj
         else:
             omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
@@ -147,20 +150,23 @@ class RKS(rks.RKS):
             vj_last = getattr(vhf_last, 'vj', None)
             vk_last = getattr(vhf_last, 'vk', None)
             vj = vhfopt.apply_coeff_CT_mat_C(vj)
-            vj = pack_tril(vj[0])
-            if isinstance(vj_last, cp.ndarray):
-                vj_last += vj
-                vj = vj_last
-            vk = vhfopt.apply_coeff_CT_mat_C(vk)
-            vk = pack_tril(vk[0])
-            if isinstance(vk_last, cp.ndarray):
-                vk_last += vk
-                vk = vk_last
+            vj = pack_tril(vj[0]).get()
+            if vj_last is not None:
+                if isinstance(vj_last, cp.ndarray):
+                    vj_last = vj_last.get()
+                vj += vj_last
             vxc += vj
+
+            vk = vhfopt.apply_coeff_CT_mat_C(vk)
+            vk = pack_tril(vk[0]).get()
+            if vk_last is not None:
+                if isinstance(vk_last, cp.ndarray):
+                    vk_last = vk_last.get()
+                vk += vk_last
             vxc -= vk * .5
 
         log.timer_debug1('jk total', *cput1)
-        vxc = tag_array(vxc, exc=exc, vj=vj, vk=vk)
+        vxc = pyscf_lib.tag_array(vxc, exc=exc, vj=vj, vk=vk)
         return vxc
 
     def energy_elec(self, dm, h1e, vhf):
@@ -171,6 +177,7 @@ class RKS(rks.RKS):
         i = cp.arange(nao)
         diag = i*(i+1)//2 + i
         dm_tril[diag] *= .5
+        dm_tril = dm_tril.get()
         e1 = float(h1e.dot(dm_tril) * 2)
         ecoul = float(vhf.vj.dot(dm_tril))
         exc = vhf.exc

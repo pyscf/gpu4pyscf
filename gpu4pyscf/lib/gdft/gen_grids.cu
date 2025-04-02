@@ -36,9 +36,9 @@ void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, 
     double zg = 0.0;
     int atom_id = natm;
     if (grid_id < ngrids) {
-        xg = coords[3*grid_id+0];
-        yg = coords[3*grid_id+1];
-        zg = coords[3*grid_id+2];
+        xg = coords[0*ngrids+grid_id];
+        yg = coords[1*ngrids+grid_id];
+        zg = coords[2*ngrids+grid_id];
         atom_id = atm_idx[grid_id];
     }
     double *atm_x = atm_coords;
@@ -142,6 +142,7 @@ void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, 
             }
         }
         if (grid_id < ngrids) {
+#pragma unroll
             for (int i = 0; i < TILE; ++i) {
                 if (i >= i1) {
                     break;

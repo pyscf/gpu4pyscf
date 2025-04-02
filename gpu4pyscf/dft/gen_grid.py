@@ -188,27 +188,6 @@ def original_becke(g):
 #    return g
     pass
 
-def gen_grids_partition(atm_coords, coords, a):
-    stream = cupy.cuda.get_current_stream()
-    natm = atm_coords.shape[0]
-    ngrids = coords.shape[0]
-    assert ngrids < 65535 * 16
-
-    pbecke = cupy.empty([natm, ngrids], order='C')
-    #atm_coords = cupy.asarray(atm_coords, order='F')
-    err = libgdft.GDFTgen_grid_partition(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(pbecke.data.ptr, ctypes.c_void_p),
-        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ngrids),
-        ctypes.c_int(natm)
-    )
-    if err != 0:
-        raise RuntimeError('CUDA Error in grids_partition kernel')
-    return pbecke
-
 def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                      level=3, prune=nwchem_prune, **kwargs):
     '''Generate number of radial grids and angular grids for the given molecule.
@@ -287,16 +266,14 @@ def get_partition(mol, atom_grids_tab,
         weight 1D array has N elements.
     '''
     assert becke_scheme is original_becke
-    atm_coords = numpy.asarray(mol.atom_coords() , order='C')
-    atm_coords = cupy.asarray(atm_coords)
+    atm_coords = cupy.asarray(mol.atom_coords() , order='F')
     atm_ngrids = numpy.array([atom_grids_tab[mol.atom_symbol(ia)][1].size
                               for ia in range(mol.natm)])
     ngrids = atm_ngrids.sum()
-    coords = cupy.empty((ngrids, 3))
+    coords = cupy.empty((ngrids, 3), order='F')
     weights = cupy.empty(ngrids)
     atm_idx = cupy.empty(ngrids, dtype=numpy.int32)
     p0 = p1 = 0
-    atm_coords = cupy.asarray(atm_coords)
     for ia in range(mol.natm):
         r, vol = atom_grids_tab[mol.atom_symbol(ia)]
         p0, p1 = p1, p1 + vol.size
@@ -309,7 +286,6 @@ def get_partition(mol, atom_grids_tab,
     assert radii_adjust == radi.treutler_atomic_radii_adjust
     a = -radi.get_treutler_fac(mol, atomic_radii)
     #a = -radi.get_becke_fac(mol, atomic_radii)
-    atm_coords = cupy.asarray(atm_coords, order='F')
     err = libgdft.GDFTbecke_partition_weights(
         ctypes.cast(weights.data.ptr, ctypes.c_void_p),
         ctypes.cast(coords.data.ptr, ctypes.c_void_p),

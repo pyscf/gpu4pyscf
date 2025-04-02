@@ -54,10 +54,10 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
             dm0 = mf.get_init_guess(mol, mf.init_guess)
         cput1 = log.timer_debug1('generating initial guess', *cput1)
 
-    h1e = cp.asarray(mf.get_hcore(mol))
+    h1e = mf.get_hcore(mol) # On CPU
     cput1 = log.timer_debug1('hcore', *cput1)
-    dm, dm0 = asarray(dm0, order='C'), None
-    vhf = mf.get_veff(mol, dm)
+    dm, dm0 = asarray(dm0, order='C'), None # on GPU
+    vhf = mf.get_veff(mol, dm) # On CPU
     e_tot = mf.energy_tot(dm, h1e, vhf)
     log.info('init E= %.15g', e_tot)
     scf_conv = False
@@ -89,24 +89,24 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         mo_coeff = mo_occ = mo_energy = fock = None
         last_hf_e = e_tot
 
-        s1e = mf.get_ovlp(mol)
-        fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis)
+        s1e = cp.asarray(mf.get_ovlp(mol))
+        fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis) # on GPU
         t1 = log.timer_debug1('DIIS', *t0)
-        mo_energy, mo_coeff = mf.eig(fock, s1e)
+        mo_energy, mo_coeff = mf.eig(fock, s1e) # on GPU
         fock = s1e = None
         t1 = log.timer_debug1('eig', *t1)
 
-        mo_occ = mf.get_occ(mo_energy, mo_coeff)
+        mo_occ = mf.get_occ(mo_energy, mo_coeff) # on GPU
         # Update mo_coeff and mo_occ, allowing get_veff to generate DMs on the fly
         mf.mo_coeff = mo_coeff
         mf.mo_occ = mo_occ
-        vhf = mf.get_veff(mol, None, dm, vhf)
+        vhf = mf.get_veff(mol, None, dm, vhf) # on CPU
         cp.get_default_memory_pool().free_all_blocks()
 
         fock = mf.get_fock(h1e, None, vhf)  # = h1e + vhf, no DIIS
         norm_gorb = cp.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
         fock = None
-        dm, dm_last = mf.make_rdm1(mo_coeff, mo_occ), dm
+        dm, dm_last = mf.make_rdm1(mo_coeff, mo_occ), dm # on GPU
         e_tot = mf.energy_tot(dm, h1e, vhf)
         norm_ddm = cp.linalg.norm(dm-dm_last)
         dm_last = None
@@ -186,7 +186,7 @@ class RHF(hf.RHF):
         hcore = hf.get_hcore(mol)
         nao = hcore.shape[0]
         idx = np.arange(nao)
-        return hcore[idx[:,None] >= idx]
+        return hcore[idx[:,None] >= idx].get()
 
     def get_jk(self, mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None):
         raise NotImplementedError
@@ -197,7 +197,7 @@ class RHF(hf.RHF):
     def get_k(self, mol=None, dm=None, hermi=1, omega=None):
         raise NotImplementedError
 
-    def get_veff(self, mol, dm, dm_last=None, vhf_last=0, hermi=1):
+    def get_veff(self, mol, dm, dm_last=None, vhf_last=None, hermi=1):
         '''Constructus the lower-triangular part of the Fock matrix.'''
         log = logger.new_logger(mol, self.verbose)
         cput0 = log.init_timer()
@@ -213,26 +213,23 @@ class RHF(hf.RHF):
         dm = None
         vk *= -.5
         vj += vk
-        vj = vhfopt.apply_coeff_CT_mat_C(vj)
-        vk = None
-        if isinstance(vhf_last, cp.ndarray):
-            vhf = asarray(vhf_last) # remove attributes if vhf_last is a tag_array
-            vhf_last = None
-            vhf += pack_tril(vj[0]) # Reuse the memory of previous Veff
-        else:
-            vhf = pack_tril(vj[0])
+        vhf = vhfopt.apply_coeff_CT_mat_C(vj)
+        vj = vk = None
+        vhf = pack_tril(vhf[0])
+        if vhf_last is not None:
+            vhf += cp.asarray(vhf_last)
         log.timer('vj and vk', *cput0)
-        return vhf
+        return vhf.get()
 
     def _delta_rdm1(self, dm, dm_last, vhfopt):
         '''Construct dm-dm_last suitable for the vhfopt.get_jk method'''
-        if dm is None:
-            if isinstance(dm, WaveFunction):
-                mo_coeff = dm.mo_coeff
-                mo_occ = dm.mo_occ
-            else:
+        if dm is None or isinstance(dm, WaveFunction):
+            if dm is None:
                 mo_coeff = self.mo_coeff
                 mo_occ = self.mo_occ
+            else:
+                mo_coeff = dm.mo_coeff
+                mo_occ = dm.mo_occ
             mask = mo_occ > 0
             occ_coeff = mo_coeff[:,mask]
             occ_coeff *= mo_occ[mask]**.5
@@ -266,7 +263,7 @@ class RHF(hf.RHF):
         # h1e and vhf must be both in tril storage or square-matrix storage
         assert h1e.shape[-1] == vhf.shape[-1]
         assert h1e.ndim == vhf.ndim == 1
-        f = unpack_tril(h1e + vhf)
+        f = unpack_tril(cp.asarray(h1e + vhf))
         if cycle < 0 and diis is None:  # Not inside the SCF iteration
             return f
 
@@ -310,6 +307,7 @@ class RHF(hf.RHF):
         i = cp.arange(nao)
         diag = i*(i+1)//2 + i
         dm_tril[diag] *= .5
+        dm_tril = dm_tril.get()
         e1 = float(h1e.dot(dm_tril) * 2)
         e_coul = float(vhf.dot(dm_tril))
         self.scf_summary['e1'] = e1
