@@ -296,7 +296,7 @@ def get_partition(mol, atom_grids_tab,
         ctypes.c_int(mol.natm)
     )
     if err != 0:
-        raise RuntimeError(f'GDFTbecke_partition_weights kernel failed')
+        raise RuntimeError('GDFTbecke_partition_weights kernel failed')
     if not concat:
         offsets = numpy.cumsum(atm_ngrids)
         coords = cupy.split(coords, offsets[:-1])
