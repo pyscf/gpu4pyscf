@@ -467,7 +467,7 @@ class Grids(lib.StreamObject):
             if padding > 0:
                 # cupy.vstack and cupy.hstack convert numpy array into cupy array first
                 self.coords = cupy.vstack(
-                    [self.coords, numpy.repeat([[1e-4]*3], padding, axis=0)])
+                    [self.coords, cupy.full((padding, 3), 1e-4)])
                 self.weights = cupy.hstack([self.weights, numpy.zeros(padding)])
         if sort_grids:
             #idx = arg_group_grids(mol, self.coords)
@@ -533,7 +533,7 @@ class Grids(lib.StreamObject):
                 logger.debug(self, 'prune_by_density_: %d padding grids', padding)
                 if padding > 0:
                     self.coords = cupy.vstack(
-                        [self.coords, cupy.repeat([[1e-4]*3], padding, axis=0)])
+                        [self.coords, cupy.full((padding, 3), 1e-4)])
                     self.weights = cupy.hstack([self.weights, cupy.zeros(padding)])
             if self.non0tab is not None:
                 # with_non0tab is enalbed when initialling the grids. Update the
