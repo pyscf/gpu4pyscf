@@ -70,35 +70,26 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, ks_grad.max_memory*.9-mem_now)
     if ks_grad.grid_response:
-        exc, vxc_tmp = get_vxc_full_response(ni, mol, grids, mf.xc, dm,
+        exc, vxc_tmp = get_exc_full_response(ni, mol, grids, mf.xc, dm,
                                          max_memory=max_memory,
                                          verbose=ks_grad.verbose)
         if mf.do_nlc():
             raise NotImplementedError
     else:
-        exc, vxc_tmp = get_vxc(ni, mol, grids, mf.xc, dm,
+        exc, vxc_tmp = get_exc(ni, mol, grids, mf.xc, dm,
                            max_memory=max_memory, verbose=ks_grad.verbose)
         if mf.do_nlc():
             if ni.libxc.is_nlc(mf.xc):
                 xc = mf.xc
             else:
                 xc = mf.nlc
-            enlc, vnlc = get_nlc_vxc(
+            enlc, vnlc = get_nlc_exc(
                 ni, mol, nlcgrids, xc, dm, mf.mo_coeff, mf.mo_occ,
                 max_memory=max_memory, verbose=ks_grad.verbose)
-            vxc_tmp[0] += vnlc
-            vxc_tmp[1] += vnlc
+            vxc_tmp += vnlc
     t0 = logger.timer(ks_grad, 'vxc', *t0)
 
-    mo_coeff_alpha = mf.mo_coeff[0]
-    mo_coeff_beta = mf.mo_coeff[1]
-    occ_coeff0 = cupy.asarray(mo_coeff_alpha[:, mf.mo_occ[0]>0.5], order='C')
-    occ_coeff1 = cupy.asarray(mo_coeff_beta[:, mf.mo_occ[1]>0.5], order='C')
-    tmp = contract('nij,jk->nik', vxc_tmp[0], occ_coeff0)
-    exc1_per_atom = contract('nik,ik->ni', tmp, occ_coeff0)
-    tmp = contract('nij,jk->nik', vxc_tmp[1], occ_coeff1)
-    exc1_per_atom+= contract('nik,ik->ni', tmp, occ_coeff1)
-
+    exc1_per_atom = vxc_tmp
     aoslices = mol.aoslice_by_atom()
     exc1_per_atom = [exc1_per_atom[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
     exc1_per_atom = cupy.asarray(exc1_per_atom)
@@ -137,7 +128,7 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
 
     return tag_array(exc1_per_atom, exc1_grid=exc)
 
-def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
+def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                   verbose=None, with_lapl=False, grid_range=(), device_id=0):
     ''' Calculate the gradient of vxc on given device
     '''
@@ -152,17 +143,16 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         nao = mol.nao
         opt = ni.gdftopt
         _sorted_mol = opt._sorted_mol
-        nset = dms.shape[0]
-        
+
         ngrids_glob = grids.coords.shape[0]
         grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} grids on Device {device_id}")
 
-        vmat = cupy.zeros((nset,3,nao,nao))
+        exc1 = cupy.zeros((3,nao))
         if xctype == 'LDA':
             ao_deriv = 1
-            for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None, 
+            for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
                 mo_coeff_mask = mo_coeff[:,idx,:]
                 rho_a = eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask[0], mo_occ[0], None, xctype)
@@ -172,10 +162,14 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 wv = weight * vxc[:,0]
                 aow = numint._scale_ao(ao_mask[0], wv[0])
                 vtmp = rks_grad._d1_dot_(ao_mask[1:4], aow.T)
-                add_sparse(vmat[0], vtmp, idx)
+                #add_sparse(vmat[0], vtmp, idx)
+                dm_mask = dms[0][idx[:,None],idx]
+                exc1[:, idx] += contract('nij,ij->ni', vtmp, dm_mask)
                 aow = numint._scale_ao(ao_mask[0], wv[1])
                 vtmp = rks_grad._d1_dot_(ao_mask[1:4], aow.T)
-                add_sparse(vmat[1], vtmp, idx)
+                #add_sparse(vmat[1], vtmp, idx)
+                dm_mask = dms[1][idx[:,None],idx]
+                exc1[:, idx] += contract('nij,ij->ni', vtmp, dm_mask)
         elif xctype == 'GGA':
             ao_deriv = 2
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
@@ -188,9 +182,13 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 wv = weight * vxc
                 wv[:,0] *= .5
                 vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[0])
-                add_sparse(vmat[0], vtmp, idx)
+                #add_sparse(vmat[0], vtmp, idx)
+                dm_mask = dms[0][idx[:,None],idx]
+                exc1[:, idx] += contract('nij,ij->ni', vtmp, dm_mask)
                 vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[1])
-                add_sparse(vmat[1], vtmp, idx)
+                #add_sparse(vmat[1], vtmp, idx)
+                dm_mask = dms[1][idx[:,None],idx]
+                exc1[:, idx] += contract('nij,ij->ni', vtmp, dm_mask)
         elif xctype == 'NLC':
             raise NotImplementedError('NLC')
 
@@ -207,15 +205,18 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 wv[:,4] *= .5  # for the factor 1/2 in tau
                 vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[0])
                 vtmp += rks_grad._tau_grad_dot_(ao_mask, wv[0,4])
-                add_sparse(vmat[0], vtmp, idx)
+                #add_sparse(vmat[0], vtmp, idx)
+                dm_mask = dms[0][idx[:,None],idx]
+                exc1[:, idx] += contract('nij,ij->ni', vtmp, dm_mask)
                 vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[1])
                 vtmp += rks_grad._tau_grad_dot_(ao_mask, wv[1,4])
-                add_sparse(vmat[1], vtmp, idx)
-
+                #add_sparse(vmat[1], vtmp, idx)
+                dm_mask = dms[1][idx[:,None],idx]
+                exc1[:, idx] += contract('nij,ij->ni', vtmp, dm_mask)
         log.timer_debug1('gradient of vxc', *t0)
-    return vmat
+    return exc1
 
-def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
+def get_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             max_memory=2000, verbose=None):
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
@@ -233,20 +234,20 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
         for device_id in range(num_devices):
             future = executor.submit(
-                _get_vxc_task,
+                _get_exc_task,
                 ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 verbose=verbose, device_id=device_id)
             futures.append(future)
     vmat_dist = [future.result() for future in futures]
     vmat = reduce_to_device(vmat_dist)
 
-    vmat = opt.unsort_orbitals(vmat, axis=[2,3])
+    vmat = opt.unsort_orbitals(vmat, axis=[1])
     exc = None
 
     # - sign because nabla_X = -nabla_x
     return exc, -cupy.array(vmat)
 
-def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
+def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                           max_memory=2000, verbose=None):
     '''Full response including the response of the grids'''
     log = logger.new_logger(mol, verbose)
@@ -258,11 +259,11 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     natm = mol.natm
     mol = None
     _sorted_mol = opt._sorted_mol
-    coeff = cupy.asarray(opt.coeff)
-    nao, nao0 = coeff.shape
+    nao = _sorted_mol.nao
+    dms = cupy.asarray(dms)
     dms = cupy.asarray(dms)
     assert dms.ndim == 3 and dms.shape[0] == 2
-    dms = opt.sort_orbitals(dms.reshape(-1,nao0,nao0), axis=[1,2])
+    dms = opt.sort_orbitals(dms.reshape(-1,nao,nao), axis=[1,2])
 
     excsum = cupy.zeros((natm, 3))
     vmat = cupy.zeros((2,3,nao,nao))
@@ -349,12 +350,15 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[1]) * 2
                     rho = vxc = None
 
-    vmat = opt.unsort_orbitals(vmat, axis=[2,3])
+    #vmat = opt.unsort_orbitals(vmat, axis=[2,3])
+    exc1 = contract('nij,ij->ni', vmat[0], dms[0])
+    exc1+= contract('nij,ij->ni', vmat[1], dms[1])
+    exc1 = opt.unsort_orbitals(exc1, axis=[1])
     # - sign because nabla_X = -nabla_x
-    return excsum, -vmat
+    return excsum, -exc1
 
 
-def get_nlc_vxc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, hermi=1,
+def get_nlc_exc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, hermi=1,
                 max_memory=2000, verbose=None):
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
@@ -367,10 +371,10 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
 
     mol = None
     _sorted_mol = opt._sorted_mol
-    coeff = cupy.asarray(opt.coeff)
-    nao, nao0 = coeff.shape
+    nao = _sorted_mol.nao
     mo_coeff_0 = opt.sort_orbitals(mo_coeff[0], axis=[0])
     mo_coeff_1 = opt.sort_orbitals(mo_coeff[1], axis=[0])
+    dms = opt.sort_orbitals(dms.reshape(-1,nao,nao), axis=[1,2])
     nset = 1
     assert nset == 1
 
@@ -394,7 +398,8 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
                           grids.coords, nlc_pars)[1]
     vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
 
-    vmat = cupy.zeros((3,nao,nao))
+    dm = dms[0] + dms[1]
+    exc1 = cupy.zeros((3,nao))
     p1 = 0
     for ao_mask, mask, weight, coords \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
@@ -402,12 +407,13 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
         wv = vv_vxc[:,p0:p1] * weight
         wv[0] *= .5  # *.5 because vmat + vmat.T at the end
         vmat_tmp = rks_grad._gga_grad_sum_(ao_mask, wv)
-        add_sparse(vmat, vmat_tmp, mask)
+        #add_sparse(vmat, vmat_tmp, mask)
+        dm_mask = dm[mask[:,None],mask]
+        exc1[:,mask] += contract('nij,ij->ni', vmat_tmp, dm_mask)
 
-    vmat = opt.unsort_orbitals(vmat, axis=[1,2])
-    exc = None
+    exc1 = opt.unsort_orbitals(exc1, axis=[1])
     # - sign because nabla_X = -nabla_x
-    return exc, -vmat
+    return None, -exc1
 
 
 class Gradients(uhf_grad.Gradients):

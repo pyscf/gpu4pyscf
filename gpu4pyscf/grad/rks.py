@@ -76,29 +76,29 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, ks_grad.max_memory*.9-mem_now)
     if ks_grad.grid_response:
-        exc, vxc = get_vxc_full_response(ni, mol, grids, mf.xc, dm,
+        exc, vxc = get_exc_full_response(ni, mol, grids, mf.xc, dm,
                                          max_memory=max_memory,
                                          verbose=ks_grad.verbose)
         if mf.do_nlc():
             raise NotImplementedError
     else:
-        exc, vxc = get_vxc(ni, mol, grids, mf.xc, dm,
+        exc, vxc = get_exc(ni, mol, grids, mf.xc, dm,
                            max_memory=max_memory, verbose=ks_grad.verbose)
         if mf.do_nlc():
             if ni.libxc.is_nlc(mf.xc):
                 xc = mf.xc
             else:
                 xc = mf.nlc
-            enlc, vnlc = get_nlc_vxc(
+            enlc, vnlc = get_nlc_exc(
                 ni, mol, nlcgrids, xc, dm,
                 max_memory=max_memory, verbose=ks_grad.verbose)
             vxc += vnlc
     t0 = logger.timer(ks_grad, 'vxc', *t0)
 
     # this can be moved into vxc calculations
-    occ_coeff = cupy.asarray(mf.mo_coeff[:, mf.mo_occ>0.5], order='C')
-    tmp = contract('nij,jk->nik', vxc, occ_coeff)
-    exc1_per_atom = 2.0*contract('nik,ik->ni', tmp, occ_coeff)
+    #occ_coeff = cupy.asarray(mf.mo_coeff[:, mf.mo_occ>0.5], order='C')
+    #tmp = contract('nij,jk->nik', vxc, occ_coeff)
+    exc1_per_atom = vxc #2.0*contract('nik,ik->ni', tmp, occ_coeff)
 
     aoslices = mol.aoslice_by_atom()
     exc1_per_atom = [exc1_per_atom[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
@@ -137,7 +137,7 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
                 mol, dm, vhfopt, j_factor, k_factor, verbose=verbose)
     return tag_array(exc1_per_atom, exc1_grid=exc)
 
-def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
+def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                   verbose=None, with_lapl=False, device_id=0):
     ''' Calculate the gradient of vxc on given device
     '''
@@ -161,7 +161,7 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
 
         nset = len(dms)
         assert nset == 1
-        vmat = cupy.zeros((nset,3,nao,nao))
+        exc1_ao = cupy.zeros((nset,3,nao))
         if xctype == 'LDA':
             ao_deriv = 1
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
@@ -173,7 +173,9 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     wv = weight * vxc[0]
                     aow = numint._scale_ao(ao_mask[0], wv)
                     vtmp = _d1_dot_(ao_mask[1:4], aow.T)
-                    add_sparse(vmat[idm], vtmp, idx)
+                    dm_mask = dms[idm][idx[:,None],idx]
+                    exc1_ao[idm][:,idx] += contract('nij,ij->ni', vtmp, dm_mask)
+                    #add_sparse(vmat[idm], vtmp, idx)
         elif xctype == 'GGA':
             ao_deriv = 2
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
@@ -185,7 +187,9 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     wv = weight * vxc
                     wv[0] *= .5
                     vtmp = _gga_grad_sum_(ao_mask, wv)
-                    add_sparse(vmat[idm], vtmp, idx)
+                    dm_mask = dms[idm][idx[:,None],idx]
+                    exc1_ao[idm][:,idx] += contract('nij,ij->ni', vtmp, dm_mask)
+                    #add_sparse(vmat[idm], vtmp, idx)
         elif xctype == 'NLC':
             raise NotImplementedError('NLC')
 
@@ -202,11 +206,13 @@ def _get_vxc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     wv[4] *= .5  # for the factor 1/2 in tau
                     vtmp = _gga_grad_sum_(ao_mask, wv)
                     vtmp += _tau_grad_dot_(ao_mask, wv[4])
-                    add_sparse(vmat[idm], vtmp, idx)
+                    #add_sparse(vmat[idm], vtmp, idx)
+                    dm_mask = dms[idm][idx[:,None],idx]
+                    exc1_ao[idm][:,idx] += contract('nij,ij->ni', vtmp, dm_mask)
         log.timer_debug1('gradient of vxc', *t0)
-    return vmat
+    return exc1_ao
 
-def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
+def get_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             max_memory=2000, verbose=None):
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
@@ -228,21 +234,20 @@ def get_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
         for device_id in range(num_devices):
             future = executor.submit(
-                _get_vxc_task,
+                _get_exc_task,
                 ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 verbose=log.verbose, device_id=device_id)
             futures.append(future)
-    vmat_dist = [future.result() for future in futures]
-    vmat = reduce_to_device(vmat_dist)
-    vmat = opt.unsort_orbitals(vmat, axis=[2,3])
-    exc = None
+    exc1_dist = [future.result() for future in futures]
+    exc1 = reduce_to_device(exc1_dist)
+    exc1 = opt.unsort_orbitals(exc1, axis=[2])
     if nset == 1:
-        vmat = vmat[0]
+        exc1 = exc1[0]
     log.timer_debug1('grad vxc', *t0)
     # - sign because nabla_X = -nabla_x
-    return exc, -vmat
+    return None, -exc1
 
-def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
+def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 max_memory=2000, verbose=None):
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
@@ -256,9 +261,8 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     mo_coeff = cupy.asarray(dms.mo_coeff)
 
     _sorted_mol = opt._sorted_mol
-    coeff = cupy.asarray(opt.coeff)
-    nao, nao0 = coeff.shape
-    dms = cupy.asarray(dms).reshape(-1,nao0,nao0)
+    nao = _sorted_mol.nao
+    dms = cupy.asarray(dms).reshape(-1,nao,nao)
     dms = opt.sort_orbitals(dms, axis=[1,2])
     mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     nset = len(dms)
@@ -282,7 +286,7 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                           grids.coords, nlc_pars)[1]
     vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
 
-    vmat = cupy.zeros((3,nao,nao))
+    exc1 = cupy.zeros((3,nao))
     p1 = 0
     for ao_mask, mask, weight, coords \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
@@ -290,13 +294,14 @@ def get_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         wv = vv_vxc[:,p0:p1] * weight
         wv[0] *= .5  # *.5 because vmat + vmat.T at the end
         vmat_tmp = _gga_grad_sum_(ao_mask, wv)
-        add_sparse(vmat, vmat_tmp, mask)
+        #add_sparse(vmat, vmat_tmp, mask)
+        dm_mask = dms[0][mask[:,None],mask]
+        exc1[:,mask] += contract('nij,ij->ni', vmat_tmp, dm_mask)
 
-    vmat = opt.unsort_orbitals(vmat, axis=[1,2])
-    exc = None
+    exc1 = opt.unsort_orbitals(exc1, axis=[1])
     # - sign because nabla_X = -nabla_x
     log.timer_debug1('grad nlc vxc', *t0)
-    return exc, -vmat
+    return None, -exc1
 
 def _make_dR_dao_w(ao, wv):
     #:aow = numpy.einsum('npi,p->npi', ao[1:4], wv[0])
@@ -371,7 +376,7 @@ def _tau_grad_dot_(ao, wv):
     return vmat
 
 
-def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
+def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                           max_memory=2000, verbose=None):
     '''Full response including the response of the grids'''
     log = logger.new_logger(mol, verbose)
@@ -383,12 +388,11 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     natm = mol.natm
     mol = None
     _sorted_mol = opt._sorted_mol
-    coeff = cupy.asarray(opt.coeff)
-    nao, nao0 = coeff.shape
+    nao = _sorted_mol.nao
     dms = cupy.asarray(dms)
     assert dms.ndim == 2
     #:dms = cupy.einsum('pi,ij,qj->pq', coeff, dms, coeff)
-    dms = sandwich_dot(dms, coeff.T)
+    dms = opt.sort_orbitals(dms, axis=[0,1])
 
     excsum = cupy.zeros((natm, 3))
     vmat = cupy.zeros((3,nao,nao))
@@ -459,11 +463,10 @@ def get_vxc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                     excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
                     rho = vxc = None
 
-    #:vmat = cupy.einsum('pi,npq,qj->nij', coeff, vmat, coeff)
-    vmat = sandwich_dot(vmat, coeff)
-
+    exc1 = contract('nij,ij->ni', vmat, dms)
+    exc1 = opt.unsort_orbitals(exc1, axis=[1])
     # - sign because nabla_X = -nabla_x
-    return excsum, -vmat
+    return excsum, -exc1
 
 
 # JCP 98, 5612 (1993); DOI:10.1063/1.464906
