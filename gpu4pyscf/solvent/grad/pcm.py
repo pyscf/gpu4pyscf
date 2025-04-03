@@ -278,7 +278,7 @@ def grad_qv(pcmobj, dm, q_sym = None):
 def grad_solver(pcmobj, dm):
     '''
     dE = 0.5*v* d(K^-1 R) *v + q*dv
-    v^T* d(K^-1 R)v = v^T*K^-1(dR - dK K^-1R)v = v^T K^-1(dR - dK q)
+    v^T* d(K^-1 R)v = v^T*K^-1(dR - dK K^-1R)v = v^T K^-1(dR v - dK q)
     '''
     mol = pcmobj.mol
     log = logger.new_logger(mol, mol.verbose)

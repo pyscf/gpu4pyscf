@@ -60,6 +60,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dmxmy = reduce(cp.dot, (orbv, xmy, orbo.T))  # (X-Y) in ao basis
     dmzoo = reduce(cp.dot, (orbo, doo, orbo.T))  # T_{ij}*2 in ao basis
     dmzoo += reduce(cp.dot, (orbv, dvv, orbv.T))  # T_{ij}*2 + T_{ab}*2 in ao basis
+    td_grad.dmxpy = dmxpy
 
     vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=0)
     vj1, vk1 = mf.get_jk(mol, dmxpy + dmxpy.T, hermi=0)
@@ -79,11 +80,15 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     vj = cp.stack((vj0, vj1, vj2))
     vk = cp.stack((vk0, vk1, vk2))
     veff0doo = vj[0] * 2 - vk[0]  # 2 for alpha and beta
+    if getattr(mf, 'with_solvent', None):
+        veff0doo += mf.with_solvent._B_dot_x(dmzoo)* 2.0
     wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
     if singlet:
         veff = vj[1] * 2 - vk[1]
     else:
         veff = -vk[1]
+    if getattr(mf, 'with_solvent', None):
+        veff += mf.with_solvent._B_dot_x((dmxpy + dmxpy.T)*1.0)*2.0
     veff0mop = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
     wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2  # 2 for dm + dm.T
     wvo += contract("ac,ai->ci", veff0mop[nocc:, nocc:], xpy) * 2
@@ -149,6 +154,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     s1 = mf_grad.get_ovlp(mol)
 
     dmz1doo = z1ao + dmzoo  # P
+    td_grad.dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T))  # D
 
     if atmlst is None:
@@ -222,6 +228,8 @@ class Gradients(rhf_grad.GradientsBase):
         "state",
         "atmlst",
         "de",
+        "dmz1doo",
+        "dmxpy"
     }
 
     def __init__(self, td):
@@ -234,6 +242,8 @@ class Gradients(rhf_grad.GradientsBase):
         self.state = 1  # of which the gradients to be computed.
         self.atmlst = None
         self.de = None
+        self.dmz1doo = None
+        self.dmxpy = None
 
     def dump_flags(self, verbose=None):
         log = logger.new_logger(self, verbose)
