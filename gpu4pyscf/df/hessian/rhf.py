@@ -58,7 +58,6 @@ def _hk_ip1_ip1(rhok1_Pko, dm0, mocc_2):
     mem_avail = get_avail_mem()
     blksize = int(((mem_avail-hk_ao_ao.nbytes)*0.4/(nao*nao*3*8)/ALIGNED))*ALIGNED
     for k0, k1 in lib.prange(0,nnz,blksize):
-        #rhok1_Pko_kslice = cupy.asarray(rhok1_Pko[k0:k1])
         rhok1_Pko_kslice = copy_array(rhok1_Pko[k0:k1])
 
         # (10|0)(0|10) without response of RI basis
@@ -492,8 +491,6 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     else:
         rhok0_Pl_ = wk_Pl_ # reuse the memory
         for p0, p1 in lib.prange(0,nao,64):
-            #wk_tmp = cupy.asarray(wk_Pl_[:,p0:p1])
-            #rhok0_Pl_[:,p0:p1] = solve_j2c(wk_tmp).get()
             wk_tmp = copy_array(wk_Pl_[:,p0:p1])
             wk_tmp = solve_j2c(wk_tmp)
             copy_array(wk_tmp, rhok0_Pl_[:,p0:p1])
@@ -531,7 +528,6 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
             else:
                 rhok0_P__ = cupy.empty([naux,nocc,nocc])
                 for p0, p1 in lib.prange(0,naux,64):
-                    #rhok0_Pl_tmp = cupy.asarray(rhok0_Pl_[p0:p1])
                     rhok0_Pl_tmp = copy_array(rhok0_Pl_[p0:p1])
                     rhok0_P__[p0:p1] = contract('pio,ir->pro', rhok0_Pl_tmp, mocc)
                 rhok0_Pl_tmp = None

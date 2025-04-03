@@ -1002,7 +1002,7 @@ def _int3c2e_ip2_vjk_task(intopt, task_k_list, rhoj, rhok, dm0, orbo,
 
                 wk2_P__[:,:,i0:i1] += contract('xpji,jo->xpio', int3c_blk, orbo[j0:j1])
                 int3c_blk = None
-            #rhok_tmp = cupy.asarray(rhok[k0:k1])
+
             rhok_tmp = copy_array(rhok[k0:k1])
             if with_j:
                 vj1_tmp = -contract('pio,xp->xpio', rhok_tmp, wj2)
@@ -1082,7 +1082,6 @@ def _int3c2e_ip1_wjk_task(intopt, task_k_list, dm0, orbo, wk, device_id=0, with_
                     wk_tmp[:,i0:i1] += contract('xpji,jo->piox', int3c_blk, orbo[j0:j1])
                 int3c_blk = None
             if with_k:
-                #wk_tmp.get(out=wk[k0:k1])
                 copy_array(wk_tmp, wk[k0:k1])
             wk_tmp = None
         t0 = log.timer_debug1(f'int3c2e_ip1_wjk on Device {device_id}', *t0)

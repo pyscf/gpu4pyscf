@@ -16,14 +16,17 @@
 import unittest
 import numpy
 import cupy
-from pyscf import gto, scf
+from pyscf import gto, scf, df
 from pyscf.df.hessian import rhf as df_rhf_cpu
 from pyscf.hessian import rhf as rhf_cpu
+from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df.hessian import rhf as df_rhf_gpu
 from gpu4pyscf.hessian import rhf as rhf_gpu
+from gpu4pyscf.df.hessian import jk
+from gpu4pyscf.lib.cupy_helper import tag_array
 
 def setUpModule():
-    global mol
+    global mol, auxmol
     mol = gto.Mole()
     mol.verbose = 1
     mol.output = '/dev/null'
@@ -33,11 +36,13 @@ def setUpModule():
         [1   , (0. , 0.757  , 0.587)] ])
     mol.basis = 'sto3g'
     mol.build()
+    auxmol = df.addons.make_auxmol(mol)
 
 def tearDownModule():
-    global mol
+    global mol, auxmol
     mol.stdout.close()
-    del mol
+    auxmol.stdout.close()
+    del mol, auxmol
 
 class KnownValues(unittest.TestCase):
     def test_gen_vind(self):
@@ -140,6 +145,35 @@ class KnownValues(unittest.TestCase):
         hess_gpu = hobj.kernel()
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
 
+    def test_df_int3c2e_jk(self):
+        intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
+        intopt.build(1e-14, diag_block_with_triu=True, aosym=False, verbose=0)
+        naux = auxmol.nao
+        nao = mol.nao
+        nocc = 3
+        cupy.random.seed(42)
+        rhoj0_P = cupy.random.rand(naux)
+        rhok0_P__ = cupy.random.rand(naux,nocc,nocc)
+        rhok0_P__ += rhok0_P__.transpose([0,2,1])
+        occ_coeff = cupy.random.rand(nao,nocc)
+        dm0 = 2.0*occ_coeff.dot(occ_coeff.T)
+        dm0_tag = tag_array(dm0, occ_coeff=occ_coeff)
+        hj, hk = jk.get_int3c2e_hjk(intopt, rhoj0_P, rhok0_P__, dm0_tag,
+                                    auxbasis_response=2)
+        assert numpy.abs(cupy.linalg.norm(hj) - 327.7263302420326) < 1e-7
+        assert numpy.abs(cupy.linalg.norm(hk) - 409.5288044690909) < 1e-7
+
+        wj, wk = int3c2e.get_int3c2e_ip2_wjk(intopt, dm0_tag)
+        assert numpy.abs(cupy.linalg.norm(wj) - 158.9654245022007) < 1e-7
+        assert numpy.abs(cupy.linalg.norm(wk) - 77.24428836560023) < 1e-7
+
+        wj, wk = int3c2e.get_int3c2e_ip1_wjk(intopt, dm0_tag)
+        assert numpy.abs(cupy.linalg.norm(wj) - 148.36364566536304) < 1e-7
+        assert numpy.abs(cupy.linalg.norm(wk) - 72.88740036064684) < 1e-7
+
+        wj, wk = int3c2e.get_int3c2e_jk(mol, auxmol, dm0_tag)
+        assert numpy.abs(cupy.linalg.norm(wj) - 330.87338791445404) < 1e-7
+        assert numpy.abs(cupy.linalg.norm(wk) - 157.8308877495413) < 1e-7
 if __name__ == "__main__":
     print("Full Tests for DF RHF Hessian")
     unittest.main()
