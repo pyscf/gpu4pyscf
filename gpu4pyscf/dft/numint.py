@@ -1587,40 +1587,58 @@ def _sparse_index(mol, coords, l_ctr_offsets, ao_loc):
     ng = coords.shape[0]
     nctr = len(l_ctr_offsets) - 1
     nao = ao_loc[-1]
-    non0shl_idx = cupy.zeros(len(ao_loc)-1, dtype=np.int32)
+    nbas = len(ao_loc) - 1
+    non0shl_mask = cupy.zeros(nbas, dtype=np.int32)
     coords = cupy.asarray(coords, order='F')
 
     libgdft.GDFTscreen_index(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(non0shl_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(non0shl_mask.data.ptr, ctypes.c_void_p),
         ctypes.c_double(cutoff),
         ctypes.cast(coords.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ng),
         l_ctr_offsets.ctypes.data_as(ctypes.c_void_p),
         ctypes.c_int(nctr),
         mol._bas.ctypes.data_as(ctypes.c_void_p))
-    non0shl_idx = non0shl_idx.get()
+    non0shl_mask = non0shl_mask.get()
 
     # offset of contraction pattern, used in eval_ao
-    cumsum = np.cumsum(non0shl_idx, dtype=np.int32)
+    cumsum = np.cumsum(non0shl_mask, dtype=np.int32)
     glob_ctr_offsets = l_ctr_offsets
     ctr_offsets_slice = cumsum[glob_ctr_offsets-1]
     ctr_offsets_slice[0] = 0
 
-    non0shl_mask = non0shl_idx == 1
-    ao_seg_idx = np.split(np.arange(nao, dtype=np.int32), ao_loc[1:-1])
-    idx = np.hstack(list(itertools.compress(ao_seg_idx, non0shl_mask)))
-    zero_idx = np.hstack(list(itertools.compress(ao_seg_idx, ~non0shl_mask)))
-
-    pad = (len(idx) + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT - len(idx)
-    idx = cupy.asarray(np.hstack([idx, zero_idx[:pad]]), dtype=np.int32)
-    pad = min(pad, len(zero_idx))
-
+    non0shl_mask = non0shl_mask == 1
     non0shl_idx = np.where(non0shl_mask)[0]
-    ao_dims = ao_loc[1:] - ao_loc[:-1]
-    ao_loc_slice = np.cumsum(np.append(0, ao_dims[non0shl_idx]))
-    ao_loc_slice = cupy.asarray(ao_loc_slice, dtype=np.int32)
-    non0shl_idx = cupy.asarray(non0shl_idx, dtype=np.int32)
+    non0shl_idx = non0shl_idx.astype(np.int32)
+    if len(non0shl_idx) == nbas:
+        pad = 0
+        idx = np.arange(nao, dtype=np.int32)
+        ao_loc_slice = ao_loc
+    elif len(non0shl_idx) > 0:
+        ao_seg_idx = np.split(np.arange(nao, dtype=np.int32), ao_loc[1:-1])
+        idx = np.hstack([ao_seg_idx[x] for x in non0shl_idx])
+        zero_idx = np.hstack(list(itertools.compress(ao_seg_idx, ~non0shl_mask)))
+        pad = (len(idx) + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT - len(idx)
+        idx = np.hstack([idx, zero_idx[:pad]])
+        pad = min(pad, len(zero_idx))
+        ao_dims = ao_loc[1:] - ao_loc[:-1]
+        ao_loc_slice = np.append(np.int32(0), ao_dims[non0shl_idx].cumsum(dtype=np.int32))
+    else:
+        pad = 0
+        idx = np.zeros(0, dtype=np.int32)
+        ao_loc_slice = np.zeros(1, dtype=np.int32)
+
+    p0 = idx.size
+    p1 = p0 + non0shl_idx.size
+    p2 = p1 + ao_loc_slice.size
+    buf = cupy.empty(p2, dtype=np.int32)
+    buf[:p0].set(idx)
+    buf[p0:p1].set(non0shl_idx)
+    buf[p1:].set(ao_loc_slice)
+    idx = buf[:p0]
+    non0shl_idx = buf[p0:p1]
+    ao_loc_slice = buf[p1:]
     t1 = log.timer_debug2('init ao sparsity', *t1)
     return pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice
 
@@ -1675,14 +1693,13 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             # cache ao indices
             lookup_key = (device_id, block_id, blksize, ngrids)
             if lookup_key not in ni.non0ao_idx:
-                mem_avail0 = get_avail_mem()
-                ni.non0ao_idx[lookup_key] = _sparse_index(
+                ni.non0ao_idx[lookup_key] = res = _sparse_index(
                     _sorted_mol, coords, opt.l_ctr_offsets, ao_loc)
-                mem_avail1 = get_avail_mem()
-                lookup_cache_size += mem_avail0 - mem_avail1
-
-            pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[lookup_key]
-            if len(idx) == 0: 
+                pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = res
+                lookup_cache_size += idx.nbytes + non0shl_idx.nbytes + ao_loc_slice.nbytes
+            else:
+                pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[lookup_key]
+            if len(idx) == 0:
                 continue
 
             ao_mask = eval_ao(
@@ -1753,11 +1770,10 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             weight = grids.weights[ip0:ip1]
             # cache ao indices
             if (block_id, blksize, ngrids) not in ni.non0ao_idx:
-                mem_avail0 = get_avail_mem()
-                ni.non0ao_idx[block_id, blksize, ngrids] = _sparse_index(
+                ni.non0ao_idx[block_id, blksize, ngrids] = res = _sparse_index(
                     _sorted_mol, coords, opt.l_ctr_offsets, ao_loc)
-                mem_avail1 = get_avail_mem()
-                lookup_cache_size += mem_avail0 - mem_avail1
+                pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = res
+                lookup_cache_size += idx.nbytes + non0shl_idx.nbytes + ao_loc_slice.nbytes
 
             pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[block_id, blksize, ngrids]
 
