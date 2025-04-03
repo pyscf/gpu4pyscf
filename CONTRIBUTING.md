@@ -45,8 +45,8 @@ adding features to the library for PySCF functions running on GPU devices.
 * While examples or documentation are not mandatory, it is highly recommended to
   include examples of how to invoke the new module.
 
-* CUDA compute capability 60 (sm_60) is required. Please avoid using features
-  that are only available on CUDA compute capability 70 or newer. The CUDA code
+* CUDA compute capability 70 (sm_70) is required. Please avoid using features
+  that are only available on CUDA compute capability 80 or newer. The CUDA code
   should be compiled and run using CUDA 11 and CUDA 12 toolkits.
 
 Thank you for your contributions!

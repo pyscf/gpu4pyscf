@@ -7,7 +7,7 @@ Installation
 --------
 
 > [!NOTE]
-> The compiled binary packages support compute capability 6.0 and later (Pascal and later, such as Tesla P100, RTX 10 series and later).
+> The compiled binary packages support compute capability 7.0 and later (Volta and later, such as Tesla V100, RTX 20 series and later).
 
 Run ```nvcc --version``` in your terminal to check the installed CUDA toolkit version. Then, choose the proper package based on your CUDA toolkit version.
 
@@ -27,7 +27,7 @@ cmake --build build/temp.gpu4pyscf -j 4
 CURRENT_PATH=`pwd`
 export PYTHONPATH="${PYTHONPATH}:${CURRENT_PATH}"
 ```
-Then install cutensor and cupy for acceleration (please switch the versions according to your nvcc version!)
+Then install cutensor and cupy for acceleration (please switch the versions according to your runtime CUDA environment!)
 ```sh
 pip3 install cutensor-cu12 cupy-cuda12x
 ```
@@ -45,17 +45,21 @@ Features
 - LDA, GGA, mGGA, hybrid, and range-separated functionals via [libXC](https://gitlab.com/libxc/libxc/-/tree/master/);
 - Spin-conserved and spin-flip TDA and TDDFT for excitated states
 - Geometry optimization and transition state search via [geomeTRIC](https://geometric.readthedocs.io/en/latest/);
+- Atomic Simulation Environment ([ASE](https://gitlab.com/ase/ase)) interface;
 - Dispersion corrections via [DFTD3](https://github.com/dftd3/simple-dftd3) and [DFTD4](https://github.com/dftd4/dftd4);
 - Nonlocal functional correction (vv10) for SCF and gradient;
-- ECP is supported and calculated on CPU;
-- PCM models, SMD model, their analytical gradients, and semi-analytical Hessian matrix;
+- ECP is supported and calculated on GPU;
+- PCM models, their analytical gradients, and analytical Hessian matrix;
+- SMD solvent model;
 - Unrestricted Hartree-Fock and unrestricted DFT, gradient, and Hessian;
-- MP2/DF-MP2 and CCSD (experimental);
-- Polarizability, IR, and NMR shielding (experimental);
-- QM/MM with PBC;
 - CHELPG, ESP, and RESP atomic charge;
-- Multi-GPU for both direct SCF and density fitting (experimental)
-- SCF and DFT with periodic boundary condition (experimental)
+
+The following features are still in the experimental stage
+- MP2/DF-MP2 and CCSD;
+- Polarizability, IR, and NMR shielding;
+- QM/MM with PBC;
+- Multi-GPU for both direct SCF and density fitting
+- SCF and DFT with periodic boundary condition
 
 Limitations
 --------
@@ -65,6 +69,7 @@ Limitations
 - Density fitting scheme up to ~168 atoms with def2-tzvpd basis, bounded by CPU memory;
 - meta-GGA without density laplacian;
 - Double hybrid functionals are not supported;
+- Hessian of TDDFT is not supported;
 
 Examples
 --------
@@ -113,7 +118,7 @@ Find more examples in [gpu4pyscf/examples](https://github.com/pyscf/gpu4pyscf/tr
 
 Benchmarks
 --------
-Speedup with GPU4PySCF v0.6.0 on A100-80G over Q-Chem 6.1 on 32-cores CPU (Desity fitting, SCF, def2-tzvpp, def2-universal-jkfit, B3LYP, (99,590))
+Speedup with GPU4PySCF v0.6.0 on A100-80G over Q-Chem 6.1 on 32-cores CPU (density fitting, SCF, def2-tzvpp, def2-universal-jkfit, B3LYP, (99,590))
 
 | mol               |   natm |    LDA |    PBE |   B3LYP |    M06 |   wB97m-v |
 |:------------------|-------:|-------:|-------:|--------:|-------:|----------:|
