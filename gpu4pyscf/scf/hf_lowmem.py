@@ -214,8 +214,10 @@ class RHF(hf.RHF):
             vhfopt = self._opt_gpu[omega] = jk._VHFOpt(mol, self.direct_scf_tol).build()
 
         dm = self._delta_rdm1(dm, dm_last, vhfopt)
-        vj, vk = vhfopt.get_jk(dm, hermi, True, True, log)
+        #:vj, vk = vhfopt.get_jk(dm, hermi, True, True, log)
+        vj = vhfopt.get_j(dm, log)
         assert vj.ndim == 3
+        vk = vhfopt.get_jk(dm, hermi, False, True, log)[1]
         dm = None
         vk *= -.5
         vj += vk

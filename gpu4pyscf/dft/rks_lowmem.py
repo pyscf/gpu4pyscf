@@ -113,57 +113,48 @@ class RKS(rks.RKS):
         mem_avail = get_avail_mem()
         log.debug1('available GPU memory for get_jk in rks.get_veff: %.3f GB',
                    mem_avail/1e9)
-        vj = vk = None
-        if not ni.libxc.is_hybrid_xc(self.xc):
-            vj = vhfopt.get_j(_dm, log)
-            _dm = None
-            vj = vhfopt.apply_coeff_CT_mat_C(vj)
-            vj = pack_tril(vj[0]).get()
-            vj_last = getattr(vhf_last, 'vj', None)
-            if vj_last is not None:
-                if isinstance(vj_last, cp.ndarray):
-                    vj_last = vj_last.get()
-                vj += vj_last
-            vxc += vj
-        else:
+
+        vj = vhfopt.get_j(_dm, log)
+        assert vj.ndim == 3
+        vj = vhfopt.apply_coeff_CT_mat_C(vj)
+        vj = pack_tril(vj[0])
+        vj = vj.get()
+        vj_last = getattr(vhf_last, 'vj', None)
+        if vj_last is not None:
+            if isinstance(vj_last, cp.ndarray):
+                vj_last = vj_last.get()
+            vj += vj_last
+        vxc += vj
+        vj = None
+
+        vk = None
+        if ni.libxc.is_hybrid_xc(self.xc):
             omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
             if omega == 0:
-                vj, vk = vhfopt.get_jk(_dm, hermi, True, True, log)
+                vk = vhfopt.get_jk(_dm, hermi, False, True, log)
                 vk *= hyb
             elif alpha == 0: # LR=0, only SR exchange
-                vj = vhfopt.get_j(_dm, log)
                 vk = self._get_k_sorted_mol(_dm, hermi, -omega, log)
                 vk *= hyb
             elif hyb == 0: # SR=0, only LR exchange
-                vj = vhfopt.get_j(_dm, log)
                 vk = self._get_k_sorted_mol(_dm, hermi, omega, log)
                 vk *= alpha
             else: # SR and LR exchange with different ratios
-                vj, vk = vhfopt.get_jk(_dm, hermi, True, True, log)
+                vk = vhfopt.get_jk(_dm, hermi, False, True, log)
                 vk *= hyb
                 vklr = self._get_k_sorted_mol(_dm, hermi, omega, log)
                 vklr *= (alpha - hyb)
                 vk += vklr
-            _dm = None
-
-            assert vj.ndim == 3
-            vj_last = getattr(vhf_last, 'vj', None)
             vk_last = getattr(vhf_last, 'vk', None)
-            vj = vhfopt.apply_coeff_CT_mat_C(vj)
-            vj = pack_tril(vj[0]).get()
-            if vj_last is not None:
-                if isinstance(vj_last, cp.ndarray):
-                    vj_last = vj_last.get()
-                vj += vj_last
-            vxc += vj
-
             vk = vhfopt.apply_coeff_CT_mat_C(vk)
-            vk = pack_tril(vk[0]).get()
+            vk = pack_tril(vk[0])
+            vk *= .5
+            vk = vk.get()
             if vk_last is not None:
                 if isinstance(vk_last, cp.ndarray):
                     vk_last = vk_last.get()
                 vk += vk_last
-            vxc -= vk * .5
+            vxc -= vk
 
         log.timer_debug1('jk total', *cput1)
         vxc = pyscf_lib.tag_array(vxc, exc=exc, vj=vj, vk=vk)
@@ -182,7 +173,7 @@ class RKS(rks.RKS):
         ecoul = float(vhf.vj.dot(dm_tril))
         exc = vhf.exc
         if vhf.vk is not None:
-            exc -= float(vhf.vk.dot(dm_tril)) * .5
+            exc -= float(vhf.vk.dot(dm_tril))
         e2 = ecoul + exc
         self.scf_summary['e1'] = e1
         self.scf_summary['coul'] = ecoul
