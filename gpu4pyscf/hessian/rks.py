@@ -664,7 +664,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
             vmat_tmp[:,:,p0:p1] += v_ip[:,p0:p1].transpose(0,2,1)
             tmp = contract('xij,jq->xiq', vmat_tmp, mocc)
             tmp += vmat[ia]
-            contract('xiq,ip->xpq', vmat_tmp, mo_coeff, alpha=-1., out=v_mo[ia])
+            contract('xiq,ip->xpq', tmp, mo_coeff, alpha=-1., out=v_mo[ia])
     return v_mo
 
 def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):

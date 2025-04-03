@@ -833,14 +833,14 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         vmat_tmp[:,:,p0:p1] += vipa[:,p0:p1].transpose(0,2,1)
         tmp = contract('xij,jq->xiq', vmat_tmp, mocca)
         tmp += vmata[ia]
-        contract('xiq,ip->xpq', vmat_tmp, mo_coeff[0], alpha=-1., out=va_mo[ia])
+        contract('xiq,ip->xpq', tmp, mo_coeff[0], alpha=-1., out=va_mo[ia])
 
         vmat_tmp[:] = 0.
         vmat_tmp[:,p0:p1] += vipb[:,p0:p1]
         vmat_tmp[:,:,p0:p1] += vipb[:,p0:p1].transpose(0,2,1)
         tmp = contract('xij,jq->xiq', vmat_tmp, moccb)
         tmp += vmatb[ia]
-        contract('xiq,ip->xpq', vmat_tmp, mo_coeff[1], alpha=-1., out=vb_mo[ia])
+        contract('xiq,ip->xpq', tmp, mo_coeff[1], alpha=-1., out=vb_mo[ia])
     return va_mo, vb_mo
 
 def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
