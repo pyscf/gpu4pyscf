@@ -261,7 +261,6 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     _sorted_mol = opt._sorted_mol
     nao = _sorted_mol.nao
     dms = cupy.asarray(dms)
-    dms = cupy.asarray(dms)
     assert dms.ndim == 3 and dms.shape[0] == 2
     dms = opt.sort_orbitals(dms.reshape(-1,nao,nao), axis=[1,2])
 

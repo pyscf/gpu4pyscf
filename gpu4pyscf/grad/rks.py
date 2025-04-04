@@ -76,32 +76,27 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, ks_grad.max_memory*.9-mem_now)
     if ks_grad.grid_response:
-        exc, vxc = get_exc_full_response(ni, mol, grids, mf.xc, dm,
+        exc, exc1 = get_exc_full_response(ni, mol, grids, mf.xc, dm,
                                          max_memory=max_memory,
                                          verbose=ks_grad.verbose)
         if mf.do_nlc():
             raise NotImplementedError
     else:
-        exc, vxc = get_exc(ni, mol, grids, mf.xc, dm,
+        exc, exc1 = get_exc(ni, mol, grids, mf.xc, dm,
                            max_memory=max_memory, verbose=ks_grad.verbose)
         if mf.do_nlc():
             if ni.libxc.is_nlc(mf.xc):
                 xc = mf.xc
             else:
                 xc = mf.nlc
-            enlc, vnlc = get_nlc_exc(
+            enlc, exc1_nlc = get_nlc_exc(
                 ni, mol, nlcgrids, xc, dm,
                 max_memory=max_memory, verbose=ks_grad.verbose)
-            vxc += vnlc
+            exc1 += exc1_nlc
     t0 = logger.timer(ks_grad, 'vxc', *t0)
 
-    # this can be moved into vxc calculations
-    #occ_coeff = cupy.asarray(mf.mo_coeff[:, mf.mo_occ>0.5], order='C')
-    #tmp = contract('nij,jk->nik', vxc, occ_coeff)
-    exc1_per_atom = vxc #2.0*contract('nik,ik->ni', tmp, occ_coeff)
-
     aoslices = mol.aoslice_by_atom()
-    exc1_per_atom = [exc1_per_atom[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
+    exc1_per_atom = [exc1[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
     exc1_per_atom = cupy.asarray(exc1_per_atom)
 
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)

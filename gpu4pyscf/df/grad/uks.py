@@ -103,8 +103,8 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
             ek_aux = (ekaux0+ekaux1) * hyb
 
         if omega != 0:
-            mocc0 = ks_grad.base.mo_coeff[0]
-            mocc1 = ks_grad.base.mo_coeff[1]
+            mocc0 = ks_grad.base.mo_occ[0]
+            mocc1 = ks_grad.base.mo_occ[1]
             mo_coeff0 = ks_grad.base.mo_coeff[0]
             mo_coeff1 = ks_grad.base.mo_coeff[1]
             ek_lr0, ekaux_lr0 = ks_grad.get_k(mol, dm[0], mo_coeff=mo_coeff0, mo_occ=mocc0, omega=omega)
