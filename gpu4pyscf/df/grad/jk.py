@@ -269,16 +269,16 @@ def _jk_ip_task_td(intopt, rhoj_cart, dm_cart, rhok_cart, orbol_cart, orbor_cart
         t0 = (logger.process_clock(), logger.perf_counter())
 
         cart_aux_loc = intopt.cart_aux_loc
-        vj = vk = vjaux = vkaux = None
+        ej = ek = ejaux = ekaux = None
         if with_j:
             rhoj_cart = cupy.asarray(rhoj_cart)
             dm_cart = cupy.asarray(dm_cart)
-            vj = cupy.zeros((natm,3), order='C')
-            vjaux = cupy.zeros((natm,3))
+            ej = cupy.zeros((natm,3), order='C')
+            ejaux = cupy.zeros((natm,3))
         if with_k:
             rhok_cart = cupy.asarray(rhok_cart)
-            vk = cupy.zeros((natm,3), order='C')
-            vkaux = cupy.zeros((natm,3))
+            ek = cupy.zeros((natm,3), order='C')
+            ekaux = cupy.zeros((natm,3))
         
         for cp_kl_id in task_list:
             k0, k1 = cart_aux_loc[cp_kl_id], cart_aux_loc[cp_kl_id+1]
@@ -289,16 +289,16 @@ def _jk_ip_task_td(intopt, rhoj_cart, dm_cart, rhok_cart, orbol_cart, orbor_cart
                 rhok_tmp = contract('por,ir->pio', rhok_cart[k0:k1], orbol_cart)
                 rhok_tmp = contract('pio,jo->pji', rhok_tmp, orbor_cart)
 
-            vj_tmp, vk_tmp = get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip1', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
-            if with_j: vj += vj_tmp
-            if with_k: vk += vk_tmp
-            vj_tmp, vk_tmp = get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip2', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
-            if with_j: vjaux += vj_tmp
-            if with_k: vkaux += vk_tmp
+            ej_tmp, ek_tmp = get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip1', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
+            if with_j: ej += ej_tmp
+            if with_k: ek += ek_tmp
+            ej_tmp, ek_tmp = get_int3c2e_ip_jk(intopt, cp_kl_id, 'ip2', rhoj_tmp, rhok_tmp, dm_cart, omega=omega)
+            if with_j: ejaux += ej_tmp
+            if with_k: ekaux += ek_tmp
 
-            rhoj_tmp = rhok_tmp = vj_tmp = vk_tmp = None
+            rhoj_tmp = rhok_tmp = ej_tmp = ek_tmp = None
             t0 = log.timer_debug1(f'calculate {cp_kl_id:3d} / {len(intopt.aux_log_qs):3d}, {k1-k0:3d} slices', *t0)
-    return vj, vk, vjaux, vkaux
+    return ej, ek, ejaux, ekaux
 
 
 def get_grad_vjk_td(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbol_cart, orbor_cart, 
@@ -329,20 +329,20 @@ def get_grad_vjk_td(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbol_c
 
     rhoj_total = []
     rhok_total = []
-    vjaux_total = []
-    vkaux_total = []
+    ejaux_total = []
+    ekaux_total = []
     for future in futures:
-        rhoj, rhok, vjaux, vkaux = future.result()
+        rhoj, rhok, ejaux, ekaux = future.result()
         rhoj_total.append(rhoj)
         rhok_total.append(rhok)
-        vjaux_total.append(vjaux)
-        vkaux_total.append(vkaux)
+        ejaux_total.append(ejaux)
+        ekaux_total.append(ekaux)
 
-    rhoj = rhok = vjaux = vkaux = None
+    rhoj = rhok = ejaux = ekaux = None
     if with_j:
         rhoj = reduce_to_device(rhoj_total)
-        vjaux = reduce_to_device(vjaux_total)
+        ejaux = reduce_to_device(ejaux_total)
     if with_k:
         rhok = reduce_to_device(rhok_total)
-        vkaux = reduce_to_device(vkaux_total)
-    return rhoj, rhok, vjaux, vkaux
+        ekaux = reduce_to_device(ekaux_total)
+    return rhoj, rhok, ejaux, ekaux

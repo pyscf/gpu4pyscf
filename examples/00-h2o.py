@@ -47,7 +47,7 @@ mf_GPU = rks.RKS(                      # restricted Kohn-Sham DFT
 mf_GPU.grids.atom_grid = (99,590)      # (99,590) lebedev grids, (75,302) is often enough
 mf_GPU.conv_tol = 1e-10                # controls SCF convergence tolerance
 mf_GPU.max_cycle = 50                  # controls max iterations of SCF
-mf_GPU.conv_tol_cpscf = 1e-3          # controls max iterations of CPSCF (for hessian)
+mf_GPU.conv_tol_cpscf = 1e-3           # controls max iterations of CPSCF (for hessian)
 
 # Compute Energy
 e_dft = mf_GPU.kernel()
