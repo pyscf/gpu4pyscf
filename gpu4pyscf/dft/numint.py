@@ -960,15 +960,14 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
         opt = ni.gdftopt
     mol = None
     _sorted_mol = opt._sorted_mol
+    nao = _sorted_mol.nao
     log = logger.new_logger(opt.mol, verbose)
-    coeff = cupy.asarray(opt.coeff)
-    nao = coeff.shape[0]
     mo_coeff = getattr(dm, 'mo_coeff', None)
     mo_occ = getattr(dm,'mo_occ', None)
 
-    dm = coeff @ cupy.asarray(dm) @ coeff.T
+    dm = opt.sort_orbitals(cupy.asarray(dm), axis=[0,1])
     if mo_coeff is not None:
-        mo_coeff = coeff @ mo_coeff
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
 
     mem_avail = get_avail_mem()
     blksize = mem_avail*.2/8/nao//ALIGNED * ALIGNED
@@ -1248,7 +1247,7 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
 
-    nao, nao0 = opt.coeff.shape
+    nao = opt._sorted_mol.nao
     dma, dmb = dms
     dm_shape = dma.shape
     # AO basis -> gdftopt AO basis
@@ -1263,8 +1262,8 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         occ_coeff_b = opt.sort_orbitals(occ_coeffb, axis=[0])
         occ_coeff = (occ_coeff_a, occ_coeff_b)
         mo1 = (mo1a, mo1b)
-    dma = cupy.asarray(dma).reshape(-1,nao0,nao0)
-    dmb = cupy.asarray(dmb).reshape(-1,nao0,nao0)
+    dma = cupy.asarray(dma).reshape(-1,nao,nao)
+    dmb = cupy.asarray(dmb).reshape(-1,nao,nao)
     dma = opt.sort_orbitals(dma, axis=[1,2])
     dmb = opt.sort_orbitals(dmb, axis=[1,2])
 
@@ -1419,7 +1418,7 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
     mol = None
     _sorted_mol = opt._sorted_mol
     mo_coeff = cupy.asarray(mo_coeff)
-    nao = opt.coeff.shape[0]
+    nao = _sorted_mol.nao
     if mo_coeff.ndim == 2: # RHF
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
         rho = []
