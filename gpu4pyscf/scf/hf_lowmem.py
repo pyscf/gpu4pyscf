@@ -250,11 +250,11 @@ class RHF(hf.RHF):
         if mo_occ is None: mo_occ = self.mo_occ
         return self.make_wfn(mo_coeff, mo_occ).make_rdm1()
 
-    def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
+    def get_fock(self, h1e=None, s1e=None, vhf=None, dm_or_wfn=None, cycle=-1, diis=None,
                  diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
         '''Return Fock matrix in square storage'''
         if h1e is None: h1e = self.get_hcore()
-        if vhf is None: vhf = self.get_veff(self.mol, dm)
+        if vhf is None: vhf = self.get_veff(self.mol, dm_or_wfn)
         if not isinstance(h1e, cp.ndarray): h1e = cp.asarray(h1e)
         if not isinstance(vhf, cp.ndarray): vhf = cp.asarray(vhf)
         # h1e and vhf must be both in tril storage or square-matrix storage
@@ -267,7 +267,12 @@ class RHF(hf.RHF):
             return f
 
         if s1e is None: s1e = self.get_ovlp()
-        if dm is None: dm = self.make_rdm1()
+        if dm_or_wfn is None:
+            dm = self.make_rdm1()
+        elif isinstance(dm_or_wfn, WaveFunction):
+            dm = dm_or_wfn.make_rdm1()
+        else:
+            dm = dm_or_wfn
         if not isinstance(s1e, cp.ndarray): s1e = cp.asarray(s1e)
         if not isinstance(dm, cp.ndarray): dm = cp.asarray(dm)
         # Ensure overlap in square-matrix format
