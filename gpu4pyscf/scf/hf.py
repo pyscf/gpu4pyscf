@@ -339,14 +339,6 @@ def init_guess_by_minao(mol):
 
     Returns:
         Density matrix, 2D ndarray
-
-    Examples:
-
-    >>> from pyscf import gto, scf
-    >>> mol = gto.M(atom='H 0 0 0; H 0 0 1.1')
-    >>> scf.hf.init_guess_by_minao(mol)
-    array([[ 0.94758917,  0.09227308],
-           [ 0.09227308,  0.94758917]])
     '''
     from pyscf.scf import atom_hf
     from pyscf.scf import addons
@@ -592,7 +584,6 @@ class SCF(pyscf_lib.StreamObject):
     get_fock                 = get_fock
     get_occ                  = get_occ
     get_grad                 = staticmethod(get_grad)
-    init_guess_by_minao      = staticmethod(init_guess_by_minao)
     init_guess_by_atom       = hf_cpu.SCF.init_guess_by_atom
     init_guess_by_huckel     = hf_cpu.SCF.init_guess_by_huckel
     init_guess_by_mod_huckel = hf_cpu.SCF.init_guess_by_mod_huckel
@@ -637,6 +628,10 @@ class SCF(pyscf_lib.StreamObject):
     canonicalize             = NotImplemented
     mulliken_pop             = NotImplemented
     mulliken_meta            = NotImplemented
+
+    def init_guess_by_minao(self, mol=None):
+        if mol is None: mol = self.mol
+        return init_guess_by_minao(mol)
 
     def get_hcore(self, mol=None):
         if mol is None: mol = self.mol
