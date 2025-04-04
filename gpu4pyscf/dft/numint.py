@@ -92,7 +92,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
 
     if out is None:
         out = cupy.empty((comp, nao_slice, ngrids), order='C')
-    
+
     err = libgdft.GDFTeval_gto(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
@@ -104,7 +104,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
         ctr_offsets.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(nctr),
         ctr_offsets_slice.ctypes.data_as(ctypes.c_void_p),
         _sorted_mol._bas.ctypes.data_as(ctypes.c_void_p))
-    
+
     if err != 0:
         raise RuntimeError('CUDA Error in evaluating AO')
 
@@ -966,16 +966,15 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
         opt = ni.gdftopt
     mol = None
     _sorted_mol = opt._sorted_mol
+    nao = _sorted_mol.nao
     log = logger.new_logger(opt.mol, verbose)
-    coeff = opt.coeff
-    nao = coeff.shape[0]
+
     mo_coeff = getattr(dm, 'mo_coeff', None)
     mo_occ = getattr(dm,'mo_occ', None)
 
+    dm = opt.sort_orbitals(cupy.asarray(dm), axis=[0,1])
     if mo_coeff is not None:
-        mo_coeff = cupy.asarray(coeff) @ mo_coeff
-    else:
-        dm = sandwich_dot(dm, coeff.T)
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
 
     mem_avail = get_avail_mem()
     blksize = mem_avail*.2/8/nao//ALIGNED * ALIGNED
@@ -1147,15 +1146,15 @@ def nr_rks_fxc_st(ni, mol, grids, xc_code, dm0=None, dms_alpha=None,
 def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
                      verbose=None, hermi=1, device_id=0):
     with cupy.cuda.Device(device_id), _streams[device_id]:
-        if dms is not None: 
+        if dms is not None:
             dma, dmb = dms
             dma = cupy.asarray(dma)
             dmb = cupy.asarray(dmb)
-        if mo1 is not None: 
+        if mo1 is not None:
             mo1a, mo1b = mo1
             mo1a = cupy.asarray(mo1a)
             mo1b = cupy.asarray(mo1b)
-        if occ_coeff is not None: 
+        if occ_coeff is not None:
             occ_coeff_a, occ_coeff_b = occ_coeff
             occ_coeff_a = cupy.asarray(occ_coeff_a)
             occ_coeff_b = cupy.asarray(occ_coeff_b)
@@ -1187,10 +1186,10 @@ def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
 
         p0 = p1 = grid_start
         t1 = t0 = log.init_timer()
-        for ao, mask, weights, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, 
+        for ao, mask, weights, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                   max_memory=None,
                                                   grid_range=(grid_start, grid_end)):
-            
+
             t0 = log.init_timer()
             p0, p1 = p1, p1+len(weights)
             # precompute fxc_w
@@ -1255,8 +1254,7 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
 
-    #nao, nao0 = opt.coeff.shape
-    nao0 = mol.nao
+    nao = opt._sorted_mol.nao
     dma, dmb = dms
     dm_shape = dma.shape
     # AO basis -> gdftopt AO basis
@@ -1271,8 +1269,8 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         occ_coeff_b = opt.sort_orbitals(occ_coeffb, axis=[0])
         occ_coeff = (occ_coeff_a, occ_coeff_b)
         mo1 = (mo1a, mo1b)
-    dma = cupy.asarray(dma).reshape(-1,nao0,nao0)
-    dmb = cupy.asarray(dmb).reshape(-1,nao0,nao0)
+    dma = cupy.asarray(dma).reshape(-1,nao,nao)
+    dmb = cupy.asarray(dmb).reshape(-1,nao,nao)
     dma = opt.sort_orbitals(dma, axis=[1,2])
     dmb = opt.sort_orbitals(dmb, axis=[1,2])
 
@@ -1285,13 +1283,13 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
                 ni, mol, grids, xc_code, fxc, (dma, dmb), mo1, occ_coeff,
                 verbose=log.verbose, hermi=hermi, device_id=device_id)
             futures.append(future)
-    vmata_dist = [] 
+    vmata_dist = []
     vmatb_dist = []
     for future in futures:
         vmata, vmatb = future.result()
         vmata_dist.append(vmata)
         vmatb_dist.append(vmatb)
-    
+
     vmata = reduce_to_device(vmata_dist, inplace=True)
     vmatb = reduce_to_device(vmatb_dist, inplace=True)
 
@@ -1699,6 +1697,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 lookup_cache_size += idx.nbytes + non0shl_idx.nbytes + ao_loc_slice.nbytes
             else:
                 pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[lookup_key]
+            
             if len(idx) == 0:
                 continue
 
@@ -2114,7 +2113,7 @@ class _GDFTOpt:
 
         pmol = basis_seg_contraction(mol, allow_replica=True)[0]
         pmol.cart = mol.cart
-        coeff = np.eye(mol.nao)      # without cart2sph transformation
+
         # Sort basis according to angular momentum and contraction patterns so
         # as to group the basis functions to blocks in GPU kernel.
         l_ctrs = pmol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
@@ -2160,19 +2159,27 @@ class _GDFTOpt:
         ao_idx = np.array_split(np.arange(nao), ao_loc[1:-1])
         ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
         assert pmol.nbas % BAS_ALIGNED == 0
-        # Padding zeros to transformation coefficients
-        if nao > coeff.shape[0]:
-            paddings = nao - coeff.shape[0]
-            coeff = np.vstack([coeff, np.zeros((paddings, coeff.shape[1]))])
+
         pmol._decontracted = True
         self._sorted_mol = pmol
         self._ao_idx = np.asarray(ao_idx, dtype=np.int32)
-        self.coeff = coeff[ao_idx]
+
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts)).astype(np.int32)
         self.l_bas_offsets = np.append(0, np.cumsum(l_counts)).astype(np.int32)
         logger.debug2(mol, 'l_ctr_offsets = %s', self.l_ctr_offsets)
         logger.debug2(mol, 'l_bas_offsets = %s', self.l_bas_offsets)
         return self
+
+    @property
+    def coeff(self):
+        nao = self.mol.nao
+        coeff = cupy.eye(nao)      # without cart2sph transformation
+        # Padding zeros to transformation coefficients
+        if nao > coeff.shape[0]:
+            paddings = nao - coeff.shape[0]
+            coeff = np.vstack([coeff, np.zeros((paddings, coeff.shape[1]))])
+        self._coeff = coeff[self._ao_idx]
+        return self._coeff
 
     @classmethod
     def from_mol(cls, mol):
@@ -2191,7 +2198,7 @@ class _GDFTOpt:
         env = cupy.asarray(_sorted_mol._env, dtype=np.double, order='C')
 
         libgdft.GDFTinit_envs(
-            ctypes.byref(envs_cache), 
+            ctypes.byref(envs_cache),
             ctypes.cast(bas_atom.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_exp.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_coeff.data.ptr, ctypes.c_void_p),
