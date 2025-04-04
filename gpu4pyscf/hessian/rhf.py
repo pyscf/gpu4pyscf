@@ -70,6 +70,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     mo_coeff = cupy.asarray(mo_coeff)
     de2 = hessobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ, atmlst,
                                     max_memory, log)
+    print(cupy.linalg.norm(de2))
     t1 = log.timer_debug1('hess elec', *t1)
     if h1mo is None:
         h1mo = hessobj.make_h1(mo_coeff, mo_occ, None, atmlst, log)
@@ -87,6 +88,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     de2 += contract('kxpi,lypi->klxy', cupy.asarray(h1mo), mo1) * 4
     mo1 = contract('kxai,pa->kxpi', mo1, mo_coeff)
     mo_e1 = cupy.asarray(mo_e1)
+    print(cupy.linalg.norm(de2))
 
     nao = mo_coeff.shape[0]
     mocc = mo_coeff[:,mo_occ>0]
@@ -106,7 +108,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
         s1mo = contract('xpq,qi->xpi', s1ao, mocc_e)
         de2[i0] -= contract('xpi,kypi->kxy', s1mo, mo1) * 4
-
+    print(cupy.linalg.norm(de2))
     de2 = de2 + de2.transpose(1,0,3,2)
     de2 *= .5
     log.timer('RHF hessian', *time0)
@@ -862,6 +864,7 @@ def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     de = hessobj.hess_elec(mo_energy, mo_coeff, mo_occ, atmlst=atmlst)
     hessobj.de = de.get() + hessobj.hess_nuc(hessobj.mol, atmlst=atmlst)
+    print(cupy.linalg.norm(hessobj.de))
     mf = hessobj.base
     if mf.do_disp():
         h_disp = hessobj.get_dispersion()

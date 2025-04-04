@@ -164,6 +164,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
         ek = -ek
         ekaux -= ekaux_3c
     t0 = log.timer_debug1('(di,j|P) and (i,j|dP)', *t0)
+    print(cupy.linalg.norm(ej), cupy.linalg.norm(ek), cupy.linalg.norm(ejaux), cupy.linalg.norm(ekaux))
     return ej, ek, ejaux, ekaux
 
 

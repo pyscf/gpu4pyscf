@@ -54,6 +54,7 @@ void GINTdel_basis_prod(BasisProdCache **pbp)
     
     if (bpcache->a12 != NULL) {
         FREE(bpcache->bas_coords);
+        FREE(bpcache->bas_atm);
         FREE(bpcache->bas_pair2bra);
         FREE(bpcache->ao_loc);
         FREE(bpcache->a12);
