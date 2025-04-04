@@ -54,6 +54,7 @@ void GINTdel_basis_prod(BasisProdCache **pbp)
     
     if (bpcache->a12 != NULL) {
         FREE(bpcache->bas_coords);
+        FREE(bpcache->bas_atm);
         FREE(bpcache->bas_pair2bra);
         FREE(bpcache->ao_loc);
         FREE(bpcache->a12);
@@ -87,10 +88,14 @@ void GINTinit_basis_prod(BasisProdCache **pbp, double diag_fac, int *ao_loc,
     // initialize basis coordinates on GPU memory
     bpcache->nbas = nbas;
     double *bas_coords = (double *)malloc(sizeof(double) * nbas * 3);
-    GINTsort_bas_coordinates(bas_coords, atm, natm, bas, nbas, env);
+    int *bas_atm = (int *)malloc(sizeof(int) * nbas);
+    GINTsort_bas_coordinates(bas_coords, bas_atm, atm, natm, bas, nbas, env);
     DEVICE_INIT(double, d_bas_coords, bas_coords, nbas * 3);
+    DEVICE_INIT(int, d_bas_atm, bas_atm, nbas);
     bpcache->bas_coords = d_bas_coords;
+    bpcache->bas_atm = d_bas_atm;
     free(bas_coords);
+    free(bas_atm);
 
     // initialize pair data on GPU memory
     DEVICE_INIT(double, d_aexyz, aexyz, n_primitive_pairs * 7);

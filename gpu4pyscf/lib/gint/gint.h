@@ -263,6 +263,7 @@ typedef struct {
 
     // Data below held on GPU global memory
     double *bas_coords;  // basis coordinates
+    int *bas_atm;        // corresponding atom for each basis
     int *bas_pair2bra;
     int *bas_pair2ket;
     int *ao_loc;

@@ -14,18 +14,95 @@
  * limitations under the License.
  */
 
-template <int NROOTS, int GSIZE_INT3C> __global__
+
+__device__
+static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, double* g, 
+    const int ish, const int jsh, const int ksh)
+{
+    int *ao_loc = c_bpcache.ao_loc;
+    size_t jstride = eri.stride_j;
+    size_t kstride = eri.stride_k;
+    int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
+    int i1 = ao_loc[ish+1] - eri.ao_offsets_i;
+    int j0 = ao_loc[jsh  ] - eri.ao_offsets_j;
+    int j1 = ao_loc[jsh+1] - eri.ao_offsets_j;
+    int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
+    int k1 = ao_loc[ksh+1] - eri.ao_offsets_k;
+
+    int *idx = c_idx;
+    int *idy = c_idx + TOT_NF;
+    int *idz = c_idx + TOT_NF * 2;
+
+    const int di = envs.stride_i;
+    const int dj = envs.stride_j;
+    const int dk = envs.stride_k;
+    const int g_size = envs.g_size;
+
+    const int li = envs.i_l;
+    const int lj = envs.j_l;
+    const int lk = envs.k_l;
+    const int nrys_roots = envs.nrys_roots;
+
+    //for (int k = k0; k < k1; ++k) {
+    //for (int j = j0; j < j1; ++j) {
+    //for (int i = i0; i < i1; ++i) {
+    for (int tx = threadIdx.x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim.x) {
+        const int k = tx / ((j1-j0)*(i1-i0));
+        const int j = (tx / (i1-i0)) % (j1-j0);
+        const int i = tx % (i1-i0);
+
+        const int loc_k = c_l_locs[lk] + k;
+        const int loc_j = c_l_locs[lj] + j;
+        const int loc_i = c_l_locs[li] + i;
+
+        const int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+        const int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+        const int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
+        double eri_data = 0;
+#pragma unroll
+        for (int ir = 0; ir < nrys_roots; ++ir){
+            eri_data += g[ix + ir] * g[iy + ir] * g[iz + ir];
+        }
+        const int idx = (i+i0) + jstride*(j+j0) + kstride*(k+k0);
+        eri.data[idx] += eri_data;
+    }
+}
+
+__device__
+static void GINTmemset_int3c2e(GINTEnvVars envs, ERITensor eri, int ish, int jsh, int ksh)
+{
+    int *ao_loc = c_bpcache.ao_loc;
+    size_t jstride = eri.stride_j;
+    size_t kstride = eri.stride_k;
+    int i0 = ao_loc[ish  ] - eri.ao_offsets_i;
+    int i1 = ao_loc[ish+1] - eri.ao_offsets_i;
+    int j0 = ao_loc[jsh  ] - eri.ao_offsets_j;
+    int j1 = ao_loc[jsh+1] - eri.ao_offsets_j;
+    int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
+    int k1 = ao_loc[ksh+1] - eri.ao_offsets_k;
+
+    for (int tx = threadIdx.x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim.x) {
+        const int k = tx / ((j1-j0)*(i1-i0));
+        const int j = (tx / (i1-i0)) % (j1-j0);
+        const int i = tx % (i1-i0);
+
+        const int idx = (i+i0) + jstride*(j+j0) + kstride*(k+k0);
+        eri.data[idx] = 0.0;
+    }
+}
+
+__global__
 void GINTfill_int3c2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
 
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
-    const double norm = envs.fac;
     const int bas_ij = offsets.bas_ij + task_ij;
     const int bas_kl = offsets.bas_kl + task_kl;
     const int nprim_ij = envs.nprim_ij;
@@ -37,16 +114,16 @@ void GINTfill_int3c2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets o
     const int ish = bas_pair2bra[bas_ij];
     const int jsh = bas_pair2ket[bas_ij];
     const int ksh = bas_pair2bra[bas_kl];
-    double g[GSIZE_INT3C];
+    extern __shared__ double g[];
 
-    const int as_ish = envs.ibase ? ish: jsh; 
-    const int as_jsh = envs.ibase ? jsh: ish; 
+    const int as_ish = envs.ibase ? ish: jsh;
+    const int as_jsh = envs.ibase ? jsh: ish;
 
-    GINTmemset_int3c2e<NROOTS>(envs, eri, ish, jsh, ksh);
+    GINTmemset_int3c2e(envs, eri, ish, jsh, ksh);
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-        for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-            GINTg0_int3c2e<NROOTS>(envs, g, norm, as_ish, as_jsh, ksh, ij, kl);
-            GINTwrite_int3c2e_direct<NROOTS>(envs, eri, g, ish, jsh, ksh);
+    for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+        GINTg0_int3c2e_shared(envs, g, as_ish, as_jsh, ksh, ij, kl);
+        GINTwrite_int3c2e_direct(envs, eri, g, ish, jsh, ksh);
     } }
 }
 
