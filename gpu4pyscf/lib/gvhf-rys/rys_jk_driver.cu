@@ -135,8 +135,8 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                     printf("Failed in cudaFuncGetAttributes(), attribute value is not reliable\n"); fflush(stdout);
                 }
                 if (buflen*sizeof(double) > attributes.maxDynamicSharedSizeBytes) {
-                    printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
-                    fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                    printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %ld > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                    fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %ld > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
                 }
             }
 
@@ -152,8 +152,8 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                     printf("Failed in cudaFuncGetAttributes(), attribute value is not reliable\n"); fflush(stdout);
                 }
                 if (buflen*sizeof(double) > attributes.maxDynamicSharedSizeBytes) {
-                    printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
-                    fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                    printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %ld > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                    fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %ld > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
                 }
             }
 
@@ -225,7 +225,13 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;// + ij_prims*4*TILE2;
+
+        const int j_cache_size = nfij + nfkl;
+        const int k_cache_size = nfi * nfk + nfi * nfl + nfj * nfk + nfj * nfl;
+        const int jk_cache_size = ((vj != NULL) ? j_cache_size : 0) + ((vk != NULL) ? k_cache_size : 0);
+        const int root_g_size = nroots * 2 + g_size * 3;
+        const int shared_root_g_jk_cache_size = (root_g_size > jk_cache_size) ? root_g_size : jk_cache_size;
+        const int buflen = (9 + ij_prims + shared_root_g_jk_cache_size) * quartets_per_block;// + ij_prims*4*TILE2;
 
         if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
             cudaFuncAttributes attributes;
@@ -234,8 +240,8 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
                 printf("Failed in cudaFuncGetAttributes(), attribute value is not reliable\n"); fflush(stdout);
             }
             if (buflen*sizeof(double) > attributes.maxDynamicSharedSizeBytes) {
-                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
-                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %ld > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %ld > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
             }
         }
 
@@ -314,8 +320,8 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
                 printf("Failed in cudaFuncGetAttributes(), attribute value is not reliable\n"); fflush(stdout);
             }
             if (buflen*sizeof(double) > attributes.maxDynamicSharedSizeBytes) {
-                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
-                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %ld > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %ld > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
             }
         }
 
@@ -400,8 +406,8 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                 printf("Failed in cudaFuncGetAttributes(), attribute value is not reliable\n"); fflush(stdout);
             }
             if (buflen*sizeof(double) > attributes.maxDynamicSharedSizeBytes) {
-                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
-                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %ld > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %ld > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
             }
         }
 
@@ -486,8 +492,8 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
                 printf("Failed in cudaFuncGetAttributes(), attribute value is not reliable\n"); fflush(stdout);
             }
             if (buflen*sizeof(double) > attributes.maxDynamicSharedSizeBytes) {
-                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
-                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %ld > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %ld > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
             }
         }
 
@@ -573,8 +579,8 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
                 printf("Failed in cudaFuncGetAttributes(), attribute value is not reliable\n"); fflush(stdout);
             }
             if (buflen*sizeof(double) > attributes.maxDynamicSharedSizeBytes) {
-                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
-                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %d > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                printf("Dynamic shared memory size in used (buflen*sizeof(double)) = %ld > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
+                fprintf(stderr, "Dynamic shared memory size in used (buflen*sizeof(double)) = %ld > set max value (attributes.maxDynamicSharedSizeBytes) = %d\n", buflen*sizeof(double), attributes.maxDynamicSharedSizeBytes); fflush(stdout);
             }
         }
 
