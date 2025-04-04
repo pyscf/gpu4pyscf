@@ -141,11 +141,11 @@ def eval_rho(mol, ao, dm, non0tab=None, xctype='LDA', hermi=0,
         c0 = dm.dot(ao[0])
         rho[0] = _contract_rho(c0, ao[0])
         for i in range(1, 4):
-            rho[i] = _contract_rho(c0, ao[i])
+            _contract_rho(c0, ao[i], rho=rho[i])
         if hermi:
             rho[1:4] *= 2  # *2 for + einsum('pi,ij,pj->p', ao[i], dm, ao[0])
         else:
-            c0 = dm.T.dot(ao[0])
+            c0 = dm.T.dot(ao[0], out=c0)
             for i in range(1, 4):
                 rho[i] += _contract_rho(ao[i], c0)
     else:  # meta-GGA
@@ -157,9 +157,10 @@ def eval_rho(mol, ao, dm, non0tab=None, xctype='LDA', hermi=0,
 
         rho[tau_idx] = 0
         for i in range(1, 4):
-            c1 = dm.dot(ao[i])
+            _contract_rho(c0, ao[i], rho=rho[i])
+        for i in range(1, 4):
+            c1 = dm.dot(ao[i], out=c0)
             rho[tau_idx] += _contract_rho(c1, ao[i])
-            rho[i] = _contract_rho(c0, ao[i])
             if hermi:
                 rho[i] *= 2
             else:
@@ -188,8 +189,9 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
         rho = cupy.empty((4,ngrids))
         c0 = cupy.dot(cpos.T, ao[0])
         _contract_rho(c0, c0, rho=rho[0])
+        buf = cupy.empty_like(c0)
         for i in range(1, 4):
-            c1 = cupy.dot(cpos.T, ao[i])
+            c1 = cupy.dot(cpos.T, ao[i], out=buf)
             _contract_rho(c0, c1, rho=rho[i])
         rho[1:] *= 2
     else: # meta-GGA
@@ -200,8 +202,9 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
         c0 = cupy.dot(cpos.T, ao[0])
         _contract_rho(c0, c0, rho=rho[0])
         rho[tau_idx] = 0
+        buf = cupy.empty_like(c0)
         for i in range(1, 4):
-            c1 = cupy.dot(cpos.T, ao[i])
+            c1 = cupy.dot(cpos.T, ao[i], out=buf)
             rho[i] = _contract_rho(c0, c1)
             rho[tau_idx] += _contract_rho(c1, c1)
 
@@ -400,23 +403,24 @@ def gen_grid_range(ngrids, device_id, blksize=MIN_BLK_SIZE):
     grid_end = min((device_id + 1) * ngrids_per_device, ngrids)
     return grid_start, grid_end
 
-def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
+def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
                  verbose=None, with_lapl=False, device_id=0, hermi=1):
     ''' nr_rks task on given device
     '''
     with cupy.cuda.Device(device_id), _streams[device_id]:
-        if isinstance(dms, cupy.ndarray):
-            # Ensure dms allocated on each device
-            dms = cupy.asarray(dms)
+        if isinstance(dm, cupy.ndarray):
+            assert dm.ndim == 2
+            # Ensure dm allocated on each device
+            dm = cupy.asarray(dm)
         if mo_coeff is not None: mo_coeff = cupy.asarray(mo_coeff)
         if mo_occ is not None: mo_occ = cupy.asarray(mo_occ)
         assert isinstance(verbose, int)
         log = logger.new_logger(mol, verbose)
         t0 = log.init_timer()
         xctype = ni._xc_type(xc_code)
-        nao = mol.nao
         opt = ni.gdftopt
         _sorted_mol = opt._sorted_mol
+        nao = _sorted_mol.nao
         if xctype == 'LDA':
             ao_deriv = 0
         else:
@@ -443,8 +447,8 @@ def _nr_rks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             weights[p0:p1] = weight
             # If AO is sparse enough, use density matrix to calculate rho
             if mo_coeff is None:
-                dms_mask = dms[idx[:,None],idx]
-                rho_tot[:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dms_mask,
+                dm_mask = dm[idx[:,None],idx]
+                rho_tot[:,p0:p1] = eval_rho(_sorted_mol, ao_mask, dm_mask,
                                             xctype=xctype, hermi=hermi, with_lapl=with_lapl)
             else:
                 assert hermi == 1
@@ -507,17 +511,15 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
-    nao = mol.nao
     mo_coeff = getattr(dms, 'mo_coeff', None)
     mo_occ = getattr(dms,'mo_occ', None)
 
     if mo_coeff is not None:
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     else:
+        assert dms.ndim == 2
         dms = cupy.asarray(dms)
-        dms = opt.sort_orbitals(dms.reshape(-1,nao,nao), axis=[1,2])
-        assert len(dms) == 1
-        dms = dms[0]
+        dms = opt.sort_orbitals(dms, axis=[0,1])
 
     release_gpu_stack()
     cupy.cuda.get_current_stream().synchronize()
@@ -547,7 +549,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         transpose_sum(vmat)
 
     if FREE_CUPY_CACHE:
-        dms = None
+        dms = mo_coeff = None
         cupy.get_default_memory_pool().free_all_blocks()
 
     t0 = log.timer_debug1('nr_rks', *t0)
@@ -657,13 +659,13 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     mo_occ = getattr(dms,'mo_occ', None)
 
     _sorted_mol = opt._sorted_mol
-    #nao, nao0 = opt.coeff.shape
-    nao = nao0 = mol.nao
     mol = None
 
     if mo_coeff is not None:
+        nao = nao0 = mo_coeff.shape[0]
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     else:
+        nao = nao0 = dms.shape[-1]
         dms = cupy.asarray(dms)
         dm_shape = dms.shape
         dms = opt.sort_orbitals(dms.reshape(-1,nao0,nao0), axis=[1,2])
@@ -806,9 +808,9 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         log = logger.new_logger(mol, verbose)
         t0 = log.init_timer()
         xctype = ni._xc_type(xc_code)
-        nao = mol.nao
         opt = ni.gdftopt
         _sorted_mol = opt._sorted_mol
+        nao = _sorted_mol.nao
 
         nset = dma.shape[0]
         nelec = np.zeros((2,nset))
@@ -897,9 +899,9 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     mo_coeff = getattr(dms, 'mo_coeff', None)
     mo_occ = getattr(dms,'mo_occ', None)
-    nao = mol.nao
     dma, dmb = dms
     dm_shape = dma.shape
+    nao = dm_shape[-1]
     dma = cupy.asarray(dma).reshape(-1,nao,nao)
     dmb = cupy.asarray(dmb).reshape(-1,nao,nao)
     dma = opt.sort_orbitals(dma, axis=[1,2])
@@ -966,38 +968,45 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
         opt = ni.gdftopt
     mol = None
     _sorted_mol = opt._sorted_mol
-    nao = _sorted_mol.nao
     log = logger.new_logger(opt.mol, verbose)
 
     mo_coeff = getattr(dm, 'mo_coeff', None)
     mo_occ = getattr(dm,'mo_occ', None)
 
+    nao = dm.shape[-1]
     dm = opt.sort_orbitals(cupy.asarray(dm), axis=[0,1])
     if mo_coeff is not None:
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
+    else:
+        assert dm.ndim == 2
+        dm = cupy.asarray(dm)
+        dm = opt.sort_orbitals(dm, axis=[0,1])
 
     mem_avail = get_avail_mem()
     blksize = mem_avail*.2/8/nao//ALIGNED * ALIGNED
     blksize = min(blksize, MIN_BLK_SIZE)
     GB = 1024*1024*1024
-    log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
+    log.debug(f'GPU Memory {mem_avail/GB:.3f} GB available, block size {blksize}')
 
+    ao_deriv = 0
     ngrids = grids.weights.size
     rho = cupy.empty(ngrids)
     with opt.gdft_envs_cache():
         t1 = t0 = log.init_timer()
-        for p0, p1 in lib.prange(0,ngrids,blksize):
-            coords = grids.coords[p0:p1]
-            ao = eval_ao(_sorted_mol, coords, 0, gdftopt=opt, transpose=False)
+        p0 = p1 = 0
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+            p0, p1 = p1, p1 + weight.size
             if mo_coeff is None:
-                rho[p0:p1] = eval_rho(_sorted_mol, ao, dm, xctype='LDA', hermi=1)
+                dm_mask = dm[idx[:,None],idx]
+                rho[p0:p1] = eval_rho(_sorted_mol, ao, dm_mask, xctype='LDA', hermi=1)
             else:
-                rho[p0:p1] = eval_rho2(_sorted_mol, ao, mo_coeff, mo_occ, None, 'LDA')
+                mo_coeff_mask = mo_coeff[idx,:]
+                rho[p0:p1] = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, 'LDA')
             t1 = log.timer_debug2('eval rho slice', *t1)
     t0 = log.timer_debug1('eval rho', *t0)
 
     if FREE_CUPY_CACHE:
-        dm = None
+        dm = mo_coeff = None
         cupy.get_default_memory_pool().free_all_blocks()
     return rho
 
@@ -1014,7 +1023,7 @@ def _nr_rks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
         opt = getattr(ni, 'gdftopt', None)
 
         _sorted_mol = opt.mol
-        nao = mol.nao
+        nao = dms.shape[-1]
         dms = cupy.asarray(dms)
         nset = len(dms)
         vmat = cupy.zeros((nset, nao, nao))
@@ -1094,9 +1103,9 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
 
-    nao = mol.nao
     dms = cupy.asarray(dms)
     dm_shape = dms.shape
+    nao = dm_shape[-1]
     # AO basis -> gdftopt AO basis
     with_mocc = hasattr(dms, 'mo1')
     mo1 = occ_coeff = None
@@ -1166,7 +1175,7 @@ def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
         opt = getattr(ni, 'gdftopt', None)
 
         _sorted_mol = opt.mol
-        nao = mol.nao
+        nao = _sorted_mol.nao
         nset = len(dma)
         vmata = cupy.zeros((nset, nao, nao))
         vmatb = cupy.zeros((nset, nao, nao))
@@ -1254,9 +1263,9 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
 
-    nao = opt._sorted_mol.nao
     dma, dmb = dms
     dm_shape = dma.shape
+    nao = dm_shape[-1]
     # AO basis -> gdftopt AO basis
     with_mocc = hasattr(dms, 'mo1')
     mo1 = occ_coeff = None
@@ -1351,17 +1360,15 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     mo_coeff = getattr(dms, 'mo_coeff', None)
     mo_occ = getattr(dms,'mo_occ', None)
 
-    #nao, nao0 = opt.coeff.shape
-    nao = nao0 = mol.nao
     mol = None
     _sorted_mol = opt._sorted_mol
+    nao = _sorted_mol.nao
 
     if mo_coeff is not None:
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     else:
-        dms = dms.reshape(-1,nao0,nao0)
-        assert len(dms) == 1
-        dms = opt.sort_orbitals(dms, axis=[1,2])
+        assert dms.ndim == 2
+        dms = opt.sort_orbitals(dms, axis=[0,1])
 
     ao_deriv = 1
     vvrho = []
@@ -1697,7 +1704,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 lookup_cache_size += idx.nbytes + non0shl_idx.nbytes + ao_loc_slice.nbytes
             else:
                 pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[lookup_key]
-            
+
             if len(idx) == 0:
                 continue
 
@@ -2178,8 +2185,8 @@ class _GDFTOpt:
         if nao > coeff.shape[0]:
             paddings = nao - coeff.shape[0]
             coeff = np.vstack([coeff, np.zeros((paddings, coeff.shape[1]))])
-        self._coeff = coeff[self._ao_idx]
-        return self._coeff
+        coeff = coeff[self._ao_idx]
+        return coeff
 
     @classmethod
     def from_mol(cls, mol):
