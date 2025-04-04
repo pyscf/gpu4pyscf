@@ -15,7 +15,7 @@
 import numpy, cupy
 from pyscf import lib
 from pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf.lib.cupy_helper import tag_array, pack_tril
 from gpu4pyscf import scf
 
 def _for_scf(mf, solvent_obj, dm=None):
@@ -74,19 +74,23 @@ class SCFWithSolvent(_Solvation):
         return super().reset(mol)
 
     def get_veff(self, mol=None, dm=None, *args, **kwargs):
-        vhf = super().get_veff(mol, dm, *args, **kwargs)
+        veff = super().get_veff(mol, dm, *args, **kwargs)
         with_solvent = self.with_solvent
         if not with_solvent.frozen:
             if dm is None:
                 dm = self.make_rdm1()
             with_solvent.e, with_solvent.v = with_solvent.kernel(dm)
         e_solvent, v_solvent = with_solvent.e, with_solvent.v
-        if vhf.shape[-1] != v_solvent.shape[-1]:
+        if veff.shape[-1] != v_solvent.shape[-1]:
             # lowmem mode, only lower triangular part of Fock matrix is stored
             nao = v_solvent.shape[-1]
-            assert vhf.ndim == 1 and vhf.shape[0] == nao * (nao + 1) // 2
-            v_solvent = v_solvent[numpy.tril_indices(nao)]
-        return tag_array(vhf, e_solvent=e_solvent, v_solvent=v_solvent)
+            assert not isinstance(veff, cupy.ndarray)
+            assert veff.ndim == 1 and veff.shape[0] == nao * (nao + 1) // 2
+            v_solvent = pack_tril(v_solvent).get()
+            veff = lib.tag_array(veff, e_solvent=e_solvent, v_solvent=v_solvent)
+        else:
+            veff = tag_array(veff, e_solvent=e_solvent, v_solvent=v_solvent)
+        return veff
 
     def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1,
                  diis=None, diis_start_cycle=None,

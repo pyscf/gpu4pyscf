@@ -15,6 +15,7 @@
 import numpy as np
 import cupy
 import h5py
+import itertools
 from functools import reduce
 from pyscf import gto
 from pyscf import lib as pyscf_lib
@@ -426,7 +427,7 @@ def init_guess_by_minao(mol):
                     occ4ecp.append(np.repeat(occ_l, l * 2 + 1))
 
             occ4ecp = np.hstack(occ4ecp)
-            basis4ecp = lib.flatten(basis4ecp)
+            basis4ecp = list(itertools.chain.from_iterable(basis4ecp))
 
 # Compared to ANO valence basis, to check whether the ECP basis set has
 # reasonable AO-character contraction.  The ANO valence AO should have

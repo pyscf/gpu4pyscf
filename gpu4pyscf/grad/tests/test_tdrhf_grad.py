@@ -64,14 +64,14 @@ def diagonalize_tda(a, nroots=5):
     return e_sorted_final[:nroots], xy_sorted[:, :nroots]
 
 
-def cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda):
+def cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, tda, singlet=True):
     a, b = td.get_ab()
 
     if tda:
         atmlst = range(mol.natm)
         e_diag, xy_diag = diagonalize_tda(a)
         x = xy_diag[:, 0].reshape(nocc, nvir) * np.sqrt(0.5)
-        de_td = grad_elec(tdgrad, (x, 0))
+        de_td = tdgrad.grad_elec((x, 0), singlet)
         gradient_ana = de_td + tdgrad.grad_nuc(atmlst=atmlst)
     else:
         atmlst = range(mol.natm)
@@ -84,7 +84,7 @@ def cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda):
         x = x.reshape(nocc, nvir)
         y = y.reshape(nocc, nvir)
 
-        de_td = grad_elec(tdgrad, (x, y))
+        de_td = tdgrad.grad_elec((x, y), singlet)
         gradient_ana = de_td + tdgrad.grad_nuc(atmlst=atmlst)
 
     return gradient_ana
@@ -98,6 +98,7 @@ def setUpModule():
 
 def tearDownModule():
     global mol
+    mol.stdout.close()
     del mol
 
 
@@ -115,17 +116,10 @@ def benchmark_with_cpu(mol, nstates=3, lindep=1.0e-12, tda=False):
     nvir = nmo - nocc
 
     tdgrad_gpu = gpu4pyscf.grad.tdrhf.Gradients(td)
-    gpu_gradient = cal_analytic_gradient(mol, td, tdgrad_gpu, nocc, nvir, gpu4pyscf.grad.tdrhf.grad_elec, tda)
+    gpu_gradient = cal_analytic_gradient(mol, td, tdgrad_gpu, nocc, nvir, tda)
 
-
-    if tda:
-        cpu_gradient = np.array([[ 6.1708732035531e-16,  5.4527883622350e-15, 1.0228273246502e-01],
-                                 [-5.6967766850923e-16,  6.9672215647416e-02, -5.1141366232508e-02],
-                                 [-4.7409651846241e-17, -6.9672215647420e-02, -5.1141366232510e-02]])
-    else:
-        cpu_gradient = np.array([[-3.4653829069609e-16,  2.3748317799310e-14, 1.0506609371536e-01],
-                                 [ 5.6250300822602e-16,  7.1515265578103e-02, -5.2533046857670e-02],
-                                 [-2.1596471752992e-16, -7.1515265578123e-02, -5.2533046857686e-02]])
+    tdgrad_cpu = tdgrad_gpu.to_cpu()
+    cpu_gradient = cal_analytic_gradient(mol, td, tdgrad_cpu, nocc, nvir, tda)
 
     return cpu_gradient, gpu_gradient
 
@@ -145,9 +139,8 @@ def benchmark_with_finite_diff(
     else:
         td = gpu4pyscf.tdscf.rhf.TDHF(mf)
     assert td.device == "gpu"
-    tdgrad = gpu4pyscf.grad.tdrks.Gradients(td)
-    gradient_ana = cal_analytic_gradient(
-        mol, td, tdgrad, nocc, nvir, gpu4pyscf.grad.tdrhf.grad_elec, tda)
+    tdgrad = td.Gradients()
+    gradient_ana = cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, tda)
 
     coords = mol.atom_coords(unit="Ang") * 1.0
     natm = coords.shape[0]
@@ -201,25 +194,35 @@ def _check_grad(mol, tol=1e-6, lindep=1.0E-12, disp=None, tda=False, method="cpu
         )
         norm_diff = np.linalg.norm(gradi_cpu - grad_gpu)
     elif method == "numerical":
-        grad_ana, grad = benchmark_with_finite_diff(
+        grad_gpu, grad = benchmark_with_finite_diff(
             mol, delta=0.005, nstates=5, lindep=lindep, tda=tda
         )
-        norm_diff = np.linalg.norm(grad_ana - grad)
+        norm_diff = np.linalg.norm(grad_gpu - grad)
     assert norm_diff < tol
+    return grad_gpu
 
 
 class KnownValues(unittest.TestCase):
     def test_grad_tda_singlet_cpu(self):
-        _check_grad(mol, tol=1e-10, tda=True, method="cpu")
+        grad_gpu = _check_grad(mol, tol=1e-10, tda=True, method="cpu")
+
+        grad_cpu, grad_gpu = benchmark_with_cpu(
+            mol, nstates=5, lindep=1e-12, tda=True
+        )
+        ref = np.array([[ 6.1708732035531e-16,  5.4527883622350e-15, 1.0228273246502e-01],
+                        [-5.6967766850923e-16,  6.9672215647416e-02, -5.1141366232508e-02],
+                        [-4.7409651846241e-17, -6.9672215647420e-02, -5.1141366232510e-02]])
+        assert abs(grad_gpu - ref).max() < 1e-5
 
     def test_grad_tda_singlet_numerical(self):
         _check_grad(mol, tol=1e-4, tda=True, method="numerical")
 
     def test_grad_tdhf_singlet_cpu(self):
-        _check_grad(mol, tol=1e-10, lindep=1.0E-6, tda=False, method="cpu")
-
-    # def test_grad_tdhf_singlet_numerical(self):
-    #     _check_grad(mol, tol=1e-4, lindep=1.0E-6, tda=False, method="numerical")
+        grad_gpu = _check_grad(mol, tol=1e-10, lindep=1.0E-6, tda=False, method="cpu")
+        ref = np.array([[-3.4653829069609e-16,  2.3748317799310e-14, 1.0506609371536e-01],
+                        [ 5.6250300822602e-16,  7.1515265578103e-02, -5.2533046857670e-02],
+                        [-2.1596471752992e-16, -7.1515265578123e-02, -5.2533046857686e-02]])
+        assert abs(grad_gpu - ref).max() < 1e-5
 
 
 if __name__ == "__main__":

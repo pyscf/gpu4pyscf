@@ -52,6 +52,7 @@ class RKS(rks.RKS):
     get_k = hf_lowmem.RHF.get_k
     get_j = hf_lowmem.RHF.get_j
     get_fock = hf_lowmem.RHF.get_fock
+    make_wfn = hf_lowmem.RHF.make_wfn
     make_rdm1 = hf_lowmem.RHF.make_rdm1
     _delta_rdm1 = hf_lowmem.RHF._delta_rdm1
 
@@ -63,43 +64,43 @@ class RKS(rks.RKS):
         hf_lowmem.RHF.dump_flags(self, verbose)
         return rks.KohnShamDFT.dump_flags(self, verbose)
 
-    def _get_k_sorted_mol(self, dm, hermi, omega, log):
+    def _get_k_sorted_mol(self, dm_or_wfn, hermi, omega, log):
         mol = self.mol
         with mol.with_range_coulomb(omega):
             vhfopt = self._opt_gpu.get(omega)
             if vhfopt is None:
                 vhfopt = self._opt_gpu[omega] = jk._VHFOpt(mol, self.direct_scf_tol).build()
-            return vhfopt.get_jk(dm, hermi, False, True, log)[1]
+            return vhfopt.get_jk(dm_or_wfn, hermi, False, True, log)[1]
 
-    def get_veff(self, mol, dm, dm_last=None, vhf_last=0, hermi=1):
+    def get_veff(self, mol, dm_or_wfn, dm_last=None, vhf_last=0, hermi=1):
         '''Constructus the lower-triangular part of the Fock matrix.'''
         assert hermi == 1
         log = logger.new_logger(mol, self.verbose)
         cput0 = log.init_timer()
-        if dm is None:
+        if dm_or_wfn is None:
             # Avoid explicitly constructing density matrix. Use the RHFWfn
             # instance to just pass mo_coeff and mo_occ to the nr_rks function.
-            _dm = hf_lowmem.RHFWfn(self.mo_coeff, self.mo_occ)
+            dm = hf_lowmem.RHFWfn(self.mo_coeff, self.mo_occ)
         else:
-            _dm = dm
-        initialize_grids(self, mol, _dm)
+            dm = dm_or_wfn
+        initialize_grids(self, mol, dm)
         mem_avail = get_avail_mem()
         log.debug1('available GPU memory for rks.get_veff: %.3f GB',
                    mem_avail/1e9)
 
         ni = self._numint
-        n, exc, vxc = ni.nr_rks(mol, self.grids, self.xc, _dm)
+        n, exc, vxc = ni.nr_rks(mol, self.grids, self.xc, dm)
         if self.do_nlc():
             if ni.libxc.is_nlc(self.xc):
                 xc = self.xc
             else:
                 assert ni.libxc.is_nlc(self.nlc)
                 xc = self.nlc
-            n, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, _dm)
+            n, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm)
             exc += enlc
             vxc += vnlc
-        _dm = None
-        vxc = pack_tril(vxc).get()
+        dm = None
+        vxc = pack_tril(vxc)
         log.debug('nelec by numeric integration = %s', n)
         cput1 = log.timer_debug1('vxc tot', *cput0)
 
@@ -107,62 +108,68 @@ class RKS(rks.RKS):
         vhfopt = self._opt_gpu.get(omega)
         if vhfopt is None:
             vhfopt = self._opt_gpu[omega] = jk._VHFOpt(mol, self.direct_scf_tol).build()
-        _dm = self._delta_rdm1(dm, dm_last, vhfopt)
+        dm = self._delta_rdm1(dm_or_wfn, dm_last, vhfopt)
 
         cp.get_default_memory_pool().free_all_blocks()
         mem_avail = get_avail_mem()
         log.debug1('available GPU memory for get_jk in rks.get_veff: %.3f GB',
                    mem_avail/1e9)
 
-        vj = vhfopt.get_j(_dm, log)
+        vj = vhfopt.get_j(dm, log)
         assert vj.ndim == 3
         vj = vhfopt.apply_coeff_CT_mat_C(vj)
         vj = pack_tril(vj[0])
-        vj = vj.get()
         vj_last = getattr(vhf_last, 'vj', None)
         if vj_last is not None:
             if isinstance(vj_last, cp.ndarray):
-                vj_last = vj_last.get()
-            vj += vj_last
+                vj += vj_last
+            else:
+                vj += cp.asarray(vj_last)
         vxc += vj
-        vj = None
+        vj = vj.get()
 
         vk = None
         if ni.libxc.is_hybrid_xc(self.xc):
             omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
             if omega == 0:
-                vk = vhfopt.get_jk(_dm, hermi, False, True, log)
+                vk = vhfopt.get_jk(dm, hermi, False, True, log)[1]
                 vk *= hyb
             elif alpha == 0: # LR=0, only SR exchange
-                vk = self._get_k_sorted_mol(_dm, hermi, -omega, log)
+                vk = self._get_k_sorted_mol(dm, hermi, -omega, log)
                 vk *= hyb
             elif hyb == 0: # SR=0, only LR exchange
-                vk = self._get_k_sorted_mol(_dm, hermi, omega, log)
+                vk = self._get_k_sorted_mol(dm, hermi, omega, log)
                 vk *= alpha
             else: # SR and LR exchange with different ratios
-                vk = vhfopt.get_jk(_dm, hermi, False, True, log)
+                vk = vhfopt.get_jk(dm, hermi, False, True, log)[1]
                 vk *= hyb
-                vklr = self._get_k_sorted_mol(_dm, hermi, omega, log)
+                vklr = self._get_k_sorted_mol(dm, hermi, omega, log)
                 vklr *= (alpha - hyb)
                 vk += vklr
             vk_last = getattr(vhf_last, 'vk', None)
             vk = vhfopt.apply_coeff_CT_mat_C(vk)
             vk = pack_tril(vk[0])
             vk *= .5
-            vk = vk.get()
             if vk_last is not None:
                 if isinstance(vk_last, cp.ndarray):
-                    vk_last = vk_last.get()
-                vk += vk_last
+                    vk += vk_last
+                else:
+                    vk += cp.asarray(vk_last)
             vxc -= vk
+            vk = vk.get()
 
+        vxc = vxc.get()
         log.timer_debug1('jk total', *cput1)
         vxc = pyscf_lib.tag_array(vxc, exc=exc, vj=vj, vk=vk)
         return vxc
 
-    def energy_elec(self, dm, h1e, vhf):
-        assert dm.dtype == np.float64
+    def energy_elec(self, dm_or_wfn, h1e, vhf):
         assert h1e.ndim == vhf.ndim == 1
+        if isinstance(dm_or_wfn, hf_lowmem.WaveFunction):
+            dm = dm_or_wfn.make_rdm1()
+        else:
+            dm = dm_or_wfn
+        assert dm.dtype == np.float64
         dm_tril = pack_tril(dm)
         nao = dm.shape[0]
         i = cp.arange(nao)
@@ -184,7 +191,7 @@ class RKS(rks.RKS):
     def to_cpu(self):
         raise NotImplementedError
 
-def initialize_grids(ks, mol=None, dm=None):
+def initialize_grids(ks, mol=None, dm_or_wfn=None):
     # Initialize self.grids the first time call get_veff
     if mol is None: mol = ks.mol
     if ks.grids.coords is None:
@@ -195,7 +202,7 @@ def initialize_grids(ks, mol=None, dm=None):
         ks.grids.coords = cp.asarray(ks.grids.coords)
         if ks.small_rho_cutoff > 1e-20:
             # Filter grids the first time setup grids
-            ks.grids = rks.prune_small_rho_grids_(ks, ks.mol, dm, ks.grids)
+            ks.grids = rks.prune_small_rho_grids_(ks, ks.mol, dm_or_wfn, ks.grids)
         t0 = logger.timer_debug1(ks, 'setting up grids', *t0)
 
         if ks.do_nlc() and ks.nlcgrids.coords is None:
@@ -207,6 +214,6 @@ def initialize_grids(ks, mol=None, dm=None):
                 ks.nlcgrids.coords = cp.asarray(ks.nlcgrids.coords)
                 if ks.small_rho_cutoff > 1e-20:
                     # Filter grids the first time setup grids
-                    ks.nlcgrids = rks.prune_small_rho_grids_(ks, ks.mol, dm, ks.nlcgrids)
+                    ks.nlcgrids = rks.prune_small_rho_grids_(ks, ks.mol, dm_or_wfn, ks.nlcgrids)
                 t0 = logger.timer_debug1(ks, 'setting up nlc grids', *t0)
     return ks
