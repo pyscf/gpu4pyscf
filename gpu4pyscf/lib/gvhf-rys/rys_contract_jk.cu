@@ -40,7 +40,9 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int lk = bounds.lk;
     int ll = bounds.ll;
     int nfi = bounds.nfi;
+    int nfj = (lj + 1) * (lj + 2) / 2;
     int nfk = bounds.nfk;
+    int nfl = (ll + 1) * (ll + 2) / 2;
     int nfij = bounds.nfij;
     int nfkl = bounds.nfkl;
     int iprim = bounds.iprim;
@@ -68,16 +70,17 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
 
-    extern __shared__ double rw_cache[];
-    double *rw = rw_cache + sq_id;
-    double *g = rw + nsq_per_block * nroots*2;
-    double *gx = g;
-    double *gy = g + nsq_per_block * g_size;
-    double *gz = gy + nsq_per_block * g_size;
-    double *rjri = gz + nsq_per_block * g_size;
+    extern __shared__ double shared_memory[];
+    double *rjri = shared_memory + sq_id;
     double *rlrk = rjri + nsq_per_block * 3;
     double *Rpq = rlrk + nsq_per_block * 3;
     double *cicj_cache = Rpq + nsq_per_block * 3;
+    double *rw = cicj_cache + nsq_per_block * iprim * jprim;
+    double *g = rw + nsq_per_block * nroots * 2;
+    double *gx = g;
+    double *gy = g + nsq_per_block * g_size;
+    double *gz = gy + nsq_per_block * g_size;
+
     double gout[GOUT_WIDTH];
 
     for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
@@ -328,15 +331,30 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 }
             }
         }
-        if (task_id >= ntasks) {
-            continue;
-        }
+
         double *dm = jk.dm;
         double *vj = jk.vj;
         double *vk = jk.vk;
-        int do_j = vj != NULL;
-        int do_k = vk != NULL;
+        const bool do_j = (vj != NULL) && (task_id < ntasks);
+        const bool do_k = (vk != NULL) && (task_id < ntasks);
+
+        double* j_cache = rw;
+        double* j_ij = j_cache;
+        double* j_kl = j_ij + nfij * nsq_per_block;
+        double* k_cache = do_j ? (j_kl + nfkl * nsq_per_block) : j_cache;
+        double* k_ik = k_cache;
+        double* k_il = k_ik + nfi * nfk * nsq_per_block;
+        double* k_jk = k_il + nfi * nfl * nsq_per_block;
+        double* k_jl = k_jk + nfj * nfk * nsq_per_block;
+        int jk_cache_size = 0;
+        if (do_j) jk_cache_size += nfij + nfkl;
+        if (do_k) jk_cache_size += nfi * nfk + nfi * nfl + nfj * nfk + nfj * nfl;
+
         for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+            __syncthreads();
+            for (int i = gout_id; i < jk_cache_size; i += gout_stride)
+                j_cache[i * nsq_per_block] = 0;
+            __syncthreads();
 #pragma unroll
             for (int n = 0; n < GOUT_WIDTH; ++n) {
                 int ijkl = (gout_start + n*gout_stride+gout_id);
@@ -353,22 +371,83 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 int _k = k + k0;
                 int _l = l + l0;
                 if (do_j) {
-                    int _ji = _j*nao+_i;
-                    int _lk = _l*nao+_k;
-                    atomicAdd(vj+_lk, s * dm[_ji]);
-                    atomicAdd(vj+_ji, s * dm[_lk]);
+                    const int _ji = _j*nao+_i;
+                    const int _lk = _l*nao+_k;
+                    atomicAdd(j_kl + kl * nsq_per_block, s * dm[_ji]);
+                    atomicAdd(j_ij + ij * nsq_per_block, s * dm[_lk]);
                 }
                 if (do_k) {
-                    int _jl = _j*nao+_l;
-                    int _jk = _j*nao+_k;
-                    int _il = _i*nao+_l;
-                    int _ik = _i*nao+_k;
-                    atomicAdd(vk+_ik, s * dm[_jl]);
-                    atomicAdd(vk+_il, s * dm[_jk]);
-                    atomicAdd(vk+_jk, s * dm[_il]);
-                    atomicAdd(vk+_jl, s * dm[_ik]);
+                    // The order of ik,il,jk,jl is consistent with ij,kl
+                    // which is (j * nfi + i) and (l * nfk + k)
+                    const int ik = k * nfi + i;
+                    const int il = l * nfi + i;
+                    const int jk = k * nfj + j;
+                    const int jl = l * nfj + j;
+                    const int _jl = _j*nao+_l;
+                    const int _jk = _j*nao+_k;
+                    const int _il = _i*nao+_l;
+                    const int _ik = _i*nao+_k;
+                    atomicAdd(k_ik + ik * nsq_per_block, s * dm[_jl]);
+                    atomicAdd(k_il + il * nsq_per_block, s * dm[_jk]);
+                    atomicAdd(k_jk + jk * nsq_per_block, s * dm[_il]);
+                    atomicAdd(k_jl + jl * nsq_per_block, s * dm[_ik]);
                 }
             }
+            __syncthreads();
+            if (do_j) {
+                for (int ij = gout_id; ij < nfij; ij += gout_stride) {
+                    const int i = ij % nfi;
+                    const int j = ij / nfi;
+                    const int _i = i + i0;
+                    const int _j = j + j0;
+                    const int _ji = _j*nao+_i;
+                    atomicAdd(vj + _ji, j_ij[ij * nsq_per_block]);
+                }
+                for (int kl = gout_id; kl < nfkl; kl += gout_stride) {
+                    const int k = kl % nfk;
+                    const int l = kl / nfk;
+                    const int _k = k + k0;
+                    const int _l = l + l0;
+                    const int _lk = _l*nao+_k;
+                    atomicAdd(vj + _lk, j_kl[kl * nsq_per_block]);
+                }
+            }
+            if (do_k) {
+                for (int ik = gout_id; ik < nfi * nfk; ik += gout_stride) {
+                    const int i = ik % nfi;
+                    const int k = ik / nfi;
+                    const int _i = i + i0;
+                    const int _k = k + k0;
+                    const int _ik = _i*nao+_k;
+                    atomicAdd(vk + _ik, k_ik[ik * nsq_per_block]);
+                }
+                for (int il = gout_id; il < nfi * nfl; il += gout_stride) {
+                    const int i = il % nfi;
+                    const int l = il / nfi;
+                    const int _i = i + i0;
+                    const int _l = l + l0;
+                    const int _il = _i*nao+_l;
+                    atomicAdd(vk + _il, k_il[il * nsq_per_block]);
+                }
+                for (int jk = gout_id; jk < nfj * nfk; jk += gout_stride) {
+                    const int j = jk % nfj;
+                    const int k = jk / nfj;
+                    const int _j = j + j0;
+                    const int _k = k + k0;
+                    const int _jk = _j*nao+_k;
+                    atomicAdd(vk + _jk, k_jk[jk * nsq_per_block]);
+                }
+                for (int jl = gout_id; jl < nfj * nfl; jl += gout_stride) {
+                    const int j = jl % nfj;
+                    const int l = jl / nfj;
+                    const int _j = j + j0;
+                    const int _l = l + l0;
+                    const int _jl = _j*nao+_l;
+                    atomicAdd(vk + _jl, k_jl[jl * nsq_per_block]);
+                }
+            }
+            __syncthreads();
+
             vj += nao * nao;
             vk += nao * nao;
             dm += nao * nao;

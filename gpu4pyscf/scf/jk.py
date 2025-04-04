@@ -453,7 +453,7 @@ class _VHFOpt:
                  for j in range(i+1)
                  for k in range(i+1)
                  for l in range(k+1)]
-        schemes = {t: quartets_scheme(mol, uniq_l_ctr[list(t)]) for t in tasks}
+        schemes = {t: quartets_scheme(mol, uniq_l_ctr[list(t)], with_j, with_k) for t in tasks}
 
         def proc(dms, dm_cond):
             device_id = cp.cuda.device.get_device_id()
@@ -845,7 +845,7 @@ def _make_j_engine_pair_locs(mol):
     pair_loc = np.append(0, np.cumsum((ll+1)*(ll+2)*(ll+3)//6))
     return np.asarray(pair_loc, dtype=np.int32)
 
-def quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
+def quartets_scheme(mol, l_ctr_pattern, with_j, with_k, shm_size=SHM_SIZE):
     ls = l_ctr_pattern[:,0]
     li, lj, lk, ll = ls
     order = li + lj + lk + ll
@@ -858,7 +858,11 @@ def quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nps = l_ctr_pattern[:,1]
     ij_prims = nps[0] * nps[1]
     nroots = order // 2 + 1
-    unit = nroots*2 + g_size*3 + ij_prims + 9
+    jk_cache_size = 0
+    if with_j: jk_cache_size += nfi*nfj + nfk*nfl
+    if with_k: jk_cache_size += nfi*nfk + nfi*nfl + nfj*nfk + nfj*nfl
+    root_g_jk_cache_shared = max(nroots*2 + g_size*3, jk_cache_size)
+    unit = root_g_jk_cache_shared + ij_prims + 9
     if mol.omega < 0: # SR
         unit += nroots * 2
     counts = shm_size // (unit*8)
