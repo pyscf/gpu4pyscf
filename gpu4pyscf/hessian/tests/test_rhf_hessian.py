@@ -90,7 +90,8 @@ class KnownValues(unittest.TestCase):
         e1, refj, refk = rhf_cpu._partial_hess_ejk(h, mo_energy, mo_coeff, mo_occ)
         e2_ref = refj - refk
         assert abs(ejk.get() - e2_ref).max() < 1e-8
-
+        mol.stdout.close()
+        
     def test_get_jk(self):
         mol = gto.M(
             atom = '''
@@ -129,6 +130,7 @@ class KnownValues(unittest.TestCase):
         h1ao = np.array(h1ao)
         refj = h1ao[:,0]
         refk = h1ao[:,1]
+        mol.stdout.close()
         assert abs(vj.get() - refj).max() < 1e-8
         assert abs(vk.get() - refk).max() < 1e-8
 
@@ -194,6 +196,7 @@ class KnownValues(unittest.TestCase):
         vk_cpu = (mo_coeff.T @ vk @ mocc).reshape(1,-1)
         assert cupy.linalg.norm(vj_cpu - vj_mo) < 1e-5
         assert cupy.linalg.norm(vk_cpu - vk_mo) < 1e-5
+        mol1.stdout.close()
 
     def test_ecp_hess(self):
         mol = gto.M(atom='Cu 0 0 0; H 0 0 1.5', basis='lanl2dz',
@@ -207,6 +210,7 @@ class KnownValues(unittest.TestCase):
         mfs = mf.nuc_grad_method().as_scanner()
         e1 = mfs(mol.set_geom_('Cu 0 0  0.001; H 0 0 1.5'))[1]
         e2 = mfs(mol.set_geom_('Cu 0 0 -0.001; H 0 0 1.5'))[1]
+        mol.stdout.close()
         self.assertAlmostEqual(abs(hess[0,:,2] - (e1-e2)/0.002*lib.param.BOHR).max(), 0, 5)
 
 if __name__ == "__main__":

@@ -821,29 +821,29 @@ def hess_nuc_elec_ecp(mol, dm):
     natm = mol.natm
     aoslices = mol.aoslice_by_atom()
     ecp_atoms = set(mol._ecpbas[:,ATOM_OF])
-    
+    n_ecp_atm = len(ecp_atoms)
     de_ecp = cupy.zeros([3,3,natm,natm])
-    rinv2aa = -get_ecp_ipip(mol, ip_type='ipipv').reshape(natm,3,3,nao,nao)
-    for iatm in ecp_atoms:
-        de = contract('xypq,pq->xyp', rinv2aa[iatm], dm)
+    rinv2aa = -get_ecp_ipip(mol, ip_type='ipipv').reshape(n_ecp_atm,3,3,nao,nao)
+    for idx, atm_id in enumerate(ecp_atoms):
+        de = contract('xypq,pq->xyp', rinv2aa[idx], dm)
         de = cupy.asarray([cupy.sum(de[:,:,p0:p1], axis=2) for p0,p1 in aoslices[:,2:]])
-        de_ecp[:,:,iatm] += de.transpose([1,2,0])
-        de_ecp[:,:,:,iatm] += de.transpose([2,1,0])
+        de_ecp[:,:,atm_id] += de.transpose([1,2,0])
+        de_ecp[:,:,:,atm_id] += de.transpose([2,1,0])
         
         # 2nd derivative on ECP basis
-        de = contract('xypq,pq->xy', rinv2aa[iatm], dm)
-        de_ecp[:,:,iatm,iatm] -= de
+        de = contract('xypq,pq->xy', rinv2aa[idx], dm)
+        de_ecp[:,:,atm_id,atm_id] -= de
     
-    rinv2ab = -get_ecp_ipip(mol, ip_type='ipvip').reshape(natm,3,3,nao,nao)
-    for iatm in ecp_atoms:
-        de = contract('xypq,pq->xyp', rinv2ab[iatm], dm).transpose(1,0,2)
+    rinv2ab = -get_ecp_ipip(mol, ip_type='ipvip').reshape(n_ecp_atm,3,3,nao,nao)
+    for idx, atm_id in enumerate(ecp_atoms):
+        de = contract('xypq,pq->xyp', rinv2ab[idx], dm).transpose(1,0,2)
         de = cupy.asarray([cupy.sum(de[:,:,p0:p1], axis=2) for p0,p1 in aoslices[:,2:]])
-        de_ecp[:,:,iatm] += de.transpose([1,2,0])
-        de_ecp[:,:,:,iatm] += de.transpose([2,1,0])
+        de_ecp[:,:,atm_id] += de.transpose([1,2,0])
+        de_ecp[:,:,:,atm_id] += de.transpose([2,1,0])
 
         # 2nd derivative on ECP basis
-        de = contract('xypq,pq->xy', rinv2ab[iatm], dm)
-        de_ecp[:,:,iatm,iatm] -= de
+        de = contract('xypq,pq->xy', rinv2ab[idx], dm)
+        de_ecp[:,:,atm_id,atm_id] -= de
 
     return de_ecp
 
@@ -891,8 +891,8 @@ def _e_hcore_generator(hessobj, dm):
     dm = dm.get()
     with_ecp = mol.has_ecp()
     aoslices = mol.aoslice_by_atom()
-
-    de_ecp = hess_nuc_elec_ecp(mol, dm)
+    if with_ecp:
+        de_ecp = hess_nuc_elec_ecp(mol, dm)
 
     # Move data to GPU, get_hcore is slow on CPU
     h1aa, h1ab = hessobj.get_hcore(mol)
