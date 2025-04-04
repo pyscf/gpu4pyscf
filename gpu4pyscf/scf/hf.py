@@ -112,7 +112,7 @@ def get_hcore(mol):
     else:
         assert not mol.nucmod
         #:h+= mol.intor_symmetric('int1e_nuc')
-        from gpu4pyscf.gto.int1e_grids import int1e_grids
+        from gpu4pyscf.gto.int3c1e import int1e_grids
         h = cupy.asarray(h)
         h += int1e_grids(mol, mol.atom_coords(), charges=-mol.atom_charges())
     if len(mol._ecpbas) > 0:
