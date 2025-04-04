@@ -236,8 +236,9 @@ class RHF(hf.RHF):
 
         if isinstance(dm_last, WaveFunction):
             dm_last = dm_last.make_rdm1()
+        if dm_last is not None:
+            dm -= dm_last
 
-        dm -= dm_last
         dm = vhfopt.apply_coeff_C_mat_CT(dm)
         return dm[None] # Add an additional axis, as required by the get_jk function
 
