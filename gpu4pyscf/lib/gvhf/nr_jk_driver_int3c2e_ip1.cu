@@ -130,7 +130,7 @@ static int GINTrun_tasks_int3c2e_ip1_jk(JKMatrix *jk, BasisProdOffsets *offsets,
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error of GINTint3c2e_ip1_jk_general_kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error of GINTint3c2e_ip1_jk_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

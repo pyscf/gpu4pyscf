@@ -51,6 +51,7 @@ __device__ static void block_reduce_y(double val, double *addr, int tx, int ty){
 template <int BLKSIZE> 
 __device__ void block_reduce(double *sum, double a){
     const int tx = threadIdx.x;
+    __syncthreads();
     __shared__ double as[BLKSIZE];
     as[tx] = a;
     __syncthreads();
