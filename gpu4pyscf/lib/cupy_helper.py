@@ -23,6 +23,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
+from gpu4pyscf.lib.multi_gpu import lru_cache
 from gpu4pyscf.__config__ import _streams, num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
@@ -222,7 +223,7 @@ def pack_tril(a, stream=None):
         a_tril = a_tril[0]
     return a_tril
 
-def unpack_tril(cderi_tril, cderi=None, stream=None, hermi=1):
+def unpack_tril(cderi_tril, out=None, stream=None, hermi=1):
     assert cderi_tril.flags.c_contiguous
     assert hermi in (1, 2)
     ndim = cderi_tril.ndim
@@ -230,37 +231,39 @@ def unpack_tril(cderi_tril, cderi=None, stream=None, hermi=1):
     if ndim == 1:
         cderi_tril = cderi_tril[None]
     count = cderi_tril.shape[0]
-    if cderi is None:
+    if out is None:
         nao = int((2*cderi_tril.shape[1])**.5)
-        cderi = cupy.empty((count,nao,nao), dtype=cderi_tril.dtype)
+        out = cupy.empty((count,nao,nao), dtype=cderi_tril.dtype)
     else:
-        nao = cderi.shape[1]
+        nao = out.shape[1]
+        assert out.flags.c_contiguous
+        out = out.reshape(count, nao, nao)
 
     if cderi_tril.dtype != np.float64:
         idx = cupy.arange(nao)
         mask = idx[:,None] >= idx
-        cderiT = cderi.transpose(0,2,1)
+        cderiT = out.transpose(0,2,1)
         if hermi == 1:
             cderiT[:,mask] = cderi_tril.conj()
         else:
             raise NotImplementedError
-        cderi [:,mask] = cderi_tril
-        return cderi
+        out [:,mask] = cderi_tril
+        return out
 
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.unpack_tril(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(cderi_tril.data.ptr, ctypes.c_void_p),
-        ctypes.cast(cderi.data.ptr, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.c_int(nao),
         ctypes.c_int(count),
         ctypes.c_int(hermi))
     if err != 0:
         raise RuntimeError('failed in unpack_tril kernel')
     if ndim == 1:
-        cderi = cderi[0]
-    return cderi
+        out = out[0]
+    return out
 
 def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
     if stream is None:
@@ -294,6 +297,7 @@ def add_sparse(a, b, indices):
     assert a.flags.c_contiguous
     assert b.flags.c_contiguous
     if len(indices) == 0: return a
+    indices = cupy.asarray(indices, dtype=np.int32)
     n = a.shape[-1]
     m = b.shape[-1]
     if a.ndim > 2:
@@ -339,7 +343,7 @@ def dist_matrix(x, y, out=None):
         raise RuntimeError('failed in calculating distance matrix')
     return out
 
-@functools.lru_cache(1)
+@lru_cache(1)
 def _initialize_c2s_data():
     from gpu4pyscf.gto import mole
     c2s_l = [mole.cart2sph_by_l(l) for l in range(LMAX_ON_GPU)]

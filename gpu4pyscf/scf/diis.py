@@ -51,6 +51,9 @@ class CDIIS(lib.diis.DIIS):
         if self.incore is None:
             mem_avail = get_avail_mem()
             self.incore = errvec.nbytes*2 * (20+self.space) < mem_avail
+            if self.incore:
+                logger.debug(self, 'Large system detected. DIIS intermediates '
+                             'are saved in the host memory')
         nao = self.Corth.shape[1]
         errvec = pack_tril(errvec.reshape(-1,nao,nao))
         f_tril = pack_tril(f.reshape(-1,nao,nao))

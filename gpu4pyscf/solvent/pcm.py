@@ -274,7 +274,6 @@ class PCM(lib.StreamObject):
 
         self.e = None
         self.v = None
-        self._dm = None
 
     def dump_flags(self, verbose=None):
         logger.info(self, '******** %s ********', self.__class__)
@@ -370,7 +369,6 @@ class PCM(lib.StreamObject):
         self.v_grids_n = cupy.asarray(v_grids_n)
 
     def kernel(self, dm):
-        self._dm = dm
         self.e, self.v = self._get_vind(dm)
         return self.e, self.v
 

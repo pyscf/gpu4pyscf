@@ -57,9 +57,9 @@ static void _screen_index(int *non0shl_idx, double cutoff, int ang, int nprim, d
     double* atm_coords = c_envs.atom_coordx;
     double gridx, gridy, gridz;
     if (active) {
-        gridx = coords[3*grid_id + 0];
-        gridy = coords[3*grid_id + 1];
-        gridz = coords[3*grid_id + 2];
+        gridx = coords[0*ngrids + grid_id];
+        gridy = coords[1*ngrids + grid_id];
+        gridz = coords[2*ngrids + grid_id];
     } else {
         gridx = 0.0;
         gridy = 0.0;
