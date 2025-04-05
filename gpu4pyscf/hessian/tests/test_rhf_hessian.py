@@ -199,7 +199,7 @@ class KnownValues(unittest.TestCase):
         mol1.stdout.close()
 
     def test_ecp_hess(self):
-        mol = gto.M(atom='Cu 0 0 0; H 0 0 1.5', basis='lanl2dz',
+        mol = gto.M(atom='H 0 0 1.5; Cu 0 0 0', basis='lanl2dz',
                     ecp={'Cu':'lanl2dz'}, 
                     verbose=0,
                     output = '/dev/null')
@@ -208,10 +208,10 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(hess), -0.20927804440983355, 6)
 
         mfs = mf.nuc_grad_method().as_scanner()
-        e1 = mfs(mol.set_geom_('Cu 0 0  0.001; H 0 0 1.5'))[1]
-        e2 = mfs(mol.set_geom_('Cu 0 0 -0.001; H 0 0 1.5'))[1]
+        e1 = mfs(mol.set_geom_('H 0 0 1.5; Cu 0 0  0.001'))[1]
+        e2 = mfs(mol.set_geom_('H 0 0 1.5; Cu 0 0 -0.001'))[1]
         mol.stdout.close()
-        self.assertAlmostEqual(abs(hess[0,:,2] - (e1-e2)/0.002*lib.param.BOHR).max(), 0, 5)
+        self.assertAlmostEqual(abs(hess[1,:,2] - (e1-e2)/0.002*lib.param.BOHR).max(), 0, 5)
 
 if __name__ == "__main__":
     print("Full Tests for RHF Hessian")

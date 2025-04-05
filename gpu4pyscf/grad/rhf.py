@@ -224,16 +224,12 @@ def get_dh1e_ecp(mol, dm):
     '''
     Nuclear gradients of core Hamiltonian due to ECP
     '''
-    natm = mol.natm
-    dh1e_ecp = cupy.zeros([natm,3])
     with_ecp = mol.has_ecp()
     if not with_ecp:
-        return dh1e_ecp
+        raise RuntimeWarning("ECP not found")
     
     h1_ecp = get_ecp_ip(mol)
-    ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
-    for idx, atm_id in enumerate(ecp_atoms):
-        dh1e_ecp[atm_id] = contract('xij,ij->x', h1_ecp[idx], dm)
+    dh1e_ecp = contract('nxij,ij->nx', h1_ecp, dm)
     return 2.0 * dh1e_ecp
 
 def get_hcore(mf, mol):
@@ -244,7 +240,7 @@ def get_hcore(mf, mol):
     if mol._pseudo:
         NotImplementedError('Nuclear gradients for GTH PP')
     else:
-        h+= mol.intor('int1e_ipnuc', comp=3)
+        h += mol.intor('int1e_ipnuc', comp=3)
     h = cupy.asarray(h)
     if mol.has_ecp():
         h += get_ecp_ip(mol).sum(axis=0)
@@ -283,7 +279,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dh1e = int3c2e.get_dh1e(mol, dm0)
 
     if mol.has_ecp():
-        dh1e += get_dh1e_ecp(mol, dm0)
+        ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
+        dh1e[ecp_atoms] += get_dh1e_ecp(mol, dm0)
     t3 = log.timer_debug1('gradients of h1e', *t3)
 
     dvhf = mf_grad.get_veff(mol, dm0)
@@ -356,13 +353,12 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
 
     # Contributions due to ECP
     if mol.has_ecp():
-        ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
+        ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
         h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
-        for idx, atm_id in enumerate(ecp_atoms):
-            h1ao = h1_ecp[idx] + h1_ecp[idx].transpose([0,2,1])
-            h1mo = contract('xij,jo->xio', h1ao, orbo)
-            dh1e[atm_id] += contract('xio,ip->xpo', h1mo, mo_coeff)
-    
+        h1_ecp = h1_ecp + h1_ecp.transpose([0,1,3,2])
+        h1mo = contract('nxij,jo->nxio', h1_ecp, orbo)
+        dh1e[ecp_atoms] += contract('nxio,ip->nxpo', h1mo, mo_coeff)
+
     return dh1e
 
 def as_scanner(mf_grad):

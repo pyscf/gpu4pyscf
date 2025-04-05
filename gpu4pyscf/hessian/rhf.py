@@ -820,7 +820,7 @@ def hess_nuc_elec_ecp(mol, dm):
     nao = mol.nao
     natm = mol.natm
     aoslices = mol.aoslice_by_atom()
-    ecp_atoms = set(mol._ecpbas[:,ATOM_OF])
+    ecp_atoms = sorted(set(mol._ecpbas[:,ATOM_OF]))
     n_ecp_atm = len(ecp_atoms)
     de_ecp = cupy.zeros([3,3,natm,natm])
     rinv2aa = -get_ecp_ipip(mol, ip_type='ipipv').reshape(n_ecp_atm,3,3,nao,nao)

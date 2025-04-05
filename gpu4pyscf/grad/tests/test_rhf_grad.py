@@ -116,17 +116,17 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(ejk - ref).max(), 0, 9)
 
     def test_ecp_grad(self):
-        mol = gto.M(atom='Cu 0 0 0; H 0 0 1.5', basis='lanl2dz',
+        mol = gto.M(atom=' H 0 0 1.5; Cu 0 0 0', basis='lanl2dz',
                     ecp='lanl2dz', verbose=0)
         mf = gpu_scf.RHF(mol)
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(mol.atom)[1]
-        self.assertAlmostEqual(lib.fp(g), -0.012310573162997052, 7)
-
+        self.assertAlmostEqual(lib.fp(g), 0.012310573162997052, 7)
+        
         mfs = mf.as_scanner()
-        e1 = mfs(mol.set_geom_('Cu 0 0 -0.001; H 0 0 1.5'))
-        e2 = mfs(mol.set_geom_('Cu 0 0  0.001; H 0 0 1.5'))
-        self.assertAlmostEqual(g[0,2], (e2-e1)/0.002*lib.param.BOHR, 6)
+        e1 = mfs(mol.set_geom_('H 0 0 1.5; Cu 0 0 -0.001'))
+        e2 = mfs(mol.set_geom_('H 0 0 1.5; Cu 0 0  0.001'))
+        self.assertAlmostEqual(g[1,2], (e2-e1)/0.002*lib.param.BOHR, 6)
 
 if __name__ == "__main__":
     print("Full Tests for RHF Gradient")

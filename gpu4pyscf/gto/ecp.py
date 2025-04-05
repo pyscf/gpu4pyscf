@@ -43,6 +43,8 @@ libecp.ECP_ip_cart.argtypes = ecp_cart_argtypes
 libecp.ECP_ipipv_cart.argtypes = ecp_cart_argtypes
 libecp.ECP_ipvip_cart.argtypes = ecp_cart_argtypes
 
+ECP_ATOM_ID = 7
+
 def sort_ecp_basis(_ecpbas, cart=True, log=None):
     '''
     # Sort ECP basis based on angular momentum
@@ -123,11 +125,18 @@ def select_basis(ecpbas, ecp_atoms):
     for idx, bas in enumerate(ecpbas):
         atm_id = bas[gto.ATOM_OF]
         if atm_id in ecp_atoms:
-            bas[gto.ATOM_OF] = atom_map[atm_id]
+            bas[ECP_ATOM_ID] = atom_map[atm_id]
             selected_ecpbas.append(bas)
     return np.array(selected_ecpbas)
 
 def get_ecp(mol):
+    """
+    Calculate sum of ECP integrals
+
+    Returns:
+        CuPy array: [nao, nao] 
+            sum of ECP integrals over all ecp atoms
+    """
     _sorted_mol, coeff, uniq_l_ctr, l_ctr_counts = group_basis(mol)
 
     _ecpbas = _sorted_mol._ecpbas
@@ -166,17 +175,21 @@ def get_ecp(mol):
                     atm.data.ptr, bas.data.ptr, env.data.ptr,
                     li, lj, lk)
                 if err != 0:
-                    raise RuntimeError('ECP CUDA kernel')
+                    raise RuntimeError('ECP CUDA kernel failed.')
     coeff = cp.asarray(coeff)
     return coeff.T @ mat1 @ coeff
 
 
 def get_ecp_ip(mol, ip_type='ip', ecp_atoms=None):
     """
-    First derivative of ECP integrals, 
+    First derivative of ECP integrals
+
+    Returns:
+        CuPy array: [n_ecp_atoms, 3, nao, nao], 
+            reindex the first dimension acoording to ecp_atoms
     """
     if ecp_atoms is None:
-        ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
+        ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
 
     if ip_type == 'ip':
         fn = libecp.ECP_ip_cart
@@ -185,7 +198,7 @@ def get_ecp_ip(mol, ip_type='ip', ecp_atoms=None):
         raise ValueError('Invalid IP type')
 
     _sorted_mol, coeff, uniq_l_ctr, l_ctr_counts = group_basis(mol)
-    _ecpbas = mol._ecpbas
+    _ecpbas = mol._ecpbas.copy()
 
     ecpbas = select_basis(_ecpbas, ecp_atoms)
     ecpbas, uniq_lecp, lecp_counts, ecp_loc= sort_ecp_basis(ecpbas)
@@ -224,7 +237,7 @@ def get_ecp_ip(mol, ip_type='ip', ecp_atoms=None):
                     atm.data.ptr, bas.data.ptr, env.data.ptr,
                     li, lj, lk)
                 if err != 0:
-                    raise RuntimeError('ECP CUDA kernel')
+                    raise RuntimeError('ECP CUDA kernel failed.')
 
     coeff = cp.asarray(coeff)
     mat1 = contract('axij,jq->axiq', mat1, coeff)
@@ -234,6 +247,14 @@ def get_ecp_ip(mol, ip_type='ip', ecp_atoms=None):
 def get_ecp_ipip(mol, ip_type='ipipv', ecp_atoms=None):
     """
     Second derivatives of ECP integrals
+    Args:
+        ip_type: 
+            ipipv -> (i''|ecp|j)
+            ipvip -> (i'|ecp|j') 
+    
+    Returns:
+        CuPy array: [n_ecp_atoms, 9, nao, nao], 
+            reindex the first dimension acoording to ecp_atoms
     """
     if ecp_atoms is None:
         ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
@@ -287,7 +308,7 @@ def get_ecp_ipip(mol, ip_type='ipipv', ecp_atoms=None):
                     atm.data.ptr, bas.data.ptr, env.data.ptr,
                     li, lj, lk)
                 if err != 0:
-                    raise RuntimeError('ECP CUDA kernel')
+                    raise RuntimeError('ECP CUDA kernel failed.')
                 
     coeff = cp.asarray(coeff)
     mat1 = contract('axij,jq->axiq', mat1, coeff)
