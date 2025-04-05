@@ -17,6 +17,7 @@ Perodic 3-center 2-electron short-range Coulomb integral helper functions
 '''
 
 import ctypes
+import itertools
 import math
 import numpy as np
 import cupy as cp
@@ -41,6 +42,7 @@ __all__ = [
 
 libpbc.fill_int3c2e.restype = ctypes.c_int
 libpbc.overlap_img_counts.restype = ctypes.c_int
+libpbc.overlap_img_idx.restype = ctypes.c_int
 libpbc.sr_int3c2e_img_idx_sparse.restype = ctypes.c_int
 libpbc.conc_img_idx.restype = ctypes.c_int
 
@@ -258,19 +260,22 @@ def to_primitive_bas(cell):
 
     # prim shells are sorted. the mapping needs to be sorted accordingly.
     # The lookup stores the mapping for each angular momentum
-    p2c_mapping_lookup = []
-    for l in range(lmax+1):
+    c_ls = cell._bas[:,ANG_OF]
+    counts = [cell._bas[c_ls==l,NCTR_OF].sum() for l in range(lmax+1)]
+    c_shell_offsets = np.append(0, np.cumsum(counts))
+    p2c_mapping = []
+    for l, offset in enumerate(c_shell_offsets[:-1]):
         i, idx = np.unique(prim_to_ctr_mapping[ls==l], return_inverse=True)
         assert all(i[:-1] < i[1:])
-        p2c_mapping_lookup.append(idx)
+        p2c_mapping.append(idx + offset)
+    p2c_mapping = np.asarray(np.hstack(p2c_mapping), dtype=np.int32)
 
     # ao_idx transform the AOs in sorted cell into AOs in the original cell
-    ls = cell._bas[:,ANG_OF]
-    sorted_idx = np.hstack([np.where(ls==l)[0] for l in range(lmax+1)])
+    sorted_idx = np.hstack([np.where(c_ls==l)[0] for l in range(lmax+1)])
     ao_loc = cell.ao_loc
     ao_idx = np.array_split(np.arange(cell.nao), ao_loc[1:-1])
     ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
-    return pcell, p2c_mapping_lookup, ao_idx
+    return pcell, p2c_mapping, ao_idx
 
 class SRInt3c2eOpt:
     def __init__(self, cell, auxcell, omega, bvk_kmesh=None):
@@ -402,29 +407,13 @@ class SRInt3c2eOpt:
         # Keep a reference to these arrays, prevent releasing them upon returning the closure
         int3c2e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
         self.int3c2e_envs = int3c2e_envs
-        p2c_mapping_lookup = [cp.asarray(x, dtype=np.int32) for x in self.prim_to_ctr_mapping]
 
         log.debug1('prim_l_counts %s', self.cell0_prim_l_counts)
         log.debug1('ctr_l_counts %s', self.cell0_ctr_l_counts)
         c_shell_counts = self.cell0_ctr_l_counts
         c_shell_offsets = np.append(0, np.cumsum(c_shell_counts))
         p_shell_l_offsets = np.append(0, np.cumsum(self.cell0_prim_l_counts))
-
-        p2c_mapping = [p2c + offset for offset, p2c in zip(c_shell_offsets, p2c_mapping_lookup)]
-        p2c_mapping = cp.asarray(cp.hstack(p2c_mapping), dtype=np.int32)
-        ovlp_img_idx = cp.empty((nimgs,s_nbas,s_nbas), dtype=np.int32)
-        ovlp_img_counts = cp.zeros((sup_ncells,p_nbas,sup_ncells,p_nbas), dtype=np.int32)
-        err = libpbc.overlap_img_counts(
-            ctypes.cast(ovlp_img_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(ovlp_img_counts.data.ptr, ctypes.c_void_p),
-            ctypes.cast(p2c_mapping.data.ptr, ctypes.c_void_p),
-            ctypes.byref(int3c2e_envs),
-            ctypes.cast(exps.data.ptr, ctypes.c_void_p),
-            ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p))
-        cp.cuda.stream.Stream.null.synchronize()
-        if err != 0:
-            raise RuntimeError('overlap_img_counts failed')
-        log.timer_debug1('ovlp_img_counts', *cput0)
+        p2c_mapping = cp.asarray(self.prim_to_ctr_mapping, dtype=np.int32)
 
         def gen_img_idx(li, lj):
             t0 = log.init_timer()
@@ -435,24 +424,45 @@ class SRInt3c2eOpt:
             nctri = c_shell_counts[li]
             nctrj = c_shell_counts[lj]
 
-            counts = ovlp_img_counts[:,ish0:ish1,:,jsh0:jsh1].ravel()
-            bas_ij = cp.where(counts > 0)[0]
+            ovlp_img_counts = cp.zeros((sup_ncells*nprimi*sup_ncells*nprimj), dtype=np.int32)
+            err = libpbc.overlap_img_counts(
+                ctypes.cast(ovlp_img_counts.data.ptr, ctypes.c_void_p),
+                ctypes.cast(p2c_mapping.data.ptr, ctypes.c_void_p),
+                (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                ctypes.byref(int3c2e_envs),
+                ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+                ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p))
+            if err != 0:
+                raise RuntimeError('overlap_img_counts failed')
+
+            bas_ij = cp.asarray(cp.where(ovlp_img_counts > 0)[0], dtype=np.int32)
             ovlp_npairs = len(bas_ij)
             if ovlp_npairs == 0:
                 img_idx = offsets = bas_ij = pair_mapping = c_pair_idx = np.zeros(0, dtype=np.int32)
                 return img_idx, offsets, bas_ij, pair_mapping, c_pair_idx
 
-            counts = counts[bas_ij]
-            counts_sorting = (-counts).argsort()
+            counts_sorting = (-ovlp_img_counts[bas_ij]).argsort()
             bas_ij = bas_ij[counts_sorting]
-            nimgs_J = int(counts[counts_sorting[0]])
-            I, ish, J, jsh = cp.unravel_index(
-                bas_ij, (sup_ncells, nprimi, sup_ncells, nprimj))
-            ish += ish0
-            jsh += jsh0
-            bas_ij = cp.ravel_multi_index(
-                (I, ish, J, jsh), (sup_ncells, p_nbas, sup_ncells, p_nbas))
-            bas_ij = cp.asarray(bas_ij, dtype=np.int32, order='C')
+            ovlp_img_counts = ovlp_img_counts[bas_ij]
+            nimgs_J = int(ovlp_img_counts[0])
+            ovlp_img_offsets = cp.empty(ovlp_npairs+1, dtype=np.int32)
+            ovlp_img_offsets[0] = 0
+            cp.cumsum(ovlp_img_counts, out=ovlp_img_offsets[1:])
+            tot_imgs = int(ovlp_img_offsets[ovlp_npairs])
+            ovlp_img_idx = cp.empty(tot_imgs, dtype=np.int32)
+            err = libpbc.overlap_img_idx(
+                ctypes.cast(ovlp_img_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ovlp_img_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(ovlp_npairs),
+                (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                ctypes.byref(int3c2e_envs),
+                ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+                ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p))
+            if err != 0:
+                raise RuntimeError('overlap_img_counts failed')
+            log.timer_debug1('ovlp_img_idx', *cput0)
+            ovlp_img_counts = counts_sorting = None
 
             nimgs_IJ = nimgs + nimgs_J * 6
             if vol < 216:
@@ -466,11 +476,11 @@ class SRInt3c2eOpt:
                 ctypes.cast(img_idx_sparse.data.ptr, ctypes.c_void_p),
                 ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(ovlp_npairs),
                 ctypes.cast(ovlp_img_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(ovlp_img_counts.data.ptr, ctypes.c_void_p),
-                ctypes.byref(int3c2e_envs),
+                ctypes.cast(ovlp_img_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(ovlp_npairs),
                 (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                ctypes.byref(int3c2e_envs),
                 ctypes.cast(exps.data.ptr, ctypes.c_void_p),
                 ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
                 ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p))
@@ -481,6 +491,7 @@ class SRInt3c2eOpt:
             if npairs == 0:
                 img_idx = offsets = bas_ij = pair_mapping = c_pair_idx = np.zeros(0, dtype=np.int32)
                 return img_idx, offsets, bas_ij, pair_mapping, c_pair_idx
+
             counts_sorting = (-img_counts.ravel()).argsort()[:npairs]
             counts_sorting = cp.asarray(counts_sorting, dtype=np.int32)
             bas_ij = bas_ij[counts_sorting]
@@ -506,11 +517,14 @@ class SRInt3c2eOpt:
             # bas_ij stores the important primitive-pair indices.
             # p2c_mapping converts the bas_ij to contracted GTO-pair indices.
             I, i, J, j = cp.unravel_index(
-                bas_ij, (sup_ncells, p_nbas, sup_ncells, p_nbas))
-            i -= ish0
-            j -= jsh0
-            ic = p2c_mapping_lookup[li][i]
-            jc = p2c_mapping_lookup[lj][j]
+                bas_ij, (sup_ncells, nprimi, sup_ncells, nprimj))
+            i += ish0
+            j += jsh0
+            bas_ij = cp.ravel_multi_index(
+                (I, i, J, j), (sup_ncells, p_nbas, sup_ncells, p_nbas))
+            bas_ij = cp.asarray(bas_ij, dtype=np.int32)
+            ic = p2c_mapping[i] - c_shell_offsets[li]
+            jc = p2c_mapping[j] - c_shell_offsets[lj]
             I %= bvk_ncells
             J %= bvk_ncells
             reduced_pair_idx = cp.ravel_multi_index(

@@ -365,6 +365,44 @@ def _solve_cderi(cd_j2c, j3c, j2ctag):
         j3c = solve_triangular(cd_j2c, j3c.reshape(-1,naux).T, lower=True)
         return j3c.reshape(naux,nao,nao)
 
+#def build_cderi_compressed(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
+#                           linear_dep_threshold=LINEAR_DEP_THR):
+#    log = logger.new_logger(cell)
+#    t0 = log.init_timer()
+#    kmesh = None
+#    kpts = None
+#
+#    j3c = sr_aux_e2(cell, auxcell, -omega)
+#    t1 = log.timer('pass1: int3c2e', *t0)
+#
+#    log.debug('Generate auxcell 2c2e integrals')
+#    j2c = _get_2c2e(auxcell, kpts, omega, with_long_range) # on CPU
+#    j2c = j2c[0].real
+#    t1 = log.timer('int2c2e', *t1)
+#
+#    cderi = {}
+#    cderip = {}
+#    if with_long_range:
+#        ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, kmesh, omega, log)
+#        for pqG, auxG_conj in ft_ao_iter():
+#            # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
+#            # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
+#            # functions |P> are assumed to be real
+#            j3c += contract('pqG,Gr->pqr', pqG[0], auxG_conj).real
+#
+#    prefer_ed = PREFER_ED
+#    if cell.dimension == 2:
+#        prefer_ed = True
+#    cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
+#        j2c, prefer_ed, linear_dep_threshold)
+#
+#    cderi[0,0] = _solve_cderi(cd_j2c, j3c, j2ctag)
+#    if cd_j2c_negative is not None:
+#        assert cell.dimension == 2
+#        cderip[0,0] = _solve_cderi(cd_j2c_negative, j3c, j2ctag)
+#    t1 = log.timer('pass2: solve cderi', *t1)
+#    return cderi, cderip
+
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
     cell_exps, cs = extract_pgto_params(cell, 'diffused')

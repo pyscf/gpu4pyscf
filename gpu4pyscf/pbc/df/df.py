@@ -70,8 +70,12 @@ class GDF(lib.StreamObject):
         self.auxcell = auxcell
 
         t1 = (logger.process_clock(), logger.perf_counter())
-        self._cderi, self._cderip = rsdf_builder.build_cderi(
-            cell, auxcell, self.kpts, j_only=j_only)
+        if self.kpts is None or is_zero(self.kpts):
+            self._cderi, self._cderip = rsdf_builder.build_cderi(
+                cell, auxcell, self.kpts, j_only=j_only)
+        else:
+            self._cderi, self._cderip = rsdf_builder.build_cderi(
+                cell, auxcell, self.kpts, j_only=j_only)
         t1 = logger.timer_debug1(self, 'j3c', *t1)
         return self
 
