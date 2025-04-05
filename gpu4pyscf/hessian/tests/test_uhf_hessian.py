@@ -138,7 +138,8 @@ class KnownValues(unittest.TestCase):
         vk2[3*nao:] = (mo_coeff[1].T @ vk[1] @ moccb).reshape(1,-1)
         assert cupy.linalg.norm(vj2 - vj_mo) < 1e-5
         assert cupy.linalg.norm(vk2 - vk_mo) < 1e-5
-
+        mol1.stdout.close()
+        
 if __name__ == "__main__":
     print("Full Tests for UHF Hessian")
     unittest.main()

@@ -148,7 +148,7 @@ void type1_cart_ip1(double *gctr,
     const int ksh = tasks[task_id + 2*ntasks];
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
-    const int ecp_id = ecpbas[ATOM_OF+ecploc[ksh]*BAS_SLOTS];
+    const int ecp_id = ecpbas[ECP_ATOM_ID+ecploc[ksh]*BAS_SLOTS];
     gctr += 3*ecp_id*nao*nao + ioff*nao + joff;
 
     __shared__ double gctr_smem[NF_MAX*NF_MAX*3];
@@ -205,7 +205,7 @@ void type1_cart_ipipv(double *gctr,
 
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
-    const int ecp_id = ecpbas[ATOM_OF+ecploc[ksh]*BAS_SLOTS];
+    const int ecp_id = ecpbas[ECP_ATOM_ID+ecploc[ksh]*BAS_SLOTS];
     gctr += ioff*nao + joff + 9*ecp_id*nao*nao;
 
     constexpr int nfi2_max = (AO_LMAX+3)*(AO_LMAX+4)/2;
@@ -262,7 +262,7 @@ void type1_cart_ipvip(double *gctr,
 
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
-    const int ecp_id = ecpbas[ATOM_OF+ecploc[ksh]*BAS_SLOTS];
+    const int ecp_id = ecpbas[ECP_ATOM_ID+ecploc[ksh]*BAS_SLOTS];
     gctr += ioff*nao + joff + 9*ecp_id*nao*nao;
 
     constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;

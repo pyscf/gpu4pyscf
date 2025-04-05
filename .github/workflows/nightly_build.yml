@@ -85,5 +85,5 @@ jobs:
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
           -v $GITHUB_WORKSPACE:/workspace wxj6000/gpu4pyscf:latest \
-          /bin/bash -c "cd /workspace && source build.sh && pytest gpu4pyscf/tests/test_benchmark_ecp.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_ecp_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+          /bin/bash -c "cd /workspace && source build.sh && pytest gpu4pyscf/tests/test_benchmark_ecp.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_ecp_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
 
