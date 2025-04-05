@@ -1375,7 +1375,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     for ao, idx, weight, coords \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         if mo_coeff is None:
-            rho = eval_rho(_sorted_mol, ao, dms[0][idx[:,None],idx], xctype='GGA', hermi=1)
+            rho = eval_rho(_sorted_mol, ao, dms[idx[:,None],idx], xctype='GGA', hermi=1)
         else:
             mo_coeff_mask = mo_coeff[idx,:]
             rho = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, 'GGA')
