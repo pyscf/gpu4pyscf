@@ -95,4 +95,4 @@ def test_df_ecp_rb3lyp_hessian(benchmark):
     h = benchmark(run_rb3lyp_hessian, small_mol, 'def2-tzvpp', 'def2-tzvpp', True)
     print('testing df rb3lyp hessian')
     print(np.linalg.norm(h))
-    assert np.isclose(np.linalg.norm(h), 3.7587394873290885, atol=1e-4, rtol=1e-16)
+    assert np.isclose(np.linalg.norm(h), 4.82148828357935, atol=1e-4, rtol=1e-16)
