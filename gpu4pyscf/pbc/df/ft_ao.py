@@ -170,7 +170,7 @@ class FTOpt:
         _env = cp.array(_scale_sp_ctr_coeff(bvkcell))
         ao_loc = cp.array(bvkcell.ao_loc)
         aft_envs = AFTIntEnvVars(
-            bvkcell.natm, bvkcell.nbas, bvk_ncells, nimgs, _atm.data.ptr,
+            cell.natm, cell.nbas, bvk_ncells, nimgs, _atm.data.ptr,
             _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr, Ls.data.ptr
         )
         # Keep a reference to these arrays, prevent releasing them upon returning the closure
@@ -225,7 +225,8 @@ class FTOpt:
                     ctypes.byref(aft_envs),
                     ctypes.cast(exps.data.ptr, ctypes.c_void_p),
                     ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
-                    ctypes.c_float(log_cutoff), ctypes.c_int(permutation_symmetry))
+                    ctypes.c_float(log_cutoff),
+                    ctypes.c_int(int(permutation_symmetry)))
                 if err != 0:
                     raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
                 bas_ij = cp.asarray(cp.where(img_counts > 0)[0], dtype=np.int32)
@@ -253,7 +254,7 @@ class FTOpt:
                     ctypes.byref(aft_envs),
                     ctypes.cast(exps.data.ptr, ctypes.c_void_p),
                     ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
-                    ctypes.float(log_cutoff))
+                    ctypes.c_float(log_cutoff))
                 if err != 0:
                     raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
                 t1 = log.timer_debug1('ovlp_img_idx', *t1)

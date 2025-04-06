@@ -370,19 +370,50 @@ def _solve_cderi(cd_j2c, j3c, j2ctag):
         j3c = solve_triangular(cd_j2c, j3c.reshape(-1,naux).T, lower=True)
         return j3c.reshape(naux,nao,nao)
 
-def build_cderi_gamma_compressed(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
+def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
                                  linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
-    kpts = None
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega)
+    naux = int3c2e_opt.aux_coeff.shape[1]
 
-    j3c = sr_aux_e2(cell, auxcell, -omega)
+    c_shell_counts = np.asarray(int3c2e_opt.cell0_ctr_l_counts)
+    lmax = len(c_shell_counts) - 1
+    uniq_l = np.arange(lmax+1)
+    if cell.cart:
+        nf = (uniq_l + 1) * (uniq_l + 2) // 2
+    else:
+        nf = uniq_l * 2 + 1
+    c_l_offsets = np.append(0, np.cumsum(c_shell_counts*nf))
+    lmax = cell._bas[:,ANG_OF].max()
+    c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
+
+    size = 0
+    for (li, lj), (_, _, _, _, c_pair_idx) in int3c2e_opt.img_idx_cache.items():
+        n_pairs = len(c_pair_idx)
+        size += nf[li] * nf[lj] * n_pairs
+    j3c = cp.zeros((size, naux))
+    p0 = p1 = 0
+    for li, lj, c_pair_idx, compressed_eri3c in int3c2e_opt.int3c2e_kernel():
+        i0, i1 = c_l_offsets[li:li+2]
+        j0, j1 = c_l_offsets[lj:lj+2]
+        nctrj = c_shell_counts[lj]
+        nfi = (li+1)*(li+2)//2
+        nfj = (lj+1)*(lj+2)//2
+        n_pairs = len(c_pair_idx)
+        compressed_eri3c = compressed_eri3c.reshape(-1,nfi*nfj*n_pairs)
+        compressed_eri3c = compressed_eri3c.T.dot(cp.asarray(int3c2e_opt.aux_coeff))
+        if not cell.cart:
+            compressed_eri3c = compressed_eri3c.reshape(nfj,nfi,n_pairs,naux)
+            compressed_eri3c = contract('qj,qpmk->jpmk', c2s[lj], compressed_eri3c)
+            compressed_eri3c = contract('pi,jpmk->jimk', c2s[li], compressed_eri3c)
+            nfi = li * 2 + 1
+            nfj = lj * 2 + 1
+        p0, p1 = p1, p1 + nfi*nfj*n_pairs
+        j3c[p0:p1] = compressed_eri3c.reshape(nfj*nfi*n_pairs,naux)
+        compressed_eri3c = None
     t1 = log.timer('pass1: int3c2e', *t0)
-
-    log.debug('Generate auxcell 2c2e integrals')
-    j2c = _get_2c2e(auxcell, kpts, omega, with_long_range) # on CPU
-    j2c = j2c[0].real
-    t1 = log.timer('int2c2e', *t1)
+    # FIXME: sort j3c
 
     cderi = {}
     cderip = {}
@@ -446,16 +477,18 @@ def build_cderi_gamma_compressed(cell, auxcell, omega=OMEGA_MIN, with_long_range
         Gblksize = min(Gblksize, ngrids, 16384)
         logger.debug1(cell, 'Gblksize = %d', Gblksize)
 
+        permutation_symmetry = 1
+        ij_tasks = [(i, j) for i in range(n_groups) for j in range(i+1)]
+
         coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws)
         auxG_conj = cp.asarray(ft_ao.ft_ao(auxcell, Gv).conj(), order='C')
         auxG_conj *= cp.asarray(coulG[:,None])
+
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = len(Gv)
             # Padding zeros, allowing idle threads to access these data
             GvT = cp.array(Gv[p0:p1].T, order='C', copy=True)
             GvT = cp.append(GvT, cp.zeros(THREADS))
-            permutation_symmetry = True
-            ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
 
             for i, j in ij_tasks:
                 li = uniq_l[i]
@@ -535,6 +568,11 @@ def build_cderi_gamma_compressed(cell, auxcell, omega=OMEGA_MIN, with_long_range
                 # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
                 # functions |P> are assumed to be real
                 j3c += contract('xG,Gr->xr', pqG, auxG_conj[p0:p1]).real
+
+    log.debug('Generate auxcell 2c2e integrals')
+    j2c = _get_2c2e(auxcell, kpts, omega, with_long_range) # on CPU
+    j2c = j2c[0].real
+    t1 = log.timer('int2c2e', *t1)
 
     prefer_ed = PREFER_ED
     if cell.dimension == 2:

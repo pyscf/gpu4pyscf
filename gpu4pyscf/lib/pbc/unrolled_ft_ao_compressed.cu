@@ -95,9 +95,9 @@ void ft_ao_unrolled_00(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
         }
     }
     if (Gv_id < nGv) {
-        double *aft_tensor = out + (1 * pair_ij * nGv + Gv_id) * OF_COMPLEX;
-        aft_tensor[0] = gout0R;
-        aft_tensor[1] = gout0I;
+        double *aft_tensor = out + (pair_ij * nGv + Gv_id) * OF_COMPLEX;
+        aft_tensor[0*npairs_ij*nGv*2  ] = gout0R;
+        aft_tensor[0*npairs_ij*nGv*2+1] = gout0I;
     }
 }
 
@@ -218,13 +218,13 @@ void ft_ao_unrolled_01(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
         }
     }
     if (Gv_id < nGv) {
-        double *aft_tensor = out + (3 * pair_ij * nGv + Gv_id) * OF_COMPLEX;
-        aft_tensor[0] = gout0R;
-        aft_tensor[1] = gout0I;
-        aft_tensor[2] = gout1R;
-        aft_tensor[3] = gout1I;
-        aft_tensor[4] = gout2R;
-        aft_tensor[5] = gout2I;
+        double *aft_tensor = out + (pair_ij * nGv + Gv_id) * OF_COMPLEX;
+        aft_tensor[0*npairs_ij*nGv*2  ] = gout0R;
+        aft_tensor[0*npairs_ij*nGv*2+1] = gout0I;
+        aft_tensor[1*npairs_ij*nGv*2  ] = gout1R;
+        aft_tensor[1*npairs_ij*nGv*2+1] = gout1I;
+        aft_tensor[2*npairs_ij*nGv*2  ] = gout2R;
+        aft_tensor[2*npairs_ij*nGv*2+1] = gout2I;
     }
 }
 
@@ -381,19 +381,19 @@ void ft_ao_unrolled_02(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
         }
     }
     if (Gv_id < nGv) {
-        double *aft_tensor = out + (6 * pair_ij * nGv + Gv_id) * OF_COMPLEX;
-        aft_tensor[0] = gout0R;
-        aft_tensor[1] = gout0I;
-        aft_tensor[2] = gout1R;
-        aft_tensor[3] = gout1I;
-        aft_tensor[4] = gout2R;
-        aft_tensor[5] = gout2I;
-        aft_tensor[6] = gout3R;
-        aft_tensor[7] = gout3I;
-        aft_tensor[8] = gout4R;
-        aft_tensor[9] = gout4I;
-        aft_tensor[10] = gout5R;
-        aft_tensor[11] = gout5I;
+        double *aft_tensor = out + (pair_ij * nGv + Gv_id) * OF_COMPLEX;
+        aft_tensor[0*npairs_ij*nGv*2  ] = gout0R;
+        aft_tensor[0*npairs_ij*nGv*2+1] = gout0I;
+        aft_tensor[1*npairs_ij*nGv*2  ] = gout1R;
+        aft_tensor[1*npairs_ij*nGv*2+1] = gout1I;
+        aft_tensor[2*npairs_ij*nGv*2  ] = gout2R;
+        aft_tensor[2*npairs_ij*nGv*2+1] = gout2I;
+        aft_tensor[3*npairs_ij*nGv*2  ] = gout3R;
+        aft_tensor[3*npairs_ij*nGv*2+1] = gout3I;
+        aft_tensor[4*npairs_ij*nGv*2  ] = gout4R;
+        aft_tensor[4*npairs_ij*nGv*2+1] = gout4I;
+        aft_tensor[5*npairs_ij*nGv*2  ] = gout5R;
+        aft_tensor[5*npairs_ij*nGv*2+1] = gout5I;
     }
 }
 
@@ -508,13 +508,13 @@ void ft_ao_unrolled_10(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
         }
     }
     if (Gv_id < nGv) {
-        double *aft_tensor = out + (3 * pair_ij * nGv + Gv_id) * OF_COMPLEX;
-        aft_tensor[0] = gout0R;
-        aft_tensor[1] = gout0I;
-        aft_tensor[2] = gout1R;
-        aft_tensor[3] = gout1I;
-        aft_tensor[4] = gout2R;
-        aft_tensor[5] = gout2I;
+        double *aft_tensor = out + (pair_ij * nGv + Gv_id) * OF_COMPLEX;
+        aft_tensor[0*npairs_ij*nGv*2  ] = gout0R;
+        aft_tensor[0*npairs_ij*nGv*2+1] = gout0I;
+        aft_tensor[1*npairs_ij*nGv*2  ] = gout1R;
+        aft_tensor[1*npairs_ij*nGv*2+1] = gout1I;
+        aft_tensor[2*npairs_ij*nGv*2  ] = gout2R;
+        aft_tensor[2*npairs_ij*nGv*2+1] = gout2I;
     }
 }
 
@@ -683,25 +683,25 @@ void ft_ao_unrolled_11(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
         }
     }
     if (Gv_id < nGv) {
-        double *aft_tensor = out + (9 * pair_ij * nGv + Gv_id) * OF_COMPLEX;
-        aft_tensor[0] = gout0R;
-        aft_tensor[1] = gout0I;
-        aft_tensor[6] = gout3R;
-        aft_tensor[7] = gout3I;
-        aft_tensor[12] = gout6R;
-        aft_tensor[13] = gout6I;
-        aft_tensor[2] = gout1R;
-        aft_tensor[3] = gout1I;
-        aft_tensor[8] = gout4R;
-        aft_tensor[9] = gout4I;
-        aft_tensor[14] = gout7R;
-        aft_tensor[15] = gout7I;
-        aft_tensor[4] = gout2R;
-        aft_tensor[5] = gout2I;
-        aft_tensor[10] = gout5R;
-        aft_tensor[11] = gout5I;
-        aft_tensor[16] = gout8R;
-        aft_tensor[17] = gout8I;
+        double *aft_tensor = out + (pair_ij * nGv + Gv_id) * OF_COMPLEX;
+        aft_tensor[0*npairs_ij*nGv*2  ] = gout0R;
+        aft_tensor[0*npairs_ij*nGv*2+1] = gout0I;
+        aft_tensor[3*npairs_ij*nGv*2  ] = gout3R;
+        aft_tensor[3*npairs_ij*nGv*2+1] = gout3I;
+        aft_tensor[6*npairs_ij*nGv*2  ] = gout6R;
+        aft_tensor[6*npairs_ij*nGv*2+1] = gout6I;
+        aft_tensor[1*npairs_ij*nGv*2  ] = gout1R;
+        aft_tensor[1*npairs_ij*nGv*2+1] = gout1I;
+        aft_tensor[4*npairs_ij*nGv*2  ] = gout4R;
+        aft_tensor[4*npairs_ij*nGv*2+1] = gout4I;
+        aft_tensor[7*npairs_ij*nGv*2  ] = gout7R;
+        aft_tensor[7*npairs_ij*nGv*2+1] = gout7I;
+        aft_tensor[2*npairs_ij*nGv*2  ] = gout2R;
+        aft_tensor[2*npairs_ij*nGv*2+1] = gout2I;
+        aft_tensor[5*npairs_ij*nGv*2  ] = gout5R;
+        aft_tensor[5*npairs_ij*nGv*2+1] = gout5I;
+        aft_tensor[8*npairs_ij*nGv*2  ] = gout8R;
+        aft_tensor[8*npairs_ij*nGv*2+1] = gout8I;
     }
 }
 
@@ -944,43 +944,43 @@ void ft_ao_unrolled_12(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
         }
     }
     if (Gv_id < nGv) {
-        double *aft_tensor = out + (18 * pair_ij * nGv + Gv_id) * OF_COMPLEX;
-        aft_tensor[0] = gout0R;
-        aft_tensor[1] = gout0I;
-        aft_tensor[6] = gout3R;
-        aft_tensor[7] = gout3I;
-        aft_tensor[12] = gout6R;
-        aft_tensor[13] = gout6I;
-        aft_tensor[18] = gout9R;
-        aft_tensor[19] = gout9I;
-        aft_tensor[24] = gout12R;
-        aft_tensor[25] = gout12I;
-        aft_tensor[30] = gout15R;
-        aft_tensor[31] = gout15I;
-        aft_tensor[2] = gout1R;
-        aft_tensor[3] = gout1I;
-        aft_tensor[8] = gout4R;
-        aft_tensor[9] = gout4I;
-        aft_tensor[14] = gout7R;
-        aft_tensor[15] = gout7I;
-        aft_tensor[20] = gout10R;
-        aft_tensor[21] = gout10I;
-        aft_tensor[26] = gout13R;
-        aft_tensor[27] = gout13I;
-        aft_tensor[32] = gout16R;
-        aft_tensor[33] = gout16I;
-        aft_tensor[4] = gout2R;
-        aft_tensor[5] = gout2I;
-        aft_tensor[10] = gout5R;
-        aft_tensor[11] = gout5I;
-        aft_tensor[16] = gout8R;
-        aft_tensor[17] = gout8I;
-        aft_tensor[22] = gout11R;
-        aft_tensor[23] = gout11I;
-        aft_tensor[28] = gout14R;
-        aft_tensor[29] = gout14I;
-        aft_tensor[34] = gout17R;
-        aft_tensor[35] = gout17I;
+        double *aft_tensor = out + (pair_ij * nGv + Gv_id) * OF_COMPLEX;
+        aft_tensor[0*npairs_ij*nGv*2  ] = gout0R;
+        aft_tensor[0*npairs_ij*nGv*2+1] = gout0I;
+        aft_tensor[3*npairs_ij*nGv*2  ] = gout3R;
+        aft_tensor[3*npairs_ij*nGv*2+1] = gout3I;
+        aft_tensor[6*npairs_ij*nGv*2  ] = gout6R;
+        aft_tensor[6*npairs_ij*nGv*2+1] = gout6I;
+        aft_tensor[9*npairs_ij*nGv*2  ] = gout9R;
+        aft_tensor[9*npairs_ij*nGv*2+1] = gout9I;
+        aft_tensor[12*npairs_ij*nGv*2  ] = gout12R;
+        aft_tensor[12*npairs_ij*nGv*2+1] = gout12I;
+        aft_tensor[15*npairs_ij*nGv*2  ] = gout15R;
+        aft_tensor[15*npairs_ij*nGv*2+1] = gout15I;
+        aft_tensor[1*npairs_ij*nGv*2  ] = gout1R;
+        aft_tensor[1*npairs_ij*nGv*2+1] = gout1I;
+        aft_tensor[4*npairs_ij*nGv*2  ] = gout4R;
+        aft_tensor[4*npairs_ij*nGv*2+1] = gout4I;
+        aft_tensor[7*npairs_ij*nGv*2  ] = gout7R;
+        aft_tensor[7*npairs_ij*nGv*2+1] = gout7I;
+        aft_tensor[10*npairs_ij*nGv*2  ] = gout10R;
+        aft_tensor[10*npairs_ij*nGv*2+1] = gout10I;
+        aft_tensor[13*npairs_ij*nGv*2  ] = gout13R;
+        aft_tensor[13*npairs_ij*nGv*2+1] = gout13I;
+        aft_tensor[16*npairs_ij*nGv*2  ] = gout16R;
+        aft_tensor[16*npairs_ij*nGv*2+1] = gout16I;
+        aft_tensor[2*npairs_ij*nGv*2  ] = gout2R;
+        aft_tensor[2*npairs_ij*nGv*2+1] = gout2I;
+        aft_tensor[5*npairs_ij*nGv*2  ] = gout5R;
+        aft_tensor[5*npairs_ij*nGv*2+1] = gout5I;
+        aft_tensor[8*npairs_ij*nGv*2  ] = gout8R;
+        aft_tensor[8*npairs_ij*nGv*2+1] = gout8I;
+        aft_tensor[11*npairs_ij*nGv*2  ] = gout11R;
+        aft_tensor[11*npairs_ij*nGv*2+1] = gout11I;
+        aft_tensor[14*npairs_ij*nGv*2  ] = gout14R;
+        aft_tensor[14*npairs_ij*nGv*2+1] = gout14I;
+        aft_tensor[17*npairs_ij*nGv*2  ] = gout17R;
+        aft_tensor[17*npairs_ij*nGv*2+1] = gout17I;
     }
 }
 
@@ -1119,19 +1119,19 @@ void ft_ao_unrolled_20(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
         }
     }
     if (Gv_id < nGv) {
-        double *aft_tensor = out + (6 * pair_ij * nGv + Gv_id) * OF_COMPLEX;
-        aft_tensor[0] = gout0R;
-        aft_tensor[1] = gout0I;
-        aft_tensor[2] = gout1R;
-        aft_tensor[3] = gout1I;
-        aft_tensor[4] = gout2R;
-        aft_tensor[5] = gout2I;
-        aft_tensor[6] = gout3R;
-        aft_tensor[7] = gout3I;
-        aft_tensor[8] = gout4R;
-        aft_tensor[9] = gout4I;
-        aft_tensor[10] = gout5R;
-        aft_tensor[11] = gout5I;
+        double *aft_tensor = out + (pair_ij * nGv + Gv_id) * OF_COMPLEX;
+        aft_tensor[0*npairs_ij*nGv*2  ] = gout0R;
+        aft_tensor[0*npairs_ij*nGv*2+1] = gout0I;
+        aft_tensor[1*npairs_ij*nGv*2  ] = gout1R;
+        aft_tensor[1*npairs_ij*nGv*2+1] = gout1I;
+        aft_tensor[2*npairs_ij*nGv*2  ] = gout2R;
+        aft_tensor[2*npairs_ij*nGv*2+1] = gout2I;
+        aft_tensor[3*npairs_ij*nGv*2  ] = gout3R;
+        aft_tensor[3*npairs_ij*nGv*2+1] = gout3I;
+        aft_tensor[4*npairs_ij*nGv*2  ] = gout4R;
+        aft_tensor[4*npairs_ij*nGv*2+1] = gout4I;
+        aft_tensor[5*npairs_ij*nGv*2  ] = gout5R;
+        aft_tensor[5*npairs_ij*nGv*2+1] = gout5I;
     }
 }
 
@@ -1362,43 +1362,43 @@ void ft_ao_unrolled_21(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
         }
     }
     if (Gv_id < nGv) {
-        double *aft_tensor = out + (18 * pair_ij * nGv + Gv_id) * OF_COMPLEX;
-        aft_tensor[0] = gout0R;
-        aft_tensor[1] = gout0I;
-        aft_tensor[12] = gout6R;
-        aft_tensor[13] = gout6I;
-        aft_tensor[24] = gout12R;
-        aft_tensor[25] = gout12I;
-        aft_tensor[2] = gout1R;
-        aft_tensor[3] = gout1I;
-        aft_tensor[14] = gout7R;
-        aft_tensor[15] = gout7I;
-        aft_tensor[26] = gout13R;
-        aft_tensor[27] = gout13I;
-        aft_tensor[4] = gout2R;
-        aft_tensor[5] = gout2I;
-        aft_tensor[16] = gout8R;
-        aft_tensor[17] = gout8I;
-        aft_tensor[28] = gout14R;
-        aft_tensor[29] = gout14I;
-        aft_tensor[6] = gout3R;
-        aft_tensor[7] = gout3I;
-        aft_tensor[18] = gout9R;
-        aft_tensor[19] = gout9I;
-        aft_tensor[30] = gout15R;
-        aft_tensor[31] = gout15I;
-        aft_tensor[8] = gout4R;
-        aft_tensor[9] = gout4I;
-        aft_tensor[20] = gout10R;
-        aft_tensor[21] = gout10I;
-        aft_tensor[32] = gout16R;
-        aft_tensor[33] = gout16I;
-        aft_tensor[10] = gout5R;
-        aft_tensor[11] = gout5I;
-        aft_tensor[22] = gout11R;
-        aft_tensor[23] = gout11I;
-        aft_tensor[34] = gout17R;
-        aft_tensor[35] = gout17I;
+        double *aft_tensor = out + (pair_ij * nGv + Gv_id) * OF_COMPLEX;
+        aft_tensor[0*npairs_ij*nGv*2  ] = gout0R;
+        aft_tensor[0*npairs_ij*nGv*2+1] = gout0I;
+        aft_tensor[6*npairs_ij*nGv*2  ] = gout6R;
+        aft_tensor[6*npairs_ij*nGv*2+1] = gout6I;
+        aft_tensor[12*npairs_ij*nGv*2  ] = gout12R;
+        aft_tensor[12*npairs_ij*nGv*2+1] = gout12I;
+        aft_tensor[1*npairs_ij*nGv*2  ] = gout1R;
+        aft_tensor[1*npairs_ij*nGv*2+1] = gout1I;
+        aft_tensor[7*npairs_ij*nGv*2  ] = gout7R;
+        aft_tensor[7*npairs_ij*nGv*2+1] = gout7I;
+        aft_tensor[13*npairs_ij*nGv*2  ] = gout13R;
+        aft_tensor[13*npairs_ij*nGv*2+1] = gout13I;
+        aft_tensor[2*npairs_ij*nGv*2  ] = gout2R;
+        aft_tensor[2*npairs_ij*nGv*2+1] = gout2I;
+        aft_tensor[8*npairs_ij*nGv*2  ] = gout8R;
+        aft_tensor[8*npairs_ij*nGv*2+1] = gout8I;
+        aft_tensor[14*npairs_ij*nGv*2  ] = gout14R;
+        aft_tensor[14*npairs_ij*nGv*2+1] = gout14I;
+        aft_tensor[3*npairs_ij*nGv*2  ] = gout3R;
+        aft_tensor[3*npairs_ij*nGv*2+1] = gout3I;
+        aft_tensor[9*npairs_ij*nGv*2  ] = gout9R;
+        aft_tensor[9*npairs_ij*nGv*2+1] = gout9I;
+        aft_tensor[15*npairs_ij*nGv*2  ] = gout15R;
+        aft_tensor[15*npairs_ij*nGv*2+1] = gout15I;
+        aft_tensor[4*npairs_ij*nGv*2  ] = gout4R;
+        aft_tensor[4*npairs_ij*nGv*2+1] = gout4I;
+        aft_tensor[10*npairs_ij*nGv*2  ] = gout10R;
+        aft_tensor[10*npairs_ij*nGv*2+1] = gout10I;
+        aft_tensor[16*npairs_ij*nGv*2  ] = gout16R;
+        aft_tensor[16*npairs_ij*nGv*2+1] = gout16I;
+        aft_tensor[5*npairs_ij*nGv*2  ] = gout5R;
+        aft_tensor[5*npairs_ij*nGv*2+1] = gout5I;
+        aft_tensor[11*npairs_ij*nGv*2  ] = gout11R;
+        aft_tensor[11*npairs_ij*nGv*2+1] = gout11I;
+        aft_tensor[17*npairs_ij*nGv*2  ] = gout17R;
+        aft_tensor[17*npairs_ij*nGv*2+1] = gout17I;
     }
 }
 
@@ -1767,79 +1767,79 @@ void ft_ao_unrolled_22(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
         }
     }
     if (Gv_id < nGv) {
-        double *aft_tensor = out + (36 * pair_ij * nGv + Gv_id) * OF_COMPLEX;
-        aft_tensor[0] = gout0R;
-        aft_tensor[1] = gout0I;
-        aft_tensor[12] = gout6R;
-        aft_tensor[13] = gout6I;
-        aft_tensor[24] = gout12R;
-        aft_tensor[25] = gout12I;
-        aft_tensor[36] = gout18R;
-        aft_tensor[37] = gout18I;
-        aft_tensor[48] = gout24R;
-        aft_tensor[49] = gout24I;
-        aft_tensor[60] = gout30R;
-        aft_tensor[61] = gout30I;
-        aft_tensor[2] = gout1R;
-        aft_tensor[3] = gout1I;
-        aft_tensor[14] = gout7R;
-        aft_tensor[15] = gout7I;
-        aft_tensor[26] = gout13R;
-        aft_tensor[27] = gout13I;
-        aft_tensor[38] = gout19R;
-        aft_tensor[39] = gout19I;
-        aft_tensor[50] = gout25R;
-        aft_tensor[51] = gout25I;
-        aft_tensor[62] = gout31R;
-        aft_tensor[63] = gout31I;
-        aft_tensor[4] = gout2R;
-        aft_tensor[5] = gout2I;
-        aft_tensor[16] = gout8R;
-        aft_tensor[17] = gout8I;
-        aft_tensor[28] = gout14R;
-        aft_tensor[29] = gout14I;
-        aft_tensor[40] = gout20R;
-        aft_tensor[41] = gout20I;
-        aft_tensor[52] = gout26R;
-        aft_tensor[53] = gout26I;
-        aft_tensor[64] = gout32R;
-        aft_tensor[65] = gout32I;
-        aft_tensor[6] = gout3R;
-        aft_tensor[7] = gout3I;
-        aft_tensor[18] = gout9R;
-        aft_tensor[19] = gout9I;
-        aft_tensor[30] = gout15R;
-        aft_tensor[31] = gout15I;
-        aft_tensor[42] = gout21R;
-        aft_tensor[43] = gout21I;
-        aft_tensor[54] = gout27R;
-        aft_tensor[55] = gout27I;
-        aft_tensor[66] = gout33R;
-        aft_tensor[67] = gout33I;
-        aft_tensor[8] = gout4R;
-        aft_tensor[9] = gout4I;
-        aft_tensor[20] = gout10R;
-        aft_tensor[21] = gout10I;
-        aft_tensor[32] = gout16R;
-        aft_tensor[33] = gout16I;
-        aft_tensor[44] = gout22R;
-        aft_tensor[45] = gout22I;
-        aft_tensor[56] = gout28R;
-        aft_tensor[57] = gout28I;
-        aft_tensor[68] = gout34R;
-        aft_tensor[69] = gout34I;
-        aft_tensor[10] = gout5R;
-        aft_tensor[11] = gout5I;
-        aft_tensor[22] = gout11R;
-        aft_tensor[23] = gout11I;
-        aft_tensor[34] = gout17R;
-        aft_tensor[35] = gout17I;
-        aft_tensor[46] = gout23R;
-        aft_tensor[47] = gout23I;
-        aft_tensor[58] = gout29R;
-        aft_tensor[59] = gout29I;
-        aft_tensor[70] = gout35R;
-        aft_tensor[71] = gout35I;
+        double *aft_tensor = out + (pair_ij * nGv + Gv_id) * OF_COMPLEX;
+        aft_tensor[0*npairs_ij*nGv*2  ] = gout0R;
+        aft_tensor[0*npairs_ij*nGv*2+1] = gout0I;
+        aft_tensor[6*npairs_ij*nGv*2  ] = gout6R;
+        aft_tensor[6*npairs_ij*nGv*2+1] = gout6I;
+        aft_tensor[12*npairs_ij*nGv*2  ] = gout12R;
+        aft_tensor[12*npairs_ij*nGv*2+1] = gout12I;
+        aft_tensor[18*npairs_ij*nGv*2  ] = gout18R;
+        aft_tensor[18*npairs_ij*nGv*2+1] = gout18I;
+        aft_tensor[24*npairs_ij*nGv*2  ] = gout24R;
+        aft_tensor[24*npairs_ij*nGv*2+1] = gout24I;
+        aft_tensor[30*npairs_ij*nGv*2  ] = gout30R;
+        aft_tensor[30*npairs_ij*nGv*2+1] = gout30I;
+        aft_tensor[1*npairs_ij*nGv*2  ] = gout1R;
+        aft_tensor[1*npairs_ij*nGv*2+1] = gout1I;
+        aft_tensor[7*npairs_ij*nGv*2  ] = gout7R;
+        aft_tensor[7*npairs_ij*nGv*2+1] = gout7I;
+        aft_tensor[13*npairs_ij*nGv*2  ] = gout13R;
+        aft_tensor[13*npairs_ij*nGv*2+1] = gout13I;
+        aft_tensor[19*npairs_ij*nGv*2  ] = gout19R;
+        aft_tensor[19*npairs_ij*nGv*2+1] = gout19I;
+        aft_tensor[25*npairs_ij*nGv*2  ] = gout25R;
+        aft_tensor[25*npairs_ij*nGv*2+1] = gout25I;
+        aft_tensor[31*npairs_ij*nGv*2  ] = gout31R;
+        aft_tensor[31*npairs_ij*nGv*2+1] = gout31I;
+        aft_tensor[2*npairs_ij*nGv*2  ] = gout2R;
+        aft_tensor[2*npairs_ij*nGv*2+1] = gout2I;
+        aft_tensor[8*npairs_ij*nGv*2  ] = gout8R;
+        aft_tensor[8*npairs_ij*nGv*2+1] = gout8I;
+        aft_tensor[14*npairs_ij*nGv*2  ] = gout14R;
+        aft_tensor[14*npairs_ij*nGv*2+1] = gout14I;
+        aft_tensor[20*npairs_ij*nGv*2  ] = gout20R;
+        aft_tensor[20*npairs_ij*nGv*2+1] = gout20I;
+        aft_tensor[26*npairs_ij*nGv*2  ] = gout26R;
+        aft_tensor[26*npairs_ij*nGv*2+1] = gout26I;
+        aft_tensor[32*npairs_ij*nGv*2  ] = gout32R;
+        aft_tensor[32*npairs_ij*nGv*2+1] = gout32I;
+        aft_tensor[3*npairs_ij*nGv*2  ] = gout3R;
+        aft_tensor[3*npairs_ij*nGv*2+1] = gout3I;
+        aft_tensor[9*npairs_ij*nGv*2  ] = gout9R;
+        aft_tensor[9*npairs_ij*nGv*2+1] = gout9I;
+        aft_tensor[15*npairs_ij*nGv*2  ] = gout15R;
+        aft_tensor[15*npairs_ij*nGv*2+1] = gout15I;
+        aft_tensor[21*npairs_ij*nGv*2  ] = gout21R;
+        aft_tensor[21*npairs_ij*nGv*2+1] = gout21I;
+        aft_tensor[27*npairs_ij*nGv*2  ] = gout27R;
+        aft_tensor[27*npairs_ij*nGv*2+1] = gout27I;
+        aft_tensor[33*npairs_ij*nGv*2  ] = gout33R;
+        aft_tensor[33*npairs_ij*nGv*2+1] = gout33I;
+        aft_tensor[4*npairs_ij*nGv*2  ] = gout4R;
+        aft_tensor[4*npairs_ij*nGv*2+1] = gout4I;
+        aft_tensor[10*npairs_ij*nGv*2  ] = gout10R;
+        aft_tensor[10*npairs_ij*nGv*2+1] = gout10I;
+        aft_tensor[16*npairs_ij*nGv*2  ] = gout16R;
+        aft_tensor[16*npairs_ij*nGv*2+1] = gout16I;
+        aft_tensor[22*npairs_ij*nGv*2  ] = gout22R;
+        aft_tensor[22*npairs_ij*nGv*2+1] = gout22I;
+        aft_tensor[28*npairs_ij*nGv*2  ] = gout28R;
+        aft_tensor[28*npairs_ij*nGv*2+1] = gout28I;
+        aft_tensor[34*npairs_ij*nGv*2  ] = gout34R;
+        aft_tensor[34*npairs_ij*nGv*2+1] = gout34I;
+        aft_tensor[5*npairs_ij*nGv*2  ] = gout5R;
+        aft_tensor[5*npairs_ij*nGv*2+1] = gout5I;
+        aft_tensor[11*npairs_ij*nGv*2  ] = gout11R;
+        aft_tensor[11*npairs_ij*nGv*2+1] = gout11I;
+        aft_tensor[17*npairs_ij*nGv*2  ] = gout17R;
+        aft_tensor[17*npairs_ij*nGv*2+1] = gout17I;
+        aft_tensor[23*npairs_ij*nGv*2  ] = gout23R;
+        aft_tensor[23*npairs_ij*nGv*2+1] = gout23I;
+        aft_tensor[29*npairs_ij*nGv*2  ] = gout29R;
+        aft_tensor[29*npairs_ij*nGv*2+1] = gout29I;
+        aft_tensor[35*npairs_ij*nGv*2  ] = gout35R;
+        aft_tensor[35*npairs_ij*nGv*2+1] = gout35I;
     }
 }
 
