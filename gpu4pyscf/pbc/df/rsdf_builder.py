@@ -17,12 +17,14 @@ Build GDF tensor using the range-separation integral algorithm.
 '''
 
 import os
+import math
 import ctypes
 import warnings
 import numpy as np
 import cupy as cp
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
+from pyscf.gto import ANG_OF
 #from pyscf.pbc import gto as pbcgto
 #from pyscf.pbc.gto import pseudo
 from pyscf.pbc.tools import pbc as pbctools
@@ -36,7 +38,8 @@ from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.gto.mole import extract_pgto_params
-from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, estimate_rcut
+from gpu4pyscf.scf.jk import _scale_sp_ctr_coeff
+from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, estimate_rcut, libpbc
 
 OMEGA_MIN = 0.3
 
@@ -50,6 +53,8 @@ OMEGA_MIN = 0.3
 LINEAR_DEP_THR = 1e-11
 # Use eigenvalue decomposition in decompose_j2c
 PREFER_ED = False
+
+THREADS = 256
 
 def build_cderi(cell, auxcell, kpts=None, j_only=False,
                 omega=None, linear_dep_threshold=LINEAR_DEP_THR):
@@ -365,43 +370,185 @@ def _solve_cderi(cd_j2c, j3c, j2ctag):
         j3c = solve_triangular(cd_j2c, j3c.reshape(-1,naux).T, lower=True)
         return j3c.reshape(naux,nao,nao)
 
-#def build_cderi_compressed(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
-#                           linear_dep_threshold=LINEAR_DEP_THR):
-#    log = logger.new_logger(cell)
-#    t0 = log.init_timer()
-#    kmesh = None
-#    kpts = None
-#
-#    j3c = sr_aux_e2(cell, auxcell, -omega)
-#    t1 = log.timer('pass1: int3c2e', *t0)
-#
-#    log.debug('Generate auxcell 2c2e integrals')
-#    j2c = _get_2c2e(auxcell, kpts, omega, with_long_range) # on CPU
-#    j2c = j2c[0].real
-#    t1 = log.timer('int2c2e', *t1)
-#
-#    cderi = {}
-#    cderip = {}
-#    if with_long_range:
-#        ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, kmesh, omega, log)
-#        for pqG, auxG_conj in ft_ao_iter():
-#            # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
-#            # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
-#            # functions |P> are assumed to be real
-#            j3c += contract('pqG,Gr->pqr', pqG[0], auxG_conj).real
-#
-#    prefer_ed = PREFER_ED
-#    if cell.dimension == 2:
-#        prefer_ed = True
-#    cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
-#        j2c, prefer_ed, linear_dep_threshold)
-#
-#    cderi[0,0] = _solve_cderi(cd_j2c, j3c, j2ctag)
-#    if cd_j2c_negative is not None:
-#        assert cell.dimension == 2
-#        cderip[0,0] = _solve_cderi(cd_j2c_negative, j3c, j2ctag)
-#    t1 = log.timer('pass2: solve cderi', *t1)
-#    return cderi, cderip
+def build_cderi_gamma_compressed(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
+                                 linear_dep_threshold=LINEAR_DEP_THR):
+    log = logger.new_logger(cell)
+    t0 = log.init_timer()
+    kpts = None
+
+    j3c = sr_aux_e2(cell, auxcell, -omega)
+    t1 = log.timer('pass1: int3c2e', *t0)
+
+    log.debug('Generate auxcell 2c2e integrals')
+    j2c = _get_2c2e(auxcell, kpts, omega, with_long_range) # on CPU
+    j2c = j2c[0].real
+    t1 = log.timer('int2c2e', *t1)
+
+    cderi = {}
+    cderip = {}
+    if with_long_range:
+        ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+        mesh = cell.cutoff_to_mesh(ke_cutoff)
+        mesh = cell.symmetrize_mesh(mesh)
+        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+        ngrids = len(Gv)
+        nao = cell.nao
+
+        ft_opt = ft_ao.FTOpt(cell)
+        sorted_cell = ft_opt.sorted_cell
+        coeff = ft_opt.coeff
+        uniq_l_ctr = ft_opt.uniq_l_ctr
+        l_ctr_offsets = ft_opt.l_ctr_offsets
+
+        Ls = cp.asarray(sorted_cell.get_lattice_Ls())
+        Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
+        nimgs = len(Ls)
+        nbas = sorted_cell.nbas
+
+        rcut = sorted_cell.rcut
+        vol = sorted_cell.vol
+        cell_exp, _, cell_l = ft_ao.most_diffused_pgto(sorted_cell)
+        lsum = cell_l * 2 + 1
+        rad = vol**(-1./3) * rcut + 1
+        surface = 4*np.pi * rad**2
+        lattice_sum_factor = 2*np.pi*rcut*lsum/(vol*cell_exp*2) + surface
+        cutoff = sorted_cell.precision / lattice_sum_factor
+        log_cutoff = math.log(cutoff)
+        log.debug1('ft_ao min_exp=%g cutoff=%g nimgs=%d', cell_exp, cutoff, nimgs)
+
+        ls = sorted_cell._bas[:,ANG_OF]
+        exps, cs = extract_pgto_params(sorted_cell, 'diffused')
+        cs *= ((2*ls+1)/(4*np.pi))**.5
+        exps = cp.asarray(exps, dtype=np.float32)
+        log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
+
+        _atm = cp.array(sorted_cell._atm)
+        _bas = cp.array(sorted_cell._bas)
+        _env = cp.array(_scale_sp_ctr_coeff(sorted_cell))
+        ao_loc = cp.array(sorted_cell.ao_loc)
+        aft_envs = ft_ao.AFTIntEnvVars(
+            sorted_cell.natm, sorted_cell.nbas, 1, nimgs, _atm.data.ptr,
+            _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr, Ls.data.ptr
+        )
+        # Keep a reference to these arrays, prevent releasing them upon returning the closure
+        aft_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
+
+        nao, nao_orig = coeff.shape
+        uniq_l = uniq_l_ctr[:,0]
+        l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
+        n_groups = np.count_nonzero(uniq_l <= ft_ao.LMAX)
+
+        ft_ao.init_constant(sorted_cell)
+        kern = libpbc.build_ft_ao_compressed
+
+        avail_mem = get_avail_mem() * .8
+        Gblksize = max(16, int(avail_mem/(2*16*nao**2))//8*8)
+        Gblksize = min(Gblksize, ngrids, 16384)
+        logger.debug1(cell, 'Gblksize = %d', Gblksize)
+
+        coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws)
+        auxG_conj = cp.asarray(ft_ao.ft_ao(auxcell, Gv).conj(), order='C')
+        auxG_conj *= cp.asarray(coulG[:,None])
+        for p0, p1 in lib.prange(0, ngrids, Gblksize):
+            nGv = len(Gv)
+            # Padding zeros, allowing idle threads to access these data
+            GvT = cp.array(Gv[p0:p1].T, order='C', copy=True)
+            GvT = cp.append(GvT, cp.zeros(THREADS))
+            permutation_symmetry = True
+            ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
+
+            for i, j in ij_tasks:
+                li = uniq_l[i]
+                lj = uniq_l[j]
+                ll_pattern = f'{l_symb[i]}{l_symb[j]}'
+                ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+                jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+                nish = ish1 - ish0
+                njsh = jsh1 - jsh0
+                img_counts = cp.zeros((nish*njsh), dtype=np.int32)
+                err = libpbc.overlap_img_counts(
+                    ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
+                    (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                    ctypes.byref(aft_envs),
+                    ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+                    ctypes.c_float(log_cutoff), ctypes.c_int(permutation_symmetry))
+                if err != 0:
+                    raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
+                bas_ij = cp.asarray(cp.where(img_counts > 0)[0], dtype=np.int32)
+                npairs = len(bas_ij)
+                if npairs == 0:
+                    continue
+
+                # Sort according to the number of images. In the CUDA kernel,
+                # shell-pairs that have closed number of images are processed on
+                # the same SM processor, ensuring the best parallel execution.
+                counts_sorting = (-img_counts[bas_ij]).argsort()
+                bas_ij = bas_ij[counts_sorting]
+                img_counts = img_counts[bas_ij]
+                img_offsets = cp.empty(npairs+1, dtype=np.int32)
+                img_offsets[0] = 0
+                cp.cumsum(img_counts, out=img_offsets[1:])
+                tot_imgs = int(img_offsets[npairs])
+                img_idx = cp.empty(tot_imgs, dtype=np.int32)
+                err = libpbc.overlap_img_idx(
+                    ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(npairs),
+                    (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                    ctypes.byref(aft_envs),
+                    ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+                    ctypes.c_float(log_cutoff))
+                if err != 0:
+                    raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
+                log.timer_debug2('ovlp_img_idx', *t1)
+                img_counts = counts_sorting = None
+
+                # bas_ij stores the non-negligible primitive-pair indices.
+                i, j = cp.unravel_index(bas_ij, (nish, njsh))
+                i += ish0
+                j += jsh0
+                bas_ij = cp.ravel_multi_index((i, j), (nbas, nbas))
+                bas_ij = cp.asarray(bas_ij, dtype=np.int32)
+                pqG = cp.zeros((npairs, nGv), dtype=np.complex128)
+
+                scheme = ft_ao.ft_ao_scheme(cell, li, lj, nGv)
+                log.debug2('ft_ao_scheme for %s: %s', ll_pattern, scheme)
+                err = kern(
+                    ctypes.cast(pqG.data.ptr, ctypes.c_void_p),
+                    ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
+                    (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                    ctypes.c_int(npairs), ctypes.c_int(nGv),
+                    ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+                    cell._atm.ctypes, ctypes.c_int(cell.natm),
+                    cell._bas.ctypes, ctypes.c_int(cell.nbas), cell._env.ctypes)
+                if err != 0:
+                    raise RuntimeError(f'build_ft_ao_compressed kernel for {ll_pattern} failed')
+                t1 = log.timer_debug2(f'processing {ll_pattern}', *t1)
+
+                # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
+                # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
+                # functions |P> are assumed to be real
+                j3c += contract('xG,Gr->xr', pqG, auxG_conj[p0:p1]).real
+
+    prefer_ed = PREFER_ED
+    if cell.dimension == 2:
+        prefer_ed = True
+    cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
+        j2c, prefer_ed, linear_dep_threshold)
+
+    cderi[0,0] = _solve_cderi(cd_j2c, j3c, j2ctag)
+    if cd_j2c_negative is not None:
+        assert cell.dimension == 2
+        cderip[0,0] = _solve_cderi(cd_j2c_negative, j3c, j2ctag)
+    t1 = log.timer('pass2: solve cderi', *t1)
+    return cderi, cderip
+
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)

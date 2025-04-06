@@ -36,7 +36,6 @@ typedef struct {
     double *env;
     int *ao_loc; // in bvk-cell
     double *img_coords; // vectors in lattice sum
-    float log_cutoff;
 } PBCInt3c2eEnvVars;
 
 typedef struct {

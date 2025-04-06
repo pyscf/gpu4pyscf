@@ -23,13 +23,13 @@
 #include "gvhf-rys/vhf.cuh"
 #include "int3c2e.cuh"
 
-#define M_PI_F 3.14159265f
 #define REMOTE_THRESHOLD 50
 
 __global__ static
 void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
                                int ish0, int jsh0, int nish, int njsh,
-                               PBCInt3c2eEnvVars envs, float *exps, float *log_coeff)
+                               PBCInt3c2eEnvVars envs, float *exps,
+                               float *log_coeff, float log_cutoff)
 {
     int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int s_nish = envs.bvk_ncells * nish;
@@ -73,7 +73,7 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
     float zj = rj[2];
     // log(ci*cj * (pi/aij)**1.5)
     float log_fac = log_cicj + 1.717f - 1.5f*logf(aij);
-    float log_cutoff = envs.log_cutoff - log_fac;
+    log_cutoff = log_cutoff - log_fac;
 
     int counts = 0;
     for (int img = 0; img < nimgs; ++img) {
@@ -105,7 +105,8 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
 __global__ static
 void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
                             int npairs, int ish0, int jsh0, int nish, int njsh,
-                            PBCInt3c2eEnvVars envs, float *exps, float *log_coeff)
+                            PBCInt3c2eEnvVars envs, float *exps, float *log_coeff,
+                            float log_cutoff)
 {
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (pair_id >= npairs) {
@@ -146,7 +147,7 @@ void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
     float zj = rj[2];
     // log(ci*cj * (pi/aij)**1.5)
     float log_fac = log_cicj + 1.717f - 1.5f*logf(aij);
-    float log_cutoff = envs.log_cutoff - log_fac;
+    log_cutoff = log_cutoff - log_fac;
 
     int counts = 0;
     img_idx += img_offsets[pair_id];
@@ -185,7 +186,7 @@ void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_ij_map
                                   int *ovlp_img_idx, int *ovlp_img_offsets,
                                   int npairs, int ish0, int jsh0, int nish, int njsh,
                                   PBCInt3c2eEnvVars envs, float *exps, float *log_coeff,
-                                  float *atom_aux_exps)
+                                  float *atom_aux_exps, float log_cutoff)
 {
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     int thread_id = threadIdx.x;
@@ -238,7 +239,7 @@ void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_ij_map
     float fac_guess = .5f - logf(omega2)/4;
     // log(ci*cj * (pi/aij)**1.5)
     float log_fac = log_cicj + 1.717f - 1.5f*logf(aij) + fac_guess;
-    float log_cutoff = envs.log_cutoff - log_fac;
+    log_cutoff = log_cutoff - log_fac;
     float theta = (omega2 * aij) / (omega2 + aij);
     double *ri = env + atm[bas[ish*BAS_SLOTS+ATOM_OF] * ATM_SLOTS + PTR_COORD];
     double *rj = env + atm[bas[jsh*BAS_SLOTS+ATOM_OF] * ATM_SLOTS + PTR_COORD];
@@ -325,9 +326,9 @@ void conc_img_idx_kernel(int *output, int *offsets, int *idx_sparse,
 }
 
 extern "C" {
-int overlap_img_counts(int *img_counts, int *p2c_mapping, int *shls_slice,
-                       PBCInt3c2eEnvVars *envs, float *exps, float *log_coeff,
-                       float log_cutoff)
+int bvk_overlap_img_counts(int *img_counts, int *p2c_mapping, int *shls_slice,
+                           PBCInt3c2eEnvVars *envs, float *exps, float *log_coeff,
+                           float log_cutoff)
 {
     int ish0 = shls_slice[0];
     int ish1 = shls_slice[1];
@@ -337,21 +338,21 @@ int overlap_img_counts(int *img_counts, int *p2c_mapping, int *shls_slice,
     int njsh = jsh1 - jsh0;
     constexpr int threads = 512;
     int ncells = envs->bvk_ncells;
-    int blocks = (nish*njsh *ncells*ncells + threads-1)/threads;
+    int blocks = (ncells*nish*ncells*njsh + threads-1)/threads;
     overlap_img_counts_kernel<<<blocks, threads>>>(
         img_counts, p2c_mapping, ish0, jsh0, nish, njsh,
-        *envs, exps, log_coeff);
+        *envs, exps, log_coeff, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in overlap_img_counts: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in bvk_overlap_img_counts: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
 }
 
-int overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
-                    int npairs, int *shls_slice, PBCInt3c2eEnvVars *envs,
-                    float *exps, float *log_coeff, float log_cutoff)
+int bvk_overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
+                        int npairs, int *shls_slice, PBCInt3c2eEnvVars *envs,
+                        float *exps, float *log_coeff, float log_cutoff)
 {
     int ish0 = shls_slice[0];
     int ish1 = shls_slice[1];
@@ -360,14 +361,13 @@ int overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
     int nish = ish1 - ish0;
     int njsh = jsh1 - jsh0;
     constexpr int threads = 512;
-    int ncells = envs->bvk_ncells;
-    int blocks = (nish*njsh *ncells*ncells + threads-1)/threads;
+    int blocks = (npairs + threads-1)/threads;
     overlap_img_idx_kernel<<<blocks, threads>>>(
         img_idx, img_offsets, bas_ij_mapping, npairs, ish0, jsh0, nish, njsh,
-        *envs, exps, log_coeff);
+        *envs, exps, log_coeff, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in overlap_img_counts: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in bvk_overlap_img_counts: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
@@ -376,7 +376,8 @@ int overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
 int sr_int3c2e_img_idx_sparse(int *img_idx, int *img_counts, int *bas_ij_mapping,
                               int *ovlp_img_idx, int *ovlp_img_offsets,
                               int npairs, int *shls_slice, PBCInt3c2eEnvVars *envs,
-                              float *exps, float *log_coeff, float *atom_aux_exps)
+                              float *exps, float *log_coeff, float *atom_aux_exps,
+                              float log_cutoff)
 {
     int ish0 = shls_slice[0];
     int ish1 = shls_slice[1];
@@ -390,7 +391,8 @@ int sr_int3c2e_img_idx_sparse(int *img_idx, int *img_counts, int *bas_ij_mapping
     int buflen = cell0_natm * 3 * sizeof(float);
     sr_int3c2e_img_sparse_kernel<<<blocks, threads, buflen>>>(
         img_idx, img_counts, bas_ij_mapping, ovlp_img_idx, ovlp_img_offsets,
-        npairs, ish0, jsh0, nish, njsh, *envs, exps, log_coeff, atom_aux_exps);
+        npairs, ish0, jsh0, nish, njsh, *envs, exps, log_coeff, atom_aux_exps,
+        log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in sr_int3c2e_img_idx_sparse: %s\n", cudaGetErrorString(err));

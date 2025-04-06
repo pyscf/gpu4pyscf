@@ -31,18 +31,18 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.gto.mole import cart2sph_by_l, group_basis, PTR_BAS_COORD
+from gpu4pyscf.gto.mole import (cart2sph_by_l, group_basis, PTR_BAS_COORD,
+                                extract_pgto_params)
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
-from gpu4pyscf.gto.mole import extract_pgto_params
-from gpu4pyscf.pbc.df.ft_ao import libpbc, init_constant
+from gpu4pyscf.pbc.df.ft_ao import libpbc, init_constant, most_diffused_pgto
 
 __all__ = [
     'sr_aux_e2',
 ]
 
 libpbc.fill_int3c2e.restype = ctypes.c_int
-libpbc.overlap_img_counts.restype = ctypes.c_int
-libpbc.overlap_img_idx.restype = ctypes.c_int
+libpbc.bvk_overlap_img_counts.restype = ctypes.c_int
+libpbc.bvk_overlap_img_idx.restype = ctypes.c_int
 libpbc.sr_int3c2e_img_idx_sparse.restype = ctypes.c_int
 libpbc.conc_img_idx.restype = ctypes.c_int
 
@@ -341,7 +341,9 @@ class SRInt3c2eOpt:
         bvk_ncells = np.prod(self.bvk_kmesh)
         vol = pcell.vol
 
+        ls = pcell._bas[:,ANG_OF]
         exps, cs = extract_pgto_params(pcell, 'diffused')
+        cs *= ((2*ls+1)/(4*np.pi))**.5
         exps = cp.asarray(exps, dtype=np.float32)
         log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
 
@@ -369,9 +371,9 @@ class SRInt3c2eOpt:
             aux_exp, _, aux_l = most_diffused_pgto(auxcell)
             cell_exp, _, cell_l = most_diffused_pgto(pcell)
             if omega == 0:
-                theta = 1./(1./cell_exp + 1./aux_exp)
+                theta = 1./(1./cell_exp*2 + 1./aux_exp)
             else:
-                theta = 1./(1./cell_exp + 1./aux_exp + omega**-2)
+                theta = 1./(1./cell_exp*2 + 1./aux_exp + omega**-2)
             lsum = cell_l * 2 + aux_l + 1
             rad = vol**(-1./3) * rcut + 1
             surface = 4*np.pi * rad**2
@@ -379,6 +381,7 @@ class SRInt3c2eOpt:
             cutoff = pcell.precision / lattice_sum_factor
             log.debug1('int3c_kernel integral omega=%g theta=%g cutoff=%g',
                        omega, theta, cutoff)
+        log_cutoff = math.log(cutoff)
 
         # Note: sort_orbitals and unsort_orbitals do not transform the
         # s and p orbitals. _scale_sp_ctr_coeff apply these special
@@ -400,9 +403,8 @@ class SRInt3c2eOpt:
         aux_loc = auxcell.ao_loc
         ao_loc = _conc_locs(sup_ao_loc, aux_loc)
         int3c2e_envs = Int3c2eEnvVars(
-            pcell.natm, p_nbas, sup_ncells, nimgs,
-            _atm.data.ptr, _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr,
-            Ls.data.ptr, math.log(cutoff),
+            pcell.natm, p_nbas, sup_ncells, nimgs, _atm.data.ptr, _bas.data.ptr,
+            _env.data.ptr, ao_loc.data.ptr, Ls.data.ptr,
         )
         # Keep a reference to these arrays, prevent releasing them upon returning the closure
         int3c2e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
@@ -424,16 +426,18 @@ class SRInt3c2eOpt:
             nctri = c_shell_counts[li]
             nctrj = c_shell_counts[lj]
 
+            # Number of images for each pair of (bas_i_in_bvkcell, bas_j_in_bvkcell)
             ovlp_img_counts = cp.zeros((sup_ncells*nprimi*sup_ncells*nprimj), dtype=np.int32)
-            err = libpbc.overlap_img_counts(
+            err = libpbc.bvk_overlap_img_counts(
                 ctypes.cast(ovlp_img_counts.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p2c_mapping.data.ptr, ctypes.c_void_p),
                 (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
                 ctypes.byref(int3c2e_envs),
                 ctypes.cast(exps.data.ptr, ctypes.c_void_p),
-                ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p))
+                ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+                ctypes.float(log_cutoff))
             if err != 0:
-                raise RuntimeError('overlap_img_counts failed')
+                raise RuntimeError('bvk_overlap_img_counts failed')
 
             bas_ij = cp.asarray(cp.where(ovlp_img_counts > 0)[0], dtype=np.int32)
             ovlp_npairs = len(bas_ij)
@@ -444,13 +448,12 @@ class SRInt3c2eOpt:
             counts_sorting = (-ovlp_img_counts[bas_ij]).argsort()
             bas_ij = bas_ij[counts_sorting]
             ovlp_img_counts = ovlp_img_counts[bas_ij]
-            nimgs_J = int(ovlp_img_counts[0])
             ovlp_img_offsets = cp.empty(ovlp_npairs+1, dtype=np.int32)
             ovlp_img_offsets[0] = 0
             cp.cumsum(ovlp_img_counts, out=ovlp_img_offsets[1:])
             tot_imgs = int(ovlp_img_offsets[ovlp_npairs])
             ovlp_img_idx = cp.empty(tot_imgs, dtype=np.int32)
-            err = libpbc.overlap_img_idx(
+            err = libpbc.bvk_overlap_img_idx(
                 ctypes.cast(ovlp_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(ovlp_img_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
@@ -458,10 +461,12 @@ class SRInt3c2eOpt:
                 (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
                 ctypes.byref(int3c2e_envs),
                 ctypes.cast(exps.data.ptr, ctypes.c_void_p),
-                ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p))
+                ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+                ctypes.float(log_cutoff))
             if err != 0:
-                raise RuntimeError('overlap_img_counts failed')
+                raise RuntimeError('bvk_overlap_img_counts failed')
             log.timer_debug1('ovlp_img_idx', *cput0)
+            nimgs_J = int(ovlp_img_counts[0])
             ovlp_img_counts = counts_sorting = None
 
             nimgs_IJ = nimgs + nimgs_J * 6
@@ -483,7 +488,8 @@ class SRInt3c2eOpt:
                 ctypes.byref(int3c2e_envs),
                 ctypes.cast(exps.data.ptr, ctypes.c_void_p),
                 ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
-                ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p))
+                ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
+                ctypes.float(log_cutoff))
             if err != 0:
                 raise RuntimeError('sr_int3c2e_img_idx failed')
 
@@ -514,7 +520,7 @@ class SRInt3c2eOpt:
                        nimgs_J, npairs, tot_imgs, img_counts[0], img_counts[npairs//2])
             t1 = log.timer_debug1('int3c2e_img_idx', *t0)
 
-            # bas_ij stores the important primitive-pair indices.
+            # bas_ij stores the non-negligible primitive-pair indices.
             # p2c_mapping converts the bas_ij to contracted GTO-pair indices.
             I, i, J, j = cp.unravel_index(
                 bas_ij, (sup_ncells, nprimi, sup_ncells, nprimj))
@@ -656,7 +662,6 @@ class Int3c2eEnvVars(ctypes.Structure):
         ('env', ctypes.c_void_p),
         ('ao_loc', ctypes.c_void_p),
         ('img_coords', ctypes.c_void_p),
-        ('log_cutoff', ctypes.c_float),
     ]
 
 def _conc_locs(ao_loc1, ao_loc2):
@@ -692,13 +697,6 @@ def int3c2e_scheme(li, lj, lk, shm_size=SHM_SIZE):
 
     gout_stride = THREADS // (nksh_per_block*nsp_per_block)
     return nksh_per_block, gout_stride, nsp_per_block
-
-def most_diffused_pgto(cell):
-    exps, cs = extract_pgto_params(cell, 'diffused')
-    ls = cell._bas[:,ANG_OF]
-    r2 = np.log(cs**2 / cell.precision * 10**ls) / exps
-    idx = r2.argmax()
-    return exps[idx], cs[idx], ls[idx]
 
 # This modified rcut estimation function will be available in pyscf-2.8 or newer
 def estimate_rcut(cell, auxcell, omega):
