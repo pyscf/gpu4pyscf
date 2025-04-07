@@ -26,7 +26,7 @@ from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.hf import KohnShamDFT
-from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, reduce_to_device
+from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, reduce_to_device, transpose_sum
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
@@ -226,10 +226,10 @@ def get_dh1e_ecp(mol, dm):
     '''
     with_ecp = mol.has_ecp()
     if not with_ecp:
-        natom = mol.natm
-        return cupy.zeros([natom,3])
+        raise RuntimeWarning("ECP not found")
+    
     h1_ecp = get_ecp_ip(mol)
-    dh1e_ecp = contract('axij,ij->ax', h1_ecp, dm)
+    dh1e_ecp = contract('nxij,ij->nx', h1_ecp, dm)
     return 2.0 * dh1e_ecp
 
 def get_hcore(mf, mol):
@@ -240,7 +240,7 @@ def get_hcore(mf, mol):
     if mol._pseudo:
         NotImplementedError('Nuclear gradients for GTH PP')
     else:
-        h+= mol.intor('int1e_ipnuc', comp=3)
+        h += mol.intor('int1e_ipnuc', comp=3)
     h = cupy.asarray(h)
     if mol.has_ecp():
         h += get_ecp_ip(mol).sum(axis=0)
@@ -279,7 +279,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dh1e = int3c2e.get_dh1e(mol, dm0)
 
     if mol.has_ecp():
-        dh1e += get_dh1e_ecp(mol, dm0)
+        ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
+        dh1e[ecp_atoms] += get_dh1e_ecp(mol, dm0)
     t3 = log.timer_debug1('gradients of h1e', *t3)
 
     dvhf = mf_grad.get_veff(mol, dm0)
@@ -342,15 +343,22 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     # derivative w.r.t. atomic orbitals
     h1 = cupy.asarray(mf_grad.get_hcore(mol))
     aoslices = mol.aoslice_by_atom()
-    h1_ecp = get_ecp_ip(mol)
+    
     for atm_id in range(natm):
         p0, p1 = aoslices[atm_id][2:]
-        h1ao = h1_ecp[atm_id]
-        h1ao[:,p0:p1] += h1[:,p0:p1]
-        h1ao += h1ao.transpose([0,2,1])
-        h1ao = cupy.asarray(h1ao)
-        h1mo = contract('xij,jo->xio', h1ao, orbo)
-        dh1e[atm_id] += contract('xio,ip->xpo', h1mo, mo_coeff)
+        h1mo = contract('xij,jo->xio', h1[:,p0:p1], orbo)
+        dh1e[atm_id] += contract('xio,ip->xpo', h1mo, mo_coeff[p0:p1])
+        h1mo = contract('xij,jp->xpi', h1[:,p0:p1], mo_coeff)
+        dh1e[atm_id] += contract('xpi,io->xpo', h1mo, orbo[p0:p1])
+
+    # Contributions due to ECP
+    if mol.has_ecp():
+        ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
+        h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
+        h1_ecp = h1_ecp + h1_ecp.transpose([0,1,3,2])
+        h1mo = contract('nxij,jo->nxio', h1_ecp, orbo)
+        dh1e[ecp_atoms] += contract('nxio,ip->nxpo', h1mo, mo_coeff)
+
     return dh1e
 
 def as_scanner(mf_grad):

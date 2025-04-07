@@ -10,11 +10,11 @@
 #define KAPPA_OF        4
 #define PTR_EXP         5
 #define PTR_COEFF       6
-#define PTR_BAS_COORD   7
+#define ECP_ATOM_ID     7    // Reindexing ECP atoms
 #define BAS_SLOTS       8
 
-#define RADI_POWER      3
-#define SO_TYPE_OF      4
+#define RADI_POWER      3    // For ECP
+#define SO_TYPE_OF      4    // For ECP
 
 // atm
 #define PTR_COORD       1
