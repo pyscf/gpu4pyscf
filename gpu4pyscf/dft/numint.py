@@ -24,7 +24,7 @@ from pyscf.gto.eval_gto import NBINS, CUTOFF
 from gpu4pyscf.gto.mole import basis_seg_contraction
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, transpose_sum,
-    grouped_dot, grouped_gemm, reduce_to_device, sandwich_dot)
+    grouped_dot, grouped_gemm, reduce_to_device)
 from gpu4pyscf.dft import xc_deriv, xc_alias, libxc
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.multi_gpu import lru_cache
@@ -1723,7 +1723,6 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                     ao_mask[-pad:,:] = 0.0
                 else:
                     ao_mask[:,-pad:,:] = 0.0
-            mem_avail = get_avail_mem()
             yield ao_mask, idx, weight, coords
 
     if lookup_cache_size != 0:

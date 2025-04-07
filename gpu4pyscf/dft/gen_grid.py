@@ -468,7 +468,7 @@ class Grids(lib.StreamObject):
                 # cupy.vstack and cupy.hstack convert numpy array into cupy array first
                 self.coords = cupy.vstack(
                     [self.coords, cupy.full((padding, 3), 1e-4)])
-                self.weights = cupy.hstack([self.weights, numpy.zeros(padding)])
+                self.weights = cupy.hstack([self.weights, cupy.zeros(padding)])
         if sort_grids:
             #idx = arg_group_grids(mol, self.coords)
             idx = atomic_group_grids(mol, self.coords)
