@@ -971,7 +971,7 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
 
     mem_avail = get_avail_mem()
     blksize = mem_avail*.2/8/nao//ALIGNED * ALIGNED
-    blksize = min(blksize, MIN_BLK_SIZE)
+    blksize = max(blksize, MIN_BLK_SIZE)
     GB = 1024*1024*1024
     log.debug(f'GPU Memory {mem_avail/GB:.1f} GB available, block size {blksize}')
 
@@ -1644,7 +1644,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         # By default, a memory space of [comp,nao,blksize] is reserved
         mem_avail = get_avail_mem()
         blksize = int((mem_avail*.2/8/((comp+1)*nao + extra))/ ALIGNED) * ALIGNED
-        blksize = min(blksize, MIN_BLK_SIZE)
+        blksize = max(blksize, MIN_BLK_SIZE)
         log.debug(f'{mem_avail/1e6} MB memory is available on Device {device_id}, block_size {blksize}')
         if blksize < ALIGNED:
             raise RuntimeError('Not enough GPU memory')
@@ -1708,7 +1708,7 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         #cupy.get_default_memory_pool().free_all_blocks()
         mem_avail = get_avail_mem()
         blksize = int((mem_avail*.2/8/((comp+1)*nao + extra))/ ALIGNED) * ALIGNED
-        blksize = min(blksize, MIN_BLK_SIZE)
+        blksize = max(blksize, MIN_BLK_SIZE)
         log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, blksize)
         if blksize < ALIGNED:
             raise RuntimeError('Not enough GPU memory')
