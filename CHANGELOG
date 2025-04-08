@@ -8,7 +8,8 @@ v1.4.0 (2025-03-27)
   - ASE interface for molecular systems.
 * Improvements
   - Reduce memory footprint in SCF driver.
-  - Reduce memory requirements in PCM energy and gradients.
+  - Reduce memory requirements for PCM energy and gradients.
+  - Reduce memory requirements for DFT gradients.
   - Utilize the sparsity in cart2sph coefficients in the cart2sph transformation in scf.jk kernel
   - Molecular 3c2e integrals generated using the block-divergent alogrithm.
   - Support I orbitals in DFT.
