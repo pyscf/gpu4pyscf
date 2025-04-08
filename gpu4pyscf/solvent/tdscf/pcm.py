@@ -48,7 +48,6 @@ class WithSolventTDSCF:
 
     def __init__(self, tda_method):
         self.__dict__.update(tda_method.__dict__)
-        tda_method._scf.with_solvent.tdscf = True
 
     def undo_solvent(self):
         cls = self.__class__
@@ -58,7 +57,6 @@ class WithSolventTDSCF:
     
     def _finalize(self):
         super()._finalize()
-        self._scf.with_solvent.tdscf = False
 
     def nuc_grad_method(self):
         grad_method = super().nuc_grad_method()
@@ -233,36 +231,37 @@ class WithSolventTDSCFGradient:
 
     def __init__(self, tda_grad_method):
         self.__dict__.update(tda_grad_method.__dict__)
-        tda_grad_method.base._scf.with_solvent.tdscf = True
         
     def grad_elec(self, xy, singlet, atmlst=None, verbose=logger.INFO):
         de = super().grad_elec(xy, singlet, atmlst, verbose) 
-        if self.base._scf.with_solvent.tdscf and not self.base._scf.with_solvent.equilibrium_solvation:
-            dm = self.base._scf.make_rdm1(ao_repr=True)
-            if dm.ndim == 3:
-                dm = dm[0] + dm[1]
-            # TODO: add unrestricted case support
-            dmP = 0.5 * (self.dmz1doo + self.dmz1doo.T)
-            dmxpy = 1.0 * (self.dmxpy + self.dmxpy.T)
-            pcmobj = self.base._scf.with_solvent
-            de += grad_qv(pcmobj, dm)
-            de += grad_solver(pcmobj, dm)
-            de += grad_nuc(pcmobj, dm)
-            q_sym_dm = pcmobj._get_qsym(dm, with_nuc = True)[0]
-            qE_sym_dmP = pcmobj._get_qsym(dmP)[0]
-            qE_sym_dmxpy = pcmobj._get_qsym(dmxpy)[0]
-            de += grad_qv(pcmobj, dm, q_sym = qE_sym_dmP)
-            de += grad_nuc(pcmobj, dm, q_sym = qE_sym_dmP.get())
-            de += grad_qv(pcmobj, dmP, q_sym = q_sym_dm)
-            de += grad_solver_td(pcmobj, dm, dmP, with_nuc_q = True) * 2
-            de += grad_qv(pcmobj, dmxpy, q_sym = qE_sym_dmxpy) * 2.0
-            de += grad_solver_td(pcmobj, dmxpy, dmxpy) * 2
-        else:
-            raise NotImplementedError("State-specific approach is not supported TDDFT gradient")
+
+        assert self.base._scf.with_solvent.equilibrium_solvation
+
+        dm = self.base._scf.make_rdm1(ao_repr=True)
+        # TODO: add unrestricted case support
+        dmP = 0.5 * (self.dmz1doo + self.dmz1doo.T)
+        dmxpy = 1.0 * (self.dmxpy + self.dmxpy.T)
+        pcmobj = self.base._scf.with_solvent
+        de += grad_qv(pcmobj, dm)
+        de += grad_solver(pcmobj, dm)
+        de += grad_nuc(pcmobj, dm)
+        
+        q_sym_dm = pcmobj._get_qsym(dm, with_nuc = True)[0]
+        qE_sym_dmP = pcmobj._get_qsym(dmP)[0]
+        qE_sym_dmxpy = pcmobj._get_qsym(dmxpy)[0]
+        de += grad_qv(pcmobj, dm, q_sym = qE_sym_dmP)
+        de += grad_nuc(pcmobj, dm, q_sym = qE_sym_dmP.get())
+        de += grad_qv(pcmobj, dmP, q_sym = q_sym_dm)
+        v_grids_1 = pcmobj._get_vgrids(dmP, with_nuc = False)
+        de += grad_solver(pcmobj, dm, v_grids_1 = v_grids_1) * 2.0
+        de += grad_qv(pcmobj, dmxpy, q_sym = qE_sym_dmxpy) * 2.0
+        v_grids = pcmobj._get_vgrids(dmxpy, with_nuc = False)
+        q = pcmobj._get_qsym(dmxpy, with_nuc = False)[1]
+        v_grids_1 = pcmobj._get_vgrids(dmxpy, with_nuc = False)
+        de += grad_solver(pcmobj, dmxpy, v_grids=v_grids, v_grids_1=v_grids_1, q=q) * 2.0
         
         return de
 
     def _finalize(self):
         super()._finalize()
-        self.base._scf.with_solvent.tdscf = False
 

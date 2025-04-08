@@ -275,7 +275,7 @@ def grad_qv(pcmobj, dm, q_sym = None):
     t1 = log.timer_debug1('grad qv', *t1)
     return de.get()
 
-def grad_solver(pcmobj, dm):
+def grad_solver(pcmobj, dm, v_grids = None, v_grids_1 = None, q = None):
     '''
     dE = 0.5*v* d(K^-1 R) *v + q*dv
     v^T* d(K^-1 R)v = v^T*K^-1(dR - dK K^-1R)v = v^T K^-1(dR v - dK q)
@@ -292,15 +292,19 @@ def grad_solver(pcmobj, dm):
         pcmobj._get_vind(dm)
 
     gridslice    = pcmobj.surface['gslice_by_atom']
-    v_grids      = pcmobj._intermediates['v_grids']
-    q            = pcmobj._intermediates['q']
+    if v_grids is None:
+        v_grids = pcmobj._intermediates['v_grids']
+    if v_grids_1 is None:
+        v_grids_1 = pcmobj._intermediates['v_grids']
+    if q is None:
+        q            = pcmobj._intermediates['q']
     f_epsilon    = pcmobj._intermediates['f_epsilon']
     if not pcmobj.if_method_in_CPCM_category:
         A = pcmobj._intermediates['A']
         D = pcmobj._intermediates['D']
         S = pcmobj._intermediates['S']
 
-    vK_1 = pcmobj.left_solve_K(v_grids, K_transpose = True)
+    vK_1 = pcmobj.left_solve_K(v_grids_1, K_transpose = True)
 
     def contract_bra(a, B, c):
         ''' i,xij,j->jx '''

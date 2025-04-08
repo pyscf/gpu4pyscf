@@ -246,7 +246,7 @@ class PCM(lib.StreamObject):
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
         'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
-        'equilibrium_solvation', 'e', 'v', 'eps_optical', 'tdscf'
+        'equilibrium_solvation', 'e', 'v', 'tdscf'
     }
     from gpu4pyscf.lib.utils import to_gpu, device
     kernel = ddcosmo.DDCOSMO.kernel
@@ -266,7 +266,6 @@ class PCM(lib.StreamObject):
         self.lebedev_order = 29
         self._intermediates = {}
         self.eps = 78.3553
-        self.eps_optical = 1.78
         self.tdscf = False
 
         self.max_cycle = 20
@@ -515,46 +514,6 @@ class PCM(lib.StreamObject):
         out_shape = dms.shape
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)
-
-        if self.tdscf:
-            assert not self.equilibrium_solvation
-            epsilon = self.eps_optical
-            logger.info(self, 'eps optical = %s', self.eps_optical)
-            F, A = get_F_A(self.surface)
-            D, S = get_D_S(self.surface, with_S = True, with_D = not self.if_method_in_CPCM_category)
-            epsilon = self.eps_optical
-            if self.method.upper() in ['C-PCM', 'CPCM']:
-                f_epsilon = (epsilon-1.)/epsilon
-                K = S
-            elif self.method.upper() == 'COSMO':
-                f_epsilon = (epsilon - 1.0)/(epsilon + 1.0/2.0)
-                K = S
-            elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
-                f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
-                DA = D*A
-                DAS = cupy.dot(DA, S)
-                K = S - f_epsilon/(2.0*PI) * DAS
-            elif self.method.upper() == 'SS(V)PE':
-                f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
-                DA = D*A
-                DAS = cupy.dot(DA, S)
-                K = S - f_epsilon/(4.0*PI) * (DAS + DAS.T)
-            else:
-                raise RuntimeError(f"Unknown implicit solvent model: {self.method}")
-
-            K_LU, K_LU_pivot = lu_factor(K, overwrite_a = True, check_finite = False)
-            K = None
-            v_grids = -self._get_v(dms)
-
-            b = self.left_multiply_R(v_grids.T, f_epsilon = f_epsilon)
-            q = self.left_solve_K(b, K_LU=K_LU, K_LU_pivot=K_LU_pivot).T
-
-            vK_1 = self.left_solve_K(v_grids.T, K_LU=K_LU, K_LU_pivot=K_LU_pivot, K_transpose = True)
-            qt = self.left_multiply_R(vK_1, f_epsilon = f_epsilon, R_transpose = True).T
-            q_sym = (q + qt)/2.0
-
-            vmat = self._get_vmat(q_sym)
-            return vmat.reshape(out_shape)
         
         v_grids = -self._get_v(dms)
 

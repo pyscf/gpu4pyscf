@@ -37,6 +37,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
     """
+    if singlet is None:
+        singlet = True
     log = logger.new_logger(td_grad, verbose)
     time0 = logger.init_timer(td_grad)
     mol = td_grad.mol

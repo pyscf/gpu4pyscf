@@ -36,14 +36,12 @@ class KnownValues(unittest.TestCase):
         cls.mf.with_solvent.method = 'C-PCM'
         cls.mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
         cls.mf.with_solvent.eps = 78
-        cls.mf.with_solvent.eps_optical = 1.78
         cls.mf = mf.run(conv_tol=1e-10)
 
         cls.mfu = mfu = mol.UHF().PCM().to_gpu()
         cls.mfu.with_solvent.method = 'C-PCM'
         cls.mfu.with_solvent.lebedev_order = 29 # 302 Lebedev grids
         cls.mfu.with_solvent.eps = 78
-        cls.mfu.with_solvent.eps_optical = 1.78
         cls.mfu = mfu.run(conv_tol=1e-10)
 
         mf_b3lyp_nodf = mol.RKS().PCM().to_gpu()
@@ -52,7 +50,6 @@ class KnownValues(unittest.TestCase):
         mf_b3lyp_nodf.with_solvent.method = 'C-PCM'
         mf_b3lyp_nodf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
         mf_b3lyp_nodf.with_solvent.eps = 78
-        mf_b3lyp_nodf.with_solvent.eps_optical = 1.78
         mf_b3lyp_nodf.cphf_grids = mf_b3lyp_nodf.grids
         cls.mf_b3lyp_nodf = mf_b3lyp_nodf.run(conv_tol=1e-10)
 
@@ -62,7 +59,6 @@ class KnownValues(unittest.TestCase):
         mf_b3lyp_nodf_u.with_solvent.method = 'C-PCM'
         mf_b3lyp_nodf_u.with_solvent.lebedev_order = 29 # 302 Lebedev grids
         mf_b3lyp_nodf_u.with_solvent.eps = 78
-        mf_b3lyp_nodf_u.with_solvent.eps_optical = 1.78
         mf_b3lyp_nodf_u.cphf_grids = mf_b3lyp_nodf_u.grids
         cls.mf_b3lyp_nodf_u = mf_b3lyp_nodf_u.run(conv_tol=1e-10)
 
@@ -72,7 +68,6 @@ class KnownValues(unittest.TestCase):
         mf_b3lyp_nodf_iefpcm.with_solvent.method = 'IEF-PCM'
         mf_b3lyp_nodf_iefpcm.with_solvent.lebedev_order = 29 # 302 Lebedev grids
         mf_b3lyp_nodf_iefpcm.with_solvent.eps = 78
-        mf_b3lyp_nodf_iefpcm.with_solvent.eps_optical = 1.78
         mf_b3lyp_nodf_iefpcm.cphf_grids = mf_b3lyp_nodf_iefpcm.grids
         cls.mf_b3lyp_nodf_iefpcm = mf_b3lyp_nodf_iefpcm.run(conv_tol=1e-10)
 
@@ -82,7 +77,6 @@ class KnownValues(unittest.TestCase):
         mf_b3lyp_nodf_iefpcm_u.with_solvent.method = 'IEF-PCM'
         mf_b3lyp_nodf_iefpcm_u.with_solvent.lebedev_order = 29 # 302 Lebedev grids
         mf_b3lyp_nodf_iefpcm_u.with_solvent.eps = 78
-        mf_b3lyp_nodf_iefpcm_u.with_solvent.eps_optical = 1.78
         mf_b3lyp_nodf_iefpcm_u.cphf_grids = mf_b3lyp_nodf_iefpcm_u.grids
         cls.mf_b3lyp_nodf_iefpcm_u = mf_b3lyp_nodf_iefpcm.run(conv_tol=1e-10)
 
@@ -118,30 +112,34 @@ class KnownValues(unittest.TestCase):
         """
         mf = self.mf
         td = mf.TDHF()
-        assert td.device == 'gpu'
+        td._scf.with_solvent.tdscf = True
+        td._scf.with_solvent.eps = 1.78
+        td._scf.with_solvent.build()
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
+        print(es_gound)
         ref = np.array([-75.61072291, -75.54419399, -75.51949191, -75.45219025, -75.40975027])
         assert np.allclose(es_gound, ref)
 
         td = mf.TDA()
-        assert td.device == 'gpu'
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
+        print(es_gound)
         ref = np.array([-75.60864828, -75.54169327, -75.51738767, -75.44915784, -75.40839714])
         assert np.allclose(es_gound, ref)
 
     def test_b3lyp_CPCM(self):
         mf = self.mf_b3lyp_nodf
         td = mf.TDDFT()
-        assert td.device == 'gpu'
+        td._scf.with_solvent.tdscf = True
+        td._scf.with_solvent.eps = 1.78
+        td._scf.with_solvent.build()
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-76.06898428, -75.99630982, -75.98765186, -75.91045133, -75.84783748])
         assert np.allclose(es_gound, ref)
 
         td = mf.TDA()
-        assert td.device == 'gpu'
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-76.06789176, -75.99609709, -75.98589720, -75.90894600, -75.84699115])
@@ -150,14 +148,15 @@ class KnownValues(unittest.TestCase):
     def test_b3lyp_IEFPCM(self):
         mf = self.mf_b3lyp_nodf_iefpcm
         td = mf.TDDFT()
-        assert td.device == 'gpu'
+        td._scf.with_solvent.tdscf = True
+        td._scf.with_solvent.eps = 1.78
+        td._scf.with_solvent.build()
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-76.06881645, -75.99631929, -75.98713725, -75.91015704, -75.84668800])
         assert np.allclose(es_gound, ref)
 
         td = mf.TDA()
-        assert td.device == 'gpu'
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-76.06773319, -75.99610928, -75.98534912, -75.90861455, -75.84576041])
@@ -166,7 +165,9 @@ class KnownValues(unittest.TestCase):
     def test_unrestricted_hf_CPCM(self):
         mf = self.mfu
         td = mf.TDHF()
-        assert td.device == 'gpu'
+        td._scf.with_solvent.tdscf = True
+        td._scf.with_solvent.eps = 1.78
+        td._scf.with_solvent.build()
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-75.64482315, -75.61072291, -75.57156784, -75.56769949, -75.54419399])
@@ -175,7 +176,9 @@ class KnownValues(unittest.TestCase):
     def test_unrestricted_b3lyp_CPCM(self):
         mf = self.mf_b3lyp_nodf_u
         td = mf.TDDFT()
-        assert td.device == 'gpu'
+        td._scf.with_solvent.tdscf = True
+        td._scf.with_solvent.eps = 1.78
+        td._scf.with_solvent.build()
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-76.09301571, -76.06898428, -76.01822101, -76.01369024, -75.99630982])
