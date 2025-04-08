@@ -82,15 +82,13 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     vj = cp.stack((vj0, vj1, vj2))
     vk = cp.stack((vk0, vk1, vk2))
     veff0doo = vj[0] * 2 - vk[0]  # 2 for alpha and beta
-    if getattr(mf, 'with_solvent', None):
-        veff0doo += mf.with_solvent._B_dot_x(dmzoo)* 2.0
+    veff0doo += td_grad.solvent_response(dmzoo)
     wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
     if singlet:
         veff = vj[1] * 2 - vk[1]
     else:
         veff = -vk[1]
-    if getattr(mf, 'with_solvent', None):
-        veff += mf.with_solvent._B_dot_x((dmxpy + dmxpy.T)*1.0)*2.0
+    veff += td_grad.solvent_response(dmxpy + dmxpy.T)
     veff0mop = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
     wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2  # 2 for dm + dm.T
     wvo += contract("ac,ai->ci", veff0mop[nocc:, nocc:], xpy) * 2
@@ -343,6 +341,9 @@ class Gradients(rhf_grad.GradientsBase):
             )
             self._write(self.mol, self.de, self.atmlst)
             logger.note(self, "----------------------------------------------")
+
+    def solvent_response(self, dm):
+        return 0.0
 
     as_scanner = NotImplemented
 

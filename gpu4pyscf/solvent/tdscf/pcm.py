@@ -231,6 +231,9 @@ class WithSolventTDSCFGradient:
 
     def __init__(self, tda_grad_method):
         self.__dict__.update(tda_grad_method.__dict__)
+
+    def solvent_response(self, dm):
+        return self.base._scf.with_solvent._B_dot_x(dm)*2.0 
         
     def grad_elec(self, xy, singlet, atmlst=None, verbose=logger.INFO):
         de = super().grad_elec(xy, singlet, atmlst, verbose) 
@@ -238,9 +241,11 @@ class WithSolventTDSCFGradient:
         assert self.base._scf.with_solvent.equilibrium_solvation
 
         dm = self.base._scf.make_rdm1(ao_repr=True)
+        if dm.ndim == 3:
+            dm = dm[0] + dm[1]
         # TODO: add unrestricted case support
         dmP = 0.5 * (self.dmz1doo + self.dmz1doo.T)
-        dmxpy = 1.0 * (self.dmxpy + self.dmxpy.T)
+        dmxpy = self.dmxpy + self.dmxpy.T
         pcmobj = self.base._scf.with_solvent
         de += grad_qv(pcmobj, dm)
         de += grad_solver(pcmobj, dm)
