@@ -136,7 +136,7 @@ int ECP_ip_cart(double *gctr,
     if (lc < 0){
         const int lij1 = li+lj+2;
         const int lij3 = lij1*lij1*lij1;
-        
+
         int smem_size = 0;
         smem_size += lij3;      // rad_ang
         smem_size += lij1*lij1; // rad_all
@@ -146,7 +146,7 @@ int ECP_ip_cart(double *gctr,
             tasks, ntasks,
             ecpbas, ecploc,
             atm, bas, env);
-        
+
     } else {
         const int li1 = li+2;
         const int lj1 = lj+1;
@@ -164,7 +164,7 @@ int ECP_ip_cart(double *gctr,
         int smem_size2 = lj1*(lj1+1)*(lj1+2)/6 * blkj; // omegaj
         int smem_size3 = li1*lic1*nfi; // angi
         int smem_size4 = lj1*ljc1*nfj; // angj
-        
+
         int dynamic_smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
         cudaError_t err = cudaFuncSetAttribute(type2_cart_ip1,
                                          cudaFuncAttributeMaxDynamicSharedMemorySize,
@@ -203,7 +203,7 @@ int ECP_ipipv_cart(double *gctr,
     if (lc < 0){
         const int lij1 = li+lj+3; //
         const int lij3 = lij1*lij1*lij1;
-        
+
         int smem_size = 0;
         smem_size += lij3;      // rad_ang
         smem_size += lij1*lij1; // rad_all
@@ -213,7 +213,7 @@ int ECP_ipipv_cart(double *gctr,
             tasks, ntasks,
             ecpbas, ecploc,
             atm, bas, env);
-        
+
     } else {
         const int li1 = li+3;
         const int lj1 = lj+1;
@@ -225,7 +225,7 @@ int ECP_ipipv_cart(double *gctr,
         const int lcc1 = 2*lc+1;
         const int blki = (lic1+1)/2 * lcc1;
         const int blkj = (ljc1+1)/2 * lcc1;
-        
+
         int smem_size0 = lij1 * lic1 * ljc1; // rad_all
         int smem_size1 = li1*(li1+1)*(li1+2)/6 * blki; // omegai
         int smem_size2 = lj1*(lj1+1)*(lj1+2)/6 * blkj; // omegaj
@@ -254,7 +254,7 @@ int ECP_ipipv_cart(double *gctr,
             tasks, ntasks,
             ecpbas, ecploc,
             atm, bas, env);
-        
+
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -277,7 +277,7 @@ int ECP_ipvip_cart(double *gctr,
     if (lc < 0){
         const int lij1 = li+lj+3; //
         const int lij3 = lij1*lij1*lij1;
-        
+
         int smem_size = 0;
         smem_size += lij3;      // rad_ang
         smem_size += lij1*lij1; // rad_all
