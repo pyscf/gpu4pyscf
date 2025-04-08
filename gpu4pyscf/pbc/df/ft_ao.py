@@ -23,7 +23,7 @@ import numpy as np
 import cupy as cp
 import scipy.linalg
 from pyscf import lib
-from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD
+from pyscf.gto.mole import ANG_OF, NPRIM_OF, NCTR_OF, ATOM_OF, PTR_COORD
 from pyscf.scf import _vhf
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools import k2gamma
@@ -92,21 +92,31 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
 class FTOpt:
     def __init__(self, cell, kpts=None, bvk_kmesh=None):
         self.cell = cell
-        cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
-        self.sorted_cell = cell
+        sorted_cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
+        self.sorted_cell = sorted_cell
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
         self.coeff = cp.asarray(coeff, dtype=np.complex128)
+
+        # TODO: ao_idx from group_basis
+        ls = np.repeat(cell._bas[:,ANG_OF], cell._bas[:,NCTR_OF])
+        nprims = np.repeat(cell._bas[:,NPRIM_OF], cell._bas[:,NCTR_OF])
+        l_ctrs = np.column_stack((ls, -nprims))
+        _, inv_idx = np.unique(l_ctrs, return_inverse=True, axis=0)
+        sorted_idx = np.argsort(inv_idx.ravel(), kind='stable')
+        ao_loc = sorted_cell.ao_loc
+        ao_idx = np.array_split(np.arange(ao_loc[-1]), ao_loc[1:-1])
+        self.ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
 
         if bvk_kmesh is None:
             if kpts is None or is_zero(kpts):
                 bvk_kmesh = np.ones(3, dtype=int)
             else:
-                bvk_kmesh = kpts_to_kmesh(cell, kpts)
+                bvk_kmesh = kpts_to_kmesh(sorted_cell, kpts)
         if np.prod(bvk_kmesh) == 1:
-            bvkcell = cell
+            bvkcell = sorted_cell
         else:
-            bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)
+            bvkcell = pbctools.super_cell(sorted_cell, bvk_kmesh, wrap_around=True)
             # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
         self.bvkcell = bvkcell

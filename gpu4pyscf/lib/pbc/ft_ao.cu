@@ -437,12 +437,13 @@ void ft_aopair_compressed_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo 
         int nfi = (li + 1) * (li + 2) / 2;
         int nfj = (lj + 1) * (lj + 2) / 2;
         int nfij = nfi * nfj;
+        int npG = npairs_ij * nGv;
         double *aft_tensor = out + (pair_ij * nGv + Gv_id) * OF_COMPLEX;
         for (int n = 0; n < GOUT_WIDTH; ++n) {
             int ij = n*gout_stride + gout_id;
             if (ij >= nfij) break;
-            aft_tensor[n*npairs_ij*nGv*2  ] = goutR[n];
-            aft_tensor[n*npairs_ij*nGv*2+1] = goutI[n];
+            aft_tensor[n*npG*2  ] = goutR[n];
+            aft_tensor[n*npG*2+1] = goutI[n];
         }
     }
 }

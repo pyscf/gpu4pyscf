@@ -5,6 +5,7 @@ add_library(pbc SHARED
   fill_int3c2e.cu unrolled_int3c2e.cu
   estimator.cu
   rys_roots_dat.cu
+  sorting.c
 )
 
 set_target_properties(pbc PROPERTIES

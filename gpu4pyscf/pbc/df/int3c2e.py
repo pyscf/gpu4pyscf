@@ -253,29 +253,42 @@ def to_primitive_bas(cell):
     pcell._env = prim_env
     prim_to_ctr_mapping = np.asarray(np.hstack(prim_to_ctr_mapping), dtype=np.int32)
 
-    ls = pcell._bas[:,ANG_OF]
-    lmax = ls.max()
-    sorted_idx = np.hstack([np.where(ls==l)[0] for l in range(lmax+1)])
+    p_ls = pcell._bas[:,ANG_OF]
+    lmax = p_ls.max()
+    sorted_idx = np.hstack([np.where(p_ls==l)[0] for l in range(lmax+1)])
     pcell._bas = pcell._bas[sorted_idx]
 
-    # prim shells are sorted. the mapping needs to be sorted accordingly.
+    # This sorted_cell is a fictitious cell object, to define the
+    # p2c_mapping for prim_cell. PTRs in sorted_cell are not initialized.
+    # This object should not be used for any integral kernel.
+    sorted_cell = cell.copy()
+    c_ls = np.repeat(cell._bas[:,ANG_OF], cell._bas[:,NCTR_OF])
+    sorted_idx = np.repeat(np.arange(cell.nbas), cell._bas[:,NCTR_OF])
+    sorted_idx = [sorted_idx[c_ls==l] for l in range(lmax+1)]
+    counts = [len(i) for i in sorted_idx]
+    sorted_idx = np.hstack(sorted_idx)
+    sorted_cell._bas = cell._bas[sorted_idx]
+    sorted_cell._bas[:,NCTR_OF] = 1
+
+    # prim shells are sorted in pcell. The mapping needs to be sorted accordingly.
     # The lookup stores the mapping for each angular momentum
-    c_ls = cell._bas[:,ANG_OF]
-    counts = [cell._bas[c_ls==l,NCTR_OF].sum() for l in range(lmax+1)]
     c_shell_offsets = np.append(0, np.cumsum(counts))
     p2c_mapping = []
     for l, offset in enumerate(c_shell_offsets[:-1]):
-        i, idx = np.unique(prim_to_ctr_mapping[ls==l], return_inverse=True)
+        i, idx = np.unique(prim_to_ctr_mapping[p_ls==l], return_inverse=True)
         assert all(i[:-1] < i[1:])
         p2c_mapping.append(idx + offset)
     p2c_mapping = np.asarray(np.hstack(p2c_mapping), dtype=np.int32)
 
-    # ao_idx transform the AOs in sorted cell into AOs in the original cell
-    sorted_idx = np.hstack([np.where(c_ls==l)[0] for l in range(lmax+1)])
-    ao_loc = cell.ao_loc
+    # ao_idx transforms the AOs in sorted_cell into AOs in the original cell
+    if cell.cart:
+        dims = (c_ls + 1) * (c_ls + 2) // 2
+    else:
+        dims = c_ls * 2+ 1
+    ao_loc = np.append(np.int32(0), dims.cumsum(dtype=np.int32))
     ao_idx = np.array_split(np.arange(cell.nao), ao_loc[1:-1])
     ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
-    return pcell, p2c_mapping, ao_idx
+    return pcell, sorted_cell, p2c_mapping, ao_idx
 
 class SRInt3c2eOpt:
     def __init__(self, cell, auxcell, omega, bvk_kmesh=None):
@@ -284,9 +297,14 @@ class SRInt3c2eOpt:
         assert cell._bas[:,ANG_OF].max() <= LMAX
 
         self.cell = cell
-        prim_cell, self.prim_to_ctr_mapping, self.ao_idx = to_primitive_bas(cell)
+        prim_cell, sorted_cell, self.prim_to_ctr_mapping, self.ao_idx = \
+                to_primitive_bas(cell)
         self.prim_cell = prim_cell
         self.prim_cell.omega = omega
+        # This sorted_cell is a fictitious cell object, to define the
+        # p2c_mapping for prim_cell. PTRs in sorted_cell are not initialized.
+        # This object should not be used for any integral kernel.
+        self.sorted_cell = sorted_cell
 
         self.cell0_prim_l_counts = np.bincount(prim_cell._bas[:,ANG_OF])
         # How many original shells for each angular momentum.
@@ -326,62 +344,25 @@ class SRInt3c2eOpt:
             supcell._bas[:,PTR_BAS_COORD] = supcell._atm[
                 supcell._bas[:,ATOM_OF],PTR_COORD]
         self.supcell = supcell
-        self.img_idx_cache = None
 
-    def build(self, cutoff=None, verbose=None):
+        self.rcut = None
+        self.int3c2e_envs = None
+
+    def build(self, verbose=None):
         '''integral screening'''
         log = logger.new_logger(self.cell, verbose)
-        cput0 = log.init_timer()
         pcell = self.prim_cell
         auxcell = self.sorted_auxcell
         supcell = self.supcell
         s_nbas = supcell.nbas
         p_nbas = pcell.nbas
-        sup_ncells = s_nbas // p_nbas
-        bvk_ncells = np.prod(self.bvk_kmesh)
-        vol = pcell.vol
+        sup_ncells = np.prod(self.replica)
 
-        ls = pcell._bas[:,ANG_OF]
-        exps, cs = extract_pgto_params(pcell, 'diffused')
-        cs *= ((2*ls+1)/(4*np.pi))**.5
-        exps = cp.asarray(exps, dtype=np.float32)
-        log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
-
-        # Search the most diffused functions on each atom
-        aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffused')
-        aux_ls = auxcell._bas[:,ANG_OF]
-        r2_aux = np.log(aux_cs**2 / pcell.precision * 10**aux_ls) / aux_exps
-        atoms = auxcell._bas[:,ATOM_OF]
-        atom_aux_exps = np.full(pcell.natm, 1e8, dtype=np.float32)
-        for ia in range(pcell.natm):
-            bas_mask = atoms == ia
-            es = aux_exps[bas_mask]
-            if len(es) > 0:
-                atom_aux_exps[ia] = es[r2_aux[bas_mask].argmax()]
-        atom_aux_exps = cp.asarray(atom_aux_exps, dtype=np.float32)
-
-        rcut = estimate_rcut(pcell, auxcell, self.omega).max()
+        self.rcut = rcut = estimate_rcut(pcell, auxcell, self.omega).max()
         Ls = cp.asarray(supcell.get_lattice_Ls(rcut=rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
         log.debug('int3c2e_kernel rcut = %g, nimgs = %d', rcut, nimgs)
-
-        if cutoff is None:
-            omega = pcell.omega
-            aux_exp, _, aux_l = most_diffused_pgto(auxcell)
-            cell_exp, _, cell_l = most_diffused_pgto(pcell)
-            if omega == 0:
-                theta = 1./(1./cell_exp*2 + 1./aux_exp)
-            else:
-                theta = 1./(1./cell_exp*2 + 1./aux_exp + omega**-2)
-            lsum = cell_l * 2 + aux_l + 1
-            rad = vol**(-1./3) * rcut + 1
-            surface = 4*np.pi * rad**2
-            lattice_sum_factor = 2*np.pi*rcut*lsum/(vol*theta) + surface
-            cutoff = pcell.precision / lattice_sum_factor
-            log.debug1('int3c_kernel integral omega=%g theta=%g cutoff=%g',
-                       omega, theta, cutoff)
-        log_cutoff = math.log(cutoff)
 
         # Note: sort_orbitals and unsort_orbitals do not transform the
         # s and p orbitals. _scale_sp_ctr_coeff apply these special
@@ -412,6 +393,62 @@ class SRInt3c2eOpt:
 
         log.debug1('prim_l_counts %s', self.cell0_prim_l_counts)
         log.debug1('ctr_l_counts %s', self.cell0_ctr_l_counts)
+        return self
+
+    def estimate_cutoff_with_penalty(self):
+        pcell = self.prim_cell
+        auxcell = self.sorted_auxcell
+        vol = pcell.vol
+        omega = self.omega
+        aux_exp, _, aux_l = most_diffused_pgto(auxcell)
+        cell_exp, _, cell_l = most_diffused_pgto(pcell)
+        if omega == 0:
+            theta = 1./(1./cell_exp*2 + 1./aux_exp)
+        else:
+            theta = 1./(1./cell_exp*2 + 1./aux_exp + omega**-2)
+        lsum = cell_l * 2 + aux_l + 1
+        rad = vol**(-1./3) * self.rcut + 1
+        surface = 4*np.pi * rad**2
+        lattice_sum_factor = 2*np.pi*self.rcut*lsum/(vol*theta) + surface
+        cutoff = pcell.precision / lattice_sum_factor
+        logger.debug1(pcell, 'int3c_kernel integral omega=%g theta=%g cutoff=%g',
+                      omega, theta, cutoff)
+        return cutoff
+
+    def generate_img_idx(self, cutoff=None, verbose=None):
+        log = logger.new_logger(self.cell, verbose)
+        cput0 = log.init_timer()
+        int3c2e_envs = self.int3c2e_envs
+        pcell = self.prim_cell
+        auxcell = self.sorted_auxcell
+        bvk_ncells = np.prod(self.bvk_kmesh)
+        sup_ncells = np.prod(self.replica)
+        nimgs = int3c2e_envs.nimgs
+        p_nbas = pcell.nbas
+
+        ls = pcell._bas[:,ANG_OF]
+        exps, cs = extract_pgto_params(pcell, 'diffused')
+        cs *= ((2*ls+1)/(4*np.pi))**.5
+        exps = cp.asarray(exps, dtype=np.float32)
+        log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
+
+        # Search the most diffused functions on each atom
+        aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffused')
+        aux_ls = auxcell._bas[:,ANG_OF]
+        r2_aux = np.log(aux_cs**2 / pcell.precision * 10**aux_ls) / aux_exps
+        atoms = auxcell._bas[:,ATOM_OF]
+        atom_aux_exps = np.full(pcell.natm, 1e8, dtype=np.float32)
+        for ia in range(pcell.natm):
+            bas_mask = atoms == ia
+            es = aux_exps[bas_mask]
+            if len(es) > 0:
+                atom_aux_exps[ia] = es[r2_aux[bas_mask].argmax()]
+        atom_aux_exps = cp.asarray(atom_aux_exps, dtype=np.float32)
+        if cutoff is None:
+            cutoff = self.estimate_cutoff_with_penalty()
+        log_cutoff = math.log(cutoff)
+        vol = pcell.vol
+
         c_shell_counts = self.cell0_ctr_l_counts
         c_shell_offsets = np.append(0, np.cumsum(c_shell_counts))
         p_shell_l_offsets = np.append(0, np.cumsum(self.cell0_prim_l_counts))
@@ -435,7 +472,7 @@ class SRInt3c2eOpt:
                 ctypes.byref(int3c2e_envs),
                 ctypes.cast(exps.data.ptr, ctypes.c_void_p),
                 ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
-                ctypes.float(log_cutoff))
+                ctypes.c_float(log_cutoff))
             if err != 0:
                 raise RuntimeError('bvk_overlap_img_counts failed')
 
@@ -462,7 +499,7 @@ class SRInt3c2eOpt:
                 ctypes.byref(int3c2e_envs),
                 ctypes.cast(exps.data.ptr, ctypes.c_void_p),
                 ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
-                ctypes.float(log_cutoff))
+                ctypes.c_float(log_cutoff))
             if err != 0:
                 raise RuntimeError('bvk_overlap_img_counts failed')
             log.timer_debug1('ovlp_img_idx', *cput0)
@@ -489,7 +526,7 @@ class SRInt3c2eOpt:
                 ctypes.cast(exps.data.ptr, ctypes.c_void_p),
                 ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
                 ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
-                ctypes.float(log_cutoff))
+                ctypes.c_float(log_cutoff))
             if err != 0:
                 raise RuntimeError('sr_int3c2e_img_idx failed')
 
@@ -556,22 +593,24 @@ class SRInt3c2eOpt:
             log.timer_debug1(f'pair_mapping [{li},{lj}]', *t1)
             return (img_idx.get(), offsets.get(), bas_ij.get(),
                     pair_mapping.get(), c_pair_idx.get())
+        return gen_img_idx
 
-        self.img_idx_cache = img_idx_cache = {}
+    def make_img_idx_cache(self, cutoff=None):
+        img_idx_cache = {}
+        gen_img_idx = self.generate_img_idx(cutoff)
         l_counts = self.cell0_prim_l_counts
-        p_shell_l_offsets = np.append(0, np.cumsum(l_counts))
         lmax = len(l_counts) - 1
         ij_tasks = ((i, j) for i in range(lmax+1) for j in range(i+1))
         for li, lj in ij_tasks:
             if l_counts[li] == 0 or l_counts[lj] == 0:
                 continue
             img_idx_cache[li, lj] = gen_img_idx(li, lj)
-        return self
+        return img_idx_cache
 
-    def int3c2e_kernel(self, verbose=None):
+    def int3c2e_kernel(self, verbose=None, img_idx_cache=None):
         log = logger.new_logger(self.cell, verbose)
         cput0 = log.init_timer()
-        if self.img_idx_cache is None:
+        if self.int3c2e_envs is None:
             self.build()
         pcell = self.prim_cell
         auxcell = self.sorted_auxcell
@@ -597,13 +636,15 @@ class SRInt3c2eOpt:
         kern_counts = 0
 
         ij_tasks = ((i, j) for i in range(lmax+1) for j in range(i+1))
+        if img_idx_cache is None:
+            img_idx_cache = self.make_img_idx_cache()
         for li, lj in ij_tasks:
             if l_counts[li] == 0 or l_counts[lj] == 0:
                 continue
             ish0, ish1 = p_shell_l_offsets[li:li+2]
             jsh0, jsh1 = p_shell_l_offsets[lj:lj+2]
             img_idx, img_offsets, bas_ij_idx, pair_mapping, c_pair_idx = \
-                    [cp.asarray(x) for x in self.img_idx_cache[li, lj]]
+                    [cp.asarray(x) for x in img_idx_cache[li, lj]]
             nfij = nfcart[li] * nfcart[lj]
             # Note the storage order for ij_pair: i takes the smaller stride.
             n_ctr_pairs = len(c_pair_idx)

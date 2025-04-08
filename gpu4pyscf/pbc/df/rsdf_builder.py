@@ -24,9 +24,7 @@ import numpy as np
 import cupy as cp
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
-from pyscf.gto import ANG_OF
-#from pyscf.pbc import gto as pbcgto
-#from pyscf.pbc.gto import pseudo
+from pyscf.gto import ANG_OF, NPRIM_OF, NCTR_OF
 from pyscf.pbc.tools import pbc as pbctools
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df.rsdf_builder import (
@@ -37,9 +35,10 @@ from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.gto.mole import extract_pgto_params
+from gpu4pyscf.gto.mole import cart2sph_by_l, extract_pgto_params
 from gpu4pyscf.scf.jk import _scale_sp_ctr_coeff
-from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, estimate_rcut, libpbc
+from gpu4pyscf.pbc.df.int3c2e import (sr_aux_e2, estimate_rcut, libpbc,
+                                      SRInt3c2eOpt, Int3c2eEnvVars)
 
 OMEGA_MIN = 0.3
 
@@ -265,11 +264,11 @@ def _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, verbose=None):
     #logger.debug1(cell, 'Gblksize = %d', Gblksize)
     def ft_ao_iter(kpt=np.zeros(3), kpts=None):
         coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws, kpt)
-        auxG_conj = cp.asarray(ft_ao.ft_ao(auxcell, Gv, kpt=kpt).conj(), order='C')
-        auxG_conj *= cp.asarray(coulG[:,None])
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
+            auxG_conj = cp.asarray(ft_ao.ft_ao(auxcell, Gv[p0:p1], kpt=kpt).conj(), order='C')
+            auxG_conj *= cp.asarray(coulG[p0:p1,None])
             pqG = ft_kern(Gv[p0:p1], kpt, kpts).transpose(0,2,3,1)
-            yield pqG, auxG_conj[p0:p1]
+            yield pqG, auxG_conj
     return ft_ao_iter
 
 def decompose_j2c(j2c, prefer_ed=PREFER_ED, linear_dep_threshold=LINEAR_DEP_THR):
@@ -370,15 +369,305 @@ def _solve_cderi(cd_j2c, j3c, j2ctag):
         j3c = solve_triangular(cd_j2c, j3c.reshape(-1,naux).T, lower=True)
         return j3c.reshape(naux,nao,nao)
 
+# Generate overlap masks using the int3c2e.overlap_img_counts function.
+# This overlap mask will be used in the ft_aopair generation to generate the
+# non-zero elements indices. This mask ensures that non-zero pairs in the
+# int3c2e integrals are not overlooked by the ft_aopair kernel.
+def _int3c2e_overlap_mask(int3c2e_opt, cutoff):
+    cell = int3c2e_opt.cell
+    pcell = int3c2e_opt.prim_cell
+    p_nbas = pcell.nbas
+    p2c_mapping = cp.asarray(int3c2e_opt.prim_to_ctr_mapping, dtype=np.int32)
+    ovlp_img_counts = cp.zeros((p_nbas,p_nbas), dtype=np.int32)
+    ls = pcell._bas[:,ANG_OF]
+    exps, cs = extract_pgto_params(pcell, 'diffused')
+    cs *= ((2*ls+1)/(4*np.pi))**.5
+    exps = cp.asarray(exps, dtype=np.float32)
+    log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
+    log_cutoff = math.log(cutoff)
+
+    Ls = cp.asarray(pcell.get_lattice_Ls())
+    Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
+    nimgs = len(Ls)
+
+    _atm = cp.array(pcell._atm)
+    _bas = cp.array(pcell._bas)
+    _env = cp.array(_scale_sp_ctr_coeff(pcell))
+    int3c2e_envs = Int3c2eEnvVars(
+        pcell.natm, p_nbas, 1, nimgs, _atm.data.ptr, _bas.data.ptr,
+        _env.data.ptr, 0, Ls.data.ptr,
+    )
+    err = libpbc.bvk_overlap_img_counts(
+        ctypes.cast(ovlp_img_counts.data.ptr, ctypes.c_void_p),
+        ctypes.cast(p2c_mapping.data.ptr, ctypes.c_void_p),
+        (ctypes.c_int*4)(0, p_nbas, 0, p_nbas),
+        ctypes.byref(int3c2e_envs),
+        ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+        ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+        ctypes.c_float(log_cutoff))
+    if err != 0:
+        raise RuntimeError('bvk_overlap_img_counts failed')
+    p_ovlp_mask = np.asarray((ovlp_img_counts > 0).get(), dtype=np.int8)
+    p2c_mapping = np.asarray(p2c_mapping.get(), dtype=np.int32)
+    # Condense to contracted shells
+    c_nbas = np.sum(int3c2e_opt.cell0_ctr_l_counts)
+    c_ovlp_mask = np.zeros((c_nbas, c_nbas), dtype=np.int8)
+    libpbc.condense_primitive_ovlp_mask(
+        c_ovlp_mask.ctypes, p_ovlp_mask.ctypes, p2c_mapping.ctypes,
+        ctypes.c_int(c_nbas), ctypes.c_int(p_nbas))
+
+    lmax = cell._bas[:,ANG_OF].max()
+    # generally contracted shells are convert to segement contracted shells in
+    # either cases
+    ls = np.repeat(cell._bas[:,ANG_OF], cell._bas[:,NCTR_OF])
+    nprims = np.repeat(cell._bas[:,NPRIM_OF], cell._bas[:,NCTR_OF])
+
+    #** Sort ovlp mask, to adapt the order in ft_aopair
+    # sorted_idx indicates how the contracted shells of the original cell are
+    # ordered in ft_aopair. See also the mole.group_basis function.
+    l_ctrs = np.column_stack((ls, -nprims))
+    _, inv_idx = np.unique(l_ctrs, return_inverse=True, axis=0)
+    ft_sorting_idx = np.argsort(inv_idx.ravel(), kind='stable')
+
+    idx = np.arange(len(ls))
+    int3c_sorting_idx = np.hstack([idx[ls==l] for l in range(lmax+1)])
+    rev_int3c_idx = np.empty_like(int3c_sorting_idx)
+    # sorted_cell._bas[rev_int3c_idx] => cell._bas
+    rev_int3c_idx[int3c_sorting_idx] = idx
+
+    # int3c2e._sorted_cell[mapping] => ft._sorted_cell
+    mapping = rev_int3c_idx[ft_sorting_idx]
+
+    ovlp_mask = c_ovlp_mask[mapping[:,None],mapping]
+    return ovlp_mask, mapping
+
+# The long-range part of the cderi for gamma point. The resultant 3-index tensor
+# is compressed.
+def _lr_int3c2e_gamma_point(int3c2e_opt):
+    cell = int3c2e_opt.cell
+    log = logger.new_logger(cell)
+    t1 = log.init_timer()
+    auxcell = int3c2e_opt.auxcell
+    omega = int3c2e_opt.omega
+    lmax = cell._bas[:,ANG_OF].max()
+    uniq_l = np.arange(lmax+1)
+    if cell.cart:
+        nf = (uniq_l + 1) * (uniq_l + 2) // 2
+    else:
+        nf = uniq_l * 2 + 1
+        c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
+
+    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+    mesh = cell.cutoff_to_mesh(ke_cutoff)
+    mesh = cell.symmetrize_mesh(mesh)
+    Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+    ngrids = len(Gv)
+    nao = cell.nao
+    naux = auxcell.nao
+
+    ft_opt = ft_ao.FTOpt(cell)
+    sorted_cell = ft_opt.sorted_cell
+    coeff = ft_opt.coeff
+    uniq_l_ctr = ft_opt.uniq_l_ctr
+    l_ctr_offsets = ft_opt.l_ctr_offsets
+    Ls = cp.asarray(sorted_cell.get_lattice_Ls())
+    Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
+    nimgs = len(Ls)
+    nbas = sorted_cell.nbas
+
+    ls = sorted_cell._bas[:,ANG_OF]
+    exps, cs = extract_pgto_params(sorted_cell, 'diffused')
+    cs *= ((2*ls+1)/(4*np.pi))**.5
+    exps = cp.asarray(exps, dtype=np.float32)
+    log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
+
+    # The cutoff from the int3c2e is utilized. This is generally smaller than
+    # that created by the ft_aopair module. This is to ensure ft_aopair
+    # producing more non-zero integrals than that in the int3c2e function.
+    cutoff = int3c2e_opt.estimate_cutoff_with_penalty()
+    log_cutoff = math.log(cutoff)
+
+    _atm = cp.array(sorted_cell._atm)
+    _bas = cp.array(sorted_cell._bas)
+    _env = cp.array(_scale_sp_ctr_coeff(sorted_cell))
+    ao_loc = cp.array(sorted_cell.ao_loc)
+    aft_envs = ft_ao.AFTIntEnvVars(
+        sorted_cell.natm, nbas, 1, nimgs, _atm.data.ptr,
+        _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr, Ls.data.ptr
+    )
+    # Keep a reference to these arrays, prevent releasing them upon returning the closure
+    aft_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
+
+    nao, nao_orig = coeff.shape
+    uniq_l = uniq_l_ctr[:,0]
+    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
+    n_groups = np.count_nonzero(uniq_l <= ft_ao.LMAX)
+
+    permutation_symmetry = 1
+    ij_tasks = [(i, j) for i in range(n_groups) for j in range(i+1)]
+
+    int3c2e_ovlp_mask, mapping = _int3c2e_overlap_mask(int3c2e_opt, cutoff)
+    int3c2e_ovlp_mask = cp.asarray(int3c2e_ovlp_mask, dtype=bool)
+
+    # ft._sorted_cell._bas[rev_mapping] => int3c._sorted_cell._bas
+    rev_mapping = np.empty_like(mapping)
+    rev_mapping[mapping] = np.arange(len(mapping))
+
+    # Save the indices of non-zero FT integrals in the bas_ij_index_lookup.
+    # This lookup table will be used to generate the addresses for the
+    # non-zere sr_int3c2e integrals.
+    # bas_ij_index_lookup[ish,jsh] -> address in ft_aopair
+    bas_ij_index_lookup = cp.zeros((nbas, nbas), dtype=np.int32)
+    bas_ij_cache = {}
+
+    ao_pair_mapping = []
+    # Given shell Id in sorted_cell, this ao_loc maps shell to the AO offset in
+    # the original cell
+    ao_loc = cp.asarray(ft_opt.ao_idx[ft_opt.sorted_cell.ao_loc[:-1]])
+
+    p0 = p1 = 0
+    non0_size = 0
+    for i, j in ij_tasks:
+        li = uniq_l[i]
+        lj = uniq_l[j]
+        ll_pattern = f'{l_symb[i]}{l_symb[j]}'
+        ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+        jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+        nish = ish1 - ish0
+        njsh = jsh1 - jsh0
+        img_counts = cp.zeros((nish,njsh), dtype=np.int32)
+        err = libpbc.overlap_img_counts(
+            ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
+            (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+            ctypes.byref(aft_envs),
+            ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+            ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+            ctypes.c_float(log_cutoff), ctypes.c_int(permutation_symmetry))
+        if err != 0:
+            raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
+        mask = img_counts > 0
+        mask |= int3c2e_ovlp_mask[ish0:ish1,jsh0:jsh1]
+        bas_ij = cp.asarray(cp.where(mask.ravel())[0], dtype=np.int32)
+        npairs = len(bas_ij)
+        if npairs == 0:
+            continue
+
+        # Sort according to the number of images. In the CUDA kernel,
+        # shell-pairs that have closed number of images are processed on
+        # the same SM processor, ensuring the best parallel execution.
+        img_counts = img_counts.ravel()
+        counts_sorting = (-img_counts[bas_ij]).argsort()
+        bas_ij = bas_ij[counts_sorting]
+        img_counts = img_counts[bas_ij]
+        img_offsets = cp.empty(npairs+1, dtype=np.int32)
+        img_offsets[0] = 0
+        cp.cumsum(img_counts, out=img_offsets[1:])
+        tot_imgs = int(img_offsets[npairs])
+        img_idx = cp.empty(tot_imgs, dtype=np.int32)
+        err = libpbc.overlap_img_idx(
+            ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(npairs),
+            (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+            ctypes.byref(aft_envs),
+            ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+            ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+            ctypes.c_float(log_cutoff))
+        if err != 0:
+            raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
+        img_counts = counts_sorting = None
+
+        # bas_ij stores the non-negligible primitive-pair indices.
+        ish, jsh = cp.unravel_index(bas_ij, (nish, njsh))
+        ish += ish0
+        jsh += jsh0
+        bas_ij = cp.ravel_multi_index((ish, jsh), (nbas, nbas))
+        bas_ij = cp.asarray(bas_ij, dtype=np.int32)
+
+        nfij = nf[li] * nf[lj]
+        p0, p1 = p1, p1 + nfij * npairs
+        bas_ij_cache[i, j] = (bas_ij, img_offsets, img_idx)
+        bas_ij_index_lookup[ish,jsh] = cp.arange(p0, p1, nfij)
+        iaddr = ao_loc[ish,None] + cp.arange(nf[li])
+        jaddr = ao_loc[jsh,None] + cp.arange(nf[lj])
+        ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
+    non0_size = p1
+    int3c2e_ovlp_mask = None
+    ao_pair_mapping = np.hstack(ao_pair_mapping)
+    t1 = log.timer_debug2('generating bas_ij indices', *t1)
+
+    ft_ao.init_constant(sorted_cell)
+    kern = libpbc.build_ft_ao_compressed
+
+    avail_mem = get_avail_mem() * .8
+    Gblksize = max(16, int(avail_mem/(2*16*nao**2))//8*8)
+    Gblksize = min(Gblksize, ngrids, 16384)
+    logger.debug1(cell, 'Gblksize = %d', Gblksize)
+
+    j3c_compressed = cp.empty((non0_size,naux), dtype=np.float64)
+    coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws)
+    pair0 = pair1 = 0
+    for i, j in ij_tasks:
+        li = uniq_l[i]
+        lj = uniq_l[j]
+        nfi = (li+1)*(li+2)//2
+        nfj = (lj+1)*(lj+2)//2
+        nfij = nfi * nfj
+        bas_ij, img_offsets, img_idx = bas_ij_cache[i, j]
+        npairs = len(bas_ij)
+        pair0, pair1 = pair1, pair1 + npairs * nfij
+        j3c_tmp = cp.zeros((nfij*npairs,naux), dtype=np.complex128)
+        for p0, p1 in lib.prange(0, ngrids, Gblksize):
+            nGv = p1 - p0
+            auxG_conj = cp.asarray(ft_ao.ft_ao(auxcell, Gv[p0:p1]).conj(), order='C')
+            auxG_conj *= cp.asarray(coulG[p0:p1,None])
+            GvT = cp.array(Gv[p0:p1].T, order='C', copy=True)
+            # Padding zeros, allowing idle threads to access Gv over the bounds.
+            GvT = cp.append(GvT, cp.zeros(THREADS))
+
+            pqG = cp.zeros((npairs, nGv), dtype=np.complex128)
+            scheme = ft_ao.ft_ao_scheme(cell, li, lj, nGv)
+            log.debug2('ft_ao_scheme for %s: %s', ll_pattern, scheme)
+            err = kern(
+                ctypes.cast(pqG.data.ptr, ctypes.c_void_p),
+                ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
+                (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                ctypes.c_int(npairs), ctypes.c_int(nGv),
+                ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
+                ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+                ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+                cell._atm.ctypes, ctypes.c_int(cell.natm),
+                cell._bas.ctypes, ctypes.c_int(cell.nbas), cell._env.ctypes)
+            if err != 0:
+                raise RuntimeError(f'build_ft_ao_compressed kernel for {ll_pattern} failed')
+            # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
+            # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
+            # functions |P> are assumed to be real
+            contract('pG,Gr->pr', pqG, auxG_conj, beta=1., out=j3c_tmp)
+        t1 = log.timer_debug2(f'processing {ll_pattern}', *t1)
+
+        j3c_tmp = j3c_tmp.real
+        if not cell.cart:
+            j3c_tmp = j3c_tmp.reshape(npairs,nfj,nfi,naux)
+            j3c_tmp = contract('qj,qpmk->jpmk', c2s[lj], j3c_tmp)
+            j3c_tmp = contract('pi,jpmk->jimk', c2s[li], j3c_tmp)
+            j3c_tmp = j3c_tmp.reshape(-1,naux)
+
+        j3c_compressed[pair0:pair1] = j3c_tmp
+        j3c_tmp = None
+        t1 = log.timer_debug1('ft_aopair', *t1)
+    return j3c_compressed, bas_ij_index_lookup, cp.asarray(rev_mapping), ao_pair_mapping
+
 def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
                                  linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
-    t0 = log.init_timer()
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega)
-    naux = int3c2e_opt.aux_coeff.shape[1]
+    t0 = t1 = log.init_timer()
 
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, -omega).build()
     c_shell_counts = np.asarray(int3c2e_opt.cell0_ctr_l_counts)
-    lmax = len(c_shell_counts) - 1
+    lmax = cell._bas[:,ANG_OF].max()
     uniq_l = np.arange(lmax+1)
     if cell.cart:
         nf = (uniq_l + 1) * (uniq_l + 2) // 2
@@ -388,189 +677,74 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     lmax = cell._bas[:,ANG_OF].max()
     c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
 
-    size = 0
-    for (li, lj), (_, _, _, _, c_pair_idx) in int3c2e_opt.img_idx_cache.items():
-        n_pairs = len(c_pair_idx)
-        size += nf[li] * nf[lj] * n_pairs
-    j3c = cp.zeros((size, naux))
+    naux = int3c2e_opt.aux_coeff.shape[1]
+    if with_long_range:
+        # LR int3c2e generally creates more non-negligible Coulomb integrals.
+        # To add sr_int3c2e integrals to the corresponding elements in LR
+        # tensor, bas_mapping and bas_ij_index_lookup are utilized for indexing.
+        # bas_mapping associates the shell in sr_int3c2e.sorted_cell to that in
+        # ft_aopair.sorted_cell. bas_ij_index_lookup convertes the address in a
+        # dense tensor to compressed storage.
+        j3c, bas_ij_index_lookup, bas_mapping, ao_pair_mapping = \
+                _lr_int3c2e_gamma_point(int3c2e_opt)
+    else:
+        t1 = log.init_timer()
+        img_idx_cache = int3c2e_opt.make_img_idx_cache()
+        size = 0
+        for (li, lj), img_idx in img_idx_cache.itmes():
+            npairs = len(img_idx[4])
+            size += nf[li] * nf[lj] * npairs
+        j3c = cp.zeros((size, naux), dtype=np.float64)
+        # ao_pair_mapping stores AO-pair addresses in the nao x nao matrix,
+        # which allows the decompression for the CUDA kernel generated compressed_eri3c:
+        # sparse_eri3c[ao_pair_mapping] => compressed_eri3c
+        ao_pair_mapping = []
+        # Given shell Id in sorted_cell, this ao_loc maps shell to the AO offset
+        # in the original cell
+        ao_loc = cp.asarray(int3c2e_opt.ao_idx[int3c2e_opt.sorted_cell.ao_loc[:-1]])
+        nao = cell.nao
+
     p0 = p1 = 0
-    for li, lj, c_pair_idx, compressed_eri3c in int3c2e_opt.int3c2e_kernel():
+    for li, lj, c_pair_idx, j3c_tmp in int3c2e_opt.int3c2e_kernel():
         i0, i1 = c_l_offsets[li:li+2]
         j0, j1 = c_l_offsets[lj:lj+2]
         nctrj = c_shell_counts[lj]
         nfi = (li+1)*(li+2)//2
         nfj = (lj+1)*(lj+2)//2
         n_pairs = len(c_pair_idx)
-        compressed_eri3c = compressed_eri3c.reshape(-1,nfi*nfj*n_pairs)
-        compressed_eri3c = compressed_eri3c.T.dot(cp.asarray(int3c2e_opt.aux_coeff))
+        j3c_tmp = j3c_tmp.reshape(-1,nfi*nfj*n_pairs)
+        j3c_tmp = j3c_tmp.T.dot(cp.asarray(int3c2e_opt.aux_coeff))
         if not cell.cart:
-            compressed_eri3c = compressed_eri3c.reshape(nfj,nfi,n_pairs,naux)
-            compressed_eri3c = contract('qj,qpmk->jpmk', c2s[lj], compressed_eri3c)
-            compressed_eri3c = contract('pi,jpmk->jimk', c2s[li], compressed_eri3c)
+            j3c_tmp = j3c_tmp.reshape(nfj,nfi,n_pairs,naux)
+            j3c_tmp = contract('qj,qpmk->jpmk', c2s[lj], j3c_tmp)
+            j3c_tmp = contract('pi,jpmk->jimk', c2s[li], j3c_tmp)
             nfi = li * 2 + 1
             nfj = lj * 2 + 1
-        p0, p1 = p1, p1 + nfi*nfj*n_pairs
-        j3c[p0:p1] = compressed_eri3c.reshape(nfj*nfi*n_pairs,naux)
-        compressed_eri3c = None
-    t1 = log.timer('pass1: int3c2e', *t0)
-    # FIXME: sort j3c
+            j3c_tmp = j3c_tmp.reshape(nfj*nfi*n_pairs,naux)
+
+        ish, jsh = divmod(c_pair_idx, nctrj)
+        ish += i0
+        jsh += j0
+        if with_long_range:
+            ish = bas_mapping[ish]
+            jsh = bas_mapping[jsh]
+            idx = bas_ij_index_lookup[ish,jsh]
+            idx = (cp.arange(nfi*nfj)[:,None] + idx).ravel()
+            j3c[idx] += j3c_tmp
+        else:
+            p0, p1 = p1, p1 + nfi*nfj*n_pairs
+            j3c[p0:p1] = j3c_tmp
+            iaddr = ao_loc[ish,None] + cp.arange(nfi)
+            jaddr = ao_loc[jsh,None] + cp.arange(nfj)
+            ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
+        j3c_tmp = None
+    ao_pair_mapping = np.hstack(ao_pair_mapping)
+    t1 = log.timer_debug1('SR int3c2e', *t1)
 
     cderi = {}
     cderip = {}
-    if with_long_range:
-        ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
-        mesh = cell.cutoff_to_mesh(ke_cutoff)
-        mesh = cell.symmetrize_mesh(mesh)
-        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-        ngrids = len(Gv)
-        nao = cell.nao
-
-        ft_opt = ft_ao.FTOpt(cell)
-        sorted_cell = ft_opt.sorted_cell
-        coeff = ft_opt.coeff
-        uniq_l_ctr = ft_opt.uniq_l_ctr
-        l_ctr_offsets = ft_opt.l_ctr_offsets
-
-        Ls = cp.asarray(sorted_cell.get_lattice_Ls())
-        Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
-        nimgs = len(Ls)
-        nbas = sorted_cell.nbas
-
-        rcut = sorted_cell.rcut
-        vol = sorted_cell.vol
-        cell_exp, _, cell_l = ft_ao.most_diffused_pgto(sorted_cell)
-        lsum = cell_l * 2 + 1
-        rad = vol**(-1./3) * rcut + 1
-        surface = 4*np.pi * rad**2
-        lattice_sum_factor = 2*np.pi*rcut*lsum/(vol*cell_exp*2) + surface
-        cutoff = sorted_cell.precision / lattice_sum_factor
-        log_cutoff = math.log(cutoff)
-        log.debug1('ft_ao min_exp=%g cutoff=%g nimgs=%d', cell_exp, cutoff, nimgs)
-
-        ls = sorted_cell._bas[:,ANG_OF]
-        exps, cs = extract_pgto_params(sorted_cell, 'diffused')
-        cs *= ((2*ls+1)/(4*np.pi))**.5
-        exps = cp.asarray(exps, dtype=np.float32)
-        log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
-
-        _atm = cp.array(sorted_cell._atm)
-        _bas = cp.array(sorted_cell._bas)
-        _env = cp.array(_scale_sp_ctr_coeff(sorted_cell))
-        ao_loc = cp.array(sorted_cell.ao_loc)
-        aft_envs = ft_ao.AFTIntEnvVars(
-            sorted_cell.natm, sorted_cell.nbas, 1, nimgs, _atm.data.ptr,
-            _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr, Ls.data.ptr
-        )
-        # Keep a reference to these arrays, prevent releasing them upon returning the closure
-        aft_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
-
-        nao, nao_orig = coeff.shape
-        uniq_l = uniq_l_ctr[:,0]
-        l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
-        n_groups = np.count_nonzero(uniq_l <= ft_ao.LMAX)
-
-        ft_ao.init_constant(sorted_cell)
-        kern = libpbc.build_ft_ao_compressed
-
-        avail_mem = get_avail_mem() * .8
-        Gblksize = max(16, int(avail_mem/(2*16*nao**2))//8*8)
-        Gblksize = min(Gblksize, ngrids, 16384)
-        logger.debug1(cell, 'Gblksize = %d', Gblksize)
-
-        permutation_symmetry = 1
-        ij_tasks = [(i, j) for i in range(n_groups) for j in range(i+1)]
-
-        coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws)
-        auxG_conj = cp.asarray(ft_ao.ft_ao(auxcell, Gv).conj(), order='C')
-        auxG_conj *= cp.asarray(coulG[:,None])
-
-        for p0, p1 in lib.prange(0, ngrids, Gblksize):
-            nGv = len(Gv)
-            # Padding zeros, allowing idle threads to access these data
-            GvT = cp.array(Gv[p0:p1].T, order='C', copy=True)
-            GvT = cp.append(GvT, cp.zeros(THREADS))
-
-            for i, j in ij_tasks:
-                li = uniq_l[i]
-                lj = uniq_l[j]
-                ll_pattern = f'{l_symb[i]}{l_symb[j]}'
-                ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-                jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-                nish = ish1 - ish0
-                njsh = jsh1 - jsh0
-                img_counts = cp.zeros((nish*njsh), dtype=np.int32)
-                err = libpbc.overlap_img_counts(
-                    ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
-                    (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
-                    ctypes.byref(aft_envs),
-                    ctypes.cast(exps.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
-                    ctypes.c_float(log_cutoff), ctypes.c_int(permutation_symmetry))
-                if err != 0:
-                    raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
-                bas_ij = cp.asarray(cp.where(img_counts > 0)[0], dtype=np.int32)
-                npairs = len(bas_ij)
-                if npairs == 0:
-                    continue
-
-                # Sort according to the number of images. In the CUDA kernel,
-                # shell-pairs that have closed number of images are processed on
-                # the same SM processor, ensuring the best parallel execution.
-                counts_sorting = (-img_counts[bas_ij]).argsort()
-                bas_ij = bas_ij[counts_sorting]
-                img_counts = img_counts[bas_ij]
-                img_offsets = cp.empty(npairs+1, dtype=np.int32)
-                img_offsets[0] = 0
-                cp.cumsum(img_counts, out=img_offsets[1:])
-                tot_imgs = int(img_offsets[npairs])
-                img_idx = cp.empty(tot_imgs, dtype=np.int32)
-                err = libpbc.overlap_img_idx(
-                    ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(npairs),
-                    (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
-                    ctypes.byref(aft_envs),
-                    ctypes.cast(exps.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
-                    ctypes.c_float(log_cutoff))
-                if err != 0:
-                    raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
-                log.timer_debug2('ovlp_img_idx', *t1)
-                img_counts = counts_sorting = None
-
-                # bas_ij stores the non-negligible primitive-pair indices.
-                i, j = cp.unravel_index(bas_ij, (nish, njsh))
-                i += ish0
-                j += jsh0
-                bas_ij = cp.ravel_multi_index((i, j), (nbas, nbas))
-                bas_ij = cp.asarray(bas_ij, dtype=np.int32)
-                pqG = cp.zeros((npairs, nGv), dtype=np.complex128)
-
-                scheme = ft_ao.ft_ao_scheme(cell, li, lj, nGv)
-                log.debug2('ft_ao_scheme for %s: %s', ll_pattern, scheme)
-                err = kern(
-                    ctypes.cast(pqG.data.ptr, ctypes.c_void_p),
-                    ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
-                    (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
-                    ctypes.c_int(npairs), ctypes.c_int(nGv),
-                    ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
-                    cell._atm.ctypes, ctypes.c_int(cell.natm),
-                    cell._bas.ctypes, ctypes.c_int(cell.nbas), cell._env.ctypes)
-                if err != 0:
-                    raise RuntimeError(f'build_ft_ao_compressed kernel for {ll_pattern} failed')
-                t1 = log.timer_debug2(f'processing {ll_pattern}', *t1)
-
-                # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
-                # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
-                # functions |P> are assumed to be real
-                j3c += contract('xG,Gr->xr', pqG, auxG_conj[p0:p1]).real
-
     log.debug('Generate auxcell 2c2e integrals')
-    j2c = _get_2c2e(auxcell, kpts, omega, with_long_range) # on CPU
+    j2c = _get_2c2e(auxcell, None, omega, with_long_range) # on CPU
     j2c = j2c[0].real
     t1 = log.timer('int2c2e', *t1)
 
@@ -580,12 +754,15 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
         j2c, prefer_ed, linear_dep_threshold)
 
-    cderi[0,0] = _solve_cderi(cd_j2c, j3c, j2ctag)
+    if j2ctag == 'ED':
+        cderi[0,0] = contract('Lr,pr->Lp', cd_j2c, j3c)
+    else:
+        cderi[0,0] = solve_triangular(cd_j2c, j3c.T, lower=True)
     if cd_j2c_negative is not None:
         assert cell.dimension == 2
-        cderip[0,0] = _solve_cderi(cd_j2c_negative, j3c, j2ctag)
-    t1 = log.timer('pass2: solve cderi', *t1)
-    return cderi, cderip
+        cderip[0,0] = contract('Lr,pr->Lp', cd_j2c_negative, j3c)
+    t0 = log.timer_debug1('solving cderi', *t0)
+    return cderi, cderip, ao_pair_mapping
 
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
