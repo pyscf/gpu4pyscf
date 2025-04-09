@@ -297,7 +297,7 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_1 = None, q = None):
     if v_grids_1 is None:
         v_grids_1 = pcmobj._intermediates['v_grids']
     if q is None:
-        q            = pcmobj._intermediates['q']
+        q = pcmobj._intermediates['q']
     f_epsilon    = pcmobj._intermediates['f_epsilon']
     if not pcmobj.if_method_in_CPCM_category:
         A = pcmobj._intermediates['A']

@@ -31,22 +31,30 @@ H       0.7570000000     0.0000000000    -0.4696000000
 mol = pyscf.M(atom=atom, basis='def2-tzvpp')
 
 xc = 'b3lyp'
-mf = gpu4pyscf.dft.RKS(mol, xc=xc)
+mf = gpu4pyscf.dft.RKS(mol, xc=xc).PCM()
+mf.with_solvent.method = 'IEFPCM'
+mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+mf.with_solvent.eps = 78
 mf.grids.level = 5
-mf.kernel() # -76.4666495331835
+mf.kernel() # -76.476456106979
 
 # Compute TDDFT and TDA excitation energy
-print('------------------- TDDFT -----------------------------')
+print('------------------- vertical exitation TDA -----------------------------')
 td = mf.TDDFT().set(nstates=5)
-assert td.device == 'gpu'
-e_tddft = td.kernel()[0] # [ 7.51062554  9.42244962  9.76602191 11.74385565 13.59746453]
+td._scf.with_solvent.tdscf = True
+td._scf.with_solvent.eps = 1.78
+td._scf.with_solvent.build()
+e_tddft = td.kernel()[0] # [ 8.03553827 10.07361783 10.20203523 12.36009792 13.83374455]
 # print('5 TDDFT excitation energy by GPU4PySCF')
 # print(e_tddft)
 
-print('------------------- TDA -----------------------------')
+print('------------------- adiabatic excitation TDA -----------------------------')
 td = mf.TDA().set(nstates=5)
-assert td.device == 'gpu'
-e_tda = td.kernel()[0] # [ 7.53381449  9.42805412  9.81321061 11.78177395 13.62814798]
+td._scf.with_solvent.tdscf = True
+td._scf.with_solvent.eps = 78.0
+td._scf.with_solvent.equilibrium_solvation = True 
+td._scf.with_solvent.build()
+e_tda = td.kernel()[0] # [ 7.99456759 10.0632959  10.08523494 12.30675282 13.64298125]
 # print('5 TDA excitation energy by GPU4PySCF')
 # print(e_tda)
 
@@ -54,10 +62,10 @@ print('The gradient of first TDA excitation energy by GPU4PySCF')
 g = td.nuc_grad_method()
 g.kernel()
 """
---------- TDA gradients for state 1 ----------
+--------- PCMTDA gradients for state 1 ----------
          x                y                z
-0 O    -0.0000000000    -0.0000000000    -0.0901095287
-1 H     0.0598456498    -0.0000000000     0.0450549873
-2 H    -0.0598456498     0.0000000000     0.0450549873
+0 O    -0.0000000000     0.0000000000    -0.0836461430
+1 H     0.0601539533    -0.0000000000     0.0418232965
+2 H    -0.0601539533    -0.0000000000     0.0418232965
 ----------------------------------------------
 """
