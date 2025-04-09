@@ -15,7 +15,7 @@
 
 import numpy as np
 import cupy as cp
-from pyscf.data.nist import HARTREE2EV
+from pyscf.data.nist import HARTREE2EV, HARTREE2WAVENUMBER
 
 
 ''' 
@@ -24,13 +24,15 @@ from pyscf.data.nist import HARTREE2EV
 
     standard TDDFT can also use this module.
 
+    actually, pyscf already has a similar function to print transition coefficient 
+    pyscf/pyscf/tdscf/rhf.py 
+        def analyze(tdobj, verbose=None): 
+
     ECD rotatory strength is in length representation
     unit cgs (10**-40 erg-esu-cm/Gauss) 
     ECD_SCALING_FACTOR is to match Gaussian16 results
 '''
 ECD_SCALING_FACTOR = 500
-EV2CM_1 = 8065.544
-EV2NM = 1240.7011
 
 def print_coeff(state, coeff_vec, sybmol, n_occ, n_vir, print_threshold):
 
@@ -94,10 +96,10 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
     '''
     energies = energies.reshape(-1,)
 
-    eV = energies.copy() * HARTREE2EV
+    eV = energies * HARTREE2EV
 
-    cm_1 = eV * EV2CM_1
-    nm = EV2NM / eV
+    cm_1 = energies * HARTREE2WAVENUMBER
+    nm = 1e7/cm_1
 
 
     if isinstance(Y, cp.ndarray):

@@ -29,7 +29,7 @@ H         -5.23998        4.31540        0.27138
 H         -3.22959        2.35981       -0.24953
 '''
 
-mol = pyscf.M(atom=atom, basis='def2-svp',verbose=3)
+mol = pyscf.M(atom=atom, basis='def2-svp',verbose=4)
 mf = rks.RKS(mol, xc='wb97x').density_fit()
 
 e_dft = mf.kernel()  
@@ -38,7 +38,7 @@ print(f"total energy = {e_dft}")
 
 
 ''' TDDFT-ris'''
-td = ris.TDDFT(mf=mf.to_gpu(), nstates=10) 
+td = ris.TDDFT(mf=mf.to_gpu(), nstates=10, spectra=True) 
 td.kernel()
 # energies, X, Y, oscillator_strength, rotatory_strength = td.kernel()
 

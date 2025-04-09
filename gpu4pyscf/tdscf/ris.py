@@ -378,7 +378,7 @@ def get_eri2c_inv_lower(auxmol, omega=0, alpha=None, beta=None):
         L_inv = cpx_linalg.solve_triangular(L, cp.eye(L.shape[0]), lower=True)
         lower_inv_eri2c = L_inv.T
 
-    except:
+    except cp.linalg.LinAlgError:
         ''' lower_inv_eri2c = eri2c ** -0.5
             LINEAR_EPSILON = 1e-8 to remove the linear dependency, sometimes the aux eri2c is not full rank.
         '''
