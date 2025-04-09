@@ -15,6 +15,7 @@
 import numpy as np
 import cupy as cp
 import time
+import cupyx.scipy.linalg as cpx_linalg
 
 from pyscf import gto, lib
 from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
@@ -23,8 +24,6 @@ from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _lr_eig
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
 
-
-einsum = cp.einsum
 
 CITATION_INFO = """
 Please cite the TDDFT-ris method:
@@ -48,7 +47,7 @@ Please cite the TDDFT-ris method:
         (TDDFT-ris is for hybrid functionals, originates from TDDFT-as with pure functional)
 """
 
-
+LINEAR_EPSILON = 1e-8
 
 def get_memory_info(words):
     cp.cuda.PinnedMemoryPool().free_all_blocks()
@@ -68,6 +67,41 @@ def release_memory():
     '''Releases the GPU memory using Cupy.'''
     cp.cuda.PinnedMemoryPool().free_all_blocks()
     cp.get_default_memory_pool().free_all_blocks()
+
+def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis):
+    '''
+    Args:
+        auxmol_basis_keys: (['C1', 'H2', 'O3', 'H4', 'H5', 'H6'])
+        theta: float 0.2
+        fitting_basis: str ('s','sp','spd') 
+
+    return:
+        aux_basis:
+        C1 [[0, [0.1320292535005648, 1.0]]]
+        H2 [[0, [0.1999828038466018, 1.0]]]
+        O3 [[0, [0.2587932305664396, 1.0]]]
+        H4 [[0, [0.1999828038466018, 1.0]]]
+        H5 [[0, [0.1999828038466018, 1.0]]]
+        H6 [[0, [0.1999828038466018, 1.0]]]
+    '''
+    aux_basis = {}
+
+    for atom_index in auxmol_basis_keys:
+        atom = ''.join([char for char in atom_index if char.isalpha()])
+        '''
+        exponent_alpha = theta/R^2 
+        '''
+        exp_alpha = parameter.ris_exp[atom] * theta
+
+        if 's' in fitting_basis:
+            aux_basis[atom_index] = [[0, [exp_alpha, 1.0]]]
+
+        if atom != 'H':
+            if 'p' in fitting_basis:
+                aux_basis[atom_index].append([1, [exp_alpha, 1.0]])
+            if 'd' in fitting_basis:
+                aux_basis[atom_index].append([2, [exp_alpha, 1.0]])
+    return aux_basis
 
 def get_auxmol(mol, theta=0.2, fitting_basis='s'):
     """
@@ -93,38 +127,9 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s'):
                     spin=mol.spin, 
                     charge=mol.charge,
                     cart=mol.cart)
-    auxmol_basis_keys = mol._basis.keys()
-
-    '''
-    auxmol_basis_keys: (['C1', 'H2', 'O3', 'H4', 'H5', 'H6'])
     
-    aux_basis:
-    C1 [[0, [0.1320292535005648, 1.0]]]
-    H2 [[0, [0.1999828038466018, 1.0]]]
-    O3 [[0, [0.2587932305664396, 1.0]]]
-    H4 [[0, [0.1999828038466018, 1.0]]]
-    H5 [[0, [0.1999828038466018, 1.0]]]
-    H6 [[0, [0.1999828038466018, 1.0]]]
-    '''
-    aux_basis = {}
-
-    for atom_index in auxmol_basis_keys:
-        atom = ''.join([char for char in atom_index if char.isalpha()])
-        '''
-        exponent_alpha = theta/R^2 
-        '''
-        exp_alpha = parameter.ris_exp[atom] * theta
-
-        if 's' in fitting_basis:
-            aux_basis[atom_index] = [[0, [exp_alpha, 1.0]]]
-
-        if atom != 'H':
-            if 'p' in fitting_basis:
-                aux_basis[atom_index].append([1, [exp_alpha, 1.0]])
-            if 'd' in fitting_basis:
-                aux_basis[atom_index].append([2, [exp_alpha, 1.0]])
-
-    auxmol.basis = aux_basis
+    auxmol_basis_keys = mol._basis.keys()
+    auxmol.basis = get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis)
     auxmol.build(dump_input=False)
     return auxmol
    
@@ -357,13 +362,29 @@ def get_eri2c_inv_lower(auxmol, omega=0, alpha=None, beta=None):
 
     if omega and omega != 0:
 
-        auxmol.set_range_coulomb(omega)
-        auxmol.build()
-        eri2c_erf = auxmol.intor('int2c2e')
+        with auxmol.with_range_coulomb(omega):
+            eri2c_erf = auxmol.intor('int2c2e')
+
         eri2c = alpha * eri2c + beta * eri2c_erf
 
     eri2c = cp.asarray(eri2c, dtype=cp.float64, order='C')
-    lower_inv_eri2c = math_helper.matrix_power(eri2c,-0.5,epsilon=1e-8)
+
+    try: 
+        ''' eri2c=L L.T
+            LX = I
+            lower_inv_eri2c = X = L^-1
+        '''
+        L = cp.linalg.cholesky(eri2c)
+        L_inv = cpx_linalg.solve_triangular(L, cp.eye(L.shape[0]), lower=True)
+        lower_inv_eri2c = L_inv.T
+
+    except:
+        ''' lower_inv_eri2c = eri2c ** -0.5
+            LINEAR_EPSILON = 1e-8 to remove the linear dependency, sometimes the aux eri2c is not full rank.
+        '''
+        lower_inv_eri2c = math_helper.matrix_power(eri2c,-0.5,epsilon=LINEAR_EPSILON)
+    
+
     lower_inv_eri2c = cp.asarray(lower_inv_eri2c, dtype=cp.float32, order='C')
     return lower_inv_eri2c
 
@@ -371,6 +392,9 @@ def get_inter_contract_C(int_tensor, C_occ, C_vir):
 
     P = get_PuvCupCvq_to_Ppq(int_tensor, C_occ, C_vir)
 
+    ''' 3 for xyz three directions. 
+        reshape is helpful when calculating oscillator strength and polarizability.
+    '''
     P = cp.asarray(P.reshape(3,-1))
     return P
 
@@ -443,9 +467,9 @@ def gen_iajb_MVP(T_left, T_right):
             T_right_chunk = T_right[aux_start:aux_end, :, :]   # Shape: (aux_range, n_occ * n_vir)
             
 
-            T_right_jb_V_chunk = cp.einsum("Pjb,mjb->Pm", T_right_chunk, V)
+            T_right_jb_V_chunk = contract("Pjb,mjb->Pm", T_right_chunk, V)
 
-            iajb_V_chunk = cp.einsum("Pia,Pm->mia", T_left_chunk, T_right_jb_V_chunk)
+            iajb_V_chunk = contract("Pia,Pm->mia", T_left_chunk, T_right_jb_V_chunk)
             del T_right_jb_V_chunk
 
             iajb_V += iajb_V_chunk  # Accumulate the result
@@ -467,7 +491,7 @@ def gen_ijab_MVP(T_ij, T_ab):
     '''   
 
     # def ijab_MVP(V):
-    #     T_ab_V = einsum("Pab,mjb->Pamj", T_ab, V, optimize=True)
+    #     T_ab_V = einsum("Pab,mjb->Pamj", T_ab, V)
     #     ijab_V = einsum("Pij,Pamj->mia", T_ij, T_ab_V)
     #     return ijab_V
 
@@ -505,10 +529,10 @@ def gen_ijab_MVP(T_ij, T_ab):
             T_ab_chunk = T_ab[:, vir_start:vir_end, vir_start:vir_end]  # Shape: (nauxao, vir_range, n_vir)
 
             # Compute T_ab_V for the current chunk
-            T_ab_V_chunk = cp.einsum("Pab,mjb->Pamj", T_ab_chunk, V_chunk, optimize=True)
+            T_ab_V_chunk = contract("Pab,mjb->Pamj", T_ab_chunk, V_chunk)
 
             # Compute ijab_V for the current chunk
-            ijab_V[:, :, vir_start:vir_end] = cp.einsum("Pij,Pamj->mia", T_ij, T_ab_V_chunk)
+            ijab_V[:, :, vir_start:vir_end] = contract("Pij,Pamj->mia", T_ij, T_ab_V_chunk)
 
             # Release intermediate variables and clean up memory
             # del V_chunk, T_ab_V_chunk
@@ -561,10 +585,10 @@ def get_ibja_MVP(T_ia):
             T_ia_chunk = T_ia[:, occ_start:occ_end, :]  # Shape: (nauxao, occ_range, n_vir)
 
             # Compute T_ib_V for the current chunk
-            T_ib_V_chunk = cp.einsum("Pib,mjb->Pimj", T_ia_chunk, V_chunk, optimize=True)
+            T_ib_V_chunk = contract("Pib,mjb->Pimj", T_ia_chunk, V_chunk)
 
             # Compute ibja_V for the current chunk
-            ibja_V[:, occ_start:occ_end, :] = cp.einsum("Pja,Pimj->mia", T_ia_chunk, T_ib_V_chunk)
+            ibja_V[:, occ_start:occ_end, :] = contract("Pja,Pimj->mia", T_ia_chunk, T_ib_V_chunk)
 
             # Release intermediate variables and clean up memory
             # del V_chunk, T_ia_chunk, T_ib_V_chunk
@@ -597,7 +621,9 @@ class RisBase(lib.StreamObject):
                 group_size_aux: int = 256):
 
         self.single = single
+        
         if single:
+            mf = mf.copy()
             mf.mo_coeff = cp.asarray(mf.mo_coeff, dtype=cp.float32)
 
         self.mf = mf
@@ -625,8 +651,10 @@ class RisBase(lib.StreamObject):
         self.device = mf.device
         
         logger.TIMER_LEVEL = 4
-        log = logger.new_logger(self)  
+        self.log = logger.new_logger(self)
 
+    def build(self):
+        log = self.log
         log.info(f'nstates: {self.nstates}')
         log.info(f'conv_tol: {self.conv_tol}')
         log.info(f'max_iter: {self.max_iter}')
@@ -639,10 +667,10 @@ class RisBase(lib.StreamObject):
                     log.info('use pure XC functional')
                 elif self.a_x > 0 and self.a_x < 1:
                     log.info('use hybrid XC functional')
-                elif self.a_x == 0:
+                elif self.a_x == 1:
                     log.info('use HF')
                 else:
-                    log.info('a_x > 1, wired')
+                    log.info('a_x > 1, weird')
             
             elif self.omega and self.alpha and self.beta:
                 log.info('use range-separated hybrid XC functional')
@@ -650,10 +678,10 @@ class RisBase(lib.StreamObject):
                 raise ValueError('Please dounble check the XC functional parameters')
         else: 
             ''' use default XC parameters 
-                note: the definition of a_x α and β is kind of wired in pyscf/libxc
+                note: the definition of a_x, α and β is kind of weird in pyscf/libxc
             '''
 
-            omega, alpha_libxc, hyb_libxc = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mf.mol.spin)
+            omega, alpha_libxc, hyb_libxc = self.mf._numint.rsh_and_hybrid_coeff(self.mf.xc, spin=self.mf.mol.spin)
             log.info(f'omega, alpha_libxc, hyb_libxc: {omega}, {alpha_libxc}, {hyb_libxc}')
 
             if omega > 0: 
@@ -669,10 +697,10 @@ class RisBase(lib.StreamObject):
                     log.info('use pure XC functional')
                 elif self.a_x > 0 and self.a_x < 1:
                     log.info('use hybrid XC functional')
-                elif self.a_x == 0:
+                elif self.a_x == 1:
                     log.info('use HF')
                 else:
-                    log.info('a_x > 1, wired')
+                    log.info('a_x > 1, weird')
 
         log.info(f'omega: {self.omega}')
         log.info(f'alpha: {self.alpha}')
@@ -682,10 +710,10 @@ class RisBase(lib.StreamObject):
         log.info(f'single: {self.single}')
         log.info(f'group_size: {self.group_size}')
 
-        if J_fit == K_fit: 
-            log.info(f'use same J and K fitting basis: {J_fit}')
+        if self.J_fit == self.K_fit: 
+            log.info(f'use same J and K fitting basis: {self.J_fit}')
         else: 
-            log.info(f'use different J and K fitting basis: J with {J_fit} and K with {K_fit}')
+            log.info(f'use different J and K fitting basis: J with {self.J_fit} and K with {self.K_fit}')
 
         if self.mol.cart:
             self.eri_tag = '_cart'
@@ -693,30 +721,33 @@ class RisBase(lib.StreamObject):
             self.eri_tag = '_sph'
         log.info(f'cartesian or spherical electron integral = {self.eri_tag}')
 
-        if mf.mo_coeff.ndim == 2:
+        if self.mf.mo_coeff.ndim == 2:
             self.RKS = True
             self.UKS = False
-            n_occ = int(sum(mf.mo_occ>0))
-            n_vir = int(sum(mf.mo_occ==0))
+            n_occ = int(sum(self.mf.mo_occ>0))
+            n_vir = int(sum(self.mf.mo_occ==0))
             self.n_occ = n_occ
             self.n_vir = n_vir
 
-            self.C_occ_notrunc = cp.asfortranarray(mf.mo_coeff[:,:n_occ])
-            self.C_vir_notrunc = cp.asfortranarray(mf.mo_coeff[:,n_occ:])
-            mo_energy = mf.mo_energy
+            self.C_occ_notrunc = cp.asfortranarray(self.mf.mo_coeff[:,:n_occ])
+            self.C_vir_notrunc = cp.asfortranarray(self.mf.mo_coeff[:,n_occ:])
+            mo_energy = self.mf.mo_energy
             log.info(f'mo_energy.shape: {mo_energy.shape}')
             vir_ene = mo_energy[n_occ:].reshape(1,n_vir)
             occ_ene = mo_energy[:n_occ].reshape(n_occ,1)
             delta_hdiag = cp.repeat(vir_ene, n_occ, axis=0) - cp.repeat(occ_ene, n_vir, axis=1)
+            if self.single:
+                delta_hdiag = cp.asarray(delta_hdiag, dtype=cp.float32)
+        
             self.delta_hdiag = delta_hdiag
 
             log.info(f'n_occ = {n_occ}')
             log.info(f'n_vir = {n_vir}')
 
-            if Ktrunc > 0:
-                log.info(f' MO truncation in K with threshold {Ktrunc} eV above HOMO and below LUMO')
+            if self.Ktrunc > 0:
+                log.info(f' MO truncation in K with threshold {self.Ktrunc} eV above HOMO and below LUMO')
 
-                trunc_tol_au = Ktrunc/HARTREE2EV     
+                trunc_tol_au = self.Ktrunc/HARTREE2EV     
 
                 homo_vir_delta_ene = delta_hdiag[-1,:]
                 occ_lumo_delta_ene = delta_hdiag[:,0]
@@ -724,7 +755,7 @@ class RisBase(lib.StreamObject):
                 rest_occ = cp.sum(occ_lumo_delta_ene <= trunc_tol_au)
                 rest_vir = cp.sum(homo_vir_delta_ene <= trunc_tol_au)
                 
-            elif Ktrunc == 0: 
+            elif self.Ktrunc == 0: 
                 log.info('no MO truncation in K')
                 rest_occ = n_occ
                 rest_vir = n_vir 
@@ -732,19 +763,20 @@ class RisBase(lib.StreamObject):
             log.info(f'rest_occ = {rest_occ}')
             log.info(f'rest_vir = {rest_vir}')
 
-            self.C_occ_Ktrunc = cp.asfortranarray(mf.mo_coeff[:,n_occ-rest_occ:n_occ])
-            self.C_vir_Ktrunc = cp.asfortranarray(mf.mo_coeff[:,n_occ:n_occ+rest_vir])
+            self.C_occ_Ktrunc = cp.asfortranarray(self.mf.mo_coeff[:,n_occ-rest_occ:n_occ])
+            self.C_vir_Ktrunc = cp.asfortranarray(self.mf.mo_coeff[:,n_occ:n_occ+rest_vir])
              
             self.rest_occ = rest_occ
             self.rest_vir = rest_vir
 
-        elif mf.mo_coeff.ndim == 3:
+        elif self.mf.mo_coeff.ndim == 3:
+            ''' TODO UKS method '''
             self.RKS = False
             self.UKS = True
-            self.n_occ_a = sum(mf.mo_occ[0]>0)
-            self.n_vir_a = sum(mf.mo_occ[0]==0)
-            self.n_occ_b = sum(mf.mo_occ[1]>0)
-            self.n_vir_b = sum(mf.mo_occ[1]==0)
+            self.n_occ_a = sum(self.mf.mo_occ[0]>0)
+            self.n_vir_a = sum(self.mf.mo_occ[0]==0)
+            self.n_occ_b = sum(self.mf.mo_occ[1]>0)
+            self.n_vir_b = sum(self.mf.mo_occ[1]==0)
             log.info('n_occ for alpha spin = {self.n_occ_a}')
             log.info('n_vir for alpha spin = {self.n_vir_a}')
             log.info('n_occ for beta spin = {self.n_occ_b}')
@@ -788,7 +820,7 @@ class TDA(RisBase):
         super().__init__(mf, **kwargs)
         log = self.log
         log.warn("TDA-ris is still in the experimental stage, and its APIs are subject to change in future releases.")
-        log.info('TDA-RIS is initialized')
+        log.info('TDA-ris initialized')
 
     ''' ===========  RKS hybrid =========== '''
     def get_RKS_TDA_hybrid_MVP(self):
@@ -1096,6 +1128,7 @@ class TDA(RisBase):
             always use the Davidson solver
             pure TDA is not using MZ=Zw^2 form
         '''
+        self.build()
         log = self.log
         if self.RKS:
 
@@ -1117,7 +1150,7 @@ class TDA(RisBase):
                                             max_iter=self.max_iter,
                                             GS=self.GS,
                                             single=self.single,
-                                            verbose=self.verbose)
+                                            verbose=log)
         
         log.debug(f'check orthonormal of X: {cp.linalg.norm(cp.dot(X, X.T) - cp.eye(X.shape[0])):.2e}')
 
@@ -1136,7 +1169,8 @@ class TDA(RisBase):
                                                        n_occ=self.n_occ if self.RKS else (self.n_occ_a, self.n_occ_b),
                                                        n_vir=self.n_vir if self.RKS else (self.n_vir_a, self.n_vir_b))
         energies = energies*HARTREE2EV
-
+        log.info(f'energies: {energies}')
+        log.info(f'oscillator strength: {oscillator_strength}')
         log.info(CITATION_INFO)
 
         self.energies = energies
@@ -1590,7 +1624,7 @@ class TDDFT(RisBase):
         #     return ABX
 
     def kernel(self):     
-        # math_helper.show_memory_info('At the beginning')
+        self.build()
         log = self.log
         if self.a_x != 0:
             '''hybrid TDDFT'''

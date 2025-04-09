@@ -17,6 +17,21 @@ import numpy as np
 import cupy as cp
 from pyscf.data.nist import HARTREE2EV
 
+
+''' 
+    This file prints spectral data in Multiwfn format 
+    also prints transition coefficient in Gaussian16 format
+
+    standard TDDFT can also use this module.
+
+    ECD rotatory strength is in length representation
+    unit cgs (10**-40 erg-esu-cm/Gauss) 
+    ECD_SCALING_FACTOR is to match Gaussian16 results
+'''
+ECD_SCALING_FACTOR = 500
+EV2CM_1 = 8065.544
+EV2NM = 1240.7011
+
 def print_coeff(state, coeff_vec, sybmol, n_occ, n_vir, print_threshold):
 
     abs_coeff = cp.abs(coeff_vec[state, :, :])  
@@ -81,8 +96,8 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
 
     eV = energies.copy() * HARTREE2EV
 
-    cm_1 = eV*8065.544
-    nm = 1240.7011/eV
+    cm_1 = eV * EV2CM_1
+    nm = EV2NM / eV
 
 
     if isinstance(Y, cp.ndarray):
@@ -102,7 +117,7 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
     else:
         trans_magnetic_moment = -cp.dot(X*2**0.5, mdpol.T) 
 
-    rotatory_strength = 500*cp.sum(2*trans_dipole_moment * trans_magnetic_moment, axis=1)/2
+    rotatory_strength = ECD_SCALING_FACTOR * cp.sum(2*trans_dipole_moment * trans_magnetic_moment, axis=1)/2
 
     if spectra:
         entry = [eV, nm, cm_1, fosc, rotatory_strength]
