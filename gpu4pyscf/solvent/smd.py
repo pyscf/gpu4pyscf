@@ -24,6 +24,7 @@ from pyscf.dft import gen_grid
 from gpu4pyscf.solvent import pcm, _attach_solvent
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import int3c1e
+from cupyx.scipy.linalg import lu_factor
 
 @lib.with_doc(_attach_solvent._for_scf.__doc__)
 def smd_for_scf(mf, solvent_obj=None, dm=None):
@@ -379,14 +380,15 @@ class SMD(pcm.PCM):
         DA = D*A
         DAS = cupy.dot(DA, S)
         K = S - f_epsilon/(2.0*np.pi) * DAS
-        R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*np.pi)*DA)
+        K_LU, K_LU_pivot = lu_factor(K, overwrite_a = True, check_finite = False)
+        K = None
 
         intermediates = {
             'S': cupy.asarray(S),
             'D': cupy.asarray(D),
             'A': cupy.asarray(A),
-            'K': cupy.asarray(K),
-            'R': cupy.asarray(R),
+            'K_LU': cupy.asarray(K_LU),
+            'K_LU_pivot': cupy.asarray(K_LU_pivot),
             'f_epsilon': f_epsilon
         }
         self._intermediates.update(intermediates)

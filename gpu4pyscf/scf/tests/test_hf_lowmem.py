@@ -42,6 +42,16 @@ class KnownValues(unittest.TestCase):
         e_ref = -76.02676567311744
         assert np.abs(e_tot - e_ref) < 1e-8
 
+    def test_diis_on_cpu(self):
+        mf = hf_lowmem.RHF(mol)
+        mf.diis = mf.DIIS()
+        mf.diis.incore = False
+        e_tot = mf.kernel()
+        e_ref = -76.02676567311744
+        assert np.abs(e_tot - e_ref) < 1e-8
+        assert all(isinstance(x, np.ndarray) and not isinstance(x, cupy.ndarray)
+                   for x in mf.diis._buffer.values())
+
 if __name__ == "__main__":
     print("Full Tests for hf_lowmem")
     unittest.main()

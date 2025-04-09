@@ -27,8 +27,25 @@ __all__ = [
     'TDA', 'TDDFT', 'TDUKS', 'CasidaTDDFT', 'TDDFTNoHybrid',
 ]
 
-TDA = tdhf_gpu.TDA
-TDDFT = tdhf_gpu.TDHF
+
+class TDA(tdhf_gpu.TDA):
+    def nuc_grad_method(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.grad import tduks
+            return tduks.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tduks
+            return tduks.Gradients(self)
+
+class TDDFT(tdhf_gpu.TDHF):
+    def nuc_grad_method(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.grad import tduks
+            return tduks.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tduks
+            return tduks.Gradients(self)
+
 TDUKS = TDDFT
 SpinFlipTDA = tdhf_gpu.SpinFlipTDA
 SpinFlipTDDFT = tdhf_gpu.SpinFlipTDHF

@@ -88,20 +88,22 @@ static void GINTfill_int3c1e_ip_kernel00(double* output, const BasisProdOffsets 
 
         const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
         const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
-        if (boys_input > 3.e-7) {
+        double R000_0 = 1;
+        double R000_1 = -a0 / 3;
+        if (boys_input > 1e-14) {
             const double sqrt_boys_input = sqrt(boys_input);
-            const double R000_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
-            const double R000_1 = -a0 * (R000_0 - exp(-boys_input)) / boys_input;
-            const double R100_0 = R000_1 * PCx;
-            const double R010_0 = R000_1 * PCy;
-            const double R001_0 = R000_1 * PCz;
-            deri_dAx += prefactor * minus_two_a * (PAx * R000_0 + one_over_two_p * R100_0);
-            deri_dAy += prefactor * minus_two_a * (PAy * R000_0 + one_over_two_p * R010_0);
-            deri_dAz += prefactor * minus_two_a * (PAz * R000_0 + one_over_two_p * R001_0);
-            deri_dCx += prefactor * R100_0;
-            deri_dCy += prefactor * R010_0;
-            deri_dCz += prefactor * R001_0;
+            R000_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
+            R000_1 = -a0 * (R000_0 - exp(-boys_input)) / boys_input;
         }
+        const double R100_0 = R000_1 * PCx;
+        const double R010_0 = R000_1 * PCy;
+        const double R001_0 = R000_1 * PCz;
+        deri_dAx += prefactor * minus_two_a * (PAx * R000_0 + one_over_two_p * R100_0);
+        deri_dAy += prefactor * minus_two_a * (PAy * R000_0 + one_over_two_p * R010_0);
+        deri_dAz += prefactor * minus_two_a * (PAz * R000_0 + one_over_two_p * R001_0);
+        deri_dCx += prefactor * R100_0;
+        deri_dCy += prefactor * R010_0;
+        deri_dCz += prefactor * R001_0;
     }
 
     const int* ao_loc = c_bpcache.ao_loc;
@@ -186,14 +188,16 @@ static void GINTfill_int3c1e_ip1_charge_contracted_kernel00(double* output, cons
 
             const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
             const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
-            if (boys_input > 3.e-7) {
+            double R000_0 = 1;
+            double R000_1 = -a0 / 3;
+            if (boys_input > 1e-14) {
                 const double sqrt_boys_input = sqrt(boys_input);
-                const double R000_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
-                const double R000_1 = -a0 * (R000_0 - exp(-boys_input)) / boys_input;
-                deri_dAx_per_grid += prefactor * minus_two_a * (PAx * R000_0 + one_over_two_p * R000_1 * PCx);
-                deri_dAy_per_grid += prefactor * minus_two_a * (PAy * R000_0 + one_over_two_p * R000_1 * PCy);
-                deri_dAz_per_grid += prefactor * minus_two_a * (PAz * R000_0 + one_over_two_p * R000_1 * PCz);
+                R000_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
+                R000_1 = -a0 * (R000_0 - exp(-boys_input)) / boys_input;
             }
+            deri_dAx_per_grid += prefactor * minus_two_a * (PAx * R000_0 + one_over_two_p * R000_1 * PCx);
+            deri_dAy_per_grid += prefactor * minus_two_a * (PAy * R000_0 + one_over_two_p * R000_1 * PCy);
+            deri_dAz_per_grid += prefactor * minus_two_a * (PAz * R000_0 + one_over_two_p * R000_1 * PCz);
         }
 
         const double charge = grid_point[3];
@@ -279,14 +283,16 @@ static void GINTfill_int3c1e_ip1_density_contracted_kernel00(double* output, con
 
         const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
         const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
-        if (boys_input > 3.e-7) {
+        double R000_0 = 1;
+        double R000_1 = -a0 / 3;
+        if (boys_input > 1e-14) {
             const double sqrt_boys_input = sqrt(boys_input);
-            const double R000_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
-            const double R000_1 = -a0 * (R000_0 - exp(-boys_input)) / boys_input;
-            deri_dAx += prefactor * minus_two_a * (PAx * R000_0 + one_over_two_p * R000_1 * PCx);
-            deri_dAy += prefactor * minus_two_a * (PAy * R000_0 + one_over_two_p * R000_1 * PCy);
-            deri_dAz += prefactor * minus_two_a * (PAz * R000_0 + one_over_two_p * R000_1 * PCz);
+            R000_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
+            R000_1 = -a0 * (R000_0 - exp(-boys_input)) / boys_input;
         }
+        deri_dAx += prefactor * minus_two_a * (PAx * R000_0 + one_over_two_p * R000_1 * PCx);
+        deri_dAy += prefactor * minus_two_a * (PAy * R000_0 + one_over_two_p * R000_1 * PCy);
+        deri_dAz += prefactor * minus_two_a * (PAz * R000_0 + one_over_two_p * R000_1 * PCz);
     }
 
     const int* ao_loc = c_bpcache.ao_loc;
@@ -357,14 +363,16 @@ static void GINTfill_int3c1e_ip2_density_contracted_kernel00(double* output, con
 
             const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
             const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
-            if (boys_input > 3.e-7) {
+            double R000_0 = 1;
+            double R000_1 = -a0 / 3;
+            if (boys_input > 1e-14) {
                 const double sqrt_boys_input = sqrt(boys_input);
-                const double R000_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
-                const double R000_1 = -a0 * (R000_0 - exp(-boys_input)) / boys_input;
-                deri_dCx_per_pair += prefactor * R000_1 * PCx;
-                deri_dCy_per_pair += prefactor * R000_1 * PCy;
-                deri_dCz_per_pair += prefactor * R000_1 * PCz;
+                R000_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
+                R000_1 = -a0 * (R000_0 - exp(-boys_input)) / boys_input;
             }
+            deri_dCx_per_pair += prefactor * R000_1 * PCx;
+            deri_dCy_per_pair += prefactor * R000_1 * PCy;
+            deri_dCz_per_pair += prefactor * R000_1 * PCz;
         }
 
         const double D = density[bas_ij - hermite_density_offsets.pair_offset_of_angular_pair + hermite_density_offsets.density_offset_of_angular_pair];
@@ -432,17 +440,19 @@ static void GINTfill_int3c1e_ip2_charge_contracted_kernel00(double* output, cons
 
         const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
         const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
-        if (boys_input > 3.e-7) {
+        double R000_0 = 1;
+        double R000_1 = -a0 / 3;
+        if (boys_input > 1e-14) {
             const double sqrt_boys_input = sqrt(boys_input);
-            const double R000_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
-            const double R000_1 = -a0 * (R000_0 - exp(-boys_input)) / boys_input;
-            const double R100_0 = R000_1 * PCx;
-            const double R010_0 = R000_1 * PCy;
-            const double R001_0 = R000_1 * PCz;
-            deri_dCx += prefactor * R100_0;
-            deri_dCy += prefactor * R010_0;
-            deri_dCz += prefactor * R001_0;
+            R000_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
+            R000_1 = -a0 * (R000_0 - exp(-boys_input)) / boys_input;
         }
+        const double R100_0 = R000_1 * PCx;
+        const double R010_0 = R000_1 * PCy;
+        const double R001_0 = R000_1 * PCz;
+        deri_dCx += prefactor * R100_0;
+        deri_dCy += prefactor * R010_0;
+        deri_dCz += prefactor * R001_0;
     }
 
     const double charge = grid_point[3];

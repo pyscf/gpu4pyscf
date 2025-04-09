@@ -27,9 +27,9 @@ def setUpModule():
     global mol
     mol = pyscf.M(
         verbose = 0,
-        atom = 'C 0 0 0; O 0 0 1.5',
+        atom = 'C 0 0 0; O 0.1 1 1.5',
         basis = {'C': 'crenbl', 'O': 'ccpvdz'},
-        ecp = {'C': 'crenbl'},
+        ecp = {'C': 'crenbl', 'O': 'crenbl'},
         output = '/dev/null'
     )
 
@@ -122,7 +122,7 @@ class KnownValues(unittest.TestCase):
         mf = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
         mf.conv_tol = 1e-12
         e_tot = mf.kernel()
-        assert np.allclose(e_tot, -80.6305435235937)
+        assert np.allclose(e_tot, -21.29853214867972)
 
     def test_rks_gradient(self):
         _check_grad()

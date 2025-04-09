@@ -144,6 +144,7 @@ if(BUILD_SOLVENT)
   add_subdirectory(solvent)
 endif()
 
+
 option(BUILD_GINT_RYS "Using gint-rys" ON)
 if(BUILD_GINT_RYS)
   add_subdirectory(gint-rys)
@@ -165,6 +166,7 @@ if(BUILD_PBC)
 endif()
 
 add_subdirectory(multigrid)
+add_subdirectory(ecp)
 
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)

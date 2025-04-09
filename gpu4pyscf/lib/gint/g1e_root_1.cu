@@ -70,11 +70,11 @@ static void GINTfill_int3c1e_kernel00(double* output, const BasisProdOffsets off
         const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
         const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
         double eri_per_primitive = prefactor;
-        if (boys_input > 3.e-7) {
+        if (boys_input > 1e-14) {
             const double sqrt_boys_input = sqrt(boys_input);
             const double boys_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
             eri_per_primitive *= boys_0;
-        }
+        } // else, boys_0 = 1, eri_per_primitive = prefactor * 1, so do nothing
         eri += eri_per_primitive;
     }
 
@@ -138,11 +138,11 @@ static void GINTfill_int3c1e_charge_contracted_kernel00(double* output, const Ba
             const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
             const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
             double eri_per_primitive = prefactor;
-            if (boys_input > 3.e-7) {
+            if (boys_input > 1e-14) {
                 const double sqrt_boys_input = sqrt(boys_input);
                 const double boys_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
                 eri_per_primitive *= boys_0;
-            }
+            } // else, boys_0 = 1, eri_per_primitive = prefactor * 1, so do nothing
             eri_per_grid += eri_per_primitive;
         }
 
@@ -211,11 +211,11 @@ static void GINTfill_int3c1e_density_contracted_kernel00(double* output, const d
             const double prefactor = 2.0 * M_PI / aij * eij * sqrt_theta * sqrt_q_over_p_plus_q;
             const double boys_input = a0 * (PCx * PCx + PCy * PCy + PCz * PCz);
             double eri_per_primitive = prefactor;
-            if (boys_input > 3.e-7) {
+            if (boys_input > 1e-14) {
                 const double sqrt_boys_input = sqrt(boys_input);
                 const double boys_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
                 eri_per_primitive *= boys_0;
-            }
+            } // else, boys_0 = 1, eri_per_primitive = prefactor * 1, so do nothing
             eri_per_pair += eri_per_primitive;
         }
 
@@ -294,13 +294,18 @@ static void GINTfill_int3c1e_kernel10(double* output, const BasisProdOffsets off
         double eri_per_primitive_x = prefactor;
         double eri_per_primitive_y = prefactor;
         double eri_per_primitive_z = prefactor;
-        if (boys_input > 3.e-7) {
+        if (boys_input > 1e-14) {
             const double sqrt_boys_input = sqrt(boys_input);
             const double R000_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
             const double R000_1 = -a0 * (R000_0 - exp(-boys_input)) / boys_input;
             eri_per_primitive_x *= R000_0 * PAx + R000_1 * PCx * one_over_two_p;
             eri_per_primitive_y *= R000_0 * PAy + R000_1 * PCy * one_over_two_p;
             eri_per_primitive_z *= R000_0 * PAz + R000_1 * PCz * one_over_two_p;
+        } else {
+            const double R000_1 = -a0 / 3;
+            eri_per_primitive_x *= PAx + R000_1 * PCx * one_over_two_p;
+            eri_per_primitive_y *= PAy + R000_1 * PCy * one_over_two_p;
+            eri_per_primitive_z *= PAz + R000_1 * PCz * one_over_two_p;
         }
         eri_x += eri_per_primitive_x;
         eri_y += eri_per_primitive_y;
@@ -387,13 +392,18 @@ static void GINTfill_int3c1e_charge_contracted_kernel10(double* output, const Ba
             double eri_per_primitive_x = prefactor;
             double eri_per_primitive_y = prefactor;
             double eri_per_primitive_z = prefactor;
-            if (boys_input > 3.e-7) {
+            if (boys_input > 1e-14) {
                 const double sqrt_boys_input = sqrt(boys_input);
                 const double R000_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
                 const double R000_1 = -a0 * (R000_0 - exp(-boys_input)) / boys_input;
                 eri_per_primitive_x *= R000_0 * PAx + R000_1 * PCx * one_over_two_p;
                 eri_per_primitive_y *= R000_0 * PAy + R000_1 * PCy * one_over_two_p;
                 eri_per_primitive_z *= R000_0 * PAz + R000_1 * PCz * one_over_two_p;
+            } else {
+                const double R000_1 = -a0 / 3;
+                eri_per_primitive_x *= PAx + R000_1 * PCx * one_over_two_p;
+                eri_per_primitive_y *= PAy + R000_1 * PCy * one_over_two_p;
+                eri_per_primitive_z *= PAz + R000_1 * PCz * one_over_two_p;
             }
             eri_per_grid_x += eri_per_primitive_x;
             eri_per_grid_y += eri_per_primitive_y;
@@ -484,13 +494,18 @@ static void GINTfill_int3c1e_density_contracted_kernel10(double* output, const d
             double eri_per_primitive_x = prefactor;
             double eri_per_primitive_y = prefactor;
             double eri_per_primitive_z = prefactor;
-            if (boys_input > 3.e-7) {
+            if (boys_input > 1e-14) {
                 const double sqrt_boys_input = sqrt(boys_input);
                 const double R000_0 = SQRTPIE4 / sqrt_boys_input * erf(sqrt_boys_input);
                 const double R000_1 = -a0 * (R000_0 - exp(-boys_input)) / boys_input;
                 eri_per_primitive_x *= R000_0 * PAx + R000_1 * PCx * one_over_two_p;
                 eri_per_primitive_y *= R000_0 * PAy + R000_1 * PCy * one_over_two_p;
                 eri_per_primitive_z *= R000_0 * PAz + R000_1 * PCz * one_over_two_p;
+            } else {
+                const double R000_1 = -a0 / 3;
+                eri_per_primitive_x *= PAx + R000_1 * PCx * one_over_two_p;
+                eri_per_primitive_y *= PAy + R000_1 * PCy * one_over_two_p;
+                eri_per_primitive_z *= PAz + R000_1 * PCz * one_over_two_p;
             }
             eri_per_pair_x += eri_per_primitive_x;
             eri_per_pair_y += eri_per_primitive_y;
