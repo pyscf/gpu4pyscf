@@ -12,16 +12,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
+import unittest
+import cupy as cp
+from gpu4pyscf.lib.multi_gpu import lru_cache
+from gpu4pyscf.__config__ import num_devices
 
-add_library(gdft SHARED
-  nr_eval_gto.cu
-  contract_rho.cu
-  gen_grids.cu
-  nr_numint_sparse.cu
-  vv10.cu
-  libxc.cu
-)
+@unittest.skipIf(num_devices == 1, 'Single GPU')
+class KnownValues(unittest.TestCase):
+    def test_lru_cache(self):
+        counts = 0
 
-set_target_properties(gdft PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+        @lru_cache(10)
+        def fn():
+            nonlocal counts
+            counts += 1
+
+        with cp.cuda.Device(0):
+            fn()
+        with cp.cuda.Device(1):
+            fn()
+        assert counts == 2
+
+if __name__ == "__main__":
+    print("Full tests for multi_gpu helper functions")
+    unittest.main()
