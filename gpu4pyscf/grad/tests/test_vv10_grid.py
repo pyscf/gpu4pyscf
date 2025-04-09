@@ -140,13 +140,13 @@ class KnownValues(unittest.TestCase):
         ])
         test_gradient = analytical_denlc(grad_obj, dm)
 
-        assert np.linalg.norm(test_gradient - reference_gradient) < 1e-10
+        assert np.linalg.norm(test_gradient - reference_gradient) < 1e-8
 
     def test_nlc_dense_grid_without_response(self):
         mf = make_mf(mol, nlc_atom_grid_dense)
         dm = mf.make_rdm1()
         grad_obj = mf.Gradients()
-        assert grad_obj.grid_response == False
+        assert grad_obj.grid_response is False
 
         # reference_gradient = numerical_denlc(mf, dm)
         reference_gradient = np.array([

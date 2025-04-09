@@ -559,10 +559,6 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
 
-    mo_occ = cupy.asarray(dms.mo_occ)
-    mo_coeff = cupy.asarray(dms.mo_coeff)
-    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
-
     _sorted_mol = opt._sorted_mol
     nao = _sorted_mol.nao
     dms = cupy.asarray(dms)
