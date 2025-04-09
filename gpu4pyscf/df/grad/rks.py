@@ -55,14 +55,14 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, ks_grad.max_memory*.9-mem_now)
     if ks_grad.grid_response:
-        exc, vxc = rks_grad.get_vxc_full_response(
+        exc, exc1 = rks_grad.get_exc_full_response(
                 ni, mol, grids, mf.xc, dm,
                 max_memory=max_memory, verbose=ks_grad.verbose)
         #logger.debug1(ks_grad, 'sum(grids response) %s', exc.sum(axis=0))
         if mf.do_nlc():
             raise NotImplementedError
     else:
-        exc, vxc = rks_grad.get_vxc(
+        exc, exc1 = rks_grad.get_exc(
                 ni, mol, grids, mf.xc, dm,
                 max_memory=max_memory, verbose=ks_grad.verbose)
         if mf.do_nlc():
@@ -70,47 +70,42 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
                 xc = mf.xc
             else:
                 xc = mf.nlc
-            enlc, vnlc = rks_grad.get_nlc_vxc(
+            enlc, exc1_nlc = rks_grad.get_nlc_exc(
                 ni, mol, nlcgrids, xc, dm,
                 max_memory=max_memory, verbose=ks_grad.verbose)
-            vxc += vnlc
+            exc1 += exc1_nlc
     t0 = logger.timer(ks_grad, 'vxc total', *t0)
 
-    # this can be moved into vxc calculations
-    occ_coeff = cupy.asarray(mf.mo_coeff[:, mf.mo_occ>0.5], order='C')
-    tmp = contract('nij,jk->nik', vxc, occ_coeff)
-    vxc = 2.0*contract('nik,ik->ni', tmp, occ_coeff)
-
     aoslices = mol.aoslice_by_atom()
-    vxc = [vxc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
-    vxc = cupy.asarray(vxc)
+    exc1 = [exc1[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
+    exc1 = cupy.asarray(exc1)
     if abs(hyb) < 1e-10 and abs(alpha) < 1e-10:
-        vj, vjaux = ks_grad.get_j(mol, dm)
-        vxc += vj
+        ej, ejaux = ks_grad.get_j(mol, dm)
+        exc1 += ej
         if ks_grad.auxbasis_response:
-            e1_aux = vjaux
+            e1_aux = ejaux
     else:
-        vj, vk, vjaux, vkaux = ks_grad.get_jk(mol, dm)
+        ej, ek, ejaux, ekaux = ks_grad.get_jk(mol, dm)
 
         if ks_grad.auxbasis_response:
-            vk_aux = vkaux * hyb
-        vk *= hyb
+            ek_aux = ekaux * hyb
+        ek *= hyb
         if abs(omega) > 1e-10:  # For range separated Coulomb operator
-            vk_lr, vkaux_lr = ks_grad.get_k(mol, dm, omega=omega)
-            vk += vk_lr * (alpha - hyb)
+            ek_lr, ekaux_lr = ks_grad.get_k(mol, dm, omega=omega)
+            ek += ek_lr * (alpha - hyb)
             if ks_grad.auxbasis_response:
-                vk_aux += vkaux_lr * (alpha - hyb)
+                ek_aux += ekaux_lr * (alpha - hyb)
 
-        vxc += vj - vk * .5
+        exc1 += ej - ek * .5
         if ks_grad.auxbasis_response:
-            e1_aux = vjaux - vk_aux * .5
+            e1_aux = ejaux - ek_aux * .5
 
     if ks_grad.auxbasis_response:
         logger.debug1(ks_grad, 'sum(auxbasis response) %s', e1_aux.sum(axis=0))
     else:
         e1_aux = None
-    vxc = tag_array(vxc, aux=e1_aux, exc1_grid=exc)
-    return vxc
+    exc1 = tag_array(exc1, aux=e1_aux, exc1_grid=exc)
+    return exc1
 
 class Gradients(rks_grad.Gradients):
     from gpu4pyscf.lib.utils import to_gpu, device

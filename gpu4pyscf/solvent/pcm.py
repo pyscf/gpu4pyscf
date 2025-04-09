@@ -24,7 +24,6 @@ from pyscf import lib
 from pyscf import gto
 from pyscf.dft import gen_grid
 from pyscf.data import radii
-from pyscf.solvent import ddcosmo
 from gpu4pyscf.solvent import _attach_solvent
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
@@ -249,7 +248,6 @@ class PCM(lib.StreamObject):
         'equilibrium_solvation', 'e', 'v', 'tdscf'
     }
     from gpu4pyscf.lib.utils import to_gpu, device
-    kernel = ddcosmo.DDCOSMO.kernel
 
     def __init__(self, mol):
         self.mol = mol
@@ -277,7 +275,6 @@ class PCM(lib.StreamObject):
 
         self.e = None
         self.v = None
-        self._dm = None
 
     def dump_flags(self, verbose=None):
         logger.info(self, '******** %s ********', self.__class__)
@@ -372,9 +369,14 @@ class PCM(lib.StreamObject):
         v_grids_n = numpy.dot(atom_charges, v_ng)
         self.v_grids_n = cupy.asarray(v_grids_n)
 
+    def kernel(self, dm):
+        self.e, self.v = self._get_vind(dm)
+        return self.e, self.v
+
     def _get_vind(self, dms):
         if not self._intermediates:
             self.build()
+        assert dms is not None
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)
         if dms.shape[0] == 2:

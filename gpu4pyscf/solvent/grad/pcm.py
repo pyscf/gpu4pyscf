@@ -31,8 +31,6 @@ from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from pyscf import lib as pyscf_lib
 
-libdft = lib.load_library('libdft')
-
 def grad_switch_h(x):
     ''' first derivative of h(x)'''
     dy = 30.0*x**2 - 60.0*x**3 + 30.0*x**4
@@ -475,7 +473,7 @@ class WithSolventGrad:
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         dm = kwargs.pop('dm', None)
         if dm is None:
-            dm = self.base.make_rdm1(ao_repr=True)
+            dm = self.base.make_rdm1()
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
         self.de_solute = super().kernel(*args, **kwargs)
