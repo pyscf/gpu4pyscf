@@ -441,51 +441,12 @@ def _int3c2e_overlap_mask(int3c2e_opt, cutoff):
     ovlp_mask = c_ovlp_mask[mapping[:,None],mapping]
     return ovlp_mask, mapping
 
-# The long-range part of the cderi for gamma point. The resultant 3-index tensor
-# is compressed.
-def _lr_int3c2e_gamma_point(int3c2e_opt):
-    cell = int3c2e_opt.cell
-    log = logger.new_logger(cell)
-    t1 = log.init_timer()
-    auxcell = int3c2e_opt.auxcell
-    omega = int3c2e_opt.omega
-    lmax = cell._bas[:,ANG_OF].max()
-    uniq_l = np.arange(lmax+1)
-    if cell.cart:
-        nf = (uniq_l + 1) * (uniq_l + 2) // 2
-    else:
-        nf = uniq_l * 2 + 1
-        c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
-
-    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
-    mesh = cell.cutoff_to_mesh(ke_cutoff)
-    mesh = cell.symmetrize_mesh(mesh)
-    Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-    ngrids = len(Gv)
-    nao = cell.nao
-    naux = auxcell.nao
-
-    ft_opt = ft_ao.FTOpt(cell)
+def _build_aft_envs(ft_opt):
     sorted_cell = ft_opt.sorted_cell
-    coeff = ft_opt.coeff
-    uniq_l_ctr = ft_opt.uniq_l_ctr
-    l_ctr_offsets = ft_opt.l_ctr_offsets
     Ls = cp.asarray(sorted_cell.get_lattice_Ls())
     Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
     nimgs = len(Ls)
     nbas = sorted_cell.nbas
-
-    ls = sorted_cell._bas[:,ANG_OF]
-    exps, cs = extract_pgto_params(sorted_cell, 'diffused')
-    cs *= ((2*ls+1)/(4*np.pi))**.5
-    exps = cp.asarray(exps, dtype=np.float32)
-    log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
-
-    # The cutoff from the int3c2e is utilized. This is generally smaller than
-    # that created by the ft_aopair module. This is to ensure ft_aopair
-    # producing more non-zero integrals than that in the int3c2e function.
-    cutoff = int3c2e_opt.estimate_cutoff_with_penalty()
-    log_cutoff = math.log(cutoff)
 
     _atm = cp.array(sorted_cell._atm)
     _bas = cp.array(sorted_cell._bas)
@@ -497,39 +458,31 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     )
     # Keep a reference to these arrays, prevent releasing them upon returning the closure
     aft_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
+    return aft_envs
 
-    nao, nao_orig = coeff.shape
+def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
+    log = logger.new_logger(ft_opt.cell, verbose)
+    sorted_cell = ft_opt.sorted_cell
+    nbas = sorted_cell.nbas
+
+    uniq_l_ctr = ft_opt.uniq_l_ctr
+    l_ctr_offsets = ft_opt.l_ctr_offsets
     uniq_l = uniq_l_ctr[:,0]
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     n_groups = np.count_nonzero(uniq_l <= ft_ao.LMAX)
 
+    ls = sorted_cell._bas[:,ANG_OF]
+    exps, cs = extract_pgto_params(sorted_cell, 'diffused')
+    cs *= ((2*ls+1)/(4*np.pi))**.5
+    exps = cp.asarray(exps, dtype=np.float32)
+    log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
+    log_cutoff = math.log(cutoff)
+
     permutation_symmetry = 1
     ij_tasks = [(i, j) for i in range(n_groups) for j in range(i+1)]
 
-    int3c2e_ovlp_mask, mapping = _int3c2e_overlap_mask(int3c2e_opt, cutoff)
-    int3c2e_ovlp_mask = cp.asarray(int3c2e_ovlp_mask, dtype=bool)
-
-    # ft._sorted_cell._bas[rev_mapping] => int3c._sorted_cell._bas
-    rev_mapping = np.empty_like(mapping)
-    rev_mapping[mapping] = np.arange(len(mapping))
-
-    # Save the indices of non-zero FT integrals in the bas_ij_index_lookup.
-    # This lookup table will be used to generate the addresses for the
-    # non-zere sr_int3c2e integrals.
-    # bas_ij_index_lookup[ish,jsh] -> address in ft_aopair
-    bas_ij_index_lookup = cp.zeros((nbas, nbas), dtype=np.int32)
     bas_ij_cache = {}
-
-    ao_pair_mapping = []
-    # Given shell Id in sorted_cell, this ao_loc maps shell to the AO offset in
-    # the original cell
-    ao_loc = cp.asarray(ft_opt.ao_idx[ft_opt.sorted_cell.ao_loc[:-1]])
-
-    p0 = p1 = 0
-    non0_size = 0
     for i, j in ij_tasks:
-        li = uniq_l[i]
-        lj = uniq_l[j]
         ll_pattern = f'{l_symb[i]}{l_symb[j]}'
         ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
         jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
@@ -584,21 +537,83 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         jsh += jsh0
         bas_ij = cp.ravel_multi_index((ish, jsh), (nbas, nbas))
         bas_ij = cp.asarray(bas_ij, dtype=np.int32)
-
-        nfij = nf[li] * nf[lj]
-        p0, p1 = p1, p1 + nfij * npairs
         bas_ij_cache[i, j] = (bas_ij, img_offsets, img_idx)
-        bas_ij_index_lookup[ish,jsh] = cp.arange(p0, p1, nfij)
-        iaddr = ao_loc[ish,None] + cp.arange(nf[li])
-        jaddr = ao_loc[jsh,None] + cp.arange(nf[lj])
-        ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
-    non0_size = p1
-    int3c2e_ovlp_mask = None
-    ao_pair_mapping = np.hstack(ao_pair_mapping)
+        log.debug1('task (%d, %d), npairs=%d', i, j, npairs)
+    return bas_ij_cache
+
+# The long-range part of the cderi for gamma point. The resultant 3-index tensor
+# is compressed.
+def _lr_int3c2e_gamma_point(int3c2e_opt):
+    cell = int3c2e_opt.cell
+    log = logger.new_logger(cell)
+    t1 = log.init_timer()
+    auxcell = int3c2e_opt.auxcell
+    omega = abs(int3c2e_opt.omega)
+
+    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+    mesh = cell.cutoff_to_mesh(ke_cutoff)
+    mesh = cell.symmetrize_mesh(mesh)
+    Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+    ngrids = len(Gv)
+    nao = cell.nao
+    naux = auxcell.nao
+
+    # The cutoff from the int3c2e is utilized. This is generally smaller than
+    # that created by the ft_aopair module. This is to ensure ft_aopair
+    # producing more non-zero integrals than that in the int3c2e function.
+    cutoff = int3c2e_opt.estimate_cutoff_with_penalty()
+    int3c2e_ovlp_mask, mapping = _int3c2e_overlap_mask(int3c2e_opt, cutoff)
+    int3c2e_ovlp_mask = cp.asarray(int3c2e_ovlp_mask, dtype=bool)
+
+    # ft._sorted_cell._bas[rev_mapping] => int3c._sorted_cell._bas
+    rev_mapping = np.empty_like(mapping)
+    rev_mapping[mapping] = np.arange(len(mapping))
+
+    ft_opt = ft_ao.FTOpt(cell)
+    sorted_cell = ft_opt.sorted_cell
+    nbas = sorted_cell.nbas
+
+    # Save the indices of non-zero FT integrals in the bas_ij_index_lookup.
+    # This lookup table will be used to generate the addresses for the
+    # non-zere sr_int3c2e integrals.
+    # bas_ij_index_lookup[ish,jsh] -> address in ft_aopair
+    bas_ij_index_lookup = cp.zeros((nbas, nbas), dtype=np.int32)
+
+    ao_pair_mapping = []
+    # Given shell Id in sorted_cell, this ao_loc maps shell to the AO offset in
+    # the original cell
+    ao_loc = cp.asarray(ft_opt.ao_idx[ft_opt.sorted_cell.ao_loc[:-1]])
+
+    aft_envs = _build_aft_envs(ft_opt)
+    bas_ij_cache = _make_img_idx_cache(ft_opt, aft_envs, cutoff,
+                                       int3c2e_ovlp_mask, log)
     t1 = log.timer_debug2('generating bas_ij indices', *t1)
 
+    uniq_l_ctr = ft_opt.uniq_l_ctr
+    l_ctr_offsets = ft_opt.l_ctr_offsets
+    uniq_l = uniq_l_ctr[:,0]
+    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
+
+    ij_tasks = bas_ij_cache.keys()
+    nf = nf_cart = (uniq_l + 1) * (uniq_l + 2) // 2
+    if not cell.cart:
+        nf = uniq_l * 2 + 1
+        c2s = [cart2sph_by_l(l) for l in range(uniq_l.max()+1)]
+    p0 = p1 = 0
+    for i, j in ij_tasks:
+        nfij = nf[i] * nf[j]
+        bas_ij = bas_ij_cache[i, j][0]
+        npairs = len(bas_ij)
+        p0, p1 = p1, p1 + nfij * npairs
+        ish, jsh = divmod(bas_ij, nbas)
+        bas_ij_index_lookup[ish,jsh] = cp.arange(p0, p1, nfij)
+        iaddr = ao_loc[ish,None] + cp.arange(nf[i])
+        jaddr = ao_loc[jsh,None] + cp.arange(nf[j])
+        ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
+    non0_size = p1
+
     ft_ao.init_constant(sorted_cell)
-    kern = libpbc.build_ft_ao_compressed
+    kern = libpbc.build_ft_ao
 
     avail_mem = get_avail_mem() * .8
     Gblksize = max(16, int(avail_mem/(2*16*nao**2))//8*8)
@@ -608,15 +623,17 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     j3c_compressed = cp.empty((non0_size,naux), dtype=np.float64)
     coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws)
     pair0 = pair1 = 0
-    for i, j in ij_tasks:
+    for i, j in bas_ij_cache:
         li = uniq_l[i]
         lj = uniq_l[j]
-        nfi = (li+1)*(li+2)//2
-        nfj = (lj+1)*(lj+2)//2
+        ll_pattern = f'{l_symb[i]}{l_symb[j]}'
+        ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+        jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+        nfi = nf_cart[i]
+        nfj = nf_cart[j]
         nfij = nfi * nfj
         bas_ij, img_offsets, img_idx = bas_ij_cache[i, j]
         npairs = len(bas_ij)
-        pair0, pair1 = pair1, pair1 + npairs * nfij
         j3c_tmp = cp.zeros((nfij*npairs,naux), dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
@@ -626,11 +643,12 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
             # Padding zeros, allowing idle threads to access Gv over the bounds.
             GvT = cp.append(GvT, cp.zeros(THREADS))
 
-            pqG = cp.zeros((npairs, nGv), dtype=np.complex128)
+            pqG = cp.zeros((nfij*npairs, nGv), dtype=np.complex128)
             scheme = ft_ao.ft_ao_scheme(cell, li, lj, nGv)
             log.debug2('ft_ao_scheme for %s: %s', ll_pattern, scheme)
             err = kern(
                 ctypes.cast(pqG.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(1), # Compressing, remove zero elements
                 ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
                 (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
                 ctypes.c_int(npairs), ctypes.c_int(nGv),
@@ -638,8 +656,9 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
                 ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                 ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
-                cell._atm.ctypes, ctypes.c_int(cell.natm),
-                cell._bas.ctypes, ctypes.c_int(cell.nbas), cell._env.ctypes)
+                sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
+                sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
+                sorted_cell._env.ctypes)
             if err != 0:
                 raise RuntimeError(f'build_ft_ao_compressed kernel for {ll_pattern} failed')
             # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
@@ -650,11 +669,12 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
 
         j3c_tmp = j3c_tmp.real
         if not cell.cart:
-            j3c_tmp = j3c_tmp.reshape(npairs,nfj,nfi,naux)
+            j3c_tmp = j3c_tmp.reshape(nfj,nfi,npairs,naux)
             j3c_tmp = contract('qj,qpmk->jpmk', c2s[lj], j3c_tmp)
             j3c_tmp = contract('pi,jpmk->jimk', c2s[li], j3c_tmp)
             j3c_tmp = j3c_tmp.reshape(-1,naux)
 
+        pair0, pair1 = pair1, pair1 + npairs * nf[i] * nf[j]
         j3c_compressed[pair0:pair1] = j3c_tmp
         j3c_tmp = None
         t1 = log.timer_debug1('ft_aopair', *t1)
@@ -691,7 +711,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         t1 = log.init_timer()
         img_idx_cache = int3c2e_opt.make_img_idx_cache()
         size = 0
-        for (li, lj), img_idx in img_idx_cache.itmes():
+        for (li, lj), img_idx in img_idx_cache.items():
             npairs = len(img_idx[4])
             size += nf[li] * nf[lj] * npairs
         j3c = cp.zeros((size, naux), dtype=np.float64)

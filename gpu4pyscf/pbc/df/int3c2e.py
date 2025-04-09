@@ -286,14 +286,15 @@ def to_primitive_bas(cell):
     else:
         dims = c_ls * 2+ 1
     ao_loc = np.append(np.int32(0), dims.cumsum(dtype=np.int32))
+    idx = np.hstack([np.where(c_ls==l)[0] for l in range(lmax+1)])
     ao_idx = np.array_split(np.arange(cell.nao), ao_loc[1:-1])
-    ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
+    ao_idx = np.hstack([ao_idx[i] for i in idx])
     return pcell, sorted_cell, p2c_mapping, ao_idx
 
 class SRInt3c2eOpt:
     def __init__(self, cell, auxcell, omega, bvk_kmesh=None):
         assert omega < 0
-        self.omega = omega
+        self.omega = -omega
         assert cell._bas[:,ANG_OF].max() <= LMAX
 
         self.cell = cell
@@ -307,11 +308,7 @@ class SRInt3c2eOpt:
         self.sorted_cell = sorted_cell
 
         self.cell0_prim_l_counts = np.bincount(prim_cell._bas[:,ANG_OF])
-        # How many original shells for each angular momentum.
-        ls = cell._bas[:,ANG_OF]
-        lmax = ls.max()
-        counts = [cell._bas[ls==l,NCTR_OF].sum() for l in range(lmax+1)]
-        self.cell0_ctr_l_counts = np.array(counts)
+        self.cell0_ctr_l_counts = np.bincount(sorted_cell._bas[:,ANG_OF])
 
         self.auxcell = auxcell
         auxcell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(auxcell, tile=1)

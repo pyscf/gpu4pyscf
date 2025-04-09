@@ -180,19 +180,20 @@ C    D
 def test_gamma_point_compressed():
     cell = pyscf.M(
         atom='''C1   1.3    .2       .3
-                #C2   .19   .1      1.1
+                C2   .19   .1      1.1
         ''',
-        basis={'C1': [#[0, [1.1, 1.]],
+        basis={'C1': [[0, [1.1, 1.]],
                       [1, [2., 1.]]
                      ],
-               'C2': 'ccpvdz'},
+               #'C2': 'ccpvdz'
+              },
         a=np.diag([2.5, 1.9, 2.2])*3)
 
     auxcell = cell.copy()
     auxcell.basis = {
-        'C1':'''
-C    S
-     12.9917624900           1.0000000000
+#        'C1':'''
+#C    S
+#     12.9917624900           1.0000000000
 #C    S
 #      2.1325940100           1.0000000000
 #C    P
@@ -209,8 +210,14 @@ C    S
     }
     auxcell.build()
     omega = 0.3
-    gpu_dat, dat_neg, idx = rsdf_builder.compressed_cderi_gamma_point(cell, auxcell, omega=omega)
-    print(gpu_dat, idx)
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_gamma_point(cell, auxcell, omega=omega)
+#    out = cp.zeros(())
+#    out[idx] = dat
+#    out[idx.T] = dat
+    print(dat[0,0])
+
+    ref = build_cderi(cell, auxcell, omega=omega)[0]
+    print(ref[0,0])
 
 #    cell.precision = 1e-10
 #    auxcell.precision = 1e-10

@@ -281,6 +281,7 @@ class FTOpt:
                 log.debug2('ft_ao_scheme for %s: %s', ll_pattern, scheme)
                 err = kern(
                     ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(0), # Do not remove zero elements
                     ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
                     (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
                     ctypes.c_int(npairs), ctypes.c_int(nGv),
