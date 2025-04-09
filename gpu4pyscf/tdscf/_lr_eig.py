@@ -1225,7 +1225,7 @@ def Davidson(matrix_vector_product,
 
     if ii == max_iter-1 and max_norm >= conv_tol:
         log.warn(f'=== Warning: Davidson not converged below {conv_tol:.2e} Due to Iteration Limit ===')
-        log.warn('current residual norms', r_norms)
+        log.warn(f'current residual norms: {r_norms}')
         
     log.info(f'Finished in {ii+1:d} steps, {Dcost:.2f} seconds')
     log.info(f'Maximum residual norm = {max_norm:.2e}')

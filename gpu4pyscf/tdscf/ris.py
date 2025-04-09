@@ -107,6 +107,7 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s'):
     H6 [[0, [0.1999828038466018, 1.0]]]
     '''
     aux_basis = {}
+
     for atom_index in auxmol_basis_keys:
         atom = ''.join([char for char in atom_index if char.isalpha()])
         '''
@@ -124,8 +125,7 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s'):
                 aux_basis[atom_index].append([2, [exp_alpha, 1.0]])
 
     auxmol.basis = aux_basis
-    auxmol.build()
-
+    auxmol.build(dump_input=False)
     return auxmol
    
 
@@ -158,17 +158,17 @@ def get_Ppq_to_Tpq(Ppq: cp.ndarray, lower_inv_eri2c: cp.ndarray):
     return T_pq 
 
 def get_PuvCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray):
-    # '''    
-    # eri3c : (P|pq) , P = auxnao or 3
-    # C_p and C_q:  C[:, :n_occ] or C[:, n_occ:], can be both
+    # # '''    
+    # # eri3c : (P|pq) , P = auxnao or 3
+    # # C_p and C_q:  C[:, :n_occ] or C[:, n_occ:], can be both
 
-    # Ppq = einsum("Puv,up,vq->Ppq", eri3c, Cp, C_q)
+    # # Ppq = einsum("Puv,up,vq->Ppq", eri3c, Cp, C_q)
 
-    # manually reshape and transpose is faster than einsum
+    # # manually reshape and transpose is faster than einsum
 
-    # '''
+    # # '''
 
-    # '''eri3c in shape (nauxao, nao, nao)'''
+    # # '''eri3c in shape (nauxao, nao, nao)'''
     # nao = eri3c.shape[1]
     # nauxao = eri3c.shape[0]
 
@@ -176,21 +176,21 @@ def get_PuvCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray):
     # n_q = C_q.shape[1]
 
 
-    # '''eri3c (nauxao, nao, nao) -> (nauxao*nao, nao)
-    #    C_p (nao, n_p)
-    #    >> eri3c_C_p (nauxao*nao, n_p)'''
+    # # '''eri3c (nauxao, nao, nao) -> (nauxao*nao, nao)
+    # #    C_p (nao, n_p)
+    # #    >> eri3c_C_p (nauxao*nao, n_p)'''
     # eri3c = eri3c.reshape(nauxao*nao, nao)
     # eri3c_C_p = cp.dot(eri3c, C_p)
 
-    # ''' eri3c_C_p (nauxao*nao, n_p) 
-    #     -> (nauxao, nao, n_p) 
-    #     -> (nauxao, n_p, nao) '''
+    # # ''' eri3c_C_p (nauxao*nao, n_p) 
+    # #     -> (nauxao, nao, n_p) 
+    # #     -> (nauxao, n_p, nao) '''
     # eri3c_C_p = eri3c_C_p.reshape(nauxao, nao, n_p)
     # eri3c_C_p = eri3c_C_p.transpose(0,2,1)
 
-    # ''' eri3c_C_p  (nauxao, n_p, nao) -> (nauxao*n_p, nao)
-    #     C_q  (nao, n_q)
-    #     >> Ppq (nauxao*n_p, n_q) >  (nauxao, n_p, n_q)  '''
+    # # ''' eri3c_C_p  (nauxao, n_p, nao) -> (nauxao*n_p, nao)
+    # #     C_q  (nao, n_q)
+    # #     >> Ppq (nauxao*n_p, n_q) >  (nauxao, n_p, n_q)  '''
     # eri3c_C_p = eri3c_C_p.reshape(nauxao*n_p, nao)
     # Ppq = cp.dot(eri3c_C_p, C_q)
     # Ppq = Ppq.reshape(nauxao, n_p, n_q)
@@ -786,6 +786,9 @@ class RisBase(lib.StreamObject):
 class TDA(RisBase):
     def __init__(self, mf, **kwargs):
         super().__init__(mf, **kwargs)
+        log = self.log
+        log.warn("TDA-ris is still in the experimental stage, and its APIs are subject to change in future releases.")
+        log.info('TDA-RIS is initialized')
 
     ''' ===========  RKS hybrid =========== '''
     def get_RKS_TDA_hybrid_MVP(self):
@@ -1147,7 +1150,10 @@ class TDA(RisBase):
 class TDDFT(RisBase):
     def __init__(self, mf, **kwargs):
         super().__init__(mf, **kwargs)
-   
+        log = self.log
+        log.warn("TDDFT-ris is still in the experimental stage, and its APIs are subject to change in future releases.")
+        log.info('TDDFT-ris is initialized')
+
     ''' ===========  RKS hybrid =========== '''
     def gen_RKS_TDDFT_hybrid_MVP(self):  
         '''hybrid RKS TDDFT'''
@@ -1641,7 +1647,8 @@ class TDDFT(RisBase):
                                                     n_occ=self.n_occ if self.RKS else (self.n_occ_a, self.n_occ_b),
                                                     n_vir=self.n_vir if self.RKS else (self.n_vir_a, self.n_vir_b))
         energies = energies*HARTREE2EV
-
+        log.info(f'energies: {energies}')
+        log.info(f'oscillator strength: {oscillator_strength}')
         log.info(CITATION_INFO)
         self.energies = energies
         self.X = X
