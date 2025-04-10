@@ -137,6 +137,30 @@ class SCFWithSolvent(_Solvation):
         grad_method = super().nuc_grad_method()
         return self.with_solvent.nuc_grad_method(grad_method)
 
+    def TDA(self):
+        # if isinstance(self, dft.rks.RKS):
+        #     tda_method = 
+        tda_method = super().TDA()
+        return self.with_solvent.TDA(tda_method)
+
+    def TDDFT(self):
+        # if isinstance(self, dft.rks.RKS):
+        #     tda_method = 
+        tda_method = super().TDDFT()
+        return self.with_solvent.TDDFT(tda_method)
+    
+    def TDHF(self):
+        # if isinstance(self, dft.rks.RKS):
+        #     tda_method =
+        tda_method = super().TDHF()
+        return self.with_solvent.TDHF(tda_method)
+    
+    def CasidaTDDFT(self):
+        # if isinstance(self, dft.rks.RKS):
+        #     tda_method =
+        tda_method = super().CasidaTDDFT()
+        return self.with_solvent.CasidaTDDFT(tda_method)
+
     Gradients = nuc_grad_method
 
     def Hessian(self):
@@ -151,12 +175,21 @@ class SCFWithSolvent(_Solvation):
         singlet = singlet or singlet is None
         def vind_with_solvent(dm1):
             v = vind(dm1)
-            if self.with_solvent.equilibrium_solvation:
+            if self.with_solvent.tdscf:
                 if is_uhf:
                     v_solvent = self.with_solvent._B_dot_x(dm1)
                     v += v_solvent[0] + v_solvent[1]
                 elif singlet:
                     v += self.with_solvent._B_dot_x(dm1)
+                else:
+                    logger.warn(self, 'Singlet-Triplet has no LR-PCM contribution!')         
+            else:
+                if self.with_solvent.equilibrium_solvation:
+                    if is_uhf:
+                        v_solvent = self.with_solvent._B_dot_x(dm1)
+                        v += v_solvent[0] + v_solvent[1]
+                    elif singlet:
+                        v += self.with_solvent._B_dot_x(dm1)
             return v
         return vind_with_solvent
 

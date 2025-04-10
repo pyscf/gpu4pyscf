@@ -245,7 +245,7 @@ class PCM(lib.StreamObject):
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
         'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
-        'equilibrium_solvation', 'e', 'v',
+        'equilibrium_solvation', 'e', 'v', 'tdscf'
     }
     from gpu4pyscf.lib.utils import to_gpu, device
 
@@ -264,6 +264,7 @@ class PCM(lib.StreamObject):
         self.lebedev_order = 29
         self._intermediates = {}
         self.eps = 78.3553
+        self.tdscf = False
 
         self.max_cycle = 20
         self.conv_tol = 1e-7
@@ -400,6 +401,47 @@ class PCM(lib.StreamObject):
         self._intermediates['v_grids'] = v_grids[0]
         return epcm, vmat[0]
 
+    def _get_qsym(self, dms, with_nuc = False):
+        if not self._intermediates:
+            self.build()
+        nao = dms.shape[-1]
+        dms = dms.reshape(-1,nao,nao)
+        if dms.shape[0] == 2:
+            dms = (dms[0] + dms[1]).reshape(-1,nao,nao)
+        if not isinstance(dms, cupy.ndarray):
+            dms = cupy.asarray(dms)
+        v_grids_e = self._get_v(dms)
+        if with_nuc:
+            v_grids = self.v_grids_n - v_grids_e
+        else:
+            v_grids = -1.0 * v_grids_e
+
+        b = self.left_multiply_R(v_grids.T)
+        q = self.left_solve_K(b).T
+
+        vK_1 = self.left_solve_K(v_grids.T, K_transpose = True)
+        qt = self.left_multiply_R(vK_1, R_transpose = True).T
+        q_sym = (q + qt)/2.0
+
+        return q_sym[0], q[0]
+
+    def _get_vgrids(self, dms, with_nuc = False):
+        if not self._intermediates:
+            self.build()
+        nao = dms.shape[-1]
+        dms = dms.reshape(-1,nao,nao)
+        if dms.shape[0] == 2:
+            dms = (dms[0] + dms[1]).reshape(-1,nao,nao)
+        if not isinstance(dms, cupy.ndarray):
+            dms = cupy.asarray(dms)
+        v_grids_e = self._get_v(dms)
+        if with_nuc:
+            v_grids = self.v_grids_n - v_grids_e
+        else:
+            v_grids = -1.0 * v_grids_e
+
+        return v_grids[0]
+
     def _get_v(self, dms):
         '''
         return electrostatic potential on surface
@@ -425,6 +467,30 @@ class PCM(lib.StreamObject):
             return pcm_grad.make_grad_object(grad_method)
         else:
             raise RuntimeError('Only SCF gradient is supported')
+        
+    def TDA(self, td):
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        if self.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
+        return pcm_td.make_tdscf_object(td)
+    
+    def TDHF(self, td):
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        if self.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
+        return pcm_td.make_tdscf_object(td)
+    
+    def TDDFT(self, td):
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        if self.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
+        return pcm_td.make_tdscf_object(td)
+    
+    def CasidaTDDFT(self, td):
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        if self.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
+        return pcm_td.make_tdscf_object(td)
 
     def Hessian(self, hess_method):
         from gpu4pyscf.solvent.hessian import pcm as pcm_hess
@@ -450,7 +516,7 @@ class PCM(lib.StreamObject):
         out_shape = dms.shape
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)
-
+        
         v_grids = -self._get_v(dms)
 
         b = self.left_multiply_R(v_grids.T)
@@ -467,8 +533,9 @@ class PCM(lib.StreamObject):
     def if_method_in_CPCM_category(self):
         return self.method.upper() in ['C-PCM', 'CPCM', "COSMO"]
 
-    def left_multiply_R(self, right_vector, R_transpose = False):
-        f_epsilon = self._intermediates['f_epsilon']
+    def left_multiply_R(self, right_vector, f_epsilon = None, R_transpose = False):
+        if f_epsilon is None:
+            f_epsilon = self._intermediates['f_epsilon']
         if self.if_method_in_CPCM_category:
             # R = -f_epsilon * cupy.eye(K.shape[0])
             return -f_epsilon * right_vector
@@ -481,9 +548,11 @@ class PCM(lib.StreamObject):
                 DA = DA.T
             return -f_epsilon * (right_vector - 1.0/(2.0*PI) * cupy.dot(DA, right_vector))
 
-    def left_solve_K(self, right_vector, K_transpose = False):
+    def left_solve_K(self, right_vector, K_LU = None, K_LU_pivot = None, K_transpose = False):
         ''' K^{-1} @ right_vector '''
-        K_LU       = self._intermediates['K_LU']
-        K_LU_pivot = self._intermediates['K_LU_pivot']
+        if K_LU is None:
+            K_LU       = self._intermediates['K_LU']
+        if K_LU_pivot is None:
+            K_LU_pivot = self._intermediates['K_LU_pivot']
         return lu_solve((K_LU, K_LU_pivot), right_vector, trans = K_transpose, overwrite_b = False, check_finite = False)
 
