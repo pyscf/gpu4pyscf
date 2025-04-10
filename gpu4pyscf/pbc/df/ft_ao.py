@@ -104,8 +104,14 @@ class FTOpt:
         l_ctrs = np.column_stack((ls, -nprims))
         _, inv_idx = np.unique(l_ctrs, return_inverse=True, axis=0)
         sorted_idx = np.argsort(inv_idx.ravel(), kind='stable')
-        ao_loc = sorted_cell.ao_loc
+        if cell.cart:
+            dims = (ls + 1) * (ls + 2) // 2
+        else:
+            dims = ls * 2 + 1
+        ao_loc = np.append(0, dims.cumsum())
         ao_idx = np.array_split(np.arange(ao_loc[-1]), ao_loc[1:-1])
+        # mat[ao_idx[:,None],ao_idx] transforms the matrix in original cell into
+        # the matrix represented in the sorted AOs.
         self.ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
 
         if bvk_kmesh is None:

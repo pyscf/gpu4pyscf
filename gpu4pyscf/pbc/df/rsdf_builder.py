@@ -573,14 +573,14 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     sorted_cell = ft_opt.sorted_cell
     nbas = sorted_cell.nbas
 
-    # Save the indices of non-zero FT integrals in the bas_ij_index_lookup.
+    # Save the indices of non-zero FT integrals in the aopair_offsets_lookup.
     # This lookup table will be used to generate the addresses for the
     # non-zere sr_int3c2e integrals.
-    # bas_ij_index_lookup[ish,jsh] -> address in ft_aopair
-    bas_ij_index_lookup = cp.zeros((nbas, nbas), dtype=np.int32)
+    # aopair_offsets_lookup[ish,jsh] -> address in ft_aopair
+    aopair_offsets_lookup = cp.zeros((nbas, nbas), dtype=np.int32)
 
     ao_pair_mapping = []
-    # Given shell Id in sorted_cell, this ao_loc maps shell to the AO offset in
+    # Given shell I in sorted_cell, this ao_loc maps shell I to the AO offset in
     # the original cell
     ao_loc = cp.asarray(ft_opt.ao_idx[ft_opt.sorted_cell.ao_loc[:-1]])
 
@@ -606,7 +606,8 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         npairs = len(bas_ij)
         p0, p1 = p1, p1 + nfij * npairs
         ish, jsh = divmod(bas_ij, nbas)
-        bas_ij_index_lookup[ish,jsh] = cp.arange(p0, p1, nfij)
+        aopair_offsets_lookup[jsh,ish] = \
+                aopair_offsets_lookup[ish,jsh] = cp.arange(p0, p1, nfij)
         iaddr = ao_loc[ish,None] + cp.arange(nf[i])
         jaddr = ao_loc[jsh,None] + cp.arange(nf[j])
         ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
@@ -671,14 +672,14 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         if not cell.cart:
             j3c_tmp = j3c_tmp.reshape(nfj,nfi,npairs,naux)
             j3c_tmp = contract('qj,qpmk->jpmk', c2s[lj], j3c_tmp)
-            j3c_tmp = contract('pi,jpmk->jimk', c2s[li], j3c_tmp)
+            j3c_tmp = contract('pi,jpmk->mjik', c2s[li], j3c_tmp)
             j3c_tmp = j3c_tmp.reshape(-1,naux)
 
         pair0, pair1 = pair1, pair1 + npairs * nf[i] * nf[j]
         j3c_compressed[pair0:pair1] = j3c_tmp
         j3c_tmp = None
         t1 = log.timer_debug1('ft_aopair', *t1)
-    return j3c_compressed, bas_ij_index_lookup, cp.asarray(rev_mapping), ao_pair_mapping
+    return j3c_compressed, aopair_offsets_lookup, cp.asarray(rev_mapping), ao_pair_mapping
 
 def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
                                  linear_dep_threshold=LINEAR_DEP_THR):
@@ -693,7 +694,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         nf = (uniq_l + 1) * (uniq_l + 2) // 2
     else:
         nf = uniq_l * 2 + 1
-    c_l_offsets = np.append(0, np.cumsum(c_shell_counts*nf))
+    c_l_offsets = np.append(0, np.cumsum(c_shell_counts))
     lmax = cell._bas[:,ANG_OF].max()
     c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
 
@@ -701,11 +702,11 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     if with_long_range:
         # LR int3c2e generally creates more non-negligible Coulomb integrals.
         # To add sr_int3c2e integrals to the corresponding elements in LR
-        # tensor, bas_mapping and bas_ij_index_lookup are utilized for indexing.
-        # bas_mapping associates the shell in sr_int3c2e.sorted_cell to that in
-        # ft_aopair.sorted_cell. bas_ij_index_lookup convertes the address in a
-        # dense tensor to compressed storage.
-        j3c, bas_ij_index_lookup, bas_mapping, ao_pair_mapping = \
+        # tensor, bas_mapping and aopair_offsets_lookup are utilized for indexing.
+        # bas_mapping[n] translates the shell n in sr_int3c2e.sorted_cell to
+        # that in ft_aopair.sorted_cell. aopair_offsets_lookup convertes the
+        # address in a dense tensor to compressed storage.
+        j3c, aopair_offsets_lookup, bas_mapping, ao_pair_mapping = \
                 _lr_int3c2e_gamma_point(int3c2e_opt)
     else:
         t1 = log.init_timer()
@@ -740,7 +741,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
             j3c_tmp = contract('pi,jpmk->jimk', c2s[li], j3c_tmp)
             nfi = li * 2 + 1
             nfj = lj * 2 + 1
-            j3c_tmp = j3c_tmp.reshape(nfj*nfi*n_pairs,naux)
+            j3c_tmp = j3c_tmp.reshape(-1,naux)
 
         ish, jsh = divmod(c_pair_idx, nctrj)
         ish += i0
@@ -748,21 +749,19 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         if with_long_range:
             ish = bas_mapping[ish]
             jsh = bas_mapping[jsh]
-            idx = bas_ij_index_lookup[ish,jsh]
+            idx = aopair_offsets_lookup[ish,jsh]
             idx = (cp.arange(nfi*nfj)[:,None] + idx).ravel()
             j3c[idx] += j3c_tmp
         else:
             p0, p1 = p1, p1 + nfi*nfj*n_pairs
             j3c[p0:p1] = j3c_tmp
-            iaddr = ao_loc[ish,None] + cp.arange(nfi)
-            jaddr = ao_loc[jsh,None] + cp.arange(nfj)
-            ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
+            iaddr = ao_loc[ish] + cp.arange(nfi)[:,None]
+            jaddr = ao_loc[jsh] + cp.arange(nfj)[:,None]
+            ao_pair_mapping.append((iaddr * nao + jaddr[:,None,:]).ravel())
         j3c_tmp = None
     ao_pair_mapping = np.hstack(ao_pair_mapping)
     t1 = log.timer_debug1('SR int3c2e', *t1)
 
-    cderi = {}
-    cderip = {}
     log.debug('Generate auxcell 2c2e integrals')
     j2c = _get_2c2e(auxcell, None, omega, with_long_range) # on CPU
     j2c = j2c[0].real
@@ -775,12 +774,14 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         j2c, prefer_ed, linear_dep_threshold)
 
     if j2ctag == 'ED':
-        cderi[0,0] = contract('Lr,pr->Lp', cd_j2c, j3c)
+        cderi = contract('Lr,pr->Lp', cd_j2c, j3c)
     else:
-        cderi[0,0] = solve_triangular(cd_j2c, j3c.T, lower=True)
+        cderi = solve_triangular(cd_j2c, j3c.T, lower=True)
+
+    cderip = None
     if cd_j2c_negative is not None:
         assert cell.dimension == 2
-        cderip[0,0] = contract('Lr,pr->Lp', cd_j2c_negative, j3c)
+        cderip = contract('Lr,pr->Lp', cd_j2c_negative, j3c)
     t0 = log.timer_debug1('solving cderi', *t0)
     return cderi, cderip, ao_pair_mapping
 
