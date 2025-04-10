@@ -47,6 +47,7 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
     int cell0_ish = ish % nish + ish0;;
     int cell0_jsh = jsh % njsh + jsh0;;
     if (cell0_ish < cell0_jsh &&
+        // filtering based on the contracted orbital-pairs than the primitive shells
         p2c_mapping[cell0_ish] != p2c_mapping[cell0_jsh]) {
         return;
     }

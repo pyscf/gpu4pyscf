@@ -179,7 +179,7 @@ def build_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True
     cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
         j2c, prefer_ed, linear_dep_threshold)
 
-    cderi[0,0] = _solve_cderi(cd_j2c, j3c, j2ctag)
+    cderi[0,0] = j3c.transpose(2,0,1)#_solve_cderi(cd_j2c, j3c, j2ctag)
     if cd_j2c_negative is not None:
         assert cell.dimension == 2
         cderip[0,0] = _solve_cderi(cd_j2c_negative, j3c, j2ctag)
@@ -610,6 +610,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
                 aopair_offsets_lookup[ish,jsh] = cp.arange(p0, p1, nfij)
         iaddr = ao_loc[ish,None] + cp.arange(nf[i])
         jaddr = ao_loc[jsh,None] + cp.arange(nf[j])
+        # Note: in each <i|j> block, i is accessed in the inner loop
         ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
     non0_size = p1
 
@@ -749,16 +750,29 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         if with_long_range:
             ish = bas_mapping[ish]
             jsh = bas_mapping[jsh]
-            idx = aopair_offsets_lookup[ish,jsh]
-            idx = (cp.arange(nfi*nfj)[:,None] + idx).ravel()
-            j3c[idx] += j3c_tmp
+            ft_idx = aopair_offsets_lookup[ish,jsh]
+            ij = cp.arange(nfi*nfj)
+            idx = ij[:,None] + ft_idx
+            # Due to the bas_mapping from int3c2e_opt.cell to ft_opt.cell,
+            # the bas_ij pair for int3c2e_opt may correspond to the triu
+            # bas-pair in ft_opt.cell. For these bas_ij, a transpose on <i|j>
+            # should be applied to wrap the triu block to the tril block.
+            triu_mask = ish < jsh
+            ft_idx = ft_idx[triu_mask]
+            if len(ft_idx) > 0:
+                # Note: in each block, i is accessed in the inner loop
+                ijT = ij.reshape(nfj,nfi).T
+                idx[:,triu_mask] = ijT.reshape(-1,1) + ft_idx
+            j3c[idx.ravel()] += j3c_tmp
+            idx = ft_idx = ij = ijT = triu_mask = None
         else:
             p0, p1 = p1, p1 + nfi*nfj*n_pairs
             j3c[p0:p1] = j3c_tmp
             iaddr = ao_loc[ish] + cp.arange(nfi)[:,None]
             jaddr = ao_loc[jsh] + cp.arange(nfj)[:,None]
+            # Note: in each <i|j> block, i is accessed in the inner loop
             ao_pair_mapping.append((iaddr * nao + jaddr[:,None,:]).ravel())
-        j3c_tmp = None
+        j3c_tmp = ish = jsh = None
     ao_pair_mapping = np.hstack(ao_pair_mapping)
     t1 = log.timer_debug1('SR int3c2e', *t1)
 
@@ -776,7 +790,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     if j2ctag == 'ED':
         cderi = contract('Lr,pr->Lp', cd_j2c, j3c)
     else:
-        cderi = solve_triangular(cd_j2c, j3c.T, lower=True)
+        cderi = j3c.T#solve_triangular(cd_j2c, j3c.T, lower=True)
 
     cderip = None
     if cd_j2c_negative is not None:
