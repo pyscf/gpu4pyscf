@@ -23,6 +23,7 @@ from gpu4pyscf import scf
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib import logger
+from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.scf import _response_functions # noqa
 from pyscf import __config__
 
@@ -43,8 +44,8 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
 
     Ref: Chem Phys Lett, 256, 454
     '''
-    if getattr(mf, 'with_solvent', None):
-        raise NotImplementedError("PCM is not supported for get_ab")
+    # if getattr(mf, 'with_solvent', None):
+    #     raise NotImplementedError("PCM is not supported for get_ab")
     if mo_energy is None:
         mo_energy = mf.mo_energy
     if mo_coeff is None:
@@ -68,6 +69,53 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
     e_ia = mo_energy[viridx] - mo_energy[occidx,None]
     a = cp.diag(e_ia.ravel()).reshape(nocc,nvir,nocc,nvir)
     b = cp.zeros_like(a)
+
+    def add_solvent_(a, b, pcmobj):
+        charge_exp  = pcmobj.surface['charge_exp']
+        grid_coords = pcmobj.surface['grid_coords']
+
+        vmat = -int1e_grids(pcmobj.mol, grid_coords, charge_exponents = charge_exp**2, intopt = pcmobj.intopt)
+        K_LU = pcmobj._intermediates['K_LU']
+        K_LU_pivot = pcmobj._intermediates['K_LU_pivot']
+        if not isinstance(K_LU, cp.ndarray):
+            K_LU = cp.asarray(K_LU)
+        if not isinstance(K_LU_pivot, cp.ndarray):
+            K_LU_pivot = cp.asarray(K_LU_pivot)
+        ngrid_surface = K_LU.shape[0]
+        L = cp.tril(K_LU, k=-1) + cp.eye(ngrid_surface)  
+        U = cp.triu(K_LU)                
+
+        P = cp.eye(ngrid_surface)
+        for i in range(ngrid_surface):
+            pivot = int(K_LU_pivot[i].get())
+            if K_LU_pivot[i] != i:
+                P[[i, pivot]] = P[[pivot, i]]
+        K = P.T @ L @ U
+        Kinv = cp.linalg.inv(K)
+        f_epsilon = pcmobj._intermediates['f_epsilon']
+        if pcmobj.if_method_in_CPCM_category:
+            R = -f_epsilon * cp.eye(K.shape[0])
+        else:
+            A = pcmobj._intermediates['A']
+            D = pcmobj._intermediates['D']
+            DA = D*A
+            R = -f_epsilon * (cp.eye(K.shape[0]) - 1.0/(2.0*np.pi)*DA)
+        Q = Kinv @ R
+        Qs = 0.5*(Q+Q.T)
+        
+        q_sym = cp.einsum('gh,hkl->gkl', Qs, vmat)
+        kEao = contract('gij,gkl->ijkl', vmat, q_sym)
+        kEmo = contract('pjkl,pi->ijkl', kEao, orbo.conj())
+        kEmo = contract('ipkl,pj->ijkl', kEmo, mo)
+        kEmo = contract('ijpl,pk->ijkl', kEmo, mo.conj())
+        kEmo = contract('ijkp,pl->ijkl', kEmo, mo)
+        kEmo = kEmo.reshape(nocc,nmo,nmo,nmo)
+        if singlet:
+            a += cp.einsum('iabj->iajb', kEmo[:nocc,nocc:,nocc:,:nocc])*2
+            b += cp.einsum('iajb->iajb', kEmo[:nocc,nocc:,:nocc,nocc:])*2
+        else:
+            raise RuntimeError("There is no solvent response for singlet-triplet excitat")
+
 
     def add_hf_(a, b, hyb=1):
         if getattr(mf, 'with_df', None):
@@ -98,6 +146,10 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
         else:
             a -= cp.einsum('ijba->iajb', eri_mo[:nocc,:nocc,nocc:,nocc:]) * hyb
             b -= cp.einsum('jaib->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * hyb
+
+    if getattr(mf, 'with_solvent', None):
+        pcmobj = mf.with_solvent
+        add_solvent_(a, b, pcmobj)
 
     if isinstance(mf, scf.hf.KohnShamDFT):
         grids = mf.grids

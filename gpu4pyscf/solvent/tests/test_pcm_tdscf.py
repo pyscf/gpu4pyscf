@@ -19,6 +19,67 @@ from pyscf import lib, gto
 from gpu4pyscf.tdscf import rhf, rks
 from gpu4pyscf import tdscf
 
+
+def diagonalize_tda(a, nroots=5):
+    nocc, nvir = a.shape[:2]
+    nov = nocc * nvir
+    a = a.reshape(nov, nov)
+    e, xy = np.linalg.eig(np.asarray(a))
+    sorted_indices = np.argsort(e)
+    
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+    
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
+
+
+def diagonalize(a, b, nroots=5):
+    nocc, nvir = a.shape[:2]
+    nov = nocc * nvir
+    a = a.reshape(nov, nov)
+    b = b.reshape(nov, nov)
+    h = np.block([[a        , b       ],
+                     [-b.conj(),-a.conj()]])
+    e, xy = np.linalg.eig(np.asarray(h))
+    sorted_indices = np.argsort(e)
+    
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+    
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
+
+
+def diagonalize_u(a, b, nroots=5):
+    a_aa, a_ab, a_bb = a
+    b_aa, b_ab, b_bb = b
+    nocc_a, nvir_a, nocc_b, nvir_b = a_ab.shape
+    a_aa = a_aa.reshape((nocc_a*nvir_a,nocc_a*nvir_a))
+    a_ab = a_ab.reshape((nocc_a*nvir_a,nocc_b*nvir_b))
+    a_bb = a_bb.reshape((nocc_b*nvir_b,nocc_b*nvir_b))
+    b_aa = b_aa.reshape((nocc_a*nvir_a,nocc_a*nvir_a))
+    b_ab = b_ab.reshape((nocc_a*nvir_a,nocc_b*nvir_b))
+    b_bb = b_bb.reshape((nocc_b*nvir_b,nocc_b*nvir_b))
+    a = np.block([[ a_aa  , a_ab],
+                     [ a_ab.T, a_bb]])
+    b = np.block([[ b_aa  , b_ab],
+                     [ b_ab.T, b_bb]])
+    abba = np.asarray(np.block([[a        , b       ],
+                                      [-b.conj(),-a.conj()]]))
+    e, xy = np.linalg.eig(abba)
+    sorted_indices = np.argsort(e)
+    
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+    
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
+
+
 class KnownValues(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -117,16 +178,21 @@ class KnownValues(unittest.TestCase):
         td._scf.with_solvent.build()
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
-        print(es_gound)
         ref = np.array([-75.61072291, -75.54419399, -75.51949191, -75.45219025, -75.40975027])
         assert np.allclose(es_gound, ref)
+
+        a, b = td.get_ab()
+        es_get_ab = diagonalize(a, b)[0]
+        assert np.linalg.norm(es_get_ab - es) < 1e-10
 
         td = mf.TDA()
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
-        print(es_gound)
         ref = np.array([-75.60864828, -75.54169327, -75.51738767, -75.44915784, -75.40839714])
         assert np.allclose(es_gound, ref)
+
+        es_get_ab = diagonalize_tda(a)[0]
+        assert np.linalg.norm(es_get_ab - es) < 1e-10
 
     def test_b3lyp_CPCM(self):
         mf = self.mf_b3lyp_nodf
@@ -139,11 +205,18 @@ class KnownValues(unittest.TestCase):
         ref = np.array([-76.06898428, -75.99630982, -75.98765186, -75.91045133, -75.84783748])
         assert np.allclose(es_gound, ref)
 
+        a, b = td.get_ab()
+        es_get_ab = diagonalize(a, b)[0]
+        assert np.linalg.norm(es_get_ab - es) < 1e-10
+
         td = mf.TDA()
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-76.06789176, -75.99609709, -75.98589720, -75.90894600, -75.84699115])
         assert np.allclose(es_gound, ref)
+
+        es_get_ab = diagonalize_tda(a)[0]
+        assert np.linalg.norm(es_get_ab - es) < 1e-10
 
     def test_b3lyp_IEFPCM(self):
         mf = self.mf_b3lyp_nodf_iefpcm
@@ -156,11 +229,18 @@ class KnownValues(unittest.TestCase):
         ref = np.array([-76.06881645, -75.99631929, -75.98713725, -75.91015704, -75.84668800])
         assert np.allclose(es_gound, ref)
 
+        a, b = td.get_ab()
+        es_get_ab = diagonalize(a, b)[0]
+        assert np.linalg.norm(es_get_ab - es) < 1e-10
+
         td = mf.TDA()
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-76.06773319, -75.99610928, -75.98534912, -75.90861455, -75.84576041])
         assert np.allclose(es_gound, ref)
+
+        es_get_ab = diagonalize_tda(a)[0]
+        assert np.linalg.norm(es_get_ab - es) < 1e-10
 
     def test_unrestricted_hf_CPCM(self):
         mf = self.mfu
@@ -173,6 +253,10 @@ class KnownValues(unittest.TestCase):
         ref = np.array([-75.64482315, -75.61072291, -75.57156784, -75.56769949, -75.54419399])
         assert np.allclose(es_gound, ref)
 
+        a, b = td.get_ab()
+        es_get_ab = diagonalize_u(a, b)[0]
+        assert np.linalg.norm(es_get_ab - es) < 1e-10
+
     def test_unrestricted_b3lyp_CPCM(self):
         mf = self.mf_b3lyp_nodf_u
         td = mf.TDDFT()
@@ -183,6 +267,10 @@ class KnownValues(unittest.TestCase):
         es_gound = es + mf.e_tot
         ref = np.array([-76.09301571, -76.06898428, -76.01822101, -76.01369024, -75.99630982])
         assert np.allclose(es_gound, ref)
+
+        a, b = td.get_ab()
+        es_get_ab = diagonalize_u(a, b)[0]
+        assert np.linalg.norm(es_get_ab - es) < 1e-10
 
 
 if __name__ == "__main__":

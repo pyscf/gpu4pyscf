@@ -72,7 +72,7 @@ class WithSolventTDSCFGradient:
     def solvent_response(self, dm):
         return self.base._scf.with_solvent._B_dot_x(dm)*2.0 
         
-    def grad_elec(self, xy, singlet, atmlst=None, verbose=logger.INFO):
+    def grad_elec(self, xy, singlet=None, atmlst=None, verbose=logger.INFO):
         de = super().grad_elec(xy, singlet, atmlst, verbose) 
 
         assert self.base._scf.with_solvent.equilibrium_solvation
