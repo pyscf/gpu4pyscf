@@ -172,9 +172,7 @@ def asarray(a, **kwargs):
     the tagged array'''
     if isinstance(a, CPArrayWithTag):
         a = a.view(cupy.ndarray)
-    if kwargs:
-        a = cupy.asarray(a, **kwargs)
-    return a
+    return cupy.asarray(a, **kwargs)
 
 def to_cupy(a):
     '''Converts a numpy (and subclass) object to a cupy object'''

@@ -527,31 +527,31 @@ class SRInt3c2eOpt:
             if err != 0:
                 raise RuntimeError('sr_int3c2e_img_idx failed')
 
-            npairs = int(cp.count_nonzero(img_counts))
-            if npairs == 0:
+            n_pairs = int(cp.count_nonzero(img_counts))
+            if n_pairs == 0:
                 img_idx = offsets = bas_ij = pair_mapping = c_pair_idx = np.zeros(0, dtype=np.int32)
                 return img_idx, offsets, bas_ij, pair_mapping, c_pair_idx
 
-            counts_sorting = (-img_counts.ravel()).argsort()[:npairs]
+            counts_sorting = (-img_counts.ravel()).argsort()[:n_pairs]
             counts_sorting = cp.asarray(counts_sorting, dtype=np.int32)
             bas_ij = bas_ij[counts_sorting]
             img_counts = img_counts[counts_sorting]
-            offsets = cp.empty(npairs+1, dtype=np.int32)
+            offsets = cp.empty(n_pairs+1, dtype=np.int32)
             cp.cumsum(img_counts, out=offsets[1:])
             offsets[0] = 0
-            tot_imgs = int(offsets[npairs])
+            tot_imgs = int(offsets[n_pairs])
             img_idx = cp.empty(tot_imgs, dtype=np.int32)
             err = libpbc.conc_img_idx(
                 ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(offsets.data.ptr, ctypes.c_void_p),
                 ctypes.cast(img_idx_sparse.data.ptr, ctypes.c_void_p),
                 ctypes.cast(counts_sorting.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(npairs), ctypes.c_int(ovlp_npairs))
+                ctypes.c_int(n_pairs), ctypes.c_int(ovlp_npairs))
             if err != 0:
                 raise RuntimeError('conc_img_idx failed')
             log.debug1('ovlp nimgs=%d pairs=%d tot_imgs=%d. '
                        'double-lattice-sum: largest=%d, medium=%d',
-                       nimgs_J, npairs, tot_imgs, img_counts[0], img_counts[npairs//2])
+                       nimgs_J, n_pairs, tot_imgs, img_counts[0], img_counts[n_pairs//2])
             t1 = log.timer_debug1('int3c2e_img_idx', *t0)
 
             # bas_ij stores the non-negligible primitive-pair indices.

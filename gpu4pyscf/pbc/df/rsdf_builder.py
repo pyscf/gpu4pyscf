@@ -179,7 +179,7 @@ def build_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True
     cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
         j2c, prefer_ed, linear_dep_threshold)
 
-    cderi[0,0] = j3c.transpose(2,0,1)#_solve_cderi(cd_j2c, j3c, j2ctag)
+    cderi[0,0] = _solve_cderi(cd_j2c, j3c, j2ctag)
     if cd_j2c_negative is not None:
         assert cell.dimension == 2
         cderip[0,0] = _solve_cderi(cd_j2c_negative, j3c, j2ctag)
@@ -501,8 +501,8 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
         mask = img_counts > 0
         mask |= int3c2e_ovlp_mask[ish0:ish1,jsh0:jsh1]
         bas_ij = cp.asarray(cp.where(mask.ravel())[0], dtype=np.int32)
-        npairs = len(bas_ij)
-        if npairs == 0:
+        n_pairs = len(bas_ij)
+        if n_pairs == 0:
             continue
 
         # Sort according to the number of images. In the CUDA kernel,
@@ -512,16 +512,16 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
         counts_sorting = (-img_counts[bas_ij]).argsort()
         bas_ij = bas_ij[counts_sorting]
         img_counts = img_counts[bas_ij]
-        img_offsets = cp.empty(npairs+1, dtype=np.int32)
+        img_offsets = cp.empty(n_pairs+1, dtype=np.int32)
         img_offsets[0] = 0
         cp.cumsum(img_counts, out=img_offsets[1:])
-        tot_imgs = int(img_offsets[npairs])
+        tot_imgs = int(img_offsets[n_pairs])
         img_idx = cp.empty(tot_imgs, dtype=np.int32)
         err = libpbc.overlap_img_idx(
             ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(npairs),
+            ctypes.c_int(n_pairs),
             (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
             ctypes.byref(aft_envs),
             ctypes.cast(exps.data.ptr, ctypes.c_void_p),
@@ -538,7 +538,7 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
         bas_ij = cp.ravel_multi_index((ish, jsh), (nbas, nbas))
         bas_ij = cp.asarray(bas_ij, dtype=np.int32)
         bas_ij_cache[i, j] = (bas_ij, img_offsets, img_idx)
-        log.debug1('task (%d, %d), npairs=%d', i, j, npairs)
+        log.debug1('task (%d, %d), n_pairs=%d', i, j, n_pairs)
     return bas_ij_cache
 
 # The long-range part of the cderi for gamma point. The resultant 3-index tensor
@@ -599,12 +599,16 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     if not cell.cart:
         nf = uniq_l * 2 + 1
         c2s = [cart2sph_by_l(l) for l in range(uniq_l.max()+1)]
+        diag_addresses = [] # addresses wrt the compressed indices
+    offset = 0
     p0 = p1 = 0
     for i, j in ij_tasks:
-        nfij = nf[i] * nf[j]
+        nfi = nf[i]
+        nfj = nf[j]
+        nfij = nfi * nfj
         bas_ij = bas_ij_cache[i, j][0]
-        npairs = len(bas_ij)
-        p0, p1 = p1, p1 + nfij * npairs
+        n_pairs = len(bas_ij)
+        p0, p1 = p1, p1 + nfij * n_pairs
         ish, jsh = divmod(bas_ij, nbas)
         aopair_offsets_lookup[jsh,ish] = \
                 aopair_offsets_lookup[ish,jsh] = cp.arange(p0, p1, nfij)
@@ -612,7 +616,17 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         jaddr = ao_loc[jsh,None] + cp.arange(nf[j])
         # Note: in each <i|j> block, i is accessed in the inner loop
         ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
+        if i == j:
+            idx = cp.where(ish == jsh)[0]
+            addr = offset + idx[:,None] * (nfi*nfi) + cp.arange(nfi*nfi)
+            diag_addresses.append(addr.ravel())
+        offset += n_pairs * nfij
     non0_size = p1
+
+    ao_pair_mapping = cp.hstack(ao_pair_mapping)
+    rows, cols = divmod(ao_pair_mapping, nao)
+    diag_addresses = cp.hstack(diag_addresses)
+    cderi_idx = (rows.get(), cols.get(), diag_addresses.get())
 
     ft_ao.init_constant(sorted_cell)
     kern = libpbc.build_ft_ao
@@ -635,8 +649,8 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         nfj = nf_cart[j]
         nfij = nfi * nfj
         bas_ij, img_offsets, img_idx = bas_ij_cache[i, j]
-        npairs = len(bas_ij)
-        j3c_tmp = cp.zeros((nfij*npairs,naux), dtype=np.complex128)
+        n_pairs = len(bas_ij)
+        j3c_tmp = cp.zeros((nfij*n_pairs,naux), dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
             auxG_conj = cp.asarray(ft_ao.ft_ao(auxcell, Gv[p0:p1]).conj(), order='C')
@@ -645,7 +659,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
             # Padding zeros, allowing idle threads to access Gv over the bounds.
             GvT = cp.append(GvT, cp.zeros(THREADS))
 
-            pqG = cp.zeros((nfij*npairs, nGv), dtype=np.complex128)
+            pqG = cp.zeros((nfij*n_pairs, nGv), dtype=np.complex128)
             scheme = ft_ao.ft_ao_scheme(cell, li, lj, nGv)
             log.debug2('ft_ao_scheme for %s: %s', ll_pattern, scheme)
             err = kern(
@@ -653,7 +667,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
                 ctypes.c_int(1), # Compressing, remove zero elements
                 ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
                 (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
-                ctypes.c_int(npairs), ctypes.c_int(nGv),
+                ctypes.c_int(n_pairs), ctypes.c_int(nGv),
                 ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
                 ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                 ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
@@ -671,16 +685,16 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
 
         j3c_tmp = j3c_tmp.real
         if not cell.cart:
-            j3c_tmp = j3c_tmp.reshape(nfj,nfi,npairs,naux)
+            j3c_tmp = j3c_tmp.reshape(nfj,nfi,n_pairs,naux)
             j3c_tmp = contract('qj,qpmk->jpmk', c2s[lj], j3c_tmp)
             j3c_tmp = contract('pi,jpmk->mjik', c2s[li], j3c_tmp)
             j3c_tmp = j3c_tmp.reshape(-1,naux)
 
-        pair0, pair1 = pair1, pair1 + npairs * nf[i] * nf[j]
+        pair0, pair1 = pair1, pair1 + n_pairs * nf[i] * nf[j]
         j3c_compressed[pair0:pair1] = j3c_tmp
         j3c_tmp = None
         t1 = log.timer_debug1('ft_aopair', *t1)
-    return j3c_compressed, aopair_offsets_lookup, cp.asarray(rev_mapping), ao_pair_mapping
+    return j3c_compressed, aopair_offsets_lookup, cp.asarray(rev_mapping), cderi_idx
 
 def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
                                  linear_dep_threshold=LINEAR_DEP_THR):
@@ -707,25 +721,26 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         # bas_mapping[n] translates the shell n in sr_int3c2e.sorted_cell to
         # that in ft_aopair.sorted_cell. aopair_offsets_lookup convertes the
         # address in a dense tensor to compressed storage.
-        j3c, aopair_offsets_lookup, bas_mapping, ao_pair_mapping = \
+        j3c, aopair_offsets_lookup, bas_mapping, cderi_idx = \
                 _lr_int3c2e_gamma_point(int3c2e_opt)
     else:
         t1 = log.init_timer()
         img_idx_cache = int3c2e_opt.make_img_idx_cache()
         size = 0
         for (li, lj), img_idx in img_idx_cache.items():
-            npairs = len(img_idx[4])
-            size += nf[li] * nf[lj] * npairs
+            size += nf[li] * nf[lj] * len(img_idx[4])
         j3c = cp.zeros((size, naux), dtype=np.float64)
         # ao_pair_mapping stores AO-pair addresses in the nao x nao matrix,
         # which allows the decompression for the CUDA kernel generated compressed_eri3c:
         # sparse_eri3c[ao_pair_mapping] => compressed_eri3c
         ao_pair_mapping = []
+        diag_addresses = [] # addresses wrt the compressed indices
         # Given shell Id in sorted_cell, this ao_loc maps shell to the AO offset
         # in the original cell
         ao_loc = cp.asarray(int3c2e_opt.ao_idx[int3c2e_opt.sorted_cell.ao_loc[:-1]])
         nao = cell.nao
 
+    offset = 0
     p0 = p1 = 0
     for li, lj, c_pair_idx, j3c_tmp in int3c2e_opt.int3c2e_kernel():
         i0, i1 = c_l_offsets[li:li+2]
@@ -770,10 +785,22 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
             j3c[p0:p1] = j3c_tmp
             iaddr = ao_loc[ish] + cp.arange(nfi)[:,None]
             jaddr = ao_loc[jsh] + cp.arange(nfj)[:,None]
-            # Note: in each <i|j> block, i is accessed in the inner loop
+            # Note: address is computed in a different way than in the LR tensor.
+            # The storage order here is [j,i,pair_id,aux].
             ao_pair_mapping.append((iaddr * nao + jaddr[:,None,:]).ravel())
+            if li == lj:
+                idx = cp.where(ish == jsh)[0]
+                # The addresses for the compressed tensor
+                addr = offset + idx[:,None] * (nfi*nfi) + cp.arange(nfi*nfi)
+                diag_addresses.append(addr.ravel())
+            offset += n_pairs * nfi * nfj
         j3c_tmp = ish = jsh = None
-    ao_pair_mapping = np.hstack(ao_pair_mapping)
+
+    if not with_long_range:
+        ao_pair_mapping = cp.hstack(ao_pair_mapping)
+        rows, cols = divmod(ao_pair_mapping, nao)
+        diag_addresses = cp.hstack(diag_addresses)
+        cderi_idx = (rows.get(), cols.get(), diag_addresses.get())
     t1 = log.timer_debug1('SR int3c2e', *t1)
 
     log.debug('Generate auxcell 2c2e integrals')
@@ -790,14 +817,15 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     if j2ctag == 'ED':
         cderi = contract('Lr,pr->Lp', cd_j2c, j3c)
     else:
-        cderi = j3c.T#solve_triangular(cd_j2c, j3c.T, lower=True)
+        cderi = solve_triangular(cd_j2c, j3c.T, lower=True)
 
     cderip = None
     if cd_j2c_negative is not None:
         assert cell.dimension == 2
         cderip = contract('Lr,pr->Lp', cd_j2c_negative, j3c)
+
     t0 = log.timer_debug1('solving cderi', *t0)
-    return cderi, cderip, ao_pair_mapping
+    return cderi, cderip, cderi_idx
 
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):

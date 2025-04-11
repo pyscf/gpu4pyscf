@@ -32,25 +32,34 @@ from pyscf.pbc.df import df as df_cpu
 from pyscf.pbc.df.gdf_builder import libpbc
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
-from gpu4pyscf.pbc.df import df_jk, rsdf_builder
-from gpu4pyscf.pbc.df.aft import _check_kpts
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.lib.cupy_helper import return_cupy_array, pack_tril, get_avail_mem
 from gpu4pyscf.lib import utils
+from gpu4pyscf.lib.cupy_helper import return_cupy_array, pack_tril, get_avail_mem
+from gpu4pyscf.lib.memcpy import copy_array
+from gpu4pyscf.df import df as mol_df
+from gpu4pyscf.pbc.df import rsdf_builder, df_jk, df_jk_real
+from gpu4pyscf.pbc.df.aft import _check_kpts, AFTDF
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.__config__ import num_devices
+
 
 class GDF(lib.StreamObject):
     '''Gaussian density fitting
     '''
     blockdim = df_cpu.GDF.blockdim
-    _prefer_ccdf = False
-    force_dm_kbuild = False
 
     _keys = df_cpu.GDF._keys
 
-    __init__ = df_cpu.GDF.__init__
+    def __init__(self, cell, kpts=np.zeros((1,3))):
+        if cell.dimension < 3 and cell.low_dim_ft_type == 'inf_vacuum':
+            raise NotImplementedError
+        df_cpu.GDF.__init__(self, cell, kpts)
+        self._cderi_to_save = None
+        self.is_gamma_point = False
+        self.nao = None
 
     __getstate__, __setstate__ = lib.generate_pickle_methods(
-            excludes=('_cderi_to_save', '_cderi', '_rsh_df'), reset_state=True)
+        excludes=('_cderi_to_save', '_cderi', '_cderip', '_cderi_idx', '_rsh_df'),
+        reset_state=True)
 
     auxbasis = df_cpu.GDF.auxbasis
     reset = df_cpu.GDF.reset
@@ -70,9 +79,27 @@ class GDF(lib.StreamObject):
         self.auxcell = auxcell
 
         t1 = (logger.process_clock(), logger.perf_counter())
-        if self.kpts is None or is_zero(self.kpts):
-            self._cderi, self._cderip = rsdf_builder.build_cderi(
-                cell, auxcell, self.kpts, j_only=j_only)
+        if self.is_gamma_point:
+            cderi, self._cderip, self._cderi_idx = \
+                rsdf_builder.compressed_cderi_gamma_point(
+                    cell, auxcell, self.kpts, j_only=j_only)
+            self._cderi = [None] * num_devices
+            self.nao = cell.nao
+            if num_devices == 1:
+                self._cderi[0] = cderi
+            else:
+                # Distribute cderi to other devices
+                naux = len(cderi)
+                blksize = (naux + num_devices - 1) // num_devices
+                ALIGNED = mol_df.ALIGNED
+                blksize = (blksize + ALIGNED - 1) // ALIGNED * ALIGNED
+                for dev_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
+                    tmp = cp.asarray(cderi[p0:p1], order='C')
+                    if dev_id == 0:
+                        self._cderi[0] = tmp
+                        continue
+                    with cp.cuda.Device(dev_id):
+                        self._cderi[dev_id] = copy_array(tmp)
         else:
             self._cderi, self._cderip = rsdf_builder.build_cderi(
                 cell, auxcell, self.kpts, j_only=j_only)
@@ -160,14 +187,30 @@ class GDF(lib.StreamObject):
     # post-HF methods.
     def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, exxdiv=None):
-        if omega is not None:  # J/K for RSH functionals
-            raise NotImplementedError
+        if omega is not None and omega > 0:
+            cell = self.cell
+            # * AFT is computationally more efficient than GDF for the
+            #   long-range Coulomb
+            # * The sparse mesh is not appropriate for low dimensional systems
+            #   with infinity vacuum since the ERI may require large mesh to
+            #   sample density in vacuum.
+            if cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum':
+                mydf = AFTDF(cell, self.kpts)
+                ke_cutoff = aft_cpu.estimate_ke_cutoff_for_omega(cell, omega)
+                mydf.mesh = cell.cutoff_to_mesh(ke_cutoff)
+            else:
+                mydf = self
+            with mydf.range_coulomb(omega) as rsh_df:
+                return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
+                                     omega=None, exxdiv=exxdiv)
 
-        kpts, is_single_kpt = _check_kpts(self, kpts)
-        if is_single_kpt:
-            return df_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
-                                with_k, exxdiv)
-
+        if self.is_gamma_point:
+            return df_jk_real.get_jk(self, dm, hermi, with_j, with_k, exxdiv)
+        else:
+            kpts, is_single_kpt = _check_kpts(self, kpts)
+            if is_single_kpt:
+                return df_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
+                                    with_k, exxdiv)
         vj = vk = None
         if with_k:
             vk = df_jk.get_k_kpts(self, dm, hermi, kpts, kpts_band, exxdiv)
@@ -178,6 +221,73 @@ class GDF(lib.StreamObject):
     get_eri = get_ao_eri = NotImplemented
     ao2mo = get_mo_eri = NotImplemented
     ao2mo_7d = NotImplemented
+
+    get_blksize = mol_df.DF.get_blksize
+
+    # TOOD: refactor and reuse the loop method in the molecule df module
+    def loop(self, blksize=None, unpack=True):
+        ''' loop over cderi for the current device
+            and unpack the CDERI in (Lij) format
+        '''
+        device_id = cp.cuda.Device().id
+        cderi_sparse = self._cderi[device_id]
+        if blksize is None:
+            blksize = self.get_blksize()
+        if unpack:
+            nao = self.nao
+            rows, cols, diag = self._cderi_idx
+            rows = cp.asarray(rows)
+            cols = cp.asarray(cols)
+            buf_cderi = cp.zeros([blksize,nao,nao])
+
+        naux_slice = cderi_sparse.shape[0]
+        for p0, p1 in lib.prange(0, naux_slice, blksize):
+            if isinstance(cderi_sparse, cp.ndarray):
+                buf = cderi_sparse[p0:p1,:]
+            else:
+                buf = cp.asarray(cderi_sparse[p0:p1,:])
+            if unpack:
+                buf2 = buf_cderi[:p1-p0]
+                buf_cderi[:,cols,rows] = buf_cderi[:,rows,cols] = buf
+            else:
+                buf2 = None
+            yield buf2, buf.T
+
+    def sort_orbitals(self, mat, axis=[]):
+        ''' Transform given axis of a matrix into sorted AO,
+        and transform given auxiliary axis of a matrix into sorted auxiliary AO
+        '''
+        idx = self._ao_idx
+        shape_ones = (1,) * mat.ndim
+        fancy_index = []
+        for dim, n in enumerate(mat.shape):
+            if dim in axis:
+                assert n == len(idx)
+                indices = idx
+            else:
+                indices = slice(None)
+            idx_shape = shape_ones[:dim] + (n,) + shape_ones[dim+1:]
+            fancy_index.append(indices.reshape(idx_shape))
+        return mat[tuple(fancy_index)]
+
+    def unsort_orbitals(self, sorted_mat, axis=[]):
+        ''' Transform given axis of a matrix into sorted AO,
+        and transform given auxiliary axis of a matrix into original auxiliary AO
+        '''
+        idx = self._ao_idx
+        shape_ones = (1,) * sorted_mat.ndim
+        fancy_index = []
+        for dim, n in enumerate(sorted_mat.shape):
+            if dim in axis:
+                assert n == len(idx)
+                indices = idx
+            else:
+                indices = slice(None)
+            idx_shape = shape_ones[:dim] + (n,) + shape_ones[dim+1:]
+            fancy_index.append(indices.reshape(idx_shape))
+        mat = cp.empty_like(sorted_mat)
+        mat[tuple(fancy_index)] = sorted_mat
+        return mat
 
     to_gpu = utils.to_gpu
     device = utils.device
