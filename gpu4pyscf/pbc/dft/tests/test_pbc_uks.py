@@ -167,13 +167,19 @@ class KnownValues(unittest.TestCase):
 
         mf = cell.UKS(xc='pbe0').to_gpu().density_fit().run()
         self.assertTrue(isinstance(mf.with_df, GDF))
+        self.assertAlmostEqual(mf.e_tot, -0.104436032, 7)
+
+        mf.grids = pbcdft.BeckeGrids(cell)
+        mf.run()
         self.assertAlmostEqual(mf.e_tot, -0.10443638, 7)
         mf_ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
         nk = [2, 1, 1]
         kpts = cell.make_kpts(nk)
-        kmf = pbcdft.KUKS(cell, xc='pbe0', kpts=kpts).density_fit().run()
+        kmf = pbcdft.KUKS(cell, xc='pbe0', kpts=kpts).density_fit()
+        kmf.grids = pbcdft.BeckeGrids(cell)
+        kmf.run()
         self.assertTrue(isinstance(kmf.with_df, GDF))
         self.assertAlmostEqual(kmf.e_tot, -0.19581151, 7)
         mf_ref = kmf.to_cpu()

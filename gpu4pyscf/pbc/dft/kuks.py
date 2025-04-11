@@ -171,6 +171,7 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
     get_hcore = krks.KRKS.get_hcore
     get_veff = get_veff
     energy_elec = energy_elec
+    density_fit = krks.KRKS.density_fit
 
     def get_rho(self, dm=None, grids=None, kpts=None):
         if dm is None: dm = self.make_rdm1()
@@ -178,9 +179,6 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
 
     nuc_grad_method = NotImplemented
     to_hf = NotImplemented
-
-    to_gpu = utils.to_gpu
-    device = utils.device
 
     def to_cpu(self):
         mf = kuks_cpu.KUKS(self.cell)
