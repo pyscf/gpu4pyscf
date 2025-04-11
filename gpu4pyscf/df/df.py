@@ -269,7 +269,6 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     for device_id in range(num_devices):
         p0 = min(aux_blksize*device_id, naux)
         p1 = min(aux_blksize*(device_id+1), naux)
-        #for device_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
         if use_gpu_memory:
             with cupy.cuda.Device(device_id), _streams[device_id]:
                 _cderi[device_id] = cupy.empty([p1-p0, npairs])
