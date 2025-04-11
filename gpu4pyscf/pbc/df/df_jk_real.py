@@ -47,7 +47,7 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
     out_cupy = isinstance(dm, cp.ndarray)
     nao = out_shape[-1]
     assert nao == mydf.nao
-    dms = dm.reshape(-1,nao,nao)
+    dms = cp.asarray(dm).reshape(-1,nao,nao)
     nset = len(dms)
 
     vj = vk = None
@@ -61,14 +61,13 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
         nmo = dm.mo_occ.shape[-1]
         mo_occ = dm.mo_occ.reshape(nset,nmo)
         mo_coeff = dm.mo_coeff.reshape(nset,nao,nmo)
-        mo_coeff = mydf.sort_orbitals(mo_coeff, axis=[1])
         occ_coeff = []
         for c, occ in zip(mo_coeff, mo_occ):
             mask = occ > 0
             occ_coeff.append(c[:,mask] * occ[mask]**0.5)
 
         def proc():
-            vj = vk = None
+            vj_packed = vk = None
             if with_j:
                 _dm_sparse = cp.asarray(dm_sparse)
                 vj_packed = cp.zeros_like(dm_sparse)
@@ -90,11 +89,10 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
                         vk[i] += cp.dot(rhok.T, rhok)
                         rhok = None
                 cderi = None
-            return vj, vk
+            return vj_packed, vk
     else:
-        dms = mydf.sort_orbitals(dms, axis=[1,2])
         def proc():
-            vj = vk = None
+            vj_packed = vk = None
             if with_j:
                 _dm_sparse = cp.asarray(dm_sparse)
                 vj_packed = cp.zeros_like(dm_sparse)
@@ -114,7 +112,7 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
                         vk[k] += cp.dot(rhok.T, cderi.reshape([-1,nao]))
                         rhok = None
                 cderi = None
-            return vj, vk
+            return vj_packed, vk
 
     results = multi_gpu.run(proc, non_blocking=True)
 
@@ -124,14 +122,14 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
         vj_packed = multi_gpu.array_reduce(vj_packed, inplace=True)
         vj = cp.zeros_like(dms)
         vj[:,cols,rows] = vj[:,rows,cols] = vj_packed
-        vj = mydf.unsort_orbitals(vj, axis=[1,2])
         vj = vj.reshape(out_shape)
         if not out_cupy: vj = vj.get()
 
     if with_k:
         vk = [k for j, k in results]
         vk = multi_gpu.array_reduce(vk, inplace=True)
-        vk = mydf.unsort_orbitals(vk, axis=[1,2])
+        if exxdiv == 'ewald':
+            _ewald_exxdiv_for_G0(mydf.cell, np.zeros(3), dms, vk)
         vk = vk.reshape(out_shape)
         if not out_cupy: vk = vk.get()
 

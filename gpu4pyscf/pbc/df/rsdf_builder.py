@@ -693,15 +693,14 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         pair0, pair1 = pair1, pair1 + n_pairs * nf[i] * nf[j]
         j3c_compressed[pair0:pair1] = j3c_tmp
         j3c_tmp = None
-        t1 = log.timer_debug1('ft_aopair', *t1)
     return j3c_compressed, aopair_offsets_lookup, cp.asarray(rev_mapping), cderi_idx
 
 def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
                                  linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
-    t0 = t1 = log.init_timer()
+    t1 = log.init_timer()
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, -omega).build()
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-abs(omega)).build()
     c_shell_counts = np.asarray(int3c2e_opt.cell0_ctr_l_counts)
     lmax = cell._bas[:,ANG_OF].max()
     uniq_l = np.arange(lmax+1)
@@ -723,6 +722,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         # address in a dense tensor to compressed storage.
         j3c, aopair_offsets_lookup, bas_mapping, cderi_idx = \
                 _lr_int3c2e_gamma_point(int3c2e_opt)
+        t1 = log.timer_debug1('LR int3c2e', *t1)
     else:
         t1 = log.init_timer()
         img_idx_cache = int3c2e_opt.make_img_idx_cache()
@@ -824,7 +824,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         assert cell.dimension == 2
         cderip = contract('Lr,pr->Lp', cd_j2c_negative, j3c)
 
-    t0 = log.timer_debug1('solving cderi', *t0)
+    t1 = log.timer_debug1('solving cderi', *t1)
     return cderi, cderip, cderi_idx
 
 

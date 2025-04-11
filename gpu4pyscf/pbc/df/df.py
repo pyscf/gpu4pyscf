@@ -47,7 +47,7 @@ class GDF(lib.StreamObject):
     '''
     blockdim = df_cpu.GDF.blockdim
 
-    _keys = df_cpu.GDF._keys
+    _keys = df_cpu.GDF._keys.union({'is_gamma_point', 'nao'})
 
     def __init__(self, cell, kpts=np.zeros((1,3))):
         if cell.dimension < 3 and cell.low_dim_ft_type == 'inf_vacuum':
@@ -57,13 +57,33 @@ class GDF(lib.StreamObject):
         self.is_gamma_point = False
         self.nao = None
 
+    # Some methods inherited from the molecule code tries to access the .mol attribute
+    @property
+    def mol(self):
+        return self.cell
+    @mol.setter
+    def mol(self, x):
+        self.cell = x
+
     __getstate__, __setstate__ = lib.generate_pickle_methods(
         excludes=('_cderi_to_save', '_cderi', '_cderip', '_cderi_idx', '_rsh_df'),
         reset_state=True)
 
     auxbasis = df_cpu.GDF.auxbasis
     reset = df_cpu.GDF.reset
-    dump_flags = df_cpu.GDF.dump_flags
+
+    def dump_flags(self, verbose=None):
+        log = logger.new_logger(self, verbose)
+        log.info('\n')
+        log.info('******** %s ********', self.__class__)
+        if self.auxcell is None:
+            log.info('auxbasis = %s', self.auxbasis)
+        else:
+            log.info('auxbasis = %s', self.auxcell.basis)
+        log.info('exp_to_discard = %s', self.exp_to_discard)
+        log.info('len(kpts) = %d', len(self.kpts))
+        log.info('is_gamma_point = %s', self.is_gamma_point)
+        return self
 
     def build(self, j_only=None, kpts_band=None):
         warnings.warn(
@@ -81,8 +101,7 @@ class GDF(lib.StreamObject):
         t1 = (logger.process_clock(), logger.perf_counter())
         if self.is_gamma_point:
             cderi, self._cderip, self._cderi_idx = \
-                rsdf_builder.compressed_cderi_gamma_point(
-                    cell, auxcell, self.kpts, j_only=j_only)
+                rsdf_builder.compressed_cderi_gamma_point(cell, auxcell)
             self._cderi = [None] * num_devices
             self.nao = cell.nao
             if num_devices == 1:
@@ -93,7 +112,9 @@ class GDF(lib.StreamObject):
                 blksize = (naux + num_devices - 1) // num_devices
                 ALIGNED = mol_df.ALIGNED
                 blksize = (blksize + ALIGNED - 1) // ALIGNED * ALIGNED
-                for dev_id, (p0,p1) in enumerate(lib.prange(0, naux, blksize)):
+                for dev_id in range(num_devices):
+                    p0 = dev_id * blksize
+                    p1 = min(p0 + blksize, naux)
                     tmp = cp.asarray(cderi[p0:p1], order='C')
                     if dev_id == 0:
                         self._cderi[0] = tmp
@@ -231,6 +252,7 @@ class GDF(lib.StreamObject):
         '''
         device_id = cp.cuda.Device().id
         cderi_sparse = self._cderi[device_id]
+        naux_slice = len(cderi_sparse)
         if blksize is None:
             blksize = self.get_blksize()
         if unpack:
@@ -240,7 +262,6 @@ class GDF(lib.StreamObject):
             cols = cp.asarray(cols)
             buf_cderi = cp.zeros([blksize,nao,nao])
 
-        naux_slice = cderi_sparse.shape[0]
         for p0, p1 in lib.prange(0, naux_slice, blksize):
             if isinstance(cderi_sparse, cp.ndarray):
                 buf = cderi_sparse[p0:p1,:]
@@ -248,46 +269,10 @@ class GDF(lib.StreamObject):
                 buf = cp.asarray(cderi_sparse[p0:p1,:])
             if unpack:
                 buf2 = buf_cderi[:p1-p0]
-                buf_cderi[:,cols,rows] = buf_cderi[:,rows,cols] = buf
+                buf2[:,cols,rows] = buf2[:,rows,cols] = buf
             else:
                 buf2 = None
             yield buf2, buf.T
-
-    def sort_orbitals(self, mat, axis=[]):
-        ''' Transform given axis of a matrix into sorted AO,
-        and transform given auxiliary axis of a matrix into sorted auxiliary AO
-        '''
-        idx = self._ao_idx
-        shape_ones = (1,) * mat.ndim
-        fancy_index = []
-        for dim, n in enumerate(mat.shape):
-            if dim in axis:
-                assert n == len(idx)
-                indices = idx
-            else:
-                indices = slice(None)
-            idx_shape = shape_ones[:dim] + (n,) + shape_ones[dim+1:]
-            fancy_index.append(indices.reshape(idx_shape))
-        return mat[tuple(fancy_index)]
-
-    def unsort_orbitals(self, sorted_mat, axis=[]):
-        ''' Transform given axis of a matrix into sorted AO,
-        and transform given auxiliary axis of a matrix into original auxiliary AO
-        '''
-        idx = self._ao_idx
-        shape_ones = (1,) * sorted_mat.ndim
-        fancy_index = []
-        for dim, n in enumerate(sorted_mat.shape):
-            if dim in axis:
-                assert n == len(idx)
-                indices = idx
-            else:
-                indices = slice(None)
-            idx_shape = shape_ones[:dim] + (n,) + shape_ones[dim+1:]
-            fancy_index.append(indices.reshape(idx_shape))
-        mat = cp.empty_like(sorted_mat)
-        mat[tuple(fancy_index)] = sorted_mat
-        return mat
 
     to_gpu = utils.to_gpu
     device = utils.device

@@ -246,7 +246,7 @@ class RHF(SCF):
         mf = density_fit(self, auxbasis, with_df)
         # Enforce the Gamma point for single point calculation
         assert all(mf.with_df.kpts == 0)
-        mf.is_gamma_point = True
+        mf.with_df.is_gamma_point = True
         return mf
 
     def to_cpu(self):
