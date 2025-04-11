@@ -25,6 +25,7 @@ from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from gpu4pyscf import scf
 from gpu4pyscf.gto import int3c1e
+from functools import wraps
 
 
 def make_tdscf_object(tda_method):
@@ -43,6 +44,22 @@ def make_tdscf_gradient_object(tda_grad_method):
                          (WithSolventTDSCFGradient, tda_grad_method.__class__), name)
 
 
+def add_prefix(prefix):  
+    def decorator(func): 
+        def wrapper(*args, ​**kwargs):  
+            original_result = func(*args, **kwargs)  
+            return f"[{prefix}] {original_result}"  
+        return wrapper
+    return decorator
+
+
+def state_specific(td, x0=None, nstates=None):
+    td.kernel(x0=x0, nstates=nstates)
+    for icyc in range(50):
+        pass
+    # A.a = decorator(A.a)
+
+
 class WithSolventTDSCF:
     from gpu4pyscf.lib.utils import to_gpu, device
 
@@ -54,6 +71,13 @@ class WithSolventTDSCF:
         name_mixin = self.base.with_solvent.__class__.__name__
         obj = lib.view(self, lib.drop_class(cls, WithSolventTDSCF, name_mixin))
         return obj
+
+    def kernel(self, *args, **kwargs):
+        pcmobj = self._scf.with_solvent
+        if pcmobj.state_specific:
+            pass
+        else:
+            return super().kernel(*args, **kwargs)
     
     def _finalize(self):
         super()._finalize()

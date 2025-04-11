@@ -245,7 +245,7 @@ class PCM(lib.StreamObject):
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
         'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
-        'equilibrium_solvation', 'e', 'v', 'tdscf'
+        'equilibrium_solvation', 'e', 'v', 'tdscf', 'state_specific'
     }
     from gpu4pyscf.lib.utils import to_gpu, device
 
@@ -265,6 +265,7 @@ class PCM(lib.StreamObject):
         self._intermediates = {}
         self.eps = 78.3553
         self.tdscf = False
+        self.state_specific = False
 
         self.max_cycle = 20
         self.conv_tol = 1e-7
