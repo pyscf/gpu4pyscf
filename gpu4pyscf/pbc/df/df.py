@@ -50,10 +50,7 @@ class GDF(lib.StreamObject):
     _keys = df_cpu.GDF._keys.union({'is_gamma_point', 'nao'})
 
     def __init__(self, cell, kpts=np.zeros((1,3))):
-        if cell.dimension < 3 and cell.low_dim_ft_type == 'inf_vacuum':
-            raise NotImplementedError
         df_cpu.GDF.__init__(self, cell, kpts)
-        self._cderi_to_save = None
         self.is_gamma_point = False
         self.nao = None
 
@@ -92,9 +89,12 @@ class GDF(lib.StreamObject):
             self._j_only = j_only
         assert kpts_band is None and self.kpts_band is None
 
+        cell = self.cell
+        if cell.dimension < 3 and cell.low_dim_ft_type == 'inf_vacuum':
+            raise NotImplementedError
+
         self.check_sanity()
         self.dump_flags()
-        cell = self.cell
         auxcell = df_cpu.make_auxcell(cell, self.auxbasis, self.exp_to_discard)
         self.auxcell = auxcell
 

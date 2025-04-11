@@ -151,7 +151,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     return out
 
 def to_primitive_bas(cell):
-    '''Decontract the cell basis sets into primitive bases in super-mole'''
+    '''Decontract the cell basis sets into primitive bases'''
     bas_templates = {}
     prim_bas = []
     prim_env = cell._env.copy()
@@ -331,17 +331,6 @@ class SRInt3c2eOpt:
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
         self.bvkcell = bvkcell
 
-        #Replicate bvkcell, making the lattice sum idx <65536
-        self.replica = guess_supercell_images(bvkcell)
-        logger.debug(cell, 'SRInt3c2eOpt sets %s BvK cells in the super cell', self.replica)
-        if np.prod(self.replica) == 1:
-            supcell = bvkcell
-        else:
-            supcell = pbctools.super_cell(bvkcell, self.replica)
-            supcell._bas[:,PTR_BAS_COORD] = supcell._atm[
-                supcell._bas[:,ATOM_OF],PTR_COORD]
-        self.supcell = supcell
-
         self.rcut = None
         self.int3c2e_envs = None
 
@@ -350,13 +339,11 @@ class SRInt3c2eOpt:
         log = logger.new_logger(self.cell, verbose)
         pcell = self.prim_cell
         auxcell = self.sorted_auxcell
-        supcell = self.supcell
-        s_nbas = supcell.nbas
-        p_nbas = pcell.nbas
-        sup_ncells = np.prod(self.replica)
+        bvkcell = self.bvkcell
+        bvk_ncells = np.prod(self.bvk_kmesh)
 
         self.rcut = rcut = estimate_rcut(pcell, auxcell, self.omega).max()
-        Ls = cp.asarray(supcell.get_lattice_Ls(rcut=rcut))
+        Ls = cp.asarray(bvkcell.get_lattice_Ls(rcut=rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
         log.debug('int3c2e_kernel rcut = %g, nimgs = %d', rcut, nimgs)
@@ -365,11 +352,11 @@ class SRInt3c2eOpt:
         # s and p orbitals. _scale_sp_ctr_coeff apply these special
         # normalization coefficients to the _env.
         _atm_cpu, _bas_cpu, _env_cpu = conc_env(
-            supcell._atm, supcell._bas, _scale_sp_ctr_coeff(supcell),
+            bvkcell._atm, bvkcell._bas, _scale_sp_ctr_coeff(bvkcell),
             auxcell._atm, auxcell._bas, _scale_sp_ctr_coeff(auxcell))
         #NOTE: PTR_BAS_COORD is not updated in conc_env()
-        off = _bas_cpu[s_nbas,PTR_EXP] - auxcell._bas[0,PTR_EXP]
-        _bas_cpu[s_nbas:,PTR_BAS_COORD] += off
+        off = _bas_cpu[bvkcell.nbas,PTR_EXP] - auxcell._bas[0,PTR_EXP]
+        _bas_cpu[bvkcell.nbas:,PTR_BAS_COORD] += off
         self._atm_cpu = _atm_cpu
         self._bas_cpu = _bas_cpu
         self._env_cpu = _env_cpu
@@ -377,12 +364,13 @@ class SRInt3c2eOpt:
         _atm = cp.array(_atm_cpu, dtype=np.int32)
         _bas = cp.array(_bas_cpu, dtype=np.int32)
         _env = cp.array(_env_cpu, dtype=np.float64)
-        sup_ao_loc = supcell.ao_loc
+        bvk_ao_loc = bvkcell.ao_loc
         aux_loc = auxcell.ao_loc
-        ao_loc = _conc_locs(sup_ao_loc, aux_loc)
+        ao_loc = _conc_locs(bvk_ao_loc, aux_loc)
         int3c2e_envs = Int3c2eEnvVars(
-            pcell.natm, p_nbas, sup_ncells, nimgs, _atm.data.ptr, _bas.data.ptr,
-            _env.data.ptr, ao_loc.data.ptr, Ls.data.ptr,
+            pcell.natm, pcell.nbas, bvk_ncells, nimgs,
+            _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
+            ao_loc.data.ptr, Ls.data.ptr,
         )
         # Keep a reference to these arrays, prevent releasing them upon returning the closure
         int3c2e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
@@ -395,7 +383,7 @@ class SRInt3c2eOpt:
     def estimate_cutoff_with_penalty(self):
         pcell = self.prim_cell
         auxcell = self.sorted_auxcell
-        vol = pcell.vol
+        vol = self.bvkcell.vol
         omega = self.omega
         aux_exp, _, aux_l = most_diffused_pgto(auxcell)
         cell_exp, _, cell_l = most_diffused_pgto(pcell)
@@ -419,7 +407,6 @@ class SRInt3c2eOpt:
         pcell = self.prim_cell
         auxcell = self.sorted_auxcell
         bvk_ncells = np.prod(self.bvk_kmesh)
-        sup_ncells = np.prod(self.replica)
         nimgs = int3c2e_envs.nimgs
         p_nbas = pcell.nbas
 
@@ -444,7 +431,7 @@ class SRInt3c2eOpt:
         if cutoff is None:
             cutoff = self.estimate_cutoff_with_penalty()
         log_cutoff = math.log(cutoff)
-        vol = pcell.vol
+        vol = self.bvkcell.vol
 
         c_shell_counts = self.cell0_ctr_l_counts
         c_shell_offsets = np.append(0, np.cumsum(c_shell_counts))
@@ -461,7 +448,7 @@ class SRInt3c2eOpt:
             nctrj = c_shell_counts[lj]
 
             # Number of images for each pair of (bas_i_in_bvkcell, bas_j_in_bvkcell)
-            ovlp_img_counts = cp.zeros((sup_ncells*nprimi*sup_ncells*nprimj), dtype=np.int32)
+            ovlp_img_counts = cp.zeros((bvk_ncells*nprimi*bvk_ncells*nprimj), dtype=np.int32)
             err = libpbc.bvk_overlap_img_counts(
                 ctypes.cast(ovlp_img_counts.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p2c_mapping.data.ptr, ctypes.c_void_p),
@@ -557,11 +544,11 @@ class SRInt3c2eOpt:
             # bas_ij stores the non-negligible primitive-pair indices.
             # p2c_mapping converts the bas_ij to contracted GTO-pair indices.
             I, i, J, j = cp.unravel_index(
-                bas_ij, (sup_ncells, nprimi, sup_ncells, nprimj))
+                bas_ij, (bvk_ncells, nprimi, bvk_ncells, nprimj))
             i += ish0
             j += jsh0
             bas_ij = cp.ravel_multi_index(
-                (I, i, J, j), (sup_ncells, p_nbas, sup_ncells, p_nbas))
+                (I, i, J, j), (bvk_ncells, p_nbas, bvk_ncells, p_nbas))
             bas_ij = cp.asarray(bas_ij, dtype=np.int32)
             ic = p2c_mapping[i] - c_shell_offsets[li]
             jc = p2c_mapping[j] - c_shell_offsets[lj]
@@ -611,11 +598,10 @@ class SRInt3c2eOpt:
             self.build()
         pcell = self.prim_cell
         auxcell = self.sorted_auxcell
-        supcell = self.supcell
+        bvkcell = self.bvkcell
         l_ctr_aux_offsets = self.l_ctr_aux_offsets
         aux_loc = auxcell.ao_loc
         naux = aux_loc[auxcell.nbas]
-        sup_ncells = supcell.nbas // pcell.nbas
         _atm_cpu = self._atm_cpu
         _bas_cpu = self._bas_cpu
         _env_cpu = self._env_cpu
@@ -663,14 +649,15 @@ class SRInt3c2eOpt:
                     ctypes.byref(self.int3c2e_envs),
                     (ctypes.c_int*3)(*scheme),
                     (ctypes.c_int*6)(*shls_slice),
-                    ctypes.c_int(sup_ncells), ctypes.c_int(naux),
-                    ctypes.c_int(n_prim_pairs), ctypes.c_int(n_ctr_pairs),
+                    ctypes.c_int(naux),
+                    ctypes.c_int(n_prim_pairs),
+                    ctypes.c_int(n_ctr_pairs),
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pair_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
-                    _atm_cpu.ctypes, ctypes.c_int(supcell.natm),
-                    _bas_cpu.ctypes, ctypes.c_int(supcell.nbas), _env_cpu.ctypes)
+                    _atm_cpu.ctypes, ctypes.c_int(bvkcell.natm),
+                    _bas_cpu.ctypes, ctypes.c_int(bvkcell.nbas), _env_cpu.ctypes)
 
                 if err != 0:
                     raise RuntimeError(f'fill_int3c2e kernel for {lll} failed')
@@ -783,26 +770,3 @@ def estimate_rcut(cell, auxcell, omega):
     r0 = (np.log(fac * (sfac*r0)**(l3-1) + 1.) / (sfac*theta))**.5
     rcut = r0
     return rcut
-
-def guess_supercell_images(cell, target_size=BVK_CELL_SHELLS):
-    '''Generate a sufficient large bvk cell for fill_int3c2e kernel to achieve
-    better load balance'''
-    n_replica = min(
-        # produce a cell with ~400 shells
-        target_size / cell.nbas,
-        # no more than 256 images in lattice-sum
-        np.prod(cell.nimgs*2+1)/256)
-    if n_replica < 1:
-        return np.ones(3, dtype=int)
-
-    b = cell.reciprocal_vectors()
-    b_norm = np.linalg.norm(b, axis=1)
-    if cell.dimension == 2:
-        b_norm = b_norm[:2]
-        replica = np.ones(3, dtype=int)
-        replica[:2] = np.ceil((n_replica/b_norm.prod())**.5 * b_norm).astype(int)
-        return replica
-    else:
-        # The replica on each axis should be proportional to the required nimg
-        # along each direction.
-        return np.ceil((n_replica/b_norm.prod())**(1./3) * b_norm).astype(int)

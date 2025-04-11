@@ -98,7 +98,7 @@ int ft_aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_ncells,
 }
 
 int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs, int *scheme, int *shls_slice,
-                 int bvk_ncells, int naux, int n_prim_pairs, int n_ctr_pairs,
+                 int naux, int n_prim_pairs, int n_ctr_pairs,
                  int *bas_ij_idx, int *pair_mapping, int *img_idx, int *img_offsets,
                  int *atm, int natm, int *bas, int nbas, double *env)
 {

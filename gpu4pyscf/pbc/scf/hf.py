@@ -244,9 +244,7 @@ class RHF(SCF):
     def density_fit(self, auxbasis=None, with_df=None):
         from gpu4pyscf.pbc.df.df_jk import density_fit
         mf = density_fit(self, auxbasis, with_df)
-        # Enforce the Gamma point for single point calculation
-        assert all(mf.with_df.kpts == 0)
-        mf.with_df.is_gamma_point = True
+        mf.with_df.is_gamma_point = (mf.kpt == 0).all()
         return mf
 
     def to_cpu(self):

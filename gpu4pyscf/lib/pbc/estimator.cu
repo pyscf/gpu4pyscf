@@ -32,9 +32,9 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
                                float *log_coeff, float log_cutoff)
 {
     int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int s_nish = envs.bvk_ncells * nish;
-    int s_njsh = envs.bvk_ncells * njsh;
-    if (bas_ij >= s_nish*s_njsh) {
+    int bvk_nish = envs.bvk_ncells * nish;
+    int bvk_njsh = envs.bvk_ncells * njsh;
+    if (bas_ij >= bvk_nish*bvk_njsh) {
         return;
     }
     int nimgs = envs.nimgs;
@@ -42,8 +42,8 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    int ish = bas_ij / s_njsh;
-    int jsh = bas_ij % s_njsh;
+    int ish = bas_ij / bvk_njsh;
+    int jsh = bas_ij % bvk_njsh;
     int cell0_ish = ish % nish + ish0;;
     int cell0_jsh = jsh % njsh + jsh0;;
     if (cell0_ish < cell0_jsh &&
@@ -95,7 +95,7 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
         float drj = fi * dr;
         float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
         float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
-        float estimator = dri_fac + drj_fac + theta_ij_rr;
+        float estimator = dri_fac + drj_fac - theta_ij_rr;
         if (estimator > log_cutoff) {
             counts++;
         }
@@ -114,9 +114,9 @@ void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
         return;
     }
     int bas_ij = bas_ij_mapping[pair_id];
-    int s_njsh = envs.bvk_ncells * njsh;
-    int ish = bas_ij / s_njsh;
-    int jsh = bas_ij % s_njsh;
+    int bvk_njsh = envs.bvk_ncells * njsh;
+    int ish = bas_ij / bvk_njsh;
+    int jsh = bas_ij % bvk_njsh;
     int cell0_ish = ish % nish + ish0;;
     int cell0_jsh = jsh % njsh + jsh0;;
     ish = ish / nish * envs.cell0_nbas + cell0_ish;
@@ -170,7 +170,7 @@ void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
         float drj = fi * dr;
         float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
         float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
-        float estimator = dri_fac + drj_fac + theta_ij_rr;
+        float estimator = dri_fac + drj_fac - theta_ij_rr;
         if (estimator > log_cutoff) {
             img_idx[counts] = img;
             counts++;
@@ -208,9 +208,9 @@ void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_ij_map
         return;
     }
     int bas_ij = bas_ij_mapping[pair_id];
-    int s_njsh = envs.bvk_ncells * njsh;
-    int ish = bas_ij / s_njsh;
-    int jsh = bas_ij % s_njsh;
+    int bvk_njsh = envs.bvk_ncells * njsh;
+    int ish = bas_ij / bvk_njsh;
+    int jsh = bas_ij % bvk_njsh;
     int cell0_ish = ish % nish + ish0;;
     int cell0_jsh = jsh % njsh + jsh0;;
     ish = ish / nish * envs.cell0_nbas + cell0_ish;

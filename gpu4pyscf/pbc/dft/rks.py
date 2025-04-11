@@ -27,6 +27,7 @@ from pyscf.pbc.dft import rks as rks_cpu
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.dft import rks as mol_ks
 from gpu4pyscf.pbc.scf import hf as pbchf, khf
+from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.dft import gen_grid
 from gpu4pyscf.pbc.dft import numint
 from gpu4pyscf.pbc.dft import multigrid
@@ -199,14 +200,17 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
             self.with_df.reset()
 
         if isinstance(with_df, GDF):
-            mesh = cell.mesh
-            #log.warn('''
-            #mf.grids = gen_grid.BeckeGrids(self.cell)
-            #mf.grids.level = getattr(__config__, 'dft_rks_RKS_grids_level',
-            #                         mf.grids.level)
-            #mf.nlcgrids = gen_grid.BeckeGrids(self.cell)
-            #mf.nlcgrids.level = getattr(__config__, 'dft_rks_RKS_nlcgrids_level',
-            #                            mf.nlcgrids.level)''')
+            if isinstance(self.grids, gen_grid.UniformGrids):
+                cell = self.cell
+                logger.warn(cell, 'Uniform grids are used for the BPC GDF method. '
+                            'Note: this differs from PySCF default settings using Becke grids.')
+                ngrids = np.prod(cell.mesh)
+                if ngrids > 150000 * cell.natm:
+                    logger.warn(cell, '''
+Tight basis functions are found in the system. It is recommended to use Becke grids as that in PySCF:
+    from gpu4pyscf.pbc.dft import BeckeGrids
+    mf.grids = BeckeGrids(cell)
+    mf.nlcgrids = BeckeGrids(cell).set(level=1)''')
 
         if self.verbose >= logger.WARN:
             self.check_sanity()
